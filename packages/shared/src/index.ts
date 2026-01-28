@@ -42,3 +42,12 @@ export type CafeteriaMenuItem = {
   price?: number;
   availableOn: string; // YYYY-MM-DD
 };
+
+export type School = {
+  id: string; // internal id
+  code: string; // user-facing join code
+  name: string;
+  themeColor?: string;
+};
+
+export * from "./schools";
