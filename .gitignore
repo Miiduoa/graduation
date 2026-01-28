@@ -1,0 +1,28 @@
+# Node
+node_modules/
+.pnpm-store/
+
+# Env
+.env
+.env.*
+
+# Logs
+npm-debug.log*
+pnpm-debug.log*
+
+# OS
+.DS_Store
+
+# Next
+apps/web/.next/
+apps/web/out/
+
+# Expo
+apps/mobile/.expo/
+apps/mobile/dist/
+apps/mobile/web-build/
+
+# Firebase
+backend/.firebase/
+backend/functions/lib/
+
