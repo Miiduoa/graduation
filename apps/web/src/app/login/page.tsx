@@ -1,7 +1,7 @@
-import { resolveSchoolByCode } from "@campus/shared/src/schools";
+import { resolveSchool } from "@campus/shared/src/schools";
 
-export default function LoginPage(props: { searchParams?: { school?: string } }) {
-  const school = resolveSchoolByCode(props.searchParams?.school);
+export default function LoginPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
+  const school = resolveSchool({ school: props.searchParams?.school, schoolId: props.searchParams?.schoolId });
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui" }}>
