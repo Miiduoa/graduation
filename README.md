@@ -4,26 +4,59 @@
 - **Mobile**：iOS/Android（跨平台）
 - **Web**：PWA/網站
 - **Backend**：Firebase（先假資料，後續接 Firestore/Auth/Functions）
-- **SSO**：學校單一登入（暫以「可插拔 SSO」架構做 placeholder；待取得學校 SSO 規格/OIDC/SAML）
+- **SSO**：學校單一登入（暫以「可插拔 SSO」架構做 placeholder；多校通用，後續可接 OIDC/SAML/CAS）
 
 ## Monorepo 結構
 - `apps/mobile`：Expo（React Native + TypeScript）
 - `apps/web`：Next.js（TypeScript）
-- `packages/shared`：共用型別/假資料/介面
-- `packages/ui`：共用 UI 元件（可逐步抽）
-- `packages/config`：eslint/tsconfig 等
+- `packages/shared`：共用型別/假資料/介面（含 schools mock + 代碼撞碼處理）
 - `backend`：Firebase（functions / firestore rules / indexes）
 
-## 先做 MVP（本週可交付）
-- 假登入（後續換學校 SSO）
-- 公告：列表/詳情
-- 課表：週視圖/日視圖（假資料）
-- 校園地圖：點位列表 + 地圖（web 用 leaflet；mobile 用地圖套件）
-- 社團活動：列表/報名（假資料）
-- 校園餐廳：菜單/營業時間（假資料）
+## 產品路線
+- **路線1（先做）**：平台型、多校通用（不靠各校深度整合也能使用）
+- **路線2（後做）**：深整合（SSO + 校務/課表/成績/出缺席等）
 
-## 問題（需要你補資料才能真的做 SSO）
-1. 你的學校名稱/網址？
-2. SSO 規格：OIDC / SAML / CAS / 其它？（Tronclass 常見為 LMS，本身不等於學校 SSO）
-3. 是否有 client_id / issuer / redirect URI 規範？
+## 目前完成
+- Web/Mobile：多校通用骨架（school code + schoolId）
+- Code 允許撞碼：輸入縮寫代碼，若多校符合則讓使用者選擇
 
+## Firebase
+
+### 安裝/指令
+本 repo 已包含 Firebase CLI（devDependencies）。
+
+```bash
+# 查看版本
+pnpm -w firebase --version
+
+# 登入
+pnpm -w firebase login
+```
+
+### 設定專案
+編輯 `.firebaserc`：把 `YOUR_FIREBASE_PROJECT_ID` 換成你的 Firebase project id。
+
+然後執行：
+
+```bash
+pnpm -w firebase use --add
+```
+
+### Firestore Schema（multi-tenant）
+- `schools/{schoolId}`
+- `schools/{schoolId}/members/{uid}`（role: admin|editor|member）
+- `schools/{schoolId}/announcements/{id}`
+- `schools/{schoolId}/pois/{id}`
+- `schools/{schoolId}/clubEvents/{id}`
+- `schools/{schoolId}/cafeteriaMenus/{id}`
+- `schools/{schoolId}/registrations/{id}`
+
+### Rules
+- 規則檔：`backend/firestore/firestore.rules`
+- 目前策略：公共資料（公告/POI/活動/菜單）可讀；寫入需 admin/editor。
+
+部署（之後要真的 Firebase project 才能用）：
+
+```bash
+pnpm -w firebase deploy --only firestore:rules
+```
