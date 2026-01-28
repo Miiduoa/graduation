@@ -1,0 +1,54 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasRole(schoolId, role) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.role == role;
+    }
+
+    // School directory (public readable)
+    match /schools/{schoolId} {
+      allow read: if true;
+      allow write: if false; // managed by admins via functions later
+
+      match /members/{uid} {
+        allow read: if isSignedIn() && uid == request.auth.uid;
+        allow write: if isSignedIn() && uid == request.auth.uid; // user joins a school (role defaults client-side for now)
+      }
+
+      match /announcements/{docId} {
+        allow read: if true;
+        allow create, update, delete: if hasRole(schoolId, 'admin') || hasRole(schoolId, 'editor');
+      }
+
+      match /pois/{docId} {
+        allow read: if true;
+        allow create, update, delete: if hasRole(schoolId, 'admin') || hasRole(schoolId, 'editor');
+      }
+
+      match /clubEvents/{docId} {
+        allow read: if true;
+        allow create, update, delete: if hasRole(schoolId, 'admin') || hasRole(schoolId, 'editor');
+      }
+
+      match /cafeteriaMenus/{docId} {
+        allow read: if true;
+        allow create, update, delete: if hasRole(schoolId, 'admin') || hasRole(schoolId, 'editor');
+      }
+
+      match /registrations/{docId} {
+        // event registrations: user can create own, read own
+        allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+        allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+        allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+        allow update: if false;
+      }
+    }
+  }
+}

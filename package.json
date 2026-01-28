@@ -5,6 +5,10 @@
   "scripts": {
     "dev": "pnpm -r dev",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "firebase": "firebase"
+  },
+  "devDependencies": {
+    "firebase-tools": "^15.4.0"
   }
 }
