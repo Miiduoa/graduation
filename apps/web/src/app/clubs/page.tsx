@@ -1,9 +1,15 @@
+import { resolveSchoolByCode } from "@campus/shared/src/schools";
 import { mockClubEvents } from "@campus/shared/src/mockData";
 
-export default function ClubsPage() {
+export default function ClubsPage(props: { searchParams?: { school?: string } }) {
+  const school = resolveSchoolByCode(props.searchParams?.school);
+
   return (
     <main style={{ padding: 24, fontFamily: "system-ui" }}>
       <h2>社團活動（假資料）</h2>
+      <div style={{ opacity: 0.7, marginBottom: 12 }}>
+        學校：{school.name}（{school.code}）
+      </div>
       <ul>
         {mockClubEvents.map((e) => (
           <li key={e.id}>
