@@ -1,5 +1,5 @@
-import React from "react";
-import { SafeAreaView, ScrollView, Text, View, Pressable } from "react-native";
+import React, { useMemo, useState } from "react";
+import { SafeAreaView, ScrollView, Text, View, TextInput, Pressable } from "react-native";
 import {
   mockAnnouncements,
   mockCourses,
@@ -7,15 +7,35 @@ import {
   mockClubEvents,
   mockMenus,
 } from "@campus/shared/src/mockData";
+import { mockSchools, resolveSchoolByCode } from "@campus/shared/src/schools";
 
 export default function App() {
+  const [schoolCode, setSchoolCode] = useState("DEMO");
+  const school = useMemo(() => resolveSchoolByCode(schoolCode), [schoolCode]);
+
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
         <Text style={{ fontSize: 22, fontWeight: "700" }}>畢業專題｜校園應用（Mobile）</Text>
         <Text style={{ opacity: 0.7 }}>
-          目前是骨架（假資料）。之後會接 Firebase + 學校 SSO。
+          平台型多校通用：先用假資料。輸入學校代碼加入（之後可換搜尋/掃 QR）。
         </Text>
+
+        <Section title="加入學校（代碼）">
+          <Text style={{ marginBottom: 6, opacity: 0.8 }}>
+            目前：{school.name}（{school.code}）
+          </Text>
+          <TextInput
+            value={schoolCode}
+            onChangeText={setSchoolCode}
+            autoCapitalize="characters"
+            placeholder="例如 DEMO"
+            style={{ padding: 10, borderWidth: 1, borderColor: "#ddd", borderRadius: 10 }}
+          />
+          <Text style={{ marginTop: 8, opacity: 0.7 }}>
+            示範：{mockSchools.map((s) => s.code).join(" / ")}
+          </Text>
+        </Section>
 
         <Section title="公告">
           {mockAnnouncements.map((a) => (
