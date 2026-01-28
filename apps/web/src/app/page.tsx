@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { resolveSchoolByCode } from "@campus/shared/src/schools";
+import { resolveSchool } from "@campus/shared/src/schools";
 
-export default function HomePage(props: { searchParams?: { school?: string } }) {
-  const schoolCode = props.searchParams?.school ?? "DEMO";
-  const school = resolveSchoolByCode(schoolCode);
+export default function HomePage(props: { searchParams?: { school?: string; schoolId?: string } }) {
+  const school = resolveSchool({
+    school: props.searchParams?.school,
+    schoolId: props.searchParams?.schoolId,
+  });
 
-  const q = `?school=${encodeURIComponent(school.code)}`;
+  const q = `?school=${encodeURIComponent(school.code)}&schoolId=${encodeURIComponent(school.id)}`;
 
   return (
     <main style={{ padding: 24, fontFamily: "system-ui" }}>
@@ -14,7 +16,7 @@ export default function HomePage(props: { searchParams?: { school?: string } }) 
         目前學校：<strong>{school.name}</strong>（代碼：{school.code}）
       </p>
       <p style={{ opacity: 0.75 }}>
-        平台型多校通用：先用假資料，後續接 Firebase + 各校 Provider（參考 Moodle 的外掛思維）。
+        平台型多校通用：代碼可撞碼（像 Moodle 的多站台/外掛思維），因此用 <code>schoolId</code> 做唯一識別。
       </p>
 
       <p>

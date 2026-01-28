@@ -1,5 +1,12 @@
 import React, { useMemo, useState } from "react";
-import { SafeAreaView, ScrollView, Text, View, TextInput, Pressable } from "react-native";
+import {
+  SafeAreaView,
+  ScrollView,
+  Text,
+  View,
+  TextInput,
+  Pressable,
+} from "react-native";
 import {
   mockAnnouncements,
   mockCourses,
@@ -7,33 +14,80 @@ import {
   mockClubEvents,
   mockMenus,
 } from "@campus/shared/src/mockData";
-import { mockSchools, resolveSchoolByCode } from "@campus/shared/src/schools";
+import {
+  findSchoolsByCode,
+  mockSchools,
+  normalizeSchoolCode,
+  resolveSchool,
+} from "@campus/shared/src/schools";
 
 export default function App() {
-  const [schoolCode, setSchoolCode] = useState("DEMO");
-  const school = useMemo(() => resolveSchoolByCode(schoolCode), [schoolCode]);
+  const [codeInput, setCodeInput] = useState("NCHU");
+  const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(null);
+
+  const normalized = useMemo(() => normalizeSchoolCode(codeInput), [codeInput]);
+  const matches = useMemo(() => findSchoolsByCode(normalized), [normalized]);
+
+  const school = useMemo(
+    () => resolveSchool({ school: normalized, schoolId: selectedSchoolId }),
+    [normalized, selectedSchoolId]
+  );
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
         <Text style={{ fontSize: 22, fontWeight: "700" }}>畢業專題｜校園應用（Mobile）</Text>
         <Text style={{ opacity: 0.7 }}>
-          平台型多校通用：先用假資料。輸入學校代碼加入（之後可換搜尋/掃 QR）。
+          平台型多校通用：用「學校縮寫代碼」加入。代碼可能撞碼，因此會請你選正確學校。
         </Text>
 
         <Section title="加入學校（代碼）">
-          <Text style={{ marginBottom: 6, opacity: 0.8 }}>
+          <Text style={{ marginBottom: 6, opacity: 0.85 }}>
             目前：{school.name}（{school.code}）
           </Text>
+
           <TextInput
-            value={schoolCode}
-            onChangeText={setSchoolCode}
+            value={codeInput}
+            onChangeText={(t) => {
+              setCodeInput(t);
+              setSelectedSchoolId(null); // reset explicit selection when code changes
+            }}
             autoCapitalize="characters"
-            placeholder="例如 DEMO"
+            placeholder="例如 NCHU"
             style={{ padding: 10, borderWidth: 1, borderColor: "#ddd", borderRadius: 10 }}
           />
-          <Text style={{ marginTop: 8, opacity: 0.7 }}>
-            示範：{mockSchools.map((s) => s.code).join(" / ")}
+
+          {normalized.length > 0 && matches.length === 0 && (
+            <Text style={{ marginTop: 8, opacity: 0.7 }}>找不到此代碼（可先用 DEMO 測試）</Text>
+          )}
+
+          {normalized.length > 0 && matches.length === 1 && (
+            <Pressable
+              style={{ marginTop: 10, padding: 10, backgroundColor: "#eee", borderRadius: 10 }}
+              onPress={() => setSelectedSchoolId(matches[0].id)}
+            >
+              <Text>加入：{matches[0].name}</Text>
+            </Pressable>
+          )}
+
+          {normalized.length > 0 && matches.length > 1 && (
+            <View style={{ marginTop: 10, gap: 8 }}>
+              <Text style={{ fontWeight: "700" }}>此代碼有多所學校，請選一個：</Text>
+              {matches.map((s) => (
+                <Pressable
+                  key={s.id}
+                  style={{ padding: 10, backgroundColor: "#eee", borderRadius: 10 }}
+                  onPress={() => setSelectedSchoolId(s.id)}
+                >
+                  <Text>{s.name}</Text>
+                  <Text style={{ opacity: 0.6, fontSize: 12 }}>code: {s.code} ｜ id: {s.id}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          <Text style={{ marginTop: 10, opacity: 0.7 }}>
+            示範代碼：{mockSchools.map((s) => s.code).join(" / ")}
           </Text>
         </Section>
 
