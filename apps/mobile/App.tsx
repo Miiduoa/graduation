@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { SafeAreaView, ScrollView, Text, View, TextInput, Pressable } from "react-native";
+import { CreditAuditScreen } from "./src/screens/CreditAuditScreen";
 import {
   mockAnnouncements,
   mockClubEvents,
@@ -46,6 +47,7 @@ export default function App() {
         <Tab.Screen name="地圖" component={MapScreen} />
         <Tab.Screen name="餐廳" component={CafeteriaScreen} />
         <Tab.Screen name="我的" component={MeScreen} />
+        <Tab.Screen name="試算" component={CreditAuditScreen} />
       </Tab.Navigator>
     </NavigationContainer>
   );

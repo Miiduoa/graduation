@@ -51,3 +51,6 @@ export type School = {
 };
 
 export * from "./schools";
+
+export * from "./creditAudit";
+export * from "./sampleUsage";
