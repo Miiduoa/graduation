@@ -2,10 +2,10 @@ import React, { useMemo } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { calculateCredits } from "@campus/shared/src/creditAudit";
 import { demoEnrollments, mockCourses, mockGradRuleTemplateV1 } from "@campus/shared/src/mockData";
-import { Screen, Card, Pill } from "../ui/components";
+import { Screen, Card, Pill, Button } from "../ui/components";
 import { theme } from "../ui/theme";
 
-export function CreditAuditScreen() {
+export function CreditAuditScreen(props: any) {
   const res = useMemo(() => {
     const coursesById = Object.fromEntries(mockCourses.map((c) => [c.id, c]));
     return calculateCredits({
@@ -74,6 +74,14 @@ export function CreditAuditScreen() {
               </View>
             );
           })}
+        </Card>
+
+        <Card title="操作" subtitle="先把流程跑通：新增修課 → 立即看到試算變化。">
+          <Button
+            text="新增修課"
+            kind="primary"
+            onPress={() => props?.navigation?.navigate?.("CreditAuditInput", { onAdded: () => {} })}
+          />
         </Card>
 
         <Card title="下一步（之後會接 AI）" subtitle="AI 會根據缺口，建議你下學期該補哪些分類與課程。">

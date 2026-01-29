@@ -10,7 +10,7 @@ import { EventsScreen } from "./src/screens/EventsScreen";
 import { MapScreen } from "./src/screens/MapScreen";
 import { CafeteriaScreen } from "./src/screens/CafeteriaScreen";
 import { MeScreen } from "./src/screens/MeScreen";
-import { CreditAuditScreen } from "./src/screens/CreditAuditScreen";
+import { CreditAuditStack } from "./src/screens/CreditAuditStack";
 
 const Tab = createBottomTabNavigator();
 
@@ -75,7 +75,7 @@ export default function App() {
         <Tab.Screen name="地圖" component={MapScreen} />
         <Tab.Screen name="餐廳" component={CafeteriaScreen} />
         <Tab.Screen name="我的" component={MeScreen} />
-        <Tab.Screen name="試算" component={CreditAuditScreen} />
+        <Tab.Screen name="試算" component={CreditAuditStack} options={{ headerShown: false }} />
       </Tab.Navigator>
     </NavigationContainer>
   );
