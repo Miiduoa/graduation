@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { theme } from "./src/ui/theme";
 
-import { AnnouncementsScreen } from "./src/screens/AnnouncementsScreen";
+import { AnnouncementsStack } from "./src/screens/AnnouncementsStack";
 import { EventsScreen } from "./src/screens/EventsScreen";
 import { MapScreen } from "./src/screens/MapScreen";
 import { CafeteriaScreen } from "./src/screens/CafeteriaScreen";
@@ -70,7 +70,7 @@ export default function App() {
           },
         })}
       >
-        <Tab.Screen name="公告" component={AnnouncementsScreen} />
+        <Tab.Screen name="公告" component={AnnouncementsStack} options={{ headerShown: false }} />
         <Tab.Screen name="活動" component={EventsScreen} />
         <Tab.Screen name="地圖" component={MapScreen} />
         <Tab.Screen name="餐廳" component={CafeteriaScreen} />
