@@ -6,14 +6,37 @@ import type { School } from "./index";
  * `id` is the true unique key.
  */
 export const mockSchools: School[] = [
-  { id: "tw-demo-uni", code: "DEMO", name: "示範大學", themeColor: "#2563eb" },
+  { id: "tw-demo-uni", code: "DEMO", name: "示範大學", themeColor: "#2563eb", domains: ["demo.edu.tw"] },
 
   // Example collision: same code, different schools.
-  { id: "tw-taichung-uni-a", code: "TCU", name: "台中科技大學（示範A）", themeColor: "#16a34a" },
-  { id: "tw-taichung-uni-b", code: "TCU", name: "台中大學（示範B）", themeColor: "#f97316" },
+  { id: "tw-taichung-uni-a", code: "TCU", name: "台中科技大學（示範A）", themeColor: "#16a34a", domains: ["tcu.edu.tw"] },
+  { id: "tw-taichung-uni-b", code: "TCU", name: "台中大學（示範B）", themeColor: "#f97316", domains: ["tcu2.edu.tw"] },
 
-  { id: "tw-nchu", code: "NCHU", name: "國立中興大學（示範）", themeColor: "#991b1b" },
+  { id: "tw-nchu", code: "NCHU", name: "國立中興大學（示範）", themeColor: "#991b1b", domains: ["nchu.edu.tw"] },
 ];
+
+function normalizeDomain(domain?: string | null): string {
+  return (domain ?? "").trim().toLowerCase();
+}
+
+export function getEmailDomain(email?: string | null): string | null {
+  if (!email) return null;
+  const parts = String(email).toLowerCase().split("@");
+  if (parts.length < 2) return null;
+  return normalizeDomain(parts.pop() || "");
+}
+
+export function findSchoolByDomain(domain?: string | null): School | undefined {
+  const d = normalizeDomain(domain);
+  if (!d) return undefined;
+  return mockSchools.find((s) => (s.domains || []).map(normalizeDomain).includes(d));
+}
+
+export function resolveSchoolByEmail(email?: string | null): School | undefined {
+  const domain = getEmailDomain(email);
+  if (!domain) return undefined;
+  return findSchoolByDomain(domain);
+}
 
 export function normalizeSchoolCode(code?: string | null): string {
   return (code ?? "").trim().toUpperCase();
