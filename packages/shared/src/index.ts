@@ -48,6 +48,7 @@ export type School = {
   code: string; // user-facing join code
   name: string;
   themeColor?: string;
+  domains?: string[]; // email domains for auto-binding
 };
 
 export * from "./schools";
