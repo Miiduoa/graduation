@@ -186,12 +186,13 @@ export default function ProfilePage(props: { searchParams?: { school?: string; s
       <SiteShell
         schoolName={school.name}
         schoolCode={school.code}
-        title="👤 個人檔案"
-        subtitle="查看和管理您的學生資訊"
+        title="個人檔案"
+        subtitle="查看和管理您的學生資訊。"
       >
-        <div className="card" style={{ padding: 40, textAlign: "center" }}>
-          <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
-          <div style={{ color: "var(--muted)" }}>載入個人資料中...</div>
+        <div className="card emptyState">
+          <div className="emptyIcon">⏳</div>
+          <p className="emptyTitle">載入個人資料中...</p>
+          <p className="emptyBody">正在同步您的學籍、課程與活動資料。</p>
         </div>
       </SiteShell>
     );
@@ -210,476 +211,279 @@ export default function ProfilePage(props: { searchParams?: { school?: string; s
     { key: "activities", label: "活動", icon: "🎉" },
     { key: "achievements", label: "成就", icon: "🏆" },
   ];
+  const completionPercent = Math.round((user.totalCredits / user.requiredCredits) * 100);
+  const lockedAchievements = [
+    { icon: "🎓", name: "畢業在即", description: "完成所有畢業學分" },
+    { icon: "🏅", name: "全能學生", description: "學業、活動、服務三滿分" },
+    { icon: "📖", name: "書蟲", description: "圖書館借閱達 100 本" },
+  ];
 
   return (
     <SiteShell
       schoolName={school.name}
       schoolCode={school.code}
-      title="👤 個人檔案"
-      subtitle="查看和管理您的學生資訊"
+      title="個人檔案"
+      subtitle="查看和管理您的學生資訊。"
     >
-      {/* Profile Header */}
-      <div className="card" style={{ 
-        marginBottom: 24,
-        background: "linear-gradient(135deg, rgba(139,92,246,0.1) 0%, rgba(236,72,153,0.1) 100%)",
-      }}>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-          {/* Avatar */}
-          <div style={{
-            width: 120,
-            height: 120,
-            borderRadius: 60,
-            background: "linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 48,
-            flexShrink: 0,
-          }}>
-            {user.avatar}
-          </div>
-
-          {/* Info */}
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800 }}>{user.name}</h1>
-              <span style={{
-                padding: "4px 12px",
-                background: "rgba(16,185,129,0.2)",
-                color: "#10B981",
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 600,
-              }}>
-                ✓ 已認證
-              </span>
+      <div className="pageStack">
+        <section className="heroPanel">
+          <div className="heroIdentity">
+            <div className="heroAvatar is-round">{user.avatar}</div>
+            <div className="heroCopy">
+              <div className="heroTitleRow">
+                <h2 className="heroTitle">{user.name}</h2>
+                <span className="statusBadge">已認證</span>
+              </div>
+              <p className="heroMeta">{user.department} · {user.grade} · {user.studentId}</p>
+              <p className="heroText">{user.bio}</p>
+              {user.interests.length > 0 ? (
+                <div className="heroChips">
+                  {user.interests.map((interest) => (
+                    <span key={interest} className="pill">
+                      {interest}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
-            
-            <div style={{ fontSize: 16, color: "var(--muted)", marginBottom: 12 }}>
-              {user.department} · {user.grade} · {user.studentId}
-            </div>
-            
-            <div style={{ fontSize: 14, color: "var(--text)", marginBottom: 16, lineHeight: 1.6 }}>
-              {user.bio}
-            </div>
-
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {user.interests.map((interest) => (
-                <span 
-                  key={interest}
-                  className="pill"
-                  style={{ fontSize: 12 }}
-                >
-                  {interest}
-                </span>
-              ))}
+            <div className="heroActions">
+              <Link href={`/settings${q}`} className="btn primary">
+                編輯檔案
+              </Link>
+              <button type="button" className="btn" onClick={handleShare}>
+                分享檔案
+              </button>
             </div>
           </div>
+        </section>
 
-          {/* Actions */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <Link href={`/settings${q}`} className="btn primary" style={{ fontSize: 13 }}>
-              ⚙️ 編輯檔案
-            </Link>
-            <button className="btn" style={{ fontSize: 13 }} onClick={handleShare}>
-              📤 分享檔案
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", 
-        gap: 16, 
-        marginBottom: 24 
-      }}>
-        {stats.map((stat) => (
-          <div 
-            key={stat.label} 
-            className="card"
-            style={{ textAlign: "center", padding: 20 }}
-          >
-            <div style={{ fontSize: 28, marginBottom: 8 }}>{stat.icon}</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: stat.color, marginBottom: 4 }}>
-              {stat.value}
+        <div className="metricGrid">
+          {stats.map((stat) => (
+            <div key={stat.label} className="metricCard" style={{ "--tone": stat.color } as React.CSSProperties}>
+              <div className="metricIcon">{stat.icon}</div>
+              <div className="metricValue">{stat.value}</div>
+              <div className="metricLabel">{stat.label}</div>
             </div>
-            <div style={{ fontSize: 13, color: "var(--muted)" }}>{stat.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div className="card" style={{ marginBottom: 24, padding: 12 }}>
-        <div style={{ display: "flex", gap: 8 }}>
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              className={`btn ${activeTab === tab.key ? "primary" : ""}`}
-              onClick={() => setActiveTab(tab.key)}
-              style={{ fontSize: 13 }}
-            >
-              {tab.icon} {tab.label}
-            </button>
           ))}
         </div>
-      </div>
 
-      {/* Tab Content */}
+        <section className="card sectionCard">
+          <div className="segmentedGroup">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`btn ${activeTab === tab.key ? "primary" : ""}`}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
       {activeTab === "overview" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-          {/* Academic Info */}
-          <div className="card">
-            <h2 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 700 }}>🎓 學業資訊</h2>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="pageSplit">
+          <section className="card sectionCard">
+            <div className="sectionCopy">
+              <p className="sectionEyebrow">Academic</p>
+              <h2 className="sectionTitle">學業資訊</h2>
+            </div>
+
+            <div className="infoRows">
               {[
                 { label: "入學年度", value: `${user.admissionYear} 年` },
                 { label: "預計畢業", value: `${user.expectedGraduation} 年` },
                 { label: "目前 GPA", value: user.gpa.toFixed(2) },
                 { label: "學分進度", value: `${user.totalCredits} / ${user.requiredCredits}` },
               ].map((item) => (
-                <div 
-                  key={item.label}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    padding: "12px 0",
-                    borderBottom: "1px solid var(--border)",
-                  }}
-                >
-                  <span style={{ color: "var(--muted)" }}>{item.label}</span>
-                  <span style={{ fontWeight: 600 }}>{item.value}</span>
+                <div key={item.label} className="infoRow">
+                  <span className="infoKey">{item.label}</span>
+                  <span className="infoValue">{item.value}</span>
                 </div>
               ))}
             </div>
 
-            {/* Credit Progress */}
-            <div style={{ marginTop: 16 }}>
-              <div style={{ 
-                display: "flex", 
-                justifyContent: "space-between", 
-                marginBottom: 8,
-                fontSize: 13,
-              }}>
+            <div>
+              <div className="progressMeta">
                 <span>學分完成度</span>
-                <span style={{ color: "var(--brand)", fontWeight: 600 }}>
-                  {Math.round((user.totalCredits / user.requiredCredits) * 100)}%
-                </span>
+                <span className="infoValue" style={{ color: "var(--brand)" }}>{completionPercent}%</span>
               </div>
-              <div style={{
-                height: 8,
-                background: "var(--panel2)",
-                borderRadius: 4,
-                overflow: "hidden",
-              }}>
-                <div style={{
-                  width: `${(user.totalCredits / user.requiredCredits) * 100}%`,
-                  height: "100%",
-                  background: "linear-gradient(90deg, #8B5CF6 0%, #EC4899 100%)",
-                  borderRadius: 4,
-                }} />
+              <div className="progressTrack">
+                <div className="progressFill" style={{ "--progress-width": `${completionPercent}%`, "--progress": "linear-gradient(90deg, #8B5CF6 0%, #EC4899 100%)" } as React.CSSProperties} />
               </div>
             </div>
-          </div>
+          </section>
 
-          {/* Contact Info */}
-          <div className="card">
-            <h2 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 700 }}>📧 聯絡資訊</h2>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: 12,
-                background: "var(--panel2)",
-                borderRadius: 8,
-              }}>
-                <span style={{ fontSize: 20 }}>📧</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>學校信箱</div>
-                  <div style={{ fontSize: 14 }}>{user.email}</div>
+          <section className="card sectionCard">
+            <div className="sectionCopy">
+              <p className="sectionEyebrow">Contact</p>
+              <h2 className="sectionTitle">聯絡資訊</h2>
+            </div>
+
+            <div className="surfaceList">
+              <div className="surfaceItem">
+                <div className="surfaceAccent">📧</div>
+                <div className="surfaceContent">
+                  <h3 className="surfaceTitle">學校信箱</h3>
+                  <p className="surfaceMeta">{user.email}</p>
                 </div>
               </div>
 
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: 12,
-                background: "var(--panel2)",
-                borderRadius: 8,
-              }}>
-                <span style={{ fontSize: 20 }}>🐙</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>GitHub</div>
-                  <div style={{ fontSize: 14 }}>@{user.social.github}</div>
+              <div className="surfaceItem">
+                <div className="surfaceAccent">🐙</div>
+                <div className="surfaceContent">
+                  <h3 className="surfaceTitle">GitHub</h3>
+                  <p className="surfaceMeta">@{user.social.github || "未設定"}</p>
                 </div>
-                <a 
-                  href={`https://github.com/${user.social.github}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: "var(--brand)", fontSize: 13 }}
-                >
-                  查看 →
-                </a>
+                {user.social.github ? <a href={`https://github.com/${user.social.github}`} target="_blank" rel="noopener noreferrer" className="btn">查看</a> : null}
               </div>
 
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: 12,
-                background: "var(--panel2)",
-                borderRadius: 8,
-              }}>
-                <span style={{ fontSize: 20 }}>💼</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>LinkedIn</div>
-                  <div style={{ fontSize: 14 }}>@{user.social.linkedin}</div>
+              <div className="surfaceItem">
+                <div className="surfaceAccent">💼</div>
+                <div className="surfaceContent">
+                  <h3 className="surfaceTitle">LinkedIn</h3>
+                  <p className="surfaceMeta">@{user.social.linkedin || "未設定"}</p>
                 </div>
-                <a 
-                  href={`https://linkedin.com/in/${user.social.linkedin}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ color: "var(--brand)", fontSize: 13 }}
-                >
-                  查看 →
-                </a>
+                {user.social.linkedin ? <a href={`https://linkedin.com/in/${user.social.linkedin}`} target="_blank" rel="noopener noreferrer" className="btn">查看</a> : null}
               </div>
             </div>
-          </div>
+          </section>
         </div>
       )}
 
       {activeTab === "courses" && (
-        <div className="card">
-          <div style={{ 
-            display: "flex", 
-            alignItems: "center", 
-            justifyContent: "space-between",
-            marginBottom: 20,
-          }}>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>📚 課程紀錄</h2>
-            <Link href={`/timetable${q}`} style={{ color: "var(--brand)", fontSize: 13 }}>
-              查看完整課表 →
+        <section className="card sectionCard">
+          <div className="sectionHead">
+            <div className="sectionCopy">
+              <p className="sectionEyebrow">Courses</p>
+              <h2 className="sectionTitle">課程紀錄</h2>
+            </div>
+            <Link href={`/timetable${q}`} className="btn">
+              查看完整課表
             </Link>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="surfaceList">
             {recentCourses.map((course) => (
-              <div
-                key={course.name}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  padding: 16,
-                  background: "var(--panel2)",
-                  borderRadius: 12,
-                  gap: 16,
-                }}
-              >
-                <div style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 12,
-                  background: "var(--brand)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#fff",
-                  fontWeight: 700,
-                }}>
+              <div key={course.name} className="surfaceItem">
+                <div className="surfaceAccent" style={{ "--accent-bg": "var(--accent-soft)", "--accent": "#fff", background: "var(--brand)" } as React.CSSProperties}>
                   {course.credits}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>{course.name}</div>
-                  <div style={{ fontSize: 13, color: "var(--muted)" }}>{course.semester}</div>
+                <div className="surfaceContent">
+                  <h3 className="surfaceTitle">{course.name}</h3>
+                  <p className="surfaceMeta">{course.semester}</p>
                 </div>
-                <div style={{
-                  padding: "6px 12px",
-                  borderRadius: 8,
-                  background: course.grade === "進行中" 
-                    ? "rgba(59,130,246,0.1)" 
-                    : "rgba(16,185,129,0.1)",
-                  color: course.grade === "進行中" ? "#3B82F6" : "#10B981",
-                  fontWeight: 700,
-                  fontSize: 14,
-                }}>
+                <span
+                  className="statusBadge"
+                  style={
+                    course.grade === "進行中"
+                      ? ({ "--status-bg": "rgba(91, 166, 255, 0.16)", "--status-color": "var(--info)" } as React.CSSProperties)
+                      : ({ "--status-bg": "rgba(44, 184, 168, 0.16)", "--status-color": "var(--success)" } as React.CSSProperties)
+                  }
+                >
                   {course.grade}
-                </div>
+                </span>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {activeTab === "activities" && (
-        <div className="card">
-          <div style={{ 
-            display: "flex", 
-            alignItems: "center", 
-            justifyContent: "space-between",
-            marginBottom: 20,
-          }}>
-            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>🎉 活動紀錄</h2>
-            <Link href={`/clubs${q}`} style={{ color: "var(--brand)", fontSize: 13 }}>
-              探索更多活動 →
+        <section className="card sectionCard">
+          <div className="sectionHead">
+            <div className="sectionCopy">
+              <p className="sectionEyebrow">Activities</p>
+              <h2 className="sectionTitle">活動紀錄</h2>
+            </div>
+            <Link href={`/clubs${q}`} className="btn">
+              探索更多活動
             </Link>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="surfaceList">
             {activities.map((activity) => (
-              <div
-                key={activity.name}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  padding: 16,
-                  background: "var(--panel2)",
-                  borderRadius: 12,
-                  gap: 16,
-                }}
-              >
-                <div style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 12,
-                  background: 
-                    activity.status === "已參加" ? "rgba(16,185,129,0.1)" :
-                    activity.status === "已報名" ? "rgba(139,92,246,0.1)" :
-                    "rgba(156,163,175,0.1)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 20,
-                }}>
+              <div key={activity.name} className="surfaceItem">
+                <div
+                  className="surfaceAccent"
+                  style={
+                    activity.status === "已參加"
+                      ? ({ "--accent-bg": "rgba(44, 184, 168, 0.16)", "--accent": "var(--success)" } as React.CSSProperties)
+                      : activity.status === "已報名"
+                        ? ({ "--accent-bg": "rgba(91, 108, 255, 0.14)", "--accent": "var(--brand)" } as React.CSSProperties)
+                        : ({ "--accent-bg": "var(--panel2)", "--accent": "var(--muted)" } as React.CSSProperties)
+                  }
+                >
                   {activity.type === "競賽" ? "🏆" : activity.type === "工作坊" ? "💻" : "🎊"}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>{activity.name}</div>
-                  <div style={{ fontSize: 13, color: "var(--muted)" }}>{activity.date}</div>
+                <div className="surfaceContent">
+                  <h3 className="surfaceTitle">{activity.name}</h3>
+                  <p className="surfaceMeta">{activity.date}</p>
                 </div>
-                <span className="pill" style={{
-                  fontSize: 12,
-                  background: 
-                    activity.status === "已參加" ? "rgba(16,185,129,0.2)" :
-                    activity.status === "已報名" ? "rgba(139,92,246,0.2)" :
-                    "var(--panel)",
-                  color: 
-                    activity.status === "已參加" ? "#10B981" :
-                    activity.status === "已報名" ? "#8B5CF6" :
-                    "var(--muted)",
-                }}>
+                <span
+                  className="statusBadge"
+                  style={
+                    activity.status === "已參加"
+                      ? ({ "--status-bg": "rgba(44, 184, 168, 0.16)", "--status-color": "var(--success)" } as React.CSSProperties)
+                      : activity.status === "已報名"
+                        ? ({ "--status-bg": "rgba(91, 108, 255, 0.14)", "--status-color": "var(--brand)" } as React.CSSProperties)
+                        : ({ "--status-bg": "var(--panel2)", "--status-color": "var(--muted)" } as React.CSSProperties)
+                  }
+                >
                   {activity.status}
                 </span>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {activeTab === "achievements" && (
-        <div className="card">
-          <h2 style={{ margin: "0 0 20px 0", fontSize: 18, fontWeight: 700 }}>🏆 成就徽章</h2>
+        <section className="card sectionCard">
+          <div className="sectionCopy">
+            <p className="sectionEyebrow">Achievements</p>
+            <h2 className="sectionTitle">成就徽章</h2>
+          </div>
 
-          <div style={{ 
-            display: "grid", 
-            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", 
-            gap: 16 
-          }}>
+          <div className="surfaceGrid">
             {achievements.map((achievement) => (
-              <div
-                key={achievement.name}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  padding: 16,
-                  background: "var(--panel2)",
-                  borderRadius: 12,
-                  gap: 16,
-                }}
-              >
-                <div style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 28,
-                  background: "linear-gradient(135deg, rgba(139,92,246,0.2) 0%, rgba(236,72,153,0.2) 100%)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 24,
-                }}>
+              <div key={achievement.name} className="surfaceItem">
+                <div className="surfaceAccent is-round" style={{ "--accent-bg": "linear-gradient(135deg, rgba(91, 108, 255, 0.18) 0%, rgba(239, 109, 126, 0.14) 100%)" } as React.CSSProperties}>
                   {achievement.icon}
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>{achievement.name}</div>
-                  <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>
-                    {achievement.description}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--brand)" }}>
-                    🗓️ {achievement.date}
-                  </div>
+                <div className="surfaceContent">
+                  <h3 className="surfaceTitle">{achievement.name}</h3>
+                  <p className="surfaceMeta">{achievement.description}</p>
+                  <p className="metricMeta">{achievement.date}</p>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Locked Achievements */}
-          <div style={{ marginTop: 24 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: "var(--muted)" }}>
-              🔒 待解鎖成就
-            </h3>
-            <div style={{ 
-              display: "grid", 
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", 
-              gap: 16 
-            }}>
-              {[
-                { icon: "🎓", name: "畢業在即", description: "完成所有畢業學分" },
-                { icon: "🏅", name: "全能學生", description: "學業、活動、服務三滿分" },
-                { icon: "📖", name: "書蟲", description: "圖書館借閱達 100 本" },
-              ].map((achievement) => (
-                <div
-                  key={achievement.name}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    padding: 16,
-                    background: "var(--panel2)",
-                    borderRadius: 12,
-                    gap: 16,
-                    opacity: 0.5,
-                  }}
-                >
-                  <div style={{
-                    width: 56,
-                    height: 56,
-                    borderRadius: 28,
-                    background: "var(--panel)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 24,
-                    filter: "grayscale(100%)",
-                  }}>
+          <div className="sectionCard">
+            <div className="sectionCopy">
+              <h3 className="sectionTitle">待解鎖成就</h3>
+              <p className="sectionText">保留未達成目標，讓整體頁面更像持續累積的個人儀表板。</p>
+            </div>
+            <div className="surfaceGrid">
+              {lockedAchievements.map((achievement) => (
+                <div key={achievement.name} className="surfaceItem" style={{ opacity: 0.58 }}>
+                  <div className="surfaceAccent is-round" style={{ "--accent-bg": "var(--panel2)", "--accent": "var(--muted)", filter: "grayscale(100%)" } as React.CSSProperties}>
                     {achievement.icon}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, marginBottom: 4 }}>{achievement.name}</div>
-                    <div style={{ fontSize: 13, color: "var(--muted)" }}>
-                      {achievement.description}
-                    </div>
+                  <div className="surfaceContent">
+                    <h3 className="surfaceTitle">{achievement.name}</h3>
+                    <p className="surfaceMeta">{achievement.description}</p>
                   </div>
-                  <span style={{ fontSize: 20 }}>🔒</span>
+                  <span className="metricMeta">🔒</span>
                 </div>
               ))}
             </div>
           </div>
-        </div>
+        </section>
       )}
+      </div>
     </SiteShell>
   );
 }
