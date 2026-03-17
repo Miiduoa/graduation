@@ -1,0 +1,121 @@
+{
+  "name": "校園助手",
+  "short_name": "校園助手",
+  "description": "智慧校園一站式平台 - 公告、活動、地圖、餐廳、課表、成績查詢",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F0F23",
+  "theme_color": "#7C5CFF",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "zh-TW",
+  "categories": ["education", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-152x152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/home.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "首頁"
+    },
+    {
+      "src": "/screenshots/announcements.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "公告列表"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "公告",
+      "short_name": "公告",
+      "description": "查看最新公告",
+      "url": "/announcements",
+      "icons": [{ "src": "/icons/shortcut-announcements.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "餐廳菜單",
+      "short_name": "餐廳",
+      "description": "查看今日菜單",
+      "url": "/cafeteria",
+      "icons": [{ "src": "/icons/shortcut-cafeteria.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "課表",
+      "short_name": "課表",
+      "description": "查看課程表",
+      "url": "/timetable",
+      "icons": [{ "src": "/icons/shortcut-timetable.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "成績",
+      "short_name": "成績",
+      "description": "查看成績",
+      "url": "/grades",
+      "icons": [{ "src": "/icons/shortcut-grades.png", "sizes": "96x96" }]
+    }
+  ],
+  "related_applications": [
+    {
+      "platform": "play",
+      "url": "https://play.google.com/store/apps/details?id=com.campus.app",
+      "id": "com.campus.app"
+    },
+    {
+      "platform": "itunes",
+      "url": "https://apps.apple.com/app/campus-app/id123456789"
+    }
+  ],
+  "prefer_related_applications": false
+}

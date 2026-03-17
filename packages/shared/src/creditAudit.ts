@@ -71,11 +71,20 @@ export function calculateCredits(input: {
 }): CreditAuditResult {
   const passingGrade = input.passingGrade ?? 60;
 
-  const requiredTotal = input.rule?.override?.totalCreditsRequired ?? input.template.requirements.totalCreditsRequired;
-  const requiredByCategory: Partial<Record<CreditCategory, number>> = {
-    ...input.template.requirements.minByCategory,
-    ...(input.rule?.override?.minByCategory ?? {}),
-  };
+  const rawTotal = input.rule?.override?.totalCreditsRequired ?? input.template.requirements.totalCreditsRequired;
+  const requiredTotal = Number.isFinite(Number(rawTotal)) && Number(rawTotal) >= 0 ? Number(rawTotal) : 0;
+
+  const requiredByCategory: Partial<Record<CreditCategory, number>> = {};
+  const mergeSource = [
+    input.template.requirements.minByCategory,
+    input.rule?.override?.minByCategory,
+  ].filter(Boolean) as Partial<Record<CreditCategory, number>>[];
+  for (const src of mergeSource) {
+    for (const k of Object.keys(src) as CreditCategory[]) {
+      const v = Number(src[k]);
+      if (Number.isFinite(v) && v >= 0) requiredByCategory[k] = v;
+    }
+  }
 
   const earnedByCategory: Record<CreditCategory, number> = {
     required: 0,
@@ -86,6 +95,8 @@ export function calculateCredits(input: {
   };
 
   const missingCourseIds: string[] = [];
+
+  const validCategories: CreditCategory[] = ["required", "elective", "general", "english", "other"];
 
   for (const e of input.enrollments) {
     if (e.status !== "completed") continue;
@@ -99,7 +110,10 @@ export function calculateCredits(input: {
     const passed = e.passed ?? (typeof e.grade === "number" ? e.grade >= passingGrade : true);
     if (!passed) continue;
 
-    earnedByCategory[course.category] += course.credits;
+    const cred = Number(course.credits);
+    const creditsToAdd = Number.isFinite(cred) && cred >= 0 ? cred : 0;
+    const category = validCategories.includes(course.category as CreditCategory) ? (course.category as CreditCategory) : "other";
+    earnedByCategory[category] += creditsToAdd;
   }
 
   const totalEarned = Object.values(earnedByCategory).reduce((a, b) => a + b, 0);

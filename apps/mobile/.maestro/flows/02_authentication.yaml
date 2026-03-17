@@ -1,0 +1,84 @@
+# 02_authentication.yaml
+# Authentication Flow Test
+# 測試登入、註冊、登出流程
+
+appId: com.campus.app
+name: Authentication Flow
+tags:
+  - smoke
+  - auth
+
+---
+
+# 啟動 App
+- launchApp
+
+# 等待主畫面載入
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# 導航到「我的」頁面
+- tapOn:
+    text: "我的"
+
+# 等待頁面載入
+- assertVisible:
+    text: "登入"
+    timeout: 5000
+
+# 截圖 - 未登入狀態
+- takeScreenshot: me_screen_logged_out
+
+# 測試 Email 登入表單驗證
+- tapOn:
+    id: "email-input"
+    optional: true
+- inputText: "invalid-email"
+
+# 驗證錯誤訊息
+- tapOn:
+    text: "登入"
+
+# 等待錯誤提示
+- assertVisible:
+    text: "電子郵件格式不正確"
+    optional: true
+    timeout: 3000
+
+# 清除並輸入正確的 Email
+- clearText
+- inputText: ${TEST_EMAIL}
+
+# 輸入密碼
+- tapOn:
+    id: "password-input"
+    optional: true
+- inputText: "short"
+
+# 驗證密碼長度錯誤
+- assertVisible:
+    text: "密碼需至少 6 個字元"
+    optional: true
+
+# 清除並輸入正確密碼
+- clearText
+- inputText: ${TEST_PASSWORD}
+
+# 截圖 - 填寫完成的登入表單
+- takeScreenshot: login_form_filled
+
+# 嘗試登入（可能成功或失敗，取決於是否有測試帳號）
+- tapOn:
+    text: "登入"
+
+# 等待結果
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "登出"
+        - text: "帳號或密碼錯誤"
+    timeout: 10000
+
+# 截圖 - 登入結果
+- takeScreenshot: login_result

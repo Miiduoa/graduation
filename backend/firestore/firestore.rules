@@ -49,6 +49,318 @@ service cloud.firestore {
         allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
         allow update: if false;
       }
+
+      match /lostFound/{docId} {
+        allow read: if true;
+        allow create: if isSignedIn();
+        allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      }
+
+      match /settings/{docId} {
+        allow read: if true;
+        allow write: if hasRole(schoolId, 'admin');
+      }
+    }
+
+    // Conversations (DMs and group chats)
+    match /conversations/{conversationId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow create: if isSignedIn() && request.auth.uid in request.resource.data.memberIds;
+      allow update: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() 
+          && exists(/databases/$(database)/documents/conversations/$(conversationId))
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds;
+        allow create: if isSignedIn()
+          && exists(/databases/$(database)/documents/conversations/$(conversationId))
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.memberIds
+          && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // Groups
+    match /groups/{groupId} {
+      function isGroupMember() {
+        return isSignedIn()
+          && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
+          && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active';
+      }
+
+      function isGroupAdmin() {
+        return isSignedIn()
+          && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
+          && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin';
+      }
+
+      allow read: if isGroupMember();
+      allow create: if isSignedIn();
+      allow update: if isGroupAdmin();
+      allow delete: if isGroupAdmin();
+
+      match /members/{uid} {
+        allow read: if isGroupMember();
+        allow create: if isSignedIn() && uid == request.auth.uid;
+        allow update: if isGroupAdmin() || (isSignedIn() && uid == request.auth.uid);
+        allow delete: if isGroupAdmin() || (isSignedIn() && uid == request.auth.uid);
+      }
+
+      match /posts/{postId} {
+        allow read: if isGroupMember();
+        allow create: if isGroupMember();
+        allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      }
+
+      match /assignments/{assignmentId} {
+        allow read: if isGroupMember();
+        allow create, update, delete: if isGroupAdmin();
+
+        match /submissions/{submissionId} {
+          allow read: if isGroupMember();
+          allow create: if isGroupMember() && request.resource.data.studentId == request.auth.uid;
+          allow update: if isGroupAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+          allow delete: if false;
+        }
+      }
+    }
+
+    // User profiles
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == uid;
+      allow delete: if false;
+
+      match /pushTokens/{tokenId} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      match /settings/{settingId} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      match /groups/{groupRef} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      // 學分試算：使用者自己的修課紀錄（子集合）
+      match /enrollments/{enrollmentId} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
+    }
+
+    // SSO Links (internal, no client access)
+    match /ssoLinks/{linkId} {
+      allow read, write: if false;
+    }
+
+    // Admins collection
+    match /admins/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // Global announcements, events, pois, menus (multi-tenant at root level)
+    match /announcements/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /events/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /eventRegistrations/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /pois/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /menus/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /menuRatings/{docId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // Courses
+    match /courses/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Enrollments
+    match /enrollments/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // Grades
+    match /grades/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Group Posts (global collection for simplicity)
+    match /groupPosts/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    match /postLikes/{docId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow delete: if isSignedIn();
+      allow update: if false;
+    }
+
+    // Comments
+    match /comments/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.authorId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    // Assignments (global collection)
+    match /assignments/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    // Submissions
+    match /submissions/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    // Group Members (global collection)
+    match /groupMembers/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+    }
+
+    // Messages
+    match /messages/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    // Lost & Found (global)
+    match /lostFoundItems/{docId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Library
+    match /libraryBooks/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /libraryLoans/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    match /librarySeats/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /seatReservations/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Bus Routes
+    match /busRoutes/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /busArrivals/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Notifications
+    match /notifications/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Calendar Events
+    match /calendarEvents/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Orders
+    match /orders/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // Transactions
+    match /transactions/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Achievements
+    match /achievements/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    match /userAchievements/{docId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    // Favorites
+    match /favorites/{docId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if false;
     }
   }
 }
