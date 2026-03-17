@@ -1,0 +1,174 @@
+# 10_full_user_journey.yaml
+# Full User Journey Test
+# 模擬完整使用者流程
+
+appId: com.campus.app
+name: Full User Journey
+tags:
+  - regression
+  - journey
+
+---
+
+# 清除 App 狀態
+- clearState
+
+# 啟動 App
+- launchApp
+
+# === 1. 完成 Onboarding ===
+- assertVisible:
+    text: "歡迎"
+    timeout: 10000
+    optional: true
+
+# 快速跳過 Onboarding
+- repeat:
+    times: 4
+    commands:
+      - swipe:
+          direction: LEFT
+          duration: 200
+
+- tapOn:
+    text: "開始使用"
+    optional: true
+
+# 等待主畫面
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# === 2. 瀏覽公告 ===
+# 查看公告列表
+- takeScreenshot: journey_01_announcements
+
+# 點擊第一個公告
+- tapOn:
+    index: 0
+    below:
+      text: "公告"
+    optional: true
+
+# 截圖
+- takeScreenshot: journey_02_announcement_detail
+
+# 返回
+- back
+
+# === 3. 查看活動 ===
+- tapOn:
+    text: "活動"
+
+- takeScreenshot: journey_03_events
+
+# 點擊第一個活動
+- tapOn:
+    index: 0
+    below:
+      text: "活動"
+    optional: true
+
+- takeScreenshot: journey_04_event_detail
+
+- back
+
+# === 4. 探索地圖 ===
+- tapOn:
+    text: "地圖"
+
+- takeScreenshot: journey_05_map
+
+# 選擇餐廳分類
+- tapOn:
+    text: "餐廳"
+    optional: true
+
+- takeScreenshot: journey_06_map_cafeteria
+
+- back
+
+# === 5. 查看餐廳菜單 ===
+- tapOn:
+    text: "餐廳"
+
+- takeScreenshot: journey_07_cafeteria
+
+# 點擊菜單項目
+- tapOn:
+    index: 0
+    below:
+      text: "餐廳"
+    optional: true
+
+- takeScreenshot: journey_08_menu_detail
+
+- back
+
+# === 6. 前往「我的」頁面 ===
+- tapOn:
+    text: "我的"
+
+- takeScreenshot: journey_09_me
+
+# === 7. 使用 AI 助理 ===
+- tapOn:
+    text: "AI 助理"
+    optional: true
+
+- takeScreenshot: journey_10_ai_chat
+
+# 發送訊息
+- tapOn:
+    text: "今日公告"
+    optional: true
+
+# 等待回覆
+- extendedWaitUntil:
+    notVisible:
+      text: "思考中"
+    timeout: 15000
+    optional: true
+
+- takeScreenshot: journey_11_ai_response
+
+- back
+
+# === 8. 查看課表 ===
+- tapOn:
+    text: "課表"
+    optional: true
+
+- takeScreenshot: journey_12_schedule
+
+- back
+
+# === 9. 查看成績 ===
+- scrollUntilVisible:
+    element:
+      text: "成績"
+    direction: DOWN
+
+- tapOn:
+    text: "成績"
+    optional: true
+
+- takeScreenshot: journey_13_grades
+
+- back
+
+# === 10. 進入設定 ===
+- tapOn:
+    id: "settings-button"
+    optional: true
+
+- tapOn:
+    text: "設定"
+    optional: true
+
+- takeScreenshot: journey_14_settings
+
+# === 完成 ===
+- runScript:
+    script: |
+      console.log("Full user journey completed successfully!");

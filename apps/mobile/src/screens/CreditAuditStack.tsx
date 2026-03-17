@@ -3,16 +3,21 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { CreditAuditScreen } from "./CreditAuditScreen";
 import { CreditAuditInputScreen } from "./CreditAuditInputScreen";
 import { theme } from "../ui/theme";
+import { useThemeMode } from "../state/theme";
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<any, undefined>();
 
 export function CreditAuditStack() {
+  useThemeMode();
+
   return (
     <Stack.Navigator
+      id={undefined}
       screenOptions={{
-        headerStyle: { backgroundColor: theme.colors.surface },
+        headerStyle: { backgroundColor: theme.colors.bg },
         headerTitleStyle: { color: theme.colors.text, fontWeight: "800" },
         headerTintColor: theme.colors.text,
+        headerShadowVisible: false,
       }}
     >
       <Stack.Screen name="CreditAudit" component={CreditAuditScreen} options={{ title: "學分試算" }} />

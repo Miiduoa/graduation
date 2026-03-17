@@ -1,0 +1,105 @@
+# 04_events.yaml
+# Events Flow Test
+# 測試活動列表、篩選、報名流程
+
+appId: com.campus.app
+name: Events Flow
+tags:
+  - smoke
+  - events
+
+---
+
+# 啟動 App
+- launchApp
+
+# 等待主畫面載入
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# 導航到活動頁面
+- tapOn:
+    text: "活動"
+
+# 等待活動頁面載入
+- assertVisible:
+    text: "活動"
+    timeout: 5000
+
+# 截圖 - 活動列表
+- takeScreenshot: events_list
+
+# 測試時間篩選
+- tapOn:
+    text: "今日"
+    optional: true
+
+# 截圖 - 今日活動
+- takeScreenshot: events_today
+
+- tapOn:
+    text: "本週"
+    optional: true
+
+# 截圖 - 本週活動
+- takeScreenshot: events_this_week
+
+- tapOn:
+    text: "本月"
+    optional: true
+
+# 截圖 - 本月活動
+- takeScreenshot: events_this_month
+
+# 重置篩選
+- tapOn:
+    text: "全部"
+    optional: true
+
+# 點擊第一個活動
+- tapOn:
+    index: 0
+    below:
+      text: "活動"
+
+# 等待活動詳情頁面
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "報名"
+        - text: "已報名"
+        - text: "已截止"
+    timeout: 5000
+
+# 截圖 - 活動詳情
+- takeScreenshot: event_detail
+
+# 測試活動提醒設定
+- tapOn:
+    text: "設定提醒"
+    optional: true
+
+# 截圖 - 活動提醒選項
+- takeScreenshot: event_reminder_options
+
+# 測試報名功能（如果有報名按鈕）
+- tapOn:
+    text: "報名"
+    optional: true
+
+# 等待報名結果
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "報名成功"
+        - text: "已報名"
+        - text: "請先登入"
+    timeout: 5000
+    optional: true
+
+# 截圖 - 報名結果
+- takeScreenshot: event_registration_result
+
+# 返回
+- back

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#7C5CFF">
+  <title>離線 - 校園助手</title>
+  <style>
+    :root {
+      --bg: #0F0F23;
+      --surface: #1A1A2E;
+      --text: #FFFFFF;
+      --muted: #9CA3AF;
+      --brand: #7C5CFF;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    
+    .container {
+      text-align: center;
+      max-width: 400px;
+    }
+    
+    .icon {
+      font-size: 80px;
+      margin-bottom: 24px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(0.95); }
+    }
+    
+    h1 {
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 16px;
+    }
+    
+    p {
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+    
+    .card {
+      background: var(--surface);
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    
+    .feature {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .feature:last-child {
+      border-bottom: none;
+    }
+    
+    .feature-icon {
+      font-size: 24px;
+    }
+    
+    .feature-text {
+      text-align: left;
+      flex: 1;
+    }
+    
+    .feature-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    
+    .feature-desc {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    
+    button {
+      background: var(--brand);
+      color: white;
+      border: none;
+      padding: 14px 32px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(124, 92, 255, 0.3);
+    }
+    
+    button:active {
+      transform: translateY(0);
+    }
+    
+    .status {
+      margin-top: 24px;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(124, 92, 255, 0.1);
+      font-size: 14px;
+      color: var(--brand);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">📡</div>
+    <h1>目前處於離線狀態</h1>
+    <p>無法連接到網路。部分功能可能暫時無法使用，但你仍可以查看已快取的內容。</p>
+    
+    <div class="card">
+      <div class="feature">
+        <span class="feature-icon">✅</span>
+        <div class="feature-text">
+          <div class="feature-title">已快取的公告</div>
+          <div class="feature-desc">查看之前載入的公告內容</div>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">✅</span>
+        <div class="feature-text">
+          <div class="feature-title">課表資訊</div>
+          <div class="feature-desc">查看已儲存的課程表</div>
+        </div>
+      </div>
+      <div class="feature">
+        <span class="feature-icon">⏳</span>
+        <div class="feature-text">
+          <div class="feature-title">即時資料</div>
+          <div class="feature-desc">需要網路連線才能更新</div>
+        </div>
+      </div>
+    </div>
+    
+    <button onclick="location.reload()">
+      重新載入
+    </button>
+    
+    <div class="status" id="status">
+      正在嘗試重新連線...
+    </div>
+  </div>
+  
+  <script>
+    // Check for online status
+    function updateStatus() {
+      const statusEl = document.getElementById('status');
+      if (navigator.onLine) {
+        statusEl.textContent = '已恢復連線！正在重新載入...';
+        statusEl.style.background = 'rgba(34, 197, 94, 0.1)';
+        statusEl.style.color = '#22C55E';
+        setTimeout(() => location.reload(), 1000);
+      } else {
+        statusEl.textContent = '正在嘗試重新連線...';
+      }
+    }
+    
+    window.addEventListener('online', updateStatus);
+    window.addEventListener('offline', updateStatus);
+    
+    // Initial check
+    updateStatus();
+    
+    // Periodic check
+    setInterval(() => {
+      if (!navigator.onLine) {
+        fetch('/', { method: 'HEAD', mode: 'no-cors' })
+          .then(() => {
+            location.reload();
+          })
+          .catch(() => {});
+      }
+    }, 5000);
+  </script>
+</body>
+</html>

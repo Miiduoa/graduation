@@ -1,0 +1,948 @@
+// ===== 基礎公告與活動 =====
+
+export type Announcement = {
+  id: string;
+  title: string;
+  body: string;
+  publishedAt: string;
+  source?: string;
+  category?: AnnouncementCategory;
+  attachments?: Attachment[];
+  pinned?: boolean;
+  expiresAt?: string;
+  schoolId?: string;
+};
+
+export type AnnouncementCategory = 
+  | "general" 
+  | "academic" 
+  | "event" 
+  | "emergency" 
+  | "system";
+
+export type ClubEvent = {
+  id: string;
+  title: string;
+  description: string;
+  startsAt: string;
+  endsAt?: string;
+  location?: string;
+  capacity?: number;
+  registeredCount?: number;
+  category?: EventCategory;
+  organizer?: string;
+  imageUrl?: string;
+  registrationDeadline?: string;
+  fee?: number;
+  tags?: string[];
+  schoolId?: string;
+};
+
+export type EventCategory = 
+  | "academic" 
+  | "sports" 
+  | "arts" 
+  | "social" 
+  | "career" 
+  | "workshop" 
+  | "competition";
+
+// ===== 地點與餐廳 =====
+
+export type Poi = {
+  id: string;
+  name: string;
+  description?: string;
+  category: PoiCategory;
+  lat: number;
+  lng: number;
+  floor?: number;
+  building?: string;
+  openingHours?: OpeningHours;
+  imageUrl?: string;
+  facilities?: string[];
+  accessible?: boolean;
+  crowdLevel?: "low" | "medium" | "high";
+  schoolId?: string;
+};
+
+export type PoiCategory = 
+  | "building" 
+  | "food"
+  | "library" 
+  | "cafeteria" 
+  | "parking" 
+  | "sports" 
+  | "lab" 
+  | "office" 
+  | "dormitory"
+  | "medical"
+  | "convenience"
+  | "other";
+
+export type OpeningHours = {
+  monday?: DayHours;
+  tuesday?: DayHours;
+  wednesday?: DayHours;
+  thursday?: DayHours;
+  friday?: DayHours;
+  saturday?: DayHours;
+  sunday?: DayHours;
+};
+
+export type DayHours = {
+  open: string;
+  close: string;
+  closed?: boolean;
+};
+
+export type MenuItem = {
+  id: string;
+  name: string;
+  cafeteria: string;
+  availableOn: string;
+  price?: number;
+  category?: MenuCategory;
+  description?: string;
+  imageUrl?: string;
+  image?: string;
+  calories?: number;
+  allergens?: string[];
+  vegetarian?: boolean;
+  vegan?: boolean;
+  rating?: number;
+  ratingCount?: number;
+  soldOut?: boolean;
+  customizable?: boolean;
+  popular?: boolean;
+  waitTime?: number;
+  schoolId?: string;
+};
+
+export type MenuCategory = 
+  | "main" 
+  | "side" 
+  | "soup" 
+  | "dessert" 
+  | "beverage" 
+  | "set";
+
+// ===== 使用者與認證 =====
+
+export type User = {
+  id: string;
+  email: string;
+  displayName?: string;
+  photoUrl?: string;
+  avatarUrl?: string | null;
+  studentId?: string;
+  department?: string;
+  year?: number;
+  role: UserRole;
+  schoolId: string;
+  createdAt: string;
+  updatedAt?: string;
+  settings?: UserSettings;
+  pushToken?: string;
+  lastActiveAt?: string;
+  phone?: string | null;
+  bio?: string | null;
+  joinedAt?: string;
+  balance?: number;
+  isPublicProfile?: boolean;
+};
+
+export type UserRole = 
+  | "student"
+  | "teacher"
+  | "professor" 
+  | "principal"
+  | "admin"
+  | "staff"
+  | "alumni";
+
+export type UserSettings = {
+  language?: string;
+  theme?: "light" | "dark" | "system";
+  notifications?: NotificationPreferences | boolean;
+  emailNotifications?: boolean;
+  accessibility?: AccessibilitySettings;
+};
+
+export type NotificationPreferences = {
+  announcements?: boolean;
+  events?: boolean;
+  grades?: boolean;
+  assignments?: boolean;
+  messages?: boolean;
+  quietHoursStart?: string;
+  quietHoursEnd?: string;
+};
+
+export type AccessibilitySettings = {
+  fontSize?: "small" | "medium" | "large" | "xlarge";
+  highContrast?: boolean;
+  reduceMotion?: boolean;
+  screenReader?: boolean;
+};
+
+// ===== 課程與學業 =====
+
+export type Course = {
+  id: string;
+  code: string;
+  name: string;
+  instructor: string;
+  teacher?: string;
+  credits: number;
+  semester: string;
+  category?: string;
+  department?: string;
+  description?: string;
+  schedule: CourseSchedule[];
+  dayOfWeek?: number;
+  startTime?: string;
+  endTime?: string;
+  startPeriod?: number;
+  endPeriod?: number;
+  location?: string;
+  color?: string;
+  capacity?: number;
+  enrolled?: number;
+  prerequisites?: string[];
+  syllabus?: string;
+  schoolId?: string;
+};
+
+export type CourseSchedule = {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  location: string;
+  day?: number;
+  startPeriod?: number;
+  endPeriod?: number;
+};
+
+export type Enrollment = {
+  id: string;
+  userId: string;
+  courseId: string;
+  semester: string;
+  status: "enrolled" | "dropped" | "completed" | "waitlisted";
+  grade?: string;
+  gradePoints?: number;
+  createdAt: string;
+  enrolledAt?: string;
+};
+
+export type Grade = {
+  id: string;
+  userId: string;
+  courseId: string;
+  courseName: string;
+  courseCode?: string;
+  credits: number;
+  semester: string;
+  letterGrade?: string;
+  gradePoints?: number;
+  grade?: number;
+  gradePoint?: number;
+  score?: number;
+  midtermScore?: number;
+  finalScore?: number;
+  rank?: number;
+  classSize?: number;
+  publishedAt?: string;
+  instructor?: string;
+};
+
+export type Assignment = {
+  id: string;
+  groupId: string;
+  courseId?: string;
+  title: string;
+  description: string;
+  dueAt: string;
+  points?: number;
+  type: AssignmentType;
+  attachments?: Attachment[];
+  submissionCount?: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type AssignmentType = 
+  | "homework" 
+  | "quiz" 
+  | "exam" 
+  | "project" 
+  | "presentation" 
+  | "report";
+
+export type Submission = {
+  id: string;
+  assignmentId: string;
+  userId: string;
+  content?: string;
+  attachments?: Attachment[];
+  submittedAt: string;
+  grade?: number;
+  feedback?: string;
+  gradedAt?: string;
+  gradedBy?: string;
+  status: "submitted" | "graded" | "late" | "missing";
+};
+
+// ===== 群組與社群 =====
+
+export type Group = {
+  id: string;
+  name: string;
+  description?: string;
+  type: GroupType;
+  courseId?: string;
+  coverImage?: string;
+  memberCount: number;
+  createdBy?: string;
+  ownerId?: string;
+  createdAt: string;
+  isPrivate?: boolean;
+  isPublic?: boolean;
+  joinCode?: string;
+  schoolId?: string;
+  createdByEmail?: string;
+};
+
+export type GroupType = "course" | "club" | "study" | "project" | "social";
+
+export type GroupMember = {
+  id: string;
+  groupId: string;
+  userId: string;
+  uid?: string;
+  role: "owner" | "admin" | "member";
+  joinedAt: string;
+  user?: User;
+  displayName?: string;
+  email?: string;
+  avatarUrl?: string | null;
+  status?: string;
+};
+
+export type GroupPost = {
+  id: string;
+  groupId: string;
+  authorId: string;
+  author?: User;
+  content: string;
+  attachments?: Attachment[];
+  isPinned?: boolean;
+  isAnnouncement?: boolean;
+  likeCount?: number;
+  commentCount?: number;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type Comment = {
+  id: string;
+  postId: string;
+  authorId: string;
+  author?: User;
+  content: string;
+  parentId?: string;
+  likeCount?: number;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+// ===== 訊息與聊天 =====
+
+export type Conversation = {
+  id: string;
+  participants: string[];
+  participantIds?: string[];
+  participantUsers?: User[];
+  lastMessage?: Message | null;
+  lastMessageAt?: string | null;
+  unreadCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type Message = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  sender?: User;
+  content: string;
+  type: MessageType;
+  attachments?: Attachment[];
+  readBy?: string[];
+  createdAt: string;
+};
+
+export type MessageType = "text" | "image" | "file" | "location" | "system";
+
+// ===== 失物招領 =====
+
+export type LostFoundItem = {
+  id: string;
+  type: "lost" | "found";
+  title: string;
+  description: string;
+  category: LostFoundCategory;
+  location: string;
+  date: string;
+  imageUrls?: string[];
+  imageUrl?: string;
+  contactInfo?: string;
+  status: "open" | "resolved" | "expired" | "claimed" | "returned" | "active";
+  reporterId: string;
+  reporter?: User;
+  createdAt: string;
+  resolvedAt?: string;
+  schoolId?: string;
+  claimedBy?: string;
+  claimedAt?: string;
+};
+
+export type LostFoundCategory = 
+  | "electronics" 
+  | "documents" 
+  | "clothing" 
+  | "accessories" 
+  | "cards"
+  | "books"
+  | "keys" 
+  | "wallet" 
+  | "other";
+
+// ===== 圖書館 =====
+
+export type LibraryBook = {
+  id: string;
+  isbn?: string;
+  title: string;
+  author: string;
+  publisher?: string;
+  publishYear?: number;
+  publishedYear?: number;
+  category?: string;
+  location: string;
+  available: number;
+  total: number;
+  copies?: number;
+  coverUrl?: string;
+  description?: string;
+  schoolId?: string;
+};
+
+export type LibraryLoan = {
+  id: string;
+  userId: string;
+  bookId: string;
+  book?: LibraryBook;
+  borrowedAt: string;
+  dueAt?: string;
+  dueDate?: string;
+  returnedAt?: string;
+  renewCount: number;
+  status: "borrowed" | "returned" | "overdue";
+};
+
+export type LibrarySeat = {
+  id: string;
+  zone: string;
+  seatNumber: string;
+  name?: string;
+  floor?: string;
+  hasOutlet: boolean;
+  isQuietZone: boolean;
+  status: "available" | "occupied" | "reserved";
+  reservedBy?: string;
+  reservedUntil?: string;
+  schoolId?: string;
+};
+
+export type SeatReservation = {
+  id: string;
+  userId: string;
+  seatId: string;
+  seat?: LibrarySeat;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: "active" | "completed" | "cancelled" | "noshow";
+  createdAt?: string;
+};
+
+// ===== 公車與交通 =====
+
+export type BusRoute = {
+  id: string;
+  name: string;
+  description?: string;
+  stops: BusStop[];
+  schedule: BusScheduleItem[] | { weekday: string[]; weekend: string[] };
+  isActive?: boolean;
+  color?: string;
+  frequency?: string;
+  operatingHours?: string | { weekday: string[]; weekend: string[] } | BusScheduleItem[];
+  schoolId?: string;
+};
+
+export type BusStop = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  order?: number;
+};
+
+export type BusScheduleItem = {
+  stopId: string;
+  departureTime: string;
+  isWeekdayOnly?: boolean;
+  isWeekendOnly?: boolean;
+};
+
+export type BusArrival = {
+  id: string;
+  routeId: string;
+  stopId: string;
+  estimatedArrival?: string;
+  estimatedMinutes?: number;
+  busId?: string;
+  vehicleId?: string;
+  isDelayed?: boolean;
+  delayMinutes?: number;
+};
+
+// ===== 通知 =====
+
+export type Notification = {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  read: boolean;
+  createdAt: string;
+  expiresAt?: string;
+};
+
+export type NotificationType = 
+  | "announcement" 
+  | "event" 
+  | "grade" 
+  | "assignment" 
+  | "message" 
+  | "reminder"
+  | "system";
+
+// ===== 行事曆 =====
+
+export type CalendarEvent = {
+  id: string;
+  userId: string;
+  title: string;
+  description?: string;
+  startAt?: string;
+  endAt?: string;
+  startDate?: string;
+  endDate?: string;
+  allDay?: boolean;
+  location?: string;
+  color?: string;
+  type?: CalendarEventType;
+  sourceId?: string;
+  sourceType?: "course" | "event" | "assignment" | "custom";
+  reminder?: number;
+  recurrence?: RecurrenceRule;
+};
+
+export type CalendarEventType = 
+  | "class" 
+  | "assignment" 
+  | "exam" 
+  | "event" 
+  | "personal" 
+  | "holiday";
+
+export type RecurrenceRule = {
+  frequency: "daily" | "weekly" | "monthly" | "yearly";
+  interval?: number;
+  endDate?: string;
+  count?: number;
+  byDays?: number[];
+};
+
+// ===== 支付 =====
+
+export type PaymentMethod = {
+  id: string;
+  userId: string;
+  type: "credit_card" | "debit_card" | "campus_card" | "mobile_pay";
+  last4?: string;
+  brand?: string;
+  expiryMonth?: number;
+  expiryYear?: number;
+  isDefault: boolean;
+  createdAt: string;
+};
+
+export type Transaction = {
+  id: string;
+  userId: string;
+  amount: number;
+  currency: string;
+  type: "payment" | "refund" | "topup" | "expense";
+  status: "pending" | "completed" | "failed" | "cancelled";
+  description: string;
+  merchantId?: string;
+  merchantName?: string;
+  paymentMethodId?: string;
+  createdAt: string;
+  completedAt?: string;
+};
+
+export type Order = {
+  id: string;
+  userId: string;
+  items: OrderItem[];
+  subtotal?: number;
+  tax?: number;
+  total?: number;
+  totalAmount?: number;
+  status: OrderStatus;
+  paymentStatus: "pending" | "paid" | "refunded" | "unpaid";
+  merchantId?: string;
+  merchantName?: string;
+  cafeteria?: string;
+  queueNumber?: string;
+  estimatedTime?: number;
+  totalPrice?: number;
+  pickupTime?: string;
+  note?: string;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+export type OrderItem = {
+  menuItemId: string;
+  name: string;
+  quantity: number;
+  price: number;
+  options?: string[];
+  note?: string;
+};
+
+export type OrderStatus = 
+  | "pending" 
+  | "confirmed" 
+  | "preparing" 
+  | "ready" 
+  | "completed" 
+  | "cancelled";
+
+// ===== 成就系統 =====
+
+export type Achievement = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  category: AchievementCategory;
+  points: number;
+  requirement: number;
+  secret?: boolean;
+};
+
+export type AchievementCategory = 
+  | "academic" 
+  | "social" 
+  | "exploration" 
+  | "contribution" 
+  | "special";
+
+export type UserAchievement = {
+  id: string;
+  userId?: string;
+  achievementId?: string;
+  achievement?: Achievement;
+  progress: number;
+  completed?: boolean;
+  unlockedAt?: string;
+  name?: string;
+  description?: string;
+  icon?: string;
+  points?: number;
+  category?: AchievementCategory | "general";
+  maxProgress?: number;
+};
+
+// ===== 共用類型 =====
+
+export type Attachment = {
+  id: string;
+  name: string;
+  url: string;
+  type: "image" | "document" | "video" | "audio" | "other";
+  size?: number;
+  mimeType?: string;
+};
+
+export type PaginatedResult<T> = {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  nextCursor?: string;
+};
+
+export type QueryOptions = {
+  page?: number;
+  pageSize?: number;
+  limit?: number;
+  cursor?: string;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+  orderBy?: string;
+  orderDirection?: "asc" | "desc";
+  search?: string;
+  filters?: QueryFilter[];
+};
+
+export type QueryFilter = {
+  field: string;
+  operator: "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "array-contains";
+  value: unknown;
+};
+
+export type ApiResponse<T> = {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+  };
+};
+
+export type School = {
+  id: string;
+  code: string;
+  name: string;
+  shortName?: string;
+  logoUrl?: string;
+  primaryColor?: string;
+  domain?: string;
+  ssoProvider?: "oidc" | "cas" | "saml";
+  ssoConfig?: Record<string, unknown>;
+  features?: SchoolFeature[];
+  createdAt: string;
+}; 
+
+export type SchoolFeature = 
+  | "sso" 
+  | "library" 
+  | "bus" 
+  | "cafeteria" 
+  | "payment" 
+  | "ar_navigation";
+
+// ===== 宿舍服務 =====
+
+export type DormitoryInfo = {
+  id: string;
+  building: string;
+  room: string;
+  floor: number;
+  roommates?: string[];
+  startDate: string;
+  endDate: string;
+  userId: string;
+  schoolId?: string;
+};
+
+export type RepairRequest = {
+  id: string;
+  type: RepairType;
+  title: string;
+  description: string;
+  status: RepairStatus;
+  createdAt: string;
+  updatedAt?: string;
+  completedAt?: string;
+  room: string;
+  userId: string;
+  assignedTo?: string;
+  priority?: "low" | "normal" | "high" | "urgent";
+  images?: string[];
+  feedback?: string;
+  rating?: number;
+  schoolId?: string;
+};
+
+export type RepairType = 
+  | "electrical" 
+  | "plumbing" 
+  | "furniture" 
+  | "ac" 
+  | "internet" 
+  | "other";
+
+export type RepairStatus = 
+  | "pending" 
+  | "assigned" 
+  | "inProgress" 
+  | "completed" 
+  | "cancelled";
+
+export type DormPackage = {
+  id: string;
+  trackingNumber: string;
+  carrier: string;
+  arrivedAt: string;
+  status: "pending" | "picked" | "returned";
+  location: string;
+  userId: string;
+  pickedAt?: string;
+  description?: string;
+  schoolId?: string;
+};
+
+export type WashingMachine = {
+  id: string;
+  number: number;
+  floor: string;
+  building: string;
+  status: "available" | "inUse" | "maintenance" | "reserved";
+  type: "washer" | "dryer";
+  remainingTime?: number;
+  reservedBy?: string;
+  reservedUntil?: string;
+  price: number;
+  schoolId?: string;
+};
+
+export type WashingReservation = {
+  id: string;
+  machineId: string;
+  machine?: WashingMachine;
+  userId: string;
+  startTime: string;
+  endTime?: string;
+  status: "reserved" | "inUse" | "completed" | "cancelled" | "noshow";
+  createdAt: string;
+};
+
+export type DormAnnouncement = {
+  id: string;
+  title: string;
+  content: string;
+  type: "notice" | "warning" | "emergency" | "maintenance";
+  building?: string;
+  publishedAt: string;
+  expiresAt?: string;
+  schoolId?: string;
+};
+
+// ===== 列印服務 =====
+
+export type Printer = {
+  id: string;
+  name: string;
+  location: string;
+  building: string;
+  floor: string;
+  status: "online" | "offline" | "busy" | "error" | "outOfPaper" | "outOfToner";
+  capabilities: PrinterCapability[];
+  queueLength: number;
+  pricePerPage: {
+    bw: number;
+    color: number;
+  };
+  schoolId?: string;
+};
+
+export type PrinterCapability = 
+  | "color" 
+  | "duplex" 
+  | "a3" 
+  | "a4" 
+  | "scan" 
+  | "copy";
+
+export type PrintJob = {
+  id: string;
+  userId: string;
+  printerId: string;
+  printer?: Printer;
+  fileName: string;
+  fileUrl?: string;
+  pages: number;
+  copies: number;
+  color: boolean;
+  duplex: boolean;
+  status: "pending" | "printing" | "completed" | "failed" | "cancelled";
+  cost: number;
+  createdAt: string;
+  completedAt?: string;
+  errorMessage?: string;
+};
+
+// ===== 健康服務 =====
+
+export type HealthAppointment = {
+  id: string;
+  userId: string;
+  department: HealthDepartment;
+  doctorId?: string;
+  doctorName?: string;
+  date: string;
+  timeSlot: string;
+  status: "scheduled" | "completed" | "cancelled" | "noshow";
+  reason?: string;
+  notes?: string;
+  createdAt: string;
+  schoolId?: string;
+};
+
+export type HealthDepartment = 
+  | "general" 
+  | "dental" 
+  | "mental" 
+  | "physical" 
+  | "vaccination";
+
+export type HealthRecord = {
+  id: string;
+  userId: string;
+  type: "appointment" | "vaccination" | "checkup" | "prescription";
+  title?: string;
+  date: string;
+  department: HealthDepartment;
+  doctorName?: string;
+  diagnosis?: string;
+  prescription?: string;
+  notes?: string;
+  attachments?: Attachment[];
+  schoolId?: string;
+};
+
+export type HealthTimeSlot = {
+  id: string;
+  department: HealthDepartment;
+  doctorId?: string;
+  doctorName?: string;
+  date: string;
+  time: string;
+  available: boolean;
+  capacity: number;
+  booked: number;
+};

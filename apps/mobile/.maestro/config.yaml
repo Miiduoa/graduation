@@ -1,0 +1,34 @@
+# Maestro E2E Testing Configuration
+# https://maestro.mobile.dev/
+
+# Global configuration
+appId: com.campus.app
+name: Campus App E2E Tests
+
+# Environment variables
+env:
+  TEST_EMAIL: test@example.com
+  TEST_PASSWORD: testpassword123
+  SCHOOL_CODE: NCHU
+
+# Flows directory
+flows:
+  - ./flows/
+
+# Screenshots directory
+screenshots:
+  - ./screenshots/
+
+# Test artifacts
+artifacts:
+  directory: ./artifacts/
+
+# Timeout settings
+timeout:
+  default: 30000  # 30 seconds
+  flow: 300000    # 5 minutes per flow
+
+# Retry settings
+retry:
+  enabled: true
+  maxAttempts: 3

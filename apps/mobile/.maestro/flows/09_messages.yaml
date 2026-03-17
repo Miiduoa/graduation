@@ -1,0 +1,113 @@
+# 09_messages.yaml
+# Messages & Groups Flow Test
+# 測試訊息與群組功能
+
+appId: com.campus.app
+name: Messages & Groups Flow
+tags:
+  - smoke
+  - messages
+  - groups
+
+---
+
+# 啟動 App
+- launchApp
+
+# 等待主畫面載入
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# 導航到訊息頁面
+- tapOn:
+    text: "訊息"
+
+# 等待訊息頁面載入
+- assertVisible:
+    text: "訊息"
+    timeout: 5000
+
+# 截圖 - 訊息首頁
+- takeScreenshot: messages_home
+
+# === 測試進入群組 ===
+- tapOn:
+    text: "進入群組"
+    optional: true
+
+# 截圖 - 群組列表
+- takeScreenshot: groups_list
+
+# === 測試建立群組 ===
+- tapOn:
+    text: "建立群組"
+    optional: true
+
+# 等待建立群組對話框
+- assertVisible:
+    text: "建立群組"
+    timeout: 5000
+    optional: true
+
+# 截圖 - 建立群組
+- takeScreenshot: create_group
+
+# 取消建立
+- tapOn:
+    text: "取消"
+    optional: true
+
+# === 測試加入群組 ===
+- tapOn:
+    text: "加入群組"
+    optional: true
+
+# 等待加入群組對話框
+- assertVisible:
+    text: "加入碼"
+    timeout: 5000
+    optional: true
+
+# 截圖 - 加入群組
+- takeScreenshot: join_group
+
+# 輸入測試加入碼
+- inputText: "TESTCODE"
+
+# 嘗試加入
+- tapOn:
+    text: "加入"
+    optional: true
+
+# 等待結果
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "加入成功"
+        - text: "找不到群組"
+        - text: "無效的加入碼"
+    timeout: 5000
+    optional: true
+
+# 截圖 - 加入結果
+- takeScreenshot: join_group_result
+
+# 關閉對話框
+- tapOn:
+    text: "好的"
+    optional: true
+- tapOn:
+    text: "確定"
+    optional: true
+
+# === 測試私訊（如果已登入）===
+- tapOn:
+    text: "私訊"
+    optional: true
+
+# 截圖 - 私訊列表
+- takeScreenshot: dm_list
+
+# 返回訊息首頁
+- back

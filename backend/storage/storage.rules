@@ -1,0 +1,143 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // ===== Helper Functions =====
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.admin == true;
+    }
+    
+    function isValidImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+    
+    function isValidDocument() {
+      return request.resource.contentType.matches('application/pdf')
+          || request.resource.contentType.matches('application/msword')
+          || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*')
+          || request.resource.contentType.matches('text/.*');
+    }
+    
+    function maxSize(mb) {
+      return request.resource.size < mb * 1024 * 1024;
+    }
+    
+    // ===== Avatar Images =====
+    // Users can only upload/update their own avatar
+    match /avatars/{userId}.{extension} {
+      allow read: if true;
+      allow write: if isOwner(userId) && isValidImage() && maxSize(5);
+    }
+    
+    // ===== Group Files =====
+    // Group cover images
+    match /groups/{groupId}/cover.{extension} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage() && maxSize(5);
+    }
+    
+    // Group post attachments
+    match /groups/{groupId}/posts/{postId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() 
+                   && (isValidImage() || isValidDocument()) 
+                   && maxSize(20);
+    }
+    
+    // ===== Assignment Submissions =====
+    match /assignments/{assignmentId}/submissions/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) 
+                   && (isValidImage() || isValidDocument()) 
+                   && maxSize(50);
+    }
+    
+    // ===== Lost & Found Images =====
+    match /lostfound/{itemId}/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage() && maxSize(10);
+    }
+    
+    // ===== Print Job Documents =====
+    match /printjobs/{userId}/{jobId}/{fileName} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) && isValidDocument() && maxSize(100);
+    }
+    
+    // ===== Announcement Attachments =====
+    match /announcements/{announcementId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && (isValidImage() || isValidDocument()) && maxSize(20);
+    }
+    
+    // ===== Event Images =====
+    match /events/{eventId}/cover.{extension} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage() && maxSize(10);
+    }
+    
+    match /events/{eventId}/gallery/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage() && maxSize(10);
+    }
+    
+    // ===== Menu Item Images =====
+    match /menus/{menuId}/image.{extension} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage() && maxSize(5);
+    }
+    
+    // ===== POI Images =====
+    match /pois/{poiId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage() && maxSize(10);
+    }
+    
+    // ===== Chat Attachments =====
+    match /conversations/{conversationId}/messages/{messageId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() 
+                   && (isValidImage() || isValidDocument()) 
+                   && maxSize(20);
+    }
+    
+    // ===== Bug Report Attachments =====
+    match /bugreports/{reportId}/{fileName} {
+      allow read: if isAdmin();
+      allow write: if isAuthenticated() && isValidImage() && maxSize(10);
+    }
+    
+    // ===== Repair Request Images =====
+    match /repairs/{requestId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isValidImage() && maxSize(10);
+    }
+    
+    // ===== Health Records (Sensitive) =====
+    match /health/{userId}/{recordId}/{fileName} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin() && (isValidImage() || isValidDocument()) && maxSize(20);
+    }
+    
+    // ===== Temporary Uploads (24hr expiry via lifecycle rules) =====
+    match /temp/{userId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId) && maxSize(50);
+    }
+    
+    // ===== Default: deny all other access =====
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,108 @@
+# 06_cafeteria.yaml
+# Cafeteria Flow Test
+# 測試餐廳菜單、篩選、評價功能
+
+appId: com.campus.app
+name: Cafeteria Flow
+tags:
+  - smoke
+  - cafeteria
+
+---
+
+# 啟動 App
+- launchApp
+
+# 等待主畫面載入
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# 導航到餐廳頁面
+- tapOn:
+    text: "餐廳"
+
+# 等待餐廳頁面載入
+- assertVisible:
+    text: "餐廳"
+    timeout: 5000
+
+# 截圖 - 餐廳菜單列表
+- takeScreenshot: cafeteria_menu_list
+
+# 測試價格篩選
+- tapOn:
+    text: "篩選"
+    optional: true
+
+# 截圖 - 篩選選項
+- takeScreenshot: cafeteria_filter_options
+
+# 選擇價格區間
+- tapOn:
+    text: "$50-100"
+    optional: true
+
+# 截圖 - 價格篩選結果
+- takeScreenshot: cafeteria_price_filter
+
+# 重置篩選
+- tapOn:
+    text: "重置"
+    optional: true
+
+# 測試餐廳篩選
+- tapOn:
+    text: "全部餐廳"
+    optional: true
+
+# 截圖 - 餐廳選擇
+- takeScreenshot: cafeteria_restaurant_select
+
+# 點擊第一個菜單項目
+- tapOn:
+    index: 0
+    below:
+      text: "餐廳"
+
+# 等待菜單詳情頁面
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "收藏"
+        - text: "營養資訊"
+        - text: "評價"
+    timeout: 5000
+
+# 截圖 - 菜單詳情
+- takeScreenshot: menu_item_detail
+
+# 驗證營養資訊
+- assertVisible:
+    text: "熱量"
+    optional: true
+
+# 測試評價功能
+- scrollUntilVisible:
+    element:
+      text: "評價"
+    direction: DOWN
+
+# 截圖 - 評價區域
+- takeScreenshot: menu_item_reviews
+
+# 測試收藏功能
+- tapOn:
+    text: "收藏"
+    optional: true
+
+# 測試線上點餐入口
+- tapOn:
+    text: "線上點餐"
+    optional: true
+
+# 截圖 - 線上點餐
+- takeScreenshot: online_ordering
+
+# 返回
+- back

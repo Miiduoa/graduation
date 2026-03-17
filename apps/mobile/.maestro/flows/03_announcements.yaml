@@ -1,0 +1,93 @@
+# 03_announcements.yaml
+# Announcements Flow Test
+# 測試公告列表、搜尋、詳情頁面
+
+appId: com.campus.app
+name: Announcements Flow
+tags:
+  - smoke
+  - announcements
+
+---
+
+# 啟動 App
+- launchApp
+
+# 等待主畫面載入（公告頁面是預設頁面）
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# 截圖 - 公告列表
+- takeScreenshot: announcements_list
+
+# 驗證公告列表存在
+- assertVisible:
+    text: "搜尋公告"
+    optional: true
+
+# 測試搜尋功能
+- tapOn:
+    text: "搜尋公告"
+    optional: true
+
+# 輸入搜尋關鍵字
+- inputText: "選課"
+
+# 等待搜尋結果
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "選課"
+        - text: "找不到結果"
+    timeout: 5000
+
+# 截圖 - 搜尋結果
+- takeScreenshot: announcements_search_result
+
+# 清除搜尋
+- tapOn:
+    id: "clear-search"
+    optional: true
+
+# 點擊第一個公告
+- tapOn:
+    index: 0
+    below:
+      text: "公告"
+
+# 等待公告詳情頁面
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "收藏"
+        - text: "分享"
+    timeout: 5000
+
+# 截圖 - 公告詳情
+- takeScreenshot: announcement_detail
+
+# 測試收藏功能
+- tapOn:
+    text: "收藏"
+    optional: true
+
+# 測試 AI 摘要功能
+- tapOn:
+    text: "AI 摘要"
+    optional: true
+
+# 等待 AI 摘要結果
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "摘要"
+        - text: "生成中"
+    timeout: 10000
+    optional: true
+
+# 截圖 - AI 摘要
+- takeScreenshot: announcement_ai_summary
+
+# 返回公告列表
+- back

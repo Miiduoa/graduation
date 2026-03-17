@@ -1,0 +1,157 @@
+# 07_me_features.yaml
+# Me Screen Features Test
+# 測試「我的」頁面的各項功能
+
+appId: com.campus.app
+name: Me Screen Features
+tags:
+  - smoke
+  - me
+
+---
+
+# 啟動 App
+- launchApp
+
+# 等待主畫面載入
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# 導航到「我的」頁面
+- tapOn:
+    text: "我的"
+
+# 等待頁面載入
+- assertVisible:
+    text: "快捷功能"
+    timeout: 5000
+
+# 截圖 - 我的頁面
+- takeScreenshot: me_screen
+
+# === 測試 QR 碼功能 ===
+- tapOn:
+    text: "QR 碼"
+
+# 等待 QR 碼頁面
+- assertVisible:
+    text: "QR 碼"
+    timeout: 5000
+
+# 截圖 - QR 碼頁面
+- takeScreenshot: qr_code_screen
+
+- back
+
+# === 測試課表功能 ===
+- tapOn:
+    text: "課表"
+
+# 等待課表頁面
+- assertVisible:
+    text: "課表"
+    timeout: 5000
+
+# 截圖 - 課表頁面
+- takeScreenshot: schedule_screen
+
+# 測試週/日/列表切換
+- tapOn:
+    text: "日檢視"
+    optional: true
+
+# 截圖 - 日檢視
+- takeScreenshot: schedule_day_view
+
+- back
+
+# === 測試支付功能 ===
+- tapOn:
+    text: "支付"
+
+# 等待支付頁面
+- assertVisible:
+    text: "校園支付"
+    timeout: 5000
+
+# 截圖 - 支付頁面
+- takeScreenshot: payment_screen
+
+- back
+
+# === 測試公車功能 ===
+- tapOn:
+    text: "公車"
+
+# 等待公車頁面
+- assertVisible:
+    text: "校園公車"
+    timeout: 5000
+
+# 截圖 - 公車頁面
+- takeScreenshot: bus_screen
+
+- back
+
+# === 測試圖書館功能 ===
+- tapOn:
+    text: "圖書館"
+
+# 等待圖書館頁面
+- assertVisible:
+    text: "圖書館"
+    timeout: 5000
+
+# 截圖 - 圖書館頁面
+- takeScreenshot: library_screen
+
+- back
+
+# === 測試 AI 助理功能 ===
+- tapOn:
+    text: "AI 助理"
+
+# 等待 AI 助理頁面
+- assertVisible:
+    text: "校園助理"
+    timeout: 5000
+
+# 截圖 - AI 助理頁面
+- takeScreenshot: ai_chat_screen
+
+# 測試快捷指令
+- tapOn:
+    text: "今日公告"
+    optional: true
+
+# 等待 AI 回覆
+- extendedWaitUntil:
+    notVisible:
+      text: "思考中"
+    timeout: 15000
+    optional: true
+
+# 截圖 - AI 回覆
+- takeScreenshot: ai_chat_response
+
+- back
+
+# === 測試成就功能 ===
+- scrollUntilVisible:
+    element:
+      text: "成就"
+    direction: DOWN
+
+- tapOn:
+    text: "成就"
+
+# 等待成就頁面
+- assertVisible:
+    text: "成就與積分"
+    timeout: 5000
+
+# 截圖 - 成就頁面
+- takeScreenshot: achievements_screen
+
+- back

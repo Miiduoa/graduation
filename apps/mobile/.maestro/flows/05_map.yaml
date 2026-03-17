@@ -1,0 +1,116 @@
+# 05_map.yaml
+# Map Flow Test
+# 測試地圖頁面、POI 列表、篩選功能
+
+appId: com.campus.app
+name: Map Flow
+tags:
+  - smoke
+  - map
+
+---
+
+# 啟動 App
+- launchApp
+
+# 等待主畫面載入
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# 導航到地圖頁面
+- tapOn:
+    text: "地圖"
+
+# 等待地圖頁面載入
+- assertVisible:
+    text: "地圖"
+    timeout: 5000
+
+# 截圖 - 地圖頁面
+- takeScreenshot: map_screen
+
+# 測試分類篩選
+- tapOn:
+    text: "全部"
+    optional: true
+
+# 測試建築分類
+- tapOn:
+    text: "建築"
+    optional: true
+
+# 截圖 - 建築分類
+- takeScreenshot: map_buildings
+
+# 測試圖書館分類
+- tapOn:
+    text: "圖書館"
+    optional: true
+
+# 截圖 - 圖書館分類
+- takeScreenshot: map_library
+
+# 測試餐廳分類
+- tapOn:
+    text: "餐廳"
+    optional: true
+
+# 截圖 - 餐廳分類
+- takeScreenshot: map_cafeteria
+
+# 重置篩選
+- tapOn:
+    text: "全部"
+    optional: true
+
+# 測試列表/網格切換
+- tapOn:
+    id: "view-toggle"
+    optional: true
+
+# 截圖 - 網格檢視
+- takeScreenshot: map_grid_view
+
+# 點擊第一個 POI
+- tapOn:
+    index: 0
+    below:
+      text: "地圖"
+
+# 等待 POI 詳情頁面
+- extendedWaitUntil:
+    visible:
+      anyOf:
+        - text: "導航"
+        - text: "營業時間"
+        - text: "設施"
+    timeout: 5000
+
+# 截圖 - POI 詳情
+- takeScreenshot: poi_detail
+
+# 測試即時人潮顯示
+- assertVisible:
+    text: "人潮"
+    optional: true
+
+# 測試導航功能
+- tapOn:
+    text: "導航"
+    optional: true
+
+# 截圖 - 導航選項
+- takeScreenshot: poi_navigation
+
+# 測試 AR 導航入口
+- tapOn:
+    text: "AR 實景導航"
+    optional: true
+
+# 截圖 - AR 導航
+- takeScreenshot: ar_navigation
+
+# 返回
+- back
+- back
