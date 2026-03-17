@@ -36,11 +36,11 @@ interface Settings {
 }
 
 const defaultSettings: Settings = {
-  darkMode: true,
+  darkMode: false,
   language: "zh-TW",
   startPage: "home",
   autoSync: true,
-  themeColor: "#8B5CF6",
+  themeColor: "#5B6CFF",
   fontSize: "medium",
   animations: true,
   compactMode: false,
@@ -728,14 +728,9 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: "240px 1fr", 
-        gap: 24,
-        alignItems: "start",
-      }}>
+      <div className="settingsLayout">
         {/* Sidebar */}
-        <div className="card" style={{ padding: 8, position: "sticky", top: 24 }}>
+        <div className="card settingsSidebar" style={{ padding: 8 }}>
           {sections.map((section) => (
             <button
               key={section.key}
