@@ -1,0 +1,164 @@
+# 08_settings.yaml
+# Settings Flow Test
+# 測試設定頁面的各項功能
+
+appId: com.campus.app
+name: Settings Flow
+tags:
+  - smoke
+  - settings
+
+---
+
+# 啟動 App
+- launchApp
+
+# 等待主畫面載入
+- assertVisible:
+    text: "公告"
+    timeout: 10000
+
+# 導航到「我的」頁面
+- tapOn:
+    text: "我的"
+
+# 點擊設定按鈕
+- tapOn:
+    id: "settings-button"
+    optional: true
+
+# 如果找不到 id，嘗試點擊設定圖示
+- tapOn:
+    text: "設定"
+    optional: true
+
+# 等待設定頁面
+- assertVisible:
+    text: "設定"
+    timeout: 5000
+
+# 截圖 - 設定頁面
+- takeScreenshot: settings_screen
+
+# === 測試學校代碼切換 ===
+- tapOn:
+    text: "學校代碼"
+    optional: true
+
+# 截圖 - 學校代碼輸入
+- takeScreenshot: school_code_input
+
+# 輸入新的學校代碼
+- clearText
+- inputText: "DEMO"
+
+# 確認切換
+- tapOn:
+    text: "確認"
+    optional: true
+
+# === 測試主題切換 ===
+- scrollUntilVisible:
+    element:
+      text: "外觀設定"
+    direction: DOWN
+    optional: true
+
+- tapOn:
+    text: "深色模式"
+    optional: true
+
+# 截圖 - 深色模式
+- takeScreenshot: settings_dark_mode
+
+# === 測試無障礙設定 ===
+- tapOn:
+    text: "無障礙設定"
+    optional: true
+
+# 等待無障礙設定頁面
+- assertVisible:
+    text: "無障礙設定"
+    timeout: 5000
+
+# 截圖 - 無障礙設定
+- takeScreenshot: accessibility_settings
+
+# 測試文字大小調整
+- tapOn:
+    text: "大"
+    optional: true
+
+# 截圖 - 大文字模式
+- takeScreenshot: accessibility_large_text
+
+- back
+
+# === 測試語言設定 ===
+- tapOn:
+    text: "語言設定"
+    optional: true
+
+# 等待語言設定頁面
+- assertVisible:
+    text: "語言設定"
+    timeout: 5000
+
+# 截圖 - 語言設定
+- takeScreenshot: language_settings
+
+# 測試切換語言
+- tapOn:
+    text: "English"
+    optional: true
+
+# 截圖 - 英文介面
+- takeScreenshot: settings_english
+
+# 切換回中文
+- tapOn:
+    text: "繁體中文"
+    optional: true
+
+- back
+
+# === 測試通知設定 ===
+- scrollUntilVisible:
+    element:
+      text: "通知設定"
+    direction: DOWN
+
+- tapOn:
+    text: "通知設定"
+    optional: true
+
+# 等待通知設定頁面
+- assertVisible:
+    text: "通知設定"
+    timeout: 5000
+
+# 截圖 - 通知設定
+- takeScreenshot: notification_settings
+
+- back
+
+# === 測試資料匯出 ===
+- scrollUntilVisible:
+    element:
+      text: "匯出我的資料"
+    direction: DOWN
+    optional: true
+
+- tapOn:
+    text: "匯出我的資料"
+    optional: true
+
+# 等待資料匯出頁面
+- assertVisible:
+    text: "資料匯出"
+    timeout: 5000
+
+# 截圖 - 資料匯出
+- takeScreenshot: data_export
+
+- back
