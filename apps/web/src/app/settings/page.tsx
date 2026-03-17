@@ -185,19 +185,10 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
     description?: string; 
     children: React.ReactNode;
   }) => (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "space-between",
-      padding: "16px 0",
-      borderBottom: "1px solid var(--border)",
-      gap: 16,
-    }}>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 600, marginBottom: description ? 4 : 0 }}>{label}</div>
-        {description && (
-          <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.4 }}>{description}</div>
-        )}
+    <div className="settingsRow">
+      <div className="settingsRowCopy">
+        <div className="settingsRowTitle">{label}</div>
+        {description ? <div className="settingsRowText">{description}</div> : null}
       </div>
       <div>{children}</div>
     </div>
@@ -211,30 +202,16 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
     onChange: (checked: boolean) => void;
   }) => (
     <button
+      type="button"
       onClick={() => onChange(!checked)}
-      style={{
-        width: 52,
-        height: 28,
-        borderRadius: 14,
-        background: checked ? "var(--brand)" : "var(--panel2)",
-        border: "2px solid",
-        borderColor: checked ? "var(--brand)" : "var(--border)",
-        cursor: "pointer",
-        position: "relative",
-        transition: "all 0.2s",
-      }}
+      className="toggle"
+      style={
+        checked
+          ? ({ "--toggle-bg": "var(--brand)", "--toggle-border": "var(--brand)", "--toggle-left": "26px" } as React.CSSProperties)
+          : undefined
+      }
     >
-      <div style={{
-        width: 20,
-        height: 20,
-        borderRadius: 10,
-        background: "#fff",
-        position: "absolute",
-        top: 2,
-        left: checked ? 26 : 2,
-        transition: "left 0.2s",
-        boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-      }} />
+      <div className="toggleThumb" />
     </button>
   );
 
@@ -247,14 +224,8 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
         <select
           value={school.id}
           disabled
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "var(--panel2)",
-            color: "var(--text)",
-            fontSize: 14,
-          }}
+          className="input"
+          style={{ minWidth: 160 }}
         >
           <option>{school.name}</option>
         </select>
@@ -267,15 +238,8 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
         <select
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "var(--panel2)",
-            color: "var(--text)",
-            fontSize: 14,
-            minWidth: 140,
-          }}
+          className="input"
+          style={{ minWidth: 160 }}
         >
           {languages.map((lang) => (
             <option key={lang.code} value={lang.code}>
@@ -292,15 +256,8 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
         <select
           value={startPage}
           onChange={(e) => setStartPage(e.target.value)}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "var(--panel2)",
-            color: "var(--text)",
-            fontSize: 14,
-            minWidth: 140,
-          }}
+          className="input"
+          style={{ minWidth: 160 }}
         >
           <option value="home">首頁</option>
           <option value="announcements">公告</option>
@@ -433,14 +390,8 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
         <select
           value={fontSize}
           onChange={(e) => setFontSize(e.target.value)}
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "var(--panel2)",
-            color: "var(--text)",
-            fontSize: 14,
-          }}
+          className="input"
+          style={{ minWidth: 160 }}
         >
           <option value="small">小</option>
           <option value="medium">中（預設）</option>
@@ -606,17 +557,10 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
 
       <SettingRow label="顯示名稱" description="其他使用者看到的名稱">
         <input
+          className="input"
           type="text"
           placeholder="設定顯示名稱"
-          style={{
-            padding: "8px 12px",
-            borderRadius: 8,
-            border: "1px solid var(--border)",
-            background: "var(--panel2)",
-            color: "var(--text)",
-            fontSize: 14,
-            width: 160,
-          }}
+          style={{ width: 180 }}
         />
       </SettingRow>
 
@@ -693,25 +637,11 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
       title="設定"
       subtitle="個人化您的應用程式體驗"
     >
-      {/* Save Status Toast */}
       {(isSaving || saveMessage) && (
-        <div style={{
-          position: "fixed",
-          bottom: 24,
-          right: 24,
-          padding: "12px 20px",
-          background: isSaving ? "var(--panel2)" : "rgba(16, 185, 129, 0.9)",
-          color: isSaving ? "var(--text)" : "#fff",
-          borderRadius: 12,
-          boxShadow: "0 8px 24px rgba(0,0,0,0.3)",
-          zIndex: 190,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          fontSize: 14,
-          fontWeight: 500,
-          animation: "fadeIn 0.2s ease",
-        }}>
+        <div
+          className="floatingToast"
+          style={isSaving ? undefined : { background: "rgba(44, 184, 168, 0.92)", color: "#fff", borderColor: "rgba(44, 184, 168, 0.32)" }}
+        >
           {isSaving ? (
             <>
               <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span>
@@ -729,48 +659,37 @@ export default function SettingsPage(props: { searchParams?: { school?: string; 
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
       <div className="settingsLayout">
-        {/* Sidebar */}
         <div className="card settingsSidebar" style={{ padding: 8 }}>
-          {sections.map((section) => (
-            <button
-              key={section.key}
-              onClick={() => setActiveSection(section.key)}
-              style={{
-                width: "100%",
-                padding: "12px 16px",
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                background: activeSection === section.key ? "var(--brand)" : "transparent",
-                color: activeSection === section.key ? "#fff" : "var(--text)",
-                border: "none",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontSize: 14,
-                fontWeight: activeSection === section.key ? 600 : 400,
-                textAlign: "left",
-                transition: "all 0.2s",
-              }}
-            >
-              <span style={{ fontSize: 18 }}>{section.icon}</span>
-              {section.label}
-            </button>
-          ))}
+          <div className="sidebarMenu">
+            {sections.map((section) => (
+              <button
+                key={section.key}
+                type="button"
+                onClick={() => setActiveSection(section.key)}
+                className={`sidebarMenuButton${activeSection === section.key ? " active" : ""}`}
+              >
+                <span style={{ fontSize: 18 }}>{section.icon}</span>
+                {section.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {/* Content */}
-        <div className="card">
-          <h2 style={{ margin: "0 0 4px 0", fontSize: 20, fontWeight: 700 }}>
-            {sections.find((s) => s.key === activeSection)?.icon}{" "}
-            {sections.find((s) => s.key === activeSection)?.label}
-          </h2>
-          <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 24 }}>
-            {activeSection === "general" && "調整應用程式的基本設定"}
-            {activeSection === "notifications" && "管理推播和通知偏好"}
-            {activeSection === "appearance" && "自訂外觀和主題"}
-            {activeSection === "privacy" && "控制您的隱私和資料"}
-            {activeSection === "account" && "管理您的帳號資訊"}
-          </p>
+        <div className="card sectionCard">
+          <div className="sectionCopy">
+            <p className="sectionEyebrow">Preferences</p>
+            <h2 className="sectionTitle">
+              {sections.find((s) => s.key === activeSection)?.icon}{" "}
+              {sections.find((s) => s.key === activeSection)?.label}
+            </h2>
+            <p className="sectionText">
+              {activeSection === "general" && "調整應用程式的基本設定"}
+              {activeSection === "notifications" && "管理推播和通知偏好"}
+              {activeSection === "appearance" && "自訂外觀和主題"}
+              {activeSection === "privacy" && "控制您的隱私和資料"}
+              {activeSection === "account" && "管理您的帳號資訊"}
+            </p>
+          </div>
 
           {activeSection === "general" && renderGeneralSettings()}
           {activeSection === "notifications" && renderNotificationSettings()}

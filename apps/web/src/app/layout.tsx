@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { AuthProvider } from "@/components/AuthGuard";
+import { ToastProvider } from "@/components/ui";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -89,7 +90,9 @@ export default function RootLayout({
         <PWARegister />
       </head>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <ToastProvider position="top-center">{children}</ToastProvider>
+        </AuthProvider>
       </body>
     </html>
   );

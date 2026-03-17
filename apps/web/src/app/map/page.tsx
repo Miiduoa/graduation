@@ -4,6 +4,9 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { resolveSchool } from "@campus/shared/src/schools";
 import { mockPois } from "@campus/shared/src/mockData";
 import { SiteShell } from "@/components/SiteShell";
+import { useToast } from "@/components/ui";
+import { fetchPois, type Poi } from "@/lib/firebase";
+import { useSchoolCollectionData } from "@/lib/useSchoolCollectionData";
 
 type PoiCategory = "all" | "building" | "food" | "service" | "sports" | "parking";
 type MapProvider = "leaflet" | "google" | "fallback";
@@ -89,6 +92,15 @@ declare global {
   }
 }
 
+const demoPois: Poi[] = mockPois.map((poi) => ({
+  id: poi.id,
+  name: poi.name,
+  description: poi.description ?? "校園地點資訊",
+  category: poi.category ?? getPoiCategory(poi.name),
+  lat: poi.lat,
+  lng: poi.lng,
+}));
+
 export default function MapPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
   const school = resolveSchool({ school: props.searchParams?.school, schoolId: props.searchParams?.schoolId });
   const [searchQuery, setSearchQuery] = useState("");
@@ -99,27 +111,38 @@ export default function MapPage(props: { searchParams?: { school?: string; schoo
   const [mapLoaded, setMapLoaded] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isLocating, setIsLocating] = useState(false);
+  const toast = useToast();
+  const { data: pois, loading, sourceMode } = useSchoolCollectionData<Poi>(school.id, fetchPois, demoPois);
+  const usingDemo = sourceMode === "demo";
   
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<LeafletMap | null>(null);
   const markersRef = useRef<LeafletMarker[]>([]);
 
   const filteredPois = useMemo(() => {
-    return mockPois.filter((p) => {
-      const category = getPoiCategory(p.name);
+    return pois.filter((p) => {
+      const category = (p.category?.toLowerCase() as PoiCategory) || getPoiCategory(p.name);
       const matchesCategory = selectedCategory === "all" || category === selectedCategory;
-      const matchesSearch = !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const keyword = searchQuery.toLowerCase();
+      const matchesSearch =
+        !searchQuery ||
+        p.name.toLowerCase().includes(keyword) ||
+        (p.description ?? "").toLowerCase().includes(keyword) ||
+        p.building?.toLowerCase().includes(keyword) ||
+        p.category?.toLowerCase().includes(keyword);
       return matchesCategory && matchesSearch;
     });
-  }, [searchQuery, selectedCategory]);
+  }, [pois, searchQuery, selectedCategory]);
 
   const toggleFavorite = (poiId: string) => {
     setFavorites((prev) => {
       const next = new Set(prev);
       if (next.has(poiId)) {
         next.delete(poiId);
+        toast.info("已取消收藏");
       } else {
         next.add(poiId);
+        toast.success("已加入收藏");
       }
       return next;
     });
@@ -135,8 +158,8 @@ export default function MapPage(props: { searchParams?: { school?: string; schoo
     return levels[hash % levels.length];
   }, []);
 
-  const centerLat = mockPois.length > 0 ? mockPois.reduce((sum, p) => sum + p.lat, 0) / mockPois.length : 25.0;
-  const centerLng = mockPois.length > 0 ? mockPois.reduce((sum, p) => sum + p.lng, 0) / mockPois.length : 121.5;
+  const centerLat = pois.length > 0 ? pois.reduce((sum, p) => sum + p.lat, 0) / pois.length : 25.0;
+  const centerLng = pois.length > 0 ? pois.reduce((sum, p) => sum + p.lng, 0) / pois.length : 121.5;
 
   useEffect(() => {
     const loadLeaflet = async () => {
@@ -342,12 +365,12 @@ export default function MapPage(props: { searchParams?: { school?: string; schoo
     );
   };
 
-  const handleNavigateTo = (poi: typeof mockPois[0]) => {
+  const handleNavigateTo = (poi: Poi) => {
     const url = `https://www.google.com/maps/dir/?api=1&destination=${poi.lat},${poi.lng}`;
     window.open(url, "_blank");
   };
 
-  const handleCenterOnPoi = (poi: typeof mockPois[0]) => {
+  const handleCenterOnPoi = (poi: Poi) => {
     setSelectedPoi(poi.id);
     if (mapInstanceRef.current) {
       mapInstanceRef.current.setView([poi.lat, poi.lng], 18);
@@ -361,6 +384,32 @@ export default function MapPage(props: { searchParams?: { school?: string; schoo
       }
     }
   };
+
+  const handleCopyCoordinates = async (poi: Poi) => {
+    try {
+      await navigator.clipboard.writeText(`${poi.name}: ${poi.lat.toFixed(5)}, ${poi.lng.toFixed(5)}`);
+      toast.success("已複製座標");
+    } catch (error) {
+      console.error("Failed to copy coordinates:", error);
+      toast.error("複製失敗", "請確認瀏覽器允許剪貼簿權限");
+    }
+  };
+
+  if (loading) {
+    return (
+      <SiteShell
+        schoolName={school.name}
+        schoolCode={school.code}
+        title="地圖"
+        subtitle={`探索校園每個角落 · ${school.name}`}
+      >
+        <div className="card" style={{ textAlign: "center", padding: 40 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🗺️</div>
+          <div style={{ color: "var(--muted)" }}>載入地圖資料中...</div>
+        </div>
+      </SiteShell>
+    );
+  }
 
   return (
     <SiteShell
@@ -608,9 +657,12 @@ export default function MapPage(props: { searchParams?: { school?: string; schoo
 
       {/* Quick Stats */}
       <div className="card" style={{ marginBottom: 20, padding: 14 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <span className="pill subtle">{usingDemo ? "示範資料" : "Firebase 資料"}</span>
+        </div>
         <div style={{ display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center" }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 24, fontWeight: 800, color: "var(--brand)" }}>{mockPois.length}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: "var(--brand)" }}>{pois.length}</div>
             <div className="kv" style={{ fontSize: 11 }}>地點總數</div>
           </div>
           <div style={{ textAlign: "center" }}>
@@ -691,7 +743,7 @@ export default function MapPage(props: { searchParams?: { school?: string; schoo
                         </span>
                       </div>
                       <div className="kv" style={{ fontSize: 11 }}>
-                        📍 {p.lat.toFixed(4)}, {p.lng.toFixed(4)}
+                        📍 {p.building ? `${p.building}${p.floor ? ` · ${p.floor} 樓` : ""}` : `${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}`}
                       </div>
                     </div>
                   </div>
@@ -724,6 +776,16 @@ export default function MapPage(props: { searchParams?: { school?: string; schoo
                     flexDirection: "column",
                     gap: 12,
                   }}>
+                    {p.description && (
+                      <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--muted)" }}>
+                        {p.description}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {p.accessible ? <span className="pill" style={{ background: "rgba(16,185,129,0.14)", color: "#10B981" }}>無障礙友善</span> : null}
+                      {p.building ? <span className="pill subtle">{p.building}</span> : null}
+                      {p.floor ? <span className="pill subtle">{p.floor} 樓</span> : null}
+                    </div>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button
                         className="btn"
@@ -735,11 +797,25 @@ export default function MapPage(props: { searchParams?: { school?: string; schoo
                       >
                         🧭 導航
                       </button>
-                      <button className="btn" style={{ flex: 1, fontSize: 12, padding: "10px" }}>
-                        📷 照片
+                      <button
+                        className="btn"
+                        style={{ flex: 1, fontSize: 12, padding: "10px" }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleFavorite(p.id);
+                        }}
+                      >
+                        {isFavorite ? "⭐ 已收藏" : "⭐ 收藏"}
                       </button>
-                      <button className="btn" style={{ flex: 1, fontSize: 12, padding: "10px" }}>
-                        📝 評論
+                      <button
+                        className="btn"
+                        style={{ flex: 1, fontSize: 12, padding: "10px" }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleCopyCoordinates(p);
+                        }}
+                      >
+                        📋 複製座標
                       </button>
                     </div>
                     <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>

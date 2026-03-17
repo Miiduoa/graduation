@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { resolveSchool } from "@campus/shared/src/schools";
 import { mockAnnouncements } from "@campus/shared/src/mockData";
 import { SiteShell } from "@/components/SiteShell";
-import { fetchAnnouncements, isFirebaseConfigured, type Announcement } from "@/lib/firebase";
+import { useToast } from "@/components/ui";
+import { fetchAnnouncements, type Announcement } from "@/lib/firebase";
+import { useSchoolCollectionData } from "@/lib/useSchoolCollectionData";
 
 type FilterCategory = "all" | "academic" | "event" | "general";
 type AnnouncementView = "all" | "important" | "today";
@@ -27,28 +29,15 @@ export default function AnnouncementsPage(props: { searchParams?: { school?: str
   const [selectedCategory, setSelectedCategory] = useState<FilterCategory>("all");
   const [activeView, setActiveView] = useState<AnnouncementView>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const { success, info } = useToast();
+  const { data: announcements, loading, sourceMode } = useSchoolCollectionData<Announcement>(
+    school.id,
+    fetchAnnouncements,
+    mockAnnouncements
+  );
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      try {
-        if (isFirebaseConfigured()) {
-          const data = await fetchAnnouncements(school.id);
-          setAnnouncements(data.length > 0 ? data : mockAnnouncements);
-        } else {
-          setAnnouncements(mockAnnouncements);
-        }
-      } catch (error) {
-        console.error("Failed to load announcements:", error);
-        setAnnouncements(mockAnnouncements);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
-  }, [school.id]);
+  const usingDemo = sourceMode === "demo";
 
   const categories = [
     { id: "all" as const, label: "全部", icon: "📋" },
@@ -117,6 +106,65 @@ export default function AnnouncementsPage(props: { searchParams?: { school?: str
     }
   };
 
+  const getShareUrl = (announcementId: string) => {
+    if (typeof window === "undefined") return "";
+    return `${window.location.origin}${window.location.pathname}${window.location.search}#${announcementId}`;
+  };
+
+  const handleShare = async (event: MouseEvent<HTMLButtonElement>, announcement: Announcement) => {
+    event.stopPropagation();
+    const url = getShareUrl(announcement.id);
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: announcement.title,
+          text: announcement.body,
+          url,
+        });
+        success("已開啟分享面板");
+        return;
+      }
+
+      await navigator.clipboard.writeText(url);
+      success("已複製公告連結");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+
+      console.error("Failed to share announcement:", error);
+      info("無法直接分享，請稍後再試");
+    }
+  };
+
+  const handleCopyLink = async (event: MouseEvent<HTMLButtonElement>, announcementId: string) => {
+    event.stopPropagation();
+
+    try {
+      await navigator.clipboard.writeText(getShareUrl(announcementId));
+      success("已複製公告連結");
+    } catch (error) {
+      console.error("Failed to copy announcement link:", error);
+      info("複製失敗，請確認瀏覽器權限");
+    }
+  };
+
+  const toggleSaved = (event: MouseEvent<HTMLButtonElement>, announcementId: string) => {
+    event.stopPropagation();
+    setSavedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(announcementId)) {
+        next.delete(announcementId);
+        info("已取消收藏");
+      } else {
+        next.add(announcementId);
+        success("已加入收藏");
+      }
+      return next;
+    });
+  };
+
   return (
     <SiteShell
       schoolName={school.name}
@@ -127,6 +175,9 @@ export default function AnnouncementsPage(props: { searchParams?: { school?: str
       <div className="announcementsPage">
         {/* Stats Bar */}
         <div className="statsBar">
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+            <span className="pill subtle">{usingDemo ? "示範資料" : "Firebase 資料"}</span>
+          </div>
           <div className="statsGrid">
             <div className="statItem">
               <span className="statValue total">{stats.total}</span>
@@ -245,9 +296,11 @@ export default function AnnouncementsPage(props: { searchParams?: { school?: str
 
                       {isExpanded && (
                         <div className="annCardActions">
-                          <button type="button">🔗 分享</button>
-                          <button type="button">🔔 設定提醒</button>
-                          <button type="button">⭐ 收藏</button>
+                          <button type="button" onClick={(event) => handleShare(event, a)}>🔗 分享</button>
+                          <button type="button" onClick={(event) => handleCopyLink(event, a.id)}>📋 複製連結</button>
+                          <button type="button" onClick={(event) => toggleSaved(event, a.id)}>
+                            {savedIds.has(a.id) ? "⭐ 已收藏" : "⭐ 收藏"}
+                          </button>
                         </div>
                       )}
                     </article>

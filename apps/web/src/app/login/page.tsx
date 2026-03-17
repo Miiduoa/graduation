@@ -221,26 +221,28 @@ export default function LoginPage(props: { searchParams?: { school?: string; sch
     <SiteShell
       schoolName={school.name}
       schoolCode={school.code}
-      title="👤 登入"
-      subtitle="使用學校帳號或電子郵件登入"
+      title="登入"
+      subtitle="使用學校帳號、電子郵件或訪客模式進入校園助手。"
     >
-      <div style={{ maxWidth: 440, margin: "0 auto" }}>
-        {/* School Info Card */}
-        <div className="card" style={{ 
-          marginBottom: 24, 
-          textAlign: "center",
-          background: "linear-gradient(135deg, rgba(139,92,246,0.1) 0%, rgba(236,72,153,0.1) 100%)",
-        }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>🏫</div>
-          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>{school.name}</div>
-          <div style={{ fontSize: 14, color: "var(--muted)" }}>
-            學校代碼：{school.code}
+      <div className="pageStack" style={{ maxWidth: 560, margin: "0 auto" }}>
+        <section className="heroPanel">
+          <div className="heroIdentity">
+            <div className="heroAvatar is-round">🏫</div>
+            <div className="heroCopy">
+              <div className="heroTitleRow">
+                <h2 className="heroTitle">{school.name}</h2>
+                <span className="statusBadge">學校入口</span>
+              </div>
+              <p className="heroMeta">學校代碼：{school.code}</p>
+              <p className="heroText">
+                登入後可同步學籍、課表與個人資料；如果只想先看公開資訊，也可以直接用訪客模式進站。
+              </p>
+            </div>
           </div>
-        </div>
+        </section>
 
-        {/* Login Method Tabs */}
-        <div className="card" style={{ marginBottom: 24, padding: 12 }}>
-          <div style={{ display: "flex", gap: 8 }}>
+        <section className="card sectionCard">
+          <div className="segmentedGroup">
             {[
               { key: "sso", label: "學校 SSO", icon: "🔐" },
               { key: "email", label: "電子郵件", icon: "📧" },
@@ -248,89 +250,70 @@ export default function LoginPage(props: { searchParams?: { school?: string; sch
             ].map((method) => (
               <button
                 key={method.key}
+                type="button"
                 className={`btn ${loginMethod === method.key ? "primary" : ""}`}
                 onClick={() => setLoginMethod(method.key as LoginMethod)}
-                style={{ flex: 1, fontSize: 13 }}
+                style={{ flex: 1 }}
               >
                 {method.icon} {method.label}
               </button>
             ))}
           </div>
-        </div>
 
-        {/* SSO Login */}
         {loginMethod === "sso" && (
-          <div className="card">
-            <h2 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 700 }}>
-              🔐 學校單一登入 (SSO)
-            </h2>
-            <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
-              使用您的學校帳號登入，系統將自動同步您的學籍資料、課程資訊和權限。
-            </p>
+          <section className="sectionCard">
+            <div className="sectionHead">
+              <div className="sectionCopy">
+                <p className="sectionEyebrow">Single Sign-On</p>
+                <h2 className="sectionTitle">學校單一登入</h2>
+                <p className="sectionText">使用學校帳號登入，系統會同步學籍資料、課程資訊與權限設定。</p>
+              </div>
+            </div>
 
-            {/* SSO Features */}
-            <div style={{ 
-              display: "grid", 
-              gridTemplateColumns: "1fr 1fr", 
-              gap: 12, 
-              marginBottom: 24 
-            }}>
+            <div className="surfaceGrid">
               {[
                 { icon: "✓", text: "自動同步學籍" },
                 { icon: "✓", text: "無需重複註冊" },
                 { icon: "✓", text: "安全加密傳輸" },
                 { icon: "✓", text: "一鍵快速登入" },
               ].map((feature, idx) => (
-                <div 
-                  key={idx}
-                  style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    gap: 8,
-                    fontSize: 13,
-                    color: "var(--text)",
-                  }}
-                >
-                  <span style={{ color: "#10B981", fontWeight: 700 }}>{feature.icon}</span>
-                  {feature.text}
+                <div key={idx} className="surfaceItem">
+                  <div className="surfaceAccent" style={{ "--accent-bg": "rgba(44, 184, 168, 0.14)", "--accent": "var(--success)" } as React.CSSProperties}>
+                    {feature.icon}
+                  </div>
+                  <div className="surfaceContent">
+                    <h3 className="surfaceTitle">{feature.text}</h3>
+                  </div>
                 </div>
               ))}
             </div>
 
-            <button 
+            <button
+              type="button"
               className="btn primary"
               onClick={handleSSOLogin}
               disabled={isLoading}
-              style={{ 
-                width: "100%", 
-                padding: "16px 24px",
-                fontSize: 16,
-                fontWeight: 700,
-              }}
+              style={{ width: "100%" }}
             >
-              {isLoading ? "⏳ 正在連線..." : `🔑 使用 ${school.name} 帳號登入`}
+              {isLoading ? "正在連線..." : `使用 ${school.name} 帳號登入`}
             </button>
 
-            <div style={{ 
-              marginTop: 16, 
-              padding: 12, 
-              background: "var(--panel2)", 
-              borderRadius: 8,
-              fontSize: 12,
-              color: "var(--muted)",
-              lineHeight: 1.6,
-            }}>
-              💡 登入後您的帳號資訊將由學校 SSO 系統提供，我們不會儲存您的密碼。
+            <div className="surfaceItem">
+              <div className="surfaceAccent" style={{ "--accent-bg": "rgba(91, 108, 255, 0.14)" } as React.CSSProperties}>
+                i
+              </div>
+              <div className="surfaceContent">
+                <p className="surfaceMeta">登入後帳號資訊由學校 SSO 提供，平台不會儲存您的校務系統密碼。</p>
+              </div>
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Email Login / Register */}
         {loginMethod === "email" && (
-          <div className="card">
-            {/* Mode Toggle */}
-            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <section className="sectionCard">
+            <div className="segmentedGroup">
               <button
+                type="button"
                 className={`btn ${authMode === "login" ? "primary" : ""}`}
                 onClick={() => { setAuthMode("login"); setError(null); setSuccess(null); }}
                 style={{ flex: 1 }}
@@ -338,6 +321,7 @@ export default function LoginPage(props: { searchParams?: { school?: string; sch
                 登入
               </button>
               <button
+                type="button"
                 className={`btn ${authMode === "register" ? "primary" : ""}`}
                 onClick={() => { setAuthMode("register"); setError(null); setSuccess(null); }}
                 style={{ flex: 1 }}
@@ -346,24 +330,22 @@ export default function LoginPage(props: { searchParams?: { school?: string; sch
               </button>
             </div>
 
-            <h2 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 700 }}>
-              {authMode === "login" ? "📧 電子郵件登入" : "📝 建立帳號"}
-            </h2>
-            <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
+            <div className="sectionCopy">
+              <h2 className="sectionTitle">{authMode === "login" ? "電子郵件登入" : "建立帳號"}</h2>
+              <p className="sectionText">
               {authMode === "login" 
                 ? "使用您註冊的電子郵件和密碼登入。如果您的學校支援 SSO，建議使用學校帳號登入。"
                 : "建立帳號以使用完整功能。如果您的學校支援 SSO，建議使用學校帳號登入。"}
-            </p>
+              </p>
+            </div>
 
-            {/* Error/Success Messages */}
             {error && (
               <div style={{
                 padding: "12px 16px",
-                marginBottom: 16,
-                borderRadius: 8,
+                borderRadius: 14,
                 background: "rgba(239, 68, 68, 0.1)",
                 border: "1px solid rgba(239, 68, 68, 0.3)",
-                color: "#EF4444",
+                color: "var(--danger)",
                 fontSize: 14,
               }}>
                 ⚠️ {error}
@@ -373,87 +355,51 @@ export default function LoginPage(props: { searchParams?: { school?: string; sch
             {success && (
               <div style={{
                 padding: "12px 16px",
-                marginBottom: 16,
-                borderRadius: 8,
+                borderRadius: 14,
                 background: "rgba(16, 185, 129, 0.1)",
                 border: "1px solid rgba(16, 185, 129, 0.3)",
-                color: "#10B981",
+                color: "var(--success)",
                 fontSize: 14,
               }}>
                 ✓ {success}
               </div>
             )}
 
-            <form onSubmit={handleEmailLogin}>
+            <form onSubmit={handleEmailLogin} className="pageStack" style={{ gap: 16 }}>
               {authMode === "register" && (
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: 8, 
-                    fontSize: 14, 
-                    fontWeight: 600 
-                  }}>
-                    姓名（選填）
-                  </label>
+                <div>
+                  <label className="kv" htmlFor="display-name">姓名（選填）</label>
                   <input
+                    id="display-name"
+                    className="input"
                     type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
                     placeholder="您的姓名"
-                    style={{
-                      width: "100%",
-                      padding: "12px 16px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border)",
-                      background: "var(--panel2)",
-                      color: "var(--text)",
-                      fontSize: 15,
-                      outline: "none",
-                    }}
                   />
                 </div>
               )}
 
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: 8, 
-                  fontSize: 14, 
-                  fontWeight: 600 
-                }}>
-                  電子郵件
-                </label>
+              <div>
+                <label className="kv" htmlFor="login-email">電子郵件</label>
                 <input
+                  id="login-email"
+                  className="input"
                   type="email"
                   value={email}
                   onChange={(e) => { setEmail(e.target.value); setError(null); }}
                   placeholder="your@email.com"
                   required
                   autoComplete="email"
-                  style={{
-                    width: "100%",
-                    padding: "12px 16px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border)",
-                    background: "var(--panel2)",
-                    color: "var(--text)",
-                    fontSize: 15,
-                    outline: "none",
-                  }}
                 />
               </div>
 
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ 
-                  display: "block", 
-                  marginBottom: 8, 
-                  fontSize: 14, 
-                  fontWeight: 600 
-                }}>
-                  密碼
-                </label>
+              <div>
+                <label className="kv" htmlFor="login-password">密碼</label>
                 <div style={{ position: "relative" }}>
                   <input
+                    id="login-password"
+                    className="input"
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => { setPassword(e.target.value); setError(null); }}
@@ -461,15 +407,7 @@ export default function LoginPage(props: { searchParams?: { school?: string; sch
                     required
                     autoComplete={authMode === "register" ? "new-password" : "current-password"}
                     style={{
-                      width: "100%",
-                      padding: "12px 16px",
                       paddingRight: 48,
-                      borderRadius: 8,
-                      border: "1px solid var(--border)",
-                      background: "var(--panel2)",
-                      color: "var(--text)",
-                      fontSize: 15,
-                      outline: "none",
                     }}
                   />
                   <button
@@ -492,32 +430,17 @@ export default function LoginPage(props: { searchParams?: { school?: string; sch
               </div>
 
               {authMode === "register" && (
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ 
-                    display: "block", 
-                    marginBottom: 8, 
-                    fontSize: 14, 
-                    fontWeight: 600 
-                  }}>
-                    確認密碼
-                  </label>
+                <div>
+                  <label className="kv" htmlFor="confirm-password">確認密碼</label>
                   <input
+                    id="confirm-password"
+                    className="input"
                     type="password"
                     value={confirmPassword}
                     onChange={(e) => { setConfirmPassword(e.target.value); setError(null); }}
                     placeholder="再次輸入密碼"
                     required
                     autoComplete="new-password"
-                    style={{
-                      width: "100%",
-                      padding: "12px 16px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border)",
-                      background: "var(--panel2)",
-                      color: "var(--text)",
-                      fontSize: 15,
-                      outline: "none",
-                    }}
                   />
                 </div>
               )}
@@ -539,142 +462,95 @@ export default function LoginPage(props: { searchParams?: { school?: string; sch
                     />
                     記住我
                   </label>
-                  <button 
+                  <button
                     type="button"
                     onClick={handleForgotPassword}
-                    style={{ 
-                      color: "var(--brand)", 
-                      background: "none", 
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 14,
-                    }}
+                    style={{ color: "var(--brand)", background: "none", border: "none", cursor: "pointer", fontSize: 14 }}
                   >
                     忘記密碼？
                   </button>
                 </div>
               )}
 
-              <button 
+              <button
                 type="submit"
                 className="btn primary"
                 disabled={isLoading || !email || !password || (authMode === "register" && !confirmPassword)}
-                style={{ 
-                  width: "100%", 
-                  padding: "14px 24px",
-                  fontSize: 15,
-                  fontWeight: 700,
-                  marginTop: authMode === "register" ? 8 : 0,
-                }}
+                style={{ width: "100%", marginTop: authMode === "register" ? 8 : 0 }}
               >
                 {isLoading 
-                  ? (authMode === "login" ? "⏳ 登入中..." : "⏳ 註冊中...")
+                  ? (authMode === "login" ? "登入中..." : "註冊中...")
                   : (authMode === "login" ? "登入" : "建立帳號")}
               </button>
             </form>
 
-            <div style={{ 
-              marginTop: 20, 
-              textAlign: "center", 
-              fontSize: 14,
-              color: "var(--muted)",
-            }}>
+            <div style={{ textAlign: "center", fontSize: 14, color: "var(--muted)" }}>
               {authMode === "login" ? (
-                <>還沒有帳號？ <button 
-                  onClick={() => setAuthMode("register")}
-                  style={{ color: "var(--brand)", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}
-                >立即註冊</button></>
+                <>還沒有帳號？ <button type="button" onClick={() => setAuthMode("register")} style={{ color: "var(--brand)", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>立即註冊</button></>
               ) : (
-                <>已有帳號？ <button 
-                  onClick={() => setAuthMode("login")}
-                  style={{ color: "var(--brand)", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}
-                >立即登入</button></>
+                <>已有帳號？ <button type="button" onClick={() => setAuthMode("login")} style={{ color: "var(--brand)", fontWeight: 600, background: "none", border: "none", cursor: "pointer" }}>立即登入</button></>
               )}
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Guest Mode */}
         {loginMethod === "guest" && (
-          <div className="card">
-            <h2 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 700 }}>
-              👁️ 訪客瀏覽
-            </h2>
-            <p style={{ color: "var(--muted)", fontSize: 14, marginBottom: 20, lineHeight: 1.6 }}>
-              無需登入即可瀏覽公開資訊。部分功能（如報名活動、發布貼文）需要登入後才能使用。
-            </p>
+          <section className="sectionCard">
+            <div className="sectionCopy">
+              <p className="sectionEyebrow">Guest Access</p>
+              <h2 className="sectionTitle">訪客瀏覽</h2>
+              <p className="sectionText">不登入也可以先看公開資訊；需要個人化或互動功能時，再切回登入模式即可。</p>
+            </div>
 
-            {/* Available Features */}
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontWeight: 600, marginBottom: 12 }}>可使用功能：</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <div className="sectionCard">
+              <div className="sectionCopy">
+                <h3 className="sectionTitle">可使用功能</h3>
+              </div>
+              <div className="toolbarActions">
                 {["公告", "活動", "地圖", "餐廳", "公車", "課表"].map((feature) => (
-                  <span 
-                    key={feature} 
-                    className="pill" 
-                    style={{ 
-                      background: "rgba(16,185,129,0.2)", 
-                      color: "#10B981",
-                      fontSize: 12,
-                    }}
-                  >
+                  <span key={feature} className="pill" style={{ background: "rgba(44, 184, 168, 0.16)", color: "var(--success)" }}>
                     ✓ {feature}
                   </span>
                 ))}
               </div>
             </div>
 
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontWeight: 600, marginBottom: 12 }}>需登入功能：</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <div className="sectionCard">
+              <div className="sectionCopy">
+                <h3 className="sectionTitle">需登入功能</h3>
+              </div>
+              <div className="toolbarActions">
                 {["報名活動", "收藏", "評論", "訊息", "成績查詢"].map((feature) => (
-                  <span 
-                    key={feature} 
-                    className="pill" 
-                    style={{ 
-                      background: "rgba(239,68,68,0.1)", 
-                      color: "#EF4444",
-                      fontSize: 12,
-                    }}
-                  >
+                  <span key={feature} className="pill" style={{ background: "rgba(239, 109, 126, 0.14)", color: "var(--danger)" }}>
                     🔒 {feature}
                   </span>
                 ))}
               </div>
             </div>
 
-            <button 
+            <button
+              type="button"
               className="btn"
               onClick={handleGuestLogin}
               disabled={isLoading}
-              style={{ 
-                width: "100%", 
-                padding: "14px 24px",
-                fontSize: 15,
-                fontWeight: 700,
-              }}
+              style={{ width: "100%" }}
             >
-              {isLoading ? "⏳ 進入中..." : "👁️ 以訪客身份瀏覽"}
+              {isLoading ? "進入中..." : "以訪客身份瀏覽"}
             </button>
-          </div>
+          </section>
         )}
 
-        {/* Privacy Notice */}
-        <div style={{ 
-          marginTop: 24, 
-          padding: 16, 
-          background: "var(--panel2)", 
-          borderRadius: 12,
-          fontSize: 12,
-          color: "var(--muted)",
-          lineHeight: 1.6,
-          textAlign: "center",
-        }}>
+          <div className="surfaceItem" style={{ justifyContent: "center", textAlign: "center" }}>
+            <div className="surfaceContent">
+              <p className="surfaceMeta">
           🔒 我們重視您的隱私。登入即表示您同意我們的
           <a href="#" style={{ color: "var(--brand)", marginLeft: 4 }}>服務條款</a>
           和
           <a href="#" style={{ color: "var(--brand)", marginLeft: 4 }}>隱私政策</a>
-        </div>
+              </p>
+            </div>
+          </div>
+        </section>
       </div>
     </SiteShell>
   );

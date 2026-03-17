@@ -4,7 +4,16 @@ import { useState, useEffect, useMemo } from "react";
 import { resolveSchool } from "@campus/shared/src/schools";
 import { mockClubEvents } from "@campus/shared/src/mockData";
 import { SiteShell } from "@/components/SiteShell";
-import { fetchEvents, isFirebaseConfigured, type ClubEvent } from "@/lib/firebase";
+import { useAuth } from "@/components/AuthGuard";
+import { useToast } from "@/components/ui";
+import {
+  cancelEventRegistration,
+  checkEventRegistration,
+  fetchEvents,
+  registerForEvent,
+  type ClubEvent,
+} from "@/lib/firebase";
+import { useSchoolCollectionData } from "@/lib/useSchoolCollectionData";
 
 type ViewMode = "list" | "grid" | "calendar";
 type EventStatus = "all" | "upcoming" | "ongoing" | "ended";
@@ -15,28 +24,41 @@ export default function ClubsPage(props: { searchParams?: { school?: string; sch
   const [statusFilter, setStatusFilter] = useState<EventStatus>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [registeredEvents, setRegisteredEvents] = useState<Set<string>>(new Set());
-  const [events, setEvents] = useState<ClubEvent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [submittingEventId, setSubmittingEventId] = useState<string | null>(null);
+  const { user } = useAuth();
+  const toast = useToast();
+  const { data: events, loading, sourceMode } = useSchoolCollectionData<ClubEvent>(
+    school.id,
+    fetchEvents,
+    mockClubEvents
+  );
+  const usingDemo = sourceMode === "demo";
 
   useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      try {
-        if (isFirebaseConfigured()) {
-          const data = await fetchEvents(school.id);
-          setEvents(data.length > 0 ? data : mockClubEvents);
-        } else {
-          setEvents(mockClubEvents);
+    let active = true;
+
+    async function loadRegistrations() {
+      if (sourceMode !== "firebase" || !user || events.length === 0) {
+        if (sourceMode === "firebase") {
+          setRegisteredEvents(new Set());
         }
-      } catch (error) {
-        console.error("Failed to load events:", error);
-        setEvents(mockClubEvents);
-      } finally {
-        setLoading(false);
+        return;
       }
+
+      const pairs = await Promise.all(
+        events.map(async (event) => [event.id, await checkEventRegistration(event.id, user.uid)] as const)
+      );
+
+      if (!active) return;
+      setRegisteredEvents(new Set(pairs.filter(([, registered]) => registered).map(([eventId]) => eventId)));
     }
-    loadData();
-  }, [school.id]);
+
+    loadRegistrations();
+
+    return () => {
+      active = false;
+    };
+  }, [events, sourceMode, user]);
 
   const getEventStatus = (startsAt: string, endsAt: string): "upcoming" | "ongoing" | "ended" => {
     const now = new Date();
@@ -73,16 +95,62 @@ export default function ClubsPage(props: { searchParams?: { school?: string; sch
     });
   }, [events, statusFilter, searchQuery]);
 
-  const handleRegister = (eventId: string) => {
-    setRegisteredEvents((prev) => {
-      const next = new Set(prev);
-      if (next.has(eventId)) {
-        next.delete(eventId);
-      } else {
-        next.add(eventId);
+  const normalizeError = (error?: string) => error?.replace(/^Error:\s*/, "") ?? "請稍後再試";
+
+  const handleRegister = async (eventItem: ClubEvent) => {
+    const eventId = eventItem.id;
+
+    if (sourceMode !== "firebase") {
+      setRegisteredEvents((prev) => {
+        const next = new Set(prev);
+        if (next.has(eventId)) {
+          next.delete(eventId);
+          toast.info("已取消示範報名");
+        } else {
+          next.add(eventId);
+          toast.success("已完成示範報名");
+        }
+        return next;
+      });
+      return;
+    }
+
+    if (!user) {
+      const returnUrl =
+        typeof window !== "undefined" ? window.location.pathname + window.location.search : `/clubs?school=${school.code}`;
+      window.location.href = `/login?returnUrl=${encodeURIComponent(returnUrl)}`;
+      return;
+    }
+
+    setSubmittingEventId(eventId);
+    try {
+      const isRegistered = registeredEvents.has(eventId);
+      const result = isRegistered
+        ? await cancelEventRegistration(eventId, user.uid)
+        : await registerForEvent(eventId, user.uid, {
+            name: user.displayName ?? undefined,
+            email: user.email ?? undefined,
+          });
+
+      if (!result.success) {
+        toast.error(isRegistered ? "取消報名失敗" : "報名失敗", normalizeError(result.error));
+        return;
       }
-      return next;
-    });
+
+      setRegisteredEvents((prev) => {
+        const next = new Set(prev);
+        if (isRegistered) {
+          next.delete(eventId);
+        } else {
+          next.add(eventId);
+        }
+        return next;
+      });
+
+      toast.success(isRegistered ? "已取消報名" : "報名成功", eventItem.title);
+    } finally {
+      setSubmittingEventId(null);
+    }
   };
 
   const formatDateTime = (dateStr: string) => {
@@ -127,6 +195,9 @@ export default function ClubsPage(props: { searchParams?: { school?: string; sch
     >
       {/* Stats Overview */}
       <div className="card" style={{ marginBottom: 20, padding: 16 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+          <span className="pill subtle">{usingDemo ? "示範資料" : "Firebase 資料"}</span>
+        </div>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center" }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 28, fontWeight: 800, color: "var(--brand)" }}>{events.length}</div>
@@ -280,8 +351,8 @@ export default function ClubsPage(props: { searchParams?: { school?: string; sch
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   <button 
                     className="btn"
-                    onClick={() => canRegister && handleRegister(e.id)}
-                    disabled={!canRegister}
+                    onClick={() => canRegister && void handleRegister(e)}
+                    disabled={!canRegister || submittingEventId === e.id}
                     style={{
                       flex: 1,
                       background: isRegistered ? "var(--accent-soft)" : canRegister ? "var(--brand)" : "var(--panel)",
@@ -291,7 +362,15 @@ export default function ClubsPage(props: { searchParams?: { school?: string; sch
                       cursor: canRegister ? "pointer" : "not-allowed",
                     }}
                   >
-                    {isRegistered ? "取消報名" : status === "ended" ? "已結束" : status === "ongoing" ? "進行中" : "立即報名"}
+                    {submittingEventId === e.id
+                      ? "處理中..."
+                      : isRegistered
+                        ? "取消報名"
+                        : status === "ended"
+                          ? "已結束"
+                          : status === "ongoing"
+                            ? "進行中"
+                            : "立即報名"}
                   </button>
                   <button className="btn" style={{ padding: "10px 14px" }}>
                     🔗
