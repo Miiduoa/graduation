@@ -270,75 +270,6 @@ export function GroupsScreen(props: any) {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
           <Card title="加入群組" subtitle="輸入加入碼（8 碼英數）。">
             {err ? <Pill text={err} /> : null}
-            {auth.user ? (
-              <View style={{ marginBottom: 10 }}>
-                <Button
-                  text="建立示範群組（MVP）"
-                  onPress={async () => {
-                    setErr(null);
-                    if (!auth.user) {
-                      setErr("請先登入");
-                      return;
-                    }
-                    try {
-                      // Create two demo groups if they don't exist yet.
-                      const demos: Array<Pick<Group, "name" | "type" | "joinCode">> = [
-                        { name: "資料庫系統（示範課程）", type: "course", joinCode: "AB12CD34" },
-                        { name: "吉他社（示範社團）", type: "club", joinCode: "ZX90QWER" },
-                      ];
-
-                      for (const d of demos) {
-                        // Skip if joinCode already exists
-                        const qy = query(collection(db, "groups"), where("joinCode", "==", d.joinCode), limit(1));
-                        const snap = await getDocs(qy);
-                        let gid: string;
-                        if (!snap.empty) {
-                          const exist = snap.docs[0]!;
-                          gid = exist.id;
-                        } else {
-                          const docRef = await addDoc(collection(db, "groups"), {
-                            schoolId: school.id,
-                            name: d.name,
-                            type: d.type,
-                            joinCode: d.joinCode,
-                            isPublished: d.type === "course" ? true : undefined,
-                            verification: d.type === "course" ? { status: "unverified" } : undefined,
-                            createdAt: serverTimestamp(),
-                            createdBy: auth.user.uid,
-                          });
-                          gid = docRef.id;
-                        }
-
-                        // Ensure creator is owner
-                        await setDoc(
-                          doc(db, "groups", gid, "members", auth.user.uid),
-                          { uid: auth.user.uid, role: "owner", status: "active", joinedAt: serverTimestamp() },
-                          { merge: true }
-                        );
-                        await setDoc(
-                          doc(db, "users", auth.user.uid, "groups", gid),
-                          {
-                            groupId: gid,
-                            schoolId: school.id,
-                            type: d.type,
-                            name: d.name,
-                            joinCode: d.joinCode,
-                            role: "owner",
-                            status: "active",
-                            joinedAt: serverTimestamp(),
-                          },
-                          { merge: true }
-                        );
-                      }
-
-                      reload();
-                    } catch (e: any) {
-                      setErr(e?.message ?? "建立示範群組失敗");
-                    }
-                  }}
-                />
-              </View>
-            ) : null}
 
             {auth.isAdmin ? (
               <View style={{ marginBottom: 10 }}>
@@ -470,7 +401,9 @@ export function GroupsScreen(props: any) {
                     <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                       <Pill text="公告" kind="accent" />
                       <Pill text="Q&A" kind="accent" />
-                      <Pill text="私訊（Sprint 2）" />
+                      <Pressable onPress={() => nav?.navigate?.("訊息", { screen: "DmsHome" })}>
+                        <Pill text="私訊" kind="accent" />
+                      </Pressable>
                     </View>
                     <View style={{ marginTop: 12 }}>
                       <Button text="退出群組" onPress={() => onLeave(g.groupId)} />

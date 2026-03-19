@@ -46,16 +46,18 @@ import { HomeStack } from "./src/screens/HomeStack";
 import { AcademicStack } from "./src/screens/AcademicStack";
 import { MapStack } from "./src/screens/MapStack";
 import { MeStack } from "./src/screens/MeStack";
-import { MessagesStack } from "./src/screens/MessagesStack";
 import { OnboardingScreen, hasSeenOnboarding } from "./src/screens/OnboardingScreen";
 import { usePushNotifications } from "./src/app/usePushNotifications";
 import { initializeRuntimeDataSource } from "./src/config/runtime";
 
+/**
+ * 4-Tab 心理學導航架構（Hick's Law — 選項數量 ∝ 決策時間）
+ * 今日（情境感知）/ 學習（課程/成績）/ 校園（地圖/生活）/ 我的（個人/訊息）
+ */
 type RootTabParamList = {
-  首頁: undefined;
-  課業: undefined;
-  地圖: undefined;
-  訊息: undefined;
+  今日: undefined;
+  學習: undefined;
+  校園: undefined;
   我的: undefined;
 };
 
@@ -71,24 +73,19 @@ const TAB_CONFIG: Array<{
   icon: { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap };
 }> = [
   {
-    key: "首頁",
-    label: "首頁",
-    icon: { active: "home", inactive: "home-outline" },
+    key: "今日",
+    label: "今日",
+    icon: { active: "sunny", inactive: "sunny-outline" },
   },
   {
-    key: "課業",
-    label: "課業",
-    icon: { active: "school", inactive: "school-outline" },
+    key: "學習",
+    label: "學習",
+    icon: { active: "book", inactive: "book-outline" },
   },
   {
-    key: "地圖",
-    label: "地圖",
-    icon: { active: "map", inactive: "map-outline" },
-  },
-  {
-    key: "訊息",
-    label: "收件匣",
-    icon: { active: "mail", inactive: "mail-outline" },
+    key: "校園",
+    label: "校園",
+    icon: { active: "location", inactive: "location-outline" },
   },
   {
     key: "我的",
@@ -101,7 +98,7 @@ const linking: LinkingOptions<RootTabParamList> = {
   prefixes: [Linking.createURL("/"), "campus://"],
   config: {
     screens: {
-      首頁: {
+      今日: {
         screens: {
           HomeMain: "home",
           公告總覽: "announcements",
@@ -113,7 +110,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           Ordering: "ordering/:menuId",
         },
       },
-      課業: {
+      學習: {
         screens: {
           AcademicHome: "academic",
           CourseSchedule: "schedule",
@@ -123,24 +120,13 @@ const linking: LinkingOptions<RootTabParamList> = {
           AICourseAdvisor: "ai-advisor",
         },
       },
-      地圖: {
+      校園: {
         screens: {
           Map: "map",
           PoiDetail: "poi/:id",
           ARNavigation: "ar-nav/:destinationId",
           AccessibleRoute: "accessible-route/:destination",
           BusSchedule: "bus",
-        },
-      },
-      訊息: {
-        screens: {
-          MessagesHome: "messages",
-          Chat: "chat/:peerId",
-          GroupDetail: "group/:groupId",
-          GroupPost: "group/:groupId/post/:postId",
-          AssignmentDetail: "group/:groupId/assignment/:assignmentId",
-          Groups: "groups",
-          Dms: "dms",
         },
       },
       我的: {
@@ -153,6 +139,13 @@ const linking: LinkingOptions<RootTabParamList> = {
           Library: "library",
           LostFound: "lost-found",
           GlobalSearch: "search",
+          MessagesHome: "messages",
+          Chat: "chat/:peerId",
+          GroupDetail: "group/:groupId",
+          GroupPost: "group/:groupId/post/:postId",
+          AssignmentDetail: "group/:groupId/assignment/:assignmentId",
+          Groups: "groups",
+          Dms: "dms",
         },
       },
     },
@@ -471,6 +464,10 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * FloatingTabBar — 4-Tab 心理學設計
+ * 視覺重量讓用戶感知「我在哪裡」（空間記憶），毛玻璃效果減少視覺干擾
+ */
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const isDark = theme.mode === "dark";
@@ -481,14 +478,14 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       bottom: Math.max(insets.bottom, 10) + 10,
       left: 16,
       right: 16,
-      borderRadius: theme.radius.xl,
+      borderRadius: 28,
       flexDirection: "row",
       alignItems: "center",
-      paddingVertical: 8,
-      paddingHorizontal: 8,
+      paddingVertical: 6,
+      paddingHorizontal: 6,
       borderWidth: 1,
-      borderColor: isDark ? theme.colors.border : "#E5E5EA",
-      backgroundColor: isDark ? theme.colors.surface : "#FFFFFF",
+      borderColor: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.06)",
+      backgroundColor: isDark ? "rgba(44,44,46,0.96)" : "rgba(255,255,255,0.97)",
       ...softShadowStyle(theme.shadows.soft),
     }}>
       {state.routes.map((route, index) => {
@@ -511,30 +508,30 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             }}
             style={({ pressed }) => ({
               flex: 1,
-              paddingHorizontal: 3,
-              transform: [{ scale: pressed ? 0.95 : 1 }],
+              paddingHorizontal: 2,
+              transform: [{ scale: pressed ? 0.93 : 1 }],
             })}
           >
             <View style={{
               alignItems: "center",
               justifyContent: "center",
-              gap: 3,
-              paddingVertical: 7,
-              paddingHorizontal: 6,
-              borderRadius: theme.radius.sm,
+              gap: 4,
+              paddingVertical: 10,
+              paddingHorizontal: 4,
+              borderRadius: 20,
               backgroundColor: focused ? theme.colors.accentSoft : "transparent",
-              minHeight: 54,
+              minHeight: 56,
             }}>
               <Ionicons
                 name={iconName}
-                size={focused ? 22 : 20}
+                size={focused ? 24 : 21}
                 color={focused ? theme.colors.accent : theme.colors.muted}
               />
               <Text style={{
                 fontSize: 10,
-                fontWeight: focused ? "700" : "500",
+                fontWeight: focused ? "800" : "500",
                 color: focused ? theme.colors.accent : theme.colors.muted,
-                letterSpacing: 0.2,
+                letterSpacing: focused ? 0.1 : 0.2,
               }}>
                 {config?.label ?? route.name}
               </Text>
@@ -588,17 +585,16 @@ function AppNavigation({
         <NetworkStatusBanner />
         <Tab.Navigator
           id={undefined}
-          initialRouteName="首頁"
+          initialRouteName="今日"
           tabBar={(props) => <FloatingTabBar {...props} />}
           screenOptions={() => ({
             headerShown: false,
             sceneStyle: { backgroundColor: theme.colors.bg },
           })}
         >
-          <Tab.Screen name="首頁" component={HomeStack} />
-          <Tab.Screen name="課業" component={AcademicStack} />
-          <Tab.Screen name="地圖" component={MapStack} />
-          <Tab.Screen name="訊息" component={MessagesStack} />
+          <Tab.Screen name="今日" component={HomeStack} />
+          <Tab.Screen name="學習" component={AcademicStack} />
+          <Tab.Screen name="校園" component={MapStack} />
           <Tab.Screen name="我的" component={MeStack} />
         </Tab.Navigator>
       </View>

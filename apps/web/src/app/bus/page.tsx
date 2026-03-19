@@ -37,7 +37,7 @@ const DEFAULT_UPCOMING: UpcomingBus[] = [
 ];
 
 export default function BusPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName } = resolveSchoolPageContext(props.searchParams);
   const [selectedRoute, setSelectedRoute] = useState<string>("all");
   const [now, setNow] = useState(new Date());
 
@@ -50,7 +50,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
   const nextBus = DEFAULT_UPCOMING[0];
 
   return (
-    <SiteShell title="公車" subtitle="校園接駁即時資訊" schoolName={school || undefined}>
+    <SiteShell title="公車" subtitle="校園接駁即時資訊" schoolName={schoolName}>
       <div className="pageStack">
         {/* ── Next Bus Hero ── */}
         <div

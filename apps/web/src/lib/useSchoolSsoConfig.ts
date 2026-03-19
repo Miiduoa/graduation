@@ -44,5 +44,10 @@ export function useSchoolSsoConfig(schoolId: string, fallbackToNull: boolean = f
     };
   }, [fallbackToNull, schoolId]);
 
-  return { config, loading };
+  return {
+    config,
+    ssoConfig: config?.ssoConfig ?? null,
+    allowEmailLogin: config?.allowEmailLogin ?? true,
+    loading,
+  };
 }

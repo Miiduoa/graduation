@@ -12,7 +12,6 @@ import {
 import {
   appendSchoolContext,
   buildSsoCallbackPath,
-  extractSchoolContextFromPath,
   sanitizeInternalPath,
 } from "@/lib/navigation";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
@@ -35,9 +34,9 @@ const ERROR_MAP: Record<string, string> = {
 export default function LoginPage(props: {
   searchParams?: { school?: string; schoolId?: string; redirect?: string; returnUrl?: string };
 }) {
-  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolContext, schoolName, schoolSearch: q, schoolId } = resolveSchoolPageContext(props.searchParams);
   const router = useRouter();
-  const { ssoConfig, loading: ssoLoading } = useSchoolSsoConfig(props.searchParams);
+  const { config, ssoConfig, allowEmailLogin, loading: ssoLoading } = useSchoolSsoConfig(schoolId);
 
   const [loginMethod, setLoginMethod] = useState<LoginMethod>("sso");
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -53,20 +52,24 @@ export default function LoginPage(props: {
 
   useEffect(() => {
     setFirebaseReady(isFirebaseConfigured());
-    const checkUser = async () => {
-      const user = await getCurrentUser();
+    const checkUser = () => {
+      const user = getCurrentUser();
       if (user) {
         const redirect = props.searchParams?.redirect || props.searchParams?.returnUrl || "/";
         const safe = sanitizeInternalPath(redirect);
-        router.replace(appendSchoolContext(safe, props.searchParams));
+        router.replace(appendSchoolContext(safe, schoolContext));
       }
     };
     checkUser();
-  }, []);
+  }, [props.searchParams?.redirect, props.searchParams?.returnUrl, router, schoolContext]);
 
   const handleSSOLogin = () => {
     if (!ssoConfig) return;
-    const callbackPath = buildSsoCallbackPath(props.searchParams);
+    const callbackPath = buildSsoCallbackPath(
+      schoolContext,
+      ssoConfig.provider,
+      props.searchParams?.redirect || props.searchParams?.returnUrl
+    );
     if (ssoConfig.provider === "oidc" || ssoConfig.provider === "saml") {
       router.push(callbackPath);
     } else {
@@ -90,7 +93,7 @@ export default function LoginPage(props: {
         await signUp(email, password, displayName || undefined);
       }
       const redirect = props.searchParams?.redirect || props.searchParams?.returnUrl || "/";
-      router.replace(appendSchoolContext(sanitizeInternalPath(redirect), props.searchParams));
+      router.replace(appendSchoolContext(sanitizeInternalPath(redirect), schoolContext));
     } catch (err: unknown) {
       const code = (err as { code?: string }).code ?? "";
       setError(ERROR_MAP[code] ?? "發生錯誤，請稍後再試");
@@ -112,7 +115,7 @@ export default function LoginPage(props: {
     }
   };
 
-  const emailAllowed = firebaseReady;
+  const emailAllowed = firebaseReady && allowEmailLogin;
 
   const inputStyle: CSSProperties = {
     width: "100%",
@@ -130,7 +133,7 @@ export default function LoginPage(props: {
   };
 
   return (
-    <SiteShell schoolName={school || undefined}>
+    <SiteShell schoolName={schoolName}>
       <div
         style={{
           maxWidth: 480,
@@ -168,10 +171,10 @@ export default function LoginPage(props: {
             🎓
           </div>
           <h1 style={{ margin: "0 0 6px", fontSize: 22, fontWeight: 800, letterSpacing: "-0.04em" }}>
-            {school ? `歡迎回到 ${school}` : "Campus One 校園助手"}
+            {schoolName ? `歡迎回到 ${schoolName}` : "Campus One 校園助手"}
           </h1>
           <p style={{ margin: 0, fontSize: 14, opacity: 0.82 }}>
-            {school ? "請登入以存取您的校園資訊" : "選擇登入方式以開始使用"}
+            {schoolName ? "請登入以存取您的校園資訊" : "選擇登入方式以開始使用"}
           </p>
         </div>
 
@@ -227,7 +230,7 @@ export default function LoginPage(props: {
                     onClick={handleSSOLogin}
                     disabled={isLoading}
                   >
-                    {isLoading ? "跳轉中…" : `使用 ${school ?? "學校"} SSO 登入 →`}
+                    {isLoading ? "跳轉中…" : `使用 ${config?.schoolName ?? schoolName ?? "學校"} SSO 登入 →`}
                   </button>
                 </div>
               ) : (

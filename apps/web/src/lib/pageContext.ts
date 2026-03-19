@@ -15,6 +15,9 @@ export function resolveSchoolPageContext(searchParams?: SchoolSearchParams) {
 
   return {
     school,
+    schoolId: school.id,
+    schoolCode: school.code,
+    schoolName: school.name,
     schoolContext: context,
     schoolSearch: buildSchoolSearch(context),
   };

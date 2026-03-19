@@ -35,12 +35,12 @@ const MOCK_ACHIEVEMENTS = [
 ];
 
 export default function ProfilePage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const creditPct = Math.round((MOCK_USER.totalCredits / MOCK_USER.requiredCredits) * 100);
 
   return (
-    <SiteShell schoolName={school || undefined}>
+    <SiteShell schoolName={schoolName}>
       <div className="pageStack">
         {/* ── Profile Hero ── */}
         <div

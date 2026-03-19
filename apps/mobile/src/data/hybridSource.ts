@@ -12,6 +12,23 @@ import type {
   BusArrival,
 } from "./types";
 import { getAdapter, hasAdapter } from "./apiAdapters/AdapterRegistry";
+import {
+  checkInAttendance as checkInCourseAttendance,
+  createCourseModule as createCourseSpaceModule,
+  createQuiz as createCourseSpaceQuiz,
+  getAttendanceSummary as getCourseAttendanceSummary,
+  getCourseGradebook,
+  getCourseSpace as getWorkspaceCourseSpace,
+  getQuiz as getWorkspaceQuiz,
+  listAttendanceSessions as listWorkspaceAttendanceSessions,
+  listCourseMaterials as listWorkspaceCourseMaterials,
+  listCourseModules as listWorkspaceCourseModules,
+  listCourseSpaces as listWorkspaceCourseSpaces,
+  listInboxTasks as listWorkspaceInboxTasks,
+  listQuizzes as listWorkspaceQuizzes,
+  startAttendanceSession as startCourseAttendanceSession,
+  submitQuiz as submitCourseSpaceQuiz,
+} from "./courseSpaceSource";
 import { mockSource } from "./mockSource";
 
 export type HybridSourceConfig = {
@@ -219,6 +236,51 @@ export const hybridSource: DataSource = {
     );
   },
   searchCourses: mockSource.searchCourses,
+  listCourseSpaces: async (userId: string, schoolId?: string) => {
+    return listWorkspaceCourseSpaces(userId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  getCourseSpace: async (courseSpaceId: string, userId: string, schoolId?: string) => {
+    return getWorkspaceCourseSpace(courseSpaceId, userId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  listCourseModules: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+    return listWorkspaceCourseModules(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  createCourseModule: async (input) => {
+    return createCourseSpaceModule(input);
+  },
+  listCourseMaterials: async (courseSpaceId: string, moduleId?: string) => {
+    return listWorkspaceCourseMaterials(courseSpaceId, moduleId);
+  },
+  listQuizzes: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+    return listWorkspaceQuizzes(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  getQuiz: async (quizId: string, userId: string, courseSpaceId?: string, schoolId?: string) => {
+    return getWorkspaceQuiz(quizId, userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  createQuiz: async (input) => {
+    return createCourseSpaceQuiz(input);
+  },
+  submitQuiz: async (input) => {
+    return submitCourseSpaceQuiz(input);
+  },
+  listAttendanceSessions: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+    return listWorkspaceAttendanceSessions(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  startAttendanceSession: async (input) => {
+    return startCourseAttendanceSession(input);
+  },
+  checkInAttendance: async (input) => {
+    return checkInCourseAttendance(input);
+  },
+  getAttendanceSummary: async (courseSpaceId: string) => {
+    return getCourseAttendanceSummary(courseSpaceId);
+  },
+  listInboxTasks: async (userId: string, schoolId?: string) => {
+    return listWorkspaceInboxTasks(userId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  getCourseGradebook: async (courseSpaceId: string) => {
+    return getCourseGradebook(courseSpaceId);
+  },
   
   listEnrollments: mockSource.listEnrollments,
   enrollCourse: mockSource.enrollCourse,

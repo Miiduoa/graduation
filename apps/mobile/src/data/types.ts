@@ -295,6 +295,180 @@ export type Submission = {
   status: "submitted" | "graded" | "late" | "missing";
 };
 
+export type CourseSpace = {
+  id: string;
+  groupId: string;
+  courseId?: string;
+  name: string;
+  description?: string;
+  role?: string;
+  unreadCount: number;
+  assignmentCount: number;
+  dueSoonCount: number;
+  quizCount: number;
+  moduleCount: number;
+  activeSessionId: string | null;
+  latestDueAt: Date | null;
+  schoolId?: string;
+};
+
+export type CourseMaterial = {
+  id: string;
+  moduleId: string;
+  groupId: string;
+  type: "link" | "file" | "video" | "document" | "external";
+  label: string;
+  description?: string;
+  url?: string | null;
+  createdAt?: Date | null;
+};
+
+export type CourseModule = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  title?: string;
+  description?: string;
+  week?: number;
+  order?: number;
+  estimatedMinutes?: number;
+  resourceCount?: number;
+  published?: boolean;
+  resourceUrl?: string | null;
+  resourceLabel?: string | null;
+  materials?: CourseMaterial[];
+};
+
+export type Question = {
+  id: string;
+  prompt: string;
+  type: "single_choice" | "multiple_choice" | "short_answer" | "essay" | "true_false";
+  required?: boolean;
+  options?: Array<{
+    id: string;
+    label: string;
+    value: string;
+  }>;
+  explanation?: string;
+  points?: number;
+};
+
+export type QuestionBank = {
+  id: string;
+  groupId: string;
+  title: string;
+  description?: string;
+  questionCount: number;
+  updatedAt?: Date | null;
+};
+
+export type Quiz = {
+  id: string;
+  assignmentId: string;
+  groupId: string;
+  groupName: string;
+  title: string;
+  description?: string;
+  dueAt?: Date | null;
+  type: "quiz" | "exam";
+  gradesPublished?: boolean;
+  questionCount?: number;
+  durationMinutes?: number;
+  points?: number;
+  weight?: number;
+  source: "quiz" | "assignment";
+  questionBankId?: string | null;
+  questions?: Question[];
+};
+
+export type AttendanceSession = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  active: boolean;
+  attendeeCount?: number;
+  startedAt: Date | null;
+  endedAt: Date | null;
+  source: "attendance" | "live";
+  attendanceMode?: string | null;
+};
+
+export type AttendanceRecord = {
+  id: string;
+  sessionId: string;
+  groupId: string;
+  userId: string;
+  status: "present" | "late" | "absent" | "excused";
+  source?: "qr" | "tap" | "manual";
+  checkedInAt?: Date | null;
+};
+
+export type AttendanceSummary = {
+  groupId: string;
+  totalSessions: number;
+  activeSessions: number;
+  totalAttendees: number;
+  latestSession: AttendanceSession | null;
+};
+
+export type InboxTask = {
+  id: string;
+  kind: "live" | "assignment" | "quiz" | "group";
+  groupId: string;
+  groupName: string;
+  title: string;
+  subtitle: string;
+  sessionId?: string;
+  assignmentId?: string;
+  priority: number;
+  dueAt?: Date | null;
+  unreadCount?: number;
+};
+
+export type CourseGradebookAssignment = {
+  id: string;
+  title: string;
+  weight: number;
+  dueAt: Date | null;
+  gradesPublished: boolean;
+  averageScore: number | null;
+};
+
+export type CourseGradebookEntry = {
+  assignmentId: string;
+  title: string;
+  weight: number;
+  dueAt: Date | null;
+  grade: number | null;
+  isLate: boolean;
+  feedback?: string | null;
+  submittedAt: Date | null;
+};
+
+export type CourseGradebookRow = {
+  uid: string;
+  displayName: string;
+  email?: string | null;
+  studentId?: string | null;
+  department?: string | null;
+  finalScore: number | null;
+  passingScore: number;
+  result: string;
+  published: boolean;
+  publishedAt: Date | null;
+  gradedAssignments: number;
+  totalAssignments: number;
+  assignmentBreakdown: CourseGradebookEntry[];
+};
+
+export type CourseGradebookData = {
+  groupName: string;
+  finalScoresPublished: boolean;
+  finalScoresPublishedAt: Date | null;
+  assignments: CourseGradebookAssignment[];
+  rows: CourseGradebookRow[];
+};
+
 // ===== 群組與社群 =====
 
 export type Group = {

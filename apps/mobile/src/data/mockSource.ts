@@ -2,6 +2,8 @@ import type { DataSource } from "./source";
 import type {
   Announcement,
   Assignment,
+  AttendanceSession,
+  AttendanceSummary,
   BusArrival,
   BusRoute,
   CalendarEvent,
@@ -9,6 +11,10 @@ import type {
   Comment,
   Conversation,
   Course,
+  CourseGradebookData,
+  CourseMaterial,
+  CourseModule,
+  CourseSpace,
   DormAnnouncement,
   DormitoryInfo,
   DormPackage,
@@ -26,11 +32,13 @@ import type {
   LostFoundItem,
   MenuItem,
   Message,
+  InboxTask,
   Notification,
   Order,
   Poi,
   Printer,
   PrintJob,
+  Quiz,
   RepairRequest,
   SeatReservation,
   Submission,
@@ -216,6 +224,82 @@ export const mockSource: DataSource = {
         c.code.toLowerCase().includes(q) ||
         c.instructor.toLowerCase().includes(q)
     );
+  },
+  async listCourseSpaces(_userId: string, schoolId?: string): Promise<CourseSpace[]> {
+    return mockGroups
+      .filter((group) => group.type === "course" && (!schoolId || group.schoolId === schoolId))
+      .map((group) => ({
+        id: group.id,
+        groupId: group.id,
+        courseId: group.courseId,
+        name: group.name,
+        description: group.description,
+        unreadCount: 0,
+        assignmentCount: 0,
+        dueSoonCount: 0,
+        quizCount: 0,
+        moduleCount: 0,
+        activeSessionId: null,
+        latestDueAt: null,
+        schoolId: group.schoolId,
+      }));
+  },
+  async getCourseSpace(courseSpaceId: string, userId: string, schoolId?: string): Promise<CourseSpace | null> {
+    const spaces = await this.listCourseSpaces(userId, schoolId);
+    return spaces.find((space) => space.groupId === courseSpaceId) ?? null;
+  },
+  async listCourseModules(): Promise<CourseModule[]> {
+    return [];
+  },
+  async createCourseModule(_input): Promise<{ id: string }> {
+    return { id: generateId() };
+  },
+  async listCourseMaterials(): Promise<CourseMaterial[]> {
+    return [];
+  },
+  async listQuizzes(): Promise<Quiz[]> {
+    return [];
+  },
+  async getQuiz(): Promise<Quiz | null> {
+    return null;
+  },
+  async createQuiz(_input): Promise<{ id: string }> {
+    return { id: generateId() };
+  },
+  async submitQuiz(input): Promise<Submission> {
+    return {
+      id: generateId(),
+      assignmentId: input.quizId,
+      userId: input.userId,
+      content: input.content,
+      attachments: input.attachments,
+      submittedAt: new Date().toISOString(),
+      status: "submitted",
+    };
+  },
+  async listAttendanceSessions(): Promise<AttendanceSession[]> {
+    return [];
+  },
+  async startAttendanceSession(): Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }> {
+    return { success: true, sessionId: generateId() };
+  },
+  async checkInAttendance(): Promise<{ success: boolean }> {
+    return { success: true };
+  },
+  async getAttendanceSummary(courseSpaceId: string): Promise<AttendanceSummary> {
+    return {
+      groupId: courseSpaceId,
+      totalSessions: 0,
+      activeSessions: 0,
+      totalAttendees: 0,
+      latestSession: null,
+    };
+  },
+  async listInboxTasks(): Promise<InboxTask[]> {
+    return [];
+  },
+  async getCourseGradebook(): Promise<CourseGradebookData | null> {
+    return null;
   },
 
   // ===== 選課 =====
