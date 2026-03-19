@@ -507,6 +507,70 @@ export function AcademicScreen(props: any) {
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
             <View style={{
               width: 26, height: 26, borderRadius: 8,
+              backgroundColor: "#0EA5E915",
+              alignItems: "center", justifyContent: "center",
+            }}>
+              <Ionicons name="grid-outline" size={14} color="#0EA5E9" />
+            </View>
+            <Text style={{ fontSize: 17, fontWeight: "800", color: theme.colors.text, letterSpacing: -0.3 }}>
+              LMS 核心
+            </Text>
+          </View>
+          <View style={{ gap: 12, marginBottom: 22 }}>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <ToolCard
+                icon="layers-outline"
+                title="課程中樞"
+                subtitle="進入正式課程空間"
+                color="#0EA5E9"
+                onPress={() => nav?.navigate?.("CourseHub")}
+              />
+              <ToolCard
+                icon="albums-outline"
+                title="教材單元"
+                subtitle="查看模組與教材"
+                color="#2563EB"
+                onPress={() => nav?.navigate?.("CourseModules")}
+              />
+            </View>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <ToolCard
+                icon="help-circle-outline"
+                title="測驗中心"
+                subtitle="測驗、考試與題庫"
+                color="#7C3AED"
+                onPress={() => nav?.navigate?.("QuizCenter")}
+              />
+              <ToolCard
+                icon="checkmark-done-outline"
+                title="點名中心"
+                subtitle="簽到、出席與課堂"
+                color="#DC2626"
+                onPress={() => nav?.navigate?.("Attendance")}
+              />
+            </View>
+            <View style={{ flexDirection: "row", gap: 12 }}>
+              <ToolCard
+                icon="analytics-outline"
+                title="學習分析"
+                subtitle="風險與進度總覽"
+                color="#14B8A6"
+                onPress={() => nav?.navigate?.("LearningAnalytics")}
+              />
+              <ToolCard
+                icon="mail-outline"
+                title="收件匣"
+                subtitle="待辦與課程提醒"
+                color="#F97316"
+                onPress={() => nav?.navigate?.("訊息", { screen: "Inbox" })}
+              />
+            </View>
+          </View>
+
+          {/* ─── 學習工具：成績、行事曆、學分、群組 ─── */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 }}>
+            <View style={{
+              width: 26, height: 26, borderRadius: 8,
               backgroundColor: `${theme.colors.accent}15`,
               alignItems: "center", justifyContent: "center",
             }}>

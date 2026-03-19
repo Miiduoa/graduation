@@ -20,7 +20,6 @@ export function createStackScreenOptions(): NativeStackNavigationOptions {
       color: theme.colors.text,
       fontSize: 17,
       fontWeight: "600",
-      letterSpacing: -0.2,
     },
     headerTintColor: theme.colors.accent,
     headerShadowVisible: false,

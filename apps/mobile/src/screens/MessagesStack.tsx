@@ -2,6 +2,7 @@ import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useThemeMode } from "../state/theme";
 import { createStackScreenOptions } from "../ui/navigationTheme";
+import { InboxScreen } from "./InboxScreen";
 import { MessagesHomeScreen } from "./MessagesHomeScreen";
 import { GroupsScreen } from "./GroupsScreen";
 import { GroupDetailScreen } from "./GroupDetailScreen";
@@ -21,9 +22,10 @@ export function MessagesStack() {
   return (
     <Stack.Navigator
       id={undefined}
-      initialRouteName="MessagesHome"
+      initialRouteName="Inbox"
       screenOptions={createStackScreenOptions()}
     >
+      <Stack.Screen name="Inbox" component={InboxScreen} options={{ title: "收件匣", headerShown: false }} />
       <Stack.Screen name="MessagesHome" component={MessagesHomeScreen} options={{ title: "訊息", headerShown: false }} />
       <Stack.Screen name="Groups" component={GroupsScreen} options={{ title: "群組" }} />
       <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ title: "群組" }} />

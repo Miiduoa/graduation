@@ -264,8 +264,35 @@ export function AchievementsScreen(props: any) {
   const [firestoreProgress, setFirestoreProgress] = useState<Record<string, { progress: number; unlocked: boolean; unlockedAt?: Date }>>({});
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
-  const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id]);
+  const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id, refreshKey]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // 手動重新抓一次排行榜快照
+      if (school?.id) {
+        const ref = collection(db, "schools", school.id, "leaderboard");
+        const snap = await getDocs(query(ref, orderBy("points", "desc"), limit(10)));
+        if (!snap.empty) {
+          const entries = snap.docs.map((d, i) => ({
+            rank: i + 1,
+            userId: d.id,
+            userName: d.data().displayName ?? "同學",
+            points: d.data().points ?? 0,
+            level: calculateLevel(d.data().points ?? 0).level,
+            isCurrentUser: d.id === auth.user?.uid,
+          }));
+          setLeaderboard(entries);
+        }
+      }
+      // 重新觸發 POI 列表載入
+      setRefreshKey((k) => k + 1);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [school?.id, auth.user?.uid, db]);
 
   const totalFavorites = useMemo(() => {
     return fav.favorites.announcement.length +
@@ -408,7 +435,7 @@ export function AchievementsScreen(props: any) {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => setRefreshing(false)} tintColor={theme.colors.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.accent} />}
       >
         <AnimatedCard title="" subtitle="">
           <View style={{ alignItems: "center", padding: 8 }}>

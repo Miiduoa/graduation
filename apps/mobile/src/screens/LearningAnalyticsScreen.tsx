@@ -18,6 +18,7 @@ import { getDb } from "../firebase";
 import {
   collection,
   getDocs,
+  getDoc,
   query,
   orderBy,
   limit,
@@ -305,6 +306,30 @@ export function LearningAnalyticsScreen(props: any) {
   const [editingGrade, setEditingGrade] = useState(false);
   const [gradeInputs, setGradeInputs] = useState<Record<string, string>>({});
 
+  // 學期選擇：動態生成最近 4 個學期
+  const availableSemesters = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear() - 1911; // 民國年
+    const month = now.getMonth() + 1;
+    const currentSemester = month >= 2 && month <= 7 ? 2 : 1;
+    const sems: string[] = [];
+    let y = year;
+    let s = currentSemester;
+    for (let i = 0; i < 4; i++) {
+      sems.push(`${y}-${s}`);
+      s--;
+      if (s < 1) { s = 2; y--; }
+    }
+    return sems;
+  }, []);
+  const [selectedSemester, setSelectedSemester] = useState<string>(() => {
+    const now = new Date();
+    const year = now.getFullYear() - 1911;
+    const month = now.getMonth() + 1;
+    const s = month >= 2 && month <= 7 ? 2 : 1;
+    return `${year}-${s}`;
+  });
+
   const loadData = async () => {
     if (!auth.user) { setLoading(false); return; }
     const uid = auth.user.uid;
@@ -319,7 +344,7 @@ export function LearningAnalyticsScreen(props: any) {
         submissionsSnap.docs.map(async (d) => {
           const data = d.data();
           const assignmentRef = d.ref.parent.parent;
-          const assignSnap = assignmentRef ? await assignmentRef.get().catch(() => null) : null;
+          const assignSnap = assignmentRef ? await getDoc(assignmentRef).catch(() => null) : null;
           return {
             id: d.id,
             groupId: assignmentRef?.parent?.parent?.id ?? "",
@@ -579,6 +604,31 @@ export function LearningAnalyticsScreen(props: any) {
                   </Text>
                 </Pressable>
               </View>
+              {editingGrade && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 6 }}>選擇學期</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                    {availableSemesters.map((sem) => (
+                      <Pressable
+                        key={sem}
+                        onPress={() => setSelectedSemester(sem)}
+                        style={{
+                          paddingHorizontal: 14,
+                          paddingVertical: 6,
+                          borderRadius: theme.radius.full,
+                          backgroundColor: selectedSemester === sem ? theme.colors.accent : theme.colors.surface2,
+                          borderWidth: 1,
+                          borderColor: selectedSemester === sem ? theme.colors.accent : theme.colors.border,
+                        }}
+                      >
+                        <Text style={{ color: selectedSemester === sem ? "#fff" : theme.colors.text, fontSize: 13, fontWeight: "600" }}>
+                          {sem}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
               {editingGrade && courses.slice(0, 8).map((course) => {
                 const existing = semesterGrades.find((g) => g.id === course.id);
                 return (
@@ -605,7 +655,7 @@ export function LearningAnalyticsScreen(props: any) {
                       }}
                     />
                     <Pressable
-                      onPress={() => saveGrade(course.id, course.name, course.credits ?? 3, "113-2")}
+                      onPress={() => saveGrade(course.id, course.name, course.credits ?? 3, selectedSemester)}
                       style={{ padding: 6 }}
                     >
                       <Ionicons name="checkmark" size={18} color={theme.colors.success} />

@@ -8,9 +8,11 @@ import {
   Alert,
   RefreshControl,
   Animated,
+  Modal,
+  StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import QRCode from "react-native-qrcode-svg";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import { Screen, Card, Button, Pill, LoadingState, ErrorState, AnimatedCard } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
@@ -30,6 +32,19 @@ import {
   limit,
   getDoc,
 } from "firebase/firestore";
+
+let QRCodeSvg: React.ComponentType<{
+  value: string;
+  size?: number;
+  color?: string;
+  backgroundColor?: string;
+}> | null = null;
+
+try {
+  QRCodeSvg = require("react-native-qrcode-svg").default;
+} catch {
+  QRCodeSvg = null;
+}
 
 type LiveSession = {
   sessionId: string;
@@ -237,6 +252,9 @@ export function ClassroomScreen(props: any) {
   const [myPollAnswers, setMyPollAnswers] = useState<Record<string, number>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [joined, setJoined] = useState(false);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const scanLockRef = useRef(false);
 
   // 教師：新增投票
   const [newPollQuestion, setNewPollQuestion] = useState("");
@@ -276,7 +294,7 @@ export function ClassroomScreen(props: any) {
     return () => unsub();
   }, [groupId, sessionId]);
 
-  // 學生加入課堂
+  // 學生加入課堂（一般加入）
   const handleJoin = useCallback(async () => {
     if (!groupId || !sessionId || !auth.user) return;
     try {
@@ -287,6 +305,45 @@ export function ClassroomScreen(props: any) {
       Alert.alert("加入失敗", e.message ?? "無法加入課堂");
     }
   }, [groupId, sessionId, auth.user]);
+
+  // 學生：開啟 QR 掃描器簽到
+  const handleOpenQRScanner = useCallback(async () => {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert("需要相機權限", "請在設定中允許相機存取，才能掃描 QR Code 簽到");
+        return;
+      }
+    }
+    scanLockRef.current = false;
+    setShowQRScanner(true);
+  }, [cameraPermission, requestCameraPermission]);
+
+  // 掃描到 QR Code 後驗證並簽到
+  const handleQRScanned = useCallback(async ({ data }: { data: string }) => {
+    if (scanLockRef.current) return;
+    scanLockRef.current = true;
+    setShowQRScanner(false);
+
+    try {
+      const url = new URL(data);
+      const token = url.searchParams.get("token");
+      const scannedGroupId = url.searchParams.get("groupId");
+      const scannedSessionId = url.searchParams.get("sessionId");
+
+      if (!token || scannedGroupId !== groupId || scannedSessionId !== sessionId) {
+        Alert.alert("QR Code 無效", "請掃描老師目前課堂的 QR Code");
+        return;
+      }
+
+      const joinSession = httpsCallable(functions, "joinLiveSession");
+      await joinSession({ groupId, sessionId, qrToken: token });
+      setJoined(true);
+      Alert.alert("簽到成功", "出席已記錄！");
+    } catch (e: any) {
+      Alert.alert("簽到失敗", e.message ?? "無法完成簽到，請稍後再試");
+    }
+  }, [groupId, sessionId, functions]);
 
   // 提交匿名問題
   const handleSubmitQuestion = useCallback(async () => {
@@ -442,7 +499,17 @@ export function ClassroomScreen(props: any) {
           {/* 學生：尚未加入時顯示加入按鈕 */}
           {!isTeacher && !joined && session.active && (
             <Card title="加入課堂" subtitle="點擊加入今天的即時互動">
-              <Button text="立即加入課堂" kind="primary" onPress={handleJoin} />
+              <View style={{ gap: 10 }}>
+                <Button text="立即加入課堂" kind="primary" onPress={handleJoin} />
+                {session.qrToken && (
+                  <Button
+                    text="掃描 QR Code 簽到"
+                    kind="ghost"
+                    icon="qr-code-outline"
+                    onPress={handleOpenQRScanner}
+                  />
+                )}
+              </View>
             </Card>
           )}
 
@@ -450,12 +517,37 @@ export function ClassroomScreen(props: any) {
           {isTeacher && session.qrToken && session.active && (
             <AnimatedCard title="出席打卡 QR Code" subtitle="學生掃碼即可記錄出席">
               <View style={{ alignItems: "center", padding: 16, gap: 12 }}>
-                <QRCode
-                  value={`campusone://classroom/join?groupId=${groupId}&sessionId=${sessionId}&token=${session.qrToken}`}
-                  size={180}
-                  color={theme.colors.text}
-                  backgroundColor="transparent"
-                />
+                {QRCodeSvg ? (
+                  <QRCodeSvg
+                    value={`campusone://classroom/join?groupId=${groupId}&sessionId=${sessionId}&token=${session.qrToken}`}
+                    size={180}
+                    color={theme.colors.text}
+                    backgroundColor="transparent"
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: 180,
+                      height: 180,
+                      borderRadius: 24,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      backgroundColor: theme.colors.surface2,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: 18,
+                      gap: 8,
+                    }}
+                  >
+                    <Ionicons name="qr-code-outline" size={36} color={theme.colors.accent} />
+                    <Text style={{ color: theme.colors.text, fontWeight: "700", textAlign: "center" }}>
+                      QR 套件尚未安裝
+                    </Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "center", lineHeight: 18 }}>
+                      目前先保留課堂流程，安裝 `react-native-qrcode-svg` 後即可顯示正式 QR Code。
+                    </Text>
+                  </View>
+                )}
                 <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "center" }}>
                   此 QR Code 每 5 分鐘更新一次以防代掃
                 </Text>
@@ -464,7 +556,7 @@ export function ClassroomScreen(props: any) {
           )}
 
           {/* 理解度反饋（學生） */}
-          {!isTeacher && (joined || true) && session.active && (
+          {!isTeacher && joined && session.active && (
             <Card title="即時理解度" subtitle="讓老師知道你的學習狀況">
               <ReactionBar
                 reactions={session.reactions}
@@ -673,6 +765,56 @@ export function ClassroomScreen(props: any) {
           </Card>
         </View>
       </ScrollView>
+
+      {/* QR Code 掃描器 Modal */}
+      <Modal visible={showQRScanner} animationType="slide" onRequestClose={() => setShowQRScanner(false)}>
+        <View style={{ flex: 1, backgroundColor: "#000" }}>
+          <CameraView
+            style={{ flex: 1 }}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+            onBarcodeScanned={handleQRScanned}
+          />
+          <View
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              justifyContent: "center",
+              alignItems: "center",
+            }}
+          >
+            <View
+              style={{
+                width: 220,
+                height: 220,
+                borderRadius: 16,
+                borderWidth: 3,
+                borderColor: "#fff",
+                backgroundColor: "transparent",
+              }}
+            />
+            <Text style={{ color: "#fff", marginTop: 20, fontSize: 15, textAlign: "center" }}>
+              將 QR Code 對準框內掃描簽到
+            </Text>
+          </View>
+          <Pressable
+            onPress={() => setShowQRScanner(false)}
+            style={{
+              position: "absolute",
+              top: 56,
+              right: 20,
+              backgroundColor: "rgba(0,0,0,0.5)",
+              borderRadius: 20,
+              padding: 8,
+            }}
+          >
+            <Ionicons name="close" size={24} color="#fff" />
+          </Pressable>
+        </View>
+      </Modal>
     </Screen>
   );
 }

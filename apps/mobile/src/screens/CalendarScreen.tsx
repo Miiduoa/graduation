@@ -72,7 +72,9 @@ function formatMonthYear(date: Date): string {
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
-const CALENDAR_API_BASE_URL = "https://asia-east1-YOUR_PROJECT_ID.cloudfunctions.net";
+const CALENDAR_API_BASE_URL =
+  process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ??
+  `https://asia-east1-${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? "YOUR_PROJECT_ID"}.cloudfunctions.net`;
 
 type SubscribeButtonProps = {
   icon: string;
@@ -366,6 +368,14 @@ export function CalendarScreen(props: any) {
     return calendarEvents.some((e) => isSameDay(e.date, date));
   };
 
+  const getEventTypesOnDay = (date: Date): { hasEvent: boolean; hasAssignment: boolean } => {
+    const dayEvents = calendarEvents.filter((e) => isSameDay(e.date, date));
+    return {
+      hasEvent: dayEvents.some((e) => e.type === "event"),
+      hasAssignment: dayEvents.some((e) => e.type === "assignment"),
+    };
+  };
+
   const goToPrevMonth = () => {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
   };
@@ -435,7 +445,7 @@ export function CalendarScreen(props: any) {
               const isCurrentMonth = date.getMonth() === currentMonth.getMonth();
               const isToday = isSameDay(date, today);
               const isSelected = selectedDate && isSameDay(date, selectedDate);
-              const hasEvent = hasEventOnDay(date);
+              const { hasEvent: hasCampusEvent, hasAssignment } = getEventTypesOnDay(date);
 
               return (
                 <Pressable
@@ -475,17 +485,29 @@ export function CalendarScreen(props: any) {
                     >
                       {date.getDate()}
                     </Text>
-                    {hasEvent ? (
-                      <View
-                        style={{
-                          position: "absolute",
-                          bottom: 3,
-                          width: 5,
-                          height: 5,
-                          borderRadius: theme.radius.full,
-                          backgroundColor: isSelected ? "#fff" : theme.colors.accent,
-                        }}
-                      />
+                    {(hasCampusEvent || hasAssignment) ? (
+                      <View style={{ position: "absolute", bottom: 3, flexDirection: "row", gap: 2 }}>
+                        {hasCampusEvent && (
+                          <View
+                            style={{
+                              width: 5,
+                              height: 5,
+                              borderRadius: theme.radius.full,
+                              backgroundColor: isSelected ? "#fff" : theme.colors.accent,
+                            }}
+                          />
+                        )}
+                        {hasAssignment && (
+                          <View
+                            style={{
+                              width: 5,
+                              height: 5,
+                              borderRadius: theme.radius.full,
+                              backgroundColor: isSelected ? "#fff" : theme.colors.warning,
+                            }}
+                          />
+                        )}
+                      </View>
                     ) : null}
                   </View>
                 </Pressable>
