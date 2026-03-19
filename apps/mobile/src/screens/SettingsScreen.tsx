@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { Screen, Card, Button, Pill, SectionTitle, AnimatedCard, ListItem, SegmentedControl, ToggleSwitch, Divider } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { useDemo, type DemoMode } from "../state/demo";
 import { useThemeMode } from "../state/theme";
 import { findSchoolsByCode, mockSchools, normalizeSchoolCode } from "@campus/shared/src/schools";
@@ -127,7 +127,7 @@ export function SettingsScreen(props: any) {
               flexDirection: "row",
               alignItems: "center",
               gap: 12,
-              ...shadowStyle(theme.shadows.sm),
+              ...softShadowStyle(theme.shadows.soft),
             }}>
               <View style={{
                 width: 42,
@@ -387,7 +387,7 @@ export function SettingsScreen(props: any) {
                   backgroundColor: theme.colors.surface,
                   padding: 14,
                   gap: 8,
-                  ...shadowStyle(theme.shadows.sm),
+                  ...softShadowStyle(theme.shadows.soft),
                 }}
               >
                 <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>資料來源診斷</Text>

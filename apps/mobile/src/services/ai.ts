@@ -126,10 +126,16 @@ export type AIContext = {
   schoolId: string;
   userId?: string;
   userName?: string;
+  // 公開校園資料
   announcements?: Array<{ id: string; title: string; source?: string }>;
   events?: Array<{ id: string; title: string; location?: string; startsAt?: string }>;
   menus?: Array<{ id: string; name: string; price?: number; cafeteria?: string }>;
   pois?: Array<{ id: string; name: string; category?: string }>;
+  // 個人化學習資料（新增）
+  courses?: Array<{ id: string; name: string; teacher?: string; dayOfWeek: number; startPeriod: number; credits?: number }>;
+  pendingAssignments?: Array<{ id: string; title: string; groupName: string; dueAt?: string; isLate?: boolean }>;
+  gradesSummary?: { gpa?: number; courses: Array<{ name: string; grade?: number; credits?: number }> };
+  weeklyReport?: { summary: string; stats: { onTimeRate: number; totalSubmissions: number; newAchievements: number } };
 };
 
 // 上下文顯示筆數（可透過環境變數覆寫）
@@ -152,27 +158,75 @@ function getConfig() {
   };
 }
 
+const DAY_NAMES = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+
 function buildSystemPrompt(context: AIContext): string {
   const limits = CONTEXT_LIMITS;
   const parts = [
-    "你是一個校園智慧助理，專門幫助學生查詢校園資訊。",
+    "你是一個校園智慧助理，專門幫助學生查詢校園資訊、管理學業和生活。",
+    "你有辦法根據學生的個人資料（課程、作業、成績）給出具體、個人化的建議。",
     "",
     "【回答原則】",
     "- 語氣友善、簡潔、有用，使用繁體中文。",
     "- 列舉項目時請用條列（數字或符號）方便閱讀。",
-    "- 若提供的資料中有相關內容，請直接引用；若某類資料目前為空，請如實告知並建議可改用其他查詢方式。",
+    "- 若提供的個人資料中有相關內容，請直接引用具體數據（如課程名稱、截止日期）。",
+    "- 若某類資料目前為空，請如實告知並建議可改用其他查詢方式。",
     "- 無法回答時請禮貌說明，並建議「查看公告」「近期活動」「推薦餐點」「找地點」等替代方向。",
+    "- 若學生提到截止日期、提醒等需求，可告知他們 App 支援設定提醒功能。",
     "",
     "【建議選項】",
     "在回答結尾，若適合引導使用者下一步，請加上一行「建議選項：」後列出 1～3 個簡短選項（用頓號或逗號分隔），例如：建議選項：查看詳情、更多公告、開啟導航。選項請簡短（2～6 字），且與 App 功能對應：查看詳情、更多公告、報名活動、其他選擇、開啟導航、今日公告、近期活動、推薦餐點、找地點 等。",
     "",
-    `【目前環境】學校：${context.schoolId}`,
+    `【目前環境】學校：${context.schoolId}，今天：${DAY_NAMES[new Date().getDay()]} ${new Date().toLocaleDateString("zh-TW")}`,
   ];
 
   if (context.userName) {
-    parts.push(`學生：${context.userName}`);
+    parts.push(`學生姓名：${context.userName}`);
   }
 
+  // ── 個人化學習資料（最重要，放在最前面）──
+  if (context.courses && context.courses.length > 0) {
+    parts.push("");
+    parts.push("【你的課程列表】");
+    context.courses.slice(0, 15).forEach((c, i) => {
+      const dayName = DAY_NAMES[c.dayOfWeek] ?? "未知";
+      parts.push(`${i + 1}. ${c.name}（${dayName} 第${c.startPeriod}節${c.teacher ? `，授課：${c.teacher}` : ""}${c.credits ? `，${c.credits}學分` : ""}）`);
+    });
+  }
+
+  if (context.pendingAssignments && context.pendingAssignments.length > 0) {
+    parts.push("");
+    parts.push("【待繳作業（近期截止）】");
+    context.pendingAssignments.slice(0, 8).forEach((a, i) => {
+      const dueStr = a.dueAt ? `截止：${a.dueAt}` : "無截止日";
+      parts.push(`${i + 1}. ${a.title}（${a.groupName}，${dueStr}${a.isLate ? "，⚠️ 已逾期" : ""}）`);
+    });
+  } else if (context.courses) {
+    parts.push("");
+    parts.push("【待繳作業】目前無待繳作業。");
+  }
+
+  if (context.gradesSummary) {
+    parts.push("");
+    parts.push("【成績概況】");
+    if (context.gradesSummary.gpa) {
+      parts.push(`GPA：${context.gradesSummary.gpa.toFixed(2)}`);
+    }
+    if (context.gradesSummary.courses.length > 0) {
+      context.gradesSummary.courses.slice(0, 8).forEach((c, i) => {
+        parts.push(`${i + 1}. ${c.name}${c.grade != null ? `：${c.grade} 分` : "（尚未公布）"}${c.credits ? `（${c.credits}學分）` : ""}`);
+      });
+    }
+  }
+
+  if (context.weeklyReport) {
+    parts.push("");
+    parts.push(`【本週學習報告】${context.weeklyReport.summary}`);
+    const s = context.weeklyReport.stats;
+    parts.push(`準時繳交率：${s.onTimeRate}%，本週繳交 ${s.totalSubmissions} 份，新解鎖成就 ${s.newAchievements} 個`);
+  }
+
+  // ── 校園公開資料 ──
   const hasAnnouncements = context.announcements && context.announcements.length > 0;
   const hasEvents = context.events && context.events.length > 0;
   const hasMenus = context.menus && context.menus.length > 0;

@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState, useEffect, useRef } from "react"
 import { ScrollView, Text, View, Pressable, Platform, RefreshControl, FlatList, Alert, AccessibilityInfo } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
@@ -15,7 +14,7 @@ import { useDemo } from "../state/demo";
 import { useSearchHistory, POPULAR_SEARCHES } from "../state/searchHistory";
 import { useToast } from "../ui/Toast";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { formatDateTime } from "../utils/format";
 
 type Announcement = {
@@ -200,23 +199,21 @@ export function AnnouncementsScreen(props: any) {
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-          <LinearGradient
-            colors={[theme.colors.accent, theme.colors.bg]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
+          <View
             style={{
               paddingTop: insets.top + 12,
-              paddingBottom: 24,
+              paddingBottom: 20,
               paddingHorizontal: 20,
+              backgroundColor: theme.colors.bg,
             }}
           >
             <Text
               style={{
-                fontSize: 28,
-                fontWeight: "900",
-                color: "#fff",
+                fontSize: 34,
+                fontWeight: "800",
+                color: theme.colors.text,
                 marginBottom: 16,
-                letterSpacing: -0.5,
+                letterSpacing: -1,
               }}
             >
               公告
@@ -226,59 +223,67 @@ export function AnnouncementsScreen(props: any) {
               <View
                 style={{
                   paddingHorizontal: 14,
-                  paddingVertical: 8,
-                  borderRadius: 12,
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  paddingVertical: 10,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.surface,
                   alignItems: "center",
                   minWidth: 64,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
                 }}
               >
-                <Text style={{ color: "#fff", fontSize: 20, fontWeight: "800" }}>{stats.total}</Text>
-                <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, marginTop: 2 }}>全部</Text>
+                <Text style={{ color: theme.colors.accent, fontSize: 20, fontWeight: "800" }}>{stats.total}</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>全部</Text>
               </View>
               <View
                 style={{
                   paddingHorizontal: 14,
-                  paddingVertical: 8,
-                  borderRadius: 12,
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  paddingVertical: 10,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.surface,
                   alignItems: "center",
                   minWidth: 64,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
                 }}
               >
-                <Text style={{ color: "#fff", fontSize: 20, fontWeight: "800" }}>{stats.important}</Text>
-                <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, marginTop: 2 }}>重要</Text>
+                <Text style={{ color: theme.colors.danger, fontSize: 20, fontWeight: "800" }}>{stats.important}</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>重要</Text>
               </View>
               <View
                 style={{
                   paddingHorizontal: 14,
-                  paddingVertical: 8,
-                  borderRadius: 12,
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  paddingVertical: 10,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.surface,
                   alignItems: "center",
                   minWidth: 64,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
                 }}
               >
-                <Text style={{ color: "#fff", fontSize: 20, fontWeight: "800" }}>{stats.today}</Text>
-                <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, marginTop: 2 }}>今日</Text>
+                <Text style={{ color: theme.colors.success, fontSize: 20, fontWeight: "800" }}>{stats.today}</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>今日</Text>
               </View>
               {isOffline && (
                 <View
                   style={{
                     paddingHorizontal: 14,
-                    paddingVertical: 8,
-                    borderRadius: 12,
-                    backgroundColor: "rgba(245,158,11,0.3)",
+                    paddingVertical: 10,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: theme.colors.warningSoft,
                     alignItems: "center",
                     justifyContent: "center",
+                    borderWidth: 1,
+                    borderColor: "transparent",
                   }}
                 >
-                  <Ionicons name="cloud-offline" size={18} color="#fff" />
-                  <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 11, marginTop: 2 }}>離線</Text>
+                  <Ionicons name="cloud-offline" size={18} color={theme.colors.warning} />
+                  <Text style={{ color: theme.colors.warning, fontSize: 11, marginTop: 2 }}>離線</Text>
                 </View>
               )}
             </View>
-          </LinearGradient>
+          </View>
 
           <View style={{ flex: 1, paddingHorizontal: 16, gap: 12 }}>
             {isOffline && lastFetchTime && (
@@ -352,7 +357,7 @@ export function AnnouncementsScreen(props: any) {
                   borderWidth: 1,
                   borderColor: theme.colors.border,
                   gap: theme.space.md,
-                  ...shadowStyle(theme.shadows.sm),
+                  ...softShadowStyle(theme.shadows.soft),
                 }}
               >
                 {recentSearches.length > 0 ? (
@@ -536,7 +541,7 @@ export function AnnouncementsScreen(props: any) {
                             borderLeftWidth: 4,
                             borderLeftColor: accentColor,
                             gap: 12,
-                            ...shadowStyle(theme.shadows.sm),
+                            ...softShadowStyle(theme.shadows.soft),
                           }}
                         >
                           <View

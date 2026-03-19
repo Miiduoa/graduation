@@ -17,7 +17,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { Screen, Button } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const ONBOARDING_KEY = "@has_seen_onboarding";
@@ -250,7 +250,7 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
                       borderColor: isSelected ? theme.colors.accent : theme.colors.border,
                       backgroundColor: isSelected ? theme.colors.accentSoft : theme.colors.surface,
                       transform: [{ scale: pressed ? 0.98 : 1 }],
-                      ...(isSelected ? shadowStyle(theme.shadows.sm) : {}),
+                      ...(isSelected ? softShadowStyle(theme.shadows.soft) : {}),
                     })}
                   >
                     <View

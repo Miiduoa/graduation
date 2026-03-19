@@ -1,17 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { ScrollView, Text, View, Switch, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { Screen, Card, Button, Pill, SectionTitle } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
-import { getDb } from "../firebase";
 import {
-  registerForPushNotificationsAsync,
-  savePushTokenToFirestore,
   type NotificationPreferences,
   defaultNotificationPreferences,
+  loadNotificationPreferences,
+  saveNotificationPreferences,
+  syncPushTokenForUser,
 } from "../services/notifications";
 
 type ToggleRowProps = {
@@ -92,7 +91,6 @@ function TimePicker({ label, value, onChange, disabled }: TimePickerProps) {
 export function NotificationSettingsScreen(props: any) {
   const nav = props?.navigation;
   const auth = useAuth();
-  const db = getDb();
 
   const [prefs, setPrefs] = useState<NotificationPreferences>(defaultNotificationPreferences);
   const [loading, setLoading] = useState(true);
@@ -106,19 +104,14 @@ export function NotificationSettingsScreen(props: any) {
 
     (async () => {
       try {
-        const docRef = doc(db, "users", uid, "settings", "notifications");
-        const snap = await getDoc(docRef);
-        if (snap.exists()) {
-          const data = snap.data() as Partial<NotificationPreferences>;
-          setPrefs({ ...defaultNotificationPreferences, ...data });
-        }
+        setPrefs(await loadNotificationPreferences(uid));
       } catch (e) {
         console.error("Failed to load notification preferences:", e);
       } finally {
         setLoading(false);
       }
     })();
-  }, [db, auth.user?.uid]);
+  }, [auth.user?.uid]);
 
   const updatePref = <K extends keyof NotificationPreferences>(
     key: K,
@@ -131,11 +124,7 @@ export function NotificationSettingsScreen(props: any) {
     if (!auth.user) return;
     setSaving(true);
     try {
-      await setDoc(
-        doc(db, "users", auth.user.uid, "settings", "notifications"),
-        { ...prefs, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
+      await saveNotificationPreferences(auth.user.uid, prefs);
     } catch (e) {
       console.error("Failed to save preferences:", e);
     } finally {
@@ -145,11 +134,10 @@ export function NotificationSettingsScreen(props: any) {
 
   const handleEnablePush = async () => {
     if (!auth.user) return;
-    const token = await registerForPushNotificationsAsync();
+    const token = await syncPushTokenForUser(auth.user.uid);
     if (token) {
       setPushToken(token);
       setPermissionStatus("granted");
-      await savePushTokenToFirestore(auth.user.uid, token);
       updatePref("enabled", true);
     } else {
       setPermissionStatus("denied");

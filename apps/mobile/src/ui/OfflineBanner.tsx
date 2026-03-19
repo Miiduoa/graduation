@@ -18,12 +18,8 @@ type OfflineBannerProps = {
   onDismiss?: () => void;
 };
 
-export function OfflineBanner({
-  visible,
-  type = "offline",
-  message,
-  onDismiss,
-}: OfflineBannerProps) {
+/** 內部共用的橫幅 UI，避免 NetworkStatusBanner 依賴 OfflineBanner 名稱造成載入順序錯誤 */
+function BannerView({ type, message, onDismiss }: { type: BannerType; message?: string; onDismiss?: () => void }) {
   const getConfig = () => {
     switch (type) {
       case "offline":
@@ -49,11 +45,7 @@ export function OfflineBanner({
         };
     }
   };
-
-  if (!visible) return null;
-
   const config = getConfig();
-
   return (
     <View
       style={{
@@ -76,6 +68,16 @@ export function OfflineBanner({
       )}
     </View>
   );
+}
+
+export function OfflineBanner({
+  visible,
+  type = "offline",
+  message,
+  onDismiss,
+}: OfflineBannerProps) {
+  if (!visible) return null;
+  return <BannerView type={type} message={message} onDismiss={onDismiss} />;
 }
 
 export function NetworkStatusBanner() {
@@ -117,8 +119,7 @@ export function NetworkStatusBanner() {
     return (
       <View>
         <Pressable onPress={() => !tipsDismissed && setShowTips(!showTips)}>
-          <OfflineBanner 
-            visible 
+          <BannerView
             type="offline"
             message={pendingCount > 0 ? `離線模式 · ${pendingCount} 項待同步` : undefined}
           />
@@ -157,8 +158,7 @@ export function NetworkStatusBanner() {
 
   if (showReconnectedBanner) {
     return (
-      <OfflineBanner
-        visible
+      <BannerView
         type={pendingCount > 0 ? "syncing" : "reconnected"}
         message={pendingCount > 0 ? `正在同步 ${pendingCount} 項變更...` : undefined}
         onDismiss={dismissReconnectedBanner}

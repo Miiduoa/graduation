@@ -1,721 +1,397 @@
 "use client";
 
 import { SiteShell } from "@/components/SiteShell";
-import { resolveSchool } from "@campus/shared/src/schools";
-import { useState, useEffect, useCallback } from "react";
+import { resolveSchoolPageContext } from "@/lib/pageContext";
+import { useState, useCallback, type CSSProperties } from "react";
 
-type SettingSection = "general" | "notifications" | "appearance" | "privacy" | "account";
+type Section = "general" | "notifications" | "appearance" | "privacy" | "account";
 
-const STORAGE_KEYS = {
-  SETTINGS: "campus_web_settings",
-  THEME: "campus_theme",
-  LANGUAGE: "campus_language",
-};
+const SECTIONS: { id: Section; label: string; icon: string }[] = [
+  { id: "general", label: "一般", icon: "⚙️" },
+  { id: "notifications", label: "通知", icon: "🔔" },
+  { id: "appearance", label: "外觀", icon: "🎨" },
+  { id: "privacy", label: "隱私", icon: "🔒" },
+  { id: "account", label: "帳號", icon: "👤" },
+];
 
-interface Settings {
-  darkMode: boolean;
-  language: string;
-  startPage: string;
-  autoSync: boolean;
-  themeColor: string;
-  fontSize: string;
-  animations: boolean;
-  compactMode: boolean;
-  notifications: {
-    announcements: boolean;
-    events: boolean;
-    messages: boolean;
-    reminders: boolean;
-    marketing: boolean;
-  };
-  privacy: {
-    showProfile: boolean;
-    showActivity: boolean;
-    analytics: boolean;
-  };
-}
-
-const defaultSettings: Settings = {
-  darkMode: false,
-  language: "zh-TW",
-  startPage: "home",
-  autoSync: true,
-  themeColor: "#5B6CFF",
-  fontSize: "medium",
-  animations: true,
-  compactMode: false,
-  notifications: {
-    announcements: true,
-    events: true,
-    messages: true,
-    reminders: true,
-    marketing: false,
-  },
-  privacy: {
-    showProfile: true,
-    showActivity: false,
-    analytics: true,
-  },
-};
-
-function loadSettings(): Settings {
-  if (typeof window === "undefined") return defaultSettings;
-  try {
-    const stored = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    if (stored) {
-      return { ...defaultSettings, ...JSON.parse(stored) };
-    }
-  } catch (e) {
-    console.error("Failed to load settings:", e);
-  }
-  return defaultSettings;
-}
-
-function saveSettings(settings: Settings): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
-    localStorage.setItem(STORAGE_KEYS.LANGUAGE, settings.language);
-    document.documentElement.setAttribute("data-theme", settings.darkMode ? "dark" : "light");
-    document.documentElement.style.setProperty("--brand", settings.themeColor);
-  } catch (e) {
-    console.error("Failed to save settings:", e);
-  }
-}
-
-export default function SettingsPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const school = resolveSchool({
-    school: props.searchParams?.school,
-    schoolId: props.searchParams?.schoolId,
-  });
-
-  const [activeSection, setActiveSection] = useState<SettingSection>("general");
-  const [settings, setSettings] = useState<Settings>(() => loadSettings());
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
-
-  useEffect(() => {
-    saveSettings(settings);
-  }, [settings]);
-
-  const updateSettings = useCallback((updates: Partial<Settings>) => {
-    setIsSaving(true);
-    setSettings((prev) => {
-      return { ...prev, ...updates };
-    });
-    setTimeout(() => {
-      setIsSaving(false);
-      setSaveMessage("設定已儲存");
-      setTimeout(() => setSaveMessage(null), 2000);
-    }, 300);
-  }, []);
-
-  const { darkMode, language, notifications, privacy, themeColor, fontSize, animations, compactMode, startPage, autoSync } = settings;
-
-  const setDarkMode = (value: boolean) => updateSettings({ darkMode: value });
-  const setLanguage = (value: string) => updateSettings({ language: value });
-  const setNotifications = (value: typeof notifications) => updateSettings({ notifications: value });
-  const setPrivacy = (value: typeof privacy) => updateSettings({ privacy: value });
-  const setThemeColor = (value: string) => updateSettings({ themeColor: value });
-  const setFontSize = (value: string) => updateSettings({ fontSize: value });
-  const setAnimations = (value: boolean) => updateSettings({ animations: value });
-  const setCompactMode = (value: boolean) => updateSettings({ compactMode: value });
-  const setStartPage = (value: string) => updateSettings({ startPage: value });
-  const setAutoSync = (value: boolean) => updateSettings({ autoSync: value });
-
-  const handleExportData = async () => {
-    const data = {
-      exportedAt: new Date().toISOString(),
-      settings,
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `campus-settings-${new Date().toISOString().split("T")[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleClearCache = () => {
-    if (confirm("確定要清除快取資料嗎？這將會清除本地儲存的暫存資料。")) {
-      const keysToKeep = [STORAGE_KEYS.SETTINGS, STORAGE_KEYS.LANGUAGE, STORAGE_KEYS.THEME];
-      const allKeys = Object.keys(localStorage);
-      allKeys.forEach((key) => {
-        if (!keysToKeep.includes(key)) {
-          localStorage.removeItem(key);
-        }
-      });
-      setSaveMessage("快取已清除");
-      setTimeout(() => setSaveMessage(null), 2000);
-    }
-  };
-
-  const handleResetSettings = () => {
-    if (confirm("確定要重設所有設定嗎？這將會恢復到預設值。")) {
-      setSettings(defaultSettings);
-      saveSettings(defaultSettings);
-      setSaveMessage("設定已重設");
-      setTimeout(() => setSaveMessage(null), 2000);
-    }
-  };
-
-  const sections: { key: SettingSection; label: string; icon: string }[] = [
-    { key: "general", label: "一般設定", icon: "⚙️" },
-    { key: "notifications", label: "通知設定", icon: "🔔" },
-    { key: "appearance", label: "外觀設定", icon: "🎨" },
-    { key: "privacy", label: "隱私設定", icon: "🔒" },
-    { key: "account", label: "帳號設定", icon: "👤" },
-  ];
-
-  const languages = [
-    { code: "zh-TW", label: "繁體中文", flag: "🇹🇼" },
-    { code: "zh-CN", label: "简体中文", flag: "🇨🇳" },
-    { code: "en", label: "English", flag: "🇺🇸" },
-    { code: "ja", label: "日本語", flag: "🇯🇵" },
-    { code: "ko", label: "한국어", flag: "🇰🇷" },
-  ];
-
-  const SettingRow = ({ 
-    label, 
-    description, 
-    children 
-  }: { 
-    label: string; 
-    description?: string; 
-    children: React.ReactNode;
-  }) => (
-    <div className="settingsRow">
-      <div className="settingsRowCopy">
-        <div className="settingsRowTitle">{label}</div>
-        {description ? <div className="settingsRowText">{description}</div> : null}
-      </div>
-      <div>{children}</div>
-    </div>
-  );
-
-  const Toggle = ({ 
-    checked, 
-    onChange 
-  }: { 
-    checked: boolean; 
-    onChange: (checked: boolean) => void;
-  }) => (
+function Toggle({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
     <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className="toggle"
-      style={
-        checked
-          ? ({ "--toggle-bg": "var(--brand)", "--toggle-border": "var(--brand)", "--toggle-left": "26px" } as React.CSSProperties)
-          : undefined
-      }
+      role="switch"
+      aria-checked={value}
+      onClick={() => onChange(!value)}
+      className={`toggle${value ? " on" : ""}`}
+      style={{ flexShrink: 0 }}
     >
-      <div className="toggleThumb" />
+      <span
+        className="toggleThumb"
+        style={{ "--toggle-left": value ? "26px" : "3px" } as CSSProperties}
+      />
     </button>
   );
+}
 
-  const renderGeneralSettings = () => (
-    <div>
-      <SettingRow 
-        label="預設學校" 
-        description="選擇您的主要學校以便快速存取相關資訊"
+function SettingRow({
+  icon,
+  iconBg,
+  title,
+  subtitle,
+  right,
+  danger,
+  onClick,
+}: {
+  icon: string;
+  iconBg?: string;
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+  danger?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      className="insetGroupRow"
+      onClick={onClick}
+      style={{ cursor: onClick ? "pointer" : "default" }}
+    >
+      <div
+        className="insetGroupRowIcon"
+        style={{
+          background: iconBg ?? "var(--accent-soft)",
+          fontSize: 17,
+          width: 34,
+          height: 34,
+          borderRadius: 9,
+          flexShrink: 0,
+        }}
       >
-        <select
-          value={school.id}
-          disabled
-          className="input"
-          style={{ minWidth: 160 }}
+        {icon}
+      </div>
+      <div className="insetGroupRowContent">
+        <div
+          className="insetGroupRowTitle"
+          style={{ color: danger ? "var(--danger)" : "var(--text)" }}
         >
-          <option>{school.name}</option>
-        </select>
-      </SettingRow>
-
-      <SettingRow 
-        label="語言" 
-        description="選擇應用程式的顯示語言"
-      >
-        <select
-          value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          className="input"
-          style={{ minWidth: 160 }}
-        >
-          {languages.map((lang) => (
-            <option key={lang.code} value={lang.code}>
-              {lang.flag} {lang.label}
-            </option>
-          ))}
-        </select>
-      </SettingRow>
-
-      <SettingRow 
-        label="啟動頁面" 
-        description="選擇應用程式啟動時顯示的頁面"
-      >
-        <select
-          value={startPage}
-          onChange={(e) => setStartPage(e.target.value)}
-          className="input"
-          style={{ minWidth: 160 }}
-        >
-          <option value="home">首頁</option>
-          <option value="announcements">公告</option>
-          <option value="timetable">課表</option>
-          <option value="map">地圖</option>
-        </select>
-      </SettingRow>
-
-      <SettingRow 
-        label="自動同步" 
-        description="在背景自動同步最新資料"
-      >
-        <Toggle checked={autoSync} onChange={setAutoSync} />
-      </SettingRow>
+          {title}
+        </div>
+        {subtitle && <div className="insetGroupRowMeta">{subtitle}</div>}
+      </div>
+      {right !== undefined ? (
+        right
+      ) : (
+        <span className="insetGroupRowChevron">›</span>
+      )}
     </div>
   );
+}
 
-  const renderNotificationSettings = () => (
-    <div>
-      <SettingRow 
-        label="公告通知" 
-        description="接收學校重要公告的推播通知"
-      >
-        <Toggle 
-          checked={notifications.announcements} 
-          onChange={(v) => setNotifications({ ...notifications, announcements: v })} 
-        />
-      </SettingRow>
+export default function SettingsPage(props: {
+  searchParams?: { school?: string; schoolId?: string };
+}) {
+  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const [activeSection, setActiveSection] = useState<Section>("general");
 
-      <SettingRow 
-        label="活動通知" 
-        description="接收活動報名、提醒等通知"
-      >
-        <Toggle 
-          checked={notifications.events} 
-          onChange={(v) => setNotifications({ ...notifications, events: v })} 
-        />
-      </SettingRow>
+  // Settings state
+  const [darkMode, setDarkMode] = useState(false);
+  const [language, setLanguage] = useState("zh-TW");
+  const [autoSync, setAutoSync] = useState(true);
+  const [compactMode, setCompactMode] = useState(false);
+  const [animations, setAnimations] = useState(true);
+  const [fontSize, setFontSize] = useState("medium");
+  const [themeColor, setThemeColor] = useState("#5E6AD2");
 
-      <SettingRow 
-        label="訊息通知" 
-        description="接收新訊息和留言通知"
-      >
-        <Toggle 
-          checked={notifications.messages} 
-          onChange={(v) => setNotifications({ ...notifications, messages: v })} 
-        />
-      </SettingRow>
+  // Notifications
+  const [pushEnabled, setPushEnabled] = useState(true);
+  const [announcements, setAnnouncements] = useState(true);
+  const [gradeReleases, setGradeReleases] = useState(true);
+  const [classReminders, setClassReminders] = useState(true);
+  const [libraryDue, setLibraryDue] = useState(true);
+  const [campusEvents, setCampusEvents] = useState(false);
 
-      <SettingRow 
-        label="課程提醒" 
-        description="接收課程開始前的提醒"
-      >
-        <Toggle 
-          checked={notifications.reminders} 
-          onChange={(v) => setNotifications({ ...notifications, reminders: v })} 
-        />
-      </SettingRow>
+  // Privacy
+  const [showProfile, setShowProfile] = useState(true);
+  const [showActivity, setShowActivity] = useState(false);
+  const [analytics, setAnalytics] = useState(true);
 
-      <SettingRow 
-        label="行銷訊息" 
-        description="接收校園優惠和推廣訊息"
-      >
-        <Toggle 
-          checked={notifications.marketing} 
-          onChange={(v) => setNotifications({ ...notifications, marketing: v })} 
-        />
-      </SettingRow>
+  const toggleDark = useCallback((v: boolean) => {
+    setDarkMode(v);
+    document.documentElement.setAttribute("data-theme", v ? "dark" : "light");
+  }, []);
 
-      <div style={{ 
-        marginTop: 20, 
-        padding: 16, 
-        background: "var(--panel2)", 
-        borderRadius: 12,
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-      }}>
-        <span style={{ fontSize: 24 }}>📱</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>啟用瀏覽器推播</div>
-          <div style={{ fontSize: 13, color: "var(--muted)" }}>
-            在瀏覽器接收即時通知
+  const THEME_COLORS = [
+    "#5E6AD2", "#007AFF", "#34C759", "#FF9500",
+    "#FF3B30", "#BF5AF2", "#FF6B35", "#32ADE6",
+  ];
+
+  function renderGeneral() {
+    return (
+      <div className="pageStack">
+        <div>
+          <div className="insetGroupHeader">帳號與學校</div>
+          <div className="insetGroup">
+            <SettingRow icon="🏫" iconBg="#E8F4FD" title="切換學校" subtitle={school || "尚未選擇學校"} />
+            <SettingRow icon="🔄" iconBg="#E8FFF2" title="自動同步" right={<Toggle value={autoSync} onChange={setAutoSync} />} />
+            <SettingRow icon="🌐" iconBg="#FFF3E8" title="語言" subtitle="繁體中文" right={<span style={{ fontSize: 13, color: "var(--muted)" }}>{language === "zh-TW" ? "繁體中文" : "English"} ›</span>} />
           </div>
         </div>
-        <button className="btn primary" style={{ fontSize: 13 }}>
-          啟用推播
-        </button>
-      </div>
-    </div>
-  );
-
-  const renderAppearanceSettings = () => (
-    <div>
-      <SettingRow 
-        label="深色模式" 
-        description="使用深色主題減少眼睛疲勞"
-      >
-        <Toggle checked={darkMode} onChange={setDarkMode} />
-      </SettingRow>
-
-      <SettingRow 
-        label="主題色彩" 
-        description="選擇應用程式的主要色彩"
-      >
-        <div style={{ display: "flex", gap: 8 }}>
-          {["#8B5CF6", "#EC4899", "#3B82F6", "#10B981", "#F59E0B"].map((color) => (
-            <button
-              key={color}
-              onClick={() => setThemeColor(color)}
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 14,
-                background: color,
-                border: color === themeColor ? "3px solid #fff" : "none",
-                boxShadow: color === themeColor ? `0 0 0 2px ${color}` : "none",
-                cursor: "pointer",
-                transition: "all 0.2s",
-              }}
+        <div>
+          <div className="insetGroupHeader">閱讀偏好</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="📏"
+              iconBg="#F3F0FF"
+              title="字體大小"
+              right={
+                <div className="segmentedGroup" style={{ padding: "3px", gap: 3 }}>
+                  {["small", "medium", "large"].map((s) => (
+                    <button
+                      key={s}
+                      className={fontSize === s ? "active" : ""}
+                      onClick={() => setFontSize(s)}
+                      style={{ padding: "4px 10px", fontSize: 12 }}
+                    >
+                      {s === "small" ? "小" : s === "medium" ? "中" : "大"}
+                    </button>
+                  ))}
+                </div>
+              }
             />
-          ))}
-        </div>
-      </SettingRow>
-
-      <SettingRow 
-        label="字體大小" 
-        description="調整應用程式的文字大小"
-      >
-        <select
-          value={fontSize}
-          onChange={(e) => setFontSize(e.target.value)}
-          className="input"
-          style={{ minWidth: 160 }}
-        >
-          <option value="small">小</option>
-          <option value="medium">中（預設）</option>
-          <option value="large">大</option>
-          <option value="xlarge">特大</option>
-        </select>
-      </SettingRow>
-
-      <SettingRow 
-        label="動畫效果" 
-        description="啟用介面轉場和動畫"
-      >
-        <Toggle checked={animations} onChange={setAnimations} />
-      </SettingRow>
-
-      <SettingRow 
-        label="緊湊模式" 
-        description="減少介面元素間距，顯示更多內容"
-      >
-        <Toggle checked={compactMode} onChange={setCompactMode} />
-      </SettingRow>
-    </div>
-  );
-
-  const renderPrivacySettings = () => (
-    <div>
-      <SettingRow 
-        label="公開個人檔案" 
-        description="允許其他使用者查看您的基本資訊"
-      >
-        <Toggle 
-          checked={privacy.showProfile} 
-          onChange={(v) => setPrivacy({ ...privacy, showProfile: v })} 
-        />
-      </SettingRow>
-
-      <SettingRow 
-        label="顯示活動狀態" 
-        description="顯示您的線上狀態和最近活動"
-      >
-        <Toggle 
-          checked={privacy.showActivity} 
-          onChange={(v) => setPrivacy({ ...privacy, showActivity: v })} 
-        />
-      </SettingRow>
-
-      <SettingRow 
-        label="使用分析" 
-        description="幫助我們改善應用程式體驗（匿名資料）"
-      >
-        <Toggle 
-          checked={privacy.analytics} 
-          onChange={(v) => setPrivacy({ ...privacy, analytics: v })} 
-        />
-      </SettingRow>
-
-      <div style={{ marginTop: 24 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>📦 資料管理</h3>
-        
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <button 
-            className="btn" 
-            onClick={handleExportData}
-            style={{ 
-              justifyContent: "space-between", 
-              padding: "14px 16px",
-              display: "flex",
-            }}
-          >
-            <span>📥 匯出我的資料</span>
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>下載 JSON</span>
-          </button>
-          
-          <button 
-            className="btn" 
-            onClick={handleClearCache}
-            style={{ 
-              justifyContent: "space-between", 
-              padding: "14px 16px",
-              display: "flex",
-            }}
-          >
-            <span>🗑️ 清除快取資料</span>
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>釋放空間</span>
-          </button>
-
-          <button 
-            className="btn" 
-            onClick={handleResetSettings}
-            style={{ 
-              justifyContent: "space-between", 
-              padding: "14px 16px",
-              display: "flex",
-            }}
-          >
-            <span>🔄 重設所有設定</span>
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>恢復預設值</span>
-          </button>
-          
-          <button 
-            className="btn" 
-            style={{ 
-              justifyContent: "space-between", 
-              padding: "14px 16px",
-              display: "flex",
-              color: "#EF4444",
-            }}
-          >
-            <span>⚠️ 刪除帳號</span>
-            <span style={{ fontSize: 13, opacity: 0.7 }}>不可復原</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderAccountSettings = () => (
-    <div>
-      {/* Profile Preview */}
-      <div style={{
-        padding: 20,
-        background: "var(--panel2)",
-        borderRadius: 12,
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        marginBottom: 24,
-      }}>
-        <div style={{
-          width: 64,
-          height: 64,
-          borderRadius: 32,
-          background: "linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#fff",
-          fontSize: 24,
-          fontWeight: 700,
-        }}>
-          U
-        </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 18 }}>訪客使用者</div>
-          <div style={{ color: "var(--muted)", fontSize: 14 }}>guest@campus.app</div>
-          <div style={{ 
-            marginTop: 8, 
-            display: "inline-block",
-            padding: "4px 10px",
-            background: "rgba(139,92,246,0.2)",
-            borderRadius: 999,
-            fontSize: 12,
-            color: "var(--brand)",
-            fontWeight: 600,
-          }}>
-            訪客帳號
+            <SettingRow icon="▤" iconBg="#FFF8E8" title="緊湊模式" subtitle="縮小卡片間距" right={<Toggle value={compactMode} onChange={setCompactMode} />} />
+            <SettingRow icon="✨" iconBg="#FFF0F5" title="動畫效果" right={<Toggle value={animations} onChange={setAnimations} />} />
           </div>
         </div>
-        <button className="btn" style={{ fontSize: 13 }}>
-          ✏️ 編輯
-        </button>
-      </div>
-
-      <SettingRow label="顯示名稱" description="其他使用者看到的名稱">
-        <input
-          className="input"
-          type="text"
-          placeholder="設定顯示名稱"
-          style={{ width: 180 }}
-        />
-      </SettingRow>
-
-      <SettingRow label="電子郵件" description="用於登入和接收通知">
-        <span style={{ color: "var(--muted)", fontSize: 14 }}>guest@campus.app</span>
-      </SettingRow>
-
-      <SettingRow label="學校帳號" description="連結學校 SSO 帳號">
-        <button className="btn" style={{ fontSize: 13 }}>
-          🔗 連結帳號
-        </button>
-      </SettingRow>
-
-      <div style={{ marginTop: 24 }}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>🔐 安全性</h3>
-        
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <button 
-            className="btn" 
-            style={{ 
-              justifyContent: "space-between", 
-              padding: "14px 16px",
-              display: "flex",
-            }}
-          >
-            <span>🔑 變更密碼</span>
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>→</span>
-          </button>
-          
-          <button 
-            className="btn" 
-            style={{ 
-              justifyContent: "space-between", 
-              padding: "14px 16px",
-              display: "flex",
-            }}
-          >
-            <span>📱 兩步驟驗證</span>
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>未啟用</span>
-          </button>
-          
-          <button 
-            className="btn" 
-            style={{ 
-              justifyContent: "space-between", 
-              padding: "14px 16px",
-              display: "flex",
-            }}
-          >
-            <span>📋 登入裝置</span>
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>1 個裝置</span>
-          </button>
+        <div>
+          <div className="insetGroupHeader">關於</div>
+          <div className="insetGroup">
+            <SettingRow icon="ℹ️" iconBg="#E8F4FD" title="Campus One" subtitle="版本 2.0.0" />
+            <SettingRow icon="📄" iconBg="#F3F0FF" title="服務條款" />
+            <SettingRow icon="🔐" iconBg="#E8FFF2" title="隱私政策" />
+          </div>
         </div>
       </div>
+    );
+  }
 
-      <div style={{ marginTop: 24, textAlign: "center" }}>
-        <button 
-          className="btn" 
-          style={{ 
-            color: "#EF4444",
-            padding: "14px 32px",
+  function renderNotifications() {
+    return (
+      <div className="pageStack">
+        <div>
+          <div className="insetGroupHeader">總開關</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="🔔"
+              iconBg={pushEnabled ? "rgba(94,106,210,0.12)" : "var(--panel)"}
+              title="推播通知"
+              subtitle="接收應用程式通知"
+              right={<Toggle value={pushEnabled} onChange={setPushEnabled} />}
+            />
+          </div>
+        </div>
+
+        {pushEnabled && (
+          <>
+            <div>
+              <div className="insetGroupHeader">學術通知</div>
+              <div className="insetGroup">
+                <SettingRow icon="📢" iconBg="#FFF3E8" title="公告與通知" right={<Toggle value={announcements} onChange={setAnnouncements} />} />
+                <SettingRow icon="📊" iconBg="var(--danger-soft)" title="成績公布" right={<Toggle value={gradeReleases} onChange={setGradeReleases} />} />
+                <SettingRow icon="📅" iconBg="var(--info-soft)" title="上課提醒" subtitle="課程開始前 15 分鐘" right={<Toggle value={classReminders} onChange={setClassReminders} />} />
+                <SettingRow icon="📚" iconBg="var(--success-soft)" title="借閱到期提醒" right={<Toggle value={libraryDue} onChange={setLibraryDue} />} />
+              </div>
+            </div>
+            <div>
+              <div className="insetGroupHeader">校園活動</div>
+              <div className="insetGroup">
+                <SettingRow icon="🎉" iconBg="#F3F0FF" title="校園活動" subtitle="社團活動與校慶資訊" right={<Toggle value={campusEvents} onChange={setCampusEvents} />} />
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderAppearance() {
+    return (
+      <div className="pageStack">
+        <div>
+          <div className="insetGroupHeader">主題</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon={darkMode ? "🌙" : "☀️"}
+              iconBg={darkMode ? "#2C2C2E" : "#FFF8E8"}
+              title="深色模式"
+              subtitle={darkMode ? "目前：深色" : "目前：淺色"}
+              right={<Toggle value={darkMode} onChange={toggleDark} />}
+            />
+          </div>
+        </div>
+
+        <div>
+          <div className="insetGroupHeader">主色調</div>
+          <div className="card" style={{ padding: "16px 18px" }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {THEME_COLORS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setThemeColor(c)}
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: "50%",
+                    background: c,
+                    border: themeColor === c ? "3px solid var(--text)" : "3px solid transparent",
+                    boxShadow: themeColor === c ? "var(--shadow-md)" : "var(--shadow-sm)",
+                    cursor: "pointer",
+                    transition: "box-shadow 0.2s ease, transform 0.15s ease",
+                    transform: themeColor === c ? "scale(1.15)" : "scale(1)",
+                  }}
+                  title={c}
+                />
+              ))}
+            </div>
+            <p style={{ margin: "12px 0 0", fontSize: 12, color: "var(--muted)" }}>
+              目前主色：<code style={{ color: "var(--brand)" }}>{themeColor}</code>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPrivacy() {
+    return (
+      <div className="pageStack">
+        <div>
+          <div className="insetGroupHeader">個人資料可見性</div>
+          <div className="insetGroup">
+            <SettingRow icon="👤" iconBg="var(--accent-soft)" title="公開個人頁面" subtitle="其他同學可查看你的基本資訊" right={<Toggle value={showProfile} onChange={setShowProfile} />} />
+            <SettingRow icon="📋" iconBg="var(--info-soft)" title="顯示活動紀錄" subtitle="讓他人看到你最近的課程活動" right={<Toggle value={showActivity} onChange={setShowActivity} />} />
+          </div>
+        </div>
+        <div>
+          <div className="insetGroupHeader">資料與分析</div>
+          <div className="insetGroup">
+            <SettingRow icon="📈" iconBg="var(--success-soft)" title="使用情況分析" subtitle="協助改善應用程式體驗" right={<Toggle value={analytics} onChange={setAnalytics} />} />
+          </div>
+        </div>
+        <div>
+          <div className="insetGroupHeader">資料管理</div>
+          <div className="insetGroup">
+            <SettingRow icon="📤" iconBg="var(--info-soft)" title="匯出個人資料" subtitle="下載你的所有資料" />
+            <SettingRow icon="🗑" iconBg="var(--danger-soft)" title="刪除帳號" subtitle="永久刪除帳號與所有資料" danger />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderAccount() {
+    return (
+      <div className="pageStack">
+        {/* Profile mini card */}
+        <div
+          className="card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 16,
+            padding: "18px 20px",
           }}
         >
-          🚪 登出
-        </button>
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: "50%",
+              background: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)",
+              color: "#fff",
+              display: "grid",
+              placeItems: "center",
+              fontSize: 24,
+              fontWeight: 800,
+              flexShrink: 0,
+              boxShadow: "var(--shadow-sm)",
+            }}
+          >
+            學
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>學生姓名</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
+              student@campus.edu · {school || "未綁定學校"}
+            </div>
+          </div>
+          <span style={{ fontSize: 13, color: "var(--brand)", fontWeight: 600, cursor: "pointer" }}>
+            編輯
+          </span>
+        </div>
+
+        <div>
+          <div className="insetGroupHeader">登入方式</div>
+          <div className="insetGroup">
+            <SettingRow icon="🏫" iconBg="#E8F4FD" title="學校 SSO" subtitle="已連結" right={<span className="pill success" style={{ fontSize: 11 }}>已連結</span>} />
+            <SettingRow icon="📧" iconBg="var(--accent-soft)" title="電子郵件" subtitle="student@campus.edu" />
+          </div>
+        </div>
+
+        <div>
+          <div className="insetGroupHeader">安全性</div>
+          <div className="insetGroup">
+            <SettingRow icon="🔑" iconBg="#FFF3E8" title="更改密碼" />
+            <SettingRow icon="📱" iconBg="var(--success-soft)" title="兩步驟驗證" subtitle="增強帳號安全性" right={<span className="pill subtle" style={{ fontSize: 11 }}>關閉</span>} />
+          </div>
+        </div>
+
+        <div>
+          <div className="insetGroupHeader">登出</div>
+          <div className="insetGroup">
+            <SettingRow icon="🚪" iconBg="var(--danger-soft)" title="登出" danger right={null} onClick={() => {}} />
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  const contentMap: Record<Section, () => JSX.Element> = {
+    general: renderGeneral,
+    notifications: renderNotifications,
+    appearance: renderAppearance,
+    privacy: renderPrivacy,
+    account: renderAccount,
+  };
 
   return (
     <SiteShell
-      schoolName={school.name}
-      schoolCode={school.code}
       title="設定"
-      subtitle="個人化您的應用程式體驗"
+      subtitle="個人化您的 Campus One 體驗"
+      schoolName={school || undefined}
     >
-      {(isSaving || saveMessage) && (
-        <div
-          className="floatingToast"
-          style={isSaving ? undefined : { background: "rgba(44, 184, 168, 0.92)", color: "#fff", borderColor: "rgba(44, 184, 168, 0.32)" }}
-        >
-          {isSaving ? (
-            <>
-              <span style={{ animation: "spin 1s linear infinite", display: "inline-block" }}>⏳</span>
-              儲存中...
-            </>
-          ) : (
-            <>
-              ✓ {saveMessage}
-            </>
-          )}
-        </div>
-      )}
-      <style>{`
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
       <div className="settingsLayout">
-        <div className="card settingsSidebar" style={{ padding: 8 }}>
+        {/* ── Sidebar ── */}
+        <aside className="settingsSidebar">
           <div className="sidebarMenu">
-            {sections.map((section) => (
+            {SECTIONS.map((s) => (
               <button
-                key={section.key}
-                type="button"
-                onClick={() => setActiveSection(section.key)}
-                className={`sidebarMenuButton${activeSection === section.key ? " active" : ""}`}
+                key={s.id}
+                className={`sidebarMenuButton${activeSection === s.id ? " active" : ""}`}
+                onClick={() => setActiveSection(s.id)}
               >
-                <span style={{ fontSize: 18 }}>{section.icon}</span>
-                {section.label}
+                <span style={{ fontSize: 18 }}>{s.icon}</span>
+                {s.label}
               </button>
             ))}
           </div>
-        </div>
+        </aside>
 
-        <div className="card sectionCard">
-          <div className="sectionCopy">
-            <p className="sectionEyebrow">Preferences</p>
-            <h2 className="sectionTitle">
-              {sections.find((s) => s.key === activeSection)?.icon}{" "}
-              {sections.find((s) => s.key === activeSection)?.label}
-            </h2>
-            <p className="sectionText">
-              {activeSection === "general" && "調整應用程式的基本設定"}
-              {activeSection === "notifications" && "管理推播和通知偏好"}
-              {activeSection === "appearance" && "自訂外觀和主題"}
-              {activeSection === "privacy" && "控制您的隱私和資料"}
-              {activeSection === "account" && "管理您的帳號資訊"}
-            </p>
-          </div>
-
-          {activeSection === "general" && renderGeneralSettings()}
-          {activeSection === "notifications" && renderNotificationSettings()}
-          {activeSection === "appearance" && renderAppearanceSettings()}
-          {activeSection === "privacy" && renderPrivacySettings()}
-          {activeSection === "account" && renderAccountSettings()}
-        </div>
-      </div>
-
-      {/* App Info Footer */}
-      <div className="card" style={{ 
-        marginTop: 24, 
-        textAlign: "center",
-        background: "var(--panel2)",
-      }}>
-        <div style={{ fontSize: 24, marginBottom: 8 }}>🏫</div>
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>Campus App</div>
-        <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>
-          版本 1.0.0 · 最後更新：2025-03-01
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", gap: 16, fontSize: 13 }}>
-          <a href="#" style={{ color: "var(--brand)" }}>使用條款</a>
-          <a href="#" style={{ color: "var(--brand)" }}>隱私政策</a>
-          <a href="#" style={{ color: "var(--brand)" }}>回報問題</a>
-          <a href="#" style={{ color: "var(--brand)" }}>關於我們</a>
-        </div>
+        {/* ── Content ── */}
+        <div>{contentMap[activeSection]()}</div>
       </div>
     </SiteShell>
   );

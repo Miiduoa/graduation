@@ -1,6 +1,5 @@
 import React, { useMemo } from "react";
 import { ScrollView, Text, View, Pressable } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -396,21 +395,17 @@ export function AcademicScreen(props: any) {
         contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
         {/* ─── Header ─── */}
-        <LinearGradient
-          colors={isDark
-            ? ["#8B5CF655", "#6366F125", theme.colors.bg]
-            : ["#8B5CF618", "#6366F108", theme.colors.bg]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
+        <View
           style={{
             paddingTop: insets.top + 12,
             paddingBottom: 22,
             paddingHorizontal: 20,
+            backgroundColor: theme.colors.bg,
           }}
         >
           <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "600", letterSpacing: 0.3 }}>學習中心</Text>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4, marginBottom: 16 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 27, fontWeight: "900", letterSpacing: -0.5 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 34, fontWeight: "800", letterSpacing: -1 }}>
               課業
             </Text>
             <Pressable
@@ -418,10 +413,10 @@ export function AcademicScreen(props: any) {
               style={({ pressed }) => ({
                 flexDirection: "row", alignItems: "center", gap: 6,
                 paddingHorizontal: 14, paddingVertical: 8,
-                borderRadius: 12,
-                backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.9)",
+                borderRadius: theme.radius.sm,
+                backgroundColor: theme.colors.accentSoft,
                 borderWidth: 1,
-                borderColor: isDark ? "rgba(255,255,255,0.12)" : `${theme.colors.accent}25`,
+                borderColor: "transparent",
                 transform: [{ scale: pressed ? 0.95 : 1 }],
               })}
             >
@@ -434,9 +429,9 @@ export function AcademicScreen(props: any) {
           <View style={{ flexDirection: "row", gap: 8 }}>
             <View style={{
               flex: 1, flexDirection: "row", alignItems: "center", gap: 8,
-              padding: 12, borderRadius: 14,
-              backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.85)",
-              borderWidth: 1, borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)",
+              padding: 12, borderRadius: theme.radius.sm,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1, borderColor: theme.colors.border,
             }}>
               <Ionicons name="layers-outline" size={15} color="#8B5CF6" />
               <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
@@ -445,9 +440,9 @@ export function AcademicScreen(props: any) {
             </View>
             <View style={{
               flex: 1, flexDirection: "row", alignItems: "center", gap: 8,
-              padding: 12, borderRadius: 14,
-              backgroundColor: isDark ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.85)",
-              borderWidth: 1, borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)",
+              padding: 12, borderRadius: theme.radius.sm,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1, borderColor: theme.colors.border,
             }}>
               <Ionicons name="star-outline" size={15} color="#F59E0B" />
               <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
@@ -457,7 +452,7 @@ export function AcademicScreen(props: any) {
             {ongoingCourse && (
               <View style={{
                 flex: 1.2, flexDirection: "row", alignItems: "center", gap: 6,
-                padding: 12, borderRadius: 14,
+                padding: 12, borderRadius: theme.radius.sm,
                 backgroundColor: `${ongoingCourse.color ?? theme.colors.accent}15`,
                 borderWidth: 1, borderColor: `${ongoingCourse.color ?? theme.colors.accent}30`,
               }}>
@@ -468,7 +463,7 @@ export function AcademicScreen(props: any) {
               </View>
             )}
           </View>
-        </LinearGradient>
+        </View>
 
         <View style={{ paddingHorizontal: 20, marginTop: 4 }}>
           {/* ─── 本週課表概覽 ─── */}
@@ -566,12 +561,10 @@ export function AcademicScreen(props: any) {
               marginBottom: 16,
             })}
           >
-            <LinearGradient
-              colors={["#8B5CF6", "#6366F1"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={{ padding: 20, borderRadius: 22 }}
-            >
+            <View style={{
+              padding: 20, borderRadius: theme.radius.md,
+              backgroundColor: "#8B5CF6",
+            }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
                 <View style={{
                   width: 52, height: 52, borderRadius: 18,
@@ -594,7 +587,7 @@ export function AcademicScreen(props: any) {
                   <Ionicons name="arrow-forward" size={17} color="#fff" />
                 </View>
               </View>
-            </LinearGradient>
+            </View>
           </Pressable>
 
           {/* ─── AI Chat 入口 ─── */}

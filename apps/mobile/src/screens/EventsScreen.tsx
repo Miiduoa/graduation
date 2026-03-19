@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState, useEffect, useRef } from "react"
 import { ScrollView, Text, View, Pressable, FlatList, RefreshControl, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
@@ -15,7 +14,7 @@ import { useDemo } from "../state/demo";
 import { useFavorites } from "../state/favorites";
 import { useToast } from "../ui/Toast";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { formatDateTime, toDate, formatRelativeTime } from "../utils/format";
 
 type ClubEvent = {
@@ -106,10 +105,10 @@ const STATUS_COLORS: Record<string, string> = {
   ended: "#71717A",
 };
 
-const CARD_BANNER_GRADIENTS: Record<string, [string, string]> = {
-  ongoing: ["#22C55E", "#16A34A"],
-  upcoming: ["#6366F1", "#818CF8"],
-  ended: ["#71717A", "#52525B"],
+const CARD_BANNER_COLORS: Record<string, string> = {
+  ongoing: "#22C55E",
+  upcoming: "#5E6AD2",
+  ended: "#71717A",
 };
 
 export function EventsScreen(props: any) {
@@ -305,75 +304,53 @@ export function EventsScreen(props: any) {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <LinearGradient
-        colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+      <View
         style={{
           paddingTop: insets.top + 8,
           paddingBottom: 20,
           paddingHorizontal: theme.space.lg,
-          borderBottomLeftRadius: 24,
-          borderBottomRightRadius: 24,
+          backgroundColor: theme.colors.bg,
         }}
       >
         <Text
           style={{
-            color: "#fff",
-            fontSize: 28,
-            fontWeight: "900",
-            letterSpacing: -0.5,
+            color: theme.colors.text,
+            fontSize: 34,
+            fontWeight: "800",
+            letterSpacing: -1,
             marginBottom: 16,
           }}
         >
           活動
         </Text>
 
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-around",
-            gap: 10,
-          }}
-        >
-          <View
-            style={{
-              flex: 1,
-              alignItems: "center",
-              paddingVertical: 10,
-              borderRadius: theme.radius.lg,
-              backgroundColor: "rgba(255,255,255,0.18)",
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 22 }}>{stats.today}</Text>
-            <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "600", marginTop: 2 }}>今日</Text>
+        <View style={{ flexDirection: "row", justifyContent: "space-around", gap: 10 }}>
+          <View style={{
+            flex: 1, alignItems: "center", paddingVertical: 10,
+            borderRadius: theme.radius.md, backgroundColor: theme.colors.surface,
+            borderWidth: 1, borderColor: theme.colors.border,
+          }}>
+            <Text style={{ color: theme.colors.success, fontWeight: "900", fontSize: 22 }}>{stats.today}</Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", marginTop: 2 }}>今日</Text>
           </View>
-          <View
-            style={{
-              flex: 1,
-              alignItems: "center",
-              paddingVertical: 10,
-              borderRadius: theme.radius.lg,
-              backgroundColor: "rgba(255,255,255,0.18)",
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 22 }}>{stats.ongoing}</Text>
-            <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "600", marginTop: 2 }}>進行中</Text>
+          <View style={{
+            flex: 1, alignItems: "center", paddingVertical: 10,
+            borderRadius: theme.radius.md, backgroundColor: theme.colors.surface,
+            borderWidth: 1, borderColor: theme.colors.border,
+          }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 22 }}>{stats.ongoing}</Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", marginTop: 2 }}>進行中</Text>
           </View>
-          <View
-            style={{
-              flex: 1,
-              alignItems: "center",
-              paddingVertical: 10,
-              borderRadius: theme.radius.lg,
-              backgroundColor: "rgba(255,255,255,0.18)",
-            }}
-          >
-            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 22 }}>{stats.upcoming}</Text>
-            <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 11, fontWeight: "600", marginTop: 2 }}>即將開始</Text>
+          <View style={{
+            flex: 1, alignItems: "center", paddingVertical: 10,
+            borderRadius: theme.radius.md, backgroundColor: theme.colors.surface,
+            borderWidth: 1, borderColor: theme.colors.border,
+          }}>
+            <Text style={{ color: theme.colors.warning, fontWeight: "900", fontSize: 22 }}>{stats.upcoming}</Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", marginTop: 2 }}>即將開始</Text>
           </View>
         </View>
-      </LinearGradient>
+      </View>
 
       {isLoading ? (
         <View style={{ flex: 1, paddingHorizontal: theme.space.lg }}>
@@ -413,7 +390,7 @@ export function EventsScreen(props: any) {
                   borderColor: theme.colors.border,
                   backgroundColor: timeFilter === f.key ? theme.colors.accent : theme.colors.surface,
                   transform: [{ scale: pressed ? 0.97 : 1 }],
-                  ...shadowStyle(theme.shadows.sm),
+                  ...softShadowStyle(theme.shadows.soft),
                 })}
               >
                 <Text
@@ -443,7 +420,7 @@ export function EventsScreen(props: any) {
                 borderColor: activeFilterCount > 0 ? theme.colors.accent : theme.colors.border,
                 backgroundColor: activeFilterCount > 0 ? theme.colors.accentSoft : theme.colors.surface,
                 transform: [{ scale: pressed ? 0.97 : 1 }],
-                ...shadowStyle(theme.shadows.sm),
+                ...softShadowStyle(theme.shadows.soft),
               })}
             >
               <Ionicons name="options" size={16} color={activeFilterCount > 0 ? theme.colors.accent : theme.colors.muted} />
@@ -471,7 +448,7 @@ export function EventsScreen(props: any) {
                 borderColor: theme.colors.border,
                 backgroundColor: theme.colors.surface,
                 transform: [{ scale: pressed ? 0.97 : 1 }],
-                ...shadowStyle(theme.shadows.sm),
+                ...softShadowStyle(theme.shadows.soft),
               })}
             >
               <Ionicons name={viewMode === "list" ? "albums-outline" : "list-outline"} size={18} color={theme.colors.muted} />
@@ -487,9 +464,9 @@ export function EventsScreen(props: any) {
                 borderColor: theme.colors.border,
                 backgroundColor: theme.colors.surface,
                 gap: 14,
-                ...shadowStyle(theme.shadows.sm),
-              }}
-            >
+                  ...softShadowStyle(theme.shadows.soft),
+                }}
+              >
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                 <Text
                   style={{
@@ -646,7 +623,7 @@ export function EventsScreen(props: any) {
                 const status = getEventStatus(e.startsAt, e.endsAt);
                 const startDate = toDate(e.startsAt);
                 const statusColor = STATUS_COLORS[status];
-                const bannerGradient = CARD_BANNER_GRADIENTS[status];
+                const bannerColor = CARD_BANNER_COLORS[status] ?? "#5E6AD2";
 
                 if (viewMode === "card") {
                   return (
@@ -666,17 +643,14 @@ export function EventsScreen(props: any) {
                           borderColor: theme.colors.border,
                           backgroundColor: theme.colors.surface,
                           overflow: "hidden",
-                          ...shadowStyle(theme.shadows.md),
-                        }}
+                          }}
                       >
-                        <LinearGradient
-                          colors={bannerGradient}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 1 }}
+                        <View
                           style={{
                             height: 100,
                             alignItems: "center",
                             justifyContent: "center",
+                            backgroundColor: bannerColor,
                           }}
                         >
                           <Ionicons name="calendar" size={40} color="rgba(255,255,255,0.85)" />
@@ -730,7 +704,7 @@ export function EventsScreen(props: any) {
                               <Ionicons name="heart" size={22} color="#fff" />
                             </View>
                           )}
-                        </LinearGradient>
+                        </View>
                         <View style={{ padding: theme.space.md, gap: 8 }}>
                           <Text
                             style={{
@@ -793,7 +767,7 @@ export function EventsScreen(props: any) {
                         borderWidth: 1,
                         borderColor: theme.colors.border,
                         overflow: "hidden",
-                        ...shadowStyle(theme.shadows.md),
+                        ...softShadowStyle(theme.shadows.soft),
                       }}
                     >
                       <View

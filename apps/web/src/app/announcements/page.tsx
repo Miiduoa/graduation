@@ -175,8 +175,9 @@ export default function AnnouncementsPage(props: { searchParams?: { school?: str
       <div className="announcementsPage">
         {/* Stats Bar */}
         <div className="statsBar">
-          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-            <span className="pill subtle">{usingDemo ? "示範資料" : "Firebase 資料"}</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text)" }}>公告統計</h3>
+            <span className="pill subtle">{usingDemo ? "示範資料" : "即時資料"}</span>
           </div>
           <div className="statsGrid">
             <div className="statItem">
@@ -192,28 +193,30 @@ export default function AnnouncementsPage(props: { searchParams?: { school?: str
               <span className="statLabel">重要公告</span>
             </div>
           </div>
-          <div className="viewTabs">
-            <button
-              type="button"
-              className={activeView === "all" ? "active" : ""}
-              onClick={() => setActiveView("all")}
-            >
-              全部
-            </button>
-            <button
-              type="button"
-              className={activeView === "important" ? "active" : ""}
-              onClick={() => setActiveView("important")}
-            >
-              重要優先
-            </button>
-            <button
-              type="button"
-              className={activeView === "today" ? "active" : ""}
-              onClick={() => setActiveView("today")}
-            >
-              今天發布
-            </button>
+          <div style={{ marginTop: 14 }}>
+            <div className="viewTabs">
+              <button
+                type="button"
+                className={activeView === "all" ? "active" : ""}
+                onClick={() => setActiveView("all")}
+              >
+                📋 全部
+              </button>
+              <button
+                type="button"
+                className={activeView === "important" ? "active" : ""}
+                onClick={() => setActiveView("important")}
+              >
+                ⭐ 重要
+              </button>
+              <button
+                type="button"
+                className={activeView === "today" ? "active" : ""}
+                onClick={() => setActiveView("today")}
+              >
+                🆕 今日
+              </button>
+            </div>
           </div>
         </div>
 

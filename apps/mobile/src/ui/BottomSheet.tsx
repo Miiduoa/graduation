@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "./navigationTheme";
-import { theme, shadowStyle } from "./theme";
+import { theme, softShadowStyle } from "./theme";
 import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 function useSafeInsets() {
@@ -129,7 +129,7 @@ export function BottomSheet({
             borderWidth: 1,
             borderBottomWidth: 0,
             borderColor: theme.colors.border,
-            ...shadowStyle(theme.shadows.xl),
+            ...softShadowStyle(theme.shadows.soft),
             transform: [{ translateY }],
           }}
           {...panResponder.panHandlers}

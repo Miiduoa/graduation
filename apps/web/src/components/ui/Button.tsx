@@ -32,79 +32,80 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
-    const baseStyles: React.CSSProperties = {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: "8px",
-      borderRadius: "12px",
-      cursor: disabled || loading ? "not-allowed" : "pointer",
-      fontWeight: 600,
-      fontSize: size === "sm" ? "13px" : size === "lg" ? "15px" : "14px",
-      transition: "all 0.2s ease",
-      letterSpacing: "0.1px",
-      opacity: disabled || loading ? 0.6 : 1,
-      width: fullWidth ? "100%" : "auto",
-      border: "1px solid var(--border)",
-      ...style,
-    };
-
     const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
-      sm: { padding: "8px 14px", minHeight: "36px" },
-      md: { padding: "12px 20px", minHeight: "44px" },
-      lg: { padding: "14px 24px", minHeight: "52px" },
+      sm: { padding: "0 12px", minHeight: "34px", fontSize: "13px" },
+      md: { padding: "0 18px", minHeight: "44px", fontSize: "14px" },
+      lg: { padding: "0 24px", minHeight: "52px", fontSize: "15px" },
     };
 
     const variantStyles: Record<ButtonVariant, React.CSSProperties> = {
       default: {
-        background: "var(--panel)",
+        background: "var(--surface)",
         color: "var(--text)",
         borderColor: "var(--border)",
+        boxShadow: "var(--shadow-sm)",
       },
       primary: {
         background: "var(--brand)",
         color: "#fff",
-        borderColor: "var(--brand)",
+        borderColor: "rgba(94, 106, 210, 0.3)",
+        boxShadow: "4px 4px 10px rgba(94,106,210,0.30), -2px -2px 6px rgba(255,255,255,0.7)",
       },
       success: {
-        background: "rgba(16, 185, 129, 0.2)",
-        color: "#10B981",
-        borderColor: "rgba(16, 185, 129, 0.4)",
+        background: "var(--success-soft)",
+        color: "var(--success)",
+        borderColor: "rgba(52,199,89,0.2)",
+        boxShadow: "var(--shadow-sm)",
       },
       danger: {
-        background: "rgba(239, 68, 68, 0.2)",
-        color: "#EF4444",
-        borderColor: "rgba(239, 68, 68, 0.4)",
+        background: "var(--danger-soft)",
+        color: "var(--danger)",
+        borderColor: "rgba(255,59,48,0.2)",
+        boxShadow: "var(--shadow-sm)",
       },
       ghost: {
         background: "transparent",
         color: "var(--text)",
         borderColor: "transparent",
+        boxShadow: "none",
       },
       outline: {
         background: "transparent",
         color: "var(--brand)",
-        borderColor: "var(--brand)",
+        borderColor: "rgba(94,106,210,0.4)",
+        boxShadow: "none",
       },
     };
 
-    const combinedStyles: React.CSSProperties = {
-      ...baseStyles,
+    const baseStyles: React.CSSProperties = {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: "7px",
+      borderRadius: "var(--radius-sm)",
+      border: "1px solid",
+      cursor: disabled || loading ? "not-allowed" : "pointer",
+      fontWeight: 600,
+      letterSpacing: "-0.01em",
+      transition: "box-shadow 0.2s ease, transform 0.15s ease, background 0.15s ease",
+      opacity: disabled || loading ? 0.45 : 1,
+      width: fullWidth ? "100%" : "auto",
       ...sizeStyles[size],
       ...variantStyles[variant],
+      ...style,
     };
 
     return (
       <button
         ref={ref}
         disabled={disabled || loading}
-        className={className}
-        style={combinedStyles}
+        className={`btn${className ? ` ${className}` : ""}`}
+        style={baseStyles}
         {...props}
       >
         {loading ? (
           <>
-            <LoadingSpinner size={size === "sm" ? 14 : size === "lg" ? 20 : 16} />
+            <LoadingSpinner size={size === "sm" ? 13 : size === "lg" ? 18 : 15} />
             {children && <span>{children}</span>}
           </>
         ) : (
@@ -121,14 +122,14 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 
 Button.displayName = "Button";
 
-function LoadingSpinner({ size = 16 }: { size?: number }) {
+function LoadingSpinner({ size = 15 }: { size?: number }) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      style={{ animation: "spin 1s linear infinite" }}
+      style={{ animation: "spin 0.8s linear infinite" }}
     >
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       <circle
@@ -139,18 +140,13 @@ function LoadingSpinner({ size = 16 }: { size?: number }) {
         strokeWidth="3"
         strokeLinecap="round"
         strokeDasharray="31.4 31.4"
-        opacity="0.25"
+        opacity="0.2"
       />
-      <circle
-        cx="12"
-        cy="12"
-        r="10"
+      <path
+        d="M12 2a10 10 0 0 1 10 10"
         stroke="currentColor"
         strokeWidth="3"
         strokeLinecap="round"
-        strokeDasharray="31.4 31.4"
-        strokeDashoffset="62.8"
-        style={{ transform: "rotate(-90deg)", transformOrigin: "center" }}
       />
     </svg>
   );

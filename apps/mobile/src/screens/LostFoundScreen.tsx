@@ -183,7 +183,7 @@ const ItemCard = memo(function ItemCard({ item, onPress }: { item: LostFoundItem
       style={({ pressed }) => ({
         padding: 14,
         borderRadius: theme.radius.lg,
-        backgroundColor: pressed ? "rgba(255,255,255,0.06)" : theme.colors.surface2,
+        backgroundColor: pressed ? theme.colors.border : theme.colors.surface2,
         borderWidth: 1,
         borderColor: theme.colors.border,
       })}
