@@ -117,7 +117,7 @@ export function FeedbackScreen(props: any) {
                     borderRadius: theme.radius.lg,
                     borderWidth: 2,
                     borderColor: feedbackType === type.key ? type.color : theme.colors.border,
-                    backgroundColor: feedbackType === type.key ? `${type.color}15` : pressed ? "rgba(255,255,255,0.06)" : "transparent",
+                    backgroundColor: feedbackType === type.key ? `${type.color}15` : pressed ? theme.colors.surface2 : "transparent",
                     alignItems: "center",
                     gap: 8,
                   })}

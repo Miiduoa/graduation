@@ -249,6 +249,22 @@ export function AssignmentDetailScreen(props: any) {
   const [gradeDraft, setGradeDraft] = useState<Record<string, string>>({});
   const [feedbackDraft, setFeedbackDraft] = useState<Record<string, string>>({});
 
+  // 同儕互評狀態
+  const [peerReviewEnabled, setPeerReviewEnabled] = useState<boolean>(false);
+  const [myReviewTask, setMyReviewTask] = useState<{ submissionOwnerId: string; ownerEmail?: string } | null>(null);
+  const [peerScores, setPeerScores] = useState<Record<string, string>>({});
+  const [peerComment, setPeerComment] = useState("");
+  const [submittingPeerReview, setSubmittingPeerReview] = useState(false);
+  const [peerReviewSent, setPeerReviewSent] = useState(false);
+  const [peerReviewReceivedCount, setPeerReviewReceivedCount] = useState(0);
+  const [myAggregateScore, setMyAggregateScore] = useState<number | null>(null);
+
+  const PEER_REVIEW_CRITERIA = [
+    { key: "logic", label: "邏輯清晰度", weight: 0.3 },
+    { key: "completeness", label: "完整性", weight: 0.4 },
+    { key: "creativity", label: "創意", weight: 0.3 },
+  ];
+
   React.useEffect(() => {
     if (!canManageCourse) return;
     const nextG: Record<string, string> = {};
@@ -266,6 +282,132 @@ export function AssignmentDetailScreen(props: any) {
     if (canManageCourse) return true;
     return !!assignment?.gradesPublished;
   }, [assignment?.gradesPublished, canManageCourse]);
+
+  // 載入同儕互評狀態
+  React.useEffect(() => {
+    if (!groupId || !assignmentId || !auth.user) return;
+    const uid = auth.user.uid;
+
+    async function loadPeerReview() {
+      try {
+        const assignRef = doc(db, "groups", groupId!, "assignments", assignmentId!);
+        const assignSnap = await getDoc(assignRef);
+        const enabled = assignSnap.data()?.peerReviewEnabled ?? false;
+        setPeerReviewEnabled(enabled);
+        if (!enabled) return;
+
+        const myReviewRef = doc(db, "groups", groupId!, "assignments", assignmentId!, "peerReviews", uid);
+        const myReviewSnap = await getDoc(myReviewRef);
+        if (myReviewSnap.exists()) {
+          const data = myReviewSnap.data();
+          if (!data.submittedAt) {
+            setMyReviewTask({ submissionOwnerId: data.submissionOwnerId, ownerEmail: data.ownerEmail });
+          } else {
+            setPeerReviewSent(true);
+          }
+        }
+
+        const receivedSnap = await getDocs(
+          query(
+            collection(db, "groups", groupId!, "assignments", assignmentId!, "peerReviews"),
+            where("submissionOwnerId", "==", uid),
+            where("submittedAt", "!=", null)
+          )
+        ).catch(() => ({ docs: [] as any[], size: 0 }));
+        setPeerReviewReceivedCount(receivedSnap.size ?? receivedSnap.docs.length);
+
+        if (receivedSnap.docs.length > 0) {
+          let totalScore = 0;
+          receivedSnap.docs.forEach((d) => {
+            const scores: Record<string, number> = d.data().scores ?? {};
+            const weighted = PEER_REVIEW_CRITERIA.reduce((sum, c) => {
+              return sum + (scores[c.key] ?? 0) * c.weight;
+            }, 0);
+            totalScore += weighted;
+          });
+          setMyAggregateScore(Math.round(totalScore / receivedSnap.docs.length));
+        }
+      } catch {}
+    }
+    loadPeerReview();
+  }, [groupId, assignmentId, auth.user?.uid, assignment?.id]);
+
+  const enablePeerReview = async () => {
+    if (!groupId || !assignmentId || !auth.user) return;
+    const allSubs = submissions;
+    if (allSubs.length < 2) {
+      Alert.alert("人數不足", "至少需要 2 名學生繳交才能開啟同儕互評");
+      return;
+    }
+
+    try {
+      // 隨機分配評審：每人評審另一人（循環分配）
+      const uids = allSubs.map((s) => s.uid);
+      const shuffled = [...uids].sort(() => Math.random() - 0.5);
+
+      await Promise.all(
+        shuffled.map((reviewerId, i) => {
+          const ownerId = shuffled[(i + 1) % shuffled.length];
+          const ownerSubmission = allSubs.find((s) => s.uid === ownerId);
+          return setDoc(
+            doc(db, "groups", groupId!, "assignments", assignmentId!, "peerReviews", reviewerId),
+            {
+              reviewerId,
+              submissionOwnerId: ownerId,
+              ownerEmail: ownerSubmission?.authorEmail ?? "",
+              assignedAt: serverTimestamp(),
+              submittedAt: null,
+              scores: {},
+              comment: "",
+            }
+          );
+        })
+      );
+
+      await updateDoc(doc(db, "groups", groupId!, "assignments", assignmentId!), {
+        peerReviewEnabled: true,
+        peerReviewEnabledAt: serverTimestamp(),
+        peerReviewEnabledBy: auth.user.uid,
+      });
+
+      setPeerReviewEnabled(true);
+      Alert.alert("同儕互評已開啟！", `已為 ${shuffled.length} 位學生隨機分配評審任務`);
+    } catch (e: any) {
+      Alert.alert("開啟失敗", e.message ?? "請稍後再試");
+    }
+  };
+
+  const submitPeerReview = async () => {
+    if (!myReviewTask || !groupId || !assignmentId || !auth.user) return;
+    const scores: Record<string, number> = {};
+    for (const c of PEER_REVIEW_CRITERIA) {
+      const val = parseFloat(peerScores[c.key] ?? "0");
+      if (isNaN(val) || val < 0 || val > 100) {
+        Alert.alert("評分錯誤", `請為「${c.label}」輸入 0-100 的分數`);
+        return;
+      }
+      scores[c.key] = val;
+    }
+
+    setSubmittingPeerReview(true);
+    try {
+      await updateDoc(
+        doc(db, "groups", groupId!, "assignments", assignmentId!, "peerReviews", auth.user.uid),
+        {
+          scores,
+          comment: peerComment.trim(),
+          submittedAt: serverTimestamp(),
+        }
+      );
+      setPeerReviewSent(true);
+      setMyReviewTask(null);
+      Alert.alert("評審完成！", "你的評語將匿名傳送給對方");
+    } catch {
+      Alert.alert("提交失敗", "請稍後再試");
+    } finally {
+      setSubmittingPeerReview(false);
+    }
+  };
 
   // File picker handler
   const handlePickFiles = async () => {
@@ -626,7 +768,7 @@ export function AssignmentDetailScreen(props: any) {
                 borderRadius: theme.radius.md,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
-                backgroundColor: "rgba(255,255,255,0.04)",
+                backgroundColor: theme.colors.surface2,
                 color: theme.colors.text,
                 textAlignVertical: "top",
               }}
@@ -649,7 +791,7 @@ export function AssignmentDetailScreen(props: any) {
                 borderRadius: theme.radius.md,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
-                backgroundColor: "rgba(255,255,255,0.04)",
+                backgroundColor: theme.colors.surface2,
                 color: theme.colors.text,
                 textAlignVertical: "top",
               }}
@@ -967,7 +1109,7 @@ export function AssignmentDetailScreen(props: any) {
                                   borderRadius: theme.radius.sm,
                                   borderWidth: 1,
                                   borderColor: theme.colors.border,
-                                  backgroundColor: "rgba(255,255,255,0.04)",
+                                  backgroundColor: theme.colors.surface2,
                                   color: theme.colors.text,
                                   textAlign: "center",
                                   fontWeight: "700",
@@ -991,7 +1133,7 @@ export function AssignmentDetailScreen(props: any) {
                                 borderRadius: theme.radius.sm,
                                 borderWidth: 1,
                                 borderColor: theme.colors.border,
-                                backgroundColor: "rgba(255,255,255,0.04)",
+                                backgroundColor: theme.colors.surface2,
                                 color: theme.colors.text,
                                 textAlignVertical: "top",
                               }}
@@ -1017,6 +1159,144 @@ export function AssignmentDetailScreen(props: any) {
                     </Text>
                   </View>
                 )}
+              </View>
+            )}
+          </AnimatedCard>
+        )}
+
+        {/* 同儕互評管理（教師） */}
+        {canManageCourse && submissions.length > 0 && (
+          <AnimatedCard
+            title="同儕互評系統"
+            subtitle={peerReviewEnabled ? "已開啟互評，學生正在進行評審" : "開啟後系統將隨機分配評審任務"}
+          >
+            {!peerReviewEnabled ? (
+              <View style={{ gap: 12 }}>
+                <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
+                  開啟後，系統會隨機為每位已繳交的學生分配一位同學互評。評語將匿名傳送，分數會聚合計算。
+                </Text>
+                <View style={{ gap: 8 }}>
+                  {PEER_REVIEW_CRITERIA.map((c) => (
+                    <View key={c.key} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Ionicons name="checkmark-circle-outline" size={16} color={theme.colors.success} />
+                      <Text style={{ color: theme.colors.text, fontSize: 13 }}>
+                        {c.label}（{Math.round(c.weight * 100)}%）
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <Button
+                  text={`開啟同儕互評（${submissions.length} 人）`}
+                  kind="primary"
+                  onPress={enablePeerReview}
+                />
+              </View>
+            ) : (
+              <View style={{ gap: 8 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: 12,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: theme.colors.successSoft,
+                  }}
+                >
+                  <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
+                  <Text style={{ color: theme.colors.success, fontWeight: "700" }}>
+                    同儕互評進行中，學生已收到通知
+                  </Text>
+                </View>
+              </View>
+            )}
+          </AnimatedCard>
+        )}
+
+        {/* 同儕互評（學生評審任務） */}
+        {!canManageCourse && peerReviewEnabled && (
+          <AnimatedCard title="同儕互評任務" subtitle="你的評語將匿名傳送給對方">
+            {peerReviewSent ? (
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Ionicons name="checkmark-circle" size={20} color={theme.colors.success} />
+                  <Text style={{ color: theme.colors.success, fontWeight: "700" }}>你已完成評審，感謝貢獻！</Text>
+                </View>
+                {myAggregateScore !== null && (
+                  <View style={{ padding: 12, borderRadius: theme.radius.md, backgroundColor: theme.colors.accentSoft, gap: 4 }}>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>你收到的同儕互評結果（{peerReviewReceivedCount} 人評分）</Text>
+                    <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 28 }}>{myAggregateScore} 分</Text>
+                  </View>
+                )}
+              </View>
+            ) : myReviewTask ? (
+              <View style={{ gap: 12 }}>
+                <View style={{ padding: 12, borderRadius: theme.radius.md, backgroundColor: theme.colors.surface2 }}>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>你被分配評審的同學作業</Text>
+                  <Text style={{ color: theme.colors.text, fontWeight: "700", marginTop: 4 }}>
+                    {myReviewTask.ownerEmail ?? myReviewTask.submissionOwnerId.slice(0, 8)}
+                  </Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>（評語會匿名發送）</Text>
+                </View>
+
+                <Text style={{ color: theme.colors.text, fontWeight: "700" }}>評分項目（各 0-100 分）</Text>
+                {PEER_REVIEW_CRITERIA.map((c) => (
+                  <View key={c.key}>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+                      {c.label}（佔 {Math.round(c.weight * 100)}%）
+                    </Text>
+                    <TextInput
+                      value={peerScores[c.key] ?? ""}
+                      onChangeText={(v) => setPeerScores((p) => ({ ...p, [c.key]: v }))}
+                      placeholder="0-100"
+                      placeholderTextColor={theme.colors.muted}
+                      keyboardType="numeric"
+                      style={{
+                        paddingVertical: 10,
+                        paddingHorizontal: 12,
+                        borderRadius: theme.radius.md,
+                        borderWidth: 1,
+                        borderColor: theme.colors.border,
+                        backgroundColor: theme.colors.surface2,
+                        color: theme.colors.text,
+                      }}
+                    />
+                  </View>
+                ))}
+
+                <View>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>整體評語（匿名）</Text>
+                  <TextInput
+                    value={peerComment}
+                    onChangeText={setPeerComment}
+                    placeholder="給予建設性的評語..."
+                    placeholderTextColor={theme.colors.muted}
+                    multiline
+                    style={{
+                      minHeight: 80,
+                      paddingVertical: 10,
+                      paddingHorizontal: 12,
+                      borderRadius: theme.radius.md,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      backgroundColor: theme.colors.surface2,
+                      color: theme.colors.text,
+                      textAlignVertical: "top",
+                    }}
+                  />
+                </View>
+
+                <Button
+                  text={submittingPeerReview ? "提交中..." : "提交評審"}
+                  kind="primary"
+                  disabled={submittingPeerReview}
+                  onPress={submitPeerReview}
+                />
+              </View>
+            ) : (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 8 }}>
+                <Ionicons name="hourglass-outline" size={16} color={theme.colors.muted} />
+                <Text style={{ color: theme.colors.muted }}>等待教師分配評審任務...</Text>
               </View>
             )}
           </AnimatedCard>

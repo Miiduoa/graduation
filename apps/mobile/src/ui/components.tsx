@@ -2,7 +2,7 @@ import React, { Component, ErrorInfo, useEffect, useMemo, useRef, useState } fro
 import { Animated, Pressable, Text, TextInput, View, Easing, ScrollView, ActivityIndicator, Platform, Dimensions, type StyleProp, type ViewStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "./navigationTheme";
-import { theme, shadowStyle } from "./theme";
+import { theme, shadowStyle, softShadowStyle } from "./theme";
 import { formatCountdown } from "../utils/format";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -37,23 +37,22 @@ export function Card(props: {
   onPress?: () => void;
 }) {
   const variant = props.variant ?? "default";
-  const borderHighlight = theme.mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.82)";
 
   const variantStyles = {
     default: {
-      shell: shadowStyle(theme.shadows.md),
-      surface: {
-        backgroundColor: theme.colors.surfaceElevated,
-        borderWidth: 1,
-        borderColor: borderHighlight,
-      },
-    },
-    elevated: {
-      shell: shadowStyle(theme.shadows.lg),
+      shell: softShadowStyle(theme.shadows.soft),
       surface: {
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
-        borderColor: borderHighlight,
+        borderColor: theme.colors.border,
+      },
+    },
+    elevated: {
+      shell: softShadowStyle(theme.shadows.soft),
+      surface: {
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
       },
     },
     outlined: {
@@ -69,7 +68,7 @@ export function Card(props: {
       surface: {
         backgroundColor: theme.colors.surface2,
         borderWidth: 1,
-        borderColor: "transparent",
+        borderColor: theme.colors.border,
       },
     },
   };
@@ -80,32 +79,19 @@ export function Card(props: {
     (props.title && props.subtitle ? `${props.title}, ${props.subtitle}` : props.title);
 
   const content = (
-    <View style={{ borderRadius: theme.radius.lg + 2, ...style.shell }}>
+    <View style={{ borderRadius: theme.radius.lg, ...style.shell }}>
       <View
         accessible={!!props.title}
         accessibilityRole={props.title ? "header" : undefined}
         accessibilityLabel={accessibilityLabel}
         style={{
           padding: theme.space.lg,
-          borderRadius: theme.radius.lg + 2,
+          borderRadius: theme.radius.lg,
           gap: 10,
           overflow: "hidden",
           ...style.surface,
         }}
       >
-        {variant !== "outlined" && (
-          <View
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              left: 18,
-              right: 18,
-              top: 0,
-              height: 1,
-              backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.9)",
-            }}
-          />
-        )}
         {props.title ? (
           <Text
             style={{
@@ -196,7 +182,7 @@ export function Pill(props: {
           borderRadius: theme.radius.full,
           backgroundColor: kStyle.bg,
           borderWidth: 1,
-          borderColor: theme.mode === "dark" ? theme.colors.border : "rgba(255,255,255,0.7)",
+          borderColor: theme.colors.border,
         },
         props.style,
       ]}
@@ -253,7 +239,7 @@ export function Button(props: {
   };
   const borderColors: Record<string, string> = {
     primary: "transparent",
-    secondary: theme.mode === "dark" ? theme.colors.border : "rgba(255,255,255,0.76)",
+    secondary: theme.colors.border,
     danger: "transparent",
     ghost: "transparent",
     "accent-ghost": "transparent",
@@ -294,7 +280,7 @@ export function Button(props: {
           alignSelf: props.fullWidth ? "stretch" : "flex-start",
           minHeight: 44,
           transform: [{ scale: pressed && !disabled ? 0.97 : 1 }],
-          ...(!disabled && (kind === "primary" || kind === "secondary") ? shadowStyle(theme.shadows.sm) : {}),
+          ...(!disabled && (kind === "primary" || kind === "secondary") ? softShadowStyle(theme.shadows.soft) : {}),
         },
         props.style,
       ]}
@@ -677,11 +663,19 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
   );
 }
 
-export function ProgressRing(props: { progress: number; size?: number; strokeWidth?: number; color?: string }) {
+export function ProgressRing(props: {
+  progress: number;
+  size?: number;
+  strokeWidth?: number;
+  color?: string;
+  /** 是否在圓環中央顯示百分比文字，預設 true。若外部自訂 center 內容請設為 false */
+  showLabel?: boolean;
+}) {
   const size = props.size ?? 60;
   const strokeWidth = props.strokeWidth ?? 5;
   const color = props.color ?? theme.colors.accent;
   const progress = Math.min(1, Math.max(0, props.progress));
+  const showLabel = props.showLabel !== false;
 
   return (
     <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
@@ -710,9 +704,11 @@ export function ProgressRing(props: { progress: number; size?: number; strokeWid
           transform: [{ rotate: "-90deg" }],
         }}
       />
-      <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: size * 0.22 }}>
-        {Math.round(progress * 100)}%
-      </Text>
+      {showLabel && (
+        <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: size * 0.22 }}>
+          {Math.round(progress * 100)}%
+        </Text>
+      )}
     </View>
   );
 }
@@ -833,7 +829,7 @@ export function AnimatedCard(props: {
         gap: 10,
         borderWidth: 1,
         borderColor: theme.colors.border,
-        ...shadowStyle(theme.shadows.sm),
+        ...softShadowStyle(theme.shadows.soft),
       }}
     >
       {props.title ? (
@@ -884,7 +880,7 @@ export function QuickAction(props: {
         minHeight: 76,
         position: "relative",
         opacity: props.disabled ? 0.4 : 1,
-        ...shadowStyle(theme.shadows.sm),
+        ...softShadowStyle(theme.shadows.soft),
         transform: [{ scale: pressed ? 0.95 : 1 }],
       })}
     >
@@ -1202,7 +1198,7 @@ export function SegmentedControl(props: {
               borderRadius: theme.radius.sm,
               backgroundColor: isSelected ? theme.colors.surface : "transparent",
               alignItems: "center",
-              ...(isSelected ? shadowStyle(theme.shadows.sm) : {}),
+              ...(isSelected ? softShadowStyle(theme.shadows.soft) : {}),
             }}
           >
             <Text
@@ -1284,7 +1280,7 @@ export function SortButton(props: {
               backgroundColor: theme.colors.surface,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              ...shadowStyle(theme.shadows.md),
+              ...softShadowStyle(theme.shadows.soft),
               zIndex: 101,
               overflow: "hidden",
             }}
@@ -1350,7 +1346,7 @@ export function StatCard(props: {
         borderWidth: 1,
         borderColor: theme.colors.border,
         minWidth: 100,
-        ...shadowStyle(theme.shadows.sm),
+        ...softShadowStyle(theme.shadows.soft),
       }}
     >
       <View
@@ -1768,7 +1764,7 @@ export function ToggleSwitch(props: {
           borderRadius: thumbSize / 2,
           backgroundColor: "#fff",
           transform: [{ translateX }],
-          ...shadowStyle(theme.shadows.sm),
+          ...softShadowStyle(theme.shadows.soft),
         }}
       />
     </Pressable>
@@ -2032,7 +2028,7 @@ export function LoadingOverlay(props: { visible: boolean; message?: string }) {
           minWidth: 120,
           borderWidth: 1,
           borderColor: theme.colors.border,
-          ...shadowStyle(theme.shadows.lg),
+          ...softShadowStyle(theme.shadows.soft),
         }}
       >
         <Animated.View
@@ -2095,7 +2091,7 @@ export function ConfirmDialog(props: {
           maxWidth: 340,
           borderWidth: 1,
           borderColor: theme.colors.border,
-          ...shadowStyle(theme.shadows.xl),
+          ...softShadowStyle(theme.shadows.soft),
         }}
         accessibilityRole="alert"
       >

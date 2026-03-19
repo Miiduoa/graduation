@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { Pressable, RefreshControl, ScrollView, Text, View, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import { useThemeMode } from "../state/theme";
@@ -13,6 +13,8 @@ import { useNotifications } from "../state/notifications";
 import { useDataSource } from "../hooks/useDataSource";
 import { useSchedule } from "../state/schedule";
 import { formatRelativeTime, toDate } from "../utils/format";
+import { getDb } from "../firebase";
+import { doc, getDoc } from "firebase/firestore";
 
 const WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
 const MONTHS_SHORT = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
@@ -33,6 +35,16 @@ const PERIODS: Record<number, { start: string; end: string }> = {
   13: { start: "20:20", end: "21:10" },
 };
 
+// 時段模式
+type TimeSegment = "morning" | "class" | "evening" | "night";
+
+function getTimeSegment(hour: number): TimeSegment {
+  if (hour >= 7 && hour < 9) return "morning";
+  if (hour >= 9 && hour < 18) return "class";
+  if (hour >= 18 && hour < 22) return "evening";
+  return "night";
+}
+
 function getGreeting(hour: number): string {
   if (hour < 6) return "夜深了";
   if (hour < 12) return "早安";
@@ -40,6 +52,20 @@ function getGreeting(hour: number): string {
   if (hour < 18) return "下午好";
   return "晚安";
 }
+
+function getSegmentHint(segment: TimeSegment): string {
+  switch (segment) {
+    case "morning": return "看看今天的課表和昨晚錯過的公告";
+    case "class": return "課業進行中，注意作業截止日期";
+    case "evening": return "整理今天的未完成事項，預覽明日行程";
+    case "night": return "放鬆一下，看看明天有什麼計畫";
+  }
+}
+
+// Widget 鍵值
+const WIDGET_LAYOUT_KEY = "home_widget_layout";
+const DEFAULT_WIDGETS = ["schedule", "assignments", "bus", "cafeteria", "achievements", "ai_brief"];
+type WidgetId = "schedule" | "assignments" | "bus" | "cafeteria" | "achievements" | "ai_brief";
 
 function periodToMinutes(period: number): number {
   const time = PERIODS[period];
@@ -77,17 +103,6 @@ function formatCountdown(startPeriod: number): string {
   return minutes > 0 ? `${hours} 小時 ${minutes} 分後開始` : `${hours} 小時後開始`;
 }
 
-function cardBorderColor() {
-  return theme.mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.82)";
-}
-
-function cardGradient(tint?: string): [string, string, ...string[]] {
-  if (theme.mode === "dark") {
-    return [theme.colors.surfaceElevated, tint ?? "rgba(255,255,255,0.04)"];
-  }
-  return ["rgba(255,255,255,0.97)", tint ?? "rgba(236,242,250,0.84)"];
-}
-
 function SoftPanel(props: {
   children: React.ReactNode;
   tint?: string;
@@ -95,32 +110,20 @@ function SoftPanel(props: {
   padding?: number;
 }) {
   return (
-    <View style={[{ borderRadius: 30 }, shadowStyle(theme.shadows.md), props.style]}>
-      <LinearGradient
-        colors={cardGradient(props.tint)}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{
-          borderRadius: 30,
+    <View
+      style={[
+        {
+          borderRadius: theme.radius.lg,
           borderWidth: 1,
-          borderColor: cardBorderColor(),
-          overflow: "hidden",
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
           padding: props.padding ?? 20,
-        }}
-      >
-        <View
-          pointerEvents="none"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 18,
-            right: 18,
-            height: 1,
-            backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.92)",
-          }}
-        />
-        {props.children}
-      </LinearGradient>
+          ...softShadowStyle(theme.shadows.soft),
+        },
+        props.style,
+      ]}
+    >
+      {props.children}
     </View>
   );
 }
@@ -152,8 +155,8 @@ function SectionHeading(props: { eyebrow: string; title: string; onMore?: () => 
             paddingVertical: 8,
             borderRadius: theme.radius.full,
             borderWidth: 1,
-            borderColor: cardBorderColor(),
-            backgroundColor: theme.colors.surfaceElevated,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.surface,
             opacity: pressed ? 0.72 : 1,
           })}
         >
@@ -177,13 +180,13 @@ function SnapshotTile(props: {
       style={({ pressed }) => ({
         flex: 1,
         minWidth: 100,
-        borderRadius: 22,
+        borderRadius: theme.radius.md,
         padding: 14,
-        backgroundColor: theme.colors.surfaceElevated,
+        backgroundColor: theme.colors.surface,
         borderWidth: 1,
-        borderColor: cardBorderColor(),
+        borderColor: theme.colors.border,
         opacity: pressed ? 0.8 : 1,
-        ...shadowStyle(theme.shadows.sm),
+        ...softShadowStyle(theme.shadows.soft),
       })}
     >
       <View
@@ -219,13 +222,14 @@ function QuickActionTile(props: {
       onPress={props.onPress}
       style={({ pressed }) => ({
         flex: 1,
-        borderRadius: 24,
+        borderRadius: theme.radius.md,
         paddingHorizontal: 14,
         paddingVertical: 16,
-        backgroundColor: theme.colors.surfaceElevated,
+        backgroundColor: theme.colors.surface,
         borderWidth: 1,
-        borderColor: cardBorderColor(),
+        borderColor: theme.colors.border,
         transform: [{ scale: pressed ? 0.97 : 1 }],
+        ...softShadowStyle(theme.shadows.soft),
       })}
     >
       <View
@@ -349,13 +353,13 @@ function FocusClassCard({ courses, nav }: { courses: any[]; nav: any }) {
             <View
               style={{
                 width: 68,
-                borderRadius: 22,
+                borderRadius: theme.radius.md,
                 paddingVertical: 12,
                 paddingHorizontal: 10,
                 alignItems: "center",
-                backgroundColor: theme.colors.surfaceElevated,
+                backgroundColor: theme.colors.surface2,
                 borderWidth: 1,
-                borderColor: cardBorderColor(),
+                borderColor: theme.colors.border,
               }}
             >
               <Text style={{ color: courseColor, fontSize: 12, fontWeight: "700" }}>第</Text>
@@ -375,9 +379,9 @@ function FocusClassCard({ courses, nav }: { courses: any[]; nav: any }) {
                 paddingHorizontal: 12,
                 paddingVertical: 9,
                 borderRadius: theme.radius.full,
-                backgroundColor: theme.colors.surfaceElevated,
+                backgroundColor: theme.colors.surface2,
                 borderWidth: 1,
-                borderColor: cardBorderColor(),
+                borderColor: theme.colors.border,
               }}
             >
               <Ionicons name="time-outline" size={14} color={courseColor} />
@@ -395,9 +399,9 @@ function FocusClassCard({ courses, nav }: { courses: any[]; nav: any }) {
                   paddingHorizontal: 12,
                   paddingVertical: 9,
                   borderRadius: theme.radius.full,
-                  backgroundColor: theme.colors.surfaceElevated,
+                  backgroundColor: theme.colors.surface2,
                   borderWidth: 1,
-                  borderColor: cardBorderColor(),
+                  borderColor: theme.colors.border,
                 }}
               >
                 <Ionicons name="location-outline" size={14} color={courseColor} />
@@ -488,12 +492,13 @@ function TodayTimelineCard({ courses, nav }: { courses: any[]; nav: any }) {
               <View
                 style={{
                   flex: 1,
-                  borderRadius: 20,
+                  borderRadius: theme.radius.md,
                   paddingHorizontal: 14,
                   paddingVertical: 13,
-                  backgroundColor: theme.colors.surfaceElevated,
+                  backgroundColor: theme.colors.surface,
                   borderWidth: 1,
-                  borderColor: isOngoing ? `${accent}35` : cardBorderColor(),
+                  borderColor: isOngoing ? `${accent}40` : theme.colors.border,
+                  ...softShadowStyle(theme.shadows.soft),
                 }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -612,6 +617,57 @@ function EventCard({ item, onPress }: { item: any; onPress: () => void }) {
   );
 }
 
+function TomorrowPreviewCard({ courses, nav }: { courses: any[]; nav: any }) {
+  const tomorrow = (new Date().getDay() + 1) % 7;
+  const tomorrowCourses = useMemo(
+    () =>
+      courses
+        .filter((c) => c.dayOfWeek === tomorrow)
+        .sort((a, b) => periodToMinutes(a.startPeriod) - periodToMinutes(b.startPeriod))
+        .slice(0, 3),
+    [courses, tomorrow]
+  );
+
+  if (tomorrowCourses.length === 0) {
+    return (
+      <SoftPanel>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <Ionicons name="checkmark-circle-outline" size={22} color={theme.colors.success} />
+          <Text style={{ color: theme.colors.muted }}>明天沒有課，好好休息！</Text>
+        </View>
+      </SoftPanel>
+    );
+  }
+
+  return (
+    <SoftPanel>
+      <View style={{ gap: 10 }}>
+        {tomorrowCourses.map((course) => {
+          const accent = course.color ?? theme.colors.accent;
+          return (
+            <View key={course.id} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View style={{ width: 4, height: 40, borderRadius: 2, backgroundColor: accent }} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{course.name}</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                  {PERIODS[course.startPeriod]?.start ?? "--"} · 第 {course.startPeriod} 節{course.location ? ` · ${course.location}` : ""}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+        {courses.filter((c) => c.dayOfWeek === tomorrow).length > 3 && (
+          <Pressable onPress={() => nav?.navigate?.("課業", { screen: "CourseSchedule" })}>
+            <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: "600", textAlign: "center", marginTop: 4 }}>
+              +{courses.filter((c) => c.dayOfWeek === tomorrow).length - 3} 門課程 →
+            </Text>
+          </Pressable>
+        )}
+      </View>
+    </SoftPanel>
+  );
+}
+
 function LoginPromptCard({ onPress }: { onPress: () => void }) {
   return (
     <Pressable onPress={onPress}>
@@ -644,6 +700,65 @@ function LoginPromptCard({ onPress }: { onPress: () => void }) {
   );
 }
 
+function AIDailyBriefCard({ brief, onClose }: { brief: string; onClose: () => void }) {
+  return (
+    <SoftPanel tint="rgba(139,92,246,0.08)">
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 16,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: "rgba(139,92,246,0.12)",
+          }}
+        >
+          <Ionicons name="sparkles" size={20} color="#8B5CF6" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: "#8B5CF6", fontSize: 11, fontWeight: "800", letterSpacing: 0.7, textTransform: "uppercase", marginBottom: 6 }}>
+            AI 每日簡報
+          </Text>
+          <Text style={{ color: theme.colors.text, fontSize: 14, lineHeight: 22 }}>{brief}</Text>
+        </View>
+        <Pressable onPress={onClose} hitSlop={8}>
+          <Ionicons name="close" size={18} color={theme.colors.muted} />
+        </Pressable>
+      </View>
+    </SoftPanel>
+  );
+}
+
+function ContextualBanner({ segment }: { segment: TimeSegment }) {
+  const configs = {
+    morning: { icon: "sunny-outline" as const, color: "#F59E0B", label: "晨間模式", hint: "查看今日課表和錯過的公告" },
+    class: { icon: "school-outline" as const, color: theme.colors.accent, label: "課程模式", hint: "注意截止日期，保持專注" },
+    evening: { icon: "moon-outline" as const, color: "#3B82F6", label: "晚間模式", hint: "整理今日，預覽明日行程" },
+    night: { icon: "bed-outline" as const, color: "#6B7280", label: "深夜模式", hint: "休息是明天最好的準備" },
+  };
+  const cfg = configs[segment];
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: theme.radius.full,
+        backgroundColor: `${cfg.color}14`,
+        alignSelf: "flex-start",
+        marginBottom: 12,
+      }}
+    >
+      <Ionicons name={cfg.icon} size={14} color={cfg.color} />
+      <Text style={{ color: cfg.color, fontSize: 12, fontWeight: "700" }}>{cfg.label}</Text>
+      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>· {cfg.hint}</Text>
+    </View>
+  );
+}
+
 export function HomeScreen(props: any) {
   const nav = props?.navigation;
   const insets = useSafeAreaInsets();
@@ -651,6 +766,7 @@ export function HomeScreen(props: any) {
   const { school } = useSchool();
   const notifs = useNotifications();
   const ds = useDataSource();
+  const db = getDb();
   useThemeMode();
 
   const { courses } = useSchedule();
@@ -659,8 +775,17 @@ export function HomeScreen(props: any) {
   const [refreshing, setRefreshing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // AI 每日簡報
+  const [dailyBrief, setDailyBrief] = useState<string | null>(null);
+  const [briefDismissed, setBriefDismissed] = useState(false);
+
+  // Widget 版面設定
+  const [widgetLayout, setWidgetLayout] = useState<WidgetId[]>(DEFAULT_WIDGETS as WidgetId[]);
+  const [editingWidgets, setEditingWidgets] = useState(false);
+
   const now = new Date();
   const greeting = getGreeting(now.getHours());
+  const timeSegment = getTimeSegment(now.getHours());
   const displayName = auth.profile?.displayName?.split(" ")[0] ?? (auth.user ? "同學" : "訪客");
 
   const loadData = async (isRefresh = false) => {
@@ -699,6 +824,38 @@ export function HomeScreen(props: any) {
     return () => abortRef.current?.abort();
   }, [ds, school.id]);
 
+  // 載入 widget 版面
+  useEffect(() => {
+    AsyncStorage.getItem(WIDGET_LAYOUT_KEY).then((val) => {
+      if (val) {
+        try {
+          setWidgetLayout(JSON.parse(val));
+        } catch {}
+      }
+    });
+  }, []);
+
+  // 載入 AI 每日簡報
+  useEffect(() => {
+    if (!auth.user) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const dismissKey = `brief_dismissed_${today}`;
+    AsyncStorage.getItem(dismissKey).then((dismissed) => {
+      if (dismissed) { setBriefDismissed(true); return; }
+    });
+    getDoc(doc(db, "users", auth.user.uid, "dailyBriefs", today)).then((snap) => {
+      if (snap.exists()) {
+        setDailyBrief(snap.data()?.content ?? null);
+      }
+    }).catch(() => {});
+  }, [auth.user?.uid]);
+
+  const dismissBrief = useCallback(() => {
+    setBriefDismissed(true);
+    const today = new Date().toISOString().slice(0, 10);
+    AsyncStorage.setItem(`brief_dismissed_${today}`, "1");
+  }, []);
+
   const todayCourseCount = useMemo(() => {
     const today = new Date().getDay();
     return courses.filter((course) => course.dayOfWeek === today).length;
@@ -717,35 +874,6 @@ export function HomeScreen(props: any) {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <View pointerEvents="none" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}>
-        <LinearGradient
-          colors={[`${theme.colors.accent}22`, "rgba(255,255,255,0)"]}
-          start={{ x: 0.2, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{
-            position: "absolute",
-            top: -80,
-            right: -40,
-            width: 280,
-            height: 280,
-            borderRadius: 140,
-          }}
-        />
-        <LinearGradient
-          colors={["rgba(255,255,255,0.72)", "rgba(255,255,255,0)"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{
-            position: "absolute",
-            top: 90,
-            left: -70,
-            width: 220,
-            height: 220,
-            borderRadius: 110,
-          }}
-        />
-      </View>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING, paddingHorizontal: 20 }}
@@ -763,10 +891,10 @@ export function HomeScreen(props: any) {
                   paddingHorizontal: 12,
                   paddingVertical: 7,
                   borderRadius: theme.radius.full,
-                  backgroundColor: theme.colors.surfaceElevated,
+                  backgroundColor: theme.colors.surface,
                   borderWidth: 1,
-                  borderColor: cardBorderColor(),
-                  ...shadowStyle(theme.shadows.sm),
+                  borderColor: theme.colors.border,
+                  ...softShadowStyle(theme.shadows.soft),
                 }}
               >
                 <Ionicons name="sparkles-outline" size={14} color={theme.colors.accent} />
@@ -781,8 +909,9 @@ export function HomeScreen(props: any) {
               <Text style={{ color: theme.colors.text, fontSize: 34, fontWeight: "800", letterSpacing: -1, marginTop: -3 }}>
                 {displayName}
               </Text>
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22, marginTop: 12, maxWidth: 280 }}>
-                {school.name} 的今日重點已整理完成，先看課程與最新校園資訊。
+              <ContextualBanner segment={timeSegment} />
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22, maxWidth: 280 }}>
+                {school.name} · {getSegmentHint(timeSegment)}
               </Text>
             </View>
 
@@ -791,14 +920,14 @@ export function HomeScreen(props: any) {
               style={({ pressed }) => ({
                 width: 52,
                 height: 52,
-                borderRadius: 20,
+                borderRadius: theme.radius.md,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: theme.colors.surfaceElevated,
+                backgroundColor: theme.colors.surface,
                 borderWidth: 1,
-                borderColor: cardBorderColor(),
+                borderColor: theme.colors.border,
                 transform: [{ scale: pressed ? 0.94 : 1 }],
-                ...shadowStyle(theme.shadows.sm),
+                ...softShadowStyle(theme.shadows.soft),
               })}
             >
               <Ionicons name="notifications-outline" size={22} color={theme.colors.text} />
@@ -851,10 +980,31 @@ export function HomeScreen(props: any) {
         </View>
 
         <View style={{ gap: 24 }}>
+          {/* AI 每日簡報卡片 */}
+          {dailyBrief && !briefDismissed && auth.user ? (
+            <AIDailyBriefCard brief={dailyBrief} onClose={dismissBrief} />
+          ) : null}
+
           <View>
             <SectionHeading eyebrow="Daily Brief" title="今日焦點" />
             <FocusClassCard courses={courses} nav={nav} />
           </View>
+
+          {/* 晨間模式：優先顯示公告 */}
+          {timeSegment === "morning" && announcements.length > 0 ? (
+            <View>
+              <SectionHeading eyebrow="Morning Catch-up" title="昨日公告" onMore={() => nav?.navigate?.("公告總覽")} />
+              <View style={{ gap: 12 }}>
+                {announcements.slice(0, 2).map((announcement) => (
+                  <AnnouncementCard
+                    key={announcement.id}
+                    item={announcement}
+                    onPress={() => nav?.navigate?.("公告詳情", { id: announcement.id })}
+                  />
+                ))}
+              </View>
+            </View>
+          ) : null}
 
           <View>
             <SectionHeading eyebrow="Shortcuts" title="快速入口" />
@@ -874,12 +1024,23 @@ export function HomeScreen(props: any) {
             </SoftPanel>
           </View>
 
-          <View>
-            <SectionHeading eyebrow="Timeline" title="今日節奏" onMore={() => nav?.navigate?.("課業", { screen: "CourseSchedule" })} />
-            <TodayTimelineCard courses={courses} nav={nav} />
-          </View>
+          {/* 課程模式：顯示今日節奏 */}
+          {(timeSegment === "class" || timeSegment === "morning") ? (
+            <View>
+              <SectionHeading eyebrow="Timeline" title="今日節奏" onMore={() => nav?.navigate?.("課業", { screen: "CourseSchedule" })} />
+              <TodayTimelineCard courses={courses} nav={nav} />
+            </View>
+          ) : null}
 
-          {announcements.length > 0 ? (
+          {/* 晚間模式：顯示明日課表預覽 */}
+          {timeSegment === "evening" ? (
+            <View>
+              <SectionHeading eyebrow="Tomorrow Preview" title="明日預覽" onMore={() => nav?.navigate?.("課業", { screen: "CourseSchedule" })} />
+              <TomorrowPreviewCard courses={courses} nav={nav} />
+            </View>
+          ) : null}
+
+          {announcements.length > 0 && timeSegment !== "morning" ? (
             <View>
               <SectionHeading eyebrow="News" title="最新公告" onMore={() => nav?.navigate?.("公告總覽")} />
               <View style={{ gap: 12 }}>

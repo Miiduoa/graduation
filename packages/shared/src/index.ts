@@ -51,7 +51,7 @@ export type School = {
   domains?: string[]; // email domains for auto-binding
 };
 
+export * from "./auth";
+export * from "./notifications";
 export * from "./schools";
-
 export * from "./creditAudit";
-export * from "./sampleUsage";

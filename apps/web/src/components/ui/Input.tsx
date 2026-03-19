@@ -36,13 +36,15 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     const isPassword = type === "password";
     const inputType = isPassword && showPassword ? "text" : type;
 
-    const sizeStyles = {
-      sm: { padding: "10px 12px", fontSize: "13px", height: "36px" },
-      md: { padding: "14px 16px", fontSize: "15px", height: "44px" },
-      lg: { padding: "16px 18px", fontSize: "16px", height: "52px" },
+    const sizeMap = {
+      sm: { minHeight: "36px", fontSize: "13px", padding: "0 12px" },
+      md: { minHeight: "46px", fontSize: "15px", padding: "0 15px" },
+      lg: { minHeight: "54px", fontSize: "16px", padding: "0 18px" },
     };
+    const sz = sizeMap[inputSize];
 
-    const sizes = sizeStyles[inputSize];
+    const insetShadow = "inset 3px 3px 7px rgba(174,174,192,0.25), inset -2px -2px 5px rgba(255,255,255,0.88)";
+    const focusShadow = `${insetShadow}, 0 0 0 3px var(--focus-ring)`;
 
     return (
       <div style={{ width: fullWidth ? "100%" : "auto" }}>
@@ -50,32 +52,27 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           <label
             style={{
               display: "block",
-              marginBottom: "8px",
-              fontSize: "14px",
-              fontWeight: 500,
-              color: error ? "#EF4444" : "var(--text)",
+              marginBottom: "7px",
+              fontSize: "13px",
+              fontWeight: 600,
+              color: error ? "var(--danger)" : "var(--muted)",
+              letterSpacing: "0.02em",
             }}
           >
             {label}
           </label>
         )}
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
+        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
           {leftIcon && (
             <div
               style={{
                 position: "absolute",
-                left: "14px",
+                left: "13px",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                color: "var(--muted)",
+                color: isFocused ? "var(--brand)" : "var(--muted)",
                 pointerEvents: "none",
+                transition: "color 0.2s ease",
               }}
             >
               {leftIcon}
@@ -96,21 +93,22 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             }}
             style={{
               width: "100%",
-              borderRadius: "12px",
-              border: `1px solid ${error ? "#EF4444" : isFocused ? "var(--brand)" : "var(--border)"}`,
-              background: disabled ? "var(--panel2)" : "var(--panel)",
+              borderRadius: "var(--radius-sm)",
+              border: `1px solid ${error ? "var(--danger)" : isFocused ? "var(--brand)" : "var(--border)"}`,
+              background: disabled ? "var(--panel)" : "var(--surface)",
               color: "var(--text)",
-              transition: "all 0.2s ease",
+              transition: "border-color 0.2s ease, box-shadow 0.2s ease",
               outline: "none",
-              paddingLeft: leftIcon ? "44px" : sizes.padding,
-              paddingRight: rightIcon || isPassword ? "44px" : sizes.padding,
-              paddingTop: sizes.padding,
-              paddingBottom: sizes.padding,
-              fontSize: sizes.fontSize,
-              height: sizes.height,
-              opacity: disabled ? 0.6 : 1,
+              paddingLeft: leftIcon ? "40px" : sz.padding.split(" ")[1],
+              paddingRight: rightIcon || isPassword ? "40px" : sz.padding.split(" ")[1],
+              paddingTop: "0",
+              paddingBottom: "0",
+              fontSize: sz.fontSize,
+              minHeight: sz.minHeight,
+              opacity: disabled ? 0.5 : 1,
               cursor: disabled ? "not-allowed" : "text",
-              boxShadow: isFocused ? "0 0 0 3px var(--accent-soft)" : "none",
+              boxShadow: isFocused ? focusShadow : insetShadow,
+              fontFamily: "inherit",
               ...style,
             }}
             {...props}
@@ -121,7 +119,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
               onClick={() => setShowPassword(!showPassword)}
               style={{
                 position: "absolute",
-                right: "14px",
+                right: "12px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -130,8 +128,10 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
                 cursor: "pointer",
                 color: "var(--muted)",
                 padding: "4px",
+                fontSize: "16px",
               }}
               tabIndex={-1}
+              aria-label={showPassword ? "隱藏密碼" : "顯示密碼"}
             >
               {showPassword ? "🙈" : "👁️"}
             </button>
@@ -140,11 +140,12 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             <div
               style={{
                 position: "absolute",
-                right: "14px",
+                right: "12px",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 color: "var(--muted)",
+                pointerEvents: "none",
               }}
             >
               {rightIcon}
@@ -154,9 +155,10 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
         {(error || hint) && (
           <p
             style={{
-              marginTop: "6px",
-              fontSize: "13px",
-              color: error ? "#EF4444" : "var(--muted)",
+              marginTop: "5px",
+              fontSize: "12px",
+              color: error ? "var(--danger)" : "var(--muted)",
+              lineHeight: 1.5,
             }}
           >
             {error || hint}
@@ -180,6 +182,8 @@ interface TextareaProps extends Omit<InputHTMLAttributes<HTMLTextAreaElement>, "
 const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ label, error, hint, rows = 4, fullWidth = true, disabled, style, ...props }, ref) => {
     const [isFocused, setIsFocused] = useState(false);
+    const insetShadow = "inset 3px 3px 7px rgba(174,174,192,0.25), inset -2px -2px 5px rgba(255,255,255,0.88)";
+    const focusShadow = `${insetShadow}, 0 0 0 3px var(--focus-ring)`;
 
     return (
       <div style={{ width: fullWidth ? "100%" : "auto" }}>
@@ -187,10 +191,10 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           <label
             style={{
               display: "block",
-              marginBottom: "8px",
-              fontSize: "14px",
-              fontWeight: 500,
-              color: error ? "#EF4444" : "var(--text)",
+              marginBottom: "7px",
+              fontSize: "13px",
+              fontWeight: 600,
+              color: error ? "var(--danger)" : "var(--muted)",
             }}
           >
             {label}
@@ -204,19 +208,19 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           onBlur={() => setIsFocused(false)}
           style={{
             width: "100%",
-            padding: "14px 16px",
-            borderRadius: "12px",
-            border: `1px solid ${error ? "#EF4444" : isFocused ? "var(--brand)" : "var(--border)"}`,
-            background: disabled ? "var(--panel2)" : "var(--panel)",
+            padding: "14px 15px",
+            borderRadius: "var(--radius-sm)",
+            border: `1px solid ${error ? "var(--danger)" : isFocused ? "var(--brand)" : "var(--border)"}`,
+            background: disabled ? "var(--panel)" : "var(--surface)",
             color: "var(--text)",
             fontSize: "15px",
-            lineHeight: 1.5,
+            lineHeight: 1.6,
             resize: "vertical",
-            transition: "all 0.2s ease",
+            transition: "border-color 0.2s ease, box-shadow 0.2s ease",
             outline: "none",
-            opacity: disabled ? 0.6 : 1,
+            opacity: disabled ? 0.5 : 1,
             cursor: disabled ? "not-allowed" : "text",
-            boxShadow: isFocused ? "0 0 0 3px var(--accent-soft)" : "none",
+            boxShadow: isFocused ? focusShadow : insetShadow,
             fontFamily: "inherit",
             ...style,
           }}
@@ -225,9 +229,9 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         {(error || hint) && (
           <p
             style={{
-              marginTop: "6px",
-              fontSize: "13px",
-              color: error ? "#EF4444" : "var(--muted)",
+              marginTop: "5px",
+              fontSize: "12px",
+              color: error ? "var(--danger)" : "var(--muted)",
             }}
           >
             {error || hint}
@@ -273,14 +277,15 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
     ref
   ) => {
     const [isFocused, setIsFocused] = useState(false);
+    const insetShadow = "inset 3px 3px 7px rgba(174,174,192,0.25), inset -2px -2px 5px rgba(255,255,255,0.88)";
+    const focusShadow = `${insetShadow}, 0 0 0 3px var(--focus-ring)`;
 
-    const sizeStyles = {
-      sm: { padding: "10px 12px", fontSize: "13px", height: "36px" },
-      md: { padding: "14px 16px", fontSize: "15px", height: "44px" },
-      lg: { padding: "16px 18px", fontSize: "16px", height: "52px" },
+    const sizeMap = {
+      sm: { minHeight: "36px", fontSize: "13px" },
+      md: { minHeight: "46px", fontSize: "15px" },
+      lg: { minHeight: "54px", fontSize: "16px" },
     };
-
-    const sizes = sizeStyles[inputSize];
+    const sz = sizeMap[inputSize];
 
     return (
       <div style={{ width: fullWidth ? "100%" : "auto" }}>
@@ -288,10 +293,10 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
           <label
             style={{
               display: "block",
-              marginBottom: "8px",
-              fontSize: "14px",
-              fontWeight: 500,
-              color: error ? "#EF4444" : "var(--text)",
+              marginBottom: "7px",
+              fontSize: "13px",
+              fontWeight: 600,
+              color: error ? "var(--danger)" : "var(--muted)",
             }}
           >
             {label}
@@ -304,23 +309,23 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
           onBlur={() => setIsFocused(false)}
           style={{
             width: "100%",
-            borderRadius: "12px",
-            border: `1px solid ${error ? "#EF4444" : isFocused ? "var(--brand)" : "var(--border)"}`,
-            background: disabled ? "var(--panel2)" : "var(--panel)",
+            padding: "0 40px 0 15px",
+            borderRadius: "var(--radius-sm)",
+            border: `1px solid ${error ? "var(--danger)" : isFocused ? "var(--brand)" : "var(--border)"}`,
+            background: disabled ? "var(--panel)" : "var(--surface)",
             color: "var(--text)",
-            transition: "all 0.2s ease",
+            transition: "border-color 0.2s ease, box-shadow 0.2s ease",
             outline: "none",
             appearance: "none",
             backgroundImage:
-              "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2'%3E%3Cpolyline points='6,9 12,15 18,9'%3E%3C/polyline%3E%3C/svg%3E\")",
+              "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238E8E93' stroke-width='2'%3E%3Cpolyline points='6,9 12,15 18,9'%3E%3C/polyline%3E%3C/svg%3E\")",
             backgroundRepeat: "no-repeat",
-            backgroundPosition: "right 12px center",
-            paddingRight: "40px",
+            backgroundPosition: "right 13px center",
             cursor: disabled ? "not-allowed" : "pointer",
-            opacity: disabled ? 0.6 : 1,
-            boxShadow: isFocused ? "0 0 0 3px var(--accent-soft)" : "none",
-            ...sizes,
-            padding: `${sizes.padding} 40px ${sizes.padding} 16px`,
+            opacity: disabled ? 0.5 : 1,
+            boxShadow: isFocused ? focusShadow : insetShadow,
+            fontFamily: "inherit",
+            ...sz,
             ...style,
           }}
           {...(props as React.SelectHTMLAttributes<HTMLSelectElement>)}
@@ -339,9 +344,9 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(
         {(error || hint) && (
           <p
             style={{
-              marginTop: "6px",
-              fontSize: "13px",
-              color: error ? "#EF4444" : "var(--muted)",
+              marginTop: "5px",
+              fontSize: "12px",
+              color: error ? "var(--danger)" : "var(--muted)",
             }}
           >
             {error || hint}

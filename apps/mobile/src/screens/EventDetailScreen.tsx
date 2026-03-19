@@ -911,7 +911,7 @@ export function EventDetailScreen(props: any) {
                     borderRadius: theme.radius.sm,
                     borderWidth: 1,
                     borderColor: theme.colors.border,
-                    backgroundColor: "rgba(255,255,255,0.04)",
+                    backgroundColor: theme.colors.surface2,
                     color: theme.colors.text,
                     textAlignVertical: "top",
                     marginBottom: 10,

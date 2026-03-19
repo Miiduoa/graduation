@@ -366,7 +366,7 @@ export function GroupsScreen(props: any) {
                 borderRadius: theme.radius.md,
                 borderWidth: 1,
                 borderColor: isValidJoinCode(joinCode) ? theme.colors.success : theme.colors.border,
-                backgroundColor: "rgba(255,255,255,0.04)",
+                backgroundColor: theme.colors.surface2,
                 color: theme.colors.text,
                 letterSpacing: 2,
                 fontSize: 16,
@@ -405,7 +405,7 @@ export function GroupsScreen(props: any) {
                   borderRadius: theme.radius.md,
                   borderWidth: 1,
                   borderColor: theme.colors.border,
-                  backgroundColor: "rgba(255,255,255,0.04)",
+                  backgroundColor: theme.colors.surface2,
                   color: theme.colors.text,
                 }}
               />

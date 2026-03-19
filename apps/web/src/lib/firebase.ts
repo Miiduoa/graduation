@@ -30,12 +30,29 @@ import {
   Auth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithCustomToken as firebaseSignInWithCustomToken,
   createUserWithEmailAndPassword,
   signOut as firebaseSignOut,
   sendPasswordResetEmail,
   updateProfile,
   User,
 } from "firebase/auth";
+import {
+  defaultNotificationPreferences,
+  normalizeNotificationPreferences,
+  normalizeSchoolSSOConfig,
+  type NotificationPreferences,
+  type SchoolSSOConfig,
+  type SSOCallbackResult,
+  type SSOProvider,
+} from "@campus/shared/src";
+
+export type {
+  NotificationPreferences,
+  SchoolSSOConfig,
+  SSOCallbackResult,
+  SSOProvider,
+} from "@campus/shared/src";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -126,6 +143,15 @@ export function getCurrentUser(): User | null {
 }
 
 export { onAuthStateChanged };
+
+function getCloudFunctionUrl(functionName: string): string {
+  if (!firebaseConfig.projectId) {
+    throw new Error("Firebase projectId is missing. Check your web environment variables.");
+  }
+
+  const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
+  return `https://${region}-${firebaseConfig.projectId}.cloudfunctions.net/${functionName}`;
+}
 
 function parseDocument<T extends { id: string }>(
   docSnap: { id: string; data: () => Record<string, unknown> | undefined }
@@ -239,6 +265,128 @@ export type Group = {
 
 export function isFirebaseConfigured(): boolean {
   return Boolean(firebaseConfig.projectId);
+}
+
+export async function fetchSchoolSSOConfig(schoolId: string): Promise<SchoolSSOConfig | null> {
+  if (!isFirebaseConfigured()) {
+    return {
+      schoolId,
+      allowEmailLogin: true,
+      ssoConfig: null,
+    };
+  }
+
+  try {
+    const response = await fetch(`${getCloudFunctionUrl("getSSOConfig")}?schoolId=${encodeURIComponent(schoolId)}`);
+    const data = (await response.json()) as Record<string, unknown>;
+    if (!response.ok) {
+      throw new Error(
+        typeof data.error === "string" ? data.error : "Failed to load school SSO configuration"
+      );
+    }
+    return normalizeSchoolSSOConfig(data);
+  } catch (error) {
+    console.warn("[Firebase] Falling back to Firestore for SSO config:", error);
+
+    try {
+      const firestore = getDb();
+      const configDoc = await getDoc(doc(firestore, "schools", schoolId, "settings", "sso"));
+      if (!configDoc.exists()) {
+        return {
+          schoolId,
+          allowEmailLogin: true,
+          ssoConfig: null,
+        };
+      }
+
+      return normalizeSchoolSSOConfig(configDoc.data() as Record<string, unknown>);
+    } catch (fallbackError) {
+      console.error("[Firebase] Failed to load school SSO config:", fallbackError);
+      return {
+        schoolId,
+        allowEmailLogin: true,
+        ssoConfig: null,
+      };
+    }
+  }
+}
+
+export async function completeWebSSOCallback(params: {
+  provider: SSOProvider;
+  schoolId: string;
+  redirectUri: string;
+  code?: string;
+  ticket?: string;
+  samlResponse?: string;
+}): Promise<SSOCallbackResult> {
+  const query = new URLSearchParams({
+    provider: params.provider,
+    schoolId: params.schoolId,
+    redirectUri: params.redirectUri,
+  });
+
+  if (params.code) query.set("code", params.code);
+  if (params.ticket) query.set("ticket", params.ticket);
+  if (params.samlResponse) query.set("SAMLResponse", params.samlResponse);
+
+  const response = await fetch(`${getCloudFunctionUrl("verifySSOCallback")}?${query.toString()}`);
+  const data = (await response.json()) as Record<string, unknown>;
+
+  if (!response.ok || typeof data.customToken !== "string") {
+    throw new Error(
+      typeof data.details === "string"
+        ? data.details
+        : typeof data.error === "string"
+          ? data.error
+          : "SSO callback verification failed"
+    );
+  }
+
+  return data as unknown as SSOCallbackResult;
+}
+
+export async function signInWithCustomAuthToken(customToken: string): Promise<User | null> {
+  const authInstance = getAuth();
+  if (!authInstance) return null;
+
+  const credential = await firebaseSignInWithCustomToken(authInstance, customToken);
+  return credential.user;
+}
+
+export async function fetchNotificationPreferences(userId: string): Promise<NotificationPreferences> {
+  if (!isFirebaseConfigured()) {
+    return defaultNotificationPreferences;
+  }
+
+  try {
+    const firestore = getDb();
+    const snap = await getDoc(doc(firestore, "users", userId, "settings", "notifications"));
+    if (!snap.exists()) {
+      return defaultNotificationPreferences;
+    }
+
+    return normalizeNotificationPreferences(snap.data() as Partial<NotificationPreferences>);
+  } catch (error) {
+    console.error("[Firebase] Failed to load notification preferences:", error);
+    return defaultNotificationPreferences;
+  }
+}
+
+export async function saveNotificationPreferences(
+  userId: string,
+  prefs: NotificationPreferences
+): Promise<void> {
+  if (!isFirebaseConfigured()) return;
+
+  const firestore = getDb();
+  await setDoc(
+    doc(firestore, "users", userId, "settings", "notifications"),
+    {
+      ...prefs,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
 }
 
 export async function fetchAnnouncements(

@@ -1,534 +1,188 @@
 "use client";
 
-import { SiteShell } from "@/components/SiteShell";
-import { resolveSchool } from "@campus/shared/src/schools";
-import { mockAnnouncements, mockClubEvents, mockMenus, mockPois } from "@campus/shared/src/mockData";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import {
-  fetchAnnouncements,
-  fetchEvents,
-  fetchMenus,
-  fetchPois,
-  isFirebaseConfigured,
-  type Announcement,
-  type ClubEvent,
-  type MenuItem,
-  type Poi,
-} from "@/lib/firebase";
+import { SiteShell } from "@/components/SiteShell";
+import { resolveSchoolPageContext } from "@/lib/pageContext";
 
-type SearchCategory = "all" | "announcements" | "events" | "places" | "menus" | "courses" | "people";
-type SearchDataSource = "demo" | "firebase";
-
-type SearchResult = {
+interface SearchResult {
   id: string;
-  type: "announcement" | "event" | "place" | "menu" | "course" | "person";
+  type: "announcement" | "course" | "location" | "club";
   title: string;
   subtitle: string;
-  icon: string;
   href: string;
-  tags?: string[];
+  icon: string;
+}
+
+const TYPE_LABELS = {
+  announcement: "公告",
+  course: "課程",
+  location: "地點",
+  club: "社團",
 };
 
-const STATIC_RESULTS: SearchResult[] = [
-  { id: "7", type: "course", title: "資料結構", subtitle: "CS201 · 王教授 · 3學分", icon: "📚", href: "/timetable", tags: ["必修", "資工"] },
-  { id: "8", type: "course", title: "人工智慧概論", subtitle: "CS402 · 周教授 · 3學分", icon: "📚", href: "/timetable", tags: ["選修", "AI"] },
-  { id: "9", type: "person", title: "王大明 教授", subtitle: "資訊工程學系 · 副教授", icon: "👤", href: "#", tags: ["教師", "資工"] },
-  { id: "10", type: "person", title: "李小華", subtitle: "資工系 大三 · 學生會幹部", icon: "👤", href: "#", tags: ["學生", "學生會"] },
+const MOCK_RESULTS: SearchResult[] = [
+  { id: "1", type: "announcement", title: "期末考試時間表公布", subtitle: "6/17–6/23 期末考試", href: "/announcements", icon: "📢" },
+  { id: "2", type: "course", title: "資料結構", subtitle: "王大明 · 工程館 302 · 週一 08:10", href: "/timetable", icon: "📘" },
+  { id: "3", type: "location", title: "圖書館", subtitle: "二樓安靜區有 15 席可用", href: "/library", icon: "📚" },
+  { id: "4", type: "club", title: "程式設計社", subtitle: "本週五黑客松活動", href: "/clubs", icon: "💻" },
 ];
 
-const RECENT_SEARCHES = ["圖書館", "餐廳", "課程", "王教授", "活動"];
-const HOT_SEARCHES = ["期中考", "校慶", "獎學金", "宿舍", "停車"];
+const QUICK_LINKS = [
+  { label: "課表", href: "/timetable", icon: "📅" },
+  { label: "成績", href: "/grades", icon: "📊" },
+  { label: "公告", href: "/announcements", icon: "📢" },
+  { label: "地圖", href: "/map", icon: "🗺" },
+  { label: "圖書館", href: "/library", icon: "📚" },
+  { label: "餐廳", href: "/cafeteria", icon: "🍱" },
+];
 
-const demoPois: Poi[] = mockPois.map((poi) => ({
-  id: poi.id,
-  name: poi.name,
-  description: poi.description ?? "校園地點",
-  category: poi.category,
-  lat: poi.lat,
-  lng: poi.lng,
-}));
-
-const demoMenus: MenuItem[] = mockMenus.map((menu) => ({
-  id: menu.id,
-  name: menu.name,
-  cafeteria: menu.cafeteria,
-  availableOn: menu.availableOn,
-  price: menu.price,
-}));
-
-function formatShortDate(dateStr: string) {
-  const parsed = new Date(dateStr);
-  if (Number.isNaN(parsed.getTime())) return dateStr;
-  return parsed.toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" });
-}
-
-function formatShortDateTime(dateStr: string) {
-  const parsed = new Date(dateStr);
-  if (Number.isNaN(parsed.getTime())) return dateStr;
-  return parsed.toLocaleString("zh-TW", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function buildSearchResults(params: {
-  announcements: Announcement[];
-  events: ClubEvent[];
-  pois: Poi[];
-  menus: MenuItem[];
-}): SearchResult[] {
-  const announcementResults = params.announcements.map((announcement) => ({
-    id: announcement.id,
-    type: "announcement" as const,
-    title: announcement.title,
-    subtitle: `${formatShortDate(announcement.publishedAt)} · ${announcement.source ?? "校方公告"}`,
-    icon: "📢",
-    href: `/announcements#${announcement.id}`,
-    tags: [announcement.category ?? "公告", announcement.pinned ? "置頂" : "最新"].filter(
-      (tag): tag is string => Boolean(tag)
-    ),
-  }));
-
-  const eventResults = params.events.map((event) => ({
-    id: event.id,
-    type: "event" as const,
-    title: event.title,
-    subtitle: `${formatShortDateTime(event.startsAt)} · ${event.location ?? "校園活動"}`,
-    icon: "🎉",
-    href: `/clubs#${event.id}`,
-    tags: [event.category ?? "活動", event.organizer ?? "校園"].filter((tag): tag is string => Boolean(tag)),
-  }));
-
-  const placeResults = params.pois.map((poi) => ({
-    id: poi.id,
-    type: "place" as const,
-    title: poi.name,
-    subtitle: [poi.building, poi.description || "校園地點"].filter(Boolean).join(" · "),
-    icon: "📍",
-    href: `/map#${poi.id}`,
-    tags: [poi.category ?? "地點", poi.accessible ? "無障礙" : undefined].filter(
-      (tag): tag is string => Boolean(tag)
-    ),
-  }));
-
-  const menuResults = params.menus.map((menu) => ({
-    id: menu.id,
-    type: "menu" as const,
-    title: menu.name,
-    subtitle: [menu.cafeteria, menu.price ? `$${menu.price}` : undefined, menu.availableOn].filter(Boolean).join(" · "),
-    icon: "🍽️",
-    href: `/cafeteria#${menu.id}`,
-    tags: [menu.category ?? "餐點", menu.vegetarian ? "素食" : undefined].filter(
-      (tag): tag is string => Boolean(tag)
-    ),
-  }));
-
-  return [...announcementResults, ...eventResults, ...placeResults, ...menuResults, ...STATIC_RESULTS];
-}
-
-function withSchoolQuery(href: string, queryString: string) {
-  if (href === "#") return href;
-  const [base, hash] = href.split("#");
-  return `${base}${queryString}${hash ? `#${hash}` : ""}`;
-}
-
-export default function SearchPage(props: { searchParams?: { school?: string; schoolId?: string; q?: string } }) {
-  const school = resolveSchool({
-    school: props.searchParams?.school,
-    schoolId: props.searchParams?.schoolId,
-  });
-  const q = `?school=${encodeURIComponent(school.code)}&schoolId=${encodeURIComponent(school.id)}`;
-
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState(props.searchParams?.q || "");
-  const [category, setCategory] = useState<SearchCategory>("all");
+export default function SearchPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
+  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [allResults, setAllResults] = useState<SearchResult[]>(STATIC_RESULTS);
-  const [dataSource, setDataSource] = useState<SearchDataSource>(isFirebaseConfigured() ? "firebase" : "demo");
-  const [loadingData, setLoadingData] = useState(true);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadSearchData() {
-      setLoadingData(true);
-
-      if (!isFirebaseConfigured()) {
-        if (!active) return;
-        setAllResults(
-          buildSearchResults({
-            announcements: mockAnnouncements,
-            events: mockClubEvents,
-            pois: demoPois,
-            menus: demoMenus,
-          })
-        );
-        setDataSource("demo");
-        setLoadingData(false);
-        return;
-      }
-
-      try {
-        const [announcements, events, pois, menus] = await Promise.all([
-          fetchAnnouncements(school.id, 40),
-          fetchEvents(school.id, 40),
-          fetchPois(school.id, 80),
-          fetchMenus(school.id, 80),
-        ]);
-
-        if (!active) return;
-        setAllResults(buildSearchResults({ announcements, events, pois, menus }));
-        setDataSource("firebase");
-      } catch (error) {
-        console.error("Failed to load search data:", error);
-        if (!active) return;
-        setAllResults(
-          buildSearchResults({
-            announcements: mockAnnouncements,
-            events: mockClubEvents,
-            pois: demoPois,
-            menus: demoMenus,
-          })
-        );
-        setDataSource("demo");
-      } finally {
-        if (active) {
-          setLoadingData(false);
-        }
-      }
+    if (!query.trim()) {
+      setResults([]);
+      return;
     }
-
-    loadSearchData();
-
-    return () => {
-      active = false;
-    };
-  }, [school.id]);
-
-  const filteredResults = useMemo(() => {
-    if (!query.trim()) return [];
-
-    const lowerQuery = query.toLowerCase();
-    return allResults.filter((result) => {
-      const matchesQuery =
-        result.title.toLowerCase().includes(lowerQuery) ||
-        result.subtitle.toLowerCase().includes(lowerQuery) ||
-        result.tags?.some((tag) => tag.toLowerCase().includes(lowerQuery));
-
-      const matchesCategory =
-        category === "all" ||
-        (category === "announcements" && result.type === "announcement") ||
-        (category === "events" && result.type === "event") ||
-        (category === "places" && result.type === "place") ||
-        (category === "menus" && result.type === "menu") ||
-        (category === "courses" && result.type === "course") ||
-        (category === "people" && result.type === "person");
-
-      return matchesQuery && matchesCategory;
-    });
-  }, [allResults, category, query]);
-
-  const handleSearch = (searchQuery: string) => {
-    setQuery(searchQuery);
-    setShowSuggestions(false);
     setIsSearching(true);
-    setTimeout(() => setIsSearching(false), 300);
-  };
-
-  const categories: { key: SearchCategory; label: string; icon: string; count?: number }[] = [
-    { key: "all", label: "全部", icon: "🔍", count: filteredResults.length },
-    { key: "announcements", label: "公告", icon: "📢", count: filteredResults.filter((r) => r.type === "announcement").length },
-    { key: "events", label: "活動", icon: "🎉", count: filteredResults.filter((r) => r.type === "event").length },
-    { key: "places", label: "地點", icon: "📍", count: filteredResults.filter((r) => r.type === "place").length },
-    { key: "menus", label: "餐點", icon: "🍽️", count: filteredResults.filter((r) => r.type === "menu").length },
-    { key: "courses", label: "課程", icon: "📚", count: filteredResults.filter((r) => r.type === "course").length },
-    { key: "people", label: "人物", icon: "👤", count: filteredResults.filter((r) => r.type === "person").length },
-  ];
-
-  const highlightMatch = (text: string, keyword: string) => {
-    if (!keyword.trim()) return text;
-    const regex = new RegExp(`(${keyword})`, "gi");
-    const parts = text.split(regex);
-    const lowerKeyword = keyword.toLowerCase();
-    return parts.map((part, i) =>
-      part.toLowerCase() === lowerKeyword ? (
-        <mark key={i} className="searchMark">
-          {part}
-        </mark>
-      ) : (
-        part
-      )
-    );
-  };
+    const timer = setTimeout(() => {
+      setResults(
+        MOCK_RESULTS.filter(
+          (r) =>
+            r.title.toLowerCase().includes(query.toLowerCase()) ||
+            r.subtitle.toLowerCase().includes(query.toLowerCase())
+        )
+      );
+      setIsSearching(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   return (
-    <SiteShell
-      schoolName={school.name}
-      schoolCode={school.code}
-      title="搜尋"
-      subtitle="用同一個入口搜尋公告、活動、地點、餐點、課程與人物。"
-    >
-      <div className="pageStack">
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <span className="pill subtle">{dataSource === "demo" ? "示範資料" : "Firebase 資料"}</span>
-        </div>
-
-        <div className="card searchComposer">
-          <div className={`searchComposerCard${showSuggestions ? " active" : ""}`}>
-            <span aria-hidden style={{ fontSize: 20, color: "var(--muted)" }}>
-              🔍
-            </span>
-            <input
-              ref={inputRef}
-              className="searchComposerInput"
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setShowSuggestions(e.target.value.length > 0);
-              }}
-              onFocus={() => setShowSuggestions(query.length > 0)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  handleSearch(query);
-                }
-                if (e.key === "Escape") {
-                  setShowSuggestions(false);
-                }
-              }}
-              placeholder="搜尋公告、活動、地點、餐點、課程..."
-            />
-            {query && (
-              <button
-                type="button"
-                className="searchComposerClear"
-                onClick={() => {
-                  setQuery("");
-                  inputRef.current?.focus();
-                }}
-              >
-                ✕
-              </button>
-            )}
-            <button className="btn primary" onClick={() => handleSearch(query)}>
-              搜尋
+    <SiteShell schoolName={school || undefined}>
+      <div className="pageStack" style={{ maxWidth: 680, margin: "0 auto" }}>
+        {/* ── Search Bar ── */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "6px 6px 6px 16px",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid",
+            borderColor: query ? "var(--brand)" : "var(--border)",
+            background: "var(--surface)",
+            boxShadow: query
+              ? "var(--shadow-inset), 0 0 0 3px var(--focus-ring)"
+              : "var(--shadow-inset)",
+            transition: "border-color 0.2s ease, box-shadow 0.2s ease",
+          }}
+        >
+          <span style={{ fontSize: 18, opacity: 0.5, flexShrink: 0 }}>🔍</span>
+          <input
+            autoFocus
+            type="search"
+            placeholder="搜尋課程、公告、地點、社團…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            style={{
+              flex: 1,
+              border: "none",
+              background: "transparent",
+              fontSize: 16,
+              color: "var(--text)",
+              outline: "none",
+              padding: "12px 0",
+              fontFamily: "inherit",
+            }}
+          />
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 18, padding: "4px 8px" }}
+            >
+              ✕
             </button>
-          </div>
-
-          {showSuggestions && filteredResults.length > 0 && (
-            <div className="searchSuggestions">
-              {filteredResults.slice(0, 5).map((result) => (
-                <Link
-                  key={result.id}
-                  href={withSchoolQuery(result.href, q)}
-                  className="searchSuggestionItem"
-                  onClick={() => setShowSuggestions(false)}
-                >
-                  <span aria-hidden style={{ fontSize: 24 }}>
-                    {result.icon}
-                  </span>
-                  <div className="surfaceContent">
-                    <div className="surfaceTitle">{highlightMatch(result.title, query)}</div>
-                    <p className="surfaceMeta">{result.subtitle}</p>
-                  </div>
-                  <span className="metricMeta">→</span>
-                </Link>
-              ))}
-              {filteredResults.length > 5 && (
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ width: "100%" }}
-                  onClick={() => {
-                    handleSearch(query);
-                  }}
-                >
-                  查看全部 {filteredResults.length} 個結果
-                </button>
-              )}
-            </div>
           )}
         </div>
 
+        {/* ── Quick Links (when no query) ── */}
         {!query && (
-          <>
-            <section className="card sectionCard">
-              <div className="sectionHead">
-                <div className="sectionCopy">
-                  <p className="sectionEyebrow">History</p>
-                  <h2 className="sectionTitle">最近搜尋</h2>
-                  <p className="sectionText">保留最近常用關鍵字，重新進站時可以直接重搜。</p>
-                </div>
-                <button type="button" className="btn">
-                  清除
-                </button>
-              </div>
+          <div className="sectionCard">
+            <h3 style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 600, color: "var(--muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              快速導覽
+            </h3>
+            <div className="tileGrid">
+              {QUICK_LINKS.map((l) => (
+                <Link key={l.href} href={`${l.href}${q}`} className="tileLink">
+                  <span className="tileIcon">{l.icon}</span>
+                  <span className="tileLabel">{l.label}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
-              <div className="toolbarActions">
-                {RECENT_SEARCHES.map((search) => (
-                  <button key={search} type="button" className="pill" onClick={() => handleSearch(search)}>
-                    {search}
-                  </button>
+        {/* ── Results ── */}
+        {query && (
+          <div>
+            {isSearching ? (
+              <div className="pageStack">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} style={{ display: "flex", gap: 12, padding: "14px 16px", background: "var(--surface)", borderRadius: "var(--radius-sm)" }}>
+                    <div className="skeleton" style={{ width: 40, height: 40, borderRadius: 10, flexShrink: 0 }} />
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div className="skeleton" style={{ height: 14, width: "70%" }} />
+                      <div className="skeleton" style={{ height: 12, width: "50%" }} />
+                    </div>
+                  </div>
                 ))}
               </div>
-            </section>
-
-            <section className="card sectionCard">
-              <div className="sectionHead">
-                <div className="sectionCopy">
-                  <p className="sectionEyebrow">Trending</p>
-                  <h2 className="sectionTitle">熱門搜尋</h2>
-                  <p className="sectionText">把近期熱門題目集中成一列，避免每次都重新打字。</p>
-                </div>
+            ) : results.length === 0 ? (
+              <div className="emptyState">
+                <div className="emptyIcon">🔍</div>
+                <h3 className="emptyTitle">找不到「{query}」的結果</h3>
+                <p className="emptyBody">嘗試不同的關鍵字或縮短搜尋詞</p>
               </div>
-
-              <div className="toolbarActions">
-                {HOT_SEARCHES.map((search, idx) => (
-                  <button
-                    key={search}
-                    type="button"
-                    className="pill"
-                    onClick={() => handleSearch(search)}
-                    style={
-                      idx < 3
-                        ? {
-                            background: "rgba(239, 109, 126, 0.16)",
-                            color: "var(--danger)",
-                          }
-                        : undefined
-                    }
+            ) : (
+              <div className="insetGroup">
+                {results.map((r, i) => (
+                  <Link
+                    key={r.id}
+                    href={`${r.href}${q}`}
+                    className="insetGroupRow"
+                    style={{ borderTop: i === 0 ? "none" : undefined }}
                   >
-                    <span style={{ color: idx < 3 ? "var(--danger)" : "var(--muted)", fontWeight: 700 }}>{idx + 1}</span>
-                    {search}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="card sectionCard">
-              <div className="sectionHead">
-                <div className="sectionCopy">
-                  <p className="sectionEyebrow">Quick Access</p>
-                  <h2 className="sectionTitle">快速前往</h2>
-                  <p className="sectionText">常用模組統一成同樣的入口卡片，和其他頁面的層級保持一致。</p>
-                </div>
-              </div>
-
-              <div className="tileGrid">
-                {[
-                  { icon: "📢", label: "公告", href: `/announcements${q}` },
-                  { icon: "🎉", label: "活動", href: `/clubs${q}` },
-                  { icon: "📍", label: "地圖", href: `/map${q}` },
-                  { icon: "🍽️", label: "餐廳", href: `/cafeteria${q}` },
-                  { icon: "📚", label: "圖書館", href: `/library${q}` },
-                  { icon: "📅", label: "課表", href: `/timetable${q}` },
-                ].map((link) => (
-                  <Link key={link.label} href={link.href} className="tileLink">
-                    <span className="tileIcon">{link.icon}</span>
-                    <span className="tileLabel">{link.label}</span>
+                    <div className="insetGroupRowIcon" style={{ fontSize: 20, background: "var(--panel)", borderRadius: 10 }}>
+                      {r.icon}
+                    </div>
+                    <div className="insetGroupRowContent">
+                      <div className="insetGroupRowTitle">{r.title}</div>
+                      <div className="insetGroupRowMeta">{r.subtitle}</div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        background: "var(--panel2)",
+                        color: "var(--muted)",
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {TYPE_LABELS[r.type]}
+                    </span>
                   </Link>
                 ))}
               </div>
-            </section>
-          </>
-        )}
-
-        {query && (
-          <>
-            {loadingData && (
-              <div className="card" style={{ textAlign: "center", color: "var(--muted)" }}>
-                正在同步搜尋索引...
-              </div>
             )}
-
-            <div className="card toolbarPanel">
-              <div className="toolbarGrow segmentedGroup">
-                {categories.map((cat) => (
-                  <button
-                    key={cat.key}
-                    type="button"
-                    className={`btn ${category === cat.key ? "primary" : ""}`}
-                    onClick={() => setCategory(cat.key)}
-                  >
-                    {cat.icon} {cat.label}
-                    {cat.count !== undefined && cat.count > 0 ? (
-                      <span
-                        className="statusBadge"
-                        style={
-                          category === cat.key
-                            ? { background: "rgba(255,255,255,0.18)", color: "#fff" }
-                            : ({ "--status-bg": "var(--panel2)", "--status-color": "var(--muted)" } as CSSProperties)
-                        }
-                      >
-                        {cat.count}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <section className="card sectionCard">
-              <div className="sectionHead">
-                <div className="sectionCopy">
-                  <p className="sectionEyebrow">Results</p>
-                  <h2 className="sectionTitle">{isSearching ? "搜尋中..." : `找到 ${filteredResults.length} 個結果`}</h2>
-                  <p className="sectionText">搜尋結果已與公告、活動、地圖、餐廳頁共用同一套資料來源。</p>
-                </div>
-                <select className="input" style={{ maxWidth: 140 }}>
-                  <option>相關性</option>
-                  <option>最新</option>
-                  <option>最舊</option>
-                </select>
-              </div>
-
-              {filteredResults.length === 0 ? (
-                <div className="emptyState">
-                  <div className="emptyIcon">🔍</div>
-                  <p className="emptyTitle">找不到「{query}」的相關結果</p>
-                  <p className="emptyBody">請試試其他關鍵字，或先切回全部類別重新搜尋。</p>
-                  <div className="toolbarActions" style={{ justifyContent: "center", marginTop: 20 }}>
-                    <button type="button" className="btn" onClick={() => setQuery("")}>
-                      清除搜尋
-                    </button>
-                    <button type="button" className="btn" onClick={() => setCategory("all")}>
-                      顯示全部類別
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="surfaceList">
-                  {filteredResults.map((result) => (
-                    <Link key={result.id} href={withSchoolQuery(result.href, q)} className="surfaceItem">
-                      <div className="surfaceAccent">{result.icon}</div>
-                      <div className="surfaceContent">
-                        <h3 className="surfaceTitle">{highlightMatch(result.title, query)}</h3>
-                        <p className="surfaceMeta">{result.subtitle}</p>
-                        {result.tags?.length ? (
-                          <div className="surfaceTags">
-                            {result.tags.map((tag) => (
-                              <span key={tag} className="pill">
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                      <span className="metricMeta">→</span>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </section>
-          </>
+          </div>
         )}
       </div>
     </SiteShell>

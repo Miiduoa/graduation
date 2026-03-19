@@ -1,16 +1,19 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { ScrollView, Text, View, Pressable, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, Card, Pill, AnimatedCard, SegmentedControl, EmptyListPlaceholder } from "../ui/components";
 import { useSchool } from "../state/school";
+import { useAuth } from "../state/auth";
 import { useSearchHistory, POPULAR_SEARCHES } from "../state/searchHistory";
 import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { formatDateTime, toDate, formatRelativeTime } from "../utils/format";
+import { getDb } from "../firebase";
+import { collection, getDocs, query, where, orderBy, limit, collectionGroup } from "firebase/firestore";
 
-type SearchCategory = "all" | "announcements" | "events" | "pois" | "menus";
+type SearchCategory = "all" | "announcements" | "events" | "pois" | "menus" | "groups";
 
 const CATEGORY_OPTIONS = [
   { key: "all", label: "全部" },
@@ -18,34 +21,86 @@ const CATEGORY_OPTIONS = [
   { key: "events", label: "活動" },
   { key: "pois", label: "地點" },
   { key: "menus", label: "餐點" },
+  { key: "groups", label: "群組貼文" },
 ];
 
 type SearchResult = {
   id: string;
-  type: "announcement" | "event" | "poi" | "menu";
+  type: "announcement" | "event" | "poi" | "menu" | "post" | "assignment";
   title: string;
   subtitle: string;
   highlight?: string;
   data: any;
+  groupId?: string;
 };
 
 export function GlobalSearchScreen(props: any) {
   const nav = props?.navigation;
   const { school } = useSchool();
+  const auth = useAuth();
   const searchHistory = useSearchHistory();
   const ds = useDataSource();
+  const db = getDb();
 
-  const [query, setQuery] = useState("");
+  const [queryText, setQueryText] = useState("");
   const [category, setCategory] = useState<SearchCategory>("all");
   const [isFocused, setIsFocused] = useState(false);
+  const [groupPosts, setGroupPosts] = useState<any[]>([]);
+  const [groupAssignments, setGroupAssignments] = useState<any[]>([]);
 
   const { items: announcements } = useAsyncList<any>(() => ds.listAnnouncements(school.id), [ds, school.id]);
   const { items: events } = useAsyncList<any>(() => ds.listEvents(school.id), [ds, school.id]);
   const { items: pois } = useAsyncList<any>(() => ds.listPois(school.id), [ds, school.id]);
   const { items: menus } = useAsyncList<any>(() => ds.listMenus(school.id), [ds, school.id]);
 
+  // 載入用戶所在群組的貼文與作業（供搜尋）
+  useEffect(() => {
+    if (!auth.user) return;
+    let cancelled = false;
+
+    async function loadGroupContent() {
+      try {
+        // 取得用戶加入的群組 ID
+        const memberSnap = await getDocs(
+          query(collectionGroup(db, "members"), where("uid", "==", auth.user!.uid), limit(20))
+        );
+        const groupIds = memberSnap.docs
+          .map((d) => d.ref.parent.parent?.id)
+          .filter(Boolean) as string[];
+
+        const posts: any[] = [];
+        const assignments: any[] = [];
+
+        await Promise.all(
+          groupIds.slice(0, 10).map(async (gid) => {
+            const [postsSnap, assignSnap] = await Promise.all([
+              getDocs(query(collection(db, "groups", gid, "posts"), orderBy("createdAt", "desc"), limit(30))),
+              getDocs(query(collection(db, "groups", gid, "assignments"), orderBy("createdAt", "desc"), limit(20))),
+            ]);
+            postsSnap.docs.forEach((d) =>
+              posts.push({ id: d.id, groupId: gid, ...d.data() })
+            );
+            assignSnap.docs.forEach((d) =>
+              assignments.push({ id: d.id, groupId: gid, ...d.data() })
+            );
+          })
+        );
+
+        if (!cancelled) {
+          setGroupPosts(posts);
+          setGroupAssignments(assignments);
+        }
+      } catch {
+        // silent
+      }
+    }
+
+    loadGroupContent();
+    return () => { cancelled = true; };
+  }, [auth.user?.uid, db]);
+
   const results = useMemo<SearchResult[]>(() => {
-    const q = query.trim().toLowerCase();
+    const q = queryText.trim().toLowerCase();
     if (!q) return [];
 
     const allResults: SearchResult[] = [];
@@ -113,8 +168,40 @@ export function GlobalSearchScreen(props: any) {
       });
     }
 
-    return allResults.slice(0, 50);
-  }, [query, category, announcements, events, pois, menus]);
+    if (category === "all" || category === "groups") {
+      groupPosts.forEach((p) => {
+        const text = `${p.title ?? ""} ${p.body ?? ""} ${p.authorEmail ?? ""}`.toLowerCase();
+        if (text.includes(q)) {
+          allResults.push({
+            id: p.id,
+            type: "post",
+            title: p.title ?? "(無標題)",
+            subtitle: `群組貼文 · ${p.kind ?? "post"}${p.authorEmail ? ` · ${p.authorEmail}` : ""}`,
+            highlight: p.body?.substring(0, 100),
+            data: p,
+            groupId: p.groupId,
+          });
+        }
+      });
+
+      groupAssignments.forEach((a) => {
+        const text = `${a.title ?? ""} ${a.description ?? ""}`.toLowerCase();
+        if (text.includes(q)) {
+          allResults.push({
+            id: a.id,
+            type: "assignment",
+            title: a.title ?? "(無標題)",
+            subtitle: `作業${a.dueAt ? ` · 截止：${formatDateTime(a.dueAt)}` : ""}`,
+            highlight: a.description?.substring(0, 100),
+            data: a,
+            groupId: a.groupId,
+          });
+        }
+      });
+    }
+
+    return allResults.slice(0, 60);
+  }, [queryText, category, announcements, events, pois, menus, groupPosts, groupAssignments]);
 
   const handleSearch = useCallback((q: string) => {
     if (q.trim()) {
@@ -126,7 +213,7 @@ export function GlobalSearchScreen(props: any) {
   const popularItems = POPULAR_SEARCHES.all;
 
   const handleResultPress = (result: SearchResult) => {
-    handleSearch(query);
+    handleSearch(queryText);
 
     switch (result.type) {
       case "announcement":
@@ -141,60 +228,61 @@ export function GlobalSearchScreen(props: any) {
       case "menu":
         nav?.navigate?.("首頁", { screen: "MenuDetail", params: { id: result.id } });
         break;
+      case "post":
+        if (result.groupId) {
+          nav?.navigate?.("訊息", { screen: "GroupDetail", params: { groupId: result.groupId } });
+        }
+        break;
+      case "assignment":
+        if (result.groupId) {
+          nav?.navigate?.("訊息", { screen: "GroupAssignments", params: { groupId: result.groupId } });
+        }
+        break;
     }
   };
 
   const handleHistoryPress = (term: string) => {
-    setQuery(term);
+    setQueryText(term);
     setIsFocused(false);
   };
 
   const getTypeIcon = (type: SearchResult["type"]): string => {
     switch (type) {
-      case "announcement":
-        return "megaphone-outline";
-      case "event":
-        return "calendar-outline";
-      case "poi":
-        return "location-outline";
-      case "menu":
-        return "restaurant-outline";
-      default:
-        return "search-outline";
+      case "announcement": return "megaphone-outline";
+      case "event": return "calendar-outline";
+      case "poi": return "location-outline";
+      case "menu": return "restaurant-outline";
+      case "post": return "chatbubble-outline";
+      case "assignment": return "document-text-outline";
+      default: return "search-outline";
     }
   };
 
   const getTypeColor = (type: SearchResult["type"]): string => {
     switch (type) {
-      case "announcement":
-        return theme.colors.accent;
-      case "event":
-        return theme.colors.success;
-      case "poi":
-        return "#F59E0B";
-      case "menu":
-        return "#EC4899";
-      default:
-        return theme.colors.muted;
+      case "announcement": return theme.colors.accent;
+      case "event": return theme.colors.success;
+      case "poi": return "#F59E0B";
+      case "menu": return "#EC4899";
+      case "post": return "#8B5CF6";
+      case "assignment": return "#EF4444";
+      default: return theme.colors.muted;
     }
   };
 
   const getTypeLabel = (type: SearchResult["type"]): string => {
     switch (type) {
-      case "announcement":
-        return "公告";
-      case "event":
-        return "活動";
-      case "poi":
-        return "地點";
-      case "menu":
-        return "餐點";
-      default:
-        return "";
+      case "announcement": return "公告";
+      case "event": return "活動";
+      case "poi": return "地點";
+      case "menu": return "餐點";
+      case "post": return "群組貼文";
+      case "assignment": return "作業";
+      default: return "";
     }
   };
 
-  const showHistory = isFocused && !query.trim() && (historyItems.length > 0 || popularItems.length > 0);
+  const showHistory = isFocused && !queryText.trim() && (historyItems.length > 0 || popularItems.length > 0);
 
   return (
     <Screen>
@@ -209,18 +297,18 @@ export function GlobalSearchScreen(props: any) {
             backgroundColor: theme.colors.surface,
             paddingHorizontal: 16,
             gap: 10,
-            ...shadowStyle(theme.shadows.sm),
+            ...softShadowStyle(theme.shadows.soft),
           }}
         >
           <Ionicons name="search" size={20} color={isFocused ? theme.colors.accent : theme.colors.muted} />
           <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="搜尋公告、活動、地點、餐點..."
+            value={queryText}
+            onChangeText={setQueryText}
+            placeholder="搜尋公告、活動、地點、餐點、群組..."
             placeholderTextColor={theme.colors.muted}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
-            onSubmitEditing={() => handleSearch(query)}
+            onSubmitEditing={() => handleSearch(queryText)}
             returnKeyType="search"
             autoFocus
             style={{
@@ -230,9 +318,9 @@ export function GlobalSearchScreen(props: any) {
               fontSize: 16,
             }}
           />
-          {query.length > 0 && (
+          {queryText.length > 0 && (
             <Pressable
-              onPress={() => setQuery("")}
+              onPress={() => setQueryText("")}
               style={({ pressed }) => ({
                 opacity: pressed ? 0.6 : 1,
                 padding: 4,
@@ -316,7 +404,7 @@ export function GlobalSearchScreen(props: any) {
               </AnimatedCard>
             )}
           </ScrollView>
-        ) : query.trim() ? (
+        ) : queryText.trim() ? (
           <ScrollView contentContainerStyle={{ gap: 10, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <Text style={{ color: theme.colors.textSecondary, fontSize: 13, fontWeight: "500" }}>
@@ -328,7 +416,7 @@ export function GlobalSearchScreen(props: any) {
               <EmptyListPlaceholder
                 icon="search-outline"
                 title="找不到結果"
-                subtitle={`沒有符合「${query}」的內容`}
+                subtitle={`沒有符合「${queryText}」的內容`}
               />
             ) : (
               results.map((result) => (
@@ -343,7 +431,7 @@ export function GlobalSearchScreen(props: any) {
                     borderWidth: 1,
                     borderColor: theme.colors.border,
                     gap: 12,
-                    ...shadowStyle(theme.shadows.sm),
+                    ...softShadowStyle(theme.shadows.soft),
                     transform: [{ scale: pressed ? 0.985 : 1 }],
                   })}
                 >

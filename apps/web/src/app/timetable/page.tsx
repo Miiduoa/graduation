@@ -1,600 +1,506 @@
 "use client";
 
 import { SiteShell } from "@/components/SiteShell";
-import { resolveSchool } from "@campus/shared/src/schools";
-import { useState, useMemo } from "react";
+import { useState, useMemo, type CSSProperties } from "react";
+import { resolveSchoolPageContext } from "@/lib/pageContext";
 
 type ViewMode = "week" | "day" | "list";
 
-type CourseSlot = {
+interface CourseSlot {
   id: string;
   name: string;
-  teacher: string;
-  location: string;
-  dayOfWeek: number;
+  instructor: string;
+  room: string;
+  dayOfWeek: number; // 1=Mon … 5=Fri
   startPeriod: number;
   endPeriod: number;
   color: string;
-  courseCode: string;
   credits: number;
-};
-
-const WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+}
 
 const PERIODS = [
-  { period: 1, time: "08:10-09:00" },
-  { period: 2, time: "09:10-10:00" },
-  { period: 3, time: "10:20-11:10" },
-  { period: 4, time: "11:20-12:10" },
-  { period: 5, time: "13:10-14:00" },
-  { period: 6, time: "14:10-15:00" },
-  { period: 7, time: "15:20-16:10" },
-  { period: 8, time: "16:20-17:10" },
-  { period: 9, time: "17:20-18:10" },
-  { period: 10, time: "18:30-19:20" },
-  { period: 11, time: "19:25-20:15" },
-  { period: 12, time: "20:20-21:10" },
-];
-
-const COURSE_COLORS = [
-  "#8B5CF6",
-  "#EC4899",
-  "#F59E0B",
-  "#10B981",
-  "#3B82F6",
-  "#EF4444",
-  "#6366F1",
-  "#14B8A6",
+  { period: 1, start: "08:10", end: "09:00" },
+  { period: 2, start: "09:10", end: "10:00" },
+  { period: 3, start: "10:10", end: "11:00" },
+  { period: 4, start: "11:10", end: "12:00" },
+  { period: 5, start: "13:10", end: "14:00" },
+  { period: 6, start: "14:10", end: "15:00" },
+  { period: 7, start: "15:10", end: "16:00" },
+  { period: 8, start: "16:10", end: "17:00" },
+  { period: 9, start: "17:10", end: "18:00" },
+  { period: 10, start: "18:30", end: "19:20" },
+  { period: 11, start: "19:30", end: "20:20" },
+  { period: 12, start: "20:30", end: "21:20" },
 ];
 
 const MOCK_COURSES: CourseSlot[] = [
-  { id: "1", name: "資料結構", teacher: "王教授", location: "資訊大樓 301", dayOfWeek: 1, startPeriod: 2, endPeriod: 3, color: COURSE_COLORS[0], courseCode: "CS201", credits: 3 },
-  { id: "2", name: "資料庫系統", teacher: "李教授", location: "資訊大樓 402", dayOfWeek: 1, startPeriod: 6, endPeriod: 7, color: COURSE_COLORS[1], courseCode: "CS301", credits: 3 },
-  { id: "3", name: "演算法", teacher: "陳教授", location: "工程大樓 201", dayOfWeek: 2, startPeriod: 3, endPeriod: 4, color: COURSE_COLORS[2], courseCode: "CS302", credits: 3 },
-  { id: "4", name: "作業系統", teacher: "林教授", location: "資訊大樓 301", dayOfWeek: 3, startPeriod: 2, endPeriod: 3, color: COURSE_COLORS[3], courseCode: "CS303", credits: 3 },
-  { id: "5", name: "計算機網路", teacher: "張教授", location: "資訊大樓 501", dayOfWeek: 3, startPeriod: 6, endPeriod: 8, color: COURSE_COLORS[4], courseCode: "CS304", credits: 3 },
-  { id: "6", name: "軟體工程", teacher: "黃教授", location: "管理大樓 102", dayOfWeek: 4, startPeriod: 3, endPeriod: 4, color: COURSE_COLORS[5], courseCode: "CS401", credits: 3 },
-  { id: "7", name: "人工智慧", teacher: "周教授", location: "資訊大樓 601", dayOfWeek: 5, startPeriod: 2, endPeriod: 3, color: COURSE_COLORS[6], courseCode: "CS402", credits: 3 },
-  { id: "8", name: "專題研究", teacher: "吳教授", location: "研究大樓 301", dayOfWeek: 5, startPeriod: 6, endPeriod: 8, color: COURSE_COLORS[7], courseCode: "CS499", credits: 2 },
+  { id: "c1", name: "資料結構", instructor: "王大明", room: "工程館 302", dayOfWeek: 1, startPeriod: 1, endPeriod: 2, color: "#5E6AD2", credits: 3 },
+  { id: "c2", name: "線性代數", instructor: "陳小華", room: "理學院 201", dayOfWeek: 1, startPeriod: 5, endPeriod: 6, color: "#34C759", credits: 3 },
+  { id: "c3", name: "作業系統", instructor: "李志明", room: "資工大樓 405", dayOfWeek: 2, startPeriod: 3, endPeriod: 4, color: "#FF9500", credits: 3 },
+  { id: "c4", name: "計算機網路", instructor: "張美玲", room: "工程館 105", dayOfWeek: 2, startPeriod: 7, endPeriod: 8, color: "#007AFF", credits: 3 },
+  { id: "c5", name: "微積分", instructor: "吳俊傑", room: "理學院 101", dayOfWeek: 3, startPeriod: 1, endPeriod: 3, color: "#FF3B30", credits: 4 },
+  { id: "c6", name: "英文寫作", instructor: "Smith, J.", room: "語言中心 202", dayOfWeek: 4, startPeriod: 2, endPeriod: 3, color: "#BF5AF2", credits: 2 },
+  { id: "c7", name: "資料庫系統", instructor: "劉建宏", room: "資工大樓 301", dayOfWeek: 4, startPeriod: 6, endPeriod: 7, color: "#32ADE6", credits: 3 },
+  { id: "c8", name: "軟體工程", instructor: "林宜珊", room: "工程館 204", dayOfWeek: 5, startPeriod: 4, endPeriod: 5, color: "#FF6B35", credits: 3 },
 ];
 
-export default function TimetablePage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const school = resolveSchool({
-    school: props.searchParams?.school,
-    schoolId: props.searchParams?.schoolId,
-  });
+const DAYS = ["一", "二", "三", "四", "五"];
+const COURSE_COLORS = ["#5E6AD2", "#34C759", "#FF9500", "#007AFF", "#FF3B30", "#BF5AF2", "#32ADE6", "#FF6B35"];
 
+export default function TimetablePage(props: {
+  searchParams?: { school?: string; schoolId?: string };
+}) {
+  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [viewMode, setViewMode] = useState<ViewMode>("week");
-  const [selectedDay, setSelectedDay] = useState(new Date().getDay() || 1);
-  const [selectedSemester, setSelectedSemester] = useState("2025-2");
+  const [selectedDay, setSelectedDay] = useState<number>(
+    Math.min(Math.max((new Date().getDay() || 5), 1), 5)
+  );
+  const [selectedSemester, setSelectedSemester] = useState("113-2");
 
-  const today = new Date().getDay();
+  const totalCredits = useMemo(
+    () => MOCK_COURSES.reduce((acc, c) => acc + c.credits, 0),
+    []
+  );
 
-  const totalCredits = useMemo(() => {
-    return MOCK_COURSES.reduce((sum, c) => sum + c.credits, 0);
-  }, []);
-
-  const todayCourses = useMemo(() => {
-    return MOCK_COURSES.filter((c) => c.dayOfWeek === today).sort((a, b) => a.startPeriod - b.startPeriod);
-  }, [today]);
-
-  const getCurrentPeriod = () => {
-    const now = new Date();
-    const hour = now.getHours();
-    const minute = now.getMinutes();
-    const time = hour * 60 + minute;
-
-    for (let i = 0; i < PERIODS.length; i++) {
-      const [start] = PERIODS[i].time.split("-");
-      const [startHour, startMin] = start.split(":").map(Number);
-      const periodStart = startHour * 60 + startMin;
-      const periodEnd = periodStart + 50;
-      if (time >= periodStart && time < periodEnd + 10) {
-        return i + 1;
-      }
-    }
-    return 0;
-  };
-
-  const currentPeriod = getCurrentPeriod();
+  const todayCourses = useMemo(
+    () =>
+      MOCK_COURSES.filter((c) => c.dayOfWeek === selectedDay).sort(
+        (a, b) => a.startPeriod - b.startPeriod
+      ),
+    [selectedDay]
+  );
 
   const nextCourse = useMemo(() => {
-    if (today === 0 || today === 6) return null;
-    return todayCourses.find((c) => c.startPeriod > currentPeriod) ?? null;
-  }, [todayCourses, currentPeriod, today]);
+    const now = new Date();
+    const todayDow = now.getDay() === 0 ? 7 : now.getDay();
+    const todayHm = now.getHours() * 100 + now.getMinutes();
+    return MOCK_COURSES.find((c) => {
+      if (c.dayOfWeek !== todayDow) return false;
+      const p = PERIODS.find((p) => p.period === c.startPeriod);
+      if (!p) return false;
+      const [h, m] = p.start.split(":").map(Number);
+      return h * 100 + m > todayHm;
+    });
+  }, []);
 
-  const semesters = [
-    { id: "2025-2", label: "113-2 學期", current: true },
-    { id: "2025-1", label: "113-1 學期" },
-    { id: "2024-2", label: "112-2 學期" },
-  ];
+  const coursesByDay = useMemo(() => {
+    const map: Record<number, CourseSlot[]> = {};
+    for (let d = 1; d <= 5; d++) {
+      map[d] = MOCK_COURSES.filter((c) => c.dayOfWeek === d).sort(
+        (a, b) => a.startPeriod - b.startPeriod
+      );
+    }
+    return map;
+  }, []);
 
-  const renderWeekView = () => {
-    const displayDays = [1, 2, 3, 4, 5];
-    const displayPeriods = PERIODS.slice(0, 10);
+  const cardStyle = (color: string): CSSProperties => ({
+    background: `${color}14`,
+    borderLeft: `3px solid ${color}`,
+    borderRadius: "var(--radius-sm)",
+    padding: "10px 12px",
+    marginBottom: 6,
+  });
 
-    return (
-      <div style={{ overflowX: "auto", paddingBottom: 8 }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 600 }}>
-          <thead>
-            <tr>
-              <th style={{ 
-                width: 60, 
-                padding: "12px 8px", 
-                fontSize: 12, 
-                color: "var(--muted)",
-                textAlign: "center",
-              }}>
-                節次
-              </th>
-              {displayDays.map((day) => (
-                <th 
-                  key={day}
-                  style={{ 
-                    padding: "12px 8px", 
-                    fontSize: 14, 
-                    fontWeight: day === today ? 700 : 500,
-                    color: day === today ? "var(--brand)" : "var(--text)",
-                    background: day === today ? "rgba(139,92,246,0.1)" : "transparent",
-                    borderRadius: day === today ? "8px 8px 0 0" : 0,
-                  }}
-                >
-                  {WEEKDAYS[day]}
-                  {day === today && <span style={{ marginLeft: 4 }}>✨</span>}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {displayPeriods.map((p) => (
-              <tr key={p.period}>
-                <td style={{ 
-                  padding: "8px", 
-                  textAlign: "center",
-                  fontSize: 12,
-                  color: p.period === currentPeriod ? "var(--brand)" : "var(--muted)",
-                  fontWeight: p.period === currentPeriod ? 700 : 400,
-                  background: p.period === currentPeriod ? "rgba(139,92,246,0.1)" : "transparent",
-                  borderRadius: p.period === currentPeriod ? "8px 0 0 8px" : 0,
-                }}>
-                  <div>{p.period}</div>
-                  <div style={{ fontSize: 10, opacity: 0.7 }}>{p.time.split("-")[0]}</div>
-                </td>
-                {displayDays.map((day) => {
-                  const course = MOCK_COURSES.find(
-                    (c) => c.dayOfWeek === day && p.period >= c.startPeriod && p.period <= c.endPeriod
-                  );
-                  const isStart = course?.startPeriod === p.period;
-
-                  if (course && isStart) {
-                    const rowSpan = course.endPeriod - course.startPeriod + 1;
-                    return (
-                      <td 
-                        key={`${day}-${p.period}`}
-                        rowSpan={rowSpan}
-                        style={{ 
-                          padding: 4,
-                          verticalAlign: "top",
-                          background: day === today ? "rgba(139,92,246,0.05)" : "transparent",
-                        }}
-                      >
-                        <div style={{
-                          padding: 10,
-                          borderRadius: 8,
-                          background: course.color,
-                          color: "#fff",
-                          height: "100%",
-                          minHeight: rowSpan * 48 - 8,
-                          cursor: "pointer",
-                          transition: "transform 0.2s, box-shadow 0.2s",
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.transform = "scale(1.02)";
-                          e.currentTarget.style.boxShadow = `0 4px 12px ${course.color}40`;
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.transform = "scale(1)";
-                          e.currentTarget.style.boxShadow = "none";
-                        }}
-                        >
-                          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{course.name}</div>
-                          <div style={{ fontSize: 11, opacity: 0.9 }}>{course.location}</div>
-                          <div style={{ fontSize: 10, opacity: 0.8, marginTop: 4 }}>{course.teacher}</div>
-                        </div>
-                      </td>
-                    );
-                  } else if (course) {
-                    return null;
-                  }
-
-                  return (
-                    <td 
-                      key={`${day}-${p.period}`}
-                      style={{ 
-                        padding: 4,
-                        background: day === today ? "rgba(139,92,246,0.05)" : "transparent",
-                      }}
-                    >
-                      <div style={{
-                        height: 40,
-                        borderRadius: 6,
-                        border: "1px dashed var(--border)",
-                        background: "var(--panel2)",
-                      }} />
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
-
-  const renderDayView = () => {
-    const dayCourses = MOCK_COURSES
-      .filter((c) => c.dayOfWeek === selectedDay)
-      .sort((a, b) => a.startPeriod - b.startPeriod);
-
-    return (
-      <div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-          {[1, 2, 3, 4, 5].map((day) => (
-            <button
-              key={day}
-              className={`btn ${selectedDay === day ? "primary" : ""}`}
-              onClick={() => setSelectedDay(day)}
-              style={{ fontSize: 13 }}
-            >
-              {WEEKDAYS[day]}
-              {day === today && <span style={{ marginLeft: 4 }}>✨</span>}
-            </button>
-          ))}
+  return (
+    <SiteShell
+      title="課表"
+      subtitle="本學期課程安排"
+      schoolName={school || undefined}
+      schoolCode={selectedSemester}
+    >
+      <div className="pageStack">
+        {/* ── Top Metrics ── */}
+        <div className="metricGrid">
+          <div className="metricCard" style={{ "--tone": "var(--brand)" } as CSSProperties}>
+            <div className="metricIcon">📚</div>
+            <div className="metricValue">{MOCK_COURSES.length}</div>
+            <div className="metricLabel">本學期課程</div>
+          </div>
+          <div className="metricCard" style={{ "--tone": "#34C759" } as CSSProperties}>
+            <div className="metricIcon">🎓</div>
+            <div className="metricValue">{totalCredits}</div>
+            <div className="metricLabel">修習學分</div>
+          </div>
+          <div className="metricCard" style={{ "--tone": "#FF9500" } as CSSProperties}>
+            <div className="metricIcon">📅</div>
+            <div className="metricValue">{todayCourses.length}</div>
+            <div className="metricLabel">今日課程</div>
+          </div>
+          {nextCourse ? (
+            <div className="metricCard" style={{ "--tone": nextCourse.color } as CSSProperties}>
+              <div className="metricIcon">⏰</div>
+              <div className="metricValue" style={{ fontSize: 18 }}>
+                {PERIODS.find((p) => p.period === nextCourse.startPeriod)?.start ?? "--"}
+              </div>
+              <div className="metricLabel">下一堂</div>
+            </div>
+          ) : (
+            <div className="metricCard" style={{ "--tone": "#34C759" } as CSSProperties}>
+              <div className="metricIcon">✅</div>
+              <div className="metricValue" style={{ fontSize: 18 }}>今日結束</div>
+              <div className="metricLabel">課程狀態</div>
+            </div>
+          )}
         </div>
 
-        {dayCourses.length === 0 ? (
-          <div style={{ 
-            textAlign: "center", 
-            padding: 40, 
-            color: "var(--muted)",
-            background: "var(--panel2)",
-            borderRadius: 12,
-          }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🎉</div>
-            <div style={{ fontSize: 16, fontWeight: 600 }}>{WEEKDAYS[selectedDay]}沒有課程</div>
-            <div style={{ fontSize: 14, marginTop: 8 }}>享受你的休息時間吧！</div>
+        {/* ── Toolbar ── */}
+        <div className="toolbarPanel">
+          <div className="toolbarGrow">
+            <div className="segmentedGroup">
+              {(["week", "day", "list"] as ViewMode[]).map((m) => (
+                <button
+                  key={m}
+                  className={viewMode === m ? "active" : ""}
+                  onClick={() => setViewMode(m)}
+                >
+                  {m === "week" ? "📅 週視圖" : m === "day" ? "📋 日視圖" : "📝 列表"}
+                </button>
+              ))}
+            </div>
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {dayCourses.map((course) => (
-              <div 
-                key={course.id}
+          <div className="toolbarActions">
+            <select
+              className="input"
+              value={selectedSemester}
+              onChange={(e) => setSelectedSemester(e.target.value)}
+              style={{ minHeight: 40, width: "auto", fontSize: 13 }}
+            >
+              {["113-2", "113-1", "112-2", "112-1"].map((s) => (
+                <option key={s} value={s}>
+                  {s} 學期
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* ── Day Selector (for day view) ── */}
+        {viewMode === "day" && (
+          <div className="card" style={{ padding: "10px 14px" }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              {DAYS.map((d, i) => {
+                const dow = i + 1;
+                const isToday = dow === (new Date().getDay() === 0 ? 7 : new Date().getDay());
+                return (
+                  <button
+                    key={d}
+                    onClick={() => setSelectedDay(dow)}
+                    style={{
+                      flex: 1,
+                      padding: "10px 4px",
+                      borderRadius: "var(--radius-sm)",
+                      border: "1px solid",
+                      borderColor: selectedDay === dow ? "var(--brand)" : "var(--border)",
+                      background: selectedDay === dow ? "var(--accent-soft)" : "var(--surface)",
+                      color: selectedDay === dow ? "var(--brand)" : isToday ? "var(--brand)" : "var(--muted)",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      boxShadow: selectedDay === dow ? "var(--shadow-sm)" : "none",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    {d}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Week View ── */}
+        {viewMode === "week" && (
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            {/* Header */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "56px repeat(5, 1fr)",
+                borderBottom: "1px solid var(--border)",
+                background: "var(--panel)",
+              }}
+            >
+              <div style={{ padding: "12px 8px", textAlign: "center" }} />
+              {DAYS.map((d, i) => {
+                const dow = i + 1;
+                const isToday = dow === (new Date().getDay() === 0 ? 7 : new Date().getDay());
+                return (
+                  <div
+                    key={d}
+                    style={{
+                      padding: "12px 8px",
+                      textAlign: "center",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: isToday ? "var(--brand)" : "var(--muted)",
+                      borderLeft: "1px solid var(--border)",
+                    }}
+                  >
+                    <div>週{d}</div>
+                    {isToday && (
+                      <div
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: "var(--brand)",
+                          margin: "4px auto 0",
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Period rows */}
+            {PERIODS.map((p) => (
+              <div
+                key={p.period}
                 style={{
-                  padding: 16,
-                  borderRadius: 12,
-                  background: "var(--panel2)",
-                  borderLeft: `4px solid ${course.color}`,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 16,
-                  cursor: "pointer",
-                  transition: "transform 0.2s",
+                  display: "grid",
+                  gridTemplateColumns: "56px repeat(5, 1fr)",
+                  minHeight: 64,
+                  borderBottom: "1px solid var(--border)",
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.transform = "translateX(4px)"}
-                onMouseLeave={(e) => e.currentTarget.style.transform = "translateX(0)"}
               >
-                <div style={{ 
-                  textAlign: "center",
-                  minWidth: 60,
-                }}>
-                  <div style={{ 
-                    fontSize: 24, 
-                    fontWeight: 900, 
-                    color: course.color,
-                  }}>
-                    {course.startPeriod}
+                {/* Period label */}
+                <div
+                  style={{
+                    padding: "8px 4px",
+                    textAlign: "center",
+                    borderRight: "1px solid var(--border)",
+                    background: "var(--panel)",
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
+                    {p.period}
                   </div>
-                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                    {PERIODS[course.startPeriod - 1]?.time.split("-")[0]}
-                  </div>
-                  {course.endPeriod > course.startPeriod && (
-                    <>
-                      <div style={{ color: "var(--muted)", fontSize: 10 }}>~</div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: course.color }}>
-                        {course.endPeriod}
-                      </div>
-                    </>
-                  )}
-                </div>
-                
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{course.name}</div>
-                  <div style={{ display: "flex", gap: 16, fontSize: 13, color: "var(--muted)" }}>
-                    <span>👨‍🏫 {course.teacher}</span>
-                    <span>📍 {course.location}</span>
+                  <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 2 }}>
+                    {p.start}
                   </div>
                 </div>
-                
-                <div style={{ 
-                  padding: "4px 10px", 
-                  borderRadius: 999, 
-                  background: `${course.color}20`,
-                  color: course.color,
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}>
-                  {course.credits} 學分
-                </div>
+
+                {/* Day cells */}
+                {DAYS.map((_, di) => {
+                  const dow = di + 1;
+                  const course = MOCK_COURSES.find(
+                    (c) => c.dayOfWeek === dow && c.startPeriod === p.period
+                  );
+                  return (
+                    <div
+                      key={di}
+                      style={{
+                        borderLeft: "1px solid var(--border)",
+                        padding: "4px",
+                        position: "relative",
+                      }}
+                    >
+                      {course && (
+                        <div
+                          style={{
+                            background: `${course.color}12`,
+                            borderLeft: `3px solid ${course.color}`,
+                            borderRadius: "var(--radius-xs)",
+                            padding: "6px 8px",
+                            height: "100%",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: course.color,
+                              lineHeight: 1.3,
+                            }}
+                          >
+                            {course.name}
+                          </div>
+                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                            {course.room}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
         )}
-      </div>
-    );
-  };
 
-  const renderListView = () => {
-    const groupedCourses = MOCK_COURSES.reduce((acc, course) => {
-      if (!acc[course.dayOfWeek]) acc[course.dayOfWeek] = [];
-      acc[course.dayOfWeek].push(course);
-      return acc;
-    }, {} as Record<number, CourseSlot[]>);
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        {[1, 2, 3, 4, 5].map((day) => {
-          const dayCourses = groupedCourses[day] ?? [];
-          if (dayCourses.length === 0) return null;
-
-          return (
-            <div key={day}>
-              <div style={{ 
-                display: "flex", 
-                alignItems: "center", 
-                gap: 12, 
-                marginBottom: 12,
-              }}>
-                <span style={{ 
-                  fontWeight: 700, 
-                  fontSize: 15,
-                  color: day === today ? "var(--brand)" : "var(--text)",
-                }}>
-                  {WEEKDAYS[day]}
-                </span>
-                {day === today && (
-                  <span className="pill" style={{ 
-                    background: "rgba(139,92,246,0.2)", 
-                    color: "var(--brand)",
-                    fontSize: 11,
-                  }}>
-                    今天
-                  </span>
-                )}
-                <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+        {/* ── Day View ── */}
+        {viewMode === "day" && (
+          <div>
+            {todayCourses.length === 0 ? (
+              <div className="emptyState">
+                <div className="emptyIcon">🏖</div>
+                <h3 className="emptyTitle">今天沒有課程</h3>
+                <p className="emptyBody">享受你的空閒時間吧！</p>
               </div>
-              
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {dayCourses
-                  .sort((a, b) => a.startPeriod - b.startPeriod)
-                  .map((course) => (
-                    <div 
-                      key={course.id}
+            ) : (
+              <div className="pageStack">
+                {todayCourses.map((c) => {
+                  const startP = PERIODS.find((p) => p.period === c.startPeriod);
+                  const endP = PERIODS.find((p) => p.period === c.endPeriod);
+                  return (
+                    <div
+                      key={c.id}
+                      className="card"
                       style={{
-                        padding: 12,
-                        borderRadius: 8,
-                        background: "var(--panel2)",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
+                        borderLeft: `4px solid ${c.color}`,
+                        padding: "18px 20px",
                       }}
                     >
-                      <div style={{
-                        width: 6,
-                        height: 36,
-                        borderRadius: 3,
-                        background: course.color,
-                      }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600 }}>{course.name}</div>
-                        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-                          第 {course.startPeriod}-{course.endPeriod} 節 · {course.location}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: c.color,
+                              letterSpacing: "0.1em",
+                              textTransform: "uppercase",
+                              marginBottom: 4,
+                            }}
+                          >
+                            第 {c.startPeriod}–{c.endPeriod} 節 · {startP?.start}–{endP?.end}
+                          </div>
+                          <h3 style={{ margin: "0 0 4px", fontSize: 17, fontWeight: 700, letterSpacing: "-0.03em" }}>
+                            {c.name}
+                          </h3>
+                          <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                            {c.instructor} · {c.room}
+                          </div>
                         </div>
+                        <span
+                          className="pill"
+                          style={{ background: `${c.color}12`, color: c.color, borderColor: `${c.color}20` }}
+                        >
+                          {c.credits} 學分
+                        </span>
                       </div>
-                      <span style={{ 
-                        fontSize: 12, 
-                        fontWeight: 600,
-                        color: course.color,
-                      }}>
-                        {course.credits} 學分
-                      </span>
                     </div>
-                  ))}
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── List View ── */}
+        {viewMode === "list" && (
+          <div className="pageStack">
+            {DAYS.map((d, di) => {
+              const dow = di + 1;
+              const courses = coursesByDay[dow];
+              if (!courses || courses.length === 0) return null;
+              return (
+                <div key={d} className="sectionCard">
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <h3
+                      style={{
+                        margin: 0,
+                        fontSize: 12,
+                        letterSpacing: "0.18em",
+                        textTransform: "uppercase",
+                        color: "var(--muted)",
+                        fontWeight: 600,
+                      }}
+                    >
+                      星期{d}
+                    </h3>
+                    <div
+                      style={{
+                        flex: 1,
+                        height: 1,
+                        background: "var(--border)",
+                      }}
+                    />
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>
+                      {courses.length} 堂
+                    </span>
+                  </div>
+                  <div className="insetGroup">
+                    {courses.map((c, ci) => {
+                      const startP = PERIODS.find((p) => p.period === c.startPeriod);
+                      const endP = PERIODS.find((p) => p.period === c.endPeriod);
+                      return (
+                        <div
+                          key={c.id}
+                          className="insetGroupRow"
+                          style={{ borderTop: ci === 0 ? "none" : undefined }}
+                        >
+                          <div
+                            className="insetGroupRowIcon"
+                            style={{ background: `${c.color}14`, fontSize: 18 }}
+                          >
+                            📖
+                          </div>
+                          <div className="insetGroupRowContent">
+                            <div className="insetGroupRowTitle">{c.name}</div>
+                            <div className="insetGroupRowMeta">
+                              {startP?.start}–{endP?.end} · {c.room} · {c.instructor}
+                            </div>
+                          </div>
+                          <span
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: c.color,
+                            }}
+                          >
+                            {c.credits}學分
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Summary */}
+            <div className="card">
+              <div style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600, marginBottom: 12 }}>
+                學分統計
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 24,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: "var(--brand)", letterSpacing: "-0.05em" }}>
+                    {totalCredits}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>總學分</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: "#34C759", letterSpacing: "-0.05em" }}>
+                    {MOCK_COURSES.length}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>門課程</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: "#FF9500", letterSpacing: "-0.05em" }}>
+                    5
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>授課天數</div>
+                </div>
               </div>
             </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  return (
-    <SiteShell
-      schoolName={school.name}
-      schoolCode={school.code}
-      title="📅 課表"
-      subtitle="課程安排 · 週課表 · 學分統計"
-    >
-      {/* Semester Selector */}
-      <div className="card" style={{ marginBottom: 24, padding: 16 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {semesters.map((sem) => (
-            <button
-              key={sem.id}
-              className={`btn ${selectedSemester === sem.id ? "primary" : ""}`}
-              onClick={() => setSelectedSemester(sem.id)}
-              style={{ fontSize: 13 }}
-            >
-              {sem.label}
-              {sem.current && <span style={{ marginLeft: 4 }}>✨</span>}
-            </button>
-          ))}
-          <div style={{ flex: 1 }} />
-          <button className="btn" style={{ fontSize: 13 }}>
-            📥 匯出課表
-          </button>
-          <button className="btn" style={{ fontSize: 13 }}>
-            🔄 同步教務系統
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Overview */}
-      <div style={{ 
-        display: "grid", 
-        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", 
-        gap: 16, 
-        marginBottom: 24 
-      }}>
-        {[
-          { label: "課程數", value: MOCK_COURSES.length.toString(), icon: "📚", color: "#8B5CF6" },
-          { label: "總學分", value: totalCredits.toString(), icon: "🎯", color: "#10B981" },
-          { label: "今日課程", value: todayCourses.length.toString(), icon: "📅", color: "#F59E0B" },
-          { label: "目前節次", value: currentPeriod > 0 ? `第 ${currentPeriod} 節` : "無", icon: "⏰", color: "#3B82F6" },
-        ].map((stat) => (
-          <div 
-            key={stat.label} 
-            className="card"
-            style={{ padding: 16, textAlign: "center" }}
-          >
-            <div style={{ fontSize: 24, marginBottom: 8 }}>{stat.icon}</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: stat.color }}>{stat.value}</div>
-            <div style={{ fontSize: 13, color: "var(--muted)" }}>{stat.label}</div>
           </div>
-        ))}
-      </div>
-
-      {/* Next Course Alert */}
-      {nextCourse && (
-        <div className="card" style={{ 
-          marginBottom: 24, 
-          background: `linear-gradient(135deg, ${nextCourse.color}15 0%, ${nextCourse.color}05 100%)`,
-          borderLeft: `4px solid ${nextCourse.color}`,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <div style={{
-              width: 56,
-              height: 56,
-              borderRadius: 28,
-              background: nextCourse.color,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#fff",
-              fontWeight: 900,
-              fontSize: 20,
-            }}>
-              {nextCourse.startPeriod}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 4 }}>🔔 下一堂課</div>
-              <div style={{ fontWeight: 700, fontSize: 18 }}>{nextCourse.name}</div>
-              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-                {nextCourse.location} · {nextCourse.teacher} · {PERIODS[nextCourse.startPeriod - 1]?.time.split("-")[0]} 開始
-              </div>
-            </div>
-            <button className="btn primary" style={{ fontSize: 13 }}>
-              📍 導航到教室
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* View Mode Tabs */}
-      <div className="card" style={{ marginBottom: 24, padding: 12 }}>
-        <div style={{ display: "flex", gap: 8 }}>
-          {[
-            { key: "week", label: "週課表", icon: "📊" },
-            { key: "day", label: "日檢視", icon: "📅" },
-            { key: "list", label: "列表", icon: "📋" },
-          ].map((mode) => (
-            <button
-              key={mode.key}
-              className={`btn ${viewMode === mode.key ? "primary" : ""}`}
-              onClick={() => setViewMode(mode.key as ViewMode)}
-              style={{ fontSize: 13 }}
-            >
-              {mode.icon} {mode.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Schedule View */}
-      <div className="card">
-        <h2 style={{ margin: "0 0 20px 0", fontSize: 18, fontWeight: 700 }}>
-          {viewMode === "week" ? "📊 週課表" : viewMode === "day" ? `📅 ${WEEKDAYS[selectedDay]}課程` : "📋 所有課程"}
-        </h2>
-        
-        {viewMode === "week" && renderWeekView()}
-        {viewMode === "day" && renderDayView()}
-        {viewMode === "list" && renderListView()}
-      </div>
-
-      {/* Course Summary */}
-      <div className="card" style={{ marginTop: 24 }}>
-        <h2 style={{ margin: "0 0 16px 0", fontSize: 18, fontWeight: 700 }}>📊 學分統計</h2>
-        
-        <div style={{ 
-          display: "grid", 
-          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", 
-          gap: 16 
-        }}>
-          {MOCK_COURSES.map((course) => (
-            <div 
-              key={course.id}
-              style={{
-                padding: 12,
-                borderRadius: 10,
-                background: `${course.color}10`,
-                borderLeft: `3px solid ${course.color}`,
-              }}
-            >
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{course.name}</div>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>{course.courseCode}</div>
-              <div style={{ 
-                marginTop: 8, 
-                fontSize: 18, 
-                fontWeight: 800, 
-                color: course.color 
-              }}>
-                {course.credits} 學分
-              </div>
-            </div>
-          ))}
-        </div>
-        
-        <div style={{ 
-          marginTop: 20, 
-          padding: 16, 
-          background: "var(--panel2)", 
-          borderRadius: 12,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-        }}>
-          <span style={{ fontWeight: 600 }}>本學期總計</span>
-          <div style={{ display: "flex", gap: 24 }}>
-            <span>
-              <span style={{ color: "var(--muted)", marginRight: 8 }}>課程數</span>
-              <span style={{ fontWeight: 700 }}>{MOCK_COURSES.length}</span>
-            </span>
-            <span>
-              <span style={{ color: "var(--muted)", marginRight: 8 }}>總學分</span>
-              <span style={{ fontWeight: 700, color: "var(--brand)" }}>{totalCredits}</span>
-            </span>
-          </div>
-        </div>
+        )}
       </div>
     </SiteShell>
   );

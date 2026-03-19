@@ -572,7 +572,7 @@ export function BusScheduleScreen(props: any) {
                 borderRadius: theme.radius.lg,
                 borderWidth: 2,
                 borderColor: selectedRoute === route.id ? route.color : theme.colors.border,
-                backgroundColor: selectedRoute === route.id ? `${route.color}15` : pressed ? "rgba(255,255,255,0.04)" : theme.colors.surface2,
+                backgroundColor: selectedRoute === route.id ? `${route.color}15` : pressed ? theme.colors.border : theme.colors.surface2,
                 minWidth: 120,
                 alignItems: "center",
               })}
@@ -630,7 +630,7 @@ export function BusScheduleScreen(props: any) {
                           alignItems: "center",
                           padding: 14,
                           borderRadius: theme.radius.lg,
-                          backgroundColor: pressed ? "rgba(255,255,255,0.06)" : theme.colors.surface2,
+                          backgroundColor: pressed ? theme.colors.border : theme.colors.surface2,
                           borderWidth: 1,
                           borderColor: theme.colors.border,
                           gap: 14,
@@ -725,7 +725,7 @@ export function BusScheduleScreen(props: any) {
                           paddingHorizontal: 8,
                           borderRadius: theme.radius.md,
                           backgroundColor: pressed
-                            ? "rgba(255,255,255,0.06)"
+                            ? theme.colors.surface2
                             : stop.isCurrentLocation
                               ? theme.colors.accentSoft
                               : "transparent",

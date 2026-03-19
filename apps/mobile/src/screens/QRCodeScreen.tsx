@@ -416,7 +416,7 @@ export function QRCodeScreen(props: any) {
                       borderRadius: theme.radius.lg,
                       borderWidth: 2,
                       borderColor: qrType === type.key ? type.color : theme.colors.border,
-                      backgroundColor: qrType === type.key ? `${type.color}15` : pressed ? "rgba(255,255,255,0.06)" : "transparent",
+                      backgroundColor: qrType === type.key ? `${type.color}15` : pressed ? theme.colors.surface2 : "transparent",
                       alignItems: "center",
                       gap: 8,
                     })}
@@ -664,7 +664,7 @@ export function QRCodeScreen(props: any) {
                       paddingHorizontal: 16,
                       paddingVertical: 10,
                       borderRadius: theme.radius.md,
-                      backgroundColor: pressed ? "rgba(255,255,255,0.06)" : theme.colors.surface2,
+                      backgroundColor: pressed ? theme.colors.border : theme.colors.surface2,
                       borderWidth: 1,
                       borderColor: theme.colors.border,
                     })}
@@ -689,7 +689,7 @@ export function QRCodeScreen(props: any) {
                       paddingHorizontal: 16,
                       paddingVertical: 10,
                       borderRadius: theme.radius.md,
-                      backgroundColor: flashOn ? theme.colors.accentSoft : pressed ? "rgba(255,255,255,0.06)" : theme.colors.surface2,
+                      backgroundColor: flashOn ? theme.colors.accentSoft : pressed ? theme.colors.border : theme.colors.surface2,
                       borderWidth: 1,
                       borderColor: flashOn ? theme.colors.accent : theme.colors.border,
                     })}

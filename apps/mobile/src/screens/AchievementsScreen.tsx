@@ -1,5 +1,5 @@
-import React, { useMemo, useState, useEffect, useRef } from "react";
-import { ScrollView, Text, View, Pressable, Animated, Easing } from "react-native";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { ScrollView, Text, View, Pressable, Animated, Easing, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, Card, Pill, Button, AnimatedCard, ProgressRing, Divider } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
@@ -10,7 +10,19 @@ import { useSchool } from "../state/school";
 import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { getDb } from "../firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  orderBy,
+  limit,
+  setDoc,
+  serverTimestamp,
+  onSnapshot,
+  where,
+} from "firebase/firestore";
 
 type Achievement = {
   id: string;
@@ -209,6 +221,38 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
   );
 }
 
+// 這些成就直接從本地狀態計算（不需要 Firestore 追蹤）
+const LOCAL_COMPUTED_IDS = new Set([
+  "first_login", "profile_complete", "first_favorite",
+  "collector_10", "collector_50", "early_bird", "night_owl",
+]);
+
+async function syncAchievementToFirestore(
+  db: any,
+  uid: string,
+  achievementId: string,
+  progress: number,
+  requirement: number
+) {
+  try {
+    const ref = doc(db, "users", uid, "achievements", achievementId);
+    const snap = await getDoc(ref);
+    const unlocked = progress >= requirement;
+    const existingData = snap.exists() ? snap.data() : null;
+
+    if (!existingData || existingData.progress !== progress) {
+      await setDoc(ref, {
+        progress,
+        unlocked,
+        updatedAt: serverTimestamp(),
+        ...(unlocked && !existingData?.unlockedAt ? { unlockedAt: serverTimestamp() } : {}),
+      }, { merge: true });
+    }
+  } catch (e) {
+    // silent - non-critical sync
+  }
+}
+
 export function AchievementsScreen(props: any) {
   const auth = useAuth();
   const fav = useFavorites();
@@ -217,12 +261,11 @@ export function AchievementsScreen(props: any) {
   const db = getDb();
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [firestoreProgress, setFirestoreProgress] = useState<Record<string, { progress: number; unlocked: boolean; unlockedAt?: Date }>>({});
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id]);
-  const { items: myPosts } = useAsyncList(async () => {
-    if (!auth.user) return [];
-    return [];
-  }, [auth.user?.uid]);
 
   const totalFavorites = useMemo(() => {
     return fav.favorites.announcement.length +
@@ -231,52 +274,97 @@ export function AchievementsScreen(props: any) {
       fav.favorites.menu.length;
   }, [fav.favorites]);
 
+  // 訂閱 Firestore 成就資料
+  useEffect(() => {
+    if (!auth.user) return;
+    const ref = collection(db, "users", auth.user.uid, "achievements");
+    const unsubscribe = onSnapshot(ref, (snap) => {
+      const data: Record<string, { progress: number; unlocked: boolean; unlockedAt?: Date }> = {};
+      snap.docs.forEach((d) => {
+        const raw = d.data();
+        data[d.id] = {
+          progress: raw.progress ?? 0,
+          unlocked: raw.unlocked ?? false,
+          unlockedAt: raw.unlockedAt?.toDate?.() ?? undefined,
+        };
+      });
+      setFirestoreProgress(data);
+    });
+    return () => unsubscribe();
+  }, [auth.user?.uid]);
+
+  // 訂閱排行榜
+  useEffect(() => {
+    if (!school?.id) return;
+    const ref = collection(db, "schools", school.id, "leaderboard");
+    const q = query(ref, orderBy("points", "desc"), limit(10));
+    const unsubscribe = onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        const entries = snap.docs.map((d, i) => ({
+          rank: i + 1,
+          userId: d.id,
+          userName: d.data().displayName ?? "同學",
+          points: d.data().points ?? 0,
+          level: calculateLevel(d.data().points ?? 0).level,
+          isCurrentUser: d.id === auth.user?.uid,
+        }));
+        setLeaderboard(entries);
+      }
+    });
+    return () => unsubscribe();
+  }, [school?.id, auth.user?.uid]);
+
   const achievements = useMemo<Achievement[]>(() => {
     const hour = new Date().getHours();
 
     return ACHIEVEMENT_DEFINITIONS.map((def) => {
       let progress = 0;
       let unlocked = false;
+      let unlockedAt: Date | undefined;
 
-      switch (def.id) {
-        case "first_login":
-          progress = auth.user ? 1 : 0;
-          break;
-        case "profile_complete":
-          progress = auth.profile?.displayName ? 1 : 0;
-          break;
-        case "first_favorite":
-        case "collector_10":
-        case "collector_50":
-          progress = totalFavorites;
-          break;
-        case "explore_5":
-        case "explore_20":
-          progress = Math.min(pois.length, def.requirement);
-          break;
-        case "early_bird":
-          progress = hour >= 6 && hour < 7 ? 1 : 0;
-          break;
-        case "night_owl":
-          progress = hour >= 1 && hour < 3 ? 1 : 0;
-          break;
-        case "ai_chat":
-          progress = 1;
-          break;
-        default:
-          progress = Math.floor(Math.random() * def.requirement * 0.8);
+      if (LOCAL_COMPUTED_IDS.has(def.id)) {
+        // 本地計算
+        switch (def.id) {
+          case "first_login":
+            progress = auth.user ? 1 : 0;
+            break;
+          case "profile_complete":
+            progress = auth.profile?.displayName ? 1 : 0;
+            break;
+          case "first_favorite":
+          case "collector_10":
+          case "collector_50":
+            progress = totalFavorites;
+            break;
+          case "early_bird":
+            progress = hour >= 6 && hour < 7 ? 1 : 0;
+            break;
+          case "night_owl":
+            progress = hour >= 1 && hour < 3 ? 1 : 0;
+            break;
+        }
+        unlocked = progress >= def.requirement;
+
+        // 同步本地計算結果到 Firestore
+        if (auth.user) {
+          syncAchievementToFirestore(db, auth.user.uid, def.id, progress, def.requirement);
+        }
+      } else {
+        // 從 Firestore 讀取（若無資料則為 0）
+        const fsData = firestoreProgress[def.id];
+        progress = fsData?.progress ?? 0;
+        unlocked = fsData?.unlocked ?? (progress >= def.requirement);
+        unlockedAt = fsData?.unlockedAt;
       }
-
-      unlocked = progress >= def.requirement;
 
       return {
         ...def,
         progress,
         unlocked,
-        unlockedAt: unlocked ? new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000) : undefined,
+        unlockedAt: unlocked ? (unlockedAt ?? (unlocked ? new Date() : undefined)) : undefined,
       };
     });
-  }, [auth.user, auth.profile, totalFavorites, pois.length]);
+  }, [auth.user, auth.profile, totalFavorites, pois.length, firestoreProgress]);
 
   const totalPoints = useMemo(() => {
     return achievements.filter((a) => a.unlocked).reduce((sum, a) => sum + a.points, 0);
@@ -292,28 +380,45 @@ export function AchievementsScreen(props: any) {
     return achievements.filter((a) => a.category === selectedCategory);
   }, [achievements, selectedCategory]);
 
-  const mockLeaderboard: LeaderboardEntry[] = useMemo(() => {
-    const entries: LeaderboardEntry[] = [
+  // 若無 Firestore 排行榜，顯示 fallback（含真實用戶分數）
+  const displayLeaderboard = useMemo<LeaderboardEntry[]>(() => {
+    if (leaderboard.length > 0) return leaderboard;
+    // fallback with real current user
+    const fallback: LeaderboardEntry[] = [
       { rank: 1, userId: "u1", userName: "學霸小明", points: 1250, level: 8, isCurrentUser: false },
       { rank: 2, userId: "u2", userName: "活動王", points: 980, level: 7, isCurrentUser: false },
       { rank: 3, userId: "u3", userName: "探索家", points: 850, level: 6, isCurrentUser: false },
-      { rank: 4, userId: auth.user?.uid ?? "me", userName: auth.profile?.displayName ?? "我", points: totalPoints, level: levelInfo.level, isCurrentUser: true },
-      { rank: 5, userId: "u5", userName: "新同學", points: 320, level: 3, isCurrentUser: false },
     ];
-    return entries.sort((a, b) => b.points - a.points).map((e, i) => ({ ...e, rank: i + 1 }));
-  }, [auth.user, auth.profile, totalPoints, levelInfo.level]);
+    if (auth.user) {
+      fallback.push({
+        rank: 4,
+        userId: auth.user.uid,
+        userName: auth.profile?.displayName ?? "我",
+        points: totalPoints,
+        level: levelInfo.level,
+        isCurrentUser: true,
+      });
+    }
+    fallback.push({ rank: 5, userId: "u5", userName: "新同學", points: 320, level: 3, isCurrentUser: false });
+    return fallback.sort((a, b) => b.points - a.points).map((e, i) => ({ ...e, rank: i + 1 }));
+  }, [leaderboard, auth.user, auth.profile, totalPoints, levelInfo.level]);
 
   return (
     <Screen>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => setRefreshing(false)} tintColor={theme.colors.accent} />}
+      >
         <AnimatedCard title="" subtitle="">
           <View style={{ alignItems: "center", padding: 8 }}>
-            <View style={{ position: "relative" }}>
+            <View style={{ position: "relative", width: 100, height: 100 }}>
               <ProgressRing
                 progress={levelInfo.currentXP / levelInfo.nextLevelXP}
                 size={100}
                 strokeWidth={8}
                 color={theme.colors.accent}
+                showLabel={false}
               />
               <View
                 style={{
@@ -324,12 +429,13 @@ export function AchievementsScreen(props: any) {
                   bottom: 0,
                   alignItems: "center",
                   justifyContent: "center",
+                  gap: 2,
                 }}
               >
-                <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 32 }}>
+                <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 30, lineHeight: 34 }}>
                   {levelInfo.level}
                 </Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 10 }}>等級</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 14 }}>等級</Text>
               </View>
             </View>
 
@@ -382,9 +488,9 @@ export function AchievementsScreen(props: any) {
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="排行榜" subtitle="本週校園積分榜" delay={100}>
+        <AnimatedCard title="排行榜" subtitle="校園積分榜（即時更新）" delay={100}>
           <View style={{ gap: 8 }}>
-            {mockLeaderboard.map((entry) => (
+            {displayLeaderboard.map((entry) => (
               <View
                 key={entry.userId}
                 style={{
