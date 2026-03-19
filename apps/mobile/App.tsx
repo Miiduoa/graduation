@@ -87,8 +87,8 @@ const TAB_CONFIG: Array<{
   },
   {
     key: "訊息",
-    label: "訊息",
-    icon: { active: "chatbubbles", inactive: "chatbubbles-outline" },
+    label: "收件匣",
+    icon: { active: "mail", inactive: "mail-outline" },
   },
   {
     key: "我的",
