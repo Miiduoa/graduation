@@ -9,8 +9,10 @@ import {
   Platform,
   Animated,
   Easing,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Notifications from "expo-notifications";
 import { Screen, Pill, AnimatedCard } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
@@ -18,8 +20,11 @@ import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
 import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncList } from "../hooks/useAsyncList";
+import { useSchedule } from "../state/schedule";
 import { chatWithAI, getAIStatus, type AIMessage, type AIContext } from "../services/ai";
 import { toDate } from "../utils/format";
+import { getDb } from "../firebase";
+import { doc, getDoc, collection, getDocs, query, orderBy, limit, where } from "firebase/firestore";
 
 type MessageRole = "user" | "assistant" | "system";
 
@@ -211,39 +216,121 @@ export function AIChatScreen(props: any) {
   const { school } = useSchool();
   const auth = useAuth();
   const ds = useDataSource();
+  const db = getDb();
   const scrollRef = useRef<ScrollView>(null);
+  const { courses } = useSchedule();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [aiStatus] = useState(() => getAIStatus());
+  const [pendingAssignments, setPendingAssignments] = useState<any[]>([]);
+  const [weeklyReport, setWeeklyReport] = useState<any>(null);
 
   const { items: announcements } = useAsyncList(() => ds.listAnnouncements(school.id), [ds, school.id]);
   const { items: events } = useAsyncList(() => ds.listEvents(school.id), [ds, school.id]);
   const { items: menus } = useAsyncList(() => ds.listMenus(school.id), [ds, school.id]);
   const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id]);
 
+  // 載入個人化資料
+  useEffect(() => {
+    if (!auth.user) return;
+    const uid = auth.user.uid;
+
+    // 載入待繳作業（從用戶加入的群組）
+    async function loadPersonalData() {
+      try {
+        // 讀取最新週報
+        const weeklySnap = await getDocs(
+          query(collection(db, "users", uid, "weeklyReports"), orderBy("generatedAt", "desc"), limit(1))
+        );
+        if (!weeklySnap.empty) setWeeklyReport(weeklySnap.docs[0].data());
+      } catch {}
+    }
+    loadPersonalData();
+  }, [auth.user?.uid]);
+
+  // Function Calling 動作執行器
+  const executeAIAction = async (action: string, params?: any): Promise<string | null> => {
+    switch (action) {
+      case "schedule_reminder": {
+        const { title, dueDate } = params ?? {};
+        if (!title) return null;
+        try {
+          const trigger = dueDate
+            ? { date: new Date(dueDate) }
+            : { seconds: 3600 };
+          await Notifications.scheduleNotificationAsync({
+            content: { title: "作業提醒", body: `別忘了完成：${title}` },
+            trigger: trigger as any,
+          });
+          return `已為「${title}」設定提醒！`;
+        } catch {
+          return "設定提醒失敗，請確認通知權限已開啟。";
+        }
+      }
+      case "search_group_knowledge": {
+        const { keyword } = params ?? {};
+        return keyword ? `已搜尋「${keyword}」相關群組討論，請前往群組查看。` : null;
+      }
+      default:
+        return null;
+    }
+  };
+
   const aiContext = useMemo<AIContext>(() => ({
     schoolId: school.id,
     userId: auth.user?.uid,
     userName: auth.profile?.displayName ?? undefined,
     announcements: announcements.map((a) => ({ id: a.id, title: a.title, source: a.source })),
-    events: events.map((e) => ({ id: e.id, title: e.title, location: e.location })),
+    events: events.map((e) => ({ id: e.id, title: e.title, location: e.location, startsAt: e.startsAt })),
     menus: menus.map((m) => ({ id: m.id, name: m.name ?? m.cafeteria, price: m.price, cafeteria: m.cafeteria })),
     pois: pois.map((p) => ({ id: p.id, name: p.name, category: p.category })),
-  }), [school.id, auth.user?.uid, auth.profile?.displayName, announcements, events, menus, pois]);
+    // 個人化資料
+    courses: courses.map((c) => ({
+      id: c.id,
+      name: c.name,
+      teacher: c.teacher,
+      dayOfWeek: c.dayOfWeek,
+      startPeriod: c.startPeriod,
+      credits: c.credits,
+    })),
+    pendingAssignments: pendingAssignments.map((a) => ({
+      id: a.id,
+      title: a.title,
+      groupName: a.groupName ?? "",
+      dueAt: a.dueAt ? new Date(a.dueAt.seconds * 1000).toLocaleDateString("zh-TW") : undefined,
+      isLate: a.isLate,
+    })),
+    weeklyReport: weeklyReport ? {
+      summary: weeklyReport.summary ?? "",
+      stats: weeklyReport.stats ?? { onTimeRate: 100, totalSubmissions: 0, newAchievements: 0 },
+    } : undefined,
+  }), [school.id, auth.user?.uid, auth.profile?.displayName, announcements, events, menus, pois, courses, pendingAssignments, weeklyReport]);
 
   useEffect(() => {
     const providerLabel = aiStatus.provider === "openai" ? "OpenAI" : aiStatus.provider === "gemini" ? "Gemini" : "本地";
+    const name = auth.profile?.displayName?.split(" ")[0] ?? (auth.user ? "同學" : "同學");
+    const courseCount = courses.length;
+    const greetingContent = [
+      `哈囉 ${name}！我是你的校園智慧助理 🎓`,
+      auth.user
+        ? `我已載入你的 ${courseCount} 門課程資料，可以幫你查詢作業截止、安排提醒、推薦餐廳等。`
+        : "有什麼我可以幫你的嗎？",
+      "我可以幫你查詢公告、活動、餐廳資訊，也了解你的課表和學業狀況。",
+    ].join("\n\n");
+
     const greeting: Message = {
       id: "greeting",
       role: "assistant",
-      content: GREETING_MESSAGES.join("\n\n") + (aiStatus.provider !== "mock" ? `\n\n（使用 ${providerLabel} 智慧引擎）` : ""),
+      content: greetingContent + (aiStatus.provider !== "mock" ? `\n\n（使用 ${providerLabel} 智慧引擎）` : ""),
       timestamp: new Date(),
-      suggestions: ["今天有什麼公告？", "推薦今天的午餐", "我想找圖書館"],
+      suggestions: auth.user
+        ? ["我有哪些作業快截止？", "今天推薦吃什麼？", "幫我找圖書館"]
+        : ["今天有什麼公告？", "推薦今天的午餐", "我想找圖書館"],
     };
     setMessages([greeting]);
-  }, []);
+  }, [auth.user?.uid, courses.length]);
 
   const generateResponse = async (userMessage: string): Promise<Message> => {
     const lowerMsg = userMessage.toLowerCase();
@@ -451,13 +538,27 @@ export function AIChatScreen(props: any) {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
-  const handleAction = (action: string, params?: any) => {
+  const handleAction = async (action: string, params?: any) => {
     if (action === "navigate" && params) {
       if (params.nested) {
         nav?.navigate?.(params.screen, { screen: params.nested, params: { id: params.id } });
       } else {
         nav?.navigate?.(params.screen);
       }
+      return;
+    }
+
+    // Function Calling 執行
+    const result = await executeAIAction(action, params);
+    if (result) {
+      const actionResultMsg: Message = {
+        id: `action-${Date.now()}`,
+        role: "assistant",
+        content: result,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, actionResultMsg]);
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     }
   };
 

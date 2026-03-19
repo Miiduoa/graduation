@@ -1,7 +1,7 @@
 import React, { memo, useCallback } from "react";
 import { View, Text, Pressable, Platform, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { getCurrentTheme, shadowStyle } from "./theme";
+import { getCurrentTheme, softShadowStyle } from "./theme";
 import { Pill, StatusBadge } from "./components";
 import { formatDateTime, formatRelativeTime, toDate } from "../utils/format";
 
@@ -35,7 +35,7 @@ export const AnnouncementItem = memo(function AnnouncementItem({
         borderColor: pressed ? theme.colors.accent : theme.colors.border,
         padding: 18,
         gap: 10,
-        ...shadowStyle(theme.shadows.sm),
+        ...softShadowStyle(theme.shadows.soft),
         transform: [{ scale: pressed ? 0.985 : 1 }],
       })}
       accessible
@@ -151,7 +151,7 @@ export const EventItem = memo(function EventItem({
           borderWidth: 1,
           borderColor: theme.colors.border,
           overflow: "hidden",
-          ...shadowStyle(theme.shadows.sm),
+          ...softShadowStyle(theme.shadows.soft),
           transform: [{ scale: pressed ? 0.97 : 1 }],
         })}
       >
@@ -242,7 +242,7 @@ export const EventItem = memo(function EventItem({
         borderColor: pressed ? theme.colors.accent : theme.colors.border,
         padding: 18,
         gap: 10,
-        ...shadowStyle(theme.shadows.sm),
+        ...softShadowStyle(theme.shadows.soft),
         transform: [{ scale: pressed ? 0.985 : 1 }],
       })}
       accessible
@@ -340,7 +340,7 @@ export const MenuItem = memo(function MenuItem({
         borderColor: theme.colors.border,
         opacity: isAvailable ? 1 : 0.45,
         gap: 14,
-        ...shadowStyle(theme.shadows.sm),
+        ...softShadowStyle(theme.shadows.soft),
         transform: [{ scale: pressed ? 0.985 : 1 }],
       })}
     >

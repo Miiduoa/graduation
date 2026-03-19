@@ -1,12 +1,11 @@
 import React, { useMemo, useEffect, useState } from "react";
 import { ScrollView, View, Text, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { collection, query, where, getDocs, limit, orderBy, onSnapshot } from "firebase/firestore";
 import { Card, Button, Pill, Badge } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import { getDb } from "../firebase";
@@ -149,33 +148,35 @@ export function MessagesHomeScreen(props: any) {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <LinearGradient
-        colors={[theme.colors.accent, theme.colors.accent + "CC", theme.colors.accent + "88"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{ paddingTop: insets.top + 8, paddingBottom: 24, paddingHorizontal: 20 }}
+      <View
+        style={{
+          paddingTop: insets.top + 12,
+          paddingBottom: 20,
+          paddingHorizontal: 20,
+          backgroundColor: theme.colors.bg,
+        }}
       >
-        <Text style={styles.headerTitle}>訊息</Text>
+        <Text style={[styles.headerTitle, { color: theme.colors.text }]}>訊息</Text>
 
         {auth.user && totalUnread > 0 && (
           <View style={styles.statsRow}>
             {unreadGroupsCount > 0 && (
-              <View style={styles.statBlock}>
-                <Ionicons name="people" size={16} color="#fff" />
-                <Text style={styles.statNumber}>{unreadGroupsCount}</Text>
-                <Text style={styles.statLabel}>群組未讀</Text>
+              <View style={[styles.statBlock, { backgroundColor: theme.colors.accentSoft, borderWidth: 1, borderColor: theme.colors.border }]}>
+                <Ionicons name="people" size={16} color={theme.colors.accent} />
+                <Text style={[styles.statNumber, { color: theme.colors.accent }]}>{unreadGroupsCount}</Text>
+                <Text style={[styles.statLabel, { color: theme.colors.muted }]}>群組未讀</Text>
               </View>
             )}
             {unreadDmsCount > 0 && (
-              <View style={styles.statBlock}>
-                <Ionicons name="chatbubble" size={16} color="#fff" />
-                <Text style={styles.statNumber}>{unreadDmsCount}</Text>
-                <Text style={styles.statLabel}>私訊未讀</Text>
+              <View style={[styles.statBlock, { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }]}>
+                <Ionicons name="chatbubble" size={16} color={theme.colors.accent} />
+                <Text style={[styles.statNumber, { color: theme.colors.accent }]}>{unreadDmsCount}</Text>
+                <Text style={[styles.statLabel, { color: theme.colors.muted }]}>私訊未讀</Text>
               </View>
             )}
           </View>
         )}
-      </LinearGradient>
+      </View>
 
       <ScrollView
         contentContainerStyle={{ gap: 16, padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
@@ -378,11 +379,11 @@ const styles = StyleSheet.create({
   },
   sectionCard: {
     backgroundColor: theme.colors.surface,
-    borderRadius: 16,
+    borderRadius: theme.radius.md,
     padding: 18,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    ...shadowStyle(theme.shadows.sm),
+    ...softShadowStyle(theme.shadows.soft),
   },
   sectionHeader: {
     flexDirection: "row",
@@ -428,11 +429,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: 14,
-    borderRadius: 14,
+    borderRadius: theme.radius.md,
     backgroundColor: theme.colors.surface,
     borderWidth: 1,
+    borderColor: theme.colors.border,
     gap: 12,
-    ...shadowStyle(theme.shadows.sm),
+    ...softShadowStyle(theme.shadows.soft),
   },
   listItemIcon: {
     width: 42,

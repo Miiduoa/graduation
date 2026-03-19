@@ -520,7 +520,7 @@ export function CreditAuditInputScreen(props: any) {
                   borderRadius: theme.radius.md,
                   borderWidth: 1,
                   borderColor: theme.colors.border,
-                  backgroundColor: "rgba(255,255,255,0.04)",
+                  backgroundColor: theme.colors.surface2,
                   color: theme.colors.text,
                   fontSize: 15,
                 }}
@@ -542,7 +542,7 @@ export function CreditAuditInputScreen(props: any) {
                       borderRadius: theme.radius.md,
                       borderWidth: 1,
                       borderColor: theme.colors.border,
-                      backgroundColor: "rgba(255,255,255,0.04)",
+                      backgroundColor: theme.colors.surface2,
                       color: theme.colors.text,
                       fontSize: 15,
                       textAlign: "center",

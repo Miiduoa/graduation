@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState, useRef } from "react";
 import { FlatList, ScrollView, Text, Pressable, View, Linking, Platform, RefreshControl, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { useAsyncList } from "../hooks/useAsyncList";
@@ -12,7 +11,7 @@ import { useSchool } from "../state/school";
 import { useDemo } from "../state/demo";
 import { useToast } from "../ui/Toast";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 
 type Poi = {
   id: string;
@@ -311,47 +310,49 @@ export function MapScreen(props: any) {
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-          <LinearGradient
-            colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <View
             style={{
               paddingTop: insets.top + 12,
               paddingBottom: 16,
               paddingHorizontal: theme.space.lg,
+              backgroundColor: theme.colors.bg,
             }}
           >
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <View style={{
                   width: 40, height: 40, borderRadius: 12,
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  backgroundColor: theme.colors.accentSoft,
                   alignItems: "center", justifyContent: "center",
                 }}>
-                  <Ionicons name="map" size={22} color="#fff" />
+                  <Ionicons name="map" size={22} color={theme.colors.accent} />
                 </View>
-                <Text style={{ fontSize: 28, fontWeight: "900", color: "#fff", letterSpacing: -0.5 }}>
+                <Text style={{ fontSize: 34, fontWeight: "800", color: theme.colors.text, letterSpacing: -1 }}>
                   地圖
                 </Text>
               </View>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <View style={{
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  backgroundColor: theme.colors.surface,
                   borderRadius: theme.radius.full,
                   paddingHorizontal: 10,
                   paddingVertical: 4,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
                 }}>
-                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>
+                  <Text style={{ color: theme.colors.textSecondary, fontWeight: "700", fontSize: 12 }}>
                     {`${stats.total} 點位`}
                   </Text>
                 </View>
                 <View style={{
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  backgroundColor: theme.colors.surface,
                   borderRadius: theme.radius.full,
                   paddingHorizontal: 10,
                   paddingVertical: 4,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
                 }}>
-                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>
+                  <Text style={{ color: theme.colors.textSecondary, fontWeight: "700", fontSize: 12 }}>
                     {`${stats.validCoords} 可導航`}
                   </Text>
                 </View>
@@ -370,13 +371,15 @@ export function MapScreen(props: any) {
                     paddingHorizontal: 14,
                     paddingVertical: 7,
                     borderRadius: theme.radius.full,
-                    backgroundColor: !selectedCategory ? "#fff" : "rgba(255,255,255,0.15)",
+                    backgroundColor: !selectedCategory ? theme.colors.accent : theme.colors.surface,
+                    borderWidth: 1,
+                    borderColor: !selectedCategory ? "transparent" : theme.colors.border,
                     transform: [{ scale: pressed ? 0.96 : 1 }],
                   })}
                 >
                   <Text
                     style={{
-                      color: !selectedCategory ? theme.colors.accent : "#fff",
+                      color: !selectedCategory ? "#fff" : theme.colors.textSecondary,
                       fontWeight: "700",
                       fontSize: 13,
                     }}
@@ -392,13 +395,15 @@ export function MapScreen(props: any) {
                       paddingHorizontal: 14,
                       paddingVertical: 7,
                       borderRadius: theme.radius.full,
-                      backgroundColor: selectedCategory === cat ? "#fff" : "rgba(255,255,255,0.15)",
+                      backgroundColor: selectedCategory === cat ? theme.colors.accent : theme.colors.surface,
+                      borderWidth: 1,
+                      borderColor: selectedCategory === cat ? "transparent" : theme.colors.border,
                       transform: [{ scale: pressed ? 0.96 : 1 }],
                     })}
                   >
                     <Text
                       style={{
-                        color: selectedCategory === cat ? theme.colors.accent : "#fff",
+                        color: selectedCategory === cat ? "#fff" : theme.colors.textSecondary,
                         fontWeight: "700",
                         fontSize: 13,
                       }}
@@ -409,7 +414,7 @@ export function MapScreen(props: any) {
                 ))}
               </ScrollView>
             )}
-          </LinearGradient>
+          </View>
 
           <View style={{ paddingHorizontal: theme.space.lg, paddingTop: theme.space.md, gap: theme.space.md, flex: 1 }}>
             <SearchBar value={q} onChange={setQ} placeholder="搜尋點位（名稱/分類/描述）" />
@@ -522,7 +527,7 @@ export function MapScreen(props: any) {
                         padding: theme.space.lg,
                         gap: 10,
                         transform: [{ scale: pressed ? 0.97 : 1 }],
-                        ...shadowStyle(theme.shadows.sm),
+                        ...softShadowStyle(theme.shadows.soft),
                       })}
                       accessible
                       accessibilityRole="button"
@@ -618,7 +623,7 @@ export function MapScreen(props: any) {
                       borderTopColor: catColor.fg,
                       backgroundColor: theme.colors.surface,
                       transform: [{ scale: pressed ? 0.97 : 1 }],
-                      ...shadowStyle(theme.shadows.sm),
+                      ...softShadowStyle(theme.shadows.soft),
                     })}
                     accessible
                     accessibilityRole="button"

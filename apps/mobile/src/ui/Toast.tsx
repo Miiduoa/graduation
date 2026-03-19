@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Animated, Pressable, StyleSheet, Text, View, Dimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { theme, shadowStyle } from "./theme";
+import { theme, softShadowStyle } from "./theme";
 import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 type ToastType = "success" | "error" | "warning" | "info";
@@ -84,7 +84,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
         borderColor: theme.colors.border,
         borderLeftWidth: 3,
         borderLeftColor: color,
-        ...shadowStyle(theme.shadows.md),
+        ...softShadowStyle(theme.shadows.soft),
         transform: [{ translateY }, { scale }],
         opacity,
       }}
@@ -231,7 +231,7 @@ export function SnackbarProvider({ children }: { children: React.ReactNode }) {
             borderRadius: theme.radius.md,
             paddingVertical: 14,
             paddingHorizontal: 18,
-            ...shadowStyle(theme.shadows.lg),
+            ...softShadowStyle(theme.shadows.soft),
             zIndex: 9999,
             transform: [{ translateY }],
           }}

@@ -2,11 +2,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { getAuthInstance, getDb, subscribeToTokenRefresh } from "../firebase";
 import { resolveSchoolByEmail } from "@campus/shared/src/schools";
 import { clearAllCache, clearCacheForSchool } from "../data/cachedSource";
 import { clearAllOfflineData, getOfflineQueue } from "../services/offline";
+import { getCachedPushToken, removePushTokenFromFirestore } from "../services/notifications";
 
 import type { UserRole as DataUserRole } from "../data/types";
 
@@ -54,16 +55,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
     const snap = await getDoc(ref);
     const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
 
-    let schoolId = (data.schoolId as string) ?? null;
-    const mapped = resolveSchoolByEmail(u.email);
-    if (mapped?.id && mapped.id !== schoolId) {
-      schoolId = mapped.id;
-      try {
-        await setDoc(ref, { schoolId, email: u.email ?? null }, { merge: true });
-      } catch (writeError) {
-        console.warn("[auth] Failed to sync schoolId:", writeError);
-      }
-    }
+    const schoolId = (data.schoolId as string) ?? resolveSchoolByEmail(u.email)?.id ?? null;
 
     return {
       uid: u.uid,
@@ -249,9 +241,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     // 先清理本地資料，再登出
     // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
     const cleanupErrors: Error[] = [];
-    
-    // 使用 Promise.allSettled 來確保所有清理操作都嘗試執行
-    const cleanupResults = await Promise.allSettled([
+    const cleanupTasks: Promise<unknown>[] = [
       clearAllCache().catch((e) => {
         console.warn("[auth] clearAllCache failed:", e);
         throw e;
@@ -268,11 +258,28 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         "@schedule_semester",
         "@schedule_view",
         "@schedule_filter",
-      ]).catch((e) => {
+        ]).catch((e) => {
         console.warn("[auth] AsyncStorage cleanup failed:", e);
         throw e;
       }),
-    ]);
+    ];
+
+    if (currentUserId) {
+      cleanupTasks.push(
+        getCachedPushToken()
+          .then((token) => {
+            if (!token) return;
+            return removePushTokenFromFirestore(currentUserId, token);
+          })
+          .catch((e) => {
+            console.warn("[auth] Failed to remove push token during sign out:", e);
+            throw e;
+          })
+      );
+    }
+
+    // 使用 Promise.allSettled 來確保所有清理操作都嘗試執行
+    const cleanupResults = await Promise.allSettled(cleanupTasks);
     
     cleanupResults.forEach((result, index) => {
       if (result.status === "rejected") {
@@ -388,22 +395,4 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
-}
-
-// Helper: ensure a basic user doc exists (role-based feature gating later)
-export async function ensureUserDoc(params: { uid: string; schoolId: string; email?: string | null }) {
-  const db = getDb();
-  const ref = doc(db, "users", params.uid);
-  const snap = await getDoc(ref);
-  if (snap.exists()) {
-    // Keep schoolId in sync (merge) but don't overwrite role.
-    await setDoc(ref, { schoolId: params.schoolId, email: params.email ?? null }, { merge: true });
-    return;
-  }
-  await setDoc(ref, {
-    schoolId: params.schoolId,
-    email: params.email ?? null,
-    role: "student",
-    createdAt: new Date(),
-  });
 }

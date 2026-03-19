@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from "react";
-import { ScrollView, Text, TextInput, View } from "react-native";
-import { Screen, Card, Button, Pill, SectionTitle, LoadingState, ErrorState } from "../ui/components";
+import { ScrollView, Text, TextInput, View, Pressable, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Screen, Card, Button, Pill, SectionTitle, LoadingState, ErrorState, AnimatedCard } from "../ui/components";
 import { generateJoinCode } from "../utils/joinCode";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
 import { useAsyncList } from "../hooks/useAsyncList";
@@ -19,8 +20,10 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
 } from "firebase/firestore";
+import { chatWithAI } from "../services/ai";
 
 type Group = {
   id: string;
@@ -52,6 +55,8 @@ type Comment = {
   authorId: string;
   authorEmail?: string | null;
   createdAt?: any;
+  isBestAnswer?: boolean;
+  isAI?: boolean;
 };
 
 export function GroupDetailScreen(props: any) {
@@ -228,7 +233,7 @@ export function GroupDetailScreen(props: any) {
     }
 
     try {
-      await addDoc(collection(db, "groups", groupId, "posts"), {
+      const postRef = await addDoc(collection(db, "groups", groupId, "posts"), {
         kind: composeKind,
         title: title.trim(),
         body: body.trim(),
@@ -238,12 +243,82 @@ export function GroupDetailScreen(props: any) {
         solved: composeKind === "question" ? false : undefined,
         schoolId: school.id,
       });
+
+      // 如果是問題，觸發 AI 初步回答
+      if (composeKind === "question") {
+        const postBody = body.trim();
+        const postTitle = title.trim();
+        // 非同步生成 AI 回答（不阻擋 UI）
+        (async () => {
+          try {
+            const aiResponse = await chatWithAI(
+              [{ role: "user", content: `課程問題：${postTitle}\n\n詳細說明：${postBody}` }],
+              { schoolId: school.id, userId: "ai-assistant" }
+            );
+            if (aiResponse.content && !aiResponse.error) {
+              await addDoc(collection(db, "groups", groupId, "posts", postRef.id, "comments"), {
+                body: `**AI 初步回答（供參考）：**\n\n${aiResponse.content}\n\n_此回答由 AI 自動生成，請以教師和同學的回答為準。_`,
+                createdAt: serverTimestamp(),
+                authorId: "ai-assistant",
+                authorEmail: "AI 助理",
+                isAI: true,
+              });
+            }
+          } catch {}
+        })();
+      }
+
       setTitle("");
       setBody("");
       reloadPosts();
     } catch (e: any) {
       setErr(e?.message ?? "發文失敗");
     }
+  };
+
+  const onMarkBestAnswer = async (postId: string, commentId: string) => {
+    if (!groupId || !auth.user) return;
+    try {
+      await updateDoc(doc(db, "groups", groupId, "posts", postId, "comments", commentId), {
+        isBestAnswer: true,
+      });
+      await updateDoc(doc(db, "groups", groupId, "posts", postId), {
+        solved: true,
+        bestAnswerCommentId: commentId,
+      });
+      reloadPosts();
+    } catch {}
+  };
+
+  const onArchiveToKnowledgeBase = async (postId: string, postTitle: string, postBody: string) => {
+    if (!groupId || !auth.user) return;
+    Alert.alert(
+      "歸入知識庫",
+      `將「${postTitle}」歸入此課程的知識庫，讓未來的同學更容易找到？`,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "確認歸入",
+          onPress: async () => {
+            try {
+              await setDoc(
+                doc(db, "groups", groupId, "knowledgeBase", postId),
+                {
+                  postId,
+                  title: postTitle,
+                  summary: postBody.slice(0, 200),
+                  archivedAt: serverTimestamp(),
+                  archivedBy: auth.user!.uid,
+                },
+                { merge: true }
+              );
+              await updateDoc(doc(db, "groups", groupId, "posts", postId), { archivedToKnowledge: true });
+              Alert.alert("已歸入知識庫！", "其他同學搜尋時將能找到這則問答。");
+            } catch {}
+          },
+        },
+      ]
+    );
   };
 
   const onAddComment = async (postId: string) => {
@@ -339,7 +414,7 @@ export function GroupDetailScreen(props: any) {
               borderRadius: theme.radius.md,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              backgroundColor: "rgba(255,255,255,0.04)",
+              backgroundColor: theme.colors.surface2,
               color: theme.colors.text,
             }}
           />
@@ -364,7 +439,7 @@ export function GroupDetailScreen(props: any) {
               borderRadius: theme.radius.md,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              backgroundColor: "rgba(255,255,255,0.04)",
+              backgroundColor: theme.colors.surface2,
               color: theme.colors.text,
             }}
           />
@@ -382,7 +457,7 @@ export function GroupDetailScreen(props: any) {
               borderRadius: theme.radius.md,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              backgroundColor: "rgba(255,255,255,0.04)",
+              backgroundColor: theme.colors.surface2,
               color: theme.colors.text,
               textAlignVertical: "top",
             }}
@@ -401,28 +476,145 @@ export function GroupDetailScreen(props: any) {
           <Card title="公告 / Q&A" subtitle="最新 50 則">
             <SectionTitle text={`結果：${visiblePosts.length}`} />
             <View style={{ marginTop: 10, gap: 10 }}>
-              {visiblePosts.map((p) => (
-                <Card
-                  key={p.id}
-                  title={p.title}
-                  subtitle={`${p.kind}${p.kind === "question" ? (p.solved ? "｜已解決" : "｜未解決") : ""}｜${p.authorEmail ?? p.authorId}`}
-                >
-                  <Text style={{ color: theme.colors.text, lineHeight: 20 }}>{p.body}</Text>
+              {visiblePosts.map((p) => {
+                const lastComment = lastComments[p.id];
+                const isQuestion = p.kind === "question";
+                const isOwnerOrTeacher = canManageCourse || p.authorId === auth.user?.uid;
 
-                  {lastComments[p.id] ? (
-                    <View style={{ marginTop: 10 }}>
-                      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>最新留言：{lastComments[p.id]?.authorEmail ?? ""}</Text>
-                      <Text style={{ color: theme.colors.muted, lineHeight: 18 }}>{lastComments[p.id]?.body}</Text>
+                return (
+                  <View
+                    key={p.id}
+                    style={{
+                      borderRadius: theme.radius.lg,
+                      backgroundColor: theme.colors.surface,
+                      borderWidth: 1,
+                      borderColor: isQuestion && p.solved ? theme.colors.success : theme.colors.border,
+                      padding: 16,
+                      gap: 10,
+                      ...softShadowStyle(theme.shadows.soft),
+                    }}
+                  >
+                    {/* 標頭 */}
+                    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                          <Pill
+                            text={isQuestion ? (p.solved ? "✓ 已解決" : "問題") : p.kind === "announcement" ? "公告" : "貼文"}
+                            kind={isQuestion && p.solved ? "success" : isQuestion ? "accent" : "default"}
+                            size="sm"
+                          />
+                          {(p as any).archivedToKnowledge && (
+                            <Pill text="📚 知識庫" kind="accent" size="sm" />
+                          )}
+                        </View>
+                        <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 15 }}>{p.title}</Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+                          {p.authorEmail ?? p.authorId}
+                        </Text>
+                      </View>
                     </View>
-                  ) : null}
 
-                  <View style={{ marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-                    <Button text="查看 / 留言" kind="primary" onPress={() => nav?.navigate?.("GroupPost", { groupId, postId: p.id })} />
-                    <Button text="成員" onPress={() => nav?.navigate?.("GroupMembers", { groupId })} />
-                    <Button text="私訊作者" onPress={() => nav?.navigate?.("Chat", { kind: "dm", peerId: p.authorId, refPostId: p.id })} />
+                    <Text style={{ color: theme.colors.text, lineHeight: 20 }} numberOfLines={3}>{p.body}</Text>
+
+                    {/* AI 初步回答或最新留言 */}
+                    {lastComment ? (
+                      <View
+                        style={{
+                          padding: 10,
+                          borderRadius: theme.radius.md,
+                          backgroundColor: lastComment.isAI
+                            ? "rgba(139,92,246,0.08)"
+                            : lastComment.isBestAnswer
+                            ? theme.colors.successSoft
+                            : theme.colors.surface2,
+                          borderWidth: 1,
+                          borderColor: lastComment.isBestAnswer
+                            ? theme.colors.success
+                            : lastComment.isAI
+                            ? "#8B5CF6"
+                            : theme.colors.border,
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                          {lastComment.isAI && <Ionicons name="sparkles" size={12} color="#8B5CF6" />}
+                          {lastComment.isBestAnswer && <Ionicons name="checkmark-circle" size={12} color={theme.colors.success} />}
+                          <Text style={{ color: lastComment.isAI ? "#8B5CF6" : theme.colors.muted, fontSize: 11, fontWeight: "700" }}>
+                            {lastComment.isBestAnswer ? "最佳解答" : lastComment.isAI ? "AI 初步回答" : `留言：${lastComment.authorEmail ?? ""}`}
+                          </Text>
+                        </View>
+                        <Text style={{ color: theme.colors.text, fontSize: 13, lineHeight: 18 }} numberOfLines={2}>
+                          {lastComment.body}
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    {/* 操作按鈕 */}
+                    <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                      <Pressable
+                        onPress={() => nav?.navigate?.("GroupPost", { groupId, postId: p.id })}
+                        style={({ pressed }) => ({
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: theme.radius.full,
+                          backgroundColor: pressed ? theme.colors.accentSoft : theme.colors.accent,
+                        })}
+                      >
+                        <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>查看 / 留言</Text>
+                      </Pressable>
+
+                      {p.authorId !== "ai-assistant" && (
+                        <Pressable
+                          onPress={() => nav?.navigate?.("Chat", { kind: "dm", peerId: p.authorId, refPostId: p.id })}
+                          style={({ pressed }) => ({
+                            paddingHorizontal: 14,
+                            paddingVertical: 8,
+                            borderRadius: theme.radius.full,
+                            backgroundColor: theme.colors.surface2,
+                            borderWidth: 1,
+                            borderColor: theme.colors.border,
+                            opacity: pressed ? 0.7 : 1,
+                          })}
+                        >
+                          <Text style={{ color: theme.colors.text, fontSize: 13 }}>私訊</Text>
+                        </Pressable>
+                      )}
+
+                      {isOwnerOrTeacher && isQuestion && !p.solved && (
+                        <Pressable
+                          onPress={() => nav?.navigate?.("GroupPost", { groupId, postId: p.id, markBestMode: true })}
+                          style={({ pressed }) => ({
+                            paddingHorizontal: 14,
+                            paddingVertical: 8,
+                            borderRadius: theme.radius.full,
+                            backgroundColor: pressed ? theme.colors.successSoft : theme.colors.successSoft,
+                            borderWidth: 1,
+                            borderColor: theme.colors.success,
+                          })}
+                        >
+                          <Text style={{ color: theme.colors.success, fontSize: 13, fontWeight: "700" }}>標記最佳解答</Text>
+                        </Pressable>
+                      )}
+
+                      {isOwnerOrTeacher && isQuestion && p.solved && !(p as any).archivedToKnowledge && (
+                        <Pressable
+                          onPress={() => onArchiveToKnowledgeBase(p.id, p.title, p.body)}
+                          style={({ pressed }) => ({
+                            paddingHorizontal: 14,
+                            paddingVertical: 8,
+                            borderRadius: theme.radius.full,
+                            backgroundColor: "rgba(99,102,241,0.1)",
+                            borderWidth: 1,
+                            borderColor: "#6366F1",
+                            opacity: pressed ? 0.7 : 1,
+                          })}
+                        >
+                          <Text style={{ color: "#6366F1", fontSize: 13, fontWeight: "700" }}>📚 歸入知識庫</Text>
+                        </Pressable>
+                      )}
+                    </View>
                   </View>
-                </Card>
-              ))}
+                );
+              })}
 
               {visiblePosts.length === 0 ? <Text style={{ color: theme.colors.muted }}>目前沒有貼文。</Text> : null}
             </View>

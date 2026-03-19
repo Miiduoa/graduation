@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "./navigationTheme";
-import { theme, shadowStyle } from "./theme";
+import { theme, softShadowStyle } from "./theme";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -79,7 +79,7 @@ export function Modal({
               borderWidth: 1,
               borderColor: theme.colors.border,
               overflow: "hidden",
-              ...shadowStyle(theme.shadows.xl),
+              ...softShadowStyle(theme.shadows.soft),
             },
             getSizeStyle(),
             { opacity: fadeAnim, transform: [{ scale: scaleAnim }] },
@@ -258,7 +258,7 @@ export function LoadingModal({ visible, message = "載入中..." }: LoadingModal
             minWidth: 130,
             borderWidth: 1,
             borderColor: theme.colors.border,
-            ...shadowStyle(theme.shadows.lg),
+            ...softShadowStyle(theme.shadows.soft),
           }}
         >
           <Animated.View

@@ -1,386 +1,164 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { resolveSchool } from "@campus/shared/src/schools";
-import { mockClubEvents } from "@campus/shared/src/mockData";
+import { useState, type CSSProperties } from "react";
 import { SiteShell } from "@/components/SiteShell";
-import { useAuth } from "@/components/AuthGuard";
-import { useToast } from "@/components/ui";
-import {
-  cancelEventRegistration,
-  checkEventRegistration,
-  fetchEvents,
-  registerForEvent,
-  type ClubEvent,
-} from "@/lib/firebase";
-import { useSchoolCollectionData } from "@/lib/useSchoolCollectionData";
+import { resolveSchoolPageContext } from "@/lib/pageContext";
 
-type ViewMode = "list" | "grid" | "calendar";
-type EventStatus = "all" | "upcoming" | "ongoing" | "ended";
+interface Club {
+  id: string;
+  name: string;
+  category: string;
+  members: number;
+  nextEvent?: string;
+  nextEventDate?: string;
+  description: string;
+  color: string;
+  icon: string;
+  isJoined: boolean;
+}
+
+const MOCK_CLUBS: Club[] = [
+  { id: "1", name: "程式設計社", category: "學術", members: 120, nextEvent: "黑客松", nextEventDate: "3/22", description: "分享程式技術，舉辦競賽與 side project 工作坊", color: "#5E6AD2", icon: "💻", isJoined: true },
+  { id: "2", name: "攝影社", category: "藝術", members: 88, nextEvent: "春季外拍", nextEventDate: "3/29", description: "攝影技巧分享與校園及戶外拍攝活動", color: "#BF5AF2", icon: "📷", isJoined: true },
+  { id: "3", name: "登山社", category: "運動", members: 65, nextEvent: "雪山健行", nextEventDate: "4/5", description: "台灣各大名山探訪，培養野外體能與生態知識", color: "#34C759", icon: "⛰️", isJoined: false },
+  { id: "4", name: "創業研究社", category: "學術", members: 52, nextEvent: "創業沙龍", nextEventDate: "3/25", description: "創業理念交流、商業計畫書撰寫與投資人對接", color: "#FF9500", icon: "🚀", isJoined: false },
+  { id: "5", name: "管弦樂社", category: "藝術", members: 78, nextEvent: "春季音樂會", nextEventDate: "4/12", description: "弦樂與管樂交流，每學期舉辦正式演奏會", color: "#FF3B30", icon: "🎻", isJoined: false },
+  { id: "6", name: "桌球社", category: "運動", members: 43, nextEvent: "社際盃", nextEventDate: "4/2", description: "每週固定練習，積極參與校際桌球競賽", color: "#007AFF", icon: "🏓", isJoined: false },
+];
+
+const CATEGORIES = ["全部", "學術", "藝術", "運動"];
 
 export default function ClubsPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const school = resolveSchool({ school: props.searchParams?.school, schoolId: props.searchParams?.schoolId });
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [statusFilter, setStatusFilter] = useState<EventStatus>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [registeredEvents, setRegisteredEvents] = useState<Set<string>>(new Set());
-  const [submittingEventId, setSubmittingEventId] = useState<string | null>(null);
-  const { user } = useAuth();
-  const toast = useToast();
-  const { data: events, loading, sourceMode } = useSchoolCollectionData<ClubEvent>(
-    school.id,
-    fetchEvents,
-    mockClubEvents
+  const { school } = resolveSchoolPageContext(props.searchParams);
+  const [category, setCategory] = useState("全部");
+  const [clubs, setClubs] = useState(MOCK_CLUBS);
+  const [search, setSearch] = useState("");
+
+  const filtered = clubs.filter(
+    (c) =>
+      (category === "全部" || c.category === category) &&
+      (!search || c.name.includes(search))
   );
-  const usingDemo = sourceMode === "demo";
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadRegistrations() {
-      if (sourceMode !== "firebase" || !user || events.length === 0) {
-        if (sourceMode === "firebase") {
-          setRegisteredEvents(new Set());
-        }
-        return;
-      }
-
-      const pairs = await Promise.all(
-        events.map(async (event) => [event.id, await checkEventRegistration(event.id, user.uid)] as const)
-      );
-
-      if (!active) return;
-      setRegisteredEvents(new Set(pairs.filter(([, registered]) => registered).map(([eventId]) => eventId)));
-    }
-
-    loadRegistrations();
-
-    return () => {
-      active = false;
-    };
-  }, [events, sourceMode, user]);
-
-  const getEventStatus = (startsAt: string, endsAt: string): "upcoming" | "ongoing" | "ended" => {
-    const now = new Date();
-    const start = new Date(startsAt);
-    const end = new Date(endsAt);
-    if (now < start) return "upcoming";
-    if (now > end) return "ended";
-    return "ongoing";
+  const toggleJoin = (id: string) => {
+    setClubs((prev) => prev.map((c) => c.id === id ? { ...c, isJoined: !c.isJoined } : c));
   };
 
-  const getStatusBadge = (status: "upcoming" | "ongoing" | "ended") => {
-    const styles: Record<string, { bg: string; color: string; text: string }> = {
-      upcoming: { bg: "rgba(59, 130, 246, 0.2)", color: "#3B82F6", text: "即將開始" },
-      ongoing: { bg: "rgba(16, 185, 129, 0.2)", color: "#10B981", text: "進行中" },
-      ended: { bg: "rgba(107, 114, 128, 0.2)", color: "#6B7280", text: "已結束" },
-    };
-    const s = styles[status];
-    return (
-      <span style={{ padding: "3px 10px", borderRadius: 8, background: s.bg, color: s.color, fontSize: 12, fontWeight: 600 }}>
-        {s.text}
-      </span>
-    );
-  };
-
-  const filteredEvents = useMemo(() => {
-    return events.filter((e) => {
-      const status = getEventStatus(e.startsAt, e.endsAt);
-      const matchesStatus = statusFilter === "all" || status === statusFilter;
-      const matchesSearch = !searchQuery ||
-        e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (e.description && e.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (e.location && e.location.toLowerCase().includes(searchQuery.toLowerCase()));
-      return matchesStatus && matchesSearch;
-    });
-  }, [events, statusFilter, searchQuery]);
-
-  const normalizeError = (error?: string) => error?.replace(/^Error:\s*/, "") ?? "請稍後再試";
-
-  const handleRegister = async (eventItem: ClubEvent) => {
-    const eventId = eventItem.id;
-
-    if (sourceMode !== "firebase") {
-      setRegisteredEvents((prev) => {
-        const next = new Set(prev);
-        if (next.has(eventId)) {
-          next.delete(eventId);
-          toast.info("已取消示範報名");
-        } else {
-          next.add(eventId);
-          toast.success("已完成示範報名");
-        }
-        return next;
-      });
-      return;
-    }
-
-    if (!user) {
-      const returnUrl =
-        typeof window !== "undefined" ? window.location.pathname + window.location.search : `/clubs?school=${school.code}`;
-      window.location.href = `/login?returnUrl=${encodeURIComponent(returnUrl)}`;
-      return;
-    }
-
-    setSubmittingEventId(eventId);
-    try {
-      const isRegistered = registeredEvents.has(eventId);
-      const result = isRegistered
-        ? await cancelEventRegistration(eventId, user.uid)
-        : await registerForEvent(eventId, user.uid, {
-            name: user.displayName ?? undefined,
-            email: user.email ?? undefined,
-          });
-
-      if (!result.success) {
-        toast.error(isRegistered ? "取消報名失敗" : "報名失敗", normalizeError(result.error));
-        return;
-      }
-
-      setRegisteredEvents((prev) => {
-        const next = new Set(prev);
-        if (isRegistered) {
-          next.delete(eventId);
-        } else {
-          next.add(eventId);
-        }
-        return next;
-      });
-
-      toast.success(isRegistered ? "已取消報名" : "報名成功", eventItem.title);
-    } finally {
-      setSubmittingEventId(null);
-    }
-  };
-
-  const formatDateTime = (dateStr: string) => {
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString("zh-TW", { 
-        month: "short", 
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const upcomingCount = events.filter(e => getEventStatus(e.startsAt, e.endsAt) === "upcoming").length;
-  const ongoingCount = events.filter(e => getEventStatus(e.startsAt, e.endsAt) === "ongoing").length;
-
-  if (loading) {
-    return (
-      <SiteShell
-        schoolName={school.name}
-        schoolCode={school.code}
-        title="活動"
-        subtitle={`探索校園精彩活動 · ${school.name}`}
-      >
-        <div className="card" style={{ textAlign: "center", padding: 40 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>⏳</div>
-          <div style={{ color: "var(--muted)" }}>載入活動資料中...</div>
-        </div>
-      </SiteShell>
-    );
-  }
+  const joined = clubs.filter((c) => c.isJoined);
 
   return (
-    <SiteShell
-      schoolName={school.name}
-      schoolCode={school.code}
-      title="活動"
-      subtitle={`探索校園精彩活動 · ${school.name}`}
-    >
-      {/* Stats Overview */}
-      <div className="card" style={{ marginBottom: 20, padding: 16 }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-          <span className="pill subtle">{usingDemo ? "示範資料" : "Firebase 資料"}</span>
-        </div>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: "var(--brand)" }}>{events.length}</div>
-            <div className="kv">總活動數</div>
+    <SiteShell title="社團活動" subtitle="探索校園活動與社團" schoolName={school || undefined}>
+      <div className="pageStack">
+        {/* ── My Clubs ── */}
+        {joined.length > 0 && (
+          <div className="sectionCard">
+            <h3 className="sectionTitle">⭐ 我加入的社團</h3>
+            <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 4 }}>
+              {joined.map((c) => (
+                <div
+                  key={c.id}
+                  style={{
+                    flexShrink: 0,
+                    width: 140,
+                    borderRadius: "var(--radius)",
+                    background: "var(--surface)",
+                    border: "1px solid var(--border)",
+                    padding: "16px 14px",
+                    boxShadow: "var(--shadow-sm)",
+                    textAlign: "center",
+                  }}
+                >
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>{c.icon}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>{c.name}</div>
+                  {c.nextEvent && (
+                    <div style={{ fontSize: 11, color: c.color, marginTop: 4, fontWeight: 600 }}>
+                      {c.nextEvent} {c.nextEventDate}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: "#3B82F6" }}>{upcomingCount}</div>
-            <div className="kv">即將開始</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: "#10B981" }}>{ongoingCount}</div>
-            <div className="kv">進行中</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: "#F59E0B" }}>{registeredEvents.size}</div>
-            <div className="kv">已報名</div>
-          </div>
-        </div>
-      </div>
+        )}
 
-      {/* Filters & Search */}
-      <div style={{ marginBottom: 20, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <input
-          type="text"
-          className="input"
-          placeholder="搜尋活動名稱、說明或地點..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{ flex: "1 1 300px" }}
-        />
-        
-        <div style={{ display: "flex", gap: 8 }}>
-          {(["all", "upcoming", "ongoing", "ended"] as const).map((s) => {
-            const labels: Record<EventStatus, string> = { all: "全部", upcoming: "即將", ongoing: "進行中", ended: "已結束" };
-            return (
-              <button
-                key={s}
-                className="btn"
-                onClick={() => setStatusFilter(s)}
-                style={{
-                  background: statusFilter === s ? "var(--accent-soft)" : "var(--panel)",
-                  borderColor: statusFilter === s ? "var(--brand)" : "var(--border)",
-                  color: statusFilter === s ? "var(--brand)" : "var(--text)",
-                  padding: "8px 14px",
-                  fontSize: 13,
-                }}
-              >
-                {labels[s]}
+        {/* ── Search + Filter ── */}
+        <div className="toolbarPanel">
+          <div className="toolbarGrow">
+            <input
+              className="input"
+              type="search"
+              placeholder="搜尋社團…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ minHeight: 42 }}
+            />
+          </div>
+          <div className="segmentedGroup">
+            {CATEGORIES.map((c) => (
+              <button key={c} className={category === c ? "active" : ""} onClick={() => setCategory(c)}>
+                {c}
               </button>
-            );
-          })}
+            ))}
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 4, border: "1px solid var(--border)", borderRadius: 10, padding: 4 }}>
-          {(["list", "grid"] as const).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setViewMode(mode)}
-              style={{
-                border: "none",
-                background: viewMode === mode ? "var(--panel2)" : "transparent",
-                color: viewMode === mode ? "var(--text)" : "var(--muted)",
-                padding: "6px 12px",
-                borderRadius: 8,
-                cursor: "pointer",
-                fontSize: 14,
-              }}
+        {/* ── Club Grid ── */}
+        <div className="grid-2">
+          {filtered.map((c) => (
+            <div
+              key={c.id}
+              className="card"
+              style={{ borderTop: `3px solid ${c.color}`, padding: "18px" }}
             >
-              {mode === "list" ? "📋" : "⊞"}
-            </button>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
+                <div style={{ fontSize: 28 }}>{c.icon}</div>
+                <span
+                  style={{
+                    fontSize: 10,
+                    padding: "3px 9px",
+                    borderRadius: "999px",
+                    background: `${c.color}14`,
+                    color: c.color,
+                    fontWeight: 700,
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  {c.category}
+                </span>
+              </div>
+              <h3 style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 700, letterSpacing: "-0.02em" }}>
+                {c.name}
+              </h3>
+              <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--muted)", lineHeight: 1.6 }}>
+                {c.description}
+              </p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  👥 {c.members} 人
+                  {c.nextEvent && <span style={{ marginLeft: 6, color: c.color, fontWeight: 600 }}>· {c.nextEvent} {c.nextEventDate}</span>}
+                </div>
+                <button
+                  onClick={() => toggleJoin(c.id)}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px solid",
+                    borderColor: c.isJoined ? "var(--border)" : c.color,
+                    background: c.isJoined ? "var(--panel)" : `${c.color}14`,
+                    color: c.isJoined ? "var(--muted)" : c.color,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  {c.isJoined ? "已加入" : "加入"}
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       </div>
-
-      {/* Events List/Grid */}
-      {filteredEvents.length === 0 ? (
-        <div className="card" style={{ textAlign: "center", padding: 40 }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>🎭</div>
-          <div style={{ color: "var(--muted)" }}>找不到符合的活動</div>
-        </div>
-      ) : (
-        <div 
-          className="list"
-          style={{
-            gridTemplateColumns: viewMode === "grid" ? "repeat(auto-fill, minmax(300px, 1fr))" : "1fr",
-          }}
-        >
-          {filteredEvents.map((e) => {
-            const status = getEventStatus(e.startsAt, e.endsAt);
-            const isRegistered = registeredEvents.has(e.id);
-            const canRegister = status === "upcoming";
-
-            return (
-              <div key={e.id} className="card">
-                {/* Event Image Placeholder */}
-                <div style={{ 
-                  height: 120, 
-                  background: "linear-gradient(135deg, var(--accent-soft), var(--panel2))",
-                  borderRadius: 12,
-                  marginBottom: 16,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 40,
-                }}>
-                  🎉
-                </div>
-
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                    {getStatusBadge(status)}
-                    {isRegistered && (
-                      <span style={{ 
-                        padding: "3px 10px", 
-                        borderRadius: 8, 
-                        background: "rgba(139, 92, 246, 0.2)", 
-                        color: "var(--brand)",
-                        fontSize: 12,
-                        fontWeight: 600,
-                      }}>
-                        ✓ 已報名
-                      </span>
-                    )}
-                  </div>
-                  
-                  <h3 style={{ margin: "0 0 10px 0", fontSize: 18, fontWeight: 700, letterSpacing: -0.3 }}>
-                    {e.title}
-                  </h3>
-                  
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, color: "var(--muted)", fontSize: 13 }}>
-                    <div>📅 {formatDateTime(e.startsAt)} ~ {formatDateTime(e.endsAt)}</div>
-                    {e.location && <div>📍 {e.location}</div>}
-                  </div>
-                </div>
-
-                {e.description && (
-                  <p style={{ 
-                    margin: "0 0 16px 0", 
-                    lineHeight: 1.6, 
-                    color: "var(--text)",
-                    fontSize: 14,
-                    display: "-webkit-box",
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: "vertical",
-                    overflow: "hidden",
-                  }}>
-                    {e.description}
-                  </p>
-                )}
-
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button 
-                    className="btn"
-                    onClick={() => canRegister && void handleRegister(e)}
-                    disabled={!canRegister || submittingEventId === e.id}
-                    style={{
-                      flex: 1,
-                      background: isRegistered ? "var(--accent-soft)" : canRegister ? "var(--brand)" : "var(--panel)",
-                      borderColor: isRegistered ? "var(--brand)" : canRegister ? "var(--brand)" : "var(--border)",
-                      color: isRegistered ? "var(--brand)" : canRegister ? "#fff" : "var(--muted)",
-                      opacity: canRegister ? 1 : 0.6,
-                      cursor: canRegister ? "pointer" : "not-allowed",
-                    }}
-                  >
-                    {submittingEventId === e.id
-                      ? "處理中..."
-                      : isRegistered
-                        ? "取消報名"
-                        : status === "ended"
-                          ? "已結束"
-                          : status === "ongoing"
-                            ? "進行中"
-                            : "立即報名"}
-                  </button>
-                  <button className="btn" style={{ padding: "10px 14px" }}>
-                    🔗
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
     </SiteShell>
   );
 }

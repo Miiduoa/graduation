@@ -21,18 +21,37 @@
 # 安裝依賴
 pnpm install
 
+# 檢查程式碼品質
+pnpm lint
+pnpm typecheck
+
+# 格式化
+pnpm format
+
 # 建立 Mobile 環境變數
 cp apps/mobile/.env.example apps/mobile/.env
 
 # 啟動 Mobile App（Expo）
-cd apps/mobile && pnpm start
+pnpm dev:mobile
 
 # 啟動 Web App（Next.js）
-cd apps/web && pnpm dev
+pnpm dev:web
 
-# 部署 Firebase Functions
-cd backend/functions && pnpm deploy
+# 啟動 Firebase Functions Emulator
+pnpm dev:functions
 ```
+
+### Workspace Scripts
+
+| 指令 | 說明 |
+|------|------|
+| `pnpm dev:web` | 啟動 Next.js Web App |
+| `pnpm dev:mobile` | 啟動 Expo Mobile App |
+| `pnpm dev:functions` | 啟動 Firebase Functions emulator |
+| `pnpm lint` | 依序檢查 `mobile/web/functions/shared` |
+| `pnpm typecheck` | 依序檢查 `mobile/web/shared` TypeScript 型別 |
+| `pnpm format` | 用 Prettier 格式化整個 monorepo |
+| `pnpm format:check` | 檢查格式是否符合 Prettier |
 
 ### Mobile 資料來源切換（mock / firebase / hybrid）
 
@@ -414,6 +433,7 @@ pnpm -w firebase deploy --only firestore:rules
 - Server Components
 - 響應式設計
 - 共用 SiteShell 元件
+- 以 `pageContext` / `navigation` helper 共用學校上下文與導頁規則
 
 ### Backend (Firebase)
 
@@ -428,6 +448,31 @@ pnpm -w firebase deploy --only firestore:rules
 | `onGradePublished` | 成績發布 | 成績通知 |
 | `onMessageCreated` | 新訊息 | 私訊通知 |
 | `onLostFoundMatch` | 配對成功 | 失物招領通知 |
+
+### 認證與 SSO 邊界
+
+```
+Mobile/Web UI
+    │
+    ├─ 發起學校登入（OIDC / CAS / SAML）
+    │
+    ▼
+School IdP Callback
+    │
+    ▼
+Firebase Function: verifySSOCallback
+    │
+    ├─ 驗證學校票證 / assertion
+    ├─ 同步 users / ssoLinks / school members
+    └─ 簽發 Firebase custom token
+    │
+    ▼
+Mobile/Web Firebase Auth Sign-In
+```
+
+- `mobile` 與 `web` 現在共用同一個 SSO 契約型別與欄位正規化邏輯。
+- 學校 SSO 驗證與 Firebase token 簽發集中在 `backend/functions/index.js`，避免 client 直接建立 custom token。
+- 通知偏好欄位統一為 `announcements/events/groups/assignments/grades/messages/quietHours`。
 
 #### Firestore Schema（多租戶）
 ```

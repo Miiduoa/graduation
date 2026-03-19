@@ -1,8 +1,6 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { View, Text, TextInput, Pressable, ScrollView, Alert, KeyboardAvoidingView, Platform, Linking } from "react-native";
+import { View, Text, TextInput, Pressable, ScrollView, Alert, KeyboardAvoidingView, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as WebBrowser from "expo-web-browser";
-import * as AuthSession from "expo-auth-session";
 import { Screen, Button, AnimatedCard, SegmentedControl, SearchBar, Spinner } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
@@ -12,7 +10,7 @@ import { useAuth } from "../state/auth";
 import { getDataSource, hasDataSource } from "../data";
 import type { Course as DataCourse } from "../data/types";
 import { analytics } from "../services/analytics";
-import { ssoService, SSOProvider } from "../services/sso";
+import { makeAppRedirectUri, ssoService, SSOProvider } from "../services/sso";
 
 type SSOCourseSyncProps = {
   onCoursesImported: (courses: DataCourse[]) => void;
@@ -86,10 +84,7 @@ function SSOCourseSync({ onCoursesImported, schoolId, semester }: SSOCourseSyncP
         return;
       }
 
-      const redirectUri = AuthSession.makeRedirectUri({
-        scheme: "campus-app",
-        path: "sso-callback",
-      });
+      const redirectUri = makeAppRedirectUri("sso-callback");
 
       const authResult = await ssoService.authenticate(ssoConfig.provider, {
         authUrl: ssoConfig.authUrl,

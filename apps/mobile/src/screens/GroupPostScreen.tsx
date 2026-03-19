@@ -518,7 +518,7 @@ export function GroupPostScreen(props: any) {
                       borderRadius: theme.radius.md,
                       borderWidth: 1,
                       borderColor: theme.colors.border,
-                      backgroundColor: "rgba(255,255,255,0.04)",
+                      backgroundColor: theme.colors.surface2,
                       color: theme.colors.text,
                       fontWeight: "700",
                       fontSize: 16,
@@ -537,7 +537,7 @@ export function GroupPostScreen(props: any) {
                       borderRadius: theme.radius.md,
                       borderWidth: 1,
                       borderColor: theme.colors.border,
-                      backgroundColor: "rgba(255,255,255,0.04)",
+                      backgroundColor: theme.colors.surface2,
                       color: theme.colors.text,
                       textAlignVertical: "top",
                     }}
@@ -687,7 +687,7 @@ export function GroupPostScreen(props: any) {
                                 borderRadius: theme.radius.sm,
                                 borderWidth: 1,
                                 borderColor: theme.colors.accent,
-                                backgroundColor: "rgba(255,255,255,0.04)",
+                                backgroundColor: theme.colors.surface2,
                                 color: theme.colors.text,
                                 textAlignVertical: "top",
                               }}
@@ -836,7 +836,7 @@ export function GroupPostScreen(props: any) {
                 borderRadius: theme.radius.md,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
-                backgroundColor: "rgba(255,255,255,0.04)",
+                backgroundColor: theme.colors.surface2,
                 color: theme.colors.text,
               }}
             />

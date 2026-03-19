@@ -1,6 +1,5 @@
 import React, { useMemo } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -10,7 +9,7 @@ import { useThemeMode } from "../state/theme";
 import { useNotifications } from "../state/notifications";
 import { useSchedule } from "../state/schedule";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, shadowStyle, softShadowStyle } from "../ui/theme";
 
 type ServiceItem = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -31,17 +30,6 @@ type SettingRow = {
   badge?: number;
 };
 
-function cardBorderColor() {
-  return theme.mode === "dark" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.82)";
-}
-
-function cardGradient(tint?: string): [string, string, ...string[]] {
-  if (theme.mode === "dark") {
-    return [theme.colors.surfaceElevated, tint ?? "rgba(255,255,255,0.04)"];
-  }
-  return ["rgba(255,255,255,0.97)", tint ?? "rgba(236,242,250,0.84)"];
-}
-
 function SoftPanel(props: {
   children: React.ReactNode;
   tint?: string;
@@ -49,32 +37,20 @@ function SoftPanel(props: {
   style?: any;
 }) {
   return (
-    <View style={[{ borderRadius: 30 }, shadowStyle(theme.shadows.md), props.style]}>
-      <LinearGradient
-        colors={cardGradient(props.tint)}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={{
-          borderRadius: 30,
+    <View
+      style={[
+        {
+          borderRadius: theme.radius.lg,
           borderWidth: 1,
-          borderColor: cardBorderColor(),
-          overflow: "hidden",
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
           padding: props.padding ?? 20,
-        }}
-      >
-        <View
-          pointerEvents="none"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 18,
-            right: 18,
-            height: 1,
-            backgroundColor: theme.mode === "dark" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.92)",
-          }}
-        />
-        {props.children}
-      </LinearGradient>
+          ...softShadowStyle(theme.shadows.soft),
+        },
+        props.style,
+      ]}
+    >
+      {props.children}
     </View>
   );
 }
@@ -105,12 +81,12 @@ function ProfileStat(props: { label: string; value: string; accent: string }) {
     <View
       style={{
         flex: 1,
-        borderRadius: 22,
+        borderRadius: theme.radius.md,
         paddingVertical: 14,
         paddingHorizontal: 12,
-        backgroundColor: theme.colors.surfaceElevated,
+        backgroundColor: theme.colors.surface2,
         borderWidth: 1,
-        borderColor: cardBorderColor(),
+        borderColor: theme.colors.border,
         alignItems: "center",
       }}
     >
@@ -126,12 +102,12 @@ function ServiceTile({ item }: { item: ServiceItem }) {
       onPress={item.onPress}
       style={({ pressed }) => ({
         flex: 1,
-        borderRadius: 24,
+        borderRadius: theme.radius.md,
         paddingHorizontal: 16,
         paddingVertical: 16,
-        backgroundColor: theme.colors.surfaceElevated,
+        backgroundColor: theme.colors.surface2,
         borderWidth: 1,
-        borderColor: cardBorderColor(),
+        borderColor: theme.colors.border,
         transform: [{ scale: pressed ? 0.97 : 1 }],
       })}
     >
@@ -380,22 +356,6 @@ export function MeScreen(props: any) {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
-      <View pointerEvents="none" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}>
-        <LinearGradient
-          colors={[`${theme.colors.accent}22`, "rgba(255,255,255,0)"]}
-          start={{ x: 0.15, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{
-            position: "absolute",
-            top: -100,
-            left: -30,
-            width: 260,
-            height: 260,
-            borderRadius: 130,
-          }}
-        />
-      </View>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING, paddingHorizontal: 20 }}
@@ -446,9 +406,9 @@ export function MeScreen(props: any) {
                         paddingHorizontal: 12,
                         paddingVertical: 7,
                         borderRadius: theme.radius.full,
-                        backgroundColor: theme.colors.surfaceElevated,
+                        backgroundColor: theme.colors.accentSoft,
                         borderWidth: 1,
-                        borderColor: cardBorderColor(),
+                        borderColor: "transparent",
                       }}
                     >
                       <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "800" }}>{school.code}</Text>
@@ -458,9 +418,9 @@ export function MeScreen(props: any) {
                         paddingHorizontal: 12,
                         paddingVertical: 7,
                         borderRadius: theme.radius.full,
-                        backgroundColor: theme.colors.surfaceElevated,
+                        backgroundColor: theme.colors.surface2,
                         borderWidth: 1,
-                        borderColor: cardBorderColor(),
+                        borderColor: theme.colors.border,
                       }}
                     >
                       <Text style={{ color: theme.colors.textSecondary, fontSize: 11, fontWeight: "700" }}>
@@ -472,9 +432,9 @@ export function MeScreen(props: any) {
                         paddingHorizontal: 12,
                         paddingVertical: 7,
                         borderRadius: theme.radius.full,
-                        backgroundColor: theme.colors.surfaceElevated,
+                        backgroundColor: theme.colors.surface2,
                         borderWidth: 1,
-                        borderColor: cardBorderColor(),
+                        borderColor: theme.colors.border,
                       }}
                     >
                       <Text style={{ color: theme.colors.textSecondary, fontSize: 11, fontWeight: "700" }}>
@@ -490,12 +450,12 @@ export function MeScreen(props: any) {
                 style={({ pressed }) => ({
                   width: 46,
                   height: 46,
-                  borderRadius: 18,
+                  borderRadius: theme.radius.sm,
                   alignItems: "center",
                   justifyContent: "center",
-                  backgroundColor: theme.colors.surfaceElevated,
+                  backgroundColor: theme.colors.surface2,
                   borderWidth: 1,
-                  borderColor: cardBorderColor(),
+                  borderColor: theme.colors.border,
                   transform: [{ scale: pressed ? 0.94 : 1 }],
                 })}
               >
@@ -523,7 +483,6 @@ export function MeScreen(props: any) {
                   justifyContent: "center",
                   gap: 8,
                   transform: [{ scale: pressed ? 0.98 : 1 }],
-                  ...shadowStyle(theme.shadows.sm),
                 })}
               >
                 <Ionicons name="log-in-outline" size={18} color="#FFFFFF" />

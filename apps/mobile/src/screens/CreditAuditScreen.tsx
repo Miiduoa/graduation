@@ -243,7 +243,7 @@ export function CreditAuditScreen(props: any) {
               marginTop: 12,
               height: 12,
               borderRadius: 6,
-              backgroundColor: "rgba(255,255,255,0.06)",
+              backgroundColor: theme.colors.surface2,
               borderWidth: 1,
               borderColor: theme.colors.border,
               overflow: "hidden",
@@ -291,7 +291,7 @@ export function CreditAuditScreen(props: any) {
                     marginTop: 6,
                     height: 8,
                     borderRadius: 4,
-                    backgroundColor: "rgba(255,255,255,0.06)",
+                    backgroundColor: theme.colors.surface2,
                     overflow: "hidden",
                   }}
                 >

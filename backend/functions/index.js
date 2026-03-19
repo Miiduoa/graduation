@@ -16,6 +16,26 @@ const REGION = "asia-east1";
 // 工具函數
 // =====================================================
 
+function normalizeSsoConfig(rawConfig = {}) {
+  return {
+    ...rawConfig,
+    authorizationEndpoint: rawConfig.authorizationEndpoint || rawConfig.authUrl,
+    authUrl: rawConfig.authUrl || rawConfig.authorizationEndpoint,
+    tokenEndpoint: rawConfig.tokenEndpoint || rawConfig.tokenUrl,
+    tokenUrl: rawConfig.tokenUrl || rawConfig.tokenEndpoint,
+    userInfoEndpoint: rawConfig.userInfoEndpoint || rawConfig.userInfoUrl,
+    userInfoUrl: rawConfig.userInfoUrl || rawConfig.userInfoEndpoint,
+    samlEntryPoint: rawConfig.samlEntryPoint || rawConfig.idpSsoUrl,
+    idpSsoUrl: rawConfig.idpSsoUrl || rawConfig.samlEntryPoint,
+  };
+}
+
+function toSchoolMemberRole(role) {
+  if (role === "admin") return "admin";
+  if (role === "teacher" || role === "staff") return "editor";
+  return "member";
+}
+
 async function getUserPushTokens(uid) {
   const tokensSnap = await db.collection("users").doc(uid).collection("pushTokens").get();
   return tokensSnap.docs.map((doc) => doc.data().token).filter(Boolean);
@@ -930,7 +950,7 @@ exports.createCustomToken = onRequest(
       return;
     }
 
-    const { schoolId, ssoSub, email, name, studentId, department, role } = req.body;
+    const { schoolId, ssoSub, existingUid } = req.body;
 
     if (!schoolId || !ssoSub) {
       res.status(400).json({ error: "Missing required fields: schoolId and ssoSub" });
@@ -941,58 +961,17 @@ exports.createCustomToken = onRequest(
       const ssoLinkRef = db.collection("ssoLinks").doc(`${schoolId}_${ssoSub}`);
       const ssoLinkDoc = await ssoLinkRef.get();
 
-      let uid;
-      let isNewUser = false;
+      if (!ssoLinkDoc.exists) {
+        res.status(403).json({ error: "SSO link not verified. Use verifySSOCallback instead." });
+        return;
+      }
 
-      if (ssoLinkDoc.exists) {
-        uid = ssoLinkDoc.data().firebaseUid;
-      } else {
-        const { getAuth } = require("firebase-admin/auth");
-        const auth = getAuth();
+      const uid = ssoLinkDoc.data().firebaseUid;
+      const role = ssoLinkDoc.data().role || "student";
 
-        const userRecord = await auth.createUser({
-          email: email || `${ssoSub}@${schoolId}.sso.local`,
-          displayName: name,
-          emailVerified: true,
-        });
-
-        uid = userRecord.uid;
-        isNewUser = true;
-
-        await ssoLinkRef.set({
-          schoolId,
-          ssoSub,
-          firebaseUid: uid,
-          email,
-          name,
-          studentId,
-          department,
-          role,
-          createdAt: FieldValue.serverTimestamp(),
-        });
-
-        await db.collection("users").doc(uid).set(
-          {
-            schoolId,
-            email,
-            displayName: name,
-            studentId,
-            department,
-            role: role === "teacher" ? "teacher" : "student",
-            ssoLinked: true,
-            createdAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-
-        await db.collection("schools").doc(schoolId).collection("members").doc(uid).set(
-          {
-            role: role === "teacher" ? "editor" : "member",
-            status: "active",
-            joinedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
+      if (existingUid && existingUid !== uid) {
+        res.status(403).json({ error: "SSO link does not match the requested user." });
+        return;
       }
 
       const { getAuth } = require("firebase-admin/auth");
@@ -1000,13 +979,13 @@ exports.createCustomToken = onRequest(
       const customToken = await auth.createCustomToken(uid, {
         schoolId,
         ssoSub,
-        role: role || "student",
+        role,
       });
 
       res.json({
         customToken,
         uid,
-        isNewUser,
+        isNewUser: false,
       });
     } catch (error) {
       console.error("Create custom token error:", error);
@@ -1041,7 +1020,7 @@ exports.verifySSOCallback = onRequest(
         return;
       }
 
-      const ssoConfig = configDoc.data().ssoConfig;
+      const ssoConfig = normalizeSsoConfig(configDoc.data().ssoConfig);
       let userInfo = null;
 
       switch (provider) {
@@ -1090,14 +1069,25 @@ exports.verifySSOCallback = onRequest(
 
       if (ssoLinkDoc.exists) {
         uid = ssoLinkDoc.data().firebaseUid;
+        const resolvedRole = determineRole(userInfo);
         
         const userRef = db.collection("users").doc(uid);
         await userRef.update({
           lastLoginAt: FieldValue.serverTimestamp(),
           displayName: userInfo.name || userInfo.displayName,
           email: userInfo.email,
+          role: resolvedRole,
         });
+
+        await db.collection("schools").doc(schoolId).collection("members").doc(uid).set(
+          {
+            status: "active",
+            role: toSchoolMemberRole(resolvedRole),
+          },
+          { merge: true }
+        );
       } else {
+        const resolvedRole = determineRole(userInfo);
         const userRecord = await auth.createUser({
           email: userInfo.email || `${userInfo.sub}@${schoolId}.sso.local`,
           displayName: userInfo.name || userInfo.displayName,
@@ -1115,7 +1105,7 @@ exports.verifySSOCallback = onRequest(
           name: userInfo.name || userInfo.displayName,
           studentId: userInfo.studentId || userInfo.employee_id,
           department: userInfo.department || userInfo.ou,
-          role: determineRole(userInfo),
+          role: resolvedRole,
           createdAt: FieldValue.serverTimestamp(),
         });
 
@@ -1124,17 +1114,20 @@ exports.verifySSOCallback = onRequest(
           displayName: userInfo.name || userInfo.displayName,
           studentId: userInfo.studentId || userInfo.employee_id,
           department: userInfo.department || userInfo.ou,
-          role: determineRole(userInfo),
+          role: resolvedRole,
           schoolId,
           createdAt: FieldValue.serverTimestamp(),
           lastLoginAt: FieldValue.serverTimestamp(),
         });
 
-        await db.collection("schools").doc(schoolId).collection("members").doc(uid).set({
-          status: "active",
-          role: determineRole(userInfo),
-          joinedAt: FieldValue.serverTimestamp(),
-        });
+        await db.collection("schools").doc(schoolId).collection("members").doc(uid).set(
+          {
+            status: "active",
+            role: toSchoolMemberRole(resolvedRole),
+            joinedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
       }
 
       const customToken = await auth.createCustomToken(uid, {
@@ -1318,7 +1311,7 @@ function determineRole(userInfo) {
     if (dept.includes("admin") || dept.includes("行政")) {
       return "admin";
     }
-    return "teacher";
+    return type.includes("staff") || type.includes("employee") ? "staff" : "teacher";
   }
   
   if (type.includes("student") || email.includes("student")) {
@@ -1363,16 +1356,24 @@ exports.getSSOConfig = onRequest(
       }
 
       const config = configDoc.data();
+      const ssoConfig = config.ssoConfig ? normalizeSsoConfig(config.ssoConfig) : null;
       
       const safeConfig = {
         schoolId: config.schoolId,
         schoolName: config.schoolName,
-        ssoConfig: config.ssoConfig
+        ssoConfig: ssoConfig
           ? {
-              provider: config.ssoConfig.provider,
-              name: config.ssoConfig.name,
-              enabled: config.ssoConfig.enabled,
-              scopes: config.ssoConfig.scopes,
+              provider: ssoConfig.provider,
+              name: ssoConfig.name,
+              enabled: ssoConfig.enabled,
+              clientId: ssoConfig.clientId,
+              authUrl: ssoConfig.authUrl,
+              authorizationEndpoint: ssoConfig.authorizationEndpoint,
+              tokenEndpoint: ssoConfig.tokenEndpoint,
+              userInfoEndpoint: ssoConfig.userInfoEndpoint,
+              casServerUrl: ssoConfig.casServerUrl,
+              samlEntryPoint: ssoConfig.samlEntryPoint,
+              scopes: ssoConfig.scopes,
             }
           : null,
         emailDomain: config.emailDomain,
@@ -3335,6 +3336,406 @@ exports.requestRefund = onCall(
       if (error instanceof HttpsError) throw error;
       console.error("requestRefund error:", error);
       throw new HttpsError("internal", "Failed to request refund");
+    }
+  }
+);
+
+// =====================================================
+// 成就追蹤系統 (trackAchievement)
+// =====================================================
+
+exports.trackAchievement = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Must be logged in");
+
+    const { achievementId, progress, schoolId } = request.data;
+    if (!achievementId || progress === undefined) {
+      throw new HttpsError("invalid-argument", "Missing achievementId or progress");
+    }
+
+    const ACHIEVEMENT_REQUIREMENTS = {
+      navigate_first: 1, event_first: 1, event_5: 5,
+      group_join: 1, post_first: 1, post_10: 10,
+      credit_check: 1, course_10: 10,
+      ai_chat: 1, ai_master: 50,
+      streak_7: 7, streak_30: 30,
+      knowledge_contributor: 5, top_questioner: 3,
+    };
+
+    const requirement = ACHIEVEMENT_REQUIREMENTS[achievementId] ?? 1;
+    const wasUnlocked = progress >= requirement;
+
+    try {
+      const achievementRef = db.collection("users").doc(uid).collection("achievements").doc(achievementId);
+      const existing = await achievementRef.get();
+      const existingData = existing.exists ? existing.data() : null;
+
+      const newData = {
+        progress,
+        unlocked: wasUnlocked,
+        updatedAt: FieldValue.serverTimestamp(),
+      };
+
+      if (wasUnlocked && !existingData?.unlockedAt) {
+        newData.unlockedAt = FieldValue.serverTimestamp();
+      }
+
+      await achievementRef.set(newData, { merge: true });
+
+      // 同步更新排行榜
+      if (schoolId && wasUnlocked && !existingData?.unlocked) {
+        const ACHIEVEMENT_POINTS = {
+          navigate_first: 15, event_first: 25, event_5: 75,
+          group_join: 20, post_first: 30, post_10: 100,
+          credit_check: 20, course_10: 80,
+          ai_chat: 25, ai_master: 150,
+          streak_7: 100, streak_30: 300,
+          knowledge_contributor: 80, top_questioner: 50,
+        };
+        const points = ACHIEVEMENT_POINTS[achievementId] ?? 10;
+
+        const leaderboardRef = db.collection("schools").doc(schoolId).collection("leaderboard").doc(uid);
+        await leaderboardRef.set({
+          points: FieldValue.increment(points),
+          displayName: (await db.collection("users").doc(uid).get()).data()?.displayName ?? "同學",
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+
+      return { success: true, unlocked: wasUnlocked };
+    } catch (error) {
+      console.error("trackAchievement error:", error);
+      throw new HttpsError("internal", "Failed to track achievement");
+    }
+  }
+);
+
+// =====================================================
+// 課堂互動 - Live Session
+// =====================================================
+
+exports.startLiveSession = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Must be logged in");
+
+    const { groupId, classroomLat, classroomLng, qrExpiryMinutes = 5 } = request.data;
+    if (!groupId) throw new HttpsError("invalid-argument", "Missing groupId");
+
+    const memberRef = db.collection("groups").doc(groupId).collection("members").doc(uid);
+    const member = await memberRef.get();
+    if (!member.exists || !["owner", "instructor"].includes(member.data()?.role)) {
+      throw new HttpsError("permission-denied", "Only instructors can start a live session");
+    }
+
+    const sessionId = `${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
+    const qrToken = `${groupId}_${sessionId}_${Math.random().toString(36).slice(2, 10)}`;
+    const qrExpiresAt = new Date(Date.now() + qrExpiryMinutes * 60 * 1000);
+
+    await db.collection("groups").doc(groupId).collection("liveSessions").doc(sessionId).set({
+      sessionId,
+      teacherId: uid,
+      startedAt: FieldValue.serverTimestamp(),
+      endedAt: null,
+      active: true,
+      qrToken,
+      qrExpiresAt: Timestamp.fromDate(qrExpiresAt),
+      ...(classroomLat && classroomLng ? { location: { lat: classroomLat, lng: classroomLng, radiusM: 100 } } : {}),
+      reactions: { understood: 0, partial: 0, confused: 0 },
+      attendeeCount: 0,
+    });
+
+    // 推播通知給群組成員
+    const membersSnap = await db.collection("groups").doc(groupId).collection("members").get();
+    const studentUids = membersSnap.docs
+      .filter((d) => d.id !== uid && !["instructor", "owner"].includes(d.data()?.role))
+      .map((d) => d.id);
+
+    const groupDoc = await db.collection("groups").doc(groupId).get();
+    const groupName = groupDoc.data()?.name ?? "課堂";
+
+    const tokens = (await Promise.all(studentUids.map(getUserPushTokens))).flat().filter(Boolean);
+    if (tokens.length > 0) {
+      await messaging.sendEachForMulticast({
+        tokens,
+        notification: { title: `${groupName} 課堂開始`, body: "老師已開啟即時課堂互動，快進入！" },
+        data: { type: "live_session", groupId, sessionId, click_action: "OPEN_CLASSROOM" },
+      });
+    }
+
+    return { success: true, sessionId, qrToken, qrExpiresAt: qrExpiresAt.toISOString() };
+  }
+);
+
+exports.endLiveSession = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Must be logged in");
+
+    const { groupId, sessionId } = request.data;
+    if (!groupId || !sessionId) throw new HttpsError("invalid-argument", "Missing groupId or sessionId");
+
+    const sessionRef = db.collection("groups").doc(groupId).collection("liveSessions").doc(sessionId);
+    const session = await sessionRef.get();
+
+    if (!session.exists || session.data()?.teacherId !== uid) {
+      throw new HttpsError("permission-denied", "Not authorized to end this session");
+    }
+
+    await sessionRef.update({ active: false, endedAt: FieldValue.serverTimestamp() });
+    return { success: true };
+  }
+);
+
+exports.submitPollResponse = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Must be logged in");
+
+    const { groupId, sessionId, pollId, optionIdx } = request.data;
+    if (!groupId || !sessionId || !pollId || optionIdx === undefined) {
+      throw new HttpsError("invalid-argument", "Missing required fields");
+    }
+
+    const pollRef = db.collection("groups").doc(groupId)
+      .collection("liveSessions").doc(sessionId)
+      .collection("polls").doc(pollId);
+
+    await pollRef.update({ [`responses.${uid}`]: optionIdx });
+    return { success: true };
+  }
+);
+
+exports.joinLiveSession = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Must be logged in");
+
+    const { groupId, sessionId, qrToken } = request.data;
+    if (!groupId || !sessionId) throw new HttpsError("invalid-argument", "Missing required fields");
+
+    const sessionRef = db.collection("groups").doc(groupId).collection("liveSessions").doc(sessionId);
+    const session = await sessionRef.get();
+
+    if (!session.exists || !session.data()?.active) {
+      throw new HttpsError("not-found", "Session not found or not active");
+    }
+
+    if (qrToken) {
+      const sessionData = session.data();
+      if (sessionData.qrToken !== qrToken) {
+        throw new HttpsError("permission-denied", "Invalid QR token");
+      }
+      if (sessionData.qrExpiresAt && sessionData.qrExpiresAt.toDate() < new Date()) {
+        throw new HttpsError("deadline-exceeded", "QR code has expired");
+      }
+    }
+
+    await sessionRef.update({
+      [`attendees.${uid}`]: FieldValue.serverTimestamp(),
+      attendeeCount: FieldValue.increment(1),
+    });
+
+    return { success: true };
+  }
+);
+
+exports.submitReaction = onCall(
+  { region: REGION },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Must be logged in");
+
+    const { groupId, sessionId, reaction } = request.data;
+    if (!groupId || !sessionId || !["understood", "partial", "confused"].includes(reaction)) {
+      throw new HttpsError("invalid-argument", "Invalid reaction");
+    }
+
+    const sessionRef = db.collection("groups").doc(groupId).collection("liveSessions").doc(sessionId);
+    const userReactionRef = sessionRef.collection("userReactions").doc(uid);
+
+    const existing = await userReactionRef.get();
+    const updates = { [`reactions.${reaction}`]: FieldValue.increment(1) };
+
+    if (existing.exists && existing.data()?.reaction) {
+      updates[`reactions.${existing.data().reaction}`] = FieldValue.increment(-1);
+    }
+
+    await Promise.all([
+      sessionRef.update(updates),
+      userReactionRef.set({ reaction, updatedAt: FieldValue.serverTimestamp() }),
+    ]);
+
+    return { success: true };
+  }
+);
+
+// =====================================================
+// AI 每日簡報 (generateDailyBrief) - 每日 07:30
+// =====================================================
+
+exports.generateDailyBrief = onSchedule(
+  { schedule: "30 7 * * *", region: REGION, timeZone: "Asia/Taipei" },
+  async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    console.log(`[generateDailyBrief] Running for ${today}`);
+
+    try {
+      const usersSnap = await db.collection("users").where("role", "in", ["student", "teacher"]).limit(500).get();
+
+      await Promise.allSettled(
+        usersSnap.docs.map(async (userDoc) => {
+          const uid = userDoc.id;
+          const userData = userDoc.data();
+
+          // 取得用戶的課程（從 AsyncStorage 無法在後端讀，改由用戶 Firestore profile 存）
+          const schoolId = userData.schoolId;
+          if (!schoolId) return;
+
+          // 取得今日課程 (透過 schedule subcollection 或 直接從 groups 取)
+          const todayDOW = new Date().getDay();
+          const briefParts = [];
+
+          // 統計今日課程 (假設用戶在 groups 中)
+          const memberSnap = await db.collectionGroup("members")
+            .where(db.FieldPath?.documentId?.() ?? "__name__", ">=", "")
+            .where("uid", "==", uid)
+            .limit(20)
+            .get()
+            .catch(() => ({ docs: [] }));
+
+          if (memberSnap.docs.length > 0) {
+            briefParts.push(`今天你已加入 ${memberSnap.docs.length} 個學習群組。`);
+          }
+
+          // 取得最新公告
+          const announcementsSnap = await db.collection("schools").doc(schoolId)
+            .collection("announcements")
+            .orderBy("publishedAt", "desc")
+            .limit(2)
+            .get()
+            .catch(() => ({ docs: [] }));
+
+          if (announcementsSnap.docs.length > 0) {
+            const titles = announcementsSnap.docs.map((d) => d.data().title).filter(Boolean);
+            if (titles.length > 0) {
+              briefParts.push(`最新公告：${titles.slice(0, 2).join("、")}。`);
+            }
+          }
+
+          if (briefParts.length === 0) {
+            briefParts.push("今天也要加油！有任何問題可以問 AI 助理。");
+          }
+
+          const content = briefParts.join(" ");
+
+          await db.collection("users").doc(uid).collection("dailyBriefs").doc(today).set({
+            content,
+            generatedAt: FieldValue.serverTimestamp(),
+            date: today,
+          });
+        })
+      );
+
+      console.log(`[generateDailyBrief] Completed for ${usersSnap.docs.length} users`);
+    } catch (error) {
+      console.error("[generateDailyBrief] Error:", error);
+    }
+  }
+);
+
+// =====================================================
+// 學習週報 (generateWeeklyReport) - 每週日 22:00
+// =====================================================
+
+exports.generateWeeklyReport = onSchedule(
+  { schedule: "0 22 * * 0", region: REGION, timeZone: "Asia/Taipei" },
+  async () => {
+    const now = new Date();
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - 6);
+    const weekId = `${weekStart.toISOString().slice(0, 10)}_${now.toISOString().slice(0, 10)}`;
+
+    console.log(`[generateWeeklyReport] Running for week ${weekId}`);
+
+    try {
+      const usersSnap = await db.collection("users").where("role", "==", "student").limit(500).get();
+
+      await Promise.allSettled(
+        usersSnap.docs.map(async (userDoc) => {
+          const uid = userDoc.id;
+          const userData = userDoc.data();
+          const schoolId = userData.schoolId;
+          if (!schoolId) return;
+
+          // 統計本週成就解鎖數
+          const achievementsSnap = await db.collection("users").doc(uid).collection("achievements")
+            .where("unlocked", "==", true)
+            .where("updatedAt", ">=", Timestamp.fromDate(weekStart))
+            .get()
+            .catch(() => ({ docs: [] }));
+
+          const newAchievements = achievementsSnap.docs.length;
+
+          // 統計本週作業繳交情況
+          const submissionsSnap = await db.collectionGroup("submissions")
+            .where("uid", "==", uid)
+            .where("submittedAt", ">=", Timestamp.fromDate(weekStart))
+            .get()
+            .catch(() => ({ docs: [] }));
+
+          const totalSubmissions = submissionsSnap.docs.length;
+          const onTimeSubmissions = submissionsSnap.docs.filter((d) => !d.data().isLate).length;
+          const onTimeRate = totalSubmissions > 0
+            ? Math.round((onTimeSubmissions / totalSubmissions) * 100)
+            : 100;
+
+          const summaryParts = [];
+          if (newAchievements > 0) summaryParts.push(`解鎖了 ${newAchievements} 個新成就`);
+          if (totalSubmissions > 0) summaryParts.push(`完成了 ${totalSubmissions} 份作業，準時率 ${onTimeRate}%`);
+
+          const summary = summaryParts.length > 0
+            ? `本週你${summaryParts.join("、")}。繼續保持！`
+            : "本週繼續努力，下週會更好！";
+
+          await db.collection("users").doc(uid).collection("weeklyReports").doc(weekId).set({
+            weekId,
+            weekStart: Timestamp.fromDate(weekStart),
+            weekEnd: Timestamp.fromDate(now),
+            summary,
+            stats: {
+              newAchievements,
+              totalSubmissions,
+              onTimeSubmissions,
+              onTimeRate,
+            },
+            generatedAt: FieldValue.serverTimestamp(),
+          });
+
+          // 推播通知
+          const tokens = await getUserPushTokens(uid);
+          if (tokens.length > 0) {
+            await messaging.sendEachForMulticast({
+              tokens,
+              notification: {
+                title: "📊 本週學習報告出爐了！",
+                body: summary,
+              },
+              data: { type: "weekly_report", weekId },
+            }).catch(() => {});
+          }
+        })
+      );
+
+      console.log(`[generateWeeklyReport] Completed for week ${weekId}`);
+    } catch (error) {
+      console.error("[generateWeeklyReport] Error:", error);
     }
   }
 );

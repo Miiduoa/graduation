@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ScrollView, Text, TextInput, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { ScrollView, Text, TextInput, View, Pressable } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Screen, Card, Button, Pill, LoadingState, ErrorState } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
@@ -40,6 +41,23 @@ export function ChatScreen(props: any) {
   const db = getDb();
 
   const [text, setText] = useState("");
+  // 快取用戶名稱：{ [uid]: displayName }
+  const [userNames, setUserNames] = useState<Record<string, string>>({});
+
+  const fetchUserName = useCallback(async (uid: string) => {
+    if (userNames[uid]) return;
+    try {
+      const snap = await getDoc(doc(db, "users", uid));
+      if (snap.exists()) {
+        const name = snap.data()?.displayName ?? snap.data()?.email ?? uid.slice(0, 8);
+        setUserNames((prev) => ({ ...prev, [uid]: name }));
+      } else {
+        setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
+      }
+    } catch {
+      setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
+    }
+  }, [db, userNames]);
 
   const convoKey = useMemo(() => {
     if (!auth.user || !peerId) return null;
@@ -86,6 +104,9 @@ export function ChatScreen(props: any) {
         setMessages(rows);
         setMsgLoading(false);
         setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+        // 預先抓取所有發訊者的用戶名稱
+        const senderIds = [...new Set(rows.map((m) => m.senderId).filter((id) => id !== auth.user?.uid))];
+        senderIds.forEach(fetchUserName);
       },
       (error) => {
         console.error("[ChatScreen] Messages subscription error:", error);
@@ -154,56 +175,116 @@ export function ChatScreen(props: any) {
 
   return (
     <Screen>
-      <ScrollView ref={scrollRef} style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
-        <Card title="訊息" subtitle={convo ? "已建立對話（即時更新）" : "尚未建立對話（送出第一則訊息會建立）"}>
-          {refPostId ? <Pill text={`引用：${refPostId}`} kind="accent" /> : null}
+      <View style={{ flex: 1 }}>
+        {/* 訊息列表 */}
+        <ScrollView
+          ref={scrollRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 80, gap: 8 }}
+        >
+          {refPostId ? (
+            <View style={{ padding: 10, borderRadius: theme.radius.md, backgroundColor: theme.colors.accentSoft, marginBottom: 8 }}>
+              <Text style={{ color: theme.colors.accent, fontSize: 12 }}>引用貼文：{refPostId}</Text>
+            </View>
+          ) : null}
 
           {msgLoading ? <LoadingState title="訊息" subtitle="載入中..." rows={3} /> : null}
           {msgError ? <ErrorState title="訊息" subtitle="讀取失敗" hint={msgError} /> : null}
 
-          <View style={{ marginTop: 12, gap: 10 }}>
-            {messages.map((m) => {
-              const mine = m.senderId === auth.user?.uid;
-              return (
+          {messages.map((m) => {
+            const mine = m.senderId === auth.user?.uid;
+            const senderName = mine ? "我" : (userNames[m.senderId] ?? m.senderId.slice(0, 8));
+            return (
+              <View
+                key={m.id}
+                style={{
+                  alignSelf: mine ? "flex-end" : "flex-start",
+                  maxWidth: "80%",
+                }}
+              >
+                {!mine && (
+                  <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 4, marginLeft: 4 }}>
+                    {senderName}
+                  </Text>
+                )}
                 <View
-                  key={m.id}
                   style={{
-                    padding: 10,
-                    borderRadius: 12,
-                    backgroundColor: mine ? "rgba(112,76,255,0.18)" : "rgba(255,255,255,0.04)",
+                    padding: 12,
+                    borderRadius: 18,
+                    borderBottomRightRadius: mine ? 4 : 18,
+                    borderBottomLeftRadius: mine ? 18 : 4,
+                    backgroundColor: mine ? theme.colors.accent : theme.colors.surface2,
+                    borderWidth: mine ? 0 : 1,
+                    borderColor: theme.colors.border,
                   }}
                 >
-                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{mine ? "我" : m.senderId.slice(0, 8) + "…"}</Text>
-                  <Text style={{ color: theme.colors.text, marginTop: 4, lineHeight: 20 }}>{m.text}</Text>
+                  <Text style={{ color: mine ? "#fff" : theme.colors.text, lineHeight: 20 }}>{m.text}</Text>
                 </View>
-              );
-            })}
-            {messages.length === 0 ? <Text style={{ color: theme.colors.muted }}>尚無訊息。</Text> : null}
-          </View>
-        </Card>
+              </View>
+            );
+          })}
+          {messages.length === 0 && !msgLoading ? (
+            <View style={{ alignItems: "center", paddingVertical: 40, gap: 8 }}>
+              <Ionicons name="chatbubble-outline" size={36} color={theme.colors.muted} />
+              <Text style={{ color: theme.colors.muted }}>尚無訊息，發送第一則訊息開始對話</Text>
+            </View>
+          ) : null}
+        </ScrollView>
 
-        <Card title="輸入" subtitle="先做文字訊息。">
+        {/* 輸入列 */}
+        <View
+          style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            padding: 12,
+            paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
+            backgroundColor: theme.colors.bg,
+            borderTopWidth: 1,
+            borderTopColor: theme.colors.border,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
           <TextInput
             value={text}
             onChangeText={setText}
             placeholder="輸入訊息..."
-            placeholderTextColor="rgba(168,176,194,0.6)"
+            placeholderTextColor={theme.colors.muted}
+            onSubmitEditing={onSend}
+            returnKeyType="send"
+            multiline
             style={{
-              marginTop: 10,
-              paddingVertical: 12,
+              flex: 1,
+              paddingVertical: 10,
               paddingHorizontal: 14,
-              borderRadius: theme.radius.md,
+              borderRadius: 20,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              backgroundColor: "rgba(255,255,255,0.04)",
+              backgroundColor: theme.colors.surface2,
               color: theme.colors.text,
+              maxHeight: 80,
             }}
           />
-          <View style={{ marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-            <Button text="送出" kind="primary" onPress={onSend} />
-          </View>
-        </Card>
-      </ScrollView>
+          <Pressable
+            onPress={onSend}
+            disabled={!text.trim()}
+            style={({ pressed }) => ({
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: text.trim() ? theme.colors.accent : theme.colors.surface2,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <Ionicons name="send" size={20} color={text.trim() ? "#fff" : theme.colors.muted} />
+          </Pressable>
+        </View>
+      </View>
     </Screen>
   );
 }

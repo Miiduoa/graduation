@@ -1,140 +1,159 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { findSchoolsByCode, mockSchools, normalizeSchoolCode } from "@campus/shared/src/schools";
 import { SiteShell } from "@/components/SiteShell";
 
-export default function JoinSchoolPage() {
+interface School {
+  id: string;
+  name: string;
+  shortName: string;
+  city: string;
+  type: "national" | "private" | "technical";
+  icon: string;
+}
+
+const SCHOOLS: School[] = [
+  { id: "ntust", name: "國立臺灣科技大學", shortName: "台科大", city: "台北", type: "national", icon: "🔬" },
+  { id: "ntu", name: "國立臺灣大學", shortName: "台大", city: "台北", type: "national", icon: "🌿" },
+  { id: "nthu", name: "國立清華大學", shortName: "清大", city: "新竹", type: "national", icon: "⚛️" },
+  { id: "nctu", name: "國立陽明交通大學", shortName: "陽交大", city: "新竹", type: "national", icon: "⚡" },
+  { id: "ncu", name: "國立中央大學", shortName: "中央", city: "桃園", type: "national", icon: "🏔" },
+  { id: "ncku", name: "國立成功大學", shortName: "成大", city: "台南", type: "national", icon: "🌅" },
+];
+
+const TYPE_LABELS = { national: "國立", private: "私立", technical: "科技大學" };
+
+export default function JoinPage() {
   const router = useRouter();
-  const [code, setCode] = useState("NCHU");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<School | null>(null);
 
-  const normalized = useMemo(() => normalizeSchoolCode(code), [code]);
-  const matches = useMemo(() => findSchoolsByCode(normalized), [normalized]);
-  const singleMatch = matches.length === 1 ? matches[0] : null;
+  const filtered = SCHOOLS.filter(
+    (s) =>
+      !search ||
+      s.name.includes(search) ||
+      s.shortName.includes(search) ||
+      s.city.includes(search)
+  );
 
-  const handleSelectSchool = (schoolId: string, schoolCode: string) => {
-    router.push(`/?school=${encodeURIComponent(schoolCode)}&schoolId=${encodeURIComponent(schoolId)}`);
+  const handleConfirm = () => {
+    if (!selected) return;
+    const q = `?school=${encodeURIComponent(selected.name)}&schoolId=${encodeURIComponent(selected.id)}`;
+    router.push(`/${q}`);
   };
 
   return (
-    <SiteShell
-      title="加入學校"
-      subtitle="輸入學校代碼，或直接從示範清單進入對應校園。"
-    >
-      <div className="pageStack">
-        <section className="card sectionCard">
-          <div className="sectionHead">
-            <div className="sectionCopy">
-              <p className="sectionEyebrow">School Access</p>
-              <h2 className="sectionTitle">先確認你要進入哪一個校園</h2>
-              <p className="sectionText">
-                代碼支援 A-Z 與數字，若有多校撞碼，系統會先列出可選項再進入首頁。
-              </p>
-            </div>
+    <SiteShell>
+      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+        <div className="pageStack">
+          {/* ── Hero ── */}
+          <div
+            className="card"
+            style={{
+              background: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)",
+              border: "none",
+              color: "#fff",
+              textAlign: "center",
+              padding: "32px 24px",
+              boxShadow: "6px 6px 16px rgba(94,106,210,0.36), -3px -3px 8px rgba(255,255,255,0.7)",
+            }}
+          >
+            <div style={{ fontSize: 52, marginBottom: 12 }}>🏫</div>
+            <h1 style={{ margin: "0 0 8px", fontSize: 24, fontWeight: 800, letterSpacing: "-0.04em" }}>
+              選擇您的學校
+            </h1>
+            <p style={{ margin: 0, fontSize: 14, opacity: 0.82 }}>
+              選擇學校以獲取個人化校園資訊與服務
+            </p>
           </div>
 
-          <div className="pageStack" style={{ gap: 16 }}>
-            <label className="kv" htmlFor="school-code">
-              學校代碼
-            </label>
+          {/* ── Search ── */}
+          <div style={{ position: "relative" }}>
+            <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", fontSize: 17, opacity: 0.5, pointerEvents: "none" }}>🔍</span>
             <input
-              id="school-code"
               className="input"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="例如 NCHU"
+              type="search"
+              placeholder="搜尋學校名稱或城市…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ paddingLeft: 40 }}
             />
-
-            {normalized.length === 0 ? (
-              <div className="emptyState">
-                <div className="emptyIcon">⌨️</div>
-                <p className="emptyTitle">請先輸入代碼</p>
-                <p className="emptyBody">輸入後會立即比對符合的學校。</p>
-              </div>
-            ) : matches.length === 0 ? (
-              <div className="emptyState">
-                <div className="emptyIcon">🏫</div>
-                <p className="emptyTitle">找不到這個代碼</p>
-                <p className="emptyBody">可以先使用示範學校，或確認輸入的縮寫是否正確。</p>
-              </div>
-            ) : singleMatch ? (
-              <div className="surfaceItem">
-                <div className="surfaceAccent">✓</div>
-                <div className="surfaceContent">
-                  <h3 className="surfaceTitle">將加入 {singleMatch.name}</h3>
-                  <p className="surfaceMeta">
-                    code: <code>{singleMatch.code}</code> ｜ id: <code>{singleMatch.id}</code>
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={() => handleSelectSchool(singleMatch.id, singleMatch.code)}
-                >
-                  繼續
-                </button>
-              </div>
-            ) : (
-              <div className="sectionCard">
-                <div className="sectionCopy">
-                  <h3 className="sectionTitle">找到多所符合代碼 {normalized} 的學校</h3>
-                  <p className="sectionText">請直接選擇正確校園，避免進入錯誤資料集。</p>
-                </div>
-                <div className="surfaceList">
-                  {matches.map((school) => (
-                    <button
-                      key={school.id}
-                      type="button"
-                      className="surfaceItem"
-                      onClick={() => handleSelectSchool(school.id, school.code)}
-                    >
-                      <div className="surfaceAccent">{school.code.slice(0, 2)}</div>
-                      <div className="surfaceContent">
-                        <h3 className="surfaceTitle">{school.name}</h3>
-                        <p className="surfaceMeta">
-                          code: <code>{school.code}</code> ｜ id: <code>{school.id}</code>
-                        </p>
-                      </div>
-                      <span className="statusBadge" style={{ "--status-bg": "var(--accent-soft)" } as React.CSSProperties}>
-                        進入
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section className="card sectionCard">
-          <div className="sectionHead">
-            <div className="sectionCopy">
-              <p className="sectionEyebrow">School Directory</p>
-              <h2 className="sectionTitle">可直接使用的學校目錄</h2>
-              <p className="sectionText">這份代碼與學校對照表會同步套用在登入、搜尋與各功能頁的學校切換流程。</p>
-            </div>
           </div>
 
-          <div className="surfaceGrid">
-            {mockSchools.map((school) => (
+          {/* ── School List ── */}
+          <div className="insetGroup">
+            {filtered.map((school, i) => (
               <button
                 key={school.id}
-                type="button"
-                className="surfaceItem"
-                onClick={() => handleSelectSchool(school.id, school.code)}
+                onClick={() => setSelected(school)}
+                className="insetGroupRow"
+                style={{
+                  borderTop: i === 0 ? "none" : undefined,
+                  width: "100%",
+                  background: selected?.id === school.id ? "var(--accent-soft)" : "var(--surface)",
+                  cursor: "pointer",
+                  border: "none",
+                  textAlign: "left",
+                }}
               >
-                <div className="surfaceAccent">{school.code.slice(0, 2)}</div>
-                <div className="surfaceContent">
-                  <h3 className="surfaceTitle">{school.name}</h3>
-                  <p className="surfaceMeta">
-                    <code>{school.code}</code> ｜ <code>{school.id}</code>
-                  </p>
+                <div
+                  className="insetGroupRowIcon"
+                  style={{ fontSize: 22, background: selected?.id === school.id ? "rgba(94,106,210,0.15)" : "var(--panel)" }}
+                >
+                  {school.icon}
+                </div>
+                <div className="insetGroupRowContent">
+                  <div
+                    className="insetGroupRowTitle"
+                    style={{ color: selected?.id === school.id ? "var(--brand)" : "var(--text)" }}
+                  >
+                    {school.name}
+                  </div>
+                  <div className="insetGroupRowMeta">
+                    {school.city} · {TYPE_LABELS[school.type]}
+                  </div>
+                </div>
+                <div
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: "50%",
+                    border: "2px solid",
+                    borderColor: selected?.id === school.id ? "var(--brand)" : "var(--border)",
+                    background: selected?.id === school.id ? "var(--brand)" : "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  {selected?.id === school.id && (
+                    <span style={{ fontSize: 12, color: "#fff", lineHeight: 1 }}>✓</span>
+                  )}
                 </div>
               </button>
             ))}
           </div>
-        </section>
+
+          {/* ── Confirm Button ── */}
+          <button
+            className="btn primary"
+            onClick={handleConfirm}
+            disabled={!selected}
+            style={{ width: "100%", minHeight: 52, fontSize: 16 }}
+          >
+            {selected ? `進入 ${selected.shortName} →` : "請選擇學校"}
+          </button>
+
+          <p style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", margin: 0 }}>
+            找不到您的學校？
+            <span style={{ color: "var(--brand)", fontWeight: 600, cursor: "pointer", marginLeft: 4 }}>
+              申請加入
+            </span>
+          </p>
+        </div>
       </div>
     </SiteShell>
   );

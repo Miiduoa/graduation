@@ -13,7 +13,7 @@ export default ({ config }: any) => {
     userInterfaceStyle: "automatic",
     icon: config.icon ?? "./assets/icon.png",
     splash: {
-      image: config.splash?.image ?? "./assets/splash.png",
+      image: config.splash?.image ?? "./assets/splash-icon.png",
       resizeMode: "contain",
       backgroundColor: "#1a1a2e",
     },
@@ -104,7 +104,6 @@ export default ({ config }: any) => {
       [
         "expo-notifications",
         {
-          icon: "./assets/notification-icon.png",
           color: "#6366F1",
           sounds: ["./assets/sounds/notification.wav"],
         },

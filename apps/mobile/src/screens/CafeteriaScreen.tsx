@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { FlatList, Pressable, Text, View, RefreshControl, ListRenderItem } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
 import { useAsyncList } from "../hooks/useAsyncList";
@@ -15,7 +14,7 @@ import { useDemo } from "../state/demo";
 import { useFavorites } from "../state/favorites";
 import { useToast } from "../ui/Toast";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { formatDateTime } from "../utils/format";
 
 type MenuItem = {
@@ -226,37 +225,35 @@ export function CafeteriaScreen(props: any) {
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-          <LinearGradient
-            colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <View
             style={{
               paddingTop: insets.top + 12,
               paddingBottom: 20,
               paddingHorizontal: theme.space.lg,
+              backgroundColor: theme.colors.bg,
             }}
           >
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <View style={{
                   width: 40, height: 40, borderRadius: 12,
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  backgroundColor: theme.colors.accentSoft,
                   alignItems: "center", justifyContent: "center",
                 }}>
-                  <Ionicons name="restaurant" size={22} color="#fff" />
+                  <Ionicons name="restaurant" size={22} color={theme.colors.accent} />
                 </View>
-                <Text style={{ fontSize: 28, fontWeight: "900", color: "#fff", letterSpacing: -0.5 }}>
+                <Text style={{ fontSize: 34, fontWeight: "800", color: theme.colors.text, letterSpacing: -1 }}>
                   餐廳
                 </Text>
               </View>
               {raw.length > 0 && (
                 <View style={{
-                  backgroundColor: "rgba(255,255,255,0.2)",
+                  backgroundColor: theme.colors.accentSoft,
                   borderRadius: theme.radius.full,
                   paddingHorizontal: 12,
                   paddingVertical: 5,
                 }}>
-                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>
+                  <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: 13 }}>
                     {`${items.length} 項餐點`}
                   </Text>
                 </View>
@@ -267,31 +264,35 @@ export function CafeteriaScreen(props: any) {
               <View style={{ flexDirection: "row", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
                 {cafeteriaOptions.slice(0, 3).map((c) => (
                   <View key={c.key} style={{
-                    backgroundColor: "rgba(255,255,255,0.15)",
+                    backgroundColor: theme.colors.surface,
                     borderRadius: theme.radius.full,
                     paddingHorizontal: 10,
                     paddingVertical: 4,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
                   }}>
-                    <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 12, fontWeight: "600" }}>
+                    <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: "600" }}>
                       {c.label}
                     </Text>
                   </View>
                 ))}
                 {cafeteriaOptions.length > 3 && (
                   <View style={{
-                    backgroundColor: "rgba(255,255,255,0.15)",
+                    backgroundColor: theme.colors.surface,
                     borderRadius: theme.radius.full,
                     paddingHorizontal: 10,
                     paddingVertical: 4,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
                   }}>
-                    <Text style={{ color: "rgba(255,255,255,0.9)", fontSize: 12, fontWeight: "600" }}>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "600" }}>
                       +{cafeteriaOptions.length - 3}
                     </Text>
                   </View>
                 )}
               </View>
             )}
-          </LinearGradient>
+          </View>
 
           {isOffline && lastFetchTime && (
             <View style={{ paddingHorizontal: theme.space.lg, paddingTop: theme.space.sm }}>
@@ -318,7 +319,7 @@ export function CafeteriaScreen(props: any) {
                     ? theme.colors.accentSoft
                     : theme.colors.surface,
                   transform: [{ scale: pressed ? 0.97 : 1 }],
-                  ...shadowStyle(theme.shadows.sm),
+                  ...softShadowStyle(theme.shadows.soft),
                 })}
               >
                 <Ionicons name="filter" size={16} color={activeFilterCount > 0 ? theme.colors.accent : theme.colors.textSecondary} />
@@ -346,7 +347,7 @@ export function CafeteriaScreen(props: any) {
                   borderColor: theme.colors.border,
                   backgroundColor: theme.colors.surface,
                   transform: [{ scale: pressed ? 0.97 : 1 }],
-                  ...shadowStyle(theme.shadows.sm),
+                  ...softShadowStyle(theme.shadows.soft),
                 })}
               >
                 <Ionicons name={viewMode === "list" ? "grid-outline" : "list-outline"} size={18} color={theme.colors.textSecondary} />
@@ -362,7 +363,7 @@ export function CafeteriaScreen(props: any) {
                   borderColor: theme.colors.border,
                   backgroundColor: theme.colors.surface,
                   gap: 16,
-                  ...shadowStyle(theme.shadows.sm),
+                  ...softShadowStyle(theme.shadows.soft),
                 }}
               >
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -456,7 +457,7 @@ export function CafeteriaScreen(props: any) {
                   borderLeftColor: theme.colors.accent,
                   gap: 10,
                   transform: [{ scale: pressed ? 0.97 : 1 }],
-                  ...shadowStyle(theme.shadows.sm),
+                  ...softShadowStyle(theme.shadows.soft),
                 })}
                 accessibilityRole="button"
                 accessibilityLabel="前往線上點餐"
@@ -509,7 +510,7 @@ export function CafeteriaScreen(props: any) {
                   borderLeftColor: theme.colors.success,
                   gap: 10,
                   transform: [{ scale: pressed ? 0.97 : 1 }],
-                  ...shadowStyle(theme.shadows.sm),
+                  ...softShadowStyle(theme.shadows.soft),
                 })}
                 accessibilityRole="button"
                 accessibilityLabel="前往菜單訂閱"
@@ -609,7 +610,7 @@ export function CafeteriaScreen(props: any) {
                         padding: theme.space.lg,
                         gap: 10,
                         transform: [{ scale: pressed ? 0.97 : 1 }],
-                        ...shadowStyle(theme.shadows.sm),
+                        ...softShadowStyle(theme.shadows.soft),
                       })}
                       accessible
                       accessibilityRole="button"
@@ -694,7 +695,7 @@ export function CafeteriaScreen(props: any) {
                       padding: 14,
                       gap: 8,
                       transform: [{ scale: pressed ? 0.97 : 1 }],
-                      ...shadowStyle(theme.shadows.sm),
+                      ...softShadowStyle(theme.shadows.soft),
                     })}
                     accessible
                     accessibilityRole="button"

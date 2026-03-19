@@ -16,7 +16,6 @@ import { useAuth } from "../state/auth";
 import {
   getSchoolSSOConfig,
   performSSOLogin,
-  linkSSOToFirebase,
   isSSOAvailable,
   getSSOProviderName,
   SSOError,
@@ -70,17 +69,15 @@ export function SSOLoginScreen(props: any) {
       }
 
       setStep("authenticating");
-      const userInfo = await performSSOLogin(school.id);
+      const result = await performSSOLogin(school.id);
 
-      if (!userInfo) {
+      if (!result) {
         setStep("idle");
         return;
       }
 
-      setSsoUserInfo(userInfo);
+      setSsoUserInfo(result.userInfo);
       setStep("linking");
-
-      const { uid, isNewUser } = await linkSSOToFirebase(school.id, userInfo);
 
       setStep("success");
 
@@ -88,8 +85,8 @@ export function SSOLoginScreen(props: any) {
 
       setTimeout(() => {
         Alert.alert(
-          isNewUser ? "歡迎加入！" : "登入成功",
-          isNewUser
+          result.isNewUser ? "歡迎加入！" : "登入成功",
+          result.isNewUser
             ? `已使用 ${getSSOProviderName(ssoConfig)} 建立新帳號`
             : `已使用 ${getSSOProviderName(ssoConfig)} 登入`,
           [

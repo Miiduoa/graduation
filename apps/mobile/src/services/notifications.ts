@@ -1,7 +1,14 @@
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import { Platform, Linking, Alert } from "react-native";
 import { doc, setDoc, deleteDoc, serverTimestamp, getDoc } from "firebase/firestore";
+import {
+  defaultNotificationPreferences,
+  normalizeNotificationPreferences,
+  type NotificationPreferences,
+} from "@campus/shared/src/notifications";
 import { getDb } from "../firebase";
 import { withRetry, isRetryableError } from "../utils/retry";
 import { trackEvent } from "./analytics";
@@ -29,6 +36,48 @@ export type PermissionResult = {
   canAskAgain: boolean;
   status: Notifications.PermissionStatus;
 };
+
+const PUSH_TOKEN_STORAGE_KEY = "@notifications.pushToken";
+
+function getExpoProjectId(): string | undefined {
+  const expoConfig = (Constants.expoConfig as any) ?? {};
+  const manifest = (Constants as any)?.manifest ?? {};
+  const easConfig = (Constants as any)?.easConfig ?? {};
+
+  const projectId =
+    easConfig.projectId ??
+    expoConfig?.extra?.eas?.projectId ??
+    manifest?.extra?.eas?.projectId;
+
+  return typeof projectId === "string" && projectId.trim().length > 0
+    ? projectId.trim()
+    : undefined;
+}
+
+async function cachePushToken(token: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token);
+  } catch (error) {
+    console.warn("[Notifications] Failed to cache push token:", error);
+  }
+}
+
+export async function getCachedPushToken(): Promise<string | null> {
+  try {
+    return await AsyncStorage.getItem(PUSH_TOKEN_STORAGE_KEY);
+  } catch (error) {
+    console.warn("[Notifications] Failed to read cached push token:", error);
+    return null;
+  }
+}
+
+export async function clearCachedPushToken(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
+  } catch (error) {
+    console.warn("[Notifications] Failed to clear cached push token:", error);
+  }
+}
 
 /**
  * 檢查當前推播權限狀態
@@ -130,9 +179,15 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   }
 
   try {
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: undefined,
-    });
+    const projectId = getExpoProjectId();
+    if (!projectId) {
+      console.warn("[Notifications] Expo projectId is missing; push token retrieval may fail in production builds.");
+    }
+
+    const tokenData = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined
+    );
+    await cachePushToken(tokenData.data);
     return tokenData.data;
   } catch (error) {
     console.error("Failed to get push token:", error);
@@ -169,6 +224,8 @@ export async function savePushTokenToFirestore(
       },
     }
   );
+
+  await cachePushToken(token);
   
   trackEvent("push_token_saved", { platform: Platform.OS });
 }
@@ -190,6 +247,11 @@ export async function removePushTokenFromFirestore(
       baseDelayMs: 500,
     }
   );
+
+  const cachedToken = await getCachedPushToken();
+  if (cachedToken === token) {
+    await clearCachedPushToken();
+  }
 }
 
 /**
@@ -218,31 +280,25 @@ export async function refreshPushTokenIfNeeded(uid: string): Promise<void> {
   }
 }
 
-export type NotificationPreferences = {
-  enabled: boolean;
-  announcements: boolean;
-  events: boolean;
-  groups: boolean;
-  assignments: boolean;
-  grades: boolean;
-  messages: boolean;
-  quietHoursEnabled: boolean;
-  quietHoursStart: string; // "HH:mm" format
-  quietHoursEnd: string;
-};
+export { defaultNotificationPreferences, type NotificationPreferences };
 
-export const defaultNotificationPreferences: NotificationPreferences = {
-  enabled: true,
-  announcements: true,
-  events: true,
-  groups: true,
-  assignments: true,
-  grades: true,
-  messages: true,
-  quietHoursEnabled: false,
-  quietHoursStart: "22:00",
-  quietHoursEnd: "08:00",
-};
+export async function syncPushTokenForUser(uid: string): Promise<string | null> {
+  const token = await registerForPushNotificationsAsync();
+  if (!token) return null;
+
+  await savePushTokenToFirestore(uid, token);
+  return token;
+}
+
+export async function loadNotificationPreferences(uid: string): Promise<NotificationPreferences> {
+  const db = getDb();
+  const snap = await getDoc(doc(db, "users", uid, "settings", "notifications"));
+  if (!snap.exists()) {
+    return defaultNotificationPreferences;
+  }
+
+  return normalizeNotificationPreferences(snap.data() as Partial<NotificationPreferences>);
+}
 
 /**
  * 儲存通知偏好設定（帶重試機制）
@@ -306,6 +362,14 @@ export function addNotificationResponseReceivedListener(
     });
     callback(response);
   });
+}
+
+export async function getLastNotificationResponseAsync(): Promise<Notifications.NotificationResponse | null> {
+  return Notifications.getLastNotificationResponseAsync();
+}
+
+export async function clearLastNotificationResponseAsync(): Promise<void> {
+  await Notifications.clearLastNotificationResponseAsync();
 }
 
 export async function getBadgeCountAsync(): Promise<number> {

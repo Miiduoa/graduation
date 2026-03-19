@@ -1,14 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { NavigationContainer, DefaultTheme, useNavigationContainerRef, LinkingOptions } from "@react-navigation/native";
+import {
+  NavigationContainer,
+  DefaultTheme,
+  useNavigationContainerRef,
+  type LinkingOptions,
+} from "@react-navigation/native";
 import { createBottomTabNavigator, BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { ActivityIndicator, View, Text, AppState, AppStateStatus, Modal, Pressable } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
-import { BlurView } from "expo-blur";
 import * as Linking from "expo-linking";
 
-import { theme, shadowStyle } from "./src/ui/theme";
+import { theme, shadowStyle, softShadowStyle } from "./src/ui/theme";
 import { SchoolProvider, useSchool } from "./src/state/school";
 import { FavoritesProvider } from "./src/state/favorites";
 import { DemoProvider } from "./src/state/demo";
@@ -21,24 +25,9 @@ import { PreferencesProvider } from "./src/state/preferences";
 import { I18nProvider } from "./src/i18n";
 import { analytics } from "./src/services/analytics";
 import {
-  setDataSource,
-  mockSource,
-  firebaseSource,
-  hybridSource,
-  createCachedSource,
   initOfflineModeSync,
-  configureHybridSource,
   setHybridSourceSchoolContext,
-  initializeSchoolApis,
-  setApiEnvironment,
-  type DataSource,
-  type ApiEnvironment,
 } from "./src/data";
-import {
-  registerForPushNotificationsAsync,
-  savePushTokenToFirestore,
-  addNotificationResponseReceivedListener,
-} from "./src/services/notifications";
 import {
   initNetworkMonitoring,
   syncEssentialData,
@@ -50,8 +39,7 @@ import {
   ConflictInfo,
 } from "./src/services/offline";
 import { ToastProvider, useToast } from "./src/ui/Toast";
-import { ScreenErrorBoundary } from "./src/ui/components";
-import { OfflineBanner } from "./src/ui/OfflineBanner";
+import { NetworkStatusBanner } from "./src/ui/OfflineBanner";
 import { ConflictResolutionModal } from "./src/ui/ConflictResolutionModal";
 
 import { HomeStack } from "./src/screens/HomeStack";
@@ -60,6 +48,8 @@ import { MapStack } from "./src/screens/MapStack";
 import { MeStack } from "./src/screens/MeStack";
 import { MessagesStack } from "./src/screens/MessagesStack";
 import { OnboardingScreen, hasSeenOnboarding } from "./src/screens/OnboardingScreen";
+import { usePushNotifications } from "./src/app/usePushNotifications";
+import { initializeRuntimeDataSource } from "./src/config/runtime";
 
 type RootTabParamList = {
   首頁: undefined;
@@ -68,6 +58,8 @@ type RootTabParamList = {
   訊息: undefined;
   我的: undefined;
 };
+
+type AppNavigationRef = ReturnType<typeof useNavigationContainerRef<RootTabParamList>>;
 
 const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
@@ -167,132 +159,10 @@ const linking: LinkingOptions<RootTabParamList> = {
   },
 };
 
-function getTabIconName(routeName: string, focused: boolean) {
-  // Mix A+B: outline by default (A), solid when active (B)
-  const config = TAB_CONFIG.find((t) => t.key === routeName);
-  if (!config) {
-    return focused ? "ellipse" : "ellipse-outline";
-  }
-  return focused ? config.icon.active : config.icon.inactive;
-}
-
-type DataSourceMode = "mock" | "firebase" | "hybrid";
-
-function parseDataSourceMode(raw?: string): DataSourceMode {
-  const value = (raw ?? "").trim().toLowerCase();
-  if (value === "firebase" || value === "hybrid" || value === "mock") return value;
-  return __DEV__ ? "mock" : "firebase";
-}
-
-function parseApiEnvironment(raw?: string): ApiEnvironment {
-  const value = (raw ?? "").trim().toLowerCase();
-  if (value === "development" || value === "staging" || value === "production") return value;
-  return __DEV__ ? "development" : "production";
-}
-
-const REQUESTED_DATA_SOURCE_MODE = parseDataSourceMode(process.env.EXPO_PUBLIC_DATA_SOURCE_MODE);
-const API_ENV = parseApiEnvironment(process.env.EXPO_PUBLIC_API_ENV);
-const HYBRID_TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_HYBRID_TIMEOUT_MS ?? 10000);
-const HYBRID_FALLBACK_TO_MOCK = (process.env.EXPO_PUBLIC_HYBRID_FALLBACK_TO_MOCK ?? "true") !== "false";
-const HYBRID_PREFER_REAL_API = (process.env.EXPO_PUBLIC_PREFER_REAL_API ?? "true") !== "false";
-
-let USING_FIREBASE = false;
-
-function createConfiguredSource(mode: DataSourceMode): DataSource {
-  if (mode === "mock") return mockSource;
-
-  if (mode === "firebase") return firebaseSource;
-
-  setApiEnvironment(API_ENV);
-  initializeSchoolApis();
-  configureHybridSource({
-    preferRealApi: HYBRID_PREFER_REAL_API,
-    fallbackToMock: HYBRID_FALLBACK_TO_MOCK,
-    realApiTimeout: Number.isFinite(HYBRID_TIMEOUT_MS) ? HYBRID_TIMEOUT_MS : 10000,
-  });
-  return hybridSource;
-}
-
-try {
-  const source = createConfiguredSource(REQUESTED_DATA_SOURCE_MODE);
-  setDataSource(createCachedSource(source));
-  USING_FIREBASE = REQUESTED_DATA_SOURCE_MODE !== "mock";
-  console.log(`[DataSource] Using mode: ${REQUESTED_DATA_SOURCE_MODE}`);
-} catch (error) {
-  console.warn(
-    `[DataSource] Failed to initialize "${REQUESTED_DATA_SOURCE_MODE}", fallback to mock.`,
-    error
-  );
-  setDataSource(createCachedSource(mockSource));
-  USING_FIREBASE = false;
-}
-
-function usePushNotifications(navigationRef: any) {
-  const auth = useAuth();
-  const responseListener = useRef<any>(null);
-
-  useEffect(() => {
-    if (!auth.user) return;
-    const uid = auth.user.uid;
-
-    (async () => {
-      const token = await registerForPushNotificationsAsync();
-      if (token) {
-        await savePushTokenToFirestore(uid, token);
-      }
-    })();
-  }, [auth.user?.uid]);
-
-  useEffect(() => {
-    responseListener.current = addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data;
-      if (!data || !navigationRef.current) return;
-
-      const nav = navigationRef.current;
-
-      switch (data.type) {
-        case "announcement":
-          if (data.announcementId) {
-            nav.navigate("首頁", { screen: "公告詳情", params: { id: data.announcementId } });
-          }
-          break;
-        case "event":
-          if (data.eventId) {
-            nav.navigate("首頁", { screen: "活動詳情", params: { id: data.eventId } });
-          }
-          break;
-        case "group_post":
-          if (data.groupId && data.postId) {
-            nav.navigate("訊息", { screen: "GroupPost", params: { groupId: data.groupId, postId: data.postId } });
-          }
-          break;
-        case "assignment":
-          if (data.groupId && data.assignmentId) {
-            nav.navigate("訊息", { screen: "AssignmentDetail", params: { groupId: data.groupId, assignmentId: data.assignmentId } });
-          }
-          break;
-        case "message":
-          if (data.peerId) {
-            nav.navigate("訊息", { screen: "Chat", params: { kind: "dm", peerId: data.peerId } });
-          }
-          break;
-        default:
-          nav.navigate("我的", { screen: "Notifications" });
-      }
-    });
-
-    return () => {
-      if (responseListener.current) {
-        responseListener.current.remove();
-      }
-    };
-  }, [navigationRef]);
-}
+const { usingFirebase: USING_FIREBASE } = initializeRuntimeDataSource();
 
 function SyncStatusHandler() {
   const toast = useToast();
-  const toastRef = useRef(toast);
-  toastRef.current = toast;
   const [conflicts, setConflicts] = useState<ConflictInfo[]>([]);
   const [showConflictModal, setShowConflictModal] = useState(false);
   
@@ -319,7 +189,7 @@ function SyncStatusHandler() {
     const unsubscribe = subscribeToSyncEvents((event) => {
       switch (event.type) {
         case "queued":
-          toastRef.current.show({
+          toast.show({
             message: "目前離線，操作將在網路恢復後同步",
             type: "info",
             duration: 3000,
@@ -327,7 +197,7 @@ function SyncStatusHandler() {
           break;
         case "sync_complete":
           if (event.processed && event.processed > 0) {
-            toastRef.current.show({
+            toast.show({
               message: `已同步 ${event.processed} 筆資料`,
               type: "success",
               duration: 2000,
@@ -335,14 +205,14 @@ function SyncStatusHandler() {
           }
           break;
         case "sync_error":
-          toastRef.current.show({
+          toast.show({
             message: `同步失敗：${event.error?.message ?? "未知錯誤"}`,
             type: "error",
             duration: 4000,
           });
           break;
         case "conflict":
-          toastRef.current.show({
+          toast.show({
             message: "部分資料與伺服器衝突，請檢查",
             type: "warning",
             duration: 4000,
@@ -352,7 +222,7 @@ function SyncStatusHandler() {
     });
     
     return unsubscribe;
-  }, []);
+  }, [toast]);
   
   const handleResolveConflict = async (
     actionId: string,
@@ -530,18 +400,16 @@ function TokenExpiredModal() {
 function TokenErrorHandler() {
   const auth = useAuth();
   const toast = useToast();
-  const toastRef = useRef(toast);
-  toastRef.current = toast;
   
   useEffect(() => {
     if (auth.tokenError && auth.tokenError.message !== "TOKEN_REFRESH_EXHAUSTED") {
-      toastRef.current.show({
+      toast.show({
         message: "連線問題，稍後會自動重試",
         type: "warning",
         duration: 3000,
       });
     }
-  }, [auth.tokenError]);
+  }, [auth.tokenError, toast]);
   
   return <TokenExpiredModal />;
 }
@@ -613,107 +481,67 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       bottom: Math.max(insets.bottom, 10) + 10,
       left: 16,
       right: 16,
-      borderRadius: 34,
-      ...shadowStyle(theme.shadows.xl),
+      borderRadius: theme.radius.xl,
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: 8,
+      paddingHorizontal: 8,
+      borderWidth: 1,
+      borderColor: isDark ? theme.colors.border : "#E5E5EA",
+      backgroundColor: isDark ? theme.colors.surface : "#FFFFFF",
+      ...softShadowStyle(theme.shadows.soft),
     }}>
-      <BlurView
-        intensity={isDark ? 60 : 78}
-        tint={isDark ? "dark" : "light"}
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          borderRadius: 34,
-          paddingVertical: 8,
-          paddingHorizontal: 8,
-          borderWidth: 1,
-          borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.76)",
-          overflow: "hidden",
-          backgroundColor: isDark ? "rgba(23,33,49,0.86)" : "rgba(255,255,255,0.82)",
-        }}
-      >
-        <View
-          pointerEvents="none"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 22,
-            right: 22,
-            height: 1,
-            backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.92)",
-          }}
-        />
-        {state.routes.map((route, index) => {
-          const { options } = descriptors[route.key];
-          const focused = state.index === index;
-          const config = TAB_CONFIG.find((t) => t.key === route.name);
-          const iconName = config
-            ? (focused ? config.icon.active : config.icon.inactive)
-            : (focused ? "ellipse" : "ellipse-outline");
+      {state.routes.map((route, index) => {
+        const { options } = descriptors[route.key];
+        const focused = state.index === index;
+        const config = TAB_CONFIG.find((t) => t.key === route.name);
+        const iconName: keyof typeof Ionicons.glyphMap = config
+          ? (focused ? config.icon.active : config.icon.inactive)
+          : (focused ? "ellipse" : "ellipse-outline");
 
-          return (
-            <Pressable
-              key={route.key}
-              accessibilityRole="button"
-              accessibilityState={focused ? { selected: true } : {}}
-              accessibilityLabel={options.tabBarAccessibilityLabel}
-              onPress={() => {
-                const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
-                if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
-              }}
-              style={({ pressed }) => ({
-                flex: 1,
-                paddingHorizontal: 3,
-                transform: [{ scale: pressed ? 0.96 : 1 }],
-              })}
-            >
-              <View style={{
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 4,
-                paddingVertical: 8,
-                paddingHorizontal: 10,
-                borderRadius: 22,
-                backgroundColor: focused
-                  ? isDark
-                    ? "rgba(255,255,255,0.08)"
-                    : "rgba(255,255,255,0.76)"
-                  : "transparent",
-                borderWidth: focused ? 1 : 0,
-                borderColor: focused
-                  ? isDark
-                    ? "rgba(255,255,255,0.08)"
-                    : "rgba(255,255,255,0.92)"
-                  : "transparent",
-                minHeight: 56,
-                ...(focused ? shadowStyle(theme.shadows.sm) : {}),
+        return (
+          <Pressable
+            key={route.key}
+            accessibilityRole="button"
+            accessibilityState={focused ? { selected: true } : {}}
+            accessibilityLabel={options.tabBarAccessibilityLabel}
+            onPress={() => {
+              const event = navigation.emit({ type: "tabPress", target: route.key, canPreventDefault: true });
+              if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
+            }}
+            style={({ pressed }) => ({
+              flex: 1,
+              paddingHorizontal: 3,
+              transform: [{ scale: pressed ? 0.95 : 1 }],
+            })}
+          >
+            <View style={{
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 3,
+              paddingVertical: 7,
+              paddingHorizontal: 6,
+              borderRadius: theme.radius.sm,
+              backgroundColor: focused ? theme.colors.accentSoft : "transparent",
+              minHeight: 54,
+            }}>
+              <Ionicons
+                name={iconName}
+                size={focused ? 22 : 20}
+                color={focused ? theme.colors.accent : theme.colors.muted}
+              />
+              <Text style={{
+                fontSize: 10,
+                fontWeight: focused ? "700" : "500",
+                color: focused ? theme.colors.accent : theme.colors.muted,
+                letterSpacing: 0.2,
               }}>
-                <View style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 17,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: focused ? theme.colors.accentSoft : "transparent",
-                }}>
-                  <Ionicons
-                    name={iconName as any}
-                    size={focused ? 20 : 19}
-                    color={focused ? theme.colors.accent : theme.colors.muted}
-                  />
-                </View>
-                <Text style={{
-                  fontSize: 10,
-                  fontWeight: focused ? "700" : "600",
-                  color: focused ? theme.colors.accent : theme.colors.muted,
-                  letterSpacing: 0.2,
-                }}>
-                  {config?.label ?? route.name}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </BlurView>
+                {config?.label ?? route.name}
+              </Text>
+            </View>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -725,10 +553,13 @@ function getTabBarBottomOffset(insetsBottom: number) {
   return Math.max(insetsBottom, 10) + 10;
 }
 
-function AppNavigation({ navigationRef }: { navigationRef: any }) {
-  usePushNotifications(navigationRef);
-  const insets = useSafeAreaInsets();
-  const tabBarReservedBottom = getTabBarBottomOffset(insets.bottom) + FLOATING_TAB_BAR_HEIGHT;
+function AppNavigation({
+  navigationRef,
+}: {
+  navigationRef: AppNavigationRef;
+}) {
+  const auth = useAuth();
+  usePushNotifications(navigationRef, auth.user?.uid);
 
   const navTheme = {
     ...DefaultTheme,
@@ -754,14 +585,14 @@ function AppNavigation({ navigationRef }: { navigationRef: any }) {
       }
     >
       <View style={{ flex: 1 }}>
-        <OfflineBanner />
+        <NetworkStatusBanner />
         <Tab.Navigator
           id={undefined}
           initialRouteName="首頁"
           tabBar={(props) => <FloatingTabBar {...props} />}
-          screenOptions={({ route }) => ({
+          screenOptions={() => ({
             headerShown: false,
-            sceneStyle: { backgroundColor: theme.colors.bg, paddingBottom: tabBarReservedBottom },
+            sceneStyle: { backgroundColor: theme.colors.bg },
           })}
         >
           <Tab.Screen name="首頁" component={HomeStack} />
@@ -776,7 +607,7 @@ function AppNavigation({ navigationRef }: { navigationRef: any }) {
 }
 
 function AppInner() {
-  const navigationRef = useNavigationContainerRef();
+  const navigationRef = useNavigationContainerRef<RootTabParamList>();
   const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
 

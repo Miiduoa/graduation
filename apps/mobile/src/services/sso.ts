@@ -4,7 +4,18 @@ import { makeRedirectUri } from "expo-auth-session";
 import { signInWithCustomToken } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import Constants from "expo-constants";
+import {
+  getSSOProviderName as getSharedSSOProviderName,
+  normalizeSSOUserInfo,
+  normalizeSchoolSSOConfig,
+  type SchoolSSOConfig,
+  type SSOCallbackResult,
+  type SSOProvider,
+  type SSOUserInfo,
+} from "@campus/shared/src/auth";
 import { getAuthInstance, getDb } from "../firebase";
+
+export type { SchoolSSOConfig, SSOProvider, SSOUserInfo } from "@campus/shared/src/auth";
 
 function getCloudFunctionUrl(functionName: string): string {
   const extra = (Constants.expoConfig as any)?.extra ?? {};
@@ -21,31 +32,7 @@ function getCloudFunctionUrl(functionName: string): string {
 }
 
 WebBrowser.maybeCompleteAuthSession();
-
-export type SSOProvider = "oidc" | "saml" | "cas";
-
-export type SSOConfig = {
-  provider: SSOProvider;
-  name: string;
-  enabled: boolean;
-  clientId?: string;
-  authorizationEndpoint?: string;
-  tokenEndpoint?: string;
-  userInfoEndpoint?: string;
-  casServerUrl?: string;
-  samlEntryPoint?: string;
-  samlIssuer?: string;
-  scopes?: string[];
-  customParams?: Record<string, string>;
-};
-
-export type SchoolSSOConfig = {
-  schoolId: string;
-  schoolName: string;
-  ssoConfig: SSOConfig | null;
-  emailDomain?: string;
-  allowEmailLogin: boolean;
-};
+type SSOConfig = NonNullable<SchoolSSOConfig["ssoConfig"]>;
 
 const MOCK_SSO_CONFIGS: Record<string, SchoolSSOConfig> = {
   nchu: {
@@ -97,6 +84,15 @@ const MOCK_SSO_CONFIGS: Record<string, SchoolSSOConfig> = {
   },
 };
 
+function getAppScheme(): string {
+  const expoConfig = (Constants.expoConfig as any) ?? {};
+  const manifest = (Constants as any)?.manifest ?? {};
+  const configuredScheme = expoConfig.scheme ?? manifest.scheme;
+  const scheme = Array.isArray(configuredScheme) ? configuredScheme[0] : configuredScheme;
+
+  return typeof scheme === "string" && scheme.trim().length > 0 ? scheme.trim() : "campus";
+}
+
 function getSchoolConfigLookupKeys(schoolId: string): string[] {
   const normalized = schoolId.trim().toLowerCase();
   const parts = normalized.split("-").filter(Boolean);
@@ -116,7 +112,7 @@ export async function getSchoolSSOConfig(schoolId: string): Promise<SchoolSSOCon
   try {
     const configDoc = await getDoc(doc(db, "schools", schoolId, "settings", "sso"));
     if (configDoc.exists()) {
-      return configDoc.data() as SchoolSSOConfig;
+      return normalizeSchoolSSOConfig(configDoc.data(), { schoolId });
     }
   } catch (error) {
     console.log("No SSO config in Firestore, using mock:", error);
@@ -124,42 +120,33 @@ export async function getSchoolSSOConfig(schoolId: string): Promise<SchoolSSOCon
 
   for (const key of getSchoolConfigLookupKeys(schoolId)) {
     if (MOCK_SSO_CONFIGS[key]) {
-      return MOCK_SSO_CONFIGS[key];
+      return normalizeSchoolSSOConfig(MOCK_SSO_CONFIGS[key], { schoolId });
     }
   }
 
   return null;
 }
 
-export function getSSORedirectUri(): string {
+export function makeAppRedirectUri(path: string): string {
   return makeRedirectUri({
-    scheme: "campus-app",
-    path: "auth/callback",
+    scheme: getAppScheme(),
+    path,
   });
 }
 
-export type OIDCTokenResponse = {
-  access_token: string;
-  id_token?: string;
-  token_type: string;
-  expires_in?: number;
-  refresh_token?: string;
-  scope?: string;
+export function getSSORedirectUri(): string {
+  return makeAppRedirectUri("auth/callback");
+}
+
+type AppSSOCallbackPayload = {
+  provider: SSOProvider;
+  redirectUri: string;
+  code?: string;
+  ticket?: string;
+  samlResponse?: string;
 };
 
-export type SSOUserInfo = {
-  sub: string;
-  email?: string;
-  name?: string;
-  given_name?: string;
-  family_name?: string;
-  picture?: string;
-  student_id?: string;
-  department?: string;
-  role?: "student" | "teacher" | "staff";
-};
-
-async function performOIDCLogin(config: SSOConfig): Promise<SSOUserInfo | null> {
+async function performOIDCLogin(config: SSOConfig): Promise<AppSSOCallbackPayload | null> {
   if (!config.clientId || !config.authorizationEndpoint) {
     throw new Error("OIDC configuration incomplete");
   }
@@ -188,50 +175,14 @@ async function performOIDCLogin(config: SSOConfig): Promise<SSOUserInfo | null> 
     return null;
   }
 
-  if (!config.tokenEndpoint) {
-    throw new Error("Token endpoint not configured");
-  }
-
-  const tokenResponse = await AuthSession.exchangeCodeAsync(
-    {
-      clientId: config.clientId,
-      code: result.params.code,
-      redirectUri,
-      extraParams: {
-        code_verifier: request.codeVerifier ?? "",
-      },
-    },
-    discovery
-  );
-
-  if (!tokenResponse.accessToken) {
-    throw new Error("Failed to get access token");
-  }
-
-  if (config.userInfoEndpoint) {
-    const userInfoResponse = await fetchWithTimeout(config.userInfoEndpoint, {
-      headers: {
-        Authorization: `Bearer ${tokenResponse.accessToken}`,
-      },
-    });
-
-    if (userInfoResponse.ok) {
-      return await userInfoResponse.json();
-    }
-  }
-
-  if (tokenResponse.idToken) {
-    const payload = decodeJWTPayload(tokenResponse.idToken);
-    return payload as SSOUserInfo;
-  }
-
   return {
-    sub: "unknown",
-    email: undefined,
+    provider: "oidc",
+    redirectUri,
+    code: result.params.code,
   };
 }
 
-async function performCASLogin(config: SSOConfig): Promise<SSOUserInfo | null> {
+async function performCASLogin(config: SSOConfig): Promise<AppSSOCallbackPayload | null> {
   if (!config.casServerUrl) {
     throw new Error("CAS server URL not configured");
   }
@@ -254,35 +205,14 @@ async function performCASLogin(config: SSOConfig): Promise<SSOUserInfo | null> {
     throw new Error("No CAS ticket received");
   }
 
-  const validateUrl = `${config.casServerUrl}/serviceValidate?service=${serviceUrl}&ticket=${ticket}&format=json`;
-  const validateResponse = await fetchWithTimeout(validateUrl);
-  
-  if (!validateResponse.ok) {
-    throw new SSOError("CAS 票證驗證失敗", "SSO_VALIDATION_FAILED");
-  }
-
-  const validateData = await validateResponse.json();
-  const serviceResponse = validateData?.serviceResponse;
-
-  if (serviceResponse?.authenticationFailure) {
-    throw new Error(serviceResponse.authenticationFailure.description || "CAS authentication failed");
-  }
-
-  const attributes = serviceResponse?.authenticationSuccess?.attributes || {};
-  const user = serviceResponse?.authenticationSuccess?.user;
-
   return {
-    sub: user || attributes.uid || "unknown",
-    email: attributes.email || attributes.mail,
-    name: attributes.displayName || attributes.cn,
-    student_id: attributes.studentId || attributes.employeeNumber,
-    department: attributes.department || attributes.ou,
-    role: attributes.eduPersonAffiliation?.includes("student") ? "student" : 
-          attributes.eduPersonAffiliation?.includes("faculty") ? "teacher" : "staff",
+    provider: "cas",
+    redirectUri,
+    ticket,
   };
 }
 
-async function performSAMLLogin(config: SSOConfig): Promise<SSOUserInfo | null> {
+async function performSAMLLogin(config: SSOConfig): Promise<AppSSOCallbackPayload | null> {
   if (!config.samlEntryPoint) {
     throw new Error("SAML entry point not configured");
   }
@@ -317,42 +247,11 @@ async function performSAMLLogin(config: SSOConfig): Promise<SSOUserInfo | null> 
     throw new Error("No SAML response received");
   }
 
-  const decodedResponse = atob(samlResponse);
-  const userInfo = parseSAMLResponse(decodedResponse);
-
-  return userInfo;
-}
-
-function parseSAMLResponse(xml: string): SSOUserInfo {
-  const getAttributeValue = (name: string): string | undefined => {
-    const regex = new RegExp(`<saml:Attribute Name="${name}"[^>]*>\\s*<saml:AttributeValue[^>]*>([^<]+)</saml:AttributeValue>`, "i");
-    const match = xml.match(regex);
-    return match?.[1];
-  };
-
-  const nameIdMatch = xml.match(/<saml:NameID[^>]*>([^<]+)<\/saml:NameID>/i);
-  const sub = nameIdMatch?.[1] || "unknown";
-
   return {
-    sub,
-    email: getAttributeValue("email") || getAttributeValue("mail"),
-    name: getAttributeValue("displayName") || getAttributeValue("cn"),
-    student_id: getAttributeValue("studentId") || getAttributeValue("employeeNumber"),
-    department: getAttributeValue("department") || getAttributeValue("ou"),
+    provider: "saml",
+    redirectUri,
+    samlResponse,
   };
-}
-
-function decodeJWTPayload(token: string): Record<string, any> {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return {};
-    
-    const payload = parts[1];
-    const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    return JSON.parse(decoded);
-  } catch {
-    return {};
-  }
 }
 
 /**
@@ -477,7 +376,39 @@ export class SSOError extends Error {
   }
 }
 
-export async function performSSOLogin(schoolId: string): Promise<SSOUserInfo | null> {
+async function completeSSOCallback(
+  schoolId: string,
+  payload: AppSSOCallbackPayload
+): Promise<SSOCallbackResult> {
+  const query = new URLSearchParams({
+    provider: payload.provider,
+    schoolId,
+    redirectUri: payload.redirectUri,
+  });
+
+  if (payload.code) query.set("code", payload.code);
+  if (payload.ticket) query.set("ticket", payload.ticket);
+  if (payload.samlResponse) query.set("SAMLResponse", payload.samlResponse);
+
+  const response = await fetchWithTimeout(
+    `${getCloudFunctionUrl("verifySSOCallback")}?${query.toString()}`
+  );
+
+  const data = (await response.json()) as Partial<SSOCallbackResult> & { error?: string; details?: string };
+
+  if (!response.ok || typeof data.customToken !== "string" || typeof data.uid !== "string") {
+    throw new SSOError(
+      data.details || data.error || "身份驗證失敗",
+      "SSO_TOKEN_ERROR"
+    );
+  }
+
+  return data as SSOCallbackResult;
+}
+
+export async function performSSOLogin(
+  schoolId: string
+): Promise<{ uid: string; isNewUser: boolean; userInfo: SSOUserInfo | null } | null> {
   let config: SchoolSSOConfig | null;
   
   try {
@@ -507,172 +438,63 @@ export async function performSSOLogin(schoolId: string): Promise<SSOUserInfo | n
   const ssoConfig = config.ssoConfig;
 
   try {
+    let payload: AppSSOCallbackPayload | null;
     switch (ssoConfig.provider) {
       case "oidc":
-        return await performOIDCLogin(ssoConfig);
+        payload = await performOIDCLogin(ssoConfig);
+        break;
       case "cas":
-        return await performCASLogin(ssoConfig);
+        payload = await performCASLogin(ssoConfig);
+        break;
       case "saml":
-        return await performSAMLLogin(ssoConfig);
+        payload = await performSAMLLogin(ssoConfig);
+        break;
       default:
         throw new SSOError(
           `不支援的 SSO 協議: ${ssoConfig.provider}`,
           "SSO_UNSUPPORTED_PROVIDER"
         );
     }
+
+    if (!payload) {
+      return null;
+    }
+
+    const result = await completeSSOCallback(schoolId, payload);
+    const auth = getAuthInstance();
+
+    try {
+      await signInWithCustomToken(auth, result.customToken);
+    } catch (error) {
+      throw new SSOError(
+        "登入失敗，請稍後再試",
+        "SSO_TOKEN_ERROR",
+        error
+      );
+    }
+
+    return {
+      uid: result.uid,
+      isNewUser: result.isNewUser,
+      userInfo: normalizeSSOUserInfo(result.userInfo ?? null),
+    };
   } catch (error) {
     throw SSOError.fromUnknown(error);
   }
 }
 
+/**
+ * 已改由 verifySSOCallback 完成學校驗證與 Firebase token 簽發。
+ * 保留同名函式避免舊呼叫點立即崩潰，但不再允許 client 直接建立 token。
+ */
 export async function linkSSOToFirebase(
-  schoolId: string,
-  ssoUserInfo: SSOUserInfo
+  _schoolId: string,
+  _ssoUserInfo: SSOUserInfo
 ): Promise<{ uid: string; isNewUser: boolean }> {
-  const db = getDb();
-  
-  // 檢查是否已經有 SSO 連結
-  let ssoLinkDoc;
-  try {
-    const ssoLinkRef = doc(db, "ssoLinks", `${schoolId}_${ssoUserInfo.sub}`);
-    ssoLinkDoc = await getDoc(ssoLinkRef);
-
-    if (ssoLinkDoc.exists()) {
-      const existingUid = ssoLinkDoc.data().firebaseUid;
-      
-      // 驗證已連結的使用者是否仍然有效
-      const auth = getAuthInstance();
-      try {
-        const customTokenResponse = await fetchWithTimeout(
-          getCloudFunctionUrl("createCustomToken"),
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              schoolId,
-              ssoSub: ssoUserInfo.sub,
-              email: ssoUserInfo.email,
-              existingUid,
-            }),
-          }
-        );
-
-        if (customTokenResponse.ok) {
-          const { customToken } = await customTokenResponse.json();
-          await signInWithCustomToken(auth, customToken);
-          return { uid: existingUid, isNewUser: false };
-        }
-      } catch (error) {
-        console.warn("[sso] Failed to sign in with existing link:", error);
-      }
-    }
-  } catch (error) {
-    console.warn("[sso] Failed to check existing SSO link:", error);
-  }
-
-  const auth = getAuthInstance();
-  
-  // 建立新的 custom token
-  let customTokenResponse;
-  try {
-    customTokenResponse = await fetchWithTimeout(
-      getCloudFunctionUrl("createCustomToken"),
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          schoolId,
-          ssoSub: ssoUserInfo.sub,
-          email: ssoUserInfo.email,
-          name: ssoUserInfo.name,
-          studentId: ssoUserInfo.student_id,
-          department: ssoUserInfo.department,
-          role: ssoUserInfo.role,
-        }),
-      }
-    );
-  } catch (error) {
-    if (error instanceof SSOError) throw error;
-    throw new SSOError(
-      "無法連接認證伺服器",
-      "SSO_NETWORK_ERROR",
-      error
-    );
-  }
-
-  if (!customTokenResponse.ok) {
-    let errorMessage = "身份驗證失敗";
-    try {
-      const errorData = await customTokenResponse.json();
-      errorMessage = errorData.error || errorMessage;
-    } catch {}
-    
-    throw new SSOError(
-      errorMessage,
-      "SSO_TOKEN_ERROR"
-    );
-  }
-
-  let tokenData;
-  try {
-    tokenData = await customTokenResponse.json();
-  } catch (error) {
-    throw new SSOError(
-      "伺服器回應格式錯誤",
-      "SSO_INVALID_RESPONSE",
-      error
-    );
-  }
-
-  const { customToken, uid, isNewUser } = tokenData;
-
-  try {
-    await signInWithCustomToken(auth, customToken);
-  } catch (error) {
-    throw new SSOError(
-      "登入失敗，請稍後再試",
-      "SSO_TOKEN_ERROR",
-      error
-    );
-  }
-
-  // 儲存 SSO 連結（允許失敗但記錄警告）
-  try {
-    const ssoLinkRef = doc(db, "ssoLinks", `${schoolId}_${ssoUserInfo.sub}`);
-    await setDoc(ssoLinkRef, {
-      schoolId,
-      ssoSub: ssoUserInfo.sub,
-      ssoProvider: (await getSchoolSSOConfig(schoolId))?.ssoConfig?.provider,
-      firebaseUid: uid,
-      email: ssoUserInfo.email,
-      linkedAt: serverTimestamp(),
-    });
-  } catch (error) {
-    console.warn("[sso] Failed to save SSO link:", error);
-  }
-
-  // 更新使用者資料（允許失敗但記錄警告）
-  try {
-    const userRef = doc(db, "users", uid);
-    await setDoc(
-      userRef,
-      {
-        schoolId,
-        email: ssoUserInfo.email,
-        displayName: ssoUserInfo.name,
-        studentId: ssoUserInfo.student_id,
-        department: ssoUserInfo.department,
-        role: ssoUserInfo.role === "teacher" ? "teacher" : "student",
-        ssoLinked: true,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-  } catch (error) {
-    console.warn("[sso] Failed to update user profile:", error);
-  }
-
-  return { uid, isNewUser };
+  throw new SSOError(
+    "請改用 performSSOLogin 完成後端驗證流程",
+    "SSO_UNSUPPORTED_PROVIDER"
+  );
 }
 
 export async function unlinkSSO(schoolId: string, uid: string): Promise<void> {
@@ -723,8 +545,7 @@ export function isSSOAvailable(schoolConfig: SchoolSSOConfig | null): boolean {
 }
 
 export function getSSOProviderName(schoolConfig: SchoolSSOConfig | null): string {
-  if (!schoolConfig?.ssoConfig) return "";
-  return schoolConfig.ssoConfig.name || `${schoolConfig.schoolName} SSO`;
+  return getSharedSSOProviderName(schoolConfig ?? undefined);
 }
 
 export const ssoService = {

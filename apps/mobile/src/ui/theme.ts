@@ -7,6 +7,7 @@ export type ThemeColors = {
   surface2: string;
   surfaceElevated: string;
   border: string;
+  separator: string;
   text: string;
   textSecondary: string;
   muted: string;
@@ -40,12 +41,26 @@ export type ThemeShadow = {
   elevation: number;
 };
 
+/** Bilateral Soft UI shadow expressed as two shadow layers */
+export type SoftShadow = {
+  /** Dark face */
+  shadowColor: string;
+  shadowOpacity: number;
+  shadowRadius: number;
+  shadowOffset: { width: number; height: number };
+  elevation: number;
+};
+
 export type ThemeShadows = {
   sm: ThemeShadow;
   md: ThemeShadow;
   lg: ThemeShadow;
   xl: ThemeShadow;
   glow: ThemeShadow;
+  /** Soft UI bilateral raised shadow (for cards) */
+  soft: SoftShadow;
+  /** Soft UI inset pressed shadow (for inputs) */
+  inset: SoftShadow;
 };
 
 export type ThemeRadius = {
@@ -115,11 +130,11 @@ export type Theme = {
 
 const sharedRadius: ThemeRadius = {
   full: 9999,
-  xl: 32,
-  lg: 24,
-  md: 18,
-  sm: 14,
-  xs: 10,
+  xl: 24,
+  lg: 20,
+  md: 14,
+  sm: 10,
+  xs: 8,
 };
 
 const sharedSpace: ThemeSpace = {
@@ -201,7 +216,7 @@ const sharedAnimation: ThemeAnimation = {
   spring: { friction: 8, tension: 65 },
 };
 
-const DEFAULT_ACCENT = "#5B8CFF";
+const DEFAULT_ACCENT = "#5E6AD2";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -237,42 +252,57 @@ export function createDarkTheme(accent: string = DEFAULT_ACCENT, schoolId?: stri
   return {
     mode: "dark",
     colors: {
-      bg: "#0D1420",
-      background: "#0D1420",
-      surface: "#172131",
-      surface2: "#202C40",
-      surfaceElevated: "rgba(23,33,49,0.94)",
-      border: "rgba(203,217,255,0.08)",
-      text: "#F7FAFF",
-      textSecondary: "#D5E2F4",
-      muted: "#93A2B8",
+      bg: "#1C1C1E",
+      background: "#1C1C1E",
+      surface: "#2C2C2E",
+      surface2: "#3A3A3C",
+      surfaceElevated: "#48484A",
+      border: "#38383A",
+      separator: "#38383A",
+      text: "#F2F2F7",
+      textSecondary: "#EBEBF5CC",
+      muted: "#8E8E93",
       accent,
       accentSoft: createAccentSoft(accent, 0.18),
       accentHover: lighten(accent, 0.12),
       gradientStart: accent,
       gradientEnd: lighten(accent, 0.24),
-      success: "#32D74B",
-      successSoft: "rgba(50,215,75,0.16)",
-      danger: "#FF6961",
-      error: "#FF6961",
-      dangerSoft: "rgba(255,105,97,0.16)",
-      warning: "#FFB340",
-      warningSoft: "rgba(255,179,64,0.16)",
-      info: "#64D2FF",
-      infoSoft: "rgba(100,210,255,0.16)",
-      focusRing: rgba(accent, 0.6),
-      overlay: "rgba(6,10,18,0.62)",
-      disabledBg: "rgba(144,159,185,0.12)",
-      disabledText: "rgba(144,159,185,0.6)",
+      success: "#30D158",
+      successSoft: "rgba(48,209,88,0.16)",
+      danger: "#FF453A",
+      error: "#FF453A",
+      dangerSoft: "rgba(255,69,58,0.18)",
+      warning: "#FF9F0A",
+      warningSoft: "rgba(255,159,10,0.16)",
+      info: "#0A84FF",
+      infoSoft: "rgba(10,132,255,0.16)",
+      focusRing: rgba(accent, 0.42),
+      overlay: "rgba(0,0,0,0.62)",
+      disabledBg: "rgba(255,255,255,0.08)",
+      disabledText: "rgba(255,255,255,0.28)",
       cardShadow: "rgba(0,0,0,0.4)",
-      shimmer: "rgba(255,255,255,0.05)",
+      shimmer: "rgba(255,255,255,0.06)",
     },
     shadows: {
-      sm: { color: "#000", opacity: 0.18, radius: 10, offsetY: 3, elevation: 3 },
-      md: { color: "#000", opacity: 0.22, radius: 18, offsetY: 8, elevation: 6 },
-      lg: { color: "#000", opacity: 0.26, radius: 28, offsetY: 12, elevation: 10 },
-      xl: { color: "#000", opacity: 0.32, radius: 36, offsetY: 18, elevation: 14 },
-      glow: { color: accent, opacity: 0.24, radius: 18, offsetY: 0, elevation: 0 },
+      sm: { color: "#000", opacity: 0.24, radius: 8, offsetY: 2, elevation: 2 },
+      md: { color: "#000", opacity: 0.32, radius: 16, offsetY: 4, elevation: 5 },
+      lg: { color: "#000", opacity: 0.40, radius: 28, offsetY: 8, elevation: 9 },
+      xl: { color: "#000", opacity: 0.48, radius: 36, offsetY: 14, elevation: 13 },
+      glow: { color: accent, opacity: 0.26, radius: 16, offsetY: 0, elevation: 0 },
+      soft: {
+        shadowColor: "#000",
+        shadowOpacity: 0.28,
+        shadowRadius: 10,
+        shadowOffset: { width: 3, height: 3 },
+        elevation: 4,
+      },
+      inset: {
+        shadowColor: "#000",
+        shadowOpacity: 0.22,
+        shadowRadius: 6,
+        shadowOffset: { width: 2, height: 2 },
+        elevation: 0,
+      },
     },
     radius: sharedRadius,
     space: sharedSpace,
@@ -287,20 +317,21 @@ export function createLightTheme(accent: string = DEFAULT_ACCENT, schoolId?: str
   return {
     mode: "light",
     colors: {
-      bg: "#EEF3F9",
-      background: "#EEF3F9",
-      surface: "#F8FBFF",
-      surface2: "#E7EEF7",
-      surfaceElevated: "rgba(255,255,255,0.9)",
-      border: "rgba(126,150,184,0.16)",
-      text: "#172033",
-      textSecondary: "#31415F",
-      muted: "#7D8AA1",
+      bg: "#F2F2F7",
+      background: "#F2F2F7",
+      surface: "#FFFFFF",
+      surface2: "#F2F2F7",
+      surfaceElevated: "#FFFFFF",
+      border: "#E5E5EA",
+      separator: "#C6C6C8",
+      text: "#1C1C1E",
+      textSecondary: "#3C3C43",
+      muted: "#8E8E93",
       accent,
-      accentSoft: createAccentSoft(accent, 0.12),
-      accentHover: lighten(accent, -0.08),
-      gradientStart: lighten(accent, 0.3),
-      gradientEnd: lighten(accent, 0.72),
+      accentSoft: createAccentSoft(accent, 0.10),
+      accentHover: lighten(accent, 0.08),
+      gradientStart: accent,
+      gradientEnd: lighten(accent, 0.28),
       success: "#34C759",
       successSoft: "rgba(52,199,89,0.12)",
       danger: "#FF3B30",
@@ -308,21 +339,35 @@ export function createLightTheme(accent: string = DEFAULT_ACCENT, schoolId?: str
       dangerSoft: "rgba(255,59,48,0.12)",
       warning: "#FF9500",
       warningSoft: "rgba(255,149,0,0.12)",
-      info: "#5AC8FA",
-      infoSoft: "rgba(90,200,250,0.12)",
-      focusRing: rgba(accent, 0.4),
-      overlay: "rgba(13,20,32,0.26)",
-      disabledBg: "rgba(125,138,161,0.12)",
-      disabledText: "rgba(125,138,161,0.56)",
-      cardShadow: "rgba(101,129,170,0.12)",
-      shimmer: "rgba(255,255,255,0.38)",
+      info: "#007AFF",
+      infoSoft: "rgba(0,122,255,0.12)",
+      focusRing: rgba(accent, 0.24),
+      overlay: "rgba(0,0,0,0.36)",
+      disabledBg: "rgba(142,142,147,0.12)",
+      disabledText: "rgba(142,142,147,0.55)",
+      cardShadow: "rgba(174,174,192,0.28)",
+      shimmer: "rgba(255,255,255,0.72)",
     },
     shadows: {
-      sm: { color: "#6D86A8", opacity: 0.08, radius: 10, offsetY: 4, elevation: 2 },
-      md: { color: "#6D86A8", opacity: 0.12, radius: 18, offsetY: 8, elevation: 4 },
-      lg: { color: "#6D86A8", opacity: 0.14, radius: 28, offsetY: 12, elevation: 7 },
-      xl: { color: "#6D86A8", opacity: 0.16, radius: 36, offsetY: 18, elevation: 10 },
-      glow: { color: accent, opacity: 0.16, radius: 18, offsetY: 0, elevation: 0 },
+      sm: { color: "#AEAEC0", opacity: 0.28, radius: 8, offsetY: 4, elevation: 2 },
+      md: { color: "#AEAEC0", opacity: 0.38, radius: 14, offsetY: 6, elevation: 4 },
+      lg: { color: "#AEAEC0", opacity: 0.48, radius: 20, offsetY: 10, elevation: 7 },
+      xl: { color: "#AEAEC0", opacity: 0.56, radius: 28, offsetY: 14, elevation: 10 },
+      glow: { color: accent, opacity: 0.20, radius: 16, offsetY: 0, elevation: 0 },
+      soft: {
+        shadowColor: "#AEAEC0",
+        shadowOpacity: 0.32,
+        shadowRadius: 8,
+        shadowOffset: { width: 4, height: 4 },
+        elevation: 3,
+      },
+      inset: {
+        shadowColor: "#AEAEC0",
+        shadowOpacity: 0.24,
+        shadowRadius: 5,
+        shadowOffset: { width: 2, height: 2 },
+        elevation: 0,
+      },
     },
     radius: sharedRadius,
     space: sharedSpace,
@@ -453,6 +498,16 @@ export function shadowStyle(shadow: ThemeShadow) {
     shadowOpacity: shadow.opacity,
     shadowRadius: shadow.radius,
     shadowOffset: { width: 0, height: shadow.offsetY },
+    elevation: shadow.elevation,
+  };
+}
+
+export function softShadowStyle(shadow: SoftShadow) {
+  return {
+    shadowColor: shadow.shadowColor,
+    shadowOpacity: shadow.shadowOpacity,
+    shadowRadius: shadow.shadowRadius,
+    shadowOffset: shadow.shadowOffset,
     elevation: shadow.elevation,
   };
 }

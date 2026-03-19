@@ -235,7 +235,7 @@ export function HelpScreen(props: any) {
                   borderRadius: 999,
                   borderWidth: 1,
                   borderColor: selectedCategory === cat ? theme.colors.accent : theme.colors.border,
-                  backgroundColor: selectedCategory === cat ? theme.colors.accentSoft : pressed ? "rgba(255,255,255,0.06)" : "transparent",
+                  backgroundColor: selectedCategory === cat ? theme.colors.accentSoft : pressed ? theme.colors.surface2 : "transparent",
                 })}
               >
                 <Text

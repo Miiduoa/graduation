@@ -3,7 +3,7 @@ import { ScrollView, Text, View, Pressable, Alert, Share, Linking, Clipboard } f
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, Card, Pill, Button, LoadingState, ErrorState, SectionTitle, Divider } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, shadowStyle } from "../ui/theme";
+import { theme, softShadowStyle } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
 import { useDataSource } from "../hooks/useDataSource";
@@ -134,7 +134,7 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
         borderWidth: 1,
         borderColor: theme.colors.border,
         backgroundColor: theme.colors.surface,
-        ...shadowStyle(theme.shadows.sm),
+        ...softShadowStyle(theme.shadows.soft),
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -542,7 +542,7 @@ export function CalendarScreen(props: any) {
                       borderWidth: 1,
                       borderColor: theme.colors.border,
                       backgroundColor: theme.colors.surface,
-                      ...shadowStyle(theme.shadows.sm),
+                      ...softShadowStyle(theme.shadows.soft),
                       transform: [{ scale: pressed ? 0.985 : 1 }],
                     })}
                   >
