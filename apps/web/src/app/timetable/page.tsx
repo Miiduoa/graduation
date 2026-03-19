@@ -1,8 +1,15 @@
 "use client";
 
 import { SiteShell } from "@/components/SiteShell";
-import { useState, useMemo, type CSSProperties } from "react";
+import { useState, useMemo, useEffect, type CSSProperties } from "react";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
+import {
+  getAuth,
+  fetchUserCourses,
+  isFirebaseConfigured,
+  type UserCourse,
+} from "@/lib/firebase";
+import { onAuthStateChanged, type User } from "firebase/auth";
 
 type ViewMode = "week" | "day" | "list";
 
@@ -47,51 +54,118 @@ const MOCK_COURSES: CourseSlot[] = [
 const DAYS = ["一", "二", "三", "四", "五"];
 const COURSE_COLORS = ["#5E6AD2", "#34C759", "#FF9500", "#007AFF", "#FF3B30", "#BF5AF2", "#32ADE6", "#FF6B35"];
 
+function generateSemesters(): string[] {
+  const now = new Date();
+  const year = now.getFullYear() - 1911;
+  const month = now.getMonth() + 1;
+  const currentSem = month >= 2 && month <= 7 ? 2 : 1;
+  const sems: string[] = [];
+  let y = year; let s = currentSem;
+  for (let i = 0; i < 4; i++) {
+    sems.push(`${y}-${s}`);
+    s--; if (s < 1) { s = 2; y--; }
+  }
+  return sems;
+}
+
+function mapUserCourse(c: UserCourse, idx: number): CourseSlot {
+  return {
+    id: c.id,
+    name: c.name,
+    instructor: c.instructor ?? "—",
+    room: c.room ?? "—",
+    dayOfWeek: c.dayOfWeek,
+    startPeriod: c.startPeriod,
+    endPeriod: c.endPeriod,
+    color: c.color ?? COURSE_COLORS[idx % COURSE_COLORS.length],
+    credits: c.credits,
+  };
+}
+
+const SEMESTERS = generateSemesters();
+
 export default function TimetablePage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [selectedDay, setSelectedDay] = useState<number>(
     Math.min(Math.max((new Date().getDay() || 5), 1), 5)
   );
-  const [selectedSemester, setSelectedSemester] = useState("113-2");
+  const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
+  const [user, setUser] = useState<User | null>(null);
+  const [courses, setCourses] = useState<CourseSlot[]>(MOCK_COURSES);
+  const [usingDemo, setUsingDemo] = useState(true);
+  const [loading, setLoading] = useState(false);
+
+  // 監聽 Firebase Auth
+  useEffect(() => {
+    const auth = getAuth();
+    if (!auth) return;
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsub();
+  }, []);
+
+  // 依學期載入課程
+  useEffect(() => {
+    if (!user || !isFirebaseConfigured()) {
+      setCourses(MOCK_COURSES);
+      setUsingDemo(true);
+      return;
+    }
+    let active = true;
+    async function load() {
+      setLoading(true);
+      try {
+        const fbCourses = await fetchUserCourses(user!.uid, selectedSemester);
+        if (!active) return;
+        if (fbCourses.length > 0) {
+          setCourses(fbCourses.map(mapUserCourse));
+          setUsingDemo(false);
+        } else {
+          setCourses(MOCK_COURSES);
+          setUsingDemo(true);
+        }
+      } catch {
+        if (active) { setCourses(MOCK_COURSES); setUsingDemo(true); }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    load();
+    return () => { active = false; };
+  }, [user, selectedSemester]);
 
   const totalCredits = useMemo(
-    () => MOCK_COURSES.reduce((acc, c) => acc + c.credits, 0),
-    []
+    () => courses.reduce((acc, c) => acc + c.credits, 0),
+    [courses]
   );
 
   const todayCourses = useMemo(
-    () =>
-      MOCK_COURSES.filter((c) => c.dayOfWeek === selectedDay).sort(
-        (a, b) => a.startPeriod - b.startPeriod
-      ),
-    [selectedDay]
+    () => courses.filter((c) => c.dayOfWeek === selectedDay).sort((a, b) => a.startPeriod - b.startPeriod),
+    [courses, selectedDay]
   );
 
   const nextCourse = useMemo(() => {
     const now = new Date();
     const todayDow = now.getDay() === 0 ? 7 : now.getDay();
     const todayHm = now.getHours() * 100 + now.getMinutes();
-    return MOCK_COURSES.find((c) => {
+    return courses.find((c) => {
       if (c.dayOfWeek !== todayDow) return false;
       const p = PERIODS.find((p) => p.period === c.startPeriod);
       if (!p) return false;
       const [h, m] = p.start.split(":").map(Number);
       return h * 100 + m > todayHm;
     });
-  }, []);
+  }, [courses]);
 
   const coursesByDay = useMemo(() => {
     const map: Record<number, CourseSlot[]> = {};
     for (let d = 1; d <= 5; d++) {
-      map[d] = MOCK_COURSES.filter((c) => c.dayOfWeek === d).sort(
-        (a, b) => a.startPeriod - b.startPeriod
-      );
+      map[d] = courses.filter((c) => c.dayOfWeek === d).sort((a, b) => a.startPeriod - b.startPeriod);
     }
     return map;
-  }, []);
+  }, [courses]);
 
   const cardStyle = (color: string): CSSProperties => ({
     background: `${color}14`,
@@ -104,16 +178,22 @@ export default function TimetablePage(props: {
   return (
     <SiteShell
       title="課表"
-      subtitle="本學期課程安排"
-      schoolName={school || undefined}
+      subtitle={`${selectedSemester} 學期課程安排`}
+      schoolName={schoolName}
       schoolCode={selectedSemester}
     >
       <div className="pageStack">
+        {usingDemo && (
+          <div className="card" style={{ padding: "10px 16px", background: "var(--warning-soft)", borderColor: "var(--warning)", fontSize: 13, color: "var(--text)" }}>
+            ⚠️ 目前顯示示範資料。{!user ? "請登入帳號" : "本學期尚無課表記錄"}以查看實際課表。{loading && " 載入中..."}
+          </div>
+        )}
+
         {/* ── Top Metrics ── */}
         <div className="metricGrid">
           <div className="metricCard" style={{ "--tone": "var(--brand)" } as CSSProperties}>
             <div className="metricIcon">📚</div>
-            <div className="metricValue">{MOCK_COURSES.length}</div>
+            <div className="metricValue">{courses.length}</div>
             <div className="metricLabel">本學期課程</div>
           </div>
           <div className="metricCard" style={{ "--tone": "#34C759" } as CSSProperties}>
@@ -165,7 +245,7 @@ export default function TimetablePage(props: {
               onChange={(e) => setSelectedSemester(e.target.value)}
               style={{ minHeight: 40, width: "auto", fontSize: 13 }}
             >
-              {["113-2", "113-1", "112-2", "112-1"].map((s) => (
+              {SEMESTERS.map((s) => (
                 <option key={s} value={s}>
                   {s} 學期
                 </option>
@@ -284,7 +364,7 @@ export default function TimetablePage(props: {
                 {/* Day cells */}
                 {DAYS.map((_, di) => {
                   const dow = di + 1;
-                  const course = MOCK_COURSES.find(
+                  const course = courses.find(
                     (c) => c.dayOfWeek === dow && c.startPeriod === p.period
                   );
                   return (
@@ -487,7 +567,7 @@ export default function TimetablePage(props: {
                 </div>
                 <div>
                   <div style={{ fontSize: 28, fontWeight: 800, color: "#34C759", letterSpacing: "-0.05em" }}>
-                    {MOCK_COURSES.length}
+                    {courses.length}
                   </div>
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>門課程</div>
                 </div>

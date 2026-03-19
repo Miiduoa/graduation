@@ -1499,3 +1499,47 @@ export async function submitFeedback(
     return { success: false, error: String(error) };
   }
 }
+
+export type UserCourse = {
+  id: string;
+  name: string;
+  instructor?: string;
+  room?: string;
+  dayOfWeek: number;
+  startPeriod: number;
+  endPeriod: number;
+  credits: number;
+  semester: string;
+  color?: string;
+};
+
+/**
+ * 讀取使用者課表（從 users/{uid}/courses 集合）
+ */
+export async function fetchUserCourses(
+  userId: string,
+  semester?: string
+): Promise<UserCourse[]> {
+  if (!isFirebaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const firestore = getDb();
+    const constraints: QueryConstraint[] = [];
+    if (semester) {
+      constraints.push(where("semester", "==", semester));
+    }
+
+    const q = query(collection(firestore, "users", userId, "courses"), ...constraints);
+    const snap = await getDocs(q);
+
+    return snap.docs
+      .map((d) => parseDocument<UserCourse>({ id: d.id, data: () => d.data() }))
+      .filter((c): c is UserCourse => c !== null);
+  } catch (error) {
+    console.error("[Firebase] Failed to fetch user courses:", error);
+    return [];
+  }
+}
+

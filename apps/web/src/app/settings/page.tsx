@@ -2,7 +2,7 @@
 
 import { SiteShell } from "@/components/SiteShell";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
-import { useState, useCallback, type CSSProperties } from "react";
+import { useState, useCallback, type CSSProperties, type ReactNode } from "react";
 
 type Section = "general" | "notifications" | "appearance" | "privacy" | "account";
 
@@ -94,7 +94,7 @@ function SettingRow({
 export default function SettingsPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [activeSection, setActiveSection] = useState<Section>("general");
 
   // Settings state
@@ -135,7 +135,7 @@ export default function SettingsPage(props: {
         <div>
           <div className="insetGroupHeader">帳號與學校</div>
           <div className="insetGroup">
-            <SettingRow icon="🏫" iconBg="#E8F4FD" title="切換學校" subtitle={school || "尚未選擇學校"} />
+            <SettingRow icon="🏫" iconBg="#E8F4FD" title="切換學校" subtitle={schoolName || "尚未選擇學校"} />
             <SettingRow icon="🔄" iconBg="#E8FFF2" title="自動同步" right={<Toggle value={autoSync} onChange={setAutoSync} />} />
             <SettingRow icon="🌐" iconBg="#FFF3E8" title="語言" subtitle="繁體中文" right={<span style={{ fontSize: 13, color: "var(--muted)" }}>{language === "zh-TW" ? "繁體中文" : "English"} ›</span>} />
           </div>
@@ -325,7 +325,7 @@ export default function SettingsPage(props: {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 700 }}>學生姓名</div>
             <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
-              student@campus.edu · {school || "未綁定學校"}
+              student@campus.edu · {schoolName || "未綁定學校"}
             </div>
           </div>
           <span style={{ fontSize: 13, color: "var(--brand)", fontWeight: 600, cursor: "pointer" }}>
@@ -359,7 +359,7 @@ export default function SettingsPage(props: {
     );
   }
 
-  const contentMap: Record<Section, () => JSX.Element> = {
+  const contentMap: Record<Section, () => ReactNode> = {
     general: renderGeneral,
     notifications: renderNotifications,
     appearance: renderAppearance,
@@ -371,7 +371,7 @@ export default function SettingsPage(props: {
     <SiteShell
       title="設定"
       subtitle="個人化您的 Campus One 體驗"
-      schoolName={school || undefined}
+      schoolName={schoolName}
     >
       <div className="settingsLayout">
         {/* ── Sidebar ── */}

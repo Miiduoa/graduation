@@ -36,7 +36,7 @@ const DEFAULT_ZONES: Zone[] = [
 type Tab = "borrow" | "seats" | "search";
 
 export default function LibraryPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { school } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName } = resolveSchoolPageContext(props.searchParams);
   const [activeTab, setActiveTab] = useState<Tab>("borrow");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -44,7 +44,7 @@ export default function LibraryPage(props: { searchParams?: { school?: string; s
   const urgentBooks = DEFAULT_BORROWED.filter((b) => b.daysLeft <= 3).length;
 
   return (
-    <SiteShell title="圖書館" subtitle="借閱管理與座位資訊" schoolName={school || undefined}>
+    <SiteShell title="圖書館" subtitle="借閱管理與座位資訊" schoolName={schoolName}>
       <div className="pageStack">
         {/* ── Stats ── */}
         <div className="metricGrid">

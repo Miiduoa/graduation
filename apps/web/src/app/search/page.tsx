@@ -39,7 +39,7 @@ const QUICK_LINKS = [
 ];
 
 export default function SearchPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -64,7 +64,7 @@ export default function SearchPage(props: { searchParams?: { school?: string; sc
   }, [query]);
 
   return (
-    <SiteShell schoolName={school || undefined}>
+    <SiteShell schoolName={schoolName}>
       <div className="pageStack" style={{ maxWidth: 680, margin: "0 auto" }}>
         {/* ── Search Bar ── */}
         <div

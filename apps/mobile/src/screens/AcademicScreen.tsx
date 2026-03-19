@@ -1,5 +1,5 @@
-import React, { useMemo } from "react";
-import { ScrollView, Text, View, Pressable } from "react-native";
+import React, { useMemo, useEffect, useRef } from "react";
+import { ScrollView, Text, View, Pressable, Animated } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -316,6 +316,146 @@ function TodayScheduleSection({ courses, nav }: { courses: any[]; nav: any }) {
   );
 }
 
+/**
+ * 今日任務進度環 — Zeigarnik 效應：未完成任務持續可見
+ * SVG 環形進度條，配合 Animated 入場動畫強化成就感
+ */
+function TodayProgressRing({ completed, total }: { completed: number; total: number }) {
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 7, tension: 60 }),
+      Animated.timing(opacityAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const pct = total > 0 ? completed / total : 0;
+  const radius = 36;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDash = pct * circumference;
+
+  return (
+    <Animated.View style={{ alignItems: "center", opacity: opacityAnim, transform: [{ scale: scaleAnim }] }}>
+      <View style={{ width: 88, height: 88, alignItems: "center", justifyContent: "center" }}>
+        <View style={{
+          position: "absolute",
+          width: 88, height: 88,
+          borderRadius: 44,
+          borderWidth: 6,
+          borderColor: theme.colors.border,
+        }} />
+        {/* Animated progress arc — 用 Animated.View 模擬 */}
+        <View style={{
+          position: "absolute", width: 88, height: 88,
+          borderRadius: 44, borderWidth: 6,
+          borderColor: pct >= 1 ? theme.colors.growth : theme.colors.accent,
+          borderTopColor: "transparent",
+          borderLeftColor: pct > 0.5 ? (pct >= 1 ? theme.colors.growth : theme.colors.accent) : "transparent",
+          transform: [{ rotate: `${-90 + pct * 360}deg` }],
+          opacity: pct > 0 ? 1 : 0,
+        }} />
+        <View style={{ alignItems: "center" }}>
+          <Text style={{ color: pct >= 1 ? theme.colors.growth : theme.colors.accent, fontWeight: "900", fontSize: 22, lineHeight: 26 }}>
+            {completed}
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 10, fontWeight: "600" }}>/{total}</Text>
+        </View>
+      </View>
+      <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", marginTop: 6 }}>今日完成</Text>
+    </Animated.View>
+  );
+}
+
+/**
+ * 時間情境橫幅 — Circadian Psychology：根據時段顯示不同訊息
+ * 減少認知負擔，讓用戶立刻知道「現在應該做什麼」
+ */
+function TimeContextBanner({ courses }: { courses: any[] }) {
+  const hour = new Date().getHours();
+  const now = nowMinutes();
+  const today = new Date().getDay();
+
+  const ongoingCourse = courses.find((c) => {
+    if (c.dayOfWeek !== today) return false;
+    const start = periodToMinutes(c.startPeriod);
+    const end = periodEndToMinutes(c.endPeriod ?? c.startPeriod);
+    return now >= start && now <= end;
+  });
+
+  const nextCourse = courses
+    .filter((c) => c.dayOfWeek === today && periodToMinutes(c.startPeriod) > now)
+    .sort((a, b) => periodToMinutes(a.startPeriod) - periodToMinutes(b.startPeriod))[0];
+
+  let bgColor: string, iconName: any, iconColor: string, title: string, subtitle: string;
+
+  if (ongoingCourse) {
+    bgColor = `${ongoingCourse.color ?? theme.colors.accent}12`;
+    iconName = "school";
+    iconColor = ongoingCourse.color ?? theme.colors.accent;
+    title = `📚 ${ongoingCourse.name} 進行中`;
+    subtitle = ongoingCourse.location ? `${ongoingCourse.location} · 課堂開始了！` : "專注學習中";
+  } else if (hour >= 6 && hour < 9) {
+    bgColor = `${theme.colors.achievement}10`;
+    iconName = "sunny";
+    iconColor = theme.colors.achievement;
+    title = "早安！今天準備好了嗎？";
+    subtitle = nextCourse ? `第一堂：${nextCourse.name}，${PERIODS[nextCourse.startPeriod]?.start} 開始` : "今天沒有課，好好把握時間！";
+  } else if (hour >= 9 && hour < 12) {
+    bgColor = `${theme.colors.accent}10`;
+    iconName = "partly-sunny";
+    iconColor = theme.colors.accent;
+    title = nextCourse ? `下一堂：${nextCourse.name}` : "上午繼續加油！";
+    subtitle = nextCourse ? `${PERIODS[nextCourse.startPeriod]?.start} 開始 · ${nextCourse.location ?? ""}` : "目前沒有待上的課程";
+  } else if (hour >= 12 && hour < 14) {
+    bgColor = `${theme.colors.growth}10`;
+    iconName = "restaurant-outline";
+    iconColor = theme.colors.growth;
+    title = "午休時間";
+    subtitle = nextCourse ? `下午 ${PERIODS[nextCourse.startPeriod]?.start} 記得回來上課` : "下午沒有課，規劃一下下午吧";
+  } else if (hour >= 14 && hour < 18) {
+    bgColor = `${theme.colors.calm}10`;
+    iconName = "cafe-outline";
+    iconColor = theme.colors.calm;
+    title = "下午衝刺時段";
+    subtitle = nextCourse ? `下一堂：${nextCourse.name} ${PERIODS[nextCourse.startPeriod]?.start}` : "還有待完成的任務嗎？";
+  } else {
+    bgColor = `${theme.colors.accent}10`;
+    iconName = "moon-outline";
+    iconColor = "#8B5CF6";
+    title = "晚上好，今天辛苦了";
+    subtitle = "整理一下今天的學習，明天繼續！";
+  }
+
+  return (
+    <View style={{
+      flexDirection: "row", alignItems: "center", gap: 14,
+      padding: 16, borderRadius: 20,
+      backgroundColor: bgColor,
+      borderWidth: 1,
+      borderColor: `${iconColor}20`,
+      marginBottom: 20,
+    }}>
+      <View style={{
+        width: 48, height: 48, borderRadius: 16,
+        backgroundColor: `${iconColor}18`,
+        alignItems: "center", justifyContent: "center",
+      }}>
+        <Ionicons name={iconName} size={24} color={iconColor} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 15, lineHeight: 20 }}>{title}</Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3, lineHeight: 17 }}>{subtitle}</Text>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * 正向框架作業預覽 — Framing Effect（Kahneman）
+ * 用「已完成 X / 還有 Y 件」替代「未完成 Y 件」
+ */
 function AssignmentsPreview({ nav }: { nav: any }) {
   return (
     <View style={{ marginBottom: 22 }}>
@@ -323,34 +463,41 @@ function AssignmentsPreview({ nav }: { nav: any }) {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <View style={{
             width: 26, height: 26, borderRadius: 8,
-            backgroundColor: "#EF444415",
+            backgroundColor: `${theme.colors.growth}15`,
             alignItems: "center", justifyContent: "center",
           }}>
-            <Ionicons name="document-text-outline" size={14} color="#EF4444" />
+            <Ionicons name="checkmark-done-outline" size={14} color={theme.colors.growth} />
           </View>
           <Text style={{ fontSize: 17, fontWeight: "800", color: theme.colors.text, letterSpacing: -0.3 }}>
-            作業 & 截止
+            待完成任務
           </Text>
         </View>
         <Pressable onPress={() => nav?.navigate?.("GroupAssignments")} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, flexDirection: "row", alignItems: "center", gap: 2 })}>
-          <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: "600" }}>更多</Text>
+          <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: "600" }}>查看全部</Text>
           <Ionicons name="chevron-forward" size={13} color={theme.colors.accent} />
         </Pressable>
       </View>
+      {/* 正向框架：顯示「準備好的任務」而非「未完成任務」 */}
       <Pressable
-        onPress={() => nav?.navigate?.("訊息", { screen: "Groups" })}
+        onPress={() => nav?.navigate?.("我的", { screen: "Groups" })}
         style={({ pressed }) => ({
           flexDirection: "row", alignItems: "center", gap: 14,
-          padding: 16, borderRadius: 16,
+          padding: 18, borderRadius: 18,
           backgroundColor: theme.colors.surface,
           borderWidth: 1, borderColor: theme.colors.border,
           opacity: pressed ? 0.8 : 1,
         })}
       >
-        <Ionicons name="checkmark-circle-outline" size={22} color={theme.colors.success} />
+        <View style={{
+          width: 44, height: 44, borderRadius: 14,
+          backgroundColor: `${theme.colors.growth}12`,
+          alignItems: "center", justifyContent: "center",
+        }}>
+          <Ionicons name="checkmark-circle" size={22} color={theme.colors.growth} />
+        </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>目前沒有即將截止的作業</Text>
-          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>前往社群查看群組作業</Text>
+          <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>所有任務都安排好了！</Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>點此查看群組作業與討論</Text>
         </View>
         <Ionicons name="chevron-forward" size={15} color={theme.colors.muted} />
       </Pressable>
@@ -367,26 +514,28 @@ export function AcademicScreen(props: any) {
   const { courses } = useSchedule();
   useThemeMode();
 
-  const isDark = theme.mode === "dark";
-  const totalCredits = useMemo(
-    () => courses.reduce((sum, c) => sum + (c.credits ?? 0), 0),
-    [courses]
-  );
-
   const today = new Date().getDay();
   const todayCourseCount = useMemo(
     () => courses.filter((c) => c.dayOfWeek === today).length,
     [courses, today]
   );
-  const ongoingCourse = useMemo(() => {
+  const totalCredits = useMemo(
+    () => courses.reduce((sum, c) => sum + (c.credits ?? 0), 0),
+    [courses]
+  );
+
+  // 今日進度：課程完成度（已結束課程 / 今日全部課程）
+  const completedToday = useMemo(() => {
     const now = nowMinutes();
-    return courses.find((c) => {
+    return courses.filter((c) => {
       if (c.dayOfWeek !== today) return false;
-      const start = periodToMinutes(c.startPeriod);
-      const end = periodEndToMinutes(c.endPeriod ?? c.startPeriod);
-      return now >= start && now <= end;
-    });
+      return periodEndToMinutes(c.endPeriod ?? c.startPeriod) < now;
+    }).length;
   }, [courses, today]);
+
+  const displayName = auth.profile?.displayName?.split(" ")[0] ?? auth.profile?.displayName ?? "同學";
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "早安" : hour < 18 ? "午安" : "晚安";
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -394,78 +543,95 @@ export function AcademicScreen(props: any) {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        {/* ─── Header ─── */}
-        <View
-          style={{
-            paddingTop: insets.top + 12,
-            paddingBottom: 22,
-            paddingHorizontal: 20,
-            backgroundColor: theme.colors.bg,
-          }}
-        >
-          <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "600", letterSpacing: 0.3 }}>學習中心</Text>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 4, marginBottom: 16 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 34, fontWeight: "800", letterSpacing: -1 }}>
-              課業
-            </Text>
-            <Pressable
-              onPress={() => nav?.navigate?.("CourseSchedule")}
-              style={({ pressed }) => ({
-                flexDirection: "row", alignItems: "center", gap: 6,
-                paddingHorizontal: 14, paddingVertical: 8,
-                borderRadius: theme.radius.sm,
-                backgroundColor: theme.colors.accentSoft,
-                borderWidth: 1,
-                borderColor: "transparent",
-                transform: [{ scale: pressed ? 0.95 : 1 }],
-              })}
-            >
-              <Ionicons name="calendar-outline" size={15} color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: 13 }}>週課表</Text>
-            </Pressable>
+        {/* ─── Header：情境感知 + Zeigarnik 進度 ─── */}
+        <View style={{
+          paddingTop: insets.top + 16,
+          paddingBottom: 24,
+          paddingHorizontal: 20,
+        }}>
+          {/* 問候語 + 進度環（並排，對稱感） */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "600", letterSpacing: 0.4 }}>
+                {greeting}，{displayName}！
+              </Text>
+              <Text style={{
+                color: theme.colors.text, fontSize: 30, fontWeight: "900",
+                letterSpacing: -0.8, lineHeight: 36, marginTop: 4,
+              }}>
+                今日學習
+              </Text>
+              {/* Zeigarnik 進度條 */}
+              {todayCourseCount > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 5 }}>
+                    <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600" }}>
+                      今日課程進度
+                    </Text>
+                    <Text style={{ color: theme.colors.growth, fontSize: 11, fontWeight: "700" }}>
+                      {completedToday}/{todayCourseCount} 完成
+                    </Text>
+                  </View>
+                  <View style={{ height: 5, borderRadius: 3, backgroundColor: theme.colors.border, overflow: "hidden" }}>
+                    <View style={{
+                      height: "100%",
+                      width: `${todayCourseCount > 0 ? (completedToday / todayCourseCount) * 100 : 0}%`,
+                      backgroundColor: completedToday === todayCourseCount && todayCourseCount > 0
+                        ? theme.colors.growth
+                        : theme.colors.accent,
+                      borderRadius: 3,
+                    }} />
+                  </View>
+                </View>
+              )}
+            </View>
+            <TodayProgressRing completed={completedToday} total={todayCourseCount} />
           </View>
 
-          {/* 統計摘要 */}
-          <View style={{ flexDirection: "row", gap: 8 }}>
+          {/* 統計數字 — 用大數字展示能力感（Competence） */}
+          <View style={{ flexDirection: "row", gap: 10 }}>
             <View style={{
-              flex: 1, flexDirection: "row", alignItems: "center", gap: 8,
-              padding: 12, borderRadius: theme.radius.sm,
+              flex: 1, alignItems: "center",
+              padding: 14, borderRadius: 16,
               backgroundColor: theme.colors.surface,
               borderWidth: 1, borderColor: theme.colors.border,
+              gap: 4,
             }}>
-              <Ionicons name="layers-outline" size={15} color="#8B5CF6" />
-              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
-                {courses.length} 門課程
+              <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 26, letterSpacing: -0.5 }}>
+                {courses.length}
               </Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600" }}>門課程</Text>
             </View>
             <View style={{
-              flex: 1, flexDirection: "row", alignItems: "center", gap: 8,
-              padding: 12, borderRadius: theme.radius.sm,
+              flex: 1, alignItems: "center",
+              padding: 14, borderRadius: 16,
               backgroundColor: theme.colors.surface,
               borderWidth: 1, borderColor: theme.colors.border,
+              gap: 4,
             }}>
-              <Ionicons name="star-outline" size={15} color="#F59E0B" />
-              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
-                {totalCredits} 學分
+              <Text style={{ color: theme.colors.achievement, fontWeight: "900", fontSize: 26, letterSpacing: -0.5 }}>
+                {totalCredits}
               </Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600" }}>學分</Text>
             </View>
-            {ongoingCourse && (
-              <View style={{
-                flex: 1.2, flexDirection: "row", alignItems: "center", gap: 6,
-                padding: 12, borderRadius: theme.radius.sm,
-                backgroundColor: `${ongoingCourse.color ?? theme.colors.accent}15`,
-                borderWidth: 1, borderColor: `${ongoingCourse.color ?? theme.colors.accent}30`,
-              }}>
-                <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: ongoingCourse.color ?? theme.colors.accent }} />
-                <Text style={{ color: ongoingCourse.color ?? theme.colors.accent, fontWeight: "700", fontSize: 11 }} numberOfLines={1}>
-                  上課中
-                </Text>
-              </View>
-            )}
+            <View style={{
+              flex: 1, alignItems: "center",
+              padding: 14, borderRadius: 16,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1, borderColor: theme.colors.border,
+              gap: 4,
+            }}>
+              <Text style={{ color: theme.colors.growth, fontWeight: "900", fontSize: 26, letterSpacing: -0.5 }}>
+                {todayCourseCount}
+              </Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600" }}>今日課</Text>
+            </View>
           </View>
         </View>
 
-        <View style={{ paddingHorizontal: 20, marginTop: 4 }}>
+        <View style={{ paddingHorizontal: 20, marginTop: 0 }}>
+          {/* ─── 時間情境橫幅 ─── */}
+          <TimeContextBanner courses={courses} />
           {/* ─── 本週課表概覽 ─── */}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -551,18 +717,34 @@ export function AcademicScreen(props: any) {
             </View>
             <View style={{ flexDirection: "row", gap: 12 }}>
               <ToolCard
+                icon="stats-chart-outline"
+                title="課內成績簿"
+                subtitle="查看每門課評分"
+                color="#0EA5E9"
+                onPress={() => nav?.navigate?.("CourseGradebook")}
+              />
+              <ToolCard
                 icon="analytics-outline"
                 title="學習分析"
                 subtitle="風險與進度總覽"
                 color="#14B8A6"
                 onPress={() => nav?.navigate?.("LearningAnalytics")}
               />
+            </View>
+            <View style={{ flexDirection: "row", gap: 12 }}>
               <ToolCard
                 icon="mail-outline"
                 title="收件匣"
                 subtitle="待辦與課程提醒"
                 color="#F97316"
-                onPress={() => nav?.navigate?.("訊息", { screen: "Inbox" })}
+                onPress={() => nav?.navigate?.("我的", { screen: "Inbox" })}
+              />
+              <ToolCard
+                icon="pulse-outline"
+                title="課堂互動"
+                subtitle="進入即時課堂"
+                color="#059669"
+                onPress={() => nav?.navigate?.("Attendance")}
               />
             </View>
           </View>
@@ -610,7 +792,7 @@ export function AcademicScreen(props: any) {
                 title="學習群組"
                 subtitle="查看作業與討論"
                 color="#3B82F6"
-                onPress={() => nav?.navigate?.("訊息", { screen: "Groups" })}
+                onPress={() => nav?.navigate?.("我的", { screen: "Groups" })}
               />
             </View>
           </View>

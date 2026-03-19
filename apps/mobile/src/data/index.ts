@@ -6,3 +6,4 @@ export * from "./helpers";
 export * from "./cachedSource";
 export * from "./hybridSource";
 export * from "./apiConfig";
+export * from "./courseSpaceSource";

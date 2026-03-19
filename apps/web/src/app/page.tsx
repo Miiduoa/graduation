@@ -18,7 +18,7 @@ import { mockAnnouncements } from "@campus/shared/src/mockData";
 export default function HomePage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
 
   const [user, setUser] = useState<User | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -51,7 +51,7 @@ export default function HomePage(props: {
       try {
         if (isFirebaseConfigured()) {
           const [anns, gpaData] = await Promise.all([
-            fetchAnnouncements(school, 3),
+            fetchAnnouncements(schoolId, 3),
             user ? fetchGPA(user.uid) : Promise.resolve(null),
           ]);
           if (active) {
@@ -69,7 +69,7 @@ export default function HomePage(props: {
     }
     load();
     return () => { active = false; };
-  }, [school, user]);
+  }, [schoolId, user]);
 
   const userName = user?.displayName?.split(" ")[0] ?? user?.email?.split("@")[0] ?? null;
   const announcementCount = announcements.length;
@@ -99,7 +99,7 @@ export default function HomePage(props: {
       ];
 
   return (
-    <SiteShell schoolName={school || undefined}>
+    <SiteShell schoolName={schoolName}>
       <div className="homePage">
         {/* ── Greeting Hero ── */}
         <div

@@ -3,6 +3,8 @@ import type {
   Achievement,
   Announcement, 
   Assignment,
+  AttendanceSession,
+  AttendanceSummary,
   BusArrival,
   BusRoute,
   CalendarEvent,
@@ -10,6 +12,10 @@ import type {
   Comment,
   Conversation,
   Course,
+  CourseGradebookData,
+  CourseMaterial,
+  CourseModule,
+  CourseSpace,
   DormAnnouncement,
   DormitoryInfo,
   DormPackage,
@@ -27,12 +33,14 @@ import type {
   LostFoundItem,
   MenuItem,
   Message,
+  InboxTask,
   Notification,
   Order,
   Poi, 
   Printer,
   PrintJob,
   QueryOptions,
+  Quiz,
   RepairRequest,
   SeatReservation,
   Submission,
@@ -65,6 +73,23 @@ import {
   arrayRemove,
 } from "firebase/firestore";
 import { getDb } from "../firebase";
+import {
+  checkInAttendance as checkInCourseAttendance,
+  createCourseModule as createCourseSpaceModule,
+  createQuiz as createCourseSpaceQuiz,
+  getAttendanceSummary as getCourseAttendanceSummary,
+  getCourseGradebook,
+  getCourseSpace as getWorkspaceCourseSpace,
+  getQuiz as getWorkspaceQuiz,
+  listAttendanceSessions as listWorkspaceAttendanceSessions,
+  listCourseMaterials as listWorkspaceCourseMaterials,
+  listCourseModules as listWorkspaceCourseModules,
+  listCourseSpaces as listWorkspaceCourseSpaces,
+  listInboxTasks as listWorkspaceInboxTasks,
+  listQuizzes as listWorkspaceQuizzes,
+  startAttendanceSession as startCourseAttendanceSession,
+  submitQuiz as submitCourseSpaceQuiz,
+} from "./courseSpaceSource";
 
 const DEFAULT_LIMIT = 100;
 const DEFAULT_PAGE_SIZE = 20;
@@ -428,6 +453,66 @@ export const firebaseSource: DataSource = {
         c.code.toLowerCase().includes(q) ||
         c.instructor.toLowerCase().includes(q)
     );
+  },
+
+  async listCourseSpaces(userId, schoolId) {
+    return listWorkspaceCourseSpaces(userId, schoolId);
+  },
+
+  async getCourseSpace(courseSpaceId, userId, schoolId) {
+    return getWorkspaceCourseSpace(courseSpaceId, userId, schoolId);
+  },
+
+  async listCourseModules(userId, courseSpaceId, schoolId) {
+    return listWorkspaceCourseModules(userId, courseSpaceId, schoolId);
+  },
+
+  async createCourseModule(input) {
+    return createCourseSpaceModule(input);
+  },
+
+  async listCourseMaterials(courseSpaceId, moduleId) {
+    return listWorkspaceCourseMaterials(courseSpaceId, moduleId);
+  },
+
+  async listQuizzes(userId, courseSpaceId, schoolId) {
+    return listWorkspaceQuizzes(userId, courseSpaceId, schoolId);
+  },
+
+  async getQuiz(quizId, userId, courseSpaceId, schoolId) {
+    return getWorkspaceQuiz(quizId, userId, courseSpaceId, schoolId);
+  },
+
+  async createQuiz(input) {
+    return createCourseSpaceQuiz(input);
+  },
+
+  async submitQuiz(input) {
+    return submitCourseSpaceQuiz(input);
+  },
+
+  async listAttendanceSessions(userId, courseSpaceId, schoolId) {
+    return listWorkspaceAttendanceSessions(userId, courseSpaceId, schoolId);
+  },
+
+  async startAttendanceSession(input) {
+    return startCourseAttendanceSession(input);
+  },
+
+  async checkInAttendance(input) {
+    return checkInCourseAttendance(input);
+  },
+
+  async getAttendanceSummary(courseSpaceId) {
+    return getCourseAttendanceSummary(courseSpaceId);
+  },
+
+  async listInboxTasks(userId, schoolId) {
+    return listWorkspaceInboxTasks(userId, schoolId);
+  },
+
+  async getCourseGradebook(courseSpaceId) {
+    return getCourseGradebook(courseSpaceId);
   },
 
   // ===== 選課 =====

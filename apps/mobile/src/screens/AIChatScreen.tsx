@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
   ScrollView,
   Text,
@@ -11,6 +11,7 @@ import {
   Easing,
   Alert,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
 import { Screen, Pill, AnimatedCard } from "../ui/components";
@@ -24,7 +25,10 @@ import { useSchedule } from "../state/schedule";
 import { chatWithAI, getAIStatus, type AIMessage, type AIContext } from "../services/ai";
 import { toDate } from "../utils/format";
 import { getDb } from "../firebase";
-import { doc, getDoc, collection, getDocs, query, orderBy, limit, where } from "firebase/firestore";
+import { doc, getDoc, collection, getDocs, query, orderBy, limit, where, Timestamp } from "firebase/firestore";
+
+const CHAT_HISTORY_KEY = "ai_chat_history";
+const CHAT_HISTORY_MAX = 50;
 
 type MessageRole = "user" | "assistant" | "system";
 
@@ -232,12 +236,45 @@ export function AIChatScreen(props: any) {
   const { items: menus } = useAsyncList(() => ds.listMenus(school.id), [ds, school.id]);
   const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id]);
 
-  // 載入個人化資料
+  // 從 AsyncStorage 讀取對話記錄
+  useEffect(() => {
+    async function loadHistory() {
+      try {
+        const stored = await AsyncStorage.getItem(CHAT_HISTORY_KEY);
+        if (stored) {
+          const parsed: Message[] = JSON.parse(stored);
+          // 還原 Date 物件（JSON 序列化後變為字串）
+          const restored = parsed.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
+          if (restored.length > 0) {
+            setMessages(restored);
+          }
+        }
+      } catch {}
+    }
+    loadHistory();
+  }, []); // 僅在 mount 時執行一次
+
+  // 儲存對話記錄到 AsyncStorage（排除初始問候）
+  const saveHistoryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (messages.length <= 1) return; // 只有問候訊息時不儲存
+    if (saveHistoryRef.current) clearTimeout(saveHistoryRef.current);
+    saveHistoryRef.current = setTimeout(async () => {
+      try {
+        const toSave = messages.slice(-CHAT_HISTORY_MAX);
+        await AsyncStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(toSave));
+      } catch {}
+    }, 500);
+    return () => {
+      if (saveHistoryRef.current) clearTimeout(saveHistoryRef.current);
+    };
+  }, [messages]);
+
+  // 載入個人化資料（pendingAssignments + 週報）
   useEffect(() => {
     if (!auth.user) return;
     const uid = auth.user.uid;
 
-    // 載入待繳作業（從用戶加入的群組）
     async function loadPersonalData() {
       try {
         // 讀取最新週報
@@ -245,7 +282,42 @@ export function AIChatScreen(props: any) {
           query(collection(db, "users", uid, "weeklyReports"), orderBy("generatedAt", "desc"), limit(1))
         );
         if (!weeklySnap.empty) setWeeklyReport(weeklySnap.docs[0].data());
-      } catch {}
+
+        // 讀取待繳作業（從用戶加入的群組讀取 assignments）
+        const userGroupsRef = collection(db, "users", uid, "groups");
+        const groupsSnap = await getDocs(query(userGroupsRef, where("status", "==", "active"), limit(10)));
+        const groupIds = groupsSnap.docs.map((d) => d.id);
+
+        const now = Timestamp.now();
+        const pending: any[] = [];
+
+        for (const gid of groupIds.slice(0, 8)) {
+          const assSnap = await getDocs(
+            query(
+              collection(db, "groups", gid, "assignments"),
+              where("dueAt", ">", now),
+              orderBy("dueAt", "asc"),
+              limit(5)
+            )
+          ).catch(() => ({ docs: [] as any[] }));
+
+          const groupName = groupsSnap.docs.find((d) => d.id === gid)?.data()?.name ?? gid;
+          for (const d of assSnap.docs) {
+            pending.push({ id: d.id, groupId: gid, groupName, ...d.data() });
+          }
+        }
+
+        // 按截止日排序
+        pending.sort((a, b) => {
+          const aTs = a.dueAt?.seconds ?? 0;
+          const bTs = b.dueAt?.seconds ?? 0;
+          return aTs - bTs;
+        });
+
+        setPendingAssignments(pending);
+      } catch (e) {
+        console.warn("[AIChatScreen] loadPersonalData error:", e);
+      }
     }
     loadPersonalData();
   }, [auth.user?.uid]);
@@ -572,6 +644,31 @@ export function AIChatScreen(props: any) {
     setTimeout(() => handleSend(), 100);
   };
 
+  const handleClearHistory = useCallback(() => {
+    Alert.alert("清除對話記錄", "確定要清除所有對話記錄嗎？", [
+      { text: "取消", style: "cancel" },
+      {
+        text: "清除",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await AsyncStorage.removeItem(CHAT_HISTORY_KEY);
+          } catch {}
+          // 重設回歡迎訊息
+          const name = auth.profile?.displayName?.split(" ")[0] ?? "同學";
+          const greeting: Message = {
+            id: "greeting",
+            role: "assistant",
+            content: `哈囉 ${name}！對話記錄已清除。有什麼我可以幫你的嗎？`,
+            timestamp: new Date(),
+            suggestions: ["今天有什麼公告？", "推薦午餐", "找地點"],
+          };
+          setMessages([greeting]);
+        },
+      },
+    ]);
+  }, [auth.profile?.displayName]);
+
   return (
     <Screen>
       <KeyboardAvoidingView
@@ -664,6 +761,16 @@ export function AIChatScreen(props: any) {
               borderColor: theme.colors.border,
             }}
           >
+            <Pressable
+              onPress={handleClearHistory}
+              style={({ pressed }) => ({
+                width: 36, height: 36, borderRadius: 18,
+                backgroundColor: pressed ? theme.colors.surface2 : "transparent",
+                alignItems: "center", justifyContent: "center",
+              })}
+            >
+              <Ionicons name="trash-outline" size={18} color={theme.colors.muted} />
+            </Pressable>
             <TextInput
               value={input}
               onChangeText={setInput}
@@ -683,12 +790,9 @@ export function AIChatScreen(props: any) {
               onPress={handleSend}
               disabled={!input.trim()}
               style={({ pressed }) => ({
-                width: 40,
-                height: 40,
-                borderRadius: 20,
+                width: 40, height: 40, borderRadius: 20,
                 backgroundColor: input.trim() ? theme.colors.accent : theme.colors.surface2,
-                alignItems: "center",
-                justifyContent: "center",
+                alignItems: "center", justifyContent: "center",
                 opacity: pressed ? 0.8 : 1,
               })}
             >
