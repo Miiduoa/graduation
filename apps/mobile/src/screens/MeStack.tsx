@@ -30,6 +30,17 @@ import { FeedbackScreen } from "./FeedbackScreen";
 import { HelpScreen } from "./HelpScreen";
 import { useThemeMode } from "../state/theme";
 import { createStackScreenOptions } from "../ui/navigationTheme";
+/* 訊息/群組 Screens — 從原 MessagesStack 合併進來（4-Tab 架構重組） */
+import { InboxScreen } from "./InboxScreen";
+import { MessagesHomeScreen } from "./MessagesHomeScreen";
+import { GroupsScreen } from "./GroupsScreen";
+import { GroupDetailScreen } from "./GroupDetailScreen";
+import { GroupMembersScreen } from "./GroupMembersScreen";
+import { GroupPostScreen } from "./GroupPostScreen";
+import { GroupAssignmentsScreen } from "./GroupAssignmentsScreen";
+import { AssignmentDetailScreen } from "./AssignmentDetailScreen";
+import { DmsScreen } from "./DmsScreen";
+import { ChatScreen } from "./ChatScreen";
 
 const Stack = createNativeStackNavigator<any, undefined>();
 
@@ -82,6 +93,18 @@ export function MeStack() {
       {/* 管理員 */}
       <Stack.Screen name="AdminDashboard" component={AdminDashboardScreen} options={{ title: "管理員控制台" }} />
       <Stack.Screen name="AdminCourseVerify" component={AdminCourseVerifyScreen} options={{ title: "課程認證" }} />
+
+      {/* 訊息/群組（由原 MessagesStack 合併）— 4-Tab 架構：Relatedness 需求整合進「我的」 */}
+      <Stack.Screen name="Inbox" component={InboxScreen} options={{ title: "收件匣", headerShown: false }} />
+      <Stack.Screen name="MessagesHome" component={MessagesHomeScreen} options={{ title: "訊息" }} />
+      <Stack.Screen name="Groups" component={GroupsScreen} options={{ title: "群組" }} />
+      <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ title: "群組" }} />
+      <Stack.Screen name="GroupMembers" component={GroupMembersScreen} options={{ title: "成員" }} />
+      <Stack.Screen name="GroupPost" component={GroupPostScreen} options={{ title: "貼文" }} />
+      <Stack.Screen name="GroupAssignments" component={GroupAssignmentsScreen} options={{ title: "作業" }} />
+      <Stack.Screen name="AssignmentDetail" component={AssignmentDetailScreen} options={{ title: "作業詳情" }} />
+      <Stack.Screen name="Dms" component={DmsScreen} options={{ title: "私訊" }} />
+      <Stack.Screen name="Chat" component={ChatScreen} options={{ title: "對話" }} />
     </Stack.Navigator>
   );
 }

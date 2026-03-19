@@ -26,7 +26,7 @@ const MOCK_GROUPS: Group[] = [
 ];
 
 export default function GroupsPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { school } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName } = resolveSchoolPageContext(props.searchParams);
   const [filter, setFilter] = useState<"all" | "course" | "club">("all");
   const [search, setSearch] = useState("");
 
@@ -39,7 +39,7 @@ export default function GroupsPage(props: { searchParams?: { school?: string; sc
   const totalUnread = MOCK_GROUPS.reduce((s, g) => s + g.unread, 0);
 
   return (
-    <SiteShell title="群組" subtitle="課程討論與社團交流" schoolName={school || undefined}>
+    <SiteShell title="群組" subtitle="課程討論與社團交流" schoolName={schoolName}>
       <div className="pageStack">
         {/* ── Stats ── */}
         <div className="metricGrid">

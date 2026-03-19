@@ -96,7 +96,7 @@ const SEMESTERS = generateSemesters();
 export default function GradesPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { school, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
   const [sortBy, setSortBy] = useState<"name" | "score" | "gpa">("score");
   const [user, setUser] = useState<User | null>(null);
@@ -173,7 +173,7 @@ export default function GradesPage(props: {
   const maxGpa = gpaHistory.length > 0 ? Math.max(...gpaHistory.map((h) => h.gpa)) : 4.3;
 
   return (
-    <SiteShell title="成績" subtitle={`${selectedSemester} 學期成績查詢`} schoolName={school || undefined} schoolCode={selectedSemester}>
+    <SiteShell title="成績" subtitle={`${selectedSemester} 學期成績查詢`} schoolName={schoolName} schoolCode={selectedSemester}>
       <div className="pageStack">
         {usingDemo && (
           <div className="card" style={{ padding: "10px 16px", background: "var(--warning-soft)", borderColor: "var(--warning)", fontSize: 13, color: "var(--text)" }}>

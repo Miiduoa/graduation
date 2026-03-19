@@ -1,6 +1,9 @@
 import type { 
   Announcement, 
   Assignment,
+  Attachment,
+  AttendanceSession,
+  AttendanceSummary,
   BusArrival,
   BusRoute,
   CalendarEvent,
@@ -8,6 +11,10 @@ import type {
   Comment,
   Conversation,
   Course,
+  CourseGradebookData,
+  CourseMaterial,
+  CourseModule,
+  CourseSpace,
   DormAnnouncement,
   DormitoryInfo,
   DormPackage,
@@ -25,8 +32,10 @@ import type {
   LostFoundItem,
   MenuItem, 
   Message,
+  InboxTask,
   Notification,
   Order,
+  Quiz,
   PaginatedResult,
   Poi,
   Printer,
@@ -75,6 +84,62 @@ export type DataSource = {
   listCourses: (schoolId?: string, options?: QueryOptions) => Promise<Course[]>;
   getCourse: (id: string) => Promise<Course | null>;
   searchCourses: (query: string, schoolId?: string) => Promise<Course[]>;
+  listCourseSpaces: (userId: string, schoolId?: string) => Promise<CourseSpace[]>;
+  getCourseSpace: (courseSpaceId: string, userId: string, schoolId?: string) => Promise<CourseSpace | null>;
+  listCourseModules: (userId: string, courseSpaceId?: string, schoolId?: string) => Promise<CourseModule[]>;
+  createCourseModule: (input: {
+    courseSpaceId: string;
+    title: string;
+    description?: string;
+    week?: number;
+    order?: number;
+    estimatedMinutes?: number;
+    resourceLabel?: string;
+    resourceUrl?: string;
+    createdBy: string;
+    createdByEmail?: string | null;
+    schoolId?: string;
+  }) => Promise<{ id: string }>;
+  listCourseMaterials: (courseSpaceId: string, moduleId?: string) => Promise<CourseMaterial[]>;
+  listQuizzes: (userId: string, courseSpaceId?: string, schoolId?: string) => Promise<Quiz[]>;
+  getQuiz: (quizId: string, userId: string, courseSpaceId?: string, schoolId?: string) => Promise<Quiz | null>;
+  createQuiz: (input: {
+    courseSpaceId: string;
+    title: string;
+    description?: string;
+    dueAt?: Date | null;
+    type: "quiz" | "exam";
+    questionCount?: number;
+    durationMinutes?: number;
+    points?: number;
+    weight?: number;
+    createdBy: string;
+    createdByEmail?: string | null;
+    schoolId?: string;
+  }) => Promise<{ id: string }>;
+  submitQuiz: (input: {
+    courseSpaceId: string;
+    quizId: string;
+    userId: string;
+    content?: string;
+    answers?: Record<string, string | string[]>;
+    attachments?: Attachment[];
+  }) => Promise<Submission>;
+  listAttendanceSessions: (userId: string, courseSpaceId?: string, schoolId?: string) => Promise<AttendanceSession[]>;
+  startAttendanceSession: (input: {
+    courseSpaceId: string;
+    classroomLat?: number;
+    classroomLng?: number;
+    qrExpiryMinutes?: number;
+  }) => Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }>;
+  checkInAttendance: (input: {
+    courseSpaceId: string;
+    sessionId: string;
+    qrToken?: string;
+  }) => Promise<{ success: boolean }>;
+  getAttendanceSummary: (courseSpaceId: string) => Promise<AttendanceSummary>;
+  listInboxTasks: (userId: string, schoolId?: string) => Promise<InboxTask[]>;
+  getCourseGradebook: (courseSpaceId: string) => Promise<CourseGradebookData | null>;
   
   // 選課
   listEnrollments: (userId: string, semester?: string) => Promise<Enrollment[]>;

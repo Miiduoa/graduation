@@ -31,6 +31,22 @@ export type ThemeColors = {
   disabledText: string;
   cardShadow: string;
   shimmer: string;
+  /** 心理學情緒色盤 — Psychological Emotional Palette */
+  /** 成就/獎勵（暖琥珀）— Variable Reward + Competence */
+  achievement: string;
+  achievementSoft: string;
+  /** 連續打卡 Streak（活力橘紅）— Habit Loop + Loss Aversion */
+  streak: string;
+  streakSoft: string;
+  /** 成長/完成（森林綠）— Growth Mindset + Competence */
+  growth: string;
+  growthSoft: string;
+  /** 情感安撫（天空藍）— Anxiety Reduction，用於截止日期提醒 */
+  calm: string;
+  calmSoft: string;
+  /** 輕度警示（暖黃）— Framing Effect，取代部分紅色場景 */
+  gentleWarn: string;
+  gentleWarnSoft: string;
 };
 
 export type ThemeShadow = {
@@ -141,8 +157,8 @@ const sharedSpace: ThemeSpace = {
   xxs: 2,
   xs: 4,
   sm: 8,
-  md: 16,
-  lg: 24,
+  md: 20,   // 從 16 增加到 20，更多呼吸感（Whitespace Psychology）
+  lg: 26,   // 從 24 增加到 26
   xl: 32,
   xxl: 48,
   xxxl: 64,
@@ -282,6 +298,16 @@ export function createDarkTheme(accent: string = DEFAULT_ACCENT, schoolId?: stri
       disabledText: "rgba(255,255,255,0.28)",
       cardShadow: "rgba(0,0,0,0.4)",
       shimmer: "rgba(255,255,255,0.06)",
+      achievement: "#FF9F0A",
+      achievementSoft: "rgba(255,159,10,0.18)",
+      streak: "#FF6B35",
+      streakSoft: "rgba(255,107,53,0.18)",
+      growth: "#30D158",
+      growthSoft: "rgba(48,209,88,0.16)",
+      calm: "#5AC8FA",
+      calmSoft: "rgba(90,200,250,0.16)",
+      gentleWarn: "#FFD60A",
+      gentleWarnSoft: "rgba(255,214,10,0.16)",
     },
     shadows: {
       sm: { color: "#000", opacity: 0.24, radius: 8, offsetY: 2, elevation: 2 },
@@ -347,6 +373,16 @@ export function createLightTheme(accent: string = DEFAULT_ACCENT, schoolId?: str
       disabledText: "rgba(142,142,147,0.55)",
       cardShadow: "rgba(174,174,192,0.28)",
       shimmer: "rgba(255,255,255,0.72)",
+      achievement: "#FF9500",
+      achievementSoft: "rgba(255,149,0,0.12)",
+      streak: "#FF6B35",
+      streakSoft: "rgba(255,107,53,0.12)",
+      growth: "#30B97B",
+      growthSoft: "rgba(48,185,123,0.12)",
+      calm: "#8AAFCD",
+      calmSoft: "rgba(138,175,205,0.12)",
+      gentleWarn: "#F5C842",
+      gentleWarnSoft: "rgba(245,200,66,0.12)",
     },
     shadows: {
       sm: { color: "#AEAEC0", opacity: 0.28, radius: 8, offsetY: 4, elevation: 2 },

@@ -1,9 +1,71 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue, FieldPath, Timestamp } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const https = require("https");
+const http = require("http");
+
+// TDX API 金鑰（透過 firebase functions:secrets:set 設定）
+const TDX_CLIENT_ID = defineSecret("TDX_CLIENT_ID");
+const TDX_CLIENT_SECRET = defineSecret("TDX_CLIENT_SECRET");
+
+// TDX OAuth2 取得 Access Token
+async function getTdxAccessToken(clientId, clientSecret) {
+  return new Promise((resolve, reject) => {
+    const body = `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(clientSecret)}`;
+    const options = {
+      hostname: "tdx.transportdata.tw",
+      path: "/auth/realms/TDXConnect/protocol/openid-connect/token",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.access_token) resolve(parsed.access_token);
+          else reject(new Error(`TDX token error: ${data}`));
+        } catch (e) { reject(e); }
+      });
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// 呼叫 TDX API
+async function fetchTdxApi(path, accessToken) {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: "tdx.transportdata.tw",
+      path,
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(e); }
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 initializeApp();
 
@@ -2782,27 +2844,93 @@ exports.getHealthRecords = onCall(
 exports.getBusArrivals = onCall(
   {
     region: REGION,
+    secrets: [TDX_CLIENT_ID, TDX_CLIENT_SECRET],
   },
   async (request) => {
-    const { schoolId, stopId } = request.data;
+    const { schoolId, stopId, city, routeId } = request.data;
 
     if (!schoolId || !stopId) {
-      throw new HttpsError("invalid-argument", "Missing required fields");
+      throw new HttpsError("invalid-argument", "Missing schoolId or stopId");
     }
 
-    const arrivalsSnap = await db.collection("schools").doc(schoolId)
-      .collection("busArrivals")
-      .where("stopId", "==", stopId)
-      .orderBy("estimatedArrival", "asc")
-      .limit(10)
-      .get();
+    const cacheRef = db.collection("busArrivals").doc(`${schoolId}_${stopId}`);
+    const CACHE_TTL_MS = 60 * 1000; // 60 秒 Cache
 
-    return {
-      arrivals: arrivalsSnap.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })),
-    };
+    // 讀取 Firestore Cache
+    const cached = await cacheRef.get().catch(() => null);
+    if (cached && cached.exists) {
+      const cacheData = cached.data();
+      const cacheAge = Date.now() - (cacheData.cachedAt?.toMillis() ?? 0);
+      if (cacheAge < CACHE_TTL_MS) {
+        console.log(`[getBusArrivals] Cache hit for ${stopId}`);
+        return { arrivals: cacheData.arrivals, fromCache: true };
+      }
+    }
+
+    // 嘗試呼叫 TDX API
+    const clientId = TDX_CLIENT_ID.value();
+    const clientSecret = TDX_CLIENT_SECRET.value();
+
+    if (!clientId || !clientSecret) {
+      // 沒有 TDX 金鑰：回傳靜態資料
+      const staticSnap = await db.collection("busArrivals")
+        .where("schoolId", "==", schoolId)
+        .where("stopId", "==", stopId)
+        .orderBy("estimatedArrival", "asc")
+        .limit(10)
+        .get()
+        .catch(() => ({ docs: [] }));
+      return {
+        arrivals: staticSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        fromCache: false,
+        noApiKey: true,
+      };
+    }
+
+    try {
+      const accessToken = await getTdxAccessToken(clientId, clientSecret);
+      const cityCode = city ?? "Taipei";
+      const apiPath = routeId
+        ? `/api/basic/v3/Bus/EstimatedTimeOfArrival/City/${cityCode}/${encodeURIComponent(routeId)}?%24filter=StopUID%20eq%20'${encodeURIComponent(stopId)}'&%24format=JSON&%24top=20`
+        : `/api/basic/v3/Bus/EstimatedTimeOfArrival/City/${cityCode}?%24filter=StopUID%20eq%20'${encodeURIComponent(stopId)}'&%24format=JSON&%24top=20`;
+
+      const tdxData = await fetchTdxApi(apiPath, accessToken);
+      const arrivals = Array.isArray(tdxData) ? tdxData.map((item) => ({
+        routeId: item.RouteID ?? routeId,
+        routeName: item.RouteName?.Zh_tw ?? item.RouteUID ?? "—",
+        stopId: item.StopUID ?? stopId,
+        stopName: item.StopName?.Zh_tw ?? "—",
+        estimatedArrival: item.EstimateTime != null ? item.EstimateTime : null, // 秒數
+        plateNo: item.PlateNumb ?? null,
+        status: item.StopStatus ?? 0,
+        direction: item.Direction ?? 0,
+        fetchedAt: new Date().toISOString(),
+      })) : [];
+
+      // 寫入 Firestore Cache
+      await cacheRef.set({
+        schoolId, stopId,
+        arrivals,
+        cachedAt: FieldValue.serverTimestamp(),
+      }).catch((e) => console.warn("[getBusArrivals] Cache write failed:", e));
+
+      console.log(`[getBusArrivals] TDX fetch OK: ${arrivals.length} arrivals for ${stopId}`);
+      return { arrivals, fromCache: false };
+    } catch (err) {
+      console.error("[getBusArrivals] TDX API error:", err);
+      // 回傳 Firestore 靜態資料作為 fallback
+      const staticSnap = await db.collection("busArrivals")
+        .where("schoolId", "==", schoolId)
+        .where("stopId", "==", stopId)
+        .limit(10)
+        .get()
+        .catch(() => ({ docs: [] }));
+      return {
+        arrivals: staticSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        fromCache: false,
+        error: "TDX API unavailable, using static data",
+      };
+    }
   }
 );
 
@@ -3435,7 +3563,9 @@ exports.startLiveSession = onCall(
     const qrToken = `${groupId}_${sessionId}_${Math.random().toString(36).slice(2, 10)}`;
     const qrExpiresAt = new Date(Date.now() + qrExpiryMinutes * 60 * 1000);
 
-    await db.collection("groups").doc(groupId).collection("liveSessions").doc(sessionId).set({
+    const liveSessionRef = db.collection("groups").doc(groupId).collection("liveSessions").doc(sessionId);
+    const attendanceSessionRef = db.collection("groups").doc(groupId).collection("attendanceSessions").doc(sessionId);
+    const sessionPayload = {
       sessionId,
       teacherId: uid,
       startedAt: FieldValue.serverTimestamp(),
@@ -3446,7 +3576,25 @@ exports.startLiveSession = onCall(
       ...(classroomLat && classroomLng ? { location: { lat: classroomLat, lng: classroomLng, radiusM: 100 } } : {}),
       reactions: { understood: 0, partial: 0, confused: 0 },
       attendeeCount: 0,
-    });
+    };
+
+    await Promise.all([
+      liveSessionRef.set(sessionPayload),
+      attendanceSessionRef.set({
+        sessionId,
+        liveSessionId: sessionId,
+        groupId,
+        teacherId: uid,
+        startedAt: FieldValue.serverTimestamp(),
+        endedAt: null,
+        active: true,
+        attendeeCount: 0,
+        attendanceMode: "qr",
+        source: "live_session",
+        qrEnabled: true,
+        ...(classroomLat && classroomLng ? { location: { lat: classroomLat, lng: classroomLng, radiusM: 100 } } : {}),
+      }),
+    ]);
 
     // 推播通知給群組成員
     const membersSnap = await db.collection("groups").doc(groupId).collection("members").get();
@@ -3486,7 +3634,13 @@ exports.endLiveSession = onCall(
       throw new HttpsError("permission-denied", "Not authorized to end this session");
     }
 
-    await sessionRef.update({ active: false, endedAt: FieldValue.serverTimestamp() });
+    await Promise.all([
+      sessionRef.update({ active: false, endedAt: FieldValue.serverTimestamp() }),
+      db.collection("groups").doc(groupId).collection("attendanceSessions").doc(sessionId).set({
+        active: false,
+        endedAt: FieldValue.serverTimestamp(),
+      }, { merge: true }),
+    ]);
     return { success: true };
   }
 );
@@ -3537,9 +3691,55 @@ exports.joinLiveSession = onCall(
       }
     }
 
-    await sessionRef.update({
-      [`attendees.${uid}`]: FieldValue.serverTimestamp(),
-      attendeeCount: FieldValue.increment(1),
+    const attendanceSessionRef = db.collection("groups").doc(groupId).collection("attendanceSessions").doc(sessionId);
+
+    await db.runTransaction(async (transaction) => {
+      const latestSession = await transaction.get(sessionRef);
+      if (!latestSession.exists || !latestSession.data()?.active) {
+        throw new HttpsError("not-found", "Session not found or not active");
+      }
+
+      const latestSessionData = latestSession.data();
+      const alreadyJoined = !!latestSessionData?.attendees?.[uid];
+      const sessionUpdates = {
+        [`attendees.${uid}`]: FieldValue.serverTimestamp(),
+      };
+
+      if (!alreadyJoined) {
+        sessionUpdates.attendeeCount = FieldValue.increment(1);
+      }
+
+      transaction.update(sessionRef, sessionUpdates);
+      transaction.set(
+        attendanceSessionRef,
+        {
+          sessionId,
+          liveSessionId: sessionId,
+          groupId,
+          teacherId: latestSessionData.teacherId,
+          startedAt: latestSessionData.startedAt || FieldValue.serverTimestamp(),
+          active: latestSessionData.active,
+          attendanceMode: "qr",
+          source: "live_session",
+          ...(qrToken ? { qrEnabled: true } : {}),
+          ...(latestSessionData.location ? { location: latestSessionData.location } : {}),
+          [`attendees.${uid}`]: FieldValue.serverTimestamp(),
+          ...(alreadyJoined ? {} : { attendeeCount: FieldValue.increment(1) }),
+        },
+        { merge: true }
+      );
+      transaction.set(
+        attendanceSessionRef.collection("attendanceRecords").doc(uid),
+        {
+          uid,
+          status: "present",
+          source: qrToken ? "qr" : "tap",
+          checkedInAt: FieldValue.serverTimestamp(),
+          sessionId,
+          groupId,
+        },
+        { merge: true }
+      );
     });
 
     return { success: true };
@@ -3602,9 +3802,8 @@ exports.generateDailyBrief = onSchedule(
           const todayDOW = new Date().getDay();
           const briefParts = [];
 
-          // 統計今日課程 (假設用戶在 groups 中)
+          // 統計今日課程（查詢用戶加入的所有群組 members 紀錄）
           const memberSnap = await db.collectionGroup("members")
-            .where(db.FieldPath?.documentId?.() ?? "__name__", ">=", "")
             .where("uid", "==", uid)
             .limit(20)
             .get()
@@ -3614,9 +3813,9 @@ exports.generateDailyBrief = onSchedule(
             briefParts.push(`今天你已加入 ${memberSnap.docs.length} 個學習群組。`);
           }
 
-          // 取得最新公告
-          const announcementsSnap = await db.collection("schools").doc(schoolId)
-            .collection("announcements")
+          // 取得最新公告（頂層 announcements 集合，依 schoolId 篩選）
+          const announcementsSnap = await db.collection("announcements")
+            .where("schoolId", "==", schoolId)
             .orderBy("publishedAt", "desc")
             .limit(2)
             .get()

@@ -1,6 +1,7 @@
 /* ========================================
-   CAMPUS SOFT — Design System v2.0
-   iOS-style minimalist card UI + Soft UI
+   CAMPUS SOFT — Design System v3.0
+   Psychology-Driven iOS Minimalist UI
+   Emotional Color Palette + Anxiety Reduction
    ======================================== */
 
 :root {
@@ -45,6 +46,35 @@
   --overlay: rgba(0, 0, 0, 0.36);
   --disabled-bg: rgba(142, 142, 147, 0.12);
   --disabled-text: rgba(142, 142, 147, 0.55);
+
+  /* ── Psychological Emotional Palette ──
+     心理學情緒色盤：依 Self-Determination Theory + Anxiety Psychology 設計 */
+
+  /* 成就/獎勵（暖琥珀）Variable Reward + Competence */
+  --achievement: #FF9500;
+  --achievement-soft: rgba(255, 149, 0, 0.12);
+
+  /* 連續打卡 Streak（活力橘紅）Habit Loop */
+  --streak: #FF6B35;
+  --streak-soft: rgba(255, 107, 53, 0.12);
+
+  /* 成長/完成（森林綠）Growth Mindset */
+  --growth: #30B97B;
+  --growth-soft: rgba(48, 185, 123, 0.12);
+
+  /* 情感安撫（天空藍）Anxiety Reduction — 截止日期提醒用 */
+  --calm: #8AAFCD;
+  --calm-soft: rgba(138, 175, 205, 0.12);
+
+  /* 輕度警示（暖黃）Framing Effect — 取代部分紅色場景 */
+  --gentle-warn: #F5C842;
+  --gentle-warn-soft: rgba(245, 200, 66, 0.12);
+
+  /* ── Today Dashboard ── */
+  --today-morning: linear-gradient(135deg, #FF9500 0%, #FFCC00 100%);
+  --today-afternoon: linear-gradient(135deg, #5E6AD2 0%, #A0ABFF 100%);
+  --today-evening: linear-gradient(135deg, #30B97B 0%, #5AC8FA 100%);
+  --today-night: linear-gradient(135deg, #2C2C2E 0%, #3A3A3C 100%);
 
   /* ── Soft UI Shadows (bilateral neumorphic) ── */
   --shadow-sm: 4px 4px 8px rgba(174, 174, 192, 0.28), -3px -3px 6px rgba(255, 255, 255, 0.92);
@@ -92,6 +122,60 @@
   --font-label-sm-letter-spacing: 0.3px;
 }
 
+:root[data-theme="dark"],
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1C1C1E;
+    --bg-soft: #2C2C2E;
+    --surface: #2C2C2E;
+    --surface-strong: #3A3A3C;
+    --surface-raised: #48484A;
+    --surface-tint: rgba(255, 255, 255, 0.06);
+    --panel: #2C2C2E;
+    --panel2: #3A3A3C;
+    --text: #F2F2F7;
+    --muted: #8E8E93;
+    --muted-light: #636366;
+    --border: #38383A;
+    --border-strong: #48484A;
+    --brand: #8EA5FF;
+    --brand2: #C0CDFF;
+    --accent-soft: rgba(142, 165, 255, 0.18);
+    --success: #30D158;
+    --success-soft: rgba(48, 209, 88, 0.16);
+    --danger: #FF453A;
+    --danger-soft: rgba(255, 69, 58, 0.18);
+    --warning: #FF9F0A;
+    --warning-soft: rgba(255, 159, 10, 0.16);
+    --info: #0A84FF;
+    --info-soft: rgba(10, 132, 255, 0.16);
+    --focus-ring: rgba(142, 165, 255, 0.30);
+    --overlay: rgba(0, 0, 0, 0.60);
+    --disabled-bg: rgba(255, 255, 255, 0.08);
+    --disabled-text: rgba(255, 255, 255, 0.28);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.18);
+    --shadow-md: 0 4px 18px rgba(0, 0, 0, 0.36), 0 2px 4px rgba(0, 0, 0, 0.22);
+    --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.44), 0 4px 8px rgba(0, 0, 0, 0.26);
+    --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.32), inset 0 1px 2px rgba(0, 0, 0, 0.2);
+    /* Dark emotional palette */
+    --achievement: #FF9F0A;
+    --achievement-soft: rgba(255, 159, 10, 0.18);
+    --streak: #FF7F50;
+    --streak-soft: rgba(255, 127, 80, 0.18);
+    --growth: #30D158;
+    --growth-soft: rgba(48, 209, 88, 0.16);
+    --calm: #5AC8FA;
+    --calm-soft: rgba(90, 200, 250, 0.16);
+    --gentle-warn: #FFD60A;
+    --gentle-warn-soft: rgba(255, 214, 10, 0.16);
+    --today-morning: linear-gradient(135deg, #FF9F0A 0%, #FFD60A 100%);
+    --today-afternoon: linear-gradient(135deg, #8EA5FF 0%, #C0CDFF 100%);
+    --today-evening: linear-gradient(135deg, #30D158 0%, #5AC8FA 100%);
+    --today-night: linear-gradient(135deg, #1C1C1E 0%, #2C2C2E 100%);
+  }
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #1C1C1E;
@@ -127,6 +211,21 @@
   --shadow-md: 0 4px 18px rgba(0, 0, 0, 0.36), 0 2px 4px rgba(0, 0, 0, 0.22);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.44), 0 4px 8px rgba(0, 0, 0, 0.26);
   --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.32), inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  /* Dark emotional palette */
+  --achievement: #FF9F0A;
+  --achievement-soft: rgba(255, 159, 10, 0.18);
+  --streak: #FF7F50;
+  --streak-soft: rgba(255, 127, 80, 0.18);
+  --growth: #30D158;
+  --growth-soft: rgba(48, 209, 88, 0.16);
+  --calm: #5AC8FA;
+  --calm-soft: rgba(90, 200, 250, 0.16);
+  --gentle-warn: #FFD60A;
+  --gentle-warn-soft: rgba(255, 214, 10, 0.16);
+  --today-morning: linear-gradient(135deg, #FF9F0A 0%, #FFD60A 100%);
+  --today-afternoon: linear-gradient(135deg, #8EA5FF 0%, #C0CDFF 100%);
+  --today-evening: linear-gradient(135deg, #30D158 0%, #5AC8FA 100%);
+  --today-night: linear-gradient(135deg, #1C1C1E 0%, #2C2C2E 100%);
 }
 
 /* ============================
@@ -2774,3 +2873,212 @@ select.input option {
     scroll-behavior: auto !important;
   }
 }
+
+/* ============================
+   Psychological UI Additions
+   ============================ */
+
+/* 成就/進度 Streak 火焰指示器 */
+.streakBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--streak-soft);
+  color: var(--streak);
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 107, 53, 0.2);
+}
+
+/* 今日進度環容器 */
+.todayProgressRing {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.todayProgressRing svg {
+  transform: rotate(-90deg);
+}
+
+/* 截止日期正向框架標籤（calm 色） */
+.deadlineCalm {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--calm-soft);
+  color: var(--calm);
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(138, 175, 205, 0.2);
+}
+
+/* 完成動畫 */
+@keyframes completePop {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.15); }
+  60% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+.animate-completePop {
+  animation: completePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* 成就解鎖動畫 */
+@keyframes achievementUnlock {
+  0% { opacity: 0; transform: translateY(20px) scale(0.8); }
+  60% { transform: translateY(-4px) scale(1.05); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.animate-achievementUnlock {
+  animation: achievementUnlock 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* 時間軸當前時間指示線 */
+.timelineNowLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--danger);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.timelineNowLine::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.timelineNowLabel {
+  position: absolute;
+  left: -48px;
+  top: -9px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+/* Zeigarnik 進度條（未完成任務可見性） */
+.zeigarnikBar {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--panel2);
+  overflow: hidden;
+  position: relative;
+}
+
+.zeigarnikFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--growth) 0%, var(--brand) 100%);
+  transition: width 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* AI 情境泡泡 */
+.aiBubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  border: 1px solid rgba(94, 106, 210, 0.15);
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  color: var(--brand);
+  cursor: pointer;
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+  animation: fadeIn 0.3s ease;
+}
+
+.aiBubble:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.aiBubbleIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* 正向框架截止日期卡片 */
+.positiveDeadlineCard {
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--gentle-warn-soft);
+  border: 1px solid rgba(245, 200, 66, 0.2);
+}
+
+.positiveDeadlineCard.urgent {
+  background: var(--calm-soft);
+  border-color: rgba(138, 175, 205, 0.2);
+}
+
+/* 今日情境時段橫幅 */
+.contextBanner {
+  padding: 16px 20px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+.contextBanner.morning {
+  background: linear-gradient(135deg, rgba(255, 149, 0, 0.08) 0%, rgba(255, 204, 0, 0.06) 100%);
+  border: 1px solid rgba(255, 149, 0, 0.15);
+}
+
+.contextBanner.class {
+  background: var(--accent-soft);
+  border: 1px solid rgba(94, 106, 210, 0.15);
+}
+
+.contextBanner.afternoon {
+  background: linear-gradient(135deg, rgba(48, 185, 123, 0.08) 0%, rgba(94, 106, 210, 0.06) 100%);
+  border: 1px solid rgba(48, 185, 123, 0.15);
+}
+
+.contextBanner.evening {
+  background: linear-gradient(135deg, rgba(48, 185, 123, 0.06) 0%, rgba(90, 200, 250, 0.06) 100%);
+  border: 1px solid rgba(48, 185, 123, 0.12);
+}
+
+/* ============================
+   Timetable Time Axis
+   ============================ */
+
+.timetableWrapper {
+  position: relative;
+}
+
+.timetableGrid {
+  position: relative;
+}
+
+/* ============================
+   Leaflet Map
+   ============================ */
+@import "leaflet/dist/leaflet.css";

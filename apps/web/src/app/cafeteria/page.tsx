@@ -44,7 +44,7 @@ const nowPeriod = (): MealPeriod => {
 };
 
 export default function CafeteriaPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { school } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName } = resolveSchoolPageContext(props.searchParams);
   const [selectedCafeteria, setSelectedCafeteria] = useState("全部");
   const [period, setPeriod] = useState<MealPeriod>(nowPeriod());
   const [search, setSearch] = useState("");
@@ -73,7 +73,7 @@ export default function CafeteriaPage(props: { searchParams?: { school?: string;
   const currentPeriod = PERIODS.find((p) => p.key === period)!;
 
   return (
-    <SiteShell title="餐廳" subtitle="今日菜單與時段總覽" schoolName={school || undefined}>
+    <SiteShell title="餐廳" subtitle="今日菜單與時段總覽" schoolName={schoolName}>
       <div className="pageStack">
         {/* ── Period Selector ── */}
         <div className="metricGrid">
