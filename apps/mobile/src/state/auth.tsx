@@ -1,5 +1,4 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import Constants from "expo-constants";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { getAuthInstance, getDb, hasUsableFirebaseConfig, subscribeToTokenRefresh } from "../firebase";
@@ -168,15 +167,6 @@ function toMockFirebaseUser(session: {
   } as User;
 }
 
-function parseAdminEmails(): string[] {
-  const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
-  const raw = String(extra.adminEmails ?? "");
-  return raw
-    .split(",")
-    .map((s: string) => s.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 export function AuthProvider(props: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -190,11 +180,11 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   const requestIdRef = useRef(0);
   const isSigningOutRef = useRef(false);
 
-  const adminEmails = useMemo(() => parseAdminEmails(), []);
   const isAdmin = useMemo(() => {
-    const email = user?.email?.toLowerCase() ?? "";
-    return !!email && adminEmails.includes(email);
-  }, [user?.email, adminEmails]);
+    const role = profile?.role;
+    const schoolMembershipRole = profile?.schoolMembershipRole;
+    return role === "admin" || schoolMembershipRole === "admin";
+  }, [profile?.role, profile?.schoolMembershipRole]);
   
   const isEditor = useMemo(() => {
     const role = profile?.role;

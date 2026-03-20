@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCurrentSsoRedirectUri,
   buildWebSsoStartUrl,
+  getSsoTransactionState,
   readWebSsoCallbackParams,
 } from "./sso";
 
@@ -22,6 +23,9 @@ describe("web SSO helpers", () => {
         },
         {
           redirectUri: "https://campus-app.web.app/sso-callback?school=DEMO&schoolId=tw-demo-uni&provider=oidc",
+          state: "tx-state",
+          nonce: "tx-nonce",
+          codeChallenge: "pkce-challenge",
         }
       )
     );
@@ -32,6 +36,10 @@ describe("web SSO helpers", () => {
     expect(url.searchParams.get("response_type")).toBe("code");
     expect(url.searchParams.get("scope")).toBe("openid profile email");
     expect(url.searchParams.get("prompt")).toBe("login");
+    expect(url.searchParams.get("state")).toBe("tx-state");
+    expect(url.searchParams.get("nonce")).toBe("tx-nonce");
+    expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
   it("builds a CAS login url", () => {
@@ -73,12 +81,31 @@ describe("web SSO helpers", () => {
   it("reconstructs the original redirect uri without callback params", () => {
     const redirectUri = buildCurrentSsoRedirectUri(
       new URL(
-        "https://campus-app.web.app/sso-callback?school=DEMO&schoolId=tw-demo-uni&provider=oidc&returnUrl=%2Fcourse%2F123&code=abc&error=ignored"
+        "https://campus-app.web.app/sso-callback?school=DEMO&schoolId=tw-demo-uni&provider=oidc&returnUrl=%2Fcourse%2F123&code=abc&state=oauth-state&error=ignored"
       )
     );
 
     expect(redirectUri).toBe(
       "https://campus-app.web.app/sso-callback?school=DEMO&schoolId=tw-demo-uni&provider=oidc&returnUrl=%2Fcourse%2F123"
     );
+  });
+
+  it("prefers OAuth state and falls back to tx_state", () => {
+    expect(
+      getSsoTransactionState(
+        new URLSearchParams({
+          state: "oauth-state",
+          tx_state: "fallback-state",
+        })
+      )
+    ).toBe("oauth-state");
+
+    expect(
+      getSsoTransactionState(
+        new URLSearchParams({
+          tx_state: "fallback-state",
+        })
+      )
+    ).toBe("fallback-state");
   });
 });

@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { SiteShell } from "@/components/SiteShell";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
@@ -41,27 +40,19 @@ const QUICK_LINKS = [
 export default function SearchPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-
-  useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
-    setIsSearching(true);
-    const timer = setTimeout(() => {
-      setResults(
-        MOCK_RESULTS.filter(
-          (r) =>
-            r.title.toLowerCase().includes(query.toLowerCase()) ||
-            r.subtitle.toLowerCase().includes(query.toLowerCase())
-        )
-      );
-      setIsSearching(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query]);
+  const normalizedQuery = query.trim().toLowerCase();
+  const results = useMemo(
+    () =>
+      normalizedQuery
+        ? MOCK_RESULTS.filter(
+            (r) =>
+              r.title.toLowerCase().includes(normalizedQuery) ||
+              r.subtitle.toLowerCase().includes(normalizedQuery)
+          )
+        : [],
+    [normalizedQuery]
+  );
+  const isSearching = false;
 
   return (
     <SiteShell schoolName={schoolName}>

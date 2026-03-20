@@ -161,20 +161,6 @@ export function NotificationsScreen(props: any) {
     }
   }, [nav, notifs]);
 
-  if (!auth.user) {
-    return (
-      <Screen>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
-          <Card title="通知" subtitle="尚未登入">
-            <Text style={{ color: theme.colors.muted }}>
-              請先到『我的』登入後才能查看通知。
-            </Text>
-          </Card>
-        </ScrollView>
-      </Screen>
-    );
-  }
-
   const renderNotification = useCallback(({ item: n }: ListRenderItemInfo<Notification>) => (
     <NotificationItem
       key={n.id}
@@ -220,6 +206,20 @@ export function NotificationsScreen(props: any) {
       />
     </Card>
   ), [nav]);
+
+  if (!auth.user) {
+    return (
+      <Screen>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+          <Card title="通知" subtitle="尚未登入">
+            <Text style={{ color: theme.colors.muted }}>
+              請先到『我的』登入後才能查看通知。
+            </Text>
+          </Card>
+        </ScrollView>
+      </Screen>
+    );
+  }
 
   return (
     <Screen>

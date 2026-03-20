@@ -73,8 +73,15 @@ import {
   arrayRemove,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { getDb, getFunctionsInstance } from "../firebase";
-import { buildGroupCollectionPath, buildSchoolCollectionPath, buildUserCollectionPath } from "@campus/shared/src";
+import { getAuthInstance, getDb, getFunctionsInstance } from "../firebase";
+import {
+  buildConversationCollectionPath,
+  buildGroupCollectionPath,
+  buildSchoolCollectionPath,
+  buildUserCollectionPath,
+  buildUserSchoolCollectionPath,
+} from "@campus/shared/src";
+import { collectionFromSegments, docFromSegments } from "./firestorePath";
 import {
   checkInAttendance as checkInCourseAttendance,
   createCourseModule as createCourseSpaceModule,
@@ -189,7 +196,7 @@ async function fetchCollectionAtPath<T extends { id: string }>(
     const db = getDb();
     const validConstraints = constraints.filter((c): c is QueryConstraint => c !== null);
     const finalConstraints = applyQueryOptions(validConstraints, options);
-    const qy = query(collection(db, pathSegments.join("/")), ...finalConstraints);
+    const qy = query(collectionFromSegments(db, pathSegments), ...finalConstraints);
     const snap = await getDocs(qy);
     return snap.docs.map((d) => parseDocument<T>(d));
   } catch (error) {
@@ -201,6 +208,178 @@ async function fetchCollectionAtPath<T extends { id: string }>(
       error
     );
   }
+}
+
+async function fetchDocumentAtPath<T extends { id: string }>(
+  pathSegments: string[]
+): Promise<T | null> {
+  try {
+    const db = getDb();
+    const docSnap = await getDoc(docFromSegments(db, pathSegments));
+
+    if (!docSnap.exists()) {
+      return null;
+    }
+
+    return parseDocument<T>({ id: docSnap.id, data: () => docSnap.data() as Record<string, unknown> });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[firebase] Failed to fetch ${pathSegments.join("/")}:`, error);
+    throw new FirebaseDataError(
+      `無法載入${pathSegments.join("/")}：${message}`,
+      pathSegments.join("/"),
+      error
+    );
+  }
+}
+
+async function createDocumentAtPath<T extends { id: string }>(
+  pathSegments: string[],
+  data: Omit<T, "id" | "createdAt"> & Partial<Pick<T, Extract<keyof T, "createdAt">>>
+): Promise<T> {
+  try {
+    const db = getDb();
+    const docRef = await addDoc(collectionFromSegments(db, pathSegments), {
+      ...data,
+      createdAt: serverTimestamp(),
+    });
+    const created = await fetchDocumentAtPath<T>([...pathSegments, docRef.id]);
+
+    if (!created) {
+      throw new Error("Document not found after creation");
+    }
+
+    return created;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[firebase] Failed to create ${pathSegments.join("/")}:`, error);
+    throw new FirebaseDataError(
+      `無法建立${pathSegments.join("/")}：${message}`,
+      pathSegments.join("/"),
+      error
+    );
+  }
+}
+
+async function updateDocumentAtPath<T extends { id?: string }>(
+  pathSegments: string[],
+  data: Partial<T>
+): Promise<void> {
+  const db = getDb();
+  await updateDoc(docFromSegments(db, pathSegments), {
+    ...data,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+async function deleteDocumentAtPath(pathSegments: string[]): Promise<void> {
+  const db = getDb();
+  await deleteDoc(docFromSegments(db, pathSegments));
+}
+
+async function fetchCanonicalUserSchoolCollection<T extends { id: string }>(params: {
+  uid: string;
+  schoolId?: string | null;
+  canonicalCollection: string;
+  canonicalConstraints?: (QueryConstraint | null)[];
+  fallbackUserCollection?: string;
+  fallbackUserConstraints?: (QueryConstraint | null)[];
+  fallbackRootCollection?: string;
+  fallbackRootConstraints?: (QueryConstraint | null)[];
+  options?: QueryOptions;
+}): Promise<T[]> {
+  let lastError: unknown = null;
+
+  if (params.schoolId) {
+    try {
+      const canonicalRows = await fetchCollectionAtPath<T>(
+        buildUserSchoolCollectionPath(params.uid, params.schoolId, params.canonicalCollection),
+        params.canonicalConstraints ?? [],
+        params.options
+      );
+      if (canonicalRows.length > 0) {
+        return canonicalRows;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (params.fallbackUserCollection) {
+    try {
+      const fallbackUserRows = await fetchCollectionAtPath<T>(
+        buildUserCollectionPath(params.uid, params.fallbackUserCollection),
+        params.fallbackUserConstraints ?? [],
+        params.options
+      );
+      if (fallbackUserRows.length > 0) {
+        return fallbackUserRows;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (params.fallbackRootCollection) {
+    return fetchCollection<T>(
+      params.fallbackRootCollection,
+      params.fallbackRootConstraints ?? [],
+      params.schoolId ?? undefined,
+      params.options
+    );
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return [];
+}
+
+async function fetchCanonicalUserSchoolDocument<T extends { id: string }>(params: {
+  uid: string;
+  schoolId?: string | null;
+  canonicalCollection: string;
+  docId: string;
+  fallbackUserCollection?: string;
+  fallbackRootCollection?: string;
+}): Promise<T | null> {
+  const pathCandidates: string[][] = [];
+
+  if (params.schoolId) {
+    pathCandidates.push(buildUserSchoolCollectionPath(params.uid, params.schoolId, params.canonicalCollection, params.docId));
+  }
+  if (params.fallbackUserCollection) {
+    pathCandidates.push(buildUserCollectionPath(params.uid, params.fallbackUserCollection, params.docId));
+  }
+  if (params.fallbackRootCollection) {
+    pathCandidates.push([params.fallbackRootCollection, params.docId]);
+  }
+
+  for (const pathSegments of pathCandidates) {
+    const row = await fetchDocumentAtPath<T>(pathSegments);
+    if (row) {
+      return row;
+    }
+  }
+
+  return null;
+}
+
+async function resolveUserSchoolId(
+  uid: string,
+  preferredSchoolId?: string | null
+): Promise<string | null> {
+  if (preferredSchoolId) {
+    return preferredSchoolId;
+  }
+
+  const userDoc = await fetchDocumentAtPath<{ id: string; schoolId?: string | null; primarySchoolId?: string | null }>([
+    "users",
+    uid,
+  ]).catch(() => null);
+
+  return userDoc?.primarySchoolId ?? userDoc?.schoolId ?? null;
 }
 
 async function fetchCanonicalSchoolCollection<T extends { id: string }>(params: {
@@ -276,7 +455,7 @@ async function fetchDocument<T extends { id: string }>(
 
 async function createDocument<T extends { id: string }>(
   collectionName: string,
-  data: Omit<T, "id">
+  data: Omit<T, "id" | "createdAt"> & Partial<Pick<T, Extract<keyof T, "createdAt">>>
 ): Promise<T> {
   try {
     const db = getDb();
@@ -599,39 +778,74 @@ export const firebaseSource: DataSource = {
   },
 
   // ===== 選課 =====
-  async listEnrollments(userId, semester) {
+  async listEnrollments(userId, semester, schoolId = undefined) {
     const constraints: (QueryConstraint | null)[] = [byUser(userId)];
     if (semester) {
       constraints.push(where("semester", "==", semester));
     }
-    return fetchCollection<Enrollment>("enrollments", constraints);
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    return fetchCanonicalUserSchoolCollection<Enrollment>({
+      uid: userId,
+      schoolId: resolvedSchoolId,
+      canonicalCollection: "enrollments",
+      canonicalConstraints: constraints,
+      fallbackUserCollection: "enrollments",
+      fallbackUserConstraints: constraints,
+      fallbackRootCollection: "enrollments",
+      fallbackRootConstraints: constraints,
+    });
   },
 
-  async enrollCourse(userId, courseId, semester) {
-    return createDocument<Enrollment>("enrollments", {
+  async enrollCourse(userId, courseId, semester, schoolId = undefined) {
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    if (!resolvedSchoolId) {
+      throw new Error("缺少 schoolId，無法建立選課資料");
+    }
+
+    return createDocumentAtPath<Enrollment>(buildUserSchoolCollectionPath(userId, resolvedSchoolId, "enrollments"), {
       userId,
+      schoolId: resolvedSchoolId,
       courseId,
       semester,
       status: "enrolled",
     } as Omit<Enrollment, "id">);
   },
 
-  async dropCourse(enrollmentId) {
+  async dropCourse(enrollmentId, userId = undefined, schoolId = undefined) {
+    const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
+    if (userId && resolvedSchoolId) {
+      await updateDocumentAtPath<Enrollment>(
+        buildUserSchoolCollectionPath(userId, resolvedSchoolId, "enrollments", enrollmentId),
+        { status: "dropped" }
+      );
+      return;
+    }
+
     await updateDocument<Enrollment>("enrollments", enrollmentId, { status: "dropped" });
   },
 
   // ===== 成績 =====
-  async listGrades(userId, semester) {
+  async listGrades(userId, semester, schoolId = undefined) {
     const constraints: (QueryConstraint | null)[] = [byUser(userId)];
     if (semester) {
       constraints.push(where("semester", "==", semester));
     }
     constraints.push(orderBy("publishedAt", "desc"));
-    return fetchCollection<Grade>("grades", constraints);
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    return fetchCanonicalUserSchoolCollection<Grade>({
+      uid: userId,
+      schoolId: resolvedSchoolId,
+      canonicalCollection: "grades",
+      canonicalConstraints: constraints,
+      fallbackUserCollection: "grades",
+      fallbackUserConstraints: constraints,
+      fallbackRootCollection: "grades",
+      fallbackRootConstraints: constraints,
+    });
   },
 
-  async getGPA(userId) {
-    const grades = await this.listGrades(userId);
+  async getGPA(userId, schoolId = undefined) {
+    const grades = await this.listGrades(userId, undefined, schoolId);
     let totalPoints = 0;
     let totalCredits = 0;
     
@@ -1055,15 +1269,25 @@ export const firebaseSource: DataSource = {
     return fetchDocument<LibraryBook>("libraryBooks", id);
   },
 
-  async listLoans(userId) {
-    return fetchCollection<LibraryLoan>(
-      "libraryLoans",
-      [byUser(userId), where("status", "!=", "returned")]
-    );
+  async listLoans(userId, schoolId = undefined) {
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    const constraints: (QueryConstraint | null)[] = [byUser(userId), where("status", "!=", "returned")];
+    return fetchCanonicalUserSchoolCollection<LibraryLoan>({
+      uid: userId,
+      schoolId: resolvedSchoolId,
+      canonicalCollection: "libraryLoans",
+      canonicalConstraints: constraints,
+      fallbackRootCollection: "libraryLoans",
+      fallbackRootConstraints: constraints,
+    });
   },
 
-  async borrowBook(bookId, userId) {
+  async borrowBook(bookId, userId, schoolId = undefined) {
     const db = getDb();
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    if (!resolvedSchoolId) {
+      throw new Error("缺少 schoolId，無法借閱書籍");
+    }
     const book = await this.getBook(bookId);
     if (!book || book.available <= 0) {
       throw new Error("書籍不可借閱");
@@ -1072,45 +1296,101 @@ export const firebaseSource: DataSource = {
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + 14);
     
-    const loan = await createDocument<LibraryLoan>("libraryLoans", {
-      userId,
-      bookId,
-      borrowedAt: new Date().toISOString(),
-      dueAt: dueDate.toISOString(),
-      renewCount: 0,
-      status: "borrowed",
-    } as Omit<LibraryLoan, "id">);
+    const loan = await createDocumentAtPath<LibraryLoan>(
+      buildUserSchoolCollectionPath(userId, resolvedSchoolId, "libraryLoans"),
+      {
+        userId,
+        schoolId: resolvedSchoolId,
+        bookId,
+        borrowedAt: new Date().toISOString(),
+        dueAt: dueDate.toISOString(),
+        renewCount: 0,
+        status: "borrowed",
+      } as Omit<LibraryLoan, "id">
+    );
     
-    await updateDoc(doc(db, "libraryBooks", bookId), {
+    await updateDoc(docFromSegments(db, buildSchoolCollectionPath(resolvedSchoolId, "libraryBooks", bookId)), {
       available: increment(-1),
     });
     
     return loan;
   },
 
-  async returnBook(loanId) {
-    const loan = await fetchDocument<LibraryLoan>("libraryLoans", loanId);
+  async returnBook(loanId, userId = undefined, schoolId = undefined) {
+    const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
+    const loan =
+      userId && resolvedSchoolId
+        ? await fetchCanonicalUserSchoolDocument<LibraryLoan>({
+            uid: userId,
+            schoolId: resolvedSchoolId,
+            canonicalCollection: "libraryLoans",
+            docId: loanId,
+            fallbackRootCollection: "libraryLoans",
+          })
+        : await fetchDocument<LibraryLoan>("libraryLoans", loanId);
     if (!loan) throw new Error("借閱記錄不存在");
     
     const db = getDb();
-    await updateDoc(doc(db, "libraryLoans", loanId), {
-      status: "returned",
-      returnedAt: serverTimestamp(),
-    });
-    
-    await updateDoc(doc(db, "libraryBooks", loan.bookId), {
-      available: increment(1),
-    });
+    if (userId && resolvedSchoolId) {
+      await updateDocumentAtPath<LibraryLoan>(
+        buildUserSchoolCollectionPath(userId, resolvedSchoolId, "libraryLoans", loanId),
+        { status: "returned", returnedAt: serverTimestamp() as never }
+      );
+    } else {
+      await updateDoc(doc(db, "libraryLoans", loanId), {
+        status: "returned",
+        returnedAt: serverTimestamp(),
+      });
+    }
+
+    if (resolvedSchoolId) {
+      await updateDoc(docFromSegments(db, buildSchoolCollectionPath(resolvedSchoolId, "libraryBooks", loan.bookId)), {
+        available: increment(1),
+      });
+    } else {
+      await updateDoc(doc(db, "libraryBooks", loan.bookId), {
+        available: increment(1),
+      });
+    }
   },
 
-  async renewBook(loanId) {
-    const loan = await fetchDocument<LibraryLoan>("libraryLoans", loanId);
+  async renewBook(loanId, userId = undefined, schoolId = undefined) {
+    const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
+    const loan =
+      userId && resolvedSchoolId
+        ? await fetchCanonicalUserSchoolDocument<LibraryLoan>({
+            uid: userId,
+            schoolId: resolvedSchoolId,
+            canonicalCollection: "libraryLoans",
+            docId: loanId,
+            fallbackRootCollection: "libraryLoans",
+          })
+        : await fetchDocument<LibraryLoan>("libraryLoans", loanId);
     if (!loan) throw new Error("借閱記錄不存在");
     if (loan.renewCount >= 2) throw new Error("已達續借上限");
     
     const newDueDate = new Date(loan.dueAt);
     newDueDate.setDate(newDueDate.getDate() + 7);
     
+    if (userId && resolvedSchoolId) {
+      await updateDocumentAtPath<LibraryLoan>(
+        buildUserSchoolCollectionPath(userId, resolvedSchoolId, "libraryLoans", loanId),
+        {
+          dueAt: newDueDate.toISOString(),
+          renewCount: loan.renewCount + 1,
+        }
+      );
+      return (
+        await fetchCanonicalUserSchoolDocument<LibraryLoan>({
+          uid: userId,
+          schoolId: resolvedSchoolId,
+          canonicalCollection: "libraryLoans",
+          docId: loanId,
+          fallbackRootCollection: "libraryLoans",
+        })
+      ) as LibraryLoan;
+    }
+
     return updateDocument<LibraryLoan>("libraryLoans", loanId, {
       dueAt: newDueDate.toISOString(),
       renewCount: loan.renewCount + 1,
@@ -1132,19 +1412,29 @@ export const firebaseSource: DataSource = {
     });
   },
 
-  async listSeatReservations(userId) {
-    return fetchCollection<SeatReservation>(
-      "seatReservations",
-      [byUser(userId), where("status", "==", "active")]
-    );
+  async listSeatReservations(userId, schoolId = undefined) {
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    const constraints: (QueryConstraint | null)[] = [byUser(userId), where("status", "==", "active")];
+    return fetchCanonicalUserSchoolCollection<SeatReservation>({
+      uid: userId,
+      schoolId: resolvedSchoolId,
+      canonicalCollection: "seatReservations",
+      canonicalConstraints: constraints,
+      fallbackRootCollection: "seatReservations",
+      fallbackRootConstraints: constraints,
+    });
   },
 
-  async reserveSeat(seatId, userId, date, startTime, endTime) {
+  async reserveSeat(seatId, userId, date, startTime, endTime, schoolId = undefined) {
     const db = getDb();
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    if (!resolvedSchoolId) {
+      throw new Error("缺少 schoolId，無法預約座位");
+    }
     
     const conflicting = await getDocs(
       query(
-        collection(db, "seatReservations"),
+        collectionFromSegments(db, buildUserSchoolCollectionPath(userId, resolvedSchoolId, "seatReservations")),
         where("seatId", "==", seatId),
         where("date", "==", date),
         where("status", "==", "active")
@@ -1155,17 +1445,30 @@ export const firebaseSource: DataSource = {
       throw new Error("該時段座位已被預約");
     }
     
-    return createDocument<SeatReservation>("seatReservations", {
-      seatId,
-      userId,
-      date,
-      startTime,
-      endTime,
-      status: "active",
-    } as Omit<SeatReservation, "id">);
+    return createDocumentAtPath<SeatReservation>(
+      buildUserSchoolCollectionPath(userId, resolvedSchoolId, "seatReservations"),
+      {
+        seatId,
+        userId,
+        schoolId: resolvedSchoolId,
+        date,
+        startTime,
+        endTime,
+        status: "active",
+      } as Omit<SeatReservation, "id">
+    );
   },
 
-  async cancelSeatReservation(id) {
+  async cancelSeatReservation(id, userId = undefined, schoolId = undefined) {
+    const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
+    if (userId && resolvedSchoolId) {
+      await updateDocumentAtPath<SeatReservation>(
+        buildUserSchoolCollectionPath(userId, resolvedSchoolId, "seatReservations", id),
+        { status: "cancelled" }
+      );
+      return;
+    }
+
     await updateDocument<SeatReservation>("seatReservations", id, { status: "cancelled" });
   },
 
@@ -1225,32 +1528,76 @@ export const firebaseSource: DataSource = {
   },
 
   // ===== 行事曆 =====
-  async listCalendarEvents(userId, startDate, endDate) {
-    return fetchCollection<CalendarEvent>(
-      "calendarEvents",
-      [
-        byUser(userId),
-        where("startAt", ">=", startDate),
-        where("startAt", "<=", endDate),
-        orderBy("startAt", "asc"),
-      ]
-    );
+  async listCalendarEvents(userId, startDate, endDate, schoolId) {
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    const constraints: (QueryConstraint | null)[] = [
+      byUser(userId),
+      where("startAt", ">=", startDate),
+      where("startAt", "<=", endDate),
+      orderBy("startAt", "asc"),
+    ];
+    return fetchCanonicalUserSchoolCollection<CalendarEvent>({
+      uid: userId,
+      schoolId: resolvedSchoolId,
+      canonicalCollection: "calendarEvents",
+      canonicalConstraints: constraints,
+      fallbackRootCollection: "calendarEvents",
+      fallbackRootConstraints: constraints,
+    });
   },
 
   async createCalendarEvent(data) {
-    return createDocument<CalendarEvent>("calendarEvents", data as Omit<CalendarEvent, "id">);
+    if (!data.userId) {
+      throw new Error("缺少 userId，無法建立行事曆事件");
+    }
+    const resolvedSchoolId = await resolveUserSchoolId(data.userId, (data as any).schoolId);
+    if (!resolvedSchoolId) {
+      throw new Error("缺少 schoolId，無法建立行事曆事件");
+    }
+
+    return createDocumentAtPath<CalendarEvent>(
+      buildUserSchoolCollectionPath(data.userId, resolvedSchoolId, "calendarEvents"),
+      {
+        ...(data as Omit<CalendarEvent, "id">),
+        schoolId: resolvedSchoolId,
+      }
+    );
   },
 
-  async updateCalendarEvent(id, data) {
+  async updateCalendarEvent(id, data, userId, schoolId) {
+    const ownerId = userId ?? data.userId;
+    const resolvedSchoolId = ownerId ? await resolveUserSchoolId(ownerId, schoolId ?? (data as any).schoolId) : null;
+    if (ownerId && resolvedSchoolId) {
+      await updateDocumentAtPath<CalendarEvent>(
+        buildUserSchoolCollectionPath(ownerId, resolvedSchoolId, "calendarEvents", id),
+        data
+      );
+      return (
+        await fetchCanonicalUserSchoolDocument<CalendarEvent>({
+          uid: ownerId,
+          schoolId: resolvedSchoolId,
+          canonicalCollection: "calendarEvents",
+          docId: id,
+          fallbackRootCollection: "calendarEvents",
+        })
+      ) as CalendarEvent;
+    }
+
     return updateDocument<CalendarEvent>("calendarEvents", id, data);
   },
 
-  async deleteCalendarEvent(id) {
+  async deleteCalendarEvent(id, userId, schoolId) {
+    const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
+    if (userId && resolvedSchoolId) {
+      await deleteDocumentAtPath(buildUserSchoolCollectionPath(userId, resolvedSchoolId, "calendarEvents", id));
+      return;
+    }
     await deleteDocument("calendarEvents", id);
   },
 
-  async syncCoursesToCalendar(userId, semester) {
-    const enrollments = await this.listEnrollments(userId, semester);
+  async syncCoursesToCalendar(userId, semester, schoolId) {
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    const enrollments = await this.listEnrollments(userId, semester, resolvedSchoolId ?? undefined);
     const db = getDb();
     
     for (const enrollment of enrollments) {
@@ -1260,8 +1607,10 @@ export const firebaseSource: DataSource = {
       if (!course) continue;
       
       for (const schedule of course.schedule) {
-        await addDoc(collection(db, "calendarEvents"), {
+        if (!resolvedSchoolId) continue;
+        await addDoc(collectionFromSegments(db, buildUserSchoolCollectionPath(userId, resolvedSchoolId, "calendarEvents")), {
           userId,
+          schoolId: resolvedSchoolId,
           title: course.name,
           description: `${course.code} - ${course.instructor}`,
           startAt: schedule.startTime,
@@ -1281,42 +1630,163 @@ export const firebaseSource: DataSource = {
   },
 
   // ===== 訂單與支付 =====
-  async listOrders(userId, options) {
-    return fetchCollection<Order>(
-      "orders",
-      [byUser(userId), orderBy("createdAt", "desc")],
-      undefined,
-      options
-    );
+  async listOrders(userId, schoolId, options) {
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    const constraints: (QueryConstraint | null)[] = [byUser(userId), orderBy("createdAt", "desc")];
+
+    if (resolvedSchoolId) {
+      const canonicalRows = await fetchCanonicalUserSchoolCollection<Order>({
+        uid: userId,
+        schoolId: resolvedSchoolId,
+        canonicalCollection: "orders",
+        canonicalConstraints: constraints,
+        fallbackRootCollection: "orders",
+        fallbackRootConstraints: constraints,
+        options,
+      });
+      if (canonicalRows.length > 0) {
+        return canonicalRows;
+      }
+
+      try {
+        return fetchCollectionAtPath<Order>(
+          buildSchoolCollectionPath(resolvedSchoolId, "orders"),
+          constraints,
+          options
+        );
+      } catch (error) {
+        console.warn("[firebaseSource] listOrders school orders fallback failed:", error);
+      }
+    }
+
+    return fetchCollection<Order>("orders", constraints, undefined, options);
   },
 
-  async getOrder(id) {
+  async getOrder(id, userId, schoolId) {
+    const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
+    if (userId && resolvedSchoolId) {
+      const canonicalOrder = await fetchCanonicalUserSchoolDocument<Order>({
+        uid: userId,
+        schoolId: resolvedSchoolId,
+        canonicalCollection: "orders",
+        docId: id,
+        fallbackRootCollection: "orders",
+      });
+      if (canonicalOrder) {
+        return canonicalOrder;
+      }
+      return fetchDocumentAtPath<Order>(buildSchoolCollectionPath(resolvedSchoolId, "orders", id));
+    }
     return fetchDocument<Order>("orders", id);
   },
 
   async createOrder(data) {
-    return createDocument<Order>("orders", {
+    const resolvedSchoolId = await resolveUserSchoolId(data.userId, (data as any).schoolId);
+    if (!resolvedSchoolId) {
+      throw new Error("缺少 schoolId，無法建立訂單");
+    }
+
+    const db = getDb();
+    const schoolOrdersRef = collectionFromSegments(db, buildSchoolCollectionPath(resolvedSchoolId, "orders"));
+    const schoolOrderRef = doc(schoolOrdersRef);
+    const orderPayload = {
       ...data,
+      schoolId: resolvedSchoolId,
       status: "pending",
       paymentStatus: "pending",
-    } as Omit<Order, "id">);
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(schoolOrderRef, orderPayload);
+    await setDoc(
+      docFromSegments(db, buildUserSchoolCollectionPath(data.userId, resolvedSchoolId, "orders", schoolOrderRef.id)),
+      orderPayload,
+      { merge: true }
+    );
+
+    return (await fetchDocumentAtPath<Order>(buildUserSchoolCollectionPath(data.userId, resolvedSchoolId, "orders", schoolOrderRef.id))) as Order;
   },
 
-  async updateOrderStatus(id, status) {
+  async updateOrderStatus(id, status, userId, schoolId) {
+    const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
+    if (userId && resolvedSchoolId) {
+      await updateDocumentAtPath<Order>(buildUserSchoolCollectionPath(userId, resolvedSchoolId, "orders", id), { status });
+      await updateDocumentAtPath<Order>(buildSchoolCollectionPath(resolvedSchoolId, "orders", id), { status });
+      return (
+        await fetchCanonicalUserSchoolDocument<Order>({
+          uid: userId,
+          schoolId: resolvedSchoolId,
+          canonicalCollection: "orders",
+          docId: id,
+          fallbackRootCollection: "orders",
+        })
+      ) as Order;
+    }
+
     return updateDocument<Order>("orders", id, { status });
   },
 
-  async cancelOrder(id) {
+  async cancelOrder(id, userId, schoolId) {
+    const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
+    if (userId && resolvedSchoolId) {
+      await updateDocumentAtPath<Order>(buildUserSchoolCollectionPath(userId, resolvedSchoolId, "orders", id), {
+        status: "cancelled",
+      });
+      await updateDocumentAtPath<Order>(buildSchoolCollectionPath(resolvedSchoolId, "orders", id), {
+        status: "cancelled",
+      });
+      return;
+    }
     await updateDocument<Order>("orders", id, { status: "cancelled" });
   },
 
-  async listTransactions(userId, options) {
-    return fetchCollection<Transaction>(
-      "transactions",
-      [byUser(userId), orderBy("createdAt", "desc")],
-      undefined,
-      options
-    );
+  async listTransactions(userId, schoolId, options) {
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    try {
+      const getTransactionHistory = httpsCallable<
+        { schoolId?: string; limit?: number; type?: string },
+        { transactions?: Array<Record<string, unknown>> }
+      >(getFunctionsInstance(), "getTransactionHistory");
+      const result = await getTransactionHistory({
+        schoolId: resolvedSchoolId ?? undefined,
+        limit: options?.pageSize ?? DEFAULT_PAGE_SIZE,
+      });
+
+      const rows = Array.isArray(result.data?.transactions) ? result.data.transactions : [];
+      return rows.map((row) => ({
+        id: String(row.id ?? ""),
+        userId,
+        schoolId: resolvedSchoolId ?? undefined,
+        amount: Number(row.amount ?? 0),
+        currency: String(row.currency ?? "TWD"),
+        type: (String(row.type ?? "payment") as Transaction["type"]),
+        status: (String(row.status ?? "pending") as Transaction["status"]),
+        description: String(row.description ?? "交易"),
+        merchantId: typeof row.merchantId === "string" ? row.merchantId : undefined,
+        merchantName: typeof row.merchantName === "string" ? row.merchantName : undefined,
+        paymentMethodId:
+          typeof row.paymentMethod === "string"
+            ? row.paymentMethod
+            : typeof row.paymentMethodId === "string"
+              ? row.paymentMethodId
+              : undefined,
+        createdAt: typeof row.createdAt === "string" ? row.createdAt : new Date().toISOString(),
+        completedAt: typeof row.completedAt === "string" ? row.completedAt : undefined,
+      }));
+    } catch (error) {
+      console.warn("[firebaseSource] listTransactions callable failed, falling back:", error);
+      const constraints: (QueryConstraint | null)[] = [byUser(userId), orderBy("createdAt", "desc")];
+      return fetchCanonicalUserSchoolCollection<Transaction>({
+        uid: userId,
+        schoolId: resolvedSchoolId,
+        canonicalCollection: "transactions",
+        canonicalConstraints: constraints,
+        fallbackRootCollection: "transactions",
+        fallbackRootConstraints: constraints,
+        options,
+      });
+    }
   },
 
   // ===== 成就 =====
@@ -1324,18 +1794,28 @@ export const firebaseSource: DataSource = {
     return fetchCollection<UserAchievement>("achievements", []);
   },
 
-  async getUserAchievements(userId) {
-    return fetchCollection<UserAchievement>(
-      "userAchievements",
-      [byUser(userId)]
-    );
+  async getUserAchievements(userId, schoolId) {
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    return fetchCanonicalUserSchoolCollection<UserAchievement>({
+      uid: userId,
+      schoolId: resolvedSchoolId,
+      canonicalCollection: "achievements",
+      canonicalConstraints: [orderBy("updatedAt", "desc")],
+      fallbackUserCollection: "achievements",
+      fallbackUserConstraints: [orderBy("updatedAt", "desc")],
+      fallbackRootCollection: "userAchievements",
+      fallbackRootConstraints: [byUser(userId)],
+    });
   },
 
-  async updateAchievementProgress(userId, achievementId, progress) {
+  async updateAchievementProgress(userId, achievementId, progress, schoolId) {
     const db = getDb();
-    const docId = `${userId}_${achievementId}`;
-    const ref = doc(db, "userAchievements", docId);
-    
+    const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
+    if (!resolvedSchoolId) {
+      throw new Error("缺少 schoolId，無法更新成就");
+    }
+
+    const ref = docFromSegments(db, buildUserSchoolCollectionPath(userId, resolvedSchoolId, "achievements", achievementId));
     const existing = await getDoc(ref);
     const achievement = await fetchDocument<Achievement>("achievements", achievementId);
     const completed = achievement ? progress >= achievement.requirement : false;
@@ -1356,7 +1836,9 @@ export const firebaseSource: DataSource = {
       });
     }
     
-    return fetchDocument<UserAchievement>("userAchievements", docId) as Promise<UserAchievement>;
+    return (await fetchDocumentAtPath<UserAchievement>(
+      buildUserSchoolCollectionPath(userId, resolvedSchoolId, "achievements", achievementId)
+    )) as UserAchievement;
   },
 
   // ===== 宿舍服務 =====
@@ -1633,65 +2115,69 @@ export const firebaseSource: DataSource = {
     errorCode?: string;
     errorMessage?: string;
   }> {
-    const { getAuth } = await import("firebase/auth");
-    const auth = getAuth();
-    
-    // 確保使用者已登入
-    if (!auth.currentUser) {
+    if (!getAuthInstance().currentUser) {
       return {
         success: false,
         errorCode: "AUTH_ERROR",
         errorMessage: "請先登入",
       };
     }
-    
-    // 取得使用者的 ID Token 用於驗證
-    const idToken = await auth.currentUser.getIdToken();
-    
+
+    const normalizedPaymentMethod =
+      data.paymentMethod === "mobile_pay"
+        ? "linepay"
+        : data.paymentMethod === "credit_card"
+          ? "credit_card"
+          : data.paymentMethod === "student_card"
+            ? "linepay"
+            : data.paymentMethod;
+
     try {
-      // 呼叫後端 Cloud Function 處理儲值
-      // Cloud Function 會負責：
-      // 1. 驗證使用者身份
-      // 2. 驗證金額限制
-      // 3. 處理支付（連接第三方支付服務）
-      // 4. 使用 Firestore Transaction 原子性地更新餘額和建立交易記錄
-      const response = await fetch(
-        `https://asia-east1-${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "campus-app"}.cloudfunctions.net/processTopup`,
+      const createTopupIntent = httpsCallable<
+        { amount: number; paymentMethod: string },
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({
-            userId: data.userId,
-            amount: data.amount,
-            paymentMethod: data.paymentMethod,
-          }),
+          success?: boolean;
+          newBalance?: number;
+          transactionId?: string;
+          intentId?: string;
+          errorCode?: string;
+          errorMessage?: string;
+          status?: string;
         }
-      );
-      
-      const result = await response.json();
-      
-      if (!response.ok) {
+      >(getFunctionsInstance(), "createTopupIntent");
+      const result = await createTopupIntent({
+        amount: data.amount,
+        paymentMethod: normalizedPaymentMethod,
+      });
+
+      const payload = result.data ?? {};
+      if (!payload.success) {
         return {
           success: false,
-          errorCode: result.code || "SERVER_ERROR",
-          errorMessage: result.message || "儲值失敗，請稍後再試",
+          errorCode:
+            payload.errorCode ??
+            (payload.status === "provider_disabled"
+              ? "EXTERNAL_PROVIDER_DISABLED"
+              : "PAYMENT_PROVIDER_UNAVAILABLE"),
+          errorMessage:
+            payload.errorMessage ??
+            "外部儲值服務尚未開通，請等待支付供應商完成設定。",
         };
       }
-      
+
       return {
         success: true,
-        newBalance: result.newBalance,
-        transactionId: result.transactionId,
+        newBalance: payload.newBalance,
+        transactionId:
+          (typeof payload.transactionId === "string" ? payload.transactionId : undefined) ??
+          (typeof payload.intentId === "string" ? payload.intentId : undefined),
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error("[firebaseSource] processTopup error:", error);
       return {
         success: false,
-        errorCode: "NETWORK_ERROR",
-        errorMessage: "網路連線失敗，請檢查網路狀態",
+        errorCode: error?.code ?? "NETWORK_ERROR",
+        errorMessage: error?.message ?? "儲值失敗，請稍後再試",
       };
     }
   },
@@ -1709,59 +2195,76 @@ export const firebaseSource: DataSource = {
     errorCode?: string;
     errorMessage?: string;
   }> {
-    const { getAuth } = await import("firebase/auth");
-    const auth = getAuth();
-    
-    if (!auth.currentUser) {
+    if (!getAuthInstance().currentUser) {
       return {
         success: false,
         errorCode: "AUTH_ERROR",
         errorMessage: "請先登入",
       };
     }
-    
-    const idToken = await auth.currentUser.getIdToken();
-    
+
+    const normalizedPaymentMethod =
+      data.paymentMethod === "student_card"
+        ? "campus_card"
+        : data.paymentMethod === "mobile_pay"
+          ? "linepay"
+          : data.paymentMethod === "credit_card"
+            ? "credit_card"
+            : data.paymentMethod;
+
     try {
-      const response = await fetch(
-        `https://asia-east1-${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID || "campus-app"}.cloudfunctions.net/processPayment`,
+      const createPaymentIntent = httpsCallable<
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({
-            userId: data.userId,
-            amount: data.amount,
-            paymentMethod: data.paymentMethod,
-            merchantId: data.merchantId,
-            description: data.description,
-          }),
+          amount: number;
+          paymentMethod: string;
+          merchantId: string;
+          description: string;
+        },
+        {
+          success?: boolean;
+          newBalance?: number;
+          transactionId?: string;
+          intentId?: string;
+          errorCode?: string;
+          errorMessage?: string;
+          status?: string;
         }
-      );
-      
-      const result = await response.json();
-      
-      if (!response.ok) {
+      >(getFunctionsInstance(), "createPaymentIntent");
+      const result = await createPaymentIntent({
+        amount: data.amount,
+        paymentMethod: normalizedPaymentMethod,
+        merchantId: data.merchantId,
+        description: data.description,
+      });
+
+      const payload = result.data ?? {};
+      if (!payload.success) {
         return {
           success: false,
-          errorCode: result.code || "SERVER_ERROR",
-          errorMessage: result.message || "支付失敗，請稍後再試",
+          errorCode:
+            payload.errorCode ??
+            (payload.status === "provider_disabled"
+              ? "EXTERNAL_PROVIDER_DISABLED"
+              : "PAYMENT_FAILED"),
+          errorMessage:
+            payload.errorMessage ??
+            "支付失敗，請稍後再試",
         };
       }
-      
+
       return {
         success: true,
-        newBalance: result.newBalance,
-        transactionId: result.transactionId,
+        newBalance: payload.newBalance,
+        transactionId:
+          (typeof payload.transactionId === "string" ? payload.transactionId : undefined) ??
+          (typeof payload.intentId === "string" ? payload.intentId : undefined),
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error("[firebaseSource] processPayment error:", error);
       return {
         success: false,
-        errorCode: "NETWORK_ERROR",
-        errorMessage: "網路連線失敗，請檢查網路狀態",
+        errorCode: error?.code ?? "NETWORK_ERROR",
+        errorMessage: error?.message ?? "支付失敗，請稍後再試",
       };
     }
   },

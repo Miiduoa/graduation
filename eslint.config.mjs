@@ -19,6 +19,21 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["apps/mobile/**/*.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "script",
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "no-console": "off",
+      "no-undef": "off",
+    },
+  },
+  {
     files: ["apps/mobile/**/*.{ts,tsx}", "packages/shared/**/*.ts"],
     languageOptions: {
       ecmaVersion: "latest",
@@ -37,9 +52,16 @@ export default tseslint.config(
       "react-hooks": reactHooks,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
       "no-unused-vars": "off",
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-require-imports": "off",
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
+      "no-case-declarations": "warn",
+      "no-empty": "warn",
+      "no-unused-expressions": "warn",
+      "no-useless-escape": "warn",
+      "react-hooks/exhaustive-deps": "warn",
+      "react-hooks/rules-of-hooks": "error",
     },
   }
 );

@@ -48,7 +48,8 @@ export function appendSchoolContext(path: string, context: SchoolContext): strin
 export function buildSsoCallbackPath(
   context: SchoolContext,
   provider: "oidc" | "cas" | "saml",
-  returnUrl?: string | null
+  returnUrl?: string | null,
+  extraParams?: Record<string, string | null | undefined>
 ): string {
   const url = toUrl("/sso-callback");
   url.searchParams.set("school", context.code);
@@ -58,6 +59,12 @@ export function buildSsoCallbackPath(
   const safeReturnUrl = sanitizeInternalPath(returnUrl);
   if (safeReturnUrl !== "/") {
     url.searchParams.set("returnUrl", safeReturnUrl);
+  }
+
+  for (const [key, value] of Object.entries(extraParams ?? {})) {
+    if (typeof value === "string" && value) {
+      url.searchParams.set(key, value);
+    }
   }
 
   return `${url.pathname}${url.search}`;

@@ -20,4 +20,13 @@ export default [
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
     },
   },
+  {
+    files: ["**/*.test.js", "**/__tests__/**/*.js"],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.jest,
+      },
+    },
+  },
 ];

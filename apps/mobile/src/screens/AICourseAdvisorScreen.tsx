@@ -351,7 +351,7 @@ ${availableCourses.slice(0, 15).map((c: any) => `- ${c.name}（${c.credits}學�
         }
       }
 
-      let aiResponse = generateLocalResponse(userMessage);
+      const aiResponse = generateLocalResponse(userMessage);
       const updatedHistory = [...newHistory, { role: "ai" as const, message: aiResponse }];
       setChatHistory(updatedHistory);
       saveChatHistory(updatedHistory);

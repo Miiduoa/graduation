@@ -619,6 +619,10 @@ export function createCachedSource(
 
       if (CACHEABLE_LIST_METHODS[prop]) {
         const cachePrefix = CACHEABLE_LIST_METHODS[prop];
+        const listMethod = originalMethod as (
+          schoolId?: string,
+          options?: QueryOptions
+        ) => Promise<unknown>;
         return async (schoolId: string = "default", options?: QueryOptions) => {
           // 將 QueryOptions 序列化納入快取 key，確保不同查詢條件不會共用快取
           const optionsKey = options ? serializeQueryOptions(options) : "";
@@ -628,7 +632,7 @@ export function createCachedSource(
           return fetchAndCacheListWithExpiry(
             cacheKey,
             schoolId,
-            () => (originalMethod as Function).call(target, schoolId, options),
+            () => listMethod.call(target, schoolId, options),
             expiryMs
           );
         };
@@ -636,11 +640,12 @@ export function createCachedSource(
 
       if (CACHEABLE_GET_METHODS[prop]) {
         const cachePrefix = CACHEABLE_GET_METHODS[prop];
+        const getMethod = originalMethod as (id: string, ...args: unknown[]) => Promise<unknown>;
         return async (id: string, ...args: unknown[]) => {
           const cacheKey = `${cachePrefix}_${id}`;
           return fetchAndCacheSingleWithExpiry(
             cacheKey,
-            () => (originalMethod as Function).call(target, id, ...args),
+            () => getMethod.call(target, id, ...args),
             expiryMs
           );
         };

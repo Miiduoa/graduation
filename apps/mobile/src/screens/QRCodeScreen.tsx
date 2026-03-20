@@ -146,6 +146,9 @@ export function QRCodeScreen(props: any) {
   const nav = props?.navigation;
   const auth = useAuth();
   const { schoolId } = useSchool();
+  const useResolvedCameraPermissions =
+    useCameraPermissions ??
+    (() => [null, async () => null] as const);
 
   const [mode, setMode] = useState<QRMode>("generate");
   const [qrType, setQrType] = useState<QRType>("checkin");
@@ -162,8 +165,7 @@ export function QRCodeScreen(props: any) {
   const [customContent, setCustomContent] = useState<string>("");
   const qrRef = useRef<any>(null);
 
-  const permission = useCameraPermissions ? useCameraPermissions() : [null, null];
-  const [cameraPermission, requestCameraPermission] = permission;
+  const [cameraPermission, requestCameraPermission] = useResolvedCameraPermissions();
   const hasCameraSupport = CameraView !== null && useCameraPermissions !== null;
   const hasQRCodeSupport = QRCode !== null;
 

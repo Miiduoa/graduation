@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import type { Map as LeafletMap } from "leaflet";
+import type { Icon, IconOptions, Map as LeafletMap, Marker } from "leaflet";
 import { fetchPois, addFavorite, removeFavorite, checkFavorite, getAuth, isFirebaseConfigured, type Poi } from "@/lib/firebase";
 import { onAuthStateChanged, type User } from "firebase/auth";
 
@@ -39,13 +39,17 @@ function poiToLocation(p: Poi, idx: number): Location {
     id: p.id,
     name: p.name,
     category: p.category ?? "校園",
-    description: (p as any).description,
-    open: (p as any).isOpen,
-    hours: (p as any).hours,
-    lat: (p as any).lat ?? 25.0170 + (idx * 0.001),
-    lng: (p as any).lng ?? 121.5390 + (idx * 0.001),
+    description: p.description,
+    lat: p.lat ?? 25.0170 + (idx * 0.001),
+    lng: p.lng ?? 121.5390 + (idx * 0.001),
   };
 }
+
+type LeafletModule = typeof import("leaflet");
+type IconDefaultWithPrivateUrl = typeof Icon.Default.prototype & {
+  _getIconUrl?: unknown;
+};
+type MarkerWithFlag = Marker & { _isMarker?: boolean };
 
 export default function MapClient({ school }: { school: string }) {
   const mapRef = useRef<LeafletMap | null>(null);
@@ -80,7 +84,7 @@ export default function MapClient({ school }: { school: string }) {
     async function load() {
       try {
         const pois = await fetchPois(school, 50);
-        const locs = pois.filter((p) => (p as any).lat && (p as any).lng);
+        const locs = pois.filter((p) => typeof p.lat === "number" && typeof p.lng === "number");
         if (locs.length > 0) {
           setLocations(locs.map(poiToLocation));
           setUsingDemo(false);
@@ -107,16 +111,16 @@ export default function MapClient({ school }: { school: string }) {
     if (typeof window === "undefined" || !mapContainerRef.current) return;
     if (mapRef.current) return; // 已初始化
 
-    import("leaflet").then((L) => {
+    import("leaflet").then((L: LeafletModule) => {
       if (!mapContainerRef.current || mapRef.current) return;
 
       // 修正 Leaflet 預設 icon 路徑問題
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
+      delete (L.Icon.Default.prototype as IconDefaultWithPrivateUrl)._getIconUrl;
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
         iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
         shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-      });
+      } satisfies Partial<IconOptions>);
 
       const center = locations.length > 0 ? [locations[0].lat, locations[0].lng] as [number, number] : [25.017, 121.539] as [number, number];
       const map = L.map(mapContainerRef.current).setView(center, 17);
@@ -139,17 +143,17 @@ export default function MapClient({ school }: { school: string }) {
   }, []); // eslint-disable-line
 
   // 更新 Markers
-  function updateMarkers(L: typeof import("leaflet"), map: LeafletMap) {
+  function updateMarkers(L: LeafletModule, map: LeafletMap) {
     map.eachLayer((layer) => {
-      if ((layer as any)._isMarker) map.removeLayer(layer);
+      if ((layer as MarkerWithFlag)._isMarker) map.removeLayer(layer);
     });
 
     filtered.forEach((loc) => {
       const color = CATEGORY_COLORS[loc.category] ?? "#5E6AD2";
       const iconHtml = `<div style="background:${color};width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3)"></div>`;
       const icon = L.divIcon({ html: iconHtml, className: "", iconSize: [28, 28], iconAnchor: [14, 28] });
-      const marker = L.marker([loc.lat, loc.lng], { icon });
-      (marker as any)._isMarker = true;
+      const marker = L.marker([loc.lat, loc.lng], { icon }) as MarkerWithFlag;
+      marker._isMarker = true;
       marker.on("click", () => setSelected(loc));
       marker.bindTooltip(loc.name, { permanent: false, direction: "top", offset: [0, -28] });
       marker.addTo(map);

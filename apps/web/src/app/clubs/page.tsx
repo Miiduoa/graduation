@@ -49,8 +49,8 @@ function mapGroupToClub(g: Group, idx: number, joinedIds: Set<string>): Club {
     id: g.id,
     name: g.name,
     category: categoryMap[g.type ?? "club"] ?? "社團",
-    members: (g as any).memberCount ?? 0,
-    description: (g as any).description ?? "加入群組參與討論",
+    members: g.memberCount ?? 0,
+    description: g.description ?? "加入群組參與討論",
     color: CLUB_COLORS[idx % CLUB_COLORS.length],
     icon: CLUB_ICONS[idx % CLUB_ICONS.length],
     isJoined: joinedIds.has(g.id),
@@ -136,7 +136,7 @@ export default function ClubsPage(props: { searchParams?: { school?: string; sch
         await joinGroup(id, user.uid, user.displayName ?? undefined);
       }
       setClubs((prev) => prev.map((c) => c.id === id ? { ...c, isJoined: !c.isJoined, members: c.isJoined ? c.members - 1 : c.members + 1 } : c));
-    } catch (err: any) {
+    } catch (err) {
       console.error("Join/leave group failed:", err);
     } finally {
       setJoiningId(null);

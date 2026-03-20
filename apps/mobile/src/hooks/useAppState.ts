@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AppState, AppStateStatus } from "react-native";
+import { useLatestValue } from "./useLatestValue";
 
 export interface AppStateOptions {
   onForeground?: () => void;
@@ -27,11 +28,8 @@ export function useAppState(options?: AppStateOptions): AppStateResult {
   const [lastActiveAt, setLastActiveAt] = useState<Date | null>(null);
   const [backgroundDuration, setBackgroundDuration] = useState(0);
   const backgroundStartRef = useRef<Date | null>(null);
-  const optionsRef = useRef(options);
-
-  useEffect(() => {
-    optionsRef.current = options;
-  }, [options]);
+  const optionsRef = useLatestValue(options);
+  const appStateRef = useLatestValue(appState);
 
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -65,7 +63,7 @@ export function useAppState(options?: AppStateOptions): AppStateResult {
     return () => {
       subscription.remove();
     };
-  }, [appState]);
+  }, [appStateRef, optionsRef]);
 
   return {
     appState,
@@ -81,11 +79,7 @@ export function useAppStateCallback(
   callback: (state: AppStateStatus) => void,
   deps: React.DependencyList = []
 ): void {
-  const callbackRef = useRef(callback);
-
-  useEffect(() => {
-    callbackRef.current = callback;
-  }, [callback]);
+  const callbackRef = useLatestValue(callback);
 
   useEffect(() => {
     const handleChange = (state: AppStateStatus) => {
@@ -102,13 +96,9 @@ export function useForegroundEffect(
   effect: () => void | (() => void),
   deps: React.DependencyList = []
 ): void {
-  const effectRef = useRef(effect);
+  const effectRef = useLatestValue(effect);
   const cleanupRef = useRef<void | (() => void)>(undefined);
   const wasBackgroundRef = useRef(false);
-
-  useEffect(() => {
-    effectRef.current = effect;
-  }, [effect]);
 
   useEffect(() => {
     cleanupRef.current = effectRef.current();
@@ -147,11 +137,7 @@ export function useAppRefresh(
   const { minBackgroundDuration = 30000, refreshOnMount = false } = options;
   const [isRefreshing, setIsRefreshing] = useState(false);
   const backgroundStartRef = useRef<Date | null>(null);
-  const refreshFnRef = useRef(refreshFn);
-
-  useEffect(() => {
-    refreshFnRef.current = refreshFn;
-  }, [refreshFn]);
+  const refreshFnRef = useLatestValue(refreshFn);
 
   const doRefresh = useCallback(async () => {
     setIsRefreshing(true);

@@ -7,35 +7,14 @@ import { completeWebSSOCallback, signInWithCustomAuthToken } from "@/lib/firebas
 import { appendSchoolContext, sanitizeInternalPath } from "@/lib/navigation";
 import {
   buildCurrentSsoRedirectUri,
-  PENDING_SAML_RESPONSE_KEY,
+  clearPendingWebSsoTransaction,
+  consumePendingSamlResponse,
+  consumePendingWebSsoTransaction,
+  getSsoTransactionState,
   readWebSsoCallbackParams,
 } from "@/lib/sso";
 
 type CallbackStatus = "loading" | "success" | "error";
-
-function consumePendingSamlResponse(callbackUrl: string): string | null {
-  try {
-    const raw = window.sessionStorage.getItem(PENDING_SAML_RESPONSE_KEY);
-    if (!raw) return null;
-
-    const payload = JSON.parse(raw) as {
-      callbackUrl?: string;
-      samlResponse?: string;
-    };
-
-    const sameCallback = payload.callbackUrl === callbackUrl;
-    window.sessionStorage.removeItem(PENDING_SAML_RESPONSE_KEY);
-
-    if (!sameCallback || typeof payload.samlResponse !== "string" || !payload.samlResponse) {
-      return null;
-    }
-
-    return payload.samlResponse;
-  } catch {
-    window.sessionStorage.removeItem(PENDING_SAML_RESPONSE_KEY);
-    return null;
-  }
-}
 
 function SSOCallbackContent() {
   const router = useRouter();
@@ -52,8 +31,12 @@ function SSOCallbackContent() {
       const returnUrl = sanitizeInternalPath(searchParams.get("returnUrl"));
       const authError = searchParams.get("error");
       const callbackParams = readWebSsoCallbackParams(searchParams);
+      const transactionState = getSsoTransactionState(searchParams);
 
       if (authError) {
+        if (transactionState) {
+          clearPendingWebSsoTransaction(transactionState);
+        }
         if (!cancelled) {
           setStatus("error");
           setMessage(decodeURIComponent(authError.replace(/\+/g, " ")));
@@ -61,16 +44,20 @@ function SSOCallbackContent() {
         return;
       }
 
-      if (!schoolId || !callbackParams.provider) {
+      if (!schoolId || !callbackParams.provider || !transactionState) {
         if (!cancelled) {
           setStatus("error");
-          setMessage("缺少學校或登入方式，請重新從登入頁發起");
+          setMessage("缺少學校、登入方式或交易狀態，請重新從登入頁發起");
         }
         return;
       }
 
       try {
         setMessage("驗證學校身份中…");
+        const pendingTransaction = consumePendingWebSsoTransaction(transactionState);
+        if (!pendingTransaction?.transactionId) {
+          throw new Error("登入交易已失效，請重新發起學校登入");
+        }
 
         const redirectUri = buildCurrentSsoRedirectUri(new URL(window.location.href));
         const samlResponse =
@@ -85,6 +72,9 @@ function SSOCallbackContent() {
           provider: callbackParams.provider,
           schoolId,
           redirectUri,
+          transactionId: pendingTransaction.transactionId,
+          state: transactionState,
+          codeVerifier: pendingTransaction.codeVerifier,
           code: callbackParams.code ?? undefined,
           ticket: callbackParams.ticket ?? undefined,
           samlResponse: samlResponse ?? undefined,
@@ -101,8 +91,6 @@ function SSOCallbackContent() {
         const target = school
           ? appendSchoolContext(returnUrl, { code: school, id: schoolId })
           : returnUrl;
-
-        window.sessionStorage.removeItem(PENDING_SAML_RESPONSE_KEY);
 
         window.setTimeout(() => {
           if (!cancelled) {

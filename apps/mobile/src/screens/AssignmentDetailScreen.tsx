@@ -559,7 +559,12 @@ export function AssignmentDetailScreen(props: any) {
       Alert.alert("提示", "沒有待評分的繳交");
       return;
     }
-    Alert.prompt?.(
+    if (typeof Alert.prompt !== "function") {
+      Alert.alert("批量評分", "此功能需要 iOS Alert.prompt 支援");
+      return;
+    }
+
+    Alert.prompt(
       "批量評分",
       `將為 ${ungraded.length} 份未評分的繳交設定相同分數`,
       [
@@ -599,7 +604,7 @@ export function AssignmentDetailScreen(props: any) {
       "plain-text",
       "",
       "numeric"
-    ) ?? Alert.alert("批量評分", "此功能需要 iOS Alert.prompt 支援");
+    );
   };
 
   const setGradesPublished = async (next: boolean) => {

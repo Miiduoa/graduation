@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useLatestValue } from "./useLatestValue";
 
 /**
  * 節流 hook - 限制值更新頻率
@@ -36,10 +37,8 @@ export function useThrottledCallback<T extends (...args: unknown[]) => unknown>(
 ): T {
   const lastExecuted = useRef<number>(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const callbackRef = useRef(callback);
+  const callbackRef = useLatestValue(callback);
   const pendingArgsRef = useRef<Parameters<T> | null>(null);
-
-  callbackRef.current = callback;
 
   const throttledCallback = useCallback(
     (...args: Parameters<T>) => {
@@ -87,9 +86,7 @@ export function usePreventDoubleClick<T extends (...args: unknown[]) => unknown>
 ): { execute: T; isBlocked: boolean } {
   const [isBlocked, setIsBlocked] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const callbackRef = useRef(callback);
-
-  callbackRef.current = callback;
+  const callbackRef = useLatestValue(callback);
 
   const execute = useCallback(
     (...args: Parameters<T>) => {

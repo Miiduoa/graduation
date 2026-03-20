@@ -18,6 +18,7 @@ const {
   normalizeSetupStatus,
   toPublicSsoConfig,
 } = require("./sso/providerRegistry");
+const { createNotificationService } = require("./lib/notificationService");
 const {
   decryptSecretConfig,
   encryptSecretConfig,
@@ -98,6 +99,11 @@ initializeApp();
 
 const db = getFirestore();
 const messaging = getMessaging();
+const {
+  getUserPushTokens,
+  sendPushToUser,
+  sendPushToMultipleUsers,
+} = createNotificationService({ db, messaging });
 
 const REGION = "asia-east1";
 const SSO_TRANSACTION_TTL_MS = 10 * 60 * 1000;
@@ -422,119 +428,6 @@ function toSchoolMemberRole(role) {
   if (role === "admin") return "admin";
   if (role === "teacher" || role === "staff") return "editor";
   return "member";
-}
-
-async function getUserPushTokens(uid) {
-  const tokensSnap = await db.collection("users").doc(uid).collection("pushTokens").get();
-  return tokensSnap.docs.map((doc) => doc.data().token).filter(Boolean);
-}
-
-async function getUserNotificationPrefs(uid) {
-  const prefsDoc = await db.collection("users").doc(uid).collection("settings").doc("notifications").get();
-  if (!prefsDoc.exists) {
-    return {
-      enabled: true,
-      announcements: true,
-      events: true,
-      groups: true,
-      assignments: true,
-      grades: true,
-      messages: true,
-      quietHoursEnabled: false,
-      quietHoursStart: "22:00",
-      quietHoursEnd: "08:00",
-    };
-  }
-  return prefsDoc.data();
-}
-
-function isInQuietHours(prefs) {
-  if (!prefs.quietHoursEnabled) return false;
-
-  const now = new Date();
-  const [startH, startM] = prefs.quietHoursStart.split(":").map(Number);
-  const [endH, endM] = prefs.quietHoursEnd.split(":").map(Number);
-
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
-  const startMinutes = startH * 60 + startM;
-  const endMinutes = endH * 60 + endM;
-
-  if (startMinutes <= endMinutes) {
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-  } else {
-    return currentMinutes >= startMinutes || currentMinutes < endMinutes;
-  }
-}
-
-async function sendPushToUser(uid, notification, data = {}) {
-  const prefs = await getUserNotificationPrefs(uid);
-
-  if (!prefs.enabled) {
-    console.log(`User ${uid} has notifications disabled`);
-    return { success: false, reason: "disabled" };
-  }
-
-  if (isInQuietHours(prefs)) {
-    console.log(`User ${uid} is in quiet hours`);
-    return { success: false, reason: "quiet_hours" };
-  }
-
-  const tokens = await getUserPushTokens(uid);
-  if (tokens.length === 0) {
-    console.log(`User ${uid} has no push tokens`);
-    return { success: false, reason: "no_tokens" };
-  }
-
-  const messages = tokens.map((token) => ({
-    token,
-    notification: {
-      title: notification.title,
-      body: notification.body,
-    },
-    data: {
-      ...data,
-      click_action: "FLUTTER_NOTIFICATION_CLICK",
-    },
-    android: {
-      notification: {
-        channelId: data.channel || "default",
-        priority: "high",
-      },
-    },
-    apns: {
-      payload: {
-        aps: {
-          sound: "default",
-          badge: 1,
-        },
-      },
-    },
-  }));
-
-  const results = await Promise.allSettled(
-    messages.map((msg) => messaging.send(msg))
-  );
-
-  const successCount = results.filter((r) => r.status === "fulfilled").length;
-  console.log(`Sent ${successCount}/${tokens.length} notifications to user ${uid}`);
-
-  return { success: successCount > 0, sent: successCount, total: tokens.length };
-}
-
-async function sendPushToMultipleUsers(uids, notification, data = {}, categoryPref = null) {
-  const results = await Promise.allSettled(
-    uids.map(async (uid) => {
-      if (categoryPref) {
-        const prefs = await getUserNotificationPrefs(uid);
-        if (!prefs[categoryPref]) {
-          return { uid, success: false, reason: "category_disabled" };
-        }
-      }
-      return { uid, ...(await sendPushToUser(uid, notification, data)) };
-    })
-  );
-
-  return results.map((r) => (r.status === "fulfilled" ? r.value : { success: false, error: r.reason }));
 }
 
 async function getSchoolMemberUids(schoolId) {

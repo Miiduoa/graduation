@@ -10,11 +10,12 @@ import { ScheduleProvider } from "./schedule";
 import { DemoProvider } from "./demo";
 import { I18nProvider } from "../i18n";
 import { ToastProvider } from "../ui/Toast";
+import { useLatestValue } from "../hooks/useLatestValue";
 
 type ProviderEntry = {
-  Provider: React.ComponentType<{ children: React.ReactNode; [key: string]: any }>;
-  props?: Record<string, any>;
-  getDynamicProps?: () => Record<string, any>;
+  Provider: React.ComponentType<{ children: React.ReactNode } & Record<string, unknown>>;
+  props?: Record<string, unknown>;
+  getDynamicProps?: () => Record<string, unknown>;
 };
 
 function composeProviders(
@@ -79,31 +80,20 @@ const AuthAwareProvidersContent = memo(function AuthAwareProvidersContent({
   userId: string | null;
   schoolId: string | null;
 }) {
-  const userIdRef = useRef(userId);
-  const schoolIdRef = useRef(schoolId);
-  userIdRef.current = userId;
-  schoolIdRef.current = schoolId;
-
   const providers: ProviderEntry[] = useMemo(
     () => [
       {
         Provider: SearchHistoryProvider,
-        getDynamicProps: () => ({ 
-          userId: userIdRef.current,
-          schoolId: schoolIdRef.current,
-        }),
+        props: { userId, schoolId },
       },
       {
         Provider: FavoritesProvider,
-        getDynamicProps: () => ({ 
-          userId: userIdRef.current,
-          schoolId: schoolIdRef.current,
-        }),
+        props: { userId, schoolId },
       },
       { Provider: ScheduleProvider },
       { Provider: DemoProvider },
     ],
-    []
+    [schoolId, userId]
   );
 
   return <>{composeProviders(providers, children)}</>;
@@ -158,12 +148,11 @@ export function useOptimizedRerender() {
 export function useStableCallback<T extends (...args: any[]) => any>(
   callback: T
 ): T {
-  const callbackRef = useRef(callback);
-  callbackRef.current = callback;
+  const callbackRef = useLatestValue(callback);
 
   return useCallback(
     ((...args) => callbackRef.current(...args)) as T,
-    []
+    [callbackRef]
   );
 }
 

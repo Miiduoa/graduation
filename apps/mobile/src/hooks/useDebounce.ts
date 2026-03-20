@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useLatestValue } from "./useLatestValue";
 
 /**
  * 防抖 hook - 在指定延遲後更新值
@@ -27,29 +28,8 @@ export function useDebounceWithPending<T>(
   value: T, 
   delay: number = 300
 ): { debouncedValue: T; isPending: boolean } {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-  const [isPending, setIsPending] = useState(false);
-  const isFirstRender = useRef(true);
-
-  useEffect(() => {
-    // 首次渲染不設定 pending
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-
-    // 值改變時標記為 pending
-    setIsPending(true);
-
-    const timer = setTimeout(() => {
-      setDebouncedValue(value);
-      setIsPending(false);
-    }, delay);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [value, delay]);
+  const debouncedValue = useDebounce(value, delay);
+  const isPending = !Object.is(debouncedValue, value);
 
   return { debouncedValue, isPending };
 }
@@ -68,44 +48,12 @@ export function useSearchDebounce(
   isEmpty: boolean;
   shouldSearch: boolean;
 } {
-  const [debouncedValue, setDebouncedValue] = useState<string>(value);
-  const [isSearching, setIsSearching] = useState(false);
-  const prevValueRef = useRef(value);
-
-  useEffect(() => {
-    const trimmedValue = value.trim();
-    const prevTrimmed = prevValueRef.current.trim();
-    
-    // 如果值沒有實質改變，不需要防抖
-    if (trimmedValue === debouncedValue.trim()) {
-      setIsSearching(false);
-      return;
-    }
-
-    // 如果輸入太短，立即清空
-    if (trimmedValue.length < minLength) {
-      setDebouncedValue(trimmedValue);
-      setIsSearching(false);
-      return;
-    }
-
-    // 開始防抖
-    setIsSearching(true);
-
-    const timer = setTimeout(() => {
-      setDebouncedValue(trimmedValue);
-      setIsSearching(false);
-    }, delay);
-
-    prevValueRef.current = value;
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [value, delay, minLength, debouncedValue]);
-
-  const isEmpty = debouncedValue.trim().length === 0;
-  const shouldSearch = debouncedValue.trim().length >= minLength;
+  const trimmedValue = value.trim();
+  const delayedValue = useDebounce(trimmedValue, delay);
+  const debouncedValue = trimmedValue.length < minLength ? trimmedValue : delayedValue;
+  const isSearching = trimmedValue.length >= minLength && debouncedValue !== trimmedValue;
+  const isEmpty = debouncedValue.length === 0;
+  const shouldSearch = debouncedValue.length >= minLength;
 
   return { debouncedValue, isSearching, isEmpty, shouldSearch };
 }
@@ -118,9 +66,7 @@ export function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
   delay: number = 300
 ): T {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const callbackRef = useRef(callback);
-  
-  callbackRef.current = callback;
+  const callbackRef = useLatestValue(callback);
 
   const debouncedCallback = useCallback(
     (...args: Parameters<T>) => {
@@ -155,10 +101,8 @@ export function useLeadingDebounce<T extends (...args: unknown[]) => unknown>(
   delay: number = 300
 ): T {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const callbackRef = useRef(callback);
+  const callbackRef = useLatestValue(callback);
   const canCallRef = useRef(true);
-  
-  callbackRef.current = callback;
 
   const debouncedCallback = useCallback(
     (...args: Parameters<T>) => {

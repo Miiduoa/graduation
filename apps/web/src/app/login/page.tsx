@@ -8,6 +8,7 @@ import {
   resetPassword,
   signIn,
   signUp,
+  startWebSSOCallback,
 } from "@/lib/firebase";
 import {
   appendSchoolContext,
@@ -15,7 +16,12 @@ import {
   sanitizeInternalPath,
 } from "@/lib/navigation";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
-import { buildWebSsoStartUrl } from "@/lib/sso";
+import {
+  buildWebSsoStartUrl,
+  createPkcePair,
+  createRandomString,
+  savePendingWebSsoTransaction,
+} from "@/lib/sso";
 import { useSchoolSsoConfig } from "@/lib/useSchoolSsoConfig";
 import { useRouter } from "next/navigation";
 
@@ -64,24 +70,49 @@ export default function LoginPage(props: {
     checkUser();
   }, [props.searchParams?.redirect, props.searchParams?.returnUrl, router, schoolContext]);
 
-  const handleSSOLogin = () => {
-    if (!ssoConfig) return;
+  const handleSSOLogin = async () => {
+    if (!ssoConfig || !schoolId) return;
     setError("");
     setSuccess("");
     setIsLoading(true);
 
     try {
+      const state = createRandomString(24);
+      const nonce = ssoConfig.provider === "oidc" ? createRandomString(24) : undefined;
+      const pkce =
+        ssoConfig.provider === "oidc"
+          ? await createPkcePair()
+          : null;
       const callbackPath = buildSsoCallbackPath(
         schoolContext,
         ssoConfig.provider,
-        props.searchParams?.redirect || props.searchParams?.returnUrl
+        props.searchParams?.redirect || props.searchParams?.returnUrl,
+        ssoConfig.provider === "oidc" ? undefined : { tx_state: state }
       );
       const callbackUrl = new URL(callbackPath, window.location.origin).toString();
+      const init = await startWebSSOCallback({
+        schoolId,
+        provider: ssoConfig.provider,
+        redirectUri: callbackUrl,
+        state,
+        codeChallenge: pkce?.codeChallenge,
+        nonce,
+      });
+      savePendingWebSsoTransaction(state, {
+        transactionId: init.transactionId,
+        provider: ssoConfig.provider,
+        callbackUrl,
+        codeVerifier: pkce?.codeVerifier,
+        expiresAt: init.expiresAt,
+      });
       const samlAcsUrl = new URL("/sso/acs", window.location.origin).toString();
       const startUrl = buildWebSsoStartUrl(ssoConfig, {
         redirectUri: callbackUrl,
         samlAcsUrl,
         samlRelayState: callbackUrl,
+        state,
+        nonce,
+        codeChallenge: pkce?.codeChallenge,
       });
 
       window.location.assign(startUrl);
@@ -241,7 +272,9 @@ export default function LoginPage(props: {
                   <button
                     className="btn primary"
                     style={{ width: "100%", minHeight: 50, fontSize: 15, borderRadius: "var(--radius-sm)" }}
-                    onClick={handleSSOLogin}
+                    onClick={() => {
+                      void handleSSOLogin();
+                    }}
                     disabled={isLoading}
                   >
                     {isLoading ? "跳轉中…" : `使用 ${config?.schoolName ?? schoolName ?? "學校"} SSO 登入 →`}

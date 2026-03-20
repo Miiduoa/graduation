@@ -141,7 +141,7 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
 
     // 使用 functional update 來獲取當前狀態並計算需要更新的項目
     let unreadIds: string[] = [];
-    let originalReadStates: Map<string, boolean> = new Map();
+    const originalReadStates: Map<string, boolean> = new Map();
     
     setNotifications((prev) => {
       const unread = prev.filter((n) => !n.read);
