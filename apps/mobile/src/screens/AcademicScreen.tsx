@@ -8,6 +8,7 @@ import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useSchedule } from "../state/schedule";
 import { useThemeMode } from "../state/theme";
+import { AIBubble, useAIBubbleVisible } from "../ui/AIBubble";
 
 // ─── 常數 ────────────────────────────────────────────────────────────────────
 
@@ -861,6 +862,18 @@ export function AcademicScreen(props: any) {
             </View>
             <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
           </Pressable>
+
+          {/* ─── 情境式 AI 提示（課程進行中時顯示）─── */}
+          {todayCourseCount > 0 && (
+            <AIBubble
+              context="course"
+              customMessage="剛上完課？讓 AI 幫你整理今日重點筆記"
+              customCta="整理筆記"
+              onPress={() => nav?.navigate?.("AIChat")}
+              delay={3000}
+              style={{ marginBottom: 16 }}
+            />
+          )}
 
           {/* ─── 未登入提示 ─── */}
           {!auth.user && (

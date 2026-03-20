@@ -1,6 +1,6 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { AcademicScreen } from "./AcademicScreen";
+import { CoursesHomeScreen } from "./CoursesHomeScreen";
 import { CourseScheduleScreen } from "./CourseScheduleScreen";
 import { AddCourseScreen } from "./AddCourseScreen";
 import { GradesScreen } from "./GradesScreen";
@@ -26,10 +26,10 @@ export function AcademicStack() {
   return (
     <Stack.Navigator
       id={undefined}
-      initialRouteName="AcademicHome"
+      initialRouteName="CoursesHome"
       screenOptions={createStackScreenOptions()}
     >
-      <Stack.Screen name="AcademicHome" component={AcademicScreen} options={{ title: "課業", headerShown: false }} />
+      <Stack.Screen name="CoursesHome" component={CoursesHomeScreen} options={{ title: "課程", headerShown: false }} />
       <Stack.Screen name="CourseSchedule" component={CourseScheduleScreen} options={{ title: "課表" }} />
       <Stack.Screen name="AddCourse" component={AddCourseScreen} options={{ title: "新增課程" }} />
       <Stack.Screen name="CourseHub" component={CourseHubScreen} options={{ title: "課程中樞" }} />

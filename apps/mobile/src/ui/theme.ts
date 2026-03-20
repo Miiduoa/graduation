@@ -5,7 +5,10 @@ export type ThemeColors = {
   background: string;
   surface: string;
   surface2: string;
+  surface3: string;
   surfaceElevated: string;
+  surfaceInteractive: string;
+  surfaceInteractiveStrong: string;
   border: string;
   separator: string;
   text: string;
@@ -14,6 +17,7 @@ export type ThemeColors = {
   accent: string;
   accentSoft: string;
   accentHover: string;
+  accentStrong: string;
   gradientStart: string;
   gradientEnd: string;
   success: string;
@@ -47,6 +51,26 @@ export type ThemeColors = {
   /** 輕度警示（暖黃）— Framing Effect，取代部分紅色場景 */
   gentleWarn: string;
   gentleWarnSoft: string;
+  urgent: string;
+  urgentSoft: string;
+  fresh: string;
+  freshSoft: string;
+  /** 社交互動（紫）— Creativity + Social Connection */
+  social: string;
+  socialSoft: string;
+  confidenceHigh: string;
+  confidenceHighSoft: string;
+  confidenceMedium: string;
+  confidenceMediumSoft: string;
+  confidenceLow: string;
+  confidenceLowSoft: string;
+  roleStudent: string;
+  roleStudentSoft: string;
+  roleTeacher: string;
+  roleTeacherSoft: string;
+  roleAdmin: string;
+  roleAdminSoft: string;
+  focusSurface: string;
 };
 
 export type ThemeShadow = {
@@ -57,9 +81,11 @@ export type ThemeShadow = {
   elevation: number;
 };
 
-/** Bilateral Soft UI shadow expressed as two shadow layers */
+/**
+ * Calm Clarity: 單向 elevation 陰影（移除 Neumorphic 雙向陰影）
+ * 心理學：明確的物件感知 (Object Perception)，減少認知負荷
+ */
 export type SoftShadow = {
-  /** Dark face */
   shadowColor: string;
   shadowOpacity: number;
   shadowRadius: number;
@@ -73,9 +99,9 @@ export type ThemeShadows = {
   lg: ThemeShadow;
   xl: ThemeShadow;
   glow: ThemeShadow;
-  /** Soft UI bilateral raised shadow (for cards) */
+  /** Legacy soft (kept for compatibility, now uses single-direction elevation) */
   soft: SoftShadow;
-  /** Soft UI inset pressed shadow (for inputs) */
+  /** Legacy inset (kept for compatibility, now minimal) */
   inset: SoftShadow;
 };
 
@@ -97,6 +123,8 @@ export type ThemeSpace = {
   xl: number;
   xxl: number;
   xxxl: number;
+  /** 區塊間分隔 — 心理分離感 */
+  section: number;
 };
 
 export type ThemeTypographyScale = {
@@ -117,6 +145,8 @@ export type ThemeTypography = {
   label: ThemeTypographyScale;
   labelSmall: ThemeTypographyScale;
   caption: ThemeTypographyScale;
+  /** Eyebrow / overline — 區塊標籤用 */
+  overline: ThemeTypographyScale;
 };
 
 export type ThemeAnimation = {
@@ -157,34 +187,36 @@ const sharedSpace: ThemeSpace = {
   xxs: 2,
   xs: 4,
   sm: 8,
-  md: 20,   // 從 16 增加到 20，更多呼吸感（Whitespace Psychology）
-  lg: 26,   // 從 24 增加到 26
+  md: 16,   // Gestalt Proximity: 調整為 16，讓相關元素更緊密
+  lg: 24,
   xl: 32,
   xxl: 48,
   xxxl: 64,
+  section: 40, // 區塊間心理分離感
 };
 
 const sharedTypography: ThemeTypography = {
+  // 認知流暢性：從 40px 降至 34px，避免過大文字降低閱讀效率
   hero: {
-    fontSize: 40,
-    lineHeight: 48,
+    fontSize: 34,
+    lineHeight: 42,
     letterSpacing: -1,
     fontWeight: "900",
   },
   display: {
-    fontSize: 32,
-    lineHeight: 40,
+    fontSize: 28,
+    lineHeight: 36,
     letterSpacing: -0.6,
     fontWeight: "800",
   },
   h1: {
-    fontSize: 26,
-    lineHeight: 34,
+    fontSize: 24,
+    lineHeight: 32,
     letterSpacing: -0.4,
     fontWeight: "700",
   },
   h2: {
-    fontSize: 21,
+    fontSize: 20,
     lineHeight: 28,
     letterSpacing: -0.3,
     fontWeight: "700",
@@ -195,14 +227,15 @@ const sharedTypography: ThemeTypography = {
     letterSpacing: -0.1,
     fontWeight: "600",
   },
+  // 閱讀心理學：1.6x 行高是最佳可讀性
   body: {
     fontSize: 15,
-    lineHeight: 22,
+    lineHeight: 24,
     fontWeight: "400",
   },
   bodySmall: {
     fontSize: 13,
-    lineHeight: 19,
+    lineHeight: 20,
     fontWeight: "400",
   },
   label: {
@@ -219,20 +252,28 @@ const sharedTypography: ThemeTypography = {
   },
   caption: {
     fontSize: 11,
-    lineHeight: 14,
+    lineHeight: 15,
     letterSpacing: 0.3,
     fontWeight: "500",
+  },
+  // 新增 overline: 用於區塊 eyebrow 標籤
+  overline: {
+    fontSize: 10,
+    lineHeight: 14,
+    letterSpacing: 1.5,
+    fontWeight: "700",
   },
 };
 
 const sharedAnimation: ThemeAnimation = {
   fast: 150,
-  normal: 300,
-  slow: 500,
+  normal: 250,
+  slow: 450,
   spring: { friction: 8, tension: 65 },
 };
 
-const DEFAULT_ACCENT = "#5E6AD2";
+// 新主色：靛藍 #2563EB — 藍色在教育情境中最能引發信任與專注 (Mehta & Zhu, 2009)
+const DEFAULT_ACCENT = "#2563EB";
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -247,7 +288,7 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 
 function rgba(hex: string, opacity: number): string {
   const rgb = hexToRgb(hex);
-  if (!rgb) return `rgba(99,102,241,${opacity})`;
+  if (!rgb) return `rgba(37,99,235,${opacity})`;
   return `rgba(${rgb.r},${rgb.g},${rgb.b},${opacity})`;
 }
 
@@ -268,65 +309,89 @@ export function createDarkTheme(accent: string = DEFAULT_ACCENT, schoolId?: stri
   return {
     mode: "dark",
     colors: {
-      bg: "#1C1C1E",
-      background: "#1C1C1E",
-      surface: "#2C2C2E",
-      surface2: "#3A3A3C",
-      surfaceElevated: "#48484A",
-      border: "#38383A",
-      separator: "#38383A",
-      text: "#F2F2F7",
-      textSecondary: "#EBEBF5CC",
-      muted: "#8E8E93",
+      bg: "#0F1117",
+      background: "#0F1117",
+      surface: "#1A1D27",
+      surface2: "#222535",
+      surface3: "#2A2E40",
+      surfaceElevated: "#30344A",
+      surfaceInteractive: "#1E2233",
+      surfaceInteractiveStrong: "#1A2B5E",
+      border: "#2A2E40",
+      separator: "#2A2E40",
+      text: "#F0F2FF",
+      textSecondary: "#B0B8D4",
+      muted: "#6B7399",
       accent,
-      accentSoft: createAccentSoft(accent, 0.18),
-      accentHover: lighten(accent, 0.12),
+      accentSoft: createAccentSoft(accent, 0.16),
+      accentHover: lighten(accent, 0.14),
+      accentStrong: lighten(accent, 0.24),
       gradientStart: accent,
-      gradientEnd: lighten(accent, 0.24),
-      success: "#30D158",
-      successSoft: "rgba(48,209,88,0.16)",
-      danger: "#FF453A",
-      error: "#FF453A",
-      dangerSoft: "rgba(255,69,58,0.18)",
-      warning: "#FF9F0A",
-      warningSoft: "rgba(255,159,10,0.16)",
-      info: "#0A84FF",
-      infoSoft: "rgba(10,132,255,0.16)",
-      focusRing: rgba(accent, 0.42),
-      overlay: "rgba(0,0,0,0.62)",
-      disabledBg: "rgba(255,255,255,0.08)",
-      disabledText: "rgba(255,255,255,0.28)",
-      cardShadow: "rgba(0,0,0,0.4)",
-      shimmer: "rgba(255,255,255,0.06)",
-      achievement: "#FF9F0A",
-      achievementSoft: "rgba(255,159,10,0.18)",
-      streak: "#FF6B35",
-      streakSoft: "rgba(255,107,53,0.18)",
-      growth: "#30D158",
-      growthSoft: "rgba(48,209,88,0.16)",
-      calm: "#5AC8FA",
-      calmSoft: "rgba(90,200,250,0.16)",
-      gentleWarn: "#FFD60A",
-      gentleWarnSoft: "rgba(255,214,10,0.16)",
+      gradientEnd: lighten(accent, 0.26),
+      success: "#34D399",
+      successSoft: "rgba(52,211,153,0.15)",
+      danger: "#F87171",
+      error: "#F87171",
+      dangerSoft: "rgba(248,113,113,0.15)",
+      warning: "#FBBF24",
+      warningSoft: "rgba(251,191,36,0.15)",
+      info: "#60A5FA",
+      infoSoft: "rgba(96,165,250,0.15)",
+      focusRing: rgba(accent, 0.40),
+      overlay: "rgba(0,0,0,0.70)",
+      disabledBg: "rgba(255,255,255,0.06)",
+      disabledText: "rgba(255,255,255,0.24)",
+      cardShadow: "rgba(0,0,0,0.50)",
+      shimmer: "rgba(255,255,255,0.05)",
+      achievement: "#FBBF24",
+      achievementSoft: "rgba(251,191,36,0.16)",
+      streak: "#FB7185",
+      streakSoft: "rgba(251,113,133,0.16)",
+      growth: "#34D399",
+      growthSoft: "rgba(52,211,153,0.15)",
+      calm: "#60A5FA",
+      calmSoft: "rgba(96,165,250,0.15)",
+      gentleWarn: "#FCD34D",
+      gentleWarnSoft: "rgba(252,211,77,0.15)",
+      urgent: "#FB923C",
+      urgentSoft: "rgba(251,146,60,0.16)",
+      fresh: "#22D3EE",
+      freshSoft: "rgba(34,211,238,0.15)",
+      social: "#38BDF8",
+      socialSoft: "rgba(56,189,248,0.16)",
+      confidenceHigh: "#34D399",
+      confidenceHighSoft: "rgba(52,211,153,0.16)",
+      confidenceMedium: "#FCD34D",
+      confidenceMediumSoft: "rgba(252,211,77,0.15)",
+      confidenceLow: "#F87171",
+      confidenceLowSoft: "rgba(248,113,113,0.15)",
+      roleStudent: "#60A5FA",
+      roleStudentSoft: "rgba(96,165,250,0.15)",
+      roleTeacher: "#2DD4BF",
+      roleTeacherSoft: "rgba(45,212,191,0.16)",
+      roleAdmin: "#FBBF24",
+      roleAdminSoft: "rgba(251,191,36,0.16)",
+      focusSurface: rgba(accent, 0.14),
     },
     shadows: {
-      sm: { color: "#000", opacity: 0.24, radius: 8, offsetY: 2, elevation: 2 },
-      md: { color: "#000", opacity: 0.32, radius: 16, offsetY: 4, elevation: 5 },
-      lg: { color: "#000", opacity: 0.40, radius: 28, offsetY: 8, elevation: 9 },
-      xl: { color: "#000", opacity: 0.48, radius: 36, offsetY: 14, elevation: 13 },
-      glow: { color: accent, opacity: 0.26, radius: 16, offsetY: 0, elevation: 0 },
+      sm: { color: "#000", opacity: 0.20, radius: 6, offsetY: 2, elevation: 2 },
+      md: { color: "#000", opacity: 0.28, radius: 12, offsetY: 4, elevation: 4 },
+      lg: { color: "#000", opacity: 0.36, radius: 20, offsetY: 6, elevation: 8 },
+      xl: { color: "#000", opacity: 0.44, radius: 32, offsetY: 10, elevation: 12 },
+      glow: { color: accent, opacity: 0.28, radius: 20, offsetY: 0, elevation: 0 },
+      // Calm Clarity: 單向輕陰影，取代 Neumorphic 雙向陰影
       soft: {
         shadowColor: "#000",
-        shadowOpacity: 0.28,
-        shadowRadius: 10,
-        shadowOffset: { width: 3, height: 3 },
-        elevation: 4,
+        shadowOpacity: 0.20,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 3,
       },
       inset: {
         shadowColor: "#000",
-        shadowOpacity: 0.22,
-        shadowRadius: 6,
-        shadowOffset: { width: 2, height: 2 },
+        shadowOpacity: 0.12,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 1 },
         elevation: 0,
       },
     },
@@ -343,65 +408,90 @@ export function createLightTheme(accent: string = DEFAULT_ACCENT, schoolId?: str
   return {
     mode: "light",
     colors: {
-      bg: "#F2F2F7",
-      background: "#F2F2F7",
+      // 暖白背景：比 #F2F2F7 更溫暖，色彩心理學：暖色調增加信任感
+      bg: "#F8F9FC",
+      background: "#F8F9FC",
       surface: "#FFFFFF",
-      surface2: "#F2F2F7",
+      surface2: "#F3F4F8",
+      surface3: "#EAECF3",
       surfaceElevated: "#FFFFFF",
-      border: "#E5E5EA",
-      separator: "#C6C6C8",
-      text: "#1C1C1E",
-      textSecondary: "#3C3C43",
-      muted: "#8E8E93",
+      surfaceInteractive: "#EEF2FF",
+      surfaceInteractiveStrong: "#DBEAFE",
+      border: "#E4E7F0",
+      separator: "#D0D5E8",
+      text: "#111827",
+      textSecondary: "#374151",
+      muted: "#9CA3AF",
       accent,
-      accentSoft: createAccentSoft(accent, 0.10),
-      accentHover: lighten(accent, 0.08),
+      accentSoft: createAccentSoft(accent, 0.08),
+      accentHover: lighten(accent, 0.10),
+      accentStrong: lighten(accent, 0.20),
       gradientStart: accent,
-      gradientEnd: lighten(accent, 0.28),
-      success: "#34C759",
-      successSoft: "rgba(52,199,89,0.12)",
-      danger: "#FF3B30",
-      error: "#FF3B30",
-      dangerSoft: "rgba(255,59,48,0.12)",
-      warning: "#FF9500",
-      warningSoft: "rgba(255,149,0,0.12)",
-      info: "#007AFF",
-      infoSoft: "rgba(0,122,255,0.12)",
-      focusRing: rgba(accent, 0.24),
-      overlay: "rgba(0,0,0,0.36)",
-      disabledBg: "rgba(142,142,147,0.12)",
-      disabledText: "rgba(142,142,147,0.55)",
-      cardShadow: "rgba(174,174,192,0.28)",
-      shimmer: "rgba(255,255,255,0.72)",
-      achievement: "#FF9500",
-      achievementSoft: "rgba(255,149,0,0.12)",
-      streak: "#FF6B35",
-      streakSoft: "rgba(255,107,53,0.12)",
-      growth: "#30B97B",
-      growthSoft: "rgba(48,185,123,0.12)",
-      calm: "#8AAFCD",
-      calmSoft: "rgba(138,175,205,0.12)",
-      gentleWarn: "#F5C842",
-      gentleWarnSoft: "rgba(245,200,66,0.12)",
+      gradientEnd: lighten(accent, 0.30),
+      success: "#10B981",
+      successSoft: "rgba(16,185,129,0.10)",
+      danger: "#EF4444",
+      error: "#EF4444",
+      dangerSoft: "rgba(239,68,68,0.10)",
+      warning: "#F59E0B",
+      warningSoft: "rgba(245,158,11,0.10)",
+      info: "#3B82F6",
+      infoSoft: "rgba(59,130,246,0.10)",
+      focusRing: rgba(accent, 0.22),
+      overlay: "rgba(0,0,0,0.32)",
+      disabledBg: "rgba(156,163,175,0.12)",
+      disabledText: "rgba(156,163,175,0.60)",
+      cardShadow: "rgba(17,25,60,0.08)",
+      shimmer: "rgba(255,255,255,0.80)",
+      achievement: "#D97706",
+      achievementSoft: "rgba(217,119,6,0.10)",
+      streak: "#E11D48",
+      streakSoft: "rgba(225,29,72,0.10)",
+      growth: "#059669",
+      growthSoft: "rgba(5,150,105,0.10)",
+      calm: "#2563EB",
+      calmSoft: "rgba(37,99,235,0.10)",
+      gentleWarn: "#D97706",
+      gentleWarnSoft: "rgba(217,119,6,0.10)",
+      urgent: "#EA580C",
+      urgentSoft: "rgba(234,88,12,0.10)",
+      fresh: "#0891B2",
+      freshSoft: "rgba(8,145,178,0.10)",
+      social: "#0EA5E9",
+      socialSoft: "rgba(14,165,233,0.10)",
+      confidenceHigh: "#059669",
+      confidenceHighSoft: "rgba(5,150,105,0.10)",
+      confidenceMedium: "#D97706",
+      confidenceMediumSoft: "rgba(217,119,6,0.10)",
+      confidenceLow: "#DC2626",
+      confidenceLowSoft: "rgba(220,38,38,0.10)",
+      roleStudent: "#2563EB",
+      roleStudentSoft: "rgba(37,99,235,0.10)",
+      roleTeacher: "#0F766E",
+      roleTeacherSoft: "rgba(15,118,110,0.10)",
+      roleAdmin: "#B45309",
+      roleAdminSoft: "rgba(180,83,9,0.10)",
+      focusSurface: rgba(accent, 0.08),
     },
     shadows: {
-      sm: { color: "#AEAEC0", opacity: 0.28, radius: 8, offsetY: 4, elevation: 2 },
-      md: { color: "#AEAEC0", opacity: 0.38, radius: 14, offsetY: 6, elevation: 4 },
-      lg: { color: "#AEAEC0", opacity: 0.48, radius: 20, offsetY: 10, elevation: 7 },
-      xl: { color: "#AEAEC0", opacity: 0.56, radius: 28, offsetY: 14, elevation: 10 },
-      glow: { color: accent, opacity: 0.20, radius: 16, offsetY: 0, elevation: 0 },
+      sm: { color: "#111827", opacity: 0.06, radius: 6, offsetY: 2, elevation: 2 },
+      md: { color: "#111827", opacity: 0.10, radius: 12, offsetY: 4, elevation: 4 },
+      lg: { color: "#111827", opacity: 0.12, radius: 20, offsetY: 6, elevation: 7 },
+      xl: { color: "#111827", opacity: 0.14, radius: 28, offsetY: 10, elevation: 10 },
+      glow: { color: accent, opacity: 0.18, radius: 20, offsetY: 0, elevation: 0 },
+      // Calm Clarity: 單向輕陰影
       soft: {
-        shadowColor: "#AEAEC0",
-        shadowOpacity: 0.32,
+        shadowColor: "#111827",
+        shadowOpacity: 0.08,
         shadowRadius: 8,
-        shadowOffset: { width: 4, height: 4 },
-        elevation: 3,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2,
       },
       inset: {
-        shadowColor: "#AEAEC0",
-        shadowOpacity: 0.24,
-        shadowRadius: 5,
-        shadowOffset: { width: 2, height: 2 },
+        shadowColor: "#111827",
+        shadowOpacity: 0.04,
+        shadowRadius: 3,
+        shadowOffset: { width: 0, height: 1 },
         elevation: 0,
       },
     },

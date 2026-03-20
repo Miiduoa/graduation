@@ -1,3 +1,5 @@
+@import "leaflet/dist/leaflet.css";
+
 /* ========================================
    CAMPUS SOFT — Design System v3.0
    Psychology-Driven iOS Minimalist UI
@@ -6,8 +8,8 @@
 
 :root {
   /* ── Backgrounds ── */
-  --bg: #F2F2F7;
-  --bg-soft: #F8F8FC;
+  --bg: #F8F9FC;
+  --bg-soft: #FAFBFC;
 
   /* ── Surfaces ── */
   --surface: #FFFFFF;
@@ -27,9 +29,9 @@
   --border-strong: #D1D1D6;
 
   /* ── Brand ── */
-  --brand: #5E6AD2;
-  --brand2: #A0ABFF;
-  --accent-soft: rgba(94, 106, 210, 0.10);
+  --brand: #2563EB;
+  --brand2: #60A5FA;
+  --accent-soft: rgba(37, 99, 235, 0.10);
 
   /* ── Status Colors ── */
   --success: #34C759;
@@ -42,7 +44,7 @@
   --info-soft: rgba(0, 122, 255, 0.12);
 
   /* ── Interaction ── */
-  --focus-ring: rgba(94, 106, 210, 0.24);
+  --focus-ring: rgba(15, 139, 141, 0.24);
   --overlay: rgba(0, 0, 0, 0.36);
   --disabled-bg: rgba(142, 142, 147, 0.12);
   --disabled-text: rgba(142, 142, 147, 0.55);
@@ -72,15 +74,15 @@
 
   /* ── Today Dashboard ── */
   --today-morning: linear-gradient(135deg, #FF9500 0%, #FFCC00 100%);
-  --today-afternoon: linear-gradient(135deg, #5E6AD2 0%, #A0ABFF 100%);
+  --today-afternoon: linear-gradient(135deg, #2563EB 0%, #60A5FA 100%);
   --today-evening: linear-gradient(135deg, #30B97B 0%, #5AC8FA 100%);
   --today-night: linear-gradient(135deg, #2C2C2E 0%, #3A3A3C 100%);
 
   /* ── Soft UI Shadows (bilateral neumorphic) ── */
-  --shadow-sm: 4px 4px 8px rgba(174, 174, 192, 0.28), -3px -3px 6px rgba(255, 255, 255, 0.92);
-  --shadow-md: 6px 6px 14px rgba(174, 174, 192, 0.38), -4px -4px 10px rgba(255, 255, 255, 0.92);
-  --shadow-lg: 10px 10px 20px rgba(174, 174, 192, 0.48), -6px -6px 14px rgba(255, 255, 255, 0.92);
-  --shadow-inset: inset 3px 3px 7px rgba(174, 174, 192, 0.28), inset -2px -2px 5px rgba(255, 255, 255, 0.9);
+  --shadow-sm: 0 2px 10px rgba(17, 25, 60, 0.08);
+  --shadow-md: 0 6px 18px rgba(17, 25, 60, 0.10);
+  --shadow-lg: 0 10px 28px rgba(17, 25, 60, 0.14);
+  --shadow-inset: inset 0 1px 2px rgba(17, 25, 60, 0.08);
 
   /* ── Border Radius ── */
   --radius-xs: 8px;
@@ -122,26 +124,25 @@
   --font-label-sm-letter-spacing: 0.3px;
 }
 
-:root[data-theme="dark"],
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #1C1C1E;
-    --bg-soft: #2C2C2E;
-    --surface: #2C2C2E;
+    --bg: #0F1117;
+    --bg-soft: #111827;
+    --surface: #1A1D27;
     --surface-strong: #3A3A3C;
     --surface-raised: #48484A;
     --surface-tint: rgba(255, 255, 255, 0.06);
-    --panel: #2C2C2E;
-    --panel2: #3A3A3C;
-    --text: #F2F2F7;
-    --muted: #8E8E93;
+    --panel: #1A1D27;
+    --panel2: #2A2E40;
+    --text: #F0F2FF;
+    --muted: #6B7399;
     --muted-light: #636366;
-    --border: #38383A;
+    --border: #2A2E40;
     --border-strong: #48484A;
-    --brand: #8EA5FF;
-    --brand2: #C0CDFF;
-    --accent-soft: rgba(142, 165, 255, 0.18);
+    --brand: #2563EB;
+    --brand2: #60A5FA;
+    --accent-soft: rgba(37, 99, 235, 0.18);
     --success: #30D158;
     --success-soft: rgba(48, 209, 88, 0.16);
     --danger: #FF453A;
@@ -150,14 +151,14 @@
     --warning-soft: rgba(255, 159, 10, 0.16);
     --info: #0A84FF;
     --info-soft: rgba(10, 132, 255, 0.16);
-    --focus-ring: rgba(142, 165, 255, 0.30);
+    --focus-ring: rgba(37, 99, 235, 0.30);
     --overlay: rgba(0, 0, 0, 0.60);
     --disabled-bg: rgba(255, 255, 255, 0.08);
     --disabled-text: rgba(255, 255, 255, 0.28);
-    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.18);
-    --shadow-md: 0 4px 18px rgba(0, 0, 0, 0.36), 0 2px 4px rgba(0, 0, 0, 0.22);
-    --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.44), 0 4px 8px rgba(0, 0, 0, 0.26);
-    --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.32), inset 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.30);
+    --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 10px 28px rgba(0, 0, 0, 0.42);
+    --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.26);
     /* Dark emotional palette */
     --achievement: #FF9F0A;
     --achievement-soft: rgba(255, 159, 10, 0.18);
@@ -170,7 +171,7 @@
     --gentle-warn: #FFD60A;
     --gentle-warn-soft: rgba(255, 214, 10, 0.16);
     --today-morning: linear-gradient(135deg, #FF9F0A 0%, #FFD60A 100%);
-    --today-afternoon: linear-gradient(135deg, #8EA5FF 0%, #C0CDFF 100%);
+    --today-afternoon: linear-gradient(135deg, #2563EB 0%, #60A5FA 100%);
     --today-evening: linear-gradient(135deg, #30D158 0%, #5AC8FA 100%);
     --today-night: linear-gradient(135deg, #1C1C1E 0%, #2C2C2E 100%);
   }
@@ -178,22 +179,22 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1C1C1E;
-  --bg-soft: #2C2C2E;
-  --surface: #2C2C2E;
+  --bg: #0F1117;
+  --bg-soft: #111827;
+  --surface: #1A1D27;
   --surface-strong: #3A3A3C;
   --surface-raised: #48484A;
   --surface-tint: rgba(255, 255, 255, 0.06);
-  --panel: #2C2C2E;
-  --panel2: #3A3A3C;
-  --text: #F2F2F7;
-  --muted: #8E8E93;
+  --panel: #1A1D27;
+  --panel2: #2A2E40;
+  --text: #F0F2FF;
+  --muted: #6B7399;
   --muted-light: #636366;
-  --border: #38383A;
+  --border: #2A2E40;
   --border-strong: #48484A;
-  --brand: #8EA5FF;
-  --brand2: #C0CDFF;
-  --accent-soft: rgba(142, 165, 255, 0.18);
+  --brand: #2563EB;
+  --brand2: #60A5FA;
+  --accent-soft: rgba(37, 99, 235, 0.18);
   --success: #30D158;
   --success-soft: rgba(48, 209, 88, 0.16);
   --danger: #FF453A;
@@ -202,15 +203,15 @@
   --warning-soft: rgba(255, 159, 10, 0.16);
   --info: #0A84FF;
   --info-soft: rgba(10, 132, 255, 0.16);
-  --focus-ring: rgba(142, 165, 255, 0.30);
+  --focus-ring: rgba(37, 99, 235, 0.30);
   --overlay: rgba(0, 0, 0, 0.60);
   --disabled-bg: rgba(255, 255, 255, 0.08);
   --disabled-text: rgba(255, 255, 255, 0.28);
   /* Dark mode: directional shadows work better */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.18);
-  --shadow-md: 0 4px 18px rgba(0, 0, 0, 0.36), 0 2px 4px rgba(0, 0, 0, 0.22);
-  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.44), 0 4px 8px rgba(0, 0, 0, 0.26);
-  --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.32), inset 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.30);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 10px 28px rgba(0, 0, 0, 0.42);
+  --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.26);
   /* Dark emotional palette */
   --achievement: #FF9F0A;
   --achievement-soft: rgba(255, 159, 10, 0.18);
@@ -223,7 +224,7 @@
   --gentle-warn: #FFD60A;
   --gentle-warn-soft: rgba(255, 214, 10, 0.16);
   --today-morning: linear-gradient(135deg, #FF9F0A 0%, #FFD60A 100%);
-  --today-afternoon: linear-gradient(135deg, #8EA5FF 0%, #C0CDFF 100%);
+  --today-afternoon: linear-gradient(135deg, #2563EB 0%, #60A5FA 100%);
   --today-evening: linear-gradient(135deg, #30D158 0%, #5AC8FA 100%);
   --today-night: linear-gradient(135deg, #1C1C1E 0%, #2C2C2E 100%);
 }
@@ -507,7 +508,7 @@ button {
   min-height: 40px;
   padding: 0 16px;
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(94, 106, 210, 0.2);
+  border: 1px solid rgba(15, 139, 141, 0.2);
   background: var(--accent-soft);
   color: var(--brand);
   font-weight: 700;
@@ -662,14 +663,14 @@ button {
 .btn-primary {
   color: #fff;
   background: var(--brand);
-  border-color: rgba(94, 106, 210, 0.3);
-  box-shadow: 4px 4px 10px rgba(94, 106, 210, 0.32), -2px -2px 6px rgba(255, 255, 255, 0.7);
+  border-color: rgba(15, 139, 141, 0.3);
+  box-shadow: 4px 4px 10px rgba(15, 139, 141, 0.32), -2px -2px 6px rgba(255, 255, 255, 0.7);
 }
 
 .btn.primary:hover,
 .btn-primary:hover {
-  background: #4f5bc0;
-  box-shadow: 6px 6px 14px rgba(94, 106, 210, 0.4), -3px -3px 8px rgba(255, 255, 255, 0.8);
+  background: #0d7778;
+  box-shadow: 6px 6px 14px rgba(15, 139, 141, 0.4), -3px -3px 8px rgba(255, 255, 255, 0.8);
 }
 
 .btn.primary:active,
@@ -780,7 +781,7 @@ select.input option {
 .pill.brand {
   background: var(--accent-soft);
   color: var(--brand);
-  border-color: rgba(94, 106, 210, 0.18);
+  border-color: rgba(15, 139, 141, 0.18);
   box-shadow: none;
 }
 
@@ -823,8 +824,8 @@ select.input option {
 
 .toggle.on {
   background: var(--brand);
-  border-color: rgba(94, 106, 210, 0.3);
-  box-shadow: 3px 3px 8px rgba(94, 106, 210, 0.3), -2px -2px 5px rgba(255, 255, 255, 0.8);
+  border-color: rgba(15, 139, 141, 0.3);
+  box-shadow: 3px 3px 8px rgba(15, 139, 141, 0.3), -2px -2px 5px rgba(255, 255, 255, 0.8);
 }
 
 .toggleThumb {
@@ -2220,7 +2221,7 @@ select.input option {
 .homePulseCard {
   padding: 18px;
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(94, 106, 210, 0.16);
+  border: 1px solid rgba(15, 139, 141, 0.16);
   background: var(--accent-soft);
   box-shadow: var(--shadow-sm);
 }
@@ -2468,7 +2469,7 @@ select.input option {
 
 .announcementsPage .categoryPills button.active {
   background: var(--accent-soft);
-  border-color: rgba(94, 106, 210, 0.2);
+  border-color: rgba(15, 139, 141, 0.2);
   color: var(--brand);
   box-shadow: none;
 }
@@ -2997,7 +2998,7 @@ select.input option {
   padding: 10px 14px;
   border-radius: var(--radius-lg);
   background: var(--accent-soft);
-  border: 1px solid rgba(94, 106, 210, 0.15);
+  border: 1px solid rgba(15, 139, 141, 0.15);
   box-shadow: var(--shadow-sm);
   font-size: 13px;
   color: var(--brand);
@@ -3053,11 +3054,11 @@ select.input option {
 
 .contextBanner.class {
   background: var(--accent-soft);
-  border: 1px solid rgba(94, 106, 210, 0.15);
+  border: 1px solid rgba(15, 139, 141, 0.15);
 }
 
 .contextBanner.afternoon {
-  background: linear-gradient(135deg, rgba(48, 185, 123, 0.08) 0%, rgba(94, 106, 210, 0.06) 100%);
+  background: linear-gradient(135deg, rgba(48, 185, 123, 0.08) 0%, rgba(15, 139, 141, 0.06) 100%);
   border: 1px solid rgba(48, 185, 123, 0.15);
 }
 
@@ -3081,4 +3082,3 @@ select.input option {
 /* ============================
    Leaflet Map
    ============================ */
-@import "leaflet/dist/leaflet.css";

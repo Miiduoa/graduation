@@ -7,6 +7,12 @@ const { getFirestore, FieldValue, FieldPath, Timestamp } = require("firebase-adm
 const { getMessaging } = require("firebase-admin/messaging");
 const https = require("https");
 const http = require("http");
+const {
+  evaluateSsoConfiguration,
+  getProviderAdapter,
+  normalizeSetupStatus,
+  toPublicSsoConfig,
+} = require("./sso/providerRegistry");
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret("TDX_CLIENT_ID");
@@ -1062,7 +1068,13 @@ exports.verifySSOCallback = onRequest(
     cors: true,
   },
   async (req, res) => {
-    const { provider, schoolId, code, ticket, SAMLResponse, redirectUri } = req.query;
+    if (req.method !== "GET" && req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    const input = req.method === "POST" ? (req.body || {}) : req.query;
+    const { provider, schoolId, code, ticket, SAMLResponse, redirectUri } = input;
 
     if (!provider || !schoolId) {
       res.status(400).json({ error: "Missing provider or schoolId" });
@@ -1077,43 +1089,61 @@ exports.verifySSOCallback = onRequest(
         .doc("sso")
         .get();
 
-      if (!configDoc.exists || !configDoc.data().ssoConfig?.enabled) {
-        res.status(400).json({ error: "SSO not configured for this school" });
+      const config = configDoc.exists ? configDoc.data() : null;
+      const ssoConfig = config?.ssoConfig ? normalizeSsoConfig(config.ssoConfig) : null;
+      const availability = evaluateSsoConfiguration({
+        ...(config || {}),
+        ssoConfig,
+      });
+
+      if (!availability.isConfigured) {
+        res.status(400).json({ error: availability.message, reason: availability.reason });
         return;
       }
 
-      const ssoConfig = normalizeSsoConfig(configDoc.data().ssoConfig);
-      let userInfo = null;
-
-      switch (provider) {
-        case "oidc":
-          if (!code) {
-            res.status(400).json({ error: "Missing authorization code" });
-            return;
-          }
-          userInfo = await verifyOIDC(code, ssoConfig, redirectUri);
-          break;
-
-        case "cas":
-          if (!ticket) {
-            res.status(400).json({ error: "Missing CAS ticket" });
-            return;
-          }
-          userInfo = await verifyCAS(ticket, ssoConfig, redirectUri);
-          break;
-
-        case "saml":
-          if (!SAMLResponse) {
-            res.status(400).json({ error: "Missing SAML response" });
-            return;
-          }
-          userInfo = await verifySAML(SAMLResponse, ssoConfig);
-          break;
-
-        default:
-          res.status(400).json({ error: `Unsupported provider: ${provider}` });
-          return;
+      if (!availability.isLoginReady) {
+        res.status(400).json({
+          error: availability.message,
+          reason: availability.reason,
+          missingFields: availability.missingFields,
+          setupStatus: availability.setupStatus,
+        });
+        return;
       }
+
+      if (ssoConfig.provider !== provider) {
+        res.status(400).json({
+          error: `Configured provider is ${ssoConfig.provider}, not ${provider}`,
+        });
+        return;
+      }
+
+      const adapter = getProviderAdapter(provider);
+      if (!adapter) {
+        res.status(400).json({ error: `Unsupported provider: ${provider}` });
+        return;
+      }
+
+      const missingCallbackFields = adapter.getMissingCallbackFields({
+        code,
+        ticket,
+        SAMLResponse,
+        redirectUri,
+      });
+      if (missingCallbackFields.length > 0) {
+        res.status(400).json({
+          error: `Missing callback parameters: ${missingCallbackFields.join(", ")}`,
+        });
+        return;
+      }
+
+      const userInfo = await adapter.verify({
+        code,
+        ticket,
+        SAMLResponse,
+        redirectUri,
+        ssoConfig,
+      });
 
       if (!userInfo || !userInfo.sub) {
         res.status(401).json({ error: "Failed to verify SSO credentials" });
@@ -1204,10 +1234,18 @@ exports.verifySSOCallback = onRequest(
         uid,
         isNewUser,
         userInfo: {
+          sub: userInfo.sub,
           email: userInfo.email,
           name: userInfo.name || userInfo.displayName,
-          studentId: userInfo.studentId,
-          department: userInfo.department,
+          displayName: userInfo.displayName || userInfo.name,
+          studentId: userInfo.studentId || userInfo.student_id,
+          student_id: userInfo.studentId || userInfo.student_id,
+          employee_id: userInfo.employee_id,
+          department: userInfo.department || userInfo.ou,
+          ou: userInfo.ou || userInfo.department,
+          affiliation: userInfo.affiliation,
+          userType: userInfo.userType,
+          role: determineRole(userInfo),
         },
       });
     } catch (error) {
@@ -1219,150 +1257,6 @@ exports.verifySSOCallback = onRequest(
     }
   }
 );
-
-async function verifyOIDC(code, ssoConfig, redirectUri) {
-  const fetch = (await import("node-fetch")).default;
-  
-  const tokenResponse = await fetch(ssoConfig.tokenUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      client_id: ssoConfig.clientId,
-      client_secret: ssoConfig.clientSecret,
-      redirect_uri: redirectUri,
-    }).toString(),
-  });
-
-  if (!tokenResponse.ok) {
-    const errorText = await tokenResponse.text();
-    console.error("OIDC token error:", errorText);
-    throw new Error("Failed to exchange authorization code");
-  }
-
-  const tokens = await tokenResponse.json();
-  
-  if (tokens.id_token) {
-    const decoded = decodeJWT(tokens.id_token);
-    return {
-      sub: decoded.sub,
-      email: decoded.email,
-      name: decoded.name || decoded.preferred_username,
-      displayName: decoded.name || decoded.preferred_username,
-      studentId: decoded.student_id || decoded.employee_id,
-      department: decoded.department || decoded.ou,
-      accessToken: tokens.access_token,
-    };
-  }
-
-  const userInfoResponse = await fetch(ssoConfig.userInfoUrl, {
-    headers: {
-      Authorization: `Bearer ${tokens.access_token}`,
-    },
-  });
-
-  if (!userInfoResponse.ok) {
-    throw new Error("Failed to fetch user info");
-  }
-
-  const userInfo = await userInfoResponse.json();
-  return {
-    sub: userInfo.sub,
-    email: userInfo.email,
-    name: userInfo.name || userInfo.preferred_username,
-    displayName: userInfo.name || userInfo.preferred_username,
-    studentId: userInfo.student_id || userInfo.employee_id,
-    department: userInfo.department || userInfo.ou,
-    accessToken: tokens.access_token,
-  };
-}
-
-async function verifyCAS(ticket, ssoConfig, serviceUrl) {
-  const fetch = (await import("node-fetch")).default;
-  const xml2js = require("xml2js");
-  
-  const validateUrl = `${ssoConfig.casServerUrl}/serviceValidate?ticket=${ticket}&service=${encodeURIComponent(serviceUrl)}`;
-  
-  const response = await fetch(validateUrl);
-  if (!response.ok) {
-    throw new Error("CAS ticket validation failed");
-  }
-
-  const xmlText = await response.text();
-  const parser = new xml2js.Parser({ explicitArray: false });
-  const result = await parser.parseStringPromise(xmlText);
-
-  const serviceResponse = result["cas:serviceResponse"];
-  
-  if (serviceResponse["cas:authenticationFailure"]) {
-    throw new Error(serviceResponse["cas:authenticationFailure"]._ || "CAS authentication failed");
-  }
-
-  const success = serviceResponse["cas:authenticationSuccess"];
-  if (!success) {
-    throw new Error("Unexpected CAS response format");
-  }
-
-  const attributes = success["cas:attributes"] || {};
-  
-  return {
-    sub: success["cas:user"],
-    email: attributes["cas:email"] || attributes["cas:mail"],
-    name: attributes["cas:displayName"] || attributes["cas:cn"] || success["cas:user"],
-    displayName: attributes["cas:displayName"] || attributes["cas:cn"],
-    studentId: attributes["cas:studentId"] || attributes["cas:employeeNumber"],
-    department: attributes["cas:department"] || attributes["cas:ou"],
-  };
-}
-
-async function verifySAML(samlResponse, ssoConfig) {
-  const saml2 = require("saml2-js");
-  
-  const sp = new saml2.ServiceProvider({
-    entity_id: ssoConfig.spEntityId,
-    private_key: ssoConfig.spPrivateKey,
-    certificate: ssoConfig.spCertificate,
-    assert_endpoint: ssoConfig.assertConsumerUrl,
-  });
-
-  const idp = new saml2.IdentityProvider({
-    sso_login_url: ssoConfig.idpSsoUrl,
-    sso_logout_url: ssoConfig.idpSloUrl,
-    certificates: [ssoConfig.idpCertificate],
-  });
-
-  return new Promise((resolve, reject) => {
-    sp.post_assert(idp, { request_body: { SAMLResponse: samlResponse } }, (err, samlResponse) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-
-      const user = samlResponse.user;
-      resolve({
-        sub: user.name_id,
-        email: user.attributes?.email?.[0],
-        name: user.attributes?.displayName?.[0] || user.attributes?.cn?.[0],
-        displayName: user.attributes?.displayName?.[0],
-        studentId: user.attributes?.studentId?.[0] || user.attributes?.employeeNumber?.[0],
-        department: user.attributes?.department?.[0] || user.attributes?.ou?.[0],
-      });
-    });
-  });
-}
-
-function decodeJWT(token) {
-  const parts = token.split(".");
-  if (parts.length !== 3) {
-    throw new Error("Invalid JWT format");
-  }
-  
-  const payload = Buffer.from(parts[1], "base64url").toString("utf8");
-  return JSON.parse(payload);
-}
 
 function determineRole(userInfo) {
   const email = (userInfo.email || "").toLowerCase();
@@ -1413,34 +1307,30 @@ exports.getSSOConfig = onRequest(
           schoolId,
           ssoConfig: null,
           allowEmailLogin: true,
+          setupStatus: "draft",
+          availability: {
+            reason: "not-configured",
+            missingFields: [],
+            isConfigured: false,
+            isEnabled: false,
+            isComplete: false,
+            isLoginReady: false,
+            isProductionReady: false,
+          },
         });
         return;
       }
 
       const config = configDoc.data();
       const ssoConfig = config.ssoConfig ? normalizeSsoConfig(config.ssoConfig) : null;
-      
-      const safeConfig = {
-        schoolId: config.schoolId,
-        schoolName: config.schoolName,
-        ssoConfig: ssoConfig
-          ? {
-              provider: ssoConfig.provider,
-              name: ssoConfig.name,
-              enabled: ssoConfig.enabled,
-              clientId: ssoConfig.clientId,
-              authUrl: ssoConfig.authUrl,
-              authorizationEndpoint: ssoConfig.authorizationEndpoint,
-              tokenEndpoint: ssoConfig.tokenEndpoint,
-              userInfoEndpoint: ssoConfig.userInfoEndpoint,
-              casServerUrl: ssoConfig.casServerUrl,
-              samlEntryPoint: ssoConfig.samlEntryPoint,
-              scopes: ssoConfig.scopes,
-            }
-          : null,
-        emailDomain: config.emailDomain,
-        allowEmailLogin: config.allowEmailLogin ?? true,
-      };
+
+      const safeConfig = toPublicSsoConfig(
+        {
+          ...config,
+          schoolId: config.schoolId || schoolId,
+        },
+        ssoConfig
+      );
 
       res.json(safeConfig);
     } catch (error) {
@@ -1485,6 +1375,10 @@ exports.updateSSOConfig = onCall(
       .set(
         {
           ...config,
+          setupStatus: normalizeSetupStatus(
+            config.setupStatus,
+            Boolean(config.ssoConfig)
+          ),
           updatedAt: FieldValue.serverTimestamp(),
           updatedBy: uid,
         },

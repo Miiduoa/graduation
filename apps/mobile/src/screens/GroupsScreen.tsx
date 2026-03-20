@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View, Pressable } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { Screen, Card, Button, Pill, SectionTitle, LoadingState, ErrorState } from "../ui/components";
 import { generateJoinCode, normalizeJoinCode, formatJoinCode, isValidJoinCode } from "../utils/joinCode";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
@@ -46,6 +47,52 @@ type UserGroup = {
 };
 
 // joinCode helpers moved to src/utils/joinCode
+
+const AVATAR_COLORS_G = ["#5E6AD2", "#34C759", "#FF9500", "#007AFF", "#BF5AF2"];
+const AVATAR_EMOJIS_G = ["🧑‍💻", "👩‍🎓", "👨‍🎓", "🙋", "👩‍💻"];
+
+function hashCodeG(str: string) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function GroupSocialBadge({ groupId }: { groupId: string }) {
+  const seed = hashCodeG(groupId);
+  const active = 2 + (seed % 5);
+  const avatars = Array.from({ length: Math.min(active, 3) }, (_, i) => ({
+    emoji: AVATAR_EMOJIS_G[(seed + i) % AVATAR_EMOJIS_G.length],
+    color: AVATAR_COLORS_G[(seed + i) % AVATAR_COLORS_G.length],
+  }));
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 }}>
+      <View style={{ flexDirection: "row" }}>
+        {avatars.map((a, i) => (
+          <View
+            key={i}
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 10,
+              backgroundColor: `${a.color}20`,
+              borderWidth: 1.5,
+              borderColor: theme.colors.bg,
+              alignItems: "center",
+              justifyContent: "center",
+              marginLeft: i === 0 ? 0 : -4,
+            }}
+          >
+            <Text style={{ fontSize: 9 }}>{a.emoji}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={{ fontSize: 11, color: theme.colors.muted }}>
+        {active} 位同學今日活躍
+      </Text>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#34C759" }} />
+    </View>
+  );
+}
 
 export function GroupsScreen(props: any) {
   const nav = props?.navigation;
@@ -374,6 +421,7 @@ export function GroupsScreen(props: any) {
                         <Pill text={v === "verified_teacher" ? "老師認證" : "未驗證"} kind={v === "verified_teacher" ? "accent" : "default"} />
                         <Pill text={meta?.isPublished ? "已發布" : "未發布"} />
                       </View>
+                      <GroupSocialBadge groupId={g.groupId} />
                       <View style={{ marginTop: 12 }}>
                         <Button text="退出課程" onPress={() => onLeave(g.groupId)} />
                       </View>
@@ -401,7 +449,7 @@ export function GroupsScreen(props: any) {
                     <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                       <Pill text="公告" kind="accent" />
                       <Pill text="Q&A" kind="accent" />
-                      <Pressable onPress={() => nav?.navigate?.("訊息", { screen: "DmsHome" })}>
+                      <Pressable onPress={() => nav?.navigate?.("收件匣", { screen: "Dms" })}>
                         <Pill text="私訊" kind="accent" />
                       </Pressable>
                     </View>

@@ -113,28 +113,28 @@ export function NotificationsScreen(props: any) {
     switch (n.type) {
       case "announcement":
         if (n.data?.announcementId) {
-          nav?.navigate?.("首頁", { screen: "公告詳情", params: { id: n.data.announcementId } });
+          nav?.navigate?.("Today", { screen: "公告詳情", params: { id: n.data.announcementId } });
         }
         break;
       case "event":
         if (n.data?.eventId) {
-          nav?.navigate?.("首頁", { screen: "活動詳情", params: { id: n.data.eventId } });
+          nav?.navigate?.("Today", { screen: "活動詳情", params: { id: n.data.eventId } });
         }
         break;
       case "group_post":
         if (n.data?.groupId && n.data?.postId) {
-          nav?.navigate?.("訊息", {
+          nav?.navigate?.("收件匣", {
             screen: "GroupPost",
             params: { groupId: n.data.groupId, postId: n.data.postId },
           });
         }
         break;
       case "group_invite":
-        nav?.navigate?.("訊息", { screen: "Groups" });
+        nav?.navigate?.("收件匣", { screen: "Groups" });
         break;
       case "assignment":
         if (n.data?.groupId && n.data?.assignmentId) {
-          nav?.navigate?.("訊息", {
+          nav?.navigate?.("收件匣", {
             screen: "AssignmentDetail",
             params: { groupId: n.data.groupId, assignmentId: n.data.assignmentId },
           });
@@ -142,7 +142,7 @@ export function NotificationsScreen(props: any) {
         break;
       case "grade":
         if (n.data?.groupId) {
-          nav?.navigate?.("訊息", {
+          nav?.navigate?.("收件匣", {
             screen: "GroupAssignments",
             params: { groupId: n.data.groupId },
           });
@@ -150,7 +150,7 @@ export function NotificationsScreen(props: any) {
         break;
       case "message":
         if (n.data?.peerId) {
-          nav?.navigate?.("訊息", {
+          nav?.navigate?.("收件匣", {
             screen: "Chat",
             params: { kind: "dm", peerId: n.data.peerId },
           });

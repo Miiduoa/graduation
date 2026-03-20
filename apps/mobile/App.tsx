@@ -12,7 +12,7 @@ import { ActivityIndicator, View, Text, AppState, AppStateStatus, Modal, Pressab
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Linking from "expo-linking";
 
-import { theme, shadowStyle, softShadowStyle } from "./src/ui/theme";
+import { theme, softShadowStyle } from "./src/ui/theme";
 import { SchoolProvider, useSchool } from "./src/state/school";
 import { FavoritesProvider } from "./src/state/favorites";
 import { DemoProvider } from "./src/state/demo";
@@ -45,19 +45,28 @@ import { ConflictResolutionModal } from "./src/ui/ConflictResolutionModal";
 import { HomeStack } from "./src/screens/HomeStack";
 import { AcademicStack } from "./src/screens/AcademicStack";
 import { MapStack } from "./src/screens/MapStack";
+import { MessagesStack } from "./src/screens/MessagesStack";
 import { MeStack } from "./src/screens/MeStack";
 import { OnboardingScreen, hasSeenOnboarding } from "./src/screens/OnboardingScreen";
 import { usePushNotifications } from "./src/app/usePushNotifications";
 import { initializeRuntimeDataSource } from "./src/config/runtime";
 
 /**
- * 4-Tab 心理學導航架構（Hick's Law — 選項數量 ∝ 決策時間）
- * 今日（情境感知）/ 學習（課程/成績）/ 校園（地圖/生活）/ 我的（個人/訊息）
+ * 5-Tab 心理學導航架構（Hick's Law + Progressive Disclosure）
+ *
+ * Today / 課程 / 校園 / 收件匣 / 我的
+ *
+ * 設計根據：
+ * - Hick's Law: 首層只保留 5 個穩定入口，避免首頁變成功能總表
+ * - Temporal Self-Regulation: Today 只處理下一步、今日課務與校園情境
+ * - Context-Dependent Memory: 課程主流程與收件匣分工清楚，減少切換迷失
+ * - Spatial Cognition: 校園服務依移動與生活情境集中到同一入口
  */
 type RootTabParamList = {
-  今日: undefined;
-  學習: undefined;
+  Today: undefined;
+  課程: undefined;
   校園: undefined;
+  收件匣: undefined;
   我的: undefined;
 };
 
@@ -73,19 +82,24 @@ const TAB_CONFIG: Array<{
   icon: { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap };
 }> = [
   {
-    key: "今日",
-    label: "今日",
+    key: "Today",
+    label: "Today",
     icon: { active: "sunny", inactive: "sunny-outline" },
   },
   {
-    key: "學習",
-    label: "學習",
+    key: "課程",
+    label: "課程",
     icon: { active: "book", inactive: "book-outline" },
   },
   {
     key: "校園",
     label: "校園",
-    icon: { active: "location", inactive: "location-outline" },
+    icon: { active: "map", inactive: "map-outline" },
+  },
+  {
+    key: "收件匣",
+    label: "收件匣",
+    icon: { active: "mail", inactive: "mail-outline" },
   },
   {
     key: "我的",
@@ -98,54 +112,83 @@ const linking: LinkingOptions<RootTabParamList> = {
   prefixes: [Linking.createURL("/"), "campus://"],
   config: {
     screens: {
-      今日: {
+      Today: {
         screens: {
-          HomeMain: "home",
+          TodayHome: "home",
           公告總覽: "announcements",
           公告詳情: "announcement/:id",
           活動總覽: "events",
           活動詳情: "event/:id",
-          餐廳總覽: "cafeteria",
-          MenuDetail: "menu/:id",
-          Ordering: "ordering/:menuId",
+          AIChat: "ai-chat",
         },
       },
-      學習: {
+      課程: {
         screens: {
-          AcademicHome: "academic",
+          CoursesHome: "courses",
           CourseSchedule: "schedule",
+          AddCourse: "course/new",
+          CourseHub: "course-hub",
+          CourseModules: "course-modules",
+          QuizCenter: "quiz-center",
+          Attendance: "attendance",
+          Classroom: "classroom/:sessionId",
+          LearningAnalytics: "learning-analytics",
+          CourseGradebook: "course-gradebook",
           Grades: "grades",
           Calendar: "calendar",
-          AIChat: "ai-chat",
           AICourseAdvisor: "ai-advisor",
+          AIChat: "course-ai-chat",
         },
       },
       校園: {
         screens: {
+          CampusHome: "campus",
           Map: "map",
           PoiDetail: "poi/:id",
           ARNavigation: "ar-nav/:destinationId",
           AccessibleRoute: "accessible-route/:destination",
           BusSchedule: "bus",
+          餐廳總覽: "cafeteria",
+          MenuDetail: "menu/:id",
+          Ordering: "ordering/:menuId",
+          MenuSubscription: "menu-subscription",
+          Library: "library",
+          Health: "health",
+          Dormitory: "dormitory",
+          PrintService: "print",
+          LostFound: "lost-found",
+          LostFoundDetail: "lost-found/:id",
+          LostFoundPost: "lost-found/post",
+          Payment: "payment",
+        },
+      },
+      收件匣: {
+        screens: {
+          Inbox: "inbox",
+          MessagesHome: "messages",
+          Groups: "groups",
+          GroupDetail: "group/:groupId",
+          GroupPost: "group/:groupId/post/:postId",
+          GroupAssignments: "group/:groupId/assignments",
+          AssignmentDetail: "group/:groupId/assignment/:assignmentId",
+          Dms: "dms",
+          Chat: "chat/:peerId",
+          AdminCourseVerify: "course-verify",
         },
       },
       我的: {
         screens: {
-          MeHome: "me",
+          MeHome: "profile",
           Settings: "settings",
           Notifications: "notifications",
+          NotificationSettings: "notification-settings",
           ProfileEdit: "profile/edit",
           QRCode: "qrcode",
-          Library: "library",
-          LostFound: "lost-found",
           GlobalSearch: "search",
-          MessagesHome: "messages",
-          Chat: "chat/:peerId",
-          GroupDetail: "group/:groupId",
-          GroupPost: "group/:groupId/post/:postId",
-          AssignmentDetail: "group/:groupId/assignment/:assignmentId",
-          Groups: "groups",
-          Dms: "dms",
+          Achievements: "achievements",
+          DataExport: "data-export",
+          AccountDeletion: "account-deletion",
+          SSOLogin: "sso-login",
         },
       },
     },
@@ -292,19 +335,22 @@ function TokenExpiredModal() {
         <View
           style={{
             backgroundColor: theme.colors.surface,
-            borderRadius: 16,
-            padding: 24,
+            borderRadius: theme.radius.xl,
+            padding: 28,
             width: "100%",
             maxWidth: 340,
             alignItems: "center",
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            ...softShadowStyle(theme.shadows.soft),
           }}
         >
           <View
             style={{
               width: 64,
               height: 64,
-              borderRadius: 32,
-              backgroundColor: "rgba(239, 68, 68, 0.15)",
+              borderRadius: 20,
+              backgroundColor: theme.colors.dangerSoft,
               alignItems: "center",
               justifyContent: "center",
               marginBottom: 16,
@@ -330,45 +376,46 @@ function TokenExpiredModal() {
               color: theme.colors.muted,
               fontSize: 14,
               textAlign: "center",
-              lineHeight: 20,
+              lineHeight: 22,
               marginBottom: 24,
             }}
           >
             您的登入已過期或在其他裝置登入。為了保護您的帳號安全，請重新登入。
           </Text>
           
-          <View style={{ flexDirection: "row", gap: 12, width: "100%" }}>
+          <View style={{ flexDirection: "row", gap: 10, width: "100%" }}>
             <Pressable
               onPress={handleDismiss}
-              style={{
+              style={({ pressed }) => ({
                 flex: 1,
-                paddingVertical: 12,
-                borderRadius: 8,
-                backgroundColor: theme.colors.surface2,
+                paddingVertical: 13,
+                borderRadius: theme.radius.md,
+                backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface2,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
                 alignItems: "center",
-              }}
+                opacity: pressed ? 0.8 : 1,
+              })}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: "600" }}>以離線模式繼續</Text>
+              <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>離線繼續</Text>
             </Pressable>
             
             <Pressable
               onPress={handleSignOut}
               disabled={isLoggingOut}
-              style={{
+              style={({ pressed }) => ({
                 flex: 1,
-                paddingVertical: 12,
-                borderRadius: 8,
+                paddingVertical: 13,
+                borderRadius: theme.radius.md,
                 backgroundColor: theme.colors.accent,
                 alignItems: "center",
-                opacity: isLoggingOut ? 0.7 : 1,
-              }}
+                opacity: isLoggingOut || pressed ? 0.8 : 1,
+              })}
             >
               {isLoggingOut ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={{ color: "#fff", fontWeight: "600" }}>重新登入</Text>
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>重新登入</Text>
               )}
             </Pressable>
           </View>
@@ -378,11 +425,11 @@ function TokenExpiredModal() {
               color: theme.colors.muted,
               fontSize: 11,
               textAlign: "center",
-              marginTop: 12,
+              marginTop: 14,
               lineHeight: 16,
             }}
           >
-            選擇「以離線模式繼續」後，您可以瀏覽已快取的資料，但無法存取需要登入的功能。
+            離線模式下仍可瀏覽已快取的資料
           </Text>
         </View>
       </View>
@@ -465,8 +512,12 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * FloatingTabBar — 4-Tab 心理學設計
- * 視覺重量讓用戶感知「我在哪裡」（空間記憶），毛玻璃效果減少視覺干擾
+ * FloatingTabBar — Calm Clarity 設計語言
+ *
+ * 心理學：
+ * - Fitts's Law: 5 個清楚命名的 Tab 仍維持穩定大目標區，降低誤觸
+ * - Affordance: 清晰的選中/未選中視覺差異
+ * - Gestalt 接近法則: 毛玻璃背景與底部安全區完整融合
  */
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -475,17 +526,17 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   return (
     <View style={{
       position: "absolute",
-      bottom: Math.max(insets.bottom, 10) + 10,
-      left: 16,
-      right: 16,
-      borderRadius: 28,
+      bottom: Math.max(insets.bottom, 8) + 8,
+      left: 12,
+      right: 12,
+      borderRadius: 26,
       flexDirection: "row",
       alignItems: "center",
       paddingVertical: 6,
-      paddingHorizontal: 6,
+      paddingHorizontal: 8,
       borderWidth: 1,
-      borderColor: isDark ? "rgba(255,255,255,0.10)" : "rgba(0,0,0,0.06)",
-      backgroundColor: isDark ? "rgba(44,44,46,0.96)" : "rgba(255,255,255,0.97)",
+      borderColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+      backgroundColor: isDark ? "rgba(26,29,39,0.97)" : "rgba(255,255,255,0.98)",
       ...softShadowStyle(theme.shadows.soft),
     }}>
       {state.routes.map((route, index) => {
@@ -508,30 +559,31 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             }}
             style={({ pressed }) => ({
               flex: 1,
-              paddingHorizontal: 2,
-              transform: [{ scale: pressed ? 0.93 : 1 }],
+              transform: [{ scale: pressed ? 0.94 : 1 }],
             })}
           >
             <View style={{
               alignItems: "center",
               justifyContent: "center",
-              gap: 4,
-              paddingVertical: 10,
+              gap: 3,
+              paddingVertical: 9,
               paddingHorizontal: 4,
-              borderRadius: 20,
-              backgroundColor: focused ? theme.colors.accentSoft : "transparent",
-              minHeight: 56,
+              borderRadius: 18,
+              backgroundColor: focused
+                ? (isDark ? "rgba(37,99,235,0.16)" : "rgba(37,99,235,0.08)")
+                : "transparent",
+              minHeight: 52,
             }}>
               <Ionicons
                 name={iconName}
-                size={focused ? 24 : 21}
+                size={focused ? 22 : 20}
                 color={focused ? theme.colors.accent : theme.colors.muted}
               />
               <Text style={{
                 fontSize: 10,
-                fontWeight: focused ? "800" : "500",
+                fontWeight: focused ? "700" : "500",
                 color: focused ? theme.colors.accent : theme.colors.muted,
-                letterSpacing: focused ? 0.1 : 0.2,
+                letterSpacing: focused ? 0 : 0.1,
               }}>
                 {config?.label ?? route.name}
               </Text>
@@ -541,13 +593,6 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       })}
     </View>
   );
-}
-
-/** 浮動 Tab 列本體高度（含圓角區），不含底部 safe area */
-const FLOATING_TAB_BAR_HEIGHT = 72;
-/** Tab 列距離螢幕底部的間距（與 FloatingTabBar 的 bottom 一致：Math.max(insets.bottom, 10) + 10） */
-function getTabBarBottomOffset(insetsBottom: number) {
-  return Math.max(insetsBottom, 10) + 10;
 }
 
 function AppNavigation({
@@ -570,6 +615,14 @@ function AppNavigation({
     },
   };
 
+  if (auth.loading || auth.profileLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: theme.colors.bg }}>
+        <ActivityIndicator size="large" color={theme.colors.accent} />
+      </View>
+    );
+  }
+
   return (
     <NavigationContainer 
       ref={navigationRef} 
@@ -585,16 +638,17 @@ function AppNavigation({
         <NetworkStatusBanner />
         <Tab.Navigator
           id={undefined}
-          initialRouteName="今日"
+          initialRouteName={auth.isAdmin ? "我的" : auth.isEditor ? "課程" : "Today"}
           tabBar={(props) => <FloatingTabBar {...props} />}
           screenOptions={() => ({
             headerShown: false,
             sceneStyle: { backgroundColor: theme.colors.bg },
           })}
         >
-          <Tab.Screen name="今日" component={HomeStack} />
-          <Tab.Screen name="學習" component={AcademicStack} />
+          <Tab.Screen name="Today" component={HomeStack} />
+          <Tab.Screen name="課程" component={AcademicStack} />
           <Tab.Screen name="校園" component={MapStack} />
+          <Tab.Screen name="收件匣" component={MessagesStack} />
           <Tab.Screen name="我的" component={MeStack} />
         </Tab.Navigator>
       </View>
@@ -607,11 +661,9 @@ function AppInner() {
   const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
-  // Initialize network monitoring for offline support and sync cache layer offline mode
   useEffect(() => {
     const networkCleanup = initNetworkMonitoring();
     
-    // 同步快取層的離線模式狀態
     let offlineModeCleanup: (() => void) | null = null;
     initOfflineModeSync().then((cleanup) => {
       offlineModeCleanup = cleanup;
@@ -623,7 +675,6 @@ function AppInner() {
     };
   }, []);
 
-  // Check if user has seen onboarding
   useEffect(() => {
     (async () => {
       try {
@@ -637,16 +688,13 @@ function AppInner() {
     })();
   }, []);
 
-  // When Firebase is enabled, force demoMode back to normal so it doesn't hide real data.
   useEffect(() => {
     if (!USING_FIREBASE) return;
     AsyncStorage.setItem("campus.demoMode.v1", "normal").catch(() => void 0);
   }, []);
 
-  // Re-render when theme mode changes so NavigationContainer + tab styles update.
   useThemeMode();
 
-  // Show loading while checking onboarding status
   if (isCheckingOnboarding) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: "center", alignItems: "center" }}>
@@ -655,7 +703,6 @@ function AppInner() {
     );
   }
 
-  // Show onboarding for first-time users
   if (showOnboarding) {
     return <OnboardingScreen onComplete={() => setShowOnboarding(false)} />;
   }
@@ -703,17 +750,29 @@ class AppErrorBoundary extends React.Component<
             backgroundColor: theme.colors.bg,
             justifyContent: "center",
             alignItems: "center",
-            padding: 24,
+            padding: 32,
           }}
         >
-          <Ionicons name="warning" size={64} color={theme.colors.danger} />
+          <View
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 24,
+              backgroundColor: theme.colors.dangerSoft,
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 20,
+            }}
+          >
+            <Ionicons name="warning-outline" size={36} color={theme.colors.danger} />
+          </View>
           <Text
             style={{
               color: theme.colors.text,
               fontSize: 20,
               fontWeight: "700",
-              marginTop: 16,
               textAlign: "center",
+              marginBottom: 10,
             }}
           >
             應用程式發生錯誤
@@ -722,23 +781,25 @@ class AppErrorBoundary extends React.Component<
             style={{
               color: theme.colors.muted,
               fontSize: 14,
-              marginTop: 8,
               textAlign: "center",
+              lineHeight: 22,
+              marginBottom: 28,
             }}
           >
             {this.state.error?.message ?? "未知錯誤"}
           </Text>
-          <Text
-            style={{
-              color: theme.colors.accent,
-              fontSize: 14,
-              fontWeight: "600",
-              marginTop: 24,
-            }}
+          <Pressable
             onPress={() => this.setState({ hasError: false, error: null })}
+            style={({ pressed }) => ({
+              paddingHorizontal: 24,
+              paddingVertical: 13,
+              borderRadius: theme.radius.md,
+              backgroundColor: theme.colors.accent,
+              opacity: pressed ? 0.85 : 1,
+            })}
           >
-            點擊重試
-          </Text>
+            <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>重新嘗試</Text>
+          </Pressable>
         </View>
       );
     }

@@ -58,7 +58,7 @@ function mapGroupToClub(g: Group, idx: number, joinedIds: Set<string>): Club {
 }
 
 export default function ClubsPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolId, schoolName } = resolveSchoolPageContext(props.searchParams);
   const [category, setCategory] = useState("全部");
   const [clubs, setClubs] = useState<Club[]>(MOCK_CLUBS);
   const [search, setSearch] = useState("");

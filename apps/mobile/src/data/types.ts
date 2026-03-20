@@ -161,6 +161,8 @@ export type UserRole =
   | "staff"
   | "alumni";
 
+export type RoleMode = "guest" | "student" | "teacher" | "admin";
+
 export type UserSettings = {
   language?: string;
   theme?: "light" | "dark" | "system";
@@ -423,6 +425,74 @@ export type InboxTask = {
   priority: number;
   dueAt?: Date | null;
   unreadCount?: number;
+};
+
+export type InboxIntent =
+  | "submit"
+  | "join"
+  | "review"
+  | "read"
+  | "reply"
+  | "navigate"
+  | "verify";
+
+export type InboxUrgency = "critical" | "high" | "medium" | "low";
+
+export type FreshnessState = "live" | "new" | "today" | "stale";
+
+export type InboxItem = InboxTask & {
+  intent: InboxIntent;
+  urgency: InboxUrgency;
+  freshness: FreshnessState;
+  actionLabel: string;
+  actionTarget?: {
+    tab?: string;
+    screen?: string;
+    params?: Record<string, unknown>;
+  };
+  reason?: string;
+  consequence?: string;
+  nextStep?: string;
+};
+
+export type TodayCardPriority = "critical" | "high" | "medium" | "low" | "complete";
+
+export type TodayCardContext = "next_action" | "course" | "deadline" | "campus" | "support";
+
+export type TodayCard = {
+  id: string;
+  title: string;
+  description: string;
+  priority: TodayCardPriority;
+  context: TodayCardContext;
+  confidence: FreshnessState;
+  badge?: string;
+  meta?: string;
+  actionLabel?: string;
+  actionTarget?: {
+    tab?: string;
+    screen?: string;
+    params?: Record<string, unknown>;
+  };
+};
+
+export type CampusServiceCategory = "mobility" | "daily_life" | "operations" | "support";
+
+export type CampusService = {
+  id: string;
+  title: string;
+  description: string;
+  category: CampusServiceCategory;
+  icon: string;
+  tint: string;
+  contextTags: string[];
+  badge?: string;
+  actionLabel: string;
+  actionTarget?: {
+    tab?: string;
+    screen?: string;
+    params?: Record<string, unknown>;
+  };
 };
 
 export type CourseGradebookAssignment = {

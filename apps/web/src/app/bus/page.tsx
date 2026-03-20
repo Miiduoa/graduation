@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, type CSSProperties } from "react";
+import { useState, useEffect } from "react";
 import { SiteShell } from "@/components/SiteShell";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
 

@@ -310,7 +310,7 @@ export function MeScreen(props: any) {
     : [
         {
           icon: "log-in-outline",
-          label: "學校 SSO 登入",
+          label: "學校帳號登入",
           color: theme.colors.accent,
           onPress: () => nav?.navigate?.("SSOLogin"),
         },
