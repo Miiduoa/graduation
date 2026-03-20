@@ -1,11 +1,16 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
 const STORAGE_KEY_PREFIX = "@search_history";
 const STORAGE_VERSION = "v3"; // Updated version to include schoolId
 const MAX_HISTORY_ITEMS = 20;
 
 function getStorageKey(userId: string | null, schoolId: string | null): string {
+  return getScopedStorageKey("search-history", { uid: userId, schoolId });
+}
+
+function getLegacyStorageKey(userId: string | null, schoolId: string | null): string {
   const userPart = userId || "anonymous";
   const schoolPart = schoolId || "default";
   return `${STORAGE_KEY_PREFIX}.${userPart}.${schoolPart}.${STORAGE_VERSION}`;
@@ -45,7 +50,7 @@ export function SearchHistoryProvider(props: {
     prevKeyRef.current = currentKey;
     setLoaded(false);
     
-    AsyncStorage.getItem(currentKey)
+    getFirstStorageValue([currentKey, getLegacyStorageKey(userId, schoolId)])
       .then((raw) => {
         if (raw) {
           try {

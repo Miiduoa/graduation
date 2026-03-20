@@ -26,8 +26,9 @@ import { chatWithCampusAssistant, getAIStatus, type AIMessage, type AIContext } 
 import { toDate } from "../utils/format";
 import { getDb } from "../firebase";
 import { doc, getDoc, collection, getDocs, query, orderBy, limit, where, Timestamp } from "firebase/firestore";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
-const CHAT_HISTORY_KEY = "ai_chat_history";
+const LEGACY_CHAT_HISTORY_KEY = "ai_chat_history";
 const CHAT_HISTORY_MAX = 50;
 
 type MessageRole = "user" | "assistant" | "system";
@@ -246,6 +247,10 @@ export function AIChatScreen(props: any) {
   const [aiStatus] = useState(() => getAIStatus());
   const [pendingAssignments, setPendingAssignments] = useState<any[]>([]);
   const [weeklyReport, setWeeklyReport] = useState<any>(null);
+  const chatHistoryKey = useMemo(
+    () => getScopedStorageKey("ai-chat-history", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+    [auth.user?.uid, school.id]
+  );
 
   const { items: announcements } = useAsyncList(() => ds.listAnnouncements(school.id), [ds, school.id]);
   const { items: events } = useAsyncList(() => ds.listEvents(school.id), [ds, school.id]);
@@ -254,21 +259,26 @@ export function AIChatScreen(props: any) {
 
   // 從 AsyncStorage 讀取對話記錄
   useEffect(() => {
+    let cancelled = false;
+
     async function loadHistory() {
       try {
-        const stored = await AsyncStorage.getItem(CHAT_HISTORY_KEY);
+        const stored = await getFirstStorageValue([chatHistoryKey, LEGACY_CHAT_HISTORY_KEY]);
         if (stored) {
           const parsed: Message[] = JSON.parse(stored);
           // 還原 Date 物件（JSON 序列化後變為字串）
           const restored = parsed.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
-          if (restored.length > 0) {
+          if (!cancelled && restored.length > 0) {
             setMessages(restored);
           }
         }
       } catch {}
     }
     loadHistory();
-  }, []); // 僅在 mount 時執行一次
+    return () => {
+      cancelled = true;
+    };
+  }, [chatHistoryKey]);
 
   // 儲存對話記錄到 AsyncStorage（排除初始問候）
   const saveHistoryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -278,13 +288,13 @@ export function AIChatScreen(props: any) {
     saveHistoryRef.current = setTimeout(async () => {
       try {
         const toSave = messages.slice(-CHAT_HISTORY_MAX);
-        await AsyncStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(toSave));
+        await AsyncStorage.setItem(chatHistoryKey, JSON.stringify(toSave));
       } catch {}
     }, 500);
     return () => {
       if (saveHistoryRef.current) clearTimeout(saveHistoryRef.current);
     };
-  }, [messages]);
+  }, [messages, chatHistoryKey]);
 
   // 載入個人化資料（pendingAssignments + 週報）
   useEffect(() => {
@@ -668,7 +678,7 @@ export function AIChatScreen(props: any) {
         style: "destructive",
         onPress: async () => {
           try {
-            await AsyncStorage.removeItem(CHAT_HISTORY_KEY);
+            await AsyncStorage.removeItem(chatHistoryKey);
           } catch {}
           // 重設回歡迎訊息
           const name = auth.profile?.displayName?.split(" ")[0] ?? "同學";
@@ -683,7 +693,7 @@ export function AIChatScreen(props: any) {
         },
       },
     ]);
-  }, [auth.profile?.displayName]);
+  }, [auth.profile?.displayName, chatHistoryKey]);
 
   return (
     <Screen>
