@@ -50,7 +50,7 @@ function SSOCourseSync({ onCoursesImported, schoolId, semester }: SSOCourseSyncP
         
         if (hasDataSource()) {
           const ds = getDataSource();
-          const enrollments = await ds.listEnrollments(auth.user.uid, semester);
+          const enrollments = await ds.listEnrollments(auth.user.uid, semester, schoolId);
           const courses: DataCourse[] = [];
           
           for (const enrollment of enrollments) {

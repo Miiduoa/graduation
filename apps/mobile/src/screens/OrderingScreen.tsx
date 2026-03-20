@@ -165,7 +165,7 @@ export function OrderingScreen(props: any) {
     
     setLoadingOrders(true);
     try {
-      const dataOrders = await ds.listOrders(auth.user.uid);
+      const dataOrders = await ds.listOrders(auth.user.uid, undefined, school.id);
       if (dataOrders && dataOrders.length > 0) {
         const converted: Order[] = dataOrders.map((o: DataOrder) => ({
           id: o.id,
@@ -395,7 +395,7 @@ export function OrderingScreen(props: any) {
           style: "destructive",
           onPress: async () => {
             try {
-              await ds.cancelOrder(orderId);
+              await ds.cancelOrder(orderId, auth.user?.uid, school.id);
               
               analytics.logEvent("cancel_order", {
                 order_id: orderId,

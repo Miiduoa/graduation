@@ -382,6 +382,73 @@ async function resolveUserSchoolId(
   return userDoc?.primarySchoolId ?? userDoc?.schoolId ?? null;
 }
 
+async function resolveEventSchoolId(
+  eventId: string,
+  preferredSchoolId?: string | null
+): Promise<string | null> {
+  if (preferredSchoolId) {
+    return preferredSchoolId;
+  }
+
+  const legacyEvent =
+    (await fetchDocument<ClubEvent>("events", eventId).catch(() => null)) ??
+    (await fetchDocument<ClubEvent>("clubEvents", eventId).catch(() => null));
+
+  return legacyEvent?.schoolId ?? null;
+}
+
+async function ensureCanonicalEventDocument(
+  eventId: string,
+  schoolId: string
+): Promise<string[]> {
+  const db = getDb();
+  const canonicalPath = buildSchoolCollectionPath(schoolId, "events", eventId);
+  const canonicalRef = docFromSegments(db, canonicalPath);
+  const canonicalSnap = await getDoc(canonicalRef);
+
+  if (canonicalSnap.exists()) {
+    return canonicalPath;
+  }
+
+  const legacyRootEvent =
+    (await fetchDocument<ClubEvent>("events", eventId).catch(() => null)) ??
+    (await fetchDocument<ClubEvent>("clubEvents", eventId).catch(() => null));
+  const legacySchoolEvent =
+    (await fetchDocumentAtPath<ClubEvent>(buildSchoolCollectionPath(schoolId, "clubEvents", eventId)).catch(() => null)) ??
+    (await fetchDocumentAtPath<ClubEvent>(buildSchoolCollectionPath(schoolId, "events", eventId)).catch(() => null));
+  const sourceEvent = legacySchoolEvent ?? legacyRootEvent;
+
+  if (sourceEvent) {
+    await setDoc(
+      canonicalRef,
+      {
+        ...sourceEvent,
+        schoolId,
+        migratedAt: serverTimestamp(),
+        sourcePath: legacySchoolEvent
+          ? buildSchoolCollectionPath(schoolId, "clubEvents", eventId).join("/")
+          : legacyRootEvent
+            ? `events/${eventId}`
+            : undefined,
+      },
+      { merge: true }
+    );
+  } else {
+    await setDoc(
+      canonicalRef,
+      {
+        id: eventId,
+        schoolId,
+        registeredCount: 0,
+        createdAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  }
+
+  return canonicalPath;
+}
+
 async function fetchCanonicalSchoolCollection<T extends { id: string }>(params: {
   schoolId?: string;
   canonicalCollections: string[];
@@ -583,7 +650,7 @@ export const firebaseSource: DataSource = {
   async listEvents(schoolId, options) {
     return fetchCanonicalSchoolCollection<ClubEvent>({
       schoolId,
-      canonicalCollections: ["clubEvents", "events"],
+      canonicalCollections: ["events", "clubEvents"],
       schoolConstraints: [orderBy("startsAt", "asc")],
       fallbackCollection: "events",
       fallbackConstraints: [bySchool(schoolId), orderBy("startsAt", "asc")],
@@ -591,19 +658,46 @@ export const firebaseSource: DataSource = {
     });
   },
 
-  async getEvent(id) {
-    return fetchDocument<ClubEvent>("events", id);
+  async getEvent(id, schoolId = undefined) {
+    if (schoolId) {
+      const canonicalEvent =
+        (await fetchDocumentAtPath<ClubEvent>(buildSchoolCollectionPath(schoolId, "events", id))) ??
+        (await fetchDocumentAtPath<ClubEvent>(buildSchoolCollectionPath(schoolId, "clubEvents", id)));
+      if (canonicalEvent) {
+        return { ...canonicalEvent, schoolId: canonicalEvent.schoolId ?? schoolId };
+      }
+    }
+
+    return (
+      (await fetchDocument<ClubEvent>("events", id)) ??
+      (await fetchDocument<ClubEvent>("clubEvents", id))
+    );
   },
 
-  async registerEvent(eventId, userId) {
+  async registerEvent(eventId, userId, schoolId = undefined) {
     const db = getDb();
-    const eventRef = doc(db, "events", eventId);
-    const registrationRef = doc(db, "eventRegistrations", `${eventId}_${userId}`);
-    
+    const resolvedSchoolId = await resolveEventSchoolId(eventId, schoolId);
+    if (!resolvedSchoolId) {
+      throw new Error("缺少 schoolId，無法報名活動");
+    }
+
+    const eventPath = await ensureCanonicalEventDocument(eventId, resolvedSchoolId);
+    const eventRef = docFromSegments(db, eventPath);
+    const registrationRef = docFromSegments(
+      db,
+      buildSchoolCollectionPath(resolvedSchoolId, "events", eventId, "registrations", userId)
+    );
+
+    const registrationSnap = await getDoc(registrationRef);
+    if (registrationSnap.exists()) {
+      return;
+    }
+
     const batch = writeBatch(db);
     batch.set(registrationRef, {
       eventId,
       userId,
+      schoolId: resolvedSchoolId,
       registeredAt: serverTimestamp(),
     });
     batch.update(eventRef, {
@@ -612,11 +706,25 @@ export const firebaseSource: DataSource = {
     await batch.commit();
   },
 
-  async unregisterEvent(eventId, userId) {
+  async unregisterEvent(eventId, userId, schoolId = undefined) {
     const db = getDb();
-    const eventRef = doc(db, "events", eventId);
-    const registrationRef = doc(db, "eventRegistrations", `${eventId}_${userId}`);
-    
+    const resolvedSchoolId = await resolveEventSchoolId(eventId, schoolId);
+    if (!resolvedSchoolId) {
+      throw new Error("缺少 schoolId，無法取消活動報名");
+    }
+
+    const eventPath = await ensureCanonicalEventDocument(eventId, resolvedSchoolId);
+    const eventRef = docFromSegments(db, eventPath);
+    const registrationRef = docFromSegments(
+      db,
+      buildSchoolCollectionPath(resolvedSchoolId, "events", eventId, "registrations", userId)
+    );
+
+    const registrationSnap = await getDoc(registrationRef);
+    if (!registrationSnap.exists()) {
+      return;
+    }
+
     const batch = writeBatch(db);
     batch.delete(registrationRef);
     batch.update(eventRef, {

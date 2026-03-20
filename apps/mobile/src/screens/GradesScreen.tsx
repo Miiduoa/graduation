@@ -374,8 +374,8 @@ export function GradesScreen(props: any) {
     try {
       const ds = getDataSource();
       const [grades, gpa] = await Promise.all([
-        ds.listGrades(auth.user.uid),
-        ds.getGPA(auth.user.uid),
+        ds.listGrades(auth.user.uid, undefined, school.id),
+        ds.getGPA(auth.user.uid, school.id),
       ]);
       setServerGrades(grades);
       setGpaData(gpa);
@@ -384,7 +384,7 @@ export function GradesScreen(props: any) {
     } finally {
       setLoading(false);
     }
-  }, [auth.user?.uid]);
+  }, [auth.user?.uid, school.id]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);

@@ -485,6 +485,121 @@ export type TodayCard = {
   };
 };
 
+export type TodayCardSource =
+  | "official_public"
+  | "user_import"
+  | "crowd_verified"
+  | "ai_synthesized";
+
+export type CampusSignalType =
+  | "course"
+  | "announcement"
+  | "event"
+  | "menu"
+  | "place"
+  | "mobility"
+  | "crowd"
+  | "imported_event"
+  | "task"
+  | "ai_action";
+
+export type CampusSignalActionTarget = {
+  tab?: string;
+  screen?: string;
+  params?: Record<string, unknown>;
+};
+
+export type CampusSignal = {
+  id: string;
+  schoolId: string;
+  type: CampusSignalType;
+  title: string;
+  description?: string;
+  source: TodayCardSource;
+  startAt?: string;
+  endAt?: string;
+  location?: string;
+  freshness: FreshnessState;
+  trustScore: number;
+  actionTarget?: CampusSignalActionTarget;
+  meta?: string;
+  updatedAt?: string;
+};
+
+export type ImportedArtifactType =
+  | "ical"
+  | "manual_course"
+  | "manual_task"
+  | "screenshot"
+  | "pdf";
+
+export type ImportedEntityType = "course" | "event" | "task";
+
+export type ImportedEntity = {
+  id: string;
+  entityType: ImportedEntityType;
+  title: string;
+  description?: string;
+  date?: string;
+  dayOfWeek?: number;
+  startTime?: string;
+  endTime?: string;
+  location?: string;
+};
+
+export type ImportedArtifact = {
+  id: string;
+  artifactType: ImportedArtifactType;
+  rawInputRef?: string;
+  parsedEntities: ImportedEntity[];
+  confidence: number;
+  createdAt: string;
+  userConfirmedAt?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CrowdSignalType =
+  | "cafeteria_queue"
+  | "library_seat"
+  | "bus_crowd"
+  | "study_space";
+
+export type CrowdSignalValue = "low" | "medium" | "high";
+
+export type CrowdReport = {
+  id: string;
+  schoolId: string;
+  signalType: CrowdSignalType;
+  placeId: string;
+  placeName?: string;
+  value: CrowdSignalValue;
+  evidenceType: "self_report" | "photo" | "consensus";
+  reporterReputation: number;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt?: string;
+  trustScore?: number;
+};
+
+export type AIActionSuggestion = {
+  id: string;
+  label: string;
+  reason?: string;
+  signalId?: string;
+  actionTarget?: CampusSignalActionTarget;
+};
+
+export type AIActionBrief = {
+  summary: string;
+  reasons: string[];
+  suggestedActions: AIActionSuggestion[];
+  generatedAt: string;
+  basedOn: Array<{
+    signalId: string;
+    source: TodayCardSource;
+  }>;
+};
+
 export type CampusServiceCategory = "mobility" | "daily_life" | "operations" | "support";
 
 export type CampusService = {

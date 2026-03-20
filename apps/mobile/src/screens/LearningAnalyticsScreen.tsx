@@ -9,10 +9,12 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { buildUserSchoolCollectionPath } from "@campus/shared/src";
 import { Screen, Card, AnimatedCard, Button, Pill, LoadingState, ProgressRing } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
 import { useAuth } from "../state/auth";
+import { useSchool } from "../state/school";
 import { useSchedule } from "../state/schedule";
 import { getDb } from "../firebase";
 import {
@@ -28,6 +30,7 @@ import {
   setDoc,
   serverTimestamp,
 } from "firebase/firestore";
+import { collectionFromSegments } from "../data/firestorePath";
 
 type SubmissionRecord = {
   id: string;
@@ -295,6 +298,7 @@ function HeatmapGrid({ title, data }: { title: string; data: number[][] }) {
 export function LearningAnalyticsScreen(props: any) {
   const nav = props?.navigation;
   const auth = useAuth();
+  const { school } = useSchool();
   const { courses } = useSchedule();
   const db = getDb();
 
@@ -345,9 +349,15 @@ export function LearningAnalyticsScreen(props: any) {
           const data = d.data();
           const assignmentRef = d.ref.parent.parent;
           const assignSnap = assignmentRef ? await getDoc(assignmentRef).catch(() => null) : null;
+          const groupId = assignmentRef?.parent?.parent?.id ?? "";
+          const groupSnap = groupId ? await getDoc(doc(db, "groups", groupId)).catch(() => null) : null;
+          const groupSchoolId = groupSnap?.data()?.schoolId as string | undefined;
+          if (groupSchoolId && groupSchoolId !== school.id) {
+            return null;
+          }
           return {
             id: d.id,
-            groupId: assignmentRef?.parent?.parent?.id ?? "",
+            groupId,
             assignmentTitle: assignSnap?.data()?.title ?? "作業",
             isLate: data.isLate ?? false,
             grade: data.grade,
@@ -355,18 +365,32 @@ export function LearningAnalyticsScreen(props: any) {
           };
         })
       );
-      setSubmissions(subs);
+      setSubmissions(subs.filter(Boolean) as SubmissionRecord[]);
 
       // 讀取成績資料
-      const gradesSnap = await getDocs(
-        query(collection(db, "users", uid, "grades"), orderBy("semester", "desc"), limit(30))
-      ).catch(() => ({ docs: [] as any[] }));
+      const canonicalGradesSnap = await getDocs(
+        query(
+          collectionFromSegments(db, buildUserSchoolCollectionPath(uid, school.id, "grades")),
+          orderBy("semester", "desc"),
+          limit(30)
+        )
+      ).catch(() => ({ empty: true, docs: [] as any[] }));
+      const gradesSnap = canonicalGradesSnap.empty
+        ? await getDocs(query(collection(db, "users", uid, "grades"), orderBy("semester", "desc"), limit(30))).catch(() => ({ docs: [] as any[] }))
+        : canonicalGradesSnap;
       setSemesterGrades(gradesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as SemesterGrade[]);
 
       // 讀取週報
-      const reportsSnap = await getDocs(
-        query(collection(db, "users", uid, "weeklyReports"), orderBy("generatedAt", "desc"), limit(8))
-      ).catch(() => ({ docs: [] as any[] }));
+      const canonicalReportsSnap = await getDocs(
+        query(
+          collectionFromSegments(db, buildUserSchoolCollectionPath(uid, school.id, "weeklyReports")),
+          orderBy("generatedAt", "desc"),
+          limit(8)
+        )
+      ).catch(() => ({ empty: true, docs: [] as any[] }));
+      const reportsSnap = canonicalReportsSnap.empty
+        ? await getDocs(query(collection(db, "users", uid, "weeklyReports"), orderBy("generatedAt", "desc"), limit(8))).catch(() => ({ docs: [] as any[] }))
+        : canonicalReportsSnap;
       setWeeklyReports(reportsSnap.docs.map((d) => d.data()) as WeeklyReport[]);
     } finally {
       setLoading(false);
@@ -374,7 +398,7 @@ export function LearningAnalyticsScreen(props: any) {
     }
   };
 
-  useEffect(() => { loadData(); }, [auth.user?.uid]);
+  useEffect(() => { loadData(); }, [auth.user?.uid, school.id]);
 
   // 計算準時繳交率
   const submissionStats = useMemo(() => {
