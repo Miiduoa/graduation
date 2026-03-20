@@ -136,7 +136,7 @@ export default ({ config }: any) => {
         appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
       },
       cloudFunctionRegion: process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? "asia-east1",
-      aiProvider: process.env.EXPO_PUBLIC_AI_PROVIDER ?? "mock",
+      aiProvider: process.env.EXPO_PUBLIC_AI_PROVIDER ?? "cloud",
       enableMockSSO: process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === "true",
       ...(isProduction
         ? {}
