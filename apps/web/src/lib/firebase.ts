@@ -319,17 +319,22 @@ export async function completeWebSSOCallback(params: {
   ticket?: string;
   samlResponse?: string;
 }): Promise<SSOCallbackResult> {
-  const query = new URLSearchParams({
+  const payload = {
     provider: params.provider,
     schoolId: params.schoolId,
     redirectUri: params.redirectUri,
+    ...(params.code ? { code: params.code } : {}),
+    ...(params.ticket ? { ticket: params.ticket } : {}),
+    ...(params.samlResponse ? { SAMLResponse: params.samlResponse } : {}),
+  };
+
+  const response = await fetch(`${getCloudFunctionUrl("verifySSOCallback")}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
   });
-
-  if (params.code) query.set("code", params.code);
-  if (params.ticket) query.set("ticket", params.ticket);
-  if (params.samlResponse) query.set("SAMLResponse", params.samlResponse);
-
-  const response = await fetch(`${getCloudFunctionUrl("verifySSOCallback")}?${query.toString()}`);
   const data = (await response.json()) as Record<string, unknown>;
 
   if (!response.ok || typeof data.customToken !== "string") {
@@ -1543,3 +1548,155 @@ export async function fetchUserCourses(
   }
 }
 
+export type CourseWorkspaceModule = {
+  id: string;
+  title?: string;
+  description?: string;
+  week?: number;
+  order?: number;
+  estimatedMinutes?: number;
+  published?: boolean;
+  resourceCount?: number;
+  resourceLabel?: string | null;
+  resourceUrl?: string | null;
+};
+
+export type CourseWorkspaceAssignment = {
+  id: string;
+  title: string;
+  description?: string;
+  dueAt?: string;
+  type?: string;
+  points?: number;
+  weight?: number;
+  gradesPublished?: boolean;
+  submissionCount?: number;
+};
+
+export type CourseWorkspaceQuiz = {
+  id: string;
+  assignmentId?: string;
+  title: string;
+  description?: string;
+  dueAt?: string;
+  type: "quiz" | "exam";
+  questionCount?: number;
+  durationMinutes?: number;
+  points?: number;
+  weight?: number;
+  gradesPublished?: boolean;
+};
+
+export type CourseWorkspaceAttendanceSession = {
+  id: string;
+  active: boolean;
+  attendeeCount: number;
+  startedAt?: string;
+  endedAt?: string;
+  attendanceMode?: string;
+  source: "attendance" | "live";
+};
+
+export type CourseWorkspacePost = {
+  id: string;
+  content: string;
+  authorName?: string;
+  createdAt: string;
+};
+
+export type CourseWorkspaceGradebookRow = {
+  id: string;
+  finalScore?: number;
+  published?: boolean;
+  result?: string;
+};
+
+export type CourseWorkspace = {
+  course: Group | null;
+  modules: CourseWorkspaceModule[];
+  assignments: CourseWorkspaceAssignment[];
+  quizzes: CourseWorkspaceQuiz[];
+  attendance: CourseWorkspaceAttendanceSession[];
+  gradebookRows: CourseWorkspaceGradebookRow[];
+  posts: CourseWorkspacePost[];
+};
+
+async function fetchSubcollection<T extends { id: string }>(
+  pathSegments: [string, ...string[]],
+  constraints: QueryConstraint[] = []
+): Promise<T[]> {
+  if (!isFirebaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const firestore = getDb();
+    const ref = collection(firestore, ...pathSegments);
+    const q = constraints.length > 0 ? query(ref, ...constraints) : query(ref);
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((docSnap) => parseDocument<T>({ id: docSnap.id, data: () => docSnap.data() }))
+      .filter((item): item is T => item !== null);
+  } catch (error) {
+    console.error("[Firebase] Failed to fetch subcollection:", pathSegments.join("/"), error);
+    return [];
+  }
+}
+
+export async function fetchCourseWorkspace(courseId: string): Promise<CourseWorkspace> {
+  if (!isFirebaseConfigured()) {
+    return {
+      course: null,
+      modules: [],
+      assignments: [],
+      quizzes: [],
+      attendance: [],
+      gradebookRows: [],
+      posts: [],
+    };
+  }
+
+  try {
+    const firestore = getDb();
+    const courseDoc = await getDoc(doc(firestore, "groups", courseId));
+    const course = courseDoc.exists()
+      ? parseDocument<Group>({ id: courseDoc.id, data: () => courseDoc.data() })
+      : null;
+
+    const [modules, assignments, quizzes, attendanceSessions, liveSessions, gradebookRows, posts] = await Promise.all([
+      fetchSubcollection<CourseWorkspaceModule>(["groups", courseId, "modules"]),
+      fetchSubcollection<CourseWorkspaceAssignment>(["groups", courseId, "assignments"]),
+      fetchSubcollection<CourseWorkspaceQuiz>(["groups", courseId, "quizzes"]),
+      fetchSubcollection<CourseWorkspaceAttendanceSession>(["groups", courseId, "attendanceSessions"]),
+      fetchSubcollection<CourseWorkspaceAttendanceSession>(["groups", courseId, "liveSessions"]),
+      fetchSubcollection<CourseWorkspaceGradebookRow>(["groups", courseId, "gradebook"]),
+      fetchSubcollection<CourseWorkspacePost>(["groups", courseId, "posts"], [orderBy("createdAt", "desc"), limit(5)]),
+    ]);
+
+    const normalizedAttendance =
+      attendanceSessions.length > 0
+        ? attendanceSessions.map((session) => ({ ...session, source: "attendance" as const }))
+        : liveSessions.map((session) => ({ ...session, source: "live" as const }));
+
+    return {
+      course,
+      modules: modules.sort((left, right) => (left.order ?? left.week ?? 999) - (right.order ?? right.week ?? 999)),
+      assignments: assignments.sort((left, right) => (left.dueAt ?? "").localeCompare(right.dueAt ?? "")),
+      quizzes: quizzes.sort((left, right) => (left.dueAt ?? "").localeCompare(right.dueAt ?? "")),
+      attendance: normalizedAttendance.sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? "")),
+      gradebookRows,
+      posts,
+    };
+  } catch (error) {
+    console.error("[Firebase] Failed to fetch course workspace:", error);
+    return {
+      course: null,
+      modules: [],
+      assignments: [],
+      quizzes: [],
+      attendance: [],
+      gradebookRows: [],
+      posts: [],
+    };
+  }
+}

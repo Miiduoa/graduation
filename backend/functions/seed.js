@@ -92,6 +92,7 @@ async function seedSchool() {
   await ssoConfigRef.set({
     schoolId: DEMO_SCHOOL_ID,
     schoolName: DEMO_SCHOOL_NAME,
+    setupStatus: "testing",
     ssoConfig: {
       provider: "oidc",
       name: "台科大單一登入",

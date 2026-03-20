@@ -1,12 +1,17 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useRef } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { School } from "@campus/shared/src";
 import { normalizeSchoolCode, resolveSchool } from "@campus/shared/src/schools";
 import { clearCacheExceptSchool } from "../data/cachedSource";
-import { applySchoolTheme, registerSchoolTheme, getCurrentTheme } from "../ui/theme";
+import { applySchoolTheme, registerSchoolTheme } from "../ui/theme";
 
 export type SchoolSelection = {
   code: string; // e.g. NCHU
   schoolId: string | null;
+  schoolName?: string | null;
+  shortName?: string | null;
+  themeColor?: string | null;
+  domains?: string[] | null;
 };
 
 export type SchoolContextValue = {
@@ -25,6 +30,10 @@ export function SchoolProvider(props: { children: React.ReactNode; initial?: Par
   const [selection, setSelectionState] = useState<SchoolSelection>({
     code: normalizeSchoolCode(props.initial?.code ?? "NCHU"),
     schoolId: props.initial?.schoolId ?? null,
+    schoolName: props.initial?.schoolName ?? null,
+    shortName: props.initial?.shortName ?? null,
+    themeColor: props.initial?.themeColor ?? null,
+    domains: props.initial?.domains ?? null,
   });
 
   // Load persisted selection once.
@@ -39,6 +48,10 @@ export function SchoolProvider(props: { children: React.ReactNode; initial?: Par
         setSelectionState((prev) => ({
           code: normalizeSchoolCode(parsed.code ?? prev.code),
           schoolId: parsed.schoolId ?? null,
+          schoolName: parsed.schoolName ?? null,
+          shortName: parsed.shortName ?? null,
+          themeColor: parsed.themeColor ?? null,
+          domains: parsed.domains ?? null,
         }));
       } catch {
         // ignore
@@ -55,9 +68,19 @@ export function SchoolProvider(props: { children: React.ReactNode; initial?: Par
 
   const setSelection = (next: Partial<SchoolSelection>) => {
     setSelectionState((prev) => {
+      const identityChanged = next.code !== undefined || next.schoolId !== undefined;
       const code = next.code != null ? normalizeSchoolCode(next.code) : prev.code;
       const schoolId = next.schoolId === undefined ? prev.schoolId : next.schoolId;
-      return { code, schoolId };
+      const schoolName =
+        next.schoolName === undefined ? (identityChanged ? null : prev.schoolName ?? null) : next.schoolName;
+      const shortName =
+        next.shortName === undefined ? (identityChanged ? null : prev.shortName ?? null) : next.shortName;
+      const themeColor =
+        next.themeColor === undefined ? (identityChanged ? null : prev.themeColor ?? null) : next.themeColor;
+      const domains =
+        next.domains === undefined ? (identityChanged ? null : prev.domains ?? null) : next.domains;
+
+      return { code, schoolId, schoolName, shortName, themeColor, domains };
     });
   };
 
@@ -79,8 +102,30 @@ export function SchoolProvider(props: { children: React.ReactNode; initial?: Par
   }, [loaded, selection]);
 
   const school = useMemo(() => {
-    return resolveSchool({ school: selection.code, schoolId: selection.schoolId ?? undefined });
-  }, [selection.code, selection.schoolId]);
+    const resolved = resolveSchool({ school: selection.code, schoolId: selection.schoolId ?? undefined });
+
+    if (selection.schoolId && resolved.id !== selection.schoolId) {
+      const fallbackSchool: School = {
+        id: selection.schoolId,
+        code: selection.code || normalizeSchoolCode(selection.schoolId),
+        name: selection.schoolName ?? selection.shortName ?? selection.schoolId,
+        shortName: selection.shortName ?? undefined,
+        themeColor: selection.themeColor ?? undefined,
+        domains: selection.domains ?? undefined,
+      };
+
+      return fallbackSchool;
+    }
+
+    return resolved;
+  }, [
+    selection.code,
+    selection.schoolId,
+    selection.schoolName,
+    selection.shortName,
+    selection.themeColor,
+    selection.domains,
+  ]);
 
   // 當學校變更時，自動應用學校主題
   useEffect(() => {

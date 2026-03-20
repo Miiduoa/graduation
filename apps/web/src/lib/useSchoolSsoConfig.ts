@@ -1,7 +1,48 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getSchoolSsoAvailability, type SchoolSsoAvailability } from "@campus/shared/src/auth";
 import { fetchSchoolSSOConfig, type SchoolSSOConfig } from "./firebase";
+
+export type SchoolSsoState = {
+  config: SchoolSSOConfig | null;
+  ssoConfig: SchoolSSOConfig["ssoConfig"];
+  allowEmailLogin: boolean;
+  availability: SchoolSsoAvailability;
+  ssoReady: boolean;
+  loading: boolean;
+};
+
+export function getSchoolSsoFallbackConfig(
+  schoolId: string,
+  fallbackToNull: boolean = false
+): SchoolSSOConfig | null {
+  if (fallbackToNull) {
+    return null;
+  }
+
+  return {
+    schoolId,
+    allowEmailLogin: true,
+    ssoConfig: null,
+  };
+}
+
+export function toSchoolSsoState(
+  config: SchoolSSOConfig | null,
+  loading: boolean
+): SchoolSsoState {
+  const availability = getSchoolSsoAvailability(config);
+
+  return {
+    config,
+    ssoConfig: config?.ssoConfig ?? null,
+    allowEmailLogin: config?.allowEmailLogin ?? true,
+    availability,
+    ssoReady: availability.isLoginReady,
+    loading,
+  };
+}
 
 export function useSchoolSsoConfig(schoolId: string, fallbackToNull: boolean = false) {
   const [config, setConfig] = useState<SchoolSSOConfig | null>(null);
@@ -20,15 +61,7 @@ export function useSchoolSsoConfig(schoolId: string, fallbackToNull: boolean = f
       } catch (error) {
         console.error("Failed to load school SSO config:", error);
         if (active) {
-          setConfig(
-            fallbackToNull
-              ? null
-              : {
-                  schoolId,
-                  allowEmailLogin: true,
-                  ssoConfig: null,
-                }
-          );
+          setConfig(getSchoolSsoFallbackConfig(schoolId, fallbackToNull));
         }
       } finally {
         if (active) {
@@ -44,10 +77,5 @@ export function useSchoolSsoConfig(schoolId: string, fallbackToNull: boolean = f
     };
   }, [fallbackToNull, schoolId]);
 
-  return {
-    config,
-    ssoConfig: config?.ssoConfig ?? null,
-    allowEmailLogin: config?.allowEmailLogin ?? true,
-    loading,
-  };
+  return toSchoolSsoState(config, loading);
 }

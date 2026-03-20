@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { ScrollView, Text, View, Pressable, Animated, Easing, RefreshControl } from "react-native";
+import { ScrollView, Text, View, Pressable, Animated, Easing, RefreshControl, Share, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Screen, Card, Pill, Button, AnimatedCard, ProgressRing, Divider } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
@@ -71,6 +72,43 @@ const ACHIEVEMENT_DEFINITIONS: Omit<Achievement, "progress" | "unlocked" | "unlo
   { id: "streak_30", title: "鐵粉認證", description: "連續 30 天登入", icon: "medal", category: "engagement", points: 300, requirement: 30, rarity: "legendary" },
 ];
 
+const STREAK_KEY = "campus.streak.v1";
+
+type StreakData = {
+  currentStreak: number;
+  longestStreak: number;
+  lastLoginDate: string; // ISO date string YYYY-MM-DD
+  totalDays: number;
+};
+
+async function updateStreak(): Promise<StreakData> {
+  try {
+    const raw = await AsyncStorage.getItem(STREAK_KEY);
+    const existing: StreakData = raw ? JSON.parse(raw) : {
+      currentStreak: 0, longestStreak: 0,
+      lastLoginDate: "", totalDays: 0,
+    };
+
+    const today = new Date().toISOString().split("T")[0];
+    if (existing.lastLoginDate === today) return existing;
+
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+    const isConsecutive = existing.lastLoginDate === yesterday;
+
+    const newStreak = isConsecutive ? existing.currentStreak + 1 : 1;
+    const updated: StreakData = {
+      currentStreak: newStreak,
+      longestStreak: Math.max(existing.longestStreak, newStreak),
+      lastLoginDate: today,
+      totalDays: existing.totalDays + 1,
+    };
+    await AsyncStorage.setItem(STREAK_KEY, JSON.stringify(updated));
+    return updated;
+  } catch {
+    return { currentStreak: 1, longestStreak: 1, lastLoginDate: "", totalDays: 1 };
+  }
+}
+
 const CATEGORY_INFO = {
   explorer: { label: "探索", color: "#3B82F6", icon: "compass" },
   social: { label: "社交", color: "#10B981", icon: "people" },
@@ -78,6 +116,111 @@ const CATEGORY_INFO = {
   engagement: { label: "互動", color: "#8B5CF6", icon: "heart" },
   special: { label: "特殊", color: "#EF4444", icon: "star" },
 };
+
+/**
+ * StreakCard — Habit Loop 視覺化
+ * Streak 系統依據行為心理學：提供一致性的正向強化，利用 Loss Aversion（不想中斷 streak）維持習慣
+ */
+function StreakCard({ streak, onShare }: { streak: StreakData; onShare: () => void }) {
+  const flameAnim = useRef(new Animated.Value(1)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 7 }),
+      Animated.timing(opacityAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+    ]).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(flameAnim, { toValue: 1.12, duration: 800, useNativeDriver: true }),
+        Animated.timing(flameAnim, { toValue: 0.95, duration: 800, useNativeDriver: true }),
+      ])
+    ).start();
+  }, []);
+
+  const streakColor = streak.currentStreak >= 30
+    ? theme.colors.achievement
+    : streak.currentStreak >= 7
+      ? theme.colors.streak
+      : theme.colors.accent;
+
+  const streakMilestones = [1, 3, 7, 14, 30, 60, 100];
+  const nextMilestone = streakMilestones.find((m) => m > streak.currentStreak) ?? 100;
+  const prevMilestone = streakMilestones.filter((m) => m <= streak.currentStreak).pop() ?? 0;
+  const milestoneProgress = (streak.currentStreak - prevMilestone) / (nextMilestone - prevMilestone);
+
+  return (
+    <Animated.View style={{ opacity: opacityAnim, transform: [{ scale: scaleAnim }], marginBottom: 12 }}>
+      <View style={{
+        padding: 20, borderRadius: 24,
+        backgroundColor: `${streakColor}10`,
+        borderWidth: 1.5, borderColor: `${streakColor}25`,
+      }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
+          {/* 火焰動畫 */}
+          <Animated.View style={{
+            width: 72, height: 72, borderRadius: 22,
+            backgroundColor: `${streakColor}20`,
+            alignItems: "center", justifyContent: "center",
+            transform: [{ scale: flameAnim }],
+          }}>
+            <Text style={{ fontSize: 36 }}>
+              {streak.currentStreak >= 30 ? "🔥" : streak.currentStreak >= 7 ? "⚡" : "✨"}
+            </Text>
+          </Animated.View>
+
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.3 }}>
+              連續使用天數
+            </Text>
+            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4, marginTop: 2 }}>
+              <Text style={{ color: streakColor, fontWeight: "900", fontSize: 40, letterSpacing: -1 }}>
+                {streak.currentStreak}
+              </Text>
+              <Text style={{ color: streakColor, fontWeight: "700", fontSize: 16 }}>天</Text>
+            </View>
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+              最長紀錄 {streak.longestStreak} 天 · 共 {streak.totalDays} 天
+            </Text>
+          </View>
+
+          <Pressable
+            onPress={onShare}
+            style={({ pressed }) => ({
+              padding: 10, borderRadius: 12,
+              backgroundColor: `${streakColor}18`,
+              opacity: pressed ? 0.7 : 1,
+            })}
+          >
+            <Ionicons name="share-outline" size={20} color={streakColor} />
+          </Pressable>
+        </View>
+
+        {/* 到下一個里程碑的進度 */}
+        <View style={{ marginTop: 16 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600" }}>
+              距離 {nextMilestone} 天里程碑
+            </Text>
+            <Text style={{ color: streakColor, fontSize: 11, fontWeight: "700" }}>
+              還差 {nextMilestone - streak.currentStreak} 天
+            </Text>
+          </View>
+          <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.border, overflow: "hidden" }}>
+            <View style={{
+              height: "100%",
+              width: `${milestoneProgress * 100}%`,
+              backgroundColor: streakColor,
+              borderRadius: 3,
+            }} />
+          </View>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
 
 const RARITY_INFO = {
   common: { label: "普通", color: "#94A3B8", bgColor: "rgba(148,163,184,0.15)" },
@@ -104,13 +247,14 @@ function calculateLevel(points: number): { level: number; currentXP: number; nex
   };
 }
 
-function AchievementCard(props: { achievement: Achievement; onPress?: () => void }) {
+function AchievementCard(props: { achievement: Achievement; onPress?: () => void; onShare?: () => void }) {
   const { achievement } = props;
   const rarityInfo = RARITY_INFO[achievement.rarity];
   const categoryInfo = CATEGORY_INFO[achievement.category];
 
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
+  const unlockAnim = useRef(new Animated.Value(achievement.unlocked ? 1 : 0)).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -119,6 +263,16 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
     ]).start();
   }, []);
 
+  // 解鎖動畫（當狀態從未解鎖→解鎖時觸發）
+  useEffect(() => {
+    if (achievement.unlocked) {
+      Animated.sequence([
+        Animated.spring(unlockAnim, { toValue: 1.2, useNativeDriver: true, friction: 5 }),
+        Animated.spring(unlockAnim, { toValue: 1, useNativeDriver: true, friction: 7 }),
+      ]).start();
+    }
+  }, [achievement.unlocked]);
+
   const progress = Math.min(1, achievement.progress / achievement.requirement);
 
   return (
@@ -126,33 +280,30 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
       <Pressable
         onPress={props.onPress}
         style={{
-          padding: 16,
+          padding: 18,
           borderRadius: theme.radius.lg,
           backgroundColor: achievement.unlocked ? rarityInfo.bgColor : theme.colors.surface2,
-          borderWidth: 1,
+          borderWidth: achievement.unlocked ? 1.5 : 1,
           borderColor: achievement.unlocked ? rarityInfo.color : theme.colors.border,
-          opacity: achievement.unlocked ? 1 : 0.7,
+          opacity: achievement.unlocked ? 1 : 0.65,
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-          <View
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 28,
-              backgroundColor: achievement.unlocked ? `${categoryInfo.color}30` : theme.colors.surface2,
-              alignItems: "center",
-              justifyContent: "center",
+          <Animated.View style={{ transform: [{ scale: unlockAnim }] }}>
+            <View style={{
+              width: 56, height: 56, borderRadius: 28,
+              backgroundColor: achievement.unlocked ? `${categoryInfo.color}25` : theme.colors.surface2,
+              alignItems: "center", justifyContent: "center",
               borderWidth: 2,
               borderColor: achievement.unlocked ? categoryInfo.color : theme.colors.border,
-            }}
-          >
-            <Ionicons
-              name={achievement.icon as any}
-              size={28}
-              color={achievement.unlocked ? categoryInfo.color : theme.colors.muted}
-            />
-          </View>
+            }}>
+              <Ionicons
+                name={achievement.icon as any}
+                size={28}
+                color={achievement.unlocked ? categoryInfo.color : theme.colors.muted}
+              />
+            </View>
+          </Animated.View>
 
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -160,7 +311,7 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
                 {achievement.title}
               </Text>
               {achievement.unlocked && (
-                <Ionicons name="checkmark-circle" size={18} color={theme.colors.success} />
+                <Ionicons name="checkmark-circle" size={18} color={theme.colors.growth} />
               )}
             </View>
             <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 2 }}>
@@ -170,50 +321,38 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
             {!achievement.unlocked && (
               <View style={{ marginTop: 8 }}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                  {/* 正向框架：「已達成 X/Y」而非「未完成 Y-X」 */}
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-                    {achievement.progress}/{achievement.requirement}
+                    已達成 {achievement.progress}/{achievement.requirement}
                   </Text>
-                  <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-                    {Math.round(progress * 100)}%
+                  <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "600" }}>
+                    再努力 {achievement.requirement - achievement.progress} 步！
                   </Text>
                 </View>
-                <View
-                  style={{
-                    height: 6,
+                <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.border, overflow: "hidden" }}>
+                  <View style={{
+                    height: "100%",
+                    width: `${progress * 100}%`,
+                    backgroundColor: categoryInfo.color,
                     borderRadius: 3,
-                    backgroundColor: theme.colors.border,
-                    overflow: "hidden",
-                  }}
-                >
-                  <View
-                    style={{
-                      height: "100%",
-                      width: `${progress * 100}%`,
-                      backgroundColor: categoryInfo.color,
-                      borderRadius: 3,
-                    }}
-                  />
+                  }} />
                 </View>
               </View>
             )}
           </View>
 
-          <View style={{ alignItems: "flex-end" }}>
-            <View
-              style={{
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: 999,
-                backgroundColor: rarityInfo.bgColor,
-              }}
-            >
-              <Text style={{ color: rarityInfo.color, fontSize: 10, fontWeight: "700" }}>
-                {rarityInfo.label}
-              </Text>
+          <View style={{ alignItems: "flex-end", gap: 6 }}>
+            <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: rarityInfo.bgColor }}>
+              <Text style={{ color: rarityInfo.color, fontSize: 10, fontWeight: "700" }}>{rarityInfo.label}</Text>
             </View>
-            <Text style={{ color: theme.colors.accent, fontWeight: "700", marginTop: 6 }}>
+            <Text style={{ color: theme.colors.achievement, fontWeight: "800", fontSize: 13 }}>
               +{achievement.points}
             </Text>
+            {achievement.unlocked && props.onShare && (
+              <Pressable onPress={props.onShare} hitSlop={8}>
+                <Ionicons name="share-social-outline" size={16} color={theme.colors.muted} />
+              </Pressable>
+            )}
           </View>
         </View>
       </Pressable>
@@ -265,6 +404,12 @@ export function AchievementsScreen(props: any) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [streakData, setStreakData] = useState<StreakData>({ currentStreak: 0, longestStreak: 0, lastLoginDate: "", totalDays: 0 });
+  const [showStreakShare, setShowStreakShare] = useState(false);
+
+  useEffect(() => {
+    updateStreak().then(setStreakData);
+  }, []);
 
   const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id, refreshKey]);
 
@@ -430,6 +575,28 @@ export function AchievementsScreen(props: any) {
     return fallback.sort((a, b) => b.points - a.points).map((e, i) => ({ ...e, rank: i + 1 }));
   }, [leaderboard, auth.user, auth.profile, totalPoints, levelInfo.level]);
 
+  const handleShareStreak = useCallback(async () => {
+    try {
+      await Share.share({
+        message: `我已連續使用校園助手 ${streakData.currentStreak} 天！🔥\n最高紀錄 ${streakData.longestStreak} 天，一起來挑戰吧！`,
+        title: "我的學習 Streak",
+      });
+    } catch {
+      // ignore
+    }
+  }, [streakData]);
+
+  const handleShareAchievement = useCallback(async (achievement: Achievement) => {
+    try {
+      await Share.share({
+        message: `我在校園助手解鎖了「${achievement.title}」成就！🏆\n${achievement.description}\n+${achievement.points} 積分`,
+        title: "成就解鎖",
+      });
+    } catch {
+      // ignore
+    }
+  }, []);
+
   return (
     <Screen>
       <ScrollView
@@ -437,6 +604,9 @@ export function AchievementsScreen(props: any) {
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.accent} />}
       >
+        {/* ─── Streak 連續使用卡片 ─── */}
+        <StreakCard streak={streakData} onShare={handleShareStreak} />
+
         <AnimatedCard title="" subtitle="">
           <View style={{ alignItems: "center", padding: 8 }}>
             <View style={{ position: "relative", width: 100, height: 100 }}>
@@ -610,8 +780,12 @@ export function AchievementsScreen(props: any) {
         </AnimatedCard>
 
         <View style={{ gap: 12 }}>
-          {filteredAchievements.map((achievement, index) => (
-            <AchievementCard key={achievement.id} achievement={achievement} />
+          {filteredAchievements.map((achievement) => (
+            <AchievementCard
+              key={achievement.id}
+              achievement={achievement}
+              onShare={achievement.unlocked ? () => handleShareAchievement(achievement) : undefined}
+            />
           ))}
         </View>
       </ScrollView>

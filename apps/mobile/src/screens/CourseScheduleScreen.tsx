@@ -253,7 +253,7 @@ export function CourseScheduleScreen(props: any) {
 
     if (matchedPoi) {
       if (rootNavigation?.navigate) {
-        rootNavigation.navigate("地圖", { screen: "PoiDetail", params: { id: matchedPoi.id } });
+        rootNavigation.navigate("校園", { screen: "PoiDetail", params: { id: matchedPoi.id } });
       } else {
         nav?.navigate?.("PoiDetail", { id: matchedPoi.id });
       }
@@ -274,7 +274,7 @@ export function CourseScheduleScreen(props: any) {
           text: "開啟地圖",
           onPress: () => {
             if (rootNavigation?.navigate) {
-              rootNavigation.navigate("地圖", { screen: "Map" });
+              rootNavigation.navigate("校園", { screen: "Map" });
             }
             analytics.logEvent("course_location_navigation", {
               location,

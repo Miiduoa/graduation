@@ -84,10 +84,36 @@ function mapUserCourse(c: UserCourse, idx: number): CourseSlot {
 
 const SEMESTERS = generateSemesters();
 
+const PERIOD_ROW_HEIGHT = 64;
+
+function getNowLineTopPx(now: Date): number | null {
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  for (let i = 0; i < PERIODS.length; i++) {
+    const [sh, sm] = PERIODS[i].start.split(":").map(Number);
+    const [eh, em] = PERIODS[i].end.split(":").map(Number);
+    const startMin = sh * 60 + sm;
+    const endMin = eh * 60 + em;
+
+    if (nowMin >= startMin && nowMin <= endMin) {
+      const fraction = (nowMin - startMin) / (endMin - startMin);
+      return i * PERIOD_ROW_HEIGHT + fraction * PERIOD_ROW_HEIGHT;
+    }
+
+    if (i < PERIODS.length - 1) {
+      const [nsh, nsm] = PERIODS[i + 1].start.split(":").map(Number);
+      const nextStartMin = nsh * 60 + nsm;
+      if (nowMin > endMin && nowMin < nextStartMin) {
+        return (i + 0.97) * PERIOD_ROW_HEIGHT;
+      }
+    }
+  }
+  return null;
+}
+
 export default function TimetablePage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName } = resolveSchoolPageContext(props.searchParams);
   const [viewMode, setViewMode] = useState<ViewMode>("week");
   const [selectedDay, setSelectedDay] = useState<number>(
     Math.min(Math.max((new Date().getDay() || 5), 1), 5)
@@ -97,6 +123,14 @@ export default function TimetablePage(props: {
   const [courses, setCourses] = useState<CourseSlot[]>(MOCK_COURSES);
   const [usingDemo, setUsingDemo] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+
+  // 每分鐘更新當前時間以重繪時間軸
+  useEffect(() => {
+    const tick = () => setNow(new Date());
+    const id = setInterval(tick, 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   // 監聽 Firebase Auth
   useEffect(() => {
@@ -333,79 +367,138 @@ export default function TimetablePage(props: {
               })}
             </div>
 
-            {/* Period rows */}
-            {PERIODS.map((p) => (
-              <div
-                key={p.period}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "56px repeat(5, 1fr)",
-                  minHeight: 64,
-                  borderBottom: "1px solid var(--border)",
-                }}
-              >
-                {/* Period label */}
-                <div
-                  style={{
-                    padding: "8px 4px",
-                    textAlign: "center",
-                    borderRight: "1px solid var(--border)",
-                    background: "var(--panel)",
-                  }}
-                >
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
-                    {p.period}
-                  </div>
-                  <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 2 }}>
-                    {p.start}
-                  </div>
-                </div>
+            {/* Period rows with now-line overlay */}
+            {(() => {
+              const nowDow = now.getDay() === 0 ? 7 : now.getDay();
+              const isThisWeek = nowDow >= 1 && nowDow <= 5;
+              const nowTopPx = isThisWeek ? getNowLineTopPx(now) : null;
+              const nowTimeStr = now.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
 
-                {/* Day cells */}
-                {DAYS.map((_, di) => {
-                  const dow = di + 1;
-                  const course = courses.find(
-                    (c) => c.dayOfWeek === dow && c.startPeriod === p.period
-                  );
-                  return (
+              return (
+                <div style={{ position: "relative" }}>
+                  {PERIODS.map((p) => (
                     <div
-                      key={di}
+                      key={p.period}
                       style={{
-                        borderLeft: "1px solid var(--border)",
-                        padding: "4px",
-                        position: "relative",
+                        display: "grid",
+                        gridTemplateColumns: "56px repeat(5, 1fr)",
+                        minHeight: PERIOD_ROW_HEIGHT,
+                        borderBottom: "1px solid var(--border)",
                       }}
                     >
-                      {course && (
-                        <div
-                          style={{
-                            background: `${course.color}12`,
-                            borderLeft: `3px solid ${course.color}`,
-                            borderRadius: "var(--radius-xs)",
-                            padding: "6px 8px",
-                            height: "100%",
-                          }}
-                        >
+                      {/* Period label */}
+                      <div
+                        style={{
+                          padding: "8px 4px",
+                          textAlign: "center",
+                          borderRight: "1px solid var(--border)",
+                          background: "var(--panel)",
+                        }}
+                      >
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--muted)" }}>
+                          {p.period}
+                        </div>
+                        <div style={{ fontSize: 10, color: "var(--muted-light)", marginTop: 2 }}>
+                          {p.start}
+                        </div>
+                      </div>
+
+                      {/* Day cells */}
+                      {DAYS.map((_, di) => {
+                        const dow = di + 1;
+                        const course = courses.find(
+                          (c) => c.dayOfWeek === dow && c.startPeriod === p.period
+                        );
+                        const isNowCol = dow === nowDow;
+                        return (
                           <div
+                            key={di}
                             style={{
-                              fontSize: 11,
-                              fontWeight: 700,
-                              color: course.color,
-                              lineHeight: 1.3,
+                              borderLeft: "1px solid var(--border)",
+                              padding: "4px",
+                              position: "relative",
+                              background: isNowCol && isThisWeek ? "rgba(94,106,210,0.03)" : undefined,
                             }}
                           >
-                            {course.name}
+                            {course && (
+                              <div
+                                style={{
+                                  background: `${course.color}12`,
+                                  borderLeft: `3px solid ${course.color}`,
+                                  borderRadius: "var(--radius-xs)",
+                                  padding: "6px 8px",
+                                  height: "100%",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    color: course.color,
+                                    lineHeight: 1.3,
+                                  }}
+                                >
+                                  {course.name}
+                                </div>
+                                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                                  {course.room}
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                            {course.room}
-                          </div>
-                        </div>
-                      )}
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-            ))}
+                  ))}
+
+                  {/* Current time red line */}
+                  {nowTopPx !== null && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        top: nowTopPx,
+                        height: 2,
+                        background: "var(--danger, #FF3B30)",
+                        zIndex: 10,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      {/* Circle dot at start */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: 48,
+                          top: -4,
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          background: "var(--danger, #FF3B30)",
+                        }}
+                      />
+                      {/* Time label */}
+                      <div
+                        style={{
+                          position: "absolute",
+                          left: 2,
+                          top: -9,
+                          fontSize: 9,
+                          fontWeight: 800,
+                          color: "var(--danger, #FF3B30)",
+                          letterSpacing: "0.02em",
+                          lineHeight: 1,
+                          background: "var(--bg)",
+                          paddingRight: 2,
+                        }}
+                      >
+                        {nowTimeStr}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 

@@ -4,6 +4,15 @@ export type AuthRole = "student" | "teacher" | "admin" | "staff";
 
 export type SchoolMemberRole = "member" | "editor" | "admin";
 
+export type SSOSetupStatus = "draft" | "testing" | "live";
+
+export type SchoolSsoAvailabilityReason =
+  | "not-configured"
+  | "disabled"
+  | "not-live"
+  | "incomplete"
+  | "ready";
+
 export type SchoolSSOProviderConfig = {
   provider: SSOProvider;
   name?: string;
@@ -36,7 +45,21 @@ export type SchoolSSOConfig = {
   schoolName?: string;
   emailDomain?: string;
   allowEmailLogin: boolean;
+  setupStatus?: SSOSetupStatus;
   ssoConfig: SchoolSSOProviderConfig | null;
+};
+
+export type SchoolSsoAvailability = {
+  provider: SSOProvider | null;
+  setupStatus: SSOSetupStatus;
+  reason: SchoolSsoAvailabilityReason;
+  message: string;
+  missingFields: string[];
+  isConfigured: boolean;
+  isEnabled: boolean;
+  isComplete: boolean;
+  isLoginReady: boolean;
+  isProductionReady: boolean;
 };
 
 export type SSOUserInfo = {
@@ -62,12 +85,7 @@ export type SSOCallbackResult = {
   customToken: string;
   uid: string;
   isNewUser: boolean;
-  userInfo?: {
-    email?: string;
-    name?: string;
-    studentId?: string;
-    department?: string;
-  };
+  userInfo?: Partial<SSOUserInfo>;
 };
 
 function asString(value: unknown): string | undefined {
@@ -90,6 +108,17 @@ function asStringRecord(value: unknown): Record<string, string> | undefined {
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+function normalizeSetupStatus(
+  value: unknown,
+  hasSsoConfig: boolean
+): SSOSetupStatus {
+  if (value === "draft" || value === "testing" || value === "live") {
+    return value;
+  }
+
+  return hasSsoConfig ? "testing" : "draft";
+}
+
 export function normalizeSchoolSSOConfig(
   value: unknown,
   fallback: Partial<Pick<SchoolSSOConfig, "schoolId" | "schoolName" | "emailDomain">> = {}
@@ -105,6 +134,7 @@ export function normalizeSchoolSSOConfig(
     schoolName: asString(input.schoolName) ?? fallback.schoolName,
     emailDomain: asString(input.emailDomain) ?? fallback.emailDomain,
     allowEmailLogin: input.allowEmailLogin !== false,
+    setupStatus: normalizeSetupStatus(input.setupStatus, Boolean(rawConfig)),
     ssoConfig: rawConfig
       ? {
           provider: ((asString(rawConfig.provider) as SSOProvider | undefined) ?? "oidc"),
@@ -135,6 +165,170 @@ export function normalizeSchoolSSOConfig(
         }
       : null,
   };
+}
+
+type RequiredSchoolSsoField = keyof Pick<
+  SchoolSSOProviderConfig,
+  | "clientId"
+  | "clientSecret"
+  | "authorizationEndpoint"
+  | "tokenEndpoint"
+  | "casServerUrl"
+  | "samlEntryPoint"
+  | "spEntityId"
+  | "spPrivateKey"
+  | "spCertificate"
+  | "assertConsumerUrl"
+  | "idpCertificate"
+>;
+
+const REQUIRED_PROVIDER_FIELDS: Record<SSOProvider, RequiredSchoolSsoField[]> = {
+  oidc: ["clientId", "clientSecret", "authorizationEndpoint", "tokenEndpoint"],
+  cas: ["casServerUrl"],
+  saml: [
+    "samlEntryPoint",
+    "spEntityId",
+    "spPrivateKey",
+    "spCertificate",
+    "assertConsumerUrl",
+    "idpCertificate",
+  ],
+};
+
+function hasConfigValue(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return Boolean(value);
+}
+
+export function getRequiredSchoolSsoFields(
+  provider?: SSOProvider | null
+): RequiredSchoolSsoField[] {
+  if (!provider) return [];
+  return [...REQUIRED_PROVIDER_FIELDS[provider]];
+}
+
+export function getMissingSchoolSsoFields(
+  config?: SchoolSSOProviderConfig | null
+): string[] {
+  if (!config) return [];
+
+  const requiredFields = getRequiredSchoolSsoFields(config.provider);
+  return requiredFields.filter((field) => !hasConfigValue(config[field]));
+}
+
+export function getSchoolSsoAvailability(
+  config?: SchoolSSOConfig | null
+): SchoolSsoAvailability {
+  const ssoConfig = config?.ssoConfig ?? null;
+  const provider = ssoConfig?.provider ?? null;
+  const setupStatus = normalizeSetupStatus(config?.setupStatus, Boolean(ssoConfig));
+  const missingFields = getMissingSchoolSsoFields(ssoConfig);
+  const isConfigured = Boolean(ssoConfig);
+  const isEnabled = Boolean(ssoConfig?.enabled);
+  const isComplete = isConfigured && missingFields.length === 0;
+  const isLoginReady = isComplete && isEnabled && setupStatus !== "draft";
+  const isProductionReady = isComplete && isEnabled && setupStatus === "live";
+
+  if (!ssoConfig) {
+    return {
+      provider,
+      setupStatus,
+      reason: "not-configured",
+      message: "此學校尚未設定學校登入",
+      missingFields,
+      isConfigured,
+      isEnabled,
+      isComplete,
+      isLoginReady,
+      isProductionReady,
+    };
+  }
+
+  if (!ssoConfig.enabled) {
+    return {
+      provider,
+      setupStatus,
+      reason: "disabled",
+      message: "此學校的學校登入已停用",
+      missingFields,
+      isConfigured,
+      isEnabled,
+      isComplete,
+      isLoginReady,
+      isProductionReady,
+    };
+  }
+
+  if (!isComplete) {
+    return {
+      provider,
+      setupStatus,
+      reason: "incomplete",
+      message: "此學校的學校登入設定尚未完成",
+      missingFields,
+      isConfigured,
+      isEnabled,
+      isComplete,
+      isLoginReady,
+      isProductionReady,
+    };
+  }
+
+  if (setupStatus === "draft") {
+    return {
+      provider,
+      setupStatus,
+      reason: "not-live",
+      message: "此學校的學校登入尚未正式開通",
+      missingFields,
+      isConfigured,
+      isEnabled,
+      isComplete,
+      isLoginReady,
+      isProductionReady,
+    };
+  }
+
+  if (setupStatus === "testing") {
+    return {
+      provider,
+      setupStatus,
+      reason: "not-live",
+      message: "此學校的學校登入仍在測試中",
+      missingFields,
+      isConfigured,
+      isEnabled,
+      isComplete,
+      isLoginReady,
+      isProductionReady,
+    };
+  }
+
+  return {
+    provider,
+    setupStatus,
+    reason: "ready",
+    message: "此學校已開通學校登入",
+    missingFields,
+    isConfigured,
+    isEnabled,
+    isComplete,
+    isLoginReady,
+    isProductionReady,
+  };
+}
+
+export function isSchoolSsoLoginReady(
+  config?: SchoolSSOConfig | null
+): boolean {
+  return getSchoolSsoAvailability(config).isLoginReady;
+}
+
+export function isProductionSSOReady(
+  config?: SchoolSSOConfig | null
+): boolean {
+  return getSchoolSsoAvailability(config).isProductionReady;
 }
 
 export function normalizeSSOUserInfo(value: unknown): SSOUserInfo | null {

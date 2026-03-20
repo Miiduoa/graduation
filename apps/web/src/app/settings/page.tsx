@@ -94,7 +94,7 @@ function SettingRow({
 export default function SettingsPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName } = resolveSchoolPageContext(props.searchParams);
   const [activeSection, setActiveSection] = useState<Section>("general");
 
   // Settings state

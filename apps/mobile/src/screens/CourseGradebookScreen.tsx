@@ -159,7 +159,7 @@ export function CourseGradebookScreen(props: any) {
                 text="前往作業與期末發布"
                 kind="primary"
                 onPress={() =>
-                  nav?.navigate?.("訊息", {
+                  nav?.navigate?.("收件匣", {
                     screen: "GroupAssignments",
                     params: { groupId: routeGroupId },
                   })

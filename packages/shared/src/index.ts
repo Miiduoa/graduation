@@ -47,8 +47,10 @@ export type School = {
   id: string; // internal id
   code: string; // user-facing join code
   name: string;
+  shortName?: string;
   themeColor?: string;
   domains?: string[]; // email domains for auto-binding
+  aliases?: string[];
 };
 
 export * from "./auth";

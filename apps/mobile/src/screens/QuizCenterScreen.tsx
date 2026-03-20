@@ -299,7 +299,7 @@ export function QuizCenterScreen(props: any) {
                 <Pressable
                   key={`${item.groupId}-${item.id}`}
                   onPress={() =>
-                    nav?.navigate?.("訊息", {
+                    nav?.navigate?.("收件匣", {
                       screen: "AssignmentDetail",
                       params: { groupId: item.groupId, assignmentId: item.assignmentId },
                     })

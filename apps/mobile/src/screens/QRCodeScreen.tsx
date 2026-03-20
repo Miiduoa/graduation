@@ -294,7 +294,7 @@ export function QRCodeScreen(props: any) {
                 onPress: () => {
                   analytics.logEvent("qr_action", { action: "join_group" });
                   Alert.alert("成功", "已成功加入群組！");
-                  nav?.navigate?.("訊息");
+                  nav?.navigate?.("收件匣");
                 },
               },
             ]
@@ -312,7 +312,7 @@ export function QRCodeScreen(props: any) {
               text: "發送訊息", 
               onPress: () => {
                 analytics.logEvent("qr_action", { action: "send_message", target_user: userId });
-                nav?.navigate?.("訊息", { screen: "Chat", params: { peerId: userId } });
+                nav?.navigate?.("收件匣", { screen: "Chat", params: { peerId: userId } });
               }
             },
           ]);

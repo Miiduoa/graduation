@@ -217,25 +217,25 @@ export function GlobalSearchScreen(props: any) {
 
     switch (result.type) {
       case "announcement":
-        nav?.navigate?.("首頁", { screen: "公告詳情", params: { id: result.id } });
+        nav?.navigate?.("Today", { screen: "公告詳情", params: { id: result.id } });
         break;
       case "event":
-        nav?.navigate?.("首頁", { screen: "活動詳情", params: { id: result.id } });
+        nav?.navigate?.("Today", { screen: "活動詳情", params: { id: result.id } });
         break;
       case "poi":
-        nav?.navigate?.("地圖", { screen: "PoiDetail", params: { id: result.id } });
+        nav?.navigate?.("校園", { screen: "PoiDetail", params: { id: result.id } });
         break;
       case "menu":
-        nav?.navigate?.("首頁", { screen: "MenuDetail", params: { id: result.id } });
+        nav?.navigate?.("校園", { screen: "MenuDetail", params: { id: result.id } });
         break;
       case "post":
         if (result.groupId) {
-          nav?.navigate?.("訊息", { screen: "GroupDetail", params: { groupId: result.groupId } });
+          nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: result.groupId } });
         }
         break;
       case "assignment":
         if (result.groupId) {
-          nav?.navigate?.("訊息", { screen: "GroupAssignments", params: { groupId: result.groupId } });
+          nav?.navigate?.("收件匣", { screen: "GroupAssignments", params: { groupId: result.groupId } });
         }
         break;
     }

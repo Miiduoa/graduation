@@ -96,7 +96,7 @@ const SEMESTERS = generateSemesters();
 export default function GradesPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName } = resolveSchoolPageContext(props.searchParams);
   const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
   const [sortBy, setSortBy] = useState<"name" | "score" | "gpa">("score");
   const [user, setUser] = useState<User | null>(null);

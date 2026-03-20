@@ -370,7 +370,7 @@ export function CourseModulesScreen(props: any) {
                   subtitle="沿用現有課程群組的公告、貼文與 Q&A"
                   icon="newspaper-outline"
                   tint={theme.colors.accent}
-                  onPress={() => nav?.navigate?.("訊息", { screen: "GroupDetail", params: { groupId: routeGroupId } })}
+                  onPress={() => nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: routeGroupId } })}
                 />
                 <ModuleRow
                   title="作業與評量"
@@ -378,7 +378,7 @@ export function CourseModulesScreen(props: any) {
                   icon="document-text-outline"
                   tint="#F97316"
                   onPress={() =>
-                    nav?.navigate?.("訊息", {
+                    nav?.navigate?.("收件匣", {
                       screen: "GroupAssignments",
                       params: { groupId: routeGroupId },
                     })

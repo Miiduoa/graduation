@@ -8,17 +8,15 @@ import { OfflineBanner } from "./OfflineBanner";
 import { UpdateBanner } from "./UpdateBanner";
 
 const NAV_ICONS: Record<string, string> = {
-  "/": "⊞",
-  "/announcements": "📢",
-  "/clubs": "🎉",
+  "/": "☀️",
+  "/groups": "🎓",
+  "/map": "🗺️",
+  "/announcements": "📥",
+  "/profile": "👤",
   "/timetable": "📅",
-  "/map": "🗺",
   "/cafeteria": "🍱",
   "/bus": "🚌",
   "/library": "📚",
-  "/grades": "📊",
-  "/groups": "💬",
-  "/profile": "👤",
   "/search": "🔍",
   "/settings": "⚙",
 };
@@ -41,27 +39,27 @@ function SiteShellInner(props: {
       : "";
 
   const navItems = [
-    { href: "/", label: "首頁", group: "primary" as const },
-    { href: "/announcements", label: "公告", group: "primary" as const },
-    { href: "/clubs", label: "活動", group: "primary" as const },
-    { href: "/timetable", label: "課表", group: "primary" as const },
-    { href: "/map", label: "地圖", group: "primary" as const },
+    { href: "/", label: "Today", group: "primary" as const },
+    { href: "/groups", label: "課程", group: "primary" as const },
+    { href: "/map", label: "校園", group: "primary" as const },
+    { href: "/announcements", label: "收件匣", group: "primary" as const },
+    { href: "/profile", label: "我的", group: "primary" as const },
+    { href: "/timetable", label: "課表", group: "secondary" as const },
     { href: "/cafeteria", label: "餐廳", group: "secondary" as const },
     { href: "/bus", label: "公車", group: "secondary" as const },
     { href: "/library", label: "圖書館", group: "secondary" as const },
-    { href: "/grades", label: "成績", group: "secondary" as const },
-    { href: "/groups", label: "群組", group: "secondary" as const },
+    { href: "/settings", label: "設定", group: "secondary" as const },
   ];
 
   const primaryNav = navItems.filter((item) => item.group === "primary");
   const secondaryNav = navItems.filter((item) => item.group === "secondary");
 
   const mobileNav = [
-    { href: "/", label: "首頁", icon: "⊞" },
-    { href: "/announcements", label: "公告", icon: "📢" },
-    { href: "/timetable", label: "課表", icon: "📅" },
-    { href: "/map", label: "地圖", icon: "🗺" },
-    { href: "/profile", label: "個人", icon: "👤" },
+    { href: "/", label: "Today", icon: "☀️" },
+    { href: "/groups", label: "課程", icon: "🎓" },
+    { href: "/map", label: "校園", icon: "🗺️" },
+    { href: "/announcements", label: "收件匣", icon: "📥" },
+    { href: "/profile", label: "我的", icon: "👤" },
   ];
 
   const isActive = (href: string) => {
@@ -79,10 +77,10 @@ function SiteShellInner(props: {
             <div className="topbarRow">
               <div className="brandCluster">
                 <Link href={`/${q}`} className="brandLink">
-                  <span className="brandMark">C1</span>
+                  <span className="brandMark">OS</span>
                   <div className="brand">
-                    <span className="brandEyebrow">Campus One</span>
-                    <span className="brandTitle">校園助手</span>
+                    <span className="brandEyebrow">Campus Learning OS</span>
+                    <span className="brandTitle">校園學習中樞</span>
                   </div>
                 </Link>
                 <div className="brandMeta">
@@ -151,7 +149,7 @@ function SiteShellInner(props: {
           {props.title ? (
             <div className="pageHead">
               <div className="pageHeadCopy">
-                <div className="pageHeadEyebrow">Campus Companion</div>
+                <div className="pageHeadEyebrow">Campus Learning OS</div>
                 <h1 className="h1">{props.title}</h1>
                 {props.subtitle ? <p className="sub">{props.subtitle}</p> : null}
               </div>
@@ -211,10 +209,10 @@ export function SiteShell(props: {
               <div className="topbarRow">
                 <div className="brandCluster">
                   <div className="brandLink">
-                    <span className="brandMark">C1</span>
+                    <span className="brandMark">OS</span>
                     <div className="brand">
-                      <span className="brandEyebrow">Campus One</span>
-                      <span className="brandTitle">校園助手</span>
+                      <span className="brandEyebrow">Campus Learning OS</span>
+                      <span className="brandTitle">校園學習中樞</span>
                     </div>
                   </div>
                   <div className="brandMeta">

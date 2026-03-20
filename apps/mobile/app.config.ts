@@ -139,6 +139,13 @@ export default ({ config }: any) => {
       geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY,
       aiProvider: process.env.EXPO_PUBLIC_AI_PROVIDER ?? "mock",
       adminEmails: process.env.EXPO_PUBLIC_ADMIN_EMAILS ?? "",
+      enableMockSSO: process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === "true",
+      testSchoolLogin: {
+        enabled: process.env.TEST_SCHOOL_LOGIN_ENABLED === "true",
+        schoolId: process.env.TEST_SCHOOL_ID ?? "",
+        username: process.env.TEST_SCHOOL_USERNAME ?? "",
+        password: process.env.TEST_SCHOOL_PASSWORD ?? "",
+      },
       eas: {
         projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID,
       },
