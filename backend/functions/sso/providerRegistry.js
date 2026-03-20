@@ -1,5 +1,6 @@
 const saml2 = require("saml2-js");
 const xml2js = require("xml2js");
+const crypto = require("crypto");
 
 const REQUIRED_PROVIDER_FIELDS = {
   oidc: ["clientId", "clientSecret", "authorizationEndpoint", "tokenEndpoint"],
@@ -147,8 +148,41 @@ function decodeJWT(token) {
   return JSON.parse(payload);
 }
 
-async function verifyOIDC({ code, redirectUri, ssoConfig }) {
+function toBase64Url(buffer) {
+  return buffer
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function verifyPkceChallenge(codeVerifier, expectedCodeChallenge) {
+  if (!codeVerifier || !expectedCodeChallenge) {
+    throw new Error("Missing PKCE verifier");
+  }
+
+  const actualChallenge = toBase64Url(
+    crypto.createHash("sha256").update(codeVerifier, "utf8").digest()
+  );
+
+  if (actualChallenge !== expectedCodeChallenge) {
+    throw new Error("PKCE validation failed");
+  }
+}
+
+async function verifyOIDC({
+  code,
+  redirectUri,
+  ssoConfig,
+  codeVerifier,
+  expectedCodeChallenge,
+  expectedNonce,
+}) {
   const fetch = (await import("node-fetch")).default;
+
+  if (expectedCodeChallenge) {
+    verifyPkceChallenge(codeVerifier, expectedCodeChallenge);
+  }
 
   const tokenResponse = await fetch(ssoConfig.tokenUrl, {
     method: "POST",
@@ -161,6 +195,7 @@ async function verifyOIDC({ code, redirectUri, ssoConfig }) {
       client_id: ssoConfig.clientId,
       client_secret: ssoConfig.clientSecret,
       redirect_uri: redirectUri,
+      ...(codeVerifier ? { code_verifier: codeVerifier } : {}),
     }).toString(),
   });
 
@@ -174,6 +209,9 @@ async function verifyOIDC({ code, redirectUri, ssoConfig }) {
 
   if (tokens.id_token) {
     const decoded = decodeJWT(tokens.id_token);
+    if (expectedNonce && decoded.nonce && decoded.nonce !== expectedNonce) {
+      throw new Error("OIDC nonce validation failed");
+    }
     return {
       sub: decoded.sub,
       email: decoded.email,
@@ -356,6 +394,8 @@ function toPublicSsoConfig(config = {}, ssoConfig = null) {
           casServerUrl: ssoConfig.casServerUrl,
           samlEntryPoint: ssoConfig.samlEntryPoint,
           scopes: ssoConfig.scopes,
+          customParams: ssoConfig.customParams,
+          courseApiUrl: ssoConfig.courseApiUrl,
         }
       : null,
     emailDomain: config.emailDomain,

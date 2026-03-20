@@ -1,6 +1,7 @@
 import Constants from "expo-constants";
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getFunctions, type Functions } from "firebase/functions";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { 
   getAuth, 
@@ -77,6 +78,15 @@ export function getFirebaseApp() {
 
 export function getDb() {
   return getFirestore(getFirebaseApp());
+}
+
+export function getCloudFunctionRegion(): string {
+  const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
+  return String(extra.cloudFunctionRegion ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? "asia-east1");
+}
+
+export function getFunctionsInstance(): Functions {
+  return getFunctions(getFirebaseApp(), getCloudFunctionRegion());
 }
 
 export function getStorageInstance() {

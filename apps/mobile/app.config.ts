@@ -135,17 +135,19 @@ export default ({ config }: any) => {
         messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
         appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
       },
-      openaiApiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY,
-      geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY,
+      cloudFunctionRegion: process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? "asia-east1",
       aiProvider: process.env.EXPO_PUBLIC_AI_PROVIDER ?? "mock",
-      adminEmails: process.env.EXPO_PUBLIC_ADMIN_EMAILS ?? "",
       enableMockSSO: process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === "true",
-      testSchoolLogin: {
-        enabled: process.env.TEST_SCHOOL_LOGIN_ENABLED === "true",
-        schoolId: process.env.TEST_SCHOOL_ID ?? "",
-        username: process.env.TEST_SCHOOL_USERNAME ?? "",
-        password: process.env.TEST_SCHOOL_PASSWORD ?? "",
-      },
+      ...(isProduction
+        ? {}
+        : {
+            testSchoolLogin: {
+              enabled: process.env.TEST_SCHOOL_LOGIN_ENABLED === "true",
+              schoolId: process.env.TEST_SCHOOL_ID ?? "",
+              username: process.env.TEST_SCHOOL_USERNAME ?? "",
+              password: process.env.TEST_SCHOOL_PASSWORD ?? "",
+            },
+          }),
       eas: {
         projectId: process.env.EXPO_PUBLIC_EAS_PROJECT_ID,
       },

@@ -7,20 +7,16 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
-import { getDb } from "../firebase";
+import { getDb, getFunctionsInstance } from "../firebase";
 import {
-  addDoc,
   collection,
-  doc,
   getDocs,
   limit,
   query,
-  serverTimestamp,
-  setDoc,
   where,
-  deleteDoc,
   documentId,
 } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import { useAsyncList } from "../hooks/useAsyncList";
 
 type Group = {
@@ -105,6 +101,7 @@ export function GroupsScreen(props: any) {
   const [isCreating, setIsCreating] = useState(false);
 
   const db = getDb();
+  const functions = getFunctionsInstance();
 
   const [newCourseName, setNewCourseName] = useState("");
 
@@ -173,53 +170,15 @@ export function GroupsScreen(props: any) {
 
     setIsJoining(true);
     try {
-      // Find group by joinCode + school
-      const gRef = collection(db, "groups");
-      // NOTE: Query by joinCode only to avoid composite index; then verify schoolId.
-      const gQ = query(gRef, where("joinCode", "==", code), limit(1));
-      const gSnap = await getDocs(gQ);
-      if (gSnap.empty) {
-        setErr("找不到此加入碼的群組（請確認學校是否正確）");
-        return;
-      }
-      const gDoc = gSnap.docs[0]!;
-      const g = { id: gDoc.id, ...(gDoc.data() as any) } as Group;
-      if (g.schoolId !== school.id) {
-        setErr("此加入碼屬於其他學校，請先切換學校再加入");
-        return;
-      }
-
-      // Write membership under group
-      await setDoc(
-        doc(db, "groups", g.id, "members", auth.user.uid),
-        {
-          uid: auth.user.uid,
-          role: "member",
-          status: "active",
-          joinedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      // Denormalize under user for fast listing
-      await setDoc(
-        doc(db, "users", auth.user.uid, "groups", g.id),
-        {
-          groupId: g.id,
-          schoolId: g.schoolId,
-          type: g.type,
-          name: g.name,
-          joinCode: g.joinCode,
-          role: "member",
-          status: "active",
-          joinedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
+      const joinGroupByCode = httpsCallable<
+        { joinCode: string; schoolId: string },
+        { success: boolean; groupId: string; groupName?: string }
+      >(functions, "joinGroupByCode");
+      const result = await joinGroupByCode({ joinCode: code, schoolId: school.id });
 
       setJoinCode("");
       reload();
-      nav?.navigate?.("GroupDetail", { groupId: g.id });
+      nav?.navigate?.("GroupDetail", { groupId: result.data.groupId });
     } catch (e: any) {
       setErr(e?.message ?? "加入失敗");
     } finally {
@@ -230,9 +189,8 @@ export function GroupsScreen(props: any) {
   const onLeave = async (groupId: string) => {
     if (!auth.user) return;
     try {
-      // For MVP, hard-delete membership (simpler). Later we can soft-delete with status=left.
-      await deleteDoc(doc(db, "groups", groupId, "members", auth.user.uid));
-      await deleteDoc(doc(db, "users", auth.user.uid, "groups", groupId));
+      const leaveGroup = httpsCallable<{ groupId: string }, { success: boolean }>(functions, "leaveGroup");
+      await leaveGroup({ groupId });
       reload();
     } catch (e: any) {
       setErr(e?.message ?? "退出失敗");
@@ -253,53 +211,32 @@ export function GroupsScreen(props: any) {
 
     setIsCreating(true);
     try {
-      // Generate unique joinCode (best-effort, MVP)
-      let code = generateJoinCode(8);
-      for (let i = 0; i < 8; i++) {
-        const qy = query(collection(db, "groups"), where("joinCode", "==", code), limit(1));
-        const snap = await getDocs(qy);
-        if (snap.empty) break;
-        code = generateJoinCode(8);
-      }
-
-      const docRef = await addDoc(collection(db, "groups"), {
+      const createGroup = httpsCallable<
+        {
+          name: string;
+          description?: string;
+          type: Group["type"];
+          schoolId: string;
+          isPrivate?: boolean;
+          isPublished?: boolean;
+          verification?: { status?: "unverified" | "verified_teacher" | "verified_org" };
+        },
+        { success: boolean; groupId: string; joinCode?: string | null }
+      >(functions, "createGroup");
+      const result = await createGroup({
         schoolId: school.id,
         name,
         type: "course",
-        joinCode: code,
+        description: "",
+        isPrivate: false,
         isPublished: false,
         verification: { status: "unverified" },
-        createdAt: serverTimestamp(),
-        createdBy: auth.user.uid,
       });
-
-      const gid = docRef.id;
-
-      await setDoc(
-        doc(db, "groups", gid, "members", auth.user.uid),
-        { uid: auth.user.uid, role: "owner", status: "active", joinedAt: serverTimestamp() },
-        { merge: true }
-      );
-
-      await setDoc(
-        doc(db, "users", auth.user.uid, "groups", gid),
-        {
-          groupId: gid,
-          schoolId: school.id,
-          type: "course",
-          name,
-          joinCode: code,
-          role: "owner",
-          status: "active",
-          joinedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
 
       setNewCourseName("");
       reload();
       reloadPublishedCourses();
-      nav?.navigate?.("GroupDetail", { groupId: gid });
+      nav?.navigate?.("GroupDetail", { groupId: result.data.groupId });
     } catch (e: any) {
       setErr(e?.message ?? "建立課程失敗");
     } finally {

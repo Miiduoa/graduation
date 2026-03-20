@@ -1,11 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { getAuthInstance, getDb, hasUsableFirebaseConfig, subscribeToTokenRefresh } from "../firebase";
 import { resolveSchoolByEmail } from "@campus/shared/src/schools";
-import { clearAllCache, clearCacheForSchool } from "../data/cachedSource";
+import { clearAllCache } from "../data/cachedSource";
 import { clearAllOfflineData, getOfflineQueue } from "../services/offline";
 import { getCachedPushToken, removePushTokenFromFirestore } from "../services/notifications";
 import { clearMockAuthSession, loadMockAuthSession } from "../services/mockAuth";
