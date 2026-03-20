@@ -15,6 +15,12 @@
 import Constants from "expo-constants";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getFirebaseApp, hasUsableFirebaseConfig } from "../firebase";
+import type { AIActionBrief, CampusSignal, ImportedArtifact, UserRole } from "../data/types";
+import {
+  createSuggestedActionsFromSignals,
+  getFreshnessLabel,
+  getTodaySourceLabel,
+} from "./studentOs";
 
 export type AIProvider = "cloud" | "mock" | "openai" | "gemini";
 
@@ -576,4 +582,70 @@ export async function extractDates(text: string): Promise<Array<{ date: string; 
   }
 
   return dates;
+}
+
+export function buildTodayActionBrief(params: {
+  signals: CampusSignal[];
+  importedArtifacts?: ImportedArtifact[];
+  userName?: string | null;
+  role?: UserRole | null;
+  schoolName?: string;
+}): AIActionBrief | null {
+  const topSignals = params.signals.slice(0, 3);
+  const importedCount = params.importedArtifacts?.filter((artifact) => artifact.userConfirmedAt).length ?? 0;
+
+  if (topSignals.length === 0 && importedCount === 0) {
+    return {
+      summary: `${params.schoolName ?? "校園"}目前先以公開資料模式運作。先匯入課表或行事曆，Today 才能開始幫你排序真正重要的下一步。`,
+      reasons: ["目前還沒有個人課務或匯入資料", "系統只會顯示公開公告、活動與校園服務"],
+      suggestedActions: [
+        {
+          id: "action-import",
+          label: "匯入資料",
+          reason: "先建立你的個人節奏",
+          actionTarget: { tab: "課程", screen: "Calendar" },
+        },
+      ],
+      generatedAt: new Date().toISOString(),
+      basedOn: [],
+    };
+  }
+
+  const lead = topSignals[0];
+  const leadSource = getTodaySourceLabel(lead.source);
+  const leadFreshness = getFreshnessLabel(lead.freshness);
+  const name = params.userName?.trim() ? params.userName.trim() : "你";
+  const roleHint =
+    params.role === "teacher" || params.role === "professor" || params.role === "staff"
+      ? "先把教學節奏穩住"
+      : params.role === "admin" || params.role === "principal"
+        ? "先處理校務節點"
+        : "先完成最接近現在的下一步";
+
+  const summary =
+    lead.type === "course"
+      ? `${name}現在最值得先看的，是 ${lead.title}${lead.meta ? `（${lead.meta}）` : ""}。這則判斷來自${leadSource}，而且資料${leadFreshness}。`
+      : lead.type === "crowd"
+        ? `${name}現在移動前先看 ${lead.title} 比較划算。這個建議來自${leadSource}，可以幫你省掉現場等待成本。`
+        : `${name}現在最值得注意的是 ${lead.title}。它來自${leadSource}，資料${leadFreshness}，建議你先處理這個節點。`;
+
+  const reasons = [
+    `${roleHint}。`,
+    ...topSignals.map((signal) => {
+      const source = getTodaySourceLabel(signal.source);
+      const freshness = getFreshnessLabel(signal.freshness);
+      return `${signal.title} · ${source} · ${freshness}`;
+    }),
+  ].slice(0, 4);
+
+  return {
+    summary,
+    reasons,
+    suggestedActions: createSuggestedActionsFromSignals(topSignals),
+    generatedAt: new Date().toISOString(),
+    basedOn: topSignals.map((signal) => ({
+      signalId: signal.id,
+      source: signal.source,
+    })),
+  };
 }

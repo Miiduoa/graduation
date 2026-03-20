@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { ScrollView, Text, View, Pressable, Animated, Easing, RefreshControl, Share, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { buildUserSchoolCollectionPath } from "@campus/shared/src";
 import { Screen, Card, Pill, Button, AnimatedCard, ProgressRing, Divider } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
@@ -24,6 +25,7 @@ import {
   onSnapshot,
   where,
 } from "firebase/firestore";
+import { collectionFromSegments, docFromSegments } from "../data/firestorePath";
 import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
 type Achievement = {
@@ -374,12 +376,13 @@ const LOCAL_COMPUTED_IDS = new Set([
 async function syncAchievementToFirestore(
   db: any,
   uid: string,
+  schoolId: string,
   achievementId: string,
   progress: number,
   requirement: number
 ) {
   try {
-    const ref = doc(db, "users", uid, "achievements", achievementId);
+    const ref = docFromSegments(db, buildUserSchoolCollectionPath(uid, schoolId, "achievements", achievementId));
     const snap = await getDoc(ref);
     const unlocked = progress >= requirement;
     const existingData = snap.exists() ? snap.data() : null;
@@ -388,6 +391,7 @@ async function syncAchievementToFirestore(
       await setDoc(ref, {
         progress,
         unlocked,
+        schoolId,
         updatedAt: serverTimestamp(),
         ...(unlocked && !existingData?.unlockedAt ? { unlockedAt: serverTimestamp() } : {}),
       }, { merge: true });
@@ -458,8 +462,8 @@ export function AchievementsScreen(props: any) {
   // 訂閱 Firestore 成就資料
   useEffect(() => {
     if (!auth.user) return;
-    const ref = collection(db, "users", auth.user.uid, "achievements");
-    const unsubscribe = onSnapshot(ref, (snap) => {
+    const canonicalRef = collectionFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "achievements"));
+    const unsubscribe = onSnapshot(canonicalRef, async (snap) => {
       const data: Record<string, { progress: number; unlocked: boolean; unlockedAt?: Date }> = {};
       snap.docs.forEach((d) => {
         const raw = d.data();
@@ -469,10 +473,23 @@ export function AchievementsScreen(props: any) {
           unlockedAt: raw.unlockedAt?.toDate?.() ?? undefined,
         };
       });
+
+      if (snap.empty) {
+        const legacySnap = await getDocs(collection(db, "users", auth.user.uid, "achievements")).catch(() => null);
+        legacySnap?.docs.forEach((d) => {
+          const raw = d.data();
+          data[d.id] = {
+            progress: raw.progress ?? 0,
+            unlocked: raw.unlocked ?? false,
+            unlockedAt: raw.unlockedAt?.toDate?.() ?? undefined,
+          };
+        });
+      }
+
       setFirestoreProgress(data);
     });
     return () => unsubscribe();
-  }, [auth.user?.uid]);
+  }, [auth.user?.uid, school.id]);
 
   // 訂閱排行榜
   useEffect(() => {
@@ -528,7 +545,7 @@ export function AchievementsScreen(props: any) {
 
         // 同步本地計算結果到 Firestore
         if (auth.user) {
-          syncAchievementToFirestore(db, auth.user.uid, def.id, progress, def.requirement);
+          syncAchievementToFirestore(db, auth.user.uid, school.id, def.id, progress, def.requirement);
         }
       } else {
         // 從 Firestore 讀取（若無資料則為 0）
@@ -545,7 +562,7 @@ export function AchievementsScreen(props: any) {
         unlockedAt: unlocked ? (unlockedAt ?? (unlocked ? new Date() : undefined)) : undefined,
       };
     });
-  }, [auth.user, auth.profile, totalFavorites, pois.length, firestoreProgress]);
+  }, [auth.user, auth.profile, totalFavorites, pois.length, firestoreProgress, db, school.id]);
 
   const totalPoints = useMemo(() => {
     return achievements.filter((a) => a.unlocked).reduce((sum, a) => sum + a.points, 0);

@@ -3,8 +3,10 @@ import { ScrollView, Text, View, Pressable, Share, Alert, TextInput, Linking, Pl
 import { Ionicons } from "@expo/vector-icons";
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, serverTimestamp, updateDoc, query, orderBy, where, increment } from "firebase/firestore";
 import * as Calendar from "expo-calendar";
+import { buildSchoolCollectionPath } from "@campus/shared/src";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
+import { collectionFromSegments, docFromSegments } from "../data/firestorePath";
 import { Screen, Card, Pill, Button, LoadingState, ErrorState, SectionTitle, CountdownTimer, AnimatedCard, InfoRow, FeatureHighlight, Avatar, StatusBadge, RatingStars, ProgressRing } from "../ui/components";
 import { useFavorites } from "../state/favorites";
 import { useAuth } from "../state/auth";
@@ -80,7 +82,7 @@ export function EventDetailScreen(props: any) {
     setNotFound(false);
     
     try {
-      const event = await ds.getEvent(id);
+      const event = await ds.getEvent(id, school.id);
       if (!event) {
         setNotFound(true);
         setItem(null);
@@ -118,24 +120,42 @@ export function EventDetailScreen(props: any) {
   const { items: registrations, loading: regLoading, reload: reloadRegistrations } = useAsyncList<Registration>(
     async () => {
       if (!id) return [];
-      const ref = collection(db, "events", id, "registrations");
-      const qy = query(ref, orderBy("registeredAt", "asc"));
-      const snap = await getDocs(qy);
-      return snap.docs.map((d) => ({ uid: d.id, ...(d.data() as any) })) as Registration[];
+      try {
+        const ref = collectionFromSegments(db, buildSchoolCollectionPath(school.id, "events", id, "registrations"));
+        const snap = await getDocs(query(ref, orderBy("registeredAt", "asc")));
+        if (!snap.empty) {
+          return snap.docs.map((d) => ({ uid: d.id, ...(d.data() as any) })) as Registration[];
+        }
+      } catch (error) {
+        console.warn("[EventDetail] Failed to read canonical registrations:", error);
+      }
+
+      const legacyRef = collection(db, "events", id, "registrations");
+      const legacySnap = await getDocs(query(legacyRef, orderBy("registeredAt", "asc")));
+      return legacySnap.docs.map((d) => ({ uid: d.id, ...(d.data() as any) })) as Registration[];
     },
-    [db, id]
+    [db, id, school.id]
   );
 
   // Fetch reviews for ended events
   const { items: reviews, loading: reviewsLoading, reload: reloadReviews } = useAsyncList<EventReview>(
     async () => {
       if (!id) return [];
-      const ref = collection(db, "events", id, "reviews");
-      const qy = query(ref, orderBy("createdAt", "desc"));
-      const snap = await getDocs(qy);
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as EventReview[];
+      try {
+        const ref = collectionFromSegments(db, buildSchoolCollectionPath(school.id, "events", id, "reviews"));
+        const snap = await getDocs(query(ref, orderBy("createdAt", "desc")));
+        if (!snap.empty) {
+          return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as EventReview[];
+        }
+      } catch (error) {
+        console.warn("[EventDetail] Failed to read canonical reviews:", error);
+      }
+
+      const legacyRef = collection(db, "events", id, "reviews");
+      const legacySnap = await getDocs(query(legacyRef, orderBy("createdAt", "desc")));
+      return legacySnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as EventReview[];
     },
-    [db, id]
+    [db, id, school.id]
   );
 
   // Fetch user profiles for display
@@ -227,18 +247,7 @@ export function EventDetailScreen(props: any) {
 
     setActionLoading(true);
     try {
-      const waitlistPosition = status === "waitlist" ? waitlistCount + 1 : undefined;
-      await setDoc(doc(db, "events", id, "registrations", auth.user.uid), {
-        uid: auth.user.uid,
-        email: auth.user.email ?? null,
-        displayName: auth.profile?.displayName ?? null,
-        avatarUrl: auth.profile?.avatarUrl ?? null,
-        registeredAt: serverTimestamp(),
-        status,
-        schoolId: school.id,
-        checkedIn: false,
-        waitlistPosition,
-      });
+      await ds.registerEvent(id, auth.user.uid, school.id);
       reloadRegistrations();
       setSuccessMsg(status === "waitlist" ? "已加入候補名單" : "報名成功！");
     } catch (e: any) {
@@ -265,7 +274,7 @@ export function EventDetailScreen(props: any) {
           onPress: async () => {
             setActionLoading(true);
             try {
-              await deleteDoc(doc(db, "events", id, "registrations", auth.user!.uid));
+              await ds.unregisterEvent(id, auth.user!.uid, school.id);
               reloadRegistrations();
               setSuccessMsg("已取消報名");
             } catch (e: any) {
@@ -338,12 +347,13 @@ export function EventDetailScreen(props: any) {
 
     setSubmittingReview(true);
     try {
-      await setDoc(doc(db, "events", id, "reviews", auth.user.uid), {
+      await setDoc(docFromSegments(db, buildSchoolCollectionPath(school.id, "events", id, "reviews", auth.user.uid)), {
         uid: auth.user.uid,
         email: auth.user.email ?? null,
         displayName: auth.profile?.displayName ?? null,
         rating: reviewRating,
         comment: reviewComment.trim(),
+        schoolId: school.id,
         createdAt: serverTimestamp(),
       });
       setReviewRating(0);

@@ -3,13 +3,16 @@ import { ScrollView, Text, View, Pressable, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { calculateCredits, type CreditCategory } from "@campus/shared/src/creditAudit";
 import { mockCourses, mockGradRuleTemplateV1 } from "@campus/shared/src/mockData";
+import { buildUserSchoolCollectionPath } from "@campus/shared/src";
 import { Screen, Card, Pill, Button, LoadingState, ErrorState, AuthGuard } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
+import { useSchool } from "../state/school";
 import { getDb } from "../firebase";
 import { collection, doc, setDoc, deleteDoc, getDocs, serverTimestamp } from "firebase/firestore";
 import { useAsyncList } from "../hooks/useAsyncList";
+import { collectionFromSegments, docFromSegments } from "../data/firestorePath";
 
 type StoredEnrollment = {
   id: string;
@@ -40,20 +43,30 @@ const CATEGORY_COLORS: Record<CreditCategory, string> = {
 
 export function CreditAuditScreen(props: any) {
   const auth = useAuth();
+  const { school } = useSchool();
   const db = getDb();
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
 
   const { items: userEnrollments, loading, error: loadError, reload } = useAsyncList<StoredEnrollment>(
     async () => {
       if (!auth.user) return [];
-      const ref = collection(db, "users", auth.user.uid, "enrollments");
-      const snap = await getDocs(ref);
-      return snap.docs.map((d) => ({
+      const canonicalSnap = await getDocs(
+        collectionFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "enrollments"))
+      ).catch(() => null);
+      if (canonicalSnap && !canonicalSnap.empty) {
+        return canonicalSnap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as any),
+        }));
+      }
+
+      const legacySnap = await getDocs(collection(db, "users", auth.user.uid, "enrollments"));
+      return legacySnap.docs.map((d) => ({
         id: d.id,
         ...(d.data() as any),
       }));
     },
-    [db, auth.user?.uid]
+    [db, auth.user?.uid, school.id]
   );
 
   const res = useMemo(() => {
@@ -101,12 +114,13 @@ export function CreditAuditScreen(props: any) {
         semester?: string;
       }) => {
         if (!auth.user) return;
-        const docRef = doc(db, "users", auth.user.uid, "enrollments", course.id);
+        const docRef = docFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "enrollments", course.id));
         await setDoc(docRef, {
           courseId: course.id,
           courseName: course.name,
           credits: course.credits,
           category: course.category,
+          schoolId: school.id,
           passed: course.passed,
           grade: course.grade ?? null,
           semester: course.semester ?? null,
@@ -118,7 +132,7 @@ export function CreditAuditScreen(props: any) {
         reload();
       },
     });
-  }, [props?.navigation, auth.user, db, reload]);
+  }, [props?.navigation, auth.user, db, reload, school.id]);
 
   const handleOpenAdvisor = useCallback(() => {
     props?.navigation?.getParent?.()?.navigate?.("AICourseAdvisor");
@@ -129,7 +143,7 @@ export function CreditAuditScreen(props: any) {
       if (!auth.user) return;
       setDeleteLoading(enrollmentId);
       try {
-        await deleteDoc(doc(db, "users", auth.user.uid, "enrollments", enrollmentId));
+        await deleteDoc(docFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "enrollments", enrollmentId)));
         reload();
       } catch (e) {
         Alert.alert("錯誤", "刪除失敗");
@@ -137,7 +151,7 @@ export function CreditAuditScreen(props: any) {
         setDeleteLoading(null);
       }
     },
-    [auth.user, db, reload]
+    [auth.user, db, reload, school.id]
   );
 
   const confirmDelete = (e: StoredEnrollment) => {

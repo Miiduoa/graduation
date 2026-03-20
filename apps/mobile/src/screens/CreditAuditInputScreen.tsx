@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { ScrollView, Text, TextInput, View, Alert, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { buildUserSchoolCollectionPath } from "@campus/shared/src";
 import * as DocumentPicker from "expo-document-picker";
 import { File, Paths } from "expo-file-system";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
@@ -12,10 +13,13 @@ import { theme } from "../ui/theme";
 import { calculateCredits, type CreditCategory } from "@campus/shared/src/creditAudit";
 import { mockGradRuleTemplateV1, mockCourses, demoEnrollments } from "@campus/shared/src/mockData";
 import { useAuth } from "../state/auth";
+import { useSchool } from "../state/school";
 import { analytics } from "../services/analytics";
 import { getDb } from "../firebase";
+import { docFromSegments } from "../data/firestorePath";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
-const STORAGE_KEY = "@credit_audit_courses";
+const LEGACY_STORAGE_KEY = "@credit_audit_courses";
 
 type SavedCourse = {
   id: string;
@@ -68,6 +72,7 @@ const gradeOptions = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "E
 export function CreditAuditInputScreen(props: any) {
   const onAdded: ((x: any) => void) | undefined = props?.route?.params?.onAdded;
   const auth = useAuth();
+  const { school } = useSchool();
 
   const [tab, setTab] = useState(0);
   const [name, setName] = useState("");
@@ -82,15 +87,19 @@ export function CreditAuditInputScreen(props: any) {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const storageKey = useMemo(
+    () => getScopedStorageKey("credit-audit-courses", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+    [auth.user?.uid, school.id]
+  );
 
   useEffect(() => {
     analytics.logScreenView("CreditAuditInput");
     loadSavedCourses();
-  }, []);
+  }, [storageKey]);
 
   const loadSavedCourses = async () => {
     try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
+      const stored = await getFirstStorageValue([storageKey, LEGACY_STORAGE_KEY]);
       if (stored) {
         setSavedCourses(JSON.parse(stored));
       }
@@ -103,7 +112,7 @@ export function CreditAuditInputScreen(props: any) {
 
   const saveCourses = async (courses: SavedCourse[]) => {
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(courses));
+      await AsyncStorage.setItem(storageKey, JSON.stringify(courses));
     } catch (error) {
       console.error("Failed to save courses:", error);
     }
@@ -119,7 +128,7 @@ export function CreditAuditInputScreen(props: any) {
       const batch = writeBatch(db);
 
       for (const course of courses) {
-        const enrollmentRef = doc(db, "users", auth.user.uid, "enrollments", course.id);
+        const enrollmentRef = docFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "enrollments", course.id));
         batch.set(
           enrollmentRef,
           {
@@ -127,6 +136,7 @@ export function CreditAuditInputScreen(props: any) {
             courseName: course.name,
             credits: course.credits,
             category: course.category,
+            schoolId: school.id,
             passed: course.passed,
             grade: course.grade ?? null,
             semester: course.semester ?? null,
@@ -142,7 +152,7 @@ export function CreditAuditInputScreen(props: any) {
 
       await batch.commit();
     },
-    [auth.user]
+    [auth.user, school.id]
   );
 
   const preview = useMemo(() => {

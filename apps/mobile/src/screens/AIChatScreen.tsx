@@ -14,6 +14,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
+import { buildUserSchoolCollectionPath } from "@campus/shared/src";
 import { Screen, Pill, AnimatedCard } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
@@ -26,6 +27,7 @@ import { chatWithCampusAssistant, getAIStatus, type AIMessage, type AIContext } 
 import { toDate } from "../utils/format";
 import { getDb } from "../firebase";
 import { doc, getDoc, collection, getDocs, query, orderBy, limit, where, Timestamp } from "firebase/firestore";
+import { collectionFromSegments } from "../data/firestorePath";
 import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 import { removePersistedValue, savePersistedValue } from "../services/persistedStorage";
 
@@ -309,10 +311,21 @@ export function AIChatScreen(props: any) {
     async function loadPersonalData() {
       try {
         // 讀取最新週報
-        const weeklySnap = await getDocs(
-          query(collection(db, "users", uid, "weeklyReports"), orderBy("generatedAt", "desc"), limit(1))
-        );
-        if (!weeklySnap.empty) setWeeklyReport(weeklySnap.docs[0].data());
+        const canonicalWeeklySnap = await getDocs(
+          query(
+            collectionFromSegments(db, buildUserSchoolCollectionPath(uid, school.id, "weeklyReports")),
+            orderBy("generatedAt", "desc"),
+            limit(1)
+          )
+        ).catch(() => ({ empty: true, docs: [] as any[] }));
+        if (!canonicalWeeklySnap.empty) {
+          setWeeklyReport(canonicalWeeklySnap.docs[0].data());
+        } else {
+          const legacyWeeklySnap = await getDocs(
+            query(collection(db, "users", uid, "weeklyReports"), orderBy("generatedAt", "desc"), limit(1))
+          );
+          if (!legacyWeeklySnap.empty) setWeeklyReport(legacyWeeklySnap.docs[0].data());
+        }
 
         // 讀取待繳作業（從用戶加入的群組讀取 assignments）
         const userGroupsRef = collection(db, "users", uid, "groups");
@@ -351,7 +364,7 @@ export function AIChatScreen(props: any) {
       }
     }
     loadPersonalData();
-  }, [auth.user?.uid]);
+  }, [auth.user?.uid, school.id]);
 
   // Function Calling 動作執行器
   const executeAIAction = async (action: string, params?: any): Promise<string | null> => {

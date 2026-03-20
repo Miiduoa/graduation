@@ -10,3 +10,4 @@ export * from "./errorReporting";
 export * from "./performance";
 export { PerformanceMonitor } from "./performanceMonitor";
 export * from "./cacheWarming";
+export * from "./studentOs";

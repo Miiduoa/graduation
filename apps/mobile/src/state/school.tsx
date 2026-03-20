@@ -28,7 +28,7 @@ const STORAGE_KEY = "campus.schoolSelection.v1";
 export function SchoolProvider(props: { children: React.ReactNode; initial?: Partial<SchoolSelection> }) {
   const [loaded, setLoaded] = useState(false);
   const [selection, setSelectionState] = useState<SchoolSelection>({
-    code: normalizeSchoolCode(props.initial?.code ?? "NCHU"),
+    code: normalizeSchoolCode(props.initial?.code ?? "PU"),
     schoolId: props.initial?.schoolId ?? null,
     schoolName: props.initial?.schoolName ?? null,
     shortName: props.initial?.shortName ?? null,

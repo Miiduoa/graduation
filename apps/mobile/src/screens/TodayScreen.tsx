@@ -1,53 +1,83 @@
-/**
- * TodayScreen — Today Tab 主畫面
- *
- * 心理學架構：
- * - Temporal Self-Regulation: 時間錨點頁面，整合「現在」所需的一切
- * - Attention Bottleneck Theory: Hero Action Card 聚焦單一任務
- * - Zeigarnik Effect: 未完成任務的進度始終可見
- * - Peak-End Rule: 以完成感（✓）作為每日體驗的高峰
- * - Loss Aversion: Streak 連續天數顯示，怕失去連續記錄
- * - Framing Effect: 正向框架「已完成 3 件」而非「還差 2 件」
- * - Context-Dependent Memory: 情境卡片依時段動態切換
- */
-import React, { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 
-import type { ClubEvent, InboxTask, MenuItem } from "../data";
+import type {
+  CampusSignal,
+  ClubEvent,
+  Course,
+  CrowdReport,
+  ImportedArtifact,
+  InboxTask,
+  MenuItem,
+} from "../data";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
+import { buildTodayActionBrief } from "../services/ai";
+import { analytics } from "../services/analytics";
+import { pickAndParseICalFile } from "../services/ical";
+import {
+  appendCrowdReport,
+  appendImportedArtifact,
+  buildCampusSignals,
+  createCrowdReport,
+  createImportedArtifactFromCalendar,
+  createManualCourseArtifact,
+  getFreshnessLabel,
+  getTodaySourceLabel,
+  listCrowdReports,
+  listImportedArtifacts,
+} from "../services/studentOs";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
-import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 import { useSchedule } from "../state/schedule";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
+import { ContextStrip, CompletionState, HeroActionCard } from "../ui/campusOs";
 import { shadowStyle, theme } from "../ui/theme";
-import { HeroActionCard, TimelineCard, CompletionState, ConfidenceBadge } from "../ui/campusOs";
 import {
   formatDueWindow,
-  getNextCourse,
+  getActionLabel,
+  getInboxIntent,
+  getInboxUrgency,
   getTodayCourses,
-  isTeachingRole,
   resolveRoleMode,
   roleSummary,
   toInboxItem,
 } from "../utils/campusOs";
 
-// ────────────────────────────────────────────────
-// 時段邏輯
-// ────────────────────────────────────────────────
 type TimeSegment = "morning" | "class" | "afternoon" | "evening" | "night";
+type CampusNavigation = {
+  navigate?: (routeName: string, params?: unknown) => void;
+};
+type ManualCourseDraft = {
+  title: string;
+  location: string;
+  instructor: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+};
+
+const WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
+const QUICK_REPORT_PLACES = [
+  { signalType: "cafeteria_queue" as const, placeId: "cafeteria", placeName: "學餐" },
+  { signalType: "library_seat" as const, placeId: "library", placeName: "圖書館" },
+  { signalType: "bus_crowd" as const, placeId: "bus", placeName: "校園公車" },
+];
 
 function getTimeSegment(): TimeSegment {
   const hour = new Date().getHours();
@@ -69,170 +99,92 @@ function getGreeting(): string {
   return "夜深了";
 }
 
-function getDateString(): string {
+function getDateString() {
   const now = new Date();
-  const weekdays = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
-  return `${now.getMonth() + 1} 月 ${now.getDate()} 日 ${weekdays[now.getDay()]}`;
+  return `${now.getMonth() + 1} 月 ${now.getDate()} 日 ${WEEKDAYS[now.getDay()]}`;
 }
 
-// ────────────────────────────────────────────────
-// Streak Badge — Loss Aversion 心理學
-// ────────────────────────────────────────────────
-function StreakBadge({ days }: { days: number }) {
-  if (days < 2) return null;
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: theme.radius.full,
-        backgroundColor: theme.colors.streakSoft,
-        borderWidth: 1,
-        borderColor: `${theme.colors.streak}30`,
-      }}
-    >
-      <Ionicons name="flame" size={12} color={theme.colors.streak} />
-      <Text style={{ color: theme.colors.streak, fontSize: 11, fontWeight: "700" }}>
-        {days} 天
-      </Text>
-    </View>
-  );
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
 }
 
-// ────────────────────────────────────────────────
-// 今日課程時間軸卡片
-// ────────────────────────────────────────────────
-function CourseTimelineItem(props: {
-  name: string;
-  teacher?: string;
-  location?: string;
-  time?: string;
-  isNow?: boolean;
-  isDone?: boolean;
-  onPress?: () => void;
-}) {
-  const statusColor = props.isNow
-    ? theme.colors.success
-    : props.isDone
-      ? theme.colors.muted
-      : theme.colors.accent;
-
-  return (
-    <Pressable
-      onPress={props.onPress}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "flex-start",
-        gap: 12,
-        opacity: pressed ? 0.85 : 1,
-        paddingVertical: 10,
-      })}
-    >
-      {/* 時間軸線 */}
-      <View style={{ alignItems: "center", width: 18, paddingTop: 4 }}>
-        <View
-          style={{
-            width: 10,
-            height: 10,
-            borderRadius: 5,
-            backgroundColor: props.isDone ? theme.colors.muted : statusColor,
-            borderWidth: props.isNow ? 2 : 0,
-            borderColor: props.isNow ? theme.colors.success : "transparent",
-          }}
-        />
-      </View>
-
-      <View style={{ flex: 1 }}>
-        <Text
-          style={{
-            color: props.isDone ? theme.colors.muted : theme.colors.text,
-            fontSize: 14,
-            fontWeight: "600",
-            textDecorationLine: props.isDone ? "line-through" : "none",
-          }}
-        >
-          {props.name}
-        </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 1 }}>
-          {[props.time, props.teacher, props.location].filter(Boolean).join("  ·  ")}
-        </Text>
-      </View>
-
-      {props.isNow && (
-        <View
-          style={{
-            paddingHorizontal: 8,
-            paddingVertical: 3,
-            borderRadius: theme.radius.full,
-            backgroundColor: theme.colors.successSoft,
-          }}
-        >
-          <Text style={{ color: theme.colors.success, fontSize: 10, fontWeight: "700" }}>進行中</Text>
-        </View>
-      )}
-    </Pressable>
-  );
+function formatSignalWindow(signal: CampusSignal) {
+  if (!signal.startAt) return getFreshnessLabel(signal.freshness);
+  const date = new Date(signal.startAt);
+  if (Number.isNaN(date.getTime())) return getFreshnessLabel(signal.freshness);
+  const timeLabel = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (signal.endAt) {
+    const endDate = new Date(signal.endAt);
+    if (!Number.isNaN(endDate.getTime())) {
+      const endLabel = `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`;
+      return `${timeLabel} - ${endLabel}`;
+    }
+  }
+  return timeLabel;
 }
 
-// ────────────────────────────────────────────────
-// 收件匣任務卡片（精簡嵌入版）
-// ────────────────────────────────────────────────
-function InboxTaskRow(props: {
-  title: string;
-  label: string;
-  dueAt?: string;
-  urgency: "critical" | "high" | "medium" | "low";
-  onPress: () => void;
-}) {
-  const urgencyColor =
-    props.urgency === "critical"
-      ? theme.colors.urgent
-      : props.urgency === "high"
-        ? theme.colors.warning
-        : props.urgency === "medium"
-          ? theme.colors.accent
-          : theme.colors.muted;
-
-  return (
-    <Pressable
-      onPress={props.onPress}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        paddingVertical: 10,
-        paddingHorizontal: 4,
-        opacity: pressed ? 0.8 : 1,
-      })}
-    >
-      <View
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: urgencyColor,
-          marginTop: 1,
-        }}
-      />
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "500" }} numberOfLines={1}>
-          {props.title}
-        </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 1 }}>
-          {props.label}{props.dueAt ? `  ·  ${props.dueAt}` : ""}
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={14} color={theme.colors.muted} />
-    </Pressable>
-  );
+function getSignalIcon(type: CampusSignal["type"]): keyof typeof Ionicons.glyphMap {
+  switch (type) {
+    case "course":
+      return "school-outline";
+    case "announcement":
+      return "megaphone-outline";
+    case "event":
+      return "calendar-outline";
+    case "menu":
+      return "restaurant-outline";
+    case "crowd":
+      return "pulse-outline";
+    case "imported_event":
+      return "calendar-number-outline";
+    case "task":
+      return "checkbox-outline";
+    case "mobility":
+      return "bus-outline";
+    case "place":
+      return "navigate-circle-outline";
+    case "ai_action":
+      return "sparkles-outline";
+    default:
+      return "ellipse-outline";
+  }
 }
 
-// ────────────────────────────────────────────────
-// 區塊標題元件
-// ────────────────────────────────────────────────
+function getSignalTint(signal: CampusSignal) {
+  switch (signal.source) {
+    case "user_import":
+      return theme.colors.accent;
+    case "crowd_verified":
+      return theme.colors.fresh;
+    case "ai_synthesized":
+      return theme.colors.social;
+    case "official_public":
+    default:
+      if (signal.type === "announcement") return theme.colors.warning;
+      if (signal.type === "event") return theme.colors.growth;
+      if (signal.type === "menu") return theme.colors.achievement;
+      return theme.colors.calm;
+  }
+}
+
+function handleActionTarget(nav: CampusNavigation | undefined, target?: CampusSignal["actionTarget"]) {
+  if (!target) return;
+  if (target.tab && target.screen) {
+    nav?.navigate?.(target.tab, { screen: target.screen, params: target.params });
+    return;
+  }
+  if (target.tab) {
+    nav?.navigate?.(target.tab);
+    return;
+  }
+  if (target.screen) {
+    nav?.navigate?.(target.screen, target.params);
+  }
+}
+
 function SectionLabel({ children }: { children: string }) {
   return (
     <Text
@@ -250,33 +202,699 @@ function SectionLabel({ children }: { children: string }) {
   );
 }
 
-// ────────────────────────────────────────────────
-// 主元件
-// ────────────────────────────────────────────────
-export function TodayScreen(props: any) {
+function Badge(props: { label: string; tint: string; soft?: boolean }) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: theme.radius.full,
+        backgroundColor: props.soft ? `${props.tint}12` : props.tint,
+        borderWidth: 1,
+        borderColor: `${props.tint}30`,
+      }}
+    >
+      <Text
+        style={{
+          color: props.soft ? props.tint : "#fff",
+          fontSize: 11,
+          fontWeight: "700",
+        }}
+      >
+        {props.label}
+      </Text>
+    </View>
+  );
+}
+
+function StreakBadge({ days }: { days: number }) {
+  if (days < 2) return null;
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: theme.radius.full,
+        backgroundColor: theme.colors.streakSoft,
+        borderWidth: 1,
+        borderColor: `${theme.colors.streak}30`,
+      }}
+    >
+      <Ionicons name="flame" size={12} color={theme.colors.streak} />
+      <Text style={{ color: theme.colors.streak, fontSize: 11, fontWeight: "700" }}>{days} 天</Text>
+    </View>
+  );
+}
+
+function CampusSignalCard(props: {
+  signal: CampusSignal;
+  onPress?: () => void;
+}) {
+  const tint = getSignalTint(props.signal);
+  const content = (
+    <View
+      style={{
+        padding: 16,
+        borderRadius: theme.radius.xl,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        gap: 12,
+        ...shadowStyle(theme.shadows.sm),
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 16,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: `${tint}12`,
+            borderWidth: 1,
+            borderColor: `${tint}24`,
+          }}
+        >
+          <Ionicons name={getSignalIcon(props.signal.type)} size={20} color={tint} />
+        </View>
+        <View style={{ flex: 1, gap: 6 }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            <Badge label={getTodaySourceLabel(props.signal.source)} tint={tint} soft />
+            <Badge label={getFreshnessLabel(props.signal.freshness)} tint={theme.colors.muted} soft />
+          </View>
+          <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "700" }}>{props.signal.title}</Text>
+          {props.signal.description ? (
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
+              {props.signal.description}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {props.signal.meta ? <Badge label={props.signal.meta} tint={theme.colors.accent} soft /> : null}
+        {props.signal.startAt ? <Badge label={formatSignalWindow(props.signal)} tint={theme.colors.growth} soft /> : null}
+        {props.signal.location ? <Badge label={props.signal.location} tint={theme.colors.calm} soft /> : null}
+      </View>
+    </View>
+  );
+
+  if (!props.onPress) return content;
+
+  return (
+    <Pressable
+      onPress={props.onPress}
+      style={({ pressed }) => ({
+        opacity: pressed ? 0.88 : 1,
+        transform: [{ scale: pressed ? 0.99 : 1 }],
+      })}
+    >
+      {content}
+    </Pressable>
+  );
+}
+
+function AIBriefCard(props: {
+  summary: string;
+  reasons: string[];
+  onActionPress: (action: { actionTarget?: CampusSignal["actionTarget"] }) => void;
+  actions: Array<{ id: string; label: string; reason?: string; actionTarget?: CampusSignal["actionTarget"] }>;
+}) {
+  return (
+    <View
+      style={{
+        padding: 18,
+        borderRadius: theme.radius.xl,
+        backgroundColor: theme.colors.focusSurface,
+        borderWidth: 1,
+        borderColor: `${theme.colors.social}26`,
+        gap: 14,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <View
+          style={{
+            width: 42,
+            height: 42,
+            borderRadius: 15,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: `${theme.colors.social}12`,
+          }}
+        >
+          <Ionicons name="sparkles" size={20} color={theme.colors.social} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.social, fontSize: 12, fontWeight: "800", letterSpacing: 0.7, textTransform: "uppercase" }}>
+            AI Action Brief
+          </Text>
+          <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "700", marginTop: 3 }}>
+            今天先把決策順序排好
+          </Text>
+        </View>
+      </View>
+
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22 }}>
+        {props.summary}
+      </Text>
+
+      <View style={{ gap: 6 }}>
+        {props.reasons.slice(0, 3).map((reason, index) => (
+          <View key={`${reason}-${index}`} style={{ flexDirection: "row", gap: 8 }}>
+            <Text style={{ color: theme.colors.social, fontWeight: "800" }}>{index + 1}.</Text>
+            <Text style={{ color: theme.colors.textSecondary, flex: 1, lineHeight: 20 }}>{reason}</Text>
+          </View>
+        ))}
+      </View>
+
+      {props.actions.length > 0 ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {props.actions.map((action) => (
+            <Pressable
+              key={action.id}
+              onPress={() => props.onActionPress(action)}
+              style={({ pressed }) => ({
+                paddingHorizontal: 12,
+                paddingVertical: 8,
+                borderRadius: theme.radius.full,
+                backgroundColor: pressed ? `${theme.colors.social}18` : `${theme.colors.social}12`,
+                borderWidth: 1,
+                borderColor: `${theme.colors.social}28`,
+              })}
+            >
+              <Text style={{ color: theme.colors.social, fontSize: 12, fontWeight: "700" }}>{action.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function ImportHubCard(props: {
+  personalized: boolean;
+  confirmedArtifactsCount: number;
+  courseCount: number;
+  onImportIcal: () => void;
+  onManualCourse: () => void;
+  onOpenCalendar: () => void;
+}) {
+  const title = props.personalized ? "維持你的 Today 精準度" : "把公開入口升級成你的 Today";
+  const description = props.personalized
+    ? `目前已連動 ${props.courseCount} 門課與 ${props.confirmedArtifactsCount} 份匯入資料。需要時再補上 iCal 或手動課表。`
+    : "先匯入課表、行事曆或手動建立課程，Today 才能真正按你的時間、地點與節奏排序。";
+
+  return (
+    <View
+      style={{
+        padding: 18,
+        borderRadius: theme.radius.xl,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        gap: 14,
+        ...shadowStyle(theme.shadows.sm),
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 16,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: theme.colors.accentSoft,
+          }}
+        >
+          <Ionicons name="download-outline" size={20} color={theme.colors.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "700" }}>{title}</Text>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 6 }}>
+            {description}
+          </Text>
+        </View>
+      </View>
+
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+        <Pressable
+          onPress={props.onImportIcal}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingHorizontal: 12,
+            paddingVertical: 9,
+            borderRadius: theme.radius.full,
+            backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
+          })}
+        >
+          <Ionicons name="calendar-outline" size={16} color="#fff" />
+          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>匯入 iCal</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={props.onManualCourse}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingHorizontal: 12,
+            paddingVertical: 9,
+            borderRadius: theme.radius.full,
+            backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+          })}
+        >
+          <Ionicons name="create-outline" size={16} color={theme.colors.text} />
+          <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: "700" }}>手動課表</Text>
+        </Pressable>
+
+        <Pressable
+          onPress={props.onOpenCalendar}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingHorizontal: 12,
+            paddingVertical: 9,
+            borderRadius: theme.radius.full,
+            backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+          })}
+        >
+          <Ionicons name="open-outline" size={16} color={theme.colors.text} />
+          <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: "700" }}>打開行事曆</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function CrowdPulseCard(props: {
+  reports: CrowdReport[];
+  onQuickReport: (input: {
+    signalType: CrowdReport["signalType"];
+    placeId: string;
+    placeName: string;
+    value: CrowdReport["value"];
+  }) => void;
+}) {
+  const latestByPlace = useMemo(() => {
+    const map = new Map<string, CrowdReport>();
+    for (const report of props.reports) {
+      const key = `${report.signalType}:${report.placeId}`;
+      const existing = map.get(key);
+      if (!existing || new Date(report.createdAt).getTime() > new Date(existing.createdAt).getTime()) {
+        map.set(key, report);
+      }
+    }
+    return map;
+  }, [props.reports]);
+
+  return (
+    <View
+      style={{
+        padding: 18,
+        borderRadius: theme.radius.xl,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        gap: 16,
+        ...shadowStyle(theme.shadows.sm),
+      }}
+    >
+      <View style={{ gap: 6 }}>
+        <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "700" }}>Verified Campus Pulse</Text>
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
+          讓同學回報的學餐排隊、圖書館座位、公車狀況進到 Today，但只保留有時效的資訊。
+        </Text>
+      </View>
+
+      <View style={{ gap: 12 }}>
+        {QUICK_REPORT_PLACES.map((place) => {
+          const latest = latestByPlace.get(`${place.signalType}:${place.placeId}`);
+          return (
+            <View
+              key={`${place.signalType}:${place.placeId}`}
+              style={{
+                borderRadius: theme.radius.lg,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                padding: 14,
+                gap: 10,
+                backgroundColor: theme.colors.surface2,
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>{place.placeName}</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
+                    {latest
+                      ? `最近回報：${latest.value === "high" ? "偏擠" : latest.value === "low" ? "順暢" : "普通"} · ${getFreshnessLabel("new")}`
+                      : "目前還沒有有效回報"}
+                  </Text>
+                </View>
+                {latest ? (
+                  <Badge
+                    label={latest.value === "high" ? "偏擠" : latest.value === "low" ? "順暢" : "普通"}
+                    tint={latest.value === "high" ? theme.colors.warning : latest.value === "low" ? theme.colors.growth : theme.colors.calm}
+                    soft
+                  />
+                ) : null}
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {[
+                  { label: "順暢", value: "low" as const, tint: theme.colors.growth },
+                  { label: "普通", value: "medium" as const, tint: theme.colors.calm },
+                  { label: "偏擠", value: "high" as const, tint: theme.colors.warning },
+                ].map((option) => (
+                  <Pressable
+                    key={option.value}
+                    onPress={() =>
+                      props.onQuickReport({
+                        signalType: place.signalType,
+                        placeId: place.placeId,
+                        placeName: place.placeName,
+                        value: option.value,
+                      })
+                    }
+                    style={({ pressed }) => ({
+                      flex: 1,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      paddingVertical: 9,
+                      borderRadius: theme.radius.md,
+                      backgroundColor: pressed ? `${option.tint}18` : `${option.tint}10`,
+                      borderWidth: 1,
+                      borderColor: `${option.tint}25`,
+                    })}
+                  >
+                    <Text style={{ color: option.tint, fontSize: 12, fontWeight: "700" }}>{option.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+function ImportPreviewModal(props: {
+  visible: boolean;
+  artifact: ImportedArtifact | null;
+  selectedIds: Set<string>;
+  onToggle: (id: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const selectedCount = props.artifact?.parsedEntities.filter((entity) => props.selectedIds.has(entity.id)).length ?? 0;
+
+  return (
+    <Modal visible={props.visible} animationType="slide" transparent onRequestClose={props.onClose}>
+      <View style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: "flex-end" }}>
+        <View
+          style={{
+            borderTopLeftRadius: theme.radius.xl,
+            borderTopRightRadius: theme.radius.xl,
+            backgroundColor: theme.colors.surface,
+            paddingHorizontal: 20,
+            paddingTop: 20,
+            paddingBottom: 30,
+            gap: 16,
+            maxHeight: "80%",
+          }}
+        >
+          <View style={{ gap: 6 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "700" }}>確認匯入內容</Text>
+            <Text style={{ color: theme.colors.textSecondary, lineHeight: 20 }}>
+              逐筆勾選你要納入 Today 的事件。只有你確認過的項目才會成為個人化訊號。
+            </Text>
+          </View>
+
+          <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+            <View style={{ gap: 10 }}>
+              {props.artifact?.parsedEntities.map((entity) => {
+                const checked = props.selectedIds.has(entity.id);
+                return (
+                  <Pressable
+                    key={entity.id}
+                    onPress={() => props.onToggle(entity.id)}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: 14,
+                      borderRadius: theme.radius.lg,
+                      borderWidth: 1,
+                      borderColor: checked ? `${theme.colors.accent}45` : theme.colors.border,
+                      backgroundColor: checked ? theme.colors.focusSurface : theme.colors.surface2,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 12,
+                        borderWidth: 2,
+                        borderColor: checked ? theme.colors.accent : theme.colors.muted,
+                        backgroundColor: checked ? theme.colors.accent : "transparent",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {checked ? <Ionicons name="checkmark" size={15} color="#fff" /> : null}
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{entity.title}</Text>
+                      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
+                        {[entity.startTime, entity.endTime ? `- ${entity.endTime}` : null, entity.location].filter(Boolean).join(" ")}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </ScrollView>
+
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable
+              onPress={props.onClose}
+              style={({ pressed }) => ({
+                flex: 1,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingVertical: 12,
+                borderRadius: theme.radius.md,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+              })}
+            >
+              <Text style={{ color: theme.colors.text, fontWeight: "700" }}>取消</Text>
+            </Pressable>
+            <Pressable
+              onPress={props.onConfirm}
+              style={({ pressed }) => ({
+                flex: 1.4,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingVertical: 12,
+                borderRadius: theme.radius.md,
+                backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
+              })}
+            >
+              <Text style={{ color: "#fff", fontWeight: "700" }}>匯入選中的 {selectedCount} 筆</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ManualCourseModal(props: {
+  visible: boolean;
+  draft: ManualCourseDraft;
+  onChange: (next: ManualCourseDraft) => void;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <Modal visible={props.visible} animationType="slide" transparent onRequestClose={props.onClose}>
+      <View style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: "flex-end" }}>
+        <View
+          style={{
+            borderTopLeftRadius: theme.radius.xl,
+            borderTopRightRadius: theme.radius.xl,
+            backgroundColor: theme.colors.surface,
+            paddingHorizontal: 20,
+            paddingTop: 20,
+            paddingBottom: 30,
+            gap: 16,
+          }}
+        >
+          <View style={{ gap: 6 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "700" }}>手動建立課表</Text>
+            <Text style={{ color: theme.colors.textSecondary, lineHeight: 20 }}>
+              這會同時建立你的課程資料與一份已確認的匯入紀錄。
+            </Text>
+          </View>
+
+          <View style={{ gap: 12 }}>
+            {[
+              { key: "title", label: "課程名稱", placeholder: "例如：英文聽講" },
+              { key: "location", label: "地點", placeholder: "例如：任垣樓 201" },
+              { key: "instructor", label: "授課教師", placeholder: "例如：王老師" },
+              { key: "startTime", label: "開始時間", placeholder: "08:10" },
+              { key: "endTime", label: "結束時間", placeholder: "09:00" },
+            ].map((field) => (
+              <View key={field.key} style={{ gap: 6 }}>
+                <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: "700" }}>{field.label}</Text>
+                <TextInput
+                  value={props.draft[field.key as keyof ManualCourseDraft] as string}
+                  onChangeText={(value) =>
+                    props.onChange({
+                      ...props.draft,
+                      [field.key]: value,
+                    })
+                  }
+                  placeholder={field.placeholder}
+                  placeholderTextColor={theme.colors.muted}
+                  style={{
+                    borderRadius: theme.radius.md,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    color: theme.colors.text,
+                    backgroundColor: theme.colors.surface2,
+                  }}
+                />
+              </View>
+            ))}
+
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: "700" }}>星期</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {WEEKDAYS.map((label, index) => (
+                  <Pressable
+                    key={label}
+                    onPress={() => props.onChange({ ...props.draft, dayOfWeek: index })}
+                    style={({ pressed }) => ({
+                      paddingHorizontal: 12,
+                      paddingVertical: 9,
+                      borderRadius: theme.radius.full,
+                      backgroundColor:
+                        props.draft.dayOfWeek === index
+                          ? theme.colors.accent
+                          : pressed
+                            ? theme.colors.surface2
+                            : theme.colors.surface,
+                      borderWidth: 1,
+                      borderColor:
+                        props.draft.dayOfWeek === index ? theme.colors.accent : theme.colors.border,
+                    })}
+                  >
+                    <Text
+                      style={{
+                        color: props.draft.dayOfWeek === index ? "#fff" : theme.colors.text,
+                        fontWeight: "700",
+                      }}
+                    >
+                      {label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </View>
+
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable
+              onPress={props.onClose}
+              style={({ pressed }) => ({
+                flex: 1,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingVertical: 12,
+                borderRadius: theme.radius.md,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+              })}
+            >
+              <Text style={{ color: theme.colors.text, fontWeight: "700" }}>取消</Text>
+            </Pressable>
+            <Pressable
+              onPress={props.onSubmit}
+              style={({ pressed }) => ({
+                flex: 1.4,
+                alignItems: "center",
+                justifyContent: "center",
+                paddingVertical: 12,
+                borderRadius: theme.radius.md,
+                backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
+              })}
+            >
+              <Text style={{ color: "#fff", fontWeight: "700" }}>建立課程</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+export function TodayScreen(props: { navigation?: CampusNavigation }) {
   const nav = props?.navigation;
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
   const schedule = useSchedule();
-  const streakStorageKey = useMemo(
-    () => getScopedStorageKey("streak", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+  const storageContext = useMemo(
+    () => ({ uid: auth.user?.uid ?? null, schoolId: school.id }),
     [auth.user?.uid, school.id]
   );
+  const streakStorageKey = useMemo(
+    () => getScopedStorageKey("streak", storageContext),
+    [storageContext]
+  );
 
-  const [streakDays, setStreakDays] = useState<number>(0);
+  const [streakDays, setStreakDays] = useState(0);
+  const [importedArtifacts, setImportedArtifacts] = useState<ImportedArtifact[]>([]);
+  const [crowdReports, setCrowdReports] = useState<CrowdReport[]>([]);
+  const [pendingImportArtifact, setPendingImportArtifact] = useState<ImportedArtifact | null>(null);
+  const [selectedImportIds, setSelectedImportIds] = useState<Set<string>>(new Set());
+  const [showManualCourseModal, setShowManualCourseModal] = useState(false);
+  const [manualCourseDraft, setManualCourseDraft] = useState<ManualCourseDraft>({
+    title: "",
+    location: "",
+    instructor: "",
+    dayOfWeek: 1,
+    startTime: "08:10",
+    endTime: "09:00",
+  });
   const streakPulse = useRef(new Animated.Value(1)).current;
 
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
   const roleCopy = roleSummary(roleMode);
-  const teachingMode = isTeachingRole(auth.profile?.role);
   const segment = getTimeSegment();
   const displayName = auth.profile?.displayName?.split(" ")[0];
-  const roleFallbackName =
-    roleMode === "teacher" ? "老師" : roleMode === "admin" ? "主管" : roleMode === "guest" ? "你" : "同學";
+  const roleFallbackName = roleMode === "guest" ? "你" : "同學";
 
-  const { items: inboxTasks, loading: inboxLoading, refresh: refreshInbox, refreshing } = useAsyncList<InboxTask>(
+  const { items: inboxTasks, refresh: refreshInbox, refreshing: inboxRefreshing } = useAsyncList<InboxTask>(
     async () => {
       if (!auth.user) return [];
       return ds.listInboxTasks(auth.user.uid, school.id);
@@ -284,56 +902,42 @@ export function TodayScreen(props: any) {
     [auth.user?.uid, ds, school.id]
   );
 
-  const { items: announcements } = useAsyncList(
-    async () => (await ds.listAnnouncements(school.id)).slice(0, 2),
+  const { items: announcements, refresh: refreshAnnouncements } = useAsyncList(
+    async () => (await ds.listAnnouncements(school.id)).slice(0, 3),
     [ds, school.id]
   );
 
-  const { items: events } = useAsyncList<ClubEvent>(
-    async () => (await ds.listEvents(school.id)).slice(0, 2),
+  const { items: events, refresh: refreshEvents } = useAsyncList<ClubEvent>(
+    async () =>
+      (await ds.listEvents(school.id))
+        .filter((event) => {
+          const startsAt = new Date(event.startsAt);
+          return !Number.isNaN(startsAt.getTime()) && startsAt.getTime() >= Date.now() - 1000 * 60 * 60;
+        })
+        .slice(0, 3),
     [ds, school.id]
   );
 
-  const { items: menus } = useAsyncList<MenuItem>(
+  const { items: menus, refresh: refreshMenus } = useAsyncList<MenuItem>(
     async () => (await ds.listMenus(school.id)).slice(0, 3),
     [ds, school.id]
   );
 
-  const rankedInboxItems = useMemo(
-    () => inboxTasks.map(toInboxItem).sort((a, b) => a.priority - b.priority),
-    [inboxTasks]
-  );
+  const loadLocalSignals = useCallback(async () => {
+    const [artifacts, reports] = await Promise.all([
+      listImportedArtifacts(storageContext),
+      listCrowdReports(storageContext),
+    ]);
+    setImportedArtifacts(artifacts);
+    setCrowdReports(reports);
+  }, [storageContext]);
 
-  // Hero Action — 最重要的下一步（注意瓶頸理論）
-  const nextAction = useMemo(() => {
-    if (!auth.user) return null;
-    return rankedInboxItems[0] ?? null;
-  }, [auth.user, rankedInboxItems]);
+  useEffect(() => {
+    loadLocalSignals().catch(() => void 0);
+  }, [loadLocalSignals]);
 
-  const nextCourse = useMemo(() => getNextCourse(schedule.courses), [schedule.courses]);
-  const todayCourses = useMemo(() => getTodayCourses(schedule.courses), [schedule.courses]);
-
-  // 今日截止任務（Zeigarnik Effect）
-  const dueTodayTasks = useMemo(() => {
-    const today = new Date();
-    return inboxTasks
-      .filter((t) => {
-        if (!t.dueAt) return false;
-        const d = new Date(t.dueAt);
-        return d.getFullYear() === today.getFullYear() &&
-          d.getMonth() === today.getMonth() &&
-          d.getDate() === today.getDate();
-      })
-      .map(toInboxItem)
-      .slice(0, 3);
-  }, [inboxTasks]);
-
-  // ────────────────────────────────────────────────
-  // Micro Rewards: 每日首次開啟更新 streak
-  // ────────────────────────────────────────────────
   useEffect(() => {
     const legacyStreakKey = "campus.streak.v1";
-
     type StreakData = {
       currentStreak: number;
       longestStreak: number;
@@ -353,7 +957,7 @@ export function TodayScreen(props: any) {
               totalDays: 0,
             };
 
-        const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+        const today = new Date().toISOString().split("T")[0];
         if (existing.lastLoginDate === today) {
           setStreakDays(existing.currentStreak);
           return;
@@ -361,7 +965,6 @@ export function TodayScreen(props: any) {
 
         const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
         const newStreak = existing.lastLoginDate === yesterday ? existing.currentStreak + 1 : 1;
-
         const updated: StreakData = {
           currentStreak: newStreak,
           longestStreak: Math.max(existing.longestStreak, newStreak),
@@ -372,12 +975,12 @@ export function TodayScreen(props: any) {
         await AsyncStorage.setItem(streakStorageKey, JSON.stringify(updated));
         setStreakDays(updated.currentStreak);
 
-        // haptic + 小動畫：每日首次打開的正向回饋
         try {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         } catch {
-          // ignore haptics failures (e.g. platform)
+          // ignore
         }
+
         streakPulse.setValue(1);
         Animated.sequence([
           Animated.timing(streakPulse, { toValue: 1.12, duration: 220, useNativeDriver: true }),
@@ -391,18 +994,61 @@ export function TodayScreen(props: any) {
     update();
   }, [streakPulse, streakStorageKey]);
 
-  // 高優先任務（顯示在收件匣摘要）
-  const urgentTasks = useMemo(() =>
-    rankedInboxItems.slice(0, 3),
-    [rankedInboxItems]
+  const rankedInboxItems = useMemo(
+    () => inboxTasks.map(toInboxItem).sort((a, b) => a.priority - b.priority),
+    [inboxTasks]
   );
 
-  const handleNextActionPress = () => {
+  const urgentInboxItems = useMemo(() => rankedInboxItems.slice(0, 3), [rankedInboxItems]);
+  const todayCourses = useMemo(() => getTodayCourses(schedule.courses), [schedule.courses]);
+  const confirmedArtifacts = useMemo(
+    () => importedArtifacts.filter((artifact) => artifact.userConfirmedAt),
+    [importedArtifacts]
+  );
+  const personalizedReady = todayCourses.length > 0 || confirmedArtifacts.length > 0;
+
+  const campusSignals = useMemo(
+    () =>
+      buildCampusSignals({
+        schoolId: school.id,
+        announcements,
+        events,
+        menus,
+        courses: schedule.courses,
+        importedArtifacts,
+        crowdReports,
+      }),
+    [announcements, crowdReports, events, importedArtifacts, menus, schedule.courses, school.id]
+  );
+
+  const aiBrief = useMemo(
+    () =>
+      buildTodayActionBrief({
+        signals: campusSignals,
+        importedArtifacts,
+        userName: displayName ?? roleFallbackName,
+        role: auth.profile?.role,
+        schoolName: school.shortName ?? school.name,
+      }),
+    [auth.profile?.role, campusSignals, displayName, importedArtifacts, roleFallbackName, school.name, school.shortName]
+  );
+
+  const nextAction = useMemo(() => rankedInboxItems[0] ?? null, [rankedInboxItems]);
+  const heroSignal = useMemo(
+    () => campusSignals.find((signal) => signal.source === "user_import" || signal.type === "course") ?? campusSignals[0] ?? null,
+    [campusSignals]
+  );
+
+  const highPressureCount = rankedInboxItems.filter(
+    (item) => item.urgency === "critical" || item.urgency === "high"
+  ).length;
+
+  const handleNextActionPress = useCallback(() => {
     if (!nextAction) return;
     if (nextAction.kind === "live" && nextAction.sessionId) {
       nav?.navigate?.("課程", {
         screen: "Classroom",
-        params: { groupId: nextAction.groupId, sessionId: nextAction.sessionId, isTeacher: teachingMode },
+        params: { groupId: nextAction.groupId, sessionId: nextAction.sessionId },
       });
       return;
     }
@@ -417,74 +1063,147 @@ export function TodayScreen(props: any) {
       screen: "GroupDetail",
       params: { groupId: nextAction.groupId },
     });
-  };
+  }, [nav, nextAction]);
 
   const handleRefresh = useCallback(async () => {
-    await Promise.all([refreshInbox(), schedule.refreshSchedule()]);
-  }, [refreshInbox, schedule.refreshSchedule]);
+    await Promise.all([
+      refreshInbox(),
+      refreshAnnouncements(),
+      refreshEvents(),
+      refreshMenus(),
+      schedule.refreshSchedule(),
+      loadLocalSignals(),
+    ]);
+  }, [loadLocalSignals, refreshAnnouncements, refreshEvents, refreshInbox, refreshMenus, schedule]);
 
-  // 情境感知的次要卡片（Context-Dependent Memory）
-  const contextCard = useMemo(() => {
-    if (segment === "morning") {
-      return {
-        icon: "newspaper-outline" as const,
-        title: announcements[0]?.title ?? "今天的校園公告",
-        description: announcements[0]?.body?.slice(0, 60) ?? "查看今日最新校園資訊與通知",
-        meta: "早晨公告",
-        tint: theme.colors.fresh,
-        onPress: () => nav?.navigate?.("公告總覽"),
-      };
+  const handlePickIcal = useCallback(async () => {
+    try {
+      const calendar = await pickAndParseICalFile();
+      if (!calendar || calendar.events.length === 0) return;
+      const artifact = createImportedArtifactFromCalendar(calendar);
+      setPendingImportArtifact(artifact);
+      setSelectedImportIds(new Set());
+      analytics.logFeatureUsed("today_import_ical_preview", { count: artifact.parsedEntities.length });
+    } catch (error: unknown) {
+      Alert.alert("匯入失敗", getErrorMessage(error, "無法解析 iCal 檔案"));
     }
-    if (segment === "class" || segment === "afternoon") {
-      return {
-        icon: "cafe-outline" as const,
-        title: menus[0]?.name ?? "今日餐廳菜單",
-        description: menus[0]
-          ? `${menus[0].cafeteria ?? "學餐"}${menus[0].price ? ` · NT$${menus[0].price}` : ""}`
-          : "查看今日午餐和下午茶選項",
-        meta: "餐廳",
-        tint: theme.colors.achievement,
-        onPress: () => nav?.navigate?.("校園", { screen: "餐廳總覽" }),
-      };
+  }, []);
+
+  const handleConfirmImport = useCallback(async () => {
+    if (!pendingImportArtifact) return;
+    const parsedEntities = pendingImportArtifact.parsedEntities.filter((entity) => selectedImportIds.has(entity.id));
+
+    if (parsedEntities.length === 0) {
+      Alert.alert("尚未選擇項目", "請至少勾選一筆確認後再匯入。");
+      return;
     }
-    if (segment === "evening") {
-      return {
-        icon: "calendar-outline" as const,
-        title: events[0]?.title ?? "近期校園活動",
-        description: events[0]?.description?.slice(0, 60) ?? "探索今晚和週末的校園活動",
-        meta: "活動",
-        tint: theme.colors.social,
-        onPress: () => nav?.navigate?.("活動總覽"),
-      };
-    }
-    return {
-      icon: "bus-outline" as const,
-      title: "公車班次",
-      description: "查看回家班車或夜間校園公車時刻",
-      meta: "交通",
-      tint: theme.colors.calm,
-      onPress: () => nav?.navigate?.("校園", { screen: "BusSchedule" }),
+
+    const confirmedArtifact: ImportedArtifact = {
+      ...pendingImportArtifact,
+      parsedEntities,
+      userConfirmedAt: new Date().toISOString(),
     };
-  }, [segment, announcements, menus, events]);
 
-  // 今日壓力摘要：沒有可靠完成態時，優先誠實呈現待處理壓力
-  const highPressureCount = rankedInboxItems.filter(
-    (item) => item.urgency === "critical" || item.urgency === "high"
-  ).length;
-  const totalToday = inboxTasks.length;
-  const completionText =
-    totalToday > 0
-      ? highPressureCount > 0
-        ? `${highPressureCount} 件高壓事項待處理`
-        : `已整理 ${totalToday} 件事項`
-      : "今天沒有需要你立刻處理的事項";
+    const next = await appendImportedArtifact(confirmedArtifact, storageContext);
+    setImportedArtifacts(next);
+    setPendingImportArtifact(null);
+    setSelectedImportIds(new Set());
+    analytics.logFeatureUsed("today_import_ical_confirmed", { count: parsedEntities.length });
+    Alert.alert("匯入完成", `已新增 ${parsedEntities.length} 筆已確認的個人資料。`);
+  }, [pendingImportArtifact, selectedImportIds, storageContext]);
+
+  const handleCreateManualCourse = useCallback(async () => {
+    if (!manualCourseDraft.title.trim()) {
+      Alert.alert("缺少課程名稱", "請先填入課程名稱。");
+      return;
+    }
+
+    const course: Course = {
+      id: `manual-course-${Date.now()}`,
+      code: "MANUAL",
+      name: manualCourseDraft.title.trim(),
+      instructor: manualCourseDraft.instructor.trim() || "自行建立",
+      teacher: manualCourseDraft.instructor.trim() || "自行建立",
+      credits: 0,
+      semester: "自訂",
+      location: manualCourseDraft.location.trim() || "未設定地點",
+      dayOfWeek: manualCourseDraft.dayOfWeek,
+      startTime: manualCourseDraft.startTime,
+      endTime: manualCourseDraft.endTime,
+      schoolId: school.id,
+      schedule: [
+        {
+          dayOfWeek: manualCourseDraft.dayOfWeek,
+          startTime: manualCourseDraft.startTime,
+          endTime: manualCourseDraft.endTime,
+          location: manualCourseDraft.location.trim() || "未設定地點",
+        },
+      ],
+    };
+
+    try {
+      await schedule.addCourse(course);
+      const artifact = createManualCourseArtifact({
+        title: manualCourseDraft.title.trim(),
+        location: manualCourseDraft.location.trim(),
+        dayOfWeek: manualCourseDraft.dayOfWeek,
+        startTime: manualCourseDraft.startTime,
+        endTime: manualCourseDraft.endTime,
+      });
+      const confirmedArtifact: ImportedArtifact = {
+        ...artifact,
+        userConfirmedAt: new Date().toISOString(),
+      };
+      const next = await appendImportedArtifact(confirmedArtifact, storageContext);
+      setImportedArtifacts(next);
+      setShowManualCourseModal(false);
+      setManualCourseDraft({
+        title: "",
+        location: "",
+        instructor: "",
+        dayOfWeek: 1,
+        startTime: "08:10",
+        endTime: "09:00",
+      });
+      analytics.logFeatureUsed("today_manual_course_added", { schoolId: school.id });
+      Alert.alert("課程已建立", "這門課現在會出現在你的 Today 與課表中。");
+    } catch (error: unknown) {
+      Alert.alert("建立失敗", getErrorMessage(error, "課程時間可能與既有項目衝突。"));
+    }
+  }, [manualCourseDraft, schedule, school.id, storageContext]);
+
+  const handleQuickReport = useCallback(
+    async (input: {
+      signalType: CrowdReport["signalType"];
+      placeId: string;
+      placeName: string;
+      value: CrowdReport["value"];
+    }) => {
+      const report = createCrowdReport({
+        schoolId: school.id,
+        signalType: input.signalType,
+        placeId: input.placeId,
+        placeName: input.placeName,
+        value: input.value,
+        reporterReputation: auth.user ? 0.82 : 0.58,
+      });
+      const next = await appendCrowdReport(report, storageContext);
+      setCrowdReports(next);
+      analytics.logFeatureUsed("today_quick_report", {
+        signal_type: input.signalType,
+        place_id: input.placeId,
+        value: input.value,
+      });
+    },
+    [auth.user, school.id, storageContext]
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
         refreshControl={
           <RefreshControl
-            refreshing={refreshing || schedule.loading}
+            refreshing={inboxRefreshing || schedule.loading}
             onRefresh={handleRefresh}
             tintColor={theme.colors.accent}
             colors={[theme.colors.accent]}
@@ -493,40 +1212,38 @@ export function TodayScreen(props: any) {
         contentContainerStyle={{
           paddingTop: insets.top + 8,
           paddingHorizontal: 16,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 8,
+          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 12,
           gap: 20,
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── 情境標頭 ─── */}
         <View style={{ gap: 12 }}>
-          {/* 日期 + Streak */}
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <Text style={{ color: theme.colors.muted, fontSize: 13, fontWeight: "500" }}>
-              {getDateString()}
-            </Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 13, fontWeight: "500" }}>{getDateString()}</Text>
             <Animated.View style={{ transform: [{ scale: streakPulse }] }}>
               <StreakBadge days={streakDays} />
             </Animated.View>
           </View>
 
-          {/* 問候 + 進度摘要 */}
           <View style={{ gap: 4 }}>
-            <Text style={{
-              color: theme.colors.text,
-              fontSize: theme.typography.display.fontSize,
-              fontWeight: theme.typography.display.fontWeight ?? "800",
-              letterSpacing: theme.typography.display.letterSpacing,
-            }}>
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontSize: theme.typography.display.fontSize,
+                fontWeight: theme.typography.display.fontWeight ?? "800",
+                letterSpacing: theme.typography.display.letterSpacing,
+              }}
+            >
               {getGreeting()}，{displayName ?? roleFallbackName}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 14, lineHeight: 21 }}>
-              {totalToday > 0 ? completionText : roleCopy.hint}
+              {personalizedReady
+                ? `${school.name} · ${segment === "morning" ? "先看接下來的時間節點" : segment === "evening" ? "把今天收尾、把明天排好" : "把校務、移動與生活節奏放在同一頁"}`
+                : `${school.name} · ${roleCopy.hint}`}
             </Text>
           </View>
 
-          {/* 壓力條：讓高壓比例可視，而不是假裝知道完成率 */}
-          {totalToday > 0 && (
+          {rankedInboxItems.length > 0 ? (
             <View style={{ gap: 6 }}>
               <View
                 style={{
@@ -543,203 +1260,197 @@ export function TodayScreen(props: any) {
                     backgroundColor:
                       highPressureCount === 0
                         ? theme.colors.growth
-                        : highPressureCount === totalToday
+                        : highPressureCount === rankedInboxItems.length
                           ? theme.colors.urgent
                           : theme.colors.warning,
-                    width: `${
-                      highPressureCount === 0
-                        ? 100
-                        : Math.max((highPressureCount / totalToday) * 100, 12)
-                    }%`,
+                    width: `${Math.max((highPressureCount / rankedInboxItems.length) * 100, highPressureCount > 0 ? 12 : 100)}%`,
                   }}
                 />
               </View>
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                {highPressureCount > 0
+                  ? `目前有 ${highPressureCount} 件高壓事項，Today 會優先把它們排在前面`
+                  : "目前沒有高壓事項，Today 以你的課程與校園情境排序"}
+              </Text>
             </View>
-          )}
+          ) : null}
         </View>
 
-        {/* ─── Hero Action Card（注意瓶頸理論：單一焦點） ─── */}
-        {!auth.user ? (
+        {!personalizedReady ? (
+          <ContextStrip
+            eyebrow="Public Mode"
+            title="目前先用公開資料模式運作"
+            description="你已經能看公告、活動、餐廳與 campus pulse，但匯入課表或行事曆後，Today 才會真正按你的節奏排序。"
+            right={<Badge label="等待個人資料" tint={theme.colors.warning} soft />}
+          />
+        ) : (
+          <ContextStrip
+            eyebrow="Student OS"
+            title="Today 已進入個人化模式"
+            description={`目前已整合 ${todayCourses.length} 門課、${confirmedArtifacts.length} 份匯入資料，並持續用校園公開資訊與同學回報補強決策。`}
+            right={<Badge label={`${campusSignals.length} 個有效訊號`} tint={theme.colors.accent} soft />}
+          />
+        )}
+
+        {!personalizedReady ? (
           <HeroActionCard
-            icon="school-outline"
-            eyebrow="開始你的校園體驗"
-            title="選學校，建立你的日常節奏"
-            description="選好學校和身份後，Campus 會自動整理你的課程、截止日、公告和校園服務。"
-            actionLabel="立即設定"
-            onPress={() => nav?.navigate?.("我的", { screen: "SSOLogin" })}
+            icon="download-outline"
+            eyebrow="建立你的第一個 daily reason"
+            title="先把課表或 iCal 接進來"
+            description="不要只停在公開資訊。只要你確認過一份課表或行事曆，Today 就能開始幫你排先後順序。"
+            meta="等待匯入"
+            tone="accent"
+            actionLabel="現在開始"
+            onPress={handlePickIcal}
           />
         ) : nextAction ? (
           <HeroActionCard
-            icon={nextAction.kind === "live" ? "pulse" : nextAction.kind === "group" ? "people" : "document-text"}
-            eyebrow="下一步"
+            icon={
+              nextAction.kind === "live"
+                ? "pulse"
+                : getInboxIntent(nextAction) === "reply"
+                  ? "chatbubble-ellipses"
+                  : "document-text"
+            }
+            eyebrow={`收件匣 · ${getActionLabel(getInboxIntent(nextAction))}`}
             title={nextAction.title}
-            description={nextAction.reason}
-            meta={nextAction.dueAt ? formatDueWindow(new Date(nextAction.dueAt)) : undefined}
+            description={nextAction.reason ?? toInboxItem(nextAction).reason ?? "這件事會影響你接下來的節奏"}
+            meta={nextAction.dueAt ? formatDueWindow(new Date(nextAction.dueAt)) : "等待處理"}
             tone={
-              nextAction.urgency === "critical"
+              getInboxUrgency(nextAction) === "critical"
                 ? "danger"
-                : nextAction.urgency === "high"
+                : getInboxUrgency(nextAction) === "high"
                   ? "warning"
                   : "accent"
             }
-            actionLabel={nextAction.actionLabel ?? "前往處理"}
+            actionLabel={nextAction.actionLabel ?? getActionLabel(getInboxIntent(nextAction))}
             onPress={handleNextActionPress}
           />
+        ) : heroSignal ? (
+          <HeroActionCard
+            icon={getSignalIcon(heroSignal.type)}
+            eyebrow={`${getTodaySourceLabel(heroSignal.source)} · 下一步`}
+            title={heroSignal.title}
+            description={heroSignal.description ?? "這是你現在最值得先看的校園節點"}
+            meta={getFreshnessLabel(heroSignal.freshness)}
+            tone={heroSignal.source === "crowd_verified" ? "success" : heroSignal.type === "announcement" ? "warning" : "accent"}
+            actionLabel="前往查看"
+            onPress={() => handleActionTarget(nav, heroSignal.actionTarget)}
+          />
         ) : (
-          roleMode === "teacher" ? (
-            <CompletionState
-              title="目前沒有待批改或待發布的課務"
-              description="可以回到課程中樞整理教材、檢查點名，或提前安排下一堂課。"
-              actionLabel="打開課程中樞"
-              onPress={() => nav?.navigate?.("課程", { screen: "CourseHub" })}
-            />
-          ) : roleMode === "admin" ? (
-            <CompletionState
-              title="目前沒有需要立刻介入的校務事項"
-              description="可以前往管理控制台檢查公告、活動與成員權限狀態。"
-              actionLabel="打開管理台"
-              onPress={() => nav?.navigate?.("我的", { screen: "AdminDashboard" })}
-            />
-          ) : (
-            <CompletionState
-              title="今天的主任務都完成了"
-              description="目前沒有急需處理的事項。可以看看課程進度或規劃明天。"
-              actionLabel="查看課程"
-              onPress={() => nav?.navigate?.("課程", { screen: "CoursesHome" })}
-            />
-          )
+          <CompletionState
+            title="今天沒有需要立刻處理的節點"
+            description="你已經把急迫事項清掉了。接下來可以補齊個人資料，讓 Tomorrow 也開始變聰明。"
+            actionLabel="打開行事曆"
+            onPress={() => nav?.navigate?.("課程", { screen: "Calendar" })}
+          />
         )}
 
-        {/* ─── 今日課表時間軸 ─── */}
-        {todayCourses.length > 0 && (
-          <View
-            style={{
-              backgroundColor: theme.colors.surface,
-              borderRadius: theme.radius.xl,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              padding: 16,
-              gap: 0,
-              ...shadowStyle(theme.shadows.sm),
-            }}
-          >
-            <SectionLabel>今日課程</SectionLabel>
-            <View>
-              {todayCourses.map((course, i) => {
-                const now = new Date();
-                const nowMinutes = now.getHours() * 60 + now.getMinutes();
-                const isNow = false;
-                const isDone = false;
-                return (
-                  <View key={course.id ?? i}>
-                    <CourseTimelineItem
-                      name={course.name}
-                      teacher={course.teacher ?? course.instructor}
-                      location={course.location}
-                      time={course.startTime ?? course.schedule?.[0]?.startTime}
-                      isNow={isNow}
-                      isDone={isDone}
-                      onPress={() => nav?.navigate?.("課程", { screen: "CourseHub" })}
-                    />
-                    {i < todayCourses.length - 1 && (
-                      <View
-                        style={{
-                          height: 1,
-                          backgroundColor: theme.colors.border,
-                          marginLeft: 30,
-                        }}
-                      />
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-            {nextCourse && (
-              <Pressable
-                onPress={() => nav?.navigate?.("課程", { screen: "CourseSchedule" })}
-                style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 4 }}
-              >
-                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>查看完整課表</Text>
-                <Ionicons name="arrow-forward" size={12} color={theme.colors.accent} />
-              </Pressable>
-            )}
-          </View>
-        )}
+        {aiBrief ? (
+          <AIBriefCard
+            summary={aiBrief.summary}
+            reasons={aiBrief.reasons}
+            actions={aiBrief.suggestedActions}
+            onActionPress={(action) => handleActionTarget(nav, action.actionTarget)}
+          />
+        ) : null}
 
-        {/* ─── 收件匣摘要（Zeigarnik Effect） ─── */}
-        {auth.user && urgentTasks.length > 0 && (
-          <View
-            style={{
-              backgroundColor: theme.colors.surface,
-              borderRadius: theme.radius.xl,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              padding: 16,
-              ...shadowStyle(theme.shadows.sm),
-            }}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
-              <SectionLabel>待處理事項</SectionLabel>
-              {inboxTasks.length > 3 && (
-                <Pressable onPress={() => nav?.navigate?.("收件匣", { screen: "Inbox" })}>
-                  <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>
-                    全部 {inboxTasks.length} 件
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-            {urgentTasks.map((task, i) => (
-              <View key={task.groupId + i}>
-                <InboxTaskRow
-                  title={task.title}
-                  label={task.kind === "live" ? "課堂" : task.kind === "assignment" ? "作業" : "群組"}
-                  dueAt={task.dueAt ? formatDueWindow(new Date(task.dueAt)) : undefined}
-                  urgency={task.urgency}
-                  onPress={() => {
-                    if (task.kind === "live" && task.sessionId) {
-                      nav?.navigate?.("課程", {
-                        screen: "Classroom",
-                        params: { groupId: task.groupId, sessionId: task.sessionId, isTeacher: teachingMode },
-                      });
-                    } else if (task.assignmentId) {
-                      nav?.navigate?.("收件匣", { screen: "AssignmentDetail", params: { groupId: task.groupId, assignmentId: task.assignmentId } });
-                    } else {
-                      nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: task.groupId } });
-                    }
-                  }}
-                />
-                {i < urgentTasks.length - 1 && (
-                  <View style={{ height: 1, backgroundColor: theme.colors.border }} />
-                )}
-              </View>
+        <ImportHubCard
+          personalized={personalizedReady}
+          confirmedArtifactsCount={confirmedArtifacts.length}
+          courseCount={schedule.courses.length}
+          onImportIcal={handlePickIcal}
+          onManualCourse={() => setShowManualCourseModal(true)}
+          onOpenCalendar={() => nav?.navigate?.("課程", { screen: "Calendar" })}
+        />
+
+        {campusSignals.length > 0 ? (
+          <View style={{ gap: 10 }}>
+            <SectionLabel>Today Intelligence</SectionLabel>
+            {campusSignals.slice(0, 5).map((signal) => (
+              <CampusSignalCard
+                key={signal.id}
+                signal={signal}
+                onPress={() => handleActionTarget(nav, signal.actionTarget)}
+              />
             ))}
           </View>
-        )}
+        ) : null}
 
-        {/* ─── 情境服務卡片（Context-Dependent Memory） ─── */}
-        <View style={{ gap: 10 }}>
-          <SectionLabel>校園情境</SectionLabel>
+        {auth.user && urgentInboxItems.length > 0 ? (
+          <View style={{ gap: 10 }}>
+            <SectionLabel>待處理事項</SectionLabel>
+            <View
+              style={{
+                padding: 16,
+                borderRadius: theme.radius.xl,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                ...shadowStyle(theme.shadows.sm),
+              }}
+            >
+              <View style={{ gap: 12 }}>
+                {urgentInboxItems.map((item, index) => (
+                  <Pressable
+                    key={`${item.groupId}-${index}`}
+                    onPress={() => {
+                      const normalized = toInboxItem(item);
+                      if (normalized.kind === "live" && normalized.sessionId) {
+                        nav?.navigate?.("課程", {
+                          screen: "Classroom",
+                          params: { groupId: normalized.groupId, sessionId: normalized.sessionId },
+                        });
+                      } else if (normalized.assignmentId) {
+                        nav?.navigate?.("收件匣", {
+                          screen: "AssignmentDetail",
+                          params: { groupId: normalized.groupId, assignmentId: normalized.assignmentId },
+                        });
+                      } else {
+                        nav?.navigate?.("收件匣", {
+                          screen: "GroupDetail",
+                          params: { groupId: normalized.groupId },
+                        });
+                      }
+                    }}
+                    style={({ pressed }) => ({
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 12,
+                      opacity: pressed ? 0.82 : 1,
+                    })}
+                  >
+                    <View
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 5,
+                        backgroundColor:
+                          item.urgency === "critical"
+                            ? theme.colors.urgent
+                            : item.urgency === "high"
+                              ? theme.colors.warning
+                              : item.urgency === "medium"
+                                ? theme.colors.accent
+                                : theme.colors.muted,
+                      }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>{item.title}</Text>
+                      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
+                        {item.reason ?? item.nextStep ?? "查看細節"}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </View>
+        ) : null}
 
-          <TimelineCard
-            icon={contextCard.icon}
-            title={contextCard.title}
-            description={contextCard.description}
-            meta={contextCard.meta}
-            tint={contextCard.tint}
-            onPress={contextCard.onPress}
-          />
+        <CrowdPulseCard reports={crowdReports} onQuickReport={handleQuickReport} />
 
-          <TimelineCard
-            icon="navigate-circle-outline"
-            title="校園地圖與導航"
-            description="教室、餐廳、圖書館的最短路線與即時位置"
-            meta="校園"
-            tint={theme.colors.accent}
-            onPress={() => nav?.navigate?.("校園", { screen: "Map" })}
-          />
-        </View>
-
-        {/* ─── AI 助理快速入口 ─── */}
         <Pressable
           onPress={() => nav?.navigate?.("AIChat")}
           style={({ pressed }) => ({
@@ -770,16 +1481,44 @@ export function TodayScreen(props: any) {
             <Ionicons name="sparkles" size={20} color={theme.colors.accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>
-              Campus AI 助理
-            </Text>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>Campus AI 助理</Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-              問時間規劃、作業建議、找地點…
+              問時間規劃、找地點、整理今天的下一步
             </Text>
           </View>
           <Ionicons name="arrow-forward" size={16} color={theme.colors.accent} />
         </Pressable>
       </ScrollView>
+
+      <ImportPreviewModal
+        visible={Boolean(pendingImportArtifact)}
+        artifact={pendingImportArtifact}
+        selectedIds={selectedImportIds}
+        onToggle={(id) =>
+          setSelectedImportIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) {
+              next.delete(id);
+            } else {
+              next.add(id);
+            }
+            return next;
+          })
+        }
+        onClose={() => {
+          setPendingImportArtifact(null);
+          setSelectedImportIds(new Set());
+        }}
+        onConfirm={handleConfirmImport}
+      />
+
+      <ManualCourseModal
+        visible={showManualCourseModal}
+        draft={manualCourseDraft}
+        onChange={setManualCourseDraft}
+        onClose={() => setShowManualCourseModal(false)}
+        onSubmit={handleCreateManualCourse}
+      />
     </View>
   );
 }
