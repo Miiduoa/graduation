@@ -67,7 +67,7 @@ Authorization: Bearer <firebase_id_token>
 
 ### GET /getSSOConfig
 
-取得學校 SSO 設定。
+取得學校 SSO 公開設定。回應不包含任何 `clientSecret`、憑證或私鑰欄位。
 
 **Query 參數**
 
@@ -94,19 +94,49 @@ Authorization: Bearer <firebase_id_token>
 
 ### POST /createCustomToken
 
-使用 SSO 資訊建立 Firebase Custom Token。
+此端點已停用，會回傳 `410 Gone`。請改用 `POST /startSSOAuth` 初始化一次性登入交易，再以 `POST /verifySSOCallback` 完成驗證與 token 簽發。
+
+### POST /startSSOAuth
+
+建立一次性 SSO 驗證交易，綁定 `state`、`redirectUri` 與有效期限。
 
 **Body 參數**
 
 | 參數 | 類型 | 必填 | 說明 |
 |-----|-----|-----|-----|
 | schoolId | string | 是 | 學校 ID |
-| ssoSub | string | 是 | SSO Subject ID |
-| email | string | 否 | 電子郵件 |
-| name | string | 否 | 姓名 |
-| studentId | string | 否 | 學號 |
-| department | string | 否 | 系所 |
-| role | string | 否 | 角色 (student/teacher) |
+| provider | string | 是 | SSO 類型 (oidc/cas/saml) |
+| redirectUri | string | 是 | 必須在 allowlist 內的 callback URL |
+| state | string | 是 | 前端產生的 anti-CSRF state |
+| codeChallenge | string | OIDC 必填 | PKCE challenge |
+| nonce | string | OIDC 建議 | OIDC nonce |
+
+**回應範例**
+
+```json
+{
+  "transactionId": "sso_tx_abc123",
+  "expiresAt": "2026-03-20T12:34:56.000Z"
+}
+```
+
+### POST /verifySSOCallback
+
+處理 SSO 回調驗證，只接受有效且未重複使用的交易。
+
+**Body 參數**
+
+| 參數 | 類型 | 必填 | 說明 |
+|-----|-----|-----|-----|
+| schoolId | string | 是 | 學校 ID |
+| provider | string | 是 | SSO 類型 (oidc/cas/saml) |
+| transactionId | string | 是 | `startSSOAuth` 回傳的一次性交易 ID |
+| redirectUri | string | 是 | 必須與初始化交易時相同 |
+| state | string | 是 | 必須與初始化交易時相同 |
+| code | string | OIDC 必填 | OIDC authorization code |
+| codeVerifier | string | OIDC 必填 | PKCE verifier |
+| ticket | string | CAS 必填 | CAS ticket |
+| SAMLResponse | string | SAML 必填 | SAML Response |
 
 **回應範例**
 
@@ -117,20 +147,6 @@ Authorization: Bearer <firebase_id_token>
   "isNewUser": true
 }
 ```
-
-### POST /verifySSOCallback
-
-處理 SSO 回調驗證。
-
-**Query 參數**
-
-| 參數 | 類型 | 必填 | 說明 |
-|-----|-----|-----|-----|
-| provider | string | 是 | SSO 類型 (oidc/cas/saml) |
-| schoolId | string | 是 | 學校 ID |
-| code | string | 依 provider | OIDC authorization code |
-| ticket | string | 依 provider | CAS ticket |
-| SAMLResponse | string | 依 provider | SAML Response |
 
 ---
 

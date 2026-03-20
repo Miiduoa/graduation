@@ -105,6 +105,30 @@ service cloud.firestore {
       match /events/{docId} {
         allow read: if true;
         allow create, update, delete: if hasEditorRole(schoolId);
+
+        match /registrations/{registrationId} {
+          allow read: if hasEditorRole(schoolId)
+            || (isSignedIn() && (
+              registrationId == request.auth.uid
+              || resource.data.userId == request.auth.uid
+            ));
+          allow create: if isSignedIn()
+            && registrationId == request.auth.uid
+            && request.resource.data.userId == request.auth.uid;
+          allow update: if false;
+          allow delete: if isSignedIn()
+            && registrationId == request.auth.uid
+            && resource.data.userId == request.auth.uid;
+        }
+
+        match /reviews/{reviewId} {
+          allow read: if true;
+          allow create: if isSignedIn()
+            && reviewId == request.auth.uid
+            && request.resource.data.uid == request.auth.uid;
+          allow update, delete: if hasEditorRole(schoolId)
+            || (isSignedIn() && resource.data.uid == request.auth.uid);
+        }
       }
 
       match /clubEvents/{docId} {
@@ -149,18 +173,26 @@ service cloud.firestore {
         allow create, update, delete: if hasEditorRole(schoolId);
       }
 
-      match /registrations/{docId} {
-        // event registrations: user can create own, read own
-        allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
-        allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
-        allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
-        allow update: if false;
-      }
-
       match /lostFound/{docId} {
         allow read: if true;
         allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
         allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      }
+
+      match /orders/{orderId} {
+        allow read: if hasEditorRole(schoolId) || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow create: if isSignedIn()
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.schoolId == schoolId;
+        allow update: if hasEditorRole(schoolId)
+          || (
+            isSignedIn()
+            && resource.data.userId == request.auth.uid
+            && request.resource.data.userId == resource.data.userId
+            && request.resource.data.schoolId == resource.data.schoolId
+            && request.resource.data.status == 'cancelled'
+          );
+        allow delete: if false;
       }
 
       match /settings/{docId} {
@@ -351,6 +383,62 @@ service cloud.firestore {
         allow read: if isSelf(uid);
         allow write: if false;
 
+        match /favorites/{favoriteId} {
+          allow read, create, delete: if isSelf(uid);
+          allow update: if false;
+        }
+
+        match /achievements/{achievementId} {
+          allow read, write: if isSelf(uid);
+        }
+
+        match /enrollments/{enrollmentId} {
+          allow read, write: if isSelf(uid);
+        }
+
+        match /grades/{gradeId} {
+          allow read: if isSelf(uid);
+          allow write: if false;
+        }
+
+        match /calendarEvents/{eventId} {
+          allow read, write: if isSelf(uid);
+        }
+
+        match /libraryLoans/{loanId} {
+          allow read, write: if isSelf(uid);
+        }
+
+        match /seatReservations/{reservationId} {
+          allow read, write: if isSelf(uid);
+        }
+
+        match /orders/{orderId} {
+          allow read: if isSelf(uid);
+          allow create, update: if isSelf(uid) && request.resource.data.userId == request.auth.uid;
+          allow delete: if false;
+        }
+
+        match /transactions/{transactionId} {
+          allow read: if isSelf(uid);
+          allow write: if false;
+        }
+
+        match /wallet/{walletDocId} {
+          allow read: if isSelf(uid);
+          allow write: if false;
+        }
+
+        match /weeklyReports/{reportId} {
+          allow read: if isSelf(uid);
+          allow write: if false;
+        }
+
+        match /dailyBriefs/{briefId} {
+          allow read: if isSelf(uid);
+          allow write: if false;
+        }
+
         match /{document=**} {
           allow read: if isSelf(uid);
           allow write: if false;
@@ -381,11 +469,13 @@ service cloud.firestore {
 
       // 學分試算：使用者自己的修課紀錄（子集合）
       match /enrollments/{enrollmentId} {
-        allow read, write: if isSelf(uid);
+        allow read: if isSelf(uid);
+        allow write: if false;
       }
 
       match /achievements/{achievementId} {
-        allow read, write: if isSelf(uid);
+        allow read: if isSelf(uid);
+        allow write: if false;
       }
 
       match /notifications/{notificationId} {
@@ -394,6 +484,11 @@ service cloud.firestore {
       }
 
       match /weeklyReports/{reportId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+
+      match /dailyBriefs/{briefId} {
         allow read: if isSelf(uid);
         allow write: if false;
       }
@@ -428,9 +523,7 @@ service cloud.firestore {
 
     match /eventRegistrations/{docId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow update: if false;
+      allow write: if false;
     }
 
     match /pois/{docId} {
@@ -462,8 +555,7 @@ service cloud.firestore {
     // Enrollments
     match /enrollments/{docId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
       allow delete: if false;
     }
 
@@ -476,14 +568,7 @@ service cloud.firestore {
     // Group Posts (global collection for simplicity)
     match /groupPosts/{docId} {
       allow read: if canReadGroupPost(docId);
-      allow create: if isSignedIn()
-        && request.resource.data.authorId == request.auth.uid
-        && isActiveGroupMember(request.resource.data.groupId);
-      allow update, delete: if isSignedIn()
-        && resource.data.authorId == request.auth.uid
-        && isActiveGroupMember(resource.data.groupId)
-        && request.resource.data.authorId == resource.data.authorId
-        && request.resource.data.groupId == resource.data.groupId;
+      allow write: if false;
     }
 
     match /postLikes/{docId} {
@@ -500,32 +585,19 @@ service cloud.firestore {
     // Comments
     match /comments/{docId} {
       allow read: if canReadGroupPost(resource.data.postId);
-      allow create: if isSignedIn()
-        && request.resource.data.authorId == request.auth.uid
-        && canReadGroupPost(request.resource.data.postId);
-      allow update, delete: if isSignedIn()
-        && resource.data.authorId == request.auth.uid
-        && canReadGroupPost(resource.data.postId)
-        && request.resource.data.authorId == resource.data.authorId
-        && request.resource.data.postId == resource.data.postId;
+      allow write: if false;
     }
 
     // Assignments (global collection)
     match /assignments/{docId} {
       allow read: if isActiveGroupMember(resource.data.groupId);
-      allow create: if isSignedIn() && canManageGroup(request.resource.data.groupId);
-      allow update, delete: if canManageGroup(resource.data.groupId)
-        && request.resource.data.groupId == resource.data.groupId;
+      allow write: if false;
     }
 
     // Submissions
     match /submissions/{docId} {
       allow read: if canReadAssignment(resource.data.assignmentId);
-      allow create: if isSignedIn()
-        && request.resource.data.userId == request.auth.uid
-        && canReadAssignment(request.resource.data.assignmentId);
-      allow update: if canManageAssignment(resource.data.assignmentId);
-      allow delete: if false;
+      allow write: if false;
     }
 
     // Group Members (global collection)
@@ -569,8 +641,7 @@ service cloud.firestore {
 
     match /libraryLoans/{docId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
       allow delete: if false;
     }
 
@@ -581,9 +652,7 @@ service cloud.firestore {
 
     match /seatReservations/{docId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
     }
 
     // Bus Routes
@@ -611,9 +680,7 @@ service cloud.firestore {
     // Calendar Events
     match /calendarEvents/{docId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
     }
 
     // Orders
@@ -646,9 +713,7 @@ service cloud.firestore {
     // Favorites
     match /favorites/{docId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow update: if false;
+      allow write: if false;
     }
   }
 }

@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Screen, AnimatedCard, Button, SearchBar, FeatureHighlight, ListItem } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
+import { getLegalUrl } from "../services/release";
 
 type FAQItem = {
   id: string;
@@ -175,6 +176,18 @@ export function HelpScreen(props: any) {
     Linking.openURL("mailto:support@campus-app.com?subject=校園App問題諮詢");
   };
 
+  const openLegalDocument = (type: "privacy" | "terms") => {
+    const url = getLegalUrl(type);
+    if (!url) {
+      Alert.alert("尚未設定", "正式法律頁尚未設定完成");
+      return;
+    }
+
+    Linking.openURL(url).catch(() => {
+      Alert.alert("無法開啟", "請稍後再試");
+    });
+  };
+
   return (
     <Screen>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
@@ -328,12 +341,12 @@ export function HelpScreen(props: any) {
             <ListItem
               title="隱私政策"
               rightIcon="open-outline"
-              onPress={() => Linking.openURL("https://example.com/privacy")}
+              onPress={() => openLegalDocument("privacy")}
             />
             <ListItem
               title="使用條款"
               rightIcon="open-outline"
-              onPress={() => Linking.openURL("https://example.com/terms")}
+              onPress={() => openLegalDocument("terms")}
             />
           </View>
         </AnimatedCard>
