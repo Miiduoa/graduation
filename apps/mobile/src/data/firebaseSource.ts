@@ -50,7 +50,7 @@ import type {
   WashingMachine,
   WashingReservation,
 } from "./types";
-import { 
+import {
   addDoc,
   collection, 
   deleteDoc,
@@ -72,8 +72,9 @@ import {
   arrayUnion,
   arrayRemove,
 } from "firebase/firestore";
-import { getDb } from "../firebase";
-import { buildSchoolCollectionPath } from "@campus/shared/src";
+import { httpsCallable } from "firebase/functions";
+import { getDb, getFunctionsInstance } from "../firebase";
+import { buildGroupCollectionPath, buildSchoolCollectionPath, buildUserCollectionPath } from "@campus/shared/src";
 import {
   checkInAttendance as checkInCourseAttendance,
   createCourseModule as createCourseSpaceModule,
@@ -188,7 +189,7 @@ async function fetchCollectionAtPath<T extends { id: string }>(
     const db = getDb();
     const validConstraints = constraints.filter((c): c is QueryConstraint => c !== null);
     const finalConstraints = applyQueryOptions(validConstraints, options);
-    const qy = query(collection(db, ...pathSegments), ...finalConstraints);
+    const qy = query(collection(db, pathSegments.join("/")), ...finalConstraints);
     const snap = await getDocs(qy);
     return snap.docs.map((d) => parseDocument<T>(d));
   } catch (error) {
@@ -648,11 +649,24 @@ export const firebaseSource: DataSource = {
 
   // ===== 群組 =====
   async listGroups(userId, options) {
-    const memberDocs = await fetchCollection<GroupMember>(
-      "groupMembers",
-      [byUser(userId)]
+    const db = getDb();
+    const schoolId =
+      options?.filters?.find((filter) => filter.field === "schoolId" && filter.operator === "==")?.value ?? null;
+    const constraints = [where("status", "==", "active")] as QueryConstraint[];
+
+    if (typeof schoolId === "string" && schoolId) {
+      constraints.push(where("schoolId", "==", schoolId));
+    }
+
+    const membershipSnap = await getDocs(
+      query(collection(db, buildUserCollectionPath(userId, "groups").join("/")), ...constraints)
     );
-    const groupIds = memberDocs.map((m) => m.groupId);
+    const groupIds = membershipSnap.docs
+      .map((docSnap) => {
+        const data = docSnap.data() as Record<string, unknown>;
+        return typeof data.groupId === "string" ? data.groupId : docSnap.id;
+      })
+      .filter(Boolean);
     
     if (groupIds.length === 0) return [];
     
@@ -669,21 +683,37 @@ export const firebaseSource: DataSource = {
   },
 
   async createGroup(data) {
-    const db = getDb();
-    const groupRef = await addDoc(collection(db, "groups"), {
+    const createGroup = httpsCallable<
+      {
+        name: string;
+        description?: string;
+        type: Group["type"];
+        schoolId: string;
+        isPrivate?: boolean;
+        isPublished?: boolean;
+        verification?: { status?: string };
+      },
+      { success: boolean; groupId: string; joinCode?: string | null }
+    >(getFunctionsInstance(), "createGroup");
+    const result = await createGroup({
+      name: data.name,
+      description: data.description,
+      type: data.type,
+      schoolId: data.schoolId ?? "",
+      isPrivate: data.isPrivate,
+      isPublished: (data as any).isPublished,
+      verification: (data as any).verification,
+    });
+    const group = await this.getGroup(result.data.groupId);
+    if (group) return group;
+
+    return {
       ...data,
+      id: result.data.groupId,
+      joinCode: result.data.joinCode ?? data.joinCode,
       memberCount: 1,
-      createdAt: serverTimestamp(),
-    });
-    
-    await addDoc(collection(db, "groupMembers"), {
-      groupId: groupRef.id,
-      userId: data.createdBy,
-      role: "owner",
-      joinedAt: serverTimestamp(),
-    });
-    
-    return { ...data, id: groupRef.id, memberCount: 1, createdAt: new Date().toISOString() } as Group;
+      createdAt: new Date().toISOString(),
+    } as Group;
   },
 
   async updateGroup(id, data) {
@@ -697,46 +727,39 @@ export const firebaseSource: DataSource = {
   async joinGroup(groupId, userId, joinCode) {
     const group = await this.getGroup(groupId);
     if (!group) throw new Error("群組不存在");
-    if (group.isPrivate && group.joinCode !== joinCode) {
-      throw new Error("加入碼錯誤");
+    if (!group.schoolId) {
+      throw new Error("群組缺少 schoolId");
     }
-    
-    const db = getDb();
-    const groupRef = doc(db, "groups", groupId);
-    const memberRef = await addDoc(collection(db, "groupMembers"), {
-      groupId,
-      userId,
-      role: "member",
-      joinedAt: serverTimestamp(),
+
+    await httpsCallable<
+      { joinCode: string; schoolId: string },
+      { success: boolean; groupId: string; groupName?: string }
+    >(getFunctionsInstance(), "joinGroupByCode")({
+      joinCode: String(joinCode ?? group.joinCode ?? "").trim().toUpperCase(),
+      schoolId: group.schoolId,
     });
-    
-    await updateDoc(groupRef, { memberCount: increment(1) });
-    
+
+    const memberSnap = await getDoc(doc(getDb(), buildGroupCollectionPath(groupId, "members", userId).join("/")));
+    const memberData = memberSnap.data() as Record<string, unknown> | undefined;
+
     return {
-      id: memberRef.id,
+      id: userId,
       groupId,
       userId,
-      role: "member",
-      joinedAt: new Date().toISOString(),
+      uid: userId,
+      role: (memberData?.role as GroupMember["role"]) ?? "member",
+      status: (memberData?.status as string | undefined) ?? "active",
+      joinedAt:
+        memberData?.joinedAt && typeof (memberData.joinedAt as any)?.toDate === "function"
+          ? (memberData.joinedAt as any).toDate().toISOString()
+          : new Date().toISOString(),
     };
   },
 
   async leaveGroup(groupId, userId) {
-    const db = getDb();
-    const membersSnap = await getDocs(
-      query(
-        collection(db, "groupMembers"),
-        where("groupId", "==", groupId),
-        where("userId", "==", userId)
-      )
-    );
-    
-    if (!membersSnap.empty) {
-      const batch = writeBatch(db);
-      membersSnap.docs.forEach((d) => batch.delete(d.ref));
-      batch.update(doc(db, "groups", groupId), { memberCount: increment(-1) });
-      await batch.commit();
-    }
+    await httpsCallable<{ groupId: string }, { success: boolean }>(getFunctionsInstance(), "leaveGroup")({
+      groupId,
+    });
   },
 
   // ===== 群組成員 =====

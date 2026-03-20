@@ -38,6 +38,7 @@ import {
   User,
 } from "firebase/auth";
 import {
+  buildSchoolCollectionPath,
   defaultNotificationPreferences,
   normalizeNotificationPreferences,
   normalizeSchoolSSOConfig,
@@ -170,6 +171,57 @@ function parseDocument<T extends { id: string }>(
   }
 
   return parsed as T;
+}
+
+async function fetchCollectionAtPath<T extends { id: string }>(
+  pathSegments: string[],
+  constraints: QueryConstraint[]
+): Promise<T[]> {
+  const firestore = getDb();
+  const q = query(collection(firestore, pathSegments.join("/")), ...constraints);
+  const snap = await getDocs(q);
+
+  return snap.docs
+    .map((d) => parseDocument<T>({ id: d.id, data: () => d.data() }))
+    .filter((row): row is T => row !== null);
+}
+
+async function fetchSchoolScopedCollection<T extends { id: string }>(params: {
+  schoolId: string;
+  canonicalCollections: string[];
+  schoolConstraints?: QueryConstraint[];
+  fallbackCollection?: string;
+  fallbackConstraints?: QueryConstraint[];
+}): Promise<T[]> {
+  const schoolConstraints = params.schoolConstraints ?? [];
+  const fallbackConstraints = params.fallbackConstraints ?? [];
+
+  for (const collectionName of params.canonicalCollections) {
+    try {
+      const rows = await fetchCollectionAtPath<T>(
+        buildSchoolCollectionPath(params.schoolId, collectionName),
+        schoolConstraints
+      );
+
+      if (rows.length > 0) {
+        return rows;
+      }
+    } catch (error) {
+      console.warn(`[Firebase] Failed canonical read for schools/${params.schoolId}/${collectionName}:`, error);
+    }
+  }
+
+  if (!params.fallbackCollection) {
+    return [];
+  }
+
+  const firestore = getDb();
+  const q = query(collection(firestore, params.fallbackCollection), ...fallbackConstraints);
+  const snap = await getDocs(q);
+
+  return snap.docs
+    .map((d) => parseDocument<T>({ id: d.id, data: () => d.data() }))
+    .filter((row): row is T => row !== null);
 }
 
 export type Announcement = {
@@ -404,19 +456,13 @@ export async function fetchAnnouncements(
   }
 
   try {
-    const firestore = getDb();
-    const constraints: QueryConstraint[] = [
-      where("schoolId", "==", schoolId),
-      orderBy("publishedAt", "desc"),
-      limit(maxItems),
-    ];
-
-    const q = query(collection(firestore, "announcements"), ...constraints);
-    const snap = await getDocs(q);
-
-    return snap.docs
-      .map((d) => parseDocument<Announcement>({ id: d.id, data: () => d.data() }))
-      .filter((a): a is Announcement => a !== null);
+    return fetchSchoolScopedCollection<Announcement>({
+      schoolId,
+      canonicalCollections: ["announcements"],
+      schoolConstraints: [orderBy("publishedAt", "desc"), limit(maxItems)],
+      fallbackCollection: "announcements",
+      fallbackConstraints: [where("schoolId", "==", schoolId), orderBy("publishedAt", "desc"), limit(maxItems)],
+    });
   } catch (error) {
     console.error("[Firebase] Failed to fetch announcements:", error);
     return [];
@@ -432,19 +478,13 @@ export async function fetchEvents(
   }
 
   try {
-    const firestore = getDb();
-    const constraints: QueryConstraint[] = [
-      where("schoolId", "==", schoolId),
-      orderBy("startsAt", "asc"),
-      limit(maxItems),
-    ];
-
-    const q = query(collection(firestore, "events"), ...constraints);
-    const snap = await getDocs(q);
-
-    return snap.docs
-      .map((d) => parseDocument<ClubEvent>({ id: d.id, data: () => d.data() }))
-      .filter((e): e is ClubEvent => e !== null);
+    return fetchSchoolScopedCollection<ClubEvent>({
+      schoolId,
+      canonicalCollections: ["clubEvents", "events"],
+      schoolConstraints: [orderBy("startsAt", "asc"), limit(maxItems)],
+      fallbackCollection: "events",
+      fallbackConstraints: [where("schoolId", "==", schoolId), orderBy("startsAt", "asc"), limit(maxItems)],
+    });
   } catch (error) {
     console.error("[Firebase] Failed to fetch events:", error);
     return [];
@@ -460,18 +500,13 @@ export async function fetchPois(
   }
 
   try {
-    const firestore = getDb();
-    const constraints: QueryConstraint[] = [
-      where("schoolId", "==", schoolId),
-      limit(maxItems),
-    ];
-
-    const q = query(collection(firestore, "pois"), ...constraints);
-    const snap = await getDocs(q);
-
-    return snap.docs
-      .map((d) => parseDocument<Poi>({ id: d.id, data: () => d.data() }))
-      .filter((p): p is Poi => p !== null);
+    return fetchSchoolScopedCollection<Poi>({
+      schoolId,
+      canonicalCollections: ["pois"],
+      schoolConstraints: [limit(maxItems)],
+      fallbackCollection: "pois",
+      fallbackConstraints: [where("schoolId", "==", schoolId), limit(maxItems)],
+    });
   } catch (error) {
     console.error("[Firebase] Failed to fetch POIs:", error);
     return [];
@@ -487,19 +522,13 @@ export async function fetchMenus(
   }
 
   try {
-    const firestore = getDb();
-    const constraints: QueryConstraint[] = [
-      where("schoolId", "==", schoolId),
-      orderBy("availableOn", "desc"),
-      limit(maxItems),
-    ];
-
-    const q = query(collection(firestore, "menus"), ...constraints);
-    const snap = await getDocs(q);
-
-    return snap.docs
-      .map((d) => parseDocument<MenuItem>({ id: d.id, data: () => d.data() }))
-      .filter((m): m is MenuItem => m !== null);
+    return fetchSchoolScopedCollection<MenuItem>({
+      schoolId,
+      canonicalCollections: ["menus", "cafeteriaMenus"],
+      schoolConstraints: [orderBy("availableOn", "desc"), limit(maxItems)],
+      fallbackCollection: "menus",
+      fallbackConstraints: [where("schoolId", "==", schoolId), orderBy("availableOn", "desc"), limit(maxItems)],
+    });
   } catch (error) {
     console.error("[Firebase] Failed to fetch menus:", error);
     return [];
@@ -514,18 +543,13 @@ export async function fetchBusRoutes(
   }
 
   try {
-    const firestore = getDb();
-    const constraints: QueryConstraint[] = [
-      where("schoolId", "==", schoolId),
-      where("isActive", "==", true),
-    ];
-
-    const q = query(collection(firestore, "busRoutes"), ...constraints);
-    const snap = await getDocs(q);
-
-    return snap.docs
-      .map((d) => parseDocument<BusRoute>({ id: d.id, data: () => d.data() }))
-      .filter((r): r is BusRoute => r !== null);
+    return fetchSchoolScopedCollection<BusRoute>({
+      schoolId,
+      canonicalCollections: ["busRoutes"],
+      schoolConstraints: [where("isActive", "==", true)],
+      fallbackCollection: "busRoutes",
+      fallbackConstraints: [where("schoolId", "==", schoolId), where("isActive", "==", true)],
+    });
   } catch (error) {
     console.error("[Firebase] Failed to fetch bus routes:", error);
     return [];
@@ -542,18 +566,13 @@ export async function searchBooks(
   }
 
   try {
-    const firestore = getDb();
-    const constraints: QueryConstraint[] = [
-      where("schoolId", "==", schoolId),
-      limit(100),
-    ];
-
-    const q = query(collection(firestore, "libraryBooks"), ...constraints);
-    const snap = await getDocs(q);
-
-    const books = snap.docs
-      .map((d) => parseDocument<LibraryBook>({ id: d.id, data: () => d.data() }))
-      .filter((b): b is LibraryBook => b !== null);
+    const books = await fetchSchoolScopedCollection<LibraryBook>({
+      schoolId,
+      canonicalCollections: ["libraryBooks"],
+      schoolConstraints: [limit(100)],
+      fallbackCollection: "libraryBooks",
+      fallbackConstraints: [where("schoolId", "==", schoolId), limit(100)],
+    });
 
     const lowerQuery = searchQuery.toLowerCase();
     return books
@@ -1218,15 +1237,28 @@ export async function joinGroup(
       if (!groupDoc.exists()) {
         throw new Error("群組不存在");
       }
+      const groupData = groupDoc.data();
 
       const existingMember = await transaction.get(memberRef);
       if (existingMember.exists()) {
         throw new Error("您已是此群組成員");
       }
 
+      const userGroupRef = doc(collection(firestore, "users", userId, "groups"), groupId);
+
       transaction.set(memberRef, {
         userId,
         userName,
+        role: "member",
+        status: "active",
+        joinedAt: serverTimestamp(),
+      });
+      transaction.set(userGroupRef, {
+        groupId,
+        schoolId: groupData.schoolId ?? null,
+        type: groupData.type ?? null,
+        name: groupData.name ?? null,
+        joinCode: groupData.joinCode ?? null,
         role: "member",
         status: "active",
         joinedAt: serverTimestamp(),
@@ -1259,6 +1291,7 @@ export async function leaveGroup(
     const firestore = getDb();
     const groupRef = doc(firestore, "groups", groupId);
     const memberRef = doc(collection(firestore, "groups", groupId, "members"), userId);
+    const userGroupRef = doc(collection(firestore, "users", userId, "groups"), groupId);
 
     await runTransaction(firestore, async (transaction) => {
       const memberDoc = await transaction.get(memberRef);
@@ -1272,6 +1305,7 @@ export async function leaveGroup(
       }
 
       transaction.delete(memberRef);
+      transaction.delete(userGroupRef);
       transaction.update(groupRef, {
         memberCount: increment(-1),
       });

@@ -1,22 +1,43 @@
-const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const {
+  onDocumentCreated,
+  onDocumentUpdated,
+  onDocumentWritten,
+} = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue, FieldPath, Timestamp } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const https = require("https");
 const http = require("http");
+const crypto = require("crypto");
 const {
   evaluateSsoConfiguration,
   getProviderAdapter,
   normalizeSetupStatus,
   toPublicSsoConfig,
 } = require("./sso/providerRegistry");
+const {
+  decryptSecretConfig,
+  encryptSecretConfig,
+  mergeSsoConfig,
+  splitSsoConfig,
+} = require("./sso/secretStore");
+const {
+  assertTrustedOrigin,
+  enforceRateLimit,
+  getClientIp,
+  getCorsOrigins,
+  isProductionRuntime,
+  requirePostJson,
+  writeHttpError,
+} = require("./securityUtils");
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret("TDX_CLIENT_ID");
 const TDX_CLIENT_SECRET = defineSecret("TDX_CLIENT_SECRET");
+const SSO_CONFIG_ENCRYPTION_KEY = defineSecret("SSO_CONFIG_ENCRYPTION_KEY");
 
 // TDX OAuth2 取得 Access Token
 async function getTdxAccessToken(clientId, clientSecret) {
@@ -79,6 +100,10 @@ const db = getFirestore();
 const messaging = getMessaging();
 
 const REGION = "asia-east1";
+const SSO_TRANSACTION_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_WALLET_CURRENCY = "TWD";
+const EXTERNAL_PAYMENT_ENABLED = !isProductionRuntime();
+const STRICT_CORS = getCorsOrigins();
 
 // =====================================================
 // 工具函數
@@ -95,6 +120,301 @@ function normalizeSsoConfig(rawConfig = {}) {
     userInfoUrl: rawConfig.userInfoUrl || rawConfig.userInfoEndpoint,
     samlEntryPoint: rawConfig.samlEntryPoint || rawConfig.idpSsoUrl,
     idpSsoUrl: rawConfig.idpSsoUrl || rawConfig.samlEntryPoint,
+  };
+}
+
+function sha256Base64Url(value) {
+  return crypto
+    .createHash("sha256")
+    .update(value, "utf8")
+    .digest("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function isAllowedRedirectUri(value) {
+  if (typeof value !== "string" || !value.trim()) return false;
+
+  if (/^campus:\/\/auth\/callback(?:[/?#]|$)/i.test(value)) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(value);
+    if (!/^https?:$/.test(parsed.protocol)) return false;
+    return STRICT_CORS.some((matcher) =>
+      matcher instanceof RegExp ? matcher.test(parsed.origin) : parsed.origin === matcher
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getSsoPrivateDocRef(schoolId) {
+  return db.collection("schools").doc(schoolId).collection("settings").doc("ssoPrivate");
+}
+
+async function getSchoolSsoDocuments(schoolId) {
+  const [publicDoc, privateDoc] = await Promise.all([
+    db.collection("schools").doc(schoolId).collection("settings").doc("sso").get(),
+    getSsoPrivateDocRef(schoolId).get(),
+  ]);
+
+  return { publicDoc, privateDoc };
+}
+
+async function getFullSchoolSsoConfig(schoolId, encryptionKey) {
+  const { publicDoc, privateDoc } = await getSchoolSsoDocuments(schoolId);
+  const publicConfig = publicDoc.exists ? publicDoc.data() : null;
+  const privateConfig = privateDoc.exists
+    ? decryptSecretConfig(privateDoc.data()?.encryptedPayload, encryptionKey)
+    : {};
+
+  if (!publicConfig) {
+    return null;
+  }
+
+  const merged = mergeSsoConfig(publicConfig, privateConfig);
+  merged.schoolId = merged.schoolId || schoolId;
+  merged.ssoConfig = merged.ssoConfig ? normalizeSsoConfig(merged.ssoConfig) : null;
+  return merged;
+}
+
+async function writeSchoolSsoConfig({
+  schoolId,
+  publicConfig,
+  secretConfig,
+  encryptionKey,
+  updatedBy,
+}) {
+  const publicRef = db.collection("schools").doc(schoolId).collection("settings").doc("sso");
+  const privateRef = getSsoPrivateDocRef(schoolId);
+  const encryptedPayload = encryptSecretConfig(secretConfig, encryptionKey);
+
+  const publicPayload = {
+    ...publicConfig,
+    schoolId,
+    updatedAt: FieldValue.serverTimestamp(),
+    updatedBy,
+  };
+
+  const writes = [
+    publicRef.set(publicPayload, { merge: true }),
+  ];
+
+  if (encryptedPayload) {
+    writes.push(
+      privateRef.set(
+        {
+          encryptedPayload,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy,
+        },
+        { merge: true }
+      )
+    );
+  } else {
+    writes.push(privateRef.delete().catch(() => null));
+  }
+
+  await Promise.all(writes);
+}
+
+async function syncAuthClaims(uid, userData = {}) {
+  const { getAuth } = require("firebase-admin/auth");
+  const auth = getAuth();
+  const currentUser = await db.collection("users").doc(uid).get();
+  const profile = currentUser.exists ? currentUser.data() : {};
+  const role = userData.role || profile?.role || "student";
+  const schoolId = userData.schoolId || profile?.schoolId || null;
+
+  await auth.setCustomUserClaims(uid, {
+    role,
+    ...(schoolId ? { schoolId } : {}),
+  });
+}
+
+function resolveProvisionedRole({ existingLink, existingUser }) {
+  return existingLink?.role || existingUser?.role || "student";
+}
+
+async function reserveSsoTransaction({ schoolId, provider, redirectUri, state, codeChallenge, nonce, source }) {
+  const transactionRef = db.collection("ssoTransactions").doc();
+  const now = Date.now();
+  await transactionRef.set({
+    schoolId,
+    provider,
+    redirectUri,
+    state,
+    codeChallenge: codeChallenge || null,
+    nonce: nonce || null,
+    source: source || "unknown",
+    createdAt: FieldValue.serverTimestamp(),
+    expiresAt: Timestamp.fromMillis(now + SSO_TRANSACTION_TTL_MS),
+    usedAt: null,
+  });
+
+  return {
+    transactionId: transactionRef.id,
+    expiresAt: new Date(now + SSO_TRANSACTION_TTL_MS).toISOString(),
+  };
+}
+
+async function validateAndConsumeSsoTransaction({
+  transactionId,
+  schoolId,
+  provider,
+  redirectUri,
+  state,
+}) {
+  const transactionRef = db.collection("ssoTransactions").doc(transactionId);
+  const transactionDoc = await transactionRef.get();
+
+  if (!transactionDoc.exists) {
+    throw new HttpsError("not-found", "SSO transaction not found");
+  }
+
+  const transactionData = transactionDoc.data();
+  if (transactionData.usedAt) {
+    throw new HttpsError("failed-precondition", "SSO transaction already used");
+  }
+
+  if (transactionData.schoolId !== schoolId || transactionData.provider !== provider) {
+    throw new HttpsError("permission-denied", "SSO transaction does not match the current request");
+  }
+
+  if (transactionData.redirectUri !== redirectUri || transactionData.state !== state) {
+    throw new HttpsError("permission-denied", "SSO transaction validation failed");
+  }
+
+  const expiresAt = transactionData.expiresAt?.toDate?.();
+  if (!expiresAt || expiresAt.getTime() < Date.now()) {
+    throw new HttpsError("deadline-exceeded", "SSO transaction has expired");
+  }
+
+  await db.runTransaction(async (transaction) => {
+    const latestDoc = await transaction.get(transactionRef);
+    const latest = latestDoc.data();
+    if (!latestDoc.exists || latest?.usedAt) {
+      throw new HttpsError("failed-precondition", "SSO transaction already used");
+    }
+    transaction.update(transactionRef, {
+      usedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return transactionData;
+}
+
+function isSupportedExternalPaymentMethod(method) {
+  return ["credit_card", "line_pay", "jko_pay", "apple_pay", "google_pay", "bank_transfer"].includes(method);
+}
+
+async function getWalletSnapshot(uid) {
+  const walletRef = db.collection("wallets").doc(uid);
+  const walletDoc = await walletRef.get();
+  const wallet = walletDoc.exists
+    ? walletDoc.data()
+    : {
+        available: 0,
+        pending: 0,
+        currency: DEFAULT_WALLET_CURRENCY,
+      };
+
+  return {
+    ref: walletRef,
+    data: wallet,
+  };
+}
+
+async function appendWalletLedgerEntry({
+  uid,
+  amount,
+  type,
+  status,
+  description,
+  paymentMethod,
+  merchantId = null,
+  sourceCollection = null,
+  sourceId = null,
+  metadata = {},
+}) {
+  const walletRef = db.collection("wallets").doc(uid);
+  const ledgerRef = db.collection("ledgerEntries").doc();
+  const transactionRef = db.collection("transactions").doc(ledgerRef.id);
+
+  await db.runTransaction(async (transaction) => {
+    const walletDoc = await transaction.get(walletRef);
+    const wallet = walletDoc.exists
+      ? walletDoc.data()
+      : {
+          available: 0,
+          pending: 0,
+          currency: DEFAULT_WALLET_CURRENCY,
+        };
+
+    const currentAvailable = Number(wallet.available || 0);
+    const nextAvailable = currentAvailable + amount;
+    if (nextAvailable < 0) {
+      throw new HttpsError("failed-precondition", "Insufficient wallet balance");
+    }
+
+    const walletPayload = {
+      available: nextAvailable,
+      pending: Number(wallet.pending || 0),
+      currency: wallet.currency || DEFAULT_WALLET_CURRENCY,
+      lastUpdated: FieldValue.serverTimestamp(),
+    };
+
+    const ledgerPayload = {
+      userId: uid,
+      amount,
+      currency: walletPayload.currency,
+      type,
+      status,
+      description,
+      paymentMethod: paymentMethod || null,
+      merchantId,
+      sourceCollection,
+      sourceId,
+      metadata,
+      balanceAfter: nextAvailable,
+      createdAt: FieldValue.serverTimestamp(),
+    };
+
+    transaction.set(walletRef, walletPayload, { merge: true });
+    transaction.set(ledgerRef, ledgerPayload);
+    transaction.set(
+      transactionRef,
+      {
+        userId: uid,
+        amount: Math.abs(amount),
+        currency: walletPayload.currency,
+        type,
+        status,
+        description,
+        merchantId,
+        paymentMethodId: paymentMethod || null,
+        createdAt: FieldValue.serverTimestamp(),
+        completedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    transaction.set(
+      db.collection("users").doc(uid),
+      {
+        balance: nextAvailable,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  });
+
+  const walletDoc = await walletRef.get();
+  return {
+    ledgerEntryId: ledgerRef.id,
+    balance: Number(walletDoc.data()?.available || 0),
   };
 }
 
@@ -235,6 +555,31 @@ async function getGroupMemberUids(groupId) {
     .where("status", "==", "active")
     .get();
   return membersSnap.docs.map((doc) => doc.id);
+}
+
+async function getActiveSchoolMembership(schoolId, uid) {
+  if (!schoolId || !uid) return null;
+  const membershipDoc = await db.collection("schools").doc(schoolId).collection("members").doc(uid).get();
+  if (!membershipDoc.exists) return null;
+
+  const membership = membershipDoc.data() || {};
+  if (membership.status && membership.status !== "active") {
+    return null;
+  }
+
+  return membership;
+}
+
+async function assertActiveSchoolMember(schoolId, uid) {
+  const membership = await getActiveSchoolMembership(schoolId, uid);
+  if (!membership) {
+    throw new HttpsError("permission-denied", "User is not an active member of this school");
+  }
+  return membership;
+}
+
+function generateGroupJoinCode(length = 8) {
+  return crypto.randomBytes(length).toString("base64url").replace(/[^A-Z0-9]/gi, "").toUpperCase().slice(0, length);
 }
 
 function normalizeAssistantText(value) {
@@ -917,6 +1262,13 @@ exports.askCampusAssistant = onCall(
   },
   async (request) => {
     const uid = request.auth?.uid ?? null;
+    const rateLimitKey = uid || getClientIp(request.rawRequest || {});
+    enforceRateLimit({
+      scope: "ask-campus-assistant",
+      key: rateLimitKey,
+      limit: 40,
+      windowMs: 5 * 60 * 1000,
+    });
     const rawMessages = Array.isArray(request.data?.messages) ? request.data.messages : [];
     const context = request.data?.context && typeof request.data.context === "object" ? request.data.context : {};
     const lastUserMessage = getLastUserMessage(rawMessages);
@@ -1573,54 +1925,105 @@ exports.calendarWebhook = onRequest(
 exports.createCustomToken = onRequest(
   {
     region: REGION,
-    cors: true,
+    cors: STRICT_CORS,
+  },
+  async (_req, res) => {
+    res.status(410).json({
+      error: "createCustomToken has been removed. Use startSSOAuth + verifySSOCallback.",
+    });
+  }
+);
+
+exports.startSSOAuth = onRequest(
+  {
+    region: REGION,
+    cors: STRICT_CORS,
+    secrets: [SSO_CONFIG_ENCRYPTION_KEY],
   },
   async (req, res) => {
-    if (req.method !== "POST") {
-      res.status(405).json({ error: "Method not allowed" });
-      return;
-    }
-
-    const { schoolId, ssoSub, existingUid } = req.body;
-
-    if (!schoolId || !ssoSub) {
-      res.status(400).json({ error: "Missing required fields: schoolId and ssoSub" });
-      return;
-    }
-
     try {
-      const ssoLinkRef = db.collection("ssoLinks").doc(`${schoolId}_${ssoSub}`);
-      const ssoLinkDoc = await ssoLinkRef.get();
+      assertTrustedOrigin(req);
+      requirePostJson(req);
 
-      if (!ssoLinkDoc.exists) {
-        res.status(403).json({ error: "SSO link not verified. Use verifySSOCallback instead." });
-        return;
-      }
-
-      const uid = ssoLinkDoc.data().firebaseUid;
-      const role = ssoLinkDoc.data().role || "student";
-
-      if (existingUid && existingUid !== uid) {
-        res.status(403).json({ error: "SSO link does not match the requested user." });
-        return;
-      }
-
-      const { getAuth } = require("firebase-admin/auth");
-      const auth = getAuth();
-      const customToken = await auth.createCustomToken(uid, {
-        schoolId,
-        ssoSub,
-        role,
+      const ip = getClientIp(req);
+      enforceRateLimit({
+        scope: "start-sso",
+        key: ip,
+        limit: 20,
+        windowMs: 5 * 60 * 1000,
       });
 
+      const {
+        schoolId,
+        provider,
+        redirectUri,
+        state,
+        codeChallenge,
+        nonce,
+        source,
+      } = req.body || {};
+
+      if (!schoolId || !provider || !redirectUri || !state) {
+        res.status(400).json({
+          error: "Missing required fields: schoolId, provider, redirectUri, state",
+        });
+        return;
+      }
+
+      if (!isAllowedRedirectUri(redirectUri)) {
+        res.status(400).json({ error: "Redirect URI is not allowlisted" });
+        return;
+      }
+
+      const encryptionKey = SSO_CONFIG_ENCRYPTION_KEY.value();
+      const fullConfig = await getFullSchoolSsoConfig(schoolId, encryptionKey);
+      if (!fullConfig?.ssoConfig) {
+        res.status(404).json({ error: "SSO is not configured for this school" });
+        return;
+      }
+
+      const availability = evaluateSsoConfiguration(fullConfig);
+      if (!availability.isLoginReady) {
+        res.status(400).json({
+          error: availability.message,
+          reason: availability.reason,
+          missingFields: availability.missingFields,
+          setupStatus: availability.setupStatus,
+        });
+        return;
+      }
+
+      if (fullConfig.ssoConfig.provider !== provider) {
+        res.status(400).json({
+          error: `Configured provider is ${fullConfig.ssoConfig.provider}, not ${provider}`,
+        });
+        return;
+      }
+
+      if (provider === "oidc" && (!codeChallenge || typeof codeChallenge !== "string")) {
+        res.status(400).json({ error: "Missing PKCE code challenge" });
+        return;
+      }
+
+      const reservation = await reserveSsoTransaction({
+        schoolId,
+        provider,
+        redirectUri,
+        state,
+        codeChallenge,
+        nonce,
+        source,
+      });
+
+      res.set("Cache-Control", "no-store");
       res.json({
-        customToken,
-        uid,
-        isNewUser: false,
+        success: true,
+        ...reservation,
+        ssoConfig: toPublicSsoConfig(fullConfig, fullConfig.ssoConfig).ssoConfig,
       });
     } catch (error) {
-      console.error("Create custom token error:", error);
-      res.status(500).json({ error: "Failed to create custom token" });
+      console.error("startSSOAuth error:", error);
+      writeHttpError(res, error, "Failed to initialize SSO");
     }
   }
 );
@@ -1628,38 +2031,56 @@ exports.createCustomToken = onRequest(
 exports.verifySSOCallback = onRequest(
   {
     region: REGION,
-    cors: true,
+    cors: STRICT_CORS,
+    secrets: [SSO_CONFIG_ENCRYPTION_KEY],
   },
   async (req, res) => {
-    if (req.method !== "GET" && req.method !== "POST") {
-      res.status(405).json({ error: "Method not allowed" });
-      return;
-    }
-
-    const input = req.method === "POST" ? (req.body || {}) : req.query;
-    const { provider, schoolId, code, ticket, SAMLResponse, redirectUri } = input;
-
-    if (!provider || !schoolId) {
-      res.status(400).json({ error: "Missing provider or schoolId" });
-      return;
-    }
-
     try {
-      const configDoc = await db
-        .collection("schools")
-        .doc(schoolId)
-        .collection("settings")
-        .doc("sso")
-        .get();
+      assertTrustedOrigin(req);
+      if (req.method !== "GET" && req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+      }
 
-      const config = configDoc.exists ? configDoc.data() : null;
-      const ssoConfig = config?.ssoConfig ? normalizeSsoConfig(config.ssoConfig) : null;
-      const availability = evaluateSsoConfiguration({
-        ...(config || {}),
-        ssoConfig,
+      const ip = getClientIp(req);
+      enforceRateLimit({
+        scope: "verify-sso",
+        key: ip,
+        limit: 30,
+        windowMs: 5 * 60 * 1000,
       });
 
-      if (!availability.isConfigured) {
+      const input = req.method === "POST" ? (req.body || {}) : req.query;
+      const {
+        provider,
+        schoolId,
+        code,
+        ticket,
+        SAMLResponse,
+        redirectUri,
+        transactionId,
+        state,
+        codeVerifier,
+      } = input;
+
+      if (!provider || !schoolId || !redirectUri) {
+        res.status(400).json({
+          error: "Missing provider, schoolId, or redirectUri",
+        });
+        return;
+      }
+
+      if (!isAllowedRedirectUri(redirectUri)) {
+        res.status(400).json({ error: "Redirect URI is not allowlisted" });
+        return;
+      }
+
+      const encryptionKey = SSO_CONFIG_ENCRYPTION_KEY.value();
+      const fullConfig = await getFullSchoolSsoConfig(schoolId, encryptionKey);
+      const ssoConfig = fullConfig?.ssoConfig || null;
+      const availability = evaluateSsoConfiguration(fullConfig || {});
+
+      if (!availability.isConfigured || !ssoConfig) {
         res.status(400).json({ error: availability.message, reason: availability.reason });
         return;
       }
@@ -1700,12 +2121,35 @@ exports.verifySSOCallback = onRequest(
         return;
       }
 
+      let transactionData = null;
+      if (transactionId || state) {
+        if (!transactionId || !state) {
+          res.status(400).json({
+            error: "transactionId and state must be provided together",
+          });
+          return;
+        }
+
+        transactionData = await validateAndConsumeSsoTransaction({
+          transactionId,
+          schoolId,
+          provider,
+          redirectUri,
+          state,
+        });
+      }
+
       const userInfo = await adapter.verify({
         code,
         ticket,
         SAMLResponse,
         redirectUri,
         ssoConfig,
+        transactionId,
+        state,
+        codeVerifier,
+        expectedCodeChallenge: transactionData?.codeChallenge || null,
+        expectedNonce: transactionData?.nonce || null,
       });
 
       if (!userInfo || !userInfo.sub) {
@@ -1721,10 +2165,17 @@ exports.verifySSOCallback = onRequest(
 
       let uid;
       let isNewUser = false;
+      let resolvedRole = "student";
+      const existingUserDoc = ssoLinkDoc.exists
+        ? await db.collection("users").doc(ssoLinkDoc.data().firebaseUid).get()
+        : null;
 
       if (ssoLinkDoc.exists) {
         uid = ssoLinkDoc.data().firebaseUid;
-        const resolvedRole = determineRole(userInfo);
+        resolvedRole = resolveProvisionedRole({
+          existingLink: ssoLinkDoc.data(),
+          existingUser: existingUserDoc?.exists ? existingUserDoc.data() : null,
+        });
         
         const userRef = db.collection("users").doc(uid);
         await userRef.update({
@@ -1742,7 +2193,6 @@ exports.verifySSOCallback = onRequest(
           { merge: true }
         );
       } else {
-        const resolvedRole = determineRole(userInfo);
         const userRecord = await auth.createUser({
           email: userInfo.email || `${userInfo.sub}@${schoolId}.sso.local`,
           displayName: userInfo.name || userInfo.displayName,
@@ -1751,6 +2201,7 @@ exports.verifySSOCallback = onRequest(
 
         uid = userRecord.uid;
         isNewUser = true;
+        resolvedRole = "student";
 
         await ssoLinkRef.set({
           schoolId,
@@ -1788,7 +2239,12 @@ exports.verifySSOCallback = onRequest(
       const customToken = await auth.createCustomToken(uid, {
         schoolId,
         ssoSub: userInfo.sub,
-        role: determineRole(userInfo),
+        role: resolvedRole,
+      });
+
+      await syncAuthClaims(uid, {
+        role: resolvedRole,
+        schoolId,
       });
 
       res.json({
@@ -1808,7 +2264,7 @@ exports.verifySSOCallback = onRequest(
           ou: userInfo.ou || userInfo.department,
           affiliation: userInfo.affiliation,
           userType: userInfo.userType,
-          role: determineRole(userInfo),
+          role: resolvedRole,
         },
       });
     } catch (error) {
@@ -1822,32 +2278,14 @@ exports.verifySSOCallback = onRequest(
 );
 
 function determineRole(userInfo) {
-  const email = (userInfo.email || "").toLowerCase();
-  const dept = (userInfo.department || userInfo.ou || "").toLowerCase();
-  const type = (userInfo.userType || userInfo.affiliation || "").toLowerCase();
-  
-  if (type.includes("faculty") || type.includes("staff") || type.includes("employee")) {
-    if (dept.includes("admin") || dept.includes("行政")) {
-      return "admin";
-    }
-    return type.includes("staff") || type.includes("employee") ? "staff" : "teacher";
-  }
-  
-  if (type.includes("student") || email.includes("student")) {
-    return "student";
-  }
-  
-  if (email.includes("teacher") || email.includes("prof")) {
-    return "teacher";
-  }
-  
   return "student";
 }
 
 exports.getSSOConfig = onRequest(
   {
     region: REGION,
-    cors: true,
+    cors: STRICT_CORS,
+    secrets: [SSO_CONFIG_ENCRYPTION_KEY],
   },
   async (req, res) => {
     const { schoolId } = req.query;
@@ -1858,14 +2296,12 @@ exports.getSSOConfig = onRequest(
     }
 
     try {
-      const configDoc = await db
-        .collection("schools")
-        .doc(schoolId)
-        .collection("settings")
-        .doc("sso")
-        .get();
+      assertTrustedOrigin(req);
 
-      if (!configDoc.exists) {
+      const encryptionKey = SSO_CONFIG_ENCRYPTION_KEY.value();
+      const fullConfig = await getFullSchoolSsoConfig(schoolId, encryptionKey);
+
+      if (!fullConfig) {
         res.json({
           schoolId,
           ssoConfig: null,
@@ -1884,17 +2320,15 @@ exports.getSSOConfig = onRequest(
         return;
       }
 
-      const config = configDoc.data();
-      const ssoConfig = config.ssoConfig ? normalizeSsoConfig(config.ssoConfig) : null;
-
       const safeConfig = toPublicSsoConfig(
         {
-          ...config,
-          schoolId: config.schoolId || schoolId,
+          ...fullConfig,
+          schoolId: fullConfig.schoolId || schoolId,
         },
-        ssoConfig
+        fullConfig.ssoConfig
       );
 
+      res.set("Cache-Control", "no-store");
       res.json(safeConfig);
     } catch (error) {
       console.error("Get SSO config error:", error);
@@ -1906,6 +2340,7 @@ exports.getSSOConfig = onRequest(
 exports.updateSSOConfig = onCall(
   {
     region: REGION,
+    secrets: [SSO_CONFIG_ENCRYPTION_KEY],
   },
   async (request) => {
     const uid = request.auth?.uid;
@@ -1913,10 +2348,17 @@ exports.updateSSOConfig = onCall(
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
 
-    const { schoolId, config } = request.data;
+    enforceRateLimit({
+      scope: "update-sso-config",
+      key: uid,
+      limit: 20,
+      windowMs: 10 * 60 * 1000,
+    });
 
-    if (!schoolId || !config) {
-      throw new HttpsError("invalid-argument", "Missing schoolId or config");
+    const { schoolId, config, publicConfig, secretConfig } = request.data;
+
+    if (!schoolId || (!config && !publicConfig)) {
+      throw new HttpsError("invalid-argument", "Missing schoolId or SSO configuration");
     }
 
     const memberDoc = await db
@@ -1930,23 +2372,27 @@ exports.updateSSOConfig = onCall(
       throw new HttpsError("permission-denied", "Only admins can update SSO config");
     }
 
-    await db
-      .collection("schools")
-      .doc(schoolId)
-      .collection("settings")
-      .doc("sso")
-      .set(
-        {
-          ...config,
-          setupStatus: normalizeSetupStatus(
-            config.setupStatus,
-            Boolean(config.ssoConfig)
-          ),
-          updatedAt: FieldValue.serverTimestamp(),
-          updatedBy: uid,
-        },
-        { merge: true }
-      );
+    const normalizedConfig = config || publicConfig;
+    const splitConfig = config
+      ? splitSsoConfig(normalizedConfig)
+      : {
+          publicConfig: normalizedConfig,
+          secretConfig: secretConfig || {},
+        };
+
+    splitConfig.publicConfig.setupStatus = normalizeSetupStatus(
+      splitConfig.publicConfig.setupStatus,
+      Boolean(splitConfig.publicConfig.ssoConfig)
+    );
+
+    const encryptionKey = SSO_CONFIG_ENCRYPTION_KEY.value();
+    await writeSchoolSsoConfig({
+      schoolId,
+      publicConfig: splitConfig.publicConfig,
+      secretConfig: splitConfig.secretConfig,
+      encryptionKey,
+      updatedBy: uid,
+    });
 
     return { success: true };
   }
@@ -2022,6 +2468,27 @@ exports.updateUserProfile = onCall(
   }
 );
 
+exports.onUserProfileChanged = onDocumentWritten(
+  {
+    region: REGION,
+    document: "users/{uid}",
+  },
+  async (event) => {
+    const uid = event.params.uid;
+    const afterData = event.data.after?.data();
+
+    if (!afterData) {
+      return;
+    }
+
+    try {
+      await syncAuthClaims(uid, afterData);
+    } catch (error) {
+      console.error("Failed to sync auth claims:", error);
+    }
+  }
+);
+
 // =====================================================
 // 群組管理 API
 // =====================================================
@@ -2036,13 +2503,27 @@ exports.createGroup = onCall(
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
 
-    const { name, description, type, schoolId, isPrivate } = request.data;
+    const { name, description, type, schoolId, isPrivate, isPublished, verification } = request.data;
 
     if (!name || !type || !schoolId) {
       throw new HttpsError("invalid-argument", "Missing required fields");
     }
 
-    const joinCode = isPrivate ? Math.random().toString(36).substring(2, 8).toUpperCase() : null;
+    await assertActiveSchoolMember(schoolId, uid);
+
+    let joinCode = null;
+    for (let i = 0; i < 8; i += 1) {
+      const candidate = generateGroupJoinCode(8);
+      const existing = await db.collection("groups").where("joinCode", "==", candidate).limit(1).get();
+      if (existing.empty) {
+        joinCode = candidate;
+        break;
+      }
+    }
+
+    if (!joinCode) {
+      throw new HttpsError("resource-exhausted", "Failed to allocate a unique join code");
+    }
 
     const groupRef = await db.collection("groups").add({
       name,
@@ -2050,6 +2531,8 @@ exports.createGroup = onCall(
       type,
       schoolId,
       isPrivate: !!isPrivate,
+      isPublished: Boolean(isPublished),
+      verification: verification || { status: "unverified" },
       joinCode,
       createdBy: uid,
       createdAt: FieldValue.serverTimestamp(),
@@ -2058,6 +2541,7 @@ exports.createGroup = onCall(
 
     // 創建者自動成為管理員
     await db.collection("groups").doc(groupRef.id).collection("members").doc(uid).set({
+      uid,
       role: "owner",
       status: "active",
       joinedAt: FieldValue.serverTimestamp(),
@@ -2067,6 +2551,9 @@ exports.createGroup = onCall(
     await db.collection("users").doc(uid).collection("groups").doc(groupRef.id).set({
       groupId: groupRef.id,
       schoolId,
+      type,
+      name,
+      joinCode,
       status: "active",
       role: "owner",
       joinedAt: FieldValue.serverTimestamp(),
@@ -2090,14 +2577,16 @@ exports.joinGroupByCode = onCall(
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
 
-    const { joinCode } = request.data;
+    const { joinCode, schoolId } = request.data;
 
-    if (!joinCode) {
-      throw new HttpsError("invalid-argument", "Missing join code");
+    if (!joinCode || !schoolId) {
+      throw new HttpsError("invalid-argument", "Missing join code or schoolId");
     }
 
+    await assertActiveSchoolMember(schoolId, uid);
+
     const groupsSnap = await db.collection("groups")
-      .where("joinCode", "==", joinCode.toUpperCase())
+      .where("joinCode", "==", String(joinCode).trim().toUpperCase())
       .limit(1)
       .get();
 
@@ -2109,6 +2598,10 @@ exports.joinGroupByCode = onCall(
     const groupId = groupDoc.id;
     const groupData = groupDoc.data();
 
+    if (groupData.schoolId !== schoolId) {
+      throw new HttpsError("permission-denied", "Join code belongs to a different school");
+    }
+
     // 檢查是否已經是成員
     const memberDoc = await db.collection("groups").doc(groupId).collection("members").doc(uid).get();
     if (memberDoc.exists && memberDoc.data().status === "active") {
@@ -2119,6 +2612,7 @@ exports.joinGroupByCode = onCall(
 
     // 加入群組
     batch.set(db.collection("groups").doc(groupId).collection("members").doc(uid), {
+      uid,
       role: "member",
       status: "active",
       joinedAt: FieldValue.serverTimestamp(),
@@ -2133,6 +2627,9 @@ exports.joinGroupByCode = onCall(
     batch.set(db.collection("users").doc(uid).collection("groups").doc(groupId), {
       groupId,
       schoolId: groupData.schoolId,
+      type: groupData.type || null,
+      name: groupData.name || null,
+      joinCode: groupData.joinCode || null,
       status: "active",
       role: "member",
       joinedAt: FieldValue.serverTimestamp(),
@@ -3547,244 +4044,288 @@ exports.gradePublishedNotification = onDocumentCreated(
 // 支付系統 API
 // =====================================================
 
+async function createIntentDocument(collectionName, payload) {
+  const ref = db.collection(collectionName).doc();
+  await ref.set({
+    ...payload,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  return ref.id;
+}
+
+function normalizePaymentMethod(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function assertValidAmount(amount, { min = 1, max = 100000 } = {}) {
+  if (typeof amount !== "number" || Number.isNaN(amount) || amount <= 0) {
+    throw new HttpsError("invalid-argument", "Invalid amount");
+  }
+  if (amount < min) {
+    throw new HttpsError("invalid-argument", `Amount must be at least ${min}`);
+  }
+  if (amount > max) {
+    throw new HttpsError("invalid-argument", `Amount must not exceed ${max}`);
+  }
+}
+
+async function createExternalTopupIntent({
+  uid,
+  amount,
+  paymentMethod,
+}) {
+  const intentId = await createIntentDocument("topupIntents", {
+    userId: uid,
+    amount,
+    currency: DEFAULT_WALLET_CURRENCY,
+    paymentMethod,
+    status: EXTERNAL_PAYMENT_ENABLED ? "pending_provider" : "provider_disabled",
+  });
+
+  if (!EXTERNAL_PAYMENT_ENABLED) {
+    return {
+      success: false,
+      intentId,
+      status: "provider_disabled",
+      errorCode: "EXTERNAL_PROVIDER_DISABLED",
+      errorMessage: "External top-up providers are disabled until webhook credentials are configured",
+    };
+  }
+
+  return {
+    success: false,
+    intentId,
+    status: "pending_provider",
+    errorCode: "PROVIDER_NOT_READY",
+    errorMessage: "Payment provider integration is not active yet",
+  };
+}
+
+async function getWalletBalancePayload(uid) {
+  const wallet = await getWalletSnapshot(uid);
+  return {
+    balance: Number(wallet.data.available || 0),
+    available: Number(wallet.data.available || 0),
+    pending: Number(wallet.data.pending || 0),
+    currency: wallet.data.currency || DEFAULT_WALLET_CURRENCY,
+    lastUpdated: wallet.data.lastUpdated?.toDate?.()?.toISOString?.() || null,
+  };
+}
+
+async function listLedgerEntriesPayload(uid, queryLimit = 50, type = null) {
+  let ledgerQuery = db.collection("ledgerEntries")
+    .where("userId", "==", uid)
+    .orderBy("createdAt", "desc");
+  if (type && ["payment", "topup", "refund"].includes(type)) {
+    ledgerQuery = ledgerQuery.where("type", "==", type);
+  }
+
+  const snapshot = await ledgerQuery.limit(queryLimit).get();
+  return snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+    createdAt: doc.data().createdAt?.toDate?.()?.toISOString?.() || null,
+  }));
+}
+
+exports.createTopupIntent = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    enforceRateLimit({
+      scope: "create-topup-intent",
+      key: uid,
+      limit: 15,
+      windowMs: 10 * 60 * 1000,
+    });
+
+    const amount = Number(request.data?.amount);
+    const paymentMethod = normalizePaymentMethod(request.data?.paymentMethod);
+
+    assertValidAmount(amount, { min: 100, max: 10000 });
+
+    if (!paymentMethod || !isSupportedExternalPaymentMethod(paymentMethod)) {
+      throw new HttpsError("invalid-argument", "Unsupported top-up payment method");
+    }
+
+    return createExternalTopupIntent({
+      uid,
+      amount,
+      paymentMethod,
+    });
+  }
+);
+
+exports.createPaymentIntent = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    enforceRateLimit({
+      scope: "create-payment-intent",
+      key: uid,
+      limit: 30,
+      windowMs: 10 * 60 * 1000,
+    });
+
+    const amount = Number(request.data?.amount);
+    const paymentMethod = normalizePaymentMethod(request.data?.paymentMethod);
+    const merchantId = String(request.data?.merchantId || "").trim();
+    const description = String(request.data?.description || "").trim();
+
+    assertValidAmount(amount, { min: 1, max: 100000 });
+
+    if (!merchantId) {
+      throw new HttpsError("invalid-argument", "Missing merchantId");
+    }
+
+    const intentId = await createIntentDocument("paymentIntents", {
+      userId: uid,
+      amount,
+      currency: DEFAULT_WALLET_CURRENCY,
+      paymentMethod,
+      merchantId,
+      description,
+      status: "created",
+    });
+
+    if (paymentMethod === "campus_card") {
+      const result = await appendWalletLedgerEntry({
+        uid,
+        amount: -amount,
+        type: "payment",
+        status: "completed",
+        description: description || "Campus card payment",
+        paymentMethod,
+        merchantId,
+        sourceCollection: "paymentIntents",
+        sourceId: intentId,
+      });
+
+      await db.collection("paymentIntents").doc(intentId).set(
+        {
+          status: "completed",
+          completedAt: FieldValue.serverTimestamp(),
+          ledgerEntryId: result.ledgerEntryId,
+          balanceAfter: result.balance,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      return {
+        success: true,
+        intentId,
+        transactionId: result.ledgerEntryId,
+        newBalance: result.balance,
+        status: "completed",
+      };
+    }
+
+    if (!isSupportedExternalPaymentMethod(paymentMethod)) {
+      await db.collection("paymentIntents").doc(intentId).set(
+        {
+          status: "rejected",
+          errorCode: "UNSUPPORTED_PAYMENT_METHOD",
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      throw new HttpsError("invalid-argument", "Unsupported payment method");
+    }
+
+    await db.collection("paymentIntents").doc(intentId).set(
+      {
+        status: EXTERNAL_PAYMENT_ENABLED ? "pending_provider" : "provider_disabled",
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return {
+      success: false,
+      intentId,
+      status: EXTERNAL_PAYMENT_ENABLED ? "pending_provider" : "provider_disabled",
+      errorCode: EXTERNAL_PAYMENT_ENABLED ? "PROVIDER_NOT_READY" : "EXTERNAL_PROVIDER_DISABLED",
+      errorMessage: EXTERNAL_PAYMENT_ENABLED
+        ? "Payment provider integration is not active yet"
+        : "External payment providers are disabled until webhook credentials are configured",
+    };
+  }
+);
+
+exports.providerWebhook = onRequest(
+  {
+    region: REGION,
+    cors: false,
+  },
+  async (req, res) => {
+    try {
+      if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+      }
+
+      enforceRateLimit({
+        scope: "provider-webhook",
+        key: getClientIp(req),
+        limit: 60,
+        windowMs: 5 * 60 * 1000,
+      });
+
+      const provider = String(req.query?.provider || req.body?.provider || "").trim().toLowerCase();
+      if (provider !== "linepay") {
+        res.status(501).json({
+          error: "Payment provider webhook is not configured yet",
+        });
+        return;
+      }
+
+      res.status(501).json({
+        error: "Line Pay webhook verification is not configured yet",
+      });
+    } catch (error) {
+      console.error("providerWebhook error:", error);
+      writeHttpError(res, error, "Webhook processing failed");
+    }
+  }
+);
+
 exports.processTopup = onRequest(
   {
     region: REGION,
-    cors: true,
+    cors: STRICT_CORS,
   },
-  async (req, res) => {
-    if (req.method !== "POST") {
-      res.status(405).json({ error: "Method not allowed" });
-      return;
-    }
-
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      res.status(401).json({ code: "AUTH_ERROR", message: "未提供有效的認證資訊" });
-      return;
-    }
-
-    const idToken = authHeader.split("Bearer ")[1];
-
-    try {
-      const { getAuth } = require("firebase-admin/auth");
-      const auth = getAuth();
-      const decodedToken = await auth.verifyIdToken(idToken);
-      const uid = decodedToken.uid;
-
-      const { userId, amount, paymentMethod } = req.body;
-
-      if (userId !== uid) {
-        res.status(403).json({ code: "PERMISSION_DENIED", message: "無法為其他使用者儲值" });
-        return;
-      }
-
-      if (!amount || typeof amount !== "number" || amount <= 0) {
-        res.status(400).json({ code: "INVALID_AMOUNT", message: "無效的儲值金額" });
-        return;
-      }
-
-      if (amount > 10000) {
-        res.status(400).json({ code: "AMOUNT_TOO_LARGE", message: "單次儲值上限為 10,000 元" });
-        return;
-      }
-
-      if (amount < 100) {
-        res.status(400).json({ code: "AMOUNT_TOO_SMALL", message: "最低儲值金額為 100 元" });
-        return;
-      }
-
-      const validPaymentMethods = ["credit_card", "line_pay", "jko_pay", "apple_pay", "google_pay", "bank_transfer"];
-      if (!validPaymentMethods.includes(paymentMethod)) {
-        res.status(400).json({ code: "INVALID_PAYMENT_METHOD", message: "不支援的付款方式" });
-        return;
-      }
-
-      const userRef = db.collection("users").doc(uid);
-      const transactionsRef = db.collection("transactions");
-
-      const result = await db.runTransaction(async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        
-        if (!userDoc.exists) {
-          throw new Error("USER_NOT_FOUND");
-        }
-
-        const userData = userDoc.data();
-        const currentBalance = userData.balance || 0;
-        const newBalance = currentBalance + amount;
-
-        const transactionDoc = transactionsRef.doc();
-        
-        transaction.update(userRef, {
-          balance: newBalance,
-          lastTopupAt: FieldValue.serverTimestamp(),
-        });
-
-        transaction.set(transactionDoc, {
-          userId: uid,
-          type: "topup",
-          amount: amount,
-          paymentMethod: paymentMethod,
-          balanceBefore: currentBalance,
-          balanceAfter: newBalance,
-          status: "completed",
-          createdAt: FieldValue.serverTimestamp(),
-        });
-
-        return {
-          transactionId: transactionDoc.id,
-          newBalance: newBalance,
-        };
-      });
-
-      console.log(`Topup completed: user ${uid}, amount ${amount}, new balance ${result.newBalance}`);
-
-      res.json({
-        success: true,
-        transactionId: result.transactionId,
-        newBalance: result.newBalance,
-      });
-
-    } catch (error) {
-      console.error("processTopup error:", error);
-      
-      if (error.message === "USER_NOT_FOUND") {
-        res.status(404).json({ code: "USER_NOT_FOUND", message: "找不到使用者" });
-        return;
-      }
-
-      res.status(500).json({ 
-        code: "SERVER_ERROR", 
-        message: "伺服器錯誤，請稍後再試" 
-      });
-    }
+  async (_req, res) => {
+    res.status(410).json({
+      code: "DEPRECATED_ENDPOINT",
+      message: "processTopup has been removed. Use createTopupIntent instead.",
+    });
   }
 );
 
 exports.processPayment = onRequest(
   {
     region: REGION,
-    cors: true,
+    cors: STRICT_CORS,
   },
-  async (req, res) => {
-    if (req.method !== "POST") {
-      res.status(405).json({ error: "Method not allowed" });
-      return;
-    }
-
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      res.status(401).json({ code: "AUTH_ERROR", message: "未提供有效的認證資訊" });
-      return;
-    }
-
-    const idToken = authHeader.split("Bearer ")[1];
-
-    try {
-      const { getAuth } = require("firebase-admin/auth");
-      const auth = getAuth();
-      const decodedToken = await auth.verifyIdToken(idToken);
-      const uid = decodedToken.uid;
-
-      const { userId, amount, paymentMethod, merchantId, description } = req.body;
-
-      if (userId !== uid) {
-        res.status(403).json({ code: "PERMISSION_DENIED", message: "無法為其他使用者付款" });
-        return;
-      }
-
-      if (!amount || typeof amount !== "number" || amount <= 0) {
-        res.status(400).json({ code: "INVALID_AMOUNT", message: "無效的付款金額" });
-        return;
-      }
-
-      if (!merchantId) {
-        res.status(400).json({ code: "INVALID_MERCHANT", message: "未指定商家" });
-        return;
-      }
-
-      const validPaymentMethods = ["campus_card", "credit_card", "line_pay", "jko_pay", "apple_pay", "google_pay"];
-      if (!validPaymentMethods.includes(paymentMethod)) {
-        res.status(400).json({ code: "INVALID_PAYMENT_METHOD", message: "不支援的付款方式" });
-        return;
-      }
-
-      const userRef = db.collection("users").doc(uid);
-      const transactionsRef = db.collection("transactions");
-
-      const result = await db.runTransaction(async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        
-        if (!userDoc.exists) {
-          throw new Error("USER_NOT_FOUND");
-        }
-
-        const userData = userDoc.data();
-        const currentBalance = userData.balance || 0;
-
-        if (paymentMethod === "campus_card" && currentBalance < amount) {
-          throw new Error("INSUFFICIENT_BALANCE");
-        }
-
-        const newBalance = paymentMethod === "campus_card" 
-          ? currentBalance - amount 
-          : currentBalance;
-
-        const transactionDoc = transactionsRef.doc();
-        
-        if (paymentMethod === "campus_card") {
-          transaction.update(userRef, {
-            balance: newBalance,
-            lastPaymentAt: FieldValue.serverTimestamp(),
-          });
-        }
-
-        transaction.set(transactionDoc, {
-          userId: uid,
-          type: "payment",
-          amount: -amount,
-          paymentMethod: paymentMethod,
-          merchantId: merchantId,
-          description: description || "",
-          balanceBefore: currentBalance,
-          balanceAfter: newBalance,
-          status: "completed",
-          createdAt: FieldValue.serverTimestamp(),
-        });
-
-        return {
-          transactionId: transactionDoc.id,
-          newBalance: newBalance,
-        };
-      });
-
-      console.log(`Payment completed: user ${uid}, amount ${amount}, merchant ${merchantId}`);
-
-      res.json({
-        success: true,
-        transactionId: result.transactionId,
-        newBalance: result.newBalance,
-      });
-
-    } catch (error) {
-      console.error("processPayment error:", error);
-      
-      if (error.message === "USER_NOT_FOUND") {
-        res.status(404).json({ code: "USER_NOT_FOUND", message: "找不到使用者" });
-        return;
-      }
-
-      if (error.message === "INSUFFICIENT_BALANCE") {
-        res.status(400).json({ code: "INSUFFICIENT_BALANCE", message: "餘額不足" });
-        return;
-      }
-
-      res.status(500).json({ 
-        code: "SERVER_ERROR", 
-        message: "伺服器錯誤，請稍後再試" 
-      });
-    }
+  async (_req, res) => {
+    res.status(410).json({
+      code: "DEPRECATED_ENDPOINT",
+      message: "processPayment has been removed. Use createPaymentIntent instead.",
+    });
   }
 );
 
@@ -3797,24 +4338,48 @@ exports.getBalance = onCall(
     if (!uid) {
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
+    return getWalletBalancePayload(uid);
+  }
+);
+
+exports.getWalletBalance = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
 
     try {
-      const userDoc = await db.collection("users").doc(uid).get();
-      
-      if (!userDoc.exists) {
-        throw new HttpsError("not-found", "User not found");
-      }
+      return getWalletBalancePayload(uid);
+    } catch (error) {
+      console.error("getWalletBalance error:", error);
+      throw new HttpsError("internal", "Failed to get wallet balance");
+    }
+  }
+);
 
-      const userData = userDoc.data();
-      
+exports.listLedgerEntries = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "Must be logged in");
+    }
+
+    const { limit: queryLimit = 50, type } = request.data || {};
+
+    try {
       return {
-        balance: userData.balance || 0,
-        lastTopupAt: userData.lastTopupAt?.toDate()?.toISOString() || null,
-        lastPaymentAt: userData.lastPaymentAt?.toDate()?.toISOString() || null,
+        entries: await listLedgerEntriesPayload(uid, queryLimit, type),
       };
     } catch (error) {
-      console.error("getBalance error:", error);
-      throw new HttpsError("internal", "Failed to get balance");
+      console.error("listLedgerEntries error:", error);
+      throw new HttpsError("internal", "Failed to list wallet ledger");
     }
   }
 );
@@ -3828,33 +4393,10 @@ exports.getTransactionHistory = onCall(
     if (!uid) {
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
-
-    const { limit: queryLimit, type } = request.data || {};
-
-    try {
-      let transactionsQuery = db.collection("transactions")
-        .where("userId", "==", uid)
-        .orderBy("createdAt", "desc");
-      
-      if (type && ["topup", "payment", "refund"].includes(type)) {
-        transactionsQuery = transactionsQuery.where("type", "==", type);
-      }
-
-      const transactionsSnap = await transactionsQuery
-        .limit(queryLimit || 50)
-        .get();
-
-      return {
-        transactions: transactionsSnap.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-          createdAt: doc.data().createdAt?.toDate()?.toISOString(),
-        })),
-      };
-    } catch (error) {
-      console.error("getTransactionHistory error:", error);
-      throw new HttpsError("internal", "Failed to get transaction history");
-    }
+    const { limit: queryLimit = 50, type } = request.data || {};
+    return {
+      transactions: await listLedgerEntriesPayload(uid, queryLimit, type),
+    };
   }
 );
 
@@ -3868,60 +4410,36 @@ exports.requestRefund = onCall(
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
 
-    const { transactionId, reason } = request.data;
+    const transactionId = String(request.data?.transactionId || "").trim();
+    const reason = String(request.data?.reason || "").trim();
 
     if (!transactionId) {
       throw new HttpsError("invalid-argument", "Missing transactionId");
     }
 
-    try {
-      const transactionDoc = await db.collection("transactions").doc(transactionId).get();
-      
-      if (!transactionDoc.exists) {
-        throw new HttpsError("not-found", "Transaction not found");
-      }
-
-      const transactionData = transactionDoc.data();
-
-      if (transactionData.userId !== uid) {
-        throw new HttpsError("permission-denied", "This is not your transaction");
-      }
-
-      if (transactionData.type !== "payment") {
-        throw new HttpsError("failed-precondition", "Only payments can be refunded");
-      }
-
-      if (transactionData.status === "refunded") {
-        throw new HttpsError("failed-precondition", "This transaction has already been refunded");
-      }
-
-      const createdAt = transactionData.createdAt?.toDate();
-      if (createdAt) {
-        const hoursSinceCreation = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60);
-        if (hoursSinceCreation > 24) {
-          throw new HttpsError("failed-precondition", "Refund window has expired (24 hours)");
-        }
-      }
-
-      const refundRequestRef = await db.collection("refundRequests").add({
-        userId: uid,
-        transactionId,
-        originalAmount: Math.abs(transactionData.amount),
-        reason: reason || "",
-        status: "pending",
-        createdAt: FieldValue.serverTimestamp(),
-      });
-
-      return {
-        success: true,
-        refundRequestId: refundRequestRef.id,
-        message: "退款申請已提交，將在 1-3 個工作天內處理",
-      };
-    } catch (error) {
-      if (error instanceof HttpsError) throw error;
-      console.error("requestRefund error:", error);
-      throw new HttpsError("internal", "Failed to request refund");
+    const transactionDoc = await db.collection("transactions").doc(transactionId).get();
+    if (!transactionDoc.exists) {
+      throw new HttpsError("not-found", "Transaction not found");
     }
+
+    const transactionData = transactionDoc.data();
+    if (transactionData.userId !== uid) {
+      throw new HttpsError("permission-denied", "This is not your transaction");
+    }
+
+    const refundRequestRef = await db.collection("refundRequests").add({
+      userId: uid,
+      transactionId,
+      reason,
+      status: "pending",
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    return {
+      success: true,
+      refundRequestId: refundRequestRef.id,
+      message: "Refund request submitted",
+    };
   }
 );
 

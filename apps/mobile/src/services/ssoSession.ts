@@ -1,5 +1,9 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { SSOUserInfo, getSchoolSSOConfig, SSOError } from "./sso";
+import {
+  secureDeleteMany,
+  secureGetItem,
+  secureSetItem,
+} from "./secureStorage";
 
 const SSO_SESSION_KEY = "campus.sso.session.v1";
 const SSO_CREDENTIALS_KEY = "campus.sso.credentials.v1";
@@ -27,7 +31,7 @@ const sessionListeners = new Set<(session: SSOSession | null) => void>();
 
 export async function loadSSOSession(): Promise<SSOSession | null> {
   try {
-    const sessionJson = await AsyncStorage.getItem(SSO_SESSION_KEY);
+    const sessionJson = await secureGetItem(SSO_SESSION_KEY);
     if (!sessionJson) return null;
     
     currentSession = JSON.parse(sessionJson);
@@ -48,7 +52,7 @@ export async function loadSSOSession(): Promise<SSOSession | null> {
 export async function saveSSOSession(session: SSOSession): Promise<void> {
   try {
     currentSession = session;
-    await AsyncStorage.setItem(SSO_SESSION_KEY, JSON.stringify(session));
+    await secureSetItem(SSO_SESSION_KEY, JSON.stringify(session));
     notifySessionListeners(session);
   } catch (error) {
     console.error("[SSOSession] Failed to save session:", error);
@@ -60,7 +64,7 @@ export async function clearSSOSession(): Promise<void> {
   try {
     currentSession = null;
     currentCredentials = null;
-    await AsyncStorage.multiRemove([SSO_SESSION_KEY, SSO_CREDENTIALS_KEY]);
+    await secureDeleteMany([SSO_SESSION_KEY, SSO_CREDENTIALS_KEY]);
     notifySessionListeners(null);
   } catch (error) {
     console.error("[SSOSession] Failed to clear session:", error);
@@ -73,7 +77,7 @@ export function getCurrentSSOSession(): SSOSession | null {
 
 export async function loadSSOCredentials(): Promise<SSOCredentials | null> {
   try {
-    const credentialsJson = await AsyncStorage.getItem(SSO_CREDENTIALS_KEY);
+    const credentialsJson = await secureGetItem(SSO_CREDENTIALS_KEY);
     if (!credentialsJson) return null;
     
     currentCredentials = JSON.parse(credentialsJson);
@@ -88,7 +92,7 @@ export async function saveSSOCredentials(credentials: SSOCredentials): Promise<v
   try {
     currentCredentials = credentials;
     const sanitizedCredentials = { ...credentials };
-    await AsyncStorage.setItem(SSO_CREDENTIALS_KEY, JSON.stringify(sanitizedCredentials));
+    await secureSetItem(SSO_CREDENTIALS_KEY, JSON.stringify(sanitizedCredentials));
   } catch (error) {
     console.error("[SSOSession] Failed to save credentials:", error);
   }

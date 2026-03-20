@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { ScrollView, Text, View, Linking, Platform, Pressable, Alert, Share, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { buildSchoolCollectionPath } from "@campus/shared/src";
 import { doc, collection, getDocs, setDoc, query, orderBy, serverTimestamp, getDoc, updateDoc, arrayUnion, arrayRemove, increment } from "firebase/firestore";
 import { findById } from "../data";
 import { useAsyncList } from "../hooks/useAsyncList";
@@ -261,30 +262,52 @@ export function PoiDetailScreen(props: any) {
     async () => {
       if (!id) return [];
       try {
-        const ref = collection(db, "pois", id, "reviews");
-        const qy = query(ref, orderBy("createdAt", "desc"));
-        const snap = await getDocs(qy);
-        return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as PoiReview[];
+        const canonicalRef = school.id
+          ? collection(db, buildSchoolCollectionPath(school.id, "pois", id, "reviews").join("/"))
+          : null;
+        const legacyRef = collection(db, "pois", id, "reviews");
+        const refs = canonicalRef ? [canonicalRef, legacyRef] : [legacyRef];
+
+        for (const ref of refs) {
+          const qy = query(ref, orderBy("createdAt", "desc"));
+          const snap = await getDocs(qy);
+          if (!snap.empty || ref === legacyRef) {
+            return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as PoiReview[];
+          }
+        }
+
+        return [];
       } catch {
         return [];
       }
     },
-    [db, id]
+    [db, id, school.id]
   );
 
   const { items: crowdReports, reload: reloadCrowdReports } = useAsyncList<CrowdReport>(
     async () => {
       if (!id) return [];
       try {
-        const ref = collection(db, "pois", id, "crowdReports");
-        const qy = query(ref, orderBy("createdAt", "desc"));
-        const snap = await getDocs(qy);
-        return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CrowdReport[];
+        const canonicalRef = school.id
+          ? collection(db, buildSchoolCollectionPath(school.id, "pois", id, "crowdReports").join("/"))
+          : null;
+        const legacyRef = collection(db, "pois", id, "crowdReports");
+        const refs = canonicalRef ? [canonicalRef, legacyRef] : [legacyRef];
+
+        for (const ref of refs) {
+          const qy = query(ref, orderBy("createdAt", "desc"));
+          const snap = await getDocs(qy);
+          if (!snap.empty || ref === legacyRef) {
+            return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CrowdReport[];
+          }
+        }
+
+        return [];
       } catch {
         return [];
       }
     },
-    [db, id]
+    [db, id, school.id]
   );
 
   const myReview = useMemo(() => {
@@ -448,7 +471,7 @@ export function PoiDetailScreen(props: any) {
 
     setSubmittingReview(true);
     try {
-      await setDoc(doc(db, "pois", id, "reviews", auth.user.uid), {
+      await setDoc(doc(db, buildSchoolCollectionPath(school.id, "pois", id, "reviews", auth.user.uid).join("/")), {
         uid: auth.user.uid,
         displayName: auth.profile?.displayName ?? null,
         avatarUrl: auth.profile?.avatarUrl ?? null,
@@ -484,7 +507,7 @@ export function PoiDetailScreen(props: any) {
     if (!id) return;
 
     try {
-      await setDoc(doc(collection(db, "pois", id, "crowdReports")), {
+      await setDoc(doc(collection(db, buildSchoolCollectionPath(school.id, "pois", id, "crowdReports").join("/"))), {
         uid: auth.user.uid,
         level,
         createdAt: serverTimestamp(),
@@ -500,7 +523,7 @@ export function PoiDetailScreen(props: any) {
   const handleHelpful = async (reviewId: string, alreadyHelpful: boolean) => {
     if (!auth.user || !id) return;
     try {
-      const reviewRef = doc(db, "pois", id, "reviews", reviewId);
+      const reviewRef = doc(db, buildSchoolCollectionPath(school.id, "pois", id, "reviews", reviewId).join("/"));
       if (alreadyHelpful) {
         await updateDoc(reviewRef, {
           helpfulBy: arrayRemove(auth.user.uid),
@@ -531,7 +554,7 @@ export function PoiDetailScreen(props: any) {
     if (!id) return;
 
     try {
-      await setDoc(doc(collection(db, "pois", id, "reports")), {
+      await setDoc(doc(collection(db, buildSchoolCollectionPath(school.id, "pois", id, "reports").join("/"))), {
         uid: auth.user.uid,
         email: auth.user.email ?? null,
         type: reportType,
