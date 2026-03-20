@@ -27,6 +27,7 @@ import { toDate } from "../utils/format";
 import { getDb } from "../firebase";
 import { doc, getDoc, collection, getDocs, query, orderBy, limit, where, Timestamp } from "firebase/firestore";
 import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
+import { removePersistedValue, savePersistedValue } from "../services/persistedStorage";
 
 const LEGACY_CHAT_HISTORY_KEY = "ai_chat_history";
 const CHAT_HISTORY_MAX = 50;
@@ -272,7 +273,9 @@ export function AIChatScreen(props: any) {
             setMessages(restored);
           }
         }
-      } catch {}
+      } catch (error) {
+        console.warn("[AIChat] Failed to load history:", error);
+      }
     }
     loadHistory();
     return () => {
@@ -288,8 +291,10 @@ export function AIChatScreen(props: any) {
     saveHistoryRef.current = setTimeout(async () => {
       try {
         const toSave = messages.slice(-CHAT_HISTORY_MAX);
-        await AsyncStorage.setItem(chatHistoryKey, JSON.stringify(toSave));
-      } catch {}
+        await savePersistedValue(chatHistoryKey, toSave);
+      } catch (error) {
+        console.warn("[AIChat] Failed to save history:", error);
+      }
     }, 500);
     return () => {
       if (saveHistoryRef.current) clearTimeout(saveHistoryRef.current);
@@ -407,7 +412,14 @@ export function AIChatScreen(props: any) {
   }), [school.id, auth.user?.uid, auth.profile?.displayName, announcements, events, menus, pois, courses, pendingAssignments, weeklyReport]);
 
   useEffect(() => {
-    const providerLabel = aiStatus.provider === "openai" ? "OpenAI" : aiStatus.provider === "gemini" ? "Gemini" : "本地";
+    const providerLabel =
+      aiStatus.provider === "openai"
+        ? "OpenAI"
+        : aiStatus.provider === "gemini"
+          ? "Gemini"
+          : aiStatus.provider === "cloud"
+            ? "Campus Cloud"
+            : "本地";
     const name = auth.profile?.displayName?.split(" ")[0] ?? (auth.user ? "同學" : "同學");
     const courseCount = courses.length;
     const greetingContent = [
@@ -678,8 +690,10 @@ export function AIChatScreen(props: any) {
         style: "destructive",
         onPress: async () => {
           try {
-            await AsyncStorage.removeItem(chatHistoryKey);
-          } catch {}
+            await removePersistedValue(chatHistoryKey);
+          } catch (error) {
+            console.warn("[AIChat] Failed to clear history:", error);
+          }
           // 重設回歡迎訊息
           const name = auth.profile?.displayName?.split(" ")[0] ?? "同學";
           const greeting: Message = {

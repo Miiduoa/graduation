@@ -5,6 +5,11 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getScopedStorageKey, makeScopedStoragePrefix } from "../services/scopedStorage";
+import {
+  loadPersistedValue,
+  removePersistedValue,
+  savePersistedValue,
+} from "../services/persistedStorage";
 import type {
   WidgetType,
   AllWidgetData,
@@ -30,12 +35,14 @@ interface CacheEntry<T> {
 
 async function getCache<T>(key: string): Promise<T | null> {
   try {
-    const cached = await AsyncStorage.getItem(key);
-    if (!cached) return null;
-    
-    const entry: CacheEntry<T> = JSON.parse(cached);
+    const entry = await loadPersistedValue<CacheEntry<T> | null>({
+      storageKey: key,
+      fallback: null,
+    });
+    if (!entry) return null;
+
     if (Date.now() - entry.timestamp > WIDGET_CACHE_TTL) {
-      await AsyncStorage.removeItem(key);
+      await removePersistedValue(key);
       return null;
     }
     return entry.data;
@@ -47,7 +54,7 @@ async function getCache<T>(key: string): Promise<T | null> {
 async function setCache<T>(key: string, data: T): Promise<void> {
   try {
     const entry: CacheEntry<T> = { data, timestamp: Date.now() };
-    await AsyncStorage.setItem(key, JSON.stringify(entry));
+    await savePersistedValue(key, entry);
   } catch {
     // Ignore cache errors
   }

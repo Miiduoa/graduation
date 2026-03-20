@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { subscribeToCacheUpdates } from "../data/cachedSource";
+import { useLatestValue } from "./useLatestValue";
 
 type CacheSubscriptionOptions<T> = {
   cacheKey: string;
@@ -26,9 +27,7 @@ export function useCacheSubscription<T>({
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [updateCount, setUpdateCount] = useState(0);
   const [isStale, setIsStale] = useState(false);
-  
-  const transformRef = useRef(transform);
-  transformRef.current = transform;
+  const transformRef = useLatestValue(transform);
 
   useEffect(() => {
     if (!enabled) return;
@@ -145,10 +144,7 @@ export function useCachedData<T>({
   const [error, setError] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
-  
-  // 使用 ref 儲存最新的 fetchFn 來避免閉包陳舊問題
-  const fetchFnRef = useRef(fetchFn);
-  fetchFnRef.current = fetchFn;
+  const fetchFnRef = useLatestValue(fetchFn);
   
   // 追蹤請求序號避免 race condition
   const requestIdRef = useRef(0);

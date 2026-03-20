@@ -8,9 +8,7 @@
  * 2. 執行 eas build 時會自動處理
  */
 
-const { withPlugins, withXcodeProject, withInfoPlist, withEntitlementsPlist } = require("expo/config-plugins");
-const path = require("path");
-const fs = require("fs");
+const { withXcodeProject, withEntitlementsPlist } = require("expo/config-plugins");
 
 const WIDGET_EXTENSION_NAME = "CampusWidgetExtension";
 const WIDGET_BUNDLE_ID_SUFFIX = "widget";
@@ -25,7 +23,6 @@ function withWidgetExtension(config) {
 
   // Modify Xcode project
   config = withXcodeProject(config, async (config) => {
-    const xcodeProject = config.modResults;
     const targetName = WIDGET_EXTENSION_NAME;
     const bundleId = `${config.ios?.bundleIdentifier}.${WIDGET_BUNDLE_ID_SUFFIX}`;
 

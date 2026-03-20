@@ -4,9 +4,9 @@
  */
 export function normalizeJoinCode(x: string): string {
   return x
-    .replace(/[\s\-]/g, "")
+    .replace(/[\s-]/g, "")
     .replace(/[IO01]/gi, (char) => {
-      const replacements: Record<string, string> = { 'I': '', 'O': '', '0': '', '1': '' };
+      const replacements: Record<string, string> = { I: "", O: "", 0: "", 1: "" };
       return replacements[char.toUpperCase()] ?? char;
     })
     .toUpperCase()

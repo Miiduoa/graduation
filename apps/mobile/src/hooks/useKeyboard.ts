@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Keyboard, KeyboardEvent, Platform, Animated } from "react-native";
+import { Keyboard, KeyboardEvent, Platform, Animated, Dimensions } from "react-native";
+import { useAnimatedAddition, useAnimatedValue } from "./useAnimatedValue";
 
 export type KeyboardState = {
   isVisible: boolean;
@@ -15,7 +16,7 @@ export function useKeyboard(): KeyboardState & {
 } {
   const [isVisible, setIsVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const keyboardAnimatedHeight = useRef(new Animated.Value(0)).current;
+  const keyboardAnimatedHeight = useAnimatedValue(0);
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -70,22 +71,14 @@ export function useKeyboard(): KeyboardState & {
  */
 export function useKeyboardAvoidingPadding(extraPadding = 0): Animated.Value {
   const { keyboardAnimatedHeight } = useKeyboard();
-  
-  // 使用 useRef 確保 Animated.Value 在整個生命週期中穩定，避免記憶體洩漏
-  const extraPaddingValue = useRef(new Animated.Value(extraPadding)).current;
+  const extraPaddingValue = useAnimatedValue(extraPadding);
   
   // 當 extraPadding 變化時更新值
   useEffect(() => {
     extraPaddingValue.setValue(extraPadding);
   }, [extraPadding, extraPaddingValue]);
-  
-  // 使用 useMemo 確保 Animated.add 的結果穩定
-  const combinedValue = useRef<Animated.AnimatedAddition<number> | null>(null);
-  if (!combinedValue.current) {
-    combinedValue.current = Animated.add(keyboardAnimatedHeight, extraPaddingValue);
-  }
-  
-  return combinedValue.current as Animated.Value;
+
+  return useAnimatedAddition(keyboardAnimatedHeight, extraPaddingValue) as unknown as Animated.Value;
 }
 
 /**
@@ -105,7 +98,7 @@ export function useKeyboardAutoScroll(
       const inputRef = inputRefs[focusedIndexRef.current];
       if (inputRef?.current) {
         inputRef.current.measureInWindow((x, y, width, height) => {
-          const screenHeight = require("react-native").Dimensions.get("window").height;
+          const screenHeight = Dimensions.get("window").height;
           const inputBottom = y + height;
           const visibleArea = screenHeight - keyboardHeight;
           

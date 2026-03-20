@@ -158,46 +158,51 @@ export function AdminCourseVerifyScreen() {
   };
 
   const rejectCourse = async (g: CourseGroup) => {
-    Alert.prompt?.(
-      "拒絕認證",
-      "請輸入拒絕原因（選填）",
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "確認拒絕",
-          style: "destructive",
-          onPress: async (reason) => {
-            setErr(null);
-            setSuccessMsg(null);
-            setProcessingId(g.id);
-            try {
-              if (!auth.user) throw new Error("請先登入");
-              await setDoc(
-                doc(db, "groups", g.id),
-                {
-                  verification: {
-                    status: "rejected",
-                    verifiedByUid: auth.user.uid,
-                    verifiedByEmail: auth.user.email ?? null,
-                    verifiedAt: serverTimestamp(),
-                    rejectionReason: reason || null,
+    if (typeof Alert.prompt === "function") {
+      Alert.prompt(
+        "拒絕認證",
+        "請輸入拒絕原因（選填）",
+        [
+          { text: "取消", style: "cancel" },
+          {
+            text: "確認拒絕",
+            style: "destructive",
+            onPress: async (reason) => {
+              setErr(null);
+              setSuccessMsg(null);
+              setProcessingId(g.id);
+              try {
+                if (!auth.user) throw new Error("請先登入");
+                await setDoc(
+                  doc(db, "groups", g.id),
+                  {
+                    verification: {
+                      status: "rejected",
+                      verifiedByUid: auth.user.uid,
+                      verifiedByEmail: auth.user.email ?? null,
+                      verifiedAt: serverTimestamp(),
+                      rejectionReason: reason || null,
+                    },
                   },
-                },
-                { merge: true }
-              );
-              reload();
-              setSuccessMsg(`「${g.name}」已拒絕認證`);
-            } catch (e: any) {
-              setErr(e?.message ?? "操作失敗");
-            } finally {
-              setProcessingId(null);
-            }
+                  { merge: true }
+                );
+                reload();
+                setSuccessMsg(`「${g.name}」已拒絕認證`);
+              } catch (e: any) {
+                setErr(e?.message ?? "操作失敗");
+              } finally {
+                setProcessingId(null);
+              }
+            },
           },
-        },
-      ],
-      "plain-text",
-      ""
-    ) ?? Alert.alert(
+        ],
+        "plain-text",
+        ""
+      );
+      return;
+    }
+
+    Alert.alert(
       "拒絕認證",
       `確定要拒絕「${g.name}」的認證申請嗎？`,
       [

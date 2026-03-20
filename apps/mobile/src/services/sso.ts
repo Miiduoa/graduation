@@ -261,21 +261,85 @@ export function getSSORedirectUri(): string {
   return makeAppRedirectUri("auth/callback");
 }
 
+const CALLBACK_STATE_PARAM = "ssoState";
+
 type AppSSOCallbackPayload = {
   provider: SSOProvider;
   redirectUri: string;
+  transactionId: string;
+  state: string;
+  codeVerifier?: string;
   code?: string;
   ticket?: string;
   samlResponse?: string;
 };
 
-async function performOIDCLogin(config: SSOConfig): Promise<AppSSOCallbackPayload | null> {
+type StartSSOAuthResult = {
+  transactionId: string;
+  expiresAt?: string | null;
+};
+
+function withCallbackState(redirectUri: string, state: string): string {
+  const url = new URL(redirectUri);
+  url.searchParams.set(CALLBACK_STATE_PARAM, state);
+  return url.toString();
+}
+
+async function startSSOAuthTransaction(params: {
+  schoolId: string;
+  provider: SSOProvider;
+  redirectUri: string;
+  state: string;
+  codeChallenge?: string;
+  nonce?: string;
+}): Promise<StartSSOAuthResult> {
+  const response = await fetchWithTimeout(`${getCloudFunctionUrl("startSSOAuth")}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      schoolId: params.schoolId,
+      provider: params.provider,
+      redirectUri: params.redirectUri,
+      state: params.state,
+      source: "mobile",
+      ...(params.codeChallenge ? { codeChallenge: params.codeChallenge } : {}),
+      ...(params.nonce ? { nonce: params.nonce } : {}),
+    }),
+  });
+
+  const data = (await response.json()) as {
+    transactionId?: string;
+    expiresAt?: string | null;
+    error?: string;
+    details?: string;
+  };
+
+  if (!response.ok || typeof data.transactionId !== "string") {
+    throw new SSOError(
+      data.details || data.error || "無法初始化學校登入流程",
+      "SSO_INVALID_RESPONSE"
+    );
+  }
+
+  return {
+    transactionId: data.transactionId,
+    expiresAt: data.expiresAt ?? null,
+  };
+}
+
+async function performOIDCLogin(
+  schoolId: string,
+  config: SSOConfig
+): Promise<AppSSOCallbackPayload | null> {
   if (!config.clientId || !config.authorizationEndpoint) {
     throw new Error("OIDC configuration incomplete");
   }
 
   const redirectUri = getSSORedirectUri();
   const scopes = config.scopes ?? ["openid", "profile", "email"];
+  const nonce = generateRandomId();
 
   const discovery = {
     authorizationEndpoint: config.authorizationEndpoint,
@@ -288,7 +352,24 @@ async function performOIDCLogin(config: SSOConfig): Promise<AppSSOCallbackPayloa
     redirectUri,
     responseType: AuthSession.ResponseType.Code,
     usePKCE: true,
-    extraParams: config.customParams,
+    extraParams: {
+      ...(config.customParams ?? {}),
+      nonce,
+    },
+  });
+  await request.makeAuthUrlAsync(discovery);
+
+  if (!request.state || !request.codeVerifier || !request.codeChallenge) {
+    throw new Error("OIDC request did not initialize PKCE correctly");
+  }
+
+  const transaction = await startSSOAuthTransaction({
+    schoolId,
+    provider: "oidc",
+    redirectUri,
+    state: request.state,
+    codeChallenge: request.codeChallenge,
+    nonce,
   });
 
   const result = await request.promptAsync(discovery);
@@ -298,19 +379,33 @@ async function performOIDCLogin(config: SSOConfig): Promise<AppSSOCallbackPayloa
     return null;
   }
 
-  return {
+  const payload: AppSSOCallbackPayload = {
     provider: "oidc",
     redirectUri,
+    transactionId: transaction.transactionId,
+    state: request.state,
+    codeVerifier: request.codeVerifier,
     code: result.params.code,
   };
+  return payload;
 }
 
-async function performCASLogin(config: SSOConfig): Promise<AppSSOCallbackPayload | null> {
+async function performCASLogin(
+  schoolId: string,
+  config: SSOConfig
+): Promise<AppSSOCallbackPayload | null> {
   if (!config.casServerUrl) {
     throw new Error("CAS server URL not configured");
   }
 
-  const redirectUri = getSSORedirectUri();
+  const state = generateRandomId();
+  const redirectUri = withCallbackState(getSSORedirectUri(), state);
+  const transaction = await startSSOAuthTransaction({
+    schoolId,
+    provider: "cas",
+    redirectUri,
+    state,
+  });
   const serviceUrl = encodeURIComponent(redirectUri);
   const casLoginUrl = `${config.casServerUrl}/login?service=${serviceUrl}`;
 
@@ -328,19 +423,32 @@ async function performCASLogin(config: SSOConfig): Promise<AppSSOCallbackPayload
     throw new Error("No CAS ticket received");
   }
 
-  return {
+  const payload: AppSSOCallbackPayload = {
     provider: "cas",
     redirectUri,
+    transactionId: transaction.transactionId,
+    state: url.searchParams.get(CALLBACK_STATE_PARAM) ?? state,
     ticket,
   };
+  return payload;
 }
 
-async function performSAMLLogin(config: SSOConfig): Promise<AppSSOCallbackPayload | null> {
+async function performSAMLLogin(
+  schoolId: string,
+  config: SSOConfig
+): Promise<AppSSOCallbackPayload | null> {
   if (!config.samlEntryPoint) {
     throw new Error("SAML entry point not configured");
   }
 
-  const redirectUri = getSSORedirectUri();
+  const state = generateRandomId();
+  const redirectUri = withCallbackState(getSSORedirectUri(), state);
+  const transaction = await startSSOAuthTransaction({
+    schoolId,
+    provider: "saml",
+    redirectUri,
+    state,
+  });
   
   const samlRequest = btoa(`
     <samlp:AuthnRequest
@@ -370,11 +478,14 @@ async function performSAMLLogin(config: SSOConfig): Promise<AppSSOCallbackPayloa
     throw new Error("No SAML response received");
   }
 
-  return {
+  const payload: AppSSOCallbackPayload = {
     provider: "saml",
     redirectUri,
+    transactionId: transaction.transactionId,
+    state: url.searchParams.get(CALLBACK_STATE_PARAM) ?? state,
     samlResponse,
   };
+  return payload;
 }
 
 /**
@@ -510,6 +621,9 @@ async function completeSSOCallback(
     provider: payload.provider,
     schoolId,
     redirectUri: payload.redirectUri,
+    transactionId: payload.transactionId,
+    state: payload.state,
+    ...(payload.codeVerifier ? { codeVerifier: payload.codeVerifier } : {}),
     ...(payload.code ? { code: payload.code } : {}),
     ...(payload.ticket ? { ticket: payload.ticket } : {}),
     ...(payload.samlResponse ? { SAMLResponse: payload.samlResponse } : {}),
@@ -573,13 +687,13 @@ export async function performSSOLogin(
     let payload: AppSSOCallbackPayload | null;
     switch (ssoConfig.provider) {
       case "oidc":
-        payload = await performOIDCLogin(ssoConfig);
+        payload = await performOIDCLogin(schoolId, ssoConfig);
         break;
       case "cas":
-        payload = await performCASLogin(ssoConfig);
+        payload = await performCASLogin(schoolId, ssoConfig);
         break;
       case "saml":
-        payload = await performSAMLLogin(ssoConfig);
+        payload = await performSAMLLogin(schoolId, ssoConfig);
         break;
       default:
         throw new SSOError(

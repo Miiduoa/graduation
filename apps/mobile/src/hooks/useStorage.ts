@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useLatestValue } from "./useLatestValue";
 
 type StorageOptions<T> = {
   defaultValue: T;
@@ -27,9 +28,7 @@ export function useAsyncStorage<T>(
 
   const [value, setValue] = useState<T>(defaultValue);
   const [loading, setLoading] = useState(true);
-  
-  const keyRef = useRef(key);
-  keyRef.current = key;
+  const keyRef = useLatestValue(key);
 
   useEffect(() => {
     let mounted = true;
@@ -55,8 +54,7 @@ export function useAsyncStorage<T>(
   }, [key, defaultValue, deserialize]);
 
   // 使用 ref 來追蹤最新的 value，避免閉包陳舊問題
-  const valueRef = useRef(value);
-  valueRef.current = value;
+  const valueRef = useLatestValue(value);
   
   const setStoredValue = useCallback(
     async (newValue: T | ((prev: T) => T)) => {
