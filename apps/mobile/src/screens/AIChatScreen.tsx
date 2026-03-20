@@ -22,7 +22,7 @@ import { useAuth } from "../state/auth";
 import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useSchedule } from "../state/schedule";
-import { chatWithAI, getAIStatus, type AIMessage, type AIContext } from "../services/ai";
+import { chatWithCampusAssistant, getAIStatus, type AIMessage, type AIContext } from "../services/ai";
 import { toDate } from "../utils/format";
 import { getDb } from "../firebase";
 import { doc, getDoc, collection, getDocs, query, orderBy, limit, where, Timestamp } from "firebase/firestore";
@@ -600,13 +600,13 @@ export function AIChatScreen(props: any) {
 
     let response: Message;
 
-    if (USE_AI_SERVICE && aiStatus.provider !== "mock") {
+    if (USE_AI_SERVICE) {
       const aiMessages: AIMessage[] = messages
         .filter((m) => m.role !== "system")
         .map((m) => ({ role: m.role, content: m.content }));
       aiMessages.push({ role: "user", content: userMsg.content });
 
-      const aiResponse = await chatWithAI(aiMessages, aiContext);
+      const aiResponse = await chatWithCampusAssistant(aiMessages, aiContext);
 
       response = {
         id: `msg-${Date.now()}`,

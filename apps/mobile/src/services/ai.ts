@@ -16,6 +16,8 @@
  */
 
 import Constants from "expo-constants";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { getFirebaseApp, hasUsableFirebaseConfig } from "../firebase";
 
 export type AIProvider = "openai" | "gemini" | "mock";
 
@@ -122,6 +124,20 @@ export type AIResponse = {
   error?: string;
 };
 
+type CampusAssistantRequest = {
+  messages: AIMessage[];
+  context: {
+    schoolId?: string;
+    userId?: string;
+    userName?: string;
+  };
+};
+
+type CampusAssistantResponse = AIResponse & {
+  citations?: Array<{ type: string; id: string; label: string }>;
+  debug?: Record<string, unknown>;
+};
+
 export type AIContext = {
   schoolId: string;
   userId?: string;
@@ -156,6 +172,11 @@ function getConfig() {
     geminiModel: extra.geminiModel ?? process.env.EXPO_PUBLIC_GEMINI_MODEL ?? "gemini-1.5-flash",
     maxTokens: extra.aiMaxTokens ?? process.env.EXPO_PUBLIC_AI_MAX_TOKENS ?? 1000,
   };
+}
+
+function getCloudFunctionRegion(): string {
+  const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
+  return String(extra.cloudFunctionRegion ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? "asia-east1");
 }
 
 const DAY_NAMES = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
@@ -579,6 +600,47 @@ async function mockAIResponse(
   };
 }
 
+async function callCampusAssistant(
+  messages: AIMessage[],
+  context: AIContext,
+  signal?: AbortSignal
+): Promise<AIResponse | null> {
+  if (!hasUsableFirebaseConfig()) {
+    return null;
+  }
+
+  if (signal?.aborted) {
+    return { content: "", error: "請求已取消" };
+  }
+
+  try {
+    const callable = httpsCallable<CampusAssistantRequest, CampusAssistantResponse>(
+      getFunctions(getFirebaseApp(), getCloudFunctionRegion()),
+      "askCampusAssistant"
+    );
+
+    const result = await callable({
+      messages: messages.slice(-12),
+      context: {
+        schoolId: context.schoolId,
+        userId: context.userId,
+        userName: context.userName,
+      },
+    });
+
+    const data = result.data;
+    return {
+      content: data.content ?? "",
+      suggestions: data.suggestions ?? extractSuggestions(data.content ?? ""),
+      actions: data.actions,
+      error: data.error,
+    };
+  } catch (e: any) {
+    console.warn("[AI] askCampusAssistant failed, falling back:", e?.code ?? e?.message ?? e);
+    return null;
+  }
+}
+
 /**
  * 主要 API：與 AI 對話
  * @param messages - 對話訊息陣列
@@ -609,6 +671,21 @@ export async function chatWithAI(
     }
     throw e;
   }
+}
+
+/**
+ * 校園助理專用入口：優先走後端 callable，失敗再退回既有 AI 流程。
+ */
+export async function chatWithCampusAssistant(
+  messages: AIMessage[],
+  context: AIContext,
+  signal?: AbortSignal
+): Promise<AIResponse> {
+  const cloudResponse = await callCampusAssistant(messages, context, signal);
+  if (cloudResponse) {
+    return cloudResponse;
+  }
+  return chatWithAI(messages, context, signal);
 }
 
 /**

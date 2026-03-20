@@ -97,7 +97,8 @@ export function GroupDetailScreen(props: any) {
   );
 
   const myRole = myMemberRows[0]?.role as any;
-  const canManageCourse = group?.type === "course" && (myRole === "owner" || myRole === "instructor");
+  const canManageCourse = group?.type === "course" && (myRole === "owner" || myRole === "instructor" || myRole === "moderator");
+  const canCreateAnnouncement = myRole === "owner" || myRole === "instructor" || myRole === "moderator";
 
   const { items: posts, loading: postsLoading, error: postsError, reload: reloadPosts } = useAsyncList<Post>(
     async () => {
@@ -229,6 +230,10 @@ export function GroupDetailScreen(props: any) {
     }
     if (!title.trim() || !body.trim()) {
       setErr("請輸入標題與內容");
+      return;
+    }
+    if (composeKind === "announcement" && !canCreateAnnouncement) {
+      setErr("只有課程管理者可以發布課程公告");
       return;
     }
 
@@ -420,11 +425,25 @@ export function GroupDetailScreen(props: any) {
           />
         </Card>
 
-        <Card title="發文 / 發問題" subtitle="(MVP) 先做文字貼文，之後加公告置頂與已解決。">
+        <Card
+          title="發文 / 發問題"
+          subtitle={
+            canCreateAnnouncement
+              ? "(MVP) 先做文字貼文，之後加公告置頂與已解決。"
+              : "(MVP) 一般成員可發貼文與問題；課程公告僅教師或管理者可發。"
+          }
+        >
           <View style={{ flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
             <Button text={composeKind === "question" ? "✓ 問題" : "問題"} onPress={() => setComposeKind("question")} />
             <Button text={composeKind === "post" ? "✓ 貼文" : "貼文"} onPress={() => setComposeKind("post")} />
-            <Button text={composeKind === "announcement" ? "✓ 公告" : "公告"} onPress={() => setComposeKind("announcement")} />
+            {canCreateAnnouncement ? (
+              <Button
+                text={composeKind === "announcement" ? "✓ 公告" : "公告"}
+                onPress={() => setComposeKind("announcement")}
+              />
+            ) : (
+              <Pill text="課程公告僅教師 / 管理者可發" kind="default" />
+            )}
           </View>
 
           <TextInput
