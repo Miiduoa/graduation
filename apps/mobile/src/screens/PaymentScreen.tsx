@@ -161,7 +161,7 @@ export function PaymentScreen(props: any) {
 
     try {
       const [txData, userData] = await Promise.all([
-        ds.listTransactions(auth.user.uid),
+        ds.listTransactions(auth.user.uid, undefined, school.id),
         ds.getUser(auth.user.uid),
       ]);
 
@@ -190,7 +190,7 @@ export function PaymentScreen(props: any) {
     } finally {
       setLoading(false);
     }
-  }, [ds, auth.user?.uid]);
+  }, [ds, auth.user?.uid, school.id]);
 
   useEffect(() => {
     loadPaymentData();

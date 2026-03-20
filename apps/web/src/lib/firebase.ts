@@ -38,7 +38,9 @@ import {
   User,
 } from "firebase/auth";
 import {
+  buildGroupCollectionPath,
   buildSchoolCollectionPath,
+  buildUserSchoolCollectionPath,
   defaultNotificationPreferences,
   normalizeNotificationPreferences,
   normalizeSchoolSSOConfig,
@@ -54,7 +56,7 @@ export type {
   SSOCallbackResult,
   SSOProvider,
 } from "@campus/shared/src";
-import { collectionFromSegments } from "./firestorePath";
+import { collectionFromSegments, docFromSegments } from "./firestorePath";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -784,7 +786,7 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile | nu
   }
 }
 
-export async function fetchLibraryLoans(userId: string): Promise<LibraryLoan[]> {
+export async function fetchLibraryLoans(userId: string, schoolId?: string): Promise<LibraryLoan[]> {
   if (!isFirebaseConfigured()) {
     return [];
   }
@@ -797,8 +799,12 @@ export async function fetchLibraryLoans(userId: string): Promise<LibraryLoan[]> 
       orderBy("dueAt", "asc"),
     ];
 
-    const q = query(collection(firestore, "libraryLoans"), ...constraints);
-    const snap = await getDocs(q);
+    const canonicalSnap = schoolId
+      ? await getDocs(query(collectionFromSegments(firestore, buildUserSchoolCollectionPath(userId, schoolId, "libraryLoans")), ...constraints)).catch(() => null)
+      : null;
+    const snap = canonicalSnap && !canonicalSnap.empty
+      ? canonicalSnap
+      : await getDocs(query(collection(firestore, "libraryLoans"), ...constraints));
 
     return snap.docs
       .map((d) => parseDocument<LibraryLoan>({ id: d.id, data: () => d.data() }))
@@ -819,14 +825,23 @@ export async function fetchGroupPosts(
 
   try {
     const firestore = getDb();
-    const constraints: QueryConstraint[] = [
-      where("groupId", "==", groupId),
-      orderBy("createdAt", "desc"),
-      limit(maxItems),
-    ];
-
-    const q = query(collection(firestore, "groupPosts"), ...constraints);
-    const snap = await getDocs(q);
+    const canonicalSnap = await getDocs(
+      query(
+        collectionFromSegments(firestore, buildGroupCollectionPath(groupId, "posts")),
+        orderBy("createdAt", "desc"),
+        limit(maxItems)
+      )
+    ).catch(() => null);
+    const snap = canonicalSnap && !canonicalSnap.empty
+      ? canonicalSnap
+      : await getDocs(
+          query(
+            collection(firestore, "groupPosts"),
+            where("groupId", "==", groupId),
+            orderBy("createdAt", "desc"),
+            limit(maxItems)
+          )
+        );
 
     return snap.docs
       .map((d) => parseDocument<{ id: string; groupId: string; authorId: string; authorName?: string; content: string; createdAt: string }>({ id: d.id, data: () => d.data() }))
@@ -851,7 +866,8 @@ export type WriteResult = {
 export async function registerForEvent(
   eventId: string,
   userId: string,
-  userInfo?: { name?: string; email?: string; phone?: string }
+  userInfo?: { name?: string; email?: string; phone?: string },
+  schoolId?: string
 ): Promise<WriteResult> {
   if (!isFirebaseConfigured()) {
     return { success: false, error: "Firebase not configured" };
@@ -859,8 +875,12 @@ export async function registerForEvent(
 
   try {
     const firestore = getDb();
-    const eventRef = doc(firestore, "events", eventId);
-    const registrationRef = doc(collection(firestore, "events", eventId, "registrations"), userId);
+    const eventRef = schoolId
+      ? docFromSegments(firestore, buildSchoolCollectionPath(schoolId, "events", eventId))
+      : doc(firestore, "events", eventId);
+    const registrationRef = schoolId
+      ? docFromSegments(firestore, buildSchoolCollectionPath(schoolId, "events", eventId, "registrations", userId))
+      : doc(collection(firestore, "events", eventId, "registrations"), userId);
 
     await runTransaction(firestore, async (transaction) => {
       const eventDoc = await transaction.get(eventRef);
@@ -885,6 +905,7 @@ export async function registerForEvent(
       transaction.set(registrationRef, {
         userId,
         eventId,
+        schoolId: schoolId ?? null,
         name: userInfo?.name,
         email: userInfo?.email,
         phone: userInfo?.phone,
@@ -909,7 +930,8 @@ export async function registerForEvent(
  */
 export async function cancelEventRegistration(
   eventId: string,
-  userId: string
+  userId: string,
+  schoolId?: string
 ): Promise<WriteResult> {
   if (!isFirebaseConfigured()) {
     return { success: false, error: "Firebase not configured" };
@@ -917,8 +939,12 @@ export async function cancelEventRegistration(
 
   try {
     const firestore = getDb();
-    const eventRef = doc(firestore, "events", eventId);
-    const registrationRef = doc(collection(firestore, "events", eventId, "registrations"), userId);
+    const eventRef = schoolId
+      ? docFromSegments(firestore, buildSchoolCollectionPath(schoolId, "events", eventId))
+      : doc(firestore, "events", eventId);
+    const registrationRef = schoolId
+      ? docFromSegments(firestore, buildSchoolCollectionPath(schoolId, "events", eventId, "registrations", userId))
+      : doc(collection(firestore, "events", eventId, "registrations"), userId);
 
     await runTransaction(firestore, async (transaction) => {
       const regDoc = await transaction.get(registrationRef);
@@ -945,7 +971,8 @@ export async function cancelEventRegistration(
  */
 export async function checkEventRegistration(
   eventId: string,
-  userId: string
+  userId: string,
+  schoolId?: string
 ): Promise<boolean> {
   if (!isFirebaseConfigured() || !userId) {
     return false;
@@ -953,7 +980,9 @@ export async function checkEventRegistration(
 
   try {
     const firestore = getDb();
-    const registrationRef = doc(collection(firestore, "events", eventId, "registrations"), userId);
+    const registrationRef = schoolId
+      ? docFromSegments(firestore, buildSchoolCollectionPath(schoolId, "events", eventId, "registrations", userId))
+      : doc(collection(firestore, "events", eventId, "registrations"), userId);
     const regDoc = await getDoc(registrationRef);
     return regDoc.exists();
   } catch (error) {
@@ -969,7 +998,8 @@ export async function addFavorite(
   userId: string,
   itemType: "announcement" | "event" | "poi" | "menu" | "group",
   itemId: string,
-  itemTitle?: string
+  itemTitle?: string,
+  schoolId?: string
 ): Promise<WriteResult> {
   if (!isFirebaseConfigured()) {
     return { success: false, error: "Firebase not configured" };
@@ -978,12 +1008,15 @@ export async function addFavorite(
   try {
     const firestore = getDb();
     const favoriteId = `${itemType}_${itemId}`;
-    const favoriteRef = doc(collection(firestore, "users", userId, "favorites"), favoriteId);
+    const favoriteRef = schoolId
+      ? docFromSegments(firestore, buildUserSchoolCollectionPath(userId, schoolId, "favorites", favoriteId))
+      : doc(collection(firestore, "users", userId, "favorites"), favoriteId);
 
     await setDoc(favoriteRef, {
       type: itemType,
       itemId,
       itemTitle,
+      schoolId: schoolId ?? null,
       addedAt: serverTimestamp(),
     });
 
@@ -1000,7 +1033,8 @@ export async function addFavorite(
 export async function removeFavorite(
   userId: string,
   itemType: "announcement" | "event" | "poi" | "menu" | "group",
-  itemId: string
+  itemId: string,
+  schoolId?: string
 ): Promise<WriteResult> {
   if (!isFirebaseConfigured()) {
     return { success: false, error: "Firebase not configured" };
@@ -1009,7 +1043,9 @@ export async function removeFavorite(
   try {
     const firestore = getDb();
     const favoriteId = `${itemType}_${itemId}`;
-    const favoriteRef = doc(collection(firestore, "users", userId, "favorites"), favoriteId);
+    const favoriteRef = schoolId
+      ? docFromSegments(firestore, buildUserSchoolCollectionPath(userId, schoolId, "favorites", favoriteId))
+      : doc(collection(firestore, "users", userId, "favorites"), favoriteId);
 
     await deleteDoc(favoriteRef);
 
@@ -1026,7 +1062,8 @@ export async function removeFavorite(
 export async function checkFavorite(
   userId: string,
   itemType: "announcement" | "event" | "poi" | "menu" | "group",
-  itemId: string
+  itemId: string,
+  schoolId?: string
 ): Promise<boolean> {
   if (!isFirebaseConfigured() || !userId) {
     return false;
@@ -1035,7 +1072,9 @@ export async function checkFavorite(
   try {
     const firestore = getDb();
     const favoriteId = `${itemType}_${itemId}`;
-    const favoriteRef = doc(collection(firestore, "users", userId, "favorites"), favoriteId);
+    const favoriteRef = schoolId
+      ? docFromSegments(firestore, buildUserSchoolCollectionPath(userId, schoolId, "favorites", favoriteId))
+      : doc(collection(firestore, "users", userId, "favorites"), favoriteId);
     const favDoc = await getDoc(favoriteRef);
     return favDoc.exists();
   } catch (error) {
@@ -1049,7 +1088,8 @@ export async function checkFavorite(
  */
 export async function fetchFavorites(
   userId: string,
-  itemType?: "announcement" | "event" | "poi" | "menu" | "group"
+  itemType?: "announcement" | "event" | "poi" | "menu" | "group",
+  schoolId?: string
 ): Promise<Array<{ id: string; type: string; itemId: string; itemTitle?: string; addedAt: string }>> {
   if (!isFirebaseConfigured() || !userId) {
     return [];
@@ -1057,7 +1097,9 @@ export async function fetchFavorites(
 
   try {
     const firestore = getDb();
-    const favoritesRef = collection(firestore, "users", userId, "favorites");
+    const favoritesRef = schoolId
+      ? collectionFromSegments(firestore, buildUserSchoolCollectionPath(userId, schoolId, "favorites"))
+      : collection(firestore, "users", userId, "favorites");
     
     let q;
     if (itemType) {
@@ -1066,7 +1108,17 @@ export async function fetchFavorites(
       q = query(favoritesRef, orderBy("addedAt", "desc"));
     }
 
-    const snap = await getDocs(q);
+    const snap = await getDocs(q).catch(async () => {
+      if (!schoolId) {
+        throw new Error("favorites query failed");
+      }
+
+      const legacyRef = collection(firestore, "users", userId, "favorites");
+      const legacyQuery = itemType
+        ? query(legacyRef, where("type", "==", itemType), orderBy("addedAt", "desc"))
+        : query(legacyRef, orderBy("addedAt", "desc"));
+      return getDocs(legacyQuery);
+    });
     return snap.docs.map((d) => {
       const data = d.data();
       return {
@@ -1092,7 +1144,8 @@ export async function postComment(
   userId: string,
   content: string,
   rating?: number,
-  userName?: string
+  userName?: string,
+  schoolId?: string
 ): Promise<WriteResult> {
   if (!isFirebaseConfigured()) {
     return { success: false, error: "Firebase not configured" };
@@ -1104,20 +1157,35 @@ export async function postComment(
 
   try {
     const firestore = getDb();
-    const commentsRef = collection(firestore, `${targetType}s`, targetId, "comments");
+    const commentsRef =
+      schoolId && targetType === "event"
+        ? collectionFromSegments(firestore, buildSchoolCollectionPath(schoolId, "events", targetId, "reviews"))
+        : schoolId && targetType === "menu"
+          ? collectionFromSegments(firestore, buildSchoolCollectionPath(schoolId, "menus", targetId, "reviews"))
+          : schoolId && targetType === "poi"
+            ? collectionFromSegments(firestore, buildSchoolCollectionPath(schoolId, "pois", targetId, "reviews"))
+            : collection(firestore, `${targetType}s`, targetId, "comments");
 
     const docRef = await addDoc(commentsRef, {
       userId,
       userName,
       content: content.trim(),
       rating: rating ?? null,
+      schoolId: schoolId ?? null,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       likes: 0,
       status: "active",
     });
 
-    const targetRef = doc(firestore, `${targetType}s`, targetId);
+    const targetRef =
+      schoolId && targetType === "event"
+        ? docFromSegments(firestore, buildSchoolCollectionPath(schoolId, "events", targetId))
+        : schoolId && targetType === "menu"
+          ? docFromSegments(firestore, buildSchoolCollectionPath(schoolId, "menus", targetId))
+          : schoolId && targetType === "poi"
+            ? docFromSegments(firestore, buildSchoolCollectionPath(schoolId, "pois", targetId))
+            : doc(firestore, `${targetType}s`, targetId);
     await updateDoc(targetRef, {
       commentCount: increment(1),
     });
@@ -1135,7 +1203,8 @@ export async function postComment(
 export async function fetchComments(
   targetType: "announcement" | "event" | "menu" | "poi",
   targetId: string,
-  maxItems: number = 50
+  maxItems: number = 50,
+  schoolId?: string
 ): Promise<Array<{
   id: string;
   userId: string;
@@ -1151,15 +1220,23 @@ export async function fetchComments(
 
   try {
     const firestore = getDb();
-    const commentsRef = collection(firestore, `${targetType}s`, targetId, "comments");
-    const q = query(
-      commentsRef,
-      where("status", "==", "active"),
-      orderBy("createdAt", "desc"),
-      limit(maxItems)
-    );
+    const commentsRef =
+      schoolId && targetType === "event"
+        ? collectionFromSegments(firestore, buildSchoolCollectionPath(schoolId, "events", targetId, "reviews"))
+        : schoolId && targetType === "menu"
+          ? collectionFromSegments(firestore, buildSchoolCollectionPath(schoolId, "menus", targetId, "reviews"))
+          : schoolId && targetType === "poi"
+            ? collectionFromSegments(firestore, buildSchoolCollectionPath(schoolId, "pois", targetId, "reviews"))
+            : collection(firestore, `${targetType}s`, targetId, "comments");
+    const q = query(commentsRef, where("status", "==", "active"), orderBy("createdAt", "desc"), limit(maxItems));
 
-    const snap = await getDocs(q);
+    const snap = await getDocs(q).catch(async () => {
+      if (!schoolId || targetType === "announcement") {
+        throw new Error("comments query failed");
+      }
+      const legacyRef = collection(firestore, `${targetType}s`, targetId, "comments");
+      return getDocs(query(legacyRef, where("status", "==", "active"), orderBy("createdAt", "desc"), limit(maxItems)));
+    });
     return snap.docs.map((d) => {
       const data = d.data();
       return {

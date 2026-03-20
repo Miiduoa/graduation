@@ -3,6 +3,7 @@ import { Pressable, RefreshControl, ScrollView, Text, View, Alert } from "react-
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { buildUserSchoolCollectionPath } from "@campus/shared/src";
 
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
@@ -15,6 +16,7 @@ import { useSchedule } from "../state/schedule";
 import { formatRelativeTime, toDate } from "../utils/format";
 import { getDb } from "../firebase";
 import { doc, getDoc } from "firebase/firestore";
+import { docFromSegments } from "../data/firestorePath";
 
 const WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
 const MONTHS_SHORT = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
@@ -843,12 +845,19 @@ export function HomeScreen(props: any) {
     AsyncStorage.getItem(dismissKey).then((dismissed) => {
       if (dismissed) { setBriefDismissed(true); return; }
     });
-    getDoc(doc(db, "users", auth.user.uid, "dailyBriefs", today)).then((snap) => {
-      if (snap.exists()) {
-        setDailyBrief(snap.data()?.content ?? null);
-      }
-    }).catch(() => {});
-  }, [auth.user?.uid]);
+    getDoc(docFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "dailyBriefs", today)))
+      .then(async (snap) => {
+        if (snap.exists()) {
+          setDailyBrief(snap.data()?.content ?? null);
+          return;
+        }
+        const legacySnap = await getDoc(doc(db, "users", auth.user.uid, "dailyBriefs", today));
+        if (legacySnap.exists()) {
+          setDailyBrief(legacySnap.data()?.content ?? null);
+        }
+      })
+      .catch(() => {});
+  }, [auth.user?.uid, school.id]);
 
   const dismissBrief = useCallback(() => {
     setBriefDismissed(true);

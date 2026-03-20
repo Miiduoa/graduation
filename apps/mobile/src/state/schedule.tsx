@@ -475,7 +475,7 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
       
       const ds = getDataSource();
       
-      const enrollments = await ds.listEnrollments(user.uid, currentSemester);
+      const enrollments = await ds.listEnrollments(user.uid, currentSemester, schoolId ?? undefined);
       const enrolledCourses: Course[] = [];
       
       for (const enrollment of enrollments) {
@@ -502,7 +502,7 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
         setLoading(false);
       }
     }
-  }, [user?.uid, currentSemester]);
+  }, [user?.uid, currentSemester, schoolId]);
 
   useEffect(() => {
     refreshScheduleRef.current = refreshSchedule;

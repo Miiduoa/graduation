@@ -168,7 +168,7 @@ export function LibraryScreen(props: any) {
         const ds = getDataSource();
         
         const [loans, seats] = await Promise.all([
-          ds.listLoans(auth.user.uid),
+          ds.listLoans(auth.user.uid, schoolId),
           ds.listSeats(schoolId),
         ]);
         
@@ -298,7 +298,7 @@ export function LibraryScreen(props: any) {
             try {
               if (hasDataSource()) {
                 const ds = getDataSource();
-                await ds.renewBook(book.id);
+                await ds.renewBook(book.id, auth.user?.uid, schoolId);
                 analytics.logEvent("book_renewed", { book_id: book.id });
               }
               
