@@ -1,3 +1,5 @@
+import type { SchoolIntegrationStatus } from "./release";
+
 export type Announcement = {
   id: string;
   title: string;
@@ -51,10 +53,12 @@ export type School = {
   themeColor?: string;
   domains?: string[]; // email domains for auto-binding
   aliases?: string[];
+  integrationStatus?: SchoolIntegrationStatus;
 };
 
 export * from "./auth";
 export * from "./notifications";
 export * from "./schools";
+export * from "./release";
 export * from "./creditAudit";
 export * from "./tenant";

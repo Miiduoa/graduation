@@ -106,16 +106,5 @@
       "icons": [{ "src": "/icons/shortcut-grades.png", "sizes": "96x96" }]
     }
   ],
-  "related_applications": [
-    {
-      "platform": "play",
-      "url": "https://play.google.com/store/apps/details?id=com.campus.app",
-      "id": "com.campus.app"
-    },
-    {
-      "platform": "itunes",
-      "url": "https://apps.apple.com/app/campus-app/id123456789"
-    }
-  ],
   "prefer_related_applications": false
 }

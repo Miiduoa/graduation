@@ -7,19 +7,14 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
 import { useDemo, type DemoMode } from "../state/demo";
 import { useThemeMode } from "../state/theme";
-import { findSchoolsByCode, mockSchools, normalizeSchoolCode } from "@campus/shared/src/schools";
+import { mockSchools, normalizeSchoolCode } from "@campus/shared/src/schools";
 import { useSchool } from "../state/school";
 import { clearAllCache, getCacheSize } from "../data/cachedSource";
 import { getHybridSourceStatus } from "../data/hybridSource";
 import { formatFileSize } from "../utils/format";
+import { getLegalUrl, getReleaseConfig, isSchoolVisibleInDirectory } from "../services/release";
 
 const APP_VERSION = Constants.expoConfig?.version ?? Constants.manifest?.version ?? "1.0.0";
-
-function getLegalUrl(type: "privacy" | "terms"): string {
-  const extra = (Constants.expoConfig as any)?.extra ?? {};
-  const baseUrl = extra.legalBaseUrl ?? "https://your-campus-app.com";
-  return type === "privacy" ? `${baseUrl}/privacy` : `${baseUrl}/terms`;
-}
 
 const modes: Array<{ key: DemoMode; label: string; hint: string }> = [
   { key: "normal", label: "正常", hint: "顯示 mock 列表" },
@@ -33,6 +28,11 @@ export function SettingsScreen(props: any) {
   const demo = useDemo();
   const themeMode = useThemeMode();
   const { selection, setSelection, school } = useSchool();
+  const release = getReleaseConfig();
+  const visibleSchools = useMemo(
+    () => mockSchools.filter((candidate) => isSchoolVisibleInDirectory(candidate.id, candidate.integrationStatus)),
+    []
+  );
 
   const [codeInput, setCodeInput] = useState(selection.code);
   const [cacheInfo, setCacheInfo] = useState<{ count: number; approximateBytes: number } | null>(null);
@@ -45,7 +45,10 @@ export function SettingsScreen(props: any) {
   } | null>(null);
 
   const normalized = useMemo(() => normalizeSchoolCode(codeInput), [codeInput]);
-  const matches = useMemo(() => findSchoolsByCode(normalized), [normalized]);
+  const matches = useMemo(
+    () => visibleSchools.filter((candidate) => candidate.code === normalized),
+    [normalized, visibleSchools]
+  );
 
   useEffect(() => {
     getCacheSize().then(setCacheInfo);
@@ -247,7 +250,7 @@ export function SettingsScreen(props: any) {
             backgroundColor: theme.colors.accentSoft,
           }}>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
-              示範代碼：{mockSchools.map((s) => s.code).join(" / ")}
+              可用學校代碼：{visibleSchools.map((s) => s.code).join(" / ")}
             </Text>
           </View>
         </AnimatedCard>
@@ -320,6 +323,10 @@ export function SettingsScreen(props: any) {
               title="隱私政策"
               onPress={() => {
                 const url = getLegalUrl("privacy");
+                if (!url) {
+                  Alert.alert("尚未設定", "尚未設定正式隱私政策連結");
+                  return;
+                }
                 Linking.canOpenURL(url).then((supported) => {
                   if (supported) {
                     Linking.openURL(url);
@@ -334,6 +341,10 @@ export function SettingsScreen(props: any) {
               title="使用條款"
               onPress={() => {
                 const url = getLegalUrl("terms");
+                if (!url) {
+                  Alert.alert("尚未設定", "尚未設定正式使用條款連結");
+                  return;
+                }
                 Linking.canOpenURL(url).then((supported) => {
                   if (supported) {
                     Linking.openURL(url);
@@ -346,7 +357,8 @@ export function SettingsScreen(props: any) {
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="開發者選項" subtitle="點擊展開進階設定" delay={500}>
+        {!release.isReleaseLike && (
+          <AnimatedCard title="開發者選項" subtitle="點擊展開進階設定" delay={500}>
           <ListItem
             icon="code-slash-outline"
             title="顯示開發者選項"
@@ -418,7 +430,8 @@ export function SettingsScreen(props: any) {
               </View>
             </View>
           )}
-        </AnimatedCard>
+          </AnimatedCard>
+        )}
       </ScrollView>
     </Screen>
   );

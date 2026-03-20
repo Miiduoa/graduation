@@ -11,6 +11,7 @@
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",
     "lint": "eslint .",
+    "backfill:canonical": "node backfillCanonicalData.js",
     "test": "jest"
   },
   "dependencies": {

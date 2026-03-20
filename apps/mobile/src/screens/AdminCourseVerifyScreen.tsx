@@ -321,7 +321,7 @@ export function AdminCourseVerifyScreen() {
               </View>
               <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 18, marginBottom: 8 }}>管理員專區</Text>
               <Text style={{ color: theme.colors.muted, textAlign: "center", lineHeight: 20 }}>
-                此功能僅限管理員帳號使用。{"\n"}若你確定是管理員，請用 admin email 登入後重試。
+                此功能僅限管理員帳號使用。{"\n"}若你確定擁有管理權限，請重新登入並確認帳號角色已由後端授權。
               </Text>
             </View>
           </AnimatedCard>

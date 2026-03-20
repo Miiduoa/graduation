@@ -12,7 +12,7 @@ const { withXcodeProject, withEntitlementsPlist } = require("expo/config-plugins
 
 const WIDGET_EXTENSION_NAME = "CampusWidgetExtension";
 const WIDGET_BUNDLE_ID_SUFFIX = "widget";
-const APP_GROUP_ID = "group.campus.app.shared";
+const APP_GROUP_ID = "group.com.campus.app";
 
 function withWidgetExtension(config) {
   // Add App Group entitlements
@@ -26,8 +26,6 @@ function withWidgetExtension(config) {
     const targetName = WIDGET_EXTENSION_NAME;
     const bundleId = `${config.ios?.bundleIdentifier}.${WIDGET_BUNDLE_ID_SUFFIX}`;
 
-    // Note: Full widget extension setup requires native code
-    // This is a placeholder for the configuration
     console.log(`[Widget Plugin] Configured widget extension: ${targetName}`);
     console.log(`[Widget Plugin] Bundle ID: ${bundleId}`);
     console.log(`[Widget Plugin] App Group: ${APP_GROUP_ID}`);

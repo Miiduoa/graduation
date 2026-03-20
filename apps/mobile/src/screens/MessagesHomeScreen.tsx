@@ -82,7 +82,7 @@ export function MessagesHomeScreen(props: any) {
         const dmsRef = collection(db, "conversations");
         const dmsQ = query(
           dmsRef,
-          where("participants", "array-contains", auth.user.uid),
+          where("memberIds", "array-contains", auth.user.uid),
           limit(5)
         );
 
@@ -90,7 +90,12 @@ export function MessagesHomeScreen(props: any) {
           const conversations = await Promise.all(
             snap.docs.map(async (d) => {
               const data = d.data();
-              const otherUserId = data.participants?.find((p: string) => p !== auth.user?.uid);
+              const memberIds = Array.isArray(data.memberIds)
+                ? data.memberIds
+                : Array.isArray(data.participants)
+                  ? data.participants
+                  : [];
+              const otherUserId = memberIds.find((p: string) => p !== auth.user?.uid);
               let participantName = "未知用戶";
 
               if (otherUserId) {

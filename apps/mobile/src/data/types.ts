@@ -731,8 +731,7 @@ export type Comment = {
 
 export type Conversation = {
   id: string;
-  participants: string[];
-  participantIds?: string[];
+  memberIds: string[];
   participantUsers?: User[];
   schoolId?: string | null;
   lastMessage?: Message | null;

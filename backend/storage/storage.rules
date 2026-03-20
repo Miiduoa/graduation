@@ -109,14 +109,20 @@ service firebase.storage {
         );
     }
 
-    match /avatars/{userId}.{extension} {
+    match /avatars/{fileName} {
       allow read: if true;
-      allow write: if isOwner(userId) && isValidImage() && maxSize(5);
+      allow write: if isAuthenticated()
+        && fileName.matches('^' + request.auth.uid + '\\.[A-Za-z0-9]+$')
+        && isValidImage()
+        && maxSize(5);
     }
 
-    match /groups/{groupId}/cover.{extension} {
+    match /groups/{groupId}/{fileName} {
       allow read: if isGroupMember(groupId);
-      allow write: if canManageGroup(groupId) && isValidImage() && maxSize(5);
+      allow write: if fileName.matches('^cover\\.[A-Za-z0-9]+$')
+        && canManageGroup(groupId)
+        && isValidImage()
+        && maxSize(5);
     }
 
     match /groups/{groupId}/posts/{postId}/{fileName} {
@@ -144,9 +150,12 @@ service firebase.storage {
       allow write: if canManageAnnouncementAsset(announcementId) && isAllowedUpload() && maxSize(20);
     }
 
-    match /events/{eventId}/cover.{extension} {
+    match /events/{eventId}/{fileName} {
       allow read: if true;
-      allow write: if canManageEventAsset(eventId) && isValidImage() && maxSize(10);
+      allow write: if fileName.matches('^cover\\.[A-Za-z0-9]+$')
+        && canManageEventAsset(eventId)
+        && isValidImage()
+        && maxSize(10);
     }
 
     match /events/{eventId}/gallery/{fileName} {
@@ -154,9 +163,12 @@ service firebase.storage {
       allow write: if canManageEventAsset(eventId) && isValidImage() && maxSize(10);
     }
 
-    match /menus/{menuId}/image.{extension} {
+    match /menus/{menuId}/{fileName} {
       allow read: if true;
-      allow write: if canManageMenuAsset(menuId) && isValidImage() && maxSize(5);
+      allow write: if fileName.matches('^image\\.[A-Za-z0-9]+$')
+        && canManageMenuAsset(menuId)
+        && isValidImage()
+        && maxSize(5);
     }
 
     match /pois/{poiId}/{fileName} {

@@ -3,6 +3,7 @@ import { View, Text, Pressable, ScrollView, Alert, RefreshControl, Modal, TextIn
 import { Ionicons } from "@expo/vector-icons";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
 import { Paths, File } from "expo-file-system";
+import { httpsCallable } from "firebase/functions";
 import { Screen, Button, AnimatedCard, SegmentedControl, SearchBar, Spinner } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
@@ -13,7 +14,7 @@ import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncStorage } from "../hooks/useStorage";
 import { analytics } from "../services/analytics";
 import type { Transaction as DataTransaction } from "../data/types";
-import { getDb } from "../firebase";
+import { getDb, getFunctionsInstance } from "../firebase";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 
 type PaymentMethod = "student_card" | "mobile_pay" | "credit_card";
@@ -123,6 +124,7 @@ export function PaymentScreen(props: any) {
   const { school } = useSchool();
   const ds = useDataSource();
   const db = getDb();
+  const functions = getFunctionsInstance();
 
   const [selectedTab, setSelectedTab] = useState(0);
   const [balance, setBalance] = useState(0);
@@ -160,9 +162,10 @@ export function PaymentScreen(props: any) {
     }
 
     try {
-      const [txData, userData] = await Promise.all([
+      const [txData, userData, walletResponse] = await Promise.all([
         ds.listTransactions(auth.user.uid, undefined, school.id),
         ds.getUser(auth.user.uid),
+        httpsCallable(functions, "getWalletBalance")({ schoolId: school.id }).catch(() => null),
       ]);
 
       if (txData && txData.length > 0) {
@@ -178,7 +181,10 @@ export function PaymentScreen(props: any) {
         setTransactions(converted);
       }
 
-      if (userData?.balance !== undefined) {
+      const walletData = (walletResponse as { data?: { balance?: number } } | null)?.data;
+      if (typeof walletData?.balance === "number") {
+        setBalance(walletData.balance);
+      } else if (userData?.balance !== undefined) {
         setBalance(userData.balance);
       } else {
         setBalance(1234);
@@ -190,7 +196,7 @@ export function PaymentScreen(props: any) {
     } finally {
       setLoading(false);
     }
-  }, [ds, auth.user?.uid, school.id]);
+  }, [ds, auth.user?.uid, functions, school.id]);
 
   useEffect(() => {
     loadPaymentData();
