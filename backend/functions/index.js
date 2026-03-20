@@ -237,6 +237,284 @@ async function getGroupMemberUids(groupId) {
   return membersSnap.docs.map((doc) => doc.id);
 }
 
+function normalizeAssistantText(value) {
+  return String(value ?? "").trim();
+}
+
+function includesAnyKeyword(text, keywords) {
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function getLastUserMessage(messages) {
+  if (!Array.isArray(messages)) return "";
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role === "user" && typeof message.content === "string") {
+      return message.content.trim();
+    }
+  }
+  return "";
+}
+
+function detectCampusAssistantIntent(rawText) {
+  const text = normalizeAssistantText(rawText).toLowerCase();
+
+  if (!text) return "general";
+  if (includesAnyKeyword(text, ["作業", "截止", "deadline", "待辦", "繳交", "due"])) return "assignment_status";
+  if (includesAnyKeyword(text, ["公告", "消息", "通知"])) return "announcements";
+  if (includesAnyKeyword(text, ["活動", "講座", "演講", "報名", "參加"])) return "events";
+  if (includesAnyKeyword(text, ["吃", "午餐", "晚餐", "早餐", "餐", "菜單", "推薦"])) return "menus";
+  if (includesAnyKeyword(text, ["在哪", "怎麼走", "地點", "位置", "圖書館", "教室", "行政", "餐廳"])) return "pois";
+  if (includesAnyKeyword(text, ["學分", "畢業", "選課"])) return "credit_audit";
+  if (includesAnyKeyword(text, ["功能", "怎麼用", "說明", "幫助"])) return "help";
+  if (includesAnyKeyword(text, ["摘要", "規劃", "今天", "今日", "成績", "提升", "安排"])) return "study_summary";
+  return "general";
+}
+
+function toJsDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (value instanceof Timestamp) return value.toDate();
+  if (typeof value?.toDate === "function") {
+    try {
+      return value.toDate();
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+function formatAssistantDate(value, includeTime = false) {
+  const date = toJsDate(value);
+  if (!date) return typeof value === "string" ? value : "";
+
+  return new Intl.DateTimeFormat("zh-TW", includeTime
+    ? { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    : { month: "numeric", day: "numeric" }).format(date);
+}
+
+function mapDocData(docSnap) {
+  return { id: docSnap.id, ...(docSnap.data() || {}) };
+}
+
+async function fetchAssistantAnnouncements(schoolId) {
+  if (!schoolId) return [];
+
+  const rootSnap = await db.collection("announcements")
+    .where("schoolId", "==", schoolId)
+    .orderBy("publishedAt", "desc")
+    .limit(5)
+    .get()
+    .catch(() => null);
+
+  if (rootSnap && !rootSnap.empty) {
+    return rootSnap.docs.map(mapDocData);
+  }
+
+  const schoolSnap = await db.collection("schools")
+    .doc(schoolId)
+    .collection("announcements")
+    .orderBy("publishedAt", "desc")
+    .limit(5)
+    .get()
+    .catch(() => null);
+
+  return schoolSnap?.docs.map(mapDocData) ?? [];
+}
+
+async function fetchAssistantEvents(schoolId) {
+  if (!schoolId) return [];
+
+  const rootSnap = await db.collection("events")
+    .where("schoolId", "==", schoolId)
+    .orderBy("startsAt", "asc")
+    .limit(10)
+    .get()
+    .catch(() => null);
+
+  if (rootSnap && !rootSnap.empty) {
+    return rootSnap.docs.map(mapDocData);
+  }
+
+  const schoolEvents = await db.collection("schools")
+    .doc(schoolId)
+    .collection("events")
+    .orderBy("startsAt", "asc")
+    .limit(10)
+    .get()
+    .catch(() => null);
+
+  if (schoolEvents && !schoolEvents.empty) {
+    return schoolEvents.docs.map(mapDocData);
+  }
+
+  const schoolClubEvents = await db.collection("schools")
+    .doc(schoolId)
+    .collection("clubEvents")
+    .orderBy("startsAt", "asc")
+    .limit(10)
+    .get()
+    .catch(() => null);
+
+  return schoolClubEvents?.docs.map(mapDocData) ?? [];
+}
+
+async function fetchAssistantMenus(schoolId) {
+  if (!schoolId) return [];
+
+  const rootSnap = await db.collection("menus")
+    .where("schoolId", "==", schoolId)
+    .orderBy("availableOn", "desc")
+    .limit(8)
+    .get()
+    .catch(() => null);
+
+  if (rootSnap && !rootSnap.empty) {
+    return rootSnap.docs.map(mapDocData);
+  }
+
+  const schoolMenus = await db.collection("schools")
+    .doc(schoolId)
+    .collection("menus")
+    .limit(8)
+    .get()
+    .catch(() => null);
+
+  if (schoolMenus && !schoolMenus.empty) {
+    return schoolMenus.docs.map(mapDocData);
+  }
+
+  const cafeteriaMenus = await db.collection("schools")
+    .doc(schoolId)
+    .collection("cafeteriaMenus")
+    .limit(8)
+    .get()
+    .catch(() => null);
+
+  return cafeteriaMenus?.docs.map(mapDocData) ?? [];
+}
+
+async function fetchAssistantPois(schoolId) {
+  if (!schoolId) return [];
+
+  const rootSnap = await db.collection("pois")
+    .where("schoolId", "==", schoolId)
+    .limit(20)
+    .get()
+    .catch(() => null);
+
+  if (rootSnap && !rootSnap.empty) {
+    return rootSnap.docs.map(mapDocData);
+  }
+
+  const schoolSnap = await db.collection("schools")
+    .doc(schoolId)
+    .collection("pois")
+    .limit(20)
+    .get()
+    .catch(() => null);
+
+  return schoolSnap?.docs.map(mapDocData) ?? [];
+}
+
+async function fetchAssistantUserProfile(uid) {
+  if (!uid) return null;
+  const userDoc = await db.collection("users").doc(uid).get().catch(() => null);
+  return userDoc?.exists ? userDoc.data() : null;
+}
+
+async function fetchAssistantWeeklyReport(uid) {
+  if (!uid) return null;
+
+  const weeklySnap = await db.collection("users")
+    .doc(uid)
+    .collection("weeklyReports")
+    .orderBy("generatedAt", "desc")
+    .limit(1)
+    .get()
+    .catch(() => null);
+
+  if (weeklySnap && !weeklySnap.empty) {
+    return weeklySnap.docs[0].data();
+  }
+
+  return null;
+}
+
+async function fetchAssistantPendingAssignments(uid, preferredGroupId) {
+  if (!uid) return [];
+
+  const groupsSnap = await db.collection("users")
+    .doc(uid)
+    .collection("groups")
+    .where("status", "==", "active")
+    .limit(10)
+    .get()
+    .catch(() => null);
+
+  const groupDocs = groupsSnap?.docs ?? [];
+  const groupMap = new Map(groupDocs.map((docSnap) => [docSnap.id, docSnap.data() || {}]));
+  const groupIds = groupDocs.map((docSnap) => docSnap.id);
+
+  if (preferredGroupId && groupIds.includes(preferredGroupId)) {
+    groupIds.splice(groupIds.indexOf(preferredGroupId), 1);
+    groupIds.unshift(preferredGroupId);
+  }
+
+  const now = Timestamp.now();
+  const rows = await Promise.all(
+    groupIds.slice(0, 8).map(async (groupId) => {
+      const snap = await db.collection("groups")
+        .doc(groupId)
+        .collection("assignments")
+        .where("dueAt", ">", now)
+        .orderBy("dueAt", "asc")
+        .limit(groupId === preferredGroupId ? 5 : 3)
+        .get()
+        .catch(() => null);
+
+      const groupName = groupMap.get(groupId)?.name ?? groupId;
+      return (snap?.docs ?? []).map((docSnap) => ({
+        id: docSnap.id,
+        groupId,
+        groupName,
+        ...docSnap.data(),
+      }));
+    })
+  );
+
+  return rows
+    .flat()
+    .sort((a, b) => (toJsDate(a.dueAt)?.getTime() ?? Number.MAX_SAFE_INTEGER) - (toJsDate(b.dueAt)?.getTime() ?? Number.MAX_SAFE_INTEGER))
+    .slice(0, 8);
+}
+
+function buildPoiResponse(queryText, pois) {
+  const normalizedQuery = normalizeAssistantText(queryText);
+  if (!normalizedQuery || pois.length === 0) return null;
+
+  const best = pois
+    .map((poi) => {
+      let score = 0;
+      const haystacks = [poi.name, poi.category, poi.description].map((value) => String(value ?? ""));
+      haystacks.forEach((value) => {
+        if (normalizedQuery.includes(value) || value.includes(normalizedQuery)) score += 3;
+      });
+      ["圖書館", "行政", "餐廳", "宿舍", "健康", "教室"].forEach((keyword) => {
+        if (normalizedQuery.includes(keyword) && haystacks.some((value) => value.includes(keyword))) score += 2;
+      });
+      return { poi, score };
+    })
+    .sort((a, b) => b.score - a.score)[0];
+
+  return best?.score > 0 ? best.poi : pois[0];
+}
+
 // =====================================================
 // 公告通知
 // =====================================================
@@ -632,6 +910,291 @@ exports.onLostFoundMatch = onDocumentCreated(
 // =====================================================
 // HTTP Callable Functions
 // =====================================================
+
+exports.askCampusAssistant = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid ?? null;
+    const rawMessages = Array.isArray(request.data?.messages) ? request.data.messages : [];
+    const context = request.data?.context && typeof request.data.context === "object" ? request.data.context : {};
+    const lastUserMessage = getLastUserMessage(rawMessages);
+    const intent = detectCampusAssistantIntent(lastUserMessage);
+
+    const userProfile = uid ? await fetchAssistantUserProfile(uid) : null;
+    const schoolId = userProfile?.schoolId ?? context.schoolId ?? null;
+    const displayName = userProfile?.displayName ?? request.auth?.token?.name ?? null;
+
+    if (!schoolId) {
+      return {
+        content: "目前無法判斷你所屬的學校。請先選擇學校，或登入後再試一次。",
+        suggestions: ["今日公告", "近期活動", "推薦餐點"],
+        debug: { intent, route: "structured_v1", sourcesUsed: 0 },
+      };
+    }
+
+    const response = {
+      content: "",
+      suggestions: [],
+      actions: [],
+      citations: [],
+      debug: { intent, route: "structured_v1", sourcesUsed: 0, hasAuth: Boolean(uid) },
+    };
+
+    if (intent === "assignment_status" || intent === "study_summary") {
+      if (!uid) {
+        response.content = "要查詢個人作業、週報或學習摘要，請先登入帳號。我也可以先幫你看公開的公告、活動或餐點資訊。";
+        response.suggestions = ["今日公告", "近期活動", "推薦餐點"];
+        return response;
+      }
+
+      const [pendingAssignments, weeklyReport, announcements] = await Promise.all([
+        fetchAssistantPendingAssignments(uid, context.groupId),
+        fetchAssistantWeeklyReport(uid),
+        fetchAssistantAnnouncements(schoolId),
+      ]);
+
+      response.debug.sourcesUsed = pendingAssignments.length + (weeklyReport ? 1 : 0) + announcements.length;
+
+      if (intent === "assignment_status") {
+        if (pendingAssignments.length === 0) {
+          response.content = "目前沒有快到期的待繳作業。你可以改問我近期公告、活動，或請我幫你規劃今天的學習重點。";
+          response.suggestions = ["今日摘要", "近期活動", "今日公告"];
+          return response;
+        }
+
+        const earliest = pendingAssignments[0];
+        const list = pendingAssignments.slice(0, 3)
+          .map((assignment, index) => `${index + 1}. ${assignment.title ?? "未命名作業"}（${assignment.groupName ?? assignment.groupId}，截止：${formatAssistantDate(assignment.dueAt)}）`)
+          .join("\n");
+
+        response.content = [
+          `你目前有 ${pendingAssignments.length} 份作業待處理，最早截止的是「${earliest.title ?? "未命名作業"}」。`,
+          "",
+          list,
+          weeklyReport?.summary ? `\n本週學習狀況：${weeklyReport.summary}` : "",
+        ].filter(Boolean).join("\n");
+        response.suggestions = ["設定提醒", "今日摘要", "今日公告"];
+        response.actions = [
+          {
+            label: "設定提醒",
+            action: "schedule_reminder",
+            params: {
+              title: earliest.title ?? "作業提醒",
+              dueDate: toJsDate(earliest.dueAt)?.toISOString() ?? undefined,
+            },
+          },
+        ];
+        response.citations = pendingAssignments.slice(0, 3).map((assignment) => ({
+          type: "assignment",
+          id: assignment.id,
+          label: assignment.title ?? "未命名作業",
+        }));
+        return response;
+      }
+
+      const lines = [];
+      if (displayName) {
+        lines.push(`${displayName}，這是你目前最值得先關注的重點：`);
+      } else {
+        lines.push("這是你目前最值得先關注的重點：");
+      }
+
+      if (pendingAssignments.length > 0) {
+        lines.push(`1. 待繳作業共有 ${pendingAssignments.length} 份，最近的是「${pendingAssignments[0].title ?? "未命名作業"}」，截止：${formatAssistantDate(pendingAssignments[0].dueAt)}。`);
+      } else {
+        lines.push("1. 目前沒有快到期的待繳作業。");
+      }
+
+      if (weeklyReport?.summary) {
+        lines.push(`2. 本週學習摘要：${weeklyReport.summary}`);
+      }
+
+      if (announcements.length > 0) {
+        lines.push(`3. 最新公告可先看「${announcements[0].title ?? "未命名公告"}」。`);
+      }
+
+      response.content = lines.join("\n");
+      response.suggestions = ["設定提醒", "今日公告", "近期活動"];
+      if (pendingAssignments[0]) {
+        response.actions = [
+          {
+            label: "設定提醒",
+            action: "schedule_reminder",
+            params: {
+              title: pendingAssignments[0].title ?? "作業提醒",
+              dueDate: toJsDate(pendingAssignments[0].dueAt)?.toISOString() ?? undefined,
+            },
+          },
+        ];
+      }
+      return response;
+    }
+
+    if (intent === "announcements") {
+      const announcements = await fetchAssistantAnnouncements(schoolId);
+      response.debug.sourcesUsed = announcements.length;
+
+      if (announcements.length === 0) {
+        response.content = "目前沒有可用的公告資料。你可以稍後再試，或改問我近期活動、餐點與校園地點。";
+        response.suggestions = ["近期活動", "推薦餐點", "找地點"];
+        return response;
+      }
+
+      response.content = [
+        `目前先幫你整理 ${Math.min(announcements.length, 3)} 則最新公告：`,
+        "",
+        announcements.slice(0, 3).map((announcement, index) =>
+          `${index + 1}. ${announcement.title ?? "未命名公告"}${announcement.publishedAt ? `（${formatAssistantDate(announcement.publishedAt)}）` : ""}`
+        ).join("\n"),
+      ].join("\n");
+      response.suggestions = ["查看詳情", "近期活動", "推薦餐點"];
+      response.actions = announcements.slice(0, 2).map((announcement) => ({
+        label: `查看「${String(announcement.title ?? "公告").slice(0, 10)}」`,
+        action: "navigate",
+        params: { screen: "Today", nested: "公告詳情", id: announcement.id },
+      }));
+      response.citations = announcements.slice(0, 3).map((announcement) => ({
+        type: "announcement",
+        id: announcement.id,
+        label: announcement.title ?? "未命名公告",
+      }));
+      return response;
+    }
+
+    if (intent === "events") {
+      const events = (await fetchAssistantEvents(schoolId))
+        .filter((event) => {
+          const start = toJsDate(event.startsAt);
+          return !start || start >= new Date(Date.now() - 60 * 60 * 1000);
+        })
+        .slice(0, 4);
+
+      response.debug.sourcesUsed = events.length;
+
+      if (events.length === 0) {
+        response.content = "近期沒有查到即將開始的活動。你可以先看看最新公告，或等晚一點再來查詢。";
+        response.suggestions = ["今日公告", "推薦餐點", "找地點"];
+        return response;
+      }
+
+      response.content = [
+        "近期值得關注的活動有：",
+        "",
+        events.slice(0, 3).map((event, index) =>
+          `${index + 1}. ${event.title ?? "未命名活動"}${event.location ? `（${event.location}）` : ""}${event.startsAt ? `，${formatAssistantDate(event.startsAt, true)}` : ""}`
+        ).join("\n"),
+      ].join("\n");
+      response.suggestions = ["查看詳情", "今日公告", "找地點"];
+      response.actions = events.slice(0, 2).map((event) => ({
+        label: `查看「${String(event.title ?? "活動").slice(0, 10)}」`,
+        action: "navigate",
+        params: { screen: "Today", nested: "活動詳情", id: event.id },
+      }));
+      response.citations = events.slice(0, 3).map((event) => ({
+        type: "event",
+        id: event.id,
+        label: event.title ?? "未命名活動",
+      }));
+      return response;
+    }
+
+    if (intent === "menus") {
+      const menus = (await fetchAssistantMenus(schoolId)).slice(0, 5);
+      response.debug.sourcesUsed = menus.length;
+
+      if (menus.length === 0) {
+        response.content = "目前沒有可用的菜單資料。你可以改問我校園地點或近期活動。";
+        response.suggestions = ["找地點", "近期活動", "今日公告"];
+        return response;
+      }
+
+      response.content = [
+        "今天可以先考慮這幾樣：",
+        "",
+        menus.slice(0, 3).map((menu, index) =>
+          `${index + 1}. ${menu.name ?? menu.title ?? "未命名餐點"}${menu.price != null ? ` - $${menu.price}` : ""}${menu.cafeteria ? `（${menu.cafeteria}）` : ""}`
+        ).join("\n"),
+      ].join("\n");
+      response.suggestions = ["其他選擇", "找地點", "近期活動"];
+      response.actions = menus.slice(0, 2).map((menu) => ({
+        label: `查看「${String(menu.name ?? menu.title ?? "餐點").slice(0, 10)}」`,
+        action: "navigate",
+        params: { screen: "校園", nested: "MenuDetail", id: menu.id },
+      }));
+      response.citations = menus.slice(0, 3).map((menu) => ({
+        type: "menu",
+        id: menu.id,
+        label: menu.name ?? menu.title ?? "未命名餐點",
+      }));
+      return response;
+    }
+
+    if (intent === "pois") {
+      const pois = await fetchAssistantPois(schoolId);
+      const poi = buildPoiResponse(lastUserMessage, pois);
+      response.debug.sourcesUsed = pois.length > 0 ? 1 : 0;
+
+      if (!poi) {
+        response.content = "我目前找不到符合的校園地點。你可以再說更具體一點，例如圖書館、行政大樓、餐廳或宿舍。";
+        response.suggestions = ["圖書館", "行政大樓", "餐廳"];
+        return response;
+      }
+
+      response.content = [
+        `找到「${poi.name ?? "未命名地點"}」了。`,
+        poi.category ? `分類：${poi.category}` : "",
+        poi.description ? `說明：${poi.description}` : "",
+        poi.openingHours ? `開放時間：${poi.openingHours}` : "",
+      ].filter(Boolean).join("\n");
+      response.suggestions = ["查看詳情", "開啟導航", "其他地點"];
+      response.actions = [
+        { label: "查看詳情", action: "navigate", params: { screen: "校園", nested: "PoiDetail", id: poi.id } },
+        { label: "開始導航", action: "navigate", params: { screen: "校園", nested: "PoiDetail", id: poi.id } },
+      ];
+      response.citations = [{ type: "poi", id: poi.id, label: poi.name ?? "未命名地點" }];
+      return response;
+    }
+
+    if (intent === "credit_audit") {
+      response.content = "學分試算與選課建議目前建議搭配既有的「學分試算」功能使用。後續可以再把畢業條件與修課紀錄接進 AI，做更精準的選課推薦。";
+      response.suggestions = ["前往學分試算", "今日摘要", "近期活動"];
+      response.actions = [
+        { label: "前往學分試算", action: "navigate", params: { screen: "我的", nested: "CreditAuditStack" } },
+      ];
+      return response;
+    }
+
+    if (intent === "help") {
+      response.content = [
+        "我目前可以幫你處理這些事情：",
+        "1. 查最新公告與活動",
+        "2. 推薦餐點與找校園地點",
+        uid ? "3. 查看你的待繳作業與學習摘要" : "3. 登入後查看個人作業與學習摘要",
+      ].join("\n");
+      response.suggestions = ["今日公告", "近期活動", "推薦餐點"];
+      return response;
+    }
+
+    const [announcements, events] = await Promise.all([
+      fetchAssistantAnnouncements(schoolId),
+      fetchAssistantEvents(schoolId),
+    ]);
+    response.debug.sourcesUsed = announcements.length + events.length;
+
+    response.content = [
+      "我目前最適合幫你做的是查詢校園資訊與整理學習重點。",
+      announcements[0]?.title ? `最新公告：${announcements[0].title}` : "",
+      events[0]?.title ? `近期活動：${events[0].title}` : "",
+      uid ? "你也可以直接問我：我有哪些作業快截止？" : "你也可以直接問我：今天有什麼公告？",
+    ].filter(Boolean).join("\n");
+    response.suggestions = uid
+      ? ["我有哪些作業快截止？", "今天有什麼公告？", "推薦午餐"]
+      : ["今天有什麼公告？", "近期活動", "推薦午餐"];
+    return response;
+  }
+);
 
 exports.sendTestNotification = onCall(
   {

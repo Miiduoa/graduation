@@ -157,7 +157,7 @@ function sortByName<T extends { name: string }>(rows: T[]) {
 }
 
 export function canManageCourse(role?: string | null) {
-  return role === "owner" || role === "instructor";
+  return role === "owner" || role === "instructor" || role === "moderator";
 }
 
 export function toDate(value: unknown): Date | null {

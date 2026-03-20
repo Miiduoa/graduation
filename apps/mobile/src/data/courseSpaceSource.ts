@@ -72,7 +72,7 @@ function normalizeMaterialType(value: unknown): CourseMaterial["type"] {
 }
 
 function canManageMembership(role?: string) {
-  return role === "owner" || role === "instructor";
+  return role === "owner" || role === "instructor" || role === "moderator";
 }
 
 export async function listCourseSpaces(userId: string, schoolId?: string): Promise<CourseSpace[]> {

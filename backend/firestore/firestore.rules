@@ -12,6 +12,22 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.role == role;
     }
 
+    function isActiveGroupMember(groupId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function canManageGroup(groupId) {
+      return isActiveGroupMember(groupId)
+        && (
+          get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin'
+          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'owner'
+          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'instructor'
+          || get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'moderator'
+        );
+    }
+
     // School directory (public readable)
     match /schools/{schoolId} {
       allow read: if true;
@@ -83,44 +99,123 @@ service cloud.firestore {
 
     // Groups
     match /groups/{groupId} {
-      function isGroupMember() {
-        return isSignedIn()
-          && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
-          && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.status == 'active';
-      }
-
-      function isGroupAdmin() {
-        return isSignedIn()
-          && exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid))
-          && get(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid)).data.role == 'admin';
-      }
-
-      allow read: if isGroupMember();
+      allow read: if isActiveGroupMember(groupId);
       allow create: if isSignedIn();
-      allow update: if isGroupAdmin();
-      allow delete: if isGroupAdmin();
+      allow update: if canManageGroup(groupId);
+      allow delete: if canManageGroup(groupId);
 
       match /members/{uid} {
-        allow read: if isGroupMember();
+        allow read: if isActiveGroupMember(groupId);
         allow create: if isSignedIn() && uid == request.auth.uid;
-        allow update: if isGroupAdmin() || (isSignedIn() && uid == request.auth.uid);
-        allow delete: if isGroupAdmin() || (isSignedIn() && uid == request.auth.uid);
+        allow update: if canManageGroup(groupId) || (isSignedIn() && uid == request.auth.uid);
+        allow delete: if canManageGroup(groupId) || (isSignedIn() && uid == request.auth.uid);
       }
 
       match /posts/{postId} {
-        allow read: if isGroupMember();
-        allow create: if isGroupMember();
-        allow update, delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+        allow read: if isActiveGroupMember(groupId);
+        allow create: if isActiveGroupMember(groupId)
+          && (request.resource.data.kind != 'announcement' || canManageGroup(groupId));
+        allow update, delete: if canManageGroup(groupId) || (isSignedIn() && resource.data.authorId == request.auth.uid);
+
+        match /comments/{commentId} {
+          allow read: if isActiveGroupMember(groupId);
+          allow create: if isActiveGroupMember(groupId);
+          allow update, delete: if canManageGroup(groupId) || (isSignedIn() && resource.data.authorId == request.auth.uid);
+        }
+      }
+
+      match /knowledgeBase/{entryId} {
+        allow read: if isActiveGroupMember(groupId);
+        allow create, update, delete: if canManageGroup(groupId);
+      }
+
+      match /modules/{moduleId} {
+        allow read: if isActiveGroupMember(groupId);
+        allow create, update, delete: if canManageGroup(groupId);
+
+        match /materials/{materialId} {
+          allow read: if isActiveGroupMember(groupId);
+          allow create, update, delete: if canManageGroup(groupId);
+        }
+      }
+
+      match /quizzes/{quizId} {
+        allow read: if isActiveGroupMember(groupId);
+        allow create, update, delete: if canManageGroup(groupId);
       }
 
       match /assignments/{assignmentId} {
-        allow read: if isGroupMember();
-        allow create, update, delete: if isGroupAdmin();
+        allow read: if isActiveGroupMember(groupId);
+        allow create, update, delete: if canManageGroup(groupId);
 
         match /submissions/{submissionId} {
-          allow read: if isGroupMember();
-          allow create: if isGroupMember() && request.resource.data.studentId == request.auth.uid;
-          allow update: if isGroupAdmin() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+          function isSubmissionOwnerCreate() {
+            return isSignedIn()
+              && (
+                submissionId == request.auth.uid
+                || request.resource.data.uid == request.auth.uid
+                || request.resource.data.studentId == request.auth.uid
+                || request.resource.data.userId == request.auth.uid
+              );
+          }
+
+          function isSubmissionOwnerExisting() {
+            return isSignedIn()
+              && (
+                submissionId == request.auth.uid
+                || resource.data.uid == request.auth.uid
+                || resource.data.studentId == request.auth.uid
+                || resource.data.userId == request.auth.uid
+              );
+          }
+
+          allow read: if isActiveGroupMember(groupId);
+          allow create: if isActiveGroupMember(groupId) && isSubmissionOwnerCreate();
+          allow update: if canManageGroup(groupId) || isSubmissionOwnerExisting();
+          allow delete: if false;
+        }
+      }
+
+      match /gradebook/{entryId} {
+        allow read: if isActiveGroupMember(groupId);
+        allow create, update, delete: if canManageGroup(groupId);
+      }
+
+      match /milestones/{milestoneId} {
+        allow read: if isActiveGroupMember(groupId);
+        allow create, update, delete: if canManageGroup(groupId);
+      }
+
+      match /liveSessions/{sessionId} {
+        allow read: if isActiveGroupMember(groupId);
+        allow create, update, delete: if canManageGroup(groupId);
+
+        match /questions/{questionId} {
+          allow read: if isActiveGroupMember(groupId);
+          allow create: if isActiveGroupMember(groupId);
+          allow update: if canManageGroup(groupId)
+            || (
+              isActiveGroupMember(groupId)
+              && request.resource.data.text == resource.data.text
+              && request.resource.data.createdAt == resource.data.createdAt
+              && request.resource.data.answered == resource.data.answered
+            );
+          allow delete: if canManageGroup(groupId);
+        }
+
+        match /polls/{pollId} {
+          allow read: if isActiveGroupMember(groupId);
+          allow create, update, delete: if canManageGroup(groupId);
+        }
+      }
+
+      match /attendanceSessions/{sessionId} {
+        allow read: if isActiveGroupMember(groupId);
+        allow create, update, delete: if canManageGroup(groupId);
+
+        match /attendanceRecords/{recordId} {
+          allow read: if isActiveGroupMember(groupId);
+          allow create, update: if canManageGroup(groupId) || (isSignedIn() && recordId == request.auth.uid);
           allow delete: if false;
         }
       }
@@ -142,6 +237,23 @@ service cloud.firestore {
 
       match /groups/{groupRef} {
         allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      match /milestones/{milestoneId} {
+        allow read: if isSignedIn() && (
+          request.auth.uid == uid
+          || (resource.data.groupId != null && canManageGroup(resource.data.groupId))
+        );
+        allow create: if isSignedIn() && (
+          request.auth.uid == uid
+          || (request.resource.data.groupId != null && canManageGroup(request.resource.data.groupId))
+        );
+        allow update: if isSignedIn() && (
+          request.auth.uid == uid
+          || (request.resource.data.groupId != null && canManageGroup(request.resource.data.groupId))
+          || (resource.data.groupId != null && canManageGroup(resource.data.groupId))
+        );
+        allow delete: if false;
       }
 
       // 學分試算：使用者自己的修課紀錄（子集合）
