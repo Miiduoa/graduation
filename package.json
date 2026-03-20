@@ -2,6 +2,15 @@
   "name": "graduation-campus-app",
   "private": true,
   "packageManager": "pnpm@10.28.2",
+  "pnpm": {
+    "overrides": {
+      "@next/eslint-plugin-next": "16.1.7",
+      "eslint-config-next": "16.1.7",
+      "fast-xml-parser": "^5.5.7",
+      "js-yaml": "^4.1.1",
+      "next": "16.1.7"
+    }
+  },
   "scripts": {
     "dev": "pnpm dev:web",
     "dev:mobile": "pnpm --filter mobile start",

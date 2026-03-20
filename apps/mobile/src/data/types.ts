@@ -231,6 +231,7 @@ export type Enrollment = {
   userId: string;
   courseId: string;
   semester: string;
+  schoolId?: string;
   status: "enrolled" | "dropped" | "completed" | "waitlisted";
   grade?: string;
   gradePoints?: number;
@@ -246,6 +247,7 @@ export type Grade = {
   courseCode?: string;
   credits: number;
   semester: string;
+  schoolId?: string;
   letterGrade?: string;
   gradePoints?: number;
   grade?: number;
@@ -287,6 +289,8 @@ export type Submission = {
   id: string;
   assignmentId: string;
   userId: string;
+  uid?: string;
+  groupId?: string;
   content?: string;
   attachments?: Attachment[];
   submittedAt: string;
@@ -598,6 +602,7 @@ export type GroupPost = {
 export type Comment = {
   id: string;
   postId: string;
+  groupId?: string;
   authorId: string;
   author?: User;
   content: string;
@@ -614,6 +619,7 @@ export type Conversation = {
   participants: string[];
   participantIds?: string[];
   participantUsers?: User[];
+  schoolId?: string | null;
   lastMessage?: Message | null;
   lastMessageAt?: string | null;
   unreadCount?: number;
@@ -693,6 +699,7 @@ export type LibraryLoan = {
   id: string;
   userId: string;
   bookId: string;
+  schoolId?: string;
   book?: LibraryBook;
   borrowedAt: string;
   dueAt?: string;
@@ -720,6 +727,7 @@ export type SeatReservation = {
   id: string;
   userId: string;
   seatId: string;
+  schoolId?: string;
   seat?: LibrarySeat;
   date: string;
   startTime: string;
@@ -798,6 +806,7 @@ export type NotificationType =
 export type CalendarEvent = {
   id: string;
   userId: string;
+  schoolId?: string;
   title: string;
   description?: string;
   startAt?: string;
@@ -847,6 +856,7 @@ export type PaymentMethod = {
 export type Transaction = {
   id: string;
   userId: string;
+  schoolId?: string;
   amount: number;
   currency: string;
   type: "payment" | "refund" | "topup" | "expense";
@@ -862,6 +872,7 @@ export type Transaction = {
 export type Order = {
   id: string;
   userId: string;
+  schoolId?: string;
   items: OrderItem[];
   subtotal?: number;
   tax?: number;
@@ -921,6 +932,7 @@ export type AchievementCategory =
 export type UserAchievement = {
   id: string;
   userId?: string;
+  schoolId?: string;
   achievementId?: string;
   achievement?: Achievement;
   progress: number;
