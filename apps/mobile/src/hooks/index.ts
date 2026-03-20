@@ -13,6 +13,8 @@ export { useNetworkStatus } from "./useNetworkStatus";
 // 防抖與節流
 export { useDebounce, useDebouncedCallback, useLeadingDebounce } from "./useDebounce";
 export { useThrottle, useThrottledCallback, usePreventDoubleClick } from "./useThrottle";
+export { useAnimatedAddition, useAnimatedValue } from "./useAnimatedValue";
+export { useConstant, useLatestValue } from "./useLatestValue";
 
 // 分頁
 export { 
@@ -41,6 +43,7 @@ export {
   useBooleanStorage, 
   useHistoryStorage 
 } from "./useStorage";
+export { usePersistedState } from "./usePersistedState";
 
 // 鍵盤
 export { 

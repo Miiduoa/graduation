@@ -54,6 +54,7 @@ export type {
   SSOCallbackResult,
   SSOProvider,
 } from "@campus/shared/src";
+import { collectionFromSegments } from "./firestorePath";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -178,7 +179,7 @@ async function fetchCollectionAtPath<T extends { id: string }>(
   constraints: QueryConstraint[]
 ): Promise<T[]> {
   const firestore = getDb();
-  const q = query(collection(firestore, pathSegments.join("/")), ...constraints);
+  const q = query(collectionFromSegments(firestore, pathSegments), ...constraints);
   const snap = await getDocs(q);
 
   return snap.docs
@@ -367,6 +368,9 @@ export async function completeWebSSOCallback(params: {
   provider: SSOProvider;
   schoolId: string;
   redirectUri: string;
+  transactionId: string;
+  state: string;
+  codeVerifier?: string;
   code?: string;
   ticket?: string;
   samlResponse?: string;
@@ -375,6 +379,9 @@ export async function completeWebSSOCallback(params: {
     provider: params.provider,
     schoolId: params.schoolId,
     redirectUri: params.redirectUri,
+    transactionId: params.transactionId,
+    state: params.state,
+    ...(params.codeVerifier ? { codeVerifier: params.codeVerifier } : {}),
     ...(params.code ? { code: params.code } : {}),
     ...(params.ticket ? { ticket: params.ticket } : {}),
     ...(params.samlResponse ? { SAMLResponse: params.samlResponse } : {}),
@@ -400,6 +407,43 @@ export async function completeWebSSOCallback(params: {
   }
 
   return data as unknown as SSOCallbackResult;
+}
+
+export async function startWebSSOCallback(params: {
+  schoolId: string;
+  provider: SSOProvider;
+  redirectUri: string;
+  state: string;
+  codeChallenge?: string;
+  nonce?: string;
+}): Promise<{ transactionId: string; expiresAt?: string | null }> {
+  const response = await fetch(`${getCloudFunctionUrl("startSSOAuth")}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      schoolId: params.schoolId,
+      provider: params.provider,
+      redirectUri: params.redirectUri,
+      state: params.state,
+      source: "web",
+      ...(params.codeChallenge ? { codeChallenge: params.codeChallenge } : {}),
+      ...(params.nonce ? { nonce: params.nonce } : {}),
+    }),
+  });
+
+  const data = (await response.json()) as Record<string, unknown>;
+  if (!response.ok || typeof data.transactionId !== "string") {
+    throw new Error(
+      typeof data.error === "string" ? data.error : "Failed to initialize SSO login"
+    );
+  }
+
+  return {
+    transactionId: data.transactionId,
+    expiresAt: typeof data.expiresAt === "string" ? data.expiresAt : null,
+  };
 }
 
 export async function signInWithCustomAuthToken(customToken: string): Promise<User | null> {

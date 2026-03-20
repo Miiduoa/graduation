@@ -1,17 +1,14 @@
 /**
  * AI Service - 校園智慧助理 API 整合層
  *
- * 支援：OpenAI (GPT-4o-mini / gpt-4o)、Google Gemini、本地模擬（開發用）
+ * 支援：後端代理 AI、本地模擬（開發用）
  *
  * 使用方式：
- * 1. 在 .env 設定 API Key 與選用參數
+ * 1. 在 .env 設定 AI 模式與選用參數
  * 2. 呼叫 chatWithAI() 發送對話
  *
  * 選用環境變數：
- * - EXPO_PUBLIC_OPENAI_API_KEY / EXPO_PUBLIC_GEMINI_API_KEY
- * - EXPO_PUBLIC_AI_PROVIDER = openai | gemini | mock
- * - EXPO_PUBLIC_OPENAI_MODEL（預設 gpt-4o-mini）
- * - EXPO_PUBLIC_GEMINI_MODEL（預設 gemini-1.5-flash）
+ * - EXPO_PUBLIC_AI_PROVIDER = cloud | mock
  * - EXPO_PUBLIC_AI_MAX_TOKENS（預設 1000）
  */
 
@@ -19,7 +16,7 @@ import Constants from "expo-constants";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getFirebaseApp, hasUsableFirebaseConfig } from "../firebase";
 
-export type AIProvider = "openai" | "gemini" | "mock";
+export type AIProvider = "cloud" | "mock" | "openai" | "gemini";
 
 // 重試配置
 const RETRY_CONFIG = {
@@ -164,12 +161,9 @@ const CONTEXT_LIMITS = {
 
 function getConfig() {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
+  const rawProvider = String(extra.aiProvider ?? process.env.EXPO_PUBLIC_AI_PROVIDER ?? "cloud").toLowerCase();
   return {
-    openaiApiKey: extra.openaiApiKey ?? process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? "",
-    geminiApiKey: extra.geminiApiKey ?? process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? "",
-    aiProvider: (extra.aiProvider ?? process.env.EXPO_PUBLIC_AI_PROVIDER ?? "mock") as AIProvider,
-    openaiModel: extra.openaiModel ?? process.env.EXPO_PUBLIC_OPENAI_MODEL ?? "gpt-4o-mini",
-    geminiModel: extra.geminiModel ?? process.env.EXPO_PUBLIC_GEMINI_MODEL ?? "gemini-1.5-flash",
+    aiProvider: (rawProvider === "mock" ? "mock" : rawProvider) as AIProvider,
     maxTokens: extra.aiMaxTokens ?? process.env.EXPO_PUBLIC_AI_MAX_TOKENS ?? 1000,
   };
 }
@@ -300,212 +294,28 @@ function buildSystemPrompt(context: AIContext): string {
   return parts.join("\n");
 }
 
-async function callOpenAI(
-  messages: AIMessage[], 
-  systemPrompt: string,
+async function callManagedAI(
+  messages: AIMessage[],
+  context: AIContext,
   signal?: AbortSignal
-): Promise<AIResponse> {
-  const config = getConfig();
-  if (!config.openaiApiKey) {
-    return { content: "", error: "OpenAI API Key 未設定" };
+): Promise<AIResponse | null> {
+  if (signal?.aborted) {
+    return { content: "", error: "請求已取消" };
   }
 
-  let lastError: string | null = null;
-  
-  for (let retryCount = 0; retryCount <= RETRY_CONFIG.maxRetries; retryCount++) {
-    try {
-      // 檢查是否被取消
-      if (signal?.aborted) {
-        return { content: "", error: "請求已取消" };
-      }
-      
-      // 等待速率限制
-      await waitForRateLimit();
-      
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${config.openaiApiKey}`,
-        },
-        body: JSON.stringify({
-          model: config.openaiModel,
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages.map((m) => ({ role: m.role, content: m.content })),
-          ],
-          temperature: 0.7,
-          max_tokens: Number(config.maxTokens) || 1000,
-        }),
-        signal,
-      });
-
-      // 處理速率限制
-      if (response.status === 429) {
-        const retryAfter = response.headers.get("Retry-After") ?? undefined;
-        handleRateLimitResponse(retryAfter);
-        
-        if (shouldRetry(response.status, retryCount)) {
-          const delay = getRetryDelay(retryCount, retryAfter);
-          console.log(`[AI] Rate limited, retrying in ${delay}ms (attempt ${retryCount + 1})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        return { content: "", error: "請求過於頻繁，請稍後再試" };
-      }
-
-      if (!response.ok) {
-        // 檢查是否應該重試
-        if (shouldRetry(response.status, retryCount)) {
-          const delay = getRetryDelay(retryCount);
-          console.log(`[AI] Request failed with ${response.status}, retrying in ${delay}ms (attempt ${retryCount + 1})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        try {
-          const error = await response.json();
-          lastError = error.error?.message ?? `API 呼叫失敗 (${response.status})`;
-        } catch {
-          lastError = `API 呼叫失敗 (${response.status})`;
-        }
-        return { content: "", error: lastError };
-      }
-
-      // 成功，重置速率限制狀態
+  try {
+    await waitForRateLimit();
+    const cloudResponse = await callCampusAssistant(messages, context, signal);
+    if (cloudResponse) {
       resetRateLimitState();
-      
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content ?? "";
-
-      return {
-        content,
-        suggestions: extractSuggestions(content),
-      };
-    } catch (e: any) {
-      if (e.name === "AbortError") {
-        return { content: "", error: "請求已取消" };
-      }
-      
-      lastError = e.message ?? "網路錯誤";
-      
-      // 網路錯誤也可以重試
-      if (retryCount < RETRY_CONFIG.maxRetries) {
-        const delay = getRetryDelay(retryCount);
-        console.log(`[AI] Network error, retrying in ${delay}ms (attempt ${retryCount + 1}):`, e.message);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        continue;
-      }
+      return cloudResponse;
     }
-  }
-  
-  return { content: "", error: lastError ?? "網路錯誤" };
-}
-
-async function callGemini(
-  messages: AIMessage[], 
-  systemPrompt: string,
-  signal?: AbortSignal
-): Promise<AIResponse> {
-  const config = getConfig();
-  if (!config.geminiApiKey) {
-    return { content: "", error: "Gemini API Key 未設定" };
+  } catch (error) {
+    handleRateLimitResponse();
+    console.warn("[AI] managed proxy failed:", error);
   }
 
-  let lastError: string | null = null;
-
-  for (let retryCount = 0; retryCount <= RETRY_CONFIG.maxRetries; retryCount++) {
-    try {
-      // 檢查是否被取消
-      if (signal?.aborted) {
-        return { content: "", error: "請求已取消" };
-      }
-      
-      // 等待速率限制
-      await waitForRateLimit();
-      
-      const history = messages.map((m) => ({
-        role: m.role === "user" ? "user" : "model",
-        parts: [{ text: m.content }],
-      }));
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents: history,
-            generationConfig: {
-              temperature: 0.7,
-              maxOutputTokens: Number(config.maxTokens) || 1000,
-            },
-          }),
-          signal,
-        }
-      );
-
-      // 處理速率限制
-      if (response.status === 429) {
-        const retryAfter = response.headers.get("Retry-After") ?? undefined;
-        handleRateLimitResponse(retryAfter);
-        
-        if (shouldRetry(response.status, retryCount)) {
-          const delay = getRetryDelay(retryCount, retryAfter);
-          console.log(`[AI] Gemini rate limited, retrying in ${delay}ms (attempt ${retryCount + 1})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        return { content: "", error: "請求過於頻繁，請稍後再試" };
-      }
-
-      if (!response.ok) {
-        if (shouldRetry(response.status, retryCount)) {
-          const delay = getRetryDelay(retryCount);
-          console.log(`[AI] Gemini request failed with ${response.status}, retrying in ${delay}ms (attempt ${retryCount + 1})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        try {
-          const error = await response.json();
-          lastError = error.error?.message ?? `API 呼叫失敗 (${response.status})`;
-        } catch {
-          lastError = `API 呼叫失敗 (${response.status})`;
-        }
-        return { content: "", error: lastError };
-      }
-
-      // 成功，重置速率限制狀態
-      resetRateLimitState();
-      
-      const data = await response.json();
-      const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-
-      return {
-        content,
-        suggestions: extractSuggestions(content),
-      };
-    } catch (e: any) {
-      if (e.name === "AbortError") {
-        return { content: "", error: "請求已取消" };
-      }
-      
-      lastError = e.message ?? "網路錯誤";
-      
-      if (retryCount < RETRY_CONFIG.maxRetries) {
-        const delay = getRetryDelay(retryCount);
-        console.log(`[AI] Gemini network error, retrying in ${delay}ms (attempt ${retryCount + 1}):`, e.message);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        continue;
-      }
-    }
-  }
-  
-  return { content: "", error: lastError ?? "網路錯誤" };
+  return null;
 }
 
 /**
@@ -653,18 +463,18 @@ export async function chatWithAI(
   signal?: AbortSignal
 ): Promise<AIResponse> {
   const config = getConfig();
-  const systemPrompt = buildSystemPrompt(context);
 
   try {
-    switch (config.aiProvider) {
-      case "openai":
-        return await callOpenAI(messages, systemPrompt, signal);
-      case "gemini":
-        return await callGemini(messages, systemPrompt, signal);
-      case "mock":
-      default:
-        return await mockAIResponse(messages, context, signal);
+    if (config.aiProvider === "mock") {
+      return await mockAIResponse(messages, context, signal);
     }
+
+    const managedResponse = await callManagedAI(messages, context, signal);
+    if (managedResponse) {
+      return managedResponse;
+    }
+
+    return await mockAIResponse(messages, context, signal);
   } catch (e: any) {
     if (e.name === "AbortError") {
       return { content: "", error: "請求已取消" };
@@ -681,11 +491,11 @@ export async function chatWithCampusAssistant(
   context: AIContext,
   signal?: AbortSignal
 ): Promise<AIResponse> {
-  const cloudResponse = await callCampusAssistant(messages, context, signal);
+  const cloudResponse = await callManagedAI(messages, context, signal);
   if (cloudResponse) {
     return cloudResponse;
   }
-  return chatWithAI(messages, context, signal);
+  return mockAIResponse(messages, context, signal);
 }
 
 /**
@@ -712,10 +522,7 @@ export function createCancellableChat() {
  */
 export function getAIStatus(): { provider: AIProvider; configured: boolean } {
   const config = getConfig();
-  const configured =
-    config.aiProvider === "mock" ||
-    (config.aiProvider === "openai" && !!config.openaiApiKey) ||
-    (config.aiProvider === "gemini" && !!config.geminiApiKey);
+  const configured = config.aiProvider === "mock" || hasUsableFirebaseConfig();
 
   return { provider: config.aiProvider, configured };
 }

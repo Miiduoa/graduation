@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
+import { getScopedStorageKey } from "../services/scopedStorage";
+import { usePersistedState } from "../hooks/usePersistedState";
 
 export type FavoriteKind = "announcement" | "event" | "poi" | "menu";
 
@@ -42,52 +42,20 @@ export function FavoritesProvider(props: {
 }) {
   const userId = props.userId ?? null;
   const schoolId = props.schoolId ?? null;
-  const [loaded, setLoaded] = useState(false);
-  const [favorites, setFavorites] = useState<FavoritesState>(emptyState);
-  const prevKeyRef = useRef<string | null>(undefined as any);
-
-  useEffect(() => {
-    const currentKey = getStorageKey(userId, schoolId);
-    if (prevKeyRef.current === currentKey && loaded) return;
-    
-    prevKeyRef.current = currentKey;
-    let cancelled = false;
-    setLoaded(false);
-    
-    (async () => {
-      try {
-        const raw = await getFirstStorageValue([currentKey, getLegacyStorageKey(userId, schoolId)]);
-        if (cancelled) return;
-        
-        if (!raw) {
-          setFavorites(emptyState);
-          return;
-        }
-        const parsed = JSON.parse(raw) as Partial<FavoritesState>;
-        setFavorites({
-          announcement: parsed.announcement ?? [],
-          event: parsed.event ?? [],
-          poi: parsed.poi ?? [],
-          menu: parsed.menu ?? [],
-        });
-      } catch {
-        if (!cancelled) setFavorites(emptyState);
-      } finally {
-        if (!cancelled) setLoaded(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, schoolId]);
-
-  useEffect(() => {
-    if (!loaded) return;
-    const storageKey = getStorageKey(userId, schoolId);
-    AsyncStorage.setItem(storageKey, JSON.stringify(favorites)).catch((e) => {
-      console.error("[Favorites] Failed to save:", e);
-    });
-  }, [loaded, favorites, userId, schoolId]);
+  const { value: favorites, setValue: setFavorites } = usePersistedState<FavoritesState>({
+    storageKey: getStorageKey(userId, schoolId),
+    legacyKeys: [getLegacyStorageKey(userId, schoolId)],
+    defaultValue: emptyState,
+    deserialize: (raw) => {
+      const parsed = JSON.parse(raw) as Partial<FavoritesState>;
+      return {
+        announcement: parsed.announcement ?? [],
+        event: parsed.event ?? [],
+        poi: parsed.poi ?? [],
+        menu: parsed.menu ?? [],
+      };
+    },
+  });
 
   // 使用 useCallback 確保函數引用穩定
   const isFavorite = useCallback(

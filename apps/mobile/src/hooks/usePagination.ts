@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useLatestValue } from "./useLatestValue";
 
 export type PaginationOptions = {
   initialPage?: number;
@@ -42,8 +43,7 @@ export function usePagination<T>(
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchFnRef = useRef(fetchFn);
-  fetchFnRef.current = fetchFn;
+  const fetchFnRef = useLatestValue(fetchFn);
   
   // 追蹤當前請求以便取消
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -217,15 +217,16 @@ export function useInfiniteScroll<T>(
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [hasMore, setHasMore] = useState(true);
 
-  const fetchFnRef = useRef(fetchFn);
-  fetchFnRef.current = fetchFn;
+  const fetchFnRef = useLatestValue(fetchFn);
 
   const isLoadingRef = useRef(false);
   const requestIdRef = useRef(0);
   const isMountedRef = useRef(true);
 
   const cursorRef = useRef<string | undefined>(cursor);
-  cursorRef.current = cursor;
+  useEffect(() => {
+    cursorRef.current = cursor;
+  }, [cursor]);
   
   // 追蹤是否已卸載
   useEffect(() => {

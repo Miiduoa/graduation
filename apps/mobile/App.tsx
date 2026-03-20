@@ -199,16 +199,12 @@ const { usingFirebase: USING_FIREBASE } = initializeRuntimeDataSource();
 
 function SyncStatusHandler() {
   const toast = useToast();
-  const [conflicts, setConflicts] = useState<ConflictInfo[]>([]);
-  const [showConflictModal, setShowConflictModal] = useState(false);
-  
+  const [conflicts, setConflicts] = useState<ConflictInfo[]>(() => getPendingConflicts());
+  const [showConflictModal, setShowConflictModal] = useState(
+    () => getPendingConflicts().length > 0
+  );
+
   useEffect(() => {
-    const existingConflicts = getPendingConflicts();
-    if (existingConflicts.length > 0) {
-      setConflicts(existingConflicts);
-      setShowConflictModal(true);
-    }
-    
     const unsubscribeConflicts = subscribeToConflicts((info) => {
       setConflicts((prev) => {
         const exists = prev.some((c) => c.action.id === info.action.id);

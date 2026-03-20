@@ -1,4 +1,5 @@
 const DEFAULT_CALLBACK_PATH = "/sso-callback";
+const PENDING_SAML_RESPONSE_KEY = "campus.web.sso.pendingSamlResponse";
 
 function escapeForInlineScript(value: string): string {
   return JSON.stringify(value)
@@ -37,13 +38,11 @@ function buildHtml(callbackUrl: string, samlResponse: string) {
   <body>
     <p>正在返回登入頁面…</p>
     <script>
-      sessionStorage.setItem(
-        "campus.web.sso.pendingSamlResponse",
-        JSON.stringify({
-          callbackUrl: ${escapeForInlineScript(callbackUrl)},
-          samlResponse: ${escapeForInlineScript(samlResponse)}
-        })
-      );
+      window.name = JSON.stringify({
+        marker: ${escapeForInlineScript(PENDING_SAML_RESPONSE_KEY)},
+        callbackUrl: ${escapeForInlineScript(callbackUrl)},
+        samlResponse: ${escapeForInlineScript(samlResponse)}
+      });
       window.location.replace(${escapeForInlineScript(callbackUrl)});
     </script>
   </body>
@@ -51,7 +50,11 @@ function buildHtml(callbackUrl: string, samlResponse: string) {
 }
 
 export async function GET(request: Request) {
-  return Response.redirect(new URL(DEFAULT_CALLBACK_PATH, request.url), 302);
+  const response = Response.redirect(new URL(DEFAULT_CALLBACK_PATH, request.url), 302);
+  response.headers.set("cache-control", "no-store");
+  response.headers.set("pragma", "no-cache");
+  response.headers.set("referrer-policy", "no-referrer");
+  return response;
 }
 
 export async function POST(request: Request) {
@@ -69,6 +72,9 @@ export async function POST(request: Request) {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
+      pragma: "no-cache",
+      "referrer-policy": "no-referrer",
+      "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'self'",
     },
   });
 }

@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef, useMemo } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
+import React, { createContext, useContext, useCallback, useMemo } from "react";
+import { getScopedStorageKey } from "../services/scopedStorage";
+import { usePersistedState } from "../hooks/usePersistedState";
 
 const STORAGE_KEY_PREFIX = "@search_history";
 const STORAGE_VERSION = "v3"; // Updated version to include schoolId
@@ -39,41 +39,15 @@ export function SearchHistoryProvider(props: {
 }) {
   const userId = props.userId ?? null;
   const schoolId = props.schoolId ?? null;
-  const [history, setHistory] = useState<SearchHistoryItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const prevKeyRef = useRef<string | null>(undefined as any);
-
-  useEffect(() => {
-    const currentKey = getStorageKey(userId, schoolId);
-    if (prevKeyRef.current === currentKey && loaded) return;
-    
-    prevKeyRef.current = currentKey;
-    setLoaded(false);
-    
-    getFirstStorageValue([currentKey, getLegacyStorageKey(userId, schoolId)])
-      .then((raw) => {
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              setHistory(parsed);
-              return;
-            }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-        setHistory([]);
-      })
-      .finally(() => setLoaded(true));
-  }, [userId, schoolId]);
-
-  useEffect(() => {
-    if (loaded) {
-      const storageKey = getStorageKey(userId, schoolId);
-      AsyncStorage.setItem(storageKey, JSON.stringify(history)).catch(() => {});
-    }
-  }, [history, loaded, userId, schoolId]);
+  const { value: history, setValue: setHistory } = usePersistedState<SearchHistoryItem[]>({
+    storageKey: getStorageKey(userId, schoolId),
+    legacyKeys: [getLegacyStorageKey(userId, schoolId)],
+    defaultValue: [],
+    deserialize: (raw) => {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    },
+  });
 
   const addSearch = useCallback((query: string, type: SearchHistoryItem["type"]) => {
     const trimmed = query.trim();
