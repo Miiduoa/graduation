@@ -29,11 +29,37 @@ function getFirebaseConfig(): FirebaseWebConfig {
   return (extra.firebase ?? {}) as FirebaseWebConfig;
 }
 
+function hasRealFirebaseValue(value?: string): boolean {
+  if (!value) return false;
+  const normalized = value.trim();
+  if (!normalized) return false;
+
+  const placeholders = new Set([
+    "your_firebase_api_key",
+    "your-project.firebaseapp.com",
+    "your-project-id",
+    "your-project.appspot.com",
+    "123456789012",
+    "1:123456789012:web:abcdef123456",
+  ]);
+
+  return !placeholders.has(normalized);
+}
+
+export function hasUsableFirebaseConfig(): boolean {
+  const cfg = getFirebaseConfig();
+  return (
+    hasRealFirebaseValue(cfg.apiKey) &&
+    hasRealFirebaseValue(cfg.projectId) &&
+    hasRealFirebaseValue(cfg.appId)
+  );
+}
+
 export function getFirebaseApp() {
   if (getApps().length) return getApps()[0]!;
   const cfg = getFirebaseConfig();
 
-  if (!cfg.apiKey || !cfg.projectId || !cfg.appId) {
+  if (!hasUsableFirebaseConfig()) {
     throw new Error(
       "Missing Firebase config. Set EXPO_PUBLIC_FIREBASE_API_KEY / PROJECT_ID / APP_ID (and others) in env and restart expo."
     );

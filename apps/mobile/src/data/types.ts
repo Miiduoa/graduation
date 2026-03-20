@@ -425,6 +425,11 @@ export type InboxTask = {
   priority: number;
   dueAt?: Date | null;
   unreadCount?: number;
+  preferredIntent?: InboxIntent;
+  actionLabel?: string;
+  reason?: string;
+  consequence?: string;
+  nextStep?: string;
 };
 
 export type InboxIntent =

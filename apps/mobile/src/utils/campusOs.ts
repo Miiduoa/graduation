@@ -30,6 +30,8 @@ export function getFreshnessState(date?: Date | null): FreshnessState {
 }
 
 export function getInboxIntent(task: InboxTask): InboxIntent {
+  if (task.preferredIntent) return task.preferredIntent;
+
   switch (task.kind) {
     case "assignment":
     case "quiz":
@@ -47,6 +49,9 @@ export function getInboxUrgency(task: InboxTask): InboxUrgency {
   if (task.priority >= 90) return "critical";
   if (task.priority >= 70) return "high";
   if (task.priority >= 40) return "medium";
+  if (task.priority <= 0) return "critical";
+  if (task.priority <= 1) return "high";
+  if (task.priority <= 2) return "medium";
   return "low";
 }
 
@@ -80,27 +85,30 @@ export function toInboxItem(task: InboxTask): InboxItem {
     intent,
     urgency,
     freshness,
-    actionLabel: getActionLabel(intent),
+    actionLabel: task.actionLabel ?? getActionLabel(intent),
     reason:
-      task.kind === "live"
+      task.reason ??
+      (task.kind === "live"
         ? "課堂正在進行，錯過會直接影響出席與互動"
         : task.kind === "assignment"
           ? "這項作業會影響本週進度"
           : task.kind === "quiz"
             ? "評量接近截止，延後會壓縮準備時間"
-            : "這則更新可能改變你的下一步",
+            : "這則更新可能改變你的下一步"),
     consequence:
-      task.kind === "live"
+      task.consequence ??
+      (task.kind === "live"
         ? "可能錯過簽到、課堂互動或教材說明"
         : task.kind === "group"
           ? "可能漏看課程異動、公告或回覆"
-          : "可能變成更高壓的臨時處理",
+          : "可能變成更高壓的臨時處理"),
     nextStep:
-      task.kind === "live"
+      task.nextStep ??
+      (task.kind === "live"
         ? "現在進入課堂模式"
         : task.kind === "group"
           ? "先看更新，再決定是否進一步處理"
-          : "先打開內容，確認要求與完成條件",
+          : "先打開內容，確認要求與完成條件"),
   };
 }
 
