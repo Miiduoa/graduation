@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+const nodeCrypto = require("crypto");
 
 const SENSITIVE_SSO_FIELDS = [
   "clientSecret",
@@ -94,7 +94,7 @@ function getKeyBuffer(secret) {
     return base64Buffer;
   }
 
-  return crypto.createHash("sha256").update(secret).digest();
+  return nodeCrypto.createHash("sha256").update(secret).digest();
 }
 
 function encryptSecretConfig(secretConfig, encryptionKey) {
@@ -105,9 +105,9 @@ function encryptSecretConfig(secretConfig, encryptionKey) {
     return null;
   }
 
-  const iv = crypto.randomBytes(12);
+  const iv = nodeCrypto.randomBytes(12);
   const key = getKeyBuffer(encryptionKey);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const cipher = nodeCrypto.createCipheriv("aes-256-gcm", key, iv);
   const plaintext = Buffer.from(JSON.stringify(normalizedSecret), "utf8");
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -136,7 +136,7 @@ function decryptSecretConfig(payload, encryptionKey) {
   }
 
   const key = getKeyBuffer(encryptionKey);
-  const decipher = crypto.createDecipheriv(
+  const decipher = nodeCrypto.createDecipheriv(
     "aes-256-gcm",
     key,
     Buffer.from(iv, "base64")

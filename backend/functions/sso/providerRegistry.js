@@ -1,6 +1,6 @@
 const saml2 = require("saml2-js");
 const xml2js = require("xml2js");
-const crypto = require("crypto");
+const nodeCrypto = require("crypto");
 
 const REQUIRED_PROVIDER_FIELDS = {
   oidc: ["clientId", "clientSecret", "authorizationEndpoint", "tokenEndpoint"],
@@ -162,7 +162,7 @@ function verifyPkceChallenge(codeVerifier, expectedCodeChallenge) {
   }
 
   const actualChallenge = toBase64Url(
-    crypto.createHash("sha256").update(codeVerifier, "utf8").digest()
+    nodeCrypto.createHash("sha256").update(codeVerifier, "utf8").digest()
   );
 
   if (actualChallenge !== expectedCodeChallenge) {
