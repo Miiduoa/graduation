@@ -1,7 +1,11 @@
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import { makeRedirectUri } from "expo-auth-session";
-import { signInWithCustomToken, signInWithEmailAndPassword } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  signInWithCustomToken,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import Constants from "expo-constants";
 import {
@@ -16,7 +20,8 @@ import {
   type SSOProvider,
   type SSOUserInfo,
 } from "@campus/shared/src/auth";
-import { getAuthInstance, getDb } from "../firebase";
+import { getAuthInstance, getDb, hasUsableFirebaseConfig } from "../firebase";
+import { saveMockAuthSession } from "./mockAuth";
 
 export type { SchoolSSOConfig, SSOProvider, SSOUserInfo } from "@campus/shared/src/auth";
 
@@ -629,20 +634,65 @@ export async function performTestSchoolCredentialLogin(
     throw new SSOError("學校帳號或密碼錯誤", "SSO_VALIDATION_FAILED");
   }
 
+  const displayName = normalizedUsername.split("@")[0] || "測試使用者";
+
+  if (!hasUsableFirebaseConfig()) {
+    const uid = `mock-${schoolId}-${normalizedUsername.replace(/[^a-z0-9]/gi, "-").toLowerCase()}`;
+
+    await saveMockAuthSession({
+      uid,
+      email: normalizedUsername,
+      schoolId,
+      displayName,
+      role: "student",
+      department: null,
+      studentId: null,
+    });
+
+    return {
+      uid,
+      isNewUser: false,
+      userInfo: {
+        sub: uid,
+        email: normalizedUsername,
+        name: displayName,
+        displayName,
+        role: "student",
+      },
+    };
+  }
+
   try {
     const auth = getAuthInstance();
-    const credential = await signInWithEmailAndPassword(auth, normalizedUsername, password);
+    let isNewUser = false;
+    let credential;
+
+    try {
+      credential = await signInWithEmailAndPassword(auth, normalizedUsername, password);
+    } catch (error) {
+      const code = (error as { code?: string })?.code;
+      if (
+        code === "auth/user-not-found" ||
+        code === "auth/invalid-credential" ||
+        code === "auth/invalid-login-credentials"
+      ) {
+        credential = await createUserWithEmailAndPassword(auth, normalizedUsername, password);
+        isNewUser = true;
+      } else {
+        throw error;
+      }
+    }
+
     const db = getDb();
-    const displayName =
+    const resolvedDisplayName =
       credential.user.displayName ??
-      normalizedUsername.split("@")[0] ??
-      "測試使用者";
+      displayName;
 
     await setDoc(
       doc(db, "users", credential.user.uid),
       {
         email: credential.user.email ?? normalizedUsername,
-        displayName,
+        displayName: resolvedDisplayName,
         schoolId,
         role: "student",
         lastLoginAt: serverTimestamp(),
@@ -653,12 +703,12 @@ export async function performTestSchoolCredentialLogin(
 
     return {
       uid: credential.user.uid,
-      isNewUser: false,
+      isNewUser,
       userInfo: {
         sub: credential.user.uid,
         email: credential.user.email ?? normalizedUsername,
-        name: displayName,
-        displayName,
+        name: resolvedDisplayName,
+        displayName: resolvedDisplayName,
         role: "student",
       },
     };
