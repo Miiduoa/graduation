@@ -174,7 +174,11 @@ export async function listQuizzes(
 ): Promise<Quiz[]> {
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
-  return listWorkspaceCourseQuizzes(db, memberships, courseSpaceId);
+  const quizzes = await listWorkspaceCourseQuizzes(db, memberships, courseSpaceId);
+  return quizzes.map((quiz) => ({
+    ...quiz,
+    dueAt: toDate(quiz.dueAt),
+  }));
 }
 
 export async function getQuiz(

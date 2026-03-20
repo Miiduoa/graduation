@@ -43,17 +43,17 @@ function navigateFromNotificationData(
   switch (data.type) {
     case "announcement":
       if (data.announcementId) {
-        nav.navigate("首頁", { screen: "公告詳情", params: { id: data.announcementId } });
+        nav.navigate("Today", { screen: "公告詳情", params: { id: data.announcementId } });
       }
       break;
     case "event":
       if (data.eventId) {
-        nav.navigate("首頁", { screen: "活動詳情", params: { id: data.eventId } });
+        nav.navigate("Today", { screen: "活動詳情", params: { id: data.eventId } });
       }
       break;
     case "group_post":
       if (data.groupId && data.postId) {
-        nav.navigate("訊息", {
+        nav.navigate("收件匣", {
           screen: "GroupPost",
           params: { groupId: data.groupId, postId: data.postId },
         });
@@ -61,7 +61,7 @@ function navigateFromNotificationData(
       break;
     case "assignment":
       if (data.groupId && data.assignmentId) {
-        nav.navigate("訊息", {
+        nav.navigate("收件匣", {
           screen: "AssignmentDetail",
           params: { groupId: data.groupId, assignmentId: data.assignmentId },
         });
@@ -69,7 +69,7 @@ function navigateFromNotificationData(
       break;
     case "message":
       if (data.peerId) {
-        nav.navigate("訊息", { screen: "Chat", params: { kind: "dm", peerId: data.peerId } });
+        nav.navigate("收件匣", { screen: "Chat", params: { kind: "dm", peerId: data.peerId } });
       }
       break;
     default:

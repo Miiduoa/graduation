@@ -22,7 +22,7 @@ const FAQ_DATA: FAQItem[] = [
   {
     id: "2",
     question: "如何加入群組？",
-    answer: "在「訊息」頁面點擊「進入群組」，輸入 8 碼加入碼即可加入。你也可以請群組管理員分享 QR 碼給你掃描加入。",
+    answer: "在「收件匣」頁面點擊「群組」，輸入 8 碼加入碼即可加入。你也可以請群組管理員分享 QR 碼給你掃描加入。",
     category: "群組功能",
   },
   {
@@ -64,7 +64,7 @@ const FAQ_DATA: FAQItem[] = [
   {
     id: "9",
     question: "如何導航到校園地點？",
-    answer: "在「地圖」頁面選擇地點，進入詳情後點擊「導航」，會自動開啟手機地圖 App 進行導航。",
+    answer: "在「校園」頁面進入地圖與點位詳情後點擊「導航」，會自動開啟手機地圖 App 進行導航。",
     category: "地圖功能",
   },
   {
@@ -149,19 +149,19 @@ export function HelpScreen(props: any) {
       case "quickstart":
         Alert.alert(
           "新手入門",
-          "1. 先到設定輸入學校代碼\n2. 在首頁查看公告與活動\n3. 到課業頁設定課表與學分\n4. 開啟通知設定，避免錯過重要提醒",
+          "1. 先完成學校與角色設定\n2. 在 Today 看今天最重要的一步\n3. 到課程頁整理課表、教材與學分\n4. 開啟通知設定，避免錯過重要提醒",
           [
-            { text: "前往首頁", onPress: () => navigateToTab("首頁", "HomeMain") },
+            { text: "前往 Today", onPress: () => navigateToTab("Today", "TodayHome") },
             { text: "前往設定", onPress: () => nav?.navigate?.("Settings") },
             { text: "關閉", style: "cancel" },
           ]
         );
         return;
       case "groups":
-        navigateToTab("訊息", "Groups");
+        navigateToTab("收件匣", "Groups");
         return;
       case "calendar":
-        navigateToTab("課業", "Calendar");
+        navigateToTab("課程", "Calendar");
         return;
       case "achievements":
         nav?.navigate?.("Achievements");

@@ -15,6 +15,7 @@ import {
   sanitizeInternalPath,
 } from "@/lib/navigation";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
+import { buildWebSsoStartUrl } from "@/lib/sso";
 import { useSchoolSsoConfig } from "@/lib/useSchoolSsoConfig";
 import { useRouter } from "next/navigation";
 
@@ -36,7 +37,7 @@ export default function LoginPage(props: {
 }) {
   const { schoolContext, schoolName, schoolSearch: q, schoolId } = resolveSchoolPageContext(props.searchParams);
   const router = useRouter();
-  const { config, ssoConfig, allowEmailLogin, loading: ssoLoading } = useSchoolSsoConfig(schoolId);
+  const { config, ssoConfig, allowEmailLogin, availability, ssoReady, loading: ssoLoading } = useSchoolSsoConfig(schoolId);
 
   const [loginMethod, setLoginMethod] = useState<LoginMethod>("sso");
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -65,15 +66,28 @@ export default function LoginPage(props: {
 
   const handleSSOLogin = () => {
     if (!ssoConfig) return;
-    const callbackPath = buildSsoCallbackPath(
-      schoolContext,
-      ssoConfig.provider,
-      props.searchParams?.redirect || props.searchParams?.returnUrl
-    );
-    if (ssoConfig.provider === "oidc" || ssoConfig.provider === "saml") {
-      router.push(callbackPath);
-    } else {
-      window.location.href = callbackPath;
+    setError("");
+    setSuccess("");
+    setIsLoading(true);
+
+    try {
+      const callbackPath = buildSsoCallbackPath(
+        schoolContext,
+        ssoConfig.provider,
+        props.searchParams?.redirect || props.searchParams?.returnUrl
+      );
+      const callbackUrl = new URL(callbackPath, window.location.origin).toString();
+      const samlAcsUrl = new URL("/sso/acs", window.location.origin).toString();
+      const startUrl = buildWebSsoStartUrl(ssoConfig, {
+        redirectUri: callbackUrl,
+        samlAcsUrl,
+        samlRelayState: callbackUrl,
+      });
+
+      window.location.assign(startUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "SSO 設定不完整，請聯絡管理員");
+      setIsLoading(false);
     }
   };
 
@@ -206,7 +220,7 @@ export default function LoginPage(props: {
                   <div className="skeleton" style={{ height: 16, width: "60%", margin: "0 auto 8px" }} />
                   <div className="skeleton" style={{ height: 44, width: "100%", borderRadius: "var(--radius-sm)" }} />
                 </div>
-              ) : ssoConfig ? (
+              ) : ssoReady && ssoConfig ? (
                 <div>
                   <div
                     style={{
@@ -236,8 +250,26 @@ export default function LoginPage(props: {
               ) : (
                 <div style={{ padding: "12px 0" }}>
                   <div style={{ fontSize: 14, color: "var(--muted)", marginBottom: 12 }}>
-                    尚未設定學校 SSO。請先選擇學校或改用電子郵件登入。
+                    {availability.message}。請先選擇已開通學校或改用電子郵件登入。
                   </div>
+                  {ssoConfig && (
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: "var(--radius-sm)",
+                        background: "var(--panel)",
+                        border: "1px solid var(--border)",
+                        fontSize: 12,
+                        color: "var(--muted)",
+                        lineHeight: 1.6,
+                        marginBottom: 12,
+                        textAlign: "left",
+                      }}
+                    >
+                      狀態：{availability.setupStatus === "live" ? "已開通" : availability.setupStatus === "testing" ? "測試中" : "未開通"}
+                      {availability.missingFields.length > 0 ? ` · 缺少欄位：${availability.missingFields.join(", ")}` : ""}
+                    </div>
+                  )}
                   <button
                     className="btn"
                     style={{ width: "100%" }}

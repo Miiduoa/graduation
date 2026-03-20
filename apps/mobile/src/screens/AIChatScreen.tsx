@@ -48,19 +48,35 @@ type QuickAction = {
 };
 
 const QUICK_ACTIONS: QuickAction[] = [
-  { icon: "newspaper", label: "今日公告", prompt: "今天有什麼重要公告？" },
-  { icon: "calendar", label: "近期活動", prompt: "最近有什麼活動可以參加？" },
+  { icon: "sparkles", label: "今日摘要", prompt: "幫我摘要今天最重要的待辦事項" },
+  { icon: "trending-up", label: "提升成績", prompt: "幫我分析如何提高本學期成績，給我具體建議" },
+  { icon: "time", label: "時間規劃", prompt: "幫我規劃今天剩餘時間的學習計畫" },
   { icon: "restaurant", label: "推薦餐點", prompt: "今天吃什麼好？推薦幾道餐點" },
   { icon: "map", label: "找地點", prompt: "圖書館在哪裡？怎麼走？" },
-  { icon: "school", label: "學分查詢", prompt: "我還差多少學分才能畢業？" },
-  { icon: "help-circle", label: "使用說明", prompt: "這個 APP 有什麼功能？" },
+  { icon: "help-circle", label: "學習支援", prompt: "我目前學習上遇到困難，你可以怎麼幫助我？" },
 ];
 
-const GREETING_MESSAGES = [
-  "哈囉！我是你的校園智慧助理 🎓",
-  "有什麼我可以幫你的嗎？",
-  "我可以幫你查詢公告、活動、餐廳資訊，或是回答校園相關問題。",
-];
+function getContextualGreeting(): string[] {
+  const hour = new Date().getHours();
+  if (hour >= 6 && hour < 12) {
+    return [
+      "早安！今天有什麼我可以幫你的嗎？☀️",
+      "我可以幫你整理今日行程、預習課程重點，或是回答任何問題。",
+    ];
+  } else if (hour >= 12 && hour < 18) {
+    return [
+      "午安！需要學習上的幫助嗎？📚",
+      "我可以幫你分析成績、整理筆記，或是規劃下午的學習計畫。",
+    ];
+  } else {
+    return [
+      "晚安！還在努力學習嗎？🌙",
+      "我可以幫你複習今天的課程重點，或是規劃明天的時間表。",
+    ];
+  }
+}
+
+const GREETING_MESSAGES = getContextualGreeting();
 
 const USE_AI_SERVICE = true;
 
@@ -428,7 +444,7 @@ export function AIChatScreen(props: any) {
         actions: recent.map((a) => ({
           label: `查看「${a.title.slice(0, 10)}...」`,
           action: "navigate",
-          params: { screen: "首頁", nested: "公告詳情", id: a.id },
+          params: { screen: "Today", nested: "公告詳情", id: a.id },
         })),
       };
     }
@@ -458,7 +474,7 @@ export function AIChatScreen(props: any) {
         actions: upcoming.map((e) => ({
           label: `報名「${e.title.slice(0, 8)}...」`,
           action: "navigate",
-          params: { screen: "首頁", nested: "活動詳情", id: e.id },
+          params: { screen: "Today", nested: "活動詳情", id: e.id },
         })),
       };
     }
@@ -484,7 +500,7 @@ export function AIChatScreen(props: any) {
         actions: shuffled.map((m) => ({
           label: `查看「${(m.name ?? m.cafeteria).slice(0, 8)}」`,
           action: "navigate",
-          params: { screen: "首頁", nested: "MenuDetail", id: m.id },
+          params: { screen: "校園", nested: "MenuDetail", id: m.id },
         })),
       };
     }
@@ -503,7 +519,7 @@ export function AIChatScreen(props: any) {
           role: "assistant",
           content: "抱歉，我找不到這個地點。你可以告訴我更具體的名稱，或是直接去地圖頁面搜尋！",
           timestamp: new Date(),
-          actions: [{ label: "開啟地圖", action: "navigate", params: { screen: "地圖" } }],
+          actions: [{ label: "開啟地圖", action: "navigate", params: { screen: "校園" } }],
         };
       }
 
@@ -514,8 +530,8 @@ export function AIChatScreen(props: any) {
         content: `找到了！「${poi.name}」位於 ${poi.category} 區域。\n\n${poi.description}\n\n要開啟導航嗎？`,
         timestamp: new Date(),
         actions: [
-          { label: "查看詳情", action: "navigate", params: { screen: "地圖", nested: "PoiDetail", id: poi.id } },
-          { label: "開始導航", action: "navigate", params: { screen: "地圖", nested: "PoiDetail", id: poi.id } },
+          { label: "查看詳情", action: "navigate", params: { screen: "校園", nested: "PoiDetail", id: poi.id } },
+          { label: "開始導航", action: "navigate", params: { screen: "校園", nested: "PoiDetail", id: poi.id } },
         ],
       };
     }

@@ -40,7 +40,7 @@ export function Card(props: {
 
   const variantStyles = {
     default: {
-      shell: softShadowStyle(theme.shadows.soft),
+      shell: shadowStyle(theme.shadows.sm),
       surface: {
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
@@ -48,7 +48,7 @@ export function Card(props: {
       },
     },
     elevated: {
-      shell: softShadowStyle(theme.shadows.soft),
+      shell: shadowStyle(theme.shadows.md),
       surface: {
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
@@ -280,7 +280,7 @@ export function Button(props: {
           alignSelf: props.fullWidth ? "stretch" : "flex-start",
           minHeight: 44,
           transform: [{ scale: pressed && !disabled ? 0.97 : 1 }],
-          ...(!disabled && (kind === "primary" || kind === "secondary") ? softShadowStyle(theme.shadows.soft) : {}),
+          ...(!disabled && kind === "primary" ? shadowStyle(theme.shadows.sm) : {}),
         },
         props.style,
       ]}

@@ -1,14 +1,17 @@
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
 import { makeRedirectUri } from "expo-auth-session";
-import { signInWithCustomToken } from "firebase/auth";
+import { signInWithCustomToken, signInWithEmailAndPassword } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import Constants from "expo-constants";
 import {
   getSSOProviderName as getSharedSSOProviderName,
+  getSchoolSsoAvailability as getSharedSchoolSsoAvailability,
+  isSchoolSsoLoginReady,
   normalizeSSOUserInfo,
   normalizeSchoolSSOConfig,
   type SchoolSSOConfig,
+  type SchoolSsoAvailability,
   type SSOCallbackResult,
   type SSOProvider,
   type SSOUserInfo,
@@ -33,11 +36,17 @@ function getCloudFunctionUrl(functionName: string): string {
 
 WebBrowser.maybeCompleteAuthSession();
 type SSOConfig = NonNullable<SchoolSSOConfig["ssoConfig"]>;
+export type TestSchoolCredentialConfig = {
+  schoolId: string;
+  username: string;
+  password: string;
+};
 
 const MOCK_SSO_CONFIGS: Record<string, SchoolSSOConfig> = {
   nchu: {
     schoolId: "nchu",
     schoolName: "國立中興大學",
+    setupStatus: "testing",
     ssoConfig: {
       provider: "oidc",
       name: "中興大學 SSO",
@@ -54,6 +63,7 @@ const MOCK_SSO_CONFIGS: Record<string, SchoolSSOConfig> = {
   nthu: {
     schoolId: "nthu",
     schoolName: "國立清華大學",
+    setupStatus: "testing",
     ssoConfig: {
       provider: "cas",
       name: "清華大學 CAS",
@@ -66,6 +76,7 @@ const MOCK_SSO_CONFIGS: Record<string, SchoolSSOConfig> = {
   ntu: {
     schoolId: "ntu",
     schoolName: "國立臺灣大學",
+    setupStatus: "testing",
     ssoConfig: {
       provider: "saml",
       name: "臺大 SAML",
@@ -79,10 +90,13 @@ const MOCK_SSO_CONFIGS: Record<string, SchoolSSOConfig> = {
   demo: {
     schoolId: "demo",
     schoolName: "Demo 學校",
+    setupStatus: "draft",
     ssoConfig: null,
     allowEmailLogin: true,
   },
 };
+
+const CONFIG_LOAD_TIMEOUT_MS = 4000;
 
 function getAppScheme(): string {
   const expoConfig = (Constants.expoConfig as any) ?? {};
@@ -91,6 +105,47 @@ function getAppScheme(): string {
   const scheme = Array.isArray(configuredScheme) ? configuredScheme[0] : configuredScheme;
 
   return typeof scheme === "string" && scheme.trim().length > 0 ? scheme.trim() : "campus";
+}
+
+function isMockSsoEnabled(): boolean {
+  const extra = (Constants.expoConfig as any)?.extra ?? {};
+  return extra.enableMockSSO === true || process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === "true";
+}
+
+function getRawTestSchoolCredentialConfig():
+  | (Partial<TestSchoolCredentialConfig> & { enabled?: boolean })
+  | null {
+  const extra = (Constants.expoConfig as any)?.extra ?? {};
+  const config = extra.testSchoolLogin;
+  return config && typeof config === "object" ? config : null;
+}
+
+export function getTestSchoolCredentialConfig(
+  schoolId: string
+): TestSchoolCredentialConfig | null {
+  const config = getRawTestSchoolCredentialConfig();
+  if (!config?.enabled) return null;
+
+  const configuredSchoolId =
+    typeof config.schoolId === "string" ? config.schoolId.trim() : "";
+  const username =
+    typeof config.username === "string" ? config.username.trim() : "";
+  const password =
+    typeof config.password === "string" ? config.password : "";
+
+  if (!configuredSchoolId || !username || !password) {
+    return null;
+  }
+
+  if (configuredSchoolId !== schoolId) {
+    return null;
+  }
+
+  return {
+    schoolId: configuredSchoolId,
+    username,
+    password,
+  };
 }
 
 function getSchoolConfigLookupKeys(schoolId: string): string[] {
@@ -103,27 +158,90 @@ function getSchoolConfigLookupKeys(schoolId: string): string[] {
     keys.add(parts[parts.length - 1]);
   }
 
+  if (parts.length > 2) {
+    keys.add(parts[1]);
+    keys.add(parts.slice(1, -1).join("-"));
+  }
+
   return [...keys];
 }
 
-export async function getSchoolSSOConfig(schoolId: string): Promise<SchoolSSOConfig | null> {
-  const db = getDb();
-  
-  try {
-    const configDoc = await getDoc(doc(db, "schools", schoolId, "settings", "sso"));
-    if (configDoc.exists()) {
-      return normalizeSchoolSSOConfig(configDoc.data(), { schoolId });
-    }
-  } catch (error) {
-    console.log("No SSO config in Firestore, using mock:", error);
-  }
-
+function getMockSchoolSSOConfig(schoolId: string): SchoolSSOConfig | null {
   for (const key of getSchoolConfigLookupKeys(schoolId)) {
     if (MOCK_SSO_CONFIGS[key]) {
       return normalizeSchoolSSOConfig(MOCK_SSO_CONFIGS[key], { schoolId });
     }
   }
 
+  return null;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(errorMessage));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+export async function getSchoolSSOConfig(schoolId: string): Promise<SchoolSSOConfig | null> {
+  console.log("[sso] Loading SSO config for school:", schoolId);
+
+  try {
+    const response = await fetchWithTimeout(
+      `${getCloudFunctionUrl("getSSOConfig")}?schoolId=${encodeURIComponent(schoolId)}`,
+      {},
+      CONFIG_LOAD_TIMEOUT_MS
+    );
+    const data = (await response.json()) as Record<string, unknown>;
+
+    if (response.ok) {
+      console.log("[sso] Loaded SSO config from cloud function for school:", schoolId);
+      return normalizeSchoolSSOConfig(data, { schoolId });
+    }
+  } catch (error) {
+    console.log("Falling back to Firestore SSO config:", error);
+  }
+
+  try {
+    const db = getDb();
+    const configDoc = await withTimeout(
+      getDoc(doc(db, "schools", schoolId, "settings", "sso")),
+      CONFIG_LOAD_TIMEOUT_MS,
+      "SSO config lookup timed out"
+    );
+
+    if (configDoc.exists()) {
+      console.log("[sso] Loaded SSO config from Firestore for school:", schoolId);
+      return normalizeSchoolSSOConfig(configDoc.data(), { schoolId });
+    }
+  } catch (error) {
+    console.log("No SSO config in Firestore, using mock:", error);
+  }
+
+  if (isMockSsoEnabled()) {
+    const mockConfig = getMockSchoolSSOConfig(schoolId);
+    if (mockConfig) {
+      console.log("[sso] Using local mock SSO config for school:", schoolId);
+      return mockConfig;
+    }
+  }
+
+  console.log("[sso] No SSO config found for school:", schoolId);
   return null;
 }
 
@@ -305,6 +423,7 @@ async function fetchWithTimeout(
 export type SSOErrorCode = 
   | "SSO_NOT_CONFIGURED"
   | "SSO_DISABLED"
+  | "SSO_NOT_READY"
   | "SSO_CANCELLED"
   | "SSO_TIMEOUT"
   | "SSO_NETWORK_ERROR"
@@ -348,6 +467,8 @@ export class SSOError extends Error {
         return "此學校尚未設定單一登入";
       case "SSO_DISABLED":
         return "此學校的單一登入功能已停用";
+      case "SSO_NOT_READY":
+        return this.message || "此學校的學校登入尚未正式開通";
       case "SSO_CANCELLED":
         return "登入已取消";
       case "SSO_TIMEOUT":
@@ -380,18 +501,24 @@ async function completeSSOCallback(
   schoolId: string,
   payload: AppSSOCallbackPayload
 ): Promise<SSOCallbackResult> {
-  const query = new URLSearchParams({
+  const requestBody = {
     provider: payload.provider,
     schoolId,
     redirectUri: payload.redirectUri,
-  });
-
-  if (payload.code) query.set("code", payload.code);
-  if (payload.ticket) query.set("ticket", payload.ticket);
-  if (payload.samlResponse) query.set("SAMLResponse", payload.samlResponse);
+    ...(payload.code ? { code: payload.code } : {}),
+    ...(payload.ticket ? { ticket: payload.ticket } : {}),
+    ...(payload.samlResponse ? { SAMLResponse: payload.samlResponse } : {}),
+  };
 
   const response = await fetchWithTimeout(
-    `${getCloudFunctionUrl("verifySSOCallback")}?${query.toString()}`
+    `${getCloudFunctionUrl("verifySSOCallback")}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    }
   );
 
   const data = (await response.json()) as Partial<SSOCallbackResult> & { error?: string; details?: string };
@@ -421,18 +548,18 @@ export async function performSSOLogin(
     );
   }
   
-  if (!config?.ssoConfig) {
-    throw new SSOError(
-      "此學校尚未設定單一登入",
-      "SSO_NOT_CONFIGURED"
-    );
+  const availability = getSharedSchoolSsoAvailability(config);
+
+  if (!availability.isConfigured) {
+    throw new SSOError(availability.message, "SSO_NOT_CONFIGURED");
   }
 
-  if (!config.ssoConfig.enabled) {
-    throw new SSOError(
-      "此學校的單一登入功能已停用",
-      "SSO_DISABLED"
-    );
+  if (!availability.isEnabled) {
+    throw new SSOError(availability.message, "SSO_DISABLED");
+  }
+
+  if (!availability.isLoginReady) {
+    throw new SSOError(availability.message, "SSO_NOT_READY");
   }
 
   const ssoConfig = config.ssoConfig;
@@ -477,6 +604,63 @@ export async function performSSOLogin(
       uid: result.uid,
       isNewUser: result.isNewUser,
       userInfo: normalizeSSOUserInfo(result.userInfo ?? null),
+    };
+  } catch (error) {
+    throw SSOError.fromUnknown(error);
+  }
+}
+
+export async function performTestSchoolCredentialLogin(
+  schoolId: string,
+  username: string,
+  password: string
+): Promise<{ uid: string; isNewUser: boolean; userInfo: SSOUserInfo | null }> {
+  const config = getTestSchoolCredentialConfig(schoolId);
+  if (!config) {
+    throw new SSOError("此學校未啟用測試校方帳密登入", "SSO_NOT_CONFIGURED");
+  }
+
+  const normalizedUsername = username.trim();
+  if (!normalizedUsername || !password) {
+    throw new SSOError("請輸入學校帳號與密碼", "SSO_VALIDATION_FAILED");
+  }
+
+  if (normalizedUsername !== config.username || password !== config.password) {
+    throw new SSOError("學校帳號或密碼錯誤", "SSO_VALIDATION_FAILED");
+  }
+
+  try {
+    const auth = getAuthInstance();
+    const credential = await signInWithEmailAndPassword(auth, normalizedUsername, password);
+    const db = getDb();
+    const displayName =
+      credential.user.displayName ??
+      normalizedUsername.split("@")[0] ??
+      "測試使用者";
+
+    await setDoc(
+      doc(db, "users", credential.user.uid),
+      {
+        email: credential.user.email ?? normalizedUsername,
+        displayName,
+        schoolId,
+        role: "student",
+        lastLoginAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return {
+      uid: credential.user.uid,
+      isNewUser: false,
+      userInfo: {
+        sub: credential.user.uid,
+        email: credential.user.email ?? normalizedUsername,
+        name: displayName,
+        displayName,
+        role: "student",
+      },
     };
   } catch (error) {
     throw SSOError.fromUnknown(error);
@@ -541,7 +725,13 @@ export async function unlinkSSO(schoolId: string, uid: string): Promise<void> {
 }
 
 export function isSSOAvailable(schoolConfig: SchoolSSOConfig | null): boolean {
-  return !!schoolConfig?.ssoConfig?.enabled;
+  return isSchoolSsoLoginReady(schoolConfig);
+}
+
+export function getSSOAvailability(
+  schoolConfig: SchoolSSOConfig | null
+): SchoolSsoAvailability {
+  return getSharedSchoolSsoAvailability(schoolConfig);
 }
 
 export function getSSOProviderName(schoolConfig: SchoolSSOConfig | null): string {

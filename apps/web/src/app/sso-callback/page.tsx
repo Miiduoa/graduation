@@ -1,67 +1,149 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+
+import { completeWebSSOCallback, signInWithCustomAuthToken } from "@/lib/firebase";
+import { appendSchoolContext, sanitizeInternalPath } from "@/lib/navigation";
+import {
+  buildCurrentSsoRedirectUri,
+  PENDING_SAML_RESPONSE_KEY,
+  readWebSsoCallbackParams,
+} from "@/lib/sso";
+
+type CallbackStatus = "loading" | "success" | "error";
+
+function consumePendingSamlResponse(callbackUrl: string): string | null {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_SAML_RESPONSE_KEY);
+    if (!raw) return null;
+
+    const payload = JSON.parse(raw) as {
+      callbackUrl?: string;
+      samlResponse?: string;
+    };
+
+    const sameCallback = payload.callbackUrl === callbackUrl;
+    window.sessionStorage.removeItem(PENDING_SAML_RESPONSE_KEY);
+
+    if (!sameCallback || typeof payload.samlResponse !== "string" || !payload.samlResponse) {
+      return null;
+    }
+
+    return payload.samlResponse;
+  } catch {
+    window.sessionStorage.removeItem(PENDING_SAML_RESPONSE_KEY);
+    return null;
+  }
+}
 
 function SSOCallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
+  const [status, setStatus] = useState<CallbackStatus>("loading");
   const [message, setMessage] = useState("正在驗證身份…");
 
   useEffect(() => {
-    const token = searchParams.get("token") || searchParams.get("code");
-    const error = searchParams.get("error");
-    const school = searchParams.get("school") || "";
-    const schoolId = searchParams.get("schoolId") || "";
-    const q = school ? `?school=${encodeURIComponent(school)}&schoolId=${encodeURIComponent(schoolId)}` : "";
+    let cancelled = false;
 
-    if (error) {
-      setStatus("error");
-      setMessage(decodeURIComponent(error.replace(/\+/g, " ")));
-      return;
-    }
+    async function run() {
+      const school = searchParams.get("school") || "";
+      const schoolId = searchParams.get("schoolId") || "";
+      const returnUrl = sanitizeInternalPath(searchParams.get("returnUrl"));
+      const authError = searchParams.get("error");
+      const callbackParams = readWebSsoCallbackParams(searchParams);
 
-    if (!token) {
-      setStatus("error");
-      setMessage("缺少驗證令牌，請重新嘗試登入");
-      return;
-    }
+      if (authError) {
+        if (!cancelled) {
+          setStatus("error");
+          setMessage(decodeURIComponent(authError.replace(/\+/g, " ")));
+        }
+        return;
+      }
 
-    const processToken = async () => {
+      if (!schoolId || !callbackParams.provider) {
+        if (!cancelled) {
+          setStatus("error");
+          setMessage("缺少學校或登入方式，請重新從登入頁發起");
+        }
+        return;
+      }
+
       try {
-        setMessage("驗證令牌中…");
-        await new Promise((r) => setTimeout(r, 1200));
+        setMessage("驗證學校身份中…");
+
+        const redirectUri = buildCurrentSsoRedirectUri(new URL(window.location.href));
+        const samlResponse =
+          callbackParams.samlResponse ||
+          (callbackParams.provider === "saml" ? consumePendingSamlResponse(redirectUri) : null);
+
+        if (!callbackParams.code && !callbackParams.ticket && !samlResponse) {
+          throw new Error("缺少驗證資料，請重新嘗試登入");
+        }
+
+        const result = await completeWebSSOCallback({
+          provider: callbackParams.provider,
+          schoolId,
+          redirectUri,
+          code: callbackParams.code ?? undefined,
+          ticket: callbackParams.ticket ?? undefined,
+          samlResponse: samlResponse ?? undefined,
+        });
+
+        setMessage("登入 Campus One…");
+        await signInWithCustomAuthToken(result.customToken);
+
+        if (cancelled) return;
+
         setStatus("success");
         setMessage("登入成功！即將跳轉…");
-        setTimeout(() => router.replace(`/${q}`), 1000);
-      } catch {
-        setStatus("error");
-        setMessage("驗證失敗，請重新嘗試");
+
+        const target = school
+          ? appendSchoolContext(returnUrl, { code: school, id: schoolId })
+          : returnUrl;
+
+        window.sessionStorage.removeItem(PENDING_SAML_RESPONSE_KEY);
+
+        window.setTimeout(() => {
+          if (!cancelled) {
+            router.replace(target);
+          }
+        }, 900);
+      } catch (error) {
+        if (!cancelled) {
+          setStatus("error");
+          setMessage(error instanceof Error ? error.message : "登入失敗，請稍後再試");
+        }
       }
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
     };
+  }, [router, searchParams]);
 
-    processToken();
-  }, []);
-
-  const iconMap = {
+  const iconMap: Record<CallbackStatus, string> = {
     loading: "⏳",
     success: "✅",
     error: "❌",
   };
 
-  const colorMap = {
-    loading: "var(--brand)",
-    success: "var(--success)",
-    error: "var(--danger)",
-  };
-
-  const bgMap = {
+  const bgMap: Record<CallbackStatus, string> = {
     loading: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)",
     success: "linear-gradient(135deg, var(--success) 0%, #5EE076 100%)",
     error: "linear-gradient(135deg, var(--danger) 0%, #FF6B6B 100%)",
   };
+  const loginQuery = new URLSearchParams();
+  const school = searchParams.get("school");
+  const schoolId = searchParams.get("schoolId");
+  const returnUrl = searchParams.get("returnUrl");
+
+  if (school) loginQuery.set("school", school);
+  if (schoolId) loginQuery.set("schoolId", schoolId);
+  if (returnUrl) loginQuery.set("returnUrl", returnUrl);
+  const loginQueryString = loginQuery.toString();
 
   return (
     <div
@@ -72,7 +154,7 @@ function SSOCallbackContent() {
         alignItems: "center",
         justifyContent: "center",
         padding: 20,
-        fontFamily: "\"SF Pro Text\", \"PingFang TC\", sans-serif",
+        fontFamily: '"SF Pro Text", "PingFang TC", sans-serif',
       }}
     >
       <div
@@ -86,7 +168,6 @@ function SSOCallbackContent() {
           overflow: "hidden",
         }}
       >
-        {/* Colored Header */}
         <div
           style={{
             background: bgMap[status],
@@ -116,16 +197,13 @@ function SSOCallbackContent() {
           >
             {status === "loading" ? "正在登入" : status === "success" ? "登入成功" : "登入失敗"}
           </h1>
-          <p style={{ margin: 0, fontSize: 14, opacity: 0.88, lineHeight: 1.6 }}>
-            {message}
-          </p>
+          <p style={{ margin: 0, fontSize: 14, opacity: 0.88, lineHeight: 1.6 }}>{message}</p>
         </div>
 
-        {/* Body */}
         <div style={{ padding: "24px 28px" }}>
           {status === "loading" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {["驗證身份令牌", "讀取學校資料", "同步個人資訊"].map((step, i) => (
+              {["驗證學校身份", "交換 Firebase 令牌", "同步登入狀態"].map((step, index) => (
                 <div
                   key={step}
                   style={{
@@ -134,16 +212,20 @@ function SSOCallbackContent() {
                     gap: 12,
                     padding: "12px 14px",
                     borderRadius: "var(--radius-sm)",
-                    background: i === 0 ? "var(--accent-soft)" : "var(--panel)",
+                    background: index === 0 ? "var(--accent-soft)" : "var(--panel)",
                     border: "1px solid",
-                    borderColor: i === 0 ? "rgba(94,106,210,0.2)" : "var(--border)",
-                    opacity: i === 0 ? 1 : 0.5,
+                    borderColor: index === 0 ? "rgba(94,106,210,0.2)" : "var(--border)",
+                    opacity: index === 0 ? 1 : 0.5,
                   }}
                 >
-                  <span style={{ fontSize: 16 }}>
-                    {i === 0 ? "⏳" : i === 1 ? "○" : "○"}
-                  </span>
-                  <span style={{ fontSize: 14, fontWeight: i === 0 ? 700 : 500, color: i === 0 ? "var(--brand)" : "var(--muted)" }}>
+                  <span style={{ fontSize: 16 }}>{index === 0 ? "⏳" : "○"}</span>
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: index === 0 ? 700 : 500,
+                      color: index === 0 ? "var(--brand)" : "var(--muted)",
+                    }}
+                  >
                     {step}
                   </span>
                 </div>
@@ -169,7 +251,7 @@ function SSOCallbackContent() {
               <button
                 className="btn primary"
                 style={{ width: "100%", minHeight: 48 }}
-                onClick={() => router.push("/login")}
+                onClick={() => router.push(`/login${loginQueryString ? `?${loginQueryString}` : ""}`)}
               >
                 返回登入頁
               </button>
@@ -189,7 +271,7 @@ function SSOCallbackContent() {
                 fontWeight: 600,
               }}
             >
-              即將跳轉至首頁…
+              即將跳轉至頁面…
             </div>
           )}
         </div>
@@ -202,7 +284,15 @@ export default function SSOCallbackPage() {
   return (
     <Suspense
       fallback={
-        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)" }}>
+        <div
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "var(--bg)",
+          }}
+        >
           <div style={{ fontSize: 48 }}>⏳</div>
         </div>
       }

@@ -549,10 +549,10 @@ export function CalendarScreen(props: any) {
                     onPress={() => {
                       if (e.type === "event") {
                         const eventId = e.id.replace("event-", "");
-                        nav?.navigate?.("活動", { screen: "EventDetail", params: { id: eventId } });
+                        nav?.navigate?.("Today", { screen: "活動詳情", params: { id: eventId } });
                       } else if (e.type === "assignment" && e.groupId) {
                         const assignmentId = e.id.replace("assignment-", "");
-                        nav?.navigate?.("訊息", {
+                        nav?.navigate?.("收件匣", {
                           screen: "AssignmentDetail",
                           params: { groupId: e.groupId, assignmentId },
                         });

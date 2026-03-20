@@ -1,252 +1,306 @@
 "use client";
 
-import type { CSSProperties } from "react";
-import { SiteShell } from "@/components/SiteShell";
 import Link from "next/link";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { onAuthStateChanged, type User } from "firebase/auth";
+
+import { SiteShell } from "@/components/SiteShell";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
-import { useEffect, useState } from "react";
 import {
-  getAuth,
   fetchAnnouncements,
   fetchGPA,
+  getAuth,
   isFirebaseConfigured,
   type Announcement,
 } from "@/lib/firebase";
-import { onAuthStateChanged, type User } from "firebase/auth";
 import { mockAnnouncements } from "@campus/shared/src/mockData";
+
+function formatGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 12) return "早安";
+  if (hour < 18) return "午安";
+  return "晚上好";
+}
 
 export default function HomePage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
-
+  const { schoolId, schoolCode, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [user, setUser] = useState<User | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [gpa, setGpa] = useState<number | null>(null);
-  const [loadingData, setLoadingData] = useState(true);
+  const [loading, setLoading] = useState(true);
 
-  const today = new Date();
-  const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
-  const greeting =
-    today.getHours() < 12 ? "早安" : today.getHours() < 18 ? "午安" : "晚安";
-
-  // 監聽 Firebase Auth 狀態
   useEffect(() => {
     const auth = getAuth();
     if (!auth) {
-      setLoadingData(false);
+      setLoading(false);
       return;
     }
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+
+    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+      setUser(nextUser);
     });
-    return () => unsub();
+
+    return () => unsubscribe();
   }, []);
 
-  // 載入公告與 GPA
   useEffect(() => {
     let active = true;
+
     async function load() {
-      setLoadingData(true);
+      setLoading(true);
       try {
         if (isFirebaseConfigured()) {
-          const [anns, gpaData] = await Promise.all([
-            fetchAnnouncements(schoolId, 3),
+          const [nextAnnouncements, nextGpa] = await Promise.all([
+            fetchAnnouncements(schoolId, 4),
             user ? fetchGPA(user.uid) : Promise.resolve(null),
           ]);
-          if (active) {
-            setAnnouncements(anns.length > 0 ? anns : mockAnnouncements.slice(0, 3) as Announcement[]);
-            setGpa(gpaData?.cumulative ?? null);
-          }
+
+          if (!active) return;
+          setAnnouncements((nextAnnouncements.length > 0 ? nextAnnouncements : mockAnnouncements.slice(0, 4)) as Announcement[]);
+          setGpa(nextGpa?.cumulative ?? null);
         } else {
-          if (active) setAnnouncements(mockAnnouncements.slice(0, 3) as Announcement[]);
+          if (!active) return;
+          setAnnouncements(mockAnnouncements.slice(0, 4) as Announcement[]);
         }
       } catch {
-        if (active) setAnnouncements(mockAnnouncements.slice(0, 3) as Announcement[]);
+        if (!active) return;
+        setAnnouncements(mockAnnouncements.slice(0, 4) as Announcement[]);
       } finally {
-        if (active) setLoadingData(false);
+        if (active) setLoading(false);
       }
     }
+
     load();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [schoolId, user]);
 
-  const userName = user?.displayName?.split(" ")[0] ?? user?.email?.split("@")[0] ?? null;
-  const announcementCount = announcements.length;
+  const userLabel = user?.displayName?.split(" ")[0] ?? user?.email?.split("@")[0] ?? "訪客";
+  const importantAnnouncements = useMemo(
+    () => announcements.filter((announcement) => announcement.pinned || announcement.title.includes("重要")).length,
+    [announcements]
+  );
 
-  const features = [
-    { code: "01", label: "公告", href: `/announcements${q}`, desc: "重要通知與校務更新。", metric: announcementCount > 0 ? `${announcementCount} 則待看` : "公告中", accent: "#5E6AD2", icon: "📢" },
-    { code: "02", label: "活動", href: `/clubs${q}`, desc: "探索社團招募與近期活動。", metric: "探索活動", accent: "#30BFA8", icon: "🎉" },
-    { code: "03", label: "地圖", href: `/map${q}`, desc: "快速找到教室與常用地點。", metric: "互動地圖", accent: "#007AFF", icon: "🗺" },
-    { code: "04", label: "餐廳", href: `/cafeteria${q}`, desc: "今日菜單與時段一屏掌握。", metric: "查看菜單", accent: "#FF9500", icon: "🍱" },
-    { code: "05", label: "圖書館", href: `/library${q}`, desc: "借閱、預約與空位資訊。", metric: "查詢館藏", accent: "#34C759", icon: "📚" },
-    { code: "06", label: "公車", href: `/bus${q}`, desc: "即時班距與校園接駁狀態。", metric: "查看時刻", accent: "#32ADE6", icon: "🚌" },
-    { code: "07", label: "成績", href: `/grades${q}`, desc: "成績查詢、GPA 與學期趨勢。", metric: gpa != null ? `GPA ${gpa.toFixed(2)}` : "查看成績", accent: "#FF3B30", icon: "📊" },
-    { code: "08", label: "群組", href: `/groups${q}`, desc: "課程討論與社團交流整合。", metric: "加入討論", accent: "#BF5AF2", icon: "💬" },
-    { code: "09", label: "課表", href: `/timetable${q}`, desc: "今天的節次與下一堂課。", metric: "查看課表", accent: "#FF6B35", icon: "📅" },
-    { code: "10", label: "個人", href: `/profile${q}`, desc: "個人資料、偏好與設定統一管理。", metric: user ? "已登入" : "登入帳號", accent: "#5E6AD2", icon: "👤" },
+  const roleCards = [
+    {
+      title: "Today",
+      description: "先看今天最重要的一步，而不是先看功能表。",
+      accent: "var(--brand)",
+    },
+    {
+      title: "課程",
+      description: "把教材、作業、測驗、點名與成績收回同一條課程主流程。",
+      accent: "var(--info)",
+    },
+    {
+      title: "校園",
+      description: "地圖、公車、餐廳與支援服務留在校園，不打斷主學習流程。",
+      accent: "var(--achievement)",
+    },
+    {
+      title: "收件匣",
+      description: "每筆更新都直接對應到下一步，而不是只顯示通知。",
+      accent: "var(--warning)",
+    },
   ];
 
-  const updates = announcements.length > 0
-    ? announcements.map((a, i) => ({
-        tag: a.category === "academic" ? "學術" : a.category === "event" ? "課外" : "校園",
-        time: a.publishedAt ? new Date(a.publishedAt).toLocaleDateString("zh-TW", { month: "short", day: "numeric" }) : "最新",
-        title: a.title,
-        body: a.body.slice(0, 80) + (a.body.length > 80 ? "..." : ""),
-      }))
-    : [
-        { tag: "校園", time: "最新", title: "歡迎使用校園 App", body: "連接 Firebase 後即可看到即時公告。目前顯示示範內容。" },
-      ];
-
-  return (
-    <SiteShell schoolName={schoolName}>
-      <div className="homePage">
-        {/* ── Greeting Hero ── */}
-        <div
-          className="card"
-          style={{
-            padding: "24px 28px",
-            background: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)",
-            border: "none",
-            color: "#fff",
-            boxShadow: "6px 6px 16px rgba(94,106,210,0.36), -3px -3px 8px rgba(255,255,255,0.7)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+  if (!user) {
+    return (
+      <SiteShell schoolName={schoolName} schoolCode={schoolCode}>
+        <div className="pageStack">
+          <div
+            className="card"
+            style={{
+              background: "linear-gradient(135deg, rgba(15,139,141,0.12) 0%, rgba(37,99,235,0.08) 100%)",
+              display: "grid",
+              gap: 18,
+            }}
+          >
+            <span className="pill brand">Campus Learning OS</span>
             <div>
-              <p style={{ margin: "0 0 4px", fontSize: 12, letterSpacing: "0.2em", textTransform: "uppercase", opacity: 0.75, fontWeight: 600 }}>
-                {today.toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric", weekday: "short" })}
-              </p>
-              <h1 style={{ margin: "0 0 6px", fontSize: "clamp(22px, 4vw, 28px)", fontWeight: 800, letterSpacing: "-0.04em" }}>
-                {greeting}，{userName ? `${userName} 👋` : "歡迎回來 👋"}
+              <h1 className="h1" style={{ marginBottom: 10 }}>
+                不再是校園功能列表，而是今日學習與校園節奏的操作台
               </h1>
-              <p style={{ margin: 0, fontSize: 14, opacity: 0.82 }}>
-                今天是星期{weekdays[today.getDay()]}
-                {announcementCount > 0 ? `，您有 ${announcementCount} 則待讀公告` : "，祝您學習順利"}
+              <p className="sub" style={{ marginTop: 0 }}>
+                從 Today 開始，依序進入課程、校園、收件匣與我的。先降低認知負荷，再疊加信任感與黏著感。
               </p>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Link
-                href={`/timetable${q}`}
-                style={{ padding: "10px 18px", borderRadius: "var(--radius-sm)", background: "rgba(255,255,255,0.22)", color: "#fff", fontSize: 13, fontWeight: 700, border: "1px solid rgba(255,255,255,0.3)", backdropFilter: "blur(8px)", whiteSpace: "nowrap" }}
-              >
-                查看課表 →
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <Link href={`/login${q}`} className="btn primary">
+                登入開始
+              </Link>
+              <Link href={`/join${q}`} className="btn">
+                選擇學校
+              </Link>
+              <Link href={`/announcements${q}`} className="btn">
+                先看公告
               </Link>
             </div>
           </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 16,
+            }}
+          >
+            {roleCards.map((card) => (
+              <div key={card.title} className="card">
+                <div
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: 16,
+                    background: `${card.accent}20`,
+                    marginBottom: 14,
+                  }}
+                />
+                <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>{card.title}</div>
+                <div style={{ color: "var(--muted)", lineHeight: 1.7, fontSize: 14 }}>{card.description}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </SiteShell>
+    );
+  }
+
+  return (
+    <SiteShell
+      schoolName={schoolName}
+      schoolCode={schoolCode}
+      title={`${formatGreeting()}，${userLabel}`}
+      subtitle="Today 只保留下一步、課程節奏與校園情境，不再把首頁做成功能總表。"
+    >
+      <div className="pageStack">
+        <div
+          className="card"
+          style={{
+            background: "linear-gradient(135deg, rgba(15,139,141,0.12) 0%, rgba(8,145,178,0.08) 100%)",
+            display: "grid",
+            gap: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ maxWidth: 760 }}>
+              <div className="pageHeadEyebrow" style={{ marginBottom: 10 }}>Today Dashboard</div>
+              <h2 style={{ margin: 0, fontSize: 32, fontWeight: 900, letterSpacing: "-0.05em" }}>
+                先完成今天最重要的一步
+              </h2>
+              <p className="sub" style={{ marginTop: 10 }}>
+                課程、校園與收件匣都在，但首頁只顯示會改變你下一步的內容。
+              </p>
+            </div>
+            <span className="pill brand">{loading ? "整理中…" : `${announcements.length} 則今日更新`}</span>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <Link href={`/groups${q}`} className="btn primary">
+              進入課程
+            </Link>
+            <Link href={`/map${q}`} className="btn">
+              打開校園
+            </Link>
+            <Link href={`/announcements${q}`} className="btn">
+              查看收件匣
+            </Link>
+          </div>
         </div>
 
-        {/* ── Quick Stats ── */}
-        <div className="metricGrid">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 16,
+          }}
+        >
           {[
-            { label: "未讀公告", value: announcementCount > 0 ? `${announcementCount} 則` : "—", icon: "📢", accent: "#FF9500" },
-            { label: "GPA", value: gpa != null ? gpa.toFixed(2) : "—", icon: "📊", accent: "#FF3B30" },
-            { label: "圖書館", value: "查詢座位", icon: "📚", accent: "#34C759" },
-            { label: "帳號狀態", value: user ? "已登入" : "訪客", icon: "👤", accent: "#5E6AD2" },
-          ].map((s) => (
-            <div key={s.label} className="metricCard" style={{ "--tone": s.accent } as CSSProperties}>
-              <div className="metricIcon">{s.icon}</div>
-              <div className="metricValue">{s.value}</div>
-              <div className="metricLabel">{s.label}</div>
+            { label: "重要公告", value: importantAnnouncements || announcements.length, tone: "var(--warning)" },
+            { label: "累計 GPA", value: gpa != null ? gpa.toFixed(2) : "—", tone: "var(--brand)" },
+            { label: "登入身份", value: user.email ? "已登入" : "訪客", tone: "var(--growth)" },
+          ].map((item) => (
+            <div key={item.label} className="card" style={{ "--tone": item.tone } as CSSProperties}>
+              <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700 }}>{item.label}</div>
+              <div style={{ marginTop: 8, fontSize: 30, fontWeight: 900, letterSpacing: "-0.05em", color: item.tone }}>
+                {item.value}
+              </div>
             </div>
           ))}
         </div>
 
-        {/* ── Feature Grid ── */}
-        <div className="homeSection">
-          <div className="homeSectionHeader">
-            <h2 className="homeSectionTitle">所有功能</h2>
-            <span className="homeSectionNote">{features.length} 個模組</span>
-          </div>
-          <div className="homeFeatureGrid">
-            {features.map((f) => (
-              <Link key={f.code} href={f.href} className="featureCard card" style={{ "--feature-accent": f.accent } as CSSProperties}>
-                <div className="featureTop">
-                  <div className="featureBadge" style={{ fontSize: 22 }}>{f.icon}</div>
-                  <span className="featureTag">{f.code}</span>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.3fr) minmax(0, 1fr)",
+            gap: 16,
+          }}
+        >
+          <div className="card" style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>Today 的下一步</div>
+                <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>
+                  只顯示真正會改變你下一步的更新
                 </div>
-                <div>
-                  <h3 className="featureLabel">{f.label}</h3>
-                  <p className="featureDesc">{f.desc}</p>
-                </div>
-                <div className="featureFoot">
-                  <span className="featureMetric">{f.metric}</span>
-                  <span>→</span>
-                </div>
+              </div>
+              <Link href={`/announcements${q}`} className="btn">
+                全部查看
               </Link>
+            </div>
+
+            {announcements.map((announcement, index) => (
+              <div
+                key={announcement.id}
+                style={{
+                  padding: 16,
+                  borderRadius: "var(--radius)",
+                  border: "1px solid var(--border)",
+                  background: index === 0 ? "var(--accent-soft)" : "var(--surface)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800 }}>{announcement.title}</div>
+                  <span className={`pill ${index === 0 ? "warning" : "subtle"}`}>
+                    {index === 0 ? "先看" : "更新"}
+                  </span>
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.7, marginTop: 8 }}>
+                  {announcement.body.slice(0, 110)}...
+                </div>
+              </div>
             ))}
           </div>
-        </div>
 
-        {/* ── Bottom Section: Updates + Quick Actions ── */}
-        <div className="homeColumns">
-          {/* Latest Updates */}
-          <div className="homePanel">
-            <div className="homePanelHeader">
-              <div>
-                <h2 className="homePanelTitle">最新動態</h2>
-                <p className="homePanelSubtitle">{loadingData ? "載入中..." : "校園最新消息與通知"}</p>
+          <div style={{ display: "grid", gap: 16 }}>
+            <div className="card">
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>課程骨架</div>
+              <div style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.7 }}>
+                教材、作業、測驗、點名與成績應該回到同一條課程主流程，而不是散在各頁。
               </div>
-              <Link href={`/announcements${q}`} style={{ fontSize: 13, color: "var(--brand)", fontWeight: 600 }}>
-                查看全部
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+                <span className="pill brand">教材</span>
+                <span className="pill">作業</span>
+                <span className="pill">測驗</span>
+                <span className="pill">點名</span>
+              </div>
+              <Link href={`/groups${q}`} className="btn" style={{ marginTop: 16 }}>
+                打開課程
               </Link>
             </div>
-            <div className="activityTimeline">
-              {updates.map((u, i) => (
-                <div key={i} className="activityItem">
-                  <div className="activityMeta">
-                    <span className="activityTag">{u.tag}</span>
-                    <span>{u.time}</span>
-                  </div>
-                  <h3 className="activityTitle">{u.title}</h3>
-                  <p className="activityBody">{u.body}</p>
-                </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Quick Actions + Insights */}
-          <div className="homePanel">
-            <div className="homePanelHeader">
-              <h2 className="homePanelTitle">快速動作</h2>
-            </div>
-            <div className="quickActionGrid">
-              {[
-                { label: "🔍 搜尋課程", href: `/search${q}` },
-                { label: "📖 借閱查詢", href: `/library${q}` },
-                { label: "🚌 公車時刻", href: `/bus${q}` },
-                { label: "🍱 今日菜單", href: `/cafeteria${q}` },
-              ].map((a) => (
-                <Link key={a.href} href={a.href} className="btn" style={{ fontSize: 13 }}>
-                  {a.label}
-                </Link>
-              ))}
-            </div>
-
-            <div style={{ marginTop: 8 }}>
-              <div className="homePanelHeader">
-                <h2 className="homePanelTitle">帳號資訊</h2>
+            <div className="card">
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>校園情境</div>
+              <div style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.7 }}>
+                地圖、公車、餐廳與圖書館留在校園分頁，避免高頻課務被生活資訊打斷。
               </div>
-              <div className="homeInsightGrid">
-                {[
-                  { label: "登入狀態", value: user ? "已登入" : "未登入" },
-                  { label: "帳號", value: user?.email?.split("@")[0] ?? "—" },
-                  { label: "GPA", value: gpa != null ? gpa.toFixed(2) : "—" },
-                  { label: "公告數量", value: announcementCount > 0 ? `${announcementCount} 則` : "—" },
-                ].map((r) => (
-                  <div key={r.label} className="homeInsightRow">
-                    <span className="homeInsightLabel">{r.label}</span>
-                    <span className="homeInsightValue">{r.value}</span>
-                  </div>
-                ))}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+                <Link href={`/map${q}`} className="btn">地圖</Link>
+                <Link href={`/cafeteria${q}`} className="btn">餐廳</Link>
+                <Link href={`/bus${q}`} className="btn">公車</Link>
               </div>
-              {!user && (
-                <div style={{ marginTop: 12 }}>
-                  <Link href={`/login${q}`} className="btn" style={{ fontSize: 13, display: "block", textAlign: "center" }}>
-                    🔐 登入帳號
-                  </Link>
-                </div>
-              )}
             </div>
           </div>
         </div>

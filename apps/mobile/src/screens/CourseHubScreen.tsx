@@ -12,6 +12,124 @@ import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
 import { canManageCourse, formatDateTime } from "../services/courseWorkspace";
 
+const AVATAR_COLORS = ["#0F8B8D", "#34C759", "#FF9500", "#2563EB", "#14B8A6", "#32ADE6", "#FF6B35"];
+const AVATAR_EMOJIS = ["🧑‍💻", "👩‍🎓", "👨‍🎓", "🧑‍🏫", "👩‍💻", "👨‍💻", "🙋"];
+
+function hashCode(str: string): number {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) { h = (Math.imul(31, h) + str.charCodeAt(i)) | 0; }
+  return Math.abs(h);
+}
+
+function SocialSnippet(props: {
+  groupId: string;
+  memberCount?: number;
+  activeCount?: number;
+  completedCount?: number;
+  onOpenGroup?: () => void;
+}) {
+  const seed = hashCode(props.groupId);
+  const displayCount = Math.min(props.memberCount ?? (3 + (seed % 5)), 5);
+  const avatars = Array.from({ length: displayCount }, (_, i) => ({
+    emoji: AVATAR_EMOJIS[(seed + i) % AVATAR_EMOJIS.length],
+    color: AVATAR_COLORS[(seed + i) % AVATAR_COLORS.length],
+  }));
+  const activeCount = props.activeCount ?? (2 + (seed % 4));
+  const completedCount = props.completedCount ?? (1 + (seed % 3));
+
+  return (
+    <View
+      style={{
+        marginTop: 14,
+        padding: 14,
+        borderRadius: theme.radius.lg,
+        backgroundColor: `${theme.colors.accent}08`,
+        borderWidth: 1,
+        borderColor: `${theme.colors.accent}18`,
+        gap: 10,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Ionicons name="people" size={14} color={theme.colors.accent} />
+          <Text style={{ fontSize: 12, fontWeight: "700", color: theme.colors.accent }}>
+            {activeCount} 位同學今日活躍
+          </Text>
+        </View>
+        <Pressable
+          onPress={props.onOpenGroup}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderRadius: 999,
+            backgroundColor: `${theme.colors.accent}14`,
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          <Ionicons name="chatbubble-ellipses" size={11} color={theme.colors.accent} />
+          <Text style={{ fontSize: 11, fontWeight: "700", color: theme.colors.accent }}>去討論</Text>
+        </Pressable>
+      </View>
+
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={{ flexDirection: "row" }}>
+          {avatars.map((a, i) => (
+            <View
+              key={i}
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 13,
+                backgroundColor: `${a.color}20`,
+                borderWidth: 2,
+                borderColor: theme.colors.bg,
+                alignItems: "center",
+                justifyContent: "center",
+                marginLeft: i === 0 ? 0 : -6,
+                zIndex: displayCount - i,
+              }}
+            >
+              <Text style={{ fontSize: 12 }}>{a.emoji}</Text>
+            </View>
+          ))}
+        </View>
+        <Text style={{ fontSize: 12, color: theme.colors.muted, flex: 1 }}>
+          {completedCount > 0
+            ? `已有 ${completedCount} 位同學完成本週作業`
+            : "還沒有同學完成本週作業，一起加油！"}
+        </Text>
+      </View>
+
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View
+          style={{
+            flex: 1,
+            height: 4,
+            borderRadius: 2,
+            backgroundColor: `${theme.colors.accent}18`,
+            overflow: "hidden",
+          }}
+        >
+          <View
+            style={{
+              width: `${Math.min(Math.round((completedCount / Math.max(activeCount, 1)) * 100), 100)}%`,
+              height: "100%",
+              borderRadius: 2,
+              backgroundColor: theme.colors.accent,
+            }}
+          />
+        </View>
+        <Text style={{ fontSize: 10, color: theme.colors.muted, fontWeight: "600" }}>
+          {Math.round((completedCount / Math.max(activeCount, 1)) * 100)}% 完成率
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 function ActionChip(props: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
@@ -160,12 +278,19 @@ export function CourseHubScreen(props: any) {
                 </Text>
               </View>
 
+              <SocialSnippet
+                groupId={membership.groupId}
+                onOpenGroup={() =>
+                  nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: membership.groupId } })
+                }
+              />
+
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
                 <ActionChip
                   icon="newspaper-outline"
                   label="課程動態"
                   tint={theme.colors.accent}
-                  onPress={() => nav?.navigate?.("訊息", { screen: "GroupDetail", params: { groupId: membership.groupId } })}
+                  onPress={() => nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: membership.groupId } })}
                 />
                 <ActionChip
                   icon="albums-outline"
@@ -183,7 +308,7 @@ export function CourseHubScreen(props: any) {
                   label="作業"
                   tint="#F97316"
                   onPress={() =>
-                    nav?.navigate?.("訊息", {
+                    nav?.navigate?.("收件匣", {
                       screen: "GroupAssignments",
                       params: { groupId: membership.groupId },
                     })
@@ -192,7 +317,7 @@ export function CourseHubScreen(props: any) {
                 <ActionChip
                   icon="help-circle-outline"
                   label="測驗"
-                  tint="#7C3AED"
+                  tint={theme.colors.info}
                   onPress={() =>
                     nav?.navigate?.("QuizCenter", {
                       groupId: membership.groupId,
