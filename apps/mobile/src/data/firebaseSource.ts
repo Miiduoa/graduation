@@ -73,6 +73,7 @@ import {
   arrayRemove,
 } from "firebase/firestore";
 import { getDb } from "../firebase";
+import { buildSchoolCollectionPath } from "@campus/shared/src";
 import {
   checkInAttendance as checkInCourseAttendance,
   createCourseModule as createCourseSpaceModule,
@@ -176,6 +177,75 @@ async function fetchCollection<T extends { id: string }>(
       error
     );
   }
+}
+
+async function fetchCollectionAtPath<T extends { id: string }>(
+  pathSegments: string[],
+  constraints: (QueryConstraint | null)[],
+  options?: QueryOptions
+): Promise<T[]> {
+  try {
+    const db = getDb();
+    const validConstraints = constraints.filter((c): c is QueryConstraint => c !== null);
+    const finalConstraints = applyQueryOptions(validConstraints, options);
+    const qy = query(collection(db, ...pathSegments), ...finalConstraints);
+    const snap = await getDocs(qy);
+    return snap.docs.map((d) => parseDocument<T>(d));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[firebase] Failed to fetch ${pathSegments.join("/")}:`, error);
+    throw new FirebaseDataError(
+      `無法載入${pathSegments.join("/")}：${message}`,
+      pathSegments.join("/"),
+      error
+    );
+  }
+}
+
+async function fetchCanonicalSchoolCollection<T extends { id: string }>(params: {
+  schoolId?: string;
+  canonicalCollections: string[];
+  schoolConstraints?: (QueryConstraint | null)[];
+  fallbackCollection?: string;
+  fallbackConstraints?: (QueryConstraint | null)[];
+  options?: QueryOptions;
+}): Promise<T[]> {
+  const schoolConstraints = params.schoolConstraints ?? [];
+  const fallbackConstraints = params.fallbackConstraints ?? [];
+  let lastError: unknown = null;
+
+  if (params.schoolId) {
+    for (const collectionName of params.canonicalCollections) {
+      try {
+        const rows = await fetchCollectionAtPath<T>(
+          buildSchoolCollectionPath(params.schoolId, collectionName),
+          schoolConstraints,
+          params.options
+        );
+
+        if (rows.length > 0) {
+          return rows;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+
+  if (params.fallbackCollection) {
+    return fetchCollection<T>(
+      params.fallbackCollection,
+      fallbackConstraints,
+      params.schoolId,
+      params.options
+    );
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return [];
 }
 
 async function fetchDocument<T extends { id: string }>(
@@ -315,12 +385,14 @@ function getCollectionLabel(collectionName: string): string {
 export const firebaseSource: DataSource = {
   // ===== 公告 =====
   async listAnnouncements(schoolId, options) {
-    return fetchCollection<Announcement>(
-      "announcements",
-      [bySchool(schoolId), orderBy("publishedAt", "desc")],
+    return fetchCanonicalSchoolCollection<Announcement>({
       schoolId,
-      options
-    );
+      canonicalCollections: ["announcements"],
+      schoolConstraints: [orderBy("publishedAt", "desc")],
+      fallbackCollection: "announcements",
+      fallbackConstraints: [bySchool(schoolId), orderBy("publishedAt", "desc")],
+      options,
+    });
   },
 
   async getAnnouncement(id) {
@@ -329,12 +401,14 @@ export const firebaseSource: DataSource = {
 
   // ===== 活動 =====
   async listEvents(schoolId, options) {
-    return fetchCollection<ClubEvent>(
-      "events",
-      [bySchool(schoolId), orderBy("startsAt", "asc")],
+    return fetchCanonicalSchoolCollection<ClubEvent>({
       schoolId,
-      options
-    );
+      canonicalCollections: ["clubEvents", "events"],
+      schoolConstraints: [orderBy("startsAt", "asc")],
+      fallbackCollection: "events",
+      fallbackConstraints: [bySchool(schoolId), orderBy("startsAt", "asc")],
+      options,
+    });
   },
 
   async getEvent(id) {
@@ -373,7 +447,13 @@ export const firebaseSource: DataSource = {
 
   // ===== 地點 =====
   async listPois(schoolId, options) {
-    return fetchCollection<Poi>("pois", [bySchool(schoolId)], schoolId, options);
+    return fetchCanonicalSchoolCollection<Poi>({
+      schoolId,
+      canonicalCollections: ["pois"],
+      fallbackCollection: "pois",
+      fallbackConstraints: [bySchool(schoolId)],
+      options,
+    });
   },
 
   async getPoi(id) {
@@ -382,12 +462,14 @@ export const firebaseSource: DataSource = {
 
   // ===== 餐廳菜單 =====
   async listMenus(schoolId, options) {
-    return fetchCollection<MenuItem>(
-      "menus",
-      [bySchool(schoolId), orderBy("availableOn", "desc")],
+    return fetchCanonicalSchoolCollection<MenuItem>({
       schoolId,
-      options
-    );
+      canonicalCollections: ["menus", "cafeteriaMenus"],
+      schoolConstraints: [orderBy("availableOn", "desc")],
+      fallbackCollection: "menus",
+      fallbackConstraints: [bySchool(schoolId), orderBy("availableOn", "desc")],
+      options,
+    });
   },
 
   async getMenuItem(id) {
@@ -896,12 +978,14 @@ export const firebaseSource: DataSource = {
 
   // ===== 失物招領 =====
   async listLostFoundItems(schoolId, options) {
-    return fetchCollection<LostFoundItem>(
-      "lostFoundItems",
-      [bySchool(schoolId), orderBy("createdAt", "desc")],
+    return fetchCanonicalSchoolCollection<LostFoundItem>({
       schoolId,
-      options
-    );
+      canonicalCollections: ["lostFound"],
+      schoolConstraints: [orderBy("createdAt", "desc")],
+      fallbackCollection: "lostFoundItems",
+      fallbackConstraints: [bySchool(schoolId), orderBy("createdAt", "desc")],
+      options,
+    });
   },
 
   async getLostFoundItem(id) {
@@ -928,12 +1012,13 @@ export const firebaseSource: DataSource = {
 
   // ===== 圖書館 =====
   async searchBooks(searchQuery, schoolId, options) {
-    const allBooks = await fetchCollection<LibraryBook>(
-      "libraryBooks",
-      [bySchool(schoolId)],
+    const allBooks = await fetchCanonicalSchoolCollection<LibraryBook>({
       schoolId,
-      options
-    );
+      canonicalCollections: ["libraryBooks"],
+      fallbackCollection: "libraryBooks",
+      fallbackConstraints: [bySchool(schoolId)],
+      options,
+    });
     const q = searchQuery.toLowerCase();
     return allBooks.filter(
       (b) =>
@@ -1011,11 +1096,17 @@ export const firebaseSource: DataSource = {
 
   // ===== 圖書館座位 =====
   async listSeats(schoolId, zone) {
-    const constraints: (QueryConstraint | null)[] = [bySchool(schoolId)];
+    const constraints: (QueryConstraint | null)[] = [];
     if (zone) {
       constraints.push(where("zone", "==", zone));
     }
-    return fetchCollection<LibrarySeat>("librarySeats", constraints, schoolId);
+    return fetchCanonicalSchoolCollection<LibrarySeat>({
+      schoolId,
+      canonicalCollections: ["librarySeats"],
+      schoolConstraints: constraints,
+      fallbackCollection: "librarySeats",
+      fallbackConstraints: [bySchool(schoolId), ...constraints],
+    });
   },
 
   async listSeatReservations(userId) {
@@ -1057,10 +1148,13 @@ export const firebaseSource: DataSource = {
 
   // ===== 公車 =====
   async listBusRoutes(schoolId) {
-    return fetchCollection<BusRoute>(
-      "busRoutes",
-      [bySchool(schoolId), where("isActive", "==", true)]
-    );
+    return fetchCanonicalSchoolCollection<BusRoute>({
+      schoolId,
+      canonicalCollections: ["busRoutes"],
+      schoolConstraints: [where("isActive", "==", true)],
+      fallbackCollection: "busRoutes",
+      fallbackConstraints: [bySchool(schoolId), where("isActive", "==", true)],
+    });
   },
 
   async getBusRoute(id) {

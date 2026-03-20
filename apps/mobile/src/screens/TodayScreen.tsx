@@ -29,6 +29,7 @@ import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 import { useSchedule } from "../state/schedule";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { shadowStyle, theme } from "../ui/theme";
@@ -259,6 +260,10 @@ export function TodayScreen(props: any) {
   const { school } = useSchool();
   const ds = useDataSource();
   const schedule = useSchedule();
+  const streakStorageKey = useMemo(
+    () => getScopedStorageKey("streak", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+    [auth.user?.uid, school.id]
+  );
 
   const [streakDays, setStreakDays] = useState<number>(0);
   const streakPulse = useRef(new Animated.Value(1)).current;
@@ -327,7 +332,7 @@ export function TodayScreen(props: any) {
   // Micro Rewards: 每日首次開啟更新 streak
   // ────────────────────────────────────────────────
   useEffect(() => {
-    const STREAK_KEY = "campus.streak.v1";
+    const legacyStreakKey = "campus.streak.v1";
 
     type StreakData = {
       currentStreak: number;
@@ -338,7 +343,7 @@ export function TodayScreen(props: any) {
 
     const update = async () => {
       try {
-        const raw = await AsyncStorage.getItem(STREAK_KEY);
+        const raw = await getFirstStorageValue([streakStorageKey, legacyStreakKey]);
         const existing: StreakData = raw
           ? (JSON.parse(raw) as StreakData)
           : {
@@ -364,7 +369,7 @@ export function TodayScreen(props: any) {
           totalDays: existing.totalDays + 1,
         };
 
-        await AsyncStorage.setItem(STREAK_KEY, JSON.stringify(updated));
+        await AsyncStorage.setItem(streakStorageKey, JSON.stringify(updated));
         setStreakDays(updated.currentStreak);
 
         // haptic + 小動畫：每日首次打開的正向回饋
@@ -384,7 +389,7 @@ export function TodayScreen(props: any) {
     };
 
     update();
-  }, [streakPulse]);
+  }, [streakPulse, streakStorageKey]);
 
   // 高優先任務（顯示在收件匣摘要）
   const urgentTasks = useMemo(() =>
