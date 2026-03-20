@@ -62,9 +62,9 @@ export type DataSource = {
   
   // 活動
   listEvents: (schoolId?: string, options?: QueryOptions) => Promise<ClubEvent[]>;
-  getEvent: (id: string) => Promise<ClubEvent | null>;
-  registerEvent: (eventId: string, userId: string) => Promise<void>;
-  unregisterEvent: (eventId: string, userId: string) => Promise<void>;
+  getEvent: (id: string, schoolId?: string) => Promise<ClubEvent | null>;
+  registerEvent: (eventId: string, userId: string, schoolId?: string) => Promise<void>;
+  unregisterEvent: (eventId: string, userId: string, schoolId?: string) => Promise<void>;
   
   // 地點
   listPois: (schoolId?: string, options?: QueryOptions) => Promise<Poi[]>;
@@ -142,13 +142,13 @@ export type DataSource = {
   getCourseGradebook: (courseSpaceId: string) => Promise<CourseGradebookData | null>;
   
   // 選課
-  listEnrollments: (userId: string, semester?: string) => Promise<Enrollment[]>;
-  enrollCourse: (userId: string, courseId: string, semester: string) => Promise<Enrollment>;
-  dropCourse: (enrollmentId: string) => Promise<void>;
+  listEnrollments: (userId: string, semester?: string, schoolId?: string) => Promise<Enrollment[]>;
+  enrollCourse: (userId: string, courseId: string, semester: string, schoolId?: string) => Promise<Enrollment>;
+  dropCourse: (enrollmentId: string, userId?: string, schoolId?: string) => Promise<void>;
   
   // 成績
-  listGrades: (userId: string, semester?: string) => Promise<Grade[]>;
-  getGPA: (userId: string) => Promise<{ gpa: number; totalCredits: number; totalPoints: number }>;
+  listGrades: (userId: string, semester?: string, schoolId?: string) => Promise<Grade[]>;
+  getGPA: (userId: string, schoolId?: string) => Promise<{ gpa: number; totalCredits: number; totalPoints: number }>;
   
   // 群組
   listGroups: (userId: string, options?: QueryOptions) => Promise<Group[]>;
@@ -166,30 +166,37 @@ export type DataSource = {
   
   // 群組貼文
   listGroupPosts: (groupId: string, options?: QueryOptions) => Promise<GroupPost[]>;
-  getGroupPost: (id: string) => Promise<GroupPost | null>;
+  getGroupPost: (id: string, groupId?: string) => Promise<GroupPost | null>;
   createGroupPost: (data: Omit<GroupPost, "id" | "createdAt" | "likeCount" | "commentCount">) => Promise<GroupPost>;
-  updateGroupPost: (id: string, data: Partial<GroupPost>) => Promise<GroupPost>;
-  deleteGroupPost: (id: string) => Promise<void>;
-  likePost: (postId: string, userId: string) => Promise<void>;
-  unlikePost: (postId: string, userId: string) => Promise<void>;
+  updateGroupPost: (id: string, data: Partial<GroupPost>, groupId?: string) => Promise<GroupPost>;
+  deleteGroupPost: (id: string, groupId?: string) => Promise<void>;
+  likePost: (postId: string, userId: string, groupId?: string) => Promise<void>;
+  unlikePost: (postId: string, userId: string, groupId?: string) => Promise<void>;
   
   // 留言
-  listComments: (postId: string, options?: QueryOptions) => Promise<Comment[]>;
+  listComments: (postId: string, options?: QueryOptions, groupId?: string) => Promise<Comment[]>;
   createComment: (data: Omit<Comment, "id" | "createdAt" | "likeCount">) => Promise<Comment>;
-  deleteComment: (id: string) => Promise<void>;
+  deleteComment: (id: string, groupId?: string, postId?: string) => Promise<void>;
   
   // 作業
   listAssignments: (groupId: string, options?: QueryOptions) => Promise<Assignment[]>;
-  getAssignment: (id: string) => Promise<Assignment | null>;
+  getAssignment: (id: string, groupId?: string) => Promise<Assignment | null>;
   createAssignment: (data: Omit<Assignment, "id" | "createdAt" | "submissionCount">) => Promise<Assignment>;
-  updateAssignment: (id: string, data: Partial<Assignment>) => Promise<Assignment>;
-  deleteAssignment: (id: string) => Promise<void>;
+  updateAssignment: (id: string, data: Partial<Assignment>, groupId?: string) => Promise<Assignment>;
+  deleteAssignment: (id: string, groupId?: string) => Promise<void>;
   
   // 作業繳交
-  listSubmissions: (assignmentId: string, options?: QueryOptions) => Promise<Submission[]>;
-  getSubmission: (assignmentId: string, userId: string) => Promise<Submission | null>;
+  listSubmissions: (assignmentId: string, options?: QueryOptions, groupId?: string) => Promise<Submission[]>;
+  getSubmission: (assignmentId: string, userId: string, groupId?: string) => Promise<Submission | null>;
   submitAssignment: (data: Omit<Submission, "id" | "submittedAt" | "status">) => Promise<Submission>;
-  gradeSubmission: (id: string, grade: number, feedback?: string) => Promise<Submission>;
+  gradeSubmission: (
+    id: string,
+    grade: number,
+    feedback?: string,
+    groupId?: string,
+    assignmentId?: string,
+    userId?: string
+  ) => Promise<Submission>;
   
   // 訊息
   listConversations: (userId: string, options?: QueryOptions) => Promise<Conversation[]>;
@@ -197,7 +204,7 @@ export type DataSource = {
   createConversation: (participantIds: string[]) => Promise<Conversation>;
   listMessages: (conversationId: string, options?: QueryOptions) => Promise<Message[]>;
   sendMessage: (data: Omit<Message, "id" | "createdAt">) => Promise<Message>;
-  markMessageRead: (messageId: string, userId: string) => Promise<void>;
+  markMessageRead: (messageId: string, userId: string, conversationId?: string) => Promise<void>;
   
   // 失物招領
   listLostFoundItems: (schoolId?: string, options?: QueryOptions) => Promise<LostFoundItem[]>;
@@ -209,16 +216,16 @@ export type DataSource = {
   // 圖書館
   searchBooks: (query: string, schoolId?: string, options?: QueryOptions) => Promise<LibraryBook[]>;
   getBook: (id: string) => Promise<LibraryBook | null>;
-  listLoans: (userId: string) => Promise<LibraryLoan[]>;
-  borrowBook: (bookId: string, userId: string) => Promise<LibraryLoan>;
-  returnBook: (loanId: string) => Promise<void>;
-  renewBook: (loanId: string) => Promise<LibraryLoan>;
+  listLoans: (userId: string, schoolId?: string) => Promise<LibraryLoan[]>;
+  borrowBook: (bookId: string, userId: string, schoolId?: string) => Promise<LibraryLoan>;
+  returnBook: (loanId: string, userId?: string, schoolId?: string) => Promise<void>;
+  renewBook: (loanId: string, userId?: string, schoolId?: string) => Promise<LibraryLoan>;
   
   // 圖書館座位
   listSeats: (schoolId?: string, zone?: string) => Promise<LibrarySeat[]>;
-  listSeatReservations: (userId: string) => Promise<SeatReservation[]>;
-  reserveSeat: (seatId: string, userId: string, date: string, startTime: string, endTime: string) => Promise<SeatReservation>;
-  cancelSeatReservation: (id: string) => Promise<void>;
+  listSeatReservations: (userId: string, schoolId?: string) => Promise<SeatReservation[]>;
+  reserveSeat: (seatId: string, userId: string, date: string, startTime: string, endTime: string, schoolId?: string) => Promise<SeatReservation>;
+  cancelSeatReservation: (id: string, userId?: string, schoolId?: string) => Promise<void>;
   
   // 公車
   listBusRoutes: (schoolId?: string) => Promise<BusRoute[]>;
@@ -232,19 +239,19 @@ export type DataSource = {
   deleteNotification: (id: string) => Promise<void>;
   
   // 行事曆
-  listCalendarEvents: (userId: string, startDate: string, endDate: string) => Promise<CalendarEvent[]>;
+  listCalendarEvents: (userId: string, startDate: string, endDate: string, schoolId?: string) => Promise<CalendarEvent[]>;
   createCalendarEvent: (data: Omit<CalendarEvent, "id">) => Promise<CalendarEvent>;
-  updateCalendarEvent: (id: string, data: Partial<CalendarEvent>) => Promise<CalendarEvent>;
-  deleteCalendarEvent: (id: string) => Promise<void>;
-  syncCoursesToCalendar: (userId: string, semester: string) => Promise<void>;
+  updateCalendarEvent: (id: string, data: Partial<CalendarEvent>, userId?: string, schoolId?: string) => Promise<CalendarEvent>;
+  deleteCalendarEvent: (id: string, userId?: string, schoolId?: string) => Promise<void>;
+  syncCoursesToCalendar: (userId: string, semester: string, schoolId?: string) => Promise<void>;
   
   // 訂單與支付
-  listOrders: (userId: string, options?: QueryOptions) => Promise<Order[]>;
-  getOrder: (id: string) => Promise<Order | null>;
+  listOrders: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<Order[]>;
+  getOrder: (id: string, userId?: string, schoolId?: string) => Promise<Order | null>;
   createOrder: (data: Omit<Order, "id" | "createdAt" | "status" | "paymentStatus">) => Promise<Order>;
-  updateOrderStatus: (id: string, status: Order["status"]) => Promise<Order>;
-  cancelOrder: (id: string) => Promise<void>;
-  listTransactions: (userId: string, options?: QueryOptions) => Promise<Transaction[]>;
+  updateOrderStatus: (id: string, status: Order["status"], userId?: string, schoolId?: string) => Promise<Order>;
+  cancelOrder: (id: string, userId?: string, schoolId?: string) => Promise<void>;
+  listTransactions: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<Transaction[]>;
   
   // 安全的儲值/支付操作（必須通過後端處理）
   processTopup: (data: {
@@ -275,8 +282,8 @@ export type DataSource = {
   
   // 成就
   listAchievements: () => Promise<UserAchievement[]>;
-  getUserAchievements: (userId: string) => Promise<UserAchievement[]>;
-  updateAchievementProgress: (userId: string, achievementId: string, progress: number) => Promise<UserAchievement>;
+  getUserAchievements: (userId: string, schoolId?: string) => Promise<UserAchievement[]>;
+  updateAchievementProgress: (userId: string, achievementId: string, progress: number, schoolId?: string) => Promise<UserAchievement>;
   
   // 宿舍服務
   getDormitoryInfo: (userId: string) => Promise<DormitoryInfo | null>;

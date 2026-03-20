@@ -804,10 +804,10 @@ export const firebaseSource: DataSource = {
 
     return createDocumentAtPath<Enrollment>(buildUserSchoolCollectionPath(userId, resolvedSchoolId, "enrollments"), {
       userId,
-      schoolId: resolvedSchoolId,
       courseId,
       semester,
       status: "enrolled",
+      createdAt: new Date().toISOString(),
     } as Omit<Enrollment, "id">);
   },
 
@@ -978,24 +978,39 @@ export const firebaseSource: DataSource = {
 
   // ===== 群組成員 =====
   async listGroupMembers(groupId, options) {
-    return fetchCollection<GroupMember>(
-      "groupMembers",
-      [where("groupId", "==", groupId)],
-      undefined,
-      options
-    );
+    try {
+      const rows = await fetchCollectionAtPath<GroupMember>(
+        buildGroupCollectionPath(groupId, "members"),
+        [where("status", "==", "active")],
+        options
+      );
+      if (rows.length > 0) {
+        return rows.map((row) => ({
+          ...row,
+          id: row.id,
+          groupId,
+          userId: row.userId ?? row.uid ?? row.id,
+          uid: row.uid ?? row.userId ?? row.id,
+        }));
+      }
+    } catch (error) {
+      console.warn("[firebaseSource] listGroupMembers canonical read failed:", error);
+    }
+
+    return fetchCollection<GroupMember>("groupMembers", [where("groupId", "==", groupId)], undefined, options);
   },
 
   async updateMemberRole(groupId, userId, role) {
+    try {
+      await updateDocumentAtPath<GroupMember>(buildGroupCollectionPath(groupId, "members", userId), { role });
+      await updateDocumentAtPath<GroupMember>(buildUserCollectionPath(userId, "groups", groupId), { role });
+      return;
+    } catch (error) {
+      console.warn("[firebaseSource] updateMemberRole canonical write failed:", error);
+    }
+
     const db = getDb();
-    const membersSnap = await getDocs(
-      query(
-        collection(db, "groupMembers"),
-        where("groupId", "==", groupId),
-        where("userId", "==", userId)
-      )
-    );
-    
+    const membersSnap = await getDocs(query(collection(db, "groupMembers"), where("groupId", "==", groupId), where("userId", "==", userId)));
     if (!membersSnap.empty) {
       await updateDoc(membersSnap.docs[0].ref, { role });
     }
@@ -1007,50 +1022,86 @@ export const firebaseSource: DataSource = {
 
   // ===== 群組貼文 =====
   async listGroupPosts(groupId, options) {
-    return fetchCollection<GroupPost>(
-      "groupPosts",
-      [where("groupId", "==", groupId), orderBy("createdAt", "desc")],
-      undefined,
-      options
-    );
+    try {
+      const rows = await fetchCollectionAtPath<GroupPost>(
+        buildGroupCollectionPath(groupId, "posts"),
+        [orderBy("createdAt", "desc")],
+        options
+      );
+      if (rows.length > 0) {
+        return rows.map((row) => ({ ...row, groupId: row.groupId ?? groupId }));
+      }
+    } catch (error) {
+      console.warn("[firebaseSource] listGroupPosts canonical read failed:", error);
+    }
+
+    return fetchCollection<GroupPost>("groupPosts", [where("groupId", "==", groupId), orderBy("createdAt", "desc")], undefined, options);
   },
 
-  async getGroupPost(id) {
+  async getGroupPost(id, groupId = undefined) {
+    if (groupId) {
+      const canonicalPost = await fetchDocumentAtPath<GroupPost>(buildGroupCollectionPath(groupId, "posts", id));
+      if (canonicalPost) {
+        return { ...canonicalPost, groupId: canonicalPost.groupId ?? groupId };
+      }
+    }
     return fetchDocument<GroupPost>("groupPosts", id);
   },
 
   async createGroupPost(data) {
-    return createDocument<GroupPost>("groupPosts", {
+    return createDocumentAtPath<GroupPost>(buildGroupCollectionPath(data.groupId, "posts"), {
       ...data,
       likeCount: 0,
       commentCount: 0,
     } as Omit<GroupPost, "id">);
   },
 
-  async updateGroupPost(id, data) {
+  async updateGroupPost(id, data, groupId = undefined) {
+    if (groupId) {
+      await updateDocumentAtPath<GroupPost>(buildGroupCollectionPath(groupId, "posts", id), data);
+      return (await fetchDocumentAtPath<GroupPost>(buildGroupCollectionPath(groupId, "posts", id))) as GroupPost;
+    }
     return updateDocument<GroupPost>("groupPosts", id, data);
   },
 
-  async deleteGroupPost(id) {
+  async deleteGroupPost(id, groupId = undefined) {
+    if (groupId) {
+      await deleteDocumentAtPath(buildGroupCollectionPath(groupId, "posts", id));
+      return;
+    }
     await deleteDocument("groupPosts", id);
   },
 
-  async likePost(postId, userId) {
+  async likePost(postId, userId, groupId = undefined) {
     const db = getDb();
+    if (groupId) {
+      await updateDoc(docFromSegments(db, buildGroupCollectionPath(groupId, "posts", postId)), {
+        likeCount: increment(1),
+        likedBy: arrayUnion(userId),
+      });
+      return;
+    }
+
     const likeRef = doc(db, "postLikes", `${postId}_${userId}`);
     const postRef = doc(db, "groupPosts", postId);
-    
     const batch = writeBatch(db);
     batch.set(likeRef, { postId, userId, createdAt: serverTimestamp() });
     batch.update(postRef, { likeCount: increment(1) });
     await batch.commit();
   },
 
-  async unlikePost(postId, userId) {
+  async unlikePost(postId, userId, groupId = undefined) {
     const db = getDb();
+    if (groupId) {
+      await updateDoc(docFromSegments(db, buildGroupCollectionPath(groupId, "posts", postId)), {
+        likeCount: increment(-1),
+        likedBy: arrayRemove(userId),
+      });
+      return;
+    }
+
     const likeRef = doc(db, "postLikes", `${postId}_${userId}`);
     const postRef = doc(db, "groupPosts", postId);
-    
     const batch = writeBatch(db);
     batch.delete(likeRef);
     batch.update(postRef, { likeCount: increment(-1) });
@@ -1058,103 +1109,181 @@ export const firebaseSource: DataSource = {
   },
 
   // ===== 留言 =====
-  async listComments(postId, options) {
-    return fetchCollection<Comment>(
-      "comments",
-      [where("postId", "==", postId), orderBy("createdAt", "asc")],
-      undefined,
-      options
-    );
+  async listComments(postId, options, groupId = undefined) {
+    try {
+      const rows = await fetchCollectionAtPath<Comment>(
+        buildGroupCollectionPath(groupId, "posts", postId, "comments"),
+        [orderBy("createdAt", "asc")],
+        options
+      );
+      if (rows.length > 0) {
+        return rows.map((row) => ({ ...row, postId: row.postId ?? postId, groupId: (row as any).groupId ?? groupId }));
+      }
+    } catch (error) {
+      console.warn("[firebaseSource] listComments canonical read failed:", error);
+    }
+
+    return fetchCollection<Comment>("comments", [where("postId", "==", postId), orderBy("createdAt", "asc")], undefined, options);
   },
 
   async createComment(data) {
     const db = getDb();
-    const comment = await createDocument<Comment>("comments", {
-      ...data,
-      likeCount: 0,
-    } as Omit<Comment, "id">);
-    
-    await updateDoc(doc(db, "groupPosts", data.postId), {
-      commentCount: increment(1),
-    });
-    
+    const groupId = (data as any).groupId as string | undefined;
+    if (groupId) {
+      const comment = await createDocumentAtPath<Comment>(
+        buildGroupCollectionPath(groupId, "posts", data.postId, "comments"),
+        {
+          ...data,
+          likeCount: 0,
+        } as Omit<Comment, "id">
+      );
+      await updateDoc(docFromSegments(db, buildGroupCollectionPath(groupId, "posts", data.postId)), {
+        commentCount: increment(1),
+      });
+      return comment;
+    }
+
+    const comment = await createDocument<Comment>("comments", { ...data, likeCount: 0 } as Omit<Comment, "id">);
+    await updateDoc(doc(db, "groupPosts", data.postId), { commentCount: increment(1) });
     return comment;
   },
 
-  async deleteComment(id) {
-    const comment = await fetchDocument<Comment>("comments", id);
-    if (comment) {
+  async deleteComment(id, groupId = undefined, postId = undefined) {
+    if (groupId && postId) {
       const db = getDb();
-      await deleteDocument("comments", id);
-      await updateDoc(doc(db, "groupPosts", comment.postId), {
+      await deleteDocumentAtPath(buildGroupCollectionPath(groupId, "posts", postId, "comments", id));
+      await updateDoc(docFromSegments(db, buildGroupCollectionPath(groupId, "posts", postId)), {
         commentCount: increment(-1),
       });
+      return;
     }
+
+    const comment = await fetchDocument<Comment>("comments", id);
+    if (!comment) return;
+    const db = getDb();
+    await deleteDocument("comments", id);
+    await updateDoc(doc(db, "groupPosts", comment.postId), { commentCount: increment(-1) });
   },
 
   // ===== 作業 =====
   async listAssignments(groupId, options) {
-    return fetchCollection<Assignment>(
-      "assignments",
-      [where("groupId", "==", groupId), orderBy("dueAt", "asc")],
-      undefined,
-      options
-    );
+    try {
+      const rows = await fetchCollectionAtPath<Assignment>(
+        buildGroupCollectionPath(groupId, "assignments"),
+        [orderBy("dueAt", "asc")],
+        options
+      );
+      if (rows.length > 0) {
+        return rows.map((row) => ({ ...row, groupId: row.groupId ?? groupId }));
+      }
+    } catch (error) {
+      console.warn("[firebaseSource] listAssignments canonical read failed:", error);
+    }
+
+    return fetchCollection<Assignment>("assignments", [where("groupId", "==", groupId), orderBy("dueAt", "asc")], undefined, options);
   },
 
-  async getAssignment(id) {
+  async getAssignment(id, groupId = undefined) {
+    if (groupId) {
+      const canonicalAssignment = await fetchDocumentAtPath<Assignment>(buildGroupCollectionPath(groupId, "assignments", id));
+      if (canonicalAssignment) {
+        return { ...canonicalAssignment, groupId: canonicalAssignment.groupId ?? groupId };
+      }
+    }
     return fetchDocument<Assignment>("assignments", id);
   },
 
   async createAssignment(data) {
-    return createDocument<Assignment>("assignments", {
+    return createDocumentAtPath<Assignment>(buildGroupCollectionPath(data.groupId, "assignments"), {
       ...data,
       submissionCount: 0,
     } as Omit<Assignment, "id">);
   },
 
-  async updateAssignment(id, data) {
+  async updateAssignment(id, data, groupId = undefined) {
+    if (groupId) {
+      await updateDocumentAtPath<Assignment>(buildGroupCollectionPath(groupId, "assignments", id), data);
+      return (await fetchDocumentAtPath<Assignment>(buildGroupCollectionPath(groupId, "assignments", id))) as Assignment;
+    }
     return updateDocument<Assignment>("assignments", id, data);
   },
 
-  async deleteAssignment(id) {
+  async deleteAssignment(id, groupId = undefined) {
+    if (groupId) {
+      await deleteDocumentAtPath(buildGroupCollectionPath(groupId, "assignments", id));
+      return;
+    }
     await deleteDocument("assignments", id);
   },
 
   // ===== 作業繳交 =====
-  async listSubmissions(assignmentId, options) {
-    return fetchCollection<Submission>(
-      "submissions",
-      [where("assignmentId", "==", assignmentId)],
-      undefined,
-      options
-    );
+  async listSubmissions(assignmentId, options, groupId = undefined) {
+    if (groupId) {
+      try {
+        const rows = await fetchCollectionAtPath<Submission>(
+          buildGroupCollectionPath(groupId, "assignments", assignmentId, "submissions"),
+          [],
+          options
+        );
+        if (rows.length > 0) {
+          return rows.map((row) => ({ ...row, assignmentId: row.assignmentId ?? assignmentId }));
+        }
+      } catch (error) {
+        console.warn("[firebaseSource] listSubmissions canonical read failed:", error);
+      }
+    }
+
+    return fetchCollection<Submission>("submissions", [where("assignmentId", "==", assignmentId)], undefined, options);
   },
 
-  async getSubmission(assignmentId, userId) {
-    const submissions = await fetchCollection<Submission>(
-      "submissions",
-      [where("assignmentId", "==", assignmentId), where("userId", "==", userId)]
-    );
+  async getSubmission(assignmentId, userId, groupId = undefined) {
+    if (groupId) {
+      const canonicalSubmission = await fetchDocumentAtPath<Submission>(
+        buildGroupCollectionPath(groupId, "assignments", assignmentId, "submissions", userId)
+      );
+      if (canonicalSubmission) {
+        return { ...canonicalSubmission, assignmentId: canonicalSubmission.assignmentId ?? assignmentId };
+      }
+    }
+
+    const submissions = await fetchCollection<Submission>("submissions", [where("assignmentId", "==", assignmentId), where("userId", "==", userId)]);
     return submissions[0] ?? null;
   },
 
   async submitAssignment(data) {
     const db = getDb();
-    const submission = await createDocument<Submission>("submissions", {
-      ...data,
-      status: "submitted",
-      submittedAt: new Date().toISOString(),
-    } as Omit<Submission, "id">);
-    
-    await updateDoc(doc(db, "assignments", data.assignmentId), {
+    const groupId = (data as any).groupId as string;
+    const submissionPath = buildGroupCollectionPath(groupId, "assignments", data.assignmentId, "submissions", data.userId);
+    await setDoc(
+      docFromSegments(db, submissionPath),
+      {
+        ...data,
+        status: "submitted",
+        submittedAt: new Date().toISOString(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    await updateDoc(docFromSegments(db, buildGroupCollectionPath(groupId, "assignments", data.assignmentId)), {
       submissionCount: increment(1),
     });
-    
-    return submission;
+
+    return (await fetchDocumentAtPath<Submission>(submissionPath)) as Submission;
   },
 
-  async gradeSubmission(id, grade, feedback) {
+  async gradeSubmission(id, grade, feedback, groupId = undefined, assignmentId = undefined, userId = undefined) {
+    if (groupId && assignmentId && userId) {
+      const submissionPath = buildGroupCollectionPath(groupId, "assignments", assignmentId, "submissions", userId);
+      await updateDocumentAtPath<Submission>(submissionPath, {
+        grade,
+        feedback,
+        status: "graded",
+        gradedAt: new Date().toISOString(),
+      });
+      return (await fetchDocumentAtPath<Submission>(submissionPath)) as Submission;
+    }
+
     return updateDocument<Submission>("submissions", id, {
       grade,
       feedback,
@@ -1180,24 +1309,37 @@ export const firebaseSource: DataSource = {
   async createConversation(participantIds) {
     return createDocument<Conversation>("conversations", {
       participants: participantIds,
+      participantIds,
+      schoolId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     } as Omit<Conversation, "id">);
   },
 
   async listMessages(conversationId, options) {
-    return fetchCollection<Message>(
-      "messages",
-      [where("conversationId", "==", conversationId), orderBy("createdAt", "asc")],
-      undefined,
-      options
-    );
+    try {
+      const rows = await fetchCollectionAtPath<Message>(
+        buildConversationCollectionPath(conversationId, "messages"),
+        [orderBy("createdAt", "asc")],
+        options
+      );
+      if (rows.length > 0) {
+        return rows.map((row) => ({ ...row, conversationId: row.conversationId ?? conversationId }));
+      }
+    } catch (error) {
+      console.warn("[firebaseSource] listMessages canonical read failed:", error);
+    }
+
+    return fetchCollection<Message>("messages", [where("conversationId", "==", conversationId), orderBy("createdAt", "asc")], undefined, options);
   },
 
   async sendMessage(data) {
     const db = getDb();
-    const message = await createDocument<Message>("messages", data as Omit<Message, "id">);
-    
+    const message = await createDocumentAtPath<Message>(
+      buildConversationCollectionPath(data.conversationId, "messages"),
+      data as Omit<Message, "id">
+    );
+
     await updateDoc(doc(db, "conversations", data.conversationId), {
       lastMessage: message,
       updatedAt: serverTimestamp(),
@@ -1206,11 +1348,16 @@ export const firebaseSource: DataSource = {
     return message;
   },
 
-  async markMessageRead(messageId, userId) {
+  async markMessageRead(messageId, userId, conversationId = undefined) {
     const db = getDb();
-    await updateDoc(doc(db, "messages", messageId), {
-      readBy: arrayUnion(userId),
-    });
+    if (conversationId) {
+      await updateDoc(docFromSegments(db, buildConversationCollectionPath(conversationId, "messages", messageId)), {
+        readBy: arrayUnion(userId),
+      });
+      return;
+    }
+
+    await updateDoc(doc(db, "messages", messageId), { readBy: arrayUnion(userId) });
   },
 
   // ===== 失物招領 =====
@@ -1528,7 +1675,7 @@ export const firebaseSource: DataSource = {
   },
 
   // ===== 行事曆 =====
-  async listCalendarEvents(userId, startDate, endDate, schoolId) {
+  async listCalendarEvents(userId, startDate, endDate, schoolId = undefined) {
     const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
     const constraints: (QueryConstraint | null)[] = [
       byUser(userId),
@@ -1559,12 +1706,11 @@ export const firebaseSource: DataSource = {
       buildUserSchoolCollectionPath(data.userId, resolvedSchoolId, "calendarEvents"),
       {
         ...(data as Omit<CalendarEvent, "id">),
-        schoolId: resolvedSchoolId,
       }
     );
   },
 
-  async updateCalendarEvent(id, data, userId, schoolId) {
+  async updateCalendarEvent(id, data, userId = undefined, schoolId = undefined) {
     const ownerId = userId ?? data.userId;
     const resolvedSchoolId = ownerId ? await resolveUserSchoolId(ownerId, schoolId ?? (data as any).schoolId) : null;
     if (ownerId && resolvedSchoolId) {
@@ -1586,7 +1732,7 @@ export const firebaseSource: DataSource = {
     return updateDocument<CalendarEvent>("calendarEvents", id, data);
   },
 
-  async deleteCalendarEvent(id, userId, schoolId) {
+  async deleteCalendarEvent(id, userId = undefined, schoolId = undefined) {
     const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
     if (userId && resolvedSchoolId) {
       await deleteDocumentAtPath(buildUserSchoolCollectionPath(userId, resolvedSchoolId, "calendarEvents", id));
@@ -1595,7 +1741,7 @@ export const firebaseSource: DataSource = {
     await deleteDocument("calendarEvents", id);
   },
 
-  async syncCoursesToCalendar(userId, semester, schoolId) {
+  async syncCoursesToCalendar(userId, semester, schoolId = undefined) {
     const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
     const enrollments = await this.listEnrollments(userId, semester, resolvedSchoolId ?? undefined);
     const db = getDb();
@@ -1630,7 +1776,7 @@ export const firebaseSource: DataSource = {
   },
 
   // ===== 訂單與支付 =====
-  async listOrders(userId, schoolId, options) {
+  async listOrders(userId, options, schoolId = undefined) {
     const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
     const constraints: (QueryConstraint | null)[] = [byUser(userId), orderBy("createdAt", "desc")];
 
@@ -1662,7 +1808,7 @@ export const firebaseSource: DataSource = {
     return fetchCollection<Order>("orders", constraints, undefined, options);
   },
 
-  async getOrder(id, userId, schoolId) {
+  async getOrder(id, userId = undefined, schoolId = undefined) {
     const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
     if (userId && resolvedSchoolId) {
       const canonicalOrder = await fetchCanonicalUserSchoolDocument<Order>({
@@ -1708,7 +1854,7 @@ export const firebaseSource: DataSource = {
     return (await fetchDocumentAtPath<Order>(buildUserSchoolCollectionPath(data.userId, resolvedSchoolId, "orders", schoolOrderRef.id))) as Order;
   },
 
-  async updateOrderStatus(id, status, userId, schoolId) {
+  async updateOrderStatus(id, status, userId = undefined, schoolId = undefined) {
     const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
     if (userId && resolvedSchoolId) {
       await updateDocumentAtPath<Order>(buildUserSchoolCollectionPath(userId, resolvedSchoolId, "orders", id), { status });
@@ -1727,7 +1873,7 @@ export const firebaseSource: DataSource = {
     return updateDocument<Order>("orders", id, { status });
   },
 
-  async cancelOrder(id, userId, schoolId) {
+  async cancelOrder(id, userId = undefined, schoolId = undefined) {
     const resolvedSchoolId = userId ? await resolveUserSchoolId(userId, schoolId) : schoolId ?? null;
     if (userId && resolvedSchoolId) {
       await updateDocumentAtPath<Order>(buildUserSchoolCollectionPath(userId, resolvedSchoolId, "orders", id), {
@@ -1741,7 +1887,7 @@ export const firebaseSource: DataSource = {
     await updateDocument<Order>("orders", id, { status: "cancelled" });
   },
 
-  async listTransactions(userId, schoolId, options) {
+  async listTransactions(userId, options, schoolId = undefined) {
     const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
     try {
       const getTransactionHistory = httpsCallable<
@@ -1757,7 +1903,6 @@ export const firebaseSource: DataSource = {
       return rows.map((row) => ({
         id: String(row.id ?? ""),
         userId,
-        schoolId: resolvedSchoolId ?? undefined,
         amount: Number(row.amount ?? 0),
         currency: String(row.currency ?? "TWD"),
         type: (String(row.type ?? "payment") as Transaction["type"]),
@@ -1794,7 +1939,7 @@ export const firebaseSource: DataSource = {
     return fetchCollection<UserAchievement>("achievements", []);
   },
 
-  async getUserAchievements(userId, schoolId) {
+  async getUserAchievements(userId, schoolId = undefined) {
     const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
     return fetchCanonicalUserSchoolCollection<UserAchievement>({
       uid: userId,
@@ -1808,7 +1953,7 @@ export const firebaseSource: DataSource = {
     });
   },
 
-  async updateAchievementProgress(userId, achievementId, progress, schoolId) {
+  async updateAchievementProgress(userId, achievementId, progress, schoolId = undefined) {
     const db = getDb();
     const resolvedSchoolId = await resolveUserSchoolId(userId, schoolId);
     if (!resolvedSchoolId) {
