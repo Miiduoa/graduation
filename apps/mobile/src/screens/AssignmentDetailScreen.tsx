@@ -114,7 +114,7 @@ export function AssignmentDetailScreen(props: any) {
   );
 
   const myRole = myMemberRows[0]?.role as any;
-  const canManageCourse = group?.type === "course" && (myRole === "owner" || myRole === "instructor");
+  const canManageCourse = group?.type === "course" && (myRole === "owner" || myRole === "instructor" || myRole === "moderator");
 
   const {
     items: assignmentRows,
