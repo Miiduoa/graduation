@@ -3,6 +3,7 @@ import { ScrollView, Text, View, Pressable, Share, Alert, TextInput, Image } fro
 import { Ionicons } from "@expo/vector-icons";
 import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, serverTimestamp, updateDoc, arrayUnion, arrayRemove, increment } from "firebase/firestore";
 import * as ImagePicker from "expo-image-picker";
+import { buildSchoolCollectionPath } from "@campus/shared/src";
 import { findById } from "../data";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
@@ -143,15 +144,26 @@ export function MenuDetailScreen(props: any) {
     async () => {
       if (!id) return [];
       try {
-        const ref = collection(db, "menus", id, "reviews");
-        const qy = query(ref, orderBy("createdAt", "desc"));
-        const snap = await getDocs(qy);
-        return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Review[];
+        const canonicalRef = school.id
+          ? collection(db, buildSchoolCollectionPath(school.id, "menus", id, "reviews").join("/"))
+          : null;
+        const legacyRef = collection(db, "menus", id, "reviews");
+        const refs = canonicalRef ? [canonicalRef, legacyRef] : [legacyRef];
+
+        for (const ref of refs) {
+          const qy = query(ref, orderBy("createdAt", "desc"));
+          const snap = await getDocs(qy);
+          if (!snap.empty || ref === legacyRef) {
+            return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Review[];
+          }
+        }
+
+        return [];
       } catch {
         return [];
       }
     },
-    [db, id]
+    [db, id, school.id]
   );
 
   // Fetch user profiles for reviews
@@ -310,7 +322,7 @@ export function MenuDetailScreen(props: any) {
 
     setSubmittingReview(true);
     try {
-      await setDoc(doc(db, "menus", id, "reviews", auth.user.uid), {
+      await setDoc(doc(db, buildSchoolCollectionPath(school.id, "menus", id, "reviews", auth.user.uid).join("/")), {
         uid: auth.user.uid,
         displayName: auth.profile?.displayName ?? null,
         avatarUrl: auth.profile?.avatarUrl ?? null,
@@ -342,7 +354,7 @@ export function MenuDetailScreen(props: any) {
   const handleHelpful = async (reviewId: string, alreadyHelpful: boolean) => {
     if (!auth.user || !id) return;
     try {
-      const reviewRef = doc(db, "menus", id, "reviews", reviewId);
+      const reviewRef = doc(db, buildSchoolCollectionPath(school.id, "menus", id, "reviews", reviewId).join("/"));
       if (alreadyHelpful) {
         await updateDoc(reviewRef, {
           helpfulBy: arrayRemove(auth.user.uid),
