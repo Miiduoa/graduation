@@ -4,6 +4,7 @@ import { type School } from "@campus/shared/src";
 import { mockSchools, normalizeSchoolCode } from "@campus/shared/src/schools";
 
 import { getDb } from "../firebase";
+import { getSchoolIntegrationStatus, isSchoolVisibleInDirectory } from "./release";
 
 const DIRECTORY_TIMEOUT_MS = 5000;
 
@@ -49,6 +50,10 @@ function normalizeSchoolFromFirestore(id: string, value: Record<string, unknown>
       (typeof value.primaryColor === "string" && value.primaryColor.trim()) ||
       undefined,
     domains: rawDomains.length > 0 ? rawDomains : undefined,
+    integrationStatus: getSchoolIntegrationStatus(
+      id,
+      (value.integrationStatus as Partial<NonNullable<School["integrationStatus"]>>) ?? undefined
+    ),
   };
 }
 
@@ -56,12 +61,13 @@ function mergeSchoolLists(primary: School[], secondary: School[]): School[] {
   const merged = new Map<string, School>();
 
   for (const school of [...primary, ...secondary]) {
-    if (!merged.has(school.id)) {
-      merged.set(school.id, school);
-    }
+    const existing = merged.get(school.id);
+    merged.set(school.id, existing ? { ...school, ...existing } : school);
   }
 
-  return [...merged.values()].sort((left, right) => left.name.localeCompare(right.name, "zh-Hant"));
+  return [...merged.values()]
+    .filter((school) => isSchoolVisibleInDirectory(school.id, school.integrationStatus))
+    .sort((left, right) => left.name.localeCompare(right.name, "zh-Hant"));
 }
 
 export async function fetchSchoolDirectory(): Promise<School[]> {
@@ -77,9 +83,21 @@ export async function fetchSchoolDirectory(): Promise<School[]> {
       normalizeSchoolFromFirestore(docSnap.id, docSnap.data() as Record<string, unknown>)
     );
 
-    return mergeSchoolLists(remoteSchools, mockSchools);
+    return mergeSchoolLists(
+      remoteSchools,
+      mockSchools.map((school) => ({
+        ...school,
+        integrationStatus: getSchoolIntegrationStatus(school.id, school.integrationStatus),
+      }))
+    );
   } catch (error) {
     console.log("[schoolDirectory] Falling back to mock schools:", error);
-    return [...mockSchools].sort((left, right) => left.name.localeCompare(right.name, "zh-Hant"));
+    return [...mockSchools]
+      .map((school) => ({
+        ...school,
+        integrationStatus: getSchoolIntegrationStatus(school.id, school.integrationStatus),
+      }))
+      .filter((school) => isSchoolVisibleInDirectory(school.id, school.integrationStatus))
+      .sort((left, right) => left.name.localeCompare(right.name, "zh-Hant"));
   }
 }

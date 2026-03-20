@@ -7,10 +7,9 @@ const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore, FieldValue, FieldPath, Timestamp } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const https = require("https");
-const http = require("http");
 const nodeCrypto = require("crypto");
 const {
   evaluateSsoConfiguration,
@@ -129,16 +128,6 @@ function normalizeSsoConfig(rawConfig = {}) {
   };
 }
 
-function sha256Base64Url(value) {
-  return crypto
-    .createHash("sha256")
-    .update(value, "utf8")
-    .digest("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
 function isAllowedRedirectUri(value) {
   if (typeof value !== "string" || !value.trim()) return false;
 
@@ -241,6 +230,32 @@ async function syncAuthClaims(uid, userData = {}) {
   });
 }
 
+async function resolveUserSchoolId(uid, preferredSchoolId = null) {
+  if (preferredSchoolId) {
+    return preferredSchoolId;
+  }
+
+  const userDoc = await db.collection("users").doc(uid).get();
+  if (!userDoc.exists) {
+    return null;
+  }
+
+  const userData = userDoc.data() || {};
+  return userData.primarySchoolId || userData.schoolId || null;
+}
+
+function getUserSchoolScope(uid, schoolId) {
+  return db.collection("users").doc(uid).collection("schools").doc(schoolId);
+}
+
+function getUserSchoolCollection(uid, schoolId, collectionName) {
+  return getUserSchoolScope(uid, schoolId).collection(collectionName);
+}
+
+function getUserSchoolDoc(uid, schoolId, collectionName, docId) {
+  return getUserSchoolCollection(uid, schoolId, collectionName).doc(docId);
+}
+
 function resolveProvisionedRole({ existingLink, existingUser }) {
   return existingLink?.role || existingUser?.role || "student";
 }
@@ -317,11 +332,20 @@ function isSupportedExternalPaymentMethod(method) {
   return ["credit_card", "line_pay", "jko_pay", "apple_pay", "google_pay", "bank_transfer"].includes(method);
 }
 
-async function getWalletSnapshot(uid) {
-  const walletRef = db.collection("wallets").doc(uid);
-  const walletDoc = await walletRef.get();
-  const wallet = walletDoc.exists
-    ? walletDoc.data()
+async function getWalletSnapshot(uid, schoolId = null) {
+  const resolvedSchoolId = await resolveUserSchoolId(uid, schoolId);
+  const canonicalWalletRef = resolvedSchoolId
+    ? getUserSchoolDoc(uid, resolvedSchoolId, "wallet", "balance")
+    : null;
+  const canonicalWalletDoc = canonicalWalletRef ? await canonicalWalletRef.get() : null;
+  const legacyWalletRef = db.collection("wallets").doc(uid);
+  const legacyWalletDoc = (!canonicalWalletDoc || !canonicalWalletDoc.exists)
+    ? await legacyWalletRef.get()
+    : null;
+  const wallet = canonicalWalletDoc && canonicalWalletDoc.exists
+    ? canonicalWalletDoc.data()
+    : legacyWalletDoc && legacyWalletDoc.exists
+      ? legacyWalletDoc.data()
     : {
         available: 0,
         pending: 0,
@@ -329,13 +353,16 @@ async function getWalletSnapshot(uid) {
       };
 
   return {
-    ref: walletRef,
+    ref: canonicalWalletRef || legacyWalletRef,
+    legacyRef: legacyWalletRef,
+    schoolId: resolvedSchoolId,
     data: wallet,
   };
 }
 
 async function appendWalletLedgerEntry({
   uid,
+  schoolId = null,
   amount,
   type,
   status,
@@ -346,14 +373,22 @@ async function appendWalletLedgerEntry({
   sourceId = null,
   metadata = {},
 }) {
-  const walletRef = db.collection("wallets").doc(uid);
-  const ledgerRef = db.collection("ledgerEntries").doc();
-  const transactionRef = db.collection("transactions").doc(ledgerRef.id);
+  const resolvedSchoolId = await resolveUserSchoolId(uid, schoolId);
+  if (!resolvedSchoolId) {
+    throw new HttpsError("invalid-argument", "Missing schoolId");
+  }
+
+  const walletRef = getUserSchoolDoc(uid, resolvedSchoolId, "wallet", "balance");
+  const legacyWalletRef = db.collection("wallets").doc(uid);
+  const transactionRef = getUserSchoolCollection(uid, resolvedSchoolId, "transactions").doc();
 
   await db.runTransaction(async (transaction) => {
     const walletDoc = await transaction.get(walletRef);
+    const legacyWalletDoc = walletDoc.exists ? null : await transaction.get(legacyWalletRef);
     const wallet = walletDoc.exists
       ? walletDoc.data()
+      : legacyWalletDoc && legacyWalletDoc.exists
+        ? legacyWalletDoc.data()
       : {
           available: 0,
           pending: 0,
@@ -375,6 +410,7 @@ async function appendWalletLedgerEntry({
 
     const ledgerPayload = {
       userId: uid,
+      schoolId: resolvedSchoolId,
       amount,
       currency: walletPayload.currency,
       type,
@@ -390,19 +426,12 @@ async function appendWalletLedgerEntry({
     };
 
     transaction.set(walletRef, walletPayload, { merge: true });
-    transaction.set(ledgerRef, ledgerPayload);
     transaction.set(
       transactionRef,
       {
-        userId: uid,
+        ...ledgerPayload,
         amount: Math.abs(amount),
-        currency: walletPayload.currency,
-        type,
-        status,
-        description,
-        merchantId,
         paymentMethodId: paymentMethod || null,
-        createdAt: FieldValue.serverTimestamp(),
         completedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
@@ -419,7 +448,8 @@ async function appendWalletLedgerEntry({
 
   const walletDoc = await walletRef.get();
   return {
-    ledgerEntryId: ledgerRef.id,
+    ledgerEntryId: transactionRef.id,
+    schoolId: resolvedSchoolId,
     balance: Number(walletDoc.data()?.available || 0),
   };
 }
@@ -1067,10 +1097,16 @@ exports.onMessageCreated = onDocumentCreated(
     const conversationDoc = await db.collection("conversations").doc(conversationId).get();
     const conversation = conversationDoc.data();
 
-    if (!conversation || !conversation.participants) return;
+    const memberIds = Array.isArray(conversation?.memberIds)
+      ? conversation.memberIds
+      : Array.isArray(conversation?.participants)
+        ? conversation.participants
+        : [];
+
+    if (memberIds.length === 0) return;
 
     const senderId = message.senderId;
-    const recipientIds = conversation.participants.filter((uid) => uid !== senderId);
+    const recipientIds = memberIds.filter((uid) => uid !== senderId);
 
     if (recipientIds.length === 0) return;
 
@@ -2168,10 +2204,6 @@ exports.verifySSOCallback = onRequest(
   }
 );
 
-function determineRole(userInfo) {
-  return "student";
-}
-
 exports.getSSOConfig = onRequest(
   {
     region: REGION,
@@ -2914,13 +2946,14 @@ exports.toggleFavorite = onCall(
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
 
-    const { itemType, itemId, schoolId } = request.data;
+    const { itemType, itemId } = request.data;
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
 
-    if (!itemType || !itemId) {
+    if (!itemType || !itemId || !schoolId) {
       throw new HttpsError("invalid-argument", "Missing required fields");
     }
 
-    const favoriteRef = db.collection("users").doc(uid).collection("favorites").doc(`${itemType}_${itemId}`);
+    const favoriteRef = getUserSchoolDoc(uid, schoolId, "favorites", `${itemType}_${itemId}`);
     const favoriteDoc = await favoriteRef.get();
 
     if (favoriteDoc.exists) {
@@ -2949,14 +2982,27 @@ exports.getFavorites = onCall(
     }
 
     const { itemType } = request.data;
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
 
-    let query = db.collection("users").doc(uid).collection("favorites");
+    if (!schoolId) {
+      throw new HttpsError("invalid-argument", "Missing schoolId");
+    }
+
+    let query = getUserSchoolCollection(uid, schoolId, "favorites");
     
     if (itemType) {
       query = query.where("itemType", "==", itemType);
     }
 
-    const favoritesSnap = await query.orderBy("createdAt", "desc").limit(100).get();
+    const favoritesSnap = await query.orderBy("createdAt", "desc").limit(100).get().catch(async () => (
+      (itemType
+        ? db.collection("users").doc(uid).collection("favorites").where("itemType", "==", itemType)
+        : db.collection("users").doc(uid).collection("favorites")
+      )
+        .orderBy("createdAt", "desc")
+        .limit(100)
+        .get()
+    ));
 
     return {
       favorites: favoritesSnap.docs.map((doc) => ({
@@ -3085,8 +3131,9 @@ exports.createOrder = onCall(
     const tax = Math.round(subtotal * 0.05);
     const total = subtotal + tax;
 
-    const orderRef = await db.collection("schools").doc(schoolId).collection("orders").add({
+    const orderPayload = {
       userId: uid,
+      schoolId,
       merchantId,
       items,
       subtotal,
@@ -3098,6 +3145,14 @@ exports.createOrder = onCall(
       status: "pending",
       paymentStatus: "pending",
       createdAt: FieldValue.serverTimestamp(),
+    };
+
+    const orderRef = db.collection("schools").doc(schoolId).collection("orders").doc();
+    const userOrderRef = getUserSchoolDoc(uid, schoolId, "orders", orderRef.id);
+
+    await db.runTransaction(async (transaction) => {
+      transaction.set(orderRef, orderPayload);
+      transaction.set(userOrderRef, orderPayload);
     });
 
     return {
@@ -3146,6 +3201,11 @@ exports.updateOrderStatus = onCall(
       status,
       [`${status}At`]: FieldValue.serverTimestamp(),
     });
+    await getUserSchoolDoc(order.userId, schoolId, "orders", orderId).set({
+      status,
+      [`${status}At`]: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
 
     if (["ready", "cancelled"].includes(status)) {
       await sendPushToUser(order.userId, {
@@ -3201,6 +3261,12 @@ exports.cancelOrder = onCall(
       cancelledAt: FieldValue.serverTimestamp(),
       cancelReason: reason || "User cancelled",
     });
+    await getUserSchoolDoc(uid, schoolId, "orders", orderId).set({
+      status: "cancelled",
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelReason: reason || "User cancelled",
+      updatedAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
 
     return { success: true };
   }
@@ -3963,11 +4029,13 @@ function assertValidAmount(amount, { min = 1, max = 100000 } = {}) {
 
 async function createExternalTopupIntent({
   uid,
+  schoolId,
   amount,
   paymentMethod,
 }) {
   const intentId = await createIntentDocument("topupIntents", {
     userId: uid,
+    schoolId: schoolId || null,
     amount,
     currency: DEFAULT_WALLET_CURRENCY,
     paymentMethod,
@@ -3993,9 +4061,10 @@ async function createExternalTopupIntent({
   };
 }
 
-async function getWalletBalancePayload(uid) {
-  const wallet = await getWalletSnapshot(uid);
+async function getWalletBalancePayload(uid, schoolId = null) {
+  const wallet = await getWalletSnapshot(uid, schoolId);
   return {
+    schoolId: wallet.schoolId,
     balance: Number(wallet.data.available || 0),
     available: Number(wallet.data.available || 0),
     pending: Number(wallet.data.pending || 0),
@@ -4004,15 +4073,34 @@ async function getWalletBalancePayload(uid) {
   };
 }
 
-async function listLedgerEntriesPayload(uid, queryLimit = 50, type = null) {
-  let ledgerQuery = db.collection("ledgerEntries")
+async function listLedgerEntriesPayload(uid, schoolId = null, queryLimit = 50, type = null) {
+  const resolvedSchoolId = await resolveUserSchoolId(uid, schoolId);
+
+  if (resolvedSchoolId) {
+    let canonicalQuery = getUserSchoolCollection(uid, resolvedSchoolId, "transactions")
+      .orderBy("createdAt", "desc");
+    if (type && ["payment", "topup", "refund"].includes(type)) {
+      canonicalQuery = canonicalQuery.where("type", "==", type);
+    }
+
+    const canonicalSnapshot = await canonicalQuery.limit(queryLimit).get().catch(() => null);
+    if (canonicalSnapshot && !canonicalSnapshot.empty) {
+      return canonicalSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate?.()?.toISOString?.() || null,
+      }));
+    }
+  }
+
+  let legacyQuery = db.collection("ledgerEntries")
     .where("userId", "==", uid)
     .orderBy("createdAt", "desc");
   if (type && ["payment", "topup", "refund"].includes(type)) {
-    ledgerQuery = ledgerQuery.where("type", "==", type);
+    legacyQuery = legacyQuery.where("type", "==", type);
   }
 
-  const snapshot = await ledgerQuery.limit(queryLimit).get();
+  const snapshot = await legacyQuery.limit(queryLimit).get();
   return snapshot.docs.map((doc) => ({
     id: doc.id,
     ...doc.data(),
@@ -4038,9 +4126,13 @@ exports.createTopupIntent = onCall(
     });
 
     const amount = Number(request.data?.amount);
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
     const paymentMethod = normalizePaymentMethod(request.data?.paymentMethod);
 
     assertValidAmount(amount, { min: 100, max: 10000 });
+    if (!schoolId) {
+      throw new HttpsError("invalid-argument", "Missing schoolId");
+    }
 
     if (!paymentMethod || !isSupportedExternalPaymentMethod(paymentMethod)) {
       throw new HttpsError("invalid-argument", "Unsupported top-up payment method");
@@ -4048,6 +4140,7 @@ exports.createTopupIntent = onCall(
 
     return createExternalTopupIntent({
       uid,
+      schoolId,
       amount,
       paymentMethod,
     });
@@ -4072,11 +4165,15 @@ exports.createPaymentIntent = onCall(
     });
 
     const amount = Number(request.data?.amount);
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
     const paymentMethod = normalizePaymentMethod(request.data?.paymentMethod);
     const merchantId = String(request.data?.merchantId || "").trim();
     const description = String(request.data?.description || "").trim();
 
     assertValidAmount(amount, { min: 1, max: 100000 });
+    if (!schoolId) {
+      throw new HttpsError("invalid-argument", "Missing schoolId");
+    }
 
     if (!merchantId) {
       throw new HttpsError("invalid-argument", "Missing merchantId");
@@ -4084,6 +4181,7 @@ exports.createPaymentIntent = onCall(
 
     const intentId = await createIntentDocument("paymentIntents", {
       userId: uid,
+      schoolId,
       amount,
       currency: DEFAULT_WALLET_CURRENCY,
       paymentMethod,
@@ -4095,6 +4193,7 @@ exports.createPaymentIntent = onCall(
     if (paymentMethod === "campus_card") {
       const result = await appendWalletLedgerEntry({
         uid,
+        schoolId,
         amount: -amount,
         type: "payment",
         status: "completed",
@@ -4229,7 +4328,8 @@ exports.getBalance = onCall(
     if (!uid) {
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
-    return getWalletBalancePayload(uid);
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
+    return getWalletBalancePayload(uid, schoolId);
   }
 );
 
@@ -4244,7 +4344,8 @@ exports.getWalletBalance = onCall(
     }
 
     try {
-      return getWalletBalancePayload(uid);
+      const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
+      return getWalletBalancePayload(uid, schoolId);
     } catch (error) {
       console.error("getWalletBalance error:", error);
       throw new HttpsError("internal", "Failed to get wallet balance");
@@ -4263,10 +4364,11 @@ exports.listLedgerEntries = onCall(
     }
 
     const { limit: queryLimit = 50, type } = request.data || {};
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
 
     try {
       return {
-        entries: await listLedgerEntriesPayload(uid, queryLimit, type),
+        entries: await listLedgerEntriesPayload(uid, schoolId, queryLimit, type),
       };
     } catch (error) {
       console.error("listLedgerEntries error:", error);
@@ -4285,8 +4387,9 @@ exports.getTransactionHistory = onCall(
       throw new HttpsError("unauthenticated", "Must be logged in");
     }
     const { limit: queryLimit = 50, type } = request.data || {};
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
     return {
-      transactions: await listLedgerEntriesPayload(uid, queryLimit, type),
+      transactions: await listLedgerEntriesPayload(uid, schoolId, queryLimit, type),
     };
   }
 );
@@ -4303,12 +4406,15 @@ exports.requestRefund = onCall(
 
     const transactionId = String(request.data?.transactionId || "").trim();
     const reason = String(request.data?.reason || "").trim();
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
 
     if (!transactionId) {
       throw new HttpsError("invalid-argument", "Missing transactionId");
     }
 
-    const transactionDoc = await db.collection("transactions").doc(transactionId).get();
+    const transactionDoc = schoolId
+      ? await getUserSchoolDoc(uid, schoolId, "transactions", transactionId).get()
+      : await db.collection("transactions").doc(transactionId).get();
     if (!transactionDoc.exists) {
       throw new HttpsError("not-found", "Transaction not found");
     }
@@ -4320,6 +4426,7 @@ exports.requestRefund = onCall(
 
     const refundRequestRef = await db.collection("refundRequests").add({
       userId: uid,
+      schoolId: schoolId || null,
       transactionId,
       reason,
       status: "pending",
@@ -4344,7 +4451,8 @@ exports.trackAchievement = onCall(
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Must be logged in");
 
-    const { achievementId, progress, schoolId } = request.data;
+    const { achievementId, progress } = request.data;
+    const schoolId = await resolveUserSchoolId(uid, request.data?.schoolId || null);
     if (!achievementId || progress === undefined) {
       throw new HttpsError("invalid-argument", "Missing achievementId or progress");
     }
@@ -4362,13 +4470,19 @@ exports.trackAchievement = onCall(
     const wasUnlocked = progress >= requirement;
 
     try {
-      const achievementRef = db.collection("users").doc(uid).collection("achievements").doc(achievementId);
+      const achievementRef = schoolId
+        ? getUserSchoolDoc(uid, schoolId, "achievements", achievementId)
+        : db.collection("users").doc(uid).collection("achievements").doc(achievementId);
       const existing = await achievementRef.get();
-      const existingData = existing.exists ? existing.data() : null;
+      const legacyExisting = (!existing.exists)
+        ? await db.collection("users").doc(uid).collection("achievements").doc(achievementId).get().catch(() => null)
+        : null;
+      const existingData = existing.exists ? existing.data() : legacyExisting?.data?.() || null;
 
       const newData = {
         progress,
         unlocked: wasUnlocked,
+        schoolId: schoolId || null,
         updatedAt: FieldValue.serverTimestamp(),
       };
 
@@ -4661,11 +4775,10 @@ exports.generateDailyBrief = onSchedule(
           const userData = userDoc.data();
 
           // 取得用戶的課程（從 AsyncStorage 無法在後端讀，改由用戶 Firestore profile 存）
-          const schoolId = userData.schoolId;
+          const schoolId = userData.primarySchoolId || userData.schoolId;
           if (!schoolId) return;
 
           // 取得今日課程 (透過 schedule subcollection 或 直接從 groups 取)
-          const todayDOW = new Date().getDay();
           const briefParts = [];
 
           // 統計今日課程（查詢用戶加入的所有群組 members 紀錄）
@@ -4700,8 +4813,9 @@ exports.generateDailyBrief = onSchedule(
 
           const content = briefParts.join(" ");
 
-          await db.collection("users").doc(uid).collection("dailyBriefs").doc(today).set({
+          await getUserSchoolDoc(uid, schoolId, "dailyBriefs", today).set({
             content,
+            schoolId,
             generatedAt: FieldValue.serverTimestamp(),
             date: today,
           });
@@ -4736,15 +4850,21 @@ exports.generateWeeklyReport = onSchedule(
         usersSnap.docs.map(async (userDoc) => {
           const uid = userDoc.id;
           const userData = userDoc.data();
-          const schoolId = userData.schoolId;
+          const schoolId = userData.primarySchoolId || userData.schoolId;
           if (!schoolId) return;
 
           // 統計本週成就解鎖數
-          const achievementsSnap = await db.collection("users").doc(uid).collection("achievements")
+          const achievementsSnap = await getUserSchoolCollection(uid, schoolId, "achievements")
             .where("unlocked", "==", true)
             .where("updatedAt", ">=", Timestamp.fromDate(weekStart))
             .get()
-            .catch(() => ({ docs: [] }));
+            .catch(async () => (
+              db.collection("users").doc(uid).collection("achievements")
+                .where("unlocked", "==", true)
+                .where("updatedAt", ">=", Timestamp.fromDate(weekStart))
+                .get()
+                .catch(() => ({ docs: [] }))
+            ));
 
           const newAchievements = achievementsSnap.docs.length;
 
@@ -4769,8 +4889,9 @@ exports.generateWeeklyReport = onSchedule(
             ? `本週你${summaryParts.join("、")}。繼續保持！`
             : "本週繼續努力，下週會更好！";
 
-          await db.collection("users").doc(uid).collection("weeklyReports").doc(weekId).set({
+          await getUserSchoolDoc(uid, schoolId, "weeklyReports", weekId).set({
             weekId,
+            schoolId,
             weekStart: Timestamp.fromDate(weekStart),
             weekEnd: Timestamp.fromDate(now),
             summary,

@@ -492,8 +492,7 @@ export const mockSource: DataSource = {
   async createConversation(participantIds: string[]): Promise<Conversation> {
     return {
       id: generateId(),
-      participants: participantIds,
-      participantIds,
+      memberIds: participantIds,
       lastMessage: null,
       lastMessageAt: null,
       unreadCount: 0,

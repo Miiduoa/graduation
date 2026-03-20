@@ -50,7 +50,7 @@ struct AnnouncementEntry: TimelineEntry {
 
 class WidgetDataManager {
     static let shared = WidgetDataManager()
-    private let appGroupId = "group.campus.app.shared"
+    private let appGroupId = "group.com.campus.app"
     
     private var userDefaults: UserDefaults? {
         return UserDefaults(suiteName: appGroupId)

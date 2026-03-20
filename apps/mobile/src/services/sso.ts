@@ -22,6 +22,7 @@ import {
 } from "@campus/shared/src/auth";
 import { getAuthInstance, getDb, hasUsableFirebaseConfig } from "../firebase";
 import { saveMockAuthSession } from "./mockAuth";
+import { getReleaseConfig } from "./release";
 
 export type { SchoolSSOConfig, SSOProvider, SSOUserInfo } from "@campus/shared/src/auth";
 
@@ -113,8 +114,12 @@ function getAppScheme(): string {
 }
 
 function isMockSsoEnabled(): boolean {
+  if (getReleaseConfig().isReleaseLike) {
+    return false;
+  }
+
   const extra = (Constants.expoConfig as any)?.extra ?? {};
-  return extra.enableMockSSO === true || process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === "true";
+  return extra.enableMockSSO === true;
 }
 
 function getRawTestSchoolCredentialConfig():
@@ -128,6 +133,10 @@ function getRawTestSchoolCredentialConfig():
 export function getTestSchoolCredentialConfig(
   schoolId: string
 ): TestSchoolCredentialConfig | null {
+  if (getReleaseConfig().isReleaseLike) {
+    return null;
+  }
+
   const config = getRawTestSchoolCredentialConfig();
   if (!config?.enabled) return null;
 

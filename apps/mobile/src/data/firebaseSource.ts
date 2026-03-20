@@ -141,6 +141,21 @@ function parseDocument<T extends { id: string }>(doc: { id: string; data: () => 
   return parsed as T;
 }
 
+function normalizeConversationRecord(row: Record<string, unknown>): Conversation {
+  const memberIds = Array.isArray(row.memberIds)
+    ? row.memberIds
+    : Array.isArray(row.participants)
+      ? row.participants
+      : Array.isArray(row.participantIds)
+        ? row.participantIds
+        : [];
+
+  return {
+    ...(row as Conversation),
+    memberIds: memberIds.filter((entry): entry is string => typeof entry === "string"),
+  };
+}
+
 function applyQueryOptions(
   constraints: QueryConstraint[],
   options?: QueryOptions
@@ -1402,22 +1417,24 @@ export const firebaseSource: DataSource = {
 
   // ===== 訊息 =====
   async listConversations(userId, options) {
-    return fetchCollection<Conversation>(
+    const rows = await fetchCollection<Conversation>(
       "conversations",
-      [where("participants", "array-contains", userId), orderBy("updatedAt", "desc")],
+      [where("memberIds", "array-contains", userId), orderBy("updatedAt", "desc")],
       undefined,
       options
     );
+
+    return rows.map((row) => normalizeConversationRecord(row as unknown as Record<string, unknown>));
   },
 
   async getConversation(id) {
-    return fetchDocument<Conversation>("conversations", id);
+    const row = await fetchDocument<Conversation>("conversations", id);
+    return row ? normalizeConversationRecord(row as unknown as Record<string, unknown>) : null;
   },
 
   async createConversation(participantIds) {
     return createDocument<Conversation>("conversations", {
-      participants: participantIds,
-      participantIds,
+      memberIds: participantIds,
       schoolId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
