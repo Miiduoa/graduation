@@ -4,6 +4,7 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getScopedStorageKey, makeScopedStoragePrefix } from "../services/scopedStorage";
 import type {
   WidgetType,
   AllWidgetData,
@@ -19,7 +20,7 @@ import type {
   LostFoundWidgetData,
 } from "./types";
 
-const WIDGET_CACHE_PREFIX = "campus.widget.cache.";
+const WIDGET_CACHE_PREFIX = makeScopedStoragePrefix("widget-cache");
 const WIDGET_CACHE_TTL = 5 * 60 * 1000; // 5 分鐘快取
 
 interface CacheEntry<T> {
@@ -29,12 +30,12 @@ interface CacheEntry<T> {
 
 async function getCache<T>(key: string): Promise<T | null> {
   try {
-    const cached = await AsyncStorage.getItem(WIDGET_CACHE_PREFIX + key);
+    const cached = await AsyncStorage.getItem(key);
     if (!cached) return null;
     
     const entry: CacheEntry<T> = JSON.parse(cached);
     if (Date.now() - entry.timestamp > WIDGET_CACHE_TTL) {
-      await AsyncStorage.removeItem(WIDGET_CACHE_PREFIX + key);
+      await AsyncStorage.removeItem(key);
       return null;
     }
     return entry.data;
@@ -46,10 +47,25 @@ async function getCache<T>(key: string): Promise<T | null> {
 async function setCache<T>(key: string, data: T): Promise<void> {
   try {
     const entry: CacheEntry<T> = { data, timestamp: Date.now() };
-    await AsyncStorage.setItem(WIDGET_CACHE_PREFIX + key, JSON.stringify(entry));
+    await AsyncStorage.setItem(key, JSON.stringify(entry));
   } catch {
     // Ignore cache errors
   }
+}
+
+function makeWidgetCacheKey(
+  scope: string,
+  params: {
+    userId?: string;
+    schoolId?: string;
+    extraKey?: string;
+  } = {}
+): string {
+  return getScopedStorageKey("widget-cache", {
+    uid: params.userId ?? null,
+    schoolId: params.schoolId ?? null,
+    scope: params.extraKey ? `${scope}-${params.extraKey}` : scope,
+  });
 }
 
 function getDayOfWeek(date: Date): string {
@@ -73,7 +89,7 @@ export async function getTodayScheduleData(
   userId: string,
   schoolId: string
 ): Promise<TodayScheduleWidgetData> {
-  const cacheKey = `todaySchedule_${userId}_${schoolId}`;
+  const cacheKey = makeWidgetCacheKey("todaySchedule", { userId, schoolId });
   const cached = await getCache<TodayScheduleWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -106,7 +122,7 @@ export async function getNextClassData(
   userId: string,
   schoolId: string
 ): Promise<NextClassWidgetData> {
-  const cacheKey = `nextClass_${userId}_${schoolId}`;
+  const cacheKey = makeWidgetCacheKey("nextClass", { userId, schoolId });
   const cached = await getCache<NextClassWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -166,7 +182,7 @@ export async function getCafeteriaMenuData(
   schoolId: string,
   cafeteriaId?: string
 ): Promise<CafeteriaMenuWidgetData> {
-  const cacheKey = `cafeteriaMenu_${schoolId}_${cafeteriaId || "default"}`;
+  const cacheKey = makeWidgetCacheKey("cafeteriaMenu", { schoolId, extraKey: cafeteriaId || "default" });
   const cached = await getCache<CafeteriaMenuWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -201,7 +217,7 @@ export async function getBusArrivalData(
   schoolId: string,
   stopId?: string
 ): Promise<BusArrivalWidgetData> {
-  const cacheKey = `busArrival_${schoolId}_${stopId || "default"}`;
+  const cacheKey = makeWidgetCacheKey("busArrival", { schoolId, extraKey: stopId || "default" });
   const cached = await getCache<BusArrivalWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -228,7 +244,7 @@ export async function getLibraryData(
   userId: string,
   schoolId: string
 ): Promise<LibraryWidgetData> {
-  const cacheKey = `library_${userId}_${schoolId}`;
+  const cacheKey = makeWidgetCacheKey("library", { userId, schoolId });
   const cached = await getCache<LibraryWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -260,7 +276,7 @@ export async function getEventCountdownData(
   schoolId: string,
   userId?: string
 ): Promise<EventCountdownWidgetData> {
-  const cacheKey = `eventCountdown_${schoolId}_${userId || "anon"}`;
+  const cacheKey = makeWidgetCacheKey("eventCountdown", { userId, schoolId });
   const cached = await getCache<EventCountdownWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -298,7 +314,7 @@ export async function getEventCountdownData(
 export async function getAnnouncementData(
   schoolId: string
 ): Promise<AnnouncementWidgetData> {
-  const cacheKey = `announcement_${schoolId}`;
+  const cacheKey = makeWidgetCacheKey("announcement", { schoolId });
   const cached = await getCache<AnnouncementWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -366,7 +382,7 @@ export async function getGradesData(
   userId: string,
   schoolId: string
 ): Promise<GradesWidgetData> {
-  const cacheKey = `grades_${userId}_${schoolId}`;
+  const cacheKey = makeWidgetCacheKey("grades", { userId, schoolId });
   const cached = await getCache<GradesWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -394,7 +410,7 @@ export async function getGradesData(
 export async function getLostFoundData(
   schoolId: string
 ): Promise<LostFoundWidgetData> {
-  const cacheKey = `lostFound_${schoolId}`;
+  const cacheKey = makeWidgetCacheKey("lostFound", { schoolId });
   const cached = await getCache<LostFoundWidgetData>(cacheKey);
   if (cached) return cached;
 
@@ -492,8 +508,8 @@ export async function refreshWidgetData(
   }
 ): Promise<AllWidgetData> {
   // 先清除該 Widget 的快取
-  const cacheKey = `${type}_${params.userId || "anon"}_${params.schoolId}`;
-  await AsyncStorage.removeItem(WIDGET_CACHE_PREFIX + cacheKey);
+  const cacheKey = makeWidgetCacheKey(type, { userId: params.userId, schoolId: params.schoolId });
+  await AsyncStorage.removeItem(cacheKey);
   
   // 重新獲取資料
   return getWidgetData(type, params);

@@ -11,6 +11,7 @@ import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { chatWithAI, getAIStatus, type AIMessage, type AIContext, createCancellableChat } from "../services/ai";
 import { analytics } from "../services/analytics";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
 type CourseCategory = "required" | "elective" | "general" | "free";
 type CourseDifficulty = "easy" | "medium" | "hard";
@@ -30,8 +31,8 @@ type RecommendedCourse = {
   matchScore: number;
 };
 
-const PREFERENCES_STORAGE_KEY = "@ai_course_advisor_preferences";
-const CHAT_HISTORY_STORAGE_KEY = "@ai_course_advisor_chat_history";
+const LEGACY_PREFERENCES_STORAGE_KEY = "@ai_course_advisor_preferences";
+const LEGACY_CHAT_HISTORY_STORAGE_KEY = "@ai_course_advisor_chat_history";
 
 type UserPreference = {
   interests: string[];
@@ -110,6 +111,14 @@ export function AICourseAdvisorScreen(props: any) {
     () => ds.listCourses?.(school.id) ?? Promise.resolve([]),
     [ds, school.id]
   );
+  const preferencesStorageKey = useMemo(
+    () => getScopedStorageKey("ai-course-advisor-preferences", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+    [auth.user?.uid, school.id]
+  );
+  const chatHistoryStorageKey = useMemo(
+    () => getScopedStorageKey("ai-course-advisor-chat-history", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+    [auth.user?.uid, school.id]
+  );
 
   const TABS = ["AI 推薦", "對話諮詢", "偏好設定"];
 
@@ -124,7 +133,7 @@ export function AICourseAdvisorScreen(props: any) {
   useEffect(() => {
     loadSavedPreferences();
     loadChatHistory();
-  }, []);
+  }, [preferencesStorageKey, chatHistoryStorageKey]);
 
   useEffect(() => {
     if (isAnalyzing) {
@@ -143,7 +152,7 @@ export function AICourseAdvisorScreen(props: any) {
 
   const loadSavedPreferences = async () => {
     try {
-      const saved = await AsyncStorage.getItem(PREFERENCES_STORAGE_KEY);
+      const saved = await getFirstStorageValue([preferencesStorageKey, LEGACY_PREFERENCES_STORAGE_KEY]);
       if (saved) {
         setPreferences(JSON.parse(saved));
       }
@@ -154,7 +163,7 @@ export function AICourseAdvisorScreen(props: any) {
 
   const savePreferences = async (prefs: UserPreference) => {
     try {
-      await AsyncStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(prefs));
+      await AsyncStorage.setItem(preferencesStorageKey, JSON.stringify(prefs));
       setPreferences(prefs);
     } catch (error) {
       console.error("Failed to save preferences:", error);
@@ -163,7 +172,7 @@ export function AICourseAdvisorScreen(props: any) {
 
   const loadChatHistory = async () => {
     try {
-      const saved = await AsyncStorage.getItem(CHAT_HISTORY_STORAGE_KEY);
+      const saved = await getFirstStorageValue([chatHistoryStorageKey, LEGACY_CHAT_HISTORY_STORAGE_KEY]);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -178,7 +187,7 @@ export function AICourseAdvisorScreen(props: any) {
   const saveChatHistory = async (history: typeof chatHistory) => {
     try {
       const limitedHistory = history.slice(-50);
-      await AsyncStorage.setItem(CHAT_HISTORY_STORAGE_KEY, JSON.stringify(limitedHistory));
+      await AsyncStorage.setItem(chatHistoryStorageKey, JSON.stringify(limitedHistory));
     } catch (error) {
       console.error("Failed to save chat history:", error);
     }

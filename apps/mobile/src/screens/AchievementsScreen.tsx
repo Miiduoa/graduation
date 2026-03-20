@@ -24,6 +24,7 @@ import {
   onSnapshot,
   where,
 } from "firebase/firestore";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
 type Achievement = {
   id: string;
@@ -72,7 +73,7 @@ const ACHIEVEMENT_DEFINITIONS: Omit<Achievement, "progress" | "unlocked" | "unlo
   { id: "streak_30", title: "鐵粉認證", description: "連續 30 天登入", icon: "medal", category: "engagement", points: 300, requirement: 30, rarity: "legendary" },
 ];
 
-const STREAK_KEY = "campus.streak.v1";
+const LEGACY_STREAK_KEY = "campus.streak.v1";
 
 type StreakData = {
   currentStreak: number;
@@ -81,9 +82,13 @@ type StreakData = {
   totalDays: number;
 };
 
-async function updateStreak(): Promise<StreakData> {
+function getStreakStorageKey(userId: string | null, schoolId: string | null): string {
+  return getScopedStorageKey("streak", { uid: userId, schoolId });
+}
+
+async function updateStreak(storageKey: string): Promise<StreakData> {
   try {
-    const raw = await AsyncStorage.getItem(STREAK_KEY);
+    const raw = await getFirstStorageValue([storageKey, LEGACY_STREAK_KEY]);
     const existing: StreakData = raw ? JSON.parse(raw) : {
       currentStreak: 0, longestStreak: 0,
       lastLoginDate: "", totalDays: 0,
@@ -102,7 +107,7 @@ async function updateStreak(): Promise<StreakData> {
       lastLoginDate: today,
       totalDays: existing.totalDays + 1,
     };
-    await AsyncStorage.setItem(STREAK_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(storageKey, JSON.stringify(updated));
     return updated;
   } catch {
     return { currentStreak: 1, longestStreak: 1, lastLoginDate: "", totalDays: 1 };
@@ -406,10 +411,14 @@ export function AchievementsScreen(props: any) {
   const [refreshKey, setRefreshKey] = useState(0);
   const [streakData, setStreakData] = useState<StreakData>({ currentStreak: 0, longestStreak: 0, lastLoginDate: "", totalDays: 0 });
   const [showStreakShare, setShowStreakShare] = useState(false);
+  const streakStorageKey = useMemo(
+    () => getStreakStorageKey(auth.user?.uid ?? null, school.id),
+    [auth.user?.uid, school.id]
+  );
 
   useEffect(() => {
-    updateStreak().then(setStreakData);
-  }, []);
+    updateStreak(streakStorageKey).then(setStreakData);
+  }, [streakStorageKey]);
 
   const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id, refreshKey]);
 

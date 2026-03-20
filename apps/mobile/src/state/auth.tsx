@@ -9,6 +9,7 @@ import { clearAllCache, clearCacheForSchool } from "../data/cachedSource";
 import { clearAllOfflineData, getOfflineQueue } from "../services/offline";
 import { getCachedPushToken, removePushTokenFromFirestore } from "../services/notifications";
 import { clearMockAuthSession, loadMockAuthSession } from "../services/mockAuth";
+import { clearUserScopedStorage } from "../services/scopedStorage";
 
 import type { UserRole as DataUserRole } from "../data/types";
 
@@ -18,7 +19,9 @@ export type UserProfile = {
   uid: string;
   email?: string | null;
   schoolId?: string | null;
+  primarySchoolId?: string | null;
   role: UserRole;
+  schoolMembershipRole?: string | null;
   displayName?: string | null;
   department?: string | null;
   studentId?: string | null;
@@ -55,14 +58,26 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
     const ref = doc(db, "users", u.uid);
     const snap = await getDoc(ref);
     const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
+    const schoolId =
+      (data.primarySchoolId as string | undefined) ??
+      (data.schoolId as string | undefined) ??
+      resolveSchoolByEmail(u.email)?.id ??
+      null;
+    let schoolMembershipRole: string | null = null;
 
-    const schoolId = (data.schoolId as string) ?? resolveSchoolByEmail(u.email)?.id ?? null;
+    if (schoolId) {
+      const membershipSnap = await getDoc(doc(db, "schools", schoolId, "members", u.uid)).catch(() => null);
+      const membershipData = membershipSnap?.exists() ? (membershipSnap.data() as Record<string, unknown>) : null;
+      schoolMembershipRole = typeof membershipData?.role === "string" ? membershipData.role : null;
+    }
 
     return {
       uid: u.uid,
       email: u.email,
       schoolId,
+      primarySchoolId: schoolId,
       role: (data.role as UserRole) ?? "student",
+      schoolMembershipRole,
       displayName: (data.displayName as string) ?? null,
       department: (data.department as string) ?? null,
       studentId: (data.studentId as string) ?? null,
@@ -77,7 +92,9 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       uid: u.uid,
       email: u.email,
       schoolId: null,
+      primarySchoolId: null,
       role: "student",
+      schoolMembershipRole: null,
       displayName: null,
       department: null,
       studentId: null,
@@ -102,7 +119,9 @@ function toMockUserProfile(session: {
     uid: session.uid,
     email: session.email,
     schoolId: session.schoolId,
+    primarySchoolId: session.schoolId,
     role: session.role,
+    schoolMembershipRole: null,
     displayName: session.displayName,
     department: session.department ?? null,
     studentId: session.studentId ?? null,
@@ -180,8 +199,17 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   
   const isEditor = useMemo(() => {
     const role = profile?.role;
-    return isAdmin || role === "admin" || role === "teacher" || role === "professor" || role === "principal";
-  }, [isAdmin, profile?.role]);
+    const schoolMembershipRole = profile?.schoolMembershipRole;
+    return (
+      isAdmin ||
+      schoolMembershipRole === "admin" ||
+      schoolMembershipRole === "editor" ||
+      role === "admin" ||
+      role === "teacher" ||
+      role === "professor" ||
+      role === "principal"
+    );
+  }, [isAdmin, profile?.role, profile?.schoolMembershipRole]);
 
   const refreshProfile = useCallback(async () => {
     if (!hasUsableFirebaseConfig()) {
@@ -351,16 +379,11 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         console.warn("[auth] clearAllOfflineData failed:", e);
         throw e;
       }),
-      AsyncStorage.multiRemove([
-        `@favorites_${currentUserId}`,
-        `@search_history_${currentUserId}`,
-        "@schedule_courses",
-        "@schedule_events",
-        "@schedule_semester",
-        "@schedule_view",
-        "@schedule_filter",
-        ]).catch((e) => {
-        console.warn("[auth] AsyncStorage cleanup failed:", e);
+      clearUserScopedStorage({
+        uid: currentUserId ?? null,
+        schoolId: profile?.schoolId ?? null,
+      }).catch((e) => {
+        console.warn("[auth] Scoped storage cleanup failed:", e);
         throw e;
       }),
     ];
@@ -416,7 +439,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     } finally {
       isSigningOutRef.current = false;
     }
-  }, [user?.uid]);
+  }, [profile?.schoolId, user?.uid]);
 
   const handleSignOutWithWarning = useCallback(async (): Promise<boolean> => {
     const pendingQueue = await getOfflineQueue();

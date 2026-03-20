@@ -4,6 +4,7 @@ import type { Course, CourseSchedule, CalendarEvent } from "../data/types";
 import { useAuth } from "./auth";
 import { getDataSource, hasDataSource } from "../data";
 import { useSchool } from "./school";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
 // ===== Types =====
 
@@ -68,13 +69,23 @@ type ScheduleContextType = {
 
 // ===== Storage Keys =====
 
-const STORAGE_KEYS = {
+const LEGACY_STORAGE_KEYS = {
   COURSES: "@schedule_courses",
   EVENTS: "@schedule_events",
   SEMESTER: "@schedule_semester",
   VIEW: "@schedule_view",
   FILTER: "@schedule_filter",
 };
+
+function getScheduleStorageKeys(userId: string | null, schoolId: string | null) {
+  return {
+    COURSES: getScopedStorageKey("schedule-courses", { uid: userId, schoolId }),
+    EVENTS: getScopedStorageKey("schedule-events", { uid: userId, schoolId }),
+    SEMESTER: getScopedStorageKey("schedule-semester", { uid: userId, schoolId }),
+    VIEW: getScopedStorageKey("schedule-view", { uid: userId, schoolId }),
+    FILTER: getScopedStorageKey("schedule-filter", { uid: userId, schoolId }),
+  };
+}
 
 // ===== Context =====
 
@@ -160,6 +171,7 @@ type ScheduleProviderProps = {
 export function ScheduleProvider({ children }: ScheduleProviderProps) {
   const { user } = useAuth();
   const { schoolId } = useSchool();
+  const currentUserId = user?.uid ?? null;
   
   const [courses, setCourses] = useState<Course[]>([]);
   const [personalEvents, setPersonalEvents] = useState<ScheduleEvent[]>([]);
@@ -173,6 +185,7 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
     showPersonal: true,
   });
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const storageKeys = useMemo(() => getScheduleStorageKeys(currentUserId, schoolId), [currentUserId, schoolId]);
   
   // 追蹤元件是否已卸載
   const isMountedRef = useRef(true);
@@ -217,7 +230,10 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
 
   // Load saved data
   useEffect(() => {
+    let cancelled = false;
+
     async function loadData() {
+      setLoading(true);
       try {
         const [
           storedCourses,
@@ -226,48 +242,66 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
           storedView,
           storedFilter,
         ] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.COURSES),
-          AsyncStorage.getItem(STORAGE_KEYS.EVENTS),
-          AsyncStorage.getItem(STORAGE_KEYS.SEMESTER),
-          AsyncStorage.getItem(STORAGE_KEYS.VIEW),
-          AsyncStorage.getItem(STORAGE_KEYS.FILTER),
+          getFirstStorageValue([storageKeys.COURSES, LEGACY_STORAGE_KEYS.COURSES]),
+          getFirstStorageValue([storageKeys.EVENTS, LEGACY_STORAGE_KEYS.EVENTS]),
+          getFirstStorageValue([storageKeys.SEMESTER, LEGACY_STORAGE_KEYS.SEMESTER]),
+          getFirstStorageValue([storageKeys.VIEW, LEGACY_STORAGE_KEYS.VIEW]),
+          getFirstStorageValue([storageKeys.FILTER, LEGACY_STORAGE_KEYS.FILTER]),
         ]);
 
-        if (storedCourses) setCourses(JSON.parse(storedCourses));
-        if (storedEvents) setPersonalEvents(JSON.parse(storedEvents));
-        if (storedSemester) setCurrentSemesterState(storedSemester);
-        if (storedView) setViewState(storedView as ScheduleView);
-        if (storedFilter) setFilterState(JSON.parse(storedFilter));
+        if (cancelled) return;
+
+        setCourses(storedCourses ? JSON.parse(storedCourses) : []);
+        setPersonalEvents(storedEvents ? JSON.parse(storedEvents) : []);
+        setCurrentSemesterState(storedSemester || getCurrentSemester());
+        setViewState(storedView ? (storedView as ScheduleView) : "week");
+        setFilterState(
+          storedFilter
+            ? JSON.parse(storedFilter)
+            : {
+                showClasses: true,
+                showEvents: true,
+                showPersonal: true,
+              }
+        );
       } catch (e) {
         console.error("[Schedule] Failed to load data:", e);
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     loadData();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [storageKeys]);
 
   // Auto-fetch courses from server when user logs in
   // 使用 ref 追蹤是否已經嘗試過獲取，避免重複請求
   const hasFetchedRef = useRef(false);
-  const previousUserRef = useRef<string | null>(null);
+  const previousContextRef = useRef<string | null>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
   const refreshScheduleRef = useRef<() => Promise<void>>(async () => {});
   
   useEffect(() => {
-    const currentUserId = user?.uid ?? null;
-    const userChanged = previousUserRef.current !== currentUserId;
-    previousUserRef.current = currentUserId;
+    const currentContextKey = `${currentUserId ?? "anonymous"}:${schoolId ?? "default"}`;
+    const contextChanged = previousContextRef.current !== currentContextKey;
+    previousContextRef.current = currentContextKey;
     
-    // 用戶改變時重置
-    if (userChanged && !currentUserId) {
+    if (contextChanged) {
       hasFetchedRef.current = false;
-      // 中止任何正在進行的請求
       if (fetchAbortRef.current) {
         fetchAbortRef.current.abort();
         fetchAbortRef.current = null;
       }
+    }
+
+    // 用戶改變時重置
+    if (!currentUserId) {
       return;
     }
     
@@ -300,45 +334,45 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
         fetchAbortRef.current = null;
       }
     };
-  }, [user?.uid, loading, courses.length]);
+  }, [currentUserId, schoolId, loading, courses.length]);
 
   // Save courses when changed
   useEffect(() => {
     if (!loading) {
-      AsyncStorage.setItem(STORAGE_KEYS.COURSES, JSON.stringify(courses)).catch(
+      AsyncStorage.setItem(storageKeys.COURSES, JSON.stringify(courses)).catch(
         (e) => console.error("[Schedule] Failed to save courses:", e)
       );
     }
-  }, [courses, loading]);
+  }, [courses, loading, storageKeys.COURSES]);
 
   // Save personal events when changed
   useEffect(() => {
     if (!loading) {
-      AsyncStorage.setItem(STORAGE_KEYS.EVENTS, JSON.stringify(personalEvents)).catch(
+      AsyncStorage.setItem(storageKeys.EVENTS, JSON.stringify(personalEvents)).catch(
         (e) => console.error("[Schedule] Failed to save events:", e)
       );
     }
-  }, [personalEvents, loading]);
+  }, [personalEvents, loading, storageKeys.EVENTS]);
 
   const setCurrentSemester = useCallback(async (semester: string) => {
     setCurrentSemesterState(semester);
-    await AsyncStorage.setItem(STORAGE_KEYS.SEMESTER, semester);
-  }, []);
+    await AsyncStorage.setItem(storageKeys.SEMESTER, semester);
+  }, [storageKeys.SEMESTER]);
 
   const setView = useCallback(async (newView: ScheduleView) => {
     setViewState(newView);
-    await AsyncStorage.setItem(STORAGE_KEYS.VIEW, newView);
-  }, []);
+    await AsyncStorage.setItem(storageKeys.VIEW, newView);
+  }, [storageKeys.VIEW]);
 
   const setFilter = useCallback(async (newFilter: Partial<ScheduleFilter>) => {
     setFilterState((prev) => {
       const updated = { ...prev, ...newFilter };
-      AsyncStorage.setItem(STORAGE_KEYS.FILTER, JSON.stringify(updated)).catch(
+      AsyncStorage.setItem(storageKeys.FILTER, JSON.stringify(updated)).catch(
         (e) => console.error("[Schedule] Failed to save filter:", e)
       );
       return updated;
     });
-  }, []);
+  }, [storageKeys.FILTER]);
 
   const addCourse = useCallback(async (course: Course) => {
     const events = courseToScheduleEvents(course);

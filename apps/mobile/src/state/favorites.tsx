@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
 export type FavoriteKind = "announcement" | "event" | "poi" | "menu";
 
@@ -21,6 +22,10 @@ const STORAGE_KEY_PREFIX = "campus.favorites";
 const STORAGE_VERSION = "v3"; // Updated version to include schoolId
 
 function getStorageKey(userId: string | null, schoolId: string | null): string {
+  return getScopedStorageKey("favorites", { uid: userId, schoolId });
+}
+
+function getLegacyStorageKey(userId: string | null, schoolId: string | null): string {
   const userPart = userId || "anonymous";
   const schoolPart = schoolId || "default";
   return `${STORAGE_KEY_PREFIX}.${userPart}.${schoolPart}.${STORAGE_VERSION}`;
@@ -51,7 +56,7 @@ export function FavoritesProvider(props: {
     
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(currentKey);
+        const raw = await getFirstStorageValue([currentKey, getLegacyStorageKey(userId, schoolId)]);
         if (cancelled) return;
         
         if (!raw) {

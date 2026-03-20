@@ -17,8 +17,9 @@ import { ContextStrip, ConfidenceBadge } from "../ui/campusOs";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import { resolveRoleMode } from "../utils/campusOs";
+import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
-const STREAK_KEY = "campus.streak.v1";
+const LEGACY_STREAK_KEY = "campus.streak.v1";
 
 type StreakData = {
   currentStreak: number;
@@ -27,9 +28,9 @@ type StreakData = {
   totalDays: number;
 };
 
-async function readStreak(): Promise<StreakData | null> {
+async function readStreak(storageKey: string): Promise<StreakData | null> {
   try {
-    const raw = await AsyncStorage.getItem(STREAK_KEY);
+    const raw = await getFirstStorageValue([storageKey, LEGACY_STREAK_KEY]);
     if (!raw) return null;
     return JSON.parse(raw) as StreakData;
   } catch {
@@ -113,6 +114,10 @@ export function ProfileScreen(props: any) {
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
+  const streakStorageKey = useMemo(
+    () => getScopedStorageKey("streak", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+    [auth.user?.uid, school.id]
+  );
 
   const [streak, setStreak] = useState<StreakData | null>(null);
   const [loadingStreak, setLoadingStreak] = useState(true);
@@ -128,7 +133,7 @@ export function ProfileScreen(props: any) {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const s = await readStreak();
+      const s = await readStreak(streakStorageKey);
       if (!mounted) return;
       setStreak(s);
       setLoadingStreak(false);
@@ -136,7 +141,7 @@ export function ProfileScreen(props: any) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [streakStorageKey]);
 
   const identity = auth.user
     ? auth.profile?.displayName ?? auth.user.email ?? "校園使用者"
