@@ -37,6 +37,7 @@ import {
   formatDueWindow,
   getNextCourse,
   getTodayCourses,
+  isTeachingRole,
   resolveRoleMode,
   roleSummary,
   toInboxItem,
@@ -264,7 +265,11 @@ export function TodayScreen(props: any) {
 
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
   const roleCopy = roleSummary(roleMode);
+  const teachingMode = isTeachingRole(auth.profile?.role);
   const segment = getTimeSegment();
+  const displayName = auth.profile?.displayName?.split(" ")[0];
+  const roleFallbackName =
+    roleMode === "teacher" ? "老師" : roleMode === "admin" ? "主管" : roleMode === "guest" ? "你" : "同學";
 
   const { items: inboxTasks, loading: inboxLoading, refresh: refreshInbox, refreshing } = useAsyncList<InboxTask>(
     async () => {
@@ -289,11 +294,16 @@ export function TodayScreen(props: any) {
     [ds, school.id]
   );
 
+  const rankedInboxItems = useMemo(
+    () => inboxTasks.map(toInboxItem).sort((a, b) => a.priority - b.priority),
+    [inboxTasks]
+  );
+
   // Hero Action — 最重要的下一步（注意瓶頸理論）
   const nextAction = useMemo(() => {
     if (!auth.user) return null;
-    return inboxTasks.map(toInboxItem).sort((a, b) => b.priority - a.priority)[0] ?? null;
-  }, [auth.user, inboxTasks]);
+    return rankedInboxItems[0] ?? null;
+  }, [auth.user, rankedInboxItems]);
 
   const nextCourse = useMemo(() => getNextCourse(schedule.courses), [schedule.courses]);
   const todayCourses = useMemo(() => getTodayCourses(schedule.courses), [schedule.courses]);
@@ -378,8 +388,8 @@ export function TodayScreen(props: any) {
 
   // 高優先任務（顯示在收件匣摘要）
   const urgentTasks = useMemo(() =>
-    inboxTasks.map(toInboxItem).sort((a, b) => b.priority - a.priority).slice(0, 3),
-    [inboxTasks]
+    rankedInboxItems.slice(0, 3),
+    [rankedInboxItems]
   );
 
   const handleNextActionPress = () => {
@@ -387,7 +397,7 @@ export function TodayScreen(props: any) {
     if (nextAction.kind === "live" && nextAction.sessionId) {
       nav?.navigate?.("課程", {
         screen: "Classroom",
-        params: { groupId: nextAction.groupId, sessionId: nextAction.sessionId, isTeacher: false },
+        params: { groupId: nextAction.groupId, sessionId: nextAction.sessionId, isTeacher: teachingMode },
       });
       return;
     }
@@ -453,7 +463,9 @@ export function TodayScreen(props: any) {
   }, [segment, announcements, menus, events]);
 
   // 今日壓力摘要：沒有可靠完成態時，優先誠實呈現待處理壓力
-  const highPressureCount = inboxTasks.filter((t) => t.priority >= 70).length;
+  const highPressureCount = rankedInboxItems.filter(
+    (item) => item.urgency === "critical" || item.urgency === "high"
+  ).length;
   const totalToday = inboxTasks.length;
   const completionText =
     totalToday > 0
@@ -501,7 +513,7 @@ export function TodayScreen(props: any) {
               fontWeight: theme.typography.display.fontWeight ?? "800",
               letterSpacing: theme.typography.display.letterSpacing,
             }}>
-              {getGreeting()}，{auth.profile?.displayName?.split(" ")[0] ?? "同學"}
+              {getGreeting()}，{displayName ?? roleFallbackName}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 14, lineHeight: 21 }}>
               {totalToday > 0 ? completionText : roleCopy.hint}
@@ -558,17 +570,39 @@ export function TodayScreen(props: any) {
             title={nextAction.title}
             description={nextAction.reason}
             meta={nextAction.dueAt ? formatDueWindow(new Date(nextAction.dueAt)) : undefined}
-            tone={nextAction.kind === "live" ? "danger" : nextAction.priority >= 70 ? "warning" : "accent"}
+            tone={
+              nextAction.urgency === "critical"
+                ? "danger"
+                : nextAction.urgency === "high"
+                  ? "warning"
+                  : "accent"
+            }
             actionLabel={nextAction.actionLabel ?? "前往處理"}
             onPress={handleNextActionPress}
           />
         ) : (
-          <CompletionState
-            title="今天的主任務都完成了"
-            description="目前沒有急需處理的事項。可以看看課程進度或規劃明天。"
-            actionLabel="查看課程"
-            onPress={() => nav?.navigate?.("課程", { screen: "CoursesHome" })}
-          />
+          roleMode === "teacher" ? (
+            <CompletionState
+              title="目前沒有待批改或待發布的課務"
+              description="可以回到課程中樞整理教材、檢查點名，或提前安排下一堂課。"
+              actionLabel="打開課程中樞"
+              onPress={() => nav?.navigate?.("課程", { screen: "CourseHub" })}
+            />
+          ) : roleMode === "admin" ? (
+            <CompletionState
+              title="目前沒有需要立刻介入的校務事項"
+              description="可以前往管理控制台檢查公告、活動與成員權限狀態。"
+              actionLabel="打開管理台"
+              onPress={() => nav?.navigate?.("我的", { screen: "AdminDashboard" })}
+            />
+          ) : (
+            <CompletionState
+              title="今天的主任務都完成了"
+              description="目前沒有急需處理的事項。可以看看課程進度或規劃明天。"
+              actionLabel="查看課程"
+              onPress={() => nav?.navigate?.("課程", { screen: "CoursesHome" })}
+            />
+          )
         )}
 
         {/* ─── 今日課表時間軸 ─── */}
@@ -655,15 +689,13 @@ export function TodayScreen(props: any) {
                   title={task.title}
                   label={task.kind === "live" ? "課堂" : task.kind === "assignment" ? "作業" : "群組"}
                   dueAt={task.dueAt ? formatDueWindow(new Date(task.dueAt)) : undefined}
-                  urgency={
-                    task.priority >= 90 ? "critical"
-                    : task.priority >= 70 ? "high"
-                    : task.priority >= 40 ? "medium"
-                    : "low"
-                  }
+                  urgency={task.urgency}
                   onPress={() => {
                     if (task.kind === "live" && task.sessionId) {
-                      nav?.navigate?.("課程", { screen: "Classroom", params: { groupId: task.groupId, sessionId: task.sessionId, isTeacher: false } });
+                      nav?.navigate?.("課程", {
+                        screen: "Classroom",
+                        params: { groupId: task.groupId, sessionId: task.sessionId, isTeacher: teachingMode },
+                      });
                     } else if (task.assignmentId) {
                       nav?.navigate?.("收件匣", { screen: "AssignmentDetail", params: { groupId: task.groupId, assignmentId: task.assignmentId } });
                     } else {

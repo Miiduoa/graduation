@@ -71,6 +71,10 @@ function normalizeMaterialType(value: unknown): CourseMaterial["type"] {
   return "link";
 }
 
+function canManageMembership(role?: string) {
+  return role === "owner" || role === "instructor";
+}
+
 export async function listCourseSpaces(userId: string, schoolId?: string): Promise<CourseSpace[]> {
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
@@ -362,6 +366,7 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
   const tasks = await Promise.all(
     memberships.map(async (membership) => {
       const groupTasks: InboxTask[] = [];
+      const teachingMembership = canManageMembership(membership.role);
 
       if ((membership.unreadCount ?? 0) > 0) {
         groupTasks.push({
@@ -369,10 +374,19 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           kind: "group",
           groupId: membership.groupId,
           groupName: membership.name,
-          title: `${membership.name} 有未讀更新`,
-          subtitle: `有 ${membership.unreadCount} 則未讀課程動態`,
+          title: teachingMembership ? `${membership.name} 有新的課程動態` : `${membership.name} 有未讀更新`,
+          subtitle: teachingMembership
+            ? `有 ${membership.unreadCount} 則貼文、提問或課務異動待你確認`
+            : `有 ${membership.unreadCount} 則未讀課程動態`,
           priority: 4,
           unreadCount: membership.unreadCount,
+          preferredIntent: "read",
+          actionLabel: teachingMembership ? "查看動態" : undefined,
+          reason: teachingMembership
+            ? "新的課程動態可能包含學生提問、課務異動或需要你回應的內容"
+            : undefined,
+          consequence: teachingMembership ? "可能延後回覆學生，或漏掉課堂安排的變更" : undefined,
+          nextStep: teachingMembership ? "先看最新動態，再決定是否需要回覆或發布" : undefined,
         });
       }
 
@@ -397,10 +411,15 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
           kind: "live",
           groupId: membership.groupId,
           groupName: membership.name,
-          title: `${membership.name} 課堂互動進行中`,
-          subtitle: "可直接進入點名、投票與課堂提問",
+          title: teachingMembership ? `${membership.name} 課堂正在進行` : `${membership.name} 課堂互動進行中`,
+          subtitle: teachingMembership ? "可直接查看點名、互動與學生提問狀態" : "可直接進入點名、投票與課堂提問",
           sessionId: activeDoc.id,
           priority: 0,
+          preferredIntent: "join",
+          actionLabel: teachingMembership ? "進入課堂" : undefined,
+          reason: teachingMembership ? "課堂進行中時，教師最需要掌握簽到、互動與現場節奏" : undefined,
+          consequence: teachingMembership ? "可能錯過簽到窗口，或無法即時回應課堂問題" : undefined,
+          nextStep: teachingMembership ? "進入課堂模式，確認點名與互動狀態" : undefined,
         });
       }
 
@@ -410,13 +429,65 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
 
       for (const assignment of assignments) {
         const dueAt = toDate(assignment.dueAt);
-        if (!dueAt) continue;
-        const diff = dueAt.getTime() - now;
-        if (diff < 0 || diff > 7 * 24 * 60 * 60 * 1000) continue;
-
         const kind: InboxTask["kind"] =
           assignment.type === "quiz" || assignment.type === "exam" ? "quiz" : "assignment";
         const label = kind === "quiz" ? "評量" : "作業";
+
+        if (teachingMembership) {
+          const submissionsSnap = await getDocs(
+            collection(db, "groups", membership.groupId, "assignments", assignment.id, "submissions")
+          ).catch(() => null);
+          const submissions =
+            submissionsSnap?.docs.map((docSnap) => docSnap.data() as Record<string, unknown>) ?? [];
+          const submittedRows = submissions.filter((submission) => !!toDate(submission.submittedAt));
+          const ungradedCount = submittedRows.filter((submission) => typeof submission.grade !== "number").length;
+          const gradedCount = submittedRows.filter((submission) => typeof submission.grade === "number").length;
+
+          if (ungradedCount > 0) {
+            groupTasks.push({
+              id: `review-${membership.groupId}-${assignment.id}`,
+              kind,
+              groupId: membership.groupId,
+              groupName: membership.name,
+              title: `${String(assignment.title ?? "未命名任務")} 待批改 ${ungradedCount} 份`,
+              subtitle:
+                submittedRows.length > 0
+                  ? `${membership.name} · 已收 ${submittedRows.length} 份繳交`
+                  : `${membership.name} · 有新的學生繳交待處理`,
+              assignmentId: assignment.id,
+              priority: 1,
+              dueAt,
+              preferredIntent: "review",
+              actionLabel: "前往批改",
+              reason: "學生已提交內容，現在批改最能維持課程回饋節奏",
+              consequence: "回饋延後會讓學生不清楚是否需要修正或補強",
+              nextStep: "打開作業詳情，先處理未評分提交",
+            });
+          } else if (gradedCount > 0 && assignment.gradesPublished !== true) {
+            groupTasks.push({
+              id: `publish-${membership.groupId}-${assignment.id}`,
+              kind,
+              groupId: membership.groupId,
+              groupName: membership.name,
+              title: `${String(assignment.title ?? "未命名任務")} 可發布成績`,
+              subtitle: `${membership.name} · ${gradedCount} 份評分已完成，等待正式發布`,
+              assignmentId: assignment.id,
+              priority: 2,
+              dueAt,
+              preferredIntent: "review",
+              actionLabel: "前往發布",
+              reason: "這份作業的評分已整理完成，下一步應正式發布給學生",
+              consequence: "學生看不到成績與回饋，後續學習調整會被延後",
+              nextStep: "確認評分內容後，切換成績發布狀態",
+            });
+          }
+
+          continue;
+        }
+
+        if (!dueAt) continue;
+        const diff = dueAt.getTime() - now;
+        if (diff < 0 || diff > 7 * 24 * 60 * 60 * 1000) continue;
 
         groupTasks.push({
           id: `${kind}-${membership.groupId}-${assignment.id}`,

@@ -3,11 +3,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
-import { getAuthInstance, getDb, subscribeToTokenRefresh } from "../firebase";
+import { getAuthInstance, getDb, hasUsableFirebaseConfig, subscribeToTokenRefresh } from "../firebase";
 import { resolveSchoolByEmail } from "@campus/shared/src/schools";
 import { clearAllCache, clearCacheForSchool } from "../data/cachedSource";
 import { clearAllOfflineData, getOfflineQueue } from "../services/offline";
 import { getCachedPushToken, removePushTokenFromFirestore } from "../services/notifications";
+import { clearMockAuthSession, loadMockAuthSession } from "../services/mockAuth";
 
 import type { UserRole as DataUserRole } from "../data/types";
 
@@ -88,6 +89,67 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
   }
 }
 
+function toMockUserProfile(session: {
+  uid: string;
+  email: string;
+  schoolId: string;
+  displayName: string;
+  role: UserRole;
+  department?: string | null;
+  studentId?: string | null;
+}): UserProfile {
+  return {
+    uid: session.uid,
+    email: session.email,
+    schoolId: session.schoolId,
+    role: session.role,
+    displayName: session.displayName,
+    department: session.department ?? null,
+    studentId: session.studentId ?? null,
+    bio: null,
+    phone: null,
+    avatarUrl: null,
+    isPublicProfile: null,
+  };
+}
+
+function toMockFirebaseUser(session: {
+  uid: string;
+  email: string;
+  displayName: string;
+}): User {
+  return {
+    uid: session.uid,
+    email: session.email,
+    displayName: session.displayName,
+    emailVerified: true,
+    isAnonymous: false,
+    photoURL: null,
+    phoneNumber: null,
+    providerId: "password",
+    tenantId: null,
+    delete: async () => undefined,
+    getIdToken: async () => "mock-token",
+    getIdTokenResult: async () => ({
+      token: "mock-token",
+      claims: {},
+      authTime: new Date().toISOString(),
+      issuedAtTime: new Date().toISOString(),
+      expirationTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      signInProvider: "password",
+      signInSecondFactor: null,
+    }),
+    reload: async () => undefined,
+    toJSON: () => ({ uid: session.uid, email: session.email, displayName: session.displayName }),
+    metadata: {
+      creationTime: new Date().toISOString(),
+      lastSignInTime: new Date().toISOString(),
+    },
+    providerData: [],
+    refreshToken: "mock-refresh-token",
+  } as User;
+}
+
 function parseAdminEmails(): string[] {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
   const raw = String(extra.adminEmails ?? "");
@@ -122,6 +184,20 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, [isAdmin, profile?.role]);
 
   const refreshProfile = useCallback(async () => {
+    if (!hasUsableFirebaseConfig()) {
+      const session = await loadMockAuthSession();
+      if (!session) {
+        setUser(null);
+        setProfile(null);
+        return;
+      }
+
+      setUser(toMockFirebaseUser(session));
+      setProfile(toMockUserProfile(session));
+      setError(null);
+      return;
+    }
+
     const currentUser = getAuthInstance().currentUser;
     if (!currentUser) {
       setProfile(null);
@@ -154,6 +230,32 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!hasUsableFirebaseConfig()) {
+      let isCancelled = false;
+
+      (async () => {
+        try {
+          const session = await loadMockAuthSession();
+          if (isCancelled) return;
+
+          setUser(session ? toMockFirebaseUser(session) : null);
+          setProfile(session ? toMockUserProfile(session) : null);
+          setTokenError(null);
+          setTokenExpired(false);
+          setError(null);
+        } finally {
+          if (!isCancelled) {
+            setLoading(false);
+            setProfileLoading(false);
+          }
+        }
+      })();
+
+      return () => {
+        isCancelled = true;
+      };
+    }
+
     const auth = getAuthInstance();
     let isCancelled = false;
     
@@ -235,8 +337,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     }
     
     isSigningOutRef.current = true;
-    const auth = getAuthInstance();
-    const currentUserId = auth.currentUser?.uid;
+    const currentUserId = hasUsableFirebaseConfig() ? getAuthInstance().currentUser?.uid : user?.uid;
     
     // 先清理本地資料，再登出
     // 這解決了登出後清理過程中發生錯誤時，使用者已登出但本地還有上一個使用者資料殘留的問題
@@ -264,7 +365,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       }),
     ];
 
-    if (currentUserId) {
+    if (currentUserId && hasUsableFirebaseConfig()) {
       cleanupTasks.push(
         getCachedPushToken()
           .then((token) => {
@@ -295,7 +396,14 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     }
     
     try {
-      await signOut(auth);
+      if (hasUsableFirebaseConfig()) {
+        const auth = getAuthInstance();
+        await signOut(auth);
+      } else {
+        await clearMockAuthSession();
+        setUser(null);
+        setProfile(null);
+      }
       
       setTokenError(null);
       setTokenExpired(false);
@@ -308,7 +416,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     } finally {
       isSigningOutRef.current = false;
     }
-  }, []);
+  }, [user?.uid]);
 
   const handleSignOutWithWarning = useCallback(async (): Promise<boolean> => {
     const pendingQueue = await getOfflineQueue();

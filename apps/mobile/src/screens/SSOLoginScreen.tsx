@@ -225,8 +225,10 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
 
       setTimeout(() => {
         Alert.alert(
-          "登入成功",
-          `已使用 ${school.name} 測試校方帳號登入`,
+          result.isNewUser ? "已建立測試帳號" : "登入成功",
+          result.isNewUser
+            ? `已建立 ${school.name} 測試校方帳號並登入`
+            : `已使用 ${school.name} 測試校方帳號登入`,
           [
             {
               text: "確定",
