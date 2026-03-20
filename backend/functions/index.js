@@ -11,7 +11,7 @@ const { getFirestore, FieldValue, FieldPath, Timestamp } = require("firebase-adm
 const { getMessaging } = require("firebase-admin/messaging");
 const https = require("https");
 const http = require("http");
-const crypto = require("crypto");
+const nodeCrypto = require("crypto");
 const {
   evaluateSsoConfiguration,
   getProviderAdapter,
@@ -579,7 +579,7 @@ async function assertActiveSchoolMember(schoolId, uid) {
 }
 
 function generateGroupJoinCode(length = 8) {
-  return crypto.randomBytes(length).toString("base64url").replace(/[^A-Z0-9]/gi, "").toUpperCase().slice(0, length);
+  return nodeCrypto.randomBytes(length).toString("base64url").replace(/[^A-Z0-9]/gi, "").toUpperCase().slice(0, length);
 }
 
 function normalizeAssistantText(value) {
@@ -1678,8 +1678,6 @@ exports.assignmentDueReminder = onSchedule(
 // =====================================================
 // iCal 訂閱 API
 // =====================================================
-
-const { onRequest } = require("firebase-functions/v2/https");
 
 function formatICalDate(date, allDay = false) {
   const d = date instanceof Date ? date : date.toDate();
