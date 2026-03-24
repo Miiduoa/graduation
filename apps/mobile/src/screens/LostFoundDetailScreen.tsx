@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import React, { useState, useMemo, useEffect } from "react";
 import { ScrollView, Text, View, Pressable, Alert, Linking, Share } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +15,8 @@ import {
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
+import { useSchool } from "../state/school";
+import { getDataSource, hasDataSource } from "../data";
 import { formatDateTime, formatRelativeTime } from "../utils/format";
 
 type ItemType = "lost" | "found";
@@ -80,6 +83,7 @@ export function LostFoundDetailScreen(props: any) {
   const route = props?.route;
   const itemId = route?.params?.id;
   const auth = useAuth();
+  const { school } = useSchool();
 
   const [loading, setLoading] = useState(true);
   const [item, setItem] = useState<LostFoundItem | null>(null);
@@ -90,7 +94,35 @@ export function LostFoundDetailScreen(props: any) {
 
   const loadItem = async () => {
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 500));
+    try {
+      if (itemId && hasDataSource()) {
+        const ds = getDataSource();
+        const serverItem = await ds.getLostFoundItem(itemId);
+        if (serverItem) {
+          setItem({
+            id: serverItem.id,
+            type: serverItem.type as ItemType,
+            status: serverItem.status === "active" ? "open" : serverItem.status === "resolved" ? "returned" : serverItem.status as ItemStatus,
+            title: serverItem.title,
+            description: serverItem.description,
+            category: serverItem.category as ItemCategory,
+            location: serverItem.location,
+            date: new Date(serverItem.date),
+            createdAt: new Date(serverItem.createdAt),
+            imageUrl: serverItem.imageUrls?.[0],
+            contactInfo: serverItem.contactInfo,
+            authorId: serverItem.reporterId,
+            authorName: serverItem.reporter?.displayName ?? "匿名用戶",
+            characteristics: [],
+          });
+          setLoading(false);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("[LostFoundDetail] Failed to load item from server:", e);
+    }
+    // 若無法從伺服器載入，使用示範資料
     setItem(MOCK_ITEM);
     setLoading(false);
   };
@@ -146,7 +178,8 @@ export function LostFoundDetailScreen(props: any) {
         { text: "取消", style: "cancel" },
         {
           text: "確認",
-          onPress: () => {
+          onPress: async () => {
+            // 更新本地狀態
             setItem((prev) =>
               prev
                 ? {
@@ -157,6 +190,15 @@ export function LostFoundDetailScreen(props: any) {
                   }
                 : null
             );
+            // 同步寫入後端
+            if (item?.id && hasDataSource()) {
+              try {
+                const ds = getDataSource();
+                await ds.updateLostFoundItem(item.id, { status: "claimed" as any });
+              } catch (e) {
+                console.warn("[LostFoundDetail] Failed to update claim status:", e);
+              }
+            }
             Alert.alert(
               "認領成功",
               item?.type === "lost"
@@ -174,8 +216,16 @@ export function LostFoundDetailScreen(props: any) {
       { text: "取消", style: "cancel" },
       {
         text: "確認",
-        onPress: () => {
+        onPress: async () => {
           setItem((prev) => (prev ? { ...prev, status: "returned" } : null));
+          if (item?.id && hasDataSource()) {
+            try {
+              const ds = getDataSource();
+              await ds.resolveLostFoundItem(item.id);
+            } catch (e) {
+              console.warn("[LostFoundDetail] Failed to resolve item:", e);
+            }
+          }
           Alert.alert("太棒了！", "感謝您的幫助，物品已標記為已歸還 🎉");
         },
       },

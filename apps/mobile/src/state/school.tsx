@@ -1,10 +1,11 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import type { School } from "@campus/shared/src";
-import { mockSchools, normalizeSchoolCode, resolveSchool } from "@campus/shared/src/schools";
-import { clearCacheExceptSchool } from "../data/cachedSource";
-import { isSchoolVisibleInDirectory } from "../services/release";
-import { applySchoolTheme, registerSchoolTheme } from "../ui/theme";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { School } from '@campus/shared/src';
+import { mockSchools, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import { clearCacheExceptSchool } from '../data/cachedSource';
+import { setHybridSourceSchoolContext } from '../data/hybridSource';
+import { isSchoolVisibleInDirectory } from '../services/release';
+import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
 
 export type SchoolSelection = {
   code: string;
@@ -24,12 +25,13 @@ export type SchoolContextValue = {
 
 const SchoolContext = createContext<SchoolContextValue | null>(null);
 
-const STORAGE_KEY = "campus.schoolSelection.v1";
+const STORAGE_KEY = 'campus.schoolSelection.v1';
 
 function getDefaultVisibleSchool(): School {
   return (
-    mockSchools.find((candidate) => isSchoolVisibleInDirectory(candidate.id, candidate.integrationStatus)) ??
-    resolveSchool()
+    mockSchools.find((candidate) =>
+      isSchoolVisibleInDirectory(candidate.id, candidate.integrationStatus),
+    ) ?? resolveSchool()
   );
 }
 
@@ -69,15 +71,15 @@ export function SchoolProvider(props: {
   initial?: Partial<SchoolSelection>;
 }) {
   const initialSelection = normalizeSelection({
-    code: props.initial?.code ?? "PU",
+    code: props.initial?.code ?? 'PU',
     schoolId: props.initial?.schoolId ?? null,
     schoolName: props.initial?.schoolName ?? null,
     shortName: props.initial?.shortName ?? null,
     themeColor: props.initial?.themeColor ?? null,
     domains: props.initial?.domains ?? null,
   });
-  const [loaded, setLoaded] = useState(false);
   const [selection, setSelectionState] = useState<SchoolSelection>(initialSelection);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +97,7 @@ export function SchoolProvider(props: {
             shortName: parsed.shortName ?? prev.shortName ?? null,
             themeColor: parsed.themeColor ?? prev.themeColor ?? null,
             domains: parsed.domains ?? prev.domains ?? null,
-          })
+          }),
         );
       } catch {
         // ignore invalid persisted state
@@ -120,22 +122,26 @@ export function SchoolProvider(props: {
         next.schoolName === undefined
           ? identityChanged
             ? null
-            : prev.schoolName ?? null
+            : (prev.schoolName ?? null)
           : next.schoolName;
       const shortName =
         next.shortName === undefined
           ? identityChanged
             ? null
-            : prev.shortName ?? null
+            : (prev.shortName ?? null)
           : next.shortName;
       const themeColor =
         next.themeColor === undefined
           ? identityChanged
             ? null
-            : prev.themeColor ?? null
+            : (prev.themeColor ?? null)
           : next.themeColor;
       const domains =
-        next.domains === undefined ? (identityChanged ? null : prev.domains ?? null) : next.domains;
+        next.domains === undefined
+          ? identityChanged
+            ? null
+            : (prev.domains ?? null)
+          : next.domains;
 
       return normalizeSelection({ code, schoolId, schoolName, shortName, themeColor, domains });
     });
@@ -149,7 +155,7 @@ export function SchoolProvider(props: {
 
     if (previousSchoolKey && previousSchoolKey !== currentSchoolKey) {
       clearCacheExceptSchool(currentSchoolKey).catch((error) => {
-        console.warn("Failed to clear cache on school switch:", error);
+        console.warn('Failed to clear cache on school switch:', error);
       });
     }
 
@@ -158,7 +164,10 @@ export function SchoolProvider(props: {
   }, [loaded, selection]);
 
   const school = useMemo(() => {
-    const resolved = resolveSchool({ school: selection.code, schoolId: selection.schoolId ?? undefined });
+    const resolved = resolveSchool({
+      school: selection.code,
+      schoolId: selection.schoolId ?? undefined,
+    });
     if (!isSchoolVisibleInDirectory(resolved.id, resolved.integrationStatus)) {
       return getDefaultVisibleSchool();
     }
@@ -199,6 +208,7 @@ export function SchoolProvider(props: {
     }
 
     applySchoolTheme(school.id, school.themeColor);
+    setHybridSourceSchoolContext(school.id);
   }, [loaded, school]);
 
   const normalizedSelection = useMemo(() => normalizeSelection(selection), [selection]);
@@ -210,7 +220,7 @@ export function SchoolProvider(props: {
       school,
       schoolId: normalizedSelection.schoolId ?? school?.id ?? null,
     }),
-    [normalizedSelection, school]
+    [normalizedSelection, school],
   );
 
   return <SchoolContext.Provider value={value}>{props.children}</SchoolContext.Provider>;
@@ -218,6 +228,6 @@ export function SchoolProvider(props: {
 
 export function useSchool() {
   const ctx = useContext(SchoolContext);
-  if (!ctx) throw new Error("useSchool must be used within SchoolProvider");
+  if (!ctx) throw new Error('useSchool must be used within SchoolProvider');
   return ctx;
 }

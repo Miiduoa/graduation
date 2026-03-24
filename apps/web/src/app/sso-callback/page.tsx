@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-import { completeWebSSOCallback, signInWithCustomAuthToken } from "@/lib/firebase";
+import { completeWebSSOCallback, signInWithCustomAuthToken } from "@/features/auth/client";
 import { appendSchoolContext, sanitizeInternalPath } from "@/lib/navigation";
 import {
   buildCurrentSsoRedirectUri,

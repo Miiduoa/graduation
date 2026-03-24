@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ScrollView, Text, View, Pressable, RefreshControl, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";

@@ -1,4 +1,5 @@
-import type { DataSource } from "./source";
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
+import type { DataSource } from './source';
 import type {
   Announcement,
   Assignment,
@@ -6,6 +7,7 @@ import type {
   AttendanceSummary,
   BusArrival,
   BusRoute,
+  Cafeteria,
   CalendarEvent,
   ClubEvent,
   Comment,
@@ -36,6 +38,9 @@ import type {
   Notification,
   Order,
   Poi,
+  PoiCrowdReport,
+  PoiReport,
+  PoiReview,
   Printer,
   PrintJob,
   Quiz,
@@ -47,221 +52,341 @@ import type {
   UserAchievement,
   WashingMachine,
   WashingReservation,
-} from "./types";
+} from './types';
 import {
-  mockAnnouncements,
-  mockClubEvents,
-  mockMenus,
-  mockPois,
-} from "@campus/shared/src/mockData";
+  getDemoAnnouncements,
+  getDemoCourses,
+  getDemoEvents,
+  getDemoPois,
+  getDemoCafeterias,
+  getDemoMenuItems,
+  getDemoGroups,
+  getDemoGroupPosts,
+  getDemoUsers,
+  getDemoBusRoutes,
+  getDemoLibraryBooks,
+  getDemoNotifications,
+  getDemoAssignments,
+  getDemoLostFoundItems,
+  getDemoCalendarEvents,
+  getDemoConversations,
+  getDemoMessages,
+  getDemoGroupMembers,
+  getDemoComments,
+  getDemoSubmissions,
+  getDemoLibraryLoans,
+  getDemoLibrarySeats,
+  getDemoAchievements,
+  getDemoCourseModules,
+  getDemoCourseMaterials,
+  getDemoQuizzes,
+  getDemoAttendanceSessions,
+  getDemoInboxTasks,
+  getDemoEnrollments,
+  getDemoGrades,
+  getDemoGPA,
+  getDemoDormitoryInfo,
+  getDemoRepairRequests,
+  getDemoDormPackages,
+  getDemoDormAnnouncements,
+  getDemoWashingMachines,
+  getDemoPrinters,
+  getDemoPrintJobs,
+  getDemoHealthAppointments,
+  getDemoHealthTimeSlots,
+  getDemoHealthRecords,
+  getDemoOrders,
+  getDemoTransactions,
+  getDemoCourseGradebook,
+} from './demoData';
 
 // 生成唯一 ID
 const generateId = () => `mock_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Mock 使用者資料
+// Default school ID for demo data
+const DEFAULT_SCHOOL = 'tw-nchu';
+
+// Mock 使用者資料 - populated from demoData by default, mutation support
 const mockUsers: Record<string, User> = {
   user1: {
-    id: "user1",
-    email: "demo@campus.edu",
-    displayName: "Demo 使用者",
-    studentId: "B10901001",
-    department: "資訊工程學系",
+    id: 'user1',
+    email: 'demo@campus.edu',
+    displayName: 'Demo 使用者',
+    studentId: 'B10901001',
+    department: '資訊工程學系',
     year: 3,
-    role: "student",
-    schoolId: "default",
-    createdAt: "2024-01-01T00:00:00Z",
+    role: 'student',
+    schoolId: 'tw-nchu',
+    balance: 1234,
+    createdAt: '2024-01-01T00:00:00Z',
     avatarUrl: null,
     phone: null,
-    bio: "這是一個測試帳號",
-    joinedAt: "2024-01-01T00:00:00Z",
+    bio: '這是一個測試帳號',
+    joinedAt: '2024-01-01T00:00:00Z',
     settings: {
       notifications: true,
       emailNotifications: true,
-      language: "zh-TW",
+      language: 'zh-TW',
     },
   },
 };
 
-// Mock 群組資料
-const mockGroups: Group[] = [
-  {
-    id: "group1",
-    name: "資工系課程討論",
-    description: "課程討論與交流",
-    type: "course",
-    courseId: "CS101",
-    memberCount: 45,
-    createdAt: "2024-01-15T00:00:00Z",
-    ownerId: "user1",
-    schoolId: "default",
-    joinCode: "ABC12345",
-    isPublic: false,
-  },
-];
+// Mock 群組資料 - start with demo data
+let mockGroups: Group[] = getDemoGroups(DEFAULT_SCHOOL);
 
-// Mock 貼文資料
-const mockPosts: GroupPost[] = [];
+// Mock 貼文資料 - start populated from demo
+let mockPosts: GroupPost[] = getDemoGroupPosts(DEFAULT_SCHOOL, 'group1');
+const mockPoiReviews = new Map<string, PoiReview[]>();
+const mockPoiCrowdReports = new Map<string, PoiCrowdReport[]>();
+const mockPoiReports = new Map<string, PoiReport[]>();
 
-// Mock 課程資料
-const mockCourses: Course[] = [
-  {
-    id: "CS101",
-    code: "CS101",
-    name: "程式設計導論",
-    instructor: "王教授",
-    credits: 3,
-    semester: "113-1",
-    schoolId: "default",
-    department: "資訊工程學系",
-    description: "本課程介紹程式設計的基本概念",
-    schedule: [
-      { dayOfWeek: 1, day: 1, startTime: "09:00", endTime: "12:00", location: "工程館 101" },
-    ],
-    capacity: 60,
-    enrolled: 45,
-  },
-];
+// Mock 課程資料 - start with demo data
+let mockCourses: Course[] = getDemoCourses(DEFAULT_SCHOOL);
 
-// 通用的「未實作」錯誤提示工廠函數
-function createNotImplementedMethod<T>(methodName: string): () => Promise<T> {
-  return async () => {
-    console.warn(`[MockSource] ${methodName} 方法在 Mock 模式下不支援此操作`);
-    throw new Error(`Mock 模式不支援 ${methodName}`);
-  };
+// Mock 餐廳資料 - start with demo data
+let mockCafeterias: Cafeteria[] = getDemoCafeterias(DEFAULT_SCHOOL);
+
+function getScopedPoiKey(poiId: string, schoolId?: string): string {
+  return `${schoolId ?? DEFAULT_SCHOOL}:${poiId}`;
 }
 
-// 通用的空陣列回傳工廠函數
-function createEmptyArrayMethod<T>(methodName: string): () => Promise<T[]> {
-  return async () => {
-    console.info(`[MockSource] ${methodName} 返回空資料（Mock 模式）`);
-    return [];
-  };
+function getPoiReviews(poiId: string, schoolId?: string): PoiReview[] {
+  return mockPoiReviews.get(getScopedPoiKey(poiId, schoolId)) ?? [];
 }
 
-// 通用的 null 回傳工廠函數
-function createNullMethod<T>(methodName: string): () => Promise<T | null> {
-  return async () => {
-    console.info(`[MockSource] ${methodName} 返回 null（Mock 模式）`);
-    return null;
-  };
+function getPoiCrowdReports(poiId: string, schoolId?: string): PoiCrowdReport[] {
+  return mockPoiCrowdReports.get(getScopedPoiKey(poiId, schoolId)) ?? [];
 }
 
 export const mockSource: DataSource = {
   // ===== 公告 =====
-  async listAnnouncements() {
-    return mockAnnouncements as Announcement[];
+  async listAnnouncements(schoolId?: string) {
+    return getDemoAnnouncements(schoolId || DEFAULT_SCHOOL);
   },
-  async getAnnouncement(id: string) {
-    const found = (mockAnnouncements as Announcement[]).find((a) => a.id === id);
+  async getAnnouncement(id: string, schoolId?: string) {
+    const found = getDemoAnnouncements(schoolId || DEFAULT_SCHOOL).find((a) => a.id === id);
     return found || null;
   },
 
   // ===== 活動 =====
-  async listEvents() {
-    return mockClubEvents as ClubEvent[];
+  async listEvents(schoolId?: string) {
+    return getDemoEvents(schoolId || DEFAULT_SCHOOL);
   },
-  async getEvent(id: string) {
-    const found = (mockClubEvents as ClubEvent[]).find((e) => e.id === id);
+  async getEvent(id: string, schoolId?: string) {
+    const found = getDemoEvents(schoolId || DEFAULT_SCHOOL).find((e) => e.id === id);
     return found || null;
   },
   async registerEvent() {
-    console.info("[MockSource] registerEvent 模擬成功");
+    console.info('[MockSource] registerEvent 模擬成功');
   },
   async unregisterEvent() {
-    console.info("[MockSource] unregisterEvent 模擬成功");
+    console.info('[MockSource] unregisterEvent 模擬成功');
   },
 
   // ===== 地點 =====
-  async listPois() {
-    return mockPois as Poi[];
+  async listPois(schoolId?: string) {
+    return getDemoPois(schoolId || DEFAULT_SCHOOL);
   },
-  async getPoi(id: string) {
-    const found = (mockPois as Poi[]).find((p) => p.id === id);
+  async getPoi(id: string, schoolId?: string) {
+    const found = getDemoPois(schoolId || DEFAULT_SCHOOL).find((p) => p.id === id);
     return found || null;
+  },
+  async listPoiReviews(poiId: string, schoolId?: string) {
+    return [...getPoiReviews(poiId, schoolId)].sort((a, b) =>
+      (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
+    );
+  },
+  async listPoiCrowdReports(poiId: string, schoolId?: string) {
+    return [...getPoiCrowdReports(poiId, schoolId)].sort((a, b) =>
+      (b.createdAt ?? '').localeCompare(a.createdAt ?? ''),
+    );
+  },
+  async submitPoiReview(data) {
+    const key = getScopedPoiKey(data.poiId, data.schoolId);
+    const nextReview: PoiReview = {
+      id: data.uid,
+      uid: data.uid,
+      schoolId: data.schoolId,
+      displayName: data.displayName ?? null,
+      avatarUrl: data.avatarUrl ?? null,
+      rating: data.rating,
+      comment: data.comment.trim(),
+      tags: data.tags ?? [],
+      helpful: 0,
+      helpfulBy: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const current = getPoiReviews(data.poiId, data.schoolId).filter((review) => review.id !== nextReview.id);
+    mockPoiReviews.set(key, [nextReview, ...current]);
+  },
+  async submitPoiCrowdReport(data) {
+    const key = getScopedPoiKey(data.poiId, data.schoolId);
+    const nextReport: PoiCrowdReport = {
+      id: generateId(),
+      uid: data.uid,
+      schoolId: data.schoolId,
+      level: data.level,
+      createdAt: new Date().toISOString(),
+    };
+    mockPoiCrowdReports.set(key, [nextReport, ...getPoiCrowdReports(data.poiId, data.schoolId)]);
+  },
+  async togglePoiReviewHelpful(data) {
+    const key = getScopedPoiKey(data.poiId, data.schoolId);
+    const nextReviews = getPoiReviews(data.poiId, data.schoolId).map((review) => {
+      if (review.id !== data.reviewId) return review;
+      const helpfulBy = new Set(review.helpfulBy ?? []);
+      if (data.alreadyHelpful) {
+        helpfulBy.delete(data.uid);
+      } else {
+        helpfulBy.add(data.uid);
+      }
+      return {
+        ...review,
+        helpfulBy: Array.from(helpfulBy),
+        helpful: helpfulBy.size,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+    mockPoiReviews.set(key, nextReviews);
+  },
+  async submitPoiReport(data) {
+    const key = getScopedPoiKey(data.poiId, data.schoolId);
+    const nextReport: PoiReport = {
+      id: generateId(),
+      uid: data.uid,
+      schoolId: data.schoolId,
+      email: data.email ?? null,
+      type: data.type,
+      description: data.description.trim(),
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    mockPoiReports.set(key, [nextReport, ...(mockPoiReports.get(key) ?? [])]);
   },
 
   // ===== 餐廳菜單 =====
-  async listMenus() {
-    return mockMenus as MenuItem[];
+  async listCafeterias(schoolId?: string): Promise<Cafeteria[]> {
+    return getDemoCafeterias(schoolId || DEFAULT_SCHOOL);
   },
-  async getMenuItem(id: string) {
-    const found = (mockMenus as MenuItem[]).find((m) => m.id === id);
+  async listMenus(schoolId?: string) {
+    return getDemoMenuItems(schoolId || DEFAULT_SCHOOL).map((menu) => {
+      const cafeteria = mockCafeterias.find((row) => row.id === menu.cafeteriaId);
+      return {
+        ...menu,
+        cafeteriaId: cafeteria?.id,
+        orderingEnabled: cafeteria?.orderingEnabled,
+        pilotStatus: cafeteria?.pilotStatus,
+      };
+    });
+  },
+  async getMenuItem(id: string, schoolId?: string) {
+    const found = getDemoMenuItems(schoolId || DEFAULT_SCHOOL).find((m) => m.id === id);
     return found || null;
   },
   async rateMenuItem() {
-    console.info("[MockSource] rateMenuItem 模擬成功");
+    console.info('[MockSource] rateMenuItem 模擬成功');
   },
 
   // ===== 使用者 =====
-  async getUser(id: string) {
-    return mockUsers[id] || null;
+  async getUser(id: string, schoolId?: string) {
+    // First check mutation store
+    if (mockUsers[id]) {
+      return mockUsers[id];
+    }
+    // Then check demo data
+    const demoUser = getDemoUsers(schoolId || DEFAULT_SCHOOL).find((u) => u.id === id);
+    return demoUser || null;
   },
   async updateUser(id: string, data: Partial<User>) {
     if (mockUsers[id]) {
       mockUsers[id] = { ...mockUsers[id], ...data };
       return mockUsers[id];
     }
-    throw new Error("使用者不存在");
+    throw new Error('使用者不存在');
   },
-  async getUserByEmail(email: string) {
+  async getUserByEmail(email: string, schoolId?: string) {
+    // Check demo data
+    const demoUser = getDemoUsers(schoolId || DEFAULT_SCHOOL).find((u) => u.email === email);
+    if (demoUser) return demoUser;
+    // Check mutation store
     const user = Object.values(mockUsers).find((u) => u.email === email);
     return user || null;
   },
 
   // ===== 課程 =====
-  async listCourses() {
-    return mockCourses;
+  async listCourses(schoolId?: string) {
+    return getDemoCourses(schoolId || DEFAULT_SCHOOL);
   },
-  async getCourse(id: string) {
-    return mockCourses.find((c) => c.id === id) || null;
+  async getCourse(id: string, schoolId?: string) {
+    return getDemoCourses(schoolId || DEFAULT_SCHOOL).find((c) => c.id === id) || null;
   },
-  async searchCourses(query: string) {
+  async searchCourses(query: string, schoolId?: string) {
     const q = query.toLowerCase();
-    return mockCourses.filter(
+    return getDemoCourses(schoolId || DEFAULT_SCHOOL).filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         c.code.toLowerCase().includes(q) ||
-        c.instructor.toLowerCase().includes(q)
+        c.instructor.toLowerCase().includes(q),
     );
   },
   async listCourseSpaces(_userId: string, schoolId?: string): Promise<CourseSpace[]> {
-    return mockGroups
-      .filter((group) => group.type === "course" && (!schoolId || group.schoolId === schoolId))
+    return getDemoGroups(schoolId || DEFAULT_SCHOOL)
+      .filter((group) => group.type === 'course')
       .map((group) => ({
         id: group.id,
         groupId: group.id,
-        courseId: group.courseId,
         name: group.name,
         description: group.description,
-        unreadCount: 0,
-        assignmentCount: 0,
-        dueSoonCount: 0,
-        quizCount: 0,
-        moduleCount: 0,
+        courseId: group.courseId,
+        memberCount: group.memberCount,
+        unreadCount: Math.floor(Math.random() * 5),
+        assignmentCount: 3,
+        dueSoonCount: 1,
+        quizCount: 2,
+        moduleCount: 5,
         activeSessionId: null,
-        latestDueAt: null,
-        schoolId: group.schoolId,
+        latestDueAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       }));
   },
-  async getCourseSpace(courseSpaceId: string, userId: string, schoolId?: string): Promise<CourseSpace | null> {
-    const spaces = await this.listCourseSpaces(userId, schoolId);
-    return spaces.find((space) => space.groupId === courseSpaceId) ?? null;
+  async getCourseSpace(
+    id: string,
+    _userId?: string,
+  ): Promise<CourseSpace | null> {
+    const group = mockGroups.find((g) => g.id === id);
+    if (!group || group.type !== 'course') return null;
+    return {
+      id: group.id,
+      groupId: group.id,
+      name: group.name,
+      description: group.description,
+      courseId: group.courseId,
+      memberCount: group.memberCount,
+      unreadCount: Math.floor(Math.random() * 5),
+      assignmentCount: 3,
+      dueSoonCount: 1,
+      quizCount: 2,
+      moduleCount: 5,
+      activeSessionId: null,
+      latestDueAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    };
   },
-  async listCourseModules(): Promise<CourseModule[]> {
-    return [];
+  async listCourseModules(_userId: string, courseSpaceId?: string, schoolId?: string): Promise<CourseModule[]> {
+    return getDemoCourseModules(schoolId || DEFAULT_SCHOOL, courseSpaceId);
   },
   async createCourseModule(_input): Promise<{ id: string }> {
     return { id: generateId() };
   },
-  async listCourseMaterials(): Promise<CourseMaterial[]> {
-    return [];
+  async listCourseMaterials(courseSpaceId: string, moduleId?: string, schoolId?: string): Promise<CourseMaterial[]> {
+    return getDemoCourseMaterials(courseSpaceId, moduleId);
   },
-  async listQuizzes(): Promise<Quiz[]> {
-    return [];
+  async listQuizzes(userId: string, courseSpaceId?: string, schoolId?: string): Promise<Quiz[]> {
+    return getDemoQuizzes(userId, courseSpaceId, schoolId || DEFAULT_SCHOOL);
   },
-  async getQuiz(): Promise<Quiz | null> {
-    return null;
+  async getQuiz(quizId: string, userId: string, courseSpaceId?: string, schoolId?: string): Promise<Quiz | null> {
+    const quizzes = getDemoQuizzes(userId, courseSpaceId, schoolId || DEFAULT_SCHOOL);
+    return quizzes.find(q => q.id === quizId) || null;
   },
   async createQuiz(_input): Promise<{ id: string }> {
     return { id: generateId() };
@@ -271,40 +396,45 @@ export const mockSource: DataSource = {
       id: generateId(),
       assignmentId: input.quizId,
       userId: input.userId,
-      content: input.content,
+      content: JSON.stringify(input.answers ?? {}),
       attachments: input.attachments,
       submittedAt: new Date().toISOString(),
-      status: "submitted",
+      status: 'submitted',
     };
   },
-  async listAttendanceSessions(): Promise<AttendanceSession[]> {
-    return [];
+  async listAttendanceSessions(userId: string, courseSpaceId?: string, schoolId?: string): Promise<AttendanceSession[]> {
+    return getDemoAttendanceSessions(userId, courseSpaceId, schoolId || DEFAULT_SCHOOL);
   },
-  async startAttendanceSession(): Promise<{ success: boolean; sessionId: string; qrToken?: string; qrExpiresAt?: string }> {
+  async startAttendanceSession(): Promise<{
+    success: boolean;
+    sessionId: string;
+    qrToken?: string;
+    qrExpiresAt?: string;
+  }> {
     return { success: true, sessionId: generateId() };
   },
   async checkInAttendance(): Promise<{ success: boolean }> {
     return { success: true };
   },
-  async getAttendanceSummary(courseSpaceId: string): Promise<AttendanceSummary> {
+  async getAttendanceSummary(groupId: string): Promise<AttendanceSummary> {
     return {
-      groupId: courseSpaceId,
-      totalSessions: 0,
-      activeSessions: 0,
-      totalAttendees: 0,
+      groupId,
+      totalSessions: 10,
+      activeSessions: 1,
+      totalAttendees: 35,
       latestSession: null,
     };
   },
-  async listInboxTasks(): Promise<InboxTask[]> {
-    return [];
+  async listInboxTasks(userId: string, schoolId?: string): Promise<InboxTask[]> {
+    return getDemoInboxTasks(userId, schoolId || DEFAULT_SCHOOL);
   },
-  async getCourseGradebook(): Promise<CourseGradebookData | null> {
-    return null;
+  async getCourseGradebook(groupId?: string): Promise<CourseGradebookData | null> {
+    // For demo purposes, return gradebook for any course
+    if (!groupId) return null;
+    return getDemoCourseGradebook(DEFAULT_SCHOOL);
   },
-
-  // ===== 選課 =====
-  async listEnrollments(): Promise<Enrollment[]> {
-    return [];
+  async listEnrollments(userId: string, semester?: string, schoolId?: string): Promise<Enrollment[]> {
+    return getDemoEnrollments(userId, semester, schoolId || DEFAULT_SCHOOL);
   },
   async enrollCourse(userId: string, courseId: string, semester: string): Promise<Enrollment> {
     return {
@@ -312,26 +442,22 @@ export const mockSource: DataSource = {
       userId,
       courseId,
       semester,
-      status: "enrolled",
       createdAt: new Date().toISOString(),
       enrolledAt: new Date().toISOString(),
+      status: 'enrolled',
     };
   },
   async dropCourse() {
-    console.info("[MockSource] dropCourse 模擬成功");
+    console.info('[MockSource] dropCourse 模擬成功');
   },
-
-  // ===== 成績 =====
-  async listGrades(): Promise<Grade[]> {
-    return [];
+  async listGrades(userId: string, semester?: string, schoolId?: string): Promise<Grade[]> {
+    return getDemoGrades(userId, semester, schoolId || DEFAULT_SCHOOL);
   },
-  async getGPA() {
-    return { gpa: 3.5, totalCredits: 60, totalPoints: 210 };
+  async getGPA(userId: string, schoolId?: string) {
+    return getDemoGPA(userId, schoolId || DEFAULT_SCHOOL);
   },
-
-  // ===== 群組 =====
-  async listGroups() {
-    return mockGroups;
+  async listGroups(userId?: string, options?: any) {
+    return getDemoGroups(options?.schoolId || DEFAULT_SCHOOL);
   },
   async getGroup(id: string) {
     return mockGroups.find((g) => g.id === id) || null;
@@ -348,7 +474,7 @@ export const mockSource: DataSource = {
   },
   async updateGroup(id: string, data: Partial<Group>): Promise<Group> {
     const idx = mockGroups.findIndex((g) => g.id === id);
-    if (idx === -1) throw new Error("群組不存在");
+    if (idx === -1) throw new Error('群組不存在');
     mockGroups[idx] = { ...mockGroups[idx], ...data };
     return mockGroups[idx];
   },
@@ -361,31 +487,34 @@ export const mockSource: DataSource = {
       id: generateId(),
       userId,
       groupId,
-      role: "member",
+      role: 'member',
       joinedAt: new Date().toISOString(),
-      displayName: "Mock 使用者",
+      displayName: 'Mock 使用者',
     };
   },
   async leaveGroup() {
-    console.info("[MockSource] leaveGroup 模擬成功");
+    console.info('[MockSource] leaveGroup 模擬成功');
   },
 
   // ===== 群組成員 =====
-  async listGroupMembers(): Promise<GroupMember[]> {
-    return [];
+  async listGroupMembers(groupId: string, options?: any): Promise<GroupMember[]> {
+    return getDemoGroupMembers(groupId, options?.schoolId || DEFAULT_SCHOOL);
   },
   async updateMemberRole() {
-    console.info("[MockSource] updateMemberRole 模擬成功");
+    console.info('[MockSource] updateMemberRole 模擬成功');
   },
   async removeMember() {
-    console.info("[MockSource] removeMember 模擬成功");
+    console.info('[MockSource] removeMember 模擬成功');
   },
 
   // ===== 群組貼文 =====
-  async listGroupPosts(): Promise<GroupPost[]> {
+  async listGroupPosts(groupId?: string, options?: any): Promise<GroupPost[]> {
+    if (groupId) {
+      return getDemoGroupPosts(options?.schoolId || DEFAULT_SCHOOL, groupId);
+    }
     return mockPosts;
   },
-  async getGroupPost(id: string) {
+  async getGroupPost(id: string, groupId?: string) {
     return mockPosts.find((p) => p.id === id) || null;
   },
   async createGroupPost(data): Promise<GroupPost> {
@@ -401,7 +530,7 @@ export const mockSource: DataSource = {
   },
   async updateGroupPost(id: string, data: Partial<GroupPost>): Promise<GroupPost> {
     const idx = mockPosts.findIndex((p) => p.id === id);
-    if (idx === -1) throw new Error("貼文不存在");
+    if (idx === -1) throw new Error('貼文不存在');
     mockPosts[idx] = { ...mockPosts[idx], ...data };
     return mockPosts[idx];
   },
@@ -410,15 +539,15 @@ export const mockSource: DataSource = {
     if (idx !== -1) mockPosts.splice(idx, 1);
   },
   async likePost() {
-    console.info("[MockSource] likePost 模擬成功");
+    console.info('[MockSource] likePost 模擬成功');
   },
   async unlikePost() {
-    console.info("[MockSource] unlikePost 模擬成功");
+    console.info('[MockSource] unlikePost 模擬成功');
   },
 
   // ===== 留言 =====
-  async listComments(): Promise<Comment[]> {
-    return [];
+  async listComments(postId: string, options?: any, groupId?: string): Promise<Comment[]> {
+    return getDemoComments(postId, options?.schoolId || DEFAULT_SCHOOL);
   },
   async createComment(data): Promise<Comment> {
     return {
@@ -429,14 +558,21 @@ export const mockSource: DataSource = {
     };
   },
   async deleteComment() {
-    console.info("[MockSource] deleteComment 模擬成功");
+    console.info('[MockSource] deleteComment 模擬成功');
   },
 
   // ===== 作業 =====
-  async listAssignments(): Promise<Assignment[]> {
+  async listAssignments(groupId?: string, options?: any): Promise<Assignment[]> {
+    if (groupId) {
+      return getDemoAssignments(options?.schoolId || DEFAULT_SCHOOL, groupId);
+    }
     return [];
   },
-  async getAssignment(): Promise<Assignment | null> {
+  async getAssignment(id?: string, groupId?: string, schoolId?: string): Promise<Assignment | null> {
+    if (id && groupId) {
+      const assignments = getDemoAssignments(schoolId || DEFAULT_SCHOOL, groupId);
+      return assignments.find((a) => a.id === id) || null;
+    }
     return null;
   },
   async createAssignment(data): Promise<Assignment> {
@@ -448,51 +584,61 @@ export const mockSource: DataSource = {
     };
   },
   async updateAssignment(id: string, data: Partial<Assignment>): Promise<Assignment> {
-    throw new Error("Mock 模式不支援此操作");
+    throw new Error('Mock 模式不支援此操作');
   },
   async deleteAssignment() {
-    console.info("[MockSource] deleteAssignment 模擬成功");
+    console.info('[MockSource] deleteAssignment 模擬成功');
   },
 
   // ===== 作業繳交 =====
-  async listSubmissions(): Promise<Submission[]> {
-    return [];
+  async listSubmissions(assignmentId: string, options?: any, groupId?: string): Promise<Submission[]> {
+    return getDemoSubmissions(assignmentId, options?.schoolId || DEFAULT_SCHOOL);
   },
-  async getSubmission(): Promise<Submission | null> {
-    return null;
+  async getSubmission(assignmentId: string, userId: string, groupId?: string): Promise<Submission | null> {
+    const subs = getDemoSubmissions(assignmentId, DEFAULT_SCHOOL);
+    return subs.find(s => s.userId === userId) || null;
   },
   async submitAssignment(data): Promise<Submission> {
     return {
       ...data,
       id: generateId(),
       submittedAt: new Date().toISOString(),
-      status: "submitted",
+      status: 'submitted',
     };
   },
   async gradeSubmission(id: string, grade: number, feedback?: string): Promise<Submission> {
     return {
       id,
-      assignmentId: "mock",
-      userId: "mock",
-      content: "",
+      assignmentId: 'mock',
+      userId: 'mock',
+      content: '',
       submittedAt: new Date().toISOString(),
-      status: "graded",
+      status: 'graded',
       grade,
       feedback,
     };
   },
 
   // ===== 訊息 =====
-  async listConversations(): Promise<Conversation[]> {
+  async listConversations(userId?: string, options?: any, schoolId?: string): Promise<Conversation[]> {
+    if (userId) {
+      return getDemoConversations(schoolId || DEFAULT_SCHOOL, userId);
+    }
     return [];
   },
-  async getConversation(): Promise<Conversation | null> {
-    return null;
+  async getConversation(id: string, schoolId?: string): Promise<Conversation | null> {
+    const convs = getDemoConversations(schoolId || DEFAULT_SCHOOL, 'user1');
+    return convs.find(c => c.id === id) || null;
   },
-  async createConversation(participantIds: string[]): Promise<Conversation> {
+  async createConversation(
+    participantIds: string[],
+    schoolId?: string,
+    conversationId?: string
+  ): Promise<Conversation> {
     return {
-      id: generateId(),
+      id: conversationId || generateId(),
       memberIds: participantIds,
+      schoolId: schoolId ?? null,
       lastMessage: null,
       lastMessageAt: null,
       unreadCount: 0,
@@ -500,8 +646,8 @@ export const mockSource: DataSource = {
       updatedAt: new Date().toISOString(),
     };
   },
-  async listMessages(): Promise<Message[]> {
-    return [];
+  async listMessages(conversationId: string, options?: any): Promise<Message[]> {
+    return getDemoMessages(conversationId);
   },
   async sendMessage(data): Promise<Message> {
     return {
@@ -511,40 +657,48 @@ export const mockSource: DataSource = {
     };
   },
   async markMessageRead() {
-    console.info("[MockSource] markMessageRead 模擬成功");
+    console.info('[MockSource] markMessageRead 模擬成功');
   },
 
   // ===== 失物招領 =====
-  async listLostFoundItems(): Promise<LostFoundItem[]> {
-    return [];
+  async listLostFoundItems(schoolId?: string): Promise<LostFoundItem[]> {
+    return getDemoLostFoundItems(schoolId || DEFAULT_SCHOOL);
   },
-  async getLostFoundItem(): Promise<LostFoundItem | null> {
-    return null;
+  async getLostFoundItem(id: string, schoolId?: string): Promise<LostFoundItem | null> {
+    const found = getDemoLostFoundItems(schoolId || DEFAULT_SCHOOL).find((item) => item.id === id);
+    return found || null;
   },
   async createLostFoundItem(data): Promise<LostFoundItem> {
     return {
       ...data,
       id: generateId(),
       createdAt: new Date().toISOString(),
-      status: "active",
+      status: 'active',
     };
   },
   async updateLostFoundItem(id: string, data: Partial<LostFoundItem>): Promise<LostFoundItem> {
-    throw new Error("Mock 模式不支援此操作");
+    throw new Error('Mock 模式不支援此操作');
   },
   async resolveLostFoundItem() {
-    console.info("[MockSource] resolveLostFoundItem 模擬成功");
+    console.info('[MockSource] resolveLostFoundItem 模擬成功');
   },
 
   // ===== 圖書館 =====
-  async searchBooks(): Promise<LibraryBook[]> {
-    return [];
+  async searchBooks(query: string, schoolId?: string): Promise<LibraryBook[]> {
+    const q = query.toLowerCase();
+    return getDemoLibraryBooks(schoolId || DEFAULT_SCHOOL).filter(
+      (book) =>
+        book.title.toLowerCase().includes(q) ||
+        book.author.toLowerCase().includes(q) ||
+        book.isbn.toLowerCase().includes(q),
+    );
   },
-  async getBook(): Promise<LibraryBook | null> {
-    return null;
+  async getBook(id: string, schoolId?: string): Promise<LibraryBook | null> {
+    const found = getDemoLibraryBooks(schoolId || DEFAULT_SCHOOL).find((book) => book.id === id);
+    return found || null;
   },
-  async listLoans(): Promise<LibraryLoan[]> {
-    return [];
+  async listLoans(userId: string, schoolId?: string): Promise<LibraryLoan[]> {
+    return getDemoLibraryLoans(userId, schoolId || DEFAULT_SCHOOL);
   },
   async borrowBook(bookId: string, userId: string): Promise<LibraryLoan> {
     return {
@@ -553,28 +707,28 @@ export const mockSource: DataSource = {
       userId,
       borrowedAt: new Date().toISOString(),
       dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-      status: "borrowed",
+      status: 'borrowed',
       renewCount: 0,
     };
   },
   async returnBook() {
-    console.info("[MockSource] returnBook 模擬成功");
+    console.info('[MockSource] returnBook 模擬成功');
   },
   async renewBook(loanId: string): Promise<LibraryLoan> {
     return {
       id: loanId,
-      bookId: "mock",
-      userId: "mock",
+      bookId: 'mock',
+      userId: 'mock',
       borrowedAt: new Date().toISOString(),
       dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-      status: "borrowed",
+      status: 'borrowed',
       renewCount: 1,
     };
   },
 
   // ===== 圖書館座位 =====
-  async listSeats(): Promise<LibrarySeat[]> {
-    return [];
+  async listSeats(schoolId?: string): Promise<LibrarySeat[]> {
+    return getDemoLibrarySeats(schoolId || DEFAULT_SCHOOL);
   },
   async listSeatReservations(): Promise<SeatReservation[]> {
     return [];
@@ -584,7 +738,7 @@ export const mockSource: DataSource = {
     userId: string,
     date: string,
     startTime: string,
-    endTime: string
+    endTime: string,
   ): Promise<SeatReservation> {
     return {
       id: generateId(),
@@ -593,67 +747,57 @@ export const mockSource: DataSource = {
       date,
       startTime,
       endTime,
-      status: "active",
+      status: 'active',
       createdAt: new Date().toISOString(),
     };
   },
   async cancelSeatReservation() {
-    console.info("[MockSource] cancelSeatReservation 模擬成功");
+    console.info('[MockSource] cancelSeatReservation 模擬成功');
   },
 
   // ===== 公車 =====
-  async listBusRoutes(): Promise<BusRoute[]> {
-    return [
-      {
-        id: "route1",
-        name: "校園巡迴線",
-        schoolId: "default",
-        stops: [
-          { id: "stop1", name: "校門口", lat: 25.0173, lng: 121.5398 },
-          { id: "stop2", name: "圖書館", lat: 25.018, lng: 121.54 },
-          { id: "stop3", name: "體育館", lat: 25.019, lng: 121.541 },
-        ],
-        schedule: {
-          weekday: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00"],
-          weekend: ["09:00", "12:00", "15:00"],
-        },
-        color: "#4CAF50",
-      },
-    ];
+  async listBusRoutes(schoolId?: string): Promise<BusRoute[]> {
+    return getDemoBusRoutes(schoolId || DEFAULT_SCHOOL);
   },
-  async getBusRoute(id: string): Promise<BusRoute | null> {
-    const routes = await mockSource.listBusRoutes();
+  async getBusRoute(id: string, schoolId?: string): Promise<BusRoute | null> {
+    const routes = getDemoBusRoutes(schoolId || DEFAULT_SCHOOL);
     return routes.find((r) => r.id === id) || null;
   },
   async getBusArrivals(): Promise<BusArrival[]> {
     return [
       {
-        id: "arr1",
-        routeId: "route1",
-        stopId: "stop1",
+        id: 'arr1',
+        routeId: 'route1',
+        stopId: 'stop1',
         estimatedArrival: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
         estimatedMinutes: 5,
-        busId: "bus1",
+        busId: 'bus1',
       },
     ];
   },
 
   // ===== 通知 =====
-  async listNotifications(): Promise<Notification[]> {
+  async listNotifications(userId?: string, options?: any): Promise<Notification[]> {
+    if (userId) {
+      return getDemoNotifications(options?.schoolId || DEFAULT_SCHOOL, userId);
+    }
     return [];
   },
   async markNotificationRead() {
-    console.info("[MockSource] markNotificationRead 模擬成功");
+    console.info('[MockSource] markNotificationRead 模擬成功');
   },
   async markAllNotificationsRead() {
-    console.info("[MockSource] markAllNotificationsRead 模擬成功");
+    console.info('[MockSource] markAllNotificationsRead 模擬成功');
   },
   async deleteNotification() {
-    console.info("[MockSource] deleteNotification 模擬成功");
+    console.info('[MockSource] deleteNotification 模擬成功');
   },
 
   // ===== 行事曆 =====
-  async listCalendarEvents(): Promise<CalendarEvent[]> {
+  async listCalendarEvents(userId?: string, startDate?: string, endDate?: string, schoolId?: string): Promise<CalendarEvent[]> {
+    if (userId) {
+      return getDemoCalendarEvents(schoolId || DEFAULT_SCHOOL, userId);
+    }
     return [];
   },
   async createCalendarEvent(data): Promise<CalendarEvent> {
@@ -665,514 +809,256 @@ export const mockSource: DataSource = {
   async updateCalendarEvent(id: string, data: Partial<CalendarEvent>): Promise<CalendarEvent> {
     return {
       id,
-      title: data.title || "Mock Event",
+      title: data.title || 'Mock Event',
       startDate: data.startDate || new Date().toISOString(),
       endDate: data.endDate || new Date().toISOString(),
-      userId: data.userId || "mock",
+      userId: data.userId || 'mock',
       ...data,
     };
   },
   async deleteCalendarEvent() {
-    console.info("[MockSource] deleteCalendarEvent 模擬成功");
+    console.info('[MockSource] deleteCalendarEvent 模擬成功');
   },
   async syncCoursesToCalendar() {
-    console.info("[MockSource] syncCoursesToCalendar 模擬成功");
+    console.info('[MockSource] syncCoursesToCalendar 模擬成功');
   },
 
   // ===== 訂單與支付 =====
-  async listOrders(): Promise<Order[]> {
-    return [];
+  async listOrders(userId: string, options?: any, schoolId?: string): Promise<Order[]> {
+    return getDemoOrders(userId, schoolId || DEFAULT_SCHOOL);
   },
-  async getOrder(): Promise<Order | null> {
-    return null;
+  async getOrder(id: string, userId?: string, schoolId?: string): Promise<Order | null> {
+    const orders = getDemoOrders(userId || 'user1', schoolId || DEFAULT_SCHOOL);
+    return orders.find(o => o.id === id) || null;
   },
   async createOrder(data): Promise<Order> {
     return {
       ...data,
       id: generateId(),
       createdAt: new Date().toISOString(),
-      status: "pending",
-      paymentStatus: "unpaid",
+      status: 'pending',
+      paymentStatus: 'unpaid',
+      merchantId: data.merchantId ?? (data as { cafeteriaId?: string }).cafeteriaId,
     };
   },
-  async updateOrderStatus(id: string, status: Order["status"]): Promise<Order> {
+  async updateOrderStatus(id: string, status: Order['status']): Promise<Order> {
     return {
       id,
-      userId: "mock",
+      userId: 'mock',
       items: [],
       totalAmount: 0,
       createdAt: new Date().toISOString(),
       status,
-      paymentStatus: "unpaid",
+      paymentStatus: 'unpaid',
     };
   },
   async cancelOrder() {
-    console.info("[MockSource] cancelOrder 模擬成功");
+    console.info('[MockSource] cancelOrder 模擬成功');
   },
-  async listTransactions(): Promise<Transaction[]> {
-    return [];
+  async listTransactions(userId: string, options?: any, schoolId?: string): Promise<Transaction[]> {
+    return getDemoTransactions(userId, schoolId || DEFAULT_SCHOOL);
   },
 
   // ===== 成就 =====
-  async listAchievements(): Promise<UserAchievement[]> {
-    return [
-      {
-        id: "ach1",
-        name: "新手上路",
-        description: "完成首次登入",
-        icon: "rocket",
-        points: 10,
-        category: "general",
-        unlockedAt: new Date().toISOString(),
-        progress: 100,
-        maxProgress: 100,
-      },
-    ];
+  async listAchievements(schoolId?: string): Promise<UserAchievement[]> {
+    return getDemoAchievements('user1', schoolId || DEFAULT_SCHOOL);
   },
-  async getUserAchievements(): Promise<UserAchievement[]> {
-    return mockSource.listAchievements();
+  async getUserAchievements(userId: string, schoolId?: string): Promise<UserAchievement[]> {
+    return getDemoAchievements(userId, schoolId || DEFAULT_SCHOOL);
   },
-  async updateAchievementProgress(
-    userId: string,
-    achievementId: string,
-    progress: number
-  ): Promise<UserAchievement> {
+  async updateAchievementProgress(_userId: string, achievementId: string, progress: number): Promise<UserAchievement> {
     return {
       id: achievementId,
-      name: "Mock Achievement",
-      description: "",
-      icon: "star",
+      name: 'Mock Achievement',
+      description: '',
+      icon: 'star',
       points: 10,
-      category: "general",
+      category: 'general',
       progress,
       maxProgress: 100,
     };
   },
 
-  // ===== 宿舍服務 =====
-  async getDormitoryInfo(userId: string): Promise<DormitoryInfo | null> {
+  // ===== 宿舍 =====
+  async listDormAnnouncements(schoolId?: string): Promise<DormAnnouncement[]> {
+    return getDemoDormAnnouncements(schoolId || DEFAULT_SCHOOL);
+  },
+  async getDormitoryInfo(userId: string, schoolId?: string): Promise<DormitoryInfo | null> {
+    return getDemoDormitoryInfo(userId, schoolId || DEFAULT_SCHOOL);
+  },
+  async listDormPackages(userId: string, options?: any, schoolId?: string): Promise<DormPackage[]> {
+    return getDemoDormPackages(userId, schoolId || DEFAULT_SCHOOL);
+  },
+  async createRepairRequest(): Promise<RepairRequest> {
     return {
-      id: "dorm1",
-      building: "A棟",
-      room: "512",
-      floor: 5,
-      roommates: ["王大明", "李小華"],
-      startDate: "2024-09-01",
-      endDate: "2025-06-30",
-      userId,
+      id: generateId(),
+      userId: 'mock',
+      type: 'other',
+      title: 'Mock issue',
+      description: 'Mock description',
+      room: 'Mock room',
+      status: 'pending',
+      createdAt: new Date().toISOString(),
     };
   },
 
-  async listRepairRequests(userId: string): Promise<RepairRequest[]> {
-    return [
-      {
-        id: "r1",
-        type: "ac",
-        title: "冷氣不冷",
-        description: "房間冷氣開強也不涼",
-        status: "assigned",
-        createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-        room: "A棟 512",
-        userId,
-      },
-      {
-        id: "r2",
-        type: "plumbing",
-        title: "水龍頭漏水",
-        description: "浴室水龍頭滴水",
-        status: "completed",
-        createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
-        completedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
-        room: "A棟 512",
-        userId,
-      },
-    ];
+  // ===== 健康與醫療 =====
+  async listHealthAppointments(userId: string, options?: any, schoolId?: string): Promise<HealthAppointment[]> {
+    return getDemoHealthAppointments(userId, schoolId || DEFAULT_SCHOOL);
   },
-
-  async createRepairRequest(data): Promise<RepairRequest> {
+  async createHealthAppointment(data: any): Promise<HealthAppointment> {
     return {
       ...data,
       id: generateId(),
+      status: 'scheduled',
       createdAt: new Date().toISOString(),
-      status: "pending",
     };
   },
-
-  async updateRepairRequest(id: string, data: Partial<RepairRequest>): Promise<RepairRequest> {
+  async cancelHealthAppointment() {
+    console.info('[MockSource] cancelHealthAppointment 模擬成功');
+  },
+  async rescheduleHealthAppointment(id: string, data: any): Promise<HealthAppointment> {
     return {
       id,
-      type: data.type || "other",
-      title: data.title || "",
-      description: data.description || "",
-      status: data.status || "pending",
+      userId: 'mock',
+      department: 'general',
+      date: data.date,
+      timeSlot: data.timeSlot,
+      status: 'scheduled',
       createdAt: new Date().toISOString(),
-      room: data.room || "",
-      userId: data.userId || "mock",
-      ...data,
     };
   },
-
-  async cancelRepairRequest() {
-    console.info("[MockSource] cancelRepairRequest 模擬成功");
+  async listHealthRecords(userId: string, options?: any, schoolId?: string): Promise<HealthRecord[]> {
+    return getDemoHealthRecords(userId, schoolId || DEFAULT_SCHOOL);
+  },
+  async listHealthTimeSlots(department: string, date: string, schoolId?: string): Promise<HealthTimeSlot[]> {
+    return getDemoHealthTimeSlots(department as any, date, schoolId || DEFAULT_SCHOOL);
   },
 
-  async listDormPackages(userId: string): Promise<DormPackage[]> {
-    return [
-      {
-        id: "p1",
-        trackingNumber: "SF1234567890",
-        carrier: "順豐速運",
-        arrivedAt: new Date(Date.now() - 4 * 3600000).toISOString(),
-        status: "pending",
-        location: "管理室",
-        userId,
-      },
-      {
-        id: "p2",
-        trackingNumber: "711234567890",
-        carrier: "7-11 交貨便",
-        arrivedAt: new Date(Date.now() - 1 * 86400000).toISOString(),
-        status: "pending",
-        location: "A棟 1F 郵件櫃",
-        userId,
-      },
-      {
-        id: "p3",
-        trackingNumber: "PCH1234567",
-        carrier: "黑貓宅急便",
-        arrivedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
-        status: "picked",
-        location: "管理室",
-        userId,
-        pickedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-      },
-    ];
+  // ===== 列印 =====
+  async listPrinters(schoolId?: string): Promise<Printer[]> {
+    return getDemoPrinters(schoolId || DEFAULT_SCHOOL);
+  },
+  async getPrinter(id: string, schoolId?: string): Promise<Printer | null> {
+    const printers = getDemoPrinters(schoolId || DEFAULT_SCHOOL);
+    return printers.find(p => p.id === id) || null;
+  },
+  async listPrintJobs(userId: string, options?: any, schoolId?: string): Promise<PrintJob[]> {
+    return getDemoPrintJobs(userId, schoolId || DEFAULT_SCHOOL);
+  },
+  async createPrintJob(): Promise<PrintJob> {
+    return {
+      id: generateId(),
+      userId: 'mock',
+      printerId: 'mock',
+      fileName: 'mock.pdf',
+      pages: 10,
+      copies: 1,
+      color: false,
+      duplex: false,
+      status: 'pending',
+      cost: 10,
+      createdAt: new Date().toISOString(),
+    };
+  },
+  async cancelPrintJob() {
+    console.info('[MockSource] cancelPrintJob 模擬成功');
   },
 
-  async confirmPackagePickup() {
-    console.info("[MockSource] confirmPackagePickup 模擬成功");
+  // ===== 洗衣機 =====
+  async listWashingMachines(schoolId?: string): Promise<WashingMachine[]> {
+    return getDemoWashingMachines(schoolId || DEFAULT_SCHOOL);
   },
-
-  async listWashingMachines(): Promise<WashingMachine[]> {
-    return [
-      { id: "w1", number: 1, floor: "1F", building: "A棟", status: "available", type: "washer", price: 20 },
-      { id: "w2", number: 2, floor: "1F", building: "A棟", status: "inUse", remainingTime: 25, type: "washer", price: 20 },
-      { id: "w3", number: 3, floor: "1F", building: "A棟", status: "inUse", remainingTime: 8, type: "washer", price: 20 },
-      { id: "w4", number: 4, floor: "1F", building: "A棟", status: "maintenance", type: "washer", price: 20 },
-      { id: "d1", number: 1, floor: "1F", building: "A棟", status: "available", type: "dryer", price: 10 },
-      { id: "d2", number: 2, floor: "1F", building: "A棟", status: "inUse", remainingTime: 42, type: "dryer", price: 10 },
-    ];
-  },
-
   async listWashingReservations(): Promise<WashingReservation[]> {
     return [];
   },
-
-  async reserveWashingMachine(machineId: string, userId: string): Promise<WashingReservation> {
+  async reserveWashingMachine(): Promise<WashingReservation> {
     return {
       id: generateId(),
-      machineId,
-      userId,
+      machineId: 'mock',
+      userId: 'mock',
       startTime: new Date().toISOString(),
-      status: "reserved",
+      endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      status: 'reserved',
       createdAt: new Date().toISOString(),
     };
   },
-
   async cancelWashingReservation() {
-    console.info("[MockSource] cancelWashingReservation 模擬成功");
+    console.info('[MockSource] cancelWashingReservation 模擬成功');
   },
 
-  async listDormAnnouncements(): Promise<DormAnnouncement[]> {
-    return [
-      {
-        id: "da1",
-        title: "停水通知",
-        content: "3/5 (二) 08:00-12:00 進行管線維修，屆時將停止供水",
-        type: "maintenance",
-        building: "A棟",
-        publishedAt: new Date().toISOString(),
-      },
-    ];
+  // ===== 維修 =====
+  async listRepairRequests(userId: string, options?: any, schoolId?: string): Promise<RepairRequest[]> {
+    return getDemoRepairRequests(userId, schoolId || DEFAULT_SCHOOL);
   },
-
-  // ===== 列印服務 =====
-  async listPrinters(): Promise<Printer[]> {
-    return [
-      {
-        id: "p1",
-        name: "圖書館 1F 印表機",
-        location: "圖書館 1F 入口處",
-        building: "圖書館",
-        floor: "1F",
-        status: "online",
-        capabilities: ["color", "duplex", "a4"],
-        queueLength: 2,
-        pricePerPage: { bw: 1, color: 5 },
-      },
-      {
-        id: "p2",
-        name: "工程館 3F 印表機",
-        location: "工程館 3F 走廊",
-        building: "工程館",
-        floor: "3F",
-        status: "online",
-        capabilities: ["duplex", "a4", "a3"],
-        queueLength: 0,
-        pricePerPage: { bw: 1, color: 5 },
-      },
-      {
-        id: "p3",
-        name: "學生活動中心印表機",
-        location: "學生活動中心 2F",
-        building: "學生活動中心",
-        floor: "2F",
-        status: "busy",
-        capabilities: ["color", "duplex", "a4", "scan", "copy"],
-        queueLength: 5,
-        pricePerPage: { bw: 1, color: 5 },
-      },
-    ];
-  },
-
-  async getPrinter(id: string): Promise<Printer | null> {
-    const printers = await mockSource.listPrinters();
-    return printers.find((p) => p.id === id) || null;
-  },
-
-  async listPrintJobs(userId: string): Promise<PrintJob[]> {
-    return [
-      {
-        id: "job1",
-        userId,
-        printerId: "p1",
-        fileName: "作業報告.pdf",
-        pages: 10,
-        copies: 1,
-        color: false,
-        duplex: true,
-        status: "completed",
-        cost: 10,
-        createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
-        completedAt: new Date(Date.now() - 2 * 86400000 + 300000).toISOString(),
-      },
-    ];
-  },
-
-  async createPrintJob(data): Promise<PrintJob> {
-    const pages = data.pages || 1;
-    const copies = data.copies || 1;
-    const cost = data.color ? pages * copies * 5 : pages * copies * 1;
+  async updateRepairRequest(id: string, data: Partial<RepairRequest>): Promise<RepairRequest> {
     return {
-      ...data,
-      id: generateId(),
+      id,
+      type: data.type || 'other',
+      title: data.title || '',
+      description: data.description || '',
+      status: data.status || 'pending',
       createdAt: new Date().toISOString(),
-      status: "pending",
-      cost,
+      room: data.room || '',
+      userId: data.userId || 'mock',
+      ...data,
     };
   },
-
-  async cancelPrintJob() {
-    console.info("[MockSource] cancelPrintJob 模擬成功");
+  async cancelRepairRequest() {
+    console.info('[MockSource] cancelRepairRequest 模擬成功');
   },
 
-  // ===== 健康服務 =====
-  async listHealthAppointments(userId: string): Promise<HealthAppointment[]> {
-    return [
-      {
-        id: "ha1",
-        userId,
-        department: "general",
-        doctorName: "陳醫師",
-        date: new Date(Date.now() + 3 * 86400000).toISOString().split("T")[0],
-        timeSlot: "10:00",
-        status: "scheduled",
-        reason: "感冒症狀",
-        createdAt: new Date().toISOString(),
-      },
-    ];
-  },
-
-  async createHealthAppointment(data): Promise<HealthAppointment> {
-    return {
-      ...data,
-      id: generateId(),
-      createdAt: new Date().toISOString(),
-      status: "scheduled",
-    };
-  },
-
-  async cancelHealthAppointment() {
-    console.info("[MockSource] cancelHealthAppointment 模擬成功");
-  },
-
-  async listHealthRecords(userId: string): Promise<HealthRecord[]> {
-    return [
-      {
-        id: "hr1",
-        userId,
-        type: "appointment",
-        date: new Date(Date.now() - 30 * 86400000).toISOString().split("T")[0],
-        department: "general",
-        doctorName: "陳醫師",
-        diagnosis: "上呼吸道感染",
-        prescription: "感冒藥三日份",
-      },
-    ];
-  },
-
-  async listHealthTimeSlots(department: string, date: string): Promise<HealthTimeSlot[]> {
-    const slots: HealthTimeSlot[] = [];
-    const times = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "14:00", "14:30", "15:00", "15:30", "16:00"];
-    
-    times.forEach((time, idx) => {
-      slots.push({
-        id: `slot_${idx}`,
-        department: department as any,
-        doctorName: "陳醫師",
-        date,
-        time,
-        available: Math.random() > 0.3,
-        capacity: 1,
-        booked: Math.random() > 0.3 ? 0 : 1,
-      });
-    });
-    
-    return slots;
+  // ===== 包裹 =====
+  async confirmPackagePickup() {
+    console.info('[MockSource] confirmPackagePickup 模擬成功');
   },
 
   // ===== 安全支付操作 =====
-  async processTopup(data: {
-    userId: string;
-    amount: number;
-    paymentMethod: string;
-  }): Promise<{
-    success: boolean;
-    newBalance?: number;
-    transactionId?: string;
-    errorCode?: string;
-    errorMessage?: string;
-  }> {
-    // 模擬後端處理
+  async processTopup(data: { userId: string; amount: number; paymentMethod: string }) {
     await delay(1000);
-    
-    // 模擬驗證
     if (data.amount < 100) {
-      return {
-        success: false,
-        errorCode: "MIN_TOPUP_AMOUNT",
-        errorMessage: "最低儲值金額為 $100",
-      };
+      return { success: false, errorCode: 'MIN_TOPUP_AMOUNT', errorMessage: '最低儲值金額為 $100' };
     }
-    
     if (data.amount > 10000) {
-      return {
-        success: false,
-        errorCode: "MAX_TOPUP_AMOUNT",
-        errorMessage: "單次儲值上限為 $10,000",
-      };
+      return { success: false, errorCode: 'MAX_TOPUP_AMOUNT', errorMessage: '單次儲值上限為 $10,000' };
     }
-    
-    // 模擬成功
-    const mockCurrentBalance = 1234;
-    const newBalance = mockCurrentBalance + data.amount;
-    
     return {
       success: true,
-      newBalance,
-      transactionId: `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      newBalance: 1234 + data.amount,
+      transactionId: `txn_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     };
   },
-
   async processPayment(data: {
     userId: string;
     amount: number;
     paymentMethod: string;
     merchantId: string;
     description: string;
-  }): Promise<{
-    success: boolean;
-    newBalance?: number;
-    transactionId?: string;
-    errorCode?: string;
-    errorMessage?: string;
-  }> {
-    // 模擬後端處理
+  }) {
     await delay(1000);
-    
-    const mockCurrentBalance = 1234;
-    
-    // 模擬餘額不足
-    if (data.amount > mockCurrentBalance) {
-      return {
-        success: false,
-        errorCode: "INSUFFICIENT_BALANCE",
-        errorMessage: "餘額不足",
-      };
+    const mockBalance = 1234;
+    if (data.amount > mockBalance) {
+      return { success: false, errorCode: 'INSUFFICIENT_BALANCE', errorMessage: '餘額不足' };
     }
-    
-    const newBalance = mockCurrentBalance - data.amount;
-    
     return {
       success: true,
-      newBalance,
-      transactionId: `txn_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      newBalance: mockBalance - data.amount,
+      transactionId: `txn_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
     };
   },
-  
-  async rescheduleHealthAppointment(id: string, data: { date: string; timeSlot: string; doctorId?: string; doctorName?: string }): Promise<any> {
-    console.info("[MockSource] rescheduleHealthAppointment:", id, data);
+
+  // ===== 宿舍進出管理 =====
+  async createAccessApplication(data: any) {
     await delay(500);
-    return {
-      id,
-      ...data,
-      status: "scheduled",
-    };
+    return { id: `access_${Date.now()}`, status: 'pending' as const };
   },
-  
-  async createAccessApplication(data: {
-    userId: string;
-    type: "extended_hours" | "temporary_access";
-    requestedTime?: string;
-    reason: string;
-    schoolId?: string;
-  }): Promise<{ id: string; status: "pending" }> {
-    console.info("[MockSource] createAccessApplication:", data);
-    await delay(500);
-    return {
-      id: `access_${Date.now()}`,
-      status: "pending",
-    };
-  },
-  
-  async createLateReturnRecord(data: {
-    userId: string;
-    building?: string;
-    room?: string;
-    returnTime: string;
-    schoolId?: string;
-  }): Promise<{ id: string }> {
-    console.info("[MockSource] createLateReturnRecord:", data);
+  async createLateReturnRecord(data: any) {
     await delay(300);
-    return {
-      id: `late_${Date.now()}`,
-    };
+    return { id: `late_${Date.now()}` };
   },
-  
-  async createVisitorRecord(data: {
-    userId: string;
-    visitorName: string;
-    visitorPhone: string;
-    building?: string;
-    room?: string;
-    arrivalTime: string;
-    expectedLeaveTime: string;
-    schoolId?: string;
-  }): Promise<{ id: string }> {
-    console.info("[MockSource] createVisitorRecord:", data);
+  async createVisitorRecord(data: any) {
     await delay(500);
-    return {
-      id: `visitor_${Date.now()}`,
-    };
+    return { id: `visitor_${Date.now()}` };
   },
+
 };

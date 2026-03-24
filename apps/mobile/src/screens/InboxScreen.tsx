@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useMemo } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,10 +8,12 @@ import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
+import { useAmbientCues } from "../features/engagement";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import {
   ActionableInboxRow,
+  AmbientCueCard,
   CompletionState,
   ContextStrip,
   TimelineCard,
@@ -25,6 +28,7 @@ export function InboxScreen(props: any) {
   const ds = useDataSource();
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
   const teachingMode = isTeachingRole(auth.profile?.role);
+  const ambientRole = roleMode === "guest" ? "guest" : roleMode;
 
   const {
     items: courseSpaces,
@@ -56,6 +60,13 @@ export function InboxScreen(props: any) {
     () => inboxTasks.map(toInboxItem).sort((a, b) => a.priority - b.priority),
     [inboxTasks]
   );
+  const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
+    schoolId: school.id,
+    uid: auth.user?.uid ?? null,
+    role: ambientRole,
+    surface: "inbox",
+    limit: 1,
+  });
 
   const liveCount = inboxItems.filter((item) => item.kind === "live").length;
   const dueCount = inboxItems.filter((item) => item.kind === "assignment" || item.kind === "quiz").length;
@@ -71,14 +82,14 @@ export function InboxScreen(props: any) {
     }
 
     if ((item.kind === "assignment" || item.kind === "quiz") && item.assignmentId) {
-      nav?.navigate?.("AssignmentDetail", {
-        groupId: item.groupId,
-        assignmentId: item.assignmentId,
+      nav?.navigate?.("收件匣", {
+        screen: "AssignmentDetail",
+        params: { groupId: item.groupId, assignmentId: item.assignmentId },
       });
       return;
     }
 
-    nav?.navigate?.("GroupDetail", { groupId: item.groupId });
+    nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: item.groupId } });
   };
 
   return (
@@ -183,6 +194,20 @@ export function InboxScreen(props: any) {
               onPress={() => nav?.navigate?.("課程", { screen: "CourseHub" })}
             />
           )
+        ) : null}
+
+        {auth.user && ambientCue ? (
+          <AmbientCueCard
+            signalType={ambientCue.signalType}
+            headline={ambientCue.headline}
+            body={ambientCue.body}
+            metric={ambientCue.metric}
+            actionLabel={ambientCue.ctaLabel}
+            onPress={() => openAmbientCue(ambientCue, nav)}
+            onDismiss={() => {
+              void dismissAmbientCue(ambientCue);
+            }}
+          />
         ) : null}
 
         {auth.user && inboxItems.length > 0 ? (

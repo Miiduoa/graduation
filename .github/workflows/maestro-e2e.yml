@@ -15,7 +15,7 @@ on:
           - authentication
           - announcements
   schedule:
-    - cron: '0 6 * * 1'  # Weekly on Monday at 6 AM UTC
+    - cron: '0 6 * * 1' # Weekly on Monday at 6 AM UTC
   pull_request:
     branches: [main, develop]
     paths:
@@ -31,13 +31,13 @@ jobs:
     name: Maestro E2E Tests
     runs-on: macos-latest
     timeout-minutes: 60
-    
+
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: ios
-            device: "iPhone 15"
+            device: 'iPhone 15'
           # Android can be added later
           # - platform: android
           #   device: "Pixel_7_API_34"
@@ -80,7 +80,7 @@ jobs:
         run: |
           # List available simulators
           xcrun simctl list devices available
-          
+
           # Boot the simulator
           SIMULATOR_ID=$(xcrun simctl list devices available | grep "${{ matrix.device }}" | head -1 | grep -oE '\([A-F0-9-]+\)' | tr -d '()')
           if [ -n "$SIMULATOR_ID" ]; then
@@ -94,12 +94,11 @@ jobs:
           # Export for iOS Simulator
           npx expo prebuild --platform ios --clean
           xcodebuild -workspace ios/*.xcworkspace \
-            -scheme CampusApp \
+            -scheme mobile \
             -configuration Debug \
             -destination "platform=iOS Simulator,name=${{ matrix.device }}" \
             -derivedDataPath build \
-            build || echo "Build may have warnings"
-        continue-on-error: true
+            build
 
       - name: Start Metro Bundler
         working-directory: apps/mobile
@@ -107,11 +106,11 @@ jobs:
           npx expo start --ios --no-dev --minify &
           METRO_PID=$!
           echo "METRO_PID=$METRO_PID" >> $GITHUB_ENV
-          
+
           # Wait for Metro to be ready
           echo "Waiting for Metro bundler..."
           sleep 45
-          
+
           # Check if Metro is running
           curl -s http://localhost:8081/status || echo "Metro status check failed"
 
@@ -123,16 +122,14 @@ jobs:
           maestro test .maestro/flows/01_onboarding.yaml \
             --format junit \
             --output .maestro/results/smoke-results.xml \
-            --env APP_ID=com.campus.app \
-            || true
-        continue-on-error: true
+            --env APP_ID=com.campus.app
 
       - name: Run Full Test Suite
         if: github.event.inputs.test_suite == 'full'
         working-directory: apps/mobile
         run: |
           mkdir -p .maestro/results .maestro/screenshots
-          
+
           # Run all test flows
           for flow in .maestro/flows/*.yaml; do
             flow_name=$(basename "$flow" .yaml)
@@ -141,23 +138,21 @@ jobs:
             maestro test "$flow" \
               --format junit \
               --output ".maestro/results/${flow_name}-results.xml" \
-              --env APP_ID=com.campus.app \
-              || echo "Test $flow_name completed with errors"
+              --env APP_ID=com.campus.app
             
             # Small delay between tests
             sleep 5
           done
-        continue-on-error: true
 
       - name: Run Specific Test Suite
         if: github.event.inputs.test_suite != 'smoke' && github.event.inputs.test_suite != 'full' && github.event.inputs.test_suite != ''
         working-directory: apps/mobile
         run: |
           mkdir -p .maestro/results
-          
+
           # Find and run matching flow
           FLOW_FILE=$(ls .maestro/flows/*_${{ github.event.inputs.test_suite }}.yaml 2>/dev/null | head -1)
-          
+
           if [ -n "$FLOW_FILE" ]; then
             echo "Running: $FLOW_FILE"
             maestro test "$FLOW_FILE" \
@@ -168,7 +163,6 @@ jobs:
             echo "No flow found for: ${{ github.event.inputs.test_suite }}"
             exit 1
           fi
-        continue-on-error: true
 
       - name: Cleanup
         if: always()
@@ -177,7 +171,7 @@ jobs:
           if [ -n "$METRO_PID" ]; then
             kill $METRO_PID || true
           fi
-          
+
           # Shutdown simulator
           if [ -n "$SIMULATOR_UDID" ]; then
             xcrun simctl shutdown "$SIMULATOR_UDID" || true

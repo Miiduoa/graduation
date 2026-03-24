@@ -345,28 +345,62 @@ async function seedCafeterias() {
     {
       id: "cafeteria-1",
       name: "第一學生餐廳",
+      merchantId: "cafeteria-1",
+      brandKey: "student-hall",
       location: "學生活動中心 1F",
       openingHours: "週一至週五 07:00-20:00，週六 08:00-14:00",
+      pilotStatus: "live",
+      orderingEnabled: true,
       seatingCapacity: 300,
       currentOccupancy: Math.floor(Math.random() * 200) + 50,
     },
     {
       id: "cafeteria-2",
       name: "第二學生餐廳",
+      merchantId: "cafeteria-2",
+      brandKey: "noodle-bar",
       location: "工程學院地下室",
       openingHours: "週一至週五 11:00-14:00, 17:00-19:00",
+      pilotStatus: "pilot",
+      orderingEnabled: true,
       seatingCapacity: 200,
       currentOccupancy: Math.floor(Math.random() * 150) + 30,
     },
     {
       id: "cafeteria-3",
       name: "便利商店 7-11",
+      merchantId: "cafeteria-3",
+      brandKey: "campus-convenience",
       location: "學生活動中心 B1",
       openingHours: "24小時營業",
+      pilotStatus: "inactive",
+      orderingEnabled: false,
       seatingCapacity: 20,
       currentOccupancy: Math.floor(Math.random() * 15) + 5,
     },
   ];
+
+  const cafeteriaOperators = {
+    "cafeteria-1": [
+      {
+        uid: "demo-merchant-1",
+        status: "active",
+        role: "owner",
+        displayName: "第一餐廳負責人",
+        email: "merchant1@example.com",
+      },
+    ],
+    "cafeteria-2": [
+      {
+        uid: "demo-merchant-2",
+        status: "active",
+        role: "manager",
+        displayName: "第二餐廳主管",
+        email: "merchant2@example.com",
+      },
+    ],
+    "cafeteria-3": [],
+  };
 
   const menus = [
     { name: "雞腿飯", price: 75, calories: 850, cafeteriaId: "cafeteria-1", category: "主餐", available: true },
@@ -387,18 +421,30 @@ async function seedCafeterias() {
   const menusRef = db.collection("schools").doc(DEMO_SCHOOL_ID).collection("menus");
 
   for (const cafeteria of cafeterias) {
+    const operators = cafeteriaOperators[cafeteria.id] ?? [];
     await cafeteriasRef.doc(cafeteria.id).set({
       ...cafeteria,
+      activeOperatorCount: operators.filter((operator) => operator.status === "active").length,
       rating: (Math.random() * 1.5 + 3.5).toFixed(1),
       reviewCount: Math.floor(Math.random() * 200) + 50,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     });
+
+    for (const operator of operators) {
+      await cafeteriasRef.doc(cafeteria.id).collection("operators").doc(operator.uid).set({
+        ...operator,
+        lastActiveAt: FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
   }
 
   for (const menu of menus) {
     await menusRef.add({
       ...menu,
+      merchantId: menu.cafeteriaId,
       rating: (Math.random() * 1.5 + 3.5).toFixed(1),
       orderCount: Math.floor(Math.random() * 1000) + 100,
       tags: [],
@@ -745,19 +791,38 @@ async function seedDemoUsers() {
       department: "計算機中心",
       role: "admin",
     },
+    {
+      uid: "demo-merchant-1",
+      email: "merchant1@example.com",
+      displayName: "第一餐廳負責人",
+      department: "校園餐飲合作店家",
+      schoolMember: false,
+    },
+    {
+      uid: "demo-merchant-2",
+      email: "merchant2@example.com",
+      displayName: "第二餐廳主管",
+      department: "校園餐飲合作店家",
+      schoolMember: false,
+    },
   ];
 
   const usersRef = db.collection("users");
 
   for (const user of users) {
+    const { schoolMember, ...userData } = user;
     await usersRef.doc(user.uid).set({
-      ...user,
-      schoolId: DEMO_SCHOOL_ID,
+      ...userData,
+      ...(schoolMember === false ? {} : { schoolId: DEMO_SCHOOL_ID }),
       avatarUrl: null,
       notificationsEnabled: true,
       createdAt: FieldValue.serverTimestamp(),
       lastLoginAt: FieldValue.serverTimestamp(),
     });
+
+    if (schoolMember === false) {
+      continue;
+    }
 
     await db.collection("schools").doc(DEMO_SCHOOL_ID).collection("members").doc(user.uid).set({
       status: "active",

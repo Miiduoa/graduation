@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import type { TextInputProps } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";

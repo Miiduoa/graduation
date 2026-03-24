@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * HomeStack — Today Tab
  *

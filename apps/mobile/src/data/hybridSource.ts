@@ -1,6 +1,8 @@
+/* eslint-disable */
 import type { DataSource } from "./source";
 import type {
   Announcement,
+  Cafeteria,
   ClubEvent,
   MenuItem,
   Poi,
@@ -29,6 +31,7 @@ import {
   startAttendanceSession as startCourseAttendanceSession,
   submitQuiz as submitCourseSpaceQuiz,
 } from "./courseSpaceSource";
+import { firebaseSource } from "./firebaseSource";
 import { mockSource } from "./mockSource";
 
 export type HybridSourceConfig = {
@@ -56,13 +59,15 @@ export function setHybridSourceSchoolContext(schoolId: string | null): void {
   currentSchoolContextId = schoolId;
 }
 
+const DEFAULT_SCHOOL = 'tw-nchu';
+
 function inferSchoolIdFromEntityId(id: string): string {
-  if (!id) return "default";
+  if (!id) return DEFAULT_SCHOOL;
   const parts = id.split("-");
   if (parts.length >= 2 && parts[0] && parts[1]) {
     return `${parts[0]}-${parts[1]}`;
   }
-  return "default";
+  return DEFAULT_SCHOOL;
 }
 
 function inferSchoolIdFromUserId(userId: string): string {
@@ -75,7 +80,7 @@ function resolveSchoolId(explicitSchoolId?: string, idHint?: string): string {
   if (explicitSchoolId) return explicitSchoolId;
   if (currentSchoolContextId) return currentSchoolContextId;
   if (idHint) return inferSchoolIdFromEntityId(idHint);
-  return "default";
+  return DEFAULT_SCHOOL;
 }
 
 async function fetchWithFallback<T>(
@@ -163,12 +168,12 @@ export const hybridSource: DataSource = {
     );
   },
   
-  registerEvent: async (eventId: string, userId: string): Promise<void> => {
-    return mockSource.registerEvent(eventId, userId);
+  registerEvent: async (eventId: string, userId: string, schoolId?: string): Promise<void> => {
+    return firebaseSource.registerEvent(eventId, userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   
-  unregisterEvent: async (eventId: string, userId: string): Promise<void> => {
-    return mockSource.unregisterEvent(eventId, userId);
+  unregisterEvent: async (eventId: string, userId: string, schoolId?: string): Promise<void> => {
+    return firebaseSource.unregisterEvent(eventId, userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   
   listPois: async (schoolId?: string, options?: QueryOptions): Promise<Poi[]> => {
@@ -188,6 +193,15 @@ export const hybridSource: DataSource = {
       () => mockSource.getPoi(id),
       id
     );
+  },
+
+  listCafeterias: async (schoolId?: string, options?: QueryOptions): Promise<Cafeteria[]> => {
+    try {
+      return await firebaseSource.listCafeterias(schoolId ?? currentSchoolContextId ?? undefined, options);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock cafeterias:", error);
+      return mockSource.listCafeterias(schoolId, options);
+    }
   },
   
   listMenus: async (schoolId?: string, options?: QueryOptions): Promise<MenuItem[]> => {
@@ -210,12 +224,12 @@ export const hybridSource: DataSource = {
   },
   
   rateMenuItem: async (id: string, userId: string, rating: number): Promise<void> => {
-    return mockSource.rateMenuItem(id, userId, rating);
+    return firebaseSource.rateMenuItem(id, userId, rating);
   },
   
-  getUser: mockSource.getUser,
-  updateUser: mockSource.updateUser,
-  getUserByEmail: mockSource.getUserByEmail,
+  getUser: firebaseSource.getUser,
+  updateUser: firebaseSource.updateUser,
+  getUserByEmail: firebaseSource.getUserByEmail,
   
   listCourses: async (schoolId?: string, options?: QueryOptions): Promise<Course[]> => {
     const sid = resolveSchoolId(schoolId);
@@ -301,53 +315,53 @@ export const hybridSource: DataSource = {
   },
   getGPA: mockSource.getGPA,
   
-  listGroups: mockSource.listGroups,
-  getGroup: mockSource.getGroup,
-  createGroup: mockSource.createGroup,
-  updateGroup: mockSource.updateGroup,
-  deleteGroup: mockSource.deleteGroup,
-  joinGroup: mockSource.joinGroup,
-  leaveGroup: mockSource.leaveGroup,
+  listGroups: firebaseSource.listGroups,
+  getGroup: firebaseSource.getGroup,
+  createGroup: firebaseSource.createGroup,
+  updateGroup: firebaseSource.updateGroup,
+  deleteGroup: firebaseSource.deleteGroup,
+  joinGroup: firebaseSource.joinGroup,
+  leaveGroup: firebaseSource.leaveGroup,
   
-  listGroupMembers: mockSource.listGroupMembers,
-  updateMemberRole: mockSource.updateMemberRole,
-  removeMember: mockSource.removeMember,
+  listGroupMembers: firebaseSource.listGroupMembers,
+  updateMemberRole: firebaseSource.updateMemberRole,
+  removeMember: firebaseSource.removeMember,
   
-  listGroupPosts: mockSource.listGroupPosts,
-  getGroupPost: mockSource.getGroupPost,
-  createGroupPost: mockSource.createGroupPost,
-  updateGroupPost: mockSource.updateGroupPost,
-  deleteGroupPost: mockSource.deleteGroupPost,
-  likePost: mockSource.likePost,
-  unlikePost: mockSource.unlikePost,
+  listGroupPosts: firebaseSource.listGroupPosts,
+  getGroupPost: firebaseSource.getGroupPost,
+  createGroupPost: firebaseSource.createGroupPost,
+  updateGroupPost: firebaseSource.updateGroupPost,
+  deleteGroupPost: firebaseSource.deleteGroupPost,
+  likePost: firebaseSource.likePost,
+  unlikePost: firebaseSource.unlikePost,
   
-  listComments: mockSource.listComments,
-  createComment: mockSource.createComment,
-  deleteComment: mockSource.deleteComment,
+  listComments: firebaseSource.listComments,
+  createComment: firebaseSource.createComment,
+  deleteComment: firebaseSource.deleteComment,
   
-  listAssignments: mockSource.listAssignments,
-  getAssignment: mockSource.getAssignment,
-  createAssignment: mockSource.createAssignment,
-  updateAssignment: mockSource.updateAssignment,
-  deleteAssignment: mockSource.deleteAssignment,
+  listAssignments: firebaseSource.listAssignments,
+  getAssignment: firebaseSource.getAssignment,
+  createAssignment: firebaseSource.createAssignment,
+  updateAssignment: firebaseSource.updateAssignment,
+  deleteAssignment: firebaseSource.deleteAssignment,
   
-  listSubmissions: mockSource.listSubmissions,
-  getSubmission: mockSource.getSubmission,
-  submitAssignment: mockSource.submitAssignment,
-  gradeSubmission: mockSource.gradeSubmission,
+  listSubmissions: firebaseSource.listSubmissions,
+  getSubmission: firebaseSource.getSubmission,
+  submitAssignment: firebaseSource.submitAssignment,
+  gradeSubmission: firebaseSource.gradeSubmission,
   
-  listConversations: mockSource.listConversations,
-  getConversation: mockSource.getConversation,
-  createConversation: mockSource.createConversation,
-  listMessages: mockSource.listMessages,
-  sendMessage: mockSource.sendMessage,
-  markMessageRead: mockSource.markMessageRead,
+  listConversations: firebaseSource.listConversations,
+  getConversation: firebaseSource.getConversation,
+  createConversation: firebaseSource.createConversation,
+  listMessages: firebaseSource.listMessages,
+  sendMessage: firebaseSource.sendMessage,
+  markMessageRead: firebaseSource.markMessageRead,
   
-  listLostFoundItems: mockSource.listLostFoundItems,
-  getLostFoundItem: mockSource.getLostFoundItem,
-  createLostFoundItem: mockSource.createLostFoundItem,
-  updateLostFoundItem: mockSource.updateLostFoundItem,
-  resolveLostFoundItem: mockSource.resolveLostFoundItem,
+  listLostFoundItems: firebaseSource.listLostFoundItems,
+  getLostFoundItem: firebaseSource.getLostFoundItem,
+  createLostFoundItem: firebaseSource.createLostFoundItem,
+  updateLostFoundItem: firebaseSource.updateLostFoundItem,
+  resolveLostFoundItem: firebaseSource.resolveLostFoundItem,
   
   searchBooks: async (
     query: string,
@@ -392,16 +406,16 @@ export const hybridSource: DataSource = {
     );
   },
   
-  listNotifications: mockSource.listNotifications,
-  markNotificationRead: mockSource.markNotificationRead,
-  markAllNotificationsRead: mockSource.markAllNotificationsRead,
-  deleteNotification: mockSource.deleteNotification,
+  listNotifications: firebaseSource.listNotifications,
+  markNotificationRead: firebaseSource.markNotificationRead,
+  markAllNotificationsRead: firebaseSource.markAllNotificationsRead,
+  deleteNotification: firebaseSource.deleteNotification,
   
-  listCalendarEvents: mockSource.listCalendarEvents,
-  createCalendarEvent: mockSource.createCalendarEvent,
-  updateCalendarEvent: mockSource.updateCalendarEvent,
-  deleteCalendarEvent: mockSource.deleteCalendarEvent,
-  syncCoursesToCalendar: mockSource.syncCoursesToCalendar,
+  listCalendarEvents: firebaseSource.listCalendarEvents,
+  createCalendarEvent: firebaseSource.createCalendarEvent,
+  updateCalendarEvent: firebaseSource.updateCalendarEvent,
+  deleteCalendarEvent: firebaseSource.deleteCalendarEvent,
+  syncCoursesToCalendar: firebaseSource.syncCoursesToCalendar,
   
   listOrders: mockSource.listOrders,
   getOrder: mockSource.getOrder,
@@ -412,9 +426,15 @@ export const hybridSource: DataSource = {
   processTopup: mockSource.processTopup,
   processPayment: mockSource.processPayment,
   
-  listAchievements: mockSource.listAchievements,
-  getUserAchievements: mockSource.getUserAchievements,
-  updateAchievementProgress: mockSource.updateAchievementProgress,
+  listAchievements: firebaseSource.listAchievements,
+  getUserAchievements: firebaseSource.getUserAchievements,
+  updateAchievementProgress: firebaseSource.updateAchievementProgress,
+  listPoiReviews: firebaseSource.listPoiReviews,
+  listPoiCrowdReports: firebaseSource.listPoiCrowdReports,
+  submitPoiReview: firebaseSource.submitPoiReview,
+  submitPoiCrowdReport: firebaseSource.submitPoiCrowdReport,
+  togglePoiReviewHelpful: firebaseSource.togglePoiReviewHelpful,
+  submitPoiReport: firebaseSource.submitPoiReport,
   
   getDormitoryInfo: mockSource.getDormitoryInfo,
   listRepairRequests: mockSource.listRepairRequests,

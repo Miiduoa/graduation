@@ -4,30 +4,67 @@
     "appVersionSource": "local"
   },
   "build": {
+    "base": {
+      "node": "20.18.0",
+      "pnpm": {
+        "version": "10.28.2"
+      }
+    },
     "development": {
+      "extends": "base",
       "developmentClient": true,
       "distribution": "internal",
       "channel": "development",
       "env": {
         "APP_ENV": "development"
+      },
+      "ios": {
+        "simulator": true
       }
     },
     "preview": {
+      "extends": "base",
       "distribution": "internal",
       "channel": "preview",
       "env": {
         "APP_ENV": "preview"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "apk"
       }
     },
     "production": {
+      "extends": "base",
       "channel": "production",
       "autoIncrement": true,
       "env": {
         "APP_ENV": "production"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "app-bundle"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "${APPLE_ID}",
+        "ascAppId": "${ASC_APP_ID}",
+        "appleTeamId": "${APPLE_TEAM_ID}",
+        "language": "zh-Hant"
+      },
+      "android": {
+        "serviceAccountKeyPath": "${GOOGLE_SERVICE_ACCOUNT_KEY_PATH}",
+        "track": "internal",
+        "releaseStatus": "draft",
+        "changesNotSentForReview": true
+      }
+    }
   }
 }

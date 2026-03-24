@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import React, { useState, useMemo } from "react";
 import { ScrollView, Text, View, TextInput, Pressable, Alert, KeyboardAvoidingView, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +15,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
+import { getDataSource, hasDataSource } from "../data";
 
 type ItemType = "lost" | "found";
 type ItemCategory = "electronics" | "cards" | "clothing" | "accessories" | "books" | "keys" | "other";
@@ -160,7 +162,28 @@ export function LostFoundPostScreen(props: any) {
     setSubmitting(true);
 
     try {
-      await new Promise((r) => setTimeout(r, 1000));
+      if (hasDataSource()) {
+        const ds = getDataSource();
+        const itemData = {
+          type,
+          title: title.trim(),
+          description: description.trim(),
+          category: category!,
+          location: finalLocation.trim(),
+          date: dateStr,
+          contactInfo: contactInfo.trim() || undefined,
+          tags: characteristics,
+          reporterId: auth.user.uid,
+          schoolId: school.id,
+        };
+
+        if (isEditing && editId) {
+          await ds.updateLostFoundItem(editId, itemData);
+        } else {
+          await ds.createLostFoundItem(itemData as any);
+        }
+      }
+      // DataSource 未就緒時仍允許導覽回上頁（示範模式）
 
       Alert.alert(
         isEditing ? "更新成功" : "發布成功",

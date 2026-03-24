@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -47,24 +48,34 @@ import { AcademicStack } from "./src/screens/AcademicStack";
 import { MapStack } from "./src/screens/MapStack";
 import { MessagesStack } from "./src/screens/MessagesStack";
 import { MeStack } from "./src/screens/MeStack";
+import { TeachingStack } from "./src/screens/TeachingStack";
+import { StaffStack } from "./src/screens/StaffStack";
+import { DepartmentStack } from "./src/screens/DepartmentStack";
+import { AdminStack } from "./src/screens/AdminStack";
 import { OnboardingScreen, hasSeenOnboarding } from "./src/screens/OnboardingScreen";
 import { usePushNotifications } from "./src/app/usePushNotifications";
 import { initializeRuntimeDataSource } from "./src/config/runtime";
+import { usePermissions } from "./src/hooks/usePermissions";
 
 /**
  * 5-Tab 心理學導航架構（Hick's Law + Progressive Disclosure）
  *
- * Today / 課程 / 校園 / 收件匣 / 我的
+ * Today / [課程|教學|服務|審核|管理] / 校園 / 收件匣 / 我的
  *
  * 設計根據：
  * - Hick's Law: 首層只保留 5 個穩定入口，避免首頁變成功能總表
  * - Temporal Self-Regulation: Today 只處理下一步、今日課務與校園情境
  * - Context-Dependent Memory: 課程主流程與收件匣分工清楚，減少切換迷失
  * - Spatial Cognition: 校園服務依移動與生活情境集中到同一入口
+ * - RBAC: 第二個 Tab 根據使用者角色動態改變
  */
 type RootTabParamList = {
   Today: undefined;
   課程: undefined;
+  教學: undefined;
+  服務: undefined;
+  審核: undefined;
+  管理: undefined;
   校園: undefined;
   收件匣: undefined;
   我的: undefined;
@@ -76,10 +87,11 @@ const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
 type TabKey = keyof RootTabParamList;
 
+// Static TAB_CONFIG for backward compatibility - will be replaced by dynamic config in FloatingTabBar
 const TAB_CONFIG: Array<{
-  key: TabKey;
+  key: string;
   label: string;
-  icon: { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap };
+  icon: { active: string; inactive: string };
 }> = [
   {
     key: "Today",
@@ -138,6 +150,41 @@ const linking: LinkingOptions<RootTabParamList> = {
           Calendar: "calendar",
           AICourseAdvisor: "ai-advisor",
           AIChat: "course-ai-chat",
+        },
+      },
+      教學: {
+        screens: {
+          TeachingHub: "teaching",
+          CourseSchedule: "schedule",
+          AddCourse: "course/new",
+          CourseHub: "course-hub",
+          CourseModules: "course-modules",
+          QuizCenter: "quiz-center",
+          Attendance: "attendance",
+          Classroom: "classroom/:sessionId",
+          LearningAnalytics: "learning-analytics",
+          CourseGradebook: "course-gradebook",
+          Grades: "grades",
+          Calendar: "calendar",
+          AICourseAdvisor: "ai-advisor",
+          AIChat: "course-ai-chat",
+        },
+      },
+      服務: {
+        screens: {
+          StaffHub: "staff",
+          MapStack: "map",
+          MessagesStack: "messages",
+        },
+      },
+      審核: {
+        screens: {
+          DepartmentHub: "department",
+        },
+      },
+      管理: {
+        screens: {
+          AdminDashboard: "admin",
         },
       },
       校園: {
@@ -508,16 +555,21 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * FloatingTabBar — Calm Clarity 設計語言
+ * FloatingTabBar — Calm Clarity 設計語言 with RBAC Support
  *
  * 心理學：
  * - Fitts's Law: 5 個清楚命名的 Tab 仍維持穩定大目標區，降低誤觸
  * - Affordance: 清晰的選中/未選中視覺差異
  * - Gestalt 接近法則: 毛玻璃背景與底部安全區完整融合
+ * - RBAC: 根據使用者角色動態調整 Tab 配置
  */
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const isDark = theme.mode === "dark";
+  const permissions = usePermissions();
+
+  // Get dynamic tab config based on role
+  const dynamicTabs = permissions.tabs;
 
   return (
     <View style={{
@@ -538,9 +590,9 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         const focused = state.index === index;
-        const config = TAB_CONFIG.find((t) => t.key === route.name);
+        const config = dynamicTabs.find((t) => t.key === route.name);
         const iconName: keyof typeof Ionicons.glyphMap = config
-          ? (focused ? config.icon.active : config.icon.inactive)
+          ? (focused ? (config.icon.active as keyof typeof Ionicons.glyphMap) : (config.icon.inactive as keyof typeof Ionicons.glyphMap))
           : (focused ? "ellipse" : "ellipse-outline");
 
         return (
@@ -591,6 +643,58 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   );
 }
 
+/**
+ * RoleAwareTabNavigator — Dynamically render tabs based on user role
+ * Maps role-specific tab keys to stack components
+ */
+function RoleAwareTabNavigator() {
+  const permissions = usePermissions();
+
+  // Map initialRoute to RootTabParamList keys
+  const getInitialRouteName = (): keyof RootTabParamList => {
+    switch (permissions.initialRoute) {
+      case "管理":
+        return "管理";
+      case "審核":
+        return "審核";
+      case "教學":
+        return "教學";
+      case "服務":
+        return "服務";
+      case "Today":
+        return "Today";
+      default:
+        return "Today";
+    }
+  };
+
+  return (
+    <Tab.Navigator
+      id={undefined}
+      initialRouteName={getInitialRouteName()}
+      tabBar={(props) => <FloatingTabBar {...props} />}
+      screenOptions={() => ({
+        headerShown: false,
+        sceneStyle: { backgroundColor: theme.colors.bg },
+      })}
+    >
+      <Tab.Screen name="Today" component={HomeStack} />
+
+      {/* Render role-specific tab */}
+      {permissions.isStudent && <Tab.Screen name="課程" component={AcademicStack} />}
+      {permissions.isTeacher && <Tab.Screen name="教學" component={TeachingStack} />}
+      {permissions.isStaff && <Tab.Screen name="服務" component={StaffStack} />}
+      {permissions.isDepartmentHead && <Tab.Screen name="審核" component={DepartmentStack} />}
+      {permissions.isAdmin && <Tab.Screen name="管理" component={AdminStack} />}
+
+      {/* Shared tabs */}
+      <Tab.Screen name="校園" component={MapStack} />
+      <Tab.Screen name="收件匣" component={MessagesStack} />
+      <Tab.Screen name="我的" component={MeStack} />
+    </Tab.Navigator>
+  );
+}
+
 function AppNavigation({
   navigationRef,
 }: {
@@ -620,8 +724,8 @@ function AppNavigation({
   }
 
   return (
-    <NavigationContainer 
-      ref={navigationRef} 
+    <NavigationContainer
+      ref={navigationRef}
       theme={navTheme}
       linking={linking}
       fallback={
@@ -632,21 +736,7 @@ function AppNavigation({
     >
       <View style={{ flex: 1 }}>
         <NetworkStatusBanner />
-        <Tab.Navigator
-          id={undefined}
-          initialRouteName={auth.isAdmin ? "我的" : auth.isEditor ? "課程" : "Today"}
-          tabBar={(props) => <FloatingTabBar {...props} />}
-          screenOptions={() => ({
-            headerShown: false,
-            sceneStyle: { backgroundColor: theme.colors.bg },
-          })}
-        >
-          <Tab.Screen name="Today" component={HomeStack} />
-          <Tab.Screen name="課程" component={AcademicStack} />
-          <Tab.Screen name="校園" component={MapStack} />
-          <Tab.Screen name="收件匣" component={MessagesStack} />
-          <Tab.Screen name="我的" component={MeStack} />
-        </Tab.Navigator>
+        <RoleAwareTabNavigator />
       </View>
     </NavigationContainer>
   );

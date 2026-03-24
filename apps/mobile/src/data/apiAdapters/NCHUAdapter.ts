@@ -1,11 +1,7 @@
 import { BaseApiAdapter } from "./BaseAdapter";
-import type { 
-  AdapterCapabilities, 
-  AuthCredentials, 
-  RawAnnouncementData, 
-  RawEventData,
-  RawMenuData,
-  RawPoiData,
+import type {
+  AdapterCapabilities,
+  AuthCredentials,
 } from "./types";
 import type { Announcement, ClubEvent, MenuItem, Poi, Course, Grade } from "../types";
 

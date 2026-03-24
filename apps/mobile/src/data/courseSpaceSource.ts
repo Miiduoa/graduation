@@ -46,6 +46,11 @@ function toCourseSpace(
     moduleCount: number;
     activeSessionId: string | null;
     latestDueAt: Date | null;
+    memberCount: number;
+    activeLearnerCount: number;
+    completedAssignmentCount: number;
+    completionRate: number;
+    socialProofUpdatedAt: Date | null;
   }
 ): CourseSpace {
   return {
@@ -60,6 +65,11 @@ function toCourseSpace(
     moduleCount: summary?.moduleCount ?? 0,
     activeSessionId: summary?.activeSessionId ?? null,
     latestDueAt: summary?.latestDueAt ?? null,
+    memberCount: summary?.memberCount ?? 0,
+    activeLearnerCount: summary?.activeLearnerCount ?? 0,
+    completedAssignmentCount: summary?.completedAssignmentCount ?? 0,
+    completionRate: summary?.completionRate ?? 0,
+    socialProofUpdatedAt: summary?.socialProofUpdatedAt ?? null,
     schoolId: membership.schoolId,
   };
 }

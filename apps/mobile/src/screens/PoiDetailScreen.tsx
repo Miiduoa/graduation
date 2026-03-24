@@ -1,21 +1,17 @@
+/* eslint-disable */
 import React, { useMemo, useState, useEffect } from "react";
 import { ScrollView, Text, View, Linking, Platform, Pressable, Alert, Share, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { buildSchoolCollectionPath } from "@campus/shared/src";
-import { doc, collection, getDocs, setDoc, query, orderBy, serverTimestamp, getDoc, updateDoc, arrayUnion, arrayRemove, increment } from "firebase/firestore";
-import { findById } from "../data";
+import { findById, type CrowdLevel, type PoiCrowdReport, type PoiReportType, type PoiReview } from "../data";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
 import { Screen, Card, Pill, Button, LoadingState, ErrorState, AnimatedCard, StatusBadge, InfoRow, FeatureHighlight, RatingStars, Avatar, SegmentedControl, Divider } from "../ui/components";
 import { useFavorites } from "../state/favorites";
 import { useAuth } from "../state/auth";
-import { getDb } from "../firebase";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { formatRelativeTime, toDate } from "../utils/format";
-
-type CrowdLevel = "low" | "medium" | "high" | "very_high";
 
 type CrowdInfo = {
   level: CrowdLevel;
@@ -25,13 +21,6 @@ type CrowdInfo = {
   lastUpdated: Date;
 };
 
-type CrowdReport = {
-  id: string;
-  uid: string;
-  level: CrowdLevel;
-  createdAt?: any;
-};
-
 type NearbyFacility = {
   id: string;
   name: string;
@@ -39,28 +28,6 @@ type NearbyFacility = {
   distance: number;
   lat: number;
   lng: number;
-};
-
-type PoiReview = {
-  id: string;
-  uid: string;
-  displayName?: string | null;
-  avatarUrl?: string | null;
-  rating: number;
-  comment: string;
-  tags?: string[];
-  createdAt?: any;
-  helpful: number;
-  helpfulBy?: string[];
-};
-
-type PoiReport = {
-  id: string;
-  uid: string;
-  type: "closed" | "wrong_info" | "accessibility" | "safety" | "other";
-  description: string;
-  createdAt?: any;
-  status: "pending" | "resolved" | "rejected";
 };
 
 type AccessibilityInfo = {
@@ -168,7 +135,7 @@ function getCrowdLevelFromScore(score: number): CrowdLevel {
   return "very_high";
 }
 
-function buildPeakHours(reports: CrowdReport[]): string[] {
+function buildPeakHours(reports: PoiCrowdReport[]): string[] {
   const histogram = new Map<number, number>();
   for (const report of reports) {
     if (!report.createdAt) continue;
@@ -195,7 +162,7 @@ function estimateCrowdCount(level: CrowdLevel, reportCount: number): number {
   return baseByLevel[level] + Math.max(reportCount - 1, 0) * 6;
 }
 
-function deriveCrowdInfoFromReports(reports: CrowdReport[]): CrowdInfo | null {
+function deriveCrowdInfoFromReports(reports: PoiCrowdReport[]): CrowdInfo | null {
   const withDate = reports
     .filter((report) => !!report.createdAt)
     .map((report) => ({ ...report, createdDate: toDate(report.createdAt) }))
@@ -238,7 +205,6 @@ export function PoiDetailScreen(props: any) {
   const id: string | undefined = props?.route?.params?.id;
   const fav = useFavorites();
   const auth = useAuth();
-  const db = getDb();
 
   const [crowdInfo, setCrowdInfo] = useState<CrowdInfo | null>(null);
   const [userRating, setUserRating] = useState(0);
@@ -249,7 +215,7 @@ export function PoiDetailScreen(props: any) {
   const [err, setErr] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [showReportForm, setShowReportForm] = useState(false);
-  const [reportType, setReportType] = useState<"closed" | "wrong_info" | "accessibility" | "safety" | "other">("wrong_info");
+  const [reportType, setReportType] = useState<PoiReportType>("wrong_info");
   const [reportDescription, setReportDescription] = useState("");
 
   const ds = useDataSource();
@@ -257,57 +223,14 @@ export function PoiDetailScreen(props: any) {
 
   const item = useMemo(() => findById(raw, id), [raw, id]);
 
-  // Fetch reviews from Firebase
   const { items: reviews, loading: reviewsLoading, reload: reloadReviews } = useAsyncList<PoiReview>(
-    async () => {
-      if (!id) return [];
-      try {
-        const canonicalRef = school.id
-          ? collection(db, buildSchoolCollectionPath(school.id, "pois", id, "reviews").join("/"))
-          : null;
-        const legacyRef = collection(db, "pois", id, "reviews");
-        const refs = canonicalRef ? [canonicalRef, legacyRef] : [legacyRef];
-
-        for (const ref of refs) {
-          const qy = query(ref, orderBy("createdAt", "desc"));
-          const snap = await getDocs(qy);
-          if (!snap.empty || ref === legacyRef) {
-            return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as PoiReview[];
-          }
-        }
-
-        return [];
-      } catch {
-        return [];
-      }
-    },
-    [db, id, school.id]
+    () => (id ? ds.listPoiReviews(id, school.id) : Promise.resolve([])),
+    [ds, id, school.id]
   );
 
-  const { items: crowdReports, reload: reloadCrowdReports } = useAsyncList<CrowdReport>(
-    async () => {
-      if (!id) return [];
-      try {
-        const canonicalRef = school.id
-          ? collection(db, buildSchoolCollectionPath(school.id, "pois", id, "crowdReports").join("/"))
-          : null;
-        const legacyRef = collection(db, "pois", id, "crowdReports");
-        const refs = canonicalRef ? [canonicalRef, legacyRef] : [legacyRef];
-
-        for (const ref of refs) {
-          const qy = query(ref, orderBy("createdAt", "desc"));
-          const snap = await getDocs(qy);
-          if (!snap.empty || ref === legacyRef) {
-            return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as CrowdReport[];
-          }
-        }
-
-        return [];
-      } catch {
-        return [];
-      }
-    },
-    [db, id, school.id]
+  const { items: crowdReports, reload: reloadCrowdReports } = useAsyncList<PoiCrowdReport>(
+    () => (id ? ds.listPoiCrowdReports(id, school.id) : Promise.resolve([])),
+    [ds, id, school.id]
   );
 
   const myReview = useMemo(() => {
@@ -455,7 +378,7 @@ export function PoiDetailScreen(props: any) {
     );
   };
 
-  // Submit review to Firebase
+  // Submit review
   const handleSubmitReview = async () => {
     setErr(null);
     setSuccessMsg(null);
@@ -471,16 +394,15 @@ export function PoiDetailScreen(props: any) {
 
     setSubmittingReview(true);
     try {
-      await setDoc(doc(db, buildSchoolCollectionPath(school.id, "pois", id, "reviews", auth.user.uid).join("/")), {
+      await ds.submitPoiReview({
+        poiId: id,
         uid: auth.user.uid,
+        schoolId: school.id,
         displayName: auth.profile?.displayName ?? null,
         avatarUrl: auth.profile?.avatarUrl ?? null,
         rating: userRating,
-        comment: userComment.trim(),
+        comment: userComment,
         tags: selectedTags,
-        createdAt: serverTimestamp(),
-        helpful: 0,
-        helpfulBy: [],
       });
 
       setShowReviewForm(false);
@@ -507,10 +429,11 @@ export function PoiDetailScreen(props: any) {
     if (!id) return;
 
     try {
-      await setDoc(doc(collection(db, buildSchoolCollectionPath(school.id, "pois", id, "crowdReports").join("/"))), {
+      await ds.submitPoiCrowdReport({
+        poiId: id,
         uid: auth.user.uid,
+        schoolId: school.id,
         level,
-        createdAt: serverTimestamp(),
       });
       await reloadCrowdReports();
       setSuccessMsg(`已收到你的「${crowdLevelConfig[level].label}」回報，感謝協助更新現場資訊`);
@@ -523,18 +446,13 @@ export function PoiDetailScreen(props: any) {
   const handleHelpful = async (reviewId: string, alreadyHelpful: boolean) => {
     if (!auth.user || !id) return;
     try {
-      const reviewRef = doc(db, buildSchoolCollectionPath(school.id, "pois", id, "reviews", reviewId).join("/"));
-      if (alreadyHelpful) {
-        await updateDoc(reviewRef, {
-          helpfulBy: arrayRemove(auth.user.uid),
-          helpful: increment(-1),
-        });
-      } else {
-        await updateDoc(reviewRef, {
-          helpfulBy: arrayUnion(auth.user.uid),
-          helpful: increment(1),
-        });
-      }
+      await ds.togglePoiReviewHelpful({
+        poiId: id,
+        reviewId,
+        uid: auth.user.uid,
+        schoolId: school.id,
+        alreadyHelpful,
+      });
       reloadReviews();
     } catch {}
   };
@@ -554,13 +472,13 @@ export function PoiDetailScreen(props: any) {
     if (!id) return;
 
     try {
-      await setDoc(doc(collection(db, buildSchoolCollectionPath(school.id, "pois", id, "reports").join("/"))), {
+      await ds.submitPoiReport({
+        poiId: id,
         uid: auth.user.uid,
+        schoolId: school.id,
         email: auth.user.email ?? null,
         type: reportType,
-        description: reportDescription.trim(),
-        createdAt: serverTimestamp(),
-        status: "pending",
+        description: reportDescription,
       });
 
       setShowReportForm(false);

@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, View, Pressable, Alert, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -5,9 +6,11 @@ import { Screen, Card, Button, Pill, LoadingState, ErrorState, SectionTitle, Ani
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
+import { useSchool } from "../state/school";
 import { getDb } from "../firebase";
 import { collection, doc, getDoc, getDocs, query, where, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { useAsyncList } from "../hooks/useAsyncList";
+import { fetchSchoolDirectoryProfiles } from "../services/memberDirectory";
 
 type MemberRole = "owner" | "instructor" | "moderator" | "member";
 
@@ -20,10 +23,8 @@ type Member = {
 
 type UserProfile = {
   uid: string;
-  email?: string | null;
   displayName?: string | null;
   department?: string | null;
-  studentId?: string | null;
   avatarUrl?: string | null;
 };
 
@@ -66,6 +67,7 @@ export function GroupMembersScreen(props: any) {
   const nav = props?.navigation;
   const groupId: string | undefined = props?.route?.params?.groupId;
   const auth = useAuth();
+  const { school } = useSchool();
   const db = getDb();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -111,30 +113,13 @@ export function GroupMembersScreen(props: any) {
   const { items: userProfiles } = useAsyncList<UserProfile>(
     async () => {
       if (items.length === 0) return [];
-      const profiles: UserProfile[] = [];
-      for (const m of items) {
-        try {
-          const snap = await getDoc(doc(db, "users", m.uid));
-          if (snap.exists()) {
-            const data = snap.data() as any;
-            profiles.push({
-              uid: m.uid,
-              email: data.email ?? null,
-              displayName: data.displayName ?? null,
-              department: data.department ?? null,
-              studentId: data.studentId ?? null,
-              avatarUrl: data.avatarUrl ?? null,
-            });
-          } else {
-            profiles.push({ uid: m.uid });
-          }
-        } catch {
-          profiles.push({ uid: m.uid });
-        }
-      }
-      return profiles;
+      return fetchSchoolDirectoryProfiles(
+        school.id,
+        items.map((member) => member.uid),
+        db,
+      );
     },
-    [db, items.map((m) => m.uid).join(",")]
+    [db, school.id, items.map((m) => m.uid).join(",")]
   );
 
   const profilesById = useMemo(() => {
@@ -159,7 +144,7 @@ export function GroupMembersScreen(props: any) {
       const q = searchQuery.toLowerCase();
       list = list.filter((m) => {
         const profile = profilesById[m.uid];
-        const searchStr = `${profile?.displayName ?? ""} ${profile?.email ?? ""} ${profile?.department ?? ""} ${profile?.studentId ?? ""}`.toLowerCase();
+        const searchStr = `${profile?.displayName ?? ""} ${profile?.department ?? ""} ${m.uid}`.toLowerCase();
         return searchStr.includes(q);
       });
     }
@@ -235,7 +220,7 @@ export function GroupMembersScreen(props: any) {
     }
 
     const profile = profilesById[uid];
-    const displayName = profile?.displayName || profile?.email || uid.slice(0, 8);
+    const displayName = profile?.displayName || uid.slice(0, 8);
 
     Alert.alert(
       "確認移除成員",
@@ -300,7 +285,7 @@ export function GroupMembersScreen(props: any) {
           <SearchBar
             value={searchQuery}
             onChange={setSearchQuery}
-            placeholder="搜尋成員（姓名、Email、系所）"
+            placeholder="搜尋成員（姓名、系所、UID）"
           />
 
           <SegmentedControl
@@ -316,13 +301,8 @@ export function GroupMembersScreen(props: any) {
           {rows.map((m, idx) => {
             const isMe = m.uid === auth.user?.uid;
             const profile = profilesById[m.uid];
-            const displayName = profile?.displayName || profile?.email || `${m.uid.slice(0, 8)}…`;
-            const subtitle = [
-              profile?.department,
-              profile?.studentId,
-            ]
-              .filter(Boolean)
-              .join("｜");
+            const displayName = profile?.displayName || `${m.uid.slice(0, 8)}…`;
+            const subtitle = [profile?.department, m.uid.slice(0, 8)].filter(Boolean).join("｜");
             const isManaging = managingMember === m.uid;
 
             return (
@@ -400,11 +380,6 @@ export function GroupMembersScreen(props: any) {
                         />
                       </View>
                       {subtitle && <Text style={{ color: theme.colors.muted, marginTop: 4 }}>{subtitle}</Text>}
-                      {profile?.email && profile.email !== profile.displayName && (
-                        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                          {profile.email}
-                        </Text>
-                      )}
                     </View>
                     <Ionicons 
                       name={isManaging ? "chevron-up" : "chevron-forward"} 

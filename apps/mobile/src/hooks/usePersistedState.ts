@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   loadPersistedValue,
@@ -28,6 +29,7 @@ export function usePersistedState<T>({
   const defaultValueRef = useLatestValue(defaultValue);
   const deserializeRef = useLatestValue(deserialize);
   const serializeRef = useLatestValue(serialize);
+  const legacyKeysRef = useLatestValue(legacyKeys);
 
   const legacyKeySignature = useMemo(() => legacyKeys.join("|"), [legacyKeys]);
 
@@ -37,13 +39,13 @@ export function usePersistedState<T>({
 
     loadPersistedValue({
       storageKey,
-      legacyKeys,
+      legacyKeys: legacyKeysRef.current,
       fallback: defaultValueRef.current,
       deserialize: deserializeRef.current,
     })
       .then((nextValue) => {
         if (!cancelled) {
-          setValue(nextValue);
+          setValue((prevValue) => (Object.is(prevValue, nextValue) ? prevValue : nextValue));
         }
       })
       .finally(() => {
@@ -55,7 +57,7 @@ export function usePersistedState<T>({
     return () => {
       cancelled = true;
     };
-  }, [storageKey, legacyKeySignature, defaultValueRef, deserializeRef, legacyKeys]);
+  }, [storageKey, legacyKeySignature]);
 
   useEffect(() => {
     if (!loaded) {

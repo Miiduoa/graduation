@@ -4,7 +4,14 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { SiteShell } from "@/components/SiteShell";
-import { fetchCourseWorkspace, isFirebaseConfigured, type CourseWorkspace } from "@/lib/firebase";
+import {
+  checkGroupMembership,
+  fetchCourseWorkspace,
+  getAuth,
+  isFirebaseConfigured,
+  onAuthStateChanged,
+  type CourseWorkspace,
+} from "@/lib/firebase";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
 
 const EMPTY_WORKSPACE: CourseWorkspace = {
@@ -24,11 +31,60 @@ export default function TeacherCoursePage(props: {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [workspace, setWorkspace] = useState<CourseWorkspace>(EMPTY_WORKSPACE);
   const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const [canManage, setCanManage] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured()) {
+      setAuthReady(true);
+      setCanManage(true);
+      return;
+    }
+
+    const auth = getAuth();
+    if (!auth) {
+      setAuthReady(true);
+      setCanManage(false);
+      setAuthError("目前無法驗證登入狀態。");
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setCanManage(false);
+        setAuthError("請先登入具備課程管理權限的帳號。");
+        setAuthReady(true);
+        return;
+      }
+
+      try {
+        const membership = await checkGroupMembership(props.params.courseId, user.uid);
+        const role = membership.role ?? "";
+        const allowed = membership.isMember && ["owner", "instructor", "moderator"].includes(role);
+        setCanManage(allowed);
+        setAuthError(allowed ? null : "你不是這門課程的教師或管理成員。");
+      } catch {
+        setCanManage(false);
+        setAuthError("無法確認你的課程權限。");
+      } finally {
+        setAuthReady(true);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [props.params.courseId]);
 
   useEffect(() => {
     let active = true;
 
     async function load() {
+      if (!authReady) return;
+      if (!canManage) {
+        setWorkspace(EMPTY_WORKSPACE);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
         const next = await fetchCourseWorkspace(props.params.courseId);
@@ -46,7 +102,7 @@ export default function TeacherCoursePage(props: {
     return () => {
       active = false;
     };
-  }, [props.params.courseId]);
+  }, [authReady, canManage, props.params.courseId]);
 
   const summary = useMemo(
     () => ({
@@ -57,6 +113,7 @@ export default function TeacherCoursePage(props: {
     }),
     [workspace]
   );
+  const accessDenied = isFirebaseConfigured() && authReady && !canManage;
 
   return (
     <SiteShell
@@ -71,7 +128,18 @@ export default function TeacherCoursePage(props: {
           </div>
         ) : null}
 
-        <div className="metricGrid">
+        {accessDenied ? (
+          <div className="card" style={{ padding: "14px 16px", background: "var(--danger-soft)", borderColor: "var(--danger)" }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>無法存取教師工作台</div>
+            <div style={{ fontSize: 14, opacity: 0.82 }}>
+              {authError ?? "只有課程 owner、instructor 或 moderator 可以查看此頁面。"}
+            </div>
+          </div>
+        ) : null}
+
+        {!accessDenied ? (
+          <>
+            <div className="metricGrid">
           <div className="metricCard" style={{ "--tone": "var(--brand)" } as CSSProperties}>
             <div className="metricIcon">📦</div>
             <div className="metricValue">{workspace.modules.length}</div>
@@ -210,6 +278,14 @@ export default function TeacherCoursePage(props: {
             </div>
           </div>
         </div>
+          </>
+        ) : (
+          <div className="toolbarPanel" style={{ justifyContent: "flex-end" }}>
+            <Link href={`/course/${props.params.courseId}${q}`} className="btn">
+              返回學生視角
+            </Link>
+          </div>
+        )}
       </div>
     </SiteShell>
   );

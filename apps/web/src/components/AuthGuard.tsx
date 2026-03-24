@@ -2,7 +2,7 @@
 
 import { useEffect, useState, ReactNode, createContext, useContext, useCallback } from "react";
 import { onAuthStateChanged, User, signOut } from "firebase/auth";
-import { getAuth } from "@/lib/firebase";
+import { getAuth } from "@/features/auth/client";
 import Link from "next/link";
 
 interface AuthState {

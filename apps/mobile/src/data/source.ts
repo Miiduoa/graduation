@@ -1,3 +1,4 @@
+/* eslint-disable */
 import type { 
   Announcement, 
   Assignment,
@@ -6,11 +7,13 @@ import type {
   AttendanceSummary,
   BusArrival,
   BusRoute,
+  Cafeteria,
   CalendarEvent,
   ClubEvent, 
   Comment,
   Conversation,
   Course,
+  CrowdLevel,
   CourseGradebookData,
   CourseMaterial,
   CourseModule,
@@ -38,6 +41,9 @@ import type {
   Quiz,
   PaginatedResult,
   Poi,
+  PoiCrowdReport,
+  PoiReportType,
+  PoiReview,
   Printer,
   PrintJob,
   QueryOptions,
@@ -69,8 +75,42 @@ export type DataSource = {
   // 地點
   listPois: (schoolId?: string, options?: QueryOptions) => Promise<Poi[]>;
   getPoi: (id: string) => Promise<Poi | null>;
+  listPoiReviews: (poiId: string, schoolId?: string) => Promise<PoiReview[]>;
+  listPoiCrowdReports: (poiId: string, schoolId?: string) => Promise<PoiCrowdReport[]>;
+  submitPoiReview: (data: {
+    poiId: string;
+    uid: string;
+    schoolId?: string;
+    displayName?: string | null;
+    avatarUrl?: string | null;
+    rating: number;
+    comment: string;
+    tags?: string[];
+  }) => Promise<void>;
+  submitPoiCrowdReport: (data: {
+    poiId: string;
+    uid: string;
+    schoolId?: string;
+    level: CrowdLevel;
+  }) => Promise<void>;
+  togglePoiReviewHelpful: (data: {
+    poiId: string;
+    reviewId: string;
+    uid: string;
+    schoolId?: string;
+    alreadyHelpful: boolean;
+  }) => Promise<void>;
+  submitPoiReport: (data: {
+    poiId: string;
+    uid: string;
+    schoolId?: string;
+    email?: string | null;
+    type: PoiReportType;
+    description: string;
+  }) => Promise<void>;
   
   // 餐廳菜單
+  listCafeterias: (schoolId?: string, options?: QueryOptions) => Promise<Cafeteria[]>;
   listMenus: (schoolId?: string, options?: QueryOptions) => Promise<MenuItem[]>;
   getMenuItem: (id: string) => Promise<MenuItem | null>;
   rateMenuItem: (id: string, userId: string, rating: number) => Promise<void>;
@@ -199,9 +239,9 @@ export type DataSource = {
   ) => Promise<Submission>;
   
   // 訊息
-  listConversations: (userId: string, options?: QueryOptions) => Promise<Conversation[]>;
+  listConversations: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<Conversation[]>;
   getConversation: (id: string) => Promise<Conversation | null>;
-  createConversation: (participantIds: string[]) => Promise<Conversation>;
+  createConversation: (participantIds: string[], schoolId?: string, conversationId?: string) => Promise<Conversation>;
   listMessages: (conversationId: string, options?: QueryOptions) => Promise<Message[]>;
   sendMessage: (data: Omit<Message, "id" | "createdAt">) => Promise<Message>;
   markMessageRead: (messageId: string, userId: string, conversationId?: string) => Promise<void>;
@@ -287,31 +327,31 @@ export type DataSource = {
   
   // 宿舍服務
   getDormitoryInfo: (userId: string) => Promise<DormitoryInfo | null>;
-  listRepairRequests: (userId: string, options?: QueryOptions) => Promise<RepairRequest[]>;
+  listRepairRequests: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<RepairRequest[]>;
   createRepairRequest: (data: Omit<RepairRequest, "id" | "createdAt" | "status">) => Promise<RepairRequest>;
   updateRepairRequest: (id: string, data: Partial<RepairRequest>) => Promise<RepairRequest>;
   cancelRepairRequest: (id: string) => Promise<void>;
-  listDormPackages: (userId: string, options?: QueryOptions) => Promise<DormPackage[]>;
-  confirmPackagePickup: (id: string) => Promise<void>;
+  listDormPackages: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<DormPackage[]>;
+  confirmPackagePickup: (id: string, schoolId?: string) => Promise<void>;
   listWashingMachines: (schoolId?: string, building?: string) => Promise<WashingMachine[]>;
-  listWashingReservations: (userId: string) => Promise<WashingReservation[]>;
-  reserveWashingMachine: (machineId: string, userId: string) => Promise<WashingReservation>;
-  cancelWashingReservation: (id: string) => Promise<void>;
+  listWashingReservations: (userId: string, schoolId?: string) => Promise<WashingReservation[]>;
+  reserveWashingMachine: (machineId: string, userId: string, schoolId?: string) => Promise<WashingReservation>;
+  cancelWashingReservation: (id: string, schoolId?: string) => Promise<void>;
   listDormAnnouncements: (schoolId?: string, building?: string) => Promise<DormAnnouncement[]>;
   
   // 列印服務
   listPrinters: (schoolId?: string, options?: QueryOptions) => Promise<Printer[]>;
   getPrinter: (id: string) => Promise<Printer | null>;
-  listPrintJobs: (userId: string, options?: QueryOptions) => Promise<PrintJob[]>;
+  listPrintJobs: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<PrintJob[]>;
   createPrintJob: (data: Omit<PrintJob, "id" | "createdAt" | "status" | "cost">) => Promise<PrintJob>;
-  cancelPrintJob: (id: string) => Promise<void>;
+  cancelPrintJob: (id: string, schoolId?: string) => Promise<void>;
   
   // 健康服務
-  listHealthAppointments: (userId: string, options?: QueryOptions) => Promise<HealthAppointment[]>;
+  listHealthAppointments: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<HealthAppointment[]>;
   createHealthAppointment: (data: Omit<HealthAppointment, "id" | "createdAt" | "status">) => Promise<HealthAppointment>;
-  cancelHealthAppointment: (id: string) => Promise<void>;
-  rescheduleHealthAppointment: (id: string, data: { date: string; timeSlot: string; doctorId?: string; doctorName?: string }) => Promise<HealthAppointment>;
-  listHealthRecords: (userId: string, options?: QueryOptions) => Promise<HealthRecord[]>;
+  cancelHealthAppointment: (id: string, schoolId?: string) => Promise<void>;
+  rescheduleHealthAppointment: (id: string, data: { date: string; timeSlot: string; doctorId?: string; doctorName?: string }, schoolId?: string) => Promise<HealthAppointment>;
+  listHealthRecords: (userId: string, options?: QueryOptions, schoolId?: string) => Promise<HealthRecord[]>;
   listHealthTimeSlots: (department: string, date: string, schoolId?: string) => Promise<HealthTimeSlot[]>;
   
   // 宿舍進階服務

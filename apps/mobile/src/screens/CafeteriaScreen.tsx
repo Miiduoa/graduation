@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { FlatList, Pressable, Text, View, RefreshControl, ListRenderItem } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,6 +17,7 @@ import { useToast } from "../ui/Toast";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
 import { formatDateTime } from "../utils/format";
+import type { Cafeteria as DataCafeteria } from "../data/types";
 
 type MenuItem = {
   id: string;
@@ -27,6 +29,11 @@ type MenuItem = {
 
 type SortOption = "default" | "price_asc" | "price_desc" | "name";
 type ViewMode = "list" | "grid";
+type CafeteriaScreenProps = {
+  navigation?: {
+    navigate?: (screen: string, params?: Record<string, unknown>) => void;
+  };
+};
 
 const PRICE_RANGES = [
   { key: "all", label: "全部" },
@@ -54,10 +61,10 @@ function getCafeteriaColor(index: number) {
   return CATEGORY_COLORS[index % CATEGORY_COLORS.length];
 }
 
-export function CafeteriaScreen(props: any) {
+export function CafeteriaScreen(props: CafeteriaScreenProps) {
   const { school } = useSchool();
   const navigation = useNavigation();
-  const nav = props?.navigation ?? navigation;
+  const nav = (props?.navigation ?? navigation) as CafeteriaScreenProps["navigation"];
   const fav = useFavorites();
   const toast = useToast();
   const toastRef = useRef(toast);
@@ -95,6 +102,11 @@ export function CafeteriaScreen(props: any) {
     [ds, school.id],
     { keepPreviousData: true, onRefreshError: handleRefreshError }
   );
+  const { items: cafeteriaRows } = useAsyncList<DataCafeteria>(
+    () => ds.listCafeterias(school.id),
+    [ds, school.id],
+    { keepPreviousData: true }
+  );
 
   const isLoading = demo.mode === "loading" || (demo.mode === "normal" && loadLoading && raw.length === 0);
   const error = demo.mode === "error" ? "(demo) 讀取菜單失敗" : demo.mode === "normal" ? loadError : null;
@@ -119,12 +131,31 @@ export function CafeteriaScreen(props: any) {
   }, [demo.mode, refresh, isOffline]);
 
   const cafeteriaOptions = useMemo(() => {
+    if (cafeteriaRows.length > 0) {
+      return cafeteriaRows.map((cafeteria) => ({
+        key: cafeteria.name,
+        label: cafeteria.name,
+        id: cafeteria.id,
+        icon: "restaurant-outline",
+        orderingEnabled:
+          cafeteria.orderingEnabled === true &&
+          (cafeteria.activeOperatorCount ?? 0) > 0 &&
+          cafeteria.pilotStatus !== "inactive",
+      }));
+    }
+
     const cafeterias = new Set<string>();
     raw.forEach((m) => {
       if (m.cafeteria) cafeterias.add(m.cafeteria);
     });
-    return Array.from(cafeterias).map((c) => ({ key: c, label: c, icon: "restaurant-outline" }));
-  }, [raw]);
+    return Array.from(cafeterias).map((c) => ({
+      key: c,
+      label: c,
+      id: undefined,
+      icon: "restaurant-outline",
+      orderingEnabled: true,
+    }));
+  }, [cafeteriaRows, raw]);
 
   const cafeteriaColorMap = useMemo(() => {
     const map = new Map<string, ReturnType<typeof getCafeteriaColor>>();
@@ -441,7 +472,11 @@ export function CafeteriaScreen(props: any) {
                 onPress={() => {
                   if (nav && typeof nav.navigate === "function") {
                     const defaultCafeteria = cafeteriaOptions.length > 0 ? cafeteriaOptions[0].key : undefined;
-                    nav.navigate("Ordering", { cafeteria: defaultCafeteria });
+                    const defaultCafeteriaMeta = cafeteriaOptions[0];
+                    nav.navigate("Ordering", {
+                      cafeteria: defaultCafeteria,
+                      cafeteriaId: defaultCafeteriaMeta?.id,
+                    });
                   }
                 }}
                 style={({ pressed }) => ({

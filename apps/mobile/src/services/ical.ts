@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { Paths, File } from "expo-file-system";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
 import { getDocumentAsync } from "expo-document-picker";

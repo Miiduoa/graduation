@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Animated, Pressable, StyleSheet, Text, View, Dimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";

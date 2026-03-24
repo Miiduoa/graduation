@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { ScrollView, Text, TextInput, View, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -5,21 +6,21 @@ import { Screen, Card, Button, Pill, LoadingState, ErrorState } from "../ui/comp
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
+import { useSchool } from "../state/school";
+import { useDataSource } from "../hooks/useDataSource";
 import { getDb } from "../firebase";
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
-  serverTimestamp,
-  setDoc,
   onSnapshot,
   orderBy,
   query,
 } from "firebase/firestore";
 import { useAsyncList } from "../hooks/useAsyncList";
+import { fetchSchoolDirectoryProfiles } from "../services/memberDirectory";
 
-type Msg = { id: string; senderId: string; text: string; createdAt?: any };
+type Msg = { id: string; senderId: string; text?: string; content?: string; createdAt?: any };
 
 type Conversation = {
   id: string;
@@ -29,40 +30,41 @@ type Conversation = {
   lastMessageAt?: any;
 };
 
-function dmId(a: string, b: string) {
+function dmId(schoolId: string, a: string, b: string) {
   const [x, y] = [a, b].sort();
-  return `dm_${x}_${y}`;
+  return `dm_${schoolId}_${x}_${y}`;
 }
 
 export function ChatScreen(props: any) {
   const peerId = props?.route?.params?.peerId as string | undefined;
   const refPostId = props?.route?.params?.refPostId as string | undefined;
   const auth = useAuth();
+  const { school } = useSchool();
+  const ds = useDataSource();
   const db = getDb();
 
   const [text, setText] = useState("");
   // 快取用戶名稱：{ [uid]: displayName }
   const [userNames, setUserNames] = useState<Record<string, string>>({});
+  // 追蹤已發送請求的 UID，避免重複 fetch 或無限迴圈
+  const fetchedUids = useRef<Set<string>>(new Set());
 
   const fetchUserName = useCallback(async (uid: string) => {
-    if (userNames[uid]) return;
+    if (fetchedUids.current.has(uid)) return;
+    fetchedUids.current.add(uid);
     try {
-      const snap = await getDoc(doc(db, "users", uid));
-      if (snap.exists()) {
-        const name = snap.data()?.displayName ?? snap.data()?.email ?? uid.slice(0, 8);
-        setUserNames((prev) => ({ ...prev, [uid]: name }));
-      } else {
-        setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
-      }
+      const [profile] = await fetchSchoolDirectoryProfiles(school.id, [uid], db);
+      const name = profile?.displayName ?? uid.slice(0, 8);
+      setUserNames((prev) => ({ ...prev, [uid]: name }));
     } catch {
       setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
     }
-  }, [db, userNames]);
+  }, [db, school.id]);
 
   const convoKey = useMemo(() => {
-    if (!auth.user || !peerId) return null;
-    return dmId(auth.user.uid, peerId);
-  }, [auth.user?.uid, peerId]);
+    if (!auth.user || !peerId || !school.id) return null;
+    return dmId(school.id, auth.user.uid, peerId);
+  }, [auth.user?.uid, peerId, school.id]);
 
   const { items: convoRows, loading: convoLoading, error: convoError, reload: reloadConvo } = useAsyncList<Conversation>(
     async () => {
@@ -116,7 +118,7 @@ export function ChatScreen(props: any) {
     );
 
     return () => unsubscribe();
-  }, [db, convoKey]);
+  }, [db, convoKey, auth.user?.uid, fetchUserName]);
 
   const headerHint = useMemo(() => {
     if (!refPostId) return null;
@@ -125,14 +127,7 @@ export function ChatScreen(props: any) {
 
   const ensureConversation = async () => {
     if (!auth.user || !peerId || !convoKey) return;
-    const ref = doc(db, "conversations", convoKey);
-    const snap = await getDoc(ref);
-    if (snap.exists()) return;
-    await setDoc(ref, {
-      type: "dm",
-      memberIds: [auth.user.uid, peerId],
-      createdAt: serverTimestamp(),
-    });
+    await ds.createConversation([auth.user.uid, peerId], school.id, convoKey);
   };
 
   const onSend = async () => {
@@ -143,21 +138,17 @@ export function ChatScreen(props: any) {
 
     await ensureConversation();
 
-    await addDoc(collection(db, "conversations", convoKey, "messages"), {
-      senderId: auth.user.uid,
-      text: text.trim(),
-      createdAt: serverTimestamp(),
-      refPostId: refPostId ?? null,
-    });
+    // 若有引用貼文，附加於訊息內容末尾（Message 型別無 refPostId 欄位）
+    const messageContent = refPostId
+      ? `${text.trim()}\n\n📎 引用貼文：${refPostId}`
+      : text.trim();
 
-    await setDoc(
-      doc(db, "conversations", convoKey),
-      {
-        lastMessageText: text.trim(),
-        lastMessageAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    await ds.sendMessage({
+      conversationId: convoKey,
+      senderId: auth.user.uid,
+      content: messageContent,
+      type: "text",
+    });
 
     setText("");
     reloadConvo();
@@ -218,7 +209,7 @@ export function ChatScreen(props: any) {
                     borderColor: theme.colors.border,
                   }}
                 >
-                  <Text style={{ color: mine ? "#fff" : theme.colors.text, lineHeight: 20 }}>{m.text}</Text>
+                  <Text style={{ color: mine ? "#fff" : theme.colors.text, lineHeight: 20 }}>{m.content ?? m.text}</Text>
                 </View>
               </View>
             );

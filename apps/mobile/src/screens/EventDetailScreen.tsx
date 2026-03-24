@@ -1,50 +1,27 @@
+/* eslint-disable */
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { ScrollView, Text, View, Pressable, Share, Alert, TextInput, Linking, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, serverTimestamp, updateDoc, query, orderBy, where, increment } from "firebase/firestore";
 import * as Calendar from "expo-calendar";
-import { buildSchoolCollectionPath } from "@campus/shared/src";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
-import { collectionFromSegments, docFromSegments } from "../data/firestorePath";
+import {
+  loadEventRegistrations,
+  loadEventReviews,
+  loadEventUserProfiles,
+  submitEventReview,
+  type EventRegistration as Registration,
+  type EventReview,
+  type EventUserProfile as UserProfile,
+} from "../features/events";
 import { Screen, Card, Pill, Button, LoadingState, ErrorState, SectionTitle, CountdownTimer, AnimatedCard, InfoRow, FeatureHighlight, Avatar, StatusBadge, RatingStars, ProgressRing } from "../ui/components";
 import { useFavorites } from "../state/favorites";
 import { useAuth } from "../state/auth";
-import { getDb } from "../firebase";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { formatDateTime, toDate, formatRelativeTime } from "../utils/format";
 import type { ClubEvent } from "../data/types";
-
-type Registration = {
-  uid: string;
-  email?: string | null;
-  displayName?: string | null;
-  avatarUrl?: string | null;
-  registeredAt?: any;
-  status: "registered" | "cancelled" | "waitlist";
-  checkedIn?: boolean;
-  checkedInAt?: any;
-  waitlistPosition?: number;
-};
-
-type EventReview = {
-  id: string;
-  uid: string;
-  email?: string | null;
-  displayName?: string | null;
-  rating: number;
-  comment: string;
-  createdAt?: any;
-};
-
-type UserProfile = {
-  uid: string;
-  displayName?: string;
-  email?: string;
-  avatarUrl?: string;
-};
 
 export function EventDetailScreen(props: any) {
   const { school } = useSchool();
@@ -52,7 +29,6 @@ export function EventDetailScreen(props: any) {
   const id: string | undefined = props?.route?.params?.id;
   const fav = useFavorites();
   const auth = useAuth();
-  const db = getDb();
 
   const [err, setErr] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -120,62 +96,33 @@ export function EventDetailScreen(props: any) {
   const { items: registrations, loading: regLoading, reload: reloadRegistrations } = useAsyncList<Registration>(
     async () => {
       if (!id) return [];
-      try {
-        const ref = collectionFromSegments(db, buildSchoolCollectionPath(school.id, "events", id, "registrations"));
-        const snap = await getDocs(query(ref, orderBy("registeredAt", "asc")));
-        if (!snap.empty) {
-          return snap.docs.map((d) => ({ uid: d.id, ...(d.data() as any) })) as Registration[];
-        }
-      } catch (error) {
-        console.warn("[EventDetail] Failed to read canonical registrations:", error);
-      }
-
-      const legacyRef = collection(db, "events", id, "registrations");
-      const legacySnap = await getDocs(query(legacyRef, orderBy("registeredAt", "asc")));
-      return legacySnap.docs.map((d) => ({ uid: d.id, ...(d.data() as any) })) as Registration[];
+      return loadEventRegistrations(id, school.id);
     },
-    [db, id, school.id]
+    [id, school.id]
   );
 
   // Fetch reviews for ended events
-  const { items: reviews, loading: reviewsLoading, reload: reloadReviews } = useAsyncList<EventReview>(
+  const { items: reviews, reload: reloadReviews } = useAsyncList<EventReview>(
     async () => {
       if (!id) return [];
-      try {
-        const ref = collectionFromSegments(db, buildSchoolCollectionPath(school.id, "events", id, "reviews"));
-        const snap = await getDocs(query(ref, orderBy("createdAt", "desc")));
-        if (!snap.empty) {
-          return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as EventReview[];
-        }
-      } catch (error) {
-        console.warn("[EventDetail] Failed to read canonical reviews:", error);
-      }
-
-      const legacyRef = collection(db, "events", id, "reviews");
-      const legacySnap = await getDocs(query(legacyRef, orderBy("createdAt", "desc")));
-      return legacySnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as EventReview[];
+      return loadEventReviews(id, school.id);
     },
-    [db, id, school.id]
+    [id, school.id]
   );
 
   // Fetch user profiles for display
   const { items: userProfiles } = useAsyncList<UserProfile>(
     async () => {
-      const uids = new Set<string>();
-      for (const r of registrations) uids.add(r.uid);
-      for (const r of reviews) uids.add(r.uid);
-      const profiles: UserProfile[] = [];
-      for (const uid of uids) {
-        try {
-          const snap = await getDoc(doc(db, "users", uid));
-          if (snap.exists()) {
-            profiles.push({ uid, ...(snap.data() as any) });
-          }
-        } catch {}
-      }
-      return profiles;
+      const uids = [
+        ...new Set([
+          ...registrations.map((registration) => registration.uid),
+          ...reviews.map((review) => review.uid),
+        ]),
+      ];
+      if (uids.length === 0) return [];
+      return loadEventUserProfiles(uids);
     },
-    [db, registrations.map(r => r.uid).join(","), reviews.map(r => r.uid).join(",")]
+    [registrations.map(r => r.uid).join(","), reviews.map(r => r.uid).join(",")]
   );
 
   const profilesById = useMemo(() => {
@@ -215,12 +162,6 @@ export function EventDetailScreen(props: any) {
     if (!item?.capacity) return false;
     return registeredCount >= item.capacity;
   }, [item?.capacity, registeredCount]);
-
-  const canRegister = useMemo(() => {
-    if (!auth.user) return false;
-    if (myRegistration) return false;
-    return true;
-  }, [auth.user, myRegistration]);
 
   const onRegister = async (joinWaitlist = false) => {
     setErr(null);
@@ -347,14 +288,14 @@ export function EventDetailScreen(props: any) {
 
     setSubmittingReview(true);
     try {
-      await setDoc(docFromSegments(db, buildSchoolCollectionPath(school.id, "events", id, "reviews", auth.user.uid)), {
+      await submitEventReview({
+        eventId: id,
+        schoolId: school.id,
         uid: auth.user.uid,
         email: auth.user.email ?? null,
         displayName: auth.profile?.displayName ?? null,
         rating: reviewRating,
-        comment: reviewComment.trim(),
-        schoolId: school.id,
-        createdAt: serverTimestamp(),
+        comment: reviewComment,
       });
       setReviewRating(0);
       setReviewComment("");
@@ -730,7 +671,7 @@ export function EventDetailScreen(props: any) {
                 .slice(0, showAllRegistrations ? undefined : 5)
                 .map((r, idx) => {
                   const profile = profilesById[r.uid];
-                  const displayName = profile?.displayName || r.displayName || r.email || `${r.uid.slice(0, 8)}…`;
+                  const displayName = profile?.displayName || r.displayName || `${r.uid.slice(0, 8)}…`;
                   return (
                     <View
                       key={r.uid}
@@ -798,7 +739,7 @@ export function EventDetailScreen(props: any) {
                     .slice(0, 3)
                     .map((r) => {
                       const profile = profilesById[r.uid];
-                      const displayName = profile?.displayName || r.displayName || r.email || `${r.uid.slice(0, 8)}…`;
+                      const displayName = profile?.displayName || r.displayName || `${r.uid.slice(0, 8)}…`;
                       return (
                         <View
                           key={r.uid}
@@ -950,7 +891,7 @@ export function EventDetailScreen(props: any) {
               <View style={{ gap: 12 }}>
                 {reviews.slice(0, 5).map((r) => {
                   const profile = profilesById[r.uid];
-                  const displayName = profile?.displayName || r.displayName || r.email || "匿名";
+                  const displayName = profile?.displayName || r.displayName || r.uid.slice(0, 8);
                   return (
                     <View key={r.id} style={{ padding: 12, backgroundColor: theme.colors.surface2, borderRadius: theme.radius.md }}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>

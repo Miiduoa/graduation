@@ -38,6 +38,7 @@ import {
   User,
 } from "firebase/auth";
 import {
+  authenticateUniversalDevAccount,
   buildGroupCollectionPath,
   buildSchoolCollectionPath,
   buildUserSchoolCollectionPath,
@@ -57,6 +58,7 @@ export type {
   SSOProvider,
 } from "@campus/shared/src";
 import { collectionFromSegments, docFromSegments } from "./firestorePath";
+import { areUniversalDevAccountsEnabled } from "./runtime";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -104,10 +106,82 @@ export function getAuth(): Auth | null {
   }
 }
 
-export async function signIn(email: string, password: string): Promise<User | null> {
+async function parseFunctionJsonResponse(
+  response: Response,
+  fallbackMessage: string
+): Promise<Record<string, unknown>> {
+  const text = await response.text();
+  if (!text.trim()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return {
+      error: response.ok ? fallbackMessage : `${fallbackMessage}（HTTP ${response.status}）`,
+      raw: text,
+    };
+  }
+}
+
+async function signInWithUniversalDevAccount(params: {
+  email: string;
+  password: string;
+  schoolId: string;
+}): Promise<User | null> {
+  if (!params.schoolId) {
+    throw new Error("Missing schoolId for universal dev account");
+  }
+
+  const response = await fetch(getCloudFunctionUrl("signInUniversalDevAccount"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email: params.email,
+      password: params.password,
+      schoolId: params.schoolId,
+    }),
+  });
+
+  const data = await parseFunctionJsonResponse(
+    response,
+    "Universal dev account endpoint returned an invalid response"
+  );
+  if (!response.ok || typeof data.customToken !== "string") {
+    throw new Error(
+      typeof data.error === "string" ? data.error : "Failed to sign in universal dev account"
+    );
+  }
+
+  return signInWithCustomAuthToken(data.customToken);
+}
+
+export async function signIn(
+  email: string,
+  password: string,
+  schoolId?: string
+): Promise<User | null> {
+  const universalAccount =
+    areUniversalDevAccountsEnabled() ? authenticateUniversalDevAccount(email, password) : null;
+  if (universalAccount) {
+    if (!isFirebaseConfigured()) {
+      throw new Error("Firebase demo 專案尚未配置，請先設定 NEXT_PUBLIC_FIREBASE_* 環境變數。");
+    }
+    return signInWithUniversalDevAccount({
+      email: universalAccount.email,
+      password,
+      schoolId: schoolId ?? "",
+    });
+  }
+
   const authInstance = getAuth();
-  if (!authInstance) return null;
-  
+  if (!authInstance) {
+    throw new Error("Firebase demo 專案尚未配置，請先設定 NEXT_PUBLIC_FIREBASE_* 環境變數。");
+  }
+
   const credential = await signInWithEmailAndPassword(authInstance, email, password);
   return credential.user;
 }
@@ -341,28 +415,12 @@ export async function fetchSchoolSSOConfig(schoolId: string): Promise<SchoolSSOC
     }
     return normalizeSchoolSSOConfig(data);
   } catch (error) {
-    console.warn("[Firebase] Falling back to Firestore for SSO config:", error);
-
-    try {
-      const firestore = getDb();
-      const configDoc = await getDoc(doc(firestore, "schools", schoolId, "settings", "sso"));
-      if (!configDoc.exists()) {
-        return {
-          schoolId,
-          allowEmailLogin: true,
-          ssoConfig: null,
-        };
-      }
-
-      return normalizeSchoolSSOConfig(configDoc.data() as Record<string, unknown>);
-    } catch (fallbackError) {
-      console.error("[Firebase] Failed to load school SSO config:", fallbackError);
-      return {
-        schoolId,
-        allowEmailLogin: true,
-        ssoConfig: null,
-      };
-    }
+    console.error("[Firebase] Failed to load school SSO config:", error);
+    return {
+      schoolId,
+      allowEmailLogin: true,
+      ssoConfig: null,
+    };
   }
 }
 
@@ -399,12 +457,12 @@ export async function completeWebSSOCallback(params: {
   const data = (await response.json()) as Record<string, unknown>;
 
   if (!response.ok || typeof data.customToken !== "string") {
+    const correlationId =
+      typeof data.correlationId === "string" ? ` (追蹤碼：${data.correlationId})` : "";
     throw new Error(
-      typeof data.details === "string"
-        ? data.details
-        : typeof data.error === "string"
-          ? data.error
-          : "SSO callback verification failed"
+      typeof data.error === "string"
+        ? `${data.error}${correlationId}`
+        : `SSO callback verification failed${correlationId}`
     );
   }
 
