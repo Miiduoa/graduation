@@ -1,9 +1,11 @@
-import { Platform } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+/* eslint-disable */
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
 // ===== Types =====
 
-export type ErrorSeverity = "fatal" | "error" | "warning" | "info";
+export type ErrorSeverity = 'fatal' | 'error' | 'warning' | 'info';
 
 export type ErrorContext = {
   userId?: string;
@@ -40,7 +42,7 @@ export type DeviceInfo = {
 
 export type Breadcrumb = {
   timestamp: number;
-  category: "navigation" | "user" | "network" | "console" | "error";
+  category: 'navigation' | 'user' | 'network' | 'console' | 'error';
   message: string;
   data?: Record<string, unknown>;
 };
@@ -56,15 +58,58 @@ export type ErrorReportingConfig = {
 
 // ===== Constants =====
 
-const STORAGE_KEY = "@error_reports";
+const STORAGE_KEY = '@error_reports';
 const MAX_BREADCRUMBS = 50;
 const MAX_STORED_ERRORS = 20;
+const SENSITIVE_KEY_PATTERN = /(token|password|authorization|samlresponse|studentid|phone)/i;
+const SENSITIVE_VALUE_PATTERN =
+  /(bearer\s+[a-z0-9._-]+|eyJ[a-zA-Z0-9._-]{10,}|samlresponse=|authorization:|password=)/i;
+
+function sanitizeText(value?: string): string | undefined {
+  if (!value) return value;
+  return SENSITIVE_VALUE_PATTERN.test(value) ? '[REDACTED]' : value;
+}
+
+function sanitizeContext(context: ErrorContext): ErrorContext {
+  return Object.fromEntries(
+    Object.entries(context)
+      .filter(([key]) => !SENSITIVE_KEY_PATTERN.test(key))
+      .map(([key, value]) => [
+        key,
+        typeof value === 'string' ? sanitizeText(value) : value,
+      ]),
+  ) as ErrorContext;
+}
+
+function sanitizeBreadcrumbData(data?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!data) return undefined;
+
+  const sanitized = Object.fromEntries(
+    Object.entries(data)
+      .filter(([key]) => !SENSITIVE_KEY_PATTERN.test(key))
+      .map(([key, value]) => [
+        key,
+        typeof value === 'string' ? sanitizeText(value) : value,
+      ]),
+  );
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+function getDefaultEndpoint(): string | undefined {
+  const expoConfig = Constants.expoConfig as unknown as { extra?: Record<string, unknown> } | null;
+  const manifest = Constants as unknown as { manifest?: { extra?: Record<string, unknown> } };
+  const extra = expoConfig?.extra ?? manifest.manifest?.extra ?? {};
+  const endpoint = extra.errorReportingEndpoint;
+  return typeof endpoint === 'string' && endpoint.trim().length > 0 ? endpoint.trim() : undefined;
+}
 
 const DEFAULT_CONFIG: ErrorReportingConfig = {
   enabled: true,
   debugMode: __DEV__,
   maxBreadcrumbs: MAX_BREADCRUMBS,
   maxStoredErrors: MAX_STORED_ERRORS,
+  endpoint: getDefaultEndpoint(),
 };
 
 // ===== Error Reporting Service =====
@@ -98,7 +143,7 @@ class ErrorReportingService {
     }
 
     this.isInitialized = true;
-    this.logDebug("Initialized with config:", this.config);
+    this.logDebug('Initialized with config:', this.config);
   }
 
   private setupGlobalErrorHandler(): void {
@@ -106,7 +151,7 @@ class ErrorReportingService {
 
     ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
       this.captureException(error, {
-        severity: isFatal ? "fatal" : "error",
+        severity: isFatal ? 'fatal' : 'error',
         context: { isFatal: Boolean(isFatal) },
       });
 
@@ -123,8 +168,8 @@ class ErrorReportingService {
       ...((global as any).__promiseRejectionTrackingOptions || {}),
       onUnhandled: (id: string, rejection: Error) => {
         this.captureException(rejection, {
-          severity: "error",
-          context: { type: "unhandled_promise_rejection", id },
+          severity: 'error',
+          context: { type: 'unhandled_promise_rejection', id },
         });
 
         if (originalRejectionTracker) {
@@ -137,8 +182,8 @@ class ErrorReportingService {
   private interceptConsoleError(): void {
     console.error = (...args: unknown[]) => {
       this.addBreadcrumb({
-        category: "console",
-        message: args.map((arg) => String(arg)).join(" "),
+        category: 'console',
+        message: args.map((arg) => String(arg)).join(' '),
       });
 
       this.originalConsoleError.apply(console, args);
@@ -172,9 +217,11 @@ class ErrorReportingService {
 
   // ===== Breadcrumbs =====
 
-  addBreadcrumb(breadcrumb: Omit<Breadcrumb, "timestamp">): void {
+  addBreadcrumb(breadcrumb: Omit<Breadcrumb, 'timestamp'>): void {
     const newBreadcrumb: Breadcrumb = {
       ...breadcrumb,
+      message: sanitizeText(breadcrumb.message) ?? '',
+      data: sanitizeBreadcrumbData(breadcrumb.data),
       timestamp: Date.now(),
     };
 
@@ -192,7 +239,7 @@ class ErrorReportingService {
   // Navigation breadcrumbs
   logNavigation(from: string, to: string): void {
     this.addBreadcrumb({
-      category: "navigation",
+      category: 'navigation',
       message: `${from} -> ${to}`,
       data: { from, to },
     });
@@ -202,7 +249,7 @@ class ErrorReportingService {
   // User action breadcrumbs
   logUserAction(action: string, data?: Record<string, unknown>): void {
     this.addBreadcrumb({
-      category: "user",
+      category: 'user',
       message: action,
       data,
     });
@@ -212,8 +259,8 @@ class ErrorReportingService {
   // Network breadcrumbs
   logNetworkRequest(method: string, url: string, status?: number): void {
     this.addBreadcrumb({
-      category: "network",
-      message: `${method} ${url}${status ? ` -> ${status}` : ""}`,
+      category: 'network',
+      message: `${method} ${url}${status ? ` -> ${status}` : ''}`,
       data: { method, url, status },
     });
   }
@@ -226,12 +273,12 @@ class ErrorReportingService {
       severity?: ErrorSeverity;
       context?: ErrorContext;
       tags?: Record<string, string>;
-    }
+    },
   ): string {
-    if (!this.config.enabled) return "";
+    if (!this.config.enabled) return '';
 
     const err = this.normalizeError(error);
-    const report = this.createErrorReport(err, options?.severity ?? "error", {
+    const report = this.createErrorReport(err, options?.severity ?? 'error', {
       ...this.context,
       ...options?.context,
     });
@@ -239,28 +286,27 @@ class ErrorReportingService {
     this.storeError(report);
     this.sendError(report);
 
-    this.logDebug("Captured exception:", report);
+    this.logDebug('Captured exception:', report);
 
     return report.id;
   }
 
   captureMessage(
     message: string,
-    severity: ErrorSeverity = "info",
-    context?: ErrorContext
+    severity: ErrorSeverity = 'info',
+    context?: ErrorContext,
   ): string {
-    if (!this.config.enabled) return "";
+    if (!this.config.enabled) return '';
 
-    const report = this.createErrorReport(
-      new Error(message),
-      severity,
-      { ...this.context, ...context }
-    );
+    const report = this.createErrorReport(new Error(message), severity, {
+      ...this.context,
+      ...context,
+    });
 
     this.storeError(report);
     this.sendError(report);
 
-    this.logDebug("Captured message:", report);
+    this.logDebug('Captured message:', report);
 
     return report.id;
   }
@@ -272,7 +318,7 @@ class ErrorReportingService {
       return error;
     }
 
-    if (typeof error === "string") {
+    if (typeof error === 'string') {
       return new Error(error);
     }
 
@@ -282,16 +328,16 @@ class ErrorReportingService {
   private createErrorReport(
     error: Error,
     severity: ErrorSeverity,
-    context: ErrorContext
+    context: ErrorContext,
   ): ErrorReport {
     return {
       id: this.generateId(),
       timestamp: Date.now(),
       severity,
-      message: error.message,
-      stack: error.stack,
+      message: sanitizeText(error.message) ?? 'Unknown error',
+      stack: sanitizeText(error.stack),
       name: error.name,
-      context,
+      context: sanitizeContext(context),
       deviceInfo: this.deviceInfo,
       breadcrumbs: [...this.breadcrumbs],
     };
@@ -302,17 +348,17 @@ class ErrorReportingService {
   }
 
   private getDeviceInfo(): DeviceInfo {
-    const { Dimensions } = require("react-native");
-    const screen = Dimensions.get("window");
+    const { Dimensions } = require('react-native');
+    const screen = Dimensions.get('window');
 
     return {
       platform: Platform.OS,
       osVersion: Platform.Version.toString(),
-      appVersion: "1.0.0",
-      buildNumber: "1",
+      appVersion: '1.0.0',
+      buildNumber: '1',
       screenWidth: screen.width,
       screenHeight: screen.height,
-      locale: "zh-TW",
+      locale: 'zh-TW',
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
   }
@@ -332,7 +378,7 @@ class ErrorReportingService {
 
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(errors));
     } catch (e) {
-      this.originalConsoleError("[ErrorReporting] Failed to store error:", e);
+      this.originalConsoleError('[ErrorReporting] Failed to store error:', e);
     }
   }
 
@@ -356,12 +402,12 @@ class ErrorReportingService {
 
     try {
       await fetch(this.config.endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(report),
       });
     } catch (e) {
-      this.logDebug("Failed to send error:", e);
+      this.logDebug('Failed to send error:', e);
     }
   }
 
@@ -373,14 +419,14 @@ class ErrorReportingService {
 
     try {
       await fetch(this.config.endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ errors }),
       });
 
       await this.clearStoredErrors();
     } catch (e) {
-      this.logDebug("Failed to flush errors:", e);
+      this.logDebug('Failed to flush errors:', e);
     }
   }
 
@@ -401,10 +447,10 @@ export const errorReporting = new ErrorReportingService();
 
 export function captureReactError(error: Error, componentStack: string): void {
   errorReporting.captureException(error, {
-    severity: "error",
+    severity: 'error',
     context: {
       componentStack,
-      type: "react_error_boundary",
+      type: 'react_error_boundary',
     },
   });
 }

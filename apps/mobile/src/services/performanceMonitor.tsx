@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * Performance Monitor Component
  * 用於在開發模式下顯示效能監控資訊

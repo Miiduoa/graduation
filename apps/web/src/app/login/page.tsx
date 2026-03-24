@@ -3,13 +3,18 @@
 import { SiteShell } from "@/components/SiteShell";
 import { useState, useEffect, type CSSProperties, type FormEvent } from "react";
 import {
+  findUniversalDevAccountByEmail,
+  listUniversalDevAccounts,
+  UNIVERSAL_DEV_ACCOUNT_PASSWORD,
+} from "@campus/shared/src/devUniversalAccounts";
+import {
   getCurrentUser,
   isFirebaseConfigured,
   resetPassword,
   signIn,
   signUp,
   startWebSSOCallback,
-} from "@/lib/firebase";
+} from "@/features/auth/client";
 import {
   appendSchoolContext,
   buildSsoCallbackPath,
@@ -22,6 +27,7 @@ import {
   createRandomString,
   savePendingWebSsoTransaction,
 } from "@/lib/sso";
+import { areUniversalDevAccountsEnabled, getWebAppEnv } from "@/lib/runtime";
 import { useSchoolSsoConfig } from "@/lib/useSchoolSsoConfig";
 import { useRouter } from "next/navigation";
 
@@ -44,6 +50,9 @@ export default function LoginPage(props: {
   const { schoolContext, schoolName, schoolSearch: q, schoolId } = resolveSchoolPageContext(props.searchParams);
   const router = useRouter();
   const { config, ssoConfig, allowEmailLogin, availability, ssoReady, loading: ssoLoading } = useSchoolSsoConfig(schoolId);
+  const universalDevAccounts = listUniversalDevAccounts();
+  const universalDevAccountsEnabled = areUniversalDevAccountsEnabled();
+  const webAppEnv = getWebAppEnv();
 
   const [loginMethod, setLoginMethod] = useState<LoginMethod>("sso");
   const [authMode, setAuthMode] = useState<AuthMode>("login");
@@ -56,6 +65,7 @@ export default function LoginPage(props: {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [firebaseReady, setFirebaseReady] = useState(false);
+  const isUniversalDevEmail = Boolean(findUniversalDevAccountByEmail(email));
 
   useEffect(() => {
     setFirebaseReady(isFirebaseConfigured());
@@ -130,10 +140,14 @@ export default function LoginPage(props: {
       setError("兩次輸入的密碼不一致");
       return;
     }
+    if (authMode === "register" && !(firebaseReady && allowEmailLogin)) {
+      setError("此學校目前不開放一般電子郵件註冊");
+      return;
+    }
     setIsLoading(true);
     try {
       if (authMode === "login") {
-        await signIn(email, password);
+        await signIn(email, password, schoolId);
       } else {
         await signUp(email, password, displayName || undefined);
       }
@@ -141,7 +155,7 @@ export default function LoginPage(props: {
       router.replace(appendSchoolContext(sanitizeInternalPath(redirect), schoolContext));
     } catch (err: unknown) {
       const code = (err as { code?: string }).code ?? "";
-      setError(ERROR_MAP[code] ?? "發生錯誤，請稍後再試");
+      setError(ERROR_MAP[code] ?? (err instanceof Error ? err.message : "發生錯誤，請稍後再試"));
     } finally {
       setIsLoading(false);
     }
@@ -161,6 +175,11 @@ export default function LoginPage(props: {
   };
 
   const emailAllowed = firebaseReady && allowEmailLogin;
+  const universalDevOverride = firebaseReady && universalDevAccountsEnabled;
+  const canSubmitEmailAuth =
+    authMode === "login"
+      ? emailAllowed || (universalDevOverride && isUniversalDevEmail)
+      : emailAllowed;
 
   const inputStyle: CSSProperties = {
     width: "100%",
@@ -318,7 +337,7 @@ export default function LoginPage(props: {
           {/* ── Email Panel ── */}
           {loginMethod === "email" && (
             <div>
-              {!emailAllowed && (
+              {!emailAllowed && !universalDevOverride && (
                 <div
                   style={{
                     padding: "12px 14px",
@@ -331,6 +350,59 @@ export default function LoginPage(props: {
                   }}
                 >
                   ⚠️ 電子郵件登入尚未設定
+                </div>
+              )}
+
+              {universalDevAccountsEnabled && (
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--panel)",
+                    border: "1px solid var(--border)",
+                    fontSize: 13,
+                    color: "var(--muted)",
+                    marginBottom: 14,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  通用測試帳號已啟用。環境：<code>{webAppEnv}</code>，密碼：<code>{UNIVERSAL_DEV_ACCOUNT_PASSWORD}</code>
+                  <br />
+                  {universalDevAccounts.map((account) => account.email).join(" / ")}
+                </div>
+              )}
+
+              {!firebaseReady && (
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--warning-soft)",
+                    border: "1px solid rgba(255,149,0,0.2)",
+                    fontSize: 13,
+                    color: "var(--warning)",
+                    marginBottom: 14,
+                    lineHeight: 1.7,
+                  }}
+                >
+                  尚未配置 Firebase demo 專案。請先設定 `NEXT_PUBLIC_FIREBASE_*`、`NEXT_PUBLIC_APP_ENV`，
+                  再使用一般登入或通用測試帳號。
+                </div>
+              )}
+
+              {!emailAllowed && universalDevOverride && (
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--warning-soft)",
+                    border: "1px solid rgba(255,149,0,0.2)",
+                    fontSize: 13,
+                    color: "var(--warning)",
+                    marginBottom: 14,
+                  }}
+                >
+                  此學校未開放一般電子郵件登入，目前只接受上方兩組通用測試帳號。
                 </div>
               )}
 
@@ -461,7 +533,7 @@ export default function LoginPage(props: {
                 <button
                   type="submit"
                   className="btn primary"
-                  disabled={isLoading || !emailAllowed}
+                  disabled={isLoading || !canSubmitEmailAuth}
                   style={{ width: "100%", minHeight: 48, fontSize: 15 }}
                 >
                   {isLoading ? "處理中…" : authMode === "login" ? "登入" : "建立帳號"}

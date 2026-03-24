@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from "react";
-import { Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+/* eslint-disable */
+import React, { useMemo, useState, useEffect } from "react";
+import { Linking, Pressable, ScrollView, Text, TextInput, View, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { CourseModule, CourseSpace } from "../data";
 import { Button, Card, ErrorState, LoadingState, Pill, Screen } from "../ui/components";
@@ -11,6 +13,23 @@ import { useSchool } from "../state/school";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
 import { canManageCourse } from "../services/courseWorkspace";
+
+type ContentType = "pdf" | "video" | "document" | "link" | "slide";
+type CompletionStatus = "not_started" | "in_progress" | "completed";
+
+interface ContentItem {
+  id: string;
+  type: ContentType;
+  label: string;
+  url?: string;
+  duration?: number;
+}
+
+interface ModuleProgress {
+  moduleId: string;
+  status: CompletionStatus;
+  completedAt?: string;
+}
 
 function ModuleRow(props: {
   title: string;
@@ -90,6 +109,262 @@ function Field(props: {
   );
 }
 
+function getContentTypeIcon(type: ContentType): keyof typeof Ionicons.glyphMap {
+  switch (type) {
+    case "pdf":
+      return "document-text-outline";
+    case "video":
+      return "play-circle-outline";
+    case "document":
+      return "document-outline";
+    case "slide":
+      return "easel-outline";
+    case "link":
+    default:
+      return "open-outline";
+  }
+}
+
+function getContentTypeLabel(type: ContentType): string {
+  switch (type) {
+    case "pdf":
+      return "PDF";
+    case "video":
+      return "影片";
+    case "document":
+      return "文件";
+    case "slide":
+      return "投影片";
+    case "link":
+    default:
+      return "連結";
+  }
+}
+
+function ContentItemCard(props: {
+  item: ContentItem;
+  onPress?: () => void;
+}) {
+  const icon = getContentTypeIcon(props.item.type);
+  const label = getContentTypeLabel(props.item.type);
+
+  const iconColor =
+    props.item.type === "video"
+      ? theme.colors.danger
+      : props.item.type === "pdf"
+      ? theme.colors.accent
+      : props.item.type === "slide"
+      ? theme.colors.warning
+      : theme.colors.info;
+
+  return (
+    <Pressable
+      onPress={props.onPress}
+      disabled={!props.onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        padding: 12,
+        borderRadius: theme.radius.md,
+        backgroundColor: pressed && props.onPress ? theme.colors.surface3 : theme.colors.surface2,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        opacity: pressed && props.onPress ? 0.8 : 1,
+      })}
+    >
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 10,
+          backgroundColor: `${iconColor}16`,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons name={icon} size={18} color={iconColor} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 13 }}>
+          {props.item.label}
+        </Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+          {label}
+          {props.item.duration ? ` • ${props.item.duration} 分` : ""}
+        </Text>
+      </View>
+      {props.onPress ? <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} /> : null}
+    </Pressable>
+  );
+}
+
+function ProgressIndicator(props: { status: CompletionStatus; size?: number }) {
+  const size = props.size ?? 20;
+  if (props.status === "completed") {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: theme.colors.success,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons name="checkmark" size={size * 0.6} color="white" />
+      </View>
+    );
+  } else if (props.status === "in_progress") {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth: 2,
+          borderColor: theme.colors.accent,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <View
+          style={{
+            width: size * 0.4,
+            height: size * 0.4,
+            borderRadius: size * 0.2,
+            backgroundColor: theme.colors.accent,
+          }}
+        />
+      </View>
+    );
+  }
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        borderWidth: 2,
+        borderColor: theme.colors.border,
+      }}
+    />
+  );
+}
+
+const DEMO_MODULES: CourseModule[] = [
+  {
+    id: "demo-1",
+    groupId: "demo",
+    groupName: "示例課程",
+    title: "第 1 週｜課程介紹",
+    description: "了解本學期課程目標、評分方式與教材結構",
+    week: 1,
+    order: 1,
+    estimatedMinutes: 45,
+    published: true,
+    materials: [
+      {
+        id: "mat-1-1",
+        moduleId: "demo-1",
+        groupId: "demo",
+        type: "file",
+        label: "課程大綱與評分標準",
+      },
+      {
+        id: "mat-1-2",
+        moduleId: "demo-1",
+        groupId: "demo",
+        type: "video",
+        label: "授課教授課程介紹影片",
+      },
+    ],
+  },
+  {
+    id: "demo-2",
+    groupId: "demo",
+    groupName: "示例課程",
+    title: "第 2 週｜基礎概念",
+    description: "學習本課程的基礎概念與理論基礎",
+    week: 2,
+    order: 2,
+    estimatedMinutes: 90,
+    published: true,
+    materials: [
+      {
+        id: "mat-2-1",
+        moduleId: "demo-2",
+        groupId: "demo",
+        type: "file",
+        label: "基礎概念投影片",
+      },
+      {
+        id: "mat-2-2",
+        moduleId: "demo-2",
+        groupId: "demo",
+        type: "document",
+        label: "補充講義與筆記",
+      },
+    ],
+  },
+  {
+    id: "demo-3",
+    groupId: "demo",
+    groupName: "示例課程",
+    title: "第 3 週｜進階主題",
+    description: "深入探討進階主題與實際應用",
+    week: 3,
+    order: 3,
+    estimatedMinutes: 120,
+    published: true,
+    materials: [
+      {
+        id: "mat-3-1",
+        moduleId: "demo-3",
+        groupId: "demo",
+        type: "video",
+        label: "進階主題講解",
+      },
+      {
+        id: "mat-3-2",
+        moduleId: "demo-3",
+        groupId: "demo",
+        type: "file",
+        label: "個案研究與實例分析",
+      },
+    ],
+  },
+  {
+    id: "demo-4",
+    groupId: "demo",
+    groupName: "示例課程",
+    title: "第 4 週｜實作練習",
+    description: "動手做練習，應用學習的知識",
+    week: 4,
+    order: 4,
+    estimatedMinutes: 60,
+    published: true,
+    materials: [
+      {
+        id: "mat-4-1",
+        moduleId: "demo-4",
+        groupId: "demo",
+        type: "link",
+        label: "線上實作環境",
+        url: "https://example.com/practice",
+      },
+      {
+        id: "mat-4-2",
+        moduleId: "demo-4",
+        groupId: "demo",
+        type: "document",
+        label: "練習題與解答",
+      },
+    ],
+  },
+];
+
 export function CourseModulesScreen(props: any) {
   const nav = props?.navigation;
   const routeGroupId = props?.route?.params?.groupId as string | undefined;
@@ -108,6 +383,58 @@ export function CourseModulesScreen(props: any) {
   const [durationText, setDurationText] = useState("");
   const [resourceLabel, setResourceLabel] = useState("");
   const [resourceUrl, setResourceUrl] = useState("");
+  const [expandedModuleId, setExpandedModuleId] = useState<string | null>(null);
+  const [moduleProgress, setModuleProgress] = useState<Record<string, ModuleProgress>>({});
+  const [loadingProgress, setLoadingProgress] = useState(true);
+
+  // Load progress from AsyncStorage
+  useEffect(() => {
+    const loadProgress = async () => {
+      try {
+        setLoadingProgress(true);
+        const progressKey = `course_progress_${routeGroupId}`;
+        const stored = await AsyncStorage.getItem(progressKey);
+        if (stored) {
+          setModuleProgress(JSON.parse(stored));
+        }
+      } catch (error) {
+        console.error("Failed to load progress:", error);
+      } finally {
+        setLoadingProgress(false);
+      }
+    };
+
+    if (routeGroupId) {
+      loadProgress();
+    }
+  }, [routeGroupId]);
+
+  const saveProgress = async (progress: Record<string, ModuleProgress>) => {
+    try {
+      const progressKey = `course_progress_${routeGroupId}`;
+      await AsyncStorage.setItem(progressKey, JSON.stringify(progress));
+    } catch (error) {
+      console.error("Failed to save progress:", error);
+    }
+  };
+
+  const toggleModuleCompletion = async (moduleId: string) => {
+    const current = moduleProgress[moduleId];
+    const newStatus: CompletionStatus =
+      current?.status === "completed" ? "not_started" : "completed";
+
+    const newProgress = {
+      ...moduleProgress,
+      [moduleId]: {
+        moduleId,
+        status: newStatus,
+        completedAt: newStatus === "completed" ? new Date().toISOString() : undefined,
+      },
+    };
+
+    setModuleProgress(newProgress);
+    await saveProgress(newProgress);
+  };
 
   const {
     items: memberships,
@@ -129,7 +456,12 @@ export function CourseModulesScreen(props: any) {
   } = useAsyncList<CourseModule>(
     async () => {
       if (!auth.user) return [];
-      return ds.listCourseModules(auth.user.uid, routeGroupId, school.id);
+      const realModules = await ds.listCourseModules(auth.user.uid, routeGroupId, school.id);
+      // Show demo data if no real modules
+      if (realModules.length === 0 && !routeGroupId?.startsWith("real-")) {
+        return DEMO_MODULES;
+      }
+      return realModules;
     },
     [ds, auth.user?.uid, routeGroupId, school.id, memberships.map((membership) => membership.groupId).join("|")]
   );
@@ -145,6 +477,16 @@ export function CourseModulesScreen(props: any) {
     }
     return map;
   }, [modules]);
+
+  const completionStats = useMemo(() => {
+    if (!modules.length) return { completed: 0, total: 0, percentage: 0 };
+
+    const completed = modules.filter((m) => moduleProgress[m.id]?.status === "completed").length;
+    const total = modules.length;
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    return { completed, total, percentage };
+  }, [modules, moduleProgress]);
 
   const onCreateModule = async () => {
     setErr(null);
@@ -222,7 +564,7 @@ export function CourseModulesScreen(props: any) {
     );
   }
 
-  if (membershipsLoading || modulesLoading) {
+  if (membershipsLoading || modulesLoading || loadingProgress) {
     return <LoadingState title="教材單元" subtitle="整理教材模組中..." rows={4} />;
   }
 
@@ -319,34 +661,174 @@ export function CourseModulesScreen(props: any) {
         {routeGroupId ? (
           <>
             {modules.length > 0 ? (
-              <Card title="正式教材模組" subtitle="依週次與單元整理的內容">
-                <View style={{ gap: 10 }}>
-                  {modules.map((module) => (
-                    <ModuleRow
-                      key={module.id}
-                      title={module.title || `第 ${module.week ?? module.order ?? "-"} 單元`}
-                      subtitle={module.description || "已建立教材模組，可持續擴充檔案、影片與外部資源"}
-                      icon="book-outline"
-                      tint="#2563EB"
-                      onPress={
-                        module.resourceUrl
-                          ? () => Linking.openURL(module.resourceUrl!)
-                          : undefined
-                      }
-                      footer={
-                        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                          {module.week ? <Pill text={`第 ${module.week} 週`} kind="default" /> : null}
-                          {module.estimatedMinutes ? <Pill text={`${module.estimatedMinutes} 分鐘`} kind="default" /> : null}
-                          {module.resourceUrl ? (
-                            <Pill text={module.resourceLabel || "外部教材"} kind="accent" />
-                          ) : null}
-                          {module.published ? <Pill text="已發布" kind="success" /> : null}
+              <>
+                {/* 進度概覽 */}
+                <Card>
+                  <View style={{ gap: 10 }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
+                        已完成 {completionStats.completed}/{completionStats.total} 單元
+                      </Text>
+                      <Text style={{ color: theme.colors.success, fontWeight: "700", fontSize: 14 }}>
+                        {completionStats.percentage}%
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: theme.colors.surface3,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <View
+                        style={{
+                          height: "100%",
+                          width: `${completionStats.percentage}%`,
+                          backgroundColor: theme.colors.success,
+                          borderRadius: 4,
+                        }}
+                      />
+                    </View>
+                  </View>
+                </Card>
+
+                {/* 教材模組列表 */}
+                <Card title="正式教材模組" subtitle="依週次與單元整理的內容">
+                  <View style={{ gap: 10 }}>
+                    {modules.map((module) => {
+                      const isExpanded = expandedModuleId === module.id;
+                      const progress = moduleProgress[module.id];
+                      const status = progress?.status ?? "not_started";
+                      const materials = (module.materials || []) as ContentItem[];
+
+                      return (
+                        <View key={module.id} style={{ gap: 8 }}>
+                          <Pressable
+                            onPress={() => setExpandedModuleId(isExpanded ? null : module.id)}
+                            style={({ pressed }) => ({
+                              gap: 10,
+                              padding: 14,
+                              borderRadius: theme.radius.lg,
+                              backgroundColor: status === "completed" ? theme.colors.surface3 : theme.colors.surface2,
+                              borderWidth: 1,
+                              borderColor:
+                                status === "completed" ? theme.colors.success : theme.colors.border,
+                              opacity: pressed ? 0.8 : 1,
+                            })}
+                          >
+                            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+                              <Pressable
+                                onPress={() => toggleModuleCompletion(module.id)}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                              >
+                                <ProgressIndicator status={status} size={24} />
+                              </Pressable>
+
+                              <View style={{ flex: 1 }}>
+                                <Text
+                                  style={{
+                                    color: theme.colors.text,
+                                    fontWeight: "700",
+                                    textDecorationLine:
+                                      status === "completed" ? "line-through" : "none",
+                                  }}
+                                >
+                                  {module.title || `第 ${module.week ?? module.order ?? "-"} 單元`}
+                                </Text>
+                                <Text
+                                  style={{
+                                    color: theme.colors.muted,
+                                    marginTop: 3,
+                                    lineHeight: 20,
+                                    textDecorationLine:
+                                      status === "completed" ? "line-through" : "none",
+                                  }}
+                                >
+                                  {module.description || "教材模組"}
+                                </Text>
+                              </View>
+
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                {status === "completed" && (
+                                  <Ionicons name="checkmark-done" size={16} color={theme.colors.success} />
+                                )}
+                                <Ionicons
+                                  name={isExpanded ? "chevron-up" : "chevron-down"}
+                                  size={18}
+                                  color={theme.colors.muted}
+                                />
+                              </View>
+                            </View>
+
+                            {/* 模組標籤 */}
+                            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginLeft: 36 }}>
+                              {module.week ? (
+                                <Pill text={`第 ${module.week} 週`} kind="default" />
+                              ) : null}
+                              {module.estimatedMinutes ? (
+                                <Pill
+                                  text={`${module.estimatedMinutes} 分鐘`}
+                                  kind="default"
+                                />
+                              ) : null}
+                              {materials.length > 0 && (
+                                <Pill
+                                  text={`${materials.length} 項內容`}
+                                  kind="accent"
+                                />
+                              )}
+                              {module.published ? <Pill text="已發布" kind="success" /> : null}
+                            </View>
+                          </Pressable>
+
+                          {/* 展開的內容項目 */}
+                          {isExpanded && materials.length > 0 && (
+                            <View style={{ gap: 8, paddingLeft: 36 }}>
+                              {materials.map((item) => (
+                                <ContentItemCard
+                                  key={item.id}
+                                  item={item}
+                                  onPress={
+                                    item.url
+                                      ? () => {
+                                          if (item.type === "video" || item.type === "link") {
+                                            Linking.openURL(item.url!).catch((err) =>
+                                              console.error("Failed to open URL:", err)
+                                            );
+                                          }
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              ))}
+                            </View>
+                          )}
+
+                          {/* 展開但無內容 */}
+                          {isExpanded && materials.length === 0 && module.resourceUrl && (
+                            <View style={{ gap: 8, paddingLeft: 36 }}>
+                              <ContentItemCard
+                                item={{
+                                  id: `${module.id}-legacy`,
+                                  type: "link",
+                                  label: module.resourceLabel || "外部教材",
+                                  url: module.resourceUrl,
+                                }}
+                                onPress={() =>
+                                  Linking.openURL(module.resourceUrl!).catch((err) =>
+                                    console.error("Failed to open URL:", err)
+                                  )
+                                }
+                              />
+                            </View>
+                          )}
                         </View>
-                      }
-                    />
-                  ))}
-                </View>
-              </Card>
+                      );
+                    })}
+                  </View>
+                </Card>
+              </>
             ) : (
               <Card title="這門課尚未建立教材模組" subtitle="現在已可直接建立正式 modules 資料">
                 <View style={{ gap: 10 }}>

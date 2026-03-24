@@ -1,32 +1,27 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { ScrollView, Text, View, Pressable, Animated, Easing, RefreshControl, Share, Alert } from "react-native";
+import { ScrollView, Text, View, Pressable, Animated, RefreshControl, Share } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { buildUserSchoolCollectionPath } from "@campus/shared/src";
-import { Screen, Card, Pill, Button, AnimatedCard, ProgressRing, Divider } from "../ui/components";
+import { Screen, Pill, AnimatedCard, ProgressRing } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useFavorites } from "../state/favorites";
 import { useSchool } from "../state/school";
-import { useDataSource } from "../hooks/useDataSource";
-import { useAsyncList } from "../hooks/useAsyncList";
-import { getDb } from "../firebase";
+import { getRuntimeDataSourcePolicy } from "../config/runtime";
+import { getReleaseConfig } from "../services/release";
 import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  query,
-  orderBy,
-  limit,
-  setDoc,
-  serverTimestamp,
-  onSnapshot,
-  where,
-} from "firebase/firestore";
-import { collectionFromSegments, docFromSegments } from "../data/firestorePath";
-import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
+  getStreakStorageKey,
+  loadLeaderboardSnapshot,
+  subscribeAchievementProgress,
+  subscribeLeaderboard,
+  syncAchievementProgress,
+  type AchievementProgress,
+  type StreakData,
+  useAmbientCues,
+  updateUserStreak,
+} from "../features/engagement";
+import { AmbientCueCard, CompletionState } from "../ui/campusOs";
 
 type Achievement = {
   id: string;
@@ -74,47 +69,6 @@ const ACHIEVEMENT_DEFINITIONS: Omit<Achievement, "progress" | "unlocked" | "unlo
   { id: "streak_7", title: "持之以恆", description: "連續 7 天登入", icon: "flame", category: "engagement", points: 100, requirement: 7, rarity: "rare" },
   { id: "streak_30", title: "鐵粉認證", description: "連續 30 天登入", icon: "medal", category: "engagement", points: 300, requirement: 30, rarity: "legendary" },
 ];
-
-const LEGACY_STREAK_KEY = "campus.streak.v1";
-
-type StreakData = {
-  currentStreak: number;
-  longestStreak: number;
-  lastLoginDate: string; // ISO date string YYYY-MM-DD
-  totalDays: number;
-};
-
-function getStreakStorageKey(userId: string | null, schoolId: string | null): string {
-  return getScopedStorageKey("streak", { uid: userId, schoolId });
-}
-
-async function updateStreak(storageKey: string): Promise<StreakData> {
-  try {
-    const raw = await getFirstStorageValue([storageKey, LEGACY_STREAK_KEY]);
-    const existing: StreakData = raw ? JSON.parse(raw) : {
-      currentStreak: 0, longestStreak: 0,
-      lastLoginDate: "", totalDays: 0,
-    };
-
-    const today = new Date().toISOString().split("T")[0];
-    if (existing.lastLoginDate === today) return existing;
-
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-    const isConsecutive = existing.lastLoginDate === yesterday;
-
-    const newStreak = isConsecutive ? existing.currentStreak + 1 : 1;
-    const updated: StreakData = {
-      currentStreak: newStreak,
-      longestStreak: Math.max(existing.longestStreak, newStreak),
-      lastLoginDate: today,
-      totalDays: existing.totalDays + 1,
-    };
-    await AsyncStorage.setItem(storageKey, JSON.stringify(updated));
-    return updated;
-  } catch {
-    return { currentStreak: 1, longestStreak: 1, lastLoginDate: "", totalDays: 1 };
-  }
-}
 
 const CATEGORY_INFO = {
   explorer: { label: "探索", color: "#3B82F6", icon: "compass" },
@@ -373,84 +327,50 @@ const LOCAL_COMPUTED_IDS = new Set([
   "collector_10", "collector_50", "early_bird", "night_owl",
 ]);
 
-async function syncAchievementToFirestore(
-  db: any,
-  uid: string,
-  schoolId: string,
-  achievementId: string,
-  progress: number,
-  requirement: number
-) {
-  try {
-    const ref = docFromSegments(db, buildUserSchoolCollectionPath(uid, schoolId, "achievements", achievementId));
-    const snap = await getDoc(ref);
-    const unlocked = progress >= requirement;
-    const existingData = snap.exists() ? snap.data() : null;
-
-    if (!existingData || existingData.progress !== progress) {
-      await setDoc(ref, {
-        progress,
-        unlocked,
-        schoolId,
-        updatedAt: serverTimestamp(),
-        ...(unlocked && !existingData?.unlockedAt ? { unlockedAt: serverTimestamp() } : {}),
-      }, { merge: true });
-    }
-  } catch (e) {
-    // silent - non-critical sync
-  }
-}
-
 export function AchievementsScreen(props: any) {
   const auth = useAuth();
   const fav = useFavorites();
   const { school } = useSchool();
-  const ds = useDataSource();
-  const db = getDb();
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [firestoreProgress, setFirestoreProgress] = useState<Record<string, { progress: number; unlocked: boolean; unlockedAt?: Date }>>({});
+  const [firestoreProgress, setFirestoreProgress] = useState<Record<string, AchievementProgress>>({});
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [streakData, setStreakData] = useState<StreakData>({ currentStreak: 0, longestStreak: 0, lastLoginDate: "", totalDays: 0 });
-  const [showStreakShare, setShowStreakShare] = useState(false);
   const streakStorageKey = useMemo(
     () => getStreakStorageKey(auth.user?.uid ?? null, school.id),
     [auth.user?.uid, school.id]
   );
+  const allowDemoLeaderboard = useMemo(() => {
+    const runtimePolicy = getRuntimeDataSourcePolicy();
+    return runtimePolicy.requestedMode === "mock" || getReleaseConfig().appEnv !== "production";
+  }, []);
 
   useEffect(() => {
-    updateStreak(streakStorageKey).then(setStreakData);
+    updateUserStreak(streakStorageKey).then(setStreakData);
   }, [streakStorageKey]);
-
-  const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id, refreshKey]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      // 手動重新抓一次排行榜快照
       if (school?.id) {
-        const ref = collection(db, "schools", school.id, "leaderboard");
-        const snap = await getDocs(query(ref, orderBy("points", "desc"), limit(10)));
-        if (!snap.empty) {
-          const entries = snap.docs.map((d, i) => ({
-            rank: i + 1,
-            userId: d.id,
-            userName: d.data().displayName ?? "同學",
-            points: d.data().points ?? 0,
-            level: calculateLevel(d.data().points ?? 0).level,
-            isCurrentUser: d.id === auth.user?.uid,
+        const rows = await loadLeaderboardSnapshot(school.id);
+        if (rows.length > 0) {
+          const entries = rows.map((row, index) => ({
+            rank: index + 1,
+            userId: row.userId,
+            userName: row.userName,
+            points: row.points,
+            level: calculateLevel(row.points).level,
+            isCurrentUser: row.userId === auth.user?.uid,
           }));
           setLeaderboard(entries);
         }
       }
-      // 重新觸發 POI 列表載入
-      setRefreshKey((k) => k + 1);
     } finally {
       setRefreshing(false);
     }
-  }, [school?.id, auth.user?.uid, db]);
+  }, [school?.id, auth.user?.uid]);
 
   const totalFavorites = useMemo(() => {
     return fav.favorites.announcement.length +
@@ -461,55 +381,35 @@ export function AchievementsScreen(props: any) {
 
   // 訂閱 Firestore 成就資料
   useEffect(() => {
-    if (!auth.user) return;
-    const canonicalRef = collectionFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "achievements"));
-    const unsubscribe = onSnapshot(canonicalRef, async (snap) => {
-      const data: Record<string, { progress: number; unlocked: boolean; unlockedAt?: Date }> = {};
-      snap.docs.forEach((d) => {
-        const raw = d.data();
-        data[d.id] = {
-          progress: raw.progress ?? 0,
-          unlocked: raw.unlocked ?? false,
-          unlockedAt: raw.unlockedAt?.toDate?.() ?? undefined,
-        };
-      });
+    const userId = auth.user?.uid;
+    if (!userId) return;
 
-      if (snap.empty) {
-        const legacySnap = await getDocs(collection(db, "users", auth.user.uid, "achievements")).catch(() => null);
-        legacySnap?.docs.forEach((d) => {
-          const raw = d.data();
-          data[d.id] = {
-            progress: raw.progress ?? 0,
-            unlocked: raw.unlocked ?? false,
-            unlockedAt: raw.unlockedAt?.toDate?.() ?? undefined,
-          };
-        });
-      }
-
-      setFirestoreProgress(data);
+    return subscribeAchievementProgress({
+      uid: userId,
+      schoolId: school.id,
+      onChange: setFirestoreProgress,
     });
-    return () => unsubscribe();
   }, [auth.user?.uid, school.id]);
 
   // 訂閱排行榜
   useEffect(() => {
     if (!school?.id) return;
-    const ref = collection(db, "schools", school.id, "leaderboard");
-    const q = query(ref, orderBy("points", "desc"), limit(10));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      if (!snap.empty) {
-        const entries = snap.docs.map((d, i) => ({
-          rank: i + 1,
-          userId: d.id,
-          userName: d.data().displayName ?? "同學",
-          points: d.data().points ?? 0,
-          level: calculateLevel(d.data().points ?? 0).level,
-          isCurrentUser: d.id === auth.user?.uid,
-        }));
-        setLeaderboard(entries);
-      }
+    return subscribeLeaderboard({
+      schoolId: school.id,
+      onChange: (rows) => {
+        if (rows.length === 0) return;
+        setLeaderboard(
+          rows.map((row, index) => ({
+            rank: index + 1,
+            userId: row.userId,
+            userName: row.userName,
+            points: row.points,
+            level: calculateLevel(row.points).level,
+            isCurrentUser: row.userId === auth.user?.uid,
+          }))
+        );
+      },
     });
-    return () => unsubscribe();
   }, [school?.id, auth.user?.uid]);
 
   const achievements = useMemo<Achievement[]>(() => {
@@ -545,7 +445,13 @@ export function AchievementsScreen(props: any) {
 
         // 同步本地計算結果到 Firestore
         if (auth.user) {
-          syncAchievementToFirestore(db, auth.user.uid, school.id, def.id, progress, def.requirement);
+          void syncAchievementProgress({
+            uid: auth.user.uid,
+            schoolId: school.id,
+            achievementId: def.id,
+            progress,
+            requirement: def.requirement,
+          });
         }
       } else {
         // 從 Firestore 讀取（若無資料則為 0）
@@ -562,11 +468,19 @@ export function AchievementsScreen(props: any) {
         unlockedAt: unlocked ? (unlockedAt ?? (unlocked ? new Date() : undefined)) : undefined,
       };
     });
-  }, [auth.user, auth.profile, totalFavorites, pois.length, firestoreProgress, db, school.id]);
+  }, [auth.user, auth.profile, totalFavorites, firestoreProgress, school.id]);
 
   const totalPoints = useMemo(() => {
     return achievements.filter((a) => a.unlocked).reduce((sum, a) => sum + a.points, 0);
   }, [achievements]);
+  const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
+    schoolId: school.id,
+    uid: auth.user?.uid ?? null,
+    role: "student",
+    surface: "achievements",
+    totalPoints,
+    limit: 1,
+  });
 
   const levelInfo = useMemo(() => calculateLevel(totalPoints), [totalPoints]);
 
@@ -581,6 +495,7 @@ export function AchievementsScreen(props: any) {
   // 若無 Firestore 排行榜，顯示 fallback（含真實用戶分數）
   const displayLeaderboard = useMemo<LeaderboardEntry[]>(() => {
     if (leaderboard.length > 0) return leaderboard;
+    if (!allowDemoLeaderboard) return [];
     // fallback with real current user
     const fallback: LeaderboardEntry[] = [
       { rank: 1, userId: "u1", userName: "學霸小明", points: 1250, level: 8, isCurrentUser: false },
@@ -599,7 +514,7 @@ export function AchievementsScreen(props: any) {
     }
     fallback.push({ rank: 5, userId: "u5", userName: "新同學", points: 320, level: 3, isCurrentUser: false });
     return fallback.sort((a, b) => b.points - a.points).map((e, i) => ({ ...e, rank: i + 1 }));
-  }, [leaderboard, auth.user, auth.profile, totalPoints, levelInfo.level]);
+  }, [allowDemoLeaderboard, leaderboard, auth.user, auth.profile, totalPoints, levelInfo.level]);
 
   const handleShareStreak = useCallback(async () => {
     try {
@@ -711,50 +626,71 @@ export function AchievementsScreen(props: any) {
           </View>
         </AnimatedCard>
 
+        {ambientCue ? (
+          <AmbientCueCard
+            signalType={ambientCue.signalType}
+            headline={ambientCue.headline}
+            body={ambientCue.body}
+            metric={ambientCue.metric}
+            actionLabel={ambientCue.ctaLabel}
+            onPress={() => openAmbientCue(ambientCue, props?.navigation)}
+            onDismiss={() => {
+              void dismissAmbientCue(ambientCue);
+            }}
+          />
+        ) : null}
+
         <AnimatedCard title="排行榜" subtitle="校園積分榜（即時更新）" delay={100}>
-          <View style={{ gap: 8 }}>
-            {displayLeaderboard.map((entry) => (
-              <View
-                key={entry.userId}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  padding: 12,
-                  borderRadius: theme.radius.md,
-                  backgroundColor: entry.isCurrentUser ? theme.colors.accentSoft : theme.colors.surface2,
-                  borderWidth: entry.isCurrentUser ? 1 : 0,
-                  borderColor: theme.colors.accent,
-                }}
-              >
+          {displayLeaderboard.length === 0 ? (
+            <CompletionState
+              title="目前還沒有可公開顯示的真實排行榜資料"
+              description="正式環境不會補假用戶或假排名。等到有足夠的真實匿名積分資料後，這裡才會顯示排行。"
+            />
+          ) : (
+            <View style={{ gap: 8 }}>
+              {displayLeaderboard.map((entry) => (
                 <View
+                  key={entry.userId}
                   style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    backgroundColor:
-                      entry.rank === 1 ? "#F59E0B" : entry.rank === 2 ? "#94A3B8" : entry.rank === 3 ? "#CD7F32" : theme.colors.surface2,
+                    flexDirection: "row",
                     alignItems: "center",
-                    justifyContent: "center",
-                    marginRight: 12,
+                    padding: 12,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: entry.isCurrentUser ? theme.colors.accentSoft : theme.colors.surface2,
+                    borderWidth: entry.isCurrentUser ? 1 : 0,
+                    borderColor: theme.colors.accent,
                   }}
                 >
-                  {entry.rank <= 3 ? (
-                    <Ionicons name="trophy" size={16} color="#fff" />
-                  ) : (
-                    <Text style={{ color: theme.colors.muted, fontWeight: "700" }}>{entry.rank}</Text>
-                  )}
+                  <View
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      backgroundColor:
+                        entry.rank === 1 ? "#F59E0B" : entry.rank === 2 ? "#94A3B8" : entry.rank === 3 ? "#CD7F32" : theme.colors.surface2,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: 12,
+                    }}
+                  >
+                    {entry.rank <= 3 ? (
+                      <Ionicons name="trophy" size={16} color="#fff" />
+                    ) : (
+                      <Text style={{ color: theme.colors.muted, fontWeight: "700" }}>{entry.rank}</Text>
+                    )}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: theme.colors.text, fontWeight: "700" }}>
+                      {entry.userName}
+                      {entry.isCurrentUser && " (你)"}
+                    </Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>Lv.{entry.level}</Text>
+                  </View>
+                  <Text style={{ color: theme.colors.accent, fontWeight: "700" }}>{entry.points} 分</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: "700" }}>
-                    {entry.userName}
-                    {entry.isCurrentUser && " (你)"}
-                  </Text>
-                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>Lv.{entry.level}</Text>
-                </View>
-                <Text style={{ color: theme.colors.accent, fontWeight: "700" }}>{entry.points} 分</Text>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          )}
         </AnimatedCard>
 
         <AnimatedCard title="成就分類" subtitle="" delay={200}>

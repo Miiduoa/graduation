@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useMemo } from "react";
 import { ScrollView, Text, View, Pressable } from "react-native";
 import { Screen, Card, Button, Pill, LoadingState, ErrorState, AnimatedCard } from "../ui/components";

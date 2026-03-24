@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { ScrollView, Text, View, Pressable, Alert, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -256,6 +257,17 @@ const GRADE_COLORS: Record<string, string> = {
   F: "#DC2626",
 };
 
+// Infer category from course code patterns
+function inferCategory(courseCode?: string, courseName?: string): Grade["category"] {
+  if (!courseCode && !courseName) return "required";
+  const code = (courseCode || "").toLowerCase();
+  const name = (courseName || "").toLowerCase();
+  if (code.startsWith("eng") || name.includes("英文")) return "english";
+  if (code.startsWith("ge")) return "general";
+  if (code.startsWith("pe")) return "general";
+  return "required";
+}
+
 const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
   required: { label: "必修", color: "#3B82F6" },
   elective: { label: "選修", color: "#8B5CF6" },
@@ -352,7 +364,7 @@ export function GradesScreen(props: any) {
   const { school } = useSchool();
 
   const [selectedTab, setSelectedTab] = useState(0);
-  const [selectedSemester, setSelectedSemester] = useState<string | null>("113-2");
+  const [selectedSemester, setSelectedSemester] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [serverGrades, setServerGrades] = useState<DataGrade[]>([]);
@@ -393,57 +405,60 @@ export function GradesScreen(props: any) {
   }, [loadGrades]);
 
   const semesters = useMemo(() => {
-    if (serverGrades.length > 0) {
-      const semesterMap = new Map<string, Semester>();
-      
-      for (const grade of serverGrades) {
-        const semId = grade.semester;
-        if (!semesterMap.has(semId)) {
-          semesterMap.set(semId, {
-            id: semId,
-            name: `${semId.split("-")[0]}學年度第${semId.split("-")[1]}學期`,
-            year: parseInt(semId.split("-")[0]),
-            term: parseInt(semId.split("-")[1]),
-            gpa: 0,
-            credits: 0,
-            courses: [],
-          });
-        }
-        
-        const sem = semesterMap.get(semId)!;
-        sem.courses.push({
-          id: grade.id,
-          courseCode: grade.courseCode,
-          courseName: grade.courseName,
-          credits: grade.credits,
-          semester: grade.semester,
-          midterm: grade.midtermScore,
-          final: grade.finalScore,
-          grade: grade.letterGrade,
-          gpa: grade.gradePoints,
-          status: grade.letterGrade ? "completed" : "in_progress",
-          category: "required",
-          instructor: grade.instructor,
+    const semesterMap = new Map<string, Semester>();
+
+    for (const grade of serverGrades) {
+      const semId = grade.semester;
+      if (!semesterMap.has(semId)) {
+        semesterMap.set(semId, {
+          id: semId,
+          name: `${semId.split("-")[0]}學年度第${semId.split("-")[1]}學期`,
+          year: parseInt(semId.split("-")[0]),
+          term: parseInt(semId.split("-")[1]),
+          gpa: 0,
+          credits: 0,
+          courses: [],
         });
-        sem.credits += grade.credits;
       }
-      
-      for (const sem of semesterMap.values()) {
-        const completedCourses = sem.courses.filter(c => c.status === "completed");
-        if (completedCourses.length > 0) {
-          const totalPoints = completedCourses.reduce((sum, c) => sum + (c.gpa ?? 0) * c.credits, 0);
-          const totalCredits = completedCourses.reduce((sum, c) => sum + c.credits, 0);
-          sem.gpa = totalCredits > 0 ? totalPoints / totalCredits : 0;
-        }
-      }
-      
-      return Array.from(semesterMap.values()).sort((a, b) => {
-        if (a.year !== b.year) return b.year - a.year;
-        return b.term - a.term;
+
+      const sem = semesterMap.get(semId)!;
+      sem.courses.push({
+        id: grade.id,
+        courseCode: grade.courseCode || "",
+        courseName: grade.courseName,
+        credits: grade.credits,
+        semester: grade.semester,
+        midterm: grade.midtermScore,
+        final: grade.finalScore,
+        grade: grade.letterGrade,
+        gpa: grade.gradePoints,
+        status: grade.letterGrade ? "completed" : "in_progress",
+        category: inferCategory(grade.courseCode, grade.courseName),
+        instructor: grade.instructor,
       });
+      sem.credits += grade.credits;
     }
-    return MOCK_SEMESTERS;
+
+    for (const sem of semesterMap.values()) {
+      const completedCourses = sem.courses.filter(c => c.status === "completed");
+      if (completedCourses.length > 0) {
+        const totalPoints = completedCourses.reduce((sum, c) => sum + (c.gpa ?? 0) * c.credits, 0);
+        const totalCredits = completedCourses.reduce((sum, c) => sum + c.credits, 0);
+        sem.gpa = totalCredits > 0 ? totalPoints / totalCredits : 0;
+      }
+    }
+
+    return Array.from(semesterMap.values()).sort((a, b) => {
+      if (a.year !== b.year) return b.year - a.year;
+      return b.term - a.term;
+    });
   }, [serverGrades]);
+
+  useEffect(() => {
+    if (selectedSemester === null && semesters.length > 0) {
+      setSelectedSemester(semesters[0].id);
+    }
+  }, [semesters, selectedSemester]);
 
   const currentSemester = semesters[0];
   const historySemesters = semesters.slice(1);
@@ -535,50 +550,69 @@ export function GradesScreen(props: any) {
         >
           {selectedTab === 0 && (
             <View style={{ gap: 12 }}>
-              <AnimatedCard title="113學年度第2學期" subtitle="進行中">
-                <View style={{ flexDirection: "row", gap: 16, marginBottom: 16 }}>
-                  <View style={{ flex: 1, alignItems: "center" }}>
-                    <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 28 }}>
-                      {currentSemester?.credits ?? 0}
-                    </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課學分</Text>
-                  </View>
-                  <View style={{ flex: 1, alignItems: "center" }}>
-                    <Text style={{ color: theme.colors.success, fontWeight: "900", fontSize: 28 }}>
-                      {currentSemester?.courses.length ?? 0}
-                    </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課數</Text>
-                  </View>
-                  <View style={{ flex: 1, alignItems: "center" }}>
-                    <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 28 }}>
-                      {currentSemester?.courses.filter((c) => c.midterm !== undefined).length ?? 0}
-                    </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>已出期中成績</Text>
-                  </View>
-                </View>
+              {currentSemester ? (
+                <>
+                  <AnimatedCard
+                    title={currentSemester.name}
+                    subtitle={currentSemester.courses.some(c => c.status === "completed") ? `GPA: ${currentSemester.gpa.toFixed(2)}` : "進行中"}
+                  >
+                    <View style={{ flexDirection: "row", gap: 16, marginBottom: 16 }}>
+                      <View style={{ flex: 1, alignItems: "center" }}>
+                        <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 28 }}>
+                          {currentSemester.credits}
+                        </Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課學分</Text>
+                      </View>
+                      <View style={{ flex: 1, alignItems: "center" }}>
+                        <Text style={{ color: theme.colors.success, fontWeight: "900", fontSize: 28 }}>
+                          {currentSemester.courses.length}
+                        </Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課數</Text>
+                      </View>
+                      <View style={{ flex: 1, alignItems: "center" }}>
+                        <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 28 }}>
+                          {currentSemester.courses.filter((c) => c.midterm !== undefined).length}
+                        </Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>已出期中成績</Text>
+                      </View>
+                    </View>
 
-                <View
-                  style={{
-                    padding: 12,
-                    borderRadius: theme.radius.md,
-                    backgroundColor: theme.colors.accentSoft,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 10,
-                  }}
-                >
-                  <Ionicons name="information-circle" size={20} color={theme.colors.accent} />
-                  <Text style={{ color: theme.colors.text, fontSize: 13, flex: 1 }}>
-                    期末成績尚未公布，目前僅顯示期中成績
-                  </Text>
-                </View>
-              </AnimatedCard>
+                    {currentSemester.courses.some(c => c.status === "in_progress") && (
+                      <View
+                        style={{
+                          padding: 12,
+                          borderRadius: theme.radius.md,
+                          backgroundColor: theme.colors.accentSoft,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <Ionicons name="information-circle" size={20} color={theme.colors.accent} />
+                        <Text style={{ color: theme.colors.text, fontSize: 13, flex: 1 }}>
+                          期末成績尚未公布，目前僅顯示期中成績
+                        </Text>
+                      </View>
+                    )}
+                  </AnimatedCard>
 
-              <SectionTitle text="本學期課程" />
+                  <SectionTitle text="本學期課程" />
 
-              {currentSemester?.courses.map((course) => (
-                <GradeCard key={course.id} course={course} />
-              ))}
+                  {currentSemester.courses.length > 0 ? (
+                    currentSemester.courses.map((course) => (
+                      <GradeCard key={course.id} course={course} />
+                    ))
+                  ) : (
+                    <AnimatedCard title="無課程" subtitle="">
+                      <Text style={{ color: theme.colors.muted }}>本學期沒有課程記錄</Text>
+                    </AnimatedCard>
+                  )}
+                </>
+              ) : (
+                <AnimatedCard title="無成績數據" subtitle="">
+                  <Text style={{ color: theme.colors.muted }}>未取得成績數據</Text>
+                </AnimatedCard>
+              )}
             </View>
           )}
 
@@ -727,7 +761,7 @@ export function GradesScreen(props: any) {
                     }}
                   >
                     <Text style={{ color: "#3B82F6", fontWeight: "900", fontSize: 24 }}>
-                      {MOCK_SEMESTERS.filter((s) => s.courses.some((c) => c.status === "completed")).length}
+                      {semesters.filter((s) => s.courses.some((c) => c.status === "completed")).length}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 11 }}>完成學期</Text>
                   </View>

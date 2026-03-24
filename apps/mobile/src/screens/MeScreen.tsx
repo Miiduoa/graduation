@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useMemo } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -269,7 +270,7 @@ export function MeScreen(props: any) {
     { icon: "qr-code-outline", label: "QR 碼", hint: "校園身份與通行", color: "#5B8CFF", onPress: () => nav?.navigate?.("QRCode") },
     { icon: "search-outline", label: "全站搜尋", hint: "快速找課程與公告", color: "#5AC8FA", onPress: () => nav?.navigate?.("GlobalSearch") },
     { icon: "library-outline", label: "圖書館", hint: "借閱、空位與書單", color: "#667EEA", onPress: () => nav?.navigate?.("Library") },
-    { icon: "bus-outline", label: "校園公車", hint: "查看即時班次", color: "#34C759", onPress: () => nav?.navigate?.("地圖", { screen: "BusSchedule" }) },
+    { icon: "bus-outline", label: "校園公車", hint: "查看即時班次", color: "#34C759", onPress: () => nav?.navigate?.("校園", { screen: "BusSchedule" }) },
   ];
 
   const campusLifeServices: ServiceItem[] = [

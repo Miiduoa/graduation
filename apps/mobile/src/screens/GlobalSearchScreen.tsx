@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { ScrollView, Text, View, Pressable, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,7 +12,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
 import { formatDateTime, toDate, formatRelativeTime } from "../utils/format";
 import { getDb } from "../firebase";
-import { collection, getDocs, query, where, orderBy, limit, collectionGroup } from "firebase/firestore";
+import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 
 type SearchCategory = "all" | "announcements" | "events" | "pois" | "menus" | "groups";
 
@@ -60,12 +61,19 @@ export function GlobalSearchScreen(props: any) {
 
     async function loadGroupContent() {
       try {
-        // 取得用戶加入的群組 ID
-        const memberSnap = await getDocs(
-          query(collectionGroup(db, "members"), where("uid", "==", auth.user!.uid), limit(20))
+        const membershipSnap = await getDocs(
+          query(
+            collection(db, "users", auth.user!.uid, "groups"),
+            where("schoolId", "==", school.id),
+            where("status", "==", "active"),
+            limit(20)
+          )
         );
-        const groupIds = memberSnap.docs
-          .map((d) => d.ref.parent.parent?.id)
+        const groupIds = membershipSnap.docs
+          .map((d) => {
+            const data = d.data();
+            return typeof data.groupId === "string" ? data.groupId : d.id;
+          })
           .filter(Boolean) as string[];
 
         const posts: any[] = [];
@@ -97,7 +105,7 @@ export function GlobalSearchScreen(props: any) {
 
     loadGroupContent();
     return () => { cancelled = true; };
-  }, [auth.user?.uid, db]);
+  }, [auth.user?.uid, db, school.id]);
 
   const results = useMemo<SearchResult[]>(() => {
     const q = queryText.trim().toLowerCase();
@@ -170,13 +178,13 @@ export function GlobalSearchScreen(props: any) {
 
     if (category === "all" || category === "groups") {
       groupPosts.forEach((p) => {
-        const text = `${p.title ?? ""} ${p.body ?? ""} ${p.authorEmail ?? ""}`.toLowerCase();
+        const text = `${p.title ?? ""} ${p.body ?? ""} ${p.authorName ?? ""} ${p.authorId ?? ""}`.toLowerCase();
         if (text.includes(q)) {
           allResults.push({
             id: p.id,
             type: "post",
             title: p.title ?? "(無標題)",
-            subtitle: `群組貼文 · ${p.kind ?? "post"}${p.authorEmail ? ` · ${p.authorEmail}` : ""}`,
+            subtitle: `群組貼文 · ${p.kind ?? "post"}${p.authorName ? ` · ${p.authorName}` : ""}`,
             highlight: p.body?.substring(0, 100),
             data: p,
             groupId: p.groupId,

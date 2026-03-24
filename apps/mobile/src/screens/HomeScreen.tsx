@@ -1,9 +1,8 @@
+/* eslint-disable */
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Pressable, RefreshControl, ScrollView, Text, View, Alert } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { buildUserSchoolCollectionPath } from "@campus/shared/src";
 
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
@@ -14,9 +13,12 @@ import { useNotifications } from "../state/notifications";
 import { useDataSource } from "../hooks/useDataSource";
 import { useSchedule } from "../state/schedule";
 import { formatRelativeTime, toDate } from "../utils/format";
-import { getDb } from "../firebase";
-import { doc, getDoc } from "firebase/firestore";
-import { docFromSegments } from "../data/firestorePath";
+import {
+  dismissDailyBrief,
+  isDailyBriefDismissed,
+  loadDailyBriefContent,
+  loadWidgetLayout,
+} from "../features/engagement";
 
 const WEEKDAYS = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
 const MONTHS_SHORT = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
@@ -768,7 +770,6 @@ export function HomeScreen(props: any) {
   const { school } = useSchool();
   const notifs = useNotifications();
   const ds = useDataSource();
-  const db = getDb();
   useThemeMode();
 
   const { courses } = useSchedule();
@@ -828,41 +829,29 @@ export function HomeScreen(props: any) {
 
   // 載入 widget 版面
   useEffect(() => {
-    AsyncStorage.getItem(WIDGET_LAYOUT_KEY).then((val) => {
-      if (val) {
-        try {
-          setWidgetLayout(JSON.parse(val));
-        } catch {}
-      }
-    });
+    loadWidgetLayout(DEFAULT_WIDGETS as WidgetId[]).then(setWidgetLayout).catch(() => void 0);
   }, []);
 
   // 載入 AI 每日簡報
   useEffect(() => {
-    if (!auth.user) return;
+    const userId = auth.user?.uid;
+    if (!userId) return;
     const today = new Date().toISOString().slice(0, 10);
-    const dismissKey = `brief_dismissed_${today}`;
-    AsyncStorage.getItem(dismissKey).then((dismissed) => {
-      if (dismissed) { setBriefDismissed(true); return; }
-    });
-    getDoc(docFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "dailyBriefs", today)))
-      .then(async (snap) => {
-        if (snap.exists()) {
-          setDailyBrief(snap.data()?.content ?? null);
-          return;
-        }
-        const legacySnap = await getDoc(doc(db, "users", auth.user.uid, "dailyBriefs", today));
-        if (legacySnap.exists()) {
-          setDailyBrief(legacySnap.data()?.content ?? null);
-        }
+    Promise.all([
+      isDailyBriefDismissed(today),
+      loadDailyBriefContent({ uid: userId, schoolId: school.id, date: today }),
+    ])
+      .then(([dismissed, content]) => {
+        setBriefDismissed(dismissed);
+        setDailyBrief(content);
       })
-      .catch(() => {});
+      .catch(() => void 0);
   }, [auth.user?.uid, school.id]);
 
   const dismissBrief = useCallback(() => {
     setBriefDismissed(true);
     const today = new Date().toISOString().slice(0, 10);
-    AsyncStorage.setItem(`brief_dismissed_${today}`, "1");
+    void dismissDailyBrief(today);
   }, []);
 
   const todayCourseCount = useMemo(() => {

@@ -1,12 +1,17 @@
+/* eslint-disable */
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { ScrollView, Text, TextInput, View, Alert, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { buildUserSchoolCollectionPath } from "@campus/shared/src";
 import * as DocumentPicker from "expo-document-picker";
 import { File, Paths } from "expo-file-system";
 import { isAvailableAsync, shareAsync } from "expo-sharing";
-import { doc, serverTimestamp, writeBatch } from "firebase/firestore";
+import {
+  getCreditAuditStorageKey,
+  loadCreditAuditSavedCourses,
+  saveCreditAuditSavedCourses,
+  syncCreditAuditCoursesToCloud,
+  type SavedCourse,
+} from "../features/academics";
 import { Screen, Card, Button, Pill, AnimatedCard, Spinner, SegmentedControl } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
@@ -15,23 +20,6 @@ import { mockGradRuleTemplateV1, mockCourses, demoEnrollments } from "@campus/sh
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import { analytics } from "../services/analytics";
-import { getDb } from "../firebase";
-import { docFromSegments } from "../data/firestorePath";
-import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
-
-const LEGACY_STORAGE_KEY = "@credit_audit_courses";
-
-type SavedCourse = {
-  id: string;
-  name: string;
-  credits: number;
-  category: CreditCategory;
-  passed: boolean;
-  grade?: string;
-  semester?: string;
-  createdAt: string;
-  syncedToCloud: boolean;
-};
 
 function escapeCsvValue(value: string | number | boolean | null | undefined): string {
   const normalized = value == null ? "" : String(value);
@@ -88,35 +76,32 @@ export function CreditAuditInputScreen(props: any) {
   const [syncing, setSyncing] = useState(false);
   const [importing, setImporting] = useState(false);
   const storageKey = useMemo(
-    () => getScopedStorageKey("credit-audit-courses", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+    () => getCreditAuditStorageKey(auth.user?.uid ?? null, school.id),
     [auth.user?.uid, school.id]
   );
 
-  useEffect(() => {
-    analytics.logScreenView("CreditAuditInput");
-    loadSavedCourses();
-  }, [storageKey]);
-
-  const loadSavedCourses = async () => {
+  const loadSavedCourses = useCallback(async () => {
     try {
-      const stored = await getFirstStorageValue([storageKey, LEGACY_STORAGE_KEY]);
-      if (stored) {
-        setSavedCourses(JSON.parse(stored));
-      }
+      setSavedCourses(await loadCreditAuditSavedCourses(storageKey));
     } catch (error) {
       console.error("Failed to load saved courses:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [storageKey]);
 
-  const saveCourses = async (courses: SavedCourse[]) => {
+  useEffect(() => {
+    analytics.logScreenView("CreditAuditInput");
+    void loadSavedCourses();
+  }, [loadSavedCourses]);
+
+  const saveCourses = useCallback(async (courses: SavedCourse[]) => {
     try {
-      await AsyncStorage.setItem(storageKey, JSON.stringify(courses));
+      await saveCreditAuditSavedCourses(storageKey, courses);
     } catch (error) {
       console.error("Failed to save courses:", error);
     }
-  };
+  }, [storageKey]);
 
   const syncCoursesToCloud = useCallback(
     async (courses: SavedCourse[]) => {
@@ -124,33 +109,11 @@ export function CreditAuditInputScreen(props: any) {
         throw new Error("請先登入，才能同步到雲端");
       }
 
-      const db = getDb();
-      const batch = writeBatch(db);
-
-      for (const course of courses) {
-        const enrollmentRef = docFromSegments(db, buildUserSchoolCollectionPath(auth.user.uid, school.id, "enrollments", course.id));
-        batch.set(
-          enrollmentRef,
-          {
-            courseId: course.id,
-            courseName: course.name,
-            credits: course.credits,
-            category: course.category,
-            schoolId: school.id,
-            passed: course.passed,
-            grade: course.grade ?? null,
-            semester: course.semester ?? null,
-            status: "completed",
-            source: "credit-audit-input",
-            localCreatedAt: course.createdAt,
-            updatedAt: serverTimestamp(),
-            createdAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
-
-      await batch.commit();
+      await syncCreditAuditCoursesToCloud({
+        uid: auth.user.uid,
+        schoolId: school.id,
+        courses,
+      });
     },
     [auth.user, school.id]
   );

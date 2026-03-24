@@ -142,10 +142,6 @@ function getCacheExpiry(methodName: string): number {
   return isOfflineMode ? DEFAULT_CACHE_EXPIRY_MS * OFFLINE_EXPIRY_MULTIPLIER : DEFAULT_CACHE_EXPIRY_MS;
 }
 
-function getCacheCategory(methodName: string): DataCategory | null {
-  return METHOD_CACHE_CATEGORY[methodName] ?? null;
-}
-
 type CacheEntry<T> = {
   data: T;
   timestamp: number;
@@ -409,81 +405,6 @@ export function createCachedSource(
   options: CachedDataSourceOptions = {}
 ): DataSource {
   const { onBackgroundUpdateError } = options;
-
-  async function fetchAndCacheList<T>(
-    cacheKey: string,
-    schoolId: string,
-    fetcher: () => Promise<T[]>
-  ): Promise<T[]> {
-    const cached = await getCache<T[]>(cacheKey, schoolId, { allowStale: true });
-    
-    if (cached) {
-      if (cached.isStale) {
-        fetchWithRetry(fetcher)
-          .then(async (fresh) => {
-            await setCache(cacheKey, fresh, schoolId);
-            notifyCacheUpdate(cacheKey, fresh);
-          })
-          .catch((e) => {
-            console.warn("[cache] Background refresh failed:", cacheKey, e);
-            onBackgroundUpdateError?.(cacheKey, e);
-          });
-      }
-      return cached.data;
-    }
-
-    try {
-      const fresh = await fetchWithRetry(fetcher);
-      await setCache(cacheKey, fresh, schoolId);
-      return fresh;
-    } catch (e) {
-      const staleCached = await getCache<T[]>(cacheKey, schoolId, { allowStale: true });
-      if (staleCached) {
-        console.warn("[cache] Using stale cache due to fetch error:", cacheKey);
-        return staleCached.data;
-      }
-      throw e;
-    }
-  }
-
-  async function fetchAndCacheSingle<T>(
-    cacheKey: string,
-    fetcher: () => Promise<T | null>
-  ): Promise<T | null> {
-    const cached = await getCache<T>(cacheKey, "global", { allowStale: true });
-    
-    if (cached) {
-      if (cached.isStale) {
-        fetchWithRetry(fetcher)
-          .then(async (fresh) => {
-            if (fresh !== null) {
-              await setCache(cacheKey, fresh, "global");
-              notifyCacheUpdate(cacheKey, fresh);
-            }
-          })
-          .catch((e) => {
-            console.warn("[cache] Background refresh failed:", cacheKey, e);
-            onBackgroundUpdateError?.(cacheKey, e);
-          });
-      }
-      return cached.data;
-    }
-
-    try {
-      const fresh = await fetchWithRetry(fetcher);
-      if (fresh !== null) {
-        await setCache(cacheKey, fresh, "global");
-      }
-      return fresh;
-    } catch (e) {
-      const staleCached = await getCache<T>(cacheKey, "global", { allowStale: true });
-      if (staleCached) {
-        console.warn("[cache] Using stale cache due to fetch error:", cacheKey);
-        return staleCached.data;
-      }
-      throw e;
-    }
-  }
 
   async function fetchAndCacheListWithExpiry<T>(
     cacheKey: string,

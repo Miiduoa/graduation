@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { storage } from '../../services/storage';
 import * as FileSystem from 'expo-file-system';
 

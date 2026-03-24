@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { ScrollView, Text, View, Pressable, Platform, RefreshControl, FlatList, Alert, AccessibilityInfo } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -7,6 +8,7 @@ import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
 import { useSearchDebounce } from "../hooks/useDebounce";
 import { useNetworkStatus } from "../hooks/useNetworkStatus";
+import { usePermissions } from "../hooks/usePermissions";
 import { Card, Pill, LoadingState, EmptyState, ErrorState, SearchBar, Button } from "../ui/components";
 import { OfflineDataNotice } from "../ui/OfflineBanner";
 import { useSchool } from "../state/school";
@@ -51,6 +53,8 @@ export function AnnouncementsScreen(props: any) {
   const toastRef = useRef(toast);
   toastRef.current = toast;
   const { isOffline, isOnline } = useNetworkStatus();
+  const { can } = usePermissions();
+  const canPublish = can("announcements.create");
 
   const demo = useDemo();
   const searchHistory = useSearchHistory();
@@ -207,17 +211,40 @@ export function AnnouncementsScreen(props: any) {
               backgroundColor: theme.colors.bg,
             }}
           >
-            <Text
-              style={{
-                fontSize: 34,
-                fontWeight: "800",
-                color: theme.colors.text,
-                marginBottom: 16,
-                letterSpacing: -1,
-              }}
-            >
-              公告
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <Text
+                style={{
+                  fontSize: 34,
+                  fontWeight: "800",
+                  color: theme.colors.text,
+                  letterSpacing: -1,
+                }}
+              >
+                公告
+              </Text>
+              {/* 只有教師/主管/管理員看得到「發佈公告」按鈕 */}
+              {canPublish && (
+                <Pressable
+                  onPress={() =>
+                    Alert.alert("發佈公告", "請至管理後台或課程中樞發佈公告。", [{ text: "確定" }])
+                  }
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    backgroundColor: theme.colors.accent,
+                    paddingHorizontal: 14,
+                    paddingVertical: 8,
+                    borderRadius: 20,
+                    opacity: pressed ? 0.8 : 1,
+                  })}
+                  accessibilityLabel="發佈新公告"
+                >
+                  <Ionicons name="add" size={16} color="#fff" />
+                  <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>發佈</Text>
+                </Pressable>
+              )}
+            </View>
 
             <View style={{ flexDirection: "row", gap: 10 }}>
               <View

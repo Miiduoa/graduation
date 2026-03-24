@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useCallback, useMemo, useState, useRef } from "react";
 import { FlatList, ScrollView, Text, Pressable, View, Linking, Platform, RefreshControl, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";

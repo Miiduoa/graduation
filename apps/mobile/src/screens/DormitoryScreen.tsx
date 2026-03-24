@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { View, Text, Pressable, ScrollView, Alert, RefreshControl, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -105,8 +106,8 @@ export function DormitoryScreen(props: any) {
     try {
       const [dormInfoData, repairsData, packagesData, machinesData, announcementsData] = await Promise.all([
         ds.getDormitoryInfo(auth.user.uid).catch(() => null),
-        ds.listRepairRequests(auth.user.uid).catch(() => []),
-        ds.listDormPackages(auth.user.uid).catch(() => []),
+        ds.listRepairRequests(auth.user.uid, undefined, school?.id).catch(() => []),
+        ds.listDormPackages(auth.user.uid, undefined, school?.id).catch(() => []),
         ds.listWashingMachines(school?.id, dormInfo?.building).catch(() => []),
         ds.listDormAnnouncements(school?.id, dormInfo?.building).catch(() => []),
       ]);
@@ -197,7 +198,7 @@ export function DormitoryScreen(props: any) {
           text: "確認",
           onPress: async () => {
             try {
-              await ds.confirmPackagePickup(packageId);
+              await ds.confirmPackagePickup(packageId, school?.id);
               setPackages(packages.map((p) => (p.id === packageId ? { ...p, status: "picked" as const, pickedAt: new Date().toISOString() } : p)));
             } catch (error) {
               Alert.alert("操作失敗", "請稍後再試");
@@ -225,7 +226,7 @@ export function DormitoryScreen(props: any) {
           text: "確認預約",
           onPress: async () => {
             try {
-              await ds.reserveWashingMachine(machine.id, auth.user!.uid);
+              await ds.reserveWashingMachine(machine.id, auth.user!.uid, school?.id);
               setMachines(machines.map((m) => 
                 m.id === machine.id ? { ...m, status: "reserved" as const, reservedBy: auth.user!.uid } : m
               ));

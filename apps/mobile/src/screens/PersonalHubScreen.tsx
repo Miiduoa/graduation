@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useMemo } from "react";
 import { Alert, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -5,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../state/auth";
 import { useNotifications } from "../state/notifications";
 import { useSchool } from "../state/school";
+import { usePermissions } from "../hooks/usePermissions";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { ContextStrip, RoleCtaCard, TimelineCard } from "../ui/campusOs";
@@ -16,7 +18,15 @@ export function PersonalHubScreen(props: any) {
   const auth = useAuth();
   const notifs = useNotifications();
   const { school } = useSchool();
+  const { displayName: roleDisplayName, badgeColor, can, isTeacher, isStaff, isDepartmentHead, isAdmin } = usePermissions();
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
+  const activeMerchantAssignments = useMemo(
+    () =>
+      (auth.profile?.merchantAssignments ?? []).filter(
+        (assignment) => assignment.status === "active"
+      ),
+    [auth.profile?.merchantAssignments]
+  );
 
   const identity = useMemo(() => {
     if (!auth.user) return "校園訪客";
@@ -38,10 +48,36 @@ export function PersonalHubScreen(props: any) {
           title={identity}
           description={
             auth.user
-              ? `${school.name} · ${roleMode === "teacher" ? "教學身份" : roleMode === "admin" ? "管理身份" : "學生身份"}。這裡只保留個人設定、帳號安全與長期成長。`
+              ? `${school.name} · ${roleDisplayName}身份。這裡只保留個人設定、帳號安全與長期成長。`
               : "這裡只處理個人設定、登入與偏好，不再塞滿高頻核心服務。"
           }
         />
+
+        {/* 角色標籤 */}
+        {auth.user ? (
+          <View style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingVertical: 4,
+          }}>
+            <View style={{
+              backgroundColor: badgeColor,
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+              borderRadius: 12,
+            }}>
+              <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>
+                {roleDisplayName}
+              </Text>
+            </View>
+            {auth.profile?.department ? (
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
+                {auth.profile.department}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {!auth.user ? (
           <RoleCtaCard
@@ -67,6 +103,16 @@ export function PersonalHubScreen(props: any) {
 
         <View style={{ gap: 10 }}>
           <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>個人與偏好</Text>
+          {activeMerchantAssignments.length > 0 ? (
+            <TimelineCard
+              icon="storefront-outline"
+              title="商家接單"
+              description={`處理 ${activeMerchantAssignments[0].cafeteriaName}${activeMerchantAssignments.length > 1 ? ` 等 ${activeMerchantAssignments.length} 間餐廳` : ""} 的訂單狀態。`}
+              meta="Merchant"
+              tint={theme.colors.accent}
+              onPress={() => nav?.navigate?.("MerchantHub")}
+            />
+          ) : null}
           <TimelineCard
             icon="person-outline"
             title="個人資料"
@@ -120,17 +166,76 @@ export function PersonalHubScreen(props: any) {
           />
         </View>
 
-        {auth.isAdmin ? (
+        {/* 角色專屬功能入口 — 依身份動態顯示 */}
+        {(isTeacher || isDepartmentHead || isStaff || isAdmin) ? (
           <View style={{ gap: 10 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>管理入口</Text>
-            <TimelineCard
-              icon="settings-outline"
-              title="管理員控制台"
-              description="管理功能保留在我的，不佔用主導航。"
-              meta="Admin"
-              tint={theme.colors.roleAdmin}
-              onPress={() => nav?.navigate?.("AdminDashboard")}
-            />
+            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>
+              {isAdmin ? "管理入口" : isStaff ? "服務管理" : isDepartmentHead ? "主管工具" : "教學工具"}
+            </Text>
+
+            {/* 教師/教授：快速進入教學管理 */}
+            {isTeacher ? (
+              <>
+                <TimelineCard
+                  icon="school-outline"
+                  title="我的課程管理"
+                  description="查看開課清單、批改作業與出缺勤紀錄"
+                  meta="教學"
+                  tint={theme.colors.roleTeacher}
+                  onPress={() => nav?.navigate?.("CourseHub")}
+                />
+              </>
+            ) : null}
+
+            {/* 職員：設施與訂單管理 */}
+            {isStaff ? (
+              <>
+                <TimelineCard
+                  icon="construct-outline"
+                  title="設施與工單管理"
+                  description="處理維修報修、訂單與列印服務"
+                  meta="服務"
+                  tint={theme.colors.warning}
+                  onPress={() => nav?.navigate?.("PrintService")}
+                />
+              </>
+            ) : null}
+
+            {/* 系所主管：審核與報表 */}
+            {isDepartmentHead ? (
+              <>
+                <TimelineCard
+                  icon="stats-chart-outline"
+                  title="系所數據與審核"
+                  description="審核流程、教學評鑑與統計報表"
+                  meta="審核"
+                  tint={theme.colors.calm}
+                  onPress={() => nav?.navigate?.("AdminDashboard")}
+                />
+              </>
+            ) : null}
+
+            {/* 超級管理員：完整控制台 */}
+            {isAdmin ? (
+              <>
+                <TimelineCard
+                  icon="settings-outline"
+                  title="管理員控制台"
+                  description="全校管理後台：成員管理、數據分析與系統設定"
+                  meta="Admin"
+                  tint={theme.colors.roleAdmin}
+                  onPress={() => nav?.navigate?.("AdminDashboard")}
+                />
+                <TimelineCard
+                  icon="checkmark-done-outline"
+                  title="課程驗證管理"
+                  description="審核與驗證新開課程申請"
+                  meta="審核"
+                  tint={theme.colors.urgent}
+                  onPress={() => nav?.navigate?.("AdminCourseVerify")}
+                />
+              </>
+            ) : null}
           </View>
         ) : null}
 

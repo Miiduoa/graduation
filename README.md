@@ -41,6 +41,22 @@ pnpm dev:web
 pnpm dev:functions
 ```
 
+### 通用測試帳號
+
+以下兩組帳號僅供 `development / preview / shared demo` 使用，`production` 應關閉：
+
+| 角色 | 帳號 | 密碼 |
+|------|------|------|
+| 學生 | `demohan513@gmail.com` | `nickkookoo` |
+| 教師 | `miiduoa@icloud.com` | `nickkookoo` |
+
+補充：
+
+- Mobile 以 `EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS` 控制是否顯示
+- Web 以 `NEXT_PUBLIC_APP_ENV` / `NEXT_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS` 控制
+- Shared demo Firebase Functions 以 `backend/functions/.env.campus-demo-3a869` 控制 preview runtime
+- 舊的 `TEST_SCHOOL_*` 設定已棄用，不再參與登入流程
+
 ### Workspace Scripts
 
 | 指令 | 說明 |
@@ -53,9 +69,25 @@ pnpm dev:functions
 | `pnpm format` | 用 Prettier 格式化整個 monorepo |
 | `pnpm format:check` | 檢查格式是否符合 Prettier |
 
+### Web Demo Firebase 設定
+
+若要在本地 Web 使用一般登入或通用測試帳號，至少需要設定：
+
+- `NEXT_PUBLIC_APP_ENV=development`
+- `NEXT_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS=true`
+- `NEXT_PUBLIC_FIREBASE_API_KEY`
+- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
+- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
+- `NEXT_PUBLIC_FIREBASE_APP_ID`
+- `NEXT_PUBLIC_CLOUD_FUNCTION_REGION=asia-east1`
+
 ### Mobile 資料來源切換（mock / firebase / hybrid）
 
 `apps/mobile/App.tsx` 已支援以環境變數切換資料來源，不需要再改程式碼常數。
+
+架構邊界請見 `docs/architecture/firebase-data-boundaries.md`。
 
 | 變數 | 可選值 | 預設 | 說明 |
 |------|--------|------|------|
@@ -70,6 +102,12 @@ pnpm dev:functions
 - 本機純前端開發：`EXPO_PUBLIC_DATA_SOURCE_MODE=mock`
 - Firebase 串接驗收：`EXPO_PUBLIC_DATA_SOURCE_MODE=firebase`
 - 逐步導入學校 API：`EXPO_PUBLIC_DATA_SOURCE_MODE=hybrid`
+
+補充：
+
+- `hybrid` 是最終整合目標模式
+- `firebase` 保留給 emulator、demo 與 Firebase 驗證
+- app-native / 即時資料仍以 Firebase 為主幹，校務正式資料逐步接 adapter 或 backend API
 
 ## 專案目標
 

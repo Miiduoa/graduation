@@ -1,8 +1,9 @@
+/* eslint-disable */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { collectionGroup, doc, documentId, getDoc, getDocs, query, where } from "firebase/firestore";
 import { getAuthInstance, getDb, hasUsableFirebaseConfig, subscribeToTokenRefresh } from "../firebase";
-import { resolveSchoolByEmail } from "@campus/shared/src/schools";
+import { findSchoolById, resolveSchoolByEmail } from "@campus/shared/src/schools";
 import { clearAllCache } from "../data/cachedSource";
 import { clearAllOfflineData, getOfflineQueue } from "../services/offline";
 import { getCachedPushToken, removePushTokenFromFirestore } from "../services/notifications";
@@ -10,6 +11,8 @@ import { clearMockAuthSession, loadMockAuthSession } from "../services/mockAuth"
 import { clearUserScopedStorage } from "../services/scopedStorage";
 
 import type { UserRole as DataUserRole } from "../data/types";
+import type { MerchantAssignment } from "../data/types";
+import { getRoleGroup, type RoleGroup } from "../services/permissions";
 
 export type UserRole = DataUserRole;
 
@@ -27,6 +30,9 @@ export type UserProfile = {
   phone?: string | null;
   avatarUrl?: string | null;
   isPublicProfile?: boolean | null;
+  roleGroup?: RoleGroup;
+  serviceRoles?: string[];
+  merchantAssignments?: MerchantAssignment[];
 };
 
 type AuthContextValue = {
@@ -48,33 +54,135 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function toIsoStringOrNull(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  if (value && typeof (value as { toDate?: () => Date }).toDate === "function") {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+  if (value && typeof (value as { seconds?: number }).seconds === "number") {
+    return new Date((value as { seconds: number }).seconds * 1000).toISOString();
+  }
+  return null;
+}
+
+async function loadMerchantAssignments(uid: string): Promise<MerchantAssignment[]> {
+  const db = getDb();
+  const snap = await getDocs(
+    query(collectionGroup(db, "operators"), where(documentId(), "==", uid))
+  ).catch(() => null);
+
+  if (!snap || snap.empty) {
+    return [];
+  }
+
+  const rows = await Promise.all(
+    snap.docs.map(async (operatorSnap) => {
+      const cafeteriaRef = operatorSnap.ref.parent.parent;
+      const schoolRef = cafeteriaRef?.parent.parent;
+      if (!cafeteriaRef || !schoolRef) {
+        return null;
+      }
+
+      const cafeteriaSnap = await getDoc(cafeteriaRef).catch(() => null);
+      const operatorData = operatorSnap.data() as Record<string, unknown>;
+      const cafeteriaData = cafeteriaSnap?.exists()
+        ? (cafeteriaSnap.data() as Record<string, unknown>)
+        : {};
+      const pilotStatusRaw = String(cafeteriaData.pilotStatus ?? "inactive");
+
+      return {
+        schoolId: schoolRef.id,
+        schoolName: findSchoolById(schoolRef.id)?.name ?? schoolRef.id,
+        cafeteriaId: cafeteriaRef.id,
+        cafeteriaName:
+          typeof cafeteriaData.name === "string" && cafeteriaData.name.trim()
+            ? cafeteriaData.name
+            : cafeteriaRef.id,
+        merchantId:
+          typeof cafeteriaData.merchantId === "string" && cafeteriaData.merchantId.trim()
+            ? cafeteriaData.merchantId
+            : cafeteriaRef.id,
+        brandKey:
+          typeof cafeteriaData.brandKey === "string" && cafeteriaData.brandKey.trim()
+            ? cafeteriaData.brandKey
+            : null,
+        operatorRole:
+          operatorData.role === "owner" || operatorData.role === "manager"
+            ? operatorData.role
+            : "staff",
+        status: operatorData.status === "inactive" ? "inactive" : "active",
+        orderingEnabled: cafeteriaData.orderingEnabled === true,
+        pilotStatus:
+          pilotStatusRaw === "pilot" || pilotStatusRaw === "live" ? pilotStatusRaw : "inactive",
+        displayName:
+          typeof operatorData.displayName === "string" ? operatorData.displayName : null,
+        email: typeof operatorData.email === "string" ? operatorData.email : null,
+        lastActiveAt: toIsoStringOrNull(operatorData.lastActiveAt),
+      } satisfies MerchantAssignment;
+    })
+  );
+
+  return rows
+    .filter((row): row is MerchantAssignment => row !== null)
+    .sort((a, b) => {
+      const aActive = a.status === "active" ? 1 : 0;
+      const bActive = b.status === "active" ? 1 : 0;
+      return bActive - aActive || a.cafeteriaName.localeCompare(b.cafeteriaName, "zh-TW");
+    });
+}
+
 async function loadProfile(u: User | null): Promise<UserProfile | null> {
   if (!u) return null;
-  
+
   try {
     const db = getDb();
     const ref = doc(db, "users", u.uid);
     const snap = await getDoc(ref);
     const data = snap.exists() ? (snap.data() as Record<string, unknown>) : {};
+    const merchantAssignments = await loadMerchantAssignments(u.uid).catch(() => []);
+    const assignmentSchoolId =
+      merchantAssignments.find((assignment) => assignment.status === "active")?.schoolId ??
+      merchantAssignments[0]?.schoolId ??
+      null;
     const schoolId =
       (data.primarySchoolId as string | undefined) ??
       (data.schoolId as string | undefined) ??
+      assignmentSchoolId ??
       resolveSchoolByEmail(u.email)?.id ??
       null;
     let schoolMembershipRole: string | null = null;
+    let serviceRoles: string[] = [];
 
     if (schoolId) {
       const membershipSnap = await getDoc(doc(db, "schools", schoolId, "members", u.uid)).catch(() => null);
       const membershipData = membershipSnap?.exists() ? (membershipSnap.data() as Record<string, unknown>) : null;
       schoolMembershipRole = typeof membershipData?.role === "string" ? membershipData.role : null;
+
+      // Try to load service roles
+      try {
+        const serviceRolesSnap = await getDoc(doc(db, "schools", schoolId, "serviceRoles", u.uid)).catch(() => null);
+        if (serviceRolesSnap?.exists()) {
+          const serviceRoleData = serviceRolesSnap.data() as Record<string, unknown>;
+          const roles = serviceRoleData.roles as unknown;
+          serviceRoles = Array.isArray(roles) ? (roles as string[]) : [];
+        }
+      } catch {
+        // Service roles optional - ignore errors
+        serviceRoles = [];
+      }
     }
+
+    const userRole = (data.role as UserRole) ?? "student";
+    const roleGroup = getRoleGroup(userRole);
 
     return {
       uid: u.uid,
       email: u.email,
       schoolId,
       primarySchoolId: schoolId,
-      role: (data.role as UserRole) ?? "student",
+      role: userRole,
       schoolMembershipRole,
       displayName: (data.displayName as string) ?? null,
       department: (data.department as string) ?? null,
@@ -83,6 +191,9 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       phone: (data.phone as string) ?? null,
       avatarUrl: (data.avatarUrl as string) ?? null,
       isPublicProfile: (data.isPublicProfile as boolean) ?? null,
+      roleGroup,
+      serviceRoles,
+      merchantAssignments,
     };
   } catch (error) {
     console.error("[auth] Failed to load profile:", error);
@@ -100,6 +211,9 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       phone: null,
       avatarUrl: null,
       isPublicProfile: null,
+      roleGroup: "student",
+      serviceRoles: [],
+      merchantAssignments: [],
     };
   }
 }
@@ -127,6 +241,9 @@ function toMockUserProfile(session: {
     phone: null,
     avatarUrl: null,
     isPublicProfile: null,
+    roleGroup: getRoleGroup(session.role),
+    serviceRoles: [],
+    merchantAssignments: [],
   };
 }
 

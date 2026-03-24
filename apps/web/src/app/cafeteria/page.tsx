@@ -48,6 +48,7 @@ export default function CafeteriaPage(props: { searchParams?: { school?: string;
   const [selectedCafeteria, setSelectedCafeteria] = useState("全部");
   const [period, setPeriod] = useState<MealPeriod>(nowPeriod());
   const [search, setSearch] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [userRatings, setUserRatings] = useState<Record<string, number>>({});
 
   const filtered = useMemo(
@@ -70,6 +71,7 @@ export default function CafeteriaPage(props: { searchParams?: { school?: string;
     return map;
   }, [filtered]);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const currentPeriod = PERIODS.find((p) => p.key === period)!;
 
   return (

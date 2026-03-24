@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { View, Text, Pressable, ScrollView, Alert, RefreshControl, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -84,7 +85,7 @@ export function PrintServiceScreen(props: any) {
     try {
       const [printersData, jobsData] = await Promise.all([
         ds.listPrinters(school?.id).catch(() => []),
-        auth.user?.uid ? ds.listPrintJobs(auth.user.uid).catch(() => []) : Promise.resolve([]),
+        auth.user?.uid ? ds.listPrintJobs(auth.user.uid, undefined, school?.id).catch(() => []) : Promise.resolve([]),
       ]);
       
       setPrinters(printersData);
@@ -157,6 +158,7 @@ export function PrintServiceScreen(props: any) {
             try {
               const newJob = await ds.createPrintJob({
                 userId: auth.user!.uid,
+                schoolId: school?.id,
                 printerId: selectedPrinter.id,
                 fileName: selectedFile.name,
                 fileUrl: selectedFile.uri,
@@ -191,7 +193,7 @@ export function PrintServiceScreen(props: any) {
           style: "destructive",
           onPress: async () => {
             try {
-              await ds.cancelPrintJob(jobId);
+              await ds.cancelPrintJob(jobId, school?.id);
               setJobs(jobs.map((j) => j.id === jobId ? { ...j, status: "cancelled" as const } : j));
             } catch (error: any) {
               Alert.alert("取消失敗", error?.message ?? "請稍後再試");

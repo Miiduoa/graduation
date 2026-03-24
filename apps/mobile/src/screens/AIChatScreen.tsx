@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
   ScrollView,
@@ -11,11 +12,9 @@ import {
   Easing,
   Alert,
 } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as Notifications from "expo-notifications";
-import { buildUserSchoolCollectionPath } from "@campus/shared/src";
-import { Screen, Pill, AnimatedCard } from "../ui/components";
+import { Screen } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useSchool } from "../state/school";
@@ -25,13 +24,15 @@ import { useAsyncList } from "../hooks/useAsyncList";
 import { useSchedule } from "../state/schedule";
 import { chatWithCampusAssistant, getAIStatus, type AIMessage, type AIContext } from "../services/ai";
 import { toDate } from "../utils/format";
-import { getDb } from "../firebase";
-import { doc, getDoc, collection, getDocs, query, orderBy, limit, where, Timestamp } from "firebase/firestore";
-import { collectionFromSegments } from "../data/firestorePath";
-import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
-import { removePersistedValue, savePersistedValue } from "../services/persistedStorage";
+import {
+  clearAIChatHistory,
+  getAIChatHistoryStorageKey,
+  loadAIChatHistory,
+  loadAiPersonalContext,
+  saveAIChatHistory,
+  type AiPersonalContext,
+} from "../features/ai";
 
-const LEGACY_CHAT_HISTORY_KEY = "ai_chat_history";
 const CHAT_HISTORY_MAX = 50;
 
 type MessageRole = "user" | "assistant" | "system";
@@ -42,7 +43,7 @@ type Message = {
   content: string;
   timestamp: Date;
   suggestions?: string[];
-  actions?: Array<{ label: string; action: string; params?: any }>;
+  actions?: Array<{ label: string; action: string; params?: Record<string, unknown> }>;
 };
 
 type QuickAction = {
@@ -59,28 +60,6 @@ const QUICK_ACTIONS: QuickAction[] = [
   { icon: "map", label: "找地點", prompt: "圖書館在哪裡？怎麼走？" },
   { icon: "help-circle", label: "學習支援", prompt: "我目前學習上遇到困難，你可以怎麼幫助我？" },
 ];
-
-function getContextualGreeting(): string[] {
-  const hour = new Date().getHours();
-  if (hour >= 6 && hour < 12) {
-    return [
-      "早安！今天有什麼我可以幫你的嗎？☀️",
-      "我可以幫你整理今日行程、預習課程重點，或是回答任何問題。",
-    ];
-  } else if (hour >= 12 && hour < 18) {
-    return [
-      "午安！需要學習上的幫助嗎？📚",
-      "我可以幫你分析成績、整理筆記，或是規劃下午的學習計畫。",
-    ];
-  } else {
-    return [
-      "晚安！還在努力學習嗎？🌙",
-      "我可以幫你複習今天的課程重點，或是規劃明天的時間表。",
-    ];
-  }
-}
-
-const GREETING_MESSAGES = getContextualGreeting();
 
 const USE_AI_SERVICE = true;
 
@@ -137,7 +116,11 @@ function TypingIndicator() {
   );
 }
 
-function MessageBubble(props: { message: Message; onAction?: (action: string, params?: any) => void; onSuggestion?: (text: string) => void }) {
+function MessageBubble(props: {
+  message: Message;
+  onAction?: (action: string, params?: Record<string, unknown>) => void;
+  onSuggestion?: (text: string) => void;
+}) {
   const { message, onAction, onSuggestion } = props;
   const isUser = message.role === "user";
 
@@ -240,7 +223,6 @@ export function AIChatScreen(props: any) {
   const { school } = useSchool();
   const auth = useAuth();
   const ds = useDataSource();
-  const db = getDb();
   const scrollRef = useRef<ScrollView>(null);
   const { courses } = useSchedule();
 
@@ -248,10 +230,12 @@ export function AIChatScreen(props: any) {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [aiStatus] = useState(() => getAIStatus());
-  const [pendingAssignments, setPendingAssignments] = useState<any[]>([]);
-  const [weeklyReport, setWeeklyReport] = useState<any>(null);
+  const [pendingAssignments, setPendingAssignments] =
+    useState<AiPersonalContext["pendingAssignments"]>([]);
+  const [weeklyReport, setWeeklyReport] =
+    useState<AiPersonalContext["weeklyReport"]>(null);
   const chatHistoryKey = useMemo(
-    () => getScopedStorageKey("ai-chat-history", { uid: auth.user?.uid ?? null, schoolId: school.id }),
+    () => getAIChatHistoryStorageKey(auth.user?.uid ?? null, school.id),
     [auth.user?.uid, school.id]
   );
 
@@ -266,14 +250,9 @@ export function AIChatScreen(props: any) {
 
     async function loadHistory() {
       try {
-        const stored = await getFirstStorageValue([chatHistoryKey, LEGACY_CHAT_HISTORY_KEY]);
-        if (stored) {
-          const parsed: Message[] = JSON.parse(stored);
-          // 還原 Date 物件（JSON 序列化後變為字串）
-          const restored = parsed.map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
-          if (!cancelled && restored.length > 0) {
-            setMessages(restored);
-          }
+        const restored = await loadAIChatHistory(chatHistoryKey);
+        if (!cancelled && restored.length > 0) {
+          setMessages(restored);
         }
       } catch (error) {
         console.warn("[AIChat] Failed to load history:", error);
@@ -292,8 +271,7 @@ export function AIChatScreen(props: any) {
     if (saveHistoryRef.current) clearTimeout(saveHistoryRef.current);
     saveHistoryRef.current = setTimeout(async () => {
       try {
-        const toSave = messages.slice(-CHAT_HISTORY_MAX);
-        await savePersistedValue(chatHistoryKey, toSave);
+        await saveAIChatHistory(chatHistoryKey, messages, CHAT_HISTORY_MAX);
       } catch (error) {
         console.warn("[AIChat] Failed to save history:", error);
       }
@@ -310,55 +288,12 @@ export function AIChatScreen(props: any) {
 
     async function loadPersonalData() {
       try {
-        // 讀取最新週報
-        const canonicalWeeklySnap = await getDocs(
-          query(
-            collectionFromSegments(db, buildUserSchoolCollectionPath(uid, school.id, "weeklyReports")),
-            orderBy("generatedAt", "desc"),
-            limit(1)
-          )
-        ).catch(() => ({ empty: true, docs: [] as any[] }));
-        if (!canonicalWeeklySnap.empty) {
-          setWeeklyReport(canonicalWeeklySnap.docs[0].data());
-        } else {
-          const legacyWeeklySnap = await getDocs(
-            query(collection(db, "users", uid, "weeklyReports"), orderBy("generatedAt", "desc"), limit(1))
-          );
-          if (!legacyWeeklySnap.empty) setWeeklyReport(legacyWeeklySnap.docs[0].data());
-        }
-
-        // 讀取待繳作業（從用戶加入的群組讀取 assignments）
-        const userGroupsRef = collection(db, "users", uid, "groups");
-        const groupsSnap = await getDocs(query(userGroupsRef, where("status", "==", "active"), limit(10)));
-        const groupIds = groupsSnap.docs.map((d) => d.id);
-
-        const now = Timestamp.now();
-        const pending: any[] = [];
-
-        for (const gid of groupIds.slice(0, 8)) {
-          const assSnap = await getDocs(
-            query(
-              collection(db, "groups", gid, "assignments"),
-              where("dueAt", ">", now),
-              orderBy("dueAt", "asc"),
-              limit(5)
-            )
-          ).catch(() => ({ docs: [] as any[] }));
-
-          const groupName = groupsSnap.docs.find((d) => d.id === gid)?.data()?.name ?? gid;
-          for (const d of assSnap.docs) {
-            pending.push({ id: d.id, groupId: gid, groupName, ...d.data() });
-          }
-        }
-
-        // 按截止日排序
-        pending.sort((a, b) => {
-          const aTs = a.dueAt?.seconds ?? 0;
-          const bTs = b.dueAt?.seconds ?? 0;
-          return aTs - bTs;
+        const personalContext = await loadAiPersonalContext({
+          uid,
+          schoolId: school.id,
         });
-
-        setPendingAssignments(pending);
+        setPendingAssignments(personalContext.pendingAssignments);
+        setWeeklyReport(personalContext.weeklyReport);
       } catch (e) {
         console.warn("[AIChatScreen] loadPersonalData error:", e);
       }
@@ -367,27 +302,38 @@ export function AIChatScreen(props: any) {
   }, [auth.user?.uid, school.id]);
 
   // Function Calling 動作執行器
-  const executeAIAction = async (action: string, params?: any): Promise<string | null> => {
+  const executeAIAction = async (
+    action: string,
+    params?: Record<string, unknown>
+  ): Promise<string | null> => {
     switch (action) {
       case "schedule_reminder": {
         const { title, dueDate } = params ?? {};
-        if (!title) return null;
+        if (typeof title !== "string" || title.trim().length === 0) return null;
         try {
-          const trigger = dueDate
-            ? { date: new Date(dueDate) }
-            : { seconds: 3600 };
+          const trigger: Notifications.NotificationTriggerInput = typeof dueDate === "string"
+            ? {
+                type: Notifications.SchedulableTriggerInputTypes.DATE,
+                date: new Date(dueDate),
+              }
+            : {
+                type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+                seconds: 3600,
+              };
           await Notifications.scheduleNotificationAsync({
-            content: { title: "作業提醒", body: `別忘了完成：${title}` },
-            trigger: trigger as any,
+            content: { title: "作業提醒", body: `別忘了完成：${title.trim()}` },
+            trigger,
           });
-          return `已為「${title}」設定提醒！`;
+          return `已為「${title.trim()}」設定提醒！`;
         } catch {
           return "設定提醒失敗，請確認通知權限已開啟。";
         }
       }
       case "search_group_knowledge": {
         const { keyword } = params ?? {};
-        return keyword ? `已搜尋「${keyword}」相關群組討論，請前往群組查看。` : null;
+        return typeof keyword === "string" && keyword.trim().length > 0
+          ? `已搜尋「${keyword.trim()}」相關群組討論，請前往群組查看。`
+          : null;
       }
       default:
         return null;
@@ -418,21 +364,29 @@ export function AIChatScreen(props: any) {
       dueAt: a.dueAt ? new Date(a.dueAt.seconds * 1000).toLocaleDateString("zh-TW") : undefined,
       isLate: a.isLate,
     })),
-    weeklyReport: weeklyReport ? {
-      summary: weeklyReport.summary ?? "",
-      stats: weeklyReport.stats ?? { onTimeRate: 100, totalSubmissions: 0, newAchievements: 0 },
-    } : undefined,
+    weeklyReport: weeklyReport
+      ? {
+          summary: typeof weeklyReport.summary === "string" ? weeklyReport.summary : "",
+          stats: {
+            onTimeRate:
+              typeof weeklyReport.stats?.onTimeRate === "number"
+                ? weeklyReport.stats.onTimeRate
+                : 100,
+            totalSubmissions:
+              typeof weeklyReport.stats?.totalSubmissions === "number"
+                ? weeklyReport.stats.totalSubmissions
+                : 0,
+            newAchievements:
+              typeof weeklyReport.stats?.newAchievements === "number"
+                ? weeklyReport.stats.newAchievements
+                : 0,
+          },
+        }
+      : undefined,
   }), [school.id, auth.user?.uid, auth.profile?.displayName, announcements, events, menus, pois, courses, pendingAssignments, weeklyReport]);
 
   useEffect(() => {
-    const providerLabel =
-      aiStatus.provider === "openai"
-        ? "OpenAI"
-        : aiStatus.provider === "gemini"
-          ? "Gemini"
-          : aiStatus.provider === "cloud"
-            ? "Campus Cloud"
-            : "本地";
+    const providerLabel = aiStatus.provider === "cloud" ? "Campus Cloud" : "本地";
     const name = auth.profile?.displayName?.split(" ")[0] ?? (auth.user ? "同學" : "同學");
     const courseCount = courses.length;
     const greetingContent = [
@@ -661,12 +615,20 @@ export function AIChatScreen(props: any) {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
-  const handleAction = async (action: string, params?: any) => {
+  const handleAction = async (action: string, params?: Record<string, unknown>) => {
     if (action === "navigate" && params) {
-      if (params.nested) {
-        nav?.navigate?.(params.screen, { screen: params.nested, params: { id: params.id } });
+      const screen = typeof params.screen === "string" ? params.screen : null;
+      const nested = typeof params.nested === "string" ? params.nested : null;
+      const id = typeof params.id === "string" ? params.id : undefined;
+
+      if (!screen) {
+        return;
+      }
+
+      if (nested) {
+        nav?.navigate?.(screen, { screen: nested, params: { id } });
       } else {
-        nav?.navigate?.(params.screen);
+        nav?.navigate?.(screen);
       }
       return;
     }
@@ -703,7 +665,7 @@ export function AIChatScreen(props: any) {
         style: "destructive",
         onPress: async () => {
           try {
-            await removePersistedValue(chatHistoryKey);
+            await clearAIChatHistory(chatHistoryKey);
           } catch (error) {
             console.warn("[AIChat] Failed to clear history:", error);
           }

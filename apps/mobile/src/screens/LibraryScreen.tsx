@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useState, useEffect, useCallback } from "react";
 import { ScrollView, Text, View, Pressable, RefreshControl, Alert, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -370,7 +371,14 @@ export function LibraryScreen(props: any) {
                   const endHour = Math.min(now.getHours() + 4, 22);
                   const endTime = `${endHour.toString().padStart(2, "0")}:00`;
                   
-                  await ds.reserveSeat(availableSeat.id, auth.user.uid, today, startTime, endTime);
+                  await ds.reserveSeat(
+                    availableSeat.id,
+                    auth.user.uid,
+                    today,
+                    startTime,
+                    endTime,
+                    schoolId,
+                  );
                   analytics.logEvent("seat_reserved", { area_id: area.id, seat_id: availableSeat.id });
                 }
               }

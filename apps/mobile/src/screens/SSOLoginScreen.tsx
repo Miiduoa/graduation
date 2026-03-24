@@ -3,6 +3,10 @@ import { ScrollView, Text, TextInput, View, Pressable, Alert, ActivityIndicator 
 import { Ionicons } from "@expo/vector-icons";
 import type { School } from "@campus/shared/src";
 import {
+  listUniversalDevAccounts,
+  UNIVERSAL_DEV_ACCOUNT_PASSWORD,
+} from "@campus/shared/src/devUniversalAccounts";
+import {
   Screen,
   Card,
   Button,
@@ -14,18 +18,18 @@ import { theme } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
 import { fetchSchoolDirectory } from "../services/schoolDirectory";
+import { areUniversalDevAccountsEnabled } from "../services/release";
 import {
   getSchoolSSOConfig,
   getSSOAvailability,
-  getTestSchoolCredentialConfig,
   performSSOLogin,
-  performTestSchoolCredentialLogin,
   isSSOAvailable,
   getSSOProviderName,
   SSOError,
   type SchoolSSOConfig,
   type SSOUserInfo,
 } from "../services/sso";
+import { signInWithUniversalDevAccount } from "../services/universalDevAuth";
 
 type LoginStep = "idle" | "checking" | "authenticating" | "linking" | "success" | "error";
 
@@ -43,6 +47,8 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const nav = props?.navigation;
   const { school, setSelection } = useSchool();
   const auth = useAuth();
+  const universalDevAccounts = useMemo(() => listUniversalDevAccounts(), []);
+  const showUniversalDevAccounts = useMemo(() => areUniversalDevAccountsEnabled(), []);
 
   const [availableSchools, setAvailableSchools] = useState<School[]>([]);
   const [schoolsLoading, setSchoolsLoading] = useState(true);
@@ -55,8 +61,9 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const [error, setError] = useState<string | null>(null);
   const [isRetryable, setIsRetryable] = useState(false);
   const [ssoUserInfo, setSsoUserInfo] = useState<SSOUserInfo | null>(null);
-  const [schoolAccount, setSchoolAccount] = useState("");
-  const [schoolPassword, setSchoolPassword] = useState("");
+  const [lastLoginAction, setLastLoginAction] = useState<
+    { type: "sso" } | { type: "universal-dev"; email: string } | null
+  >(null);
 
   const loadSchoolDirectory = useCallback(async () => {
     setSchoolsLoading(true);
@@ -93,22 +100,6 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     void loadSSOConfig();
   }, [loadSSOConfig]);
 
-  const testSchoolCredentialConfig = useMemo(
-    () => getTestSchoolCredentialConfig(school.id),
-    [school.id]
-  );
-
-  useEffect(() => {
-    if (testSchoolCredentialConfig) {
-      setSchoolAccount(testSchoolCredentialConfig.username);
-      setSchoolPassword(testSchoolCredentialConfig.password);
-      return;
-    }
-
-    setSchoolAccount("");
-    setSchoolPassword("");
-  }, [testSchoolCredentialConfig]);
-
   const filteredSchools = useMemo(() => {
     const needle = schoolSearch.trim().toLowerCase();
     if (!needle) return availableSchools;
@@ -144,12 +135,14 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     setStep("idle");
     setError(null);
     setSsoUserInfo(null);
+    setLastLoginAction(null);
   };
 
   const handleSSOLogin = async () => {
     setError(null);
     setIsRetryable(false);
     setStep("checking");
+    setLastLoginAction({ type: "sso" });
 
     try {
       if (!isSSOAvailable(ssoConfig)) {
@@ -206,29 +199,37 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     }
   };
 
-  const handleTestSchoolLogin = async () => {
+  const handleUniversalDevLogin = async (email: string) => {
     setError(null);
     setIsRetryable(false);
     setStep("authenticating");
+    setLastLoginAction({ type: "universal-dev", email });
 
     try {
-      const result = await performTestSchoolCredentialLogin(
-        school.id,
-        schoolAccount,
-        schoolPassword
-      );
+      const result = await signInWithUniversalDevAccount({
+        email,
+        password: UNIVERSAL_DEV_ACCOUNT_PASSWORD,
+        schoolId: school.id,
+      });
 
-      setSsoUserInfo(result.userInfo);
+      setSsoUserInfo({
+        sub: result.uid,
+        email: result.email,
+        name: result.displayName,
+        displayName: result.displayName,
+        role: result.role,
+      });
       setStep("linking");
+
       await auth.refreshProfile();
+
       setStep("success");
 
+      const roleLabel = result.role === "teacher" ? "教師" : "學生";
       setTimeout(() => {
         Alert.alert(
-          result.isNewUser ? "已建立測試帳號" : "登入成功",
-          result.isNewUser
-            ? `已建立 ${school.name} 測試校方帳號並登入`
-            : `已使用 ${school.name} 測試校方帳號登入`,
+          "登入成功",
+          `${roleLabel}通用帳號已套用到 ${school.name}`,
           [
             {
               text: "確定",
@@ -236,18 +237,11 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
             },
           ]
         );
-      }, 500);
-    } catch (error) {
-      console.error("Test school login error:", error);
-
-      if (error instanceof SSOError) {
-        setError(error.userFriendlyMessage);
-        setIsRetryable(error.isRetryable);
-      } else {
-        setError(getErrorMessage(error, "登入失敗，請稍後再試"));
-        setIsRetryable(true);
-      }
-
+      }, 300);
+    } catch (loginError) {
+      console.error("Universal dev login error:", loginError);
+      setError(getErrorMessage(loginError, "通用測試帳號登入失敗"));
+      setIsRetryable(true);
       setStep("error");
     }
   };
@@ -260,11 +254,10 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   };
 
   const handleRetryLogin = () => {
-    if (testSchoolCredentialConfig) {
-      void handleTestSchoolLogin();
+    if (lastLoginAction?.type === "universal-dev") {
+      void handleUniversalDevLogin(lastLoginAction.email);
       return;
     }
-
     void handleSSOLogin();
   };
 
@@ -315,9 +308,8 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
 
   const ssoAvailable = isSSOAvailable(ssoConfig);
   const ssoAvailability = getSSOAvailability(ssoConfig);
-  const testSchoolLoginAvailable = Boolean(testSchoolCredentialConfig);
-  const schoolLoginAvailable = testSchoolLoginAvailable || ssoAvailable;
-  const showRemoteLoading = loading && !testSchoolLoginAvailable;
+  const schoolLoginAvailable = ssoAvailable;
+  const showRemoteLoading = loading;
   const ssoStatusLabel =
     ssoAvailability.setupStatus === "live"
       ? "已開通"
@@ -498,18 +490,6 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                   正在讀取 {school.name} 的登入設定
                 </Text>
               </>
-            ) : testSchoolLoginAvailable ? (
-              <>
-                <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "700", textAlign: "center" }}>
-                  {school.name} 測試校方登入
-                </Text>
-                <Text style={{ color: theme.colors.muted, marginTop: 8, textAlign: "center", lineHeight: 20 }}>
-                  此學校已啟用測試校方帳密登入，可直接輸入測試學校帳號與密碼驗證。
-                </Text>
-                <Text style={{ color: theme.colors.warning, marginTop: 10, textAlign: "center", lineHeight: 20 }}>
-                  這是測試入口，正式上線學校仍會跳轉到校方官方登入頁。
-                </Text>
-              </>
             ) : ssoAvailable ? (
               <>
                 <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "700", textAlign: "center" }}>
@@ -538,21 +518,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
             )}
           </View>
 
-          {testSchoolLoginAvailable && (
-            <View
-              style={{
-                flexDirection: "row",
-                gap: 8,
-                justifyContent: "center",
-                marginBottom: 16,
-              }}
-            >
-              <Pill text="TEST SCHOOL" kind="warning" />
-              <Pill text="校方帳密" />
-            </View>
-          )}
-
-          {!showRemoteLoading && ssoConfig?.ssoConfig?.provider && !testSchoolLoginAvailable && (
+          {!showRemoteLoading && ssoConfig?.ssoConfig?.provider && (
             <View
               style={{
                 flexDirection: "row",
@@ -572,7 +538,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
             </View>
           )}
 
-          {!showRemoteLoading && configError && !testSchoolLoginAvailable && (
+          {!showRemoteLoading && configError && (
             <View style={{ marginBottom: 8 }}>
               <Button text="重新載入此學校登入設定" kind="primary" onPress={loadSSOConfig} />
             </View>
@@ -689,74 +655,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                 </View>
               )}
 
-              {testSchoolLoginAvailable && (
-                <View
-                  style={{
-                    padding: 16,
-                    borderRadius: theme.radius.lg,
-                    backgroundColor: theme.colors.surface2,
-                    borderWidth: 1,
-                    borderColor: theme.colors.border,
-                    gap: 12,
-                  }}
-                >
-                  <View style={{ gap: 6 }}>
-                    <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>
-                      測試學校帳號
-                    </Text>
-                    <TextInput
-                      value={schoolAccount}
-                      onChangeText={setSchoolAccount}
-                      autoCapitalize="none"
-                      keyboardType="email-address"
-                      placeholder="輸入學校帳號"
-                      placeholderTextColor={theme.colors.muted}
-                      style={{
-                        minHeight: 48,
-                        borderRadius: theme.radius.lg,
-                        borderWidth: 1,
-                        borderColor: theme.colors.border,
-                        backgroundColor: theme.colors.surface,
-                        color: theme.colors.text,
-                        paddingHorizontal: 14,
-                        fontSize: 14,
-                      }}
-                    />
-                  </View>
-
-                  <View style={{ gap: 6 }}>
-                    <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>
-                      測試學校密碼
-                    </Text>
-                    <TextInput
-                      value={schoolPassword}
-                      onChangeText={setSchoolPassword}
-                      secureTextEntry
-                      autoCapitalize="none"
-                      placeholder="輸入學校密碼"
-                      placeholderTextColor={theme.colors.muted}
-                      style={{
-                        minHeight: 48,
-                        borderRadius: theme.radius.lg,
-                        borderWidth: 1,
-                        borderColor: theme.colors.border,
-                        backgroundColor: theme.colors.surface,
-                        color: theme.colors.text,
-                        paddingHorizontal: 14,
-                        fontSize: 14,
-                      }}
-                    />
-                  </View>
-
-                  <Button text={`使用 ${school.shortName ?? school.name} 測試帳號登入`} kind="primary" onPress={handleTestSchoolLogin} />
-
-                  <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-                    這組帳密只用於測試學校驗證流程，不會顯示在版本庫中。
-                  </Text>
-                </View>
-              )}
-
-              {!showRemoteLoading && ssoAvailable && !testSchoolLoginAvailable && (
+              {!showRemoteLoading && ssoAvailable && (
                 <Pressable
                   onPress={handleSSOLogin}
                   style={{
@@ -809,6 +708,72 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                   <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
                     請切換其他學校；只要該校已配置學校登入，就會像 TronClass 一樣跳到校方官方頁面驗證。
                   </Text>
+                </View>
+              )}
+
+              {showUniversalDevAccounts && (
+                <View
+                  style={{
+                    padding: 16,
+                    borderRadius: theme.radius.lg,
+                    backgroundColor: theme.colors.surface2,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    gap: 10,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>
+                    開發通用帳號
+                  </Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+                    這兩組測試帳號會套用到目前選擇的學校。固定密碼：{UNIVERSAL_DEV_ACCOUNT_PASSWORD}
+                  </Text>
+
+                  {universalDevAccounts.map((account) => {
+                    const roleLabel = account.role === "teacher" ? "教師" : "學生";
+                    return (
+                      <Pressable
+                        key={account.email}
+                        onPress={() => handleUniversalDevLogin(account.email)}
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: 14,
+                          borderRadius: theme.radius.md,
+                          backgroundColor: theme.colors.surface,
+                          borderWidth: 1,
+                          borderColor: theme.colors.border,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: 20,
+                            backgroundColor: theme.colors.accentSoft,
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Ionicons
+                            name={account.role === "teacher" ? "person-circle-outline" : "school-outline"}
+                            size={20}
+                            color={theme.colors.accent}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: theme.colors.text, fontWeight: "700" }}>
+                            {roleLabel}通用帳號
+                          </Text>
+                          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+                            {account.email}
+                          </Text>
+                        </View>
+                        <Ionicons name="arrow-forward" size={18} color={theme.colors.muted} />
+                      </Pressable>
+                    );
+                  })}
                 </View>
               )}
             </View>

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+/* eslint-disable */
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { View, Text, Pressable, ScrollView, Alert, Animated, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, SearchBar, Button, AnimatedCard, SegmentedControl, Pill, LoadingState, ErrorState, Spinner } from "../ui/components";
@@ -10,7 +11,7 @@ import { useSchool } from "../state/school";
 import { getDataSource, hasDataSource } from "../data/source";
 import { isEffectivelyOnline, addToOfflineQueue } from "../services/offline";
 import { analytics } from "../services/analytics";
-import type { MenuItem as DataMenuItem, Order as DataOrder } from "../data/types";
+import type { Cafeteria as DataCafeteria, MenuItem as DataMenuItem, Order as DataOrder } from "../data/types";
 import { useDataSource } from "../hooks/useDataSource";
 
 type MenuItem = {
@@ -23,6 +24,12 @@ type MenuItem = {
   customizable?: boolean;
   popular?: boolean;
   waitTime: number;
+};
+
+type CafeteriaOption = DataCafeteria & {
+  orderingEnabled: boolean;
+  activeOperatorCount: number;
+  pilotStatus: "inactive" | "pilot" | "live";
 };
 
 type OrderStatus = "pending" | "preparing" | "ready" | "completed" | "cancelled";
@@ -107,7 +114,8 @@ function getStatusColor(status: OrderStatus): string {
 
 export function OrderingScreen(props: any) {
   const nav = props?.navigation;
-  const cafeteria = props?.route?.params?.cafeteria ?? "一餐";
+  const initialCafeteriaName = props?.route?.params?.cafeteria ?? null;
+  const initialCafeteriaId = props?.route?.params?.cafeteriaId ?? null;
 
   const auth = useAuth();
   const { school } = useSchool();
@@ -119,26 +127,98 @@ export function OrderingScreen(props: any) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(MOCK_MENU);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [cafeterias, setCafeterias] = useState<CafeteriaOption[]>([]);
+  const [selectedCafeteriaId, setSelectedCafeteriaId] = useState<string | null>(initialCafeteriaId);
+  const [selectedCafeteriaName, setSelectedCafeteriaName] = useState<string | null>(initialCafeteriaName);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
 
+  const previousCafeteriaKeyRef = useRef<string | null>(null);
+
   const TABS = ["菜單", "購物車", "我的訂單"];
+
+  const selectedCafeteria = useMemo(() => {
+    if (selectedCafeteriaId) {
+      const byId = cafeterias.find((row) => row.id === selectedCafeteriaId);
+      if (byId) return byId;
+    }
+    if (selectedCafeteriaName) {
+      return cafeterias.find((row) => row.name === selectedCafeteriaName) ?? null;
+    }
+    return cafeterias[0] ?? null;
+  }, [cafeterias, selectedCafeteriaId, selectedCafeteriaName]);
+
+  const currentCafeteriaName = selectedCafeteria?.name ?? selectedCafeteriaName ?? "餐廳";
+  const orderingEnabled = Boolean(
+    selectedCafeteria &&
+      selectedCafeteria.orderingEnabled &&
+      selectedCafeteria.activeOperatorCount > 0 &&
+      selectedCafeteria.pilotStatus !== "inactive"
+  );
+  const orderingDisabledMessage = "店家尚未開通接單";
+
+  useEffect(() => {
+    if (initialCafeteriaId) {
+      setSelectedCafeteriaId(initialCafeteriaId);
+    }
+    if (initialCafeteriaName) {
+      setSelectedCafeteriaName(initialCafeteriaName);
+    }
+  }, [initialCafeteriaId, initialCafeteriaName]);
 
   const loadMenu = useCallback(async () => {
     if (!school?.id) return;
-    
+
+    setLoading(true);
     try {
-      const dataMenus = await ds.listMenus(school.id);
+      const [cafeteriaRows, dataMenus] = await Promise.all([
+        ds.listCafeterias(school.id).catch(() => []),
+        ds.listMenus(school.id).catch(() => []),
+      ]);
+
+      const normalizedCafeterias: CafeteriaOption[] = cafeteriaRows.map((row) => ({
+        ...row,
+        merchantId: row.merchantId ?? row.id,
+        orderingEnabled: row.orderingEnabled === true,
+        activeOperatorCount: typeof row.activeOperatorCount === "number" ? row.activeOperatorCount : 0,
+        pilotStatus:
+          row.pilotStatus === "pilot" || row.pilotStatus === "live" ? row.pilotStatus : "inactive",
+      }));
+      setCafeterias(normalizedCafeterias);
+
+      const resolvedCafeteria =
+        (selectedCafeteriaId
+          ? normalizedCafeterias.find((row) => row.id === selectedCafeteriaId)
+          : null) ??
+        (selectedCafeteriaName
+          ? normalizedCafeterias.find((row) => row.name === selectedCafeteriaName)
+          : null) ??
+        normalizedCafeterias[0] ??
+        null;
+
+      if (resolvedCafeteria) {
+        setSelectedCafeteriaId(resolvedCafeteria.id);
+        setSelectedCafeteriaName(resolvedCafeteria.name);
+      }
+
       if (dataMenus && dataMenus.length > 0) {
         const converted: MenuItem[] = dataMenus
-          .filter((m: DataMenuItem) => m.cafeteria === cafeteria || !cafeteria)
+          .filter((m: DataMenuItem) => {
+            if (resolvedCafeteria?.id && m.cafeteriaId) {
+              return m.cafeteriaId === resolvedCafeteria.id;
+            }
+            if (resolvedCafeteria?.name) {
+              return m.cafeteria === resolvedCafeteria.name;
+            }
+            return true;
+          })
           .map((m: DataMenuItem) => ({
             id: m.id,
             name: m.name,
-            price: m.price,
+            price: m.price ?? 0,
             category: m.category ?? "其他",
             description: m.description,
             image: m.imageUrl,
@@ -148,26 +228,41 @@ export function OrderingScreen(props: any) {
           }));
         if (converted.length > 0) {
           setMenuItems(converted);
+        } else if (resolvedCafeteria) {
+          setMenuItems([]);
         }
+      } else {
+        // No data from DataSource, use mock as fallback
+        setMenuItems(MOCK_MENU);
       }
     } catch (error) {
-      console.warn("Failed to load menu from Firebase, using mock data:", error);
+      console.warn("Failed to load menu from DataSource, using mock data:", error);
+      setMenuItems(MOCK_MENU);
     } finally {
       setLoading(false);
     }
-  }, [ds, school?.id, cafeteria]);
+  }, [ds, school?.id, selectedCafeteriaId, selectedCafeteriaName]);
 
   const loadOrders = useCallback(async () => {
     if (!auth.user?.uid || !school?.id) {
-      setOrders(MOCK_ORDERS);
+      setOrders([]);
       return;
     }
-    
+
     setLoadingOrders(true);
     try {
       const dataOrders = await ds.listOrders(auth.user.uid, undefined, school.id);
-      if (dataOrders && dataOrders.length > 0) {
-        const converted: Order[] = dataOrders.map((o: DataOrder) => ({
+      const filteredOrders = (dataOrders ?? []).filter((o: DataOrder) => {
+        if (selectedCafeteria?.id && o.cafeteriaId) {
+          return o.cafeteriaId === selectedCafeteria.id;
+        }
+        if (selectedCafeteria?.name) {
+          return o.cafeteria === selectedCafeteria.name;
+        }
+        return true;
+      });
+      if (filteredOrders.length > 0) {
+        const converted: Order[] = filteredOrders.map((o: DataOrder) => ({
           id: o.id,
           queueNumber: (o as any).queueNumber ?? Math.floor(Math.random() * 50) + 1,
           items: (o.items ?? []).map((item: any) => ({
@@ -182,22 +277,22 @@ export function OrderingScreen(props: any) {
             notes: item.notes,
           })),
           status: o.status as OrderStatus,
-          totalPrice: o.totalAmount,
+          totalPrice: o.totalAmount ?? o.total ?? 0,
           estimatedTime: (o as any).estimatedTime ?? 10,
           createdAt: toDate(o.createdAt) ?? new Date(),
-          cafeteria: (o as any).cafeteria ?? cafeteria,
+          cafeteria: (o as any).cafeteria ?? currentCafeteriaName,
         }));
         setOrders(converted);
       } else {
         setOrders([]);
       }
     } catch (error) {
-      console.warn("Failed to load orders from Firebase:", error);
+      console.warn("Failed to load orders from DataSource, using mock data:", error);
       setOrders(MOCK_ORDERS);
     } finally {
       setLoadingOrders(false);
     }
-  }, [ds, auth.user?.uid, school?.id, menuItems, cafeteria]);
+  }, [ds, auth.user?.uid, school?.id, menuItems, selectedCafeteria?.id, selectedCafeteria?.name, currentCafeteriaName]);
 
   useEffect(() => {
     loadMenu();
@@ -208,6 +303,15 @@ export function OrderingScreen(props: any) {
       loadOrders();
     }
   }, [selectedTab, loadOrders]);
+
+  useEffect(() => {
+    const nextKey = selectedCafeteria?.id ?? selectedCafeteria?.name ?? null;
+    const previousKey = previousCafeteriaKeyRef.current;
+    if (previousKey && nextKey && previousKey !== nextKey) {
+      setCart([]);
+    }
+    previousCafeteriaKeyRef.current = nextKey;
+  }, [selectedCafeteria?.id, selectedCafeteria?.name]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -272,6 +376,11 @@ export function OrderingScreen(props: any) {
   };
 
   const handlePlaceOrder = async () => {
+    if (!selectedCafeteria || !orderingEnabled) {
+      Alert.alert("無法下單", orderingDisabledMessage);
+      return;
+    }
+
     if (cart.length === 0) {
       Alert.alert("購物車是空的", "請先選擇餐點");
       return;
@@ -313,7 +422,9 @@ export function OrderingScreen(props: any) {
               const orderData = {
                 userId: auth.user!.uid,
                 schoolId: school.id,
-                cafeteria,
+                cafeteriaId: selectedCafeteria.id,
+                merchantId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
+                cafeteria: selectedCafeteria.name,
                 items: cart.map((c) => ({
                   menuItemId: c.menuItem.id,
                   name: c.menuItem.name,
@@ -331,7 +442,8 @@ export function OrderingScreen(props: any) {
                 order_id: createdOrder?.id,
                 total_amount: cartTotal,
                 item_count: cartCount,
-                cafeteria,
+                cafeteria: selectedCafeteria.name,
+                cafeteria_id: selectedCafeteria.id,
               });
 
               const queueNumber = (createdOrder as any)?.queueNumber ?? Math.floor(Math.random() * 50) + 30;
@@ -345,7 +457,7 @@ export function OrderingScreen(props: any) {
                 totalPrice: cartTotal,
                 estimatedTime,
                 createdAt: new Date(),
-                cafeteria,
+                cafeteria: selectedCafeteria.name,
               };
               
               setOrders([newOrder, ...orders]);
@@ -399,7 +511,7 @@ export function OrderingScreen(props: any) {
               
               analytics.logEvent("cancel_order", {
                 order_id: orderId,
-                cafeteria,
+                cafeteria: currentCafeteriaName,
               });
               
               setOrders(
@@ -537,6 +649,87 @@ export function OrderingScreen(props: any) {
               
               {!loading && (
                 <>
+                {cafeterias.length > 0 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                      {cafeterias.map((row) => {
+                        const selected = selectedCafeteria?.id === row.id;
+                        const available =
+                          row.orderingEnabled && row.activeOperatorCount > 0 && row.pilotStatus !== "inactive";
+                        return (
+                          <Pressable
+                            key={row.id}
+                            onPress={() => {
+                              setSelectedCafeteriaId(row.id);
+                              setSelectedCafeteriaName(row.name);
+                            }}
+                            style={{
+                              paddingHorizontal: 14,
+                              paddingVertical: 10,
+                              borderRadius: theme.radius.full,
+                              backgroundColor: selected ? theme.colors.accent : theme.colors.surface2,
+                              borderWidth: 1,
+                              borderColor: selected ? theme.colors.accent : theme.colors.border,
+                              opacity: available ? 1 : 0.72,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: selected ? "#fff" : theme.colors.text,
+                                fontWeight: "700",
+                                fontSize: 13,
+                              }}
+                            >
+                              {row.name}
+                            </Text>
+                            {!available && (
+                              <Text
+                                style={{
+                                  color: selected ? "rgba(255,255,255,0.88)" : theme.colors.muted,
+                                  fontSize: 10,
+                                  marginTop: 2,
+                                }}
+                              >
+                                未開通
+                              </Text>
+                            )}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                )}
+
+                <AnimatedCard title={currentCafeteriaName} subtitle="線上點餐">
+                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    <Pill
+                      text={
+                        orderingEnabled
+                          ? `接單中 · ${selectedCafeteria?.activeOperatorCount ?? 0} 位店員`
+                          : orderingDisabledMessage
+                      }
+                      kind={orderingEnabled ? "success" : "warning"}
+                    />
+                    {selectedCafeteria?.pilotStatus && (
+                      <Pill
+                        text={
+                          selectedCafeteria.pilotStatus === "live"
+                            ? "正式開通"
+                            : selectedCafeteria.pilotStatus === "pilot"
+                              ? "試營運"
+                              : "未開通"
+                        }
+                        kind={orderingEnabled ? "accent" : "default"}
+                      />
+                    )}
+                  </View>
+                  {!orderingEnabled && (
+                    <Text style={{ color: theme.colors.warning, marginTop: 12, lineHeight: 20 }}>
+                      店家尚未開通接單，餐點仍可瀏覽，但目前不能送出訂單。
+                    </Text>
+                  )}
+                </AnimatedCard>
+
                 <SearchBar
                 value={searchQuery}
                 onChangeText={setSearchQuery}
@@ -574,11 +767,13 @@ export function OrderingScreen(props: any) {
               {filteredMenu.map((item, idx) => (
                 <AnimatedCard key={item.id} delay={idx * 30}>
                   <Pressable
+                    disabled={!orderingEnabled}
                     onPress={() => handleAddToCart(item)}
                     style={{
                       flexDirection: "row",
                       alignItems: "center",
                       gap: 14,
+                      opacity: orderingEnabled ? 1 : 0.55,
                     }}
                   >
                     <View
@@ -632,7 +827,7 @@ export function OrderingScreen(props: any) {
                         width: 36,
                         height: 36,
                         borderRadius: 18,
-                        backgroundColor: theme.colors.accent,
+                        backgroundColor: orderingEnabled ? theme.colors.accent : theme.colors.border,
                         alignItems: "center",
                         justifyContent: "center",
                       }}
@@ -790,10 +985,16 @@ export function OrderingScreen(props: any) {
                   </AnimatedCard>
 
                   <Button 
-                    text={submittingOrder ? "送出中..." : `下單 $${cartTotal}`} 
+                    text={
+                      !orderingEnabled
+                        ? orderingDisabledMessage
+                        : submittingOrder
+                          ? "送出中..."
+                          : `下單 $${cartTotal}`
+                    } 
                     kind="primary" 
                     onPress={handlePlaceOrder}
-                    disabled={submittingOrder}
+                    disabled={submittingOrder || !orderingEnabled}
                   />
                 </>
               )}

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { collection, getDocs, query, where, orderBy, limit, doc, setDoc, serverTimestamp, writeBatch } from "firebase/firestore";

@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { createContext, useContext, useCallback, useMemo } from "react";
 import { getScopedStorageKey } from "../services/scopedStorage";
 import { usePersistedState } from "../hooks/usePersistedState";

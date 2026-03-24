@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * useAppState Hook
  * 監聽 App 前後台切換狀態

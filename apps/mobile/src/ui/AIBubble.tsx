@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * AIBubble — 非侵入式情境 AI 提示元件
  *

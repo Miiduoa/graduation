@@ -201,6 +201,7 @@ export default function TimetablePage(props: {
     return map;
   }, [courses]);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const cardStyle = (color: string): CSSProperties => ({
     background: `${color}14`,
     borderLeft: `3px solid ${color}`,

@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { ScrollView, Text, TextInput, View, Pressable, Alert, KeyboardAvoidingView, Platform } from "react-native";
 import { Screen, Card, Button, Pill, LoadingState, ErrorState, AnimatedCard, Avatar, StatusBadge } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
+import { useSchool } from "../state/school";
 import { getDb } from "../firebase";
 import { 
   addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, 
@@ -11,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { Ionicons } from "@expo/vector-icons";
+import { fetchSchoolDirectoryProfiles } from "../services/memberDirectory";
 
 type PostKind = "announcement" | "question" | "post";
 
@@ -24,7 +27,6 @@ type Post = {
   title: string;
   body: string;
   authorId: string;
-  authorEmail?: string | null;
   authorName?: string | null;
   authorAvatarUrl?: string | null;
   createdAt?: any;
@@ -41,7 +43,6 @@ type Comment = {
   id: string;
   body: string;
   authorId: string;
-  authorEmail?: string | null;
   authorName?: string | null;
   authorAvatarUrl?: string | null;
   createdAt?: any;
@@ -55,9 +56,8 @@ type Comment = {
 
 type UserProfile = {
   uid: string;
-  displayName?: string;
-  email?: string;
-  avatarUrl?: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
 };
 
 export function GroupPostScreen(props: any) {
@@ -65,6 +65,7 @@ export function GroupPostScreen(props: any) {
   const groupId: string | undefined = props?.route?.params?.groupId;
   const postId: string | undefined = props?.route?.params?.postId;
   const auth = useAuth();
+  const { school } = useSchool();
   const db = getDb();
 
   const [commentText, setCommentText] = useState("");
@@ -140,21 +141,16 @@ export function GroupPostScreen(props: any) {
   // Fetch user profiles for comments
   const { items: userProfiles } = useAsyncList<UserProfile>(
     async () => {
-      const uids = new Set<string>();
-      if (post) uids.add(post.authorId);
-      for (const c of comments) uids.add(c.authorId);
-      const profiles: UserProfile[] = [];
-      for (const uid of uids) {
-        try {
-          const snap = await getDoc(doc(db, "users", uid));
-          if (snap.exists()) {
-            profiles.push({ uid, ...(snap.data() as any) });
-          }
-        } catch {}
-      }
-      return profiles;
+      const uids = [
+        ...new Set([
+          ...(post ? [post.authorId] : []),
+          ...comments.map((comment) => comment.authorId),
+        ]),
+      ];
+      if (uids.length === 0) return [];
+      return fetchSchoolDirectoryProfiles(school.id, uids, db);
     },
-    [db, post?.authorId, comments.map(c => c.authorId).join(",")]
+    [db, school.id, post?.authorId, comments.map(c => c.authorId).join(",")]
   );
 
   const profilesById = useMemo(() => {
@@ -189,7 +185,6 @@ export function GroupPostScreen(props: any) {
         body: commentText.trim(),
         createdAt: serverTimestamp(),
         authorId: auth.user.uid,
-        authorEmail: auth.user.email ?? null,
         authorName: auth.profile?.displayName ?? null,
         authorAvatarUrl: auth.profile?.avatarUrl ?? null,
         likedBy: [],
@@ -362,7 +357,11 @@ export function GroupPostScreen(props: any) {
 
   // Reply to comment
   const onReply = (comment: Comment) => {
-    const authorName = profilesById[comment.authorId]?.displayName || comment.authorEmail || "用戶";
+    const authorName =
+      profilesById[comment.authorId]?.displayName
+      || comment.authorName
+      || comment.authorId.slice(0, 8)
+      || "用戶";
     setReplyTo({ id: comment.id, authorName });
     inputRef.current?.focus();
   };
@@ -388,7 +387,7 @@ export function GroupPostScreen(props: any) {
   if (!post) return <ErrorState title={title} subtitle="找不到貼文" hint="可能已刪除或無權限" />;
 
   const postAuthor = profilesById[post.authorId];
-  const postAuthorName = postAuthor?.displayName || post.authorName || post.authorEmail || "匿名";
+  const postAuthorName = postAuthor?.displayName || post.authorName || post.authorId.slice(0, 8) || "匿名";
 
   const getKindIcon = (kind: PostKind) => {
     switch (kind) {
@@ -592,7 +591,11 @@ export function GroupPostScreen(props: any) {
               <View style={{ gap: 12 }}>
                 {comments.map((c, idx) => {
                   const commentAuthor = profilesById[c.authorId];
-                  const commentAuthorName = commentAuthor?.displayName || c.authorName || c.authorEmail || "用戶";
+                  const commentAuthorName =
+                    commentAuthor?.displayName
+                    || c.authorName
+                    || c.authorId.slice(0, 8)
+                    || "用戶";
                   const isMyComment = auth.user && c.authorId === auth.user.uid;
                   const alreadyLiked = auth.user && c.likedBy?.includes(auth.user.uid);
                   const isEditing = editingCommentId === c.id;

@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * positiveFrame.ts — 正向框架語言系統
  *

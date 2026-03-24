@@ -7,9 +7,44 @@ const DEFAULT_ALLOWED_ORIGINS = [
 
 const rateLimitBuckets = new Map();
 
+function normalizeRuntimeEnv(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "production" || normalized === "preview") {
+    return normalized;
+  }
+
+  return "development";
+}
+
+function getAppRuntimeEnv() {
+  const explicitAppEnv = String(process.env.APP_ENV || "").trim();
+  if (explicitAppEnv) {
+    return normalizeRuntimeEnv(explicitAppEnv);
+  }
+
+  const explicitUniversalFlag = String(process.env.UNIVERSAL_DEV_ACCOUNTS_ENABLED || "").trim().toLowerCase();
+  if (explicitUniversalFlag === "true") {
+    return "preview";
+  }
+
+  const nodeEnv = String(process.env.NODE_ENV || "").trim().toLowerCase();
+  if (nodeEnv === "production") {
+    return "production";
+  }
+
+  return "development";
+}
+
 function isProductionRuntime() {
-  const env = String(process.env.APP_ENV || process.env.NODE_ENV || "").toLowerCase();
-  return env === "production";
+  return getAppRuntimeEnv() === "production";
+}
+
+function isUniversalDevAccountsEnabled() {
+  const override = String(process.env.UNIVERSAL_DEV_ACCOUNTS_ENABLED || "").trim().toLowerCase();
+  if (override === "true") return true;
+  if (override === "false") return false;
+
+  return getAppRuntimeEnv() !== "production";
 }
 
 function getAllowedOrigins() {
@@ -141,10 +176,12 @@ function writeHttpError(res, error, fallbackMessage = "Request failed") {
 module.exports = {
   assertTrustedOrigin,
   enforceRateLimit,
+  getAppRuntimeEnv,
   getClientIp,
   getCorsOrigins,
   isAllowedOrigin,
   isProductionRuntime,
+  isUniversalDevAccountsEnabled,
   requirePostJson,
   writeHttpError,
 };

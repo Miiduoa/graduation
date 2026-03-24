@@ -1,6 +1,9 @@
 {
   "name": "graduation-campus-app",
   "private": true,
+  "engines": {
+    "node": ">=20 <21"
+  },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
     "overrides": {
@@ -8,7 +11,15 @@
       "eslint-config-next": "16.1.7",
       "fast-xml-parser": "^5.5.7",
       "js-yaml": "^4.1.1",
-      "next": "16.1.7"
+      "next": "16.1.7",
+      "@tootallnate/once": "3.0.1",
+      "minimatch": "9.0.9",
+      "qs": "6.14.2",
+      "serialize-javascript": "7.0.4",
+      "semver": "7.7.3",
+      "svgo": "2.8.2",
+      "tar": "7.5.12",
+      "undici": "6.24.1"
     }
   },
   "scripts": {
@@ -29,7 +40,14 @@
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "firebase": "firebase",
-    "test:rules": "if [ -d /opt/homebrew/opt/openjdk@21/bin ]; then export PATH=\"/opt/homebrew/opt/openjdk@21/bin:$PATH\"; export JAVA_HOME=\"/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home\"; elif [ -d /usr/local/opt/openjdk@21/bin ]; then export PATH=\"/usr/local/opt/openjdk@21/bin:$PATH\"; export JAVA_HOME=\"/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home\"; fi; firebase emulators:exec --only firestore,storage \"node --test backend/tests/security-rules.test.js\""
+    "test:rules": "if [ -d /opt/homebrew/opt/openjdk@21/bin ]; then export PATH=\"/opt/homebrew/opt/openjdk@21/bin:$PATH\"; export JAVA_HOME=\"/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home\"; elif [ -d /usr/local/opt/openjdk@21/bin ]; then export PATH=\"/usr/local/opt/openjdk@21/bin:$PATH\"; export JAVA_HOME=\"/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home\"; fi; firebase emulators:exec --only firestore,storage \"node --test backend/tests/security-rules.test.js\"",
+    "version:patch": "node ./scripts/bump-version.mjs patch",
+    "version:minor": "node ./scripts/bump-version.mjs minor",
+    "version:major": "node ./scripts/bump-version.mjs major",
+    "release:preview": "pnpm --filter mobile exec eas build --profile preview --platform all --non-interactive",
+    "release:production": "pnpm --filter mobile exec eas build --profile production --platform all --non-interactive",
+    "submit:ios": "pnpm --filter mobile exec eas submit --platform ios --latest --non-interactive",
+    "submit:android": "pnpm --filter mobile exec eas submit --platform android --latest --non-interactive"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^5.0.0",

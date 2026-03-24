@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, View, Pressable, TextInput, Alert, Modal } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -6,18 +7,9 @@ import { Paths, File } from "expo-file-system";
 import {
   collection,
   getDocs,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  doc,
   query,
   orderBy,
   limit,
-  serverTimestamp,
-  Timestamp,
-  where,
-  writeBatch,
-  deleteField,
 } from "firebase/firestore";
 
 import {
@@ -26,7 +18,6 @@ import {
   Button,
   Pill,
   LoadingState,
-  ErrorState,
   SectionTitle,
   AnimatedCard,
   StatCard,
@@ -38,6 +29,21 @@ import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
 import { getDb } from "../firebase";
 import { useAsyncList } from "../hooks/useAsyncList";
+import { useAmbientCues } from "../features/engagement";
+import { AmbientCueCard } from "../ui/campusOs";
+import {
+  bulkDeleteSchoolEvents,
+  bulkUpdateSchoolAnnouncements,
+  clearSchoolAdminTestData as clearSchoolAdminTestDataCall,
+  deleteSchoolAnnouncement,
+  deleteSchoolEvent,
+  upsertCafeteriaOperatorAssignment,
+  upsertSchoolCafeteriaConfig,
+  updateSchoolMemberRole as updateSchoolMemberRoleCall,
+  upsertSchoolAnnouncement,
+  upsertSchoolEvent,
+} from "../services/admin";
+import { fetchSchoolDirectoryProfiles } from "../services/memberDirectory";
 import { formatDateTime } from "../utils/format";
 
 type AdminTab = "overview" | "announcements" | "events" | "members" | "settings";
@@ -67,8 +73,10 @@ type ClubEvent = {
 type SchoolMember = {
   id: string;
   role: "admin" | "editor" | "member";
-  email?: string;
   displayName?: string;
+  email?: string | null;
+  department?: string | null;
+  avatarUrl?: string | null;
   joinedAt?: any;
 };
 
@@ -79,6 +87,28 @@ type AdminLog = {
   actorEmail?: string;
   details?: string;
   createdAt?: any;
+};
+
+type SchoolCafeteria = {
+  id: string;
+  name: string;
+  merchantId?: string;
+  brandKey?: string | null;
+  location?: string | null;
+  openingHours?: string | null;
+  pilotStatus: "inactive" | "pilot" | "live";
+  orderingEnabled: boolean;
+  activeOperatorCount: number;
+  updatedAt?: any;
+};
+
+type CafeteriaOperator = {
+  id: string;
+  status: "active" | "inactive";
+  role: "owner" | "manager" | "staff";
+  displayName?: string | null;
+  email?: string | null;
+  updatedAt?: any;
 };
 
 function toDateFromUnknown(value: any): Date | null {
@@ -208,13 +238,26 @@ export function AdminDashboardScreen(props: any) {
   const { school } = useSchool();
   const auth = useAuth();
   const db = getDb();
+  const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
+    schoolId: school.id,
+    uid: auth.user?.uid ?? null,
+    role: "admin",
+    surface: "admin",
+    limit: 1,
+  });
 
   const [tab, setTab] = useState<AdminTab>("overview");
   const [showAnnouncementModal, setShowAnnouncementModal] = useState(false);
   const [showEventModal, setShowEventModal] = useState(false);
+  const [showCafeteriaModal, setShowCafeteriaModal] = useState(false);
+  const [showOperatorModal, setShowOperatorModal] = useState(false);
   const [editingAnnouncement, setEditingAnnouncement] = useState<Announcement | null>(null);
   const [editingEvent, setEditingEvent] = useState<ClubEvent | null>(null);
+  const [editingCafeteria, setEditingCafeteria] = useState<SchoolCafeteria | null>(null);
+  const [selectedOperatorCafeteria, setSelectedOperatorCafeteria] = useState<SchoolCafeteria | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingCafeteria, setSavingCafeteria] = useState(false);
+  const [savingOperator, setSavingOperator] = useState(false);
   const [cleaningData, setCleaningData] = useState(false);
   const [memberKeyword, setMemberKeyword] = useState("");
   const [announcementKeyword, setAnnouncementKeyword] = useState("");
@@ -242,6 +285,17 @@ export function AdminDashboardScreen(props: any) {
   const [evtCapacity, setEvtCapacity] = useState("");
   const [evtStartsAt, setEvtStartsAt] = useState("");
   const [evtEndsAt, setEvtEndsAt] = useState("");
+  const [cafeteriaName, setCafeteriaName] = useState("");
+  const [cafeteriaLocation, setCafeteriaLocation] = useState("");
+  const [cafeteriaOpeningHours, setCafeteriaOpeningHours] = useState("");
+  const [cafeteriaBrandKey, setCafeteriaBrandKey] = useState("");
+  const [cafeteriaPilotStatus, setCafeteriaPilotStatus] = useState<"inactive" | "pilot" | "live">("inactive");
+  const [cafeteriaOrderingEnabled, setCafeteriaOrderingEnabled] = useState(false);
+  const [operatorUid, setOperatorUid] = useState("");
+  const [operatorDisplayName, setOperatorDisplayName] = useState("");
+  const [operatorEmail, setOperatorEmail] = useState("");
+  const [operatorRole, setOperatorRole] = useState<"owner" | "manager" | "staff">("staff");
+  const [operatorStatus, setOperatorStatus] = useState<"active" | "inactive">("active");
 
   const {
     items: announcements,
@@ -285,22 +339,27 @@ export function AdminDashboardScreen(props: any) {
     async () => {
       const qy = query(collection(db, "schools", school.id, "members"), limit(100));
       const snap = await getDocs(qy);
-      const rows: SchoolMember[] = [];
-      for (const d of snap.docs) {
+      const directoryProfiles = await fetchSchoolDirectoryProfiles(
+        school.id,
+        snap.docs.map((docSnap) => docSnap.id),
+        db,
+      );
+      const profilesById = Object.fromEntries(
+        directoryProfiles.map((profile) => [profile.uid, profile]),
+      );
+
+      return snap.docs.map((d) => {
         const data = d.data() as any;
-        const userDoc = await getDocs(
-          query(collection(db, "users"), where("__name__", "==", d.id), limit(1))
-        ).catch(() => null);
-        const userData = userDoc?.docs?.[0]?.data() as any;
-        rows.push({
+        const profile = profilesById[d.id];
+        return {
           id: d.id,
           role: data.role ?? "member",
-          email: userData?.email,
-          displayName: userData?.displayName,
+          displayName: profile?.displayName ?? d.id.slice(0, 8),
+          department: profile?.department ?? null,
+          avatarUrl: profile?.avatarUrl ?? null,
           joinedAt: data.joinedAt,
-        });
-      }
-      return rows;
+        } satisfies SchoolMember;
+      });
     },
     [db, school.id]
   );
@@ -322,6 +381,81 @@ export function AdminDashboardScreen(props: any) {
     [db, school.id]
   );
 
+  const {
+    items: cafeterias,
+    loading: cafeteriaLoading,
+    reload: reloadCafeterias,
+  } = useAsyncList<SchoolCafeteria>(
+    async () => {
+      const qy = query(
+        collection(db, "schools", school.id, "cafeterias"),
+        orderBy("name", "asc"),
+        limit(100)
+      );
+      const snap = await getDocs(qy);
+      return snap.docs.map((docSnap) => {
+        const data = docSnap.data() as any;
+        return {
+          id: docSnap.id,
+          name: data.name ?? docSnap.id,
+          merchantId: data.merchantId ?? docSnap.id,
+          brandKey: data.brandKey ?? null,
+          location: data.location ?? null,
+          openingHours: data.openingHours ?? null,
+          pilotStatus:
+            data.pilotStatus === "pilot" || data.pilotStatus === "live"
+              ? data.pilotStatus
+              : "inactive",
+          orderingEnabled: data.orderingEnabled === true,
+          activeOperatorCount: typeof data.activeOperatorCount === "number" ? data.activeOperatorCount : 0,
+          updatedAt: data.updatedAt,
+        } satisfies SchoolCafeteria;
+      });
+    },
+    [db, school.id]
+  );
+
+  const {
+    items: cafeteriaOperators,
+    loading: operatorsLoading,
+    reload: reloadOperators,
+  } = useAsyncList<CafeteriaOperator>(
+    async () => {
+      if (!selectedOperatorCafeteria) {
+        return [];
+      }
+
+      const snap = await getDocs(
+        query(
+          collection(
+            db,
+            "schools",
+            school.id,
+            "cafeterias",
+            selectedOperatorCafeteria.id,
+            "operators"
+          ),
+          limit(100)
+        )
+      );
+
+      return snap.docs
+        .map((docSnap) => {
+          const data = docSnap.data() as any;
+          return {
+            id: docSnap.id,
+            status: data.status === "inactive" ? "inactive" : "active",
+            role: data.role === "owner" || data.role === "manager" ? data.role : "staff",
+            displayName: data.displayName ?? null,
+            email: data.email ?? null,
+            updatedAt: data.updatedAt,
+          } satisfies CafeteriaOperator;
+        })
+        .sort((a, b) => a.id.localeCompare(b.id, "zh-TW"));
+    },
+    [db, school.id, selectedOperatorCafeteria?.id]
+  );
+
   const stats = useMemo(() => {
     return {
       announcements: announcements.length,
@@ -337,7 +471,7 @@ export function AdminDashboardScreen(props: any) {
     return members.filter((member) => {
       const fields = [
         member.displayName ?? "",
-        member.email ?? "",
+        member.department ?? "",
         member.id,
         member.role,
       ];
@@ -431,30 +565,17 @@ export function AdminDashboardScreen(props: any) {
     }
     setSaving(true);
     try {
-      if (editingAnnouncement) {
-        await updateDoc(doc(db, "schools", school.id, "announcements", editingAnnouncement.id), {
-          title: annTitle.trim(),
-          body: annBody.trim(),
-          source: annSource.trim() || school.name,
-          pinned: annPinned,
-          updatedAt: serverTimestamp(),
-        });
-      } else {
-        await addDoc(collection(db, "schools", school.id, "announcements"), {
-          title: annTitle.trim(),
-          body: annBody.trim(),
-          source: annSource.trim() || school.name,
-          pinned: annPinned,
-          publishedAt: serverTimestamp(),
-          createdBy: auth.user?.uid,
-        });
-      }
+      await upsertSchoolAnnouncement({
+        schoolId: school.id,
+        announcementId: editingAnnouncement?.id ?? null,
+        title: annTitle.trim(),
+        body: annBody.trim(),
+        source: annSource.trim() || school.name,
+        pinned: annPinned,
+      });
       setShowAnnouncementModal(false);
       reloadAnn();
-      logAdminAction(
-        editingAnnouncement ? "update_announcement" : "create_announcement",
-        `title=${annTitle.trim()}`
-      );
+      reloadLogs();
       Alert.alert("成功", editingAnnouncement ? "公告已更新" : "公告已發布");
     } catch (e: any) {
       Alert.alert("錯誤", e?.message ?? "儲存失敗");
@@ -471,9 +592,12 @@ export function AdminDashboardScreen(props: any) {
         style: "destructive",
         onPress: async () => {
           try {
-            await deleteDoc(doc(db, "schools", school.id, "announcements", ann.id));
+            await deleteSchoolAnnouncement({
+              schoolId: school.id,
+              announcementId: ann.id,
+            });
             reloadAnn();
-            logAdminAction("delete_announcement", `id=${ann.id}`);
+            reloadLogs();
           } catch (e: any) {
             Alert.alert("錯誤", e?.message ?? "刪除失敗");
           }
@@ -501,6 +625,107 @@ export function AdminDashboardScreen(props: any) {
       setEvtEndsAt("");
     }
     setShowEventModal(true);
+  };
+
+  const openCafeteriaModal = (cafeteria?: SchoolCafeteria) => {
+    if (cafeteria) {
+      setEditingCafeteria(cafeteria);
+      setCafeteriaName(cafeteria.name);
+      setCafeteriaLocation(cafeteria.location ?? "");
+      setCafeteriaOpeningHours(cafeteria.openingHours ?? "");
+      setCafeteriaBrandKey(cafeteria.brandKey ?? "");
+      setCafeteriaPilotStatus(cafeteria.pilotStatus);
+      setCafeteriaOrderingEnabled(cafeteria.orderingEnabled);
+    } else {
+      setEditingCafeteria(null);
+      setCafeteriaName("");
+      setCafeteriaLocation("");
+      setCafeteriaOpeningHours("");
+      setCafeteriaBrandKey("");
+      setCafeteriaPilotStatus("inactive");
+      setCafeteriaOrderingEnabled(false);
+    }
+    setShowCafeteriaModal(true);
+  };
+
+  const buildCafeteriaId = (name: string) => {
+    const normalized = name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return normalized || `cafeteria-${Date.now()}`;
+  };
+
+  const saveCafeteria = async () => {
+    if (!cafeteriaName.trim()) {
+      Alert.alert("錯誤", "請輸入餐廳名稱");
+      return;
+    }
+
+    setSavingCafeteria(true);
+    try {
+      await upsertSchoolCafeteriaConfig({
+        schoolId: school.id,
+        cafeteriaId: editingCafeteria?.id ?? buildCafeteriaId(cafeteriaName),
+        name: cafeteriaName.trim(),
+        location: cafeteriaLocation.trim() || null,
+        openingHours: cafeteriaOpeningHours.trim() || null,
+        brandKey: cafeteriaBrandKey.trim() || null,
+        pilotStatus: cafeteriaPilotStatus,
+        orderingEnabled: cafeteriaOrderingEnabled,
+      });
+      setShowCafeteriaModal(false);
+      reloadCafeterias();
+      reloadLogs();
+      Alert.alert("成功", editingCafeteria ? "餐廳設定已更新" : "餐廳已建立");
+    } catch (e: any) {
+      Alert.alert("錯誤", e?.message ?? "儲存餐廳設定失敗");
+    } finally {
+      setSavingCafeteria(false);
+    }
+  };
+
+  const openOperatorModal = (cafeteria: SchoolCafeteria, operator?: CafeteriaOperator) => {
+    setSelectedOperatorCafeteria(cafeteria);
+    setOperatorUid(operator?.id ?? "");
+    setOperatorDisplayName(operator?.displayName ?? "");
+    setOperatorEmail(operator?.email ?? "");
+    setOperatorRole(operator?.role ?? "staff");
+    setOperatorStatus(operator?.status ?? "active");
+    setShowOperatorModal(true);
+  };
+
+  const saveOperatorAssignment = async () => {
+    if (!selectedOperatorCafeteria) {
+      Alert.alert("錯誤", "請先選擇餐廳");
+      return;
+    }
+    if (!operatorUid.trim()) {
+      Alert.alert("錯誤", "請輸入店員 UID");
+      return;
+    }
+
+    setSavingOperator(true);
+    try {
+      await upsertCafeteriaOperatorAssignment({
+        schoolId: school.id,
+        cafeteriaId: selectedOperatorCafeteria.id,
+        targetUid: operatorUid.trim(),
+        displayName: operatorDisplayName.trim() || null,
+        email: operatorEmail.trim() || null,
+        role: operatorRole,
+        status: operatorStatus,
+      });
+      reloadOperators();
+      reloadCafeterias();
+      reloadLogs();
+      Alert.alert("成功", "店員指派已更新");
+    } catch (e: any) {
+      Alert.alert("錯誤", e?.message ?? "店員指派失敗");
+    } finally {
+      setSavingOperator(false);
+    }
   };
 
   const saveEvent = async () => {
@@ -533,39 +758,19 @@ export function AdminDashboardScreen(props: any) {
 
     setSaving(true);
     try {
-      const eventData: any = {
+      await upsertSchoolEvent({
+        schoolId: school.id,
+        eventId: editingEvent?.id ?? null,
         title: evtTitle.trim(),
         description: evtDescription.trim(),
         location: evtLocation.trim(),
-        updatedAt: serverTimestamp(),
-      };
-      if (normalizedCapacity) {
-        eventData.capacity = Number(normalizedCapacity);
-      } else {
-        eventData.capacity = deleteField();
-      }
-
-      if (editingEvent) {
-        eventData.startsAt = startDate ? Timestamp.fromDate(startDate) : deleteField();
-        eventData.endsAt = endDate ? Timestamp.fromDate(endDate) : deleteField();
-        await updateDoc(doc(db, "schools", school.id, "clubEvents", editingEvent.id), eventData);
-      } else {
-        eventData.startsAt = Timestamp.fromDate(
-          startDate ?? new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-        );
-        if (endDate) {
-          eventData.endsAt = Timestamp.fromDate(endDate);
-        }
-        eventData.createdBy = auth.user?.uid;
-        eventData.registeredCount = 0;
-        await addDoc(collection(db, "schools", school.id, "clubEvents"), eventData);
-      }
+        capacity: normalizedCapacity ? Number(normalizedCapacity) : null,
+        startsAt: startDate ? startDate.toISOString() : null,
+        endsAt: endDate ? endDate.toISOString() : null,
+      });
       setShowEventModal(false);
       reloadEvt();
-      logAdminAction(
-        editingEvent ? "update_event" : "create_event",
-        `title=${evtTitle.trim()}`
-      );
+      reloadLogs();
       Alert.alert("成功", editingEvent ? "活動已更新" : "活動已建立");
     } catch (e: any) {
       Alert.alert("錯誤", e?.message ?? "儲存失敗");
@@ -582,9 +787,12 @@ export function AdminDashboardScreen(props: any) {
         style: "destructive",
         onPress: async () => {
           try {
-            await deleteDoc(doc(db, "schools", school.id, "clubEvents", evt.id));
+            await deleteSchoolEvent({
+              schoolId: school.id,
+              eventId: evt.id,
+            });
             reloadEvt();
-            logAdminAction("delete_event", `id=${evt.id}`);
+            reloadLogs();
           } catch (e: any) {
             Alert.alert("錯誤", e?.message ?? "刪除失敗");
           }
@@ -595,12 +803,13 @@ export function AdminDashboardScreen(props: any) {
 
   const updateMemberRole = async (member: SchoolMember, newRole: "admin" | "editor" | "member") => {
     try {
-      await updateDoc(doc(db, "schools", school.id, "members", member.id), {
+      await updateSchoolMemberRoleCall({
+        schoolId: school.id,
+        targetUid: member.id,
         role: newRole,
-        updatedAt: serverTimestamp(),
       });
       reloadMem();
-      logAdminAction("update_member_role", `member=${member.id}, role=${newRole}`);
+      reloadLogs();
       Alert.alert("成功", "權限已更新");
     } catch (e: any) {
       Alert.alert("錯誤", e?.message ?? "更新失敗");
@@ -610,26 +819,13 @@ export function AdminDashboardScreen(props: any) {
   const clearTestingData = async () => {
     setCleaningData(true);
     try {
-      const annSnap = await getDocs(collection(db, "schools", school.id, "announcements"));
-      const evtSnap = await getDocs(collection(db, "schools", school.id, "clubEvents"));
-
-      const docRefs = [
-        ...annSnap.docs.map((d) => d.ref),
-        ...evtSnap.docs.map((d) => d.ref),
-      ];
-      for (let i = 0; i < docRefs.length; i += 400) {
-        const batch = writeBatch(db);
-        const chunk = docRefs.slice(i, i + 400);
-        chunk.forEach((ref) => batch.delete(ref));
-        await batch.commit();
-      }
-
+      const result = await clearSchoolAdminTestDataCall({ schoolId: school.id });
       reloadAnn();
       reloadEvt();
-      logAdminAction("clear_testing_data", `announcements=${annSnap.size}, events=${evtSnap.size}`);
+      reloadLogs();
       Alert.alert(
         "成功",
-        `已清空測試資料（公告 ${annSnap.size} 筆、活動 ${evtSnap.size} 筆）`
+        `已清空測試資料（公告 ${result.deleted.announcements} 筆、活動 ${result.deleted.events} 筆）`
       );
     } catch (e: any) {
       Alert.alert("錯誤", e?.message ?? "清空資料失敗");
@@ -645,16 +841,13 @@ export function AdminDashboardScreen(props: any) {
     }
     setBatchDeletingAnnouncements(true);
     try {
-      for (let i = 0; i < sortedAnnouncements.length; i += 400) {
-        const batch = writeBatch(db);
-        const chunk = sortedAnnouncements.slice(i, i + 400);
-        chunk.forEach((ann) => {
-          batch.delete(doc(db, "schools", school.id, "announcements", ann.id));
-        });
-        await batch.commit();
-      }
+      await bulkUpdateSchoolAnnouncements({
+        schoolId: school.id,
+        announcementIds: sortedAnnouncements.map((ann) => ann.id),
+        action: "delete",
+      });
       reloadAnn();
-      logAdminAction("batch_delete_announcements", `count=${sortedAnnouncements.length}`);
+      reloadLogs();
       Alert.alert("成功", `已刪除 ${sortedAnnouncements.length} 則公告`);
     } catch (e: any) {
       Alert.alert("錯誤", e?.message ?? "批次刪除公告失敗");
@@ -670,16 +863,12 @@ export function AdminDashboardScreen(props: any) {
     }
     setBatchDeletingEvents(true);
     try {
-      for (let i = 0; i < sortedEvents.length; i += 400) {
-        const batch = writeBatch(db);
-        const chunk = sortedEvents.slice(i, i + 400);
-        chunk.forEach((evt) => {
-          batch.delete(doc(db, "schools", school.id, "clubEvents", evt.id));
-        });
-        await batch.commit();
-      }
+      await bulkDeleteSchoolEvents({
+        schoolId: school.id,
+        eventIds: sortedEvents.map((evt) => evt.id),
+      });
       reloadEvt();
-      logAdminAction("batch_delete_events", `count=${sortedEvents.length}`);
+      reloadLogs();
       Alert.alert("成功", `已刪除 ${sortedEvents.length} 個活動`);
     } catch (e: any) {
       Alert.alert("錯誤", e?.message ?? "批次刪除活動失敗");
@@ -699,22 +888,13 @@ export function AdminDashboardScreen(props: any) {
       setBatchUnpinningAnnouncements(true);
     }
     try {
-      for (let i = 0; i < sortedAnnouncements.length; i += 400) {
-        const batch = writeBatch(db);
-        const chunk = sortedAnnouncements.slice(i, i + 400);
-        chunk.forEach((ann) => {
-          batch.update(doc(db, "schools", school.id, "announcements", ann.id), {
-            pinned,
-            updatedAt: serverTimestamp(),
-          });
-        });
-        await batch.commit();
-      }
+      await bulkUpdateSchoolAnnouncements({
+        schoolId: school.id,
+        announcementIds: sortedAnnouncements.map((ann) => ann.id),
+        action: pinned ? "pin" : "unpin",
+      });
       reloadAnn();
-      logAdminAction(
-        pinned ? "batch_pin_announcements" : "batch_unpin_announcements",
-        `count=${sortedAnnouncements.length}`
-      );
+      reloadLogs();
       Alert.alert("成功", `已將 ${sortedAnnouncements.length} 則公告設為${pinned ? "置頂" : "非置頂"}`);
     } catch (e: any) {
       Alert.alert("錯誤", e?.message ?? "批次更新公告失敗");
@@ -840,18 +1020,7 @@ export function AdminDashboardScreen(props: any) {
   };
 
   const logAdminAction = async (action: string, details?: string) => {
-    try {
-      await addDoc(collection(db, "schools", school.id, "adminLogs"), {
-        action,
-        details: details ?? "",
-        actorUid: auth.user?.uid ?? "",
-        actorEmail: auth.user?.email ?? "",
-        createdAt: serverTimestamp(),
-      });
-      reloadLogs();
-    } catch (error) {
-      console.warn("Failed to write admin log:", error);
-    }
+    console.info("[AdminDashboard] Local-only admin action:", { action, details });
   };
 
   if (!auth.isAdmin && !auth.isEditor) {
@@ -888,6 +1057,20 @@ export function AdminDashboardScreen(props: any) {
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{auth.user?.email}</Text>
               </View>
             </AnimatedCard>
+
+            {ambientCue ? (
+              <AmbientCueCard
+                signalType={ambientCue.signalType}
+                headline={ambientCue.headline}
+                body={ambientCue.body}
+                metric={ambientCue.metric}
+                actionLabel={ambientCue.ctaLabel}
+                onPress={() => openAmbientCue(ambientCue, nav)}
+                onDismiss={() => {
+                  void dismissAmbientCue(ambientCue);
+                }}
+              />
+            ) : null}
 
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 1 }}>
@@ -1191,7 +1374,7 @@ export function AdminDashboardScreen(props: any) {
               <TextInput
                 value={memberKeyword}
                 onChangeText={setMemberKeyword}
-                placeholder="搜尋姓名、Email、UID 或角色"
+                placeholder="搜尋姓名、系所、UID 或角色"
                 placeholderTextColor={theme.colors.muted}
                 style={{
                   paddingVertical: 10,
@@ -1236,7 +1419,7 @@ export function AdminDashboardScreen(props: any) {
                         }}
                       >
                         <Text style={{ color: theme.colors.accent, fontWeight: "700" }}>
-                          {(member.displayName?.[0] || member.email?.[0] || "?").toUpperCase()}
+                          {(member.displayName?.[0] || member.id?.[0] || "?").toUpperCase()}
                         </Text>
                       </View>
                       <View style={{ flex: 1 }}>
@@ -1244,7 +1427,7 @@ export function AdminDashboardScreen(props: any) {
                           {member.displayName || "(未設定名稱)"}
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                          {member.email || member.id.slice(0, 8) + "..."}
+                          {member.department || member.id.slice(0, 8) + "..."}
                         </Text>
                       </View>
                       <Pill
@@ -1314,9 +1497,82 @@ export function AdminDashboardScreen(props: any) {
                     reloadAnn();
                     reloadEvt();
                     reloadMem();
+                    reloadCafeterias();
                     reloadLogs();
                     Alert.alert("成功", "資料已重新載入");
                   }} />
+                </View>
+              </View>
+
+              <View style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 12 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                  <SectionTitle text="餐廳接單開通" />
+                  <Button text="新增餐廳" size="small" onPress={() => openCafeteriaModal()} />
+                </View>
+                <View style={{ marginTop: 10, gap: 10 }}>
+                  {cafeteriaLoading ? (
+                    <Text style={{ color: theme.colors.muted }}>載入餐廳設定中...</Text>
+                  ) : cafeterias.length === 0 ? (
+                    <Text style={{ color: theme.colors.muted }}>尚無餐廳資料</Text>
+                  ) : (
+                    cafeterias.map((cafeteria) => (
+                      <View
+                        key={cafeteria.id}
+                        style={{
+                          borderRadius: theme.radius.md,
+                          borderWidth: 1,
+                          borderColor: theme.colors.border,
+                          backgroundColor: theme.colors.surface2,
+                          padding: 12,
+                          gap: 10,
+                        }}
+                      >
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{cafeteria.name}</Text>
+                            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+                              {cafeteria.location || "未設定位置"} · {cafeteria.id}
+                            </Text>
+                          </View>
+                          <View style={{ alignItems: "flex-end", gap: 6 }}>
+                            <Pill
+                              text={
+                                cafeteria.pilotStatus === "live"
+                                  ? "正式開通"
+                                  : cafeteria.pilotStatus === "pilot"
+                                    ? "試營運"
+                                    : "未開通"
+                              }
+                              kind={
+                                cafeteria.pilotStatus === "live"
+                                  ? "success"
+                                  : cafeteria.pilotStatus === "pilot"
+                                    ? "warning"
+                                    : "default"
+                              }
+                            />
+                            <Pill
+                              text={cafeteria.orderingEnabled ? "可接單" : "已關閉接單"}
+                              kind={cafeteria.orderingEnabled ? "accent" : "default"}
+                            />
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                          <Pill text={`operator ${cafeteria.activeOperatorCount}`} kind="muted" />
+                          {cafeteria.brandKey ? <Pill text={`品牌 ${cafeteria.brandKey}`} kind="muted" /> : null}
+                        </View>
+                        <View style={{ flexDirection: "row", gap: 8 }}>
+                          <Button text="編輯設定" size="small" onPress={() => openCafeteriaModal(cafeteria)} />
+                          <Button
+                            text="管理店員"
+                            size="small"
+                            kind="outline"
+                            onPress={() => openOperatorModal(cafeteria)}
+                          />
+                        </View>
+                      </View>
+                    ))
+                  )}
                 </View>
               </View>
 
@@ -1564,6 +1820,252 @@ export function AdminDashboardScreen(props: any) {
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 8 }}>
               💡 未填開始時間時，系統會預設為 7 天後；可另外填入結束時間。
             </Text>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showCafeteriaModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowCafeteriaModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: 16,
+              borderBottomWidth: 1,
+              borderBottomColor: theme.colors.border,
+            }}
+          >
+            <Pressable onPress={() => setShowCafeteriaModal(false)}>
+              <Text style={{ color: theme.colors.accent, fontWeight: "600" }}>取消</Text>
+            </Pressable>
+            <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
+              {editingCafeteria ? "編輯餐廳" : "新增餐廳"}
+            </Text>
+            <Pressable onPress={saveCafeteria} disabled={savingCafeteria}>
+              <Text style={{ color: savingCafeteria ? theme.colors.muted : theme.colors.accent, fontWeight: "600" }}>
+                {savingCafeteria ? "儲存中..." : "儲存"}
+              </Text>
+            </Pressable>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+            <FormInput
+              label="餐廳名稱 *"
+              value={cafeteriaName}
+              onChangeText={setCafeteriaName}
+              placeholder="輸入餐廳名稱"
+            />
+            <FormInput
+              label="位置"
+              value={cafeteriaLocation}
+              onChangeText={setCafeteriaLocation}
+              placeholder="例如：第一餐廳 1F"
+            />
+            <FormInput
+              label="營業時間"
+              value={cafeteriaOpeningHours}
+              onChangeText={setCafeteriaOpeningHours}
+              placeholder="例如：11:00-19:30"
+            />
+            <FormInput
+              label="品牌代碼"
+              value={cafeteriaBrandKey}
+              onChangeText={setCafeteriaBrandKey}
+              placeholder="留空表示單店管理"
+            />
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ color: theme.colors.muted, marginBottom: 6, fontWeight: "600" }}>
+                試用狀態
+              </Text>
+              <SegmentedControl
+                options={[
+                  { key: "inactive", label: "未開通" },
+                  { key: "pilot", label: "試營運" },
+                  { key: "live", label: "正式" },
+                ]}
+                selected={cafeteriaPilotStatus}
+                onChange={(value) => setCafeteriaPilotStatus(value as "inactive" | "pilot" | "live")}
+              />
+            </View>
+            <Pressable
+              onPress={() => setCafeteriaOrderingEnabled((current) => !current)}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                paddingVertical: 12,
+              }}
+            >
+              <View
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: 6,
+                  borderWidth: 2,
+                  borderColor: cafeteriaOrderingEnabled ? theme.colors.accent : theme.colors.border,
+                  backgroundColor: cafeteriaOrderingEnabled ? theme.colors.accent : "transparent",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {cafeteriaOrderingEnabled && <Ionicons name="checkmark" size={16} color="#fff" />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: "600" }}>開啟接單</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+                  關閉後學生仍可看到店家，但無法送出訂單。
+                </Text>
+              </View>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showOperatorModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowOperatorModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: 16,
+              borderBottomWidth: 1,
+              borderBottomColor: theme.colors.border,
+            }}
+          >
+            <Pressable onPress={() => setShowOperatorModal(false)}>
+              <Text style={{ color: theme.colors.accent, fontWeight: "600" }}>取消</Text>
+            </Pressable>
+            <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
+              {selectedOperatorCafeteria ? `${selectedOperatorCafeteria.name} 店員` : "店員管理"}
+            </Text>
+            <Pressable onPress={saveOperatorAssignment} disabled={savingOperator}>
+              <Text style={{ color: savingOperator ? theme.colors.muted : theme.colors.accent, fontWeight: "600" }}>
+                {savingOperator ? "儲存中..." : "儲存"}
+              </Text>
+            </Pressable>
+          </View>
+
+          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 12 }}>
+              請輸入 Firebase Auth UID 指派店員。只有 active 店員可處理該餐廳訂單。
+            </Text>
+            <FormInput
+              label="店員 UID *"
+              value={operatorUid}
+              onChangeText={setOperatorUid}
+              placeholder="輸入 Firebase Auth UID"
+            />
+            <FormInput
+              label="顯示名稱"
+              value={operatorDisplayName}
+              onChangeText={setOperatorDisplayName}
+              placeholder="例如：王小明"
+            />
+            <FormInput
+              label="Email"
+              value={operatorEmail}
+              onChangeText={setOperatorEmail}
+              placeholder="例如：merchant@example.com"
+            />
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ color: theme.colors.muted, marginBottom: 6, fontWeight: "600" }}>
+                身分
+              </Text>
+              <SegmentedControl
+                options={[
+                  { key: "owner", label: "負責人" },
+                  { key: "manager", label: "主管" },
+                  { key: "staff", label: "店員" },
+                ]}
+                selected={operatorRole}
+                onChange={(value) => setOperatorRole(value as "owner" | "manager" | "staff")}
+              />
+            </View>
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ color: theme.colors.muted, marginBottom: 6, fontWeight: "600" }}>
+                狀態
+              </Text>
+              <SegmentedControl
+                options={[
+                  { key: "active", label: "啟用" },
+                  { key: "inactive", label: "停用" },
+                ]}
+                selected={operatorStatus}
+                onChange={(value) => setOperatorStatus(value as "active" | "inactive")}
+              />
+            </View>
+
+            <View style={{ borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 12, gap: 10 }}>
+              <SectionTitle text="目前店員" />
+              {operatorsLoading ? (
+                <Text style={{ color: theme.colors.muted }}>載入店員中...</Text>
+              ) : cafeteriaOperators.length === 0 ? (
+                <Text style={{ color: theme.colors.muted }}>此餐廳尚未指派店員</Text>
+              ) : (
+                cafeteriaOperators.map((operator) => (
+                  <View
+                    key={operator.id}
+                    style={{
+                      borderRadius: theme.radius.md,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      backgroundColor: theme.colors.surface2,
+                      padding: 12,
+                      gap: 8,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.colors.text, fontWeight: "700" }}>
+                          {operator.displayName || operator.email || operator.id}
+                        </Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+                          {operator.email || "未設定 email"} · {operator.id}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end", gap: 6 }}>
+                        <Pill
+                          text={operator.status === "active" ? "啟用中" : "已停用"}
+                          kind={operator.status === "active" ? "success" : "default"}
+                        />
+                        <Pill
+                          text={
+                            operator.role === "owner"
+                              ? "負責人"
+                              : operator.role === "manager"
+                                ? "主管"
+                                : "店員"
+                          }
+                          kind="muted"
+                        />
+                      </View>
+                    </View>
+                    <Button
+                      text="編輯店員"
+                      size="small"
+                      kind="outline"
+                      onPress={() => {
+                        if (selectedOperatorCafeteria) {
+                          openOperatorModal(selectedOperatorCafeteria, operator);
+                        }
+                      }}
+                    />
+                  </View>
+                ))
+              )}
+            </View>
           </ScrollView>
         </View>
       </Modal>

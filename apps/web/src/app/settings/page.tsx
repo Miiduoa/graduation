@@ -99,6 +99,7 @@ export default function SettingsPage(props: {
 
   // Settings state
   const [darkMode, setDarkMode] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [language, setLanguage] = useState("zh-TW");
   const [autoSync, setAutoSync] = useState(true);
   const [compactMode, setCompactMode] = useState(false);

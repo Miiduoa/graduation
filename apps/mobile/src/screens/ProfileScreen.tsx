@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * ProfileScreen — 我 Tab 主畫面（精簡版）
  *

@@ -1,12 +1,10 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
-const FALLBACK_PREFIX = "secure_fallback:";
+const memoryFallbackStore = new Map<string, string>();
 
 async function getSecureStore() {
   try {
-    const module = await import("expo-secure-store");
+    const module = await import('expo-secure-store');
     const available =
-      typeof module.isAvailableAsync === "function"
+      typeof module.isAvailableAsync === 'function'
         ? await module.isAvailableAsync()
         : true;
 
@@ -22,7 +20,7 @@ export async function secureGetItem(key: string): Promise<string | null> {
     return secureStore.getItemAsync(key);
   }
 
-  return AsyncStorage.getItem(`${FALLBACK_PREFIX}${key}`);
+  return memoryFallbackStore.get(key) ?? null;
 }
 
 export async function secureSetItem(key: string, value: string): Promise<void> {
@@ -36,7 +34,7 @@ export async function secureSetItem(key: string, value: string): Promise<void> {
     return;
   }
 
-  await AsyncStorage.setItem(`${FALLBACK_PREFIX}${key}`, value);
+  memoryFallbackStore.set(key, value);
 }
 
 export async function secureDeleteItem(key: string): Promise<void> {
@@ -46,7 +44,7 @@ export async function secureDeleteItem(key: string): Promise<void> {
     return;
   }
 
-  await AsyncStorage.removeItem(`${FALLBACK_PREFIX}${key}`);
+  memoryFallbackStore.delete(key);
 }
 
 export async function secureDeleteMany(keys: string[]): Promise<void> {

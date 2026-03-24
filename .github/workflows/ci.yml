@@ -15,6 +15,45 @@ env:
   PNPM_VERSION: '10'
 
 jobs:
+  security-gates:
+    name: Security Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Production dependency audit
+        run: pnpm audit --prod --json > audit-report.json
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-report
+          path: audit-report.json
+          retention-days: 7
+
   lint-and-typecheck:
     name: Lint & Type Check
     runs-on: ubuntu-latest
@@ -107,12 +146,35 @@ jobs:
 
       - name: Run web tests
         run: pnpm --filter web test --coverage --ci
-        continue-on-error: true
+
+  test-functions:
+    name: Functions Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run functions tests
+        run: pnpm --filter functions test --runInBand
 
   build-mobile:
     name: Build Mobile
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, test-mobile]
+    needs: [security-gates, lint-and-typecheck, test-mobile, test-functions]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -138,24 +200,26 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Export for web (build check)
-        run: pnpm --filter mobile expo export --platform web
-        continue-on-error: true
-
-      - name: Check EAS configuration
+      - name: Run Expo Doctor
         working-directory: apps/mobile
-        run: |
-          if [ -f "eas.json" ]; then
-            echo "EAS configuration found"
-            cat eas.json
-          else
-            echo "No eas.json found - skipping EAS build verification"
-          fi
+        run: npx expo-doctor
+
+      - name: Validate EAS configuration
+        working-directory: apps/mobile
+        run: npx eas-cli config --non-interactive
+
+      - name: Verify preview Android build submission
+        working-directory: apps/mobile
+        run: npx eas-cli build --platform android --profile preview --non-interactive --no-wait
+
+      - name: Verify preview iOS build submission
+        working-directory: apps/mobile
+        run: npx eas-cli build --platform ios --profile preview --non-interactive --no-wait
 
   build-web:
     name: Build Web
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck]
+    needs: [security-gates, lint-and-typecheck]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -191,7 +255,7 @@ jobs:
   deploy-functions:
     name: Deploy Firebase Functions
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck]
+    needs: [security-gates, lint-and-typecheck]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     steps:
@@ -221,7 +285,7 @@ jobs:
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, test-mobile, test-web, build-mobile, build-web]
+    needs: [security-gates, lint-and-typecheck, test-mobile, test-web, test-functions, build-mobile, build-web]
     if: always()
     steps:
       - name: Check job results
@@ -230,8 +294,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Gates | ${{ needs.security-gates.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Lint & Type Check | ${{ needs.lint-and-typecheck.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Mobile Tests | ${{ needs.test-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Web Tests | ${{ needs.test-web.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Functions Tests | ${{ needs.test-functions.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Build Mobile | ${{ needs.build-mobile.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Build Web | ${{ needs.build-web.result }} |" >> $GITHUB_STEP_SUMMARY

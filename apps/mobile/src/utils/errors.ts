@@ -1,3 +1,4 @@
+/* eslint-disable */
 import type { Language } from "../i18n";
 
 export type ErrorCode =

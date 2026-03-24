@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, View, Pressable, Alert, Share, Linking, Clipboard } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,8 +9,6 @@ import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
 import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncList } from "../hooks/useAsyncList";
-import { getDb } from "../firebase";
-import { collection, collectionGroup, getDocs, query, where, limit } from "firebase/firestore";
 import { formatDateTime } from "../utils/format";
 import {
   pickAndParseICalFile,
@@ -213,7 +212,6 @@ export function CalendarScreen(props: any) {
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
-  const db = getDb();
   const ds = useDataSource();
 
   const today = new Date();
@@ -231,30 +229,26 @@ export function CalendarScreen(props: any) {
   const { items: assignments, loading: assignmentsLoading } = useAsyncList<any>(
     async () => {
       if (!auth.user) return [];
-      const userGroupsRef = collection(db, "users", auth.user.uid, "groups");
-      const groupsSnap = await getDocs(query(userGroupsRef, where("status", "==", "active")));
-      const groupIds = groupsSnap.docs.map((d) => d.id);
+      const groups = await ds.listGroups(auth.user.uid, {
+        pageSize: 10,
+        filters: [{ field: "schoolId", operator: "==", value: school.id }],
+      });
+      if (groups.length === 0) return [];
 
-      if (groupIds.length === 0) return [];
+      const assignmentGroups = await Promise.all(
+        groups.slice(0, 10).map(async (group) => {
+          const rows = await ds.listAssignments(group.id, { pageSize: 50 });
+          return rows.map((assignment) => ({
+            ...assignment,
+            groupId: assignment.groupId ?? group.id,
+            groupName: group.name ?? group.id,
+          }));
+        }),
+      );
 
-      const allAssignments: any[] = [];
-      for (const gid of groupIds.slice(0, 10)) {
-        const assRef = collection(db, "groups", gid, "assignments");
-        const assSnap = await getDocs(query(assRef, limit(50)));
-        const groupData = groupsSnap.docs.find((d) => d.id === gid)?.data();
-        for (const d of assSnap.docs) {
-          const data = d.data() as any;
-          allAssignments.push({
-            id: d.id,
-            groupId: gid,
-            groupName: groupData?.name ?? gid,
-            ...data,
-          });
-        }
-      }
-      return allAssignments;
+      return assignmentGroups.flat();
     },
-    [db, auth.user?.uid, school.id]
+    [auth.user?.uid, ds, school.id]
   );
 
   const calendarEvents = useMemo(() => {

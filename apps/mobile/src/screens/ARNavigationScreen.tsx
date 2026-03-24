@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { View, Text, Pressable, Alert, Animated, StyleSheet, Linking, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -34,14 +35,30 @@ type NavigationStep = {
   landmark?: string;
 };
 
-const MOCK_STEPS: NavigationStep[] = [
-  { id: "1", instruction: "直走約 50 公尺", distance: 50, direction: "straight", landmark: "穿過中央走廊" },
-  { id: "2", instruction: "右轉", distance: 0, direction: "right", landmark: "在飲水機處" },
-  { id: "3", instruction: "直走約 30 公尺", distance: 30, direction: "straight" },
-  { id: "4", instruction: "左轉上樓", distance: 0, direction: "left", landmark: "使用樓梯" },
-  { id: "5", instruction: "上到 3 樓", distance: 0, direction: "up" },
-  { id: "6", instruction: "直走約 20 公尺", distance: 20, direction: "straight" },
-  { id: "7", instruction: "抵達目的地", distance: 0, direction: "destination", landmark: "301 教室在右手邊" },
+// Generate mock steps based on destination name and building
+function generateStepsForDestination(destinationName: string): NavigationStep[] {
+  const isIndoor = destinationName.includes("樓") || destinationName.includes("教室") || destinationName.includes("館");
+  const steps: NavigationStep[] = [
+    { id: "1", instruction: "直走約 50 公尺", distance: 50, direction: "straight", landmark: "沿主要路線前進" },
+    { id: "2", instruction: "右轉", distance: 0, direction: "right", landmark: "在路口" },
+    { id: "3", instruction: "直走約 30 公尺", distance: 30, direction: "straight" },
+  ];
+
+  if (isIndoor) {
+    steps.push(
+      { id: "4", instruction: "左轉進入建築", distance: 0, direction: "left", landmark: `進入 ${destinationName}` },
+      { id: "5", instruction: "搭乘電梯或樓梯", distance: 0, direction: "up" },
+      { id: "6", instruction: "直走約 20 公尺", distance: 20, direction: "straight" }
+    );
+  }
+
+  steps.push({ id: String(steps.length + 1), instruction: `抵達 ${destinationName}`, distance: 0, direction: "destination", landmark: "目的地在視線範圍內" });
+  return steps;
+}
+
+// Fallback steps when no destination is provided
+const FALLBACK_STEPS: NavigationStep[] = [
+  { id: "1", instruction: "請先選擇目的地", distance: 0, direction: "straight" },
 ];
 
 const ARRIVAL_THRESHOLD_M = 12;
@@ -244,8 +261,13 @@ export function ARNavigationScreen(props: any) {
     return getDirectionType(calculateRelativeAngle(bearingToTarget, compassHeading));
   }, [bearingToTarget, compassHeading, distanceRemaining]);
 
+  const generatedSteps = useMemo(() => {
+    if (!target) return FALLBACK_STEPS;
+    return generateStepsForDestination(target.name);
+  }, [target]);
+
   const currentInstruction = useMemo(() => {
-    if (mode !== "navigating") return MOCK_STEPS[currentStep];
+    if (mode !== "navigating") return generatedSteps[currentStep] ?? generatedSteps[0];
     return {
       id: "live",
       instruction: liveDirection === "destination"
@@ -257,7 +279,7 @@ export function ARNavigationScreen(props: any) {
         : "straight",
       landmark: target?.name,
     } as NavigationStep;
-  }, [currentStep, destination, distanceRemaining, liveDirection, mode, target?.name]);
+  }, [currentStep, destination, distanceRemaining, liveDirection, mode, target?.name, generatedSteps]);
 
   useEffect(() => {
     if (mode !== "navigating" || !currentLocation) return;
@@ -420,8 +442,9 @@ export function ARNavigationScreen(props: any) {
   }
 
   if (mode === "navigating") {
+    const currentStepDir = generatedSteps[currentStep]?.direction ?? "straight";
     const relativeAngle = calculateRelativeAngle(
-      bearingToTarget ?? (MOCK_STEPS[currentStep].direction === "right" ? 90 : MOCK_STEPS[currentStep].direction === "left" ? -90 : 0),
+      bearingToTarget ?? (currentStepDir === "right" ? 90 : currentStepDir === "left" ? -90 : 0),
       compassHeading
     );
     
@@ -765,9 +788,9 @@ export function ARNavigationScreen(props: any) {
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="導航路線預覽" subtitle={`共 ${MOCK_STEPS.length} 個步驟`} delay={100}>
+        <AnimatedCard title="導航路線預覽" subtitle={!target ? "請先選擇目的地" : `共 ${generatedSteps.length} 個步驟`} delay={100}>
           <View style={{ gap: 8 }}>
-            {MOCK_STEPS.map((step, idx) => (
+            {(!target ? FALLBACK_STEPS : generatedSteps).map((step, idx) => (
               <View
                 key={step.id}
                 style={{

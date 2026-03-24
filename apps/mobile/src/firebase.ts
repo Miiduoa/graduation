@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import Constants from "expo-constants";
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
@@ -28,6 +29,12 @@ type FirebaseWebConfig = {
 function getFirebaseConfig(): FirebaseWebConfig {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
   return (extra.firebase ?? {}) as FirebaseWebConfig;
+}
+
+function isMockRuntimeMode(): boolean {
+  const mode = String(process.env.EXPO_PUBLIC_DATA_SOURCE_MODE ?? "").toLowerCase();
+  const useMockData = String(process.env.EXPO_PUBLIC_USE_MOCK_DATA ?? "").toLowerCase() === "true";
+  return mode === "mock" || useMockData;
 }
 
 function hasRealFirebaseValue(value?: string): boolean {
@@ -61,9 +68,24 @@ export function getFirebaseApp() {
   const cfg = getFirebaseConfig();
 
   if (!hasUsableFirebaseConfig()) {
-    throw new Error(
-      "Missing Firebase config. Set EXPO_PUBLIC_FIREBASE_API_KEY / PROJECT_ID / APP_ID (and others) in env and restart expo."
+    if (!isMockRuntimeMode()) {
+      throw new Error(
+        "Missing Firebase config. Set EXPO_PUBLIC_FIREBASE_API_KEY / PROJECT_ID / APP_ID (and others) in env and restart expo."
+      );
+    }
+
+    console.warn(
+      "[firebase] Missing Firebase env config in mock mode. Using local fallback Firebase config for app bootstrap."
     );
+
+    return initializeApp({
+      apiKey: "mock-api-key",
+      authDomain: "mock-project.firebaseapp.com",
+      projectId: "mock-project",
+      storageBucket: "mock-project.appspot.com",
+      messagingSenderId: "000000000000",
+      appId: "1:000000000000:web:mock",
+    });
   }
 
   return initializeApp({

@@ -1,9 +1,9 @@
-const DEFAULT_ANDROID_PACKAGE = "com.campus.app";
+const DEFAULT_ANDROID_PACKAGE = 'com.campus.app';
 
 function buildAssetLinks() {
   const packageName = process.env.ANDROID_PACKAGE_NAME?.trim() || DEFAULT_ANDROID_PACKAGE;
-  const shaFingerprints = (process.env.ANDROID_SIGNING_SHA256 ?? "")
-    .split(",")
+  const shaFingerprints = (process.env.ANDROID_SIGNING_SHA256 ?? '')
+    .split(',')
     .map((entry) => entry.trim())
     .filter(Boolean);
 
@@ -13,9 +13,9 @@ function buildAssetLinks() {
 
   return [
     {
-      relation: ["delegate_permission/common.handle_all_urls"],
+      relation: ['delegate_permission/common.handle_all_urls'],
       target: {
-        namespace: "android_app",
+        namespace: 'android_app',
         package_name: packageName,
         sha256_cert_fingerprints: shaFingerprints,
       },
@@ -26,7 +26,7 @@ function buildAssetLinks() {
 export async function GET() {
   return Response.json(buildAssetLinks(), {
     headers: {
-      "cache-control": "public, max-age=3600",
+      'cache-control': 'public, max-age=3600',
     },
   });
 }

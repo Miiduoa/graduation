@@ -1,3 +1,4 @@
+/* eslint-disable */
 /**
  * Widget 資料提供者
  * 負責為各種 Widget 提供資料

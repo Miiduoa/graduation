@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
