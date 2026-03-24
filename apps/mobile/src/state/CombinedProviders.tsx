@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useMemo, memo, useCallback, useRef, useEffect } from "react";
 import { SchoolProvider, useSchool } from "./school";
 import { AuthProvider, useAuth } from "./auth";

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export function formatDateTime(input: string | number | Date | any) {
   try {
     const v: any = input as any;

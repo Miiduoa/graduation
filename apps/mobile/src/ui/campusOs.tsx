@@ -9,9 +9,65 @@
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, Text, View } from "react-native";
+import type { AmbientCueSignalType } from "../data/types";
 import { shadowStyle, theme } from "./theme";
 
 type IconName = keyof typeof Ionicons.glyphMap;
+
+function getAmbientCuePalette(signalType: AmbientCueSignalType) {
+  switch (signalType) {
+    case "attendance_momentum":
+      return {
+        fg: theme.colors.fresh,
+        bg: theme.colors.freshSoft,
+        border: `${theme.colors.fresh}30`,
+        icon: "pulse-outline" as IconName,
+      };
+    case "teaching_review":
+      return {
+        fg: theme.colors.warning,
+        bg: theme.colors.warningSoft,
+        border: `${theme.colors.warning}30`,
+        icon: "checkmark-circle-outline" as IconName,
+      };
+    case "leaderboard_momentum":
+      return {
+        fg: theme.colors.achievement,
+        bg: theme.colors.achievementSoft,
+        border: `${theme.colors.achievement}30`,
+        icon: "trophy-outline" as IconName,
+      };
+    case "campus_popularity":
+      return {
+        fg: theme.colors.social,
+        bg: theme.colors.socialSoft,
+        border: `${theme.colors.social}30`,
+        icon: "people-outline" as IconName,
+      };
+    case "approval_backlog":
+      return {
+        fg: theme.colors.warning,
+        bg: theme.colors.warningSoft,
+        border: `${theme.colors.warning}30`,
+        icon: "layers-outline" as IconName,
+      };
+    case "admin_activity":
+      return {
+        fg: theme.colors.roleAdmin,
+        bg: theme.colors.roleAdminSoft,
+        border: `${theme.colors.roleAdmin}30`,
+        icon: "sparkles-outline" as IconName,
+      };
+    case "course_completion":
+    default:
+      return {
+        fg: theme.colors.accent,
+        bg: theme.colors.accentSoft,
+        border: `${theme.colors.accent}30`,
+        icon: "trending-up-outline" as IconName,
+      };
+  }
+}
 
 export function ContextStrip(props: {
   eyebrow: string;
@@ -340,6 +396,101 @@ export function ActionableInboxRow(props: {
         }}
       >
         <Text style={{ color: palette.fg, fontSize: 13, fontWeight: "700" }}>{props.actionLabel}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+export function AmbientCueCard(props: {
+  signalType: AmbientCueSignalType;
+  headline: string;
+  body: string;
+  actionLabel: string;
+  metric?: string;
+  onPress?: () => void;
+  onDismiss?: () => void;
+}) {
+  const palette = getAmbientCuePalette(props.signalType);
+
+  return (
+    <Pressable
+      disabled={!props.onPress}
+      onPress={props.onPress}
+      style={({ pressed }) => ({
+        padding: 14,
+        borderRadius: theme.radius.lg,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: pressed ? palette.border : theme.colors.border,
+        gap: 10,
+        opacity: pressed ? 0.88 : 1,
+        transform: [{ scale: pressed ? 0.995 : 1 }],
+        ...shadowStyle(theme.shadows.sm),
+      })}
+    >
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+        <View
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 14,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: palette.bg,
+            borderWidth: 1,
+            borderColor: palette.border,
+          }}
+        >
+          <Ionicons name={palette.icon} size={19} color={palette.fg} />
+        </View>
+
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={{ color: palette.fg, fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4 }}>
+            觀察到的節奏
+          </Text>
+          <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700", lineHeight: 21 }}>
+            {props.headline}
+          </Text>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
+            {props.body}
+          </Text>
+        </View>
+
+        {props.onDismiss ? (
+          <Pressable onPress={props.onDismiss} hitSlop={8} style={{ padding: 2 }}>
+            <Ionicons name="close" size={16} color={theme.colors.muted} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        {props.metric ? (
+          <View
+            style={{
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: theme.radius.full,
+              backgroundColor: palette.bg,
+              borderWidth: 1,
+              borderColor: palette.border,
+            }}
+          >
+            <Text style={{ color: palette.fg, fontSize: 11, fontWeight: "700" }}>{props.metric}</Text>
+          </View>
+        ) : <View />}
+
+        <View
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 7,
+            borderRadius: theme.radius.md,
+            backgroundColor: palette.bg,
+            borderWidth: 1,
+            borderColor: palette.border,
+          }}
+        >
+          <Text style={{ color: palette.fg, fontSize: 12, fontWeight: "700" }}>{props.actionLabel}</Text>
+        </View>
       </View>
     </Pressable>
   );

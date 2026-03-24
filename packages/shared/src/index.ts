@@ -1,4 +1,4 @@
-import type { SchoolIntegrationStatus } from "./release";
+import type { SchoolIntegrationStatus } from './release';
 
 export type Announcement = {
   id: string;
@@ -24,14 +24,14 @@ export type Course = {
   teacher?: string;
   dayOfWeek: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   startTime: string; // HH:mm
-  endTime: string;   // HH:mm
+  endTime: string; // HH:mm
   location?: string;
 };
 
 export type CampusPoi = {
   id: string;
   name: string;
-  category: "building" | "food" | "office" | "other";
+  category: 'building' | 'food' | 'office' | 'other';
   lat: number;
   lng: number;
   description?: string;
@@ -56,9 +56,10 @@ export type School = {
   integrationStatus?: SchoolIntegrationStatus;
 };
 
-export * from "./auth";
-export * from "./notifications";
-export * from "./schools";
-export * from "./release";
-export * from "./creditAudit";
-export * from "./tenant";
+export * from './auth';
+export * from './devUniversalAccounts';
+export * from './notifications';
+export * from './schools';
+export * from './release';
+export * from './creditAudit';
+export * from './tenant';

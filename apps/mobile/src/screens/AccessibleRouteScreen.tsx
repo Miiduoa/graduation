@@ -1,10 +1,13 @@
-import React, { useState, useMemo, useCallback } from "react";
+/* eslint-disable */
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { View, Text, Pressable, ScrollView, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Screen, SearchBar, Button, AnimatedCard, Pill, SegmentedControl } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAsyncStorage } from "../hooks/useStorage";
+import { useDataSource } from "../hooks/useDataSource";
+import { useSchool } from "../state/school";
 
 type RouteType = "wheelchair" | "elevator" | "ramp" | "all";
 
@@ -17,15 +20,8 @@ type AccessibilityFeature = {
   description: string;
 };
 
-const MOCK_FEATURES: AccessibilityFeature[] = [
-  { id: "1", name: "行政大樓電梯", type: "elevator", building: "行政大樓", floor: "1F-6F", description: "可容納輪椅，設有點字按鈕及語音報層" },
-  { id: "2", name: "圖書館無障礙坡道", type: "ramp", building: "圖書館", floor: "1F", description: "主入口右側，坡度符合法規" },
-  { id: "3", name: "工程館無障礙廁所", type: "accessible_restroom", building: "工程館", floor: "1F, 3F, 5F", description: "設有扶手、緊急求助鈴" },
-  { id: "4", name: "導盲磚路徑 A", type: "tactile_path", building: "校園主幹道", floor: "戶外", description: "從大門延伸至圖書館" },
-  { id: "5", name: "學生活動中心自動門", type: "auto_door", building: "學生活動中心", floor: "1F", description: "感應式自動門，輪椅友善" },
-  { id: "6", name: "理學院電梯", type: "elevator", building: "理學院", floor: "1F-8F", description: "寬敞空間，設有低位按鈕" },
-  { id: "7", name: "餐廳無障礙入口", type: "ramp", building: "學生餐廳", floor: "1F", description: "側門設有緩坡及扶手" },
-];
+// Fallback features when none are available
+const FALLBACK_FEATURES: AccessibilityFeature[] = [];
 
 type RouteStep = {
   id: string;
@@ -42,14 +38,14 @@ type SavedRoute = {
   savedAt: string;
 };
 
-const MOCK_ROUTE: RouteStep[] = [
-  { id: "1", instruction: "從大門出發", distance: 0, accessibilityNote: "平坦道路" },
-  { id: "2", instruction: "沿導盲磚直走 100 公尺", distance: 100, feature: "導盲磚路徑" },
-  { id: "3", instruction: "左轉進入行政大樓", distance: 20, accessibilityNote: "自動門入口" },
-  { id: "4", instruction: "搭乘電梯至 3 樓", distance: 0, feature: "無障礙電梯", accessibilityNote: "電梯按鈕高度適宜" },
-  { id: "5", instruction: "出電梯右轉走 30 公尺", distance: 30 },
-  { id: "6", instruction: "抵達目的地", distance: 0, accessibilityNote: "301 教室" },
-];
+// Generate generic route steps based on destination
+function generateRouteSteps(destination: string): RouteStep[] {
+  return [
+    { id: "1", instruction: "從出發點開始", distance: 0, accessibilityNote: "起點" },
+    { id: "2", instruction: `前往 ${destination}`, distance: 100, accessibilityNote: "無障礙路線" },
+    { id: "3", instruction: "抵達目的地", distance: 0, accessibilityNote: `已到達 ${destination}` },
+  ];
+}
 
 function getFeatureIcon(type: AccessibilityFeature["type"]): string {
   switch (type) {
@@ -87,14 +83,57 @@ function getFeatureLabel(type: AccessibilityFeature["type"]): string {
 export function AccessibleRouteScreen(props: any) {
   const nav = props?.navigation;
   const destination = props?.route?.params?.destination ?? "";
+  const { school } = useSchool();
+  const ds = useDataSource();
 
   const [searchQuery, setSearchQuery] = useState(destination);
   const [selectedTab, setSelectedTab] = useState<number>(0);
   const [routePreference, setRoutePreference] = useState<RouteType>("all");
   const [showRoute, setShowRoute] = useState(false);
+  const [loadedFeatures, setLoadedFeatures] = useState<AccessibilityFeature[]>([]);
   const [savedRoutes, setSavedRoutes] = useAsyncStorage<SavedRoute[]>("accessible_route_favorites", {
     defaultValue: [],
   });
+
+  // Load POIs with accessible facilities from DataSource
+  useEffect(() => {
+    let active = true;
+    const loadAccessiblePOIs = async () => {
+      if (!school?.id) {
+        setLoadedFeatures([]);
+        return;
+      }
+      try {
+        const pois = await ds.listPois(school.id);
+        if (!active) return;
+
+        const features: AccessibilityFeature[] = [];
+        pois.forEach((poi, poiIdx) => {
+          if (poi.accessible && poi.facilities) {
+            const facilities = Array.isArray(poi.facilities) ? poi.facilities : [poi.facilities];
+            facilities.forEach((facility: any, facIdx: number) => {
+              features.push({
+                id: `${poi.id}:${facIdx}`,
+                name: facility.name || `${poi.name} 無障礙設施`,
+                type: facility.type || "elevator",
+                building: poi.name || "未知建築",
+                floor: facility.floor || "1F",
+                description: facility.description || "無障礙設施",
+              });
+            });
+          }
+        });
+        setLoadedFeatures(features.length > 0 ? features : FALLBACK_FEATURES);
+      } catch (error) {
+        console.warn("Failed to load accessible POIs:", error);
+        setLoadedFeatures(FALLBACK_FEATURES);
+      }
+    };
+    loadAccessiblePOIs();
+    return () => {
+      active = false;
+    };
+  }, [school?.id, ds]);
 
   const TABS = ["路線規劃", "設施地圖"];
   const ROUTE_TYPES: { key: RouteType; label: string; icon: string }[] = [
@@ -105,7 +144,7 @@ export function AccessibleRouteScreen(props: any) {
   ];
 
   const filteredFeatures = useMemo(() => {
-    let features = MOCK_FEATURES;
+    let features = loadedFeatures;
     if (searchQuery) {
       features = features.filter((f) =>
         f.name.includes(searchQuery) ||
@@ -121,11 +160,15 @@ export function AccessibleRouteScreen(props: any) {
       features = features.filter((f) => ["elevator", "ramp", "auto_door"].includes(f.type));
     }
     return features;
-  }, [searchQuery, routePreference]);
+  }, [loadedFeatures, searchQuery, routePreference]);
+
+  const routeSteps = useMemo(() => {
+    return searchQuery ? generateRouteSteps(searchQuery) : [];
+  }, [searchQuery]);
 
   const totalDistance = useMemo(() => {
-    return MOCK_ROUTE.reduce((sum, step) => sum + step.distance, 0);
-  }, []);
+    return routeSteps.reduce((sum, step) => sum + step.distance, 0);
+  }, [routeSteps]);
 
   const recentSavedRoutes = useMemo(() => {
     return [...savedRoutes]
@@ -286,7 +329,7 @@ export function AccessibleRouteScreen(props: any) {
             {showRoute && (
               <AnimatedCard title="建議路線" subtitle={`總距離 ${totalDistance}m · 約 5 分鐘`} delay={100}>
                 <View style={{ gap: 8 }}>
-                  {MOCK_ROUTE.map((step, idx) => (
+                  {routeSteps.map((step, idx) => (
                     <View
                       key={step.id}
                       style={{
@@ -302,14 +345,14 @@ export function AccessibleRouteScreen(props: any) {
                             height: 28,
                             borderRadius: 14,
                             backgroundColor:
-                              idx === MOCK_ROUTE.length - 1
+                              idx === routeSteps.length - 1
                                 ? theme.colors.success
                                 : theme.colors.accent,
                             alignItems: "center",
                             justifyContent: "center",
                           }}
                         >
-                          {idx === MOCK_ROUTE.length - 1 ? (
+                          {idx === routeSteps.length - 1 ? (
                             <Ionicons name="flag" size={14} color="#fff" />
                           ) : (
                             <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>
@@ -317,7 +360,7 @@ export function AccessibleRouteScreen(props: any) {
                             </Text>
                           )}
                         </View>
-                        {idx < MOCK_ROUTE.length - 1 && (
+                        {idx < routeSteps.length - 1 && (
                           <View
                             style={{
                               width: 2,

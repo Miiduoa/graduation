@@ -1,24 +1,17 @@
-import Constants from "expo-constants";
+import Constants from 'expo-constants';
 
 import {
-  normalizeFeatureAvailability,
+  buildReleaseRuntimeConfig,
   normalizeSchoolIntegrationStatus,
-  type AppEnvironment,
   type FeatureAvailability,
+  type ReleaseRuntimeConfig,
   type SchoolIntegrationStatus,
-} from "@campus/shared/src";
+  toConfigObject,
+} from '@campus/shared/src';
 
-type LegalDocumentType = "privacy" | "terms";
+type LegalDocumentType = 'privacy' | 'terms';
 
-type RuntimeReleaseConfig = {
-  appEnv: AppEnvironment;
-  isReleaseLike: boolean;
-  legalBaseUrl: string | null;
-  errorReportingEndpoint: string | null;
-  releasedSchoolIds: string[];
-  deepLinkHost: string | null;
-  features: FeatureAvailability;
-};
+type RuntimeReleaseConfig = ReleaseRuntimeConfig;
 
 const DEFAULT_RELEASE_FEATURES: FeatureAvailability = {
   enabled: true,
@@ -31,55 +24,24 @@ const DEFAULT_RELEASE_FEATURES: FeatureAvailability = {
 };
 
 function getExtra(): Record<string, unknown> {
-  const expoConfig = Constants.expoConfig as unknown as { extra?: Record<string, unknown> } | null;
-  return (
-    expoConfig?.extra ??
-    ((Constants as unknown as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra ?? {})
-  );
-}
-
-function getObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
-function getString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-function getStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function normalizeAppEnv(value: unknown): AppEnvironment {
-  if (value === "production" || value === "preview") {
-    return value;
-  }
-
-  return "development";
+  const expoConfig = toConfigObject(Constants.expoConfig ?? null);
+  const manifest = toConfigObject((Constants as unknown as { manifest?: unknown }).manifest);
+  return toConfigObject(expoConfig.extra ?? manifest.extra);
 }
 
 export function getReleaseConfig(): RuntimeReleaseConfig {
-  const extra = getExtra();
-  const release = getObject(extra.release);
-  const appEnv = normalizeAppEnv(extra.appEnv);
-  const isReleaseLike = appEnv === "preview" || appEnv === "production";
+  return buildReleaseRuntimeConfig(getExtra(), {
+    developmentFallbackFeatures: DEFAULT_RELEASE_FEATURES,
+  });
+}
 
-  return {
-    appEnv,
-    isReleaseLike,
-    legalBaseUrl: getString(extra.legalBaseUrl),
-    errorReportingEndpoint: getString(extra.errorReportingEndpoint),
-    releasedSchoolIds: getStringList(release.releasedSchoolIds),
-    deepLinkHost: getString(release.deepLinkHost),
-    features: normalizeFeatureAvailability(
-      getObject(release.features) as Partial<FeatureAvailability>,
-      isReleaseLike ? undefined : DEFAULT_RELEASE_FEATURES
-    ),
-  };
+export function areUniversalDevAccountsEnabled(): boolean {
+  const extra = getExtra();
+  if (typeof extra.enableUniversalDevAccounts === 'boolean') {
+    return extra.enableUniversalDevAccounts;
+  }
+
+  return getReleaseConfig().appEnv !== 'production';
 }
 
 export function getLegalUrl(type: LegalDocumentType): string | null {
@@ -90,7 +52,7 @@ export function getLegalUrl(type: LegalDocumentType): string | null {
 
 export function getSchoolIntegrationStatus(
   schoolId: string,
-  input?: Partial<SchoolIntegrationStatus> | null
+  input?: Partial<SchoolIntegrationStatus> | null,
 ): SchoolIntegrationStatus {
   const config = getReleaseConfig();
   const released = !config.isReleaseLike || config.releasedSchoolIds.includes(schoolId);
@@ -108,13 +70,13 @@ export function getSchoolIntegrationStatus(
   });
 }
 
-export function isFeatureEnabled(feature: keyof Omit<FeatureAvailability, "enabled">): boolean {
+export function isFeatureEnabled(feature: keyof Omit<FeatureAvailability, 'enabled'>): boolean {
   return getReleaseConfig().features[feature];
 }
 
 export function isSchoolVisibleInDirectory(
   schoolId: string,
-  input?: Partial<SchoolIntegrationStatus> | null
+  input?: Partial<SchoolIntegrationStatus> | null,
 ): boolean {
   return getSchoolIntegrationStatus(schoolId, input).enabled;
 }

@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   ScrollView,
   Text,
@@ -7,9 +8,7 @@ import {
   TextInput,
   Alert,
   RefreshControl,
-  Animated,
   Modal,
-  StyleSheet,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, useCameraPermissions } from "expo-camera";
@@ -30,7 +29,6 @@ import {
   query,
   orderBy,
   limit,
-  getDoc,
 } from "firebase/firestore";
 
 let QRCodeSvg: React.ComponentType<{
@@ -73,6 +71,39 @@ type Poll = {
   active: boolean;
   createdAt?: any;
 };
+
+type RandomSelection = {
+  id: string;
+  selectedStudent?: string;
+  isSpinning: boolean;
+  createdAt?: any;
+};
+
+type QuickAnswer = {
+  id: string;
+  active: boolean;
+  startedAt?: number;
+  responses: Record<string, number>;
+  createdAt?: any;
+};
+
+type PopQuiz = {
+  id: string;
+  question: string;
+  options: string[];
+  timerSeconds: number;
+  responses: Record<string, number>;
+  active: boolean;
+  startedAt?: number;
+  createdAt?: any;
+};
+
+// Demo student names for random selection
+const DEMO_STUDENTS = [
+  "李明軒", "王思齊", "陳怡安", "黃郁涵", "張子萌",
+  "劉昱辰", "林佳柔", "吳凱琪", "鄭亞寧", "楊承恩",
+  "何宇哲", "賴昱臻", "邱意涵", "曾聖傑", "蔣予晴",
+];
 
 const REACTION_CONFIG = {
   understood: { icon: "checkmark-circle" as const, color: "#10B981", label: "懂了" },
@@ -260,6 +291,27 @@ export function ClassroomScreen(props: any) {
   const [newPollQuestion, setNewPollQuestion] = useState("");
   const [newPollOptions, setNewPollOptions] = useState(["", ""]);
 
+  // 隨機選人
+  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
+  const [isSpinning, setIsSpinning] = useState(false);
+  const spinIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 搶答
+  const [quickAnswerActive, setQuickAnswerActive] = useState(false);
+  const [quickAnswerStartTime, setQuickAnswerStartTime] = useState<number | null>(null);
+  const [quickAnswerResponses, setQuickAnswerResponses] = useState<Record<string, number>>({});
+  const [quickAnswerCountdown, setQuickAnswerCountdown] = useState(3);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 即時小測
+  const [quizActive, setQuizActive] = useState(false);
+  const [quizQuestion, setQuizQuestion] = useState("");
+  const [quizOptions, setQuizOptions] = useState(["", "", ""]);
+  const [quizTimerSeconds, setQuizTimerSeconds] = useState(30);
+  const [quizResponses, setQuizResponses] = useState<Record<string, number>>({});
+  const [quizStartTime, setQuizStartTime] = useState<number | null>(null);
+  const quizTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // 訂閱 Session 狀態
   useEffect(() => {
     if (!groupId || !sessionId) return;
@@ -293,6 +345,15 @@ export function ClassroomScreen(props: any) {
     });
     return () => unsub();
   }, [groupId, sessionId]);
+
+  // 清理計時器
+  useEffect(() => {
+    return () => {
+      if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      if (quizTimerRef.current) clearInterval(quizTimerRef.current);
+    };
+  }, []);
 
   // 學生加入課堂（一般加入）
   const handleJoin = useCallback(async () => {
@@ -449,6 +510,116 @@ export function ClassroomScreen(props: any) {
     ]);
   }, [groupId, sessionId]);
 
+  // ===== 隨機選人 (Random Student Selection) =====
+  const handleStartRandomSelection = useCallback(() => {
+    setSelectedStudent(null);
+    setIsSpinning(true);
+    let spinCount = 0;
+    const maxSpins = 30;
+
+    spinIntervalRef.current = setInterval(() => {
+      spinCount++;
+      setSelectedStudent(DEMO_STUDENTS[Math.floor(Math.random() * DEMO_STUDENTS.length)]);
+      if (spinCount >= maxSpins) {
+        setIsSpinning(false);
+        if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
+      }
+    }, 100);
+  }, []);
+
+  const handleStopRandomSelection = useCallback(() => {
+    if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
+    setIsSpinning(false);
+    if (!selectedStudent) {
+      setSelectedStudent(DEMO_STUDENTS[Math.floor(Math.random() * DEMO_STUDENTS.length)]);
+    }
+  }, [selectedStudent]);
+
+  // ===== 搶答 (Quick Answer Race) =====
+  const handleStartQuickAnswer = useCallback(() => {
+    setQuickAnswerActive(true);
+    setQuickAnswerCountdown(3);
+    setQuickAnswerStartTime(null);
+    setQuickAnswerResponses({});
+
+    let countdown = 3;
+    countdownIntervalRef.current = setInterval(() => {
+      countdown--;
+      setQuickAnswerCountdown(countdown);
+      if (countdown <= 0) {
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+        setQuickAnswerStartTime(Date.now());
+      }
+    }, 1000);
+  }, []);
+
+  const handleSubmitQuickAnswer = useCallback(async () => {
+    if (!quickAnswerStartTime || !auth.user) return;
+    const responseTime = Math.round((Date.now() - quickAnswerStartTime) / 1000);
+    try {
+      const submitAnswer = httpsCallable(functions, "submitQuickAnswer");
+      await submitAnswer({ groupId, sessionId, responseTime });
+      setQuickAnswerResponses((prev) => ({
+        ...prev,
+        [auth.user!.uid]: responseTime,
+      }));
+    } catch {
+      Alert.alert("提交失敗", "請稍後再試");
+    }
+  }, [quickAnswerStartTime, auth.user, groupId, sessionId]);
+
+  const handleStopQuickAnswer = useCallback(() => {
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    setQuickAnswerActive(false);
+    setQuickAnswerStartTime(null);
+  }, []);
+
+  // ===== 即時小測 (Pop Quiz) =====
+  const handleCreatePopQuiz = useCallback(() => {
+    if (!quizQuestion.trim() || quizOptions.filter((o) => o.trim()).length < 2) {
+      Alert.alert("建立失敗", "請輸入問題並至少設定 2 個選項");
+      return;
+    }
+    setQuizActive(true);
+    setQuizStartTime(Date.now());
+    setQuizResponses({});
+
+    // Auto-stop timer
+    quizTimerRef.current = setInterval(() => {
+      setQuizTimerSeconds((prev) => {
+        if (prev <= 1) {
+          if (quizTimerRef.current) clearInterval(quizTimerRef.current);
+          setQuizActive(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [quizQuestion, quizOptions]);
+
+  const handleSubmitPopQuizAnswer = useCallback(async (optionIdx: number) => {
+    if (!auth.user || !quizActive) return;
+    try {
+      const submitQuiz = httpsCallable(functions, "submitPopQuizAnswer");
+      await submitQuiz({ groupId, sessionId, optionIdx });
+      setQuizResponses((prev) => ({
+        ...prev,
+        [auth.user!.uid]: optionIdx,
+      }));
+    } catch {
+      Alert.alert("提交失敗", "請稍後再試");
+    }
+  }, [auth.user, quizActive, groupId, sessionId]);
+
+  const handleStopPopQuiz = useCallback(() => {
+    if (quizTimerRef.current) clearInterval(quizTimerRef.current);
+    setQuizActive(false);
+    setQuizQuestion("");
+    setQuizOptions(["", "", ""]);
+    setQuizTimerSeconds(30);
+    setQuizResponses({});
+  }, []);
+
   if (!auth.user) return <ErrorState title="課堂" subtitle="尚未登入" hint="請先登入才能加入課堂" />;
   if (!groupId || !sessionId) return <ErrorState title="課堂" subtitle="缺少課堂資訊" hint="請從群組頁面進入課堂" />;
   if (loading) return <LoadingState title="課堂" subtitle="連線中..." rows={3} />;
@@ -579,6 +750,191 @@ export function ClassroomScreen(props: any) {
             </Card>
           )}
 
+          {/* 隨機選人 (Random Student Selection) - 教師 */}
+          {isTeacher && session.active && (
+            <Card title="隨機選人" subtitle="選中幸運學生進行提問或互動">
+              <View style={{ alignItems: "center", gap: 16 }}>
+                {selectedStudent && (
+                  <View
+                    style={{
+                      width: "100%",
+                      paddingVertical: 24,
+                      paddingHorizontal: 16,
+                      borderRadius: theme.radius.lg,
+                      backgroundColor: theme.colors.accentSoft,
+                      alignItems: "center",
+                      borderWidth: 2,
+                      borderColor: theme.colors.accent,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.muted, fontSize: 13, marginBottom: 8 }}>
+                      {isSpinning ? "轉動中..." : "選中學生"}
+                    </Text>
+                    <Text
+                      style={{
+                        color: theme.colors.accent,
+                        fontSize: 36,
+                        fontWeight: "800",
+                        opacity: isSpinning ? 0.7 : 1,
+                      }}
+                    >
+                      {selectedStudent}
+                    </Text>
+                  </View>
+                )}
+                <View style={{ flexDirection: "row", gap: 10, width: "100%" }}>
+                  <Pressable
+                    onPress={handleStartRandomSelection}
+                    disabled={isSpinning}
+                    style={({ pressed }) => ({
+                      flex: 1,
+                      paddingVertical: 12,
+                      paddingHorizontal: 16,
+                      borderRadius: theme.radius.md,
+                      backgroundColor: theme.colors.accent,
+                      alignItems: "center",
+                      opacity: pressed ? 0.8 : isSpinning ? 0.6 : 1,
+                    })}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>
+                      {isSpinning ? "轉動中..." : "選人"}
+                    </Text>
+                  </Pressable>
+                  {selectedStudent && !isSpinning && (
+                    <Pressable
+                      onPress={handleStartRandomSelection}
+                      style={({ pressed }) => ({
+                        flex: 1,
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderRadius: theme.radius.md,
+                        backgroundColor: theme.colors.surface2,
+                        borderWidth: 1,
+                        borderColor: theme.colors.border,
+                        alignItems: "center",
+                        opacity: pressed ? 0.8 : 1,
+                      })}
+                    >
+                      <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
+                        再選一位
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            </Card>
+          )}
+
+          {/* 搶答 (Quick Answer Race) */}
+          {quickAnswerActive && (
+            <Card title="搶答" subtitle="快速回答老師的問題">
+              <View style={{ alignItems: "center", gap: 16 }}>
+                {quickAnswerStartTime === null ? (
+                  <View style={{ width: "100%", alignItems: "center", paddingVertical: 20 }}>
+                    <Text style={{ color: theme.colors.accent, fontSize: 48, fontWeight: "800", marginBottom: 12 }}>
+                      {quickAnswerCountdown > 0 ? quickAnswerCountdown : "GO!"}
+                    </Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 14 }}>
+                      {quickAnswerCountdown > 0 ? "準備好了嗎？" : "開始搶答！"}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={{ width: "100%", gap: 12 }}>
+                    <View style={{ backgroundColor: theme.colors.surface2, borderRadius: theme.radius.md, padding: 16, alignItems: "center" }}>
+                      <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 6 }}>回應者</Text>
+                      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>
+                        {Object.keys(quickAnswerResponses).length} 人
+                      </Text>
+                    </View>
+                    {Object.keys(quickAnswerResponses).length > 0 && (
+                      <View>
+                        <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13, marginBottom: 8 }}>
+                          回應時間排行
+                        </Text>
+                        {Object.entries(quickAnswerResponses)
+                          .sort(([, a], [, b]) => a - b)
+                          .slice(0, 5)
+                          .map(([uid, time], idx) => (
+                            <View key={uid} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, paddingHorizontal: 8, borderRadius: theme.radius.sm }}>
+                              <View
+                                style={{
+                                  width: 24,
+                                  height: 24,
+                                  borderRadius: 12,
+                                  backgroundColor: idx === 0 ? "#FFD700" : idx === 1 ? "#C0C0C0" : idx === 2 ? "#CD7F32" : theme.colors.surface2,
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                <Text style={{ fontWeight: "800", fontSize: 12, color: idx < 3 ? "#fff" : theme.colors.muted }}>
+                                  {idx + 1}
+                                </Text>
+                              </View>
+                              <Text style={{ color: theme.colors.text, flex: 1, fontWeight: "700" }}>
+                                學生 {uid.slice(0, 4)}
+                              </Text>
+                              <Text style={{ color: theme.colors.accent, fontWeight: "700" }}>
+                                {time}s
+                              </Text>
+                            </View>
+                          ))}
+                      </View>
+                    )}
+                  </View>
+                )}
+                {!isTeacher && quickAnswerStartTime !== null && !quickAnswerResponses[auth.user?.uid ?? ""] && (
+                  <Pressable
+                    onPress={handleSubmitQuickAnswer}
+                    style={({ pressed }) => ({
+                      width: "100%",
+                      paddingVertical: 16,
+                      borderRadius: theme.radius.md,
+                      backgroundColor: theme.colors.accent,
+                      alignItems: "center",
+                      opacity: pressed ? 0.8 : 1,
+                    })}
+                  >
+                    <Text style={{ color: "#fff", fontWeight: "800", fontSize: 18 }}>搶答</Text>
+                  </Pressable>
+                )}
+                {isTeacher && quickAnswerStartTime !== null && (
+                  <Pressable
+                    onPress={handleStopQuickAnswer}
+                    style={({ pressed }) => ({
+                      width: "100%",
+                      paddingVertical: 12,
+                      borderRadius: theme.radius.md,
+                      backgroundColor: theme.colors.dangerSoft,
+                      borderWidth: 1,
+                      borderColor: theme.colors.danger,
+                      alignItems: "center",
+                      opacity: pressed ? 0.8 : 1,
+                    })}
+                  >
+                    <Text style={{ color: theme.colors.danger, fontWeight: "700" }}>結束搶答</Text>
+                  </Pressable>
+                )}
+              </View>
+            </Card>
+          )}
+
+          {/* 教師：啟動搶答 */}
+          {isTeacher && !quickAnswerActive && session.active && (
+            <Pressable
+              onPress={handleStartQuickAnswer}
+              style={({ pressed }) => ({
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.accent,
+                alignItems: "center",
+                opacity: pressed ? 0.8 : 1,
+              })}
+            >
+              <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>啟動搶答</Text>
+            </Pressable>
+          )}
+
           {/* 投票 */}
           {polls.filter((p) => p.active).length > 0 && (
             <View style={{ gap: 12 }}>
@@ -592,6 +948,69 @@ export function ClassroomScreen(props: any) {
                 />
               ))}
             </View>
+          )}
+
+          {/* 即時小測 - 進行中 */}
+          {quizActive && (
+            <Card title="即時小測" subtitle={`剩餘時間: ${quizTimerSeconds} 秒`}>
+              <View style={{ gap: 12 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
+                  {quizQuestion}
+                </Text>
+                <View style={{ gap: 8 }}>
+                  {quizOptions.filter((o) => o.trim()).map((opt, i) => {
+                    const totalResponses = Object.keys(quizResponses).length;
+                    const thisOptionCount = Object.values(quizResponses).filter((v) => v === i).length;
+                    const pct = totalResponses > 0 ? Math.round((thisOptionCount / totalResponses) * 100) : 0;
+                    const userAnswered = quizResponses[auth.user?.uid ?? ""] === i;
+
+                    return (
+                      <View key={i}>
+                        <Pressable
+                          onPress={() => handleSubmitPopQuizAnswer(i)}
+                          disabled={!quizActive || !!quizResponses[auth.user?.uid ?? ""]}
+                          style={({ pressed }) => ({
+                            paddingVertical: 12,
+                            paddingHorizontal: 16,
+                            borderRadius: theme.radius.md,
+                            borderWidth: 2,
+                            borderColor: userAnswered ? theme.colors.accent : theme.colors.border,
+                            backgroundColor: userAnswered ? theme.colors.accentSoft : theme.colors.surface2,
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 10,
+                            opacity: pressed ? 0.8 : 1,
+                          })}
+                        >
+                          <View
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 14,
+                              backgroundColor: userAnswered ? theme.colors.accent : theme.colors.border,
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <Text style={{ color: userAnswered ? "#fff" : theme.colors.muted, fontWeight: "700" }}>
+                              {String.fromCharCode(65 + i)}
+                            </Text>
+                          </View>
+                          <Text style={{ color: theme.colors.text, fontWeight: "600", flex: 1 }}>
+                            {opt}
+                          </Text>
+                          {totalResponses > 0 && (
+                            <Text style={{ color: theme.colors.muted, fontWeight: "700", fontSize: 12 }}>
+                              {pct}% ({thisOptionCount})
+                            </Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            </Card>
           )}
 
           {/* 教師：建立投票 */}
@@ -657,6 +1076,132 @@ export function ClassroomScreen(props: any) {
                   <Text style={{ color: "#fff", fontWeight: "700" }}>發送投票</Text>
                 </Pressable>
               </View>
+            </Card>
+          )}
+
+          {/* 教師：建立即時小測 */}
+          {isTeacher && session.active && !quizActive && (
+            <Card title="建立即時小測" subtitle="快速出題考查學生理解度">
+              <TextInput
+                value={quizQuestion}
+                onChangeText={setQuizQuestion}
+                placeholder="輸入測驗問題..."
+                placeholderTextColor={theme.colors.muted}
+                style={{
+                  color: theme.colors.text,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  borderRadius: theme.radius.md,
+                  padding: 12,
+                  backgroundColor: theme.colors.surface2,
+                  marginBottom: 12,
+                  minHeight: 60,
+                  textAlignVertical: "top",
+                }}
+                multiline
+              />
+
+              {quizOptions.map((opt, i) => (
+                <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+                  <TextInput
+                    value={opt}
+                    onChangeText={(v) => {
+                      const arr = [...quizOptions];
+                      arr[i] = v;
+                      setQuizOptions(arr);
+                    }}
+                    placeholder={`選項 ${String.fromCharCode(65 + i)}`}
+                    placeholderTextColor={theme.colors.muted}
+                    style={{
+                      flex: 1,
+                      color: theme.colors.text,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      borderRadius: theme.radius.md,
+                      padding: 10,
+                      backgroundColor: theme.colors.surface2,
+                    }}
+                  />
+                  {quizOptions.length > 2 && (
+                    <Pressable
+                      onPress={() => setQuizOptions(quizOptions.filter((_, idx) => idx !== i))}
+                      style={{ padding: 10 }}
+                    >
+                      <Ionicons name="close-circle" size={20} color={theme.colors.danger} />
+                    </Pressable>
+                  )}
+                </View>
+              ))}
+
+              <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
+                <Pressable
+                  onPress={() => {
+                    if (quizOptions.length < 4) {
+                      setQuizOptions([...quizOptions, ""]);
+                    }
+                  }}
+                  disabled={quizOptions.length >= 4}
+                  style={{
+                    flex: 1,
+                    padding: 10,
+                    borderRadius: theme.radius.md,
+                    borderWidth: 1,
+                    borderColor: quizOptions.length < 4 ? theme.colors.border : theme.colors.muted,
+                    alignItems: "center",
+                    opacity: quizOptions.length < 4 ? 1 : 0.5,
+                  }}
+                >
+                  <Text style={{ color: quizOptions.length < 4 ? theme.colors.text : theme.colors.muted }}>
+                    + 新增選項
+                  </Text>
+                </Pressable>
+              </View>
+
+              <View style={{ backgroundColor: theme.colors.surface2, borderRadius: theme.radius.md, padding: 12, marginBottom: 12 }}>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 8 }}>
+                  回答時間
+                </Text>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  {[30, 60, 90].map((secs) => (
+                    <Pressable
+                      key={secs}
+                      onPress={() => setQuizTimerSeconds(secs)}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        borderRadius: theme.radius.sm,
+                        backgroundColor: quizTimerSeconds === secs ? theme.colors.accent : theme.colors.surface,
+                        alignItems: "center",
+                        borderWidth: quizTimerSeconds === secs ? 0 : 1,
+                        borderColor: theme.colors.border,
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: quizTimerSeconds === secs ? "#fff" : theme.colors.text,
+                          fontWeight: "700",
+                          fontSize: 12,
+                        }}
+                      >
+                        {secs}s
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <Pressable
+                onPress={handleCreatePopQuiz}
+                style={({ pressed }) => ({
+                  paddingVertical: 12,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.accent,
+                  alignItems: "center",
+                  opacity: pressed ? 0.8 : 1,
+                })}
+              >
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>發送小測</Text>
+              </Pressable>
             </Card>
           )}
 

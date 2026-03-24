@@ -1,0 +1,44 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicklasu/eas-metadata-schema/main/schema.json",
+  "configVersion": 0,
+  "apple": {
+    "info": {
+      "zh-Hant": {
+        "title": "校園助手 - 多校園整合平台",
+        "subtitle": "課程、地圖、公告一手掌握",
+        "description": "校園助手是一款專為大學生設計的多校園整合應用程式，整合課程管理、校園地圖、即時公告、餐廳菜單、圖書館服務等功能，讓校園生活更便利。\n\n主要功能：\n• 課程管理 - 課表查詢、成績追蹤、出勤紀錄\n• 校園地圖 - AR 導航、無障礙路線、即時擁擠度\n• 即時公告 - AI 摘要、分類篩選、收藏追蹤\n• 餐廳服務 - 每日菜單、營養資訊、訂餐功能\n• 圖書館 - 館藏查詢、座位預約、借閱管理\n• 校車追蹤 - 即時位置、到站提醒\n• AI 助手 - 智能問答、選課建議\n• 失物招領 - 刊登遺失物、尋找失物\n\n支援多語言（繁中/簡中/英/日/韓）、深色模式、無障礙功能。",
+        "keywords": "校園,大學,課程,地圖,公告,圖書館,餐廳,校車,AI助手,學生",
+        "promotionalText": "全新 AI 助手功能上線！智能選課建議讓你輕鬆規劃學期課程。",
+        "whatsNew": "1.0.0 版本更新：\n- 全新推出校園助手\n- 支援多校園整合平台\n- AI 智能助手功能\n- AR 校園導航\n- 離線模式支援"
+      },
+      "en-US": {
+        "title": "Campus Helper - Multi-Campus Platform",
+        "subtitle": "Courses, Maps & Announcements",
+        "description": "Campus Helper is a comprehensive multi-campus application designed for university students. It integrates course management, campus maps, real-time announcements, cafeteria menus, library services, and more.\n\nKey Features:\n• Course Management - Schedule, grades, attendance tracking\n• Campus Map - AR navigation, accessible routes, real-time crowding\n• Announcements - AI summaries, category filters, bookmarks\n• Cafeteria - Daily menus, nutrition info, ordering\n• Library - Catalog search, seat reservation, borrowing\n• Bus Tracking - Real-time location, arrival alerts\n• AI Assistant - Smart Q&A, course recommendations\n• Lost & Found - Post and search for lost items\n\nSupports multiple languages (zh-TW/zh-CN/EN/JA/KO), dark mode, and accessibility features.",
+        "keywords": "campus,university,courses,map,announcements,library,cafeteria,bus,AI,student",
+        "promotionalText": "New AI Assistant feature! Get smart course recommendations for easy semester planning.",
+        "whatsNew": "Version 1.0.0:\n- Introducing Campus Helper\n- Multi-campus platform support\n- AI Smart Assistant\n- AR Campus Navigation\n- Offline mode support"
+      }
+    },
+    "categories": ["EDUCATION", "PRODUCTIVITY"],
+    "ageRating": "FOUR_PLUS",
+    "copyright": "© 2026 Campus Helper Team",
+    "primaryLocale": "zh-Hant"
+  },
+  "android": {
+    "info": {
+      "zh-TW": {
+        "title": "校園助手 - 多校園整合平台",
+        "shortDescription": "課程、地圖、公告一手掌握的校園生活助手",
+        "fullDescription": "校園助手是一款專為大學生設計的多校園整合應用程式，整合課程管理、校園地圖、即時公告、餐廳菜單、圖書館服務等功能，讓校園生活更便利。\n\n主要功能：\n• 課程管理 - 課表查詢、成績追蹤、出勤紀錄\n• 校園地圖 - AR 導航、無障礙路線、即時擁擠度\n• 即時公告 - AI 摘要、分類篩選、收藏追蹤\n• 餐廳服務 - 每日菜單、營養資訊、訂餐功能\n• 圖書館 - 館藏查詢、座位預約、借閱管理\n• 校車追蹤 - 即時位置、到站提醒\n• AI 助手 - 智能問答、選課建議\n• 失物招領 - 刊登遺失物、尋找失物\n\n支援多語言（繁中/簡中/英/日/韓）、深色模式、無障礙功能。"
+      },
+      "en-US": {
+        "title": "Campus Helper - Multi-Campus Platform",
+        "shortDescription": "Your all-in-one campus life assistant for courses, maps, and more",
+        "fullDescription": "Campus Helper is a comprehensive multi-campus application designed for university students. It integrates course management, campus maps, real-time announcements, cafeteria menus, library services, and more.\n\nKey Features:\n• Course Management - Schedule, grades, attendance tracking\n• Campus Map - AR navigation, accessible routes, real-time crowding\n• Announcements - AI summaries, category filters, bookmarks\n• Cafeteria - Daily menus, nutrition info, ordering\n• Library - Catalog search, seat reservation, borrowing\n• Bus Tracking - Real-time location, arrival alerts\n• AI Assistant - Smart Q&A, course recommendations\n• Lost & Found - Post and search for lost items\n\nSupports multiple languages, dark mode, and accessibility features."
+      }
+    },
+    "category": "EDUCATION",
+    "contentRating": "Everyone"
+  }
+}

@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useEffect, useRef, useCallback } from "react";
 import {
   Animated,

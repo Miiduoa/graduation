@@ -13,13 +13,16 @@ import {
 
 export type DataSourceMode = "mock" | "firebase" | "hybrid";
 
-function parseDataSourceMode(raw?: string): DataSourceMode {
+export const DATA_SOURCE_DESIGN_TARGET_MODE: DataSourceMode = "hybrid";
+export const DEFAULT_RUNTIME_DATA_SOURCE_MODE: DataSourceMode = __DEV__ ? "mock" : "firebase";
+
+export function parseDataSourceMode(raw?: string): DataSourceMode {
   const value = (raw ?? "").trim().toLowerCase();
   if (value === "firebase" || value === "hybrid" || value === "mock") return value;
-  return __DEV__ ? "mock" : "firebase";
+  return DEFAULT_RUNTIME_DATA_SOURCE_MODE;
 }
 
-function parseApiEnvironment(raw?: string): ApiEnvironment {
+export function parseApiEnvironment(raw?: string): ApiEnvironment {
   const value = (raw ?? "").trim().toLowerCase();
   if (value === "development" || value === "staging" || value === "production") return value;
   return __DEV__ ? "development" : "production";
@@ -30,6 +33,17 @@ const API_ENV = parseApiEnvironment(process.env.EXPO_PUBLIC_API_ENV);
 const HYBRID_TIMEOUT_MS = Number(process.env.EXPO_PUBLIC_HYBRID_TIMEOUT_MS ?? 10000);
 const HYBRID_FALLBACK_TO_MOCK = (process.env.EXPO_PUBLIC_HYBRID_FALLBACK_TO_MOCK ?? "true") !== "false";
 const HYBRID_PREFER_REAL_API = (process.env.EXPO_PUBLIC_PREFER_REAL_API ?? "true") !== "false";
+
+export function getRuntimeDataSourcePolicy() {
+  return {
+    designTargetMode: DATA_SOURCE_DESIGN_TARGET_MODE,
+    defaultRuntimeMode: DEFAULT_RUNTIME_DATA_SOURCE_MODE,
+    requestedMode: REQUESTED_DATA_SOURCE_MODE,
+    apiEnvironment: API_ENV,
+    hybridFallbackToMock: HYBRID_FALLBACK_TO_MOCK,
+    hybridPreferRealApi: HYBRID_PREFER_REAL_API,
+  };
+}
 
 function createConfiguredSource(mode: DataSourceMode): DataSource {
   if (mode === "mock") return mockSource;

@@ -2,6 +2,9 @@ import js from "@eslint/js";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
+import firebaseScreenBoundaries from "./apps/mobile/firebase-screen-boundaries.js";
+
+const { allowedScreenDirectFirebaseImports } = firebaseScreenBoundaries;
 
 export default tseslint.config(
   {
@@ -62,6 +65,36 @@ export default tseslint.config(
       "no-useless-escape": "warn",
       "react-hooks/exhaustive-deps": "warn",
       "react-hooks/rules-of-hooks": "error",
+    },
+  },
+  {
+    files: ["apps/mobile/src/screens/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "firebase/firestore",
+              message: "Use feature repositories instead of direct Firestore access in screens.",
+            },
+            {
+              name: "../firebase",
+              message: "Use DataSource or feature repositories instead of direct Firebase clients in screens.",
+            },
+            {
+              name: "@react-native-async-storage/async-storage",
+              message: "Use feature repositories or persisted storage helpers instead of AsyncStorage in screens.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: allowedScreenDirectFirebaseImports,
+    rules: {
+      "no-restricted-imports": "off",
     },
   }
 );

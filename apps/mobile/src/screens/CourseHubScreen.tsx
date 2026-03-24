@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useMemo } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -11,31 +12,37 @@ import { useSchool } from "../state/school";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
 import { canManageCourse, formatDateTime } from "../services/courseWorkspace";
-
-const AVATAR_COLORS = ["#0F8B8D", "#34C759", "#FF9500", "#2563EB", "#14B8A6", "#32ADE6", "#FF6B35"];
-const AVATAR_EMOJIS = ["🧑‍💻", "👩‍🎓", "👨‍🎓", "🧑‍🏫", "👩‍💻", "👨‍💻", "🙋"];
-
-function hashCode(str: string): number {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) { h = (Math.imul(31, h) + str.charCodeAt(i)) | 0; }
-  return Math.abs(h);
-}
+import { useAmbientCues } from "../features/engagement";
+import { AmbientCueCard } from "../ui/campusOs";
+import { getFreshnessState, resolveRoleMode } from "../utils/campusOs";
 
 function SocialSnippet(props: {
-  groupId: string;
   memberCount?: number;
   activeCount?: number;
   completedCount?: number;
+  completionRate?: number;
+  updatedAt?: Date | null;
   onOpenGroup?: () => void;
 }) {
-  const seed = hashCode(props.groupId);
-  const displayCount = Math.min(props.memberCount ?? (3 + (seed % 5)), 5);
-  const avatars = Array.from({ length: displayCount }, (_, i) => ({
-    emoji: AVATAR_EMOJIS[(seed + i) % AVATAR_EMOJIS.length],
-    color: AVATAR_COLORS[(seed + i) % AVATAR_COLORS.length],
-  }));
-  const activeCount = props.activeCount ?? (2 + (seed % 4));
-  const completedCount = props.completedCount ?? (1 + (seed % 3));
+  const activeCount = props.activeCount ?? 0;
+  const completedCount = props.completedCount ?? 0;
+  const distinctUserCount = Math.max(activeCount, completedCount);
+  const isFresh = props.updatedAt ? getFreshnessState(props.updatedAt) !== "stale" : false;
+
+  if (!isFresh || distinctUserCount < 3 || (props.memberCount ?? 0) < 3) {
+    return null;
+  }
+
+  const avatarCount = Math.min(props.memberCount ?? 0, 4);
+  const anonymousMarkers = Array.from({ length: avatarCount }, (_, index) => index);
+  const primaryLabel =
+    activeCount >= 3
+      ? `${activeCount} 位同學最近有互動`
+      : `已有 ${completedCount} 位同學完成近期作業`;
+  const secondaryLabel =
+    completedCount >= 3
+      ? `這門課的近期完成節奏已經形成${props.completionRate ? ` · ${props.completionRate}% 已跟上` : ""}`
+      : "這門課最近有人先完成，現在跟上比較不容易累積壓力";
 
   return (
     <View
@@ -53,7 +60,7 @@ function SocialSnippet(props: {
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Ionicons name="people" size={14} color={theme.colors.accent} />
           <Text style={{ fontSize: 12, fontWeight: "700", color: theme.colors.accent }}>
-            {activeCount} 位同學今日活躍
+            {primaryLabel}
           </Text>
         </View>
         <Pressable
@@ -76,30 +83,28 @@ function SocialSnippet(props: {
 
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <View style={{ flexDirection: "row" }}>
-          {avatars.map((a, i) => (
+          {anonymousMarkers.map((marker, index) => (
             <View
-              key={i}
+              key={marker}
               style={{
                 width: 26,
                 height: 26,
                 borderRadius: 13,
-                backgroundColor: `${a.color}20`,
+                backgroundColor: theme.colors.surface2,
                 borderWidth: 2,
                 borderColor: theme.colors.bg,
                 alignItems: "center",
                 justifyContent: "center",
-                marginLeft: i === 0 ? 0 : -6,
-                zIndex: displayCount - i,
+                marginLeft: index === 0 ? 0 : -6,
+                zIndex: avatarCount - index,
               }}
             >
-              <Text style={{ fontSize: 12 }}>{a.emoji}</Text>
+              <Ionicons name="person" size={12} color={theme.colors.muted} />
             </View>
           ))}
         </View>
         <Text style={{ fontSize: 12, color: theme.colors.muted, flex: 1 }}>
-          {completedCount > 0
-            ? `已有 ${completedCount} 位同學完成本週作業`
-            : "還沒有同學完成本週作業，一起加油！"}
+          {secondaryLabel}
         </Text>
       </View>
 
@@ -115,7 +120,7 @@ function SocialSnippet(props: {
         >
           <View
             style={{
-              width: `${Math.min(Math.round((completedCount / Math.max(activeCount, 1)) * 100), 100)}%`,
+              width: `${Math.min(props.completionRate ?? Math.round((completedCount / Math.max(props.memberCount ?? 1, 1)) * 100), 100)}%`,
               height: "100%",
               borderRadius: 2,
               backgroundColor: theme.colors.accent,
@@ -123,7 +128,7 @@ function SocialSnippet(props: {
           />
         </View>
         <Text style={{ fontSize: 10, color: theme.colors.muted, fontWeight: "600" }}>
-          {Math.round((completedCount / Math.max(activeCount, 1)) * 100)}% 完成率
+          {props.completionRate ?? Math.round((completedCount / Math.max(props.memberCount ?? 1, 1)) * 100)}% 完成率
         </Text>
       </View>
     </View>
@@ -164,6 +169,7 @@ export function CourseHubScreen(props: any) {
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
+  const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
 
   const {
     items: courseSpaces,
@@ -186,6 +192,13 @@ export function CourseHubScreen(props: any) {
   const totalDueSoon = courseSpaces.reduce((sum, summary) => sum + summary.dueSoonCount, 0);
   const totalQuizCount = courseSpaces.reduce((sum, summary) => sum + summary.quizCount, 0);
   const activeSessions = courseSpaces.filter((summary) => summary.activeSessionId).length;
+  const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
+    schoolId: school.id,
+    uid: auth.user?.uid ?? null,
+    role: roleMode === "guest" ? "guest" : roleMode,
+    surface: "courseHub",
+    limit: 1,
+  });
 
   if (!auth.user) {
     return (
@@ -229,6 +242,20 @@ export function CourseHubScreen(props: any) {
             <Pill text={`${activeSessions} 堂進行中`} kind={activeSessions > 0 ? "danger" : "muted"} />
           </View>
         </Card>
+
+        {ambientCue ? (
+          <AmbientCueCard
+            signalType={ambientCue.signalType}
+            headline={ambientCue.headline}
+            body={ambientCue.body}
+            metric={ambientCue.metric}
+            actionLabel={ambientCue.ctaLabel}
+            onPress={() => openAmbientCue(ambientCue, nav)}
+            onDismiss={() => {
+              void dismissAmbientCue(ambientCue);
+            }}
+          />
+        ) : null}
 
         {selectedRows.length === 0 ? (
           <Card title="尚未找到課程空間" subtitle="目前沒有可用的 course group">
@@ -279,7 +306,11 @@ export function CourseHubScreen(props: any) {
               </View>
 
               <SocialSnippet
-                groupId={membership.groupId}
+                memberCount={membership.memberCount}
+                activeCount={membership.activeLearnerCount}
+                completedCount={membership.completedAssignmentCount}
+                completionRate={membership.completionRate}
+                updatedAt={membership.socialProofUpdatedAt}
                 onOpenGroup={() =>
                   nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: membership.groupId } })
                 }

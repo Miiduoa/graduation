@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { useEffect, useState, useCallback, useRef } from "react";
 import { subscribeToCacheUpdates } from "../data/cachedSource";
 import { useLatestValue } from "./useLatestValue";

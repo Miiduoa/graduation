@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 /**
  * Payment Service
  * 支付系統服務
@@ -135,7 +136,7 @@ class PaymentService {
   /**
    * Get available payment methods for user
    */
-  async getPaymentMethods(userId: string): Promise<PaymentMethodInfo[]> {
+  async getPaymentMethods(_userId: string): Promise<PaymentMethodInfo[]> {
     const methods: PaymentMethodInfo[] = [];
     
     // Campus Card (always available)

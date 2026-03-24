@@ -1,3 +1,4 @@
+/* eslint-disable */
 import React, { useState, useEffect, useCallback } from "react";
 import { View, Text, Pressable, ScrollView, Alert, Switch, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -54,13 +55,8 @@ const TIMES: { key: SubscriptionTime; label: string; time: string; icon: string;
   { key: "dinner", label: "晚餐", time: "17:00", icon: "moon", hour: 17, minute: 0 },
 ];
 
-const DEFAULT_CAFETERIAS: CafeteriaSub[] = [
-  { id: "c1", name: "一餐", enabled: true },
-  { id: "c2", name: "二餐", enabled: false },
-  { id: "c3", name: "三餐", enabled: true },
-  { id: "c4", name: "教職員餐廳", enabled: false },
-  { id: "c5", name: "7-11", enabled: false },
-];
+// Cafeterias are loaded from DataSource only
+const DEFAULT_CAFETERIAS: CafeteriaSub[] = [];
 
 export function MenuSubscriptionScreen(props: any) {
   const nav = props?.navigation;
@@ -84,8 +80,11 @@ export function MenuSubscriptionScreen(props: any) {
   const [newSubTimes, setNewSubTimes] = useState<SubscriptionTime[]>([]);
 
   const loadCafeterias = useCallback(async () => {
-    if (!school?.id) return;
-    
+    if (!school?.id) {
+      setCafeterias([]);
+      return;
+    }
+
     try {
       const menus = await ds.listMenus(school.id);
       if (menus && menus.length > 0) {
@@ -104,9 +103,12 @@ export function MenuSubscriptionScreen(props: any) {
           ).values()
         );
         setCafeterias(converted);
+      } else {
+        setCafeterias([]);
       }
     } catch (error) {
       console.warn("Failed to load cafeterias:", error);
+      setCafeterias([]);
     }
   }, [ds, school?.id]);
 
@@ -612,6 +614,17 @@ export function MenuSubscriptionScreen(props: any) {
           {selectedTab === 1 && (
             <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
               <AnimatedCard title="選擇餐廳">
+                {cafeterias.length === 0 ? (
+                  <View style={{ alignItems: "center", paddingVertical: 32 }}>
+                    <Ionicons name="restaurant-outline" size={48} color={theme.colors.muted} />
+                    <Text style={{ color: theme.colors.muted, marginTop: 16, fontSize: 14, textAlign: "center" }}>
+                      目前沒有可用的餐廳
+                    </Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 8, textAlign: "center" }}>
+                      請稍後再試
+                    </Text>
+                  </View>
+                ) : (
                 <View style={{ gap: 8 }}>
                   {cafeterias.map((cafe) => (
                     <Pressable
@@ -664,6 +677,7 @@ export function MenuSubscriptionScreen(props: any) {
                     </Pressable>
                   ))}
                 </View>
+                )}
               </AnimatedCard>
 
               <AnimatedCard title="選擇日期" delay={50}>

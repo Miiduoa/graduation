@@ -13,12 +13,7 @@ export type Announcement = {
   schoolId?: string;
 };
 
-export type AnnouncementCategory = 
-  | "general" 
-  | "academic" 
-  | "event" 
-  | "emergency" 
-  | "system";
+export type AnnouncementCategory = 'general' | 'academic' | 'event' | 'emergency' | 'system';
 
 export type ClubEvent = {
   id: string;
@@ -38,14 +33,14 @@ export type ClubEvent = {
   schoolId?: string;
 };
 
-export type EventCategory = 
-  | "academic" 
-  | "sports" 
-  | "arts" 
-  | "social" 
-  | "career" 
-  | "workshop" 
-  | "competition";
+export type EventCategory =
+  | 'academic'
+  | 'sports'
+  | 'arts'
+  | 'social'
+  | 'career'
+  | 'workshop'
+  | 'competition';
 
 // ===== 地點與餐廳 =====
 
@@ -62,23 +57,61 @@ export type Poi = {
   imageUrl?: string;
   facilities?: string[];
   accessible?: boolean;
-  crowdLevel?: "low" | "medium" | "high";
+  crowdLevel?: 'low' | 'medium' | 'high';
   schoolId?: string;
 };
 
-export type PoiCategory = 
-  | "building" 
-  | "food"
-  | "library" 
-  | "cafeteria" 
-  | "parking" 
-  | "sports" 
-  | "lab" 
-  | "office" 
-  | "dormitory"
-  | "medical"
-  | "convenience"
-  | "other";
+export type PoiCategory =
+  | 'building'
+  | 'food'
+  | 'library'
+  | 'cafeteria'
+  | 'parking'
+  | 'sports'
+  | 'lab'
+  | 'office'
+  | 'dormitory'
+  | 'medical'
+  | 'convenience'
+  | 'other';
+
+export type CrowdLevel = 'low' | 'medium' | 'high' | 'very_high';
+
+export type PoiReview = {
+  id: string;
+  uid: string;
+  schoolId?: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  rating: number;
+  comment: string;
+  tags?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  helpful: number;
+  helpfulBy?: string[];
+};
+
+export type PoiCrowdReport = {
+  id: string;
+  uid: string;
+  schoolId?: string;
+  level: CrowdLevel;
+  createdAt?: string;
+};
+
+export type PoiReportType = 'closed' | 'wrong_info' | 'accessibility' | 'safety' | 'other';
+
+export type PoiReport = {
+  id: string;
+  uid: string;
+  schoolId?: string;
+  email?: string | null;
+  type: PoiReportType;
+  description: string;
+  createdAt?: string;
+  status: 'pending' | 'resolved' | 'rejected';
+};
 
 export type OpeningHours = {
   monday?: DayHours;
@@ -96,10 +129,52 @@ export type DayHours = {
   closed?: boolean;
 };
 
+export type CafeteriaPilotStatus = 'inactive' | 'pilot' | 'live';
+
+export type CafeteriaOperatorRole = 'owner' | 'manager' | 'staff';
+
+export type MerchantAssignmentStatus = 'active' | 'inactive';
+
+export type Cafeteria = {
+  id: string;
+  schoolId?: string;
+  name: string;
+  merchantId?: string;
+  brandKey?: string;
+  location?: string;
+  openingHours?: string;
+  seatingCapacity?: number;
+  currentOccupancy?: number;
+  pilotStatus?: CafeteriaPilotStatus;
+  orderingEnabled?: boolean;
+  activeOperatorCount?: number;
+  rating?: number | string;
+  reviewCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type MerchantAssignment = {
+  schoolId: string;
+  schoolName?: string | null;
+  cafeteriaId: string;
+  cafeteriaName: string;
+  merchantId: string;
+  brandKey?: string | null;
+  operatorRole: CafeteriaOperatorRole;
+  status: MerchantAssignmentStatus;
+  orderingEnabled: boolean;
+  pilotStatus: CafeteriaPilotStatus;
+  displayName?: string | null;
+  email?: string | null;
+  lastActiveAt?: string | null;
+};
+
 export type MenuItem = {
   id: string;
   name: string;
   cafeteria: string;
+  cafeteriaId?: string;
   availableOn: string;
   price?: number;
   category?: MenuCategory;
@@ -117,15 +192,11 @@ export type MenuItem = {
   popular?: boolean;
   waitTime?: number;
   schoolId?: string;
+  orderingEnabled?: boolean;
+  pilotStatus?: CafeteriaPilotStatus;
 };
 
-export type MenuCategory = 
-  | "main" 
-  | "side" 
-  | "soup" 
-  | "dessert" 
-  | "beverage" 
-  | "set";
+export type MenuCategory = 'main' | 'side' | 'soup' | 'dessert' | 'beverage' | 'set';
 
 // ===== 使用者與認證 =====
 
@@ -152,20 +223,20 @@ export type User = {
   isPublicProfile?: boolean;
 };
 
-export type UserRole = 
-  | "student"
-  | "teacher"
-  | "professor" 
-  | "principal"
-  | "admin"
-  | "staff"
-  | "alumni";
+export type UserRole =
+  | 'student'
+  | 'teacher'
+  | 'professor'
+  | 'principal'
+  | 'admin'
+  | 'staff'
+  | 'alumni';
 
-export type RoleMode = "guest" | "student" | "teacher" | "admin";
+export type RoleMode = 'guest' | 'student' | 'teacher' | 'admin';
 
 export type UserSettings = {
   language?: string;
-  theme?: "light" | "dark" | "system";
+  theme?: 'light' | 'dark' | 'system';
   notifications?: NotificationPreferences | boolean;
   emailNotifications?: boolean;
   accessibility?: AccessibilitySettings;
@@ -182,7 +253,7 @@ export type NotificationPreferences = {
 };
 
 export type AccessibilitySettings = {
-  fontSize?: "small" | "medium" | "large" | "xlarge";
+  fontSize?: 'small' | 'medium' | 'large' | 'xlarge';
   highContrast?: boolean;
   reduceMotion?: boolean;
   screenReader?: boolean;
@@ -232,7 +303,7 @@ export type Enrollment = {
   courseId: string;
   semester: string;
   schoolId?: string;
-  status: "enrolled" | "dropped" | "completed" | "waitlisted";
+  status: 'enrolled' | 'dropped' | 'completed' | 'waitlisted';
   grade?: string;
   gradePoints?: number;
   createdAt: string;
@@ -277,13 +348,7 @@ export type Assignment = {
   updatedAt?: string;
 };
 
-export type AssignmentType = 
-  | "homework" 
-  | "quiz" 
-  | "exam" 
-  | "project" 
-  | "presentation" 
-  | "report";
+export type AssignmentType = 'homework' | 'quiz' | 'exam' | 'project' | 'presentation' | 'report';
 
 export type Submission = {
   id: string;
@@ -298,7 +363,7 @@ export type Submission = {
   feedback?: string;
   gradedAt?: string;
   gradedBy?: string;
-  status: "submitted" | "graded" | "late" | "missing";
+  status: 'submitted' | 'graded' | 'late' | 'missing';
 };
 
 export type CourseSpace = {
@@ -315,14 +380,62 @@ export type CourseSpace = {
   moduleCount: number;
   activeSessionId: string | null;
   latestDueAt: Date | null;
+  memberCount?: number;
+  activeLearnerCount?: number;
+  completedAssignmentCount?: number;
+  completionRate?: number;
+  socialProofUpdatedAt?: Date | null;
   schoolId?: string;
+};
+
+export type AmbientCueSurface =
+  | 'today'
+  | 'inbox'
+  | 'courseHub'
+  | 'teachingHub'
+  | 'achievements'
+  | 'campus'
+  | 'department'
+  | 'admin'
+  | 'staff';
+
+export type AmbientCueRole = 'guest' | 'student' | 'teacher' | 'staff' | 'department' | 'admin';
+
+export type AmbientCueSignalType =
+  | 'course_completion'
+  | 'attendance_momentum'
+  | 'teaching_review'
+  | 'leaderboard_momentum'
+  | 'campus_popularity'
+  | 'approval_backlog'
+  | 'admin_activity';
+
+export type AmbientCueTarget = {
+  tab?: string;
+  screen?: string;
+  params?: Record<string, unknown>;
+};
+
+export type AmbientCue = {
+  id: string;
+  surface: AmbientCueSurface;
+  role: AmbientCueRole;
+  signalType: AmbientCueSignalType;
+  headline: string;
+  body: string;
+  ctaLabel: string;
+  target?: AmbientCueTarget;
+  metric?: string;
+  distinctUserCount: number;
+  updatedAt: Date | null;
+  dismissKey: string;
 };
 
 export type CourseMaterial = {
   id: string;
   moduleId: string;
   groupId: string;
-  type: "link" | "file" | "video" | "document" | "external";
+  type: 'link' | 'file' | 'video' | 'document' | 'external';
   label: string;
   description?: string;
   url?: string | null;
@@ -348,7 +461,7 @@ export type CourseModule = {
 export type Question = {
   id: string;
   prompt: string;
-  type: "single_choice" | "multiple_choice" | "short_answer" | "essay" | "true_false";
+  type: 'single_choice' | 'multiple_choice' | 'short_answer' | 'essay' | 'true_false';
   required?: boolean;
   options?: Array<{
     id: string;
@@ -376,13 +489,13 @@ export type Quiz = {
   title: string;
   description?: string;
   dueAt?: Date | null;
-  type: "quiz" | "exam";
+  type: 'quiz' | 'exam';
   gradesPublished?: boolean;
   questionCount?: number;
   durationMinutes?: number;
   points?: number;
   weight?: number;
-  source: "quiz" | "assignment";
+  source: 'quiz' | 'assignment';
   questionBankId?: string | null;
   questions?: Question[];
 };
@@ -395,7 +508,7 @@ export type AttendanceSession = {
   attendeeCount?: number;
   startedAt: Date | null;
   endedAt: Date | null;
-  source: "attendance" | "live";
+  source: 'attendance' | 'live';
   attendanceMode?: string | null;
 };
 
@@ -404,8 +517,8 @@ export type AttendanceRecord = {
   sessionId: string;
   groupId: string;
   userId: string;
-  status: "present" | "late" | "absent" | "excused";
-  source?: "qr" | "tap" | "manual";
+  status: 'present' | 'late' | 'absent' | 'excused';
+  source?: 'qr' | 'tap' | 'manual';
   checkedInAt?: Date | null;
 };
 
@@ -419,7 +532,7 @@ export type AttendanceSummary = {
 
 export type InboxTask = {
   id: string;
-  kind: "live" | "assignment" | "quiz" | "group";
+  kind: 'live' | 'assignment' | 'quiz' | 'group';
   groupId: string;
   groupName: string;
   title: string;
@@ -436,18 +549,11 @@ export type InboxTask = {
   nextStep?: string;
 };
 
-export type InboxIntent =
-  | "submit"
-  | "join"
-  | "review"
-  | "read"
-  | "reply"
-  | "navigate"
-  | "verify";
+export type InboxIntent = 'submit' | 'join' | 'review' | 'read' | 'reply' | 'navigate' | 'verify';
 
-export type InboxUrgency = "critical" | "high" | "medium" | "low";
+export type InboxUrgency = 'critical' | 'high' | 'medium' | 'low';
 
-export type FreshnessState = "live" | "new" | "today" | "stale";
+export type FreshnessState = 'live' | 'new' | 'today' | 'stale';
 
 export type InboxItem = InboxTask & {
   intent: InboxIntent;
@@ -464,9 +570,9 @@ export type InboxItem = InboxTask & {
   nextStep?: string;
 };
 
-export type TodayCardPriority = "critical" | "high" | "medium" | "low" | "complete";
+export type TodayCardPriority = 'critical' | 'high' | 'medium' | 'low' | 'complete';
 
-export type TodayCardContext = "next_action" | "course" | "deadline" | "campus" | "support";
+export type TodayCardContext = 'next_action' | 'course' | 'deadline' | 'campus' | 'support';
 
 export type TodayCard = {
   id: string;
@@ -485,122 +591,7 @@ export type TodayCard = {
   };
 };
 
-export type TodayCardSource =
-  | "official_public"
-  | "user_import"
-  | "crowd_verified"
-  | "ai_synthesized";
-
-export type CampusSignalType =
-  | "course"
-  | "announcement"
-  | "event"
-  | "menu"
-  | "place"
-  | "mobility"
-  | "crowd"
-  | "imported_event"
-  | "task"
-  | "ai_action";
-
-export type CampusSignalActionTarget = {
-  tab?: string;
-  screen?: string;
-  params?: Record<string, unknown>;
-};
-
-export type CampusSignal = {
-  id: string;
-  schoolId: string;
-  type: CampusSignalType;
-  title: string;
-  description?: string;
-  source: TodayCardSource;
-  startAt?: string;
-  endAt?: string;
-  location?: string;
-  freshness: FreshnessState;
-  trustScore: number;
-  actionTarget?: CampusSignalActionTarget;
-  meta?: string;
-  updatedAt?: string;
-};
-
-export type ImportedArtifactType =
-  | "ical"
-  | "manual_course"
-  | "manual_task"
-  | "screenshot"
-  | "pdf";
-
-export type ImportedEntityType = "course" | "event" | "task";
-
-export type ImportedEntity = {
-  id: string;
-  entityType: ImportedEntityType;
-  title: string;
-  description?: string;
-  date?: string;
-  dayOfWeek?: number;
-  startTime?: string;
-  endTime?: string;
-  location?: string;
-};
-
-export type ImportedArtifact = {
-  id: string;
-  artifactType: ImportedArtifactType;
-  rawInputRef?: string;
-  parsedEntities: ImportedEntity[];
-  confidence: number;
-  createdAt: string;
-  userConfirmedAt?: string;
-  metadata?: Record<string, unknown>;
-};
-
-export type CrowdSignalType =
-  | "cafeteria_queue"
-  | "library_seat"
-  | "bus_crowd"
-  | "study_space";
-
-export type CrowdSignalValue = "low" | "medium" | "high";
-
-export type CrowdReport = {
-  id: string;
-  schoolId: string;
-  signalType: CrowdSignalType;
-  placeId: string;
-  placeName?: string;
-  value: CrowdSignalValue;
-  evidenceType: "self_report" | "photo" | "consensus";
-  reporterReputation: number;
-  createdAt: string;
-  expiresAt: string;
-  revokedAt?: string;
-  trustScore?: number;
-};
-
-export type AIActionSuggestion = {
-  id: string;
-  label: string;
-  reason?: string;
-  signalId?: string;
-  actionTarget?: CampusSignalActionTarget;
-};
-
-export type AIActionBrief = {
-  summary: string;
-  reasons: string[];
-  suggestedActions: AIActionSuggestion[];
-  generatedAt: string;
-  basedOn: Array<{
-    signalId: string;
-    source: TodayCardSource;
-  }>;
-};
-
-export type CampusServiceCategory = "mobility" | "daily_life" | "operations" | "support";
+export type CampusServiceCategory = 'mobility' | 'daily_life' | 'operations' | 'support';
 
 export type CampusService = {
   id: string;
@@ -683,14 +674,14 @@ export type Group = {
   createdByEmail?: string;
 };
 
-export type GroupType = "course" | "club" | "study" | "project" | "social";
+export type GroupType = 'course' | 'club' | 'study' | 'project' | 'social';
 
 export type GroupMember = {
   id: string;
   groupId: string;
   userId: string;
   uid?: string;
-  role: "owner" | "admin" | "member";
+  role: 'owner' | 'admin' | 'member';
   joinedAt: string;
   user?: User;
   displayName?: string;
@@ -753,13 +744,13 @@ export type Message = {
   createdAt: string;
 };
 
-export type MessageType = "text" | "image" | "file" | "location" | "system";
+export type MessageType = 'text' | 'image' | 'file' | 'location' | 'system';
 
 // ===== 失物招領 =====
 
 export type LostFoundItem = {
   id: string;
-  type: "lost" | "found";
+  type: 'lost' | 'found';
   title: string;
   description: string;
   category: LostFoundCategory;
@@ -768,7 +759,7 @@ export type LostFoundItem = {
   imageUrls?: string[];
   imageUrl?: string;
   contactInfo?: string;
-  status: "open" | "resolved" | "expired" | "claimed" | "returned" | "active";
+  status: 'open' | 'resolved' | 'expired' | 'claimed' | 'returned' | 'active';
   reporterId: string;
   reporter?: User;
   createdAt: string;
@@ -778,16 +769,16 @@ export type LostFoundItem = {
   claimedAt?: string;
 };
 
-export type LostFoundCategory = 
-  | "electronics" 
-  | "documents" 
-  | "clothing" 
-  | "accessories" 
-  | "cards"
-  | "books"
-  | "keys" 
-  | "wallet" 
-  | "other";
+export type LostFoundCategory =
+  | 'electronics'
+  | 'documents'
+  | 'clothing'
+  | 'accessories'
+  | 'cards'
+  | 'books'
+  | 'keys'
+  | 'wallet'
+  | 'other';
 
 // ===== 圖書館 =====
 
@@ -820,7 +811,7 @@ export type LibraryLoan = {
   dueDate?: string;
   returnedAt?: string;
   renewCount: number;
-  status: "borrowed" | "returned" | "overdue";
+  status: 'borrowed' | 'returned' | 'overdue';
 };
 
 export type LibrarySeat = {
@@ -831,7 +822,7 @@ export type LibrarySeat = {
   floor?: string;
   hasOutlet: boolean;
   isQuietZone: boolean;
-  status: "available" | "occupied" | "reserved";
+  status: 'available' | 'occupied' | 'reserved';
   reservedBy?: string;
   reservedUntil?: string;
   schoolId?: string;
@@ -846,7 +837,7 @@ export type SeatReservation = {
   date: string;
   startTime: string;
   endTime: string;
-  status: "active" | "completed" | "cancelled" | "noshow";
+  status: 'active' | 'completed' | 'cancelled' | 'noshow';
   createdAt?: string;
 };
 
@@ -906,14 +897,14 @@ export type Notification = {
   expiresAt?: string;
 };
 
-export type NotificationType = 
-  | "announcement" 
-  | "event" 
-  | "grade" 
-  | "assignment" 
-  | "message" 
-  | "reminder"
-  | "system";
+export type NotificationType =
+  | 'announcement'
+  | 'event'
+  | 'grade'
+  | 'assignment'
+  | 'message'
+  | 'reminder'
+  | 'system';
 
 // ===== 行事曆 =====
 
@@ -932,21 +923,15 @@ export type CalendarEvent = {
   color?: string;
   type?: CalendarEventType;
   sourceId?: string;
-  sourceType?: "course" | "event" | "assignment" | "custom";
+  sourceType?: 'course' | 'event' | 'assignment' | 'custom';
   reminder?: number;
   recurrence?: RecurrenceRule;
 };
 
-export type CalendarEventType = 
-  | "class" 
-  | "assignment" 
-  | "exam" 
-  | "event" 
-  | "personal" 
-  | "holiday";
+export type CalendarEventType = 'class' | 'assignment' | 'exam' | 'event' | 'personal' | 'holiday';
 
 export type RecurrenceRule = {
-  frequency: "daily" | "weekly" | "monthly" | "yearly";
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
   interval?: number;
   endDate?: string;
   count?: number;
@@ -958,7 +943,7 @@ export type RecurrenceRule = {
 export type PaymentMethod = {
   id: string;
   userId: string;
-  type: "credit_card" | "debit_card" | "campus_card" | "mobile_pay";
+  type: 'credit_card' | 'debit_card' | 'campus_card' | 'mobile_pay';
   last4?: string;
   brand?: string;
   expiryMonth?: number;
@@ -973,8 +958,8 @@ export type Transaction = {
   schoolId?: string;
   amount: number;
   currency: string;
-  type: "payment" | "refund" | "topup" | "expense";
-  status: "pending" | "completed" | "failed" | "cancelled";
+  type: 'payment' | 'refund' | 'topup' | 'expense';
+  status: 'pending' | 'completed' | 'failed' | 'cancelled';
   description: string;
   merchantId?: string;
   merchantName?: string;
@@ -993,10 +978,11 @@ export type Order = {
   total?: number;
   totalAmount?: number;
   status: OrderStatus;
-  paymentStatus: "pending" | "paid" | "refunded" | "unpaid";
+  paymentStatus: 'pending' | 'paid' | 'refunded' | 'unpaid';
   merchantId?: string;
   merchantName?: string;
   cafeteria?: string;
+  cafeteriaId?: string;
   queueNumber?: string;
   estimatedTime?: number;
   totalPrice?: number;
@@ -1015,13 +1001,13 @@ export type OrderItem = {
   note?: string;
 };
 
-export type OrderStatus = 
-  | "pending" 
-  | "confirmed" 
-  | "preparing" 
-  | "ready" 
-  | "completed" 
-  | "cancelled";
+export type OrderStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'preparing'
+  | 'ready'
+  | 'completed'
+  | 'cancelled';
 
 // ===== 成就系統 =====
 
@@ -1036,12 +1022,12 @@ export type Achievement = {
   secret?: boolean;
 };
 
-export type AchievementCategory = 
-  | "academic" 
-  | "social" 
-  | "exploration" 
-  | "contribution" 
-  | "special";
+export type AchievementCategory =
+  | 'academic'
+  | 'social'
+  | 'exploration'
+  | 'contribution'
+  | 'special';
 
 export type UserAchievement = {
   id: string;
@@ -1056,7 +1042,7 @@ export type UserAchievement = {
   description?: string;
   icon?: string;
   points?: number;
-  category?: AchievementCategory | "general";
+  category?: AchievementCategory | 'general';
   maxProgress?: number;
 };
 
@@ -1066,7 +1052,7 @@ export type Attachment = {
   id: string;
   name: string;
   url: string;
-  type: "image" | "document" | "video" | "audio" | "other";
+  type: 'image' | 'document' | 'video' | 'audio' | 'other';
   size?: number;
   mimeType?: string;
 };
@@ -1086,16 +1072,16 @@ export type QueryOptions = {
   limit?: number;
   cursor?: string;
   sortBy?: string;
-  sortOrder?: "asc" | "desc";
+  sortOrder?: 'asc' | 'desc';
   orderBy?: string;
-  orderDirection?: "asc" | "desc";
+  orderDirection?: 'asc' | 'desc';
   search?: string;
   filters?: QueryFilter[];
 };
 
 export type QueryFilter = {
   field: string;
-  operator: "==" | "!=" | "<" | "<=" | ">" | ">=" | "in" | "array-contains";
+  operator: '==' | '!=' | '<' | '<=' | '>' | '>=' | 'in' | 'array-contains';
   value: unknown;
 };
 
@@ -1116,19 +1102,13 @@ export type School = {
   logoUrl?: string;
   primaryColor?: string;
   domain?: string;
-  ssoProvider?: "oidc" | "cas" | "saml";
+  ssoProvider?: 'oidc' | 'cas' | 'saml';
   ssoConfig?: Record<string, unknown>;
   features?: SchoolFeature[];
   createdAt: string;
-}; 
+};
 
-export type SchoolFeature = 
-  | "sso" 
-  | "library" 
-  | "bus" 
-  | "cafeteria" 
-  | "payment" 
-  | "ar_navigation";
+export type SchoolFeature = 'sso' | 'library' | 'bus' | 'cafeteria' | 'payment' | 'ar_navigation';
 
 // ===== 宿舍服務 =====
 
@@ -1156,34 +1136,23 @@ export type RepairRequest = {
   room: string;
   userId: string;
   assignedTo?: string;
-  priority?: "low" | "normal" | "high" | "urgent";
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
   images?: string[];
   feedback?: string;
   rating?: number;
   schoolId?: string;
 };
 
-export type RepairType = 
-  | "electrical" 
-  | "plumbing" 
-  | "furniture" 
-  | "ac" 
-  | "internet" 
-  | "other";
+export type RepairType = 'electrical' | 'plumbing' | 'furniture' | 'ac' | 'internet' | 'other';
 
-export type RepairStatus = 
-  | "pending" 
-  | "assigned" 
-  | "inProgress" 
-  | "completed" 
-  | "cancelled";
+export type RepairStatus = 'pending' | 'assigned' | 'inProgress' | 'completed' | 'cancelled';
 
 export type DormPackage = {
   id: string;
   trackingNumber: string;
   carrier: string;
   arrivedAt: string;
-  status: "pending" | "picked" | "returned";
+  status: 'pending' | 'picked' | 'returned';
   location: string;
   userId: string;
   pickedAt?: string;
@@ -1196,8 +1165,8 @@ export type WashingMachine = {
   number: number;
   floor: string;
   building: string;
-  status: "available" | "inUse" | "maintenance" | "reserved";
-  type: "washer" | "dryer";
+  status: 'available' | 'inUse' | 'maintenance' | 'reserved';
+  type: 'washer' | 'dryer';
   remainingTime?: number;
   reservedBy?: string;
   reservedUntil?: string;
@@ -1212,7 +1181,7 @@ export type WashingReservation = {
   userId: string;
   startTime: string;
   endTime?: string;
-  status: "reserved" | "inUse" | "completed" | "cancelled" | "noshow";
+  status: 'reserved' | 'inUse' | 'completed' | 'cancelled' | 'noshow';
   createdAt: string;
 };
 
@@ -1220,7 +1189,7 @@ export type DormAnnouncement = {
   id: string;
   title: string;
   content: string;
-  type: "notice" | "warning" | "emergency" | "maintenance";
+  type: 'notice' | 'warning' | 'emergency' | 'maintenance';
   building?: string;
   publishedAt: string;
   expiresAt?: string;
@@ -1235,7 +1204,7 @@ export type Printer = {
   location: string;
   building: string;
   floor: string;
-  status: "online" | "offline" | "busy" | "error" | "outOfPaper" | "outOfToner";
+  status: 'online' | 'offline' | 'busy' | 'error' | 'outOfPaper' | 'outOfToner';
   capabilities: PrinterCapability[];
   queueLength: number;
   pricePerPage: {
@@ -1245,17 +1214,12 @@ export type Printer = {
   schoolId?: string;
 };
 
-export type PrinterCapability = 
-  | "color" 
-  | "duplex" 
-  | "a3" 
-  | "a4" 
-  | "scan" 
-  | "copy";
+export type PrinterCapability = 'color' | 'duplex' | 'a3' | 'a4' | 'scan' | 'copy';
 
 export type PrintJob = {
   id: string;
   userId: string;
+  schoolId?: string;
   printerId: string;
   printer?: Printer;
   fileName: string;
@@ -1264,7 +1228,7 @@ export type PrintJob = {
   copies: number;
   color: boolean;
   duplex: boolean;
-  status: "pending" | "printing" | "completed" | "failed" | "cancelled";
+  status: 'pending' | 'printing' | 'completed' | 'failed' | 'cancelled';
   cost: number;
   createdAt: string;
   completedAt?: string;
@@ -1281,24 +1245,19 @@ export type HealthAppointment = {
   doctorName?: string;
   date: string;
   timeSlot: string;
-  status: "scheduled" | "completed" | "cancelled" | "noshow";
+  status: 'scheduled' | 'completed' | 'cancelled' | 'noshow';
   reason?: string;
   notes?: string;
   createdAt: string;
   schoolId?: string;
 };
 
-export type HealthDepartment = 
-  | "general" 
-  | "dental" 
-  | "mental" 
-  | "physical" 
-  | "vaccination";
+export type HealthDepartment = 'general' | 'dental' | 'mental' | 'physical' | 'vaccination';
 
 export type HealthRecord = {
   id: string;
   userId: string;
-  type: "appointment" | "vaccination" | "checkup" | "prescription";
+  type: 'appointment' | 'vaccination' | 'checkup' | 'prescription';
   title?: string;
   date: string;
   department: HealthDepartment;

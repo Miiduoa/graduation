@@ -1,4 +1,5 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import React, { useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View, Pressable, Alert, Linking } from "react-native";
 import {
   collection,
@@ -14,12 +15,14 @@ import {
 } from "firebase/firestore";
 import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
-import { Screen, Card, Button, Pill, LoadingState, ErrorState, SectionTitle, AnimatedCard, Avatar, StatusBadge, CountdownTimer, ProgressRing, SegmentedControl, SearchBar } from "../ui/components";
+import { Screen, Button, Pill, LoadingState, ErrorState, AnimatedCard, Avatar, StatusBadge, CountdownTimer, ProgressRing, SegmentedControl, SearchBar } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useAuth } from "../state/auth";
+import { useSchool } from "../state/school";
 import { getDb } from "../firebase";
+import { fetchSchoolDirectoryProfiles } from "../services/memberDirectory";
 
 type Group = {
   id: string;
@@ -42,7 +45,6 @@ type Assignment = {
 type Submission = {
   id: string; // uid
   uid: string;
-  authorEmail?: string | null;
   authorName?: string | null;
   text: string;
   links: string[];
@@ -50,6 +52,8 @@ type Submission = {
   submittedAt?: any;
   updatedAt?: any;
   isLate?: boolean;
+  isDraft?: boolean;
+  withdrawnAt?: any;
   grade?: number;
   feedback?: string;
   gradedAt?: any;
@@ -60,9 +64,7 @@ type Submission = {
 type UserProfile = {
   uid: string;
   displayName?: string;
-  email?: string;
   avatarUrl?: string;
-  studentId?: string;
   department?: string;
 };
 
@@ -79,16 +81,27 @@ export function AssignmentDetailScreen(props: any) {
   const assignmentId: string | undefined = props?.route?.params?.assignmentId;
 
   const auth = useAuth();
+  const { school } = useSchool();
   const db = getDb();
 
   const [err, setErr] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
   const [savingGrade, setSavingGrade] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<{ name: string; uri: string; size?: number }[]>([]);
   const [viewMode, setViewMode] = useState<"all" | "graded" | "ungraded">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [showStats, setShowStats] = useState(true);
+  const [peerReviewEnabled, setPeerReviewEnabled] = useState<boolean>(false);
+  const [myReviewTask, setMyReviewTask] = useState<{ submissionOwnerId: string } | null>(null);
+  const [peerScores, setPeerScores] = useState<Record<string, string>>({});
+  const [peerComment, setPeerComment] = useState("");
+  const [submittingPeerReview, setSubmittingPeerReview] = useState(false);
+  const [peerReviewSent, setPeerReviewSent] = useState(false);
+  const [peerReviewReceivedCount, setPeerReviewReceivedCount] = useState(0);
+  const [myAggregateScore, setMyAggregateScore] = useState<number | null>(null);
 
   const { items: groupMeta } = useAsyncList<Group>(
     async () => {
@@ -158,6 +171,7 @@ export function AssignmentDetailScreen(props: any) {
     // Sync local inputs when submission loads/changes.
     setMyText(mySubmission?.text ?? "");
     setMyLinksText((mySubmission?.links ?? []).join("\n"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mySubmission?.id]);
 
   const {
@@ -180,20 +194,18 @@ export function AssignmentDetailScreen(props: any) {
   // Fetch user profiles for submissions display
   const { items: userProfiles } = useAsyncList<UserProfile>(
     async () => {
-      if (!canManageCourse || submissions.length === 0) return [];
-      const uids = [...new Set(submissions.map(s => s.uid))];
-      const profiles: UserProfile[] = [];
-      for (const uid of uids) {
-        try {
-          const snap = await getDoc(doc(db, "users", uid));
-          if (snap.exists()) {
-            profiles.push({ uid, ...(snap.data() as any) });
-          }
-        } catch {}
-      }
-      return profiles;
+      const uids = [
+        ...(canManageCourse ? submissions.map((submission) => submission.uid) : []),
+        ...(myReviewTask ? [myReviewTask.submissionOwnerId] : []),
+      ];
+      if (uids.length === 0) return [];
+      return fetchSchoolDirectoryProfiles(
+        school.id,
+        [...new Set(uids)],
+        db,
+      );
     },
-    [db, canManageCourse, submissions.map(s => s.uid).join(",")]
+    [db, school.id, canManageCourse, submissions.map(s => s.uid).join(","), myReviewTask?.submissionOwnerId]
   );
 
   const profilesById = useMemo(() => {
@@ -225,10 +237,9 @@ export function AssignmentDetailScreen(props: any) {
       list = list.filter(s => {
         const profile = profilesById[s.uid];
         return (
-          s.authorEmail?.toLowerCase().includes(q) ||
           profile?.displayName?.toLowerCase().includes(q) ||
-          profile?.studentId?.toLowerCase().includes(q) ||
-          profile?.department?.toLowerCase().includes(q)
+          profile?.department?.toLowerCase().includes(q) ||
+          s.uid.toLowerCase().includes(q)
         );
       });
     }
@@ -249,16 +260,6 @@ export function AssignmentDetailScreen(props: any) {
 
   const [gradeDraft, setGradeDraft] = useState<Record<string, string>>({});
   const [feedbackDraft, setFeedbackDraft] = useState<Record<string, string>>({});
-
-  // 同儕互評狀態
-  const [peerReviewEnabled, setPeerReviewEnabled] = useState<boolean>(false);
-  const [myReviewTask, setMyReviewTask] = useState<{ submissionOwnerId: string; ownerEmail?: string } | null>(null);
-  const [peerScores, setPeerScores] = useState<Record<string, string>>({});
-  const [peerComment, setPeerComment] = useState("");
-  const [submittingPeerReview, setSubmittingPeerReview] = useState(false);
-  const [peerReviewSent, setPeerReviewSent] = useState(false);
-  const [peerReviewReceivedCount, setPeerReviewReceivedCount] = useState(0);
-  const [myAggregateScore, setMyAggregateScore] = useState<number | null>(null);
 
   const PEER_REVIEW_CRITERIA = [
     { key: "logic", label: "邏輯清晰度", weight: 0.3 },
@@ -302,7 +303,7 @@ export function AssignmentDetailScreen(props: any) {
         if (myReviewSnap.exists()) {
           const data = myReviewSnap.data();
           if (!data.submittedAt) {
-            setMyReviewTask({ submissionOwnerId: data.submissionOwnerId, ownerEmail: data.ownerEmail });
+            setMyReviewTask({ submissionOwnerId: data.submissionOwnerId });
           } else {
             setPeerReviewSent(true);
           }
@@ -328,9 +329,12 @@ export function AssignmentDetailScreen(props: any) {
           });
           setMyAggregateScore(Math.round(totalScore / receivedSnap.docs.length));
         }
-      } catch {}
+      } catch {
+        // Ignore errors
+      }
     }
     loadPeerReview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId, assignmentId, auth.user?.uid, assignment?.id]);
 
   const enablePeerReview = async () => {
@@ -349,13 +353,11 @@ export function AssignmentDetailScreen(props: any) {
       await Promise.all(
         shuffled.map((reviewerId, i) => {
           const ownerId = shuffled[(i + 1) % shuffled.length];
-          const ownerSubmission = allSubs.find((s) => s.uid === ownerId);
           return setDoc(
             doc(db, "groups", groupId!, "assignments", assignmentId!, "peerReviews", reviewerId),
             {
               reviewerId,
               submissionOwnerId: ownerId,
-              ownerEmail: ownerSubmission?.authorEmail ?? "",
               assignedAt: serverTimestamp(),
               submittedAt: null,
               scores: {},
@@ -487,12 +489,12 @@ export function AssignmentDetailScreen(props: any) {
         doc(db, "groups", groupId, "assignments", assignmentId, "submissions", auth.user.uid),
         {
           uid: auth.user.uid,
-          authorEmail: auth.user.email ?? null,
           authorName: auth.profile?.displayName ?? null,
           text,
           links,
           files: filesMeta,
           isLate,
+          isDraft: false,
           updatedAt: serverTimestamp(),
           submittedAt: mySubmission?.submittedAt ?? serverTimestamp(),
         },
@@ -507,6 +509,86 @@ export function AssignmentDetailScreen(props: any) {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // === 草稿儲存 ===
+  const onSaveDraft = async () => {
+    setErr(null);
+    setSuccessMsg(null);
+    if (!groupId || !assignmentId || !auth.user) return;
+    const text = myText.trim();
+    const links = parseLinks(myLinksText);
+    if (!text && links.length === 0 && selectedFiles.length === 0) {
+      setErr("請至少填寫文字、連結或附件才能儲存草稿");
+      return;
+    }
+    setSavingDraft(true);
+    try {
+      const filesMeta = selectedFiles.map(f => ({
+        name: f.name,
+        url: f.uri,
+        size: f.size,
+      }));
+      await setDoc(
+        doc(db, "groups", groupId, "assignments", assignmentId, "submissions", auth.user.uid),
+        {
+          uid: auth.user.uid,
+          authorName: auth.profile?.displayName ?? null,
+          text,
+          links,
+          files: filesMeta,
+          isDraft: true,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      setSuccessMsg("草稿已儲存！");
+      reloadMySubmission();
+    } catch (e: any) {
+      setErr(e?.message ?? "儲存草稿失敗");
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  // === 撤回繳交 ===
+  const onWithdraw = () => {
+    if (!mySubmission) return;
+    if (typeof mySubmission.grade === "number") {
+      Alert.alert("無法撤回", "老師已經批改此作業，無法撤回。");
+      return;
+    }
+    Alert.alert(
+      "確認撤回",
+      "撤回後作業將回到草稿狀態，您可以修改後重新繳交。確定要撤回嗎？",
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "確認撤回",
+          style: "destructive",
+          onPress: async () => {
+            if (!groupId || !assignmentId || !auth.user) return;
+            setWithdrawing(true);
+            try {
+              await updateDoc(
+                doc(db, "groups", groupId, "assignments", assignmentId, "submissions", auth.user.uid),
+                {
+                  isDraft: true,
+                  withdrawnAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                }
+              );
+              setSuccessMsg("已撤回繳交，可繼續修改後重新繳交");
+              reloadMySubmission();
+            } catch (e: any) {
+              setErr(e?.message ?? "撤回失敗");
+            } finally {
+              setWithdrawing(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const onSaveGrade = async (uid: string) => {
@@ -730,7 +812,11 @@ export function AssignmentDetailScreen(props: any) {
               label={assignment.gradesPublished ? "成績已發布" : "成績未發布"} 
             />
             <Pill text={canManageCourse ? "教師" : "學生"} kind={canManageCourse ? "accent" : "default"} />
-            {mySubmission && <StatusBadge status="success" label="已繳交" />}
+            {mySubmission && (
+              mySubmission.isDraft
+                ? <StatusBadge status="warning" label="草稿" />
+                : <StatusBadge status="success" label="已繳交" />
+            )}
             {mySubmission?.isLate && <StatusBadge status="warning" label="遲交" />}
           </View>
 
@@ -868,14 +954,26 @@ export function AssignmentDetailScreen(props: any) {
             )}
           </View>
 
-          {/* Submit Buttons */}
+          {/* Submit / Draft / Withdraw Buttons */}
           <View style={{ marginTop: 14, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-            <Button 
-              text={submitting ? "繳交中..." : (auth.user ? (mySubmission ? "更新繳交" : "送出作業") : "請先登入")} 
-              kind="primary" 
-              disabled={!auth.user || submitting} 
-              onPress={onSubmit} 
+            <Button
+              text={submitting ? "繳交中..." : (auth.user ? (mySubmission && !mySubmission.isDraft ? "更新繳交" : "送出作業") : "請先登入")}
+              kind="primary"
+              disabled={!auth.user || submitting || savingDraft}
+              onPress={onSubmit}
             />
+            <Button
+              text={savingDraft ? "儲存中..." : "儲存草稿"}
+              disabled={!auth.user || submitting || savingDraft}
+              onPress={onSaveDraft}
+            />
+            {mySubmission && !mySubmission.isDraft && typeof mySubmission.grade !== "number" && (
+              <Button
+                text={withdrawing ? "撤回中..." : "撤回繳交"}
+                disabled={withdrawing}
+                onPress={onWithdraw}
+              />
+            )}
             <Button
               text="重新整理"
               onPress={() => {
@@ -1008,7 +1106,7 @@ export function AssignmentDetailScreen(props: any) {
               <View style={{ gap: 12, marginTop: 14 }}>
                 {filteredSubmissions.map((s, idx) => {
                   const profile = profilesById[s.uid];
-                  const displayName = profile?.displayName || s.authorEmail || s.uid.slice(0, 8);
+                  const displayName = profile?.displayName || s.authorName || s.uid.slice(0, 8);
                   const isSaving = savingGrade === s.uid;
 
                   return (
@@ -1038,8 +1136,7 @@ export function AssignmentDetailScreen(props: any) {
                           <View style={{ flex: 1 }}>
                             <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 15 }}>{displayName}</Text>
                             <View style={{ flexDirection: "row", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                              {profile?.studentId && <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{profile.studentId}</Text>}
-                              {profile?.department && <Text style={{ color: theme.colors.muted, fontSize: 12 }}>· {profile.department}</Text>}
+                              {profile?.department && <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{profile.department}</Text>}
                             </View>
                           </View>
                           <View style={{ alignItems: "flex-end" }}>
@@ -1240,7 +1337,7 @@ export function AssignmentDetailScreen(props: any) {
                 <View style={{ padding: 12, borderRadius: theme.radius.md, backgroundColor: theme.colors.surface2 }}>
                   <Text style={{ color: theme.colors.muted, fontSize: 12 }}>你被分配評審的同學作業</Text>
                   <Text style={{ color: theme.colors.text, fontWeight: "700", marginTop: 4 }}>
-                    {myReviewTask.ownerEmail ?? myReviewTask.submissionOwnerId.slice(0, 8)}
+                    {profilesById[myReviewTask.submissionOwnerId]?.displayName ?? myReviewTask.submissionOwnerId.slice(0, 8)}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>（評語會匿名發送）</Text>
                 </View>

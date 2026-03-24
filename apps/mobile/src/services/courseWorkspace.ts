@@ -11,6 +11,7 @@ import {
   type Firestore,
 } from "firebase/firestore";
 import { httpsCallable, type Functions } from "firebase/functions";
+import { fetchSchoolDirectoryProfiles } from "./memberDirectory";
 
 export type CourseMembership = {
   id: string;
@@ -32,6 +33,11 @@ export type CourseSummary = {
   activeSessionId: string | null;
   unreadCount: number;
   latestDueAt: Date | null;
+  memberCount: number;
+  activeLearnerCount: number;
+  completedAssignmentCount: number;
+  completionRate: number;
+  socialProofUpdatedAt: Date | null;
 };
 
 export type CourseModule = {
@@ -222,7 +228,8 @@ export async function buildCourseSummaries(db: Firestore, memberships: CourseMem
 
   return Promise.all(
     memberships.map(async (membership) => {
-      const [assignmentSnap, moduleSnap, quizSnap, attendanceActiveSnap, liveActiveSnap] = await Promise.all([
+      const [groupSnap, assignmentSnap, moduleSnap, quizSnap, attendanceActiveSnap, liveActiveSnap] = await Promise.all([
+        getDoc(doc(db, "groups", membership.groupId)).catch(() => null),
         getDocs(collection(db, "groups", membership.groupId, "assignments")).catch(() => null),
         getDocs(collection(db, "groups", membership.groupId, "modules")).catch(() => null),
         getDocs(collection(db, "groups", membership.groupId, "quizzes")).catch(() => null),
@@ -235,10 +242,41 @@ export async function buildCourseSummaries(db: Firestore, memberships: CourseMem
       ]);
 
       const assignments = assignmentSnap?.docs.map((docSnap) => docSnap.data() as Record<string, unknown>) ?? [];
+      const groupData = groupSnap?.data() as Record<string, unknown> | undefined;
       const dueDates = assignments
         .map((assignment) => toDate(assignment.dueAt))
         .filter((date): date is Date => !!date)
         .sort((a, b) => a.getTime() - b.getTime());
+      const socialAssignments = [...assignments].sort((left, right) => {
+        const leftTime = toDate(left.updatedAt ?? left.createdAt ?? left.dueAt)?.getTime() ?? 0;
+        const rightTime = toDate(right.updatedAt ?? right.createdAt ?? right.dueAt)?.getTime() ?? 0;
+        return rightTime - leftTime;
+      });
+      const socialAssignment =
+        socialAssignments.find((assignment) => typeof assignment.submissionCount === "number") ?? socialAssignments[0] ?? null;
+      const memberCount =
+        typeof groupData?.memberCount === "number" && groupData.memberCount > 0
+          ? groupData.memberCount
+          : 0;
+      const attendanceDoc = attendanceActiveSnap?.docs[0]?.data() as Record<string, unknown> | undefined;
+      const liveDoc = liveActiveSnap?.docs[0]?.data() as Record<string, unknown> | undefined;
+      const activeDoc = attendanceDoc ?? liveDoc;
+      const activeLearnerCount =
+        typeof activeDoc?.attendeeCount === "number" && activeDoc.attendeeCount > 0
+          ? activeDoc.attendeeCount
+          : 0;
+      const completedAssignmentCount =
+        typeof socialAssignment?.submissionCount === "number" && socialAssignment.submissionCount > 0
+          ? socialAssignment.submissionCount
+          : 0;
+      const completionRate =
+        memberCount > 0 && completedAssignmentCount > 0
+          ? Math.min(Math.round((completedAssignmentCount / memberCount) * 100), 100)
+          : 0;
+      const socialProofUpdatedAt =
+        toDate(activeDoc?.updatedAt ?? activeDoc?.startedAt) ??
+        toDate(socialAssignment?.updatedAt ?? socialAssignment?.createdAt ?? socialAssignment?.dueAt) ??
+        null;
 
       const now = Date.now();
       const sevenDaysLater = now + 7 * 24 * 60 * 60 * 1000;
@@ -264,6 +302,11 @@ export async function buildCourseSummaries(db: Firestore, memberships: CourseMem
               : liveActiveSnap?.docs[0]?.id ?? null,
         unreadCount: membership.unreadCount ?? 0,
         latestDueAt: dueDates[0] ?? null,
+        memberCount,
+        activeLearnerCount,
+        completedAssignmentCount,
+        completionRate,
+        socialProofUpdatedAt,
       } satisfies CourseSummary;
     })
   );
@@ -600,16 +643,17 @@ export async function listCourseGradebook(db: Firestore, groupId: string) {
       ...(docSnap.data() as Record<string, unknown>),
     }))
     .filter((member) => member.status === "active" && !canManageCourse(member.role as string | undefined));
-
-  const profileRows = await Promise.all(
-    studentMembers.map(async (member) => {
-      const userSnap = await getDoc(doc(db, "users", String(member.uid))).catch(() => null);
-      return {
-        uid: String(member.uid),
-        member,
-        profile: userSnap?.exists() ? (userSnap.data() as Record<string, unknown>) : null,
-      };
-    })
+  const groupData = groupSnap.exists() ? (groupSnap.data() as Record<string, unknown>) : {};
+  const groupSchoolId = typeof groupData.schoolId === "string" ? groupData.schoolId : null;
+  const directoryProfiles = groupSchoolId
+    ? await fetchSchoolDirectoryProfiles(
+        groupSchoolId,
+        studentMembers.map((member) => String(member.uid)),
+        db,
+      ).catch(() => [])
+    : [];
+  const directoryProfileMap = Object.fromEntries(
+    directoryProfiles.map((profile) => [profile.uid, profile]),
   );
 
   const gradebookMap = Object.fromEntries(
@@ -632,10 +676,12 @@ export async function listCourseGradebook(db: Firestore, groupId: string) {
     } satisfies CourseGradebookAssignment;
   });
 
-  const rows = profileRows.map((row) => {
-    const gradebookRow = gradebookMap[row.uid] ?? {};
+  const rows = studentMembers.map((member) => {
+    const uid = String(member.uid);
+    const profile = directoryProfileMap[uid] ?? null;
+    const gradebookRow = gradebookMap[uid] ?? {};
     const assignmentBreakdown = assignments.map((assignment) => {
-      const submission = submissionMap[assignment.id]?.[row.uid] ?? {};
+      const submission = submissionMap[assignment.id]?.[uid] ?? {};
       return {
         assignmentId: assignment.id,
         title: String(assignment.title ?? "未命名作業"),
@@ -649,15 +695,14 @@ export async function listCourseGradebook(db: Firestore, groupId: string) {
     });
 
     const gradedAssignments = assignmentBreakdown.filter((entry) => typeof entry.grade === "number").length;
-    const profile = row.profile ?? {};
 
     return {
-      uid: row.uid,
+      uid,
       displayName:
-        String(profile.displayName ?? row.member.displayName ?? row.member.email ?? row.uid),
-      email: (profile.email as string | undefined) ?? (row.member.email as string | undefined) ?? null,
-      studentId: (profile.studentId as string | undefined) ?? null,
-      department: (profile.department as string | undefined) ?? null,
+        String(profile?.displayName ?? member.displayName ?? member.email ?? uid),
+      email: null,
+      studentId: null,
+      department: profile?.department ?? null,
       finalScore: typeof gradebookRow.finalScore === "number" ? gradebookRow.finalScore : null,
       passingScore: typeof gradebookRow.passingScore === "number" ? gradebookRow.passingScore : 60,
       result: (gradebookRow.result as string | undefined) ?? "incomplete",
@@ -668,8 +713,6 @@ export async function listCourseGradebook(db: Firestore, groupId: string) {
       assignmentBreakdown,
     } satisfies CourseGradebookRow;
   });
-
-  const groupData = groupSnap.exists() ? (groupSnap.data() as Record<string, unknown>) : {};
   const finalScores = (groupData.finalScores ?? {}) as Record<string, unknown>;
 
   return {
