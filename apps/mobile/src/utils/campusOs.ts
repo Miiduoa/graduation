@@ -22,12 +22,34 @@ export function isTeachingRole(role?: UserRole | null): boolean {
 
 function asDate(value: unknown): Date | null {
   if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  // Some runtimes (or mocked data) can have "Date-like" objects that pass `instanceof Date`
+  // but don't actually implement `getTime()`. Always guard `getTime` before calling.
+  const maybeDate = value as { getTime?: unknown };
+  if (typeof maybeDate?.getTime === "function") {
+    const t = (maybeDate.getTime as () => number)();
+    return Number.isNaN(t) ? null : (value as Date);
+  }
 
   // Firestore Timestamp and other objects with `toDate()`
   const maybeTimestamp = value as { toDate?: () => Date };
   if (typeof maybeTimestamp?.toDate === "function") {
     const d = maybeTimestamp.toDate();
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // Firestore Timestamp (legacy/serialized shapes)
+  const maybeFirestore = value as { _seconds?: unknown; _nanoseconds?: unknown; seconds?: unknown; nanoseconds?: unknown };
+  const seconds =
+    (typeof maybeFirestore._seconds === "number" ? maybeFirestore._seconds : maybeFirestore.seconds) as
+      | number
+      | undefined;
+  const nanoseconds =
+    (typeof maybeFirestore._nanoseconds === "number" ? maybeFirestore._nanoseconds : maybeFirestore.nanoseconds) as
+      | number
+      | undefined;
+  if (typeof seconds === "number") {
+    const ms = seconds * 1000 + Math.round((nanoseconds ?? 0) / 1e6);
+    const d = new Date(ms);
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
