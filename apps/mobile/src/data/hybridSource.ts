@@ -59,7 +59,7 @@ export function setHybridSourceSchoolContext(schoolId: string | null): void {
   currentSchoolContextId = schoolId;
 }
 
-const DEFAULT_SCHOOL = 'tw-nchu';
+const DEFAULT_SCHOOL = 'tw-pu';
 
 function inferSchoolIdFromEntityId(id: string): string {
   if (!id) return DEFAULT_SCHOOL;

@@ -1,7 +1,8 @@
-import { 
-  registerSchoolConfig, 
+import {
+  registerSchoolConfig,
   registerCustomAdapter,
   createNCHUAdapter,
+  createPUAdapter,
 } from "./apiAdapters";
 
 export type ApiEnvironment = "development" | "staging" | "production";
@@ -16,6 +17,11 @@ const API_URLS: Record<string, Record<ApiEnvironment, string>> = {
     development: "http://localhost:3001",
     staging: "https://staging-api.demo.edu.tw",
     production: "https://api.demo.edu.tw",
+  },
+  "tw-pu": {
+    development: "http://localhost:5001/campus-demo-3a869/asia-east1",
+    staging: "https://asia-east1-campus-demo-3a869.cloudfunctions.net",
+    production: "https://asia-east1-campus-demo-3a869.cloudfunctions.net",
   },
 };
 
@@ -37,7 +43,8 @@ export function getApiUrl(schoolId: string): string | null {
 
 export function initializeSchoolApis(): void {
   registerCustomAdapter("nchu", () => createNCHUAdapter());
-  
+  registerCustomAdapter("pu", () => createPUAdapter());
+
   const nchuUrl = getApiUrl("tw-nchu");
   if (nchuUrl) {
     registerSchoolConfig({
@@ -55,7 +62,25 @@ export function initializeSchoolApis(): void {
       customFactory: createNCHUAdapter,
     });
   }
-  
+
+  const puUrl = getApiUrl("tw-pu");
+  if (puUrl) {
+    registerSchoolConfig({
+      schoolId: "tw-pu",
+      schoolName: "靜宜大學",
+      adapterType: "custom",
+      config: {
+        baseUrl: puUrl,
+        timeout: 15000,
+        headers: {
+          "X-Client-Version": "1.0.0",
+          "X-Platform": "mobile",
+        },
+      },
+      customFactory: createPUAdapter,
+    });
+  }
+
   const demoUrl = getApiUrl("tw-demo-uni");
   if (demoUrl) {
     registerSchoolConfig({
@@ -75,7 +100,7 @@ export function initializeSchoolApis(): void {
       },
     });
   }
-  
+
   console.log(`[ApiConfig] Initialized school APIs for environment: ${currentEnvironment}`);
 }
 
@@ -114,6 +139,12 @@ export const SUPPORTED_SCHOOLS_WITH_API = [
     name: "國立中興大學",
     hasRealApi: true,
     capabilities: ["announcements", "events", "courses", "grades", "menu", "pois", "sso"],
+  },
+  {
+    id: "tw-pu",
+    name: "靜宜大學",
+    hasRealApi: true,
+    capabilities: ["announcements", "courses", "grades", "pois"],
   },
   {
     id: "tw-demo-uni",
