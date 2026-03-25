@@ -20,9 +20,30 @@ export function isTeachingRole(role?: UserRole | null): boolean {
   return resolveRoleMode(role, true) === "teacher" || resolveRoleMode(role, true) === "admin";
 }
 
-export function getFreshnessState(date?: Date | null): FreshnessState {
-  if (!date) return "stale";
-  const diff = Date.now() - date.getTime();
+function asDate(value: unknown): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+  // Firestore Timestamp and other objects with `toDate()`
+  const maybeTimestamp = value as { toDate?: () => Date };
+  if (typeof maybeTimestamp?.toDate === "function") {
+    const d = maybeTimestamp.toDate();
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // ISO string / epoch millis
+  if (typeof value === "string" || typeof value === "number") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  return null;
+}
+
+export function getFreshnessState(date?: Date | string | number | null): FreshnessState {
+  const d = asDate(date);
+  if (!d) return "stale";
+  const diff = Date.now() - d.getTime();
   if (diff <= 1000 * 60 * 30) return "live";
   if (diff <= 1000 * 60 * 60 * 12) return "new";
   if (diff <= 1000 * 60 * 60 * 24) return "today";
@@ -145,9 +166,10 @@ export function getNextCourse(courses: Course[], date: Date = new Date()): Cours
   );
 }
 
-export function formatDueWindow(date?: Date | null): string {
-  if (!date) return "等待下一步";
-  const diffMinutes = Math.round((date.getTime() - Date.now()) / 60000);
+export function formatDueWindow(date?: Date | string | number | null): string {
+  const d = asDate(date);
+  if (!d) return "等待下一步";
+  const diffMinutes = Math.round((d.getTime() - Date.now()) / 60000);
   if (diffMinutes <= 0) return "已到時間，現在處理";
   if (diffMinutes < 60) return `${diffMinutes} 分鐘內要處理`;
   if (diffMinutes < 24 * 60) {
