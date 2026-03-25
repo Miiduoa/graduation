@@ -84,6 +84,23 @@ const MOCK_SSO_CONFIGS: Record<string, SchoolSSOConfig> = {
     emailDomain: 'ntu.edu.tw',
     allowEmailLogin: true,
   },
+  pu: {
+    schoolId: 'pu',
+    schoolName: '靜宜大學',
+    setupStatus: 'testing',
+    ssoConfig: {
+      provider: 'oidc',
+      name: '靜宜大學 SSO',
+      enabled: true,
+      clientId: 'campus-app-pu',
+      authorizationEndpoint: 'https://alcat.pu.edu.tw/oauth2/authorize',
+      tokenEndpoint: 'https://alcat.pu.edu.tw/oauth2/token',
+      userInfoEndpoint: 'https://alcat.pu.edu.tw/oauth2/userinfo',
+      scopes: ['openid', 'profile', 'email', 'student_id'],
+    },
+    emailDomain: 'pu.edu.tw',
+    allowEmailLogin: true,
+  },
   demo: {
     schoolId: 'demo',
     schoolName: 'Demo 學校',

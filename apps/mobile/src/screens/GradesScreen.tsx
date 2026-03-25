@@ -47,197 +47,84 @@ type Semester = {
   courses: Grade[];
 };
 
+// 通用示範成績 — 僅在未登入或無法取得真實資料時當後備顯示
+// 登入後系統會透過 PUAdapter → Cloud Function → puScraper 抓取該使用者的真實成績
 const MOCK_SEMESTERS: Semester[] = [
   {
-    id: "113-1",
-    name: "113學年度第1學期",
-    year: 113,
+    id: "demo-1",
+    name: "示範學期（上）",
+    year: 0,
     term: 1,
-    gpa: 3.75,
-    credits: 18,
+    gpa: 3.60,
+    credits: 15,
     courses: [
       {
-        id: "c1",
-        courseCode: "CS101",
+        id: "demo-c1",
+        courseCode: "DEMO",
         courseName: "程式設計",
         credits: 3,
-        semester: "113-1",
+        semester: "demo-1",
+        midterm: 85,
+        final: 90,
+        grade: "A",
+        gpa: 4.0,
+        status: "completed",
+        category: "required",
+        instructor: "範例教師",
+      },
+      {
+        id: "demo-c2",
+        courseCode: "DEMO",
+        courseName: "微積分",
+        credits: 3,
+        semester: "demo-1",
+        midterm: 78,
+        final: 82,
+        grade: "B+",
+        gpa: 3.5,
+        status: "completed",
+        category: "required",
+        instructor: "範例教師",
+      },
+      {
+        id: "demo-c3",
+        courseCode: "DEMO",
+        courseName: "英文",
+        credits: 2,
+        semester: "demo-1",
         midterm: 88,
         final: 92,
         grade: "A",
         gpa: 4.0,
         status: "completed",
-        category: "required",
-        instructor: "王教授",
+        category: "english",
+        instructor: "範例教師",
       },
       {
-        id: "c2",
-        courseCode: "MATH101",
-        courseName: "微積分(一)",
-        credits: 3,
-        semester: "113-1",
-        midterm: 78,
+        id: "demo-c4",
+        courseCode: "DEMO",
+        courseName: "通識課程",
+        credits: 2,
+        semester: "demo-1",
+        midterm: 80,
         final: 85,
         grade: "A-",
         gpa: 3.7,
         status: "completed",
-        category: "required",
-        instructor: "李教授",
+        category: "general",
+        instructor: "範例教師",
       },
       {
-        id: "c3",
-        courseCode: "PHY101",
-        courseName: "普通物理",
-        credits: 3,
-        semester: "113-1",
-        midterm: 82,
-        final: 88,
-        grade: "A-",
-        gpa: 3.7,
-        status: "completed",
-        category: "required",
-        instructor: "陳教授",
-      },
-      {
-        id: "c4",
-        courseCode: "GE101",
-        courseName: "文學與人生",
-        credits: 2,
-        semester: "113-1",
-        midterm: 90,
-        final: 92,
-        grade: "A",
-        gpa: 4.0,
+        id: "demo-c5",
+        courseCode: "DEMO",
+        courseName: "體育",
+        credits: 0,
+        semester: "demo-1",
+        grade: "通過",
+        gpa: 0,
         status: "completed",
         category: "general",
-        instructor: "張教授",
-      },
-      {
-        id: "c5",
-        courseCode: "ENG101",
-        courseName: "大一英文(一)",
-        credits: 2,
-        semester: "113-1",
-        midterm: 85,
-        final: 88,
-        grade: "A-",
-        gpa: 3.7,
-        status: "completed",
-        category: "english",
-        instructor: "林老師",
-      },
-      {
-        id: "c6",
-        courseCode: "CS102",
-        courseName: "計算機概論",
-        credits: 3,
-        semester: "113-1",
-        midterm: 75,
-        final: 80,
-        grade: "B+",
-        gpa: 3.3,
-        status: "completed",
-        category: "required",
-        instructor: "黃教授",
-      },
-      {
-        id: "c7",
-        courseCode: "PE101",
-        courseName: "體育(一)",
-        credits: 2,
-        semester: "113-1",
-        grade: "A",
-        gpa: 4.0,
-        status: "completed",
-        category: "general",
-        instructor: "體育組",
-      },
-    ],
-  },
-  {
-    id: "113-2",
-    name: "113學年度第2學期",
-    year: 113,
-    term: 2,
-    gpa: 0,
-    credits: 19,
-    courses: [
-      {
-        id: "c8",
-        courseCode: "CS201",
-        courseName: "資料結構",
-        credits: 3,
-        semester: "113-2",
-        midterm: 85,
-        status: "in_progress",
-        category: "required",
-        instructor: "王教授",
-      },
-      {
-        id: "c9",
-        courseCode: "MATH102",
-        courseName: "微積分(二)",
-        credits: 3,
-        semester: "113-2",
-        midterm: 80,
-        status: "in_progress",
-        category: "required",
-        instructor: "李教授",
-      },
-      {
-        id: "c10",
-        courseCode: "CS202",
-        courseName: "物件導向程式設計",
-        credits: 3,
-        semester: "113-2",
-        midterm: 90,
-        status: "in_progress",
-        category: "required",
-        instructor: "張教授",
-      },
-      {
-        id: "c11",
-        courseCode: "MATH201",
-        courseName: "線性代數",
-        credits: 3,
-        semester: "113-2",
-        midterm: 75,
-        status: "in_progress",
-        category: "required",
-        instructor: "周教授",
-      },
-      {
-        id: "c12",
-        courseCode: "GE102",
-        courseName: "藝術欣賞",
-        credits: 2,
-        semester: "113-2",
-        midterm: 88,
-        status: "in_progress",
-        category: "general",
-        instructor: "吳教授",
-      },
-      {
-        id: "c13",
-        courseCode: "ENG102",
-        courseName: "大一英文(二)",
-        credits: 2,
-        semester: "113-2",
-        midterm: 82,
-        status: "in_progress",
-        category: "english",
-        instructor: "林老師",
-      },
-      {
-        id: "c14",
-        courseCode: "CS203",
-        courseName: "離散數學",
-        credits: 3,
-        semester: "113-2",
-        midterm: 78,
-        status: "in_progress",
-        category: "required",
-        instructor: "陳教授",
+        instructor: "體育室",
       },
     ],
   },
@@ -255,6 +142,8 @@ const GRADE_COLORS: Record<string, string> = {
   "C-": "#FBBF24",
   D: "#EF4444",
   F: "#DC2626",
+  "通過": "#22C55E",
+  "不通過": "#DC2626",
 };
 
 // Infer category from course code patterns
@@ -410,11 +299,22 @@ export function GradesScreen(props: any) {
     for (const grade of serverGrades) {
       const semId = grade.semester;
       if (!semesterMap.has(semId)) {
+        // Support both "114-1" format and "1141" format (PU scraper)
+        let yearStr: string, termStr: string;
+        if (semId.includes("-")) {
+          [yearStr, termStr] = semId.split("-");
+        } else if (semId.length === 4) {
+          yearStr = semId.substring(0, 3);
+          termStr = semId.substring(3);
+        } else {
+          yearStr = semId;
+          termStr = "1";
+        }
         semesterMap.set(semId, {
           id: semId,
-          name: `${semId.split("-")[0]}學年度第${semId.split("-")[1]}學期`,
-          year: parseInt(semId.split("-")[0]),
-          term: parseInt(semId.split("-")[1]),
+          name: `${yearStr}學年度第${termStr}學期`,
+          year: parseInt(yearStr),
+          term: parseInt(termStr),
           gpa: 0,
           credits: 0,
           courses: [],
@@ -496,14 +396,17 @@ export function GradesScreen(props: any) {
   }, [completedCourses]);
 
   const gradeDistribution = useMemo(() => {
-    const dist: Record<string, number> = { "A系列": 0, "B系列": 0, "C系列": 0, "其他": 0 };
+    const dist: Record<string, number> = { "A系列": 0, "B系列": 0, "C系列": 0, "通過": 0, "其他": 0 };
     for (const c of completedCourses) {
       if (!c.grade) continue;
       if (c.grade.startsWith("A")) dist["A系列"]++;
       else if (c.grade.startsWith("B")) dist["B系列"]++;
       else if (c.grade.startsWith("C")) dist["C系列"]++;
+      else if (c.grade === "通過" || c.grade === "不通過") dist["通過"]++;
       else dist["其他"]++;
     }
+    // Remove "通過" category if empty
+    if (dist["通過"] === 0) delete dist["通過"];
     return dist;
   }, [completedCourses]);
 

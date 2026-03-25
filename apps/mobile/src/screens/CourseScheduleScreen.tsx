@@ -63,15 +63,14 @@ const COURSE_COLORS = [
   "#14B8A6",
 ];
 
+// 通用示範課表 — 僅在未登入時顯示，登入後會被使用者真實課表取代
+// 使用靜宜大學建築代碼 (PH=主顧樓, AK=任垣樓, SF=方濟樓, SP=伯鐸樓, etc.)
 const MOCK_COURSES: CourseSlot[] = [
-  { id: "1", name: "資料結構", teacher: "王教授", location: "資訊大樓 301", dayOfWeek: 1, startPeriod: 2, endPeriod: 3, color: COURSE_COLORS[0], courseCode: "CS201", credits: 3 },
-  { id: "2", name: "資料庫系統", teacher: "李教授", location: "資訊大樓 402", dayOfWeek: 1, startPeriod: 6, endPeriod: 7, color: COURSE_COLORS[1], courseCode: "CS301", credits: 3 },
-  { id: "3", name: "演算法", teacher: "陳教授", location: "工程大樓 201", dayOfWeek: 2, startPeriod: 3, endPeriod: 4, color: COURSE_COLORS[2], courseCode: "CS302", credits: 3 },
-  { id: "4", name: "作業系統", teacher: "林教授", location: "資訊大樓 301", dayOfWeek: 3, startPeriod: 2, endPeriod: 3, color: COURSE_COLORS[3], courseCode: "CS303", credits: 3 },
-  { id: "5", name: "計算機網路", teacher: "張教授", location: "資訊大樓 501", dayOfWeek: 3, startPeriod: 6, endPeriod: 8, color: COURSE_COLORS[4], courseCode: "CS304", credits: 3 },
-  { id: "6", name: "軟體工程", teacher: "黃教授", location: "管理大樓 102", dayOfWeek: 4, startPeriod: 3, endPeriod: 4, color: COURSE_COLORS[5], courseCode: "CS401", credits: 3 },
-  { id: "7", name: "人工智慧", teacher: "周教授", location: "資訊大樓 601", dayOfWeek: 5, startPeriod: 2, endPeriod: 3, color: COURSE_COLORS[6], courseCode: "CS402", credits: 3 },
-  { id: "8", name: "專題研究", teacher: "吳教授", location: "研究大樓 301", dayOfWeek: 5, startPeriod: 6, endPeriod: 8, color: COURSE_COLORS[7], courseCode: "CS499", credits: 2 },
+  { id: "demo-1", name: "程式設計", teacher: "王老師", location: "PH303", dayOfWeek: 1, startPeriod: 2, endPeriod: 4, color: COURSE_COLORS[0], courseCode: "DEMO", credits: 3 },
+  { id: "demo-2", name: "微積分", teacher: "李老師", location: "PH217", dayOfWeek: 2, startPeriod: 3, endPeriod: 4, color: COURSE_COLORS[1], courseCode: "DEMO", credits: 3 },
+  { id: "demo-3", name: "英文(一)", teacher: "林老師", location: "SP201", dayOfWeek: 3, startPeriod: 2, endPeriod: 3, color: COURSE_COLORS[2], courseCode: "DEMO", credits: 2 },
+  { id: "demo-4", name: "通識講座", teacher: "陳老師", location: "SF101", dayOfWeek: 4, startPeriod: 5, endPeriod: 6, color: COURSE_COLORS[3], courseCode: "DEMO", credits: 2 },
+  { id: "demo-5", name: "體育", teacher: "體育室", location: "ST", dayOfWeek: 5, startPeriod: 3, endPeriod: 4, color: COURSE_COLORS[4], courseCode: "DEMO", credits: 0 },
 ];
 
 function getCurrentPeriod(): number {
