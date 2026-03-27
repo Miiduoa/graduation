@@ -25,12 +25,12 @@ import {
   tcFetchActivities,
   tcFetchModules,
   tcFetchAttendance,
+  tcFetchProfile,
   tcFetchTodos,
   type TCCourse,
   type TCActivity,
   type TCModule,
   type TCAttendance,
-  type TCSession,
 } from "./tronClassClient";
 
 // ─── Cache Keys ──────────────────────────────────────────
@@ -91,9 +91,32 @@ async function writeCache<T>(key: string, data: T): Promise<void> {
   }
 }
 
+export async function seedCachedCourses(data: PUCourseResult): Promise<void> {
+  await writeCache(KEYS.courses, data);
+}
+
+export async function seedCachedGrades(data: PUGradeResult): Promise<void> {
+  await writeCache(KEYS.grades, data);
+}
+
+export async function seedCachedAnnouncements(data: PUAnnouncement[]): Promise<void> {
+  await writeCache(KEYS.announcements, data);
+}
+
+export async function seedCachedStudentInfo(data: PUStudentInfo): Promise<void> {
+  await writeCache(KEYS.studentInfo, data);
+}
+
 function isExpired(entry: CacheEntry<unknown> | null, ttl: number): boolean {
   if (!entry) return true;
   return Date.now() - entry.fetchedAt > ttl;
+}
+
+async function ensureTronClassSession(): Promise<void> {
+  const profile = await tcFetchProfile();
+  if (!profile?.id) {
+    throw new Error("TronClass session 已失效，請重新登入");
+  }
 }
 
 // ─── Public API ──────────────────────────────────────────
@@ -238,16 +261,15 @@ export async function getAnyCachedTCActivities(): Promise<Record<number, TCActiv
 
 export async function refreshTCCourses(): Promise<TCCourse[] | null> {
   console.log("[puDataCache] refreshing TronClass courses…");
+  await ensureTronClassSession();
   const courses = await tcFetchCourses("ongoing");
-  if (courses.length > 0) {
-    await writeCache(KEYS.tcCourses, courses);
-    return courses;
-  }
-  return null;
+  await writeCache(KEYS.tcCourses, courses);
+  return courses;
 }
 
 export async function refreshTCActivitiesForCourses(courseIds: number[]): Promise<Record<number, TCActivity[]>> {
   console.log(`[puDataCache] refreshing TronClass activities for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
   const result: Record<number, TCActivity[]> = {};
 
   await Promise.allSettled(
@@ -263,6 +285,7 @@ export async function refreshTCActivitiesForCourses(courseIds: number[]): Promis
 
 export async function refreshTCModulesForCourses(courseIds: number[]): Promise<Record<number, TCModule[]>> {
   console.log(`[puDataCache] refreshing TronClass modules for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
   const result: Record<number, TCModule[]> = {};
 
   await Promise.allSettled(
@@ -278,16 +301,15 @@ export async function refreshTCModulesForCourses(courseIds: number[]): Promise<R
 
 export async function refreshTCAttendance(): Promise<TCAttendance[] | null> {
   console.log("[puDataCache] refreshing TronClass attendance…");
+  await ensureTronClassSession();
   const data = await tcFetchAttendance();
-  if (data.length > 0) {
-    await writeCache(KEYS.tcAttendance, data);
-    return data;
-  }
-  return null;
+  await writeCache(KEYS.tcAttendance, data);
+  return data;
 }
 
 export async function refreshTCTodos(): Promise<TCActivity[] | null> {
   console.log("[puDataCache] refreshing TronClass todos…");
+  await ensureTronClassSession();
   const data = await tcFetchTodos();
   await writeCache(KEYS.tcTodos, data);
   return data;
@@ -301,40 +323,124 @@ export type SyncAllResult = {
   announcements: PUAnnouncement[] | null;
   studentInfo: PUStudentInfo | null;
   tcCourses: TCCourse[] | null;
+  tcActivities: Record<number, TCActivity[]> | null;
+  tcModules: Record<number, TCModule[]> | null;
+  tcAttendance: TCAttendance[] | null;
+  tcTodos: TCActivity[] | null;
+};
+
+export type SyncAllOptions = {
+  tcCourses?: TCCourse[] | null;
+  includeEssential?: boolean;
 };
 
 /**
- * 登入成功後呼叫：平行抓取所有資料並存入快取。
- * 如果個別抓取失敗不會中斷其他的。
+ * 登入成功後呼叫：補抓延伸資料並存入快取。
+ * 必要資料（學生資料/課表/成績/公告/TronClass 課程）應由登入 bootstrap 先完成。
  */
-export async function syncAllData(session: PUSession): Promise<SyncAllResult> {
-  console.log("[puDataCache] syncAllData: starting full sync…");
+export async function syncAllData(
+  session: PUSession,
+  options: SyncAllOptions = {},
+): Promise<SyncAllResult> {
+  console.log("[puDataCache] syncAllData: starting deferred sync…");
 
-  const [courses, grades, announcements, studentInfo, tcCourses] = await Promise.all([
-    refreshCourses(session).catch((e) => { console.warn("[puDataCache] courses sync error:", e); return null; }),
-    refreshGrades(session).catch((e) => { console.warn("[puDataCache] grades sync error:", e); return null; }),
-    refreshAnnouncements(session).catch((e) => { console.warn("[puDataCache] announcements sync error:", e); return null; }),
-    refreshStudentInfo(session).catch((e) => { console.warn("[puDataCache] studentInfo sync error:", e); return null; }),
-    refreshTCCourses().catch((e) => { console.warn("[puDataCache] TC courses sync error:", e); return null; }),
-  ]);
+  const includeEssential = options.includeEssential === true;
 
-  // TronClass: 如果有課程，背景抓取活動和模組
-  if (tcCourses && tcCourses.length > 0) {
-    const courseIds = tcCourses.map((c) => c.id);
-    Promise.allSettled([
-      refreshTCActivitiesForCourses(courseIds),
-      refreshTCModulesForCourses(courseIds),
-      refreshTCAttendance(),
-      refreshTCTodos(),
-    ]).catch(() => {});
+  const [courses, grades, announcements, studentInfo] = includeEssential
+    ? await Promise.all([
+        refreshCourses(session).catch((e) => {
+          console.warn("[puDataCache] courses sync error:", e);
+          return null;
+        }),
+        refreshGrades(session).catch((e) => {
+          console.warn("[puDataCache] grades sync error:", e);
+          return null;
+        }),
+        refreshAnnouncements(session).catch((e) => {
+          console.warn("[puDataCache] announcements sync error:", e);
+          return null;
+        }),
+        refreshStudentInfo(session).catch((e) => {
+          console.warn("[puDataCache] studentInfo sync error:", e);
+          return null;
+        }),
+      ])
+    : [null, null, null, null];
+
+  const tcCourses =
+    options.tcCourses ??
+    (await getCachedTCCourses()) ??
+    (await getAnyCachedTCCourses()) ??
+    (await refreshTCCourses().catch((e) => {
+      console.warn("[puDataCache] TC courses sync error:", e);
+      return null;
+    }));
+
+  let tcActivities: Record<number, TCActivity[]> | null = null;
+  let tcModules: Record<number, TCModule[]> | null = null;
+  let tcAttendance: TCAttendance[] | null = null;
+  let tcTodos: TCActivity[] | null = null;
+
+  const courseIds = tcCourses?.map((c) => c.id) ?? [];
+
+  if (courseIds.length > 0) {
+    [tcActivities, tcModules, tcAttendance, tcTodos] = await Promise.all([
+      refreshTCActivitiesForCourses(courseIds).catch((e) => {
+        console.warn("[puDataCache] TC activities sync error:", e);
+        return null;
+      }),
+      refreshTCModulesForCourses(courseIds).catch((e) => {
+        console.warn("[puDataCache] TC modules sync error:", e);
+        return null;
+      }),
+      refreshTCAttendance().catch((e) => {
+        console.warn("[puDataCache] TC attendance sync error:", e);
+        return null;
+      }),
+      refreshTCTodos().catch((e) => {
+        console.warn("[puDataCache] TC todos sync error:", e);
+        return null;
+      }),
+    ]);
+  } else {
+    [tcAttendance, tcTodos] = await Promise.all([
+      refreshTCAttendance().catch((e) => {
+        console.warn("[puDataCache] TC attendance sync error:", e);
+        return null;
+      }),
+      refreshTCTodos().catch((e) => {
+        console.warn("[puDataCache] TC todos sync error:", e);
+        return null;
+      }),
+    ]);
   }
 
   await AsyncStorage.setItem(KEYS.lastSync, String(Date.now()));
 
-  const successCount = [courses, grades, announcements, studentInfo, tcCourses].filter(Boolean).length;
-  console.log(`[puDataCache] syncAllData done: ${successCount}/5 succeeded`);
+  const successCount = [
+    courses,
+    grades,
+    announcements,
+    studentInfo,
+    tcCourses,
+    tcActivities,
+    tcModules,
+    tcAttendance,
+    tcTodos,
+  ].filter((value) => value != null).length;
+  console.log(`[puDataCache] syncAllData done: ${successCount}/9 succeeded`);
 
-  return { courses, grades, announcements, studentInfo, tcCourses };
+  return {
+    courses,
+    grades,
+    announcements,
+    studentInfo,
+    tcCourses,
+    tcActivities,
+    tcModules,
+    tcAttendance,
+    tcTodos,
+  };
 }
 
 // ─── 智慧刷新（只更新過期的） ───────────────────────────

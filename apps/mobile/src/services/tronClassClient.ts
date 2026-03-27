@@ -14,11 +14,17 @@
  * 所有 API response 都是 JSON。
  */
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { getCloudFunctionUrl } from "./cloudFunctions";
+
 // ─── Constants ───────────────────────────────────────────
 
 const TC_BASE = "https://tronclass.pu.edu.tw";
 const IDENTITY_BASE = "https://identity.pu.edu.tw";
 const CAS_LOGIN_PATH = "/auth/realms/pu/protocol/cas/login";
+const TC_LOGIN_SERVICE_URL = `${TC_BASE}/login?next=/user/index`;
+const TC_BACKEND_SESSION_KEY = "@pu_cache:tc_backend_session";
 
 const COMMON_HEADERS: Record<string, string> = {
   "User-Agent":
@@ -29,6 +35,8 @@ const COMMON_HEADERS: Record<string, string> = {
 
 // ─── 全域 userId（登入後從 /user/index 取得） ────────────
 let _tcUserId: number | null = null;
+let _tcBackendSessionId: string | null = null;
+let _tcBackendSessionLoaded = false;
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -107,6 +115,124 @@ export type TCGradeItem = {
   semester: string;
 };
 
+async function ensureBackendSessionLoaded(): Promise<void> {
+  if (_tcBackendSessionLoaded) return;
+  _tcBackendSessionLoaded = true;
+
+  try {
+    const raw = await AsyncStorage.getItem(TC_BACKEND_SESSION_KEY);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw) as {
+      sessionId?: string;
+      userId?: number | null;
+    };
+
+    if (typeof parsed.sessionId === "string" && parsed.sessionId.trim()) {
+      _tcBackendSessionId = parsed.sessionId.trim();
+    }
+
+    if (typeof parsed.userId === "number" && Number.isFinite(parsed.userId)) {
+      _tcUserId = parsed.userId;
+    }
+  } catch (error) {
+    console.warn("[TronClass] Failed to restore backend session:", error);
+  }
+}
+
+function shouldUseBackendSession(): boolean {
+  return !!_tcBackendSessionId;
+}
+
+export async function setTCBackendSession(
+  sessionId: string,
+  userId?: number | null,
+): Promise<void> {
+  const normalized = sessionId.trim();
+  if (!normalized) {
+    throw new Error("Invalid TronClass backend session");
+  }
+
+  _tcBackendSessionId = normalized;
+  _tcBackendSessionLoaded = true;
+  _tcUserId = typeof userId === "number" && Number.isFinite(userId) ? userId : _tcUserId;
+
+  await AsyncStorage.setItem(
+    TC_BACKEND_SESSION_KEY,
+    JSON.stringify({
+      sessionId: normalized,
+      userId: _tcUserId,
+    }),
+  );
+}
+
+export async function clearTCSession(): Promise<void> {
+  _tcUserId = null;
+  _tcBackendSessionId = null;
+  _tcBackendSessionLoaded = true;
+  await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
+}
+
+async function fetchTronClassBackend<T>(
+  dataType: "profile" | "courses" | "activities" | "modules" | "attendance" | "todos",
+  extra: Record<string, unknown> = {},
+): Promise<T> {
+  await ensureBackendSessionLoaded();
+  if (!shouldUseBackendSession()) {
+    throw new Error("No TronClass backend session");
+  }
+
+  const response = await fetch(getCloudFunctionUrl("puFetchTronClassData"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sessionId: _tcBackendSessionId,
+      dataType,
+      ...extra,
+    }),
+  });
+
+  const text = await response.text();
+  let data: { success?: boolean; result?: T; error?: string; userId?: number | null } | null = null;
+
+  if (text.trim()) {
+    try {
+      data = JSON.parse(text) as { success?: boolean; result?: T; error?: string; userId?: number | null };
+    } catch {
+      data = null;
+    }
+  }
+
+  if (!response.ok || data?.success !== true) {
+    const errorMessage =
+      data?.error ||
+      (response.status === 401 || response.status === 403
+        ? "TronClass session 已失效，請重新登入"
+        : `TronClass 代理請求失敗（HTTP ${response.status}）`);
+
+    if (response.status === 401 || response.status === 403) {
+      await clearTCSession().catch(() => undefined);
+    }
+
+    throw new Error(errorMessage);
+  }
+
+  if (typeof data.userId === "number" && Number.isFinite(data.userId)) {
+    _tcUserId = data.userId;
+    await AsyncStorage.setItem(
+      TC_BACKEND_SESSION_KEY,
+      JSON.stringify({
+        sessionId: _tcBackendSessionId,
+        userId: _tcUserId,
+      }),
+    ).catch(() => undefined);
+  }
+
+  return data.result as T;
+}
+
 // ─── Helper: Native Fetch ────────────────────────────────
 
 async function tcFetch(
@@ -170,8 +296,10 @@ export async function tcLogin(
   try {
     if (!uid || !password) return { success: false, session: null, error: "請輸入帳號密碼" };
 
-    const serviceUrl = `${TC_BASE}/login`;
-    const casUrl = `${IDENTITY_BASE}${CAS_LOGIN_PATH}?service=${encodeURIComponent(serviceUrl)}&locale=zh_TW`;
+    const serviceUrl = TC_LOGIN_SERVICE_URL;
+    const casUrl =
+      `${IDENTITY_BASE}${CAS_LOGIN_PATH}` +
+      `?ui_locales=zh-TW&service=${encodeURIComponent(serviceUrl)}&locale=zh_TW`;
 
     // Step 1: GET CAS login page
     console.log("[TronClass] Step 1: GET CAS login page…");
@@ -257,7 +385,7 @@ export async function tcLogin(
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "連線失敗";
-    console.error("[TronClass] Login error:", err);
+    console.warn("[TronClass] Login error:", err);
     return { success: false, session: null, error: `TronClass 登入失敗：${msg}` };
   }
 }
@@ -266,7 +394,16 @@ export async function tcLogin(
 
 /** 取得 userId（登入後才能呼叫） */
 async function ensureUserId(): Promise<number | null> {
+  await ensureBackendSessionLoaded();
   if (_tcUserId) return _tcUserId;
+
+  if (shouldUseBackendSession()) {
+    const profile = await fetchTronClassBackend<TCUserProfile>("profile");
+    if (profile?.id) {
+      _tcUserId = profile.id;
+    }
+    return _tcUserId;
+  }
 
   // 嘗試從 /user/index 抓取
   try {
@@ -318,6 +455,11 @@ async function tcFetchAllPages<T>(
 export async function tcFetchCourses(
   status: "ongoing" | "ended" | "upcoming" = "ongoing"
 ): Promise<TCCourse[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCCourse[]>("courses", { status });
+  }
+
   const userId = await ensureUserId();
   if (!userId) {
     console.warn("[TronClass] No userId, cannot fetch courses");
@@ -365,6 +507,11 @@ export async function tcFetchCourses(
 
 /** 取得課程的模組（週次/單元）— 嘗試多個可能的 endpoint */
 export async function tcFetchModules(courseId: number): Promise<TCModule[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCModule[]>("modules", { courseId });
+  }
+
   // TronClass 不同版本可能用不同 endpoint
   const endpoints = [
     `${TC_BASE}/api/courses/${courseId}/course-modules`,
@@ -423,6 +570,11 @@ export async function tcFetchModules(courseId: number): Promise<TCModule[]> {
 
 /** 取得課程活動（作業、測驗、教材等） */
 export async function tcFetchActivities(courseId: number): Promise<TCActivity[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCActivity[]>("activities", { courseId });
+  }
+
   // 先抓一般活動
   const url = `${TC_BASE}/api/courses/${courseId}/activities`;
   type RawActivity = {
@@ -442,7 +594,6 @@ export async function tcFetchActivities(courseId: number): Promise<TCActivity[]>
   const activities = data?.activities ?? [];
 
   // 也抓作業活動（可能是另一個 endpoint）
-  const hwUrl = `${TC_BASE}/api/courses/${courseId}/homework-activities`;
   const hwData = await tcFetchAllPages<RawActivity>(
     `api/courses/${courseId}/homework-activities`,
     "homework_activities",
@@ -477,6 +628,11 @@ export async function tcFetchActivities(courseId: number): Promise<TCActivity[]>
 
 /** 取得出缺席統計 — 嘗試多個可能的 endpoint */
 export async function tcFetchAttendance(): Promise<TCAttendance[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCAttendance[]>("attendance");
+  }
+
   const userId = await ensureUserId();
 
   // TronClass 出缺席 API 沒有統一標準，嘗試多個可能路徑
@@ -566,6 +722,11 @@ export async function tcFetchGrades(): Promise<TCGradeItem[]> {
 
 /** 取得使用者 Profile */
 export async function tcFetchProfile(): Promise<TCUserProfile | null> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCUserProfile>("profile");
+  }
+
   const userId = await ensureUserId();
   if (!userId) return null;
 
@@ -579,6 +740,11 @@ export async function tcFetchProfile(): Promise<TCUserProfile | null> {
 
 /** 取得待辦事項（即將到期的作業/測驗） */
 export async function tcFetchTodos(): Promise<TCActivity[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCActivity[]>("todos");
+  }
+
   // 根據 tronclass-cli，endpoint 是 api/todos → { todo_list: [...] }
   const url = `${TC_BASE}/api/todos`;
 

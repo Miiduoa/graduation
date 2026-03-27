@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "校園助手 - 智慧校園一站式平台",
-  description: "公告、活動、地圖、餐廳、課表、成績查詢 - 多校通用的校園資訊平台",
+  description: "靜宜大學校園資訊平台，整合公告、活動、地圖、餐廳、課表與成績查詢",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     locale: "zh_TW",
     siteName: "校園助手",
     title: "校園助手 - 智慧校園一站式平台",
-    description: "公告、活動、地圖、餐廳、課表、成績查詢",
+    description: "靜宜大學校園資訊平台，整合公告、活動、地圖、餐廳、課表與成績查詢",
   },
   twitter: {
     card: "summary_large_image",

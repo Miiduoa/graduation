@@ -299,8 +299,8 @@ export function roleSummary(roleMode: RoleMode) {
       };
     default:
       return {
-        label: "訪客模式",
-        hint: "先選擇學校，再建立你的使用節奏",
+        label: "瀏覽模式",
+        hint: "可先查看公開資訊，登入靜宜學號後再同步個人課表與成績",
       };
   }
 }

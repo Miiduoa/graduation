@@ -573,7 +573,7 @@ export function EventsScreen(props: any) {
                   ? "請換個關鍵字或調整篩選條件"
                   : "目前沒有活動"
               }
-              hint="下拉刷新或切換學校試試。"
+              hint="下拉刷新或稍後再試。"
               actionText={activeFilterCount > 0 || debouncedQuery.trim() ? "清除篩選" : "重新載入"}
               onAction={
                 activeFilterCount > 0 || debouncedQuery.trim()

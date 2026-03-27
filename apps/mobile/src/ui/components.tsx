@@ -390,7 +390,7 @@ export function EmptyState(props: {
           maxWidth: 280,
         }}
       >
-        {props.subtitle ?? "你可以稍後再試，或切換學校。"}
+        {props.subtitle ?? "你可以稍後再試，或重新整理頁面。"}
       </Text>
       {props.hint && (
         <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "center", marginTop: theme.space.xs }}>

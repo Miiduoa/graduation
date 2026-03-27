@@ -5,6 +5,7 @@ export {
   isFirebaseConfigured,
   resetPassword,
   signIn,
+  signInWithPuStudentId,
   signInWithCustomAuthToken,
   signUp,
   startWebSSOCallback,

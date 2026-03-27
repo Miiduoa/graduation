@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from "@campus/shared/src";
 import type { DataSource } from "./source";
 import type {
   Announcement,
@@ -9,6 +10,7 @@ import type {
   Course,
   QueryOptions,
   Grade,
+  Enrollment,
   LibraryBook,
   BusRoute,
   BusArrival,
@@ -35,19 +37,47 @@ import {
 } from "./courseSpaceSource";
 import { firebaseSource } from "./firebaseSource";
 import { mockSource } from "./mockSource";
+import {
+  isProvidenceSchoolId,
+  toInternalSchoolId,
+  toPublicSchoolId,
+} from "./schoolIds";
 
 /**
  * 嘗試取得 PUAdapter 實例（用於 TronClass 資料）。
  * 如果不是 PU 學校或沒有 adapter 則回傳 null。
  */
-async function getPUAdapterIfAvailable(): Promise<PUAdapter | null> {
-  const sid = currentSchoolContextId ?? DEFAULT_SCHOOL;
+async function getPUAdapterIfAvailable(schoolId?: string | null): Promise<PUAdapter | null> {
+  const sid = toInternalSchoolId(schoolId ?? currentSchoolContextId ?? DEFAULT_SCHOOL);
   if (sid !== "tw-pu" || !hasAdapter(sid)) return null;
   try {
     const adapter = await getAdapter(sid);
     if (adapter instanceof PUAdapter) return adapter;
   } catch { /* ignore */ }
   return null;
+}
+
+async function listProvidenceEnrollments(
+  userId: string,
+  semester?: string,
+  schoolId?: string,
+): Promise<Enrollment[] | null> {
+  const puAdapter = await getPUAdapterIfAvailable(schoolId);
+  if (!puAdapter) return null;
+
+  const courses = await puAdapter.listCourses(userId, semester);
+  const timestamp = new Date().toISOString();
+
+  return courses.map((course, index) => ({
+    id: `pu-enr-${course.id}-${index}`,
+    userId,
+    courseId: course.id,
+    semester: course.semester ?? semester ?? "未指定",
+    schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+    status: "enrolled",
+    createdAt: timestamp,
+    enrolledAt: timestamp,
+  }));
 }
 
 export type HybridSourceConfig = {
@@ -66,35 +96,44 @@ const defaultConfig: HybridSourceConfig = {
 
 let config = { ...defaultConfig };
 let currentSchoolContextId: string | null = null;
+const PROVIDENCE_NO_MOCK_FALLBACK_METHODS = new Set([
+  "listAnnouncements",
+  "listCourses",
+  "listGrades",
+]);
 
 export function configureHybridSource(newConfig: Partial<HybridSourceConfig>): void {
   config = { ...config, ...newConfig };
 }
 
 export function setHybridSourceSchoolContext(schoolId: string | null): void {
-  currentSchoolContextId = schoolId;
+  currentSchoolContextId = toPublicSchoolId(schoolId);
 }
 
-const DEFAULT_SCHOOL = 'tw-pu';
+const DEFAULT_SCHOOL = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
 
 function inferSchoolIdFromEntityId(id: string): string {
   if (!id) return DEFAULT_SCHOOL;
+  if (id.startsWith("pu-") || id.startsWith("tc-") || id.startsWith("tw-pu")) {
+    return PROVIDENCE_UNIVERSITY_SCHOOL_ID;
+  }
   const parts = id.split("-");
   if (parts.length >= 2 && parts[0] && parts[1]) {
-    return `${parts[0]}-${parts[1]}`;
+    return toPublicSchoolId(`${parts[0]}-${parts[1]}`) ?? `${parts[0]}-${parts[1]}`;
   }
   return DEFAULT_SCHOOL;
 }
 
 function inferSchoolIdFromUserId(userId: string): string {
+  if (userId.startsWith("pu-")) return PROVIDENCE_UNIVERSITY_SCHOOL_ID;
   // Accept school-prefixed user ids like "tw-nchu-xxxx".
   const inferred = inferSchoolIdFromEntityId(userId);
   return inferred;
 }
 
 function resolveSchoolId(explicitSchoolId?: string, idHint?: string): string {
-  if (explicitSchoolId) return explicitSchoolId;
-  if (currentSchoolContextId) return currentSchoolContextId;
+  if (explicitSchoolId) return toPublicSchoolId(explicitSchoolId) ?? explicitSchoolId;
+  if (currentSchoolContextId) return toPublicSchoolId(currentSchoolContextId) ?? currentSchoolContextId;
   if (idHint) return inferSchoolIdFromEntityId(idHint);
   return DEFAULT_SCHOOL;
 }
@@ -105,14 +144,26 @@ async function fetchWithFallback<T>(
   mockMethod: () => Promise<T>,
   ...args: unknown[]
 ): Promise<T> {
-  if (!config.preferRealApi || !hasAdapter(schoolId)) {
+  const publicSchoolId = toPublicSchoolId(schoolId) ?? schoolId;
+  const adapterSchoolId = toInternalSchoolId(publicSchoolId) ?? publicSchoolId;
+  const disableMockFallback =
+    isProvidenceSchoolId(publicSchoolId) &&
+    PROVIDENCE_NO_MOCK_FALLBACK_METHODS.has(apiMethod);
+
+  if (!config.preferRealApi || !hasAdapter(adapterSchoolId)) {
+    if (disableMockFallback) {
+      throw new Error(`Providence adapter unavailable for ${apiMethod}`);
+    }
     return mockMethod();
   }
   
   try {
-    const adapter = await getAdapter(schoolId);
+    const adapter = await getAdapter(adapterSchoolId);
     if (!adapter) {
-      console.warn(`[HybridSource] No adapter for ${schoolId}, using mock`);
+      console.warn(`[HybridSource] No adapter for ${adapterSchoolId}, using mock`);
+      if (disableMockFallback) {
+        throw new Error(`Providence adapter unavailable for ${apiMethod}`);
+      }
       return mockMethod();
     }
     
@@ -136,7 +187,7 @@ async function fetchWithFallback<T>(
   } catch (error) {
     console.warn(`[HybridSource] API error for ${apiMethod}:`, error);
     
-    if (config.fallbackToMock) {
+    if (config.fallbackToMock && !disableMockFallback) {
       console.info(`[HybridSource] Falling back to mock data for ${apiMethod}`);
       return mockMethod();
     }
@@ -276,34 +327,23 @@ export const hybridSource: DataSource = {
   },
   listCourseSpaces: async (userId: string, schoolId?: string) => {
     // 優先用 PUAdapter（TronClass 資料）
-    const puAdapter = await getPUAdapterIfAvailable();
+    const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
-      try {
-        const spaces = await puAdapter.listCourseSpaces(userId, schoolId);
-        if (spaces.length > 0) return spaces;
-      } catch (err) {
-        console.warn("[HybridSource] PUAdapter listCourseSpaces error:", err);
-      }
+      return puAdapter.listCourseSpaces(userId, schoolId);
     }
     return listWorkspaceCourseSpaces(userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   getCourseSpace: async (courseSpaceId: string, userId: string, schoolId?: string) => {
-    const puAdapter = await getPUAdapterIfAvailable();
+    const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter && courseSpaceId.startsWith("tc-")) {
-      try {
-        const space = await puAdapter.getCourseSpace(courseSpaceId, userId);
-        if (space) return space;
-      } catch { /* fallback */ }
+      return puAdapter.getCourseSpace(courseSpaceId, userId);
     }
     return getWorkspaceCourseSpace(courseSpaceId, userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   listCourseModules: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
-    const puAdapter = await getPUAdapterIfAvailable();
+    const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter && (!courseSpaceId || courseSpaceId.startsWith("tc-"))) {
-      try {
-        const modules = await puAdapter.listCourseModules(userId, courseSpaceId);
-        if (modules.length > 0) return modules;
-      } catch { /* fallback */ }
+      return puAdapter.listCourseModules(userId, courseSpaceId);
     }
     return listWorkspaceCourseModules(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
@@ -315,12 +355,9 @@ export const hybridSource: DataSource = {
     return listWorkspaceCourseMaterials(courseSpaceId, moduleId);
   },
   listQuizzes: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
-    const puAdapter = await getPUAdapterIfAvailable();
+    const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
-      try {
-        const quizzes = await puAdapter.listQuizzes(userId, courseSpaceId);
-        if (quizzes.length > 0) return quizzes;
-      } catch { /* fallback */ }
+      return puAdapter.listQuizzes(userId, courseSpaceId);
     }
     return listWorkspaceQuizzes(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
@@ -334,12 +371,9 @@ export const hybridSource: DataSource = {
     return submitCourseSpaceQuiz(input);
   },
   listAttendanceSessions: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
-    const puAdapter = await getPUAdapterIfAvailable();
+    const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
-      try {
-        const sessions = await puAdapter.listAttendanceSessions(userId, courseSpaceId);
-        if (sessions.length > 0) return sessions;
-      } catch { /* fallback */ }
+      return puAdapter.listAttendanceSessions(userId, courseSpaceId);
     }
     return listWorkspaceAttendanceSessions(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
@@ -352,19 +386,14 @@ export const hybridSource: DataSource = {
   getAttendanceSummary: async (courseSpaceId: string) => {
     const puAdapter = await getPUAdapterIfAvailable();
     if (puAdapter && courseSpaceId.startsWith("tc-")) {
-      try {
-        return await puAdapter.getAttendanceSummary(courseSpaceId);
-      } catch { /* fallback */ }
+      return puAdapter.getAttendanceSummary(courseSpaceId);
     }
     return getCourseAttendanceSummary(courseSpaceId);
   },
   listInboxTasks: async (userId: string, schoolId?: string) => {
-    const puAdapter = await getPUAdapterIfAvailable();
+    const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
-      try {
-        const tasks = await puAdapter.listInboxTasks(userId);
-        if (tasks.length > 0) return tasks;
-      } catch { /* fallback */ }
+      return puAdapter.listInboxTasks(userId);
     }
     return listWorkspaceInboxTasks(userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
@@ -373,6 +402,11 @@ export const hybridSource: DataSource = {
   },
   
   listEnrollments: async (userId: string, semester?: string, schoolId?: string) => {
+    const puEnrollments = await listProvidenceEnrollments(userId, semester, schoolId);
+    if (puEnrollments) {
+      return puEnrollments;
+    }
+
     try {
       return await firebaseSource.listEnrollments(userId, semester, schoolId ?? currentSchoolContextId ?? undefined);
     } catch (error) {
@@ -397,13 +431,13 @@ export const hybridSource: DataSource = {
     }
   },
   
-  listGrades: async (userId: string, semester?: string): Promise<Grade[]> => {
-    const schoolId = currentSchoolContextId ?? inferSchoolIdFromUserId(userId);
-    if (schoolId === "default") {
+  listGrades: async (userId: string, semester?: string, schoolId?: string): Promise<Grade[]> => {
+    const resolvedSchoolId = resolveSchoolId(schoolId, userId || undefined) || inferSchoolIdFromUserId(userId);
+    if (resolvedSchoolId === "default") {
       return mockSource.listGrades(userId, semester);
     }
     return fetchWithFallback(
-      schoolId,
+      resolvedSchoolId,
       "listGrades",
       () => mockSource.listGrades(userId, semester),
       userId,

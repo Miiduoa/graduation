@@ -11,6 +11,7 @@ import { clearMockAuthSession, loadMockAuthSession } from "../services/mockAuth"
 import { clearUserScopedStorage } from "../services/scopedStorage";
 import { clearPUCache } from "../services/puDataCache";
 import { clearPUSession } from "../services/studentIdAuth";
+import { clearTCSession } from "../services/tronClassClient";
 
 import type { UserRole as DataUserRole } from "../data/types";
 import type { MerchantAssignment } from "../data/types";
@@ -202,7 +203,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
 
     return {
       uid: u.uid,
-      email: u.email,
+      email: (data.email as string | undefined) ?? u.email,
       schoolId,
       primarySchoolId: schoolId,
       role: userRole,
@@ -513,6 +514,14 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         schoolId: profile?.schoolId ?? null,
       }).catch((e) => {
         console.warn("[auth] Scoped storage cleanup failed:", e);
+        throw e;
+      }),
+      clearMockAuthSession().catch((e) => {
+        console.warn("[auth] clearMockAuthSession failed:", e);
+        throw e;
+      }),
+      clearTCSession().catch((e) => {
+        console.warn("[auth] clearTCSession failed:", e);
         throw e;
       }),
     ];

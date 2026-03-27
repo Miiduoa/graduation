@@ -136,7 +136,13 @@ export default function SettingsPage(props: {
         <div>
           <div className="insetGroupHeader">帳號與學校</div>
           <div className="insetGroup">
-            <SettingRow icon="🏫" iconBg="#E8F4FD" title="切換學校" subtitle={schoolName || "尚未選擇學校"} />
+            <SettingRow
+              icon="🏫"
+              iconBg="#E8F4FD"
+              title="目前校園"
+              subtitle={schoolName || "靜宜大學"}
+              right={<span className="pill subtle" style={{ fontSize: 11 }}>PU</span>}
+            />
             <SettingRow icon="🔄" iconBg="#E8FFF2" title="自動同步" right={<Toggle value={autoSync} onChange={setAutoSync} />} />
             <SettingRow icon="🌐" iconBg="#FFF3E8" title="語言" subtitle="繁體中文" right={<span style={{ fontSize: 13, color: "var(--muted)" }}>{language === "zh-TW" ? "繁體中文" : "English"} ›</span>} />
           </div>
@@ -326,7 +332,7 @@ export default function SettingsPage(props: {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 16, fontWeight: 700 }}>學生姓名</div>
             <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
-              student@campus.edu · {schoolName || "未綁定學校"}
+              學號登入 · {schoolName || "靜宜大學"}
             </div>
           </div>
           <span style={{ fontSize: 13, color: "var(--brand)", fontWeight: 600, cursor: "pointer" }}>
@@ -337,16 +343,21 @@ export default function SettingsPage(props: {
         <div>
           <div className="insetGroupHeader">登入方式</div>
           <div className="insetGroup">
-            <SettingRow icon="🏫" iconBg="#E8F4FD" title="學校 SSO" subtitle="已連結" right={<span className="pill success" style={{ fontSize: 11 }}>已連結</span>} />
-            <SettingRow icon="📧" iconBg="var(--accent-soft)" title="電子郵件" subtitle="student@campus.edu" />
+            <SettingRow
+              icon="🪪"
+              iconBg="#E8F4FD"
+              title="靜宜學號登入"
+              subtitle="使用靜宜 e 校園帳號密碼"
+              right={<span className="pill success" style={{ fontSize: 11 }}>啟用中</span>}
+            />
           </div>
         </div>
 
         <div>
           <div className="insetGroupHeader">安全性</div>
           <div className="insetGroup">
-            <SettingRow icon="🔑" iconBg="#FFF3E8" title="更改密碼" />
-            <SettingRow icon="📱" iconBg="var(--success-soft)" title="兩步驟驗證" subtitle="增強帳號安全性" right={<span className="pill subtle" style={{ fontSize: 11 }}>關閉</span>} />
+            <SettingRow icon="🔑" iconBg="#FFF3E8" title="密碼管理" subtitle="請至靜宜 e 校園修改你的登入密碼" />
+            <SettingRow icon="🔥" iconBg="var(--success-soft)" title="Firebase 會話" subtitle="登入後由 Campus One 自動建立" right={<span className="pill subtle" style={{ fontSize: 11 }}>已啟用</span>} />
           </div>
         </div>
 

@@ -825,7 +825,7 @@ export function HomeScreen(props: any) {
   useEffect(() => {
     loadData();
     return () => abortRef.current?.abort();
-  }, [ds, school.id]);
+  }, [auth.user?.uid, ds, school.id]);
 
   // 載入 widget 版面
   useEffect(() => {

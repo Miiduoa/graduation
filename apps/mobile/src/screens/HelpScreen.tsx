@@ -24,8 +24,8 @@ type FAQItem = {
 const FAQ_DATA: FAQItem[] = [
   {
     id: '1',
-    question: '如何切換學校？',
-    answer: '前往「我的」→「設定」，輸入你的學校代碼（如 NCHU、PU），即可切換到對應學校的資料。',
+    question: '目前支援哪個學校？',
+    answer: '目前這個版本已鎖定為靜宜大學（PU），登入、課表、成績與 TronClass 同步都以靜宜校園為主，不再提供校碼切換。',
     category: '基本操作',
   },
   {
@@ -92,7 +92,7 @@ const FAQ_DATA: FAQItem[] = [
     id: '11',
     question: '忘記密碼怎麼辦？',
     answer:
-      'App 內目前沒有密碼重設頁面，但可以在 Web 登入頁先輸入電子郵件，再點擊「忘記密碼？」寄送重設信。',
+      '目前登入方式是靜宜學號登入。若忘記密碼，請改用靜宜 e 校園既有的密碼重設或校內帳號協助流程處理，Campus One 不另外提供電子郵件重設。',
     category: '帳號相關',
   },
   {
@@ -176,7 +176,7 @@ export function HelpScreen(props: any) {
       case 'quickstart':
         Alert.alert(
           '新手入門',
-          '1. 先完成學校與角色設定\n2. 在 Today 看今天最重要的一步\n3. 到課程頁整理課表、教材與學分\n4. 開啟通知設定，避免錯過重要提醒',
+          '1. 先確認靜宜校園與你的角色設定\n2. 在 Today 看今天最重要的一步\n3. 到課程頁整理課表、教材與學分\n4. 開啟通知設定，避免錯過重要提醒',
           [
             { text: '前往 Today', onPress: () => navigateToTab('Today', 'TodayHome') },
             { text: '前往設定', onPress: () => nav?.navigate?.('Settings') },

@@ -63,3 +63,4 @@ export * from './schools';
 export * from './release';
 export * from './creditAudit';
 export * from './tenant';
+export * from './puAuth';

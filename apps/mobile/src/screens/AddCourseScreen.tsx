@@ -309,7 +309,7 @@ function SSOCourseSync({ onCoursesImported, schoolId, semester }: SSOCourseSyncP
               <Text style={{ color: theme.colors.text, fontWeight: "600" }}>安全連線</Text>
             </View>
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              使用學校 SSO 單一登入，我們不會儲存您的學校密碼。
+              使用靜宜學號登入建立的安全工作階段，我們不會儲存您的 e 校園密碼。
             </Text>
           </View>
 

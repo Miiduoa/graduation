@@ -92,7 +92,7 @@ function SiteShellInner(props: {
                       ) : null}
                     </>
                   ) : (
-                    <span className="pill subtle">尚未選擇學校</span>
+                    <span className="pill subtle">靜宜大學</span>
                   )}
                 </div>
               </div>
@@ -137,9 +137,9 @@ function SiteShellInner(props: {
                     </Link>
                   ))}
                 </nav>
-                <Link href={`/join${q}`} className="navCta">
-                  切換學校
-                </Link>
+                <span className="navCta" aria-label="目前校區">
+                  靜宜大學
+                </span>
               </div>
             </div>
           </div>
@@ -154,7 +154,7 @@ function SiteShellInner(props: {
                 {props.subtitle ? <p className="sub">{props.subtitle}</p> : null}
               </div>
               <div className="pageHeadMeta">
-                <span className="pill">{props.schoolName ?? "多校通用"}</span>
+                <span className="pill">{props.schoolName ?? "靜宜大學"}</span>
                 <span className="pill subtle">{props.schoolCode ?? "Campus Soft"}</span>
               </div>
             </div>

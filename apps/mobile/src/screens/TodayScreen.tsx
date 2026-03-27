@@ -260,17 +260,17 @@ export function TodayScreen(props: Record<string, unknown>) {
 
   const { items: announcements } = useAsyncList(
     async () => (await ds.listAnnouncements(school.id)).slice(0, 2),
-    [ds, school.id]
+    [auth.user?.uid, ds, school.id]
   );
 
   const { items: events } = useAsyncList<ClubEvent>(
     async () => (await ds.listEvents(school.id)).slice(0, 2),
-    [ds, school.id]
+    [auth.user?.uid, ds, school.id]
   );
 
   const { items: menus } = useAsyncList<MenuItem>(
     async () => (await ds.listMenus(school.id)).slice(0, 3),
-    [ds, school.id]
+    [auth.user?.uid, ds, school.id]
   );
   const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
     schoolId: school.id,
