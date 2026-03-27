@@ -5,6 +5,8 @@ node_modules/
 # Env
 .env
 .env.*
+!.env.example
+!**/.env.example
 
 # Logs
 npm-debug.log*
@@ -26,4 +28,3 @@ apps/mobile/web-build/
 # Firebase
 backend/.firebase/
 backend/functions/lib/
-
