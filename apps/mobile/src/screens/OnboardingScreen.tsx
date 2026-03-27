@@ -1,10 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 
 import { Button } from "../ui/components";
 import { theme } from "../ui/theme";
-import { mockSchools, searchSchools } from "@campus/shared/src/schools";
+import {
+  findSchoolById,
+  PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
+  PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+} from "@campus/shared/src";
 import { loadPersistedValue, removePersistedValue, savePersistedValue } from "../services/persistedStorage";
 
 const ONBOARDING_KEY = "@has_seen_onboarding";
@@ -19,13 +23,15 @@ type SchoolOption = {
 };
 
 type StepId = "school" | "role" | "goal" | "notifications";
-
-const AVAILABLE_SCHOOLS: SchoolOption[] = mockSchools.map((school) => ({
-  code: school.code,
-  name: school.name,
-  shortName: school.shortName ?? school.code,
-  schoolId: school.id,
-}));
+const PROVIDENCE_SCHOOL = (() => {
+  const school = findSchoolById(PROVIDENCE_UNIVERSITY_SCHOOL_ID);
+  return {
+    code: school?.code ?? PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
+    name: school?.name ?? "靜宜大學",
+    shortName: school?.shortName ?? "靜宜",
+    schoolId: school?.id ?? PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+  } satisfies SchoolOption;
+})();
 
 const ROLE_OPTIONS = [
   {
@@ -100,7 +106,7 @@ const NOTIFICATION_OPTIONS = [
 ] as const;
 
 const STEPS: Array<{ id: StepId; title: string; hint: string }> = [
-  { id: "school", title: "選擇學校", hint: "先讓系統知道你屬於哪個校園" },
+  { id: "school", title: "確認校園", hint: "目前 Campus One 僅支援靜宜大學版本" },
   { id: "role", title: "選擇角色", hint: "不同角色要看到的第一步不同" },
   { id: "goal", title: "設定主要目標", hint: "先決定這個 App 最該幫你什麼" },
   { id: "notifications", title: "提醒偏好", hint: "只打開你真正需要的提醒" },
@@ -168,8 +174,6 @@ function SelectCard(props: {
 
 export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
   const [stepIndex, setStepIndex] = useState(0);
-  const [selectedSchool, setSelectedSchool] = useState<SchoolOption | null>(AVAILABLE_SCHOOLS[0] ?? null);
-  const [schoolSearch, setSchoolSearch] = useState("");
   const [selectedRole, setSelectedRole] = useState<string>("student");
   const [selectedGoal, setSelectedGoal] = useState<string>("clarity");
   // 偏好設定：兩選一（避免決策負擔）
@@ -178,20 +182,13 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
   const [error, setError] = useState<string | null>(null);
 
   const currentStep = STEPS[stepIndex]!;
-  const filteredSchools = useMemo(() => {
-    return searchSchools(schoolSearch).map((school) => ({
-      code: school.code,
-      name: school.name,
-      shortName: school.shortName ?? school.code,
-      schoolId: school.id,
-    }));
-  }, [schoolSearch]);
+  const selectedSchool = PROVIDENCE_SCHOOL;
 
   const toggleNotification = (id: string) => setSelectedNotifications(id);
 
   const canProceed =
     currentStep.id === "school"
-      ? !!selectedSchool
+      ? true
       : currentStep.id === "role"
         ? !!selectedRole
         : currentStep.id === "goal"
@@ -208,14 +205,12 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
     setSaving(true);
     setError(null);
     try {
-      if (selectedSchool) {
-        await savePersistedValue(SCHOOL_SELECTION_KEY, {
-          code: selectedSchool.code,
-          schoolId: selectedSchool.schoolId,
-          schoolName: selectedSchool.name,
-          shortName: selectedSchool.shortName,
-        });
-      }
+      await savePersistedValue(SCHOOL_SELECTION_KEY, {
+        code: selectedSchool.code,
+        schoolId: selectedSchool.schoolId,
+        schoolName: selectedSchool.name,
+        shortName: selectedSchool.shortName,
+      });
 
       await savePersistedValue(ONBOARDING_PROFILE_KEY, {
         role: selectedRole,
@@ -291,39 +286,31 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
 
         {currentStep.id === "school" ? (
           <View style={{ gap: 14 }}>
+            <SelectCard
+              title={selectedSchool.name}
+              description={`${selectedSchool.shortName} · ${selectedSchool.code}`}
+              icon="school-outline"
+              tint={theme.colors.accent}
+              selected
+              onPress={() => {}}
+            />
             <View
               style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 10,
+                padding: 16,
+                borderRadius: theme.radius.lg,
                 backgroundColor: theme.colors.surface,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
-                borderRadius: theme.radius.lg,
-                paddingHorizontal: 16,
-                height: 52,
+                gap: 8,
               }}
             >
-              <Ionicons name="search-outline" size={18} color={theme.colors.muted} />
-              <TextInput
-                value={schoolSearch}
-                onChangeText={setSchoolSearch}
-                placeholder="搜尋學校名稱或代碼"
-                placeholderTextColor={theme.colors.muted}
-                style={{ flex: 1, color: theme.colors.text, fontSize: 15 }}
-              />
+              <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 15 }}>
+                這個版本固定使用靜宜校園
+              </Text>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
+                目前登入、課表、成績、TronClass 與校園資料同步都只支援靜宜大學。之後若擴充其他校園，會再重新開放校園選擇。
+              </Text>
             </View>
-            {filteredSchools.map((school) => (
-              <SelectCard
-                key={school.schoolId}
-                title={school.name}
-                description={`${school.shortName} · ${school.code}`}
-                icon="school-outline"
-                tint={theme.colors.accent}
-                selected={selectedSchool?.schoolId === school.schoolId}
-                onPress={() => setSelectedSchool(school)}
-              />
-            ))}
           </View>
         ) : null}
 

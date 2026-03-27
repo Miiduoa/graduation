@@ -54,6 +54,15 @@ const {
   puFetchAnnouncements,
   puFetchStudentInfo,
 } = require('./puScraper');
+const {
+  tcLogin,
+  tcFetchCourses,
+  tcFetchModules,
+  tcFetchActivities,
+  tcFetchAttendance,
+  tcFetchProfile,
+  tcFetchTodos,
+} = require('./tronClassScraper');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret('TDX_CLIENT_ID');
@@ -313,6 +322,7 @@ function resolveProvisionedRole({ existingLink, existingUser }) {
 }
 
 const UNIVERSAL_DEV_ACCOUNT_PASSWORD = 'nickkookoo';
+const PROVIDENCE_UNIVERSITY_SCHOOL_ID = 'pu';
 const UNIVERSAL_DEV_ACCOUNTS = [
   {
     uid: 'dev-universal-student',
@@ -342,6 +352,165 @@ function authenticateUniversalDevAccount(email, password) {
         account.email === normalizedEmail &&
         normalizedPassword === UNIVERSAL_DEV_ACCOUNT_PASSWORD,
     ) || null
+  );
+}
+
+function normalizePuStudentId(studentId) {
+  return String(studentId || '').trim().toUpperCase();
+}
+
+function buildPuStudentUid(studentId) {
+  return `pu-${studentId.toLowerCase()}`;
+}
+
+function buildPuStudentEmail(studentId) {
+  return `${studentId.toLowerCase()}@pu.edu.tw`;
+}
+
+async function createPuTronClassSession({
+  studentId,
+  cookies,
+  session,
+}) {
+  const sessionId = nodeCrypto.randomBytes(16).toString('hex');
+  await db.collection('_puTronClassSessions').doc(sessionId).set(
+    {
+      studentId,
+      cookies,
+      userId: session?.userId ?? null,
+      userName: session?.userName ?? null,
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    },
+    { merge: true },
+  );
+
+  return sessionId;
+}
+
+async function createPuCampusSession({
+  studentId,
+  cookies,
+}) {
+  const sessionId = nodeCrypto.randomBytes(16).toString('hex');
+  await db.collection('_puSessions').doc(sessionId).set(
+    {
+      studentId,
+      cookies,
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    },
+    { merge: true },
+  );
+
+  return sessionId;
+}
+
+async function ensurePuStudentAuthUser({
+  auth,
+  uid,
+  displayName,
+  email,
+}) {
+  let authUser = null;
+  let isNewUser = false;
+
+  try {
+    authUser = await auth.getUser(uid);
+  } catch (error) {
+    if (error?.code !== 'auth/user-not-found') {
+      throw error;
+    }
+  }
+
+  if (!authUser) {
+    isNewUser = true;
+    try {
+      authUser = await auth.createUser({
+        uid,
+        email,
+        displayName,
+        emailVerified: true,
+      });
+    } catch (error) {
+      if (error?.code === 'auth/email-already-exists') {
+        authUser = await auth.createUser({
+          uid,
+          displayName,
+        });
+      } else {
+        throw error;
+      }
+    }
+
+    return { authUser, isNewUser };
+  }
+
+  const updates = {};
+  if (displayName && authUser.displayName !== displayName) {
+    updates.displayName = displayName;
+  }
+  if (!authUser.email && email) {
+    updates.email = email;
+    updates.emailVerified = true;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    try {
+      authUser = await auth.updateUser(uid, updates);
+    } catch (error) {
+      if (error?.code !== 'auth/email-already-exists') {
+        throw error;
+      }
+    }
+  }
+
+  return { authUser, isNewUser };
+}
+
+async function upsertPuStudentProfile({
+  uid,
+  studentId,
+  displayName,
+  email,
+  department,
+  isNewUser,
+}) {
+  const userRef = db.collection('users').doc(uid);
+  const memberRef = db
+    .collection('schools')
+    .doc(PROVIDENCE_UNIVERSITY_SCHOOL_ID)
+    .collection('members')
+    .doc(uid);
+  const role = 'student';
+  const memberRole = toSchoolMemberRole(role);
+
+  await userRef.set(
+    {
+      email,
+      displayName,
+      studentId,
+      department: department || '',
+      role,
+      schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+      primarySchoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+      lastLoginAt: FieldValue.serverTimestamp(),
+      ...(isNewUser ? { createdAt: FieldValue.serverTimestamp() } : {}),
+    },
+    { merge: true },
+  );
+
+  await memberRef.set(
+    {
+      status: 'active',
+      role: memberRole,
+      studentId,
+      displayName,
+      department: department || '',
+      lastLoginAt: FieldValue.serverTimestamp(),
+      ...(isNewUser ? { joinedAt: FieldValue.serverTimestamp() } : {}),
+    },
+    { merge: true },
   );
 }
 
@@ -2397,6 +2566,194 @@ exports.signInUniversalDevAccount = onRequest(
     } catch (error) {
       console.error('signInUniversalDevAccount error:', error);
       writeHttpError(res, error, 'Failed to sign in universal dev account');
+    }
+  },
+);
+
+exports.signInPuStudentId = onRequest(
+  {
+    region: REGION,
+    cors: STRICT_CORS,
+  },
+  async (req, res) => {
+    try {
+      assertTrustedOrigin(req);
+      requirePostJson(req);
+
+      const ip = getClientIp(req);
+      const rawStudentId = normalizePuStudentId(req.body?.studentId);
+      const password = String(req.body?.password || '');
+      const skipFirebase = req.body?.skipFirebase === true;
+
+      if (!rawStudentId || !password) {
+        res.status(400).json({ error: 'Missing required fields: studentId, password' });
+        return;
+      }
+
+      enforceRateLimit({
+        scope: 'pu-student-login-ip',
+        key: ip,
+        limit: 20,
+        windowMs: 10 * 60 * 1000,
+      });
+      enforceRateLimit({
+        scope: 'pu-student-login-student',
+        key: rawStudentId,
+        limit: 5,
+        windowMs: 15 * 60 * 1000,
+      });
+
+      const loginResult = await puLogin(rawStudentId, password);
+      if (!loginResult.success || !loginResult.cookies || Object.keys(loginResult.cookies).length === 0) {
+        res.status(401).json({
+          error: loginResult.error || '學號或密碼錯誤',
+        });
+        return;
+      }
+
+      const tronClassLoginResult = await tcLogin(rawStudentId, password);
+      if (
+        !tronClassLoginResult.success ||
+        !tronClassLoginResult.cookies ||
+        Object.keys(tronClassLoginResult.cookies).length === 0 ||
+        !tronClassLoginResult.session
+      ) {
+        res.status(503).json({
+          error: tronClassLoginResult.error || 'TronClass 登入失敗，請稍後再試',
+        });
+        return;
+      }
+
+      const tronClassSessionId = await createPuTronClassSession({
+        studentId: rawStudentId,
+        cookies: tronClassLoginResult.cookies,
+        session: tronClassLoginResult.session,
+      });
+      const puSessionId = await createPuCampusSession({
+        studentId: rawStudentId,
+        cookies: loginResult.cookies,
+      });
+
+      const [profileResult, coursesResult, gradesResult, announcementsResult] = await Promise.all([
+        puFetchStudentInfo(loginResult.cookies),
+        puFetchCourses(loginResult.cookies),
+        puFetchGrades(loginResult.cookies),
+        puFetchAnnouncements(loginResult.cookies),
+      ]);
+      const profile = profileResult.success ? profileResult.studentInfo || {} : {};
+      const studentId = normalizePuStudentId(profile.studentId || rawStudentId);
+      const displayName = String(profile.name || loginResult.studentName || `${studentId} 同學`).trim();
+      const department = String(profile.class || '').trim();
+
+      if (skipFirebase) {
+        res.set('Cache-Control', 'no-store');
+        res.json({
+          success: true,
+          uid: buildPuStudentUid(studentId),
+          studentId,
+          displayName,
+          department,
+          isNewUser: false,
+          puSessionId,
+          tronClassSessionId,
+          tronClassUserId: tronClassLoginResult.session.userId ?? null,
+          studentInfo: profileResult.success ? profileResult.studentInfo || null : null,
+          courses: coursesResult.success
+            ? {
+                courses: coursesResult.courses || [],
+                studentInfo: {
+                  class: coursesResult.studentInfo?.class ?? null,
+                  className: coursesResult.studentInfo?.class ?? null,
+                  studentId: coursesResult.studentInfo?.studentId ?? null,
+                  name: coursesResult.studentInfo?.name ?? null,
+                  currentSemester: coursesResult.semester ?? null,
+                },
+                semester: coursesResult.semester ?? null,
+                totalCredits: coursesResult.totalCredits ?? 0,
+              }
+            : null,
+          grades: gradesResult.success
+            ? {
+                grades: gradesResult.grades || [],
+                allSemesters: gradesResult.allSemesters || [],
+                summary: gradesResult.summary || {},
+              }
+            : null,
+          announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
+        });
+        return;
+      }
+
+      const email = buildPuStudentEmail(studentId);
+      const uid = buildPuStudentUid(studentId);
+      const { getAuth } = require('firebase-admin/auth');
+      const auth = getAuth();
+
+      const { isNewUser } = await ensurePuStudentAuthUser({
+        auth,
+        uid,
+        displayName,
+        email,
+      });
+
+      await upsertPuStudentProfile({
+        uid,
+        studentId,
+        displayName,
+        email,
+        department,
+        isNewUser,
+      });
+
+      await syncAuthClaims(uid, {
+        role: 'student',
+        schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+      });
+
+      const customToken = await auth.createCustomToken(uid, {
+        schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+        role: 'student',
+      });
+
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        success: true,
+        customToken,
+        uid,
+        studentId,
+        displayName,
+        department,
+        isNewUser,
+        puSessionId,
+        tronClassSessionId,
+        tronClassUserId: tronClassLoginResult.session.userId ?? null,
+        studentInfo: profileResult.success ? profileResult.studentInfo || null : null,
+        courses: coursesResult.success
+          ? {
+              courses: coursesResult.courses || [],
+              studentInfo: {
+                class: coursesResult.studentInfo?.class ?? null,
+                className: coursesResult.studentInfo?.class ?? null,
+                studentId: coursesResult.studentInfo?.studentId ?? null,
+                name: coursesResult.studentInfo?.name ?? null,
+                currentSemester: coursesResult.semester ?? null,
+              },
+              semester: coursesResult.semester ?? null,
+              totalCredits: coursesResult.totalCredits ?? 0,
+            }
+          : null,
+        grades: gradesResult.success
+          ? {
+              grades: gradesResult.grades || [],
+              allSemesters: gradesResult.allSemesters || [],
+              summary: gradesResult.summary || {},
+            }
+          : null,
+        announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
+      });
+    } catch (error) {
+      console.error('signInPuStudentId error:', error);
+      writeHttpError(res, error, 'PU student login failed');
     }
   },
 );
@@ -7031,6 +7388,214 @@ exports.puFetchData = onCall(
         throw error;
       }
       throw new HttpsError('internal', error.message);
+    }
+  },
+);
+
+exports.puFetchCampusData = onRequest(
+  {
+    region: REGION,
+    cors: STRICT_CORS,
+  },
+  async (req, res) => {
+    try {
+      assertTrustedOrigin(req);
+      requirePostJson(req);
+
+      const sessionId = String(req.body?.sessionId || '').trim();
+      const dataType = String(req.body?.dataType || '').trim();
+      const semester = String(req.body?.semester || '').trim();
+      const allowedTypes = ['courses', 'grades', 'announcements', 'studentInfo'];
+
+      if (!sessionId || !dataType) {
+        res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
+        return;
+      }
+
+      if (!allowedTypes.includes(dataType)) {
+        res.status(400).json({ error: `Invalid dataType: ${dataType}` });
+        return;
+      }
+
+      enforceRateLimit({
+        scope: 'pu-campus-fetch-data',
+        key: `${sessionId}:${dataType}`,
+        limit: 60,
+        windowMs: 5 * 60 * 1000,
+      });
+
+      const sessionRef = db.collection('_puSessions').doc(sessionId);
+      const sessionDoc = await sessionRef.get();
+      if (!sessionDoc.exists) {
+        res.status(401).json({ error: 'Invalid or expired PU session' });
+        return;
+      }
+
+      const sessionData = sessionDoc.data();
+      const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
+      if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0 || !expiresAt || expiresAt < new Date()) {
+        await sessionRef.delete().catch(() => null);
+        res.status(401).json({ error: 'Invalid or expired PU session' });
+        return;
+      }
+
+      let result;
+      switch (dataType) {
+        case 'courses':
+          result = await puFetchCourses(sessionData.cookies, semester || '');
+          break;
+        case 'grades':
+          result = await puFetchGrades(sessionData.cookies, semester || '');
+          break;
+        case 'announcements':
+          result = await puFetchAnnouncements(sessionData.cookies);
+          break;
+        case 'studentInfo':
+          result = await puFetchStudentInfo(sessionData.cookies);
+          break;
+        default:
+          res.status(400).json({ error: `Unknown dataType: ${dataType}` });
+          return;
+      }
+
+      if (!result?.success) {
+        res.status(503).json({ error: result?.error || `Failed to fetch ${dataType}` });
+        return;
+      }
+
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        success: true,
+        result,
+      });
+    } catch (error) {
+      console.error('puFetchCampusData error:', error);
+      writeHttpError(res, error, 'Failed to fetch PU campus data');
+    }
+  },
+);
+
+exports.puFetchTronClassData = onRequest(
+  {
+    region: REGION,
+    cors: STRICT_CORS,
+  },
+  async (req, res) => {
+    try {
+      assertTrustedOrigin(req);
+      requirePostJson(req);
+
+      const sessionId = String(req.body?.sessionId || '').trim();
+      const dataType = String(req.body?.dataType || '').trim();
+      const allowedTypes = ['profile', 'courses', 'activities', 'modules', 'attendance', 'todos'];
+
+      if (!sessionId || !dataType) {
+        res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
+        return;
+      }
+
+      if (!allowedTypes.includes(dataType)) {
+        res.status(400).json({ error: `Invalid dataType: ${dataType}` });
+        return;
+      }
+
+      enforceRateLimit({
+        scope: 'pu-tronclass-fetch-data',
+        key: `${sessionId}:${dataType}`,
+        limit: 60,
+        windowMs: 5 * 60 * 1000,
+      });
+
+      const sessionRef = db.collection('_puTronClassSessions').doc(sessionId);
+      const sessionDoc = await sessionRef.get();
+      if (!sessionDoc.exists) {
+        res.status(401).json({ error: 'Invalid or expired TronClass session' });
+        return;
+      }
+
+      const sessionData = sessionDoc.data();
+      if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0) {
+        await sessionRef.delete().catch(() => null);
+        res.status(401).json({ error: 'Invalid or expired TronClass session' });
+        return;
+      }
+
+      const expiresAt = sessionData.expiresAt?.toDate?.() ?? null;
+      if (expiresAt && expiresAt < new Date()) {
+        await sessionRef.delete().catch(() => null);
+        res.status(401).json({ error: 'TronClass session expired' });
+        return;
+      }
+
+      const cookies = sessionData.cookies;
+      let userId = Number.isFinite(sessionData.userId) ? sessionData.userId : null;
+      let result = null;
+
+      switch (dataType) {
+        case 'profile':
+          result = await tcFetchProfile(cookies, { userId });
+          userId = result?.id ?? userId;
+          break;
+        case 'courses': {
+          const status = ['ongoing', 'ended', 'upcoming'].includes(req.body?.status)
+            ? req.body.status
+            : 'ongoing';
+          result = await tcFetchCourses(cookies, { userId, status });
+          break;
+        }
+        case 'activities': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchActivities(cookies, courseId);
+          break;
+        }
+        case 'modules': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchModules(cookies, courseId);
+          break;
+        }
+        case 'attendance':
+          result = await tcFetchAttendance(cookies, { userId });
+          break;
+        case 'todos':
+          result = await tcFetchTodos(cookies);
+          break;
+        default:
+          res.status(400).json({ error: `Unknown dataType: ${dataType}` });
+          return;
+      }
+
+      await sessionRef.set(
+        {
+          lastUsedAt: new Date(),
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          ...(userId ? { userId } : {}),
+        },
+        { merge: true },
+      );
+
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        success: true,
+        result,
+        userId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch TronClass data';
+      if (message.includes('session 已失效')) {
+        res.status(401).json({ error: message });
+        return;
+      }
+
+      console.error('[puFetchTronClassData] Error:', error);
+      res.status(502).json({ error: message });
     }
   },
 );

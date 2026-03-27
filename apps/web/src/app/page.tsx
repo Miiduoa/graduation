@@ -132,9 +132,6 @@ export default function HomePage(props: {
               <Link href={`/login${q}`} className="btn primary">
                 登入開始
               </Link>
-              <Link href={`/join${q}`} className="btn">
-                選擇學校
-              </Link>
               <Link href={`/announcements${q}`} className="btn">
                 先看公告
               </Link>

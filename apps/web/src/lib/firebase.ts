@@ -44,6 +44,7 @@ import {
   buildUserSchoolCollectionPath,
   defaultNotificationPreferences,
   normalizeNotificationPreferences,
+  type PuStudentLoginResponse,
   normalizeSchoolSSOConfig,
   type NotificationPreferences,
   type SchoolSSOConfig,
@@ -153,6 +154,35 @@ async function signInWithUniversalDevAccount(params: {
   if (!response.ok || typeof data.customToken !== "string") {
     throw new Error(
       typeof data.error === "string" ? data.error : "Failed to sign in universal dev account"
+    );
+  }
+
+  return signInWithCustomAuthToken(data.customToken);
+}
+
+export async function signInWithPuStudentId(
+  studentId: string,
+  password: string,
+): Promise<User | null> {
+  const response = await fetch(getCloudFunctionUrl("signInPuStudentId"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      studentId,
+      password,
+    }),
+  });
+
+  const data = (await parseFunctionJsonResponse(
+    response,
+    "PU student login endpoint returned an invalid response"
+  )) as Partial<PuStudentLoginResponse> & { error?: string };
+
+  if (!response.ok || typeof data.customToken !== "string") {
+    throw new Error(
+      typeof data.error === "string" ? data.error : "學號登入失敗，請確認帳號密碼是否正確"
     );
   }
 

@@ -603,7 +603,7 @@ export function CafeteriaScreen(props: CafeteriaScreenProps) {
                 <EmptyState
                   title={q.trim() || activeFilterCount > 0 ? "找不到符合的餐點" : "沒有菜單"}
                   subtitle={q.trim() || activeFilterCount > 0 ? "請換個關鍵字或調整篩選條件" : "目前沒有菜單"}
-                  hint="你可以切換學校或稍後再試。"
+                  hint="你可以稍後再試，或重新整理目前資料。"
                   actionText={activeFilterCount > 0 ? "清除篩選" : undefined}
                   onAction={activeFilterCount > 0 ? clearFilters : undefined}
                 />

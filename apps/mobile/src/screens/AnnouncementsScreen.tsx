@@ -11,6 +11,7 @@ import { useNetworkStatus } from "../hooks/useNetworkStatus";
 import { usePermissions } from "../hooks/usePermissions";
 import { Card, Pill, LoadingState, EmptyState, ErrorState, SearchBar, Button } from "../ui/components";
 import { OfflineDataNotice } from "../ui/OfflineBanner";
+import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import { useDemo } from "../state/demo";
 import { useSearchHistory, POPULAR_SEARCHES } from "../state/searchHistory";
@@ -49,6 +50,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nav = (props?.navigation ?? navigation) as any;
   const insets = useSafeAreaInsets();
+  const auth = useAuth();
   const { school } = useSchool();
   const toast = useToast();
   const toastRef = useRef(toast);
@@ -90,7 +92,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
     refresh 
   } = useAsyncList<Announcement>(
     () => ds.listAnnouncements(school.id),
-    [ds, school.id],
+    [auth.user?.uid, ds, school.id],
     { keepPreviousData: true, onRefreshError: handleRefreshError }
   );
   
@@ -494,7 +496,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
               <EmptyState
                 title="沒有公告"
                 subtitle="目前沒有公告內容"
-                hint="下拉刷新或切換學校試試。"
+                hint="下拉刷新或稍後再試。"
                 actionText="重新載入"
                 onAction={reload}
                 icon="newspaper-outline"

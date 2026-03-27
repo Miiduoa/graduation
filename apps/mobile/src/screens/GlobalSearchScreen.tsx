@@ -49,10 +49,22 @@ export function GlobalSearchScreen(props: any) {
   const [groupPosts, setGroupPosts] = useState<any[]>([]);
   const [groupAssignments, setGroupAssignments] = useState<any[]>([]);
 
-  const { items: announcements } = useAsyncList<any>(() => ds.listAnnouncements(school.id), [ds, school.id]);
-  const { items: events } = useAsyncList<any>(() => ds.listEvents(school.id), [ds, school.id]);
-  const { items: pois } = useAsyncList<any>(() => ds.listPois(school.id), [ds, school.id]);
-  const { items: menus } = useAsyncList<any>(() => ds.listMenus(school.id), [ds, school.id]);
+  const { items: announcements } = useAsyncList<any>(
+    () => ds.listAnnouncements(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
+  const { items: events } = useAsyncList<any>(
+    () => ds.listEvents(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
+  const { items: pois } = useAsyncList<any>(
+    () => ds.listPois(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
+  const { items: menus } = useAsyncList<any>(
+    () => ds.listMenus(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
 
   // 載入用戶所在群組的貼文與作業（供搜尋）
   useEffect(() => {
