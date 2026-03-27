@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { ScrollView, Text, View, Pressable, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { calculateCredits, type CreditCategory } from "@campus/shared/src/creditAudit";
@@ -16,6 +16,8 @@ import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import { useAsyncList } from "../hooks/useAsyncList";
+import { hasDataSource, getDataSource } from "../data";
+import type { Grade } from "../data/types";
 
 const CATEGORY_LABELS: Record<CreditCategory, string> = {
   required: "必修",
@@ -33,18 +35,47 @@ const CATEGORY_COLORS: Record<CreditCategory, string> = {
   other: "#8b5cf6",
 };
 
+/** 從分數推測學分分類 — 簡單分類（不完美，但有總比沒有好） */
+function guessCreditCategory(courseName: string): CreditCategory {
+  const n = courseName.toLowerCase();
+  if (n.includes("英文") || n.includes("english")) return "english";
+  if (n.includes("通識") || n.includes("博雅") || n.includes("核心")) return "general";
+  // 預設歸類為選修，使用者可以手動修改
+  return "elective";
+}
+
 export function CreditAuditScreen(props: any) {
   const auth = useAuth();
   const { school } = useSchool();
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
+  const [realGrades, setRealGrades] = useState<Grade[]>([]);
+  const [gpaData, setGpaData] = useState<{ gpa: number; totalCredits: number; totalPoints: number } | null>(null);
 
   const { items: userEnrollments, loading, error: loadError, reload } = useAsyncList<StoredEnrollment>(
     async () => {
       if (!auth.user) return [];
-      return listStoredEnrollments(auth.user.uid, school.id);
+      try {
+        return await listStoredEnrollments(auth.user.uid, school.id);
+      } catch {
+        // Firestore 未設定時不影響功能
+        return [];
+      }
     },
     [auth.user?.uid, school.id]
   );
+
+  // 載入真實成績資料（從 PUAdapter 快取）
+  useEffect(() => {
+    if (!auth.user?.uid || !hasDataSource()) return;
+    const ds = getDataSource();
+    Promise.all([
+      ds.listGrades(auth.user.uid, undefined, school.id).catch(() => [] as Grade[]),
+      ds.getGPA(auth.user.uid, school.id).catch(() => ({ gpa: 0, totalCredits: 0, totalPoints: 0 })),
+    ]).then(([grades, gpa]) => {
+      setRealGrades(grades);
+      setGpaData(gpa);
+    });
+  }, [auth.user?.uid, school.id]);
 
   const res = useMemo(() => {
     const coursesById: Record<string, any> = {};
@@ -54,7 +85,33 @@ export function CreditAuditScreen(props: any) {
       coursesById[c.id] = c;
     }
 
+    // 1. 加入真實成績（從 e校園 抓取的）
+    const seenRealCourses = new Set<string>();
+    for (const grade of realGrades) {
+      const courseId = grade.courseId || `real-${grade.id}`;
+      const score = grade.grade ?? grade.score ?? 0;
+      const passed = score >= 60;
+
+      seenRealCourses.add(grade.courseName);
+      coursesById[courseId] = {
+        id: courseId,
+        name: grade.courseName,
+        credits: grade.credits,
+        category: guessCreditCategory(grade.courseName),
+        departmentId: "pu-real",
+      };
+      enrollments.push({
+        id: courseId,
+        uid: auth.user?.uid || "demo",
+        courseId,
+        status: passed ? "completed" : "in_progress",
+        passed,
+      });
+    }
+
+    // 2. 加入手動登錄的（避免重複）
     for (const e of userEnrollments) {
+      if (seenRealCourses.has(e.courseName)) continue;
       const courseId = e.courseId || `user-${e.id}`;
       coursesById[courseId] = {
         id: courseId,
@@ -77,7 +134,7 @@ export function CreditAuditScreen(props: any) {
       coursesById,
       enrollments,
     });
-  }, [userEnrollments, auth.user?.uid]);
+  }, [userEnrollments, realGrades, auth.user?.uid]);
 
   const handleAddCourse = useCallback(() => {
     props?.navigation?.navigate?.("CreditAuditInput", {
@@ -245,7 +302,28 @@ export function CreditAuditScreen(props: any) {
           <Text style={{ color: theme.colors.muted, marginTop: 8 }}>
             {res.total.remaining > 0 ? `還需 ${res.total.remaining} 學分` : "已達畢業學分要求"}
           </Text>
+          {realGrades.length > 0 && (
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
+              已自動載入 {realGrades.length} 門課程成績
+            </Text>
+          )}
         </Card>
+
+        {gpaData && gpaData.totalCredits > 0 && (
+          <Card title="GPA 績點">
+            <View style={{ flexDirection: "row", alignItems: "baseline" }}>
+              <Text style={{ color: theme.colors.text, fontWeight: "900", fontSize: 36 }}>
+                {gpaData.gpa.toFixed(2)}
+              </Text>
+              <Text style={{ color: theme.colors.muted, fontWeight: "700", fontSize: 18, marginLeft: 4 }}>
+                / 4.00
+              </Text>
+            </View>
+            <Text style={{ color: theme.colors.muted, marginTop: 4 }}>
+              已修 {gpaData.totalCredits} 學分・總績點 {gpaData.totalPoints.toFixed(1)}
+            </Text>
+          </Card>
+        )}
 
         <Card title="分類進度">
           {(["required", "elective", "general", "english", "other"] as const).map((k) => {
@@ -294,7 +372,7 @@ export function CreditAuditScreen(props: any) {
           })}
         </Card>
 
-        <Card title="已登錄課程" subtitle={`共 ${userEnrollments.length} 門課程`}>
+        <Card title="已登錄課程" subtitle={`共 ${realGrades.length + userEnrollments.length} 門課程（${realGrades.length} 門自動匯入）`}>
           {!auth.user ? (
             <Text style={{ color: theme.colors.muted }}>請先登入才能儲存修課紀錄。</Text>
           ) : userEnrollments.length === 0 ? (
