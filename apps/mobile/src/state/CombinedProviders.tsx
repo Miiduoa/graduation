@@ -12,6 +12,7 @@ import { DemoProvider } from "./demo";
 import { I18nProvider } from "../i18n";
 import { ToastProvider } from "../ui/Toast";
 import { useLatestValue } from "../hooks/useLatestValue";
+import { usePUDataRefresh } from "../hooks/usePUDataRefresh";
 
 type ProviderEntry = {
   Provider: React.ComponentType<{ children: React.ReactNode } & Record<string, unknown>>;
@@ -105,6 +106,9 @@ export function AuthAwareProviders({ children }: { children: React.ReactNode }) 
   const { school } = useSchool();
   const userId = auth.user?.uid ?? null;
   const schoolId = school?.id ?? null;
+
+  // 靜宜大學資料自動刷新（背景回前景 + 定期刷新公告）
+  usePUDataRefresh();
 
   return (
     <AuthAwareProvidersContent userId={userId} schoolId={schoolId}>

@@ -1,6 +1,7 @@
 /* eslint-disable */
-import React, { useMemo } from "react";
-import { Alert, ScrollView, Text, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { Alert, Pressable, ScrollView, Text, View, ActivityIndicator } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAuth } from "../state/auth";
@@ -9,13 +10,77 @@ import { useSchool } from "../state/school";
 import { usePermissions } from "../hooks/usePermissions";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
-import { ContextStrip, RoleCtaCard, TimelineCard } from "../ui/campusOs";
+import { ContextStrip } from "../ui/campusOs";
 import { resolveRoleMode } from "../utils/campusOs";
+
+interface ListRowProps {
+  icon: string;
+  title: string;
+  meta?: string;
+  tint?: string;
+  onPress?: () => void;
+}
+
+function ListRow({ icon, title, meta, tint, onPress }: ListRowProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: theme.space.md,
+        paddingVertical: theme.space.md,
+        paddingHorizontal: theme.space.lg,
+        backgroundColor: theme.colors.surface,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.border,
+        opacity: pressed ? 0.6 : 1,
+      })}
+    >
+      <View style={{ width: 24, height: 24, justifyContent: "center", alignItems: "center" }}>
+        <Ionicons name={icon as any} size={20} color={tint || theme.colors.text} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "600" }}>
+          {title}
+        </Text>
+      </View>
+      {meta && (
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: "500" }}>
+          {meta}
+        </Text>
+      )}
+      <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+    </Pressable>
+  );
+}
+
+interface SectionHeaderProps {
+  title: string;
+}
+
+function SectionHeader({ title }: SectionHeaderProps) {
+  return (
+    <Text
+      style={{
+        color: theme.colors.text,
+        fontSize: 16,
+        fontWeight: "700",
+        marginTop: theme.space.lg,
+        marginBottom: theme.space.md,
+        paddingHorizontal: theme.space.lg,
+      }}
+    >
+      {title}
+    </Text>
+  );
+}
 
 export function PersonalHubScreen(props: any) {
   const nav = props?.navigation;
   const insets = useSafeAreaInsets();
   const auth = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const notifs = useNotifications();
   const { school } = useSchool();
   const { displayName: roleDisplayName, badgeColor, can, isTeacher, isStaff, isDepartmentHead, isAdmin } = usePermissions();
@@ -37,230 +102,252 @@ export function PersonalHubScreen(props: any) {
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + 12,
-          paddingHorizontal: 16,
+          paddingTop: insets.top + theme.space.lg,
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
-          gap: 14,
         }}
       >
-        <ContextStrip
-          eyebrow="我的"
-          title={identity}
-          description={
-            auth.user
-              ? `${school.name} · ${roleDisplayName}身份。這裡只保留個人設定、帳號安全與長期成長。`
-              : "這裡只處理個人設定、登入與偏好，不再塞滿高頻核心服務。"
-          }
-        />
-
-        {/* 角色標籤 */}
-        {auth.user ? (
-          <View style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 8,
-            paddingVertical: 4,
-          }}>
-            <View style={{
-              backgroundColor: badgeColor,
-              paddingHorizontal: 12,
-              paddingVertical: 4,
-              borderRadius: 12,
-            }}>
-              <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>
-                {roleDisplayName}
-              </Text>
-            </View>
-            {auth.profile?.department ? (
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
-                {auth.profile.department}
-              </Text>
-            ) : null}
+        <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.xl }}>
+          <View style={{ gap: theme.space.sm }}>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>我的</Text>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: "700" }}>
+              {identity}
+            </Text>
           </View>
-        ) : null}
+          {auth.user ? (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: theme.space.md,
+                marginTop: theme.space.md,
+              }}
+            >
+              <View
+                style={{
+                  backgroundColor: badgeColor,
+                  paddingHorizontal: theme.space.md,
+                  paddingVertical: theme.space.xs,
+                  borderRadius: theme.radius.full,
+                }}
+              >
+                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>
+                  {roleDisplayName}
+                </Text>
+              </View>
+              {auth.profile?.department ? (
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
+                  {auth.profile.department}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
 
         {!auth.user ? (
-          <RoleCtaCard
-            icon="log-in-outline"
-            title="登入並完成個人偏好"
-            description="完成學校、角色與提醒設定後，Today、課程與收件匣會自動調整成更符合你的節奏。"
-            roleLabel="開始使用"
-            tone="student"
-            actionLabel="前往登入"
+          <Pressable
             onPress={() => nav?.navigate?.("SSOLogin")}
-          />
+            style={({ pressed }) => ({
+              marginHorizontal: theme.space.lg,
+              marginBottom: theme.space.xl,
+              paddingVertical: theme.space.lg,
+              paddingHorizontal: theme.space.lg,
+              backgroundColor: theme.colors.accent,
+              borderRadius: theme.radius.lg,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>登入帳號</Text>
+            <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, marginTop: theme.space.xs }}>
+              使用學校帳號密碼登入以解鎖完整功能
+            </Text>
+          </Pressable>
         ) : (
-          <RoleCtaCard
-            icon="sparkles-outline"
-            title="你的核心偏好已集中到這裡"
-            description="語言、無障礙、通知、外觀、帳號安全與資料匯出都從這裡進，不再和校園服務混在一起。"
-            roleLabel="個人控制"
-            tone={roleMode === "admin" ? "admin" : roleMode === "teacher" ? "teacher" : "student"}
-            actionLabel="打開設定"
+          <Pressable
             onPress={() => nav?.navigate?.("Settings")}
-          />
+            style={({ pressed }) => ({
+              marginHorizontal: theme.space.lg,
+              marginBottom: theme.space.xl,
+              paddingVertical: theme.space.lg,
+              paddingHorizontal: theme.space.lg,
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radius.lg,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              opacity: pressed ? 0.6 : 1,
+            })}
+          >
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>
+              打開設定
+            </Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: theme.space.xs }}>
+              語言、無障礙、通知、外觀、帳號安全
+            </Text>
+          </Pressable>
         )}
 
-        <View style={{ gap: 10 }}>
-          <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>個人與偏好</Text>
-          {activeMerchantAssignments.length > 0 ? (
-            <TimelineCard
-              icon="storefront-outline"
-              title="商家接單"
-              description={`處理 ${activeMerchantAssignments[0].cafeteriaName}${activeMerchantAssignments.length > 1 ? ` 等 ${activeMerchantAssignments.length} 間餐廳` : ""} 的訂單狀態。`}
-              meta="Merchant"
-              tint={theme.colors.accent}
-              onPress={() => nav?.navigate?.("MerchantHub")}
+        <SectionHeader title="個人與偏好" />
+        {activeMerchantAssignments.length > 0 ? (
+          <ListRow
+            icon="storefront-outline"
+            title="商家接單"
+            meta={`${activeMerchantAssignments.length} 間`}
+            tint={theme.colors.accent}
+            onPress={() => nav?.navigate?.("MerchantHub")}
+          />
+        ) : null}
+        <ListRow
+          icon="person-outline"
+          title="個人資料"
+          meta={auth.user ? "已綁定" : "未登入"}
+          onPress={() => nav?.navigate?.(auth.user ? "ProfileEdit" : "SSOLogin")}
+        />
+        <ListRow
+          icon="notifications-outline"
+          title="通知與提醒"
+          meta={notifs.unreadCount > 0 ? `${notifs.unreadCount} 則` : "已整理"}
+          tint={theme.colors.warning}
+          onPress={() => nav?.navigate?.("NotificationSettings")}
+        />
+        <ListRow
+          icon="accessibility-outline"
+          title="語言與無障礙"
+          meta="偏好"
+          tint={theme.colors.calm}
+          onPress={() => nav?.navigate?.("AccessibilitySettings")}
+        />
+
+        <SectionHeader title="長期規劃與安全" />
+        <ListRow
+          icon="school-outline"
+          title="學分與畢業規劃"
+          meta="規劃"
+          tint={theme.colors.roleTeacher}
+          onPress={() => nav?.navigate?.("CreditAuditStack")}
+        />
+        <ListRow
+          icon="trophy-outline"
+          title="成就與積分"
+          meta="成長"
+          tint={theme.colors.achievement}
+          onPress={() => nav?.navigate?.("Achievements")}
+        />
+        <ListRow
+          icon="shield-checkmark-outline"
+          title="帳號安全與資料"
+          meta="安全"
+          tint={theme.colors.urgent}
+          onPress={() => nav?.navigate?.("DataExport")}
+        />
+
+        {isTeacher || isDepartmentHead || isStaff || isAdmin ? (
+          <>
+            <SectionHeader
+              title={
+                isAdmin
+                  ? "管理入口"
+                  : isStaff
+                    ? "服務管理"
+                    : isDepartmentHead
+                      ? "主管工具"
+                      : "教學工具"
+              }
             />
-          ) : null}
-          <TimelineCard
-            icon="person-outline"
-            title="個人資料"
-            description="姓名、系所、公開資訊與個人介紹"
-            meta={auth.user ? "已綁定" : "未登入"}
-            onPress={() => nav?.navigate?.(auth.user ? "ProfileEdit" : "SSOLogin")}
-          />
-          <TimelineCard
-            icon="notifications-outline"
-            title="通知與提醒"
-            description="管理推播類型與免打擾時段，讓收件匣更可控。"
-            meta={notifs.unreadCount > 0 ? `${notifs.unreadCount} 則未讀` : "已整理"}
-            tint={theme.colors.warning}
-            onPress={() => nav?.navigate?.("NotificationSettings")}
-          />
-          <TimelineCard
-            icon="accessibility-outline"
-            title="語言與無障礙"
-            description="字級、對比、減少動態與多語系"
-            meta="偏好"
-            tint={theme.colors.calm}
-            onPress={() => nav?.navigate?.("AccessibilitySettings")}
-          />
-        </View>
-
-        <View style={{ gap: 10 }}>
-          <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>長期規劃與安全</Text>
-          <TimelineCard
-            icon="school-outline"
-            title="學分與畢業規劃"
-            description="這是低頻但高價值的長期工具，應該留在我的，而不是放進高頻主流程。"
-            meta="規劃"
-            tint={theme.colors.roleTeacher}
-            onPress={() => nav?.navigate?.("CreditAuditStack")}
-          />
-          <TimelineCard
-            icon="trophy-outline"
-            title="成就與積分"
-            description="成就現在是成長層，不再扮演高頻服務入口。"
-            meta="成長"
-            tint={theme.colors.achievement}
-            onPress={() => nav?.navigate?.("Achievements")}
-          />
-          <TimelineCard
-            icon="shield-checkmark-outline"
-            title="帳號安全與資料"
-            description="匯出資料、刪除帳號與校務身份安全設定"
-            meta="安全"
-            tint={theme.colors.urgent}
-            onPress={() => nav?.navigate?.("DataExport")}
-          />
-        </View>
-
-        {/* 角色專屬功能入口 — 依身份動態顯示 */}
-        {(isTeacher || isDepartmentHead || isStaff || isAdmin) ? (
-          <View style={{ gap: 10 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>
-              {isAdmin ? "管理入口" : isStaff ? "服務管理" : isDepartmentHead ? "主管工具" : "教學工具"}
-            </Text>
-
-            {/* 教師/教授：快速進入教學管理 */}
             {isTeacher ? (
-              <>
-                <TimelineCard
-                  icon="school-outline"
-                  title="我的課程管理"
-                  description="查看開課清單、批改作業與出缺勤紀錄"
-                  meta="教學"
-                  tint={theme.colors.roleTeacher}
-                  onPress={() => nav?.navigate?.("CourseHub")}
-                />
-              </>
+              <ListRow
+                icon="school-outline"
+                title="我的課程管理"
+                meta="教學"
+                tint={theme.colors.roleTeacher}
+                onPress={() => nav?.navigate?.("CourseHub")}
+              />
             ) : null}
-
-            {/* 職員：設施與訂單管理 */}
             {isStaff ? (
-              <>
-                <TimelineCard
-                  icon="construct-outline"
-                  title="設施與工單管理"
-                  description="處理維修報修、訂單與列印服務"
-                  meta="服務"
-                  tint={theme.colors.warning}
-                  onPress={() => nav?.navigate?.("PrintService")}
-                />
-              </>
+              <ListRow
+                icon="construct-outline"
+                title="設施與工單管理"
+                meta="服務"
+                tint={theme.colors.warning}
+                onPress={() => nav?.navigate?.("PrintService")}
+              />
             ) : null}
-
-            {/* 系所主管：審核與報表 */}
             {isDepartmentHead ? (
-              <>
-                <TimelineCard
-                  icon="stats-chart-outline"
-                  title="系所數據與審核"
-                  description="審核流程、教學評鑑與統計報表"
-                  meta="審核"
-                  tint={theme.colors.calm}
-                  onPress={() => nav?.navigate?.("AdminDashboard")}
-                />
-              </>
+              <ListRow
+                icon="stats-chart-outline"
+                title="系所數據與審核"
+                meta="審核"
+                tint={theme.colors.calm}
+                onPress={() => nav?.navigate?.("AdminDashboard")}
+              />
             ) : null}
-
-            {/* 超級管理員：完整控制台 */}
             {isAdmin ? (
               <>
-                <TimelineCard
+                <ListRow
                   icon="settings-outline"
                   title="管理員控制台"
-                  description="全校管理後台：成員管理、數據分析與系統設定"
                   meta="Admin"
                   tint={theme.colors.roleAdmin}
                   onPress={() => nav?.navigate?.("AdminDashboard")}
                 />
-                <TimelineCard
+                <ListRow
                   icon="checkmark-done-outline"
                   title="課程驗證管理"
-                  description="審核與驗證新開課程申請"
                   meta="審核"
                   tint={theme.colors.urgent}
                   onPress={() => nav?.navigate?.("AdminCourseVerify")}
                 />
               </>
             ) : null}
-          </View>
+          </>
         ) : null}
 
-        <View
-          style={{
-            padding: 16,
-            borderRadius: theme.radius.lg,
-            backgroundColor: theme.colors.surface,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-          }}
-        >
-          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>保留原則</Text>
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 8 }}>
-            如果一個功能是每天高頻、帶時效、會打斷注意力的，它就不該被塞在「我的」。
-          </Text>
-          <Text
-            style={{ color: theme.colors.accent, fontSize: 13, fontWeight: "700", marginTop: 12 }}
-            onPress={() => {
-              Alert.alert("已重新定位", "高頻核心服務已移往 Today、課程、校園與收件匣。");
-            }}
-          >
-            查看重設說明
-          </Text>
-        </View>
+        {auth.user ? (
+          <>
+            <SectionHeader title="帳號" />
+            <Pressable
+              onPress={() => {
+                Alert.alert("確認登出", "登出後需要重新使用學校帳號登入，確定要登出嗎？", [
+                  { text: "取消", style: "cancel" },
+                  {
+                    text: "登出",
+                    style: "destructive",
+                    onPress: async () => {
+                      setIsLoggingOut(true);
+                      try {
+                        await auth.signOut();
+                      } finally {
+                        setIsLoggingOut(false);
+                      }
+                    },
+                  },
+                ]);
+              }}
+              disabled={isLoggingOut}
+              style={({ pressed }) => ({
+                marginHorizontal: theme.space.lg,
+                marginVertical: theme.space.md,
+                paddingVertical: theme.space.lg,
+                paddingHorizontal: theme.space.lg,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.dangerSoft,
+                opacity: pressed || isLoggingOut ? 0.7 : 1,
+              })}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.md }}>
+                {isLoggingOut ? (
+                  <ActivityIndicator size="small" color={theme.colors.danger} />
+                ) : (
+                  <Ionicons name="log-out-outline" size={20} color={theme.colors.danger} />
+                )}
+                <Text style={{ color: theme.colors.danger, fontSize: 15, fontWeight: "700", flex: 1 }}>
+                  登出帳號
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: theme.space.xs }}>
+                {auth.user.email ?? "已登入"}
+              </Text>
+            </Pressable>
+          </>
+        ) : null}
       </ScrollView>
     </View>
   );

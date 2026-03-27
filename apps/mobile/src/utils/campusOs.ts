@@ -9,6 +9,8 @@ import type {
   UserRole,
 } from "../data/types";
 
+console.log("[debug][campusOs] module loaded");
+
 export function resolveRoleMode(role?: UserRole | null, isAuthenticated?: boolean): RoleMode {
   if (!isAuthenticated) return "guest";
   if (role === "admin" || role === "principal") return "admin";
@@ -20,24 +22,90 @@ export function isTeachingRole(role?: UserRole | null): boolean {
   return resolveRoleMode(role, true) === "teacher" || resolveRoleMode(role, true) === "admin";
 }
 
+function safeGetTime(value: unknown): number | null {
+  // NOTE: Hermes can throw "Date.prototype.getTime() called on non-Date object"
+  // if we call a cross-realm Date's getTime(). Avoid calling `getTime` unless it's
+  // a real Date instance in THIS realm.
+  try {
+    if (value instanceof Date) {
+      const t = value.getTime();
+      return Number.isFinite(t) ? t : null;
+    }
+
+    if (value == null) return null;
+
+    if (typeof (value as { toMillis?: unknown }).toMillis === "function") {
+      const t = (value as { toMillis: () => number }).toMillis();
+      return typeof t === "number" && Number.isFinite(t) ? t : null;
+    }
+
+    if (typeof (value as { toDate?: unknown }).toDate === "function") {
+      return safeGetTime((value as { toDate: () => unknown }).toDate());
+    }
+
+    if (typeof (value as { seconds?: unknown }).seconds === "number") {
+      return (value as { seconds: number }).seconds * 1000;
+    }
+    if (typeof (value as { _seconds?: unknown })._seconds === "number") {
+      return (value as { _seconds: number })._seconds * 1000;
+    }
+
+    if (typeof value === "string" || typeof value === "number") {
+      const t = new Date(value).getTime();
+      return Number.isFinite(t) ? t : null;
+    }
+
+    if (Object.prototype.toString.call(value) === "[object Date]") {
+      // Cross-realm Date: use string parsing instead of calling getTime().
+      const parsed = Date.parse(String(value));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    if (typeof value === "object" && typeof (value as { getTime?: unknown }).getTime === "function") {
+      // Date-like object: best effort via string coercion, but never invoke getTime().
+      const parsed = Date.parse(String(value));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 function asDate(value: unknown): Date | null {
   if (!value) return null;
-  // Some runtimes (or mocked data) can have "Date-like" objects that pass `instanceof Date`
-  // but don't actually implement `getTime()`. Always guard `getTime` before calling.
-  const maybeDate = value as { getTime?: unknown };
-  if (typeof maybeDate?.getTime === "function") {
-    const t = (maybeDate.getTime as () => number)();
-    return Number.isNaN(t) ? null : (value as Date);
+
+  // 1. If it has toMillis() (live Firestore Timestamp), use that directly
+  if (typeof (value as { toMillis?: unknown }).toMillis === "function") {
+    const ms = (value as { toMillis: () => number }).toMillis();
+    if (typeof ms === "number" && !Number.isNaN(ms)) return new Date(ms);
   }
 
-  // Firestore Timestamp and other objects with `toDate()`
-  const maybeTimestamp = value as { toDate?: () => Date };
-  if (typeof maybeTimestamp?.toDate === "function") {
-    const d = maybeTimestamp.toDate();
-    return Number.isNaN(d.getTime()) ? null : d;
+  // 2. If it looks like a Date, try getTime() safely (Hermes can throw on cross-realm Dates)
+  const isDateLike =
+    value instanceof Date || Object.prototype.toString.call(value) === "[object Date]";
+  if (isDateLike) {
+    const t = safeGetTime(value);
+    if (t !== null) return new Date(t);
   }
 
-  // Firestore Timestamp (legacy/serialized shapes)
+  // 3. Firestore Timestamp with toDate()
+  if (typeof (value as { toDate?: unknown }).toDate === "function") {
+    try {
+      const d = (value as { toDate: () => Date }).toDate();
+      const t = safeGetTime(d);
+      if (t !== null) return d;
+      // toDate() returned a cross-realm Date — re-wrap
+      try {
+        const n = +(d as Date);
+        if (typeof n === "number" && !Number.isNaN(n)) return new Date(n);
+      } catch { /* ignore */ }
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  // 4. Serialised Firestore Timestamp ({_seconds, _nanoseconds} or {seconds, nanoseconds})
   const maybeFirestore = value as { _seconds?: unknown; _nanoseconds?: unknown; seconds?: unknown; nanoseconds?: unknown };
   const seconds =
     (typeof maybeFirestore._seconds === "number" ? maybeFirestore._seconds : maybeFirestore.seconds) as
@@ -49,14 +117,20 @@ function asDate(value: unknown): Date | null {
       | undefined;
   if (typeof seconds === "number") {
     const ms = seconds * 1000 + Math.round((nanoseconds ?? 0) / 1e6);
-    const d = new Date(ms);
-    return Number.isNaN(d.getTime()) ? null : d;
+    return new Date(ms);
   }
 
-  // ISO string / epoch millis
+  // 5. Plain object with getTime (non-Date) — e.g. mock objects
+  if (typeof value === "object" && typeof (value as { getTime?: unknown }).getTime === "function") {
+    const t = safeGetTime(value);
+    if (t !== null) return new Date(t);
+  }
+
+  // 6. ISO string / epoch millis
   if (typeof value === "string" || typeof value === "number") {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
+    const d = new Date(value as string | number);
+    const t = safeGetTime(d);
+    return t !== null ? d : null;
   }
 
   return null;
@@ -65,7 +139,9 @@ function asDate(value: unknown): Date | null {
 export function getFreshnessState(date?: Date | string | number | null): FreshnessState {
   const d = asDate(date);
   if (!d) return "stale";
-  const diff = Date.now() - d.getTime();
+  const t = safeGetTime(d);
+  if (t === null) return "stale";
+  const diff = Date.now() - t;
   if (diff <= 1000 * 60 * 30) return "live";
   if (diff <= 1000 * 60 * 60 * 12) return "new";
   if (diff <= 1000 * 60 * 60 * 24) return "today";
@@ -191,7 +267,9 @@ export function getNextCourse(courses: Course[], date: Date = new Date()): Cours
 export function formatDueWindow(date?: Date | string | number | null): string {
   const d = asDate(date);
   if (!d) return "等待下一步";
-  const diffMinutes = Math.round((d.getTime() - Date.now()) / 60000);
+  const t = safeGetTime(d);
+  if (t === null) return "等待下一步";
+  const diffMinutes = Math.round((t - Date.now()) / 60000);
   if (diffMinutes <= 0) return "已到時間，現在處理";
   if (diffMinutes < 60) return `${diffMinutes} 分鐘內要處理`;
   if (diffMinutes < 24 * 60) {

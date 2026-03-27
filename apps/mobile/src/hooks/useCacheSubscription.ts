@@ -184,7 +184,7 @@ export function useCachedData<T>({
   // 初始載入
   useEffect(() => {
     fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [...dependencies, enabled]);
 
   // 監聽快取更新

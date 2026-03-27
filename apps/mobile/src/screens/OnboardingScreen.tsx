@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 
 import { Button } from "../ui/components";
 import { theme } from "../ui/theme";
 import { mockSchools, searchSchools } from "@campus/shared/src/schools";
+import { loadPersistedValue, removePersistedValue, savePersistedValue } from "../services/persistedStorage";
 
 const ONBOARDING_KEY = "@has_seen_onboarding";
 const SCHOOL_SELECTION_KEY = "campus.schoolSelection.v1";
@@ -209,28 +209,22 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
     setError(null);
     try {
       if (selectedSchool) {
-        await AsyncStorage.setItem(
-          SCHOOL_SELECTION_KEY,
-          JSON.stringify({
-            code: selectedSchool.code,
-            schoolId: selectedSchool.schoolId,
-            schoolName: selectedSchool.name,
-            shortName: selectedSchool.shortName,
-          })
-        );
+        await savePersistedValue(SCHOOL_SELECTION_KEY, {
+          code: selectedSchool.code,
+          schoolId: selectedSchool.schoolId,
+          schoolName: selectedSchool.name,
+          shortName: selectedSchool.shortName,
+        });
       }
 
-      await AsyncStorage.setItem(
-        ONBOARDING_PROFILE_KEY,
-        JSON.stringify({
-          role: selectedRole,
-          goal: selectedGoal,
-          // 舊格式仍以陣列儲存，但此步驟只允許一個選項
-          notifications: [selectedNotifications],
-          completedAt: new Date().toISOString(),
-        })
-      );
-      await AsyncStorage.setItem(ONBOARDING_KEY, "true");
+      await savePersistedValue(ONBOARDING_PROFILE_KEY, {
+        role: selectedRole,
+        goal: selectedGoal,
+        // 舊格式仍以陣列儲存，但此步驟只允許一個選項
+        notifications: [selectedNotifications],
+        completedAt: new Date().toISOString(),
+      });
+      await savePersistedValue(ONBOARDING_KEY, true);
       onComplete();
     } catch (saveError) {
       console.error("Failed to save onboarding:", saveError);
@@ -445,10 +439,9 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
 }
 
 export async function hasSeenOnboarding(): Promise<boolean> {
-  const value = await AsyncStorage.getItem(ONBOARDING_KEY);
-  return value === "true";
+  return loadPersistedValue<boolean>({ storageKey: ONBOARDING_KEY, fallback: false });
 }
 
 export async function resetOnboarding(): Promise<void> {
-  await AsyncStorage.removeItem(ONBOARDING_KEY);
+  await removePersistedValue(ONBOARDING_KEY);
 }

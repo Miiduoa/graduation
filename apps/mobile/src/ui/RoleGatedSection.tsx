@@ -1,4 +1,4 @@
-/* eslint-disable */
+ 
 import React from "react";
 import { usePermissions } from "../hooks/usePermissions";
 import type { Permission } from "../services/permissions";

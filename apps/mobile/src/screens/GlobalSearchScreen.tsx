@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { ScrollView, Text, View, Pressable, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen, Card, Pill, AnimatedCard, SegmentedControl, EmptyListPlaceholder } from "../ui/components";
+import { Screen, Pill, AnimatedCard, SegmentedControl, EmptyListPlaceholder } from "../ui/components";
 import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
 import { useSearchHistory, POPULAR_SEARCHES } from "../state/searchHistory";
@@ -10,7 +10,7 @@ import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
-import { formatDateTime, toDate, formatRelativeTime } from "../utils/format";
+import { formatDateTime } from "../utils/format";
 import { getDb } from "../firebase";
 import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
 
@@ -105,7 +105,7 @@ export function GlobalSearchScreen(props: any) {
 
     loadGroupContent();
     return () => { cancelled = true; };
-  }, [auth.user?.uid, db, school.id]);
+  }, [auth.user, db, school.id]);
 
   const results = useMemo<SearchResult[]>(() => {
     const q = queryText.trim().toLowerCase();

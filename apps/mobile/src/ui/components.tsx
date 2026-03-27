@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { Component, ErrorInfo, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, Text, TextInput, View, Easing, ScrollView, ActivityIndicator, Platform, Dimensions, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Pressable, Text, TextInput, View, Easing, ScrollView, ActivityIndicator, Platform, Dimensions, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "./navigationTheme";
 import { theme, shadowStyle, softShadowStyle } from "./theme";
@@ -90,7 +90,7 @@ export function Card(props: {
         style={{
           padding: theme.space.lg,
           borderRadius: theme.radius.lg,
-          gap: 10,
+          gap: theme.space.md,
           overflow: "hidden",
           ...style.surface,
         }}
@@ -156,10 +156,10 @@ export function Pill(props: {
   const contentText = props.text ?? props.label ?? "";
 
   const kindStyles = {
-    default: { bg: theme.colors.surfaceElevated, color: theme.colors.textSecondary },
+    default: { bg: theme.colors.surface2, color: theme.colors.textSecondary },
     accent: { bg: theme.colors.accentSoft, color: theme.colors.accent },
     success: { bg: theme.colors.successSoft, color: theme.colors.success },
-    muted: { bg: theme.colors.surfaceElevated, color: theme.colors.muted },
+    muted: { bg: theme.colors.surface2, color: theme.colors.muted },
     danger: { bg: theme.colors.dangerSoft, color: theme.colors.danger },
     warning: { bg: theme.colors.warningSoft, color: theme.colors.warning },
   };
@@ -179,7 +179,7 @@ export function Pill(props: {
           alignSelf: "flex-start",
           flexDirection: "row",
           alignItems: "center",
-          gap: 4,
+          gap: theme.space.xs,
           paddingHorizontal: sStyle.px + 2,
           paddingVertical: sStyle.py + 1,
           borderRadius: theme.radius.full,
@@ -218,7 +218,7 @@ export function Button(props: {
 
   const bgColors: Record<string, string> = {
     primary: theme.colors.accent,
-    secondary: theme.colors.surfaceElevated,
+    secondary: theme.colors.surface2,
     danger: theme.colors.danger,
     ghost: "transparent",
     "accent-ghost": theme.colors.accentSoft,
@@ -238,7 +238,7 @@ export function Button(props: {
     danger: theme.colors.dangerSoft,
     ghost: theme.colors.surface2,
     "accent-ghost": theme.colors.accentSoft,
-    outline: theme.colors.surfaceElevated,
+    outline: theme.colors.surface2,
   };
   const borderColors: Record<string, string> = {
     primary: "transparent",
@@ -250,9 +250,9 @@ export function Button(props: {
   };
 
   const sizeStyles = {
-    small: { paddingVertical: 9, paddingHorizontal: 16, fontSize: 13, radius: theme.radius.md },
-    default: { paddingVertical: 13, paddingHorizontal: 22, fontSize: 15, radius: theme.radius.lg },
-    large: { paddingVertical: 17, paddingHorizontal: 30, fontSize: 16, radius: theme.radius.xl },
+    small: { paddingVertical: theme.space.xs, paddingHorizontal: theme.space.md, fontSize: 13, radius: theme.radius.md },
+    default: { paddingVertical: theme.space.sm, paddingHorizontal: theme.space.lg, fontSize: 15, radius: theme.radius.lg },
+    large: { paddingVertical: theme.space.md, paddingHorizontal: theme.space.xl, fontSize: 16, radius: theme.radius.xl },
   };
 
   const s = sizeStyles[size];
@@ -279,7 +279,7 @@ export function Button(props: {
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "center",
-          gap: 8,
+          gap: theme.space.xs,
           alignSelf: props.fullWidth ? "stretch" : "flex-start",
           minHeight: 44,
           transform: [{ scale: pressed && !disabled ? 0.97 : 1 }],
@@ -314,8 +314,8 @@ export function Button(props: {
 export function LoadingState(props: { title?: string; subtitle?: string; hint?: string; rows?: number }) {
   const rows = props.rows ?? 3;
   return (
-    <View style={{ gap: 16, paddingVertical: 24 }}>
-      <View style={{ alignItems: "center", gap: 12, paddingVertical: 16 }}>
+    <View style={{ gap: theme.space.md, paddingVertical: theme.space.xl }}>
+      <View style={{ alignItems: "center", gap: theme.space.md, paddingVertical: theme.space.lg }}>
         <Spinner size={32} />
         <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "600" }}>
           {props.title ?? "載入中"}
@@ -356,7 +356,7 @@ export function EmptyState(props: {
   const { icon, color } = getIconAndColor();
 
   return (
-    <View style={{ gap: 12, alignItems: "center", paddingVertical: 48, paddingHorizontal: 32 }}>
+    <View style={{ gap: theme.space.md, alignItems: "center", paddingVertical: theme.space.xxxl, paddingHorizontal: theme.space.xl }}>
       <View
         style={{
           width: 88,
@@ -365,7 +365,7 @@ export function EmptyState(props: {
           backgroundColor: `${color}10`,
           alignItems: "center",
           justifyContent: "center",
-          marginBottom: 8,
+          marginBottom: theme.space.md,
         }}
       >
         <Ionicons name={icon as any} size={36} color={color} />
@@ -393,12 +393,12 @@ export function EmptyState(props: {
         {props.subtitle ?? "你可以稍後再試，或切換學校。"}
       </Text>
       {props.hint && (
-        <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "center", marginTop: 4 }}>
+        <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "center", marginTop: theme.space.xs }}>
           {props.hint}
         </Text>
       )}
       {props.actionText && (
-        <View style={{ marginTop: 20 }}>
+        <View style={{ marginTop: theme.space.lg }}>
           <Button text={props.actionText} onPress={props.onAction} kind="primary" />
         </View>
       )}
@@ -473,16 +473,16 @@ export function ErrorState(props: {
   const actionText = props.actionText ?? config.actionText;
 
   return (
-    <View style={{ gap: 16, paddingVertical: 24 }} accessibilityRole="alert">
+    <View style={{ gap: theme.space.md, paddingVertical: theme.space.xl }} accessibilityRole="alert">
       <View
         style={{
           padding: theme.space.lg,
           borderRadius: theme.radius.lg,
           backgroundColor: theme.colors.dangerSoft,
-          gap: 14,
+          gap: theme.space.md,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.md }}>
           <View
             style={{
               width: 48,
@@ -499,14 +499,14 @@ export function ErrorState(props: {
             <Text style={{ fontSize: 16, fontWeight: "700", color: theme.colors.text, letterSpacing: -0.2 }}>
               {title}
             </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 3 }}>{subtitle}</Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: theme.space.xs }}>{subtitle}</Text>
           </View>
         </View>
 
         <Text style={{ color: theme.colors.muted, lineHeight: 20, fontSize: 14 }}>{hint}</Text>
 
         {props.showDetails && props.errorCode && (
-          <View style={{ padding: 10, borderRadius: theme.radius.sm, backgroundColor: theme.colors.surface2 }}>
+          <View style={{ padding: theme.space.sm, borderRadius: theme.radius.sm, backgroundColor: theme.colors.surface2 }}>
             <Text style={{ color: theme.colors.muted, fontSize: 11, fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }) }}>
               錯誤代碼: {props.errorCode}
             </Text>
@@ -514,7 +514,7 @@ export function ErrorState(props: {
         )}
 
         {props.onAction && (
-          <View style={{ marginTop: 4 }}>
+          <View style={{ marginTop: theme.space.sm }}>
             <Button text={actionText} onPress={props.onAction} kind="primary" />
           </View>
         )}
@@ -553,11 +553,11 @@ export function SearchBar(props: {
       style={{
         borderRadius: theme.radius.md,
         backgroundColor: theme.colors.surface2,
-        paddingHorizontal: 14,
-        paddingVertical: 11,
+        paddingHorizontal: theme.space.md,
+        paddingVertical: theme.space.sm,
         flexDirection: "row",
         alignItems: "center",
-        gap: 10,
+        gap: theme.space.sm,
         borderWidth: 1.5,
         borderColor: isFocused ? theme.colors.accent : "transparent",
       }}
@@ -620,7 +620,7 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
 
   if (countdown.isExpired) {
     return (
-      <View style={{ alignItems: "center", padding: 12 }}>
+      <View style={{ alignItems: "center", padding: theme.space.md }}>
         <Pill text="已截止" kind="danger" />
       </View>
     );
@@ -636,19 +636,19 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
   return (
     <View style={{ alignItems: "center" }}>
       {props.label ? (
-        <Text style={{ color: theme.colors.muted, marginBottom: 10, fontSize: 12, fontWeight: "500" }}>
+        <Text style={{ color: theme.colors.muted, marginBottom: theme.space.md, fontSize: 12, fontWeight: "500" }}>
           {props.label}
         </Text>
       ) : null}
-      <View style={{ flexDirection: "row", gap: 8 }}>
+      <View style={{ flexDirection: "row", gap: theme.space.sm }}>
         {units.map((unit) => (
           <View
             key={unit.label}
             style={{
               alignItems: "center",
               minWidth: 52,
-              paddingVertical: 10,
-              paddingHorizontal: 8,
+              paddingVertical: theme.space.sm,
+              paddingHorizontal: theme.space.xs,
               borderRadius: theme.radius.md,
               backgroundColor: theme.colors.accentSoft,
             }}
@@ -656,7 +656,7 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
             <Text style={{ color: theme.colors.accent, fontWeight: "800", fontSize: 22, letterSpacing: -0.5 }}>
               {String(unit.value).padStart(2, "0")}
             </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2, fontWeight: "500" }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: theme.space.xs, fontWeight: "500" }}>
               {unit.label}
             </Text>
           </View>
@@ -671,7 +671,6 @@ export function ProgressRing(props: {
   size?: number;
   strokeWidth?: number;
   color?: string;
-  /** 是否在圓環中央顯示百分比文字，預設 true。若外部自訂 center 內容請設為 false */
   showLabel?: boolean;
 }) {
   const size = props.size ?? 60;
@@ -731,9 +730,9 @@ export function StatusBadge(props: { status: string; text?: string; label?: stri
       style={{
         flexDirection: "row",
         alignItems: "center",
-        gap: 5,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        gap: theme.space.xs,
+        paddingHorizontal: theme.space.sm,
+        paddingVertical: theme.space.xs,
         borderRadius: theme.radius.full,
         backgroundColor: `${config.color}12`,
       }}
@@ -759,7 +758,7 @@ export function RatingStars(props: {
 
   return (
     <View
-      style={{ flexDirection: "row", gap: 2, alignItems: "center" }}
+      style={{ flexDirection: "row", gap: theme.space.xs, alignItems: "center" }}
       accessibilityRole={props.interactive ? "adjustable" : "text"}
       accessibilityLabel={`評分 ${props.rating.toFixed(1)} 星，滿分 ${maxRating} 星`}
       accessibilityValue={{ min: 0, max: maxRating, now: Math.round(props.rating) }}
@@ -785,7 +784,7 @@ export function RatingStars(props: {
           </Pressable>
         );
       })}
-      <Text style={{ color: theme.colors.muted, fontSize: size * 0.75, marginLeft: 4, fontWeight: "600" }}>
+      <Text style={{ color: theme.colors.muted, fontSize: size * 0.75, marginLeft: theme.space.xs, fontWeight: "600" }}>
         {props.rating.toFixed(1)}
       </Text>
     </View>
@@ -829,7 +828,7 @@ export function AnimatedCard(props: {
         padding: theme.space.lg,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
-        gap: 10,
+        gap: theme.space.md,
         borderWidth: 1,
         borderColor: theme.colors.border,
         ...softShadowStyle(theme.shadows.soft),
@@ -874,7 +873,7 @@ export function QuickAction(props: {
       style={({ pressed }) => ({
         alignItems: "center",
         justifyContent: "center",
-        padding: 14,
+        padding: theme.space.md,
         borderRadius: theme.radius.lg,
         backgroundColor: pressed ? theme.colors.accentSoft : theme.colors.surface,
         borderWidth: 1,
@@ -895,31 +894,29 @@ export function QuickAction(props: {
           backgroundColor: `${color}12`,
           alignItems: "center",
           justifyContent: "center",
-          marginBottom: 6,
+          marginBottom: theme.space.sm,
         }}
       >
-        <Ionicons name={props.icon as any} size={20} color={color} />
+        <Ionicons name={props.icon as any} size={18} color={color} />
       </View>
-      <Text style={{ color: theme.colors.text, fontSize: 11, fontWeight: "600", textAlign: "center" }}>
+      <Text style={{ fontSize: 12, fontWeight: "600", color: theme.colors.text, textAlign: "center" }}>
         {props.label}
       </Text>
       {badgeText ? (
         <View
           style={{
             position: "absolute",
-            top: 6,
-            right: 6,
-            minWidth: 18,
-            height: 18,
-            borderRadius: 9,
+            top: -6,
+            right: -6,
+            width: 20,
+            height: 20,
+            borderRadius: 10,
             backgroundColor: theme.colors.danger,
             alignItems: "center",
             justifyContent: "center",
-            paddingHorizontal: 4,
           }}
-          accessibilityElementsHidden
         >
-          <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>{badgeText}</Text>
+          <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>{badgeText}</Text>
         </View>
       ) : null}
     </Pressable>
@@ -927,237 +924,151 @@ export function QuickAction(props: {
 }
 
 export function InfoRow(props: {
-  icon?: string;
   label: string;
   value: string;
-  onPress?: () => void;
-  iconColor?: string;
+  direction?: "horizontal" | "vertical";
+  icon?: string;
 }) {
-  const iconColor = props.iconColor ?? theme.colors.accent;
-  const content = (
-    <View style={{ flexDirection: "row", alignItems: "center", paddingVertical: 12 }}>
-      {props.icon ? (
-        <View
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            backgroundColor: `${iconColor}10`,
-            alignItems: "center",
-            justifyContent: "center",
-            marginRight: 14,
-          }}
-        >
-          <Ionicons name={props.icon as any} size={16} color={iconColor} />
-        </View>
-      ) : null}
-      <Text style={{ color: theme.colors.muted, flex: 1, fontSize: 14 }}>{props.label}</Text>
-      <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>{props.value}</Text>
-      {props.onPress ? (
-        <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} style={{ marginLeft: 8 }} />
-      ) : null}
+  const isVertical = props.direction === "vertical";
+
+  return (
+    <View
+      style={{
+        flexDirection: isVertical ? "column" : "row",
+        justifyContent: isVertical ? "flex-start" : "space-between",
+        alignItems: isVertical ? "flex-start" : "center",
+        gap: isVertical ? theme.space.xs : 0,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.sm }}>
+        {props.icon && <Ionicons name={props.icon as any} size={16} color={theme.colors.muted} />}
+        <Text style={{ fontSize: 13, color: theme.colors.muted, fontWeight: "500" }}>{props.label}</Text>
+      </View>
+      <Text style={{ fontSize: 14, color: theme.colors.text, fontWeight: "600" }}>{props.value}</Text>
     </View>
   );
-
-  if (props.onPress) {
-    return (
-      <Pressable onPress={props.onPress} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}>
-        {content}
-      </Pressable>
-    );
-  }
-  return content;
 }
 
 export function Skeleton(props: { width?: number | string; height?: number; borderRadius?: number }) {
-  const pulseAnim = useRef(new Animated.Value(0.4)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 0.8, duration: 1000, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-        Animated.timing(pulseAnim, { toValue: 0.4, duration: 1000, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-      ])
-    ).start();
-  }, []);
-
+  const styleObj: any = {
+    height: props.height ?? 20,
+    borderRadius: props.borderRadius ?? theme.radius.md,
+    backgroundColor: theme.colors.surface2,
+    overflow: "hidden",
+  };
+  if (props.width !== undefined) {
+    styleObj.width = props.width;
+  } else {
+    styleObj.width = "100%";
+  }
   return (
-    <Animated.View
-      style={{
-        width: (props.width ?? "100%") as ViewStyle["width"],
-        height: props.height ?? 20,
-        borderRadius: props.borderRadius ?? theme.radius.sm,
-        backgroundColor: theme.colors.shimmer,
-        opacity: pulseAnim,
-      }}
-    />
+    <View style={styleObj} />
   );
 }
 
 export function Divider(props: { text?: string; spacing?: number }) {
-  const spacing = props.spacing ?? 16;
+  const spacing = props.spacing ?? theme.space.md;
+
   if (props.text) {
     return (
-      <View style={{ flexDirection: "row", alignItems: "center", marginVertical: spacing }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.md, marginVertical: spacing }}>
         <View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} />
-        <Text style={{ color: theme.colors.muted, marginHorizontal: 14, fontSize: 12, fontWeight: "500" }}>
-          {props.text}
-        </Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "500" }}>{props.text}</Text>
         <View style={{ flex: 1, height: 1, backgroundColor: theme.colors.border }} />
       </View>
     );
   }
+
   return <View style={{ height: 1, backgroundColor: theme.colors.border, marginVertical: spacing }} />;
 }
 
 export function FeatureHighlight(props: { icon: string; title: string; description: string; color?: string }) {
   const color = props.color ?? theme.colors.accent;
+
   return (
-    <View
-      style={{
-        flexDirection: "row",
-        gap: 14,
-        padding: 16,
-        borderRadius: theme.radius.lg,
-        backgroundColor: `${color}08`,
-      }}
-    >
+    <View style={{ gap: theme.space.sm, alignItems: "flex-start" }}>
       <View
         style={{
-          width: 44,
-          height: 44,
-          borderRadius: 14,
+          width: 40,
+          height: 40,
+          borderRadius: 12,
           backgroundColor: `${color}15`,
           alignItems: "center",
           justifyContent: "center",
         }}
       >
-        <Ionicons name={props.icon as any} size={22} color={color} />
+        <Ionicons name={props.icon as any} size={20} color={color} />
       </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 15, letterSpacing: -0.1 }}>
-          {props.title}
-        </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 4, lineHeight: 19 }}>
-          {props.description}
-        </Text>
-      </View>
+      <Text style={{ fontSize: 15, fontWeight: "700", color: theme.colors.text, letterSpacing: -0.2 }}>
+        {props.title}
+      </Text>
+      <Text style={{ fontSize: 13, color: theme.colors.muted, lineHeight: 20 }}>
+        {props.description}
+      </Text>
     </View>
   );
 }
 
 export function FilterChips(props: {
-  options: Array<{ key: string; label: string; icon?: string }>;
-  selected: string[];
-  onChange: (selected: string[]) => void;
+  options: any[];
+  selected?: any[];
+  onSelect?: (ids: any[]) => void;
+  onChange?: (ids: any[]) => void;
+  multi?: boolean;
   multiple?: boolean;
-  label?: string;
 }) {
-  const handlePress = (key: string) => {
-    if (props.multiple) {
-      if (props.selected.includes(key)) {
-        props.onChange(props.selected.filter((k) => k !== key));
-      } else {
-        props.onChange([...props.selected, key]);
-      }
+  const selected = props.selected ?? [];
+  const isMulti = props.multi || props.multiple;
+  const handleChange = props.onSelect || props.onChange || (() => {});
+
+  const handleSelect = (id: any) => {
+    if (isMulti) {
+      const newSelected = selected.includes(id)
+        ? selected.filter((s) => s !== id)
+        : [...selected, id];
+      handleChange(newSelected);
     } else {
-      props.onChange(props.selected.includes(key) ? [] : [key]);
+      handleChange([id]);
     }
   };
 
   return (
-    <View
-      style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}
-      accessibilityRole="radiogroup"
-      accessibilityLabel={props.label ?? "篩選選項"}
-    >
-      {props.options.map((opt) => {
-        const isSelected = props.selected.includes(opt.key);
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: theme.space.sm }}>
+      {props.options.map((option: any) => {
+        const optionId = typeof option === "object" ? (option.id ?? option.key) : option;
+        const optionLabel = typeof option === "object" ? option.label : option;
         return (
-          <Pressable
-            key={opt.key}
-            onPress={() => handlePress(opt.key)}
-            accessibilityRole={props.multiple ? "checkbox" : "radio"}
-            accessibilityState={{ checked: isSelected }}
-            accessibilityLabel={opt.label}
-            style={({ pressed }) => ({
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 5,
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              borderRadius: theme.radius.full,
-              backgroundColor: isSelected
-                ? theme.colors.accent
-                : pressed
-                  ? theme.colors.surface2
-                  : theme.colors.surface,
-              borderWidth: 1,
-              borderColor: isSelected ? theme.colors.accent : theme.colors.border,
-              minHeight: 38,
-            })}
-          >
-            {opt.icon && (
-              <Ionicons name={opt.icon as any} size={14} color={isSelected ? "#fff" : theme.colors.muted} />
-            )}
-            <Text
-              style={{
-                color: isSelected ? "#fff" : theme.colors.textSecondary,
-                fontWeight: "600",
-                fontSize: 13,
-              }}
-            >
-              {opt.label}
-            </Text>
-          </Pressable>
+          <FilterChip
+            key={optionId}
+            label={String(optionLabel)}
+            selected={selected.includes(optionId)}
+            onPress={() => handleSelect(optionId)}
+          />
         );
       })}
     </View>
   );
 }
 
-export function FilterChip(props: {
-  label: string;
-  selected?: boolean;
-  onPress?: () => void;
-  icon?: string;
-  style?: StyleProp<ViewStyle>;
-}) {
+export function FilterChip(props: { label: string; selected?: boolean; onPress?: () => void }) {
   return (
     <Pressable
       onPress={props.onPress}
-      style={({ pressed }) => [
-        {
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 5,
-          paddingHorizontal: 14,
-          paddingVertical: 8,
-          borderRadius: theme.radius.full,
-          backgroundColor: props.selected
-            ? theme.colors.accent
-            : pressed
-              ? theme.colors.surface2
-              : theme.colors.surface,
-          borderWidth: 1,
-          borderColor: props.selected ? theme.colors.accent : theme.colors.border,
-          minHeight: 38,
-        },
-        props.style,
-      ]}
+      style={({ pressed }) => ({
+        paddingHorizontal: theme.space.md,
+        paddingVertical: theme.space.sm,
+        borderRadius: theme.radius.full,
+        backgroundColor: props.selected ? theme.colors.accent : theme.colors.surface2,
+        borderWidth: 1,
+        borderColor: props.selected ? theme.colors.accent : theme.colors.border,
+        opacity: pressed ? 0.85 : 1,
+      })}
     >
-      {props.icon ? (
-        <Ionicons
-          name={props.icon as any}
-          size={14}
-          color={props.selected ? "#fff" : theme.colors.muted}
-        />
-      ) : null}
       <Text
         style={{
-          color: props.selected ? "#fff" : theme.colors.textSecondary,
-          fontWeight: "600",
           fontSize: 13,
+          fontWeight: "600",
+          color: props.selected ? "#fff" : theme.colors.text,
         }}
       >
         {props.label}
@@ -1167,51 +1078,42 @@ export function FilterChip(props: {
 }
 
 export function SegmentedControl(props: {
-  options: Array<{ key: string; label: string }> | string[];
-  selected: string | number;
-  onChange: (key: any) => void;
+  options: any[];
+  selected?: any;
+  onSelect?: (id: any) => void;
+  onChange?: (id: any) => void;
 }) {
-  const isStringArray = props.options.length > 0 && typeof props.options[0] === "string";
-  const normalizedOptions = props.options.map((opt, idx) => {
-    if (typeof opt === "string") return { key: `segment-${idx}`, label: opt, originalIndex: idx };
-    return { key: opt.key, label: opt.label, originalIndex: idx };
-  });
+  const getOptionId = (opt: any) => typeof opt === "object" ? (opt.id ?? opt.key) : opt;
+  const getOptionLabel = (opt: any) => typeof opt === "object" ? opt.label : opt;
+  const selected = props.selected ?? getOptionId(props.options[0]);
+  const handleChange = props.onSelect || props.onChange || (() => {});
 
   return (
-    <View
-      style={{
-        flexDirection: "row",
-        borderRadius: theme.radius.md,
-        backgroundColor: theme.colors.surface2,
-        padding: 3,
-      }}
-    >
-      {normalizedOptions.map((opt) => {
-        const isSelected = isStringArray
-          ? props.selected === opt.originalIndex
-          : props.selected === opt.key;
+    <View style={{ flexDirection: "row", padding: theme.space.xs, borderRadius: theme.radius.lg, backgroundColor: theme.colors.surface2, gap: theme.space.xs }}>
+      {props.options.map((option: any) => {
+        const optionId = getOptionId(option);
+        const optionLabel = getOptionLabel(option);
         return (
           <Pressable
-            key={opt.key}
-            onPress={() => props.onChange(isStringArray ? opt.originalIndex : opt.key)}
+            key={optionId}
+            onPress={() => handleChange(optionId)}
             style={{
               flex: 1,
-              paddingVertical: 9,
-              paddingHorizontal: 14,
-              borderRadius: theme.radius.sm,
-              backgroundColor: isSelected ? theme.colors.surface : "transparent",
+              paddingVertical: theme.space.sm,
+              paddingHorizontal: theme.space.md,
+              borderRadius: theme.radius.md,
+              backgroundColor: optionId === selected ? theme.colors.surface : "transparent",
               alignItems: "center",
-              ...(isSelected ? softShadowStyle(theme.shadows.soft) : {}),
             }}
           >
             <Text
               style={{
-                color: isSelected ? theme.colors.text : theme.colors.muted,
-                fontWeight: isSelected ? "600" : "500",
                 fontSize: 13,
+                fontWeight: "600",
+                color: optionId === selected ? theme.colors.accent : theme.colors.muted,
               }}
             >
-              {opt.label}
+              {optionLabel}
             </Text>
           </Pressable>
         );
@@ -1221,264 +1123,199 @@ export function SegmentedControl(props: {
 }
 
 export function SortButton(props: {
-  options: Array<{ key: string; label: string }>;
-  selected: string;
-  onChange: (key: string) => void;
+  options: any[];
+  selected?: any;
+  onSelect?: (id: any) => void;
+  onChange?: (id: any) => void;
+  label?: string;
 }) {
   const [visible, setVisible] = useState(false);
-  const selectedLabel = props.options.find((o) => o.key === props.selected)?.label ?? "排序";
+  const getOptionId = (opt: any) => typeof opt === "object" ? (opt.id ?? opt.key) : opt;
+  const getOptionLabel = (opt: any) => typeof opt === "object" ? opt.label : opt;
+  const selected = props.selected ?? getOptionId(props.options[0]);
+  const handleChange = props.onSelect || props.onChange || (() => {});
 
   return (
-    <View style={{ position: "relative", zIndex: visible ? 100 : 1 }}>
+    <View>
       <Pressable
         onPress={() => setVisible(!visible)}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: visible }}
-        accessibilityLabel={`排序方式: ${selectedLabel}`}
         style={({ pressed }) => ({
           flexDirection: "row",
           alignItems: "center",
-          gap: 6,
-          paddingHorizontal: 14,
-          paddingVertical: 9,
-          borderRadius: theme.radius.md,
-          backgroundColor: visible ? theme.colors.accentSoft : theme.colors.surface2,
-          minHeight: 38,
+          gap: theme.space.sm,
+          paddingHorizontal: theme.space.md,
+          paddingVertical: theme.space.sm,
+          borderRadius: theme.radius.lg,
+          backgroundColor: visible ? theme.colors.surface2 : "transparent",
+          opacity: pressed ? 0.85 : 1,
         })}
       >
-        <Ionicons name="swap-vertical" size={16} color={visible ? theme.colors.accent : theme.colors.muted} />
-        <Text
-          style={{
-            color: visible ? theme.colors.accent : theme.colors.textSecondary,
-            fontWeight: "600",
-            fontSize: 13,
-          }}
-        >
-          {selectedLabel}
+        <Ionicons name="funnel-outline" size={16} color={theme.colors.accent} />
+        <Text style={{ fontSize: 13, fontWeight: "600", color: theme.colors.text }}>
+          {props.label ?? "排序"}
         </Text>
-        <Ionicons name={visible ? "chevron-up" : "chevron-down"} size={12} color={theme.colors.muted} />
       </Pressable>
 
       {visible && (
-        <>
-          <Pressable
-            onPress={() => setVisible(false)}
-            style={{
-              position: "absolute",
-              top: -1000,
-              left: -1000,
-              width: 5000,
-              height: 5000,
-            }}
-            accessibilityLabel="關閉選單"
-          />
-          <View
-            style={{
-              position: "absolute",
-              top: "100%",
-              left: 0,
-              right: 0,
-              marginTop: 6,
-              borderRadius: theme.radius.md,
-              backgroundColor: theme.colors.surface,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              ...softShadowStyle(theme.shadows.soft),
-              zIndex: 101,
-              overflow: "hidden",
-            }}
-          >
-            {props.options.map((opt, idx) => (
+        <View style={{ marginTop: theme.space.sm, borderRadius: theme.radius.lg, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, overflow: "hidden" }}>
+          {props.options.map((option: any, idx: number) => {
+            const optionId = getOptionId(option);
+            const optionLabel = getOptionLabel(option);
+            const isLast = idx === props.options.length - 1;
+            return (
               <Pressable
-                key={opt.key}
+                key={optionId}
                 onPress={() => {
-                  props.onChange(opt.key);
+                  handleChange(optionId);
                   setVisible(false);
                 }}
-                accessibilityRole="menuitem"
-                accessibilityState={{ selected: props.selected === opt.key }}
                 style={({ pressed }) => ({
-                  paddingHorizontal: 14,
-                  paddingVertical: 12,
+                  paddingHorizontal: theme.space.md,
+                  paddingVertical: theme.space.md,
                   backgroundColor: pressed ? theme.colors.surface2 : "transparent",
-                  borderTopWidth: idx > 0 ? 1 : 0,
-                  borderTopColor: theme.colors.border,
+                  borderBottomWidth: isLast ? 0 : 1,
+                  borderBottomColor: theme.colors.border,
                   flexDirection: "row",
-                  alignItems: "center",
                   justifyContent: "space-between",
-                  minHeight: 44,
+                  alignItems: "center",
                 })}
               >
                 <Text
                   style={{
-                    color: props.selected === opt.key ? theme.colors.accent : theme.colors.text,
-                    fontWeight: props.selected === opt.key ? "600" : "400",
                     fontSize: 14,
+                    color: optionId === selected ? theme.colors.accent : theme.colors.text,
+                    fontWeight: optionId === selected ? "700" : "500",
                   }}
                 >
-                  {opt.label}
+                  {optionLabel}
                 </Text>
-                {props.selected === opt.key && (
-                  <Ionicons name="checkmark" size={16} color={theme.colors.accent} />
+                {optionId === selected && (
+                  <Ionicons name="checkmark" size={18} color={theme.colors.accent} />
                 )}
               </Pressable>
-            ))}
-          </View>
-        </>
+            );
+          })}
+        </View>
       )}
     </View>
   );
 }
 
 export function StatCard(props: {
-  icon: string;
+  icon?: string;
   label: string;
   value: string | number;
-  subtitle?: string;
+  trend?: "up" | "down" | "neutral";
+  trendValue?: string;
   color?: string;
   onPress?: () => void;
 }) {
   const color = props.color ?? theme.colors.accent;
+  const valueStr = String(props.value);
+
+  const trendIcon =
+    props.trend === "up"
+      ? "trending-up"
+      : props.trend === "down"
+        ? "trending-down"
+        : "subtract-outline";
+
+  const trendColor =
+    props.trend === "up"
+      ? theme.colors.success
+      : props.trend === "down"
+        ? theme.colors.danger
+        : theme.colors.muted;
 
   const content = (
-    <View
-      style={{
-        padding: 18,
-        borderRadius: theme.radius.lg,
-        backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        minWidth: 100,
-        ...softShadowStyle(theme.shadows.soft),
-      }}
-    >
-      <View
-        style={{
-          width: 40,
-          height: 40,
-          borderRadius: 12,
-          backgroundColor: `${color}10`,
-          alignItems: "center",
-          justifyContent: "center",
-          marginBottom: 14,
-        }}
-      >
-        <Ionicons name={props.icon as any} size={20} color={color} />
+    <View style={{ padding: theme.space.lg, borderRadius: theme.radius.lg, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, gap: theme.space.md }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+        {props.icon && (
+          <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: `${color}15`, alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name={props.icon as any} size={20} color={color} />
+          </View>
+        )}
+        {props.trend && props.trendValue && (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.xs }}>
+            <Ionicons name={trendIcon as any} size={14} color={trendColor} />
+            <Text style={{ fontSize: 12, fontWeight: "700", color: trendColor }}>
+              {props.trendValue}
+            </Text>
+          </View>
+        )}
       </View>
-      <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 26, letterSpacing: -0.5 }}>
-        {props.value}
-      </Text>
-      <Text style={{ color: theme.colors.muted, fontWeight: "500", fontSize: 13, marginTop: 4 }}>
-        {props.label}
-      </Text>
-      {props.subtitle && (
-        <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>{props.subtitle}</Text>
-      )}
+      <View style={{ gap: theme.space.xs }}>
+        <Text style={{ fontSize: 13, color: theme.colors.muted, fontWeight: "500" }}>
+          {props.label}
+        </Text>
+        <Text style={{ fontSize: 24, fontWeight: "800", color: theme.colors.text, letterSpacing: -0.5 }}>
+          {valueStr}
+        </Text>
+      </View>
     </View>
   );
 
   if (props.onPress) {
     return (
-      <Pressable onPress={props.onPress} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, transform: [{ scale: pressed ? 0.97 : 1 }] })}>
+      <Pressable
+        onPress={props.onPress}
+        style={({ pressed }) => ({
+          opacity: pressed ? 0.85 : 1,
+          transform: [{ scale: pressed ? 0.98 : 1 }],
+        })}
+      >
         {content}
       </Pressable>
     );
   }
+
   return content;
 }
 
 export function PriceRangeSlider(props: {
   min: number;
   max: number;
-  value: [number, number];
-  onChange: (value: [number, number]) => void;
+  minValue: number;
+  maxValue: number;
+  onMinChange?: (value: number) => void;
+  onMaxChange?: (value: number) => void;
   step?: number;
 }) {
-  const [low, high] = props.value;
+  const step = props.step ?? 1;
+  const range = props.max - props.min;
 
   return (
-    <View style={{ padding: 8 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 10 }}>
-        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 15 }}>${low}</Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 13 }}>—</Text>
-        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 15 }}>${high}</Text>
+    <View style={{ gap: theme.space.md }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        <Text style={{ fontSize: 13, color: theme.colors.text, fontWeight: "600" }}>
+          ${props.minValue}
+        </Text>
+        <Text style={{ fontSize: 13, color: theme.colors.text, fontWeight: "600" }}>
+          ${props.maxValue}
+        </Text>
       </View>
-      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>${props.min}</Text>
+      <View style={{ height: 4, borderRadius: 2, backgroundColor: theme.colors.surface2, overflow: "hidden" }}>
         <View
           style={{
-            flex: 1,
-            height: 4,
-            backgroundColor: theme.colors.surface2,
-            borderRadius: 2,
-            position: "relative",
+            height: "100%",
+            backgroundColor: theme.colors.accent,
+            marginLeft: `${((props.minValue - props.min) / range) * 100}%`,
+            width: `${((props.maxValue - props.minValue) / range) * 100}%`,
           }}
-        >
-          <View
-            style={{
-              position: "absolute",
-              left: `${((low - props.min) / (props.max - props.min)) * 100}%`,
-              right: `${100 - ((high - props.min) / (props.max - props.min)) * 100}%`,
-              height: "100%",
-              backgroundColor: theme.colors.accent,
-              borderRadius: 2,
-            }}
-          />
-        </View>
-        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>${props.max}</Text>
-      </View>
-      <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
-        {[
-          props.min,
-          Math.round((props.max - props.min) / 3 + props.min),
-          Math.round(((props.max - props.min) * 2) / 3 + props.min),
-          props.max,
-        ].map((preset) => (
-          <Pressable
-            key={preset}
-            onPress={() => props.onChange([props.min, preset])}
-            style={({ pressed }) => ({
-              paddingHorizontal: 12,
-              paddingVertical: 6,
-              borderRadius: theme.radius.full,
-              backgroundColor: high === preset ? theme.colors.accent : pressed ? theme.colors.surface2 : theme.colors.surface,
-              borderWidth: 1,
-              borderColor: high === preset ? theme.colors.accent : theme.colors.border,
-            })}
-          >
-            <Text
-              style={{
-                color: high === preset ? "#fff" : theme.colors.muted,
-                fontSize: 12,
-                fontWeight: "600",
-              }}
-            >
-              ≤${preset}
-            </Text>
-          </Pressable>
-        ))}
+        />
       </View>
     </View>
   );
 }
 
-function getAvatarDisplay(name?: string): { text: string; fontSize: number } {
-  if (!name || name.trim().length === 0) return { text: "?", fontSize: 1 };
-  const trimmed = name.trim();
-  const isChinese = /[\u4e00-\u9fa5]/.test(trimmed);
-  if (isChinese) {
-    if (trimmed.length >= 2) return { text: trimmed.slice(-2), fontSize: 0.32 };
-    return { text: trimmed, fontSize: 0.38 };
-  }
-  const words = trimmed.split(/\s+/);
-  if (words.length >= 2) return { text: (words[0][0] + words[1][0]).toUpperCase(), fontSize: 0.38 };
-  return { text: trimmed[0].toUpperCase(), fontSize: 0.38 };
-}
-
 export function Avatar(props: { name?: string; size?: number; imageUrl?: string; color?: string }) {
-  const size = props.size ?? 42;
-  const { text, fontSize } = getAvatarDisplay(props.name);
-  const bgColor = props.color ?? theme.colors.accentSoft;
+  const size = props.size ?? 40;
+  const color = props.color ?? theme.colors.accent;
+  const initials = props.name
+    ?.split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase() ?? "?";
 
   return (
     <View
@@ -1486,42 +1323,22 @@ export function Avatar(props: { name?: string; size?: number; imageUrl?: string;
         width: size,
         height: size,
         borderRadius: size / 2,
-        backgroundColor: bgColor,
+        backgroundColor: props.imageUrl ? "transparent" : `${color}30`,
         alignItems: "center",
         justifyContent: "center",
-        borderWidth: 2,
-        borderColor: theme.colors.surface,
+        overflow: "hidden",
       }}
     >
-      <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: size * fontSize }}>
-        {text}
-      </Text>
+      {props.imageUrl ? (
+        <Text style={{ color }}>{initials}</Text>
+      ) : (
+        <Text style={{ color, fontSize: size * 0.4, fontWeight: "700" }}>{initials}</Text>
+      )}
     </View>
   );
 }
 
 export function Badge(props: { count?: number; max?: number; dot?: boolean; text?: string }) {
-  if (props.text) {
-    return (
-      <View
-        style={{
-          alignSelf: "flex-start",
-          paddingHorizontal: 10,
-          paddingVertical: 5,
-          borderRadius: theme.radius.full,
-          backgroundColor: theme.colors.accentSoft,
-        }}
-      >
-        <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: 12 }}>
-          {props.text}
-        </Text>
-      </View>
-    );
-  }
-
-  const count = props.count ?? 0;
-  if (count <= 0 && !props.dot) return null;
-
   if (props.dot) {
     return (
       <View
@@ -1535,8 +1352,7 @@ export function Badge(props: { count?: number; max?: number; dot?: boolean; text
     );
   }
 
-  const max = props.max ?? 99;
-  const displayCount = count > max ? `${max}+` : String(count);
+  const text = props.text ?? (props.count && props.count > (props.max ?? 99) ? `${props.max ?? 99}+` : String(props.count ?? 0));
 
   return (
     <View
@@ -1550,7 +1366,7 @@ export function Badge(props: { count?: number; max?: number; dot?: boolean; text
         paddingHorizontal: 6,
       }}
     >
-      <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>{displayCount}</Text>
+      <Text style={{ fontSize: 11, fontWeight: "700", color: "#fff" }}>{text}</Text>
     </View>
   );
 }
@@ -1581,9 +1397,9 @@ export function ListItem(props: {
       style={{
         flexDirection: "row",
         alignItems: "center",
-        paddingVertical: 13,
-        paddingHorizontal: 4,
-        gap: 14,
+        paddingVertical: theme.space.sm,
+        paddingHorizontal: theme.space.xs,
+        gap: theme.space.md,
         opacity: props.disabled ? 0.4 : 1,
         minHeight: 50,
       }}
@@ -1609,7 +1425,7 @@ export function ListItem(props: {
           {props.title}
         </Text>
         {props.subtitle && (
-          <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 2 }}>{props.subtitle}</Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: theme.space.xs }}>{props.subtitle}</Text>
         )}
       </View>
       {props.rightText && (
@@ -1635,7 +1451,7 @@ export function ListItem(props: {
         style={({ pressed }) => ({
           backgroundColor: pressed ? theme.colors.surface2 : "transparent",
           marginHorizontal: -4,
-          paddingHorizontal: 4,
+          paddingHorizontal: theme.space.xs,
           borderRadius: theme.radius.sm,
         })}
       >
@@ -1650,16 +1466,13 @@ export function ListItem(props: {
 
 export function SectionHeader(props: { title: string; action?: string; onAction?: () => void }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-      <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 18, letterSpacing: -0.3 }}>
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: theme.space.md }}>
+      <Text style={{ fontSize: theme.typography.label.fontSize, fontWeight: "700", color: theme.colors.text, textTransform: "uppercase" }}>
         {props.title}
       </Text>
-      {props.action && (
-        <Pressable
-          onPress={props.onAction}
-          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-        >
-          <Text style={{ color: theme.colors.accent, fontWeight: "600", fontSize: 14 }}>{props.action}</Text>
+      {props.action && props.onAction && (
+        <Pressable onPress={props.onAction} accessibilityRole="button" accessibilityLabel={props.action}>
+          <Text style={{ fontSize: 13, color: theme.colors.accent, fontWeight: "600" }}>{props.action}</Text>
         </Pressable>
       )}
     </View>
@@ -1668,181 +1481,54 @@ export function SectionHeader(props: { title: string; action?: string; onAction?
 
 export function EmptyListPlaceholder(props: {
   icon?: string;
-  title: string;
+  title?: string;
   subtitle?: string;
-  action?: string;
+  description?: string;
+  actionLabel?: string;
   onAction?: () => void;
 }) {
+  const desc = props.description ?? props.subtitle ?? "暫無相關資料";
   return (
-    <View style={{ alignItems: "center", padding: 36 }}>
+    <View style={{ alignItems: "center", paddingVertical: theme.space.xxxl, paddingHorizontal: theme.space.xl, gap: theme.space.md }}>
       {props.icon && (
-        <View
-          style={{
-            width: 68,
-            height: 68,
-            borderRadius: 34,
-            backgroundColor: theme.colors.surface2,
-            alignItems: "center",
-            justifyContent: "center",
-            marginBottom: 18,
-          }}
-        >
+        <View style={{ width: 60, height: 60, borderRadius: 30, backgroundColor: theme.colors.surface2, alignItems: "center", justifyContent: "center", marginBottom: theme.space.md }}>
           <Ionicons name={props.icon as any} size={28} color={theme.colors.muted} />
         </View>
       )}
-      <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 16, textAlign: "center" }}>
-        {props.title}
+      <Text style={{ fontSize: 16, fontWeight: "700", color: theme.colors.text, textAlign: "center" }}>
+        {props.title ?? "沒有內容"}
       </Text>
-      {props.subtitle && (
-        <Text
-          style={{
-            color: theme.colors.muted,
-            fontSize: 14,
-            textAlign: "center",
-            marginTop: 8,
-            lineHeight: 21,
-          }}
-        >
-          {props.subtitle}
-        </Text>
-      )}
-      {props.action && (
-        <View style={{ marginTop: 20 }}>
-          <Button text={props.action} kind="primary" onPress={props.onAction} />
+      <Text style={{ fontSize: 13, color: theme.colors.muted, textAlign: "center", lineHeight: 20 }}>
+        {desc}
+      </Text>
+      {props.actionLabel && props.onAction && (
+        <View style={{ marginTop: theme.space.md }}>
+          <Button text={props.actionLabel} onPress={props.onAction} kind="primary" />
         </View>
       )}
     </View>
   );
 }
 
-type ErrorBoundaryProps = {
-  children: React.ReactNode;
-  fallback?: React.ReactNode;
-  onError?: (error: Error, errorInfo: ErrorInfo) => void;
-  showDetails?: boolean;
-};
-
-type ErrorBoundaryState = {
-  hasError: boolean;
-  error: Error | null;
-  errorInfo: ErrorInfo | null;
-};
-
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
+export class ScreenErrorBoundary extends Component<{ children: React.ReactNode; screenName?: string }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode; screenName?: string }) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
-    return { hasError: true, error };
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    this.setState({ errorInfo });
-    this.props.onError?.(error, errorInfo);
-    if (__DEV__) {
-      console.error("[ErrorBoundary]", error);
-    }
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("[ScreenErrorBoundary]", error, errorInfo);
   }
 
-  handleRetry = (): void => {
-    this.setState({ hasError: false, error: null, errorInfo: null });
-  };
-
-  render(): React.ReactNode {
+  render() {
     if (this.state.hasError) {
-      if (this.props.fallback) return this.props.fallback;
-
-      const { error, errorInfo } = this.state;
-      const showDetails = this.props.showDetails ?? __DEV__;
-
       return (
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: theme.colors.bg,
-            padding: theme.space.xl,
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <View
-            style={{
-              width: 80,
-              height: 80,
-              borderRadius: 40,
-              backgroundColor: theme.colors.dangerSoft,
-              justifyContent: "center",
-              alignItems: "center",
-              marginBottom: 24,
-            }}
-          >
-            <Ionicons name="warning-outline" size={36} color={theme.colors.danger} />
-          </View>
-
-          <Text
-            style={{
-              color: theme.colors.text,
-              fontSize: 22,
-              fontWeight: "700",
-              marginBottom: 10,
-              textAlign: "center",
-              letterSpacing: -0.3,
-            }}
-          >
-            發生錯誤
-          </Text>
-
-          <Text
-            style={{
-              color: theme.colors.muted,
-              fontSize: 15,
-              textAlign: "center",
-              marginBottom: 24,
-              lineHeight: 22,
-              maxWidth: 280,
-            }}
-          >
-            很抱歉，應用程式發生了意外錯誤。{"\n"}請嘗試重新載入。
-          </Text>
-
-          {showDetails && error && (
-            <ScrollView
-              style={{
-                maxHeight: 180,
-                width: "100%",
-                marginBottom: 24,
-                padding: 14,
-                borderRadius: theme.radius.md,
-                backgroundColor: theme.colors.surface2,
-              }}
-            >
-              <Text
-                style={{
-                  color: theme.colors.danger,
-                  fontSize: 12,
-                  fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
-                }}
-              >
-                {error.name}: {error.message}
-              </Text>
-              {errorInfo?.componentStack && (
-                <Text
-                  style={{
-                    color: theme.colors.muted,
-                    fontSize: 10,
-                    fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
-                    marginTop: 8,
-                  }}
-                >
-                  {errorInfo.componentStack.trim().slice(0, 500)}
-                </Text>
-              )}
-            </ScrollView>
-          )}
-
-          <Button text="重試" kind="primary" onPress={this.handleRetry} icon="refresh-outline" />
+        <View style={{ flex: 1, backgroundColor: theme.colors.bg, alignItems: "center", justifyContent: "center", paddingHorizontal: theme.space.lg }}>
+          <ErrorState errorType="unknown" />
         </View>
       );
     }
@@ -1851,154 +1537,80 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 }
 
-export function ScreenErrorBoundary(props: { children: React.ReactNode; screenName?: string }) {
-  return (
-    <ErrorBoundary
-      onError={(error) => {
-        console.error(`[${props.screenName ?? "Screen"}] Error:`, error.message);
-      }}
-    >
-      {props.children}
-    </ErrorBoundary>
-  );
-}
+export const ErrorBoundary = ScreenErrorBoundary;
 
 export function AuthGuard(props: {
   children: React.ReactNode;
-  user: any;
+  isAuthenticated?: boolean;
+  user?: any;
+  fallback?: React.ReactNode;
   onLogin?: () => void;
   title?: string;
   description?: string;
 }) {
-  if (props.user) return <>{props.children}</>;
-
-  return (
-    <Screen>
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 32 }}>
-        <View
-          style={{
-            width: 88,
-            height: 88,
-            borderRadius: 44,
-            backgroundColor: theme.colors.accentSoft,
-            justifyContent: "center",
-            alignItems: "center",
-            marginBottom: 28,
-          }}
-        >
-          <Ionicons name="person-outline" size={40} color={theme.colors.accent} />
-        </View>
-
-        <Text
-          style={{
-            color: theme.colors.text,
-            fontSize: 24,
-            fontWeight: "700",
-            textAlign: "center",
-            marginBottom: 12,
-            letterSpacing: -0.3,
-          }}
-        >
-          {props.title ?? "需要登入"}
-        </Text>
-
-        <Text
-          style={{
-            color: theme.colors.muted,
-            fontSize: 15,
-            textAlign: "center",
-            lineHeight: 23,
-            marginBottom: 36,
-            maxWidth: 280,
-          }}
-        >
-          {props.description ?? "請登入以使用此功能。登入後您可以享受完整的校園服務。"}
-        </Text>
-
-        <Button text="前往登入" kind="primary" onPress={props.onLogin} icon="log-in-outline" size="large" />
+  const isAuth = props.isAuthenticated ?? !!props.user;
+  if (!isAuth) {
+    return props.fallback ?? (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ErrorState errorType="auth" />
       </View>
-    </Screen>
-  );
+    );
+  }
+
+  return <>{props.children}</>;
 }
 
 export function ConfirmDialog(props: {
-  visible: boolean;
+  visible?: boolean;
   title: string;
   message: string;
   confirmText?: string;
   cancelText?: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-  destructive?: boolean;
+  onConfirm?: () => void;
+  onCancel?: () => void;
+  isDangerous?: boolean;
 }) {
   if (!props.visible) return null;
 
   return (
     <View
       style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: theme.colors.overlay,
-        justifyContent: "center",
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: "rgba(0,0,0,0.5)",
         alignItems: "center",
-        padding: 32,
-        zIndex: 1000,
+        justifyContent: "center",
+        padding: theme.space.lg,
       }}
     >
-      <Pressable
-        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-        onPress={props.onCancel}
-        accessibilityLabel="取消"
-      />
       <View
         style={{
-          padding: 28,
+          backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.xl,
-          backgroundColor: theme.colors.surfaceElevated,
+          padding: theme.space.lg,
+          gap: theme.space.md,
           width: "100%",
-          maxWidth: 340,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          ...softShadowStyle(theme.shadows.soft),
+          maxWidth: 320,
         }}
-        accessibilityRole="alert"
       >
-        <Text
-          style={{
-            color: theme.colors.text,
-            fontSize: 19,
-            fontWeight: "700",
-            marginBottom: 10,
-            letterSpacing: -0.2,
-          }}
-        >
+        <Text style={{ fontSize: 17, fontWeight: "700", color: theme.colors.text }}>
           {props.title}
         </Text>
-        <Text
-          style={{
-            color: theme.colors.muted,
-            fontSize: 15,
-            lineHeight: 22,
-            marginBottom: 28,
-          }}
-        >
+        <Text style={{ fontSize: 14, color: theme.colors.muted, lineHeight: 21 }}>
           {props.message}
         </Text>
-        <View style={{ flexDirection: "row", gap: 12 }}>
-          <View style={{ flex: 1 }}>
-            <Button text={props.cancelText ?? "取消"} kind="secondary" onPress={props.onCancel} fullWidth />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Button
-              text={props.confirmText ?? "確認"}
-              kind={props.destructive ? "danger" : "primary"}
-              onPress={props.onConfirm}
-              fullWidth
-            />
-          </View>
+        <View style={{ flexDirection: "row", gap: theme.space.sm }}>
+          <Button
+            text={props.cancelText ?? "取消"}
+            onPress={props.onCancel}
+            kind="ghost"
+            style={{ flex: 1 }}
+          />
+          <Button
+            text={props.confirmText ?? "確認"}
+            onPress={props.onConfirm}
+            kind={props.isDangerous ? "danger" : "primary"}
+            style={{ flex: 1 }}
+          />
         </View>
       </View>
     </View>

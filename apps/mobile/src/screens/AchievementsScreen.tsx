@@ -258,7 +258,8 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
               borderWidth: 2,
               borderColor: achievement.unlocked ? categoryInfo.color : theme.colors.border,
             }}>
-              <Ionicons
+            <Ionicons
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 name={achievement.icon as any}
                 size={28}
                 color={achievement.unlocked ? categoryInfo.color : theme.colors.muted}
@@ -327,7 +328,7 @@ const LOCAL_COMPUTED_IDS = new Set([
   "collector_10", "collector_50", "early_bird", "night_owl",
 ]);
 
-export function AchievementsScreen(props: any) {
+export function AchievementsScreen(props: Record<string, unknown>) {
   const auth = useAuth();
   const fav = useFavorites();
   const { school } = useSchool();
@@ -730,7 +731,8 @@ export function AchievementsScreen(props: any) {
                       borderColor: selectedCategory === key ? info.color : theme.colors.border,
                     }}
                   >
-                    <Ionicons name={info.icon as any} size={16} color={selectedCategory === key ? info.color : theme.colors.muted} />
+                    <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      name={info.icon as any} size={16} color={selectedCategory === key ? info.color : theme.colors.muted} />
                     <Text style={{ color: selectedCategory === key ? info.color : theme.colors.muted, fontWeight: "700" }}>
                       {info.label} ({count}/{total})
                     </Text>

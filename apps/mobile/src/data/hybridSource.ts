@@ -12,8 +12,10 @@ import type {
   LibraryBook,
   BusRoute,
   BusArrival,
+  Order,
 } from "./types";
 import { getAdapter, hasAdapter } from "./apiAdapters/AdapterRegistry";
+import { PUAdapter } from "./apiAdapters/PUAdapter";
 import {
   checkInAttendance as checkInCourseAttendance,
   createCourseModule as createCourseSpaceModule,
@@ -33,6 +35,20 @@ import {
 } from "./courseSpaceSource";
 import { firebaseSource } from "./firebaseSource";
 import { mockSource } from "./mockSource";
+
+/**
+ * 嘗試取得 PUAdapter 實例（用於 TronClass 資料）。
+ * 如果不是 PU 學校或沒有 adapter 則回傳 null。
+ */
+async function getPUAdapterIfAvailable(): Promise<PUAdapter | null> {
+  const sid = currentSchoolContextId ?? DEFAULT_SCHOOL;
+  if (sid !== "tw-pu" || !hasAdapter(sid)) return null;
+  try {
+    const adapter = await getAdapter(sid);
+    if (adapter instanceof PUAdapter) return adapter;
+  } catch { /* ignore */ }
+  return null;
+}
 
 export type HybridSourceConfig = {
   preferRealApi: boolean;
@@ -249,23 +265,63 @@ export const hybridSource: DataSource = {
       id
     );
   },
-  searchCourses: mockSource.searchCourses,
+  searchCourses: async (searchQuery: string, schoolId?: string) => {
+    const sid = resolveSchoolId(schoolId);
+    try {
+      return await firebaseSource.searchCourses(searchQuery, sid);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock searchCourses:", error);
+      return mockSource.searchCourses(searchQuery, schoolId);
+    }
+  },
   listCourseSpaces: async (userId: string, schoolId?: string) => {
+    // 優先用 PUAdapter（TronClass 資料）
+    const puAdapter = await getPUAdapterIfAvailable();
+    if (puAdapter) {
+      try {
+        const spaces = await puAdapter.listCourseSpaces(userId, schoolId);
+        if (spaces.length > 0) return spaces;
+      } catch (err) {
+        console.warn("[HybridSource] PUAdapter listCourseSpaces error:", err);
+      }
+    }
     return listWorkspaceCourseSpaces(userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   getCourseSpace: async (courseSpaceId: string, userId: string, schoolId?: string) => {
+    const puAdapter = await getPUAdapterIfAvailable();
+    if (puAdapter && courseSpaceId.startsWith("tc-")) {
+      try {
+        const space = await puAdapter.getCourseSpace(courseSpaceId, userId);
+        if (space) return space;
+      } catch { /* fallback */ }
+    }
     return getWorkspaceCourseSpace(courseSpaceId, userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   listCourseModules: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+    const puAdapter = await getPUAdapterIfAvailable();
+    if (puAdapter && (!courseSpaceId || courseSpaceId.startsWith("tc-"))) {
+      try {
+        const modules = await puAdapter.listCourseModules(userId, courseSpaceId);
+        if (modules.length > 0) return modules;
+      } catch { /* fallback */ }
+    }
     return listWorkspaceCourseModules(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   createCourseModule: async (input) => {
     return createCourseSpaceModule(input);
   },
   listCourseMaterials: async (courseSpaceId: string, moduleId?: string) => {
+    // TronClass materials are embedded in modules, not separate
     return listWorkspaceCourseMaterials(courseSpaceId, moduleId);
   },
   listQuizzes: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+    const puAdapter = await getPUAdapterIfAvailable();
+    if (puAdapter) {
+      try {
+        const quizzes = await puAdapter.listQuizzes(userId, courseSpaceId);
+        if (quizzes.length > 0) return quizzes;
+      } catch { /* fallback */ }
+    }
     return listWorkspaceQuizzes(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   getQuiz: async (quizId: string, userId: string, courseSpaceId?: string, schoolId?: string) => {
@@ -278,6 +334,13 @@ export const hybridSource: DataSource = {
     return submitCourseSpaceQuiz(input);
   },
   listAttendanceSessions: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
+    const puAdapter = await getPUAdapterIfAvailable();
+    if (puAdapter) {
+      try {
+        const sessions = await puAdapter.listAttendanceSessions(userId, courseSpaceId);
+        if (sessions.length > 0) return sessions;
+      } catch { /* fallback */ }
+    }
     return listWorkspaceAttendanceSessions(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   startAttendanceSession: async (input) => {
@@ -287,18 +350,52 @@ export const hybridSource: DataSource = {
     return checkInCourseAttendance(input);
   },
   getAttendanceSummary: async (courseSpaceId: string) => {
+    const puAdapter = await getPUAdapterIfAvailable();
+    if (puAdapter && courseSpaceId.startsWith("tc-")) {
+      try {
+        return await puAdapter.getAttendanceSummary(courseSpaceId);
+      } catch { /* fallback */ }
+    }
     return getCourseAttendanceSummary(courseSpaceId);
   },
   listInboxTasks: async (userId: string, schoolId?: string) => {
+    const puAdapter = await getPUAdapterIfAvailable();
+    if (puAdapter) {
+      try {
+        const tasks = await puAdapter.listInboxTasks(userId);
+        if (tasks.length > 0) return tasks;
+      } catch { /* fallback */ }
+    }
     return listWorkspaceInboxTasks(userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   getCourseGradebook: async (courseSpaceId: string) => {
     return getCourseGradebook(courseSpaceId);
   },
   
-  listEnrollments: mockSource.listEnrollments,
-  enrollCourse: mockSource.enrollCourse,
-  dropCourse: mockSource.dropCourse,
+  listEnrollments: async (userId: string, semester?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.listEnrollments(userId, semester, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock enrollments:", error);
+      return mockSource.listEnrollments(userId, semester, schoolId);
+    }
+  },
+  enrollCourse: async (userId: string, courseId: string, semester?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.enrollCourse(userId, courseId, semester, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock enrollCourse:", error);
+      return mockSource.enrollCourse(userId, courseId, semester, schoolId);
+    }
+  },
+  dropCourse: async (enrollmentId: string, userId?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.dropCourse(enrollmentId, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock dropCourse:", error);
+      return mockSource.dropCourse(enrollmentId, userId, schoolId);
+    }
+  },
   
   listGrades: async (userId: string, semester?: string): Promise<Grade[]> => {
     const schoolId = currentSchoolContextId ?? inferSchoolIdFromUserId(userId);
@@ -313,7 +410,22 @@ export const hybridSource: DataSource = {
       semester
     );
   },
-  getGPA: mockSource.getGPA,
+  getGPA: async (userId: string, schoolId?: string) => {
+    // 優先用 PUAdapter 計算真實 GPA
+    const puAdapter = await getPUAdapterIfAvailable();
+    if (puAdapter) {
+      try {
+        const result = await puAdapter.getGPA(userId);
+        if (result.totalCredits > 0) return result;
+      } catch { /* fallback */ }
+    }
+    try {
+      return await firebaseSource.getGPA(userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock getGPA:", error);
+      return mockSource.getGPA(userId, schoolId);
+    }
+  },
   
   listGroups: firebaseSource.listGroups,
   getGroup: firebaseSource.getGroup,
@@ -376,16 +488,79 @@ export const hybridSource: DataSource = {
       query
     );
   },
-  getBook: mockSource.getBook,
-  listLoans: mockSource.listLoans,
-  borrowBook: mockSource.borrowBook,
-  returnBook: mockSource.returnBook,
-  renewBook: mockSource.renewBook,
-  
-  listSeats: mockSource.listSeats,
-  listSeatReservations: mockSource.listSeatReservations,
-  reserveSeat: mockSource.reserveSeat,
-  cancelSeatReservation: mockSource.cancelSeatReservation,
+  getBook: async (id: string) => {
+    try {
+      return await firebaseSource.getBook(id);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock getBook:", error);
+      return mockSource.getBook(id);
+    }
+  },
+  listLoans: async (userId: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.listLoans(userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listLoans:", error);
+      return mockSource.listLoans(userId, schoolId);
+    }
+  },
+  borrowBook: async (bookId: string, userId: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.borrowBook(bookId, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock borrowBook:", error);
+      return mockSource.borrowBook(bookId, userId, schoolId);
+    }
+  },
+  returnBook: async (loanId: string, userId?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.returnBook(loanId, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock returnBook:", error);
+      return mockSource.returnBook(loanId, userId, schoolId);
+    }
+  },
+  renewBook: async (loanId: string, userId?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.renewBook(loanId, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock renewBook:", error);
+      return mockSource.renewBook(loanId, userId, schoolId);
+    }
+  },
+
+  listSeats: async (schoolId?: string, zone?: string) => {
+    try {
+      return await firebaseSource.listSeats(schoolId ?? currentSchoolContextId ?? undefined, zone);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listSeats:", error);
+      return mockSource.listSeats(schoolId, zone);
+    }
+  },
+  listSeatReservations: async (userId: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.listSeatReservations(userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listSeatReservations:", error);
+      return mockSource.listSeatReservations(userId, schoolId);
+    }
+  },
+  reserveSeat: async (seatId: string, userId: string, date: string, startTime: string, endTime: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.reserveSeat(seatId, userId, date, startTime, endTime, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock reserveSeat:", error);
+      return mockSource.reserveSeat(seatId, userId, date, startTime, endTime, schoolId);
+    }
+  },
+  cancelSeatReservation: async (id: string, userId?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.cancelSeatReservation(id, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock cancelSeatReservation:", error);
+      return mockSource.cancelSeatReservation(id, userId, schoolId);
+    }
+  },
   
   listBusRoutes: async (schoolId?: string): Promise<BusRoute[]> => {
     const sid = resolveSchoolId(schoolId);
@@ -395,7 +570,14 @@ export const hybridSource: DataSource = {
       () => mockSource.listBusRoutes(schoolId)
     );
   },
-  getBusRoute: mockSource.getBusRoute,
+  getBusRoute: async (id: string) => {
+    try {
+      return await firebaseSource.getBusRoute(id);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock getBusRoute:", error);
+      return mockSource.getBusRoute(id);
+    }
+  },
   getBusArrivals: async (stopId: string): Promise<BusArrival[]> => {
     const schoolId = resolveSchoolId(undefined, stopId);
     return fetchWithFallback(
@@ -417,14 +599,70 @@ export const hybridSource: DataSource = {
   deleteCalendarEvent: firebaseSource.deleteCalendarEvent,
   syncCoursesToCalendar: firebaseSource.syncCoursesToCalendar,
   
-  listOrders: mockSource.listOrders,
-  getOrder: mockSource.getOrder,
-  createOrder: mockSource.createOrder,
-  updateOrderStatus: mockSource.updateOrderStatus,
-  cancelOrder: mockSource.cancelOrder,
-  listTransactions: mockSource.listTransactions,
-  processTopup: mockSource.processTopup,
-  processPayment: mockSource.processPayment,
+  listOrders: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+    try {
+      return await firebaseSource.listOrders(userId, options, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listOrders:", error);
+      return mockSource.listOrders(userId, options, schoolId);
+    }
+  },
+  getOrder: async (id: string, userId?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.getOrder(id, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock getOrder:", error);
+      return mockSource.getOrder(id, userId, schoolId);
+    }
+  },
+  createOrder: async (data: any) => {
+    try {
+      return await firebaseSource.createOrder(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock createOrder:", error);
+      return mockSource.createOrder(data);
+    }
+  },
+  updateOrderStatus: async (id: string, status: Order["status"], userId?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.updateOrderStatus(id, status, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock updateOrderStatus:", error);
+      return mockSource.updateOrderStatus(id, status, userId, schoolId);
+    }
+  },
+  cancelOrder: async (id: string, userId?: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.cancelOrder(id, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock cancelOrder:", error);
+      return mockSource.cancelOrder(id, userId, schoolId);
+    }
+  },
+  listTransactions: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+    try {
+      return await firebaseSource.listTransactions(userId, options, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listTransactions:", error);
+      return mockSource.listTransactions(userId, options, schoolId);
+    }
+  },
+  processTopup: async (data: { userId: string; amount: number; paymentMethod: string }) => {
+    try {
+      return await firebaseSource.processTopup(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock processTopup:", error);
+      return mockSource.processTopup(data);
+    }
+  },
+  processPayment: async (data: { userId: string; amount: number; paymentMethod: string; merchantId: string; description: string }) => {
+    try {
+      return await firebaseSource.processPayment(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock processPayment:", error);
+      return mockSource.processPayment(data);
+    }
+  },
   
   listAchievements: firebaseSource.listAchievements,
   getUserAchievements: firebaseSource.getUserAchievements,
@@ -436,35 +674,217 @@ export const hybridSource: DataSource = {
   togglePoiReviewHelpful: firebaseSource.togglePoiReviewHelpful,
   submitPoiReport: firebaseSource.submitPoiReport,
   
-  getDormitoryInfo: mockSource.getDormitoryInfo,
-  listRepairRequests: mockSource.listRepairRequests,
-  createRepairRequest: mockSource.createRepairRequest,
-  updateRepairRequest: mockSource.updateRepairRequest,
-  cancelRepairRequest: mockSource.cancelRepairRequest,
-  listDormPackages: mockSource.listDormPackages,
-  confirmPackagePickup: mockSource.confirmPackagePickup,
-  listWashingMachines: mockSource.listWashingMachines,
-  listWashingReservations: mockSource.listWashingReservations,
-  reserveWashingMachine: mockSource.reserveWashingMachine,
-  cancelWashingReservation: mockSource.cancelWashingReservation,
-  listDormAnnouncements: mockSource.listDormAnnouncements,
-  
-  listPrinters: mockSource.listPrinters,
-  getPrinter: mockSource.getPrinter,
-  listPrintJobs: mockSource.listPrintJobs,
-  createPrintJob: mockSource.createPrintJob,
-  cancelPrintJob: mockSource.cancelPrintJob,
-  
-  listHealthAppointments: mockSource.listHealthAppointments,
-  createHealthAppointment: mockSource.createHealthAppointment,
-  cancelHealthAppointment: mockSource.cancelHealthAppointment,
-  rescheduleHealthAppointment: mockSource.rescheduleHealthAppointment,
-  listHealthRecords: mockSource.listHealthRecords,
-  listHealthTimeSlots: mockSource.listHealthTimeSlots,
-  
-  createAccessApplication: mockSource.createAccessApplication,
-  createLateReturnRecord: mockSource.createLateReturnRecord,
-  createVisitorRecord: mockSource.createVisitorRecord,
+  getDormitoryInfo: async (userId: string) => {
+    try {
+      return await firebaseSource.getDormitoryInfo(userId);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock getDormitoryInfo:", error);
+      return mockSource.getDormitoryInfo(userId);
+    }
+  },
+  listRepairRequests: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+    try {
+      return await firebaseSource.listRepairRequests(userId, options, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listRepairRequests:", error);
+      return mockSource.listRepairRequests(userId, options, schoolId);
+    }
+  },
+  createRepairRequest: async (data: any) => {
+    try {
+      return await firebaseSource.createRepairRequest(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock createRepairRequest:", error);
+      return mockSource.createRepairRequest(data);
+    }
+  },
+  updateRepairRequest: async (id: string, data: any) => {
+    try {
+      return await firebaseSource.updateRepairRequest(id, data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock updateRepairRequest:", error);
+      return mockSource.updateRepairRequest(id, data);
+    }
+  },
+  cancelRepairRequest: async (id: string) => {
+    try {
+      return await firebaseSource.cancelRepairRequest(id);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock cancelRepairRequest:", error);
+      return mockSource.cancelRepairRequest(id);
+    }
+  },
+  listDormPackages: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+    try {
+      return await firebaseSource.listDormPackages(userId, options, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listDormPackages:", error);
+      return mockSource.listDormPackages(userId, options, schoolId);
+    }
+  },
+  confirmPackagePickup: async (id: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.confirmPackagePickup(id, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock confirmPackagePickup:", error);
+      return mockSource.confirmPackagePickup(id, schoolId);
+    }
+  },
+  listWashingMachines: async (schoolId?: string, building?: string) => {
+    try {
+      return await firebaseSource.listWashingMachines(schoolId ?? currentSchoolContextId ?? undefined, building);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listWashingMachines:", error);
+      return mockSource.listWashingMachines(schoolId, building);
+    }
+  },
+  listWashingReservations: async (userId: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.listWashingReservations(userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listWashingReservations:", error);
+      return mockSource.listWashingReservations(userId, schoolId);
+    }
+  },
+  reserveWashingMachine: async (machineId: string, userId: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.reserveWashingMachine(machineId, userId, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock reserveWashingMachine:", error);
+      return mockSource.reserveWashingMachine(machineId, userId, schoolId);
+    }
+  },
+  cancelWashingReservation: async (id: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.cancelWashingReservation(id, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock cancelWashingReservation:", error);
+      return mockSource.cancelWashingReservation(id, schoolId);
+    }
+  },
+  listDormAnnouncements: async (schoolId?: string, building?: string) => {
+    try {
+      return await firebaseSource.listDormAnnouncements(schoolId ?? currentSchoolContextId ?? undefined, building);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listDormAnnouncements:", error);
+      return mockSource.listDormAnnouncements(schoolId, building);
+    }
+  },
+
+  listPrinters: async (schoolId?: string, options?: QueryOptions) => {
+    try {
+      return await firebaseSource.listPrinters(schoolId ?? currentSchoolContextId ?? undefined, options);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listPrinters:", error);
+      return mockSource.listPrinters(schoolId, options);
+    }
+  },
+  getPrinter: async (id: string) => {
+    try {
+      return await firebaseSource.getPrinter(id);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock getPrinter:", error);
+      return mockSource.getPrinter(id);
+    }
+  },
+  listPrintJobs: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+    try {
+      return await firebaseSource.listPrintJobs(userId, options, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listPrintJobs:", error);
+      return mockSource.listPrintJobs(userId, options, schoolId);
+    }
+  },
+  createPrintJob: async (data: any) => {
+    try {
+      return await firebaseSource.createPrintJob(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock createPrintJob:", error);
+      return mockSource.createPrintJob(data);
+    }
+  },
+  cancelPrintJob: async (id: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.cancelPrintJob(id, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock cancelPrintJob:", error);
+      return mockSource.cancelPrintJob(id, schoolId);
+    }
+  },
+
+  listHealthAppointments: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+    try {
+      return await firebaseSource.listHealthAppointments(userId, options, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listHealthAppointments:", error);
+      return mockSource.listHealthAppointments(userId, options, schoolId);
+    }
+  },
+  createHealthAppointment: async (data: any) => {
+    try {
+      return await firebaseSource.createHealthAppointment(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock createHealthAppointment:", error);
+      return mockSource.createHealthAppointment(data);
+    }
+  },
+  cancelHealthAppointment: async (id: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.cancelHealthAppointment(id, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock cancelHealthAppointment:", error);
+      return mockSource.cancelHealthAppointment(id, schoolId);
+    }
+  },
+  rescheduleHealthAppointment: async (id: string, data: any, schoolId?: string) => {
+    try {
+      return await firebaseSource.rescheduleHealthAppointment(id, data, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock rescheduleHealthAppointment:", error);
+      return mockSource.rescheduleHealthAppointment(id, data, schoolId);
+    }
+  },
+  listHealthRecords: async (userId: string, options?: QueryOptions, schoolId?: string) => {
+    try {
+      return await firebaseSource.listHealthRecords(userId, options, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listHealthRecords:", error);
+      return mockSource.listHealthRecords(userId, options, schoolId);
+    }
+  },
+  listHealthTimeSlots: async (departmentId: string, date: string, schoolId?: string) => {
+    try {
+      return await firebaseSource.listHealthTimeSlots(departmentId, date, schoolId ?? currentSchoolContextId ?? undefined);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock listHealthTimeSlots:", error);
+      return mockSource.listHealthTimeSlots(departmentId, date, schoolId);
+    }
+  },
+
+  createAccessApplication: async (data: any) => {
+    try {
+      return await firebaseSource.createAccessApplication(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock createAccessApplication:", error);
+      return mockSource.createAccessApplication(data);
+    }
+  },
+  createLateReturnRecord: async (data: any) => {
+    try {
+      return await firebaseSource.createLateReturnRecord(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock createLateReturnRecord:", error);
+      return mockSource.createLateReturnRecord(data);
+    }
+  },
+  createVisitorRecord: async (data: any) => {
+    try {
+      return await firebaseSource.createVisitorRecord(data);
+    } catch (error) {
+      console.warn("[HybridSource] Falling back to mock createVisitorRecord:", error);
+      return mockSource.createVisitorRecord(data);
+    }
+  },
 };
 
 export function getHybridSourceStatus(): {

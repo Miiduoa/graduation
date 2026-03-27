@@ -1,11 +1,3 @@
-/**
- * campusOs.tsx — Calm Clarity 設計語言元件
- *
- * 心理學設計原則：
- * - Object Perception: 單向陰影 + 明確邊框取代 Neumorphic 雙向陰影
- * - Visual Hierarchy: 色彩承載資訊語義而非裝飾
- * - Attention Direction: 圖示 + 色調引導視覺焦點
- */
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, Text, View } from "react-native";
@@ -32,16 +24,16 @@ function getAmbientCuePalette(signalType: AmbientCueSignalType) {
       };
     case "leaderboard_momentum":
       return {
-        fg: theme.colors.achievement,
-        bg: theme.colors.achievementSoft,
-        border: `${theme.colors.achievement}30`,
+        fg: theme.colors.success,
+        bg: theme.colors.successSoft,
+        border: `${theme.colors.success}30`,
         icon: "trophy-outline" as IconName,
       };
     case "campus_popularity":
       return {
-        fg: theme.colors.social,
-        bg: theme.colors.socialSoft,
-        border: `${theme.colors.social}30`,
+        fg: theme.colors.accent,
+        bg: theme.colors.accentSoft,
+        border: `${theme.colors.accent}30`,
         icon: "people-outline" as IconName,
       };
     case "approval_backlog":
@@ -78,17 +70,17 @@ export function ContextStrip(props: {
   return (
     <View
       style={{
-        padding: 20,
-        borderRadius: theme.radius.xl,
+        padding: theme.space.lg,
+        borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
         borderColor: theme.colors.border,
-        gap: 6,
+        gap: theme.space.sm,
         ...shadowStyle(theme.shadows.sm),
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-        <View style={{ flex: 1, gap: 5 }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: theme.space.md }}>
+        <View style={{ flex: 1, gap: theme.space.xs }}>
           <Text
             style={{
               color: theme.colors.accent,
@@ -102,17 +94,12 @@ export function ContextStrip(props: {
           </Text>
           <Text style={{
             color: theme.colors.text,
-            fontSize: theme.typography.h1.fontSize,
-            fontWeight: theme.typography.h1.fontWeight ?? "700",
-            letterSpacing: theme.typography.h1.letterSpacing,
+            fontSize: theme.typography.h2.fontSize,
+            fontWeight: theme.typography.h2.fontWeight ?? "700",
+            letterSpacing: theme.typography.h2.letterSpacing,
           }}>
             {props.title}
           </Text>
-          {props.description ? (
-            <Text style={{ color: theme.colors.textSecondary, lineHeight: 22, fontSize: 14 }}>
-              {props.description}
-            </Text>
-          ) : null}
         </View>
         {props.right}
       </View>
@@ -126,19 +113,19 @@ export function ConfidenceBadge(props: {
 }) {
   const colors =
     props.state === "high"
-      ? { bg: theme.colors.confidenceHighSoft, fg: theme.colors.confidenceHigh }
+      ? { bg: theme.colors.successSoft, fg: theme.colors.success }
       : props.state === "medium"
-        ? { bg: theme.colors.confidenceMediumSoft, fg: theme.colors.confidenceMedium }
+        ? { bg: theme.colors.warningSoft, fg: theme.colors.warning }
         : props.state === "live"
-          ? { bg: theme.colors.freshSoft, fg: theme.colors.fresh }
-          : { bg: theme.colors.confidenceLowSoft, fg: theme.colors.confidenceLow };
+          ? { bg: theme.colors.fresh, fg: theme.colors.fresh }
+          : { bg: theme.colors.dangerSoft, fg: theme.colors.danger };
 
   return (
     <View
       style={{
         alignSelf: "flex-start",
-        paddingHorizontal: 10,
-        paddingVertical: 5,
+        paddingHorizontal: theme.space.sm,
+        paddingVertical: theme.space.xs,
         borderRadius: theme.radius.full,
         backgroundColor: colors.bg,
         borderWidth: 1,
@@ -154,7 +141,7 @@ export function HeroActionCard(props: {
   icon: IconName;
   eyebrow: string;
   title: string;
-  description: string;
+  description?: string;
   meta?: string;
   tone?: "accent" | "warning" | "success" | "danger";
   actionLabel?: string;
@@ -167,26 +154,26 @@ export function HeroActionCard(props: {
         ? { bg: theme.colors.successSoft, fg: theme.colors.success, border: `${theme.colors.success}30` }
         : props.tone === "danger"
           ? { bg: theme.colors.dangerSoft, fg: theme.colors.danger, border: `${theme.colors.danger}30` }
-          : { bg: theme.colors.focusSurface, fg: theme.colors.accent, border: `${theme.colors.accent}30` };
+          : { bg: theme.colors.accentSoft, fg: theme.colors.accent, border: `${theme.colors.accent}30` };
 
   const content = (
     <View
       style={{
-        padding: 20,
-        borderRadius: theme.radius.xl,
+        padding: theme.space.lg,
+        borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
         borderColor: theme.colors.border,
-        gap: 14,
+        gap: theme.space.md,
         ...shadowStyle(theme.shadows.sm),
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.md }}>
         <View
           style={{
-            width: 52,
-            height: 52,
-            borderRadius: 18,
+            width: 48,
+            height: 48,
+            borderRadius: 12,
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: palette.bg,
@@ -194,11 +181,11 @@ export function HeroActionCard(props: {
             borderColor: palette.border,
           }}
         >
-          <Ionicons name={props.icon} size={24} color={palette.fg} />
+          <Ionicons name={props.icon} size={22} color={palette.fg} />
         </View>
         {props.meta ? <ConfidenceBadge state="live" label={props.meta} /> : null}
       </View>
-      <View style={{ gap: 5 }}>
+      <View style={{ gap: theme.space.xs }}>
         <Text style={{
           color: palette.fg,
           fontSize: theme.typography.overline.fontSize,
@@ -216,16 +203,18 @@ export function HeroActionCard(props: {
         }}>
           {props.title}
         </Text>
-        <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22 }}>
-          {props.description}
-        </Text>
+        {props.description && (
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
+            {props.description}
+          </Text>
+        )}
       </View>
       {props.actionLabel ? (
         <View
           style={{
             alignSelf: "flex-start",
-            paddingHorizontal: 16,
-            paddingVertical: 9,
+            paddingHorizontal: theme.space.md,
+            paddingVertical: theme.space.sm,
             borderRadius: theme.radius.md,
             backgroundColor: palette.bg,
             borderWidth: 1,
@@ -256,7 +245,7 @@ export function HeroActionCard(props: {
 export function TimelineCard(props: {
   icon: IconName;
   title: string;
-  description: string;
+  description?: string;
   meta?: string;
   hint?: string;
   tint?: string;
@@ -268,36 +257,38 @@ export function TimelineCard(props: {
       disabled={!props.onPress}
       onPress={props.onPress}
       style={({ pressed }) => ({
-        padding: 16,
+        padding: theme.space.md,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
         borderColor: pressed ? theme.colors.accent + "40" : theme.colors.border,
-        gap: 8,
+        gap: theme.space.sm,
         opacity: pressed ? 0.88 : 1,
         transform: [{ scale: pressed ? 0.99 : 1 }],
         ...shadowStyle(theme.shadows.sm),
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, flex: 1 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.md }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.md, flex: 1 }}>
           <View
             style={{
               width: 40,
               height: 40,
-              borderRadius: 14,
+              borderRadius: 12,
               alignItems: "center",
               justifyContent: "center",
               backgroundColor: `${tint}14`,
             }}
           >
-            <Ionicons name={props.icon} size={19} color={tint} />
+            <Ionicons name={props.icon} size={18} color={tint} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>{props.title}</Text>
-            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2, lineHeight: 18 }}>
-              {props.description}
-            </Text>
+            <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>{props.title}</Text>
+            {props.description && (
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: theme.space.xs, lineHeight: 18 }}>
+                {props.description}
+              </Text>
+            )}
           </View>
         </View>
         {props.meta ? <Text style={{ color: tint, fontSize: 12, fontWeight: "700" }}>{props.meta}</Text> : null}
@@ -321,44 +312,44 @@ export function ActionableInboxRow(props: {
 }) {
   const palette =
     props.urgency === "critical"
-      ? { bg: theme.colors.urgentSoft, fg: theme.colors.urgent }
+      ? { bg: theme.colors.dangerSoft, fg: theme.colors.danger }
       : props.urgency === "high"
         ? { bg: theme.colors.warningSoft, fg: theme.colors.warning }
         : props.urgency === "medium"
           ? { bg: theme.colors.accentSoft, fg: theme.colors.accent }
-          : { bg: theme.colors.calmSoft, fg: theme.colors.calm };
+          : { bg: theme.colors.infoSoft, fg: theme.colors.info };
 
   return (
     <Pressable
       onPress={props.onPress}
       style={({ pressed }) => ({
-        padding: 16,
+        padding: theme.space.md,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
         borderColor: pressed ? `${palette.fg}30` : theme.colors.border,
-        gap: 10,
+        gap: theme.space.md,
         opacity: pressed ? 0.85 : 1,
         transform: [{ scale: pressed ? 0.99 : 1 }],
         ...shadowStyle(theme.shadows.sm),
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-        <View style={{ flexDirection: "row", gap: 12, flex: 1 }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: theme.space.md }}>
+        <View style={{ flexDirection: "row", gap: theme.space.md, flex: 1 }}>
           <View
             style={{
               width: 40,
               height: 40,
-              borderRadius: 14,
+              borderRadius: 12,
               alignItems: "center",
               justifyContent: "center",
               backgroundColor: palette.bg,
             }}
           >
-            <Ionicons name={props.icon} size={19} color={palette.fg} />
+            <Ionicons name={props.icon} size={18} color={palette.fg} />
           </View>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>{props.title}</Text>
+          <View style={{ flex: 1, gap: theme.space.xs }}>
+            <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>{props.title}</Text>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
               {props.reason}
             </Text>
@@ -372,12 +363,12 @@ export function ActionableInboxRow(props: {
 
       <View
         style={{
-          padding: 10,
-          borderRadius: theme.radius.sm,
+          padding: theme.space.sm,
+          borderRadius: theme.radius.md,
           backgroundColor: theme.colors.surface2,
           borderWidth: 1,
           borderColor: theme.colors.border,
-          gap: 4,
+          gap: theme.space.xs,
         }}
       >
         <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: "600" }}>影響：{props.consequence}</Text>
@@ -387,9 +378,9 @@ export function ActionableInboxRow(props: {
       <View
         style={{
           alignSelf: "flex-start",
-          paddingHorizontal: 14,
-          paddingVertical: 8,
-          borderRadius: theme.radius.sm,
+          paddingHorizontal: theme.space.md,
+          paddingVertical: theme.space.sm,
+          borderRadius: theme.radius.md,
           backgroundColor: palette.bg,
           borderWidth: 1,
           borderColor: `${palette.fg}30`,
@@ -404,7 +395,7 @@ export function ActionableInboxRow(props: {
 export function AmbientCueCard(props: {
   signalType: AmbientCueSignalType;
   headline: string;
-  body: string;
+  body?: string;
   actionLabel: string;
   metric?: string;
   onPress?: () => void;
@@ -417,23 +408,23 @@ export function AmbientCueCard(props: {
       disabled={!props.onPress}
       onPress={props.onPress}
       style={({ pressed }) => ({
-        padding: 14,
+        padding: theme.space.md,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
         borderColor: pressed ? palette.border : theme.colors.border,
-        gap: 10,
+        gap: theme.space.md,
         opacity: pressed ? 0.88 : 1,
         transform: [{ scale: pressed ? 0.995 : 1 }],
         ...shadowStyle(theme.shadows.sm),
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: theme.space.md }}>
         <View
           style={{
             width: 40,
             height: 40,
-            borderRadius: 14,
+            borderRadius: 12,
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: palette.bg,
@@ -441,34 +432,33 @@ export function AmbientCueCard(props: {
             borderColor: palette.border,
           }}
         >
-          <Ionicons name={palette.icon} size={19} color={palette.fg} />
+          <Ionicons name={palette.icon} size={18} color={palette.fg} />
         </View>
 
-        <View style={{ flex: 1, gap: 4 }}>
-          <Text style={{ color: palette.fg, fontSize: 12, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.4 }}>
-            觀察到的節奏
-          </Text>
-          <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700", lineHeight: 21 }}>
+        <View style={{ flex: 1, gap: theme.space.xs }}>
+          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700", lineHeight: 20 }}>
             {props.headline}
           </Text>
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
-            {props.body}
-          </Text>
+          {props.body && (
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
+              {props.body}
+            </Text>
+          )}
         </View>
 
         {props.onDismiss ? (
-          <Pressable onPress={props.onDismiss} hitSlop={8} style={{ padding: 2 }}>
+          <Pressable onPress={props.onDismiss} hitSlop={8} style={{ padding: theme.space.xs }}>
             <Ionicons name="close" size={16} color={theme.colors.muted} />
           </Pressable>
         ) : null}
       </View>
 
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.md }}>
         {props.metric ? (
           <View
             style={{
-              paddingHorizontal: 10,
-              paddingVertical: 5,
+              paddingHorizontal: theme.space.sm,
+              paddingVertical: theme.space.xs,
               borderRadius: theme.radius.full,
               backgroundColor: palette.bg,
               borderWidth: 1,
@@ -481,8 +471,8 @@ export function AmbientCueCard(props: {
 
         <View
           style={{
-            paddingHorizontal: 12,
-            paddingVertical: 7,
+            paddingHorizontal: theme.space.md,
+            paddingVertical: theme.space.sm,
             borderRadius: theme.radius.md,
             backgroundColor: palette.bg,
             borderWidth: 1,
@@ -499,7 +489,7 @@ export function AmbientCueCard(props: {
 export function RoleCtaCard(props: {
   icon: IconName;
   title: string;
-  description: string;
+  description?: string;
   roleLabel: string;
   tone: "student" | "teacher" | "admin";
   actionLabel: string;
@@ -507,32 +497,32 @@ export function RoleCtaCard(props: {
 }) {
   const palette =
     props.tone === "teacher"
-      ? { bg: theme.colors.roleTeacherSoft, fg: theme.colors.roleTeacher }
+      ? { bg: theme.colors.successSoft, fg: theme.colors.success }
       : props.tone === "admin"
-        ? { bg: theme.colors.roleAdminSoft, fg: theme.colors.roleAdmin }
-        : { bg: theme.colors.roleStudentSoft, fg: theme.colors.roleStudent };
+        ? { bg: theme.colors.warningSoft, fg: theme.colors.warning }
+        : { bg: theme.colors.accentSoft, fg: theme.colors.accent };
 
   return (
     <Pressable
       onPress={props.onPress}
       style={({ pressed }) => ({
-        padding: 18,
+        padding: theme.space.lg,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
         borderColor: pressed ? `${palette.fg}40` : theme.colors.border,
-        gap: 10,
+        gap: theme.space.md,
         opacity: pressed ? 0.85 : 1,
         transform: [{ scale: pressed ? 0.99 : 1 }],
         ...shadowStyle(theme.shadows.sm),
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.md }}>
         <View
           style={{
             width: 44,
             height: 44,
-            borderRadius: 16,
+            borderRadius: 12,
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: palette.bg,
@@ -552,11 +542,13 @@ export function RoleCtaCard(props: {
           }}>
             {props.roleLabel}
           </Text>
-          <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "700", marginTop: 3 }}>{props.title}</Text>
+          <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700", marginTop: theme.space.xs }}>{props.title}</Text>
         </View>
       </View>
-      <Text style={{ color: theme.colors.textSecondary, lineHeight: 22, fontSize: 14 }}>{props.description}</Text>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      {props.description && (
+        <Text style={{ color: theme.colors.textSecondary, lineHeight: 20, fontSize: 13 }}>{props.description}</Text>
+      )}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.xs }}>
         <Text style={{ color: palette.fg, fontSize: 13, fontWeight: "700" }}>{props.actionLabel}</Text>
         <Ionicons name="arrow-forward" size={13} color={palette.fg} />
       </View>
@@ -573,13 +565,13 @@ export function CompletionState(props: {
   return (
     <View
       style={{
-        padding: 24,
-        borderRadius: theme.radius.xl,
+        padding: theme.space.lg,
+        borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
         borderColor: theme.colors.border,
         alignItems: "center",
-        gap: 10,
+        gap: theme.space.md,
         ...shadowStyle(theme.shadows.sm),
       }}
     >
@@ -590,24 +582,24 @@ export function CompletionState(props: {
           borderRadius: 20,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: theme.colors.growthSoft,
+          backgroundColor: theme.colors.successSoft,
           borderWidth: 1,
-          borderColor: `${theme.colors.growth}30`,
+          borderColor: `${theme.colors.success}30`,
         }}
       >
-        <Ionicons name="checkmark-done" size={26} color={theme.colors.growth} />
+        <Ionicons name="checkmark-done" size={26} color={theme.colors.success} />
       </View>
-      <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: "700" }}>{props.title}</Text>
-      <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 21, textAlign: "center" }}>
+      <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "700" }}>{props.title}</Text>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20, textAlign: "center" }}>
         {props.description}
       </Text>
       {props.actionLabel && props.onPress ? (
         <Pressable
           onPress={props.onPress}
           style={({ pressed }) => ({
-            marginTop: 4,
-            paddingHorizontal: 20,
-            paddingVertical: 10,
+            marginTop: theme.space.sm,
+            paddingHorizontal: theme.space.lg,
+            paddingVertical: theme.space.sm,
             borderRadius: theme.radius.md,
             backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
             opacity: pressed ? 0.9 : 1,

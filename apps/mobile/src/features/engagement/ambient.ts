@@ -22,6 +22,38 @@ const AMBIENT_CUE_MIN_DISTINCT_USERS = 3;
 const AMBIENT_CUE_DEFAULT_STALE_MS = 24 * 60 * 60 * 1000;
 const impressionKeys = new Set<string>();
 
+/** Safely convert any date-like value (Date, Firestore Timestamp, serialised {seconds}, string) to ms since epoch. */
+function toMs(val: unknown): number | null {
+  if (val == null) return null;
+  const safeGetTime = (candidate: unknown): number | null => {
+    try {
+      const gt = (candidate as { getTime?: unknown }).getTime;
+      if (typeof gt !== 'function') return null;
+      const t = (gt as (this: unknown) => unknown).call(candidate);
+      return typeof t === 'number' && !Number.isNaN(t) ? t : null;
+    } catch {
+      return null;
+    }
+  };
+  if (typeof (val as { toMillis?: unknown }).toMillis === 'function') {
+    return (val as { toMillis: () => number }).toMillis();
+  }
+  if (typeof (val as { toDate?: unknown }).toDate === 'function') {
+    const d = (val as { toDate: () => Date }).toDate();
+    return safeGetTime(d);
+  }
+  if (typeof (val as { getTime?: unknown }).getTime === 'function') {
+    return safeGetTime(val);
+  }
+  if (typeof (val as { seconds?: unknown }).seconds === 'number') {
+    return (val as { seconds: number }).seconds * 1000;
+  }
+  if (typeof (val as { _seconds?: unknown })._seconds === 'number') {
+    return (val as { _seconds: number })._seconds * 1000;
+  }
+  return null;
+}
+
 type NavigationLike = {
   navigate?: (...args: unknown[]) => void;
 } | null | undefined;
@@ -52,7 +84,9 @@ export async function dismissAmbientCue(params: {
 
 export function isAmbientCueFresh(cue: AmbientCue, now = Date.now()): boolean {
   if (!cue.updatedAt) return false;
-  return now - cue.updatedAt.getTime() <= AMBIENT_CUE_DEFAULT_STALE_MS;
+  const ms = toMs(cue.updatedAt);
+  if (ms === null) return false;
+  return now - ms <= AMBIENT_CUE_DEFAULT_STALE_MS;
 }
 
 export function hasAmbientCueSample(cue: AmbientCue): boolean {
@@ -94,7 +128,7 @@ export function applyAmbientCueVisibilityRules(
       if (priorityDiff !== 0) return priorityDiff;
       const sampleDiff = (right.distinctUserCount ?? 0) - (left.distinctUserCount ?? 0);
       if (sampleDiff !== 0) return sampleDiff;
-      return (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0);
+      return (toMs(right.updatedAt) ?? 0) - (toMs(left.updatedAt) ?? 0);
     });
 
   return { visible, hiddenLowSample };

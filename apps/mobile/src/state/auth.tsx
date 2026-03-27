@@ -9,6 +9,8 @@ import { clearAllOfflineData, getOfflineQueue } from "../services/offline";
 import { getCachedPushToken, removePushTokenFromFirestore } from "../services/notifications";
 import { clearMockAuthSession, loadMockAuthSession } from "../services/mockAuth";
 import { clearUserScopedStorage } from "../services/scopedStorage";
+import { clearPUCache } from "../services/puDataCache";
+import { clearPUSession } from "../services/studentIdAuth";
 
 import type { UserRole as DataUserRole } from "../data/types";
 import type { MerchantAssignment } from "../data/types";
@@ -58,11 +60,32 @@ function toIsoStringOrNull(value: unknown): string | null {
   if (typeof value === "string" && value.trim()) {
     return value;
   }
+  // Prefer toMillis() to avoid Hermes cross-realm Date issue
+  if (value && typeof (value as { toMillis?: unknown }).toMillis === "function") {
+    const ms = (value as { toMillis: () => number }).toMillis();
+    if (typeof ms === "number" && Number.isFinite(ms)) {
+      return new Date(ms).toISOString();
+    }
+  }
   if (value && typeof (value as { toDate?: () => Date }).toDate === "function") {
-    return (value as { toDate: () => Date }).toDate().toISOString();
+    try {
+      const d = (value as { toDate: () => Date }).toDate();
+      try {
+        return new Date(d.getTime()).toISOString();
+      } catch {
+        // Cross-realm Date — fallback to string parsing
+        const parsed = Date.parse(String(d));
+        return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+      }
+    } catch {
+      return null;
+    }
   }
   if (value && typeof (value as { seconds?: number }).seconds === "number") {
     return new Date((value as { seconds: number }).seconds * 1000).toISOString();
+  }
+  if (value && typeof (value as { _seconds?: number })._seconds === "number") {
+    return new Date((value as { _seconds: number })._seconds * 1000).toISOString();
   }
   return null;
 }
@@ -533,6 +556,10 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         setUser(null);
         setProfile(null);
       }
+
+      // 清除靜宜大學快取和 session
+      clearPUSession();
+      await clearPUCache().catch(() => {});
       
       setTokenError(null);
       setTokenExpired(false);

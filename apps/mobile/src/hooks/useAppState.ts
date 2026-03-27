@@ -89,7 +89,7 @@ export function useAppStateCallback(
 
     const subscription = AppState.addEventListener("change", handleChange);
     return () => subscription.remove();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, deps);
 }
 
@@ -124,7 +124,7 @@ export function useForegroundEffect(
         cleanupRef.current();
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, deps);
 }
 

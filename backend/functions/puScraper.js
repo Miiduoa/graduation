@@ -12,7 +12,7 @@
  * Grade table columns (6):
  *   學期別 | 課程名稱 | 修課班級 | 修別 | 學分數 | 成績
  *
- * Time format example: "二(Tue)　 3, 4:PH303"
+ * Time format example: "二(Tue)  3, 4:PH303"
  *   → dayOfWeek=2, periods=[3,4], location="PH303"
  */
 
@@ -25,7 +25,6 @@ const https = require('https');
 const ALCAT_HOST = 'alcat.pu.edu.tw';
 const MYPU_HOST = 'mypu.pu.edu.tw';
 const LOGIN_PATH = '/index_check.php';
-const COURSE_INDEX_PATH = '/stu_query/query_index.html';
 const COURSE_RESULT_PATH = '/stu_query/query_course.html';
 const GRADE_PATH = '/score_query/score_all.php';
 
@@ -188,7 +187,7 @@ function parseTable(html, headerHint) {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse PU time-place string like "二(Tue)　 3, 4:PH303"
+ * Parse PU time-place string like "二(Tue)  3, 4:PH303"
  * Returns { dayOfWeek, periods, location, startTime, endTime }
  */
 function parseTimePlace(raw) {
@@ -252,11 +251,6 @@ async function puLogin(uid, upassword) {
 
     const body = `uid=${encodeURIComponent(uid)}&upassword=${encodeURIComponent(upassword)}&en_flag=zh`;
     const res = await post(ALCAT_HOST, LOGIN_PATH, {}, body);
-
-    // After login, PU redirects to index_menu.php. Check for session cookie.
-    const hasSession = Object.keys(res.cookies).some(
-      (k) => k.toUpperCase().includes('PHPSESSID') || k.toUpperCase().includes('SID'),
-    );
 
     // Check for known error patterns
     if (

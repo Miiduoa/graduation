@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { View, Text, Pressable, ScrollView, Alert, RefreshControl, ActivityIndicator } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Screen, Button, AnimatedCard, SegmentedControl, Pill } from "../ui/components";
+import { Screen, Button, AnimatedCard, SegmentedControl } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { formatDateTime } from "../utils/format";
@@ -77,8 +77,7 @@ function getMachineStatusColor(status: WashingMachine["status"]): string {
   return colors[status] ?? theme.colors.muted;
 }
 
-export function DormitoryScreen(props: any) {
-  const nav = props?.navigation;
+export function DormitoryScreen(_props: any) {
   const ds = useDataSource();
   const auth = useAuth();
   const { school } = useSchool();
@@ -178,7 +177,7 @@ export function DormitoryScreen(props: any) {
               });
               setRepairs([newRepair, ...repairs]);
               Alert.alert("報修成功", "維修人員將盡快處理您的報修請求");
-            } catch (error) {
+            } catch {
               Alert.alert("報修失敗", "請稍後再試");
             }
           },
@@ -200,7 +199,7 @@ export function DormitoryScreen(props: any) {
             try {
               await ds.confirmPackagePickup(packageId, school?.id);
               setPackages(packages.map((p) => (p.id === packageId ? { ...p, status: "picked" as const, pickedAt: new Date().toISOString() } : p)));
-            } catch (error) {
+            } catch {
               Alert.alert("操作失敗", "請稍後再試");
             }
           },

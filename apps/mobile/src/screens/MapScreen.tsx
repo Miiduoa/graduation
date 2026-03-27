@@ -183,10 +183,11 @@ async function openInMaps(lat: number, lng: number, name: string) {
   );
 }
 
-export function MapScreen(props: any) {
+export function MapScreen(props: Record<string, unknown>) {
   const { school } = useSchool();
   const navigation = useNavigation();
-  const nav = props?.navigation ?? navigation;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = props?.navigation ?? navigation as any;
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -545,7 +546,8 @@ export function MapScreen(props: any) {
                             justifyContent: "center",
                           }}
                         >
-                          <Ionicons name={getCategoryIcon(displayCategory) as any} size={20} color={catColor.fg} />
+                          <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            name={getCategoryIcon(displayCategory) as any} size={20} color={catColor.fg} />
                         </View>
                         <View style={{ flex: 1 }}>
                           <Text
@@ -641,7 +643,8 @@ export function MapScreen(props: any) {
                         marginBottom: 10,
                       }}
                     >
-                      <Ionicons name={getCategoryIcon(displayCategory) as any} size={20} color={catColor.fg} />
+                      <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        name={getCategoryIcon(displayCategory) as any} size={20} color={catColor.fg} />
                     </View>
                     <Text
                       style={{

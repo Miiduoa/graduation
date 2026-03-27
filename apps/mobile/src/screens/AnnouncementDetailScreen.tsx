@@ -62,14 +62,30 @@ function extractDatesFromText(text: string): ExtractedDate[] {
         if (!isNaN(date.getTime())) {
           dates.push({ date, text: match[0], type });
         }
-      } catch {}
+      } catch {
+        // intentionally empty - date parsing failures are handled by returning null
+      }
     }
   }
 
   const uniqueDates = dates.filter(
-    (d, i, arr) => arr.findIndex((x) => x.date.getTime() === d.date.getTime()) === i
+    (d, i, arr) => {
+      const gtD = (d.date as { getTime?: unknown }).getTime;
+      const tD = typeof gtD === "function" ? (gtD as () => number).call(d.date) : NaN;
+      return (
+        arr.findIndex((x) => {
+          const gt = (x.date as { getTime?: unknown }).getTime;
+          const t = typeof gt === "function" ? (gt as () => number).call(x.date) : NaN;
+          return t === tD;
+        }) === i
+      );
+    }
   );
-  return uniqueDates.sort((a, b) => a.date.getTime() - b.date.getTime());
+  const getMs = (d: { date: unknown }) => {
+    const gt = (d.date as { getTime?: unknown }).getTime;
+    return typeof gt === "function" ? (gt as () => number).call(d.date as Date) : Number.NaN;
+  };
+  return uniqueDates.sort((a, b) => getMs(a) - getMs(b));
 }
 
 function generateAISummary(title: string, body: string): AISummaryResult {
@@ -222,7 +238,9 @@ export function AnnouncementDetailScreen(props: any) {
     const message = `【${item.title}】\n\n${item.body}\n\n發布時間：${formatDateTime(item.publishedAt)}${item.source ? `\n來源：${item.source}` : ""}`;
     try {
       await Share.share({ message, title: item.title });
-    } catch {}
+    } catch {
+      // intentionally empty - share cancellations or errors are non-fatal
+    }
   };
 
   const generateSummary = async () => {

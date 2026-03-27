@@ -11,7 +11,7 @@ import {
   type NotificationPreferences,
 } from "@campus/shared/src/notifications";
 import { getDb } from "../firebase";
-import { withRetry, isRetryableError } from "../utils/retry";
+import { withRetry } from "../utils/retry";
 import { trackEvent } from "./analytics";
 
 Notifications.setNotificationHandler({

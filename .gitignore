@@ -18,6 +18,7 @@ apps/web/.next/
 apps/web/out/
 
 # Expo
+.expo/
 apps/mobile/.expo/
 apps/mobile/dist/
 apps/mobile/web-build/

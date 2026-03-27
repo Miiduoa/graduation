@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { ScrollView, Text, View, Pressable, Alert, Linking, Share } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -88,11 +88,7 @@ export function LostFoundDetailScreen(props: any) {
   const [loading, setLoading] = useState(true);
   const [item, setItem] = useState<LostFoundItem | null>(null);
 
-  useEffect(() => {
-    loadItem();
-  }, [itemId]);
-
-  const loadItem = async () => {
+  const loadItem = useCallback(async () => {
     setLoading(true);
     try {
       if (itemId && hasDataSource()) {
@@ -125,7 +121,11 @@ export function LostFoundDetailScreen(props: any) {
     // 若無法從伺服器載入，使用示範資料
     setItem(MOCK_ITEM);
     setLoading(false);
-  };
+  }, [itemId]);
+
+  useEffect(() => {
+    loadItem();
+  }, [loadItem]);
 
   const categoryInfo = item ? CATEGORY_INFO[item.category] : null;
   const statusInfo = item ? STATUS_INFO[item.status] : null;
