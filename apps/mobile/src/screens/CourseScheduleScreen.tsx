@@ -115,7 +115,7 @@ function normalizeLocationText(value: string): string {
   return value
     .trim()
     .toLowerCase()
-    .replace(/[()（）【】\[\]，,。．.]/g, " ")
+    .replace(/[()（）【】[\]，,。．.]/g, " ")
     .replace(/\s+/g, "");
 }
 
@@ -165,8 +165,9 @@ function findMatchingPoi(location: string, pois: CampusPoi[]): CampusPoi | null 
   return bestMatch && bestMatch.score >= 70 ? bestMatch.poi : null;
 }
 
-export function CourseScheduleScreen(props: any) {
-  const nav = props?.navigation;
+export function CourseScheduleScreen(props: Record<string, unknown>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = props?.navigation as any;
   const auth = useAuth();
   const schedule = useSchedule();
   const { school } = useSchool();

@@ -74,7 +74,7 @@ export function useForm<T extends Record<string, unknown>>(
       values[key as keyof T] = config[key as keyof T].initialValue;
     }
     return values as T;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [configSnapshot]);
 
   const [values, setValuesState] = useState<T>(initialValues);

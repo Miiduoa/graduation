@@ -1,16 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
-/**
- * TodayScreen — Today Tab 主畫面
- *
- * 心理學架構：
- * - Temporal Self-Regulation: 時間錨點頁面，整合「現在」所需的一切
- * - Attention Bottleneck Theory: Hero Action Card 聚焦單一任務
- * - Zeigarnik Effect: 未完成任務的進度始終可見
- * - Peak-End Rule: 以完成感（✓）作為每日體驗的高峰
- * - Loss Aversion: Streak 連續天數顯示，怕失去連續記錄
- * - Framing Effect: 正向框架「已完成 3 件」而非「還差 2 件」
- * - Context-Dependent Memory: 情境卡片依時段動態切換
- */
 import React, { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   Animated,
@@ -45,9 +33,8 @@ import {
   toInboxItem,
 } from "../utils/campusOs";
 
-// ────────────────────────────────────────────────
-// 時段邏輯
-// ────────────────────────────────────────────────
+console.log("[debug][TodayScreen] module loaded");
+
 type TimeSegment = "morning" | "class" | "afternoon" | "evening" | "night";
 
 function getTimeSegment(): TimeSegment {
@@ -76,9 +63,6 @@ function getDateString(): string {
   return `${now.getMonth() + 1} 月 ${now.getDate()} 日 ${weekdays[now.getDay()]}`;
 }
 
-// ────────────────────────────────────────────────
-// Streak Badge — Loss Aversion 心理學
-// ────────────────────────────────────────────────
 function StreakBadge({ days }: { days: number }) {
   if (days < 2) return null;
   return (
@@ -103,9 +87,6 @@ function StreakBadge({ days }: { days: number }) {
   );
 }
 
-// ────────────────────────────────────────────────
-// 今日課程時間軸卡片
-// ────────────────────────────────────────────────
 function CourseTimelineItem(props: {
   name: string;
   teacher?: string;
@@ -127,12 +108,11 @@ function CourseTimelineItem(props: {
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "flex-start",
-        gap: 12,
+        gap: theme.space.md,
         opacity: pressed ? 0.85 : 1,
-        paddingVertical: 10,
+        paddingVertical: theme.space.sm,
       })}
     >
-      {/* 時間軸線 */}
       <View style={{ alignItems: "center", width: 18, paddingTop: 4 }}>
         <View
           style={{
@@ -178,9 +158,6 @@ function CourseTimelineItem(props: {
   );
 }
 
-// ────────────────────────────────────────────────
-// 收件匣任務卡片（精簡嵌入版）
-// ────────────────────────────────────────────────
 function InboxTaskRow(props: {
   title: string;
   label: string;
@@ -203,9 +180,9 @@ function InboxTaskRow(props: {
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
-        gap: 12,
-        paddingVertical: 10,
-        paddingHorizontal: 4,
+        gap: theme.space.md,
+        paddingVertical: theme.space.sm,
+        paddingHorizontal: theme.space.xs,
         opacity: pressed ? 0.8 : 1,
       })}
     >
@@ -231,9 +208,6 @@ function InboxTaskRow(props: {
   );
 }
 
-// ────────────────────────────────────────────────
-// 區塊標題元件
-// ────────────────────────────────────────────────
 function SectionLabel({ children }: { children: string }) {
   return (
     <Text
@@ -243,7 +217,7 @@ function SectionLabel({ children }: { children: string }) {
         fontWeight: theme.typography.overline.fontWeight ?? "700",
         letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
         textTransform: "uppercase",
-        marginBottom: 8,
+        marginBottom: theme.space.sm,
       }}
     >
       {children}
@@ -251,11 +225,9 @@ function SectionLabel({ children }: { children: string }) {
   );
 }
 
-// ────────────────────────────────────────────────
-// 主元件
-// ────────────────────────────────────────────────
-export function TodayScreen(props: any) {
-  const nav = props?.navigation;
+export function TodayScreen(props: Record<string, unknown>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = props?.navigation as any;
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const { school } = useSchool();
@@ -328,7 +300,37 @@ export function TodayScreen(props: any) {
     return inboxTasks
       .filter((t) => {
         if (!t.dueAt) return false;
-        const d = new Date(t.dueAt);
+        // Manually parse here (避免直接呼叫可能不是 Date/不是可呼叫 getTime 的值)
+        const raw = t.dueAt as unknown;
+        let d: Date | null = null;
+        if (raw instanceof Date) {
+          const gt = (raw as { getTime?: unknown }).getTime;
+          if (typeof gt !== "function") {
+            // #region agent log
+            console.warn("[debug][TodayScreen][dueTodayTasks] raw is Date instance but getTime is not callable", {
+              hypothesisId: "H1_dueTodayTasks_direct_getTime_call",
+              typeofGetTime: typeof gt,
+            });
+            // #endregion
+            return false;
+          }
+          const tms = gt.call(raw);
+          if (typeof tms === "number" && !isNaN(tms)) {
+            d = raw as Date;
+          }
+        } else if (typeof (raw as { toDate?: unknown }).toDate === "function") {
+          d = (raw as { toDate: () => Date }).toDate();
+        } else if (typeof (raw as { _seconds?: unknown })._seconds === "number") {
+          d = new Date((raw as { _seconds: number })._seconds * 1000);
+        } else if (typeof (raw as { seconds?: unknown }).seconds === "number") {
+          d = new Date((raw as { seconds: number }).seconds * 1000);
+        } else if (typeof raw === "string" || typeof raw === "number") {
+          d = new Date(raw as string | number);
+        }
+        const dGetTime = d ? (d as { getTime?: unknown }).getTime : undefined;
+        if (!d || typeof dGetTime !== "function") return false;
+        const dms = dGetTime.call(d);
+        if (typeof dms !== "number" || isNaN(dms)) return false;
         return d.getFullYear() === today.getFullYear() &&
           d.getMonth() === today.getMonth() &&
           d.getDate() === today.getDate();
@@ -337,9 +339,6 @@ export function TodayScreen(props: any) {
       .slice(0, 3);
   }, [inboxTasks]);
 
-  // ────────────────────────────────────────────────
-  // Micro Rewards: 每日首次開啟更新 streak
-  // ────────────────────────────────────────────────
   useEffect(() => {
     const update = async () => {
       try {
@@ -350,7 +349,6 @@ export function TodayScreen(props: any) {
           return;
         }
 
-        // haptic + 小動畫：每日首次打開的正向回饋
         try {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         } catch {
@@ -369,7 +367,6 @@ export function TodayScreen(props: any) {
     update();
   }, [streakPulse, streakStorageKey]);
 
-  // 高優先任務（顯示在收件匣摘要）
   const urgentTasks = useMemo(() =>
     rankedInboxItems.slice(0, 3),
     [rankedInboxItems]
@@ -401,7 +398,6 @@ export function TodayScreen(props: any) {
     await Promise.all([refreshInbox(), schedule.refreshSchedule()]);
   }, [refreshInbox, schedule.refreshSchedule]);
 
-  // 情境感知的次要卡片（Context-Dependent Memory）
   const contextCard = useMemo(() => {
     if (segment === "morning") {
       return {
@@ -445,7 +441,6 @@ export function TodayScreen(props: any) {
     };
   }, [segment, announcements, menus, events]);
 
-  // 今日壓力摘要：沒有可靠完成態時，優先誠實呈現待處理壓力
   const highPressureCount = rankedInboxItems.filter(
     (item) => item.urgency === "critical" || item.urgency === "high"
   ).length;
@@ -469,16 +464,14 @@ export function TodayScreen(props: any) {
           />
         }
         contentContainerStyle={{
-          paddingTop: insets.top + 8,
-          paddingHorizontal: 16,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 8,
-          gap: 20,
+          paddingTop: insets.top + theme.space.xs,
+          paddingHorizontal: theme.space.lg,
+          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + theme.space.xs,
+          gap: theme.space.xl,
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── 情境標頭 ─── */}
-        <View style={{ gap: 12 }}>
-          {/* 日期 + Streak */}
+        <View style={{ gap: theme.space.md }}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
             <Text style={{ color: theme.colors.muted, fontSize: 13, fontWeight: "500" }}>
               {getDateString()}
@@ -488,8 +481,7 @@ export function TodayScreen(props: any) {
             </Animated.View>
           </View>
 
-          {/* 問候 + 進度摘要 */}
-          <View style={{ gap: 4 }}>
+          <View style={{ gap: theme.space.xs }}>
             <Text style={{
               color: theme.colors.text,
               fontSize: theme.typography.display.fontSize,
@@ -503,9 +495,8 @@ export function TodayScreen(props: any) {
             </Text>
           </View>
 
-          {/* 壓力條：讓高壓比例可視，而不是假裝知道完成率 */}
           {totalToday > 0 && (
-            <View style={{ gap: 6 }}>
+            <View style={{ gap: theme.space.sm }}>
               <View
                 style={{
                   height: 4,
@@ -536,7 +527,6 @@ export function TodayScreen(props: any) {
           )}
         </View>
 
-        {/* ─── Hero Action Card（注意瓶頸理論：單一焦點） ─── */}
         {!auth.user ? (
           <HeroActionCard
             icon="school-outline"
@@ -552,7 +542,7 @@ export function TodayScreen(props: any) {
             eyebrow="下一步"
             title={nextAction.title}
             description={nextAction.reason}
-            meta={nextAction.dueAt ? formatDueWindow(new Date(nextAction.dueAt)) : undefined}
+            meta={nextAction.dueAt ? formatDueWindow(nextAction.dueAt) : undefined}
             tone={
               nextAction.urgency === "critical"
                 ? "danger"
@@ -602,7 +592,6 @@ export function TodayScreen(props: any) {
           />
         ) : null}
 
-        {/* ─── 今日課表時間軸 ─── */}
         {todayCourses.length > 0 && (
           <View
             style={{
@@ -610,9 +599,8 @@ export function TodayScreen(props: any) {
               borderRadius: theme.radius.xl,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              padding: 16,
+              padding: theme.space.lg,
               gap: 0,
-              ...shadowStyle(theme.shadows.sm),
             }}
           >
             <SectionLabel>今日課程</SectionLabel>
@@ -662,7 +650,6 @@ export function TodayScreen(props: any) {
           </View>
         )}
 
-        {/* ─── 收件匣摘要（Zeigarnik Effect） ─── */}
         {auth.user && urgentTasks.length > 0 && (
           <View
             style={{
@@ -670,8 +657,7 @@ export function TodayScreen(props: any) {
               borderRadius: theme.radius.xl,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              padding: 16,
-              ...shadowStyle(theme.shadows.sm),
+              padding: theme.space.lg,
             }}
           >
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
@@ -689,7 +675,7 @@ export function TodayScreen(props: any) {
                 <InboxTaskRow
                   title={task.title}
                   label={task.kind === "live" ? "課堂" : task.kind === "assignment" ? "作業" : "群組"}
-                  dueAt={task.dueAt ? formatDueWindow(new Date(task.dueAt)) : undefined}
+                  dueAt={task.dueAt ? formatDueWindow(task.dueAt) : undefined}
                   urgency={task.urgency}
                   onPress={() => {
                     if (task.kind === "live" && task.sessionId) {
@@ -712,9 +698,8 @@ export function TodayScreen(props: any) {
           </View>
         )}
 
-        {/* ─── 情境服務卡片（Context-Dependent Memory） ─── */}
-        <View style={{ gap: 10 }}>
-          <SectionLabel>校園情境</SectionLabel>
+        <View style={{ gap: theme.space.md }}>
+          <SectionLabel>Quick Links</SectionLabel>
 
           <TimelineCard
             icon={contextCard.icon}
@@ -727,54 +712,13 @@ export function TodayScreen(props: any) {
 
           <TimelineCard
             icon="navigate-circle-outline"
-            title="校園地圖與導航"
-            description="教室、餐廳、圖書館的最短路線與即時位置"
-            meta="校園"
+            title="Map"
+            description="Find routes and locations"
+            meta="Campus"
             tint={theme.colors.accent}
             onPress={() => nav?.navigate?.("校園", { screen: "Map" })}
           />
         </View>
-
-        {/* ─── AI 助理快速入口 ─── */}
-        <Pressable
-          onPress={() => nav?.navigate?.("AIChat")}
-          style={({ pressed }) => ({
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 14,
-            padding: 16,
-            borderRadius: theme.radius.xl,
-            backgroundColor: theme.colors.focusSurface,
-            borderWidth: 1,
-            borderColor: `${theme.colors.accent}30`,
-            opacity: pressed ? 0.85 : 1,
-            transform: [{ scale: pressed ? 0.99 : 1 }],
-          })}
-        >
-          <View
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 16,
-              backgroundColor: theme.colors.accentSoft,
-              alignItems: "center",
-              justifyContent: "center",
-              borderWidth: 1,
-              borderColor: `${theme.colors.accent}30`,
-            }}
-          >
-            <Ionicons name="sparkles" size={20} color={theme.colors.accent} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>
-              Campus AI 助理
-            </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-              問時間規劃、作業建議、找地點…
-            </Text>
-          </View>
-          <Ionicons name="arrow-forward" size={16} color={theme.colors.accent} />
-        </Pressable>
       </ScrollView>
     </View>
   );

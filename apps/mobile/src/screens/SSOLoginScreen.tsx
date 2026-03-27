@@ -30,6 +30,7 @@ import {
   type SSOUserInfo,
 } from "../services/sso";
 import { signInWithUniversalDevAccount } from "../services/universalDevAuth";
+import { isStudentIdLoginAvailable, signInWithStudentId } from "../services/studentIdAuth";
 
 type LoginStep = "idle" | "checking" | "authenticating" | "linking" | "success" | "error";
 
@@ -62,8 +63,13 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const [isRetryable, setIsRetryable] = useState(false);
   const [ssoUserInfo, setSsoUserInfo] = useState<SSOUserInfo | null>(null);
   const [lastLoginAction, setLastLoginAction] = useState<
-    { type: "sso" } | { type: "universal-dev"; email: string } | null
+    { type: "sso" } | { type: "universal-dev"; email: string } | { type: "student-id" } | null
   >(null);
+
+  // 學號登入表單
+  const [studentIdInput, setStudentIdInput] = useState("");
+  const [studentPwInput, setStudentPwInput] = useState("");
+  const studentIdLoginAvailable = useMemo(() => isStudentIdLoginAvailable(), []);
 
   const loadSchoolDirectory = useCallback(async () => {
     setSchoolsLoading(true);
@@ -239,8 +245,52 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
         );
       }, 300);
     } catch (loginError) {
-      console.error("Universal dev login error:", loginError);
+      console.warn("Universal dev login error:", loginError);
       setError(getErrorMessage(loginError, "通用測試帳號登入失敗"));
+      setIsRetryable(true);
+      setStep("error");
+    }
+  };
+
+  const handleStudentIdLogin = async () => {
+    setError(null);
+    setIsRetryable(false);
+    setStep("authenticating");
+    setLastLoginAction({ type: "student-id" });
+
+    try {
+      const result = await signInWithStudentId({
+        studentId: studentIdInput,
+        password: studentPwInput,
+        schoolId: school.id,
+        schoolName: school.name,
+      });
+
+      setSsoUserInfo({
+        sub: result.uid,
+        email: result.email,
+        name: result.displayName,
+        displayName: result.displayName,
+        student_id: result.studentId,
+        department: result.department,
+        role: result.role as "student" | "teacher" | "admin" | "staff",
+      });
+      setStep("linking");
+
+      await auth.refreshProfile();
+      setStep("success");
+
+      const deptLabel = result.department ? `（${result.department}）` : "";
+      setTimeout(() => {
+        Alert.alert(
+          "登入成功",
+          `歡迎，${result.displayName}${deptLabel}`,
+          [{ text: "確定", onPress: () => nav?.goBack?.() }]
+        );
+      }, 300);
+    } catch (loginError) {
+      console.warn("Student ID login error:", loginError);
+      setError(loginError instanceof Error ? loginError.message : "學號登入失敗");
       setIsRetryable(true);
       setStep("error");
     }
@@ -254,6 +304,10 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   };
 
   const handleRetryLogin = () => {
+    if (lastLoginAction?.type === "student-id") {
+      void handleStudentIdLogin();
+      return;
+    }
     if (lastLoginAction?.type === "universal-dev") {
       void handleUniversalDevLogin(lastLoginAction.email);
       return;
@@ -451,6 +505,98 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
             )}
           </View>
         </AnimatedCard>
+
+        {/* ─── 學號密碼登入（mock 模式主要入口）─── */}
+        {studentIdLoginAvailable && step === "idle" && (
+          <AnimatedCard title="學號登入" subtitle={school.name}>
+            <View style={{ gap: 14 }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 20 }}>
+                使用你的靜宜 e 校園帳號密碼登入。登入後會從學校系統抓取你的真實課表、成績和公告。
+              </Text>
+
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
+                  backgroundColor: theme.colors.surface,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  borderRadius: theme.radius.lg,
+                  paddingHorizontal: 14,
+                  minHeight: 48,
+                }}
+              >
+                <Ionicons name="person-outline" size={18} color={theme.colors.muted} />
+                <TextInput
+                  value={studentIdInput}
+                  onChangeText={setStudentIdInput}
+                  placeholder="學號（e 校園帳號）"
+                  placeholderTextColor={theme.colors.muted}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  style={{ flex: 1, color: theme.colors.text, fontSize: 15 }}
+                />
+              </View>
+
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
+                  backgroundColor: theme.colors.surface,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  borderRadius: theme.radius.lg,
+                  paddingHorizontal: 14,
+                  minHeight: 48,
+                }}
+              >
+                <Ionicons name="lock-closed-outline" size={18} color={theme.colors.muted} />
+                <TextInput
+                  value={studentPwInput}
+                  onChangeText={setStudentPwInput}
+                  placeholder="e 校園密碼"
+                  placeholderTextColor={theme.colors.muted}
+                  secureTextEntry
+                  autoCorrect={false}
+                  style={{ flex: 1, color: theme.colors.text, fontSize: 15 }}
+                />
+              </View>
+
+              <Pressable
+                onPress={handleStudentIdLogin}
+                disabled={!studentIdInput.trim()}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 16,
+                  borderRadius: theme.radius.lg,
+                  backgroundColor: studentIdInput.trim()
+                    ? (school.themeColor ?? theme.colors.accent)
+                    : theme.colors.surface2,
+                  gap: 8,
+                }}
+              >
+                <Ionicons
+                  name="log-in-outline"
+                  size={20}
+                  color={studentIdInput.trim() ? "#fff" : theme.colors.muted}
+                />
+                <Text
+                  style={{
+                    color: studentIdInput.trim() ? "#fff" : theme.colors.muted,
+                    fontSize: 16,
+                    fontWeight: "700",
+                  }}
+                >
+                  登入 {school.shortName ?? school.name}
+                </Text>
+              </Pressable>
+            </View>
+          </AnimatedCard>
+        )}
 
         <AnimatedCard title="學校帳號登入" subtitle={school.name}>
           <View style={{ alignItems: "center", paddingVertical: 20 }}>

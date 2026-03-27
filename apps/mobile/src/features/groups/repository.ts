@@ -45,7 +45,9 @@ function toTimestampLike(value: unknown): { seconds: number; nanoseconds?: numbe
     typeof (value as { toDate?: () => Date }).toDate === 'function'
   ) {
     const date = (value as { toDate: () => Date }).toDate();
-    return { seconds: Math.floor(date.getTime() / 1000) };
+    const ms = (date as Date | null)?.getTime?.();
+    if (typeof ms !== "number" || Number.isNaN(ms)) return null;
+    return { seconds: Math.floor(ms / 1000) };
   }
 
   return null;

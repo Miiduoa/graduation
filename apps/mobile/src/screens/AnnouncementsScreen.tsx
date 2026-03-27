@@ -44,9 +44,10 @@ function getAnnouncementIcon(a: Announcement) {
   return ICON_MAP.general;
 }
 
-export function AnnouncementsScreen(props: any) {
+export function AnnouncementsScreen(props: Record<string, unknown>) {
   const navigation = useNavigation();
-  const nav = props?.navigation ?? navigation;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = (props?.navigation ?? navigation) as any;
   const insets = useSafeAreaInsets();
   const { school } = useSchool();
   const toast = useToast();
@@ -355,6 +356,7 @@ export function AnnouncementsScreen(props: any) {
                     })}
                   >
                     <Ionicons
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       name={f.icon as any}
                       size={14}
                       color={isActive ? "#fff" : theme.colors.muted}
@@ -582,7 +584,8 @@ export function AnnouncementsScreen(props: any) {
                               marginTop: 2,
                             }}
                           >
-                            <Ionicons name={iconInfo.name as any} size={20} color={iconInfo.color} />
+                            <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                              name={iconInfo.name as any} size={20} color={iconInfo.color} />
                           </View>
 
                           <View style={{ flex: 1, gap: 6 }}>

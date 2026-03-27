@@ -140,7 +140,7 @@ function getOccupancyLevel(available: number, total: number): "low" | "medium" |
   return "high";
 }
 
-export function LibraryScreen(props: any) {
+export function LibraryScreen(props: Record<string, unknown>) {
   const nav = props?.navigation;
   const auth = useAuth();
   const { schoolId } = useSchool();
@@ -533,7 +533,8 @@ export function LibraryScreen(props: any) {
                         justifyContent: "center",
                       }}
                     >
-                      <Ionicons name={item.icon as any} size={22} color={theme.colors.accent} />
+                      <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        name={item.icon as any} size={22} color={theme.colors.accent} />
                     </View>
                     <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 13 }}>{item.label}</Text>
                   </Pressable>

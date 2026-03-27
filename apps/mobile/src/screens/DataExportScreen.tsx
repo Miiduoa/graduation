@@ -11,9 +11,6 @@ import {
   Button,
   Pill,
   AnimatedCard,
-  SectionTitle,
-  ListItem,
-  ToggleSwitch,
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -89,8 +86,7 @@ const EXPORT_CATEGORIES: ExportCategory[] = [
   },
 ];
 
-export function DataExportScreen(props: any) {
-  const nav = props?.navigation;
+export function DataExportScreen(_props: any) {
   const { school } = useSchool();
   const auth = useAuth();
 

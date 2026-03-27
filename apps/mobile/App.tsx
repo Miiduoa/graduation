@@ -23,6 +23,7 @@ import { NotificationsProvider } from "./src/state/notifications";
 import { SearchHistoryProvider } from "./src/state/searchHistory";
 import { ScheduleProvider } from "./src/state/schedule";
 import { PreferencesProvider } from "./src/state/preferences";
+import { AccessibilityProvider } from "./src/state/accessibility";
 import { I18nProvider } from "./src/i18n";
 import { analytics } from "./src/services/analytics";
 import {
@@ -899,11 +900,13 @@ export default function App() {
     <SafeAreaProvider>
       <AppErrorBoundary>
         <ThemeProvider>
-          <PreferencesProvider>
-            <I18nProvider>
-              <AppInner />
-            </I18nProvider>
-          </PreferencesProvider>
+          <AccessibilityProvider>
+            <PreferencesProvider>
+              <I18nProvider>
+                <AppInner />
+              </I18nProvider>
+            </PreferencesProvider>
+          </AccessibilityProvider>
         </ThemeProvider>
       </AppErrorBoundary>
     </SafeAreaProvider>

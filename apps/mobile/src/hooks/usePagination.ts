@@ -286,7 +286,7 @@ export function useInfiniteScroll<T>(
 
   useEffect(() => {
     fetchData(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, deps);
 
   const refresh = useCallback(async () => {

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { ScrollView, Text, TextInput, View, Pressable, Alert, KeyboardAvoidingView, Platform } from "react-native";
-import { Screen, Card, Button, Pill, LoadingState, ErrorState, AnimatedCard, Avatar, StatusBadge } from "../ui/components";
+import { Screen, Button, Pill, LoadingState, ErrorState, AnimatedCard, Avatar, StatusBadge } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
@@ -81,7 +81,7 @@ export function GroupPostScreen(props: any) {
   const scrollViewRef = useRef<ScrollView>(null);
   const inputRef = useRef<TextInput>(null);
 
-  const { items: groupRows } = useAsyncList<Group>(
+  useAsyncList<Group>(
     async () => {
       if (!groupId) return [];
       const snap = await getDoc(doc(db, "groups", groupId));
@@ -90,8 +90,6 @@ export function GroupPostScreen(props: any) {
     },
     [db, groupId]
   );
-
-  const group = groupRows[0];
 
   // Get my membership role
   const { items: myMemberRows } = useAsyncList<{ role?: MemberRole }>(

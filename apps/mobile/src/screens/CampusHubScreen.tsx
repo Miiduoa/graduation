@@ -1,14 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
-/**
- * CampusHubScreen — 校園 Tab 主畫面（整合版）
- *
- * 心理學架構：
- * - Spatial Cognition (Tolman): 以物理空間維度組織服務
- * - Wayfinding Theory: 地圖優先顯示，減少空間迷失感 (Spatial Anxiety)
- * - Context-Dependent Memory: 根據時間推薦最相關的服務
- * - Progressive Disclosure: 常用服務優先，完整列表摺疊
- * - Cognitive Map: 每個服務都錨定在物理空間概念中
- */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { useMemo } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,40 +15,25 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { AmbientCueCard } from '../ui/campusOs';
 import { shadowStyle, theme } from '../ui/theme';
 
-// ────────────────────────────────────────────────
-// 時段偵測
-// ────────────────────────────────────────────────
-function getTimeSegment(): 'morning' | 'noon' | 'afternoon' | 'evening' | 'night' {
-  const h = new Date().getHours();
-  if (h >= 5 && h < 10) return 'morning';
-  if (h >= 10 && h < 14) return 'noon';
-  if (h >= 14 && h < 18) return 'afternoon';
-  if (h >= 18 && h < 22) return 'evening';
-  return 'night';
-}
-
-// ────────────────────────────────────────────────
-// 服務磚（Service Tile）
-// ────────────────────────────────────────────────
+// Service tile for grid layout
 function ServiceTile(props: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   tint: string;
-  badge?: string;
   onPress: () => void;
-  highlight?: boolean;
 }) {
   return (
     <Pressable
       onPress={props.onPress}
       style={({ pressed }) => ({
         flex: 1,
-        padding: 14,
+        padding: theme.space.md,
         borderRadius: theme.radius.lg,
-        backgroundColor: props.highlight ? `${props.tint}10` : theme.colors.surface,
+        backgroundColor: theme.colors.surface,
         borderWidth: 1,
-        borderColor: props.highlight ? `${props.tint}30` : theme.colors.border,
-        gap: 8,
+        borderColor: theme.colors.border,
+        alignItems: 'center',
+        gap: theme.space.sm,
         minWidth: 80,
         opacity: pressed ? 0.82 : 1,
         transform: [{ scale: pressed ? 0.97 : 1 }],
@@ -77,26 +52,16 @@ function ServiceTile(props: {
       >
         <Ionicons name={props.icon} size={20} color={props.tint} />
       </View>
-      <View style={{ gap: 2 }}>
-        <Text
-          style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}
-          numberOfLines={1}
-        >
-          {props.label}
-        </Text>
-        {props.badge && (
-          <Text style={{ color: theme.colors.muted, fontSize: 11 }} numberOfLines={1}>
-            {props.badge}
-          </Text>
-        )}
-      </View>
+      <Text
+        style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700', textAlign: 'center' }}
+        numberOfLines={2}
+      >
+        {props.label}
+      </Text>
     </Pressable>
   );
 }
 
-// ────────────────────────────────────────────────
-// 地圖快速導覽卡
-// ────────────────────────────────────────────────
 function MapCard(props: { onPress: () => void; onARPress: () => void }) {
   return (
     <Pressable
@@ -108,17 +73,16 @@ function MapCard(props: { onPress: () => void; onARPress: () => void }) {
         ...shadowStyle(theme.shadows.md),
       })}
     >
-      {/* 地圖背景（抽象表示） */}
       <View
         style={{
-          height: 160,
+          height: 140,
           backgroundColor: theme.mode === 'dark' ? '#1A2A3A' : '#E8F4FD',
           justifyContent: 'center',
           alignItems: 'center',
           borderWidth: 1,
           borderColor: theme.colors.border,
           borderRadius: theme.radius.xl,
-          gap: 8,
+          gap: theme.space.md,
         }}
       >
         <View style={{ flexDirection: 'row', gap: 20, opacity: 0.3 }}>
@@ -134,7 +98,7 @@ function MapCard(props: { onPress: () => void; onARPress: () => void }) {
             />
           ))}
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
           <View
             style={{
               width: 32,
@@ -148,22 +112,21 @@ function MapCard(props: { onPress: () => void; onARPress: () => void }) {
             <Ionicons name="navigate" size={16} color="#fff" />
           </View>
           <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
-            打開校園地圖
+            校園地圖
           </Text>
         </View>
       </View>
 
-      {/* AR 導航按鈕 */}
       <Pressable
         onPress={props.onARPress}
         style={({ pressed }) => ({
           position: 'absolute',
-          bottom: 12,
-          right: 12,
+          bottom: theme.space.md,
+          right: theme.space.md,
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 6,
-          paddingHorizontal: 12,
+          gap: theme.space.xs,
+          paddingHorizontal: theme.space.sm,
           paddingVertical: 7,
           borderRadius: theme.radius.full,
           backgroundColor: theme.colors.surface,
@@ -174,24 +137,20 @@ function MapCard(props: { onPress: () => void; onARPress: () => void }) {
         })}
       >
         <Ionicons name="glasses-outline" size={15} color={theme.colors.accent} />
-        <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>AR 導航</Text>
+        <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>AR</Text>
       </Pressable>
     </Pressable>
   );
 }
 
-// ────────────────────────────────────────────────
-// 主元件
-// ────────────────────────────────────────────────
-export function CampusHubScreen(props: any) {
-  const nav = props?.navigation;
+export function CampusHubScreen(props: Record<string, unknown>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = props?.navigation as any;
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
   const paymentsEnabled = isFeatureEnabled('payments');
-
-  const segment = getTimeSegment();
 
   const {
     items: pois,
@@ -216,52 +175,18 @@ export function CampusHubScreen(props: any) {
     limit: 1,
   });
 
-  // 情境服務推薦（Context-Dependent Memory）
-  const contextualServices = useMemo(() => {
-    const services = [];
-    if (segment === 'noon' || segment === 'afternoon') {
-      services.push({
-        icon: 'restaurant-outline' as const,
-        title: '今日菜單',
-        description: menus[0]
-          ? `${menus[0].cafeteria ?? '學餐'} · ${menus[0].name}`
-          : '查看今日午餐選項',
-        tint: theme.colors.achievement,
-        onPress: () => nav?.navigate?.('餐廳總覽'),
-      });
-    }
-    if (segment === 'morning' || segment === 'evening' || segment === 'night') {
-      services.push({
-        icon: 'bus-outline' as const,
-        title: `公車班次 · ${routes.length} 條路線`,
-        description: '查看下班公車和到站時間',
-        tint: theme.colors.fresh,
-        onPress: () => nav?.navigate?.('BusSchedule'),
-      });
-    }
-    services.push({
-      icon: 'library-outline' as const,
-      title: '圖書館',
-      description: '查詢座位、借閱記錄',
-      tint: theme.colors.calm,
-      onPress: () => nav?.navigate?.('Library'),
-    });
-    return services.slice(0, 2);
-  }, [segment, routes, menus]);
-
-  // 所有校園服務（Progressive Disclosure）
   const allServices = [
+    {
+      icon: 'map-outline' as const,
+      label: '地圖',
+      tint: theme.colors.accent,
+      screen: 'Map',
+    },
     {
       icon: 'restaurant-outline' as const,
       label: '餐廳',
       tint: theme.colors.achievement,
       screen: '餐廳總覽',
-    },
-    {
-      icon: 'bus-outline' as const,
-      label: '公車',
-      tint: theme.colors.fresh,
-      screen: 'BusSchedule',
     },
     {
       icon: 'library-outline' as const,
@@ -276,12 +201,6 @@ export function CampusHubScreen(props: any) {
       screen: 'Dormitory',
     },
     {
-      icon: 'heart-outline' as const,
-      label: '健康中心',
-      tint: theme.colors.danger,
-      screen: 'Health',
-    },
-    {
       icon: 'print-outline' as const,
       label: '列印',
       tint: theme.colors.social,
@@ -289,15 +208,21 @@ export function CampusHubScreen(props: any) {
     },
     {
       icon: 'search-circle-outline' as const,
-      label: '失物招領',
+      label: '失物',
       tint: theme.colors.warning,
       screen: 'LostFound',
+    },
+    {
+      icon: 'heart-outline' as const,
+      label: '健康',
+      tint: theme.colors.danger,
+      screen: 'Health',
     },
     ...(paymentsEnabled
       ? [
           {
             icon: 'card-outline' as const,
-            label: '校園支付',
+            label: '付款',
             tint: theme.colors.streak,
             screen: 'Payment',
           },
@@ -317,15 +242,14 @@ export function CampusHubScreen(props: any) {
           />
         }
         contentContainerStyle={{
-          paddingTop: insets.top + 8,
-          paddingHorizontal: 16,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 8,
-          gap: 20,
+          paddingTop: insets.top + theme.space.md,
+          paddingHorizontal: theme.space.lg,
+          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + theme.space.md,
+          gap: theme.space.xl,
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── 頁面標頭 ─── */}
-        <View style={{ gap: 4 }}>
+        <View style={{ gap: theme.space.xs }}>
           <Text
             style={{
               color: theme.colors.muted,
@@ -363,14 +287,12 @@ export function CampusHubScreen(props: any) {
           />
         ) : null}
 
-        {/* ─── 地圖卡（Spatial Cognition 優先） ─── */}
         <MapCard
           onPress={() => nav?.navigate?.('Map')}
           onARPress={() => nav?.navigate?.('ARNavigation', { destinationId: 'entrance' })}
         />
 
-        {/* ─── 情境服務（Context-Dependent Memory） ─── */}
-        <View style={{ gap: 10 }}>
+        <View style={{ gap: theme.space.md }}>
           <Text
             style={{
               color: theme.colors.muted,
@@ -380,70 +302,10 @@ export function CampusHubScreen(props: any) {
               textTransform: 'uppercase',
             }}
           >
-            現在推薦
+            服務
           </Text>
-          {contextualServices.map((svc, i) => (
-            <Pressable
-              key={i}
-              onPress={svc.onPress}
-              style={({ pressed }) => ({
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 14,
-                padding: 16,
-                borderRadius: theme.radius.lg,
-                backgroundColor: theme.colors.surface,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                opacity: pressed ? 0.85 : 1,
-                transform: [{ scale: pressed ? 0.99 : 1 }],
-                ...shadowStyle(theme.shadows.sm),
-              })}
-            >
-              <View
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: 15,
-                  backgroundColor: `${svc.tint}14`,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Ionicons name={svc.icon} size={20} color={svc.tint} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
-                  {svc.title}
-                </Text>
-                <Text
-                  style={{ color: theme.colors.muted, fontSize: 13, marginTop: 2 }}
-                  numberOfLines={1}
-                >
-                  {svc.description}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
-            </Pressable>
-          ))}
-        </View>
-
-        {/* ─── 所有校園服務（Progressive Disclosure: 網格） ─── */}
-        <View style={{ gap: 10 }}>
-          <Text
-            style={{
-              color: theme.colors.muted,
-              fontSize: theme.typography.overline.fontSize,
-              fontWeight: theme.typography.overline.fontWeight ?? '700',
-              letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
-              textTransform: 'uppercase',
-            }}
-          >
-            所有服務
-          </Text>
-          {/* 每排 4 個 */}
           {[0, 1].map((row) => (
-            <View key={row} style={{ flexDirection: 'row', gap: 10 }}>
+            <View key={row} style={{ flexDirection: 'row', gap: theme.space.md }}>
               {allServices.slice(row * 4, row * 4 + 4).map((svc) => (
                 <ServiceTile
                   key={svc.label}
@@ -456,45 +318,6 @@ export function CampusHubScreen(props: any) {
             </View>
           ))}
         </View>
-
-        {/* ─── 無障礙路線（Inclusive Design） ─── */}
-        <Pressable
-          onPress={() => nav?.navigate?.('AccessibleRoute', { destination: 'main' })}
-          style={({ pressed }) => ({
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 14,
-            padding: 16,
-            borderRadius: theme.radius.xl,
-            backgroundColor: theme.colors.surface,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            opacity: pressed ? 0.85 : 1,
-            ...shadowStyle(theme.shadows.sm),
-          })}
-        >
-          <View
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 16,
-              backgroundColor: theme.colors.infoSoft,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name="accessibility-outline" size={22} color={theme.colors.info} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
-              無障礙路線規劃
-            </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-              電梯、坡道和無障礙設施地圖
-            </Text>
-          </View>
-          <Ionicons name="arrow-forward" size={16} color={theme.colors.info} />
-        </Pressable>
       </ScrollView>
     </View>
   );

@@ -254,6 +254,14 @@ export function CalendarScreen(props: any) {
   const calendarEvents = useMemo(() => {
     const items: CalendarEvent[] = [];
 
+    const safeTime = (d: unknown): number => {
+      if (!(d instanceof Date)) return 0;
+      const gt = (d as { getTime?: unknown }).getTime;
+      if (typeof gt !== "function") return 0;
+      const ms = (gt as (this: Date) => number).call(d);
+      return typeof ms === "number" && !Number.isNaN(ms) ? ms : 0;
+    };
+
     for (const e of events) {
       const startDate = e.startsAt?.toDate?.() ?? (e.startsAt ? new Date(e.startsAt) : null);
       if (startDate && !isNaN(startDate.getTime())) {
@@ -293,7 +301,7 @@ export function CalendarScreen(props: any) {
       });
     }
 
-    return items.sort((a, b) => a.date.getTime() - b.date.getTime());
+    return items.sort((a, b) => safeTime(a.date) - safeTime(b.date));
   }, [events, assignments, importedEvents]);
 
   const handleImportIcal = async () => {
