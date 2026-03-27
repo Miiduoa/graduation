@@ -1,9 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useMemo, useState } from "react";
 import { ScrollView, Text, TextInput, View, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { Screen, Card, Button, Pill, SectionTitle, LoadingState, ErrorState } from "../ui/components";
-import { generateJoinCode, normalizeJoinCode, formatJoinCode, isValidJoinCode } from "../utils/joinCode";
+import { normalizeJoinCode, formatJoinCode, isValidJoinCode } from "../utils/joinCode";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useSchool } from "../state/school";

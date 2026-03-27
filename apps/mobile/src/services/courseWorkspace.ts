@@ -168,11 +168,39 @@ export function canManageCourse(role?: string | null) {
 
 export function toDate(value: unknown): Date | null {
   if (!value) return null;
-  if (typeof (value as { toDate?: () => Date }).toDate === "function") {
-    return (value as { toDate: () => Date }).toDate();
+
+  // Firestore Timestamp — prefer toMillis() (returns a plain number, no cross-realm risk)
+  if (typeof (value as { toMillis?: unknown }).toMillis === "function") {
+    const ms = (value as { toMillis: () => number }).toMillis();
+    if (typeof ms === "number" && Number.isFinite(ms)) return new Date(ms);
   }
-  const date = new Date(value as string | number | Date);
-  return Number.isNaN(date.getTime()) ? null : date;
+
+  // Firestore Timestamp.toDate() — re-wrap to avoid Hermes cross-realm Date issues
+  if (typeof (value as { toDate?: unknown }).toDate === "function") {
+    try {
+      const d = (value as { toDate: () => Date }).toDate();
+      try { return new Date(d.getTime()); } catch { /* cross-realm */ }
+      const parsed = Date.parse(String(d));
+      return Number.isFinite(parsed) ? new Date(parsed) : null;
+    } catch { return null; }
+  }
+
+  // Serialised Firestore Timestamp ({seconds, _seconds})
+  if (typeof (value as { _seconds?: unknown })._seconds === "number") {
+    return new Date((value as { _seconds: number })._seconds * 1000);
+  }
+  if (typeof (value as { seconds?: unknown }).seconds === "number") {
+    return new Date((value as { seconds: number }).seconds * 1000);
+  }
+
+  // String, number, or Date — construct in current realm
+  try {
+    const date = new Date(value as string | number);
+    const getTime = (date as { getTime?: unknown }).getTime;
+    if (typeof getTime !== "function") return null;
+    const t = (getTime as () => number).call(date);
+    return Number.isNaN(t) ? null : date;
+  } catch { return null; }
 }
 
 export function formatDateTime(date: Date | null, fallback = "未設定時間") {
@@ -281,7 +309,10 @@ export async function buildCourseSummaries(db: Firestore, memberships: CourseMem
       const now = Date.now();
       const sevenDaysLater = now + 7 * 24 * 60 * 60 * 1000;
       const dueSoonCount = dueDates.filter((date) => {
-        const time = date.getTime();
+        const gt = (date as unknown as { getTime?: unknown }).getTime;
+        const ms = typeof gt === "function" ? (gt as (this: Date) => number).call(date as unknown as Date) : undefined;
+        if (typeof ms !== "number" || Number.isNaN(ms)) return false;
+        const time = ms;
         return time >= now && time <= sevenDaysLater;
       }).length;
 

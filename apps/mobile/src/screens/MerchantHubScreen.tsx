@@ -300,7 +300,7 @@ export function MerchantHubScreen() {
 
                     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                       <Text style={{ color: theme.colors.muted }}>
-                        總額 ${order.totalAmount ?? order.total ?? order.totalPrice ?? 0}
+                        總額 ${order.totalAmount ?? order.total ?? 0}
                       </Text>
                       {order.note ? (
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, maxWidth: "60%" }}>

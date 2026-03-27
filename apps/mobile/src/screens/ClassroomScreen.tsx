@@ -72,32 +72,6 @@ type Poll = {
   createdAt?: any;
 };
 
-type RandomSelection = {
-  id: string;
-  selectedStudent?: string;
-  isSpinning: boolean;
-  createdAt?: any;
-};
-
-type QuickAnswer = {
-  id: string;
-  active: boolean;
-  startedAt?: number;
-  responses: Record<string, number>;
-  createdAt?: any;
-};
-
-type PopQuiz = {
-  id: string;
-  question: string;
-  options: string[];
-  timerSeconds: number;
-  responses: Record<string, number>;
-  active: boolean;
-  startedAt?: number;
-  createdAt?: any;
-};
-
 // Demo student names for random selection
 const DEMO_STUDENTS = [
   "李明軒", "王思齊", "陳怡安", "黃郁涵", "張子萌",
@@ -309,7 +283,7 @@ export function ClassroomScreen(props: any) {
   const [quizOptions, setQuizOptions] = useState(["", "", ""]);
   const [quizTimerSeconds, setQuizTimerSeconds] = useState(30);
   const [quizResponses, setQuizResponses] = useState<Record<string, number>>({});
-  const [quizStartTime, setQuizStartTime] = useState<number | null>(null);
+  const [, setQuizStartTime] = useState<number | null>(null);
   const quizTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 訂閱 Session 狀態
@@ -527,14 +501,6 @@ export function ClassroomScreen(props: any) {
     }, 100);
   }, []);
 
-  const handleStopRandomSelection = useCallback(() => {
-    if (spinIntervalRef.current) clearInterval(spinIntervalRef.current);
-    setIsSpinning(false);
-    if (!selectedStudent) {
-      setSelectedStudent(DEMO_STUDENTS[Math.floor(Math.random() * DEMO_STUDENTS.length)]);
-    }
-  }, [selectedStudent]);
-
   // ===== 搶答 (Quick Answer Race) =====
   const handleStartQuickAnswer = useCallback(() => {
     setQuickAnswerActive(true);
@@ -610,15 +576,6 @@ export function ClassroomScreen(props: any) {
       Alert.alert("提交失敗", "請稍後再試");
     }
   }, [auth.user, quizActive, groupId, sessionId]);
-
-  const handleStopPopQuiz = useCallback(() => {
-    if (quizTimerRef.current) clearInterval(quizTimerRef.current);
-    setQuizActive(false);
-    setQuizQuestion("");
-    setQuizOptions(["", "", ""]);
-    setQuizTimerSeconds(30);
-    setQuizResponses({});
-  }, []);
 
   if (!auth.user) return <ErrorState title="課堂" subtitle="尚未登入" hint="請先登入才能加入課堂" />;
   if (!groupId || !sessionId) return <ErrorState title="課堂" subtitle="缺少課堂資訊" hint="請從群組頁面進入課堂" />;

@@ -675,14 +675,14 @@ async function processQueuedAction(action: QueuedAction): Promise<{ success: boo
     : doc(db, effectiveAction.collection);
   
   switch (effectiveAction.type) {
-    case "create":
+    case "create": {
       if (effectiveAction.documentId) {
         const existingDoc = await getDoc(docRef);
         if (existingDoc.exists()) {
           console.warn("[offline] Document already exists for create operation");
           const serverData = existingDoc.data();
           const conflictFields = findConflictingFields(effectiveAction.data, serverData, effectiveAction.timestamp);
-          
+
           if (conflictFields.length > 0) {
             const conflictInfo: ConflictInfo = {
               action: effectiveAction,
@@ -696,7 +696,7 @@ async function processQueuedAction(action: QueuedAction): Promise<{ success: boo
           return { success: true, conflict: false };
         }
       }
-      
+
       await setDoc(docRef, {
         ...effectiveAction.data,
         createdAt: serverTimestamp(),
@@ -705,20 +705,21 @@ async function processQueuedAction(action: QueuedAction): Promise<{ success: boo
         _createdByUserId: effectiveAction.userId,
       });
       break;
-      
-    case "update":
+    }
+
+    case "update": {
       if (!effectiveAction.documentId) {
         throw new Error("documentId is required for update operations");
       }
-      
+
       const existingUpdateDoc = await getDoc(docRef);
       if (existingUpdateDoc.exists()) {
         const serverData = existingUpdateDoc.data();
         const serverUpdatedAt = serverData.updatedAt?.toMillis?.() ?? serverData._offlineUpdatedAt ?? 0;
-        
+
         if (serverUpdatedAt > effectiveAction.timestamp) {
           const conflictFields = findConflictingFields(effectiveAction.data, serverData, effectiveAction.timestamp);
-          
+
           if (conflictFields.length > 0) {
             console.warn("[offline] Server version is newer with conflicting fields:", conflictFields);
             const conflictInfo: ConflictInfo = {
@@ -732,10 +733,10 @@ async function processQueuedAction(action: QueuedAction): Promise<{ success: boo
           }
           console.log("[offline] Server version is newer but no conflicting fields, merging");
         }
-        
+
         const currentVersion = serverData._clientVersion ?? 0;
         const expectedVersion = effectiveAction.clientVersion ?? 0;
-        
+
         if (expectedVersion > 0 && currentVersion !== expectedVersion) {
           console.warn("[offline] Version mismatch, conflict detected");
           const conflictInfo: ConflictInfo = {
@@ -748,7 +749,7 @@ async function processQueuedAction(action: QueuedAction): Promise<{ success: boo
           return { success: false, conflict: true, conflictInfo };
         }
       }
-      
+
       await updateDoc(docRef, {
         ...effectiveAction.data,
         updatedAt: serverTimestamp(),
@@ -757,17 +758,18 @@ async function processQueuedAction(action: QueuedAction): Promise<{ success: boo
         _lastUpdatedByUserId: effectiveAction.userId,
       });
       break;
-      
-    case "delete":
+    }
+
+    case "delete": {
       if (!effectiveAction.documentId) {
         throw new Error("documentId is required for delete operations");
       }
-      
+
       const existingDeleteDoc = await getDoc(docRef);
       if (existingDeleteDoc.exists()) {
         const serverData = existingDeleteDoc.data();
         const serverUpdatedAt = serverData.updatedAt?.toMillis?.() ?? serverData._offlineUpdatedAt ?? 0;
-        
+
         if (serverUpdatedAt > effectiveAction.timestamp) {
           console.warn("[offline] Document was modified after delete was queued");
           const conflictInfo: ConflictInfo = {
@@ -780,10 +782,11 @@ async function processQueuedAction(action: QueuedAction): Promise<{ success: boo
           return { success: false, conflict: true, conflictInfo };
         }
       }
-      
+
       await deleteDoc(docRef);
       break;
-      
+    }
+
     default:
       throw new Error(`Unknown action type: ${(effectiveAction as QueuedAction).type}`);
   }
@@ -918,8 +921,7 @@ export async function syncEssentialData(schoolId: string): Promise<{ synced: str
   for (const key of essentialKeys) {
     try {
       let data: unknown;
-      const maxAge = OFFLINE_SYNC_CONFIG[key].maxAgeHours * 60 * 60 * 1000;
-      
+
       switch (key) {
         case "announcements":
           data = await dataSource.listAnnouncements(schoolId);

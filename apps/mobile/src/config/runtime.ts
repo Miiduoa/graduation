@@ -14,7 +14,9 @@ import {
 export type DataSourceMode = "mock" | "firebase" | "hybrid";
 
 export const DATA_SOURCE_DESIGN_TARGET_MODE: DataSourceMode = "hybrid";
-export const DEFAULT_RUNTIME_DATA_SOURCE_MODE: DataSourceMode = __DEV__ ? "mock" : "firebase";
+// In dev we still want real integration paths (PU scraper, adapters) to run,
+// otherwise student-id login succeeds but the app keeps reading demo/mock data.
+export const DEFAULT_RUNTIME_DATA_SOURCE_MODE: DataSourceMode = __DEV__ ? "hybrid" : "firebase";
 
 export function parseDataSourceMode(raw?: string): DataSourceMode {
   const value = (raw ?? "").trim().toLowerCase();

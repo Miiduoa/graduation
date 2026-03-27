@@ -133,19 +133,19 @@ const mockUsers: Record<string, User> = {
 };
 
 // Mock 群組資料 - start with demo data
-let mockGroups: Group[] = getDemoGroups(DEFAULT_SCHOOL);
+const mockGroups: Group[] = getDemoGroups(DEFAULT_SCHOOL);
 
 // Mock 貼文資料 - start populated from demo
-let mockPosts: GroupPost[] = getDemoGroupPosts(DEFAULT_SCHOOL, 'group1');
+const mockPosts: GroupPost[] = getDemoGroupPosts(DEFAULT_SCHOOL, 'group1');
 const mockPoiReviews = new Map<string, PoiReview[]>();
 const mockPoiCrowdReports = new Map<string, PoiCrowdReport[]>();
 const mockPoiReports = new Map<string, PoiReport[]>();
 
 // Mock 課程資料 - start with demo data
-let mockCourses: Course[] = getDemoCourses(DEFAULT_SCHOOL);
+const mockCourses: Course[] = getDemoCourses(DEFAULT_SCHOOL);
 
 // Mock 餐廳資料 - start with demo data
-let mockCafeterias: Cafeteria[] = getDemoCafeterias(DEFAULT_SCHOOL);
+const mockCafeterias: Cafeteria[] = getDemoCafeterias(DEFAULT_SCHOOL);
 
 function getScopedPoiKey(poiId: string, schoolId?: string): string {
   return `${schoolId ?? DEFAULT_SCHOOL}:${poiId}`;

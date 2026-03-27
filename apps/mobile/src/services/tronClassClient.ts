@@ -1,0 +1,487 @@
+/**
+ * TronClass API Client for Providence University (靜宜大學)
+ *
+ * TronClass (tronclass.pu.edu.tw) 是靜宜使用的 LMS，
+ * 認證走 Keycloak CAS (identity.pu.edu.tw)，
+ * 資料走 REST JSON API (/api/...)。
+ *
+ * 登入流程：
+ *   1. GET  identity.pu.edu.tw CAS login page → 拿到 form action + hidden fields
+ *   2. POST credentials → CAS 給 ticket 然後 redirect 回 TronClass
+ *   3. TronClass 驗票後給 session cookie
+ *   4. 後續所有 /api/ 請求用 credentials:"include" 自動帶 cookie
+ *
+ * 所有 API response 都是 JSON。
+ */
+
+// ─── Constants ───────────────────────────────────────────
+
+const TC_BASE = "https://tronclass.pu.edu.tw";
+const IDENTITY_BASE = "https://identity.pu.edu.tw";
+const CAS_LOGIN_PATH = "/auth/realms/pu/protocol/cas/login";
+
+const COMMON_HEADERS: Record<string, string> = {
+  "User-Agent":
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  Accept: "application/json, text/html, */*",
+  "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+};
+
+// ─── Types ───────────────────────────────────────────────
+
+export type TCSession = {
+  loggedIn: true;
+  userId: number | null;
+  userName: string | null;
+};
+
+export type TCCourse = {
+  id: number;
+  name: string;
+  course_code: string;
+  department_id: number | null;
+  semester_id: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  status: string;
+  role: string;        // student, teacher, ta
+  teacher_name: string | null;
+  cover_image_url: string | null;
+  student_count: number;
+};
+
+export type TCActivity = {
+  id: number;
+  course_id: number;
+  type: string;           // homework, exam, quiz, discussion, material, survey, etc.
+  title: string;
+  description: string | null;
+  begin_date: string | null;
+  end_date: string | null;  // due date
+  score: number | null;
+  total_score: number | null;
+  status: string;           // submitted, graded, pending, etc.
+  weight: number | null;    // percentage weight in final grade
+};
+
+export type TCModule = {
+  id: number;
+  course_id: number;
+  title: string;
+  description: string | null;
+  position: number;
+  published: boolean;
+  activities: TCActivity[];
+};
+
+export type TCUserProfile = {
+  id: number;
+  name: string;
+  login_name: string;
+  email: string | null;
+  avatar_url: string | null;
+  role: string;
+};
+
+export type TCAttendance = {
+  course_id: number;
+  course_name: string;
+  total_sessions: number;
+  attended: number;
+  absent: number;
+  late: number;
+  leave: number;
+  rate: number;       // 0-100
+};
+
+export type TCGradeItem = {
+  course_id: number;
+  course_name: string;
+  final_score: number | null;
+  final_grade: string | null;  // A, B+, etc.
+  grade_point: number | null;  // 4.0, 3.7, etc.
+  credits: number;
+  semester: string;
+};
+
+// ─── Helper: Native Fetch ────────────────────────────────
+
+async function tcFetch(
+  url: string,
+  options: {
+    method?: string;
+    body?: string;
+    contentType?: string;
+    accept?: string;
+  } = {}
+): Promise<{ body: string; status: number; url: string }> {
+  const headers: Record<string, string> = { ...COMMON_HEADERS };
+  if (options.contentType) headers["Content-Type"] = options.contentType;
+  if (options.accept) headers.Accept = options.accept;
+
+  const response = await fetch(url, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body,
+    credentials: "include",
+    redirect: "follow",
+  });
+
+  const body = await response.text();
+  return { body, status: response.status, url: response.url };
+}
+
+async function tcFetchJSON<T>(url: string): Promise<T | null> {
+  try {
+    const result = await tcFetch(url, { accept: "application/json" });
+    if (result.status !== 200) {
+      console.warn(`[TronClass] API ${result.status}: ${url}`);
+      return null;
+    }
+    // 如果被 redirect 到登入頁，body 會是 HTML
+    if (result.body.trimStart().startsWith("<")) {
+      console.warn("[TronClass] Got HTML instead of JSON, session might be expired");
+      return null;
+    }
+    return JSON.parse(result.body) as T;
+  } catch (err) {
+    console.warn("[TronClass] fetch error:", url, err);
+    return null;
+  }
+}
+
+// ─── Login ───────────────────────────────────────────────
+
+/**
+ * 透過 Keycloak CAS 登入 TronClass。
+ *
+ * 步驟：
+ * 1. GET CAS login page → 解析 form action 和隱藏欄位
+ * 2. POST 帳密 → CAS redirect 回 TronClass 並設 cookie
+ * 3. 驗證登入狀態 by calling /api/users/me
+ */
+export async function tcLogin(
+  uid: string,
+  password: string
+): Promise<{ success: boolean; session: TCSession | null; error?: string }> {
+  try {
+    if (!uid || !password) return { success: false, session: null, error: "請輸入帳號密碼" };
+
+    const serviceUrl = `${TC_BASE}/login`;
+    const casUrl = `${IDENTITY_BASE}${CAS_LOGIN_PATH}?service=${encodeURIComponent(serviceUrl)}&locale=zh_TW`;
+
+    // Step 1: GET CAS login page
+    console.log("[TronClass] Step 1: GET CAS login page…");
+    const loginPage = await tcFetch(casUrl, { accept: "text/html" });
+    console.log("[TronClass] CAS page status:", loginPage.status);
+
+    // 解析 form action URL
+    const formActionMatch = loginPage.body.match(/<form[^>]+action=["']([^"']+)["']/i);
+    const formAction = formActionMatch?.[1]?.replace(/&amp;/g, "&") ?? loginPage.url;
+
+    // 解析隱藏欄位
+    const hiddenFields: Record<string, string> = {};
+    const hiddenRegex = /<input[^>]+type=["']hidden["'][^>]*>/gi;
+    let hMatch: RegExpExecArray | null;
+    while ((hMatch = hiddenRegex.exec(loginPage.body)) !== null) {
+      const nameMatch = hMatch[0].match(/name=["']([^"']+)["']/);
+      const valueMatch = hMatch[0].match(/value=["']([^"']*?)["']/);
+      if (nameMatch?.[1]) {
+        hiddenFields[nameMatch[1]] = valueMatch?.[1] ?? "";
+      }
+    }
+
+    // Step 2: POST credentials
+    console.log("[TronClass] Step 2: POST credentials to CAS…");
+    const formData = new URLSearchParams({
+      ...hiddenFields,
+      username: uid,
+      password: password,
+    });
+
+    const postUrl = formAction.startsWith("http")
+      ? formAction
+      : `${IDENTITY_BASE}${formAction}`;
+
+    const loginResult = await tcFetch(postUrl, {
+      method: "POST",
+      body: formData.toString(),
+      contentType: "application/x-www-form-urlencoded",
+      accept: "text/html",
+    });
+
+    console.log("[TronClass] POST status:", loginResult.status);
+    console.log("[TronClass] Landed on:", loginResult.url);
+
+    // Step 3: 驗證登入 — 呼叫 /api/users/me
+    console.log("[TronClass] Step 3: verifying session via /api/users/me…");
+    const profile = await tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/users/me`);
+
+    if (!profile || !profile.id) {
+      // 嘗試看看是不是帳密錯
+      if (
+        loginResult.body.includes("密碼錯誤") ||
+        loginResult.body.includes("Invalid") ||
+        loginResult.body.includes("error") ||
+        loginResult.body.includes("帳號或密碼")
+      ) {
+        return { success: false, session: null, error: "TronClass 帳號或密碼錯誤" };
+      }
+      return { success: false, session: null, error: "TronClass 登入失敗，無法取得使用者資料" };
+    }
+
+    console.log("[TronClass] Login success! User:", profile.name, "ID:", profile.id);
+    return {
+      success: true,
+      session: {
+        loggedIn: true,
+        userId: profile.id,
+        userName: profile.name,
+      },
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "連線失敗";
+    console.error("[TronClass] Login error:", err);
+    return { success: false, session: null, error: `TronClass 登入失敗：${msg}` };
+  }
+}
+
+// ─── API Endpoints ───────────────────────────────────────
+
+/** 取得已選課程清單 */
+export async function tcFetchCourses(
+  status: "ongoing" | "ended" | "upcoming" = "ongoing"
+): Promise<TCCourse[]> {
+  const condition = JSON.stringify({ status: [status] });
+  const url = `${TC_BASE}/api/courses?condition=${encodeURIComponent(condition)}&count=100`;
+
+  type APIResponse = {
+    courses?: Array<{
+      id: number;
+      name: string;
+      course_code?: string;
+      department_id?: number;
+      semester_id?: number;
+      start_date?: string;
+      end_date?: string;
+      status?: string;
+      enroll_role?: string;
+      cover?: { url?: string };
+      teacher?: { name?: string };
+      student_count?: number;
+    }>;
+  };
+
+  const data = await tcFetchJSON<APIResponse>(url);
+  if (!data?.courses) return [];
+
+  return data.courses.map((c): TCCourse => ({
+    id: c.id,
+    name: c.name,
+    course_code: c.course_code ?? "",
+    department_id: c.department_id ?? null,
+    semester_id: c.semester_id ?? null,
+    start_date: c.start_date ?? null,
+    end_date: c.end_date ?? null,
+    status: c.status ?? status,
+    role: c.enroll_role ?? "student",
+    teacher_name: c.teacher?.name ?? null,
+    cover_image_url: c.cover?.url ?? null,
+    student_count: c.student_count ?? 0,
+  }));
+}
+
+/** 取得課程的模組（週次/單元） */
+export async function tcFetchModules(courseId: number): Promise<TCModule[]> {
+  const url = `${TC_BASE}/api/courses/${courseId}/course-modules`;
+
+  type APIResponse = Array<{
+    id: number;
+    title?: string;
+    description?: string;
+    position?: number;
+    published?: boolean;
+    activities?: Array<{
+      id: number;
+      type?: string;
+      title?: string;
+      description?: string;
+      begin_date?: string;
+      end_date?: string;
+      score?: number;
+      total_score?: number;
+      status?: string;
+      weight?: number;
+    }>;
+  }>;
+
+  const data = await tcFetchJSON<APIResponse>(url);
+  if (!data || !Array.isArray(data)) return [];
+
+  return data.map((m): TCModule => ({
+    id: m.id,
+    course_id: courseId,
+    title: m.title ?? `Module ${m.position ?? 0}`,
+    description: m.description ?? null,
+    position: m.position ?? 0,
+    published: m.published !== false,
+    activities: (m.activities ?? []).map((a): TCActivity => ({
+      id: a.id,
+      course_id: courseId,
+      type: a.type ?? "material",
+      title: a.title ?? "",
+      description: a.description ?? null,
+      begin_date: a.begin_date ?? null,
+      end_date: a.end_date ?? null,
+      score: a.score ?? null,
+      total_score: a.total_score ?? null,
+      status: a.status ?? "pending",
+      weight: a.weight ?? null,
+    })),
+  }));
+}
+
+/** 取得課程活動（作業、測驗、教材等） */
+export async function tcFetchActivities(courseId: number): Promise<TCActivity[]> {
+  const url = `${TC_BASE}/api/courses/${courseId}/activities?count=200`;
+
+  type APIResponse = {
+    activities?: Array<{
+      id: number;
+      type?: string;
+      title?: string;
+      description?: string;
+      begin_date?: string;
+      end_date?: string;
+      score?: number;
+      total_score?: number;
+      status?: string;
+      weight?: number;
+    }>;
+  };
+
+  const data = await tcFetchJSON<APIResponse>(url);
+  if (!data?.activities) return [];
+
+  return data.activities.map((a): TCActivity => ({
+    id: a.id,
+    course_id: courseId,
+    type: a.type ?? "material",
+    title: a.title ?? "",
+    description: a.description ?? null,
+    begin_date: a.begin_date ?? null,
+    end_date: a.end_date ?? null,
+    score: a.score ?? null,
+    total_score: a.total_score ?? null,
+    status: a.status ?? "pending",
+    weight: a.weight ?? null,
+  }));
+}
+
+/** 取得出缺席統計 */
+export async function tcFetchAttendance(): Promise<TCAttendance[]> {
+  const url = `${TC_BASE}/api/users/me/attendances`;
+
+  type APIResponse = Array<{
+    course_id?: number;
+    course_name?: string;
+    total?: number;
+    attended?: number;
+    absent?: number;
+    late?: number;
+    leave?: number;
+    rate?: number;
+  }>;
+
+  const data = await tcFetchJSON<APIResponse>(url);
+  if (!data || !Array.isArray(data)) return [];
+
+  return data.map((a): TCAttendance => ({
+    course_id: a.course_id ?? 0,
+    course_name: a.course_name ?? "",
+    total_sessions: a.total ?? 0,
+    attended: a.attended ?? 0,
+    absent: a.absent ?? 0,
+    late: a.late ?? 0,
+    leave: a.leave ?? 0,
+    rate: a.rate ?? 0,
+  }));
+}
+
+/** 取得成績（如果 TronClass 有提供） */
+export async function tcFetchGrades(): Promise<TCGradeItem[]> {
+  // TronClass 可能的成績 endpoint
+  const url = `${TC_BASE}/api/users/me/grades`;
+
+  type APIResponse = Array<{
+    course_id?: number;
+    course_name?: string;
+    final_score?: number;
+    final_grade?: string;
+    grade_point?: number;
+    credits?: number;
+    semester?: string;
+  }>;
+
+  const data = await tcFetchJSON<APIResponse>(url);
+  if (!data || !Array.isArray(data)) return [];
+
+  return data.map((g): TCGradeItem => ({
+    course_id: g.course_id ?? 0,
+    course_name: g.course_name ?? "",
+    final_score: g.final_score ?? null,
+    final_grade: g.final_grade ?? null,
+    grade_point: g.grade_point ?? null,
+    credits: g.credits ?? 0,
+    semester: g.semester ?? "",
+  }));
+}
+
+/** 取得使用者 Profile */
+export async function tcFetchProfile(): Promise<TCUserProfile | null> {
+  return tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/users/me`);
+}
+
+/** 取得待辦事項（即將到期的作業/測驗） */
+export async function tcFetchTodos(): Promise<TCActivity[]> {
+  const url = `${TC_BASE}/api/users/me/todos?count=50`;
+
+  type APIResponse = {
+    todos?: Array<{
+      id: number;
+      course_id?: number;
+      type?: string;
+      title?: string;
+      description?: string;
+      begin_date?: string;
+      end_date?: string;
+      score?: number;
+      total_score?: number;
+      status?: string;
+      weight?: number;
+    }>;
+  };
+
+  const data = await tcFetchJSON<APIResponse>(url);
+  if (!data?.todos) {
+    // 可能是不同格式
+    if (Array.isArray(data)) {
+      return (data as TCActivity[]);
+    }
+    return [];
+  }
+
+  return data.todos.map((a): TCActivity => ({
+    id: a.id,
+    course_id: a.course_id ?? 0,
+    type: a.type ?? "homework",
+    title: a.title ?? "",
+    description: a.description ?? null,
+    begin_date: a.begin_date ?? null,
+    end_date: a.end_date ?? null,
+    score: a.score ?? null,
+    total_score: a.total_score ?? null,
+    status: a.status ?? "pending",
+    weight: a.weight ?? null,
+  }));
+}

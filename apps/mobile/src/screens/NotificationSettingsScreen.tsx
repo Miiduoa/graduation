@@ -35,7 +35,8 @@ function ToggleRow({ icon, label, description, value, onValueChange, disabled }:
         opacity: disabled ? 0.5 : 1,
       }}
     >
-      <Ionicons name={icon as any} size={22} color={theme.colors.muted} style={{ marginRight: 12 }} />
+      <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        name={icon as any} size={22} color={theme.colors.muted} style={{ marginRight: 12 }} />
       <View style={{ flex: 1 }}>
         <Text style={{ color: theme.colors.text, fontWeight: "600" }}>{label}</Text>
         {description ? (
@@ -89,7 +90,7 @@ function TimePicker({ label, value, onChange, disabled }: TimePickerProps) {
   );
 }
 
-export function NotificationSettingsScreen(props: any) {
+export function NotificationSettingsScreen(props: Record<string, unknown>) {
   const nav = props?.navigation;
   const auth = useAuth();
 

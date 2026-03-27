@@ -6,12 +6,23 @@ export function formatDateTime(input: string | number | Date | any) {
 
     // Firestore Timestamp (or Timestamp-like): { seconds, nanoseconds, toDate() }
     if (typeof v === "object") {
+      if (typeof v.toMillis === "function") {
+        const d = new Date(v.toMillis());
+        if (!Number.isNaN(d.getTime())) return d.toLocaleString();
+      }
       if (typeof v.toDate === "function") {
-        const d = v.toDate();
-        if (d instanceof Date && !Number.isNaN(d.getTime())) return d.toLocaleString();
+        const raw = v.toDate();
+        // Re-wrap to avoid Hermes cross-realm Date issues
+        let d: Date;
+        try { d = new Date(raw.getTime()); } catch { d = new Date(Date.parse(String(raw))); }
+        if (!Number.isNaN(d.getTime())) return d.toLocaleString();
       }
       if (typeof v.seconds === "number") {
         const d = new Date(v.seconds * 1000);
+        if (!Number.isNaN(d.getTime())) return d.toLocaleString();
+      }
+      if (typeof v._seconds === "number") {
+        const d = new Date(v._seconds * 1000);
         if (!Number.isNaN(d.getTime())) return d.toLocaleString();
       }
     }
@@ -29,11 +40,40 @@ export function formatDate(input: string | number | Date | any): string {
   return date ? date.toLocaleDateString("zh-TW") : "";
 }
 
+function isValidDate(d: unknown): d is Date {
+  if (!d) return false;
+  if (!(d instanceof Date)) return false;
+  // Some mocks/serializers might carry `getTime` but not behave like real Date.
+  const getTime = (d as { getTime?: unknown }).getTime;
+  if (typeof getTime !== "function") return false;
+  // getTime 依賴 this 指向 Date 物件，所以要用 call 綁定。
+  const t = (getTime as (this: Date) => number).call(d);
+  return typeof t === "number" && !Number.isNaN(t);
+}
+
 export function toDate(input: any): Date | null {
   try {
     if (input == null) return null;
-    if (typeof input.toDate === "function") return input.toDate();
+
+    // Firestore Timestamp — prefer toMillis() (plain number, no cross-realm risk)
+    if (typeof input.toMillis === "function") {
+      const ms = input.toMillis();
+      if (typeof ms === "number" && Number.isFinite(ms)) return new Date(ms);
+    }
+
+    // Firestore Timestamp.toDate() — re-wrap to avoid Hermes cross-realm Date issues
+    if (typeof input.toDate === "function") {
+      const d = input.toDate();
+      try { return new Date(d.getTime()); } catch { /* cross-realm */ }
+      const parsed = Date.parse(String(d));
+      return Number.isFinite(parsed) ? new Date(parsed) : null;
+    }
+
+    // Serialised Firestore Timestamp
+    if (typeof input._seconds === "number") return new Date(input._seconds * 1000);
     if (typeof input.seconds === "number") return new Date(input.seconds * 1000);
+
+    // String, number, or current-realm Date
     const d = input instanceof Date ? input : new Date(input);
     return Number.isNaN(d.getTime()) ? null : d;
   } catch {
@@ -41,9 +81,12 @@ export function toDate(input: any): Date | null {
   }
 }
 
-export function formatRelativeTime(date: Date): string {
+export function formatRelativeTime(date?: Date | null): string {
+  if (!isValidDate(date)) return "";
   const now = new Date();
-  const diff = date.getTime() - now.getTime();
+  const getTime = (date as { getTime?: unknown }).getTime;
+  if (typeof getTime !== "function") return "";
+  const diff = (getTime as () => number).call(date) - now.getTime();
   const absDiff = Math.abs(diff);
   const isPast = diff < 0;
 
@@ -58,9 +101,18 @@ export function formatRelativeTime(date: Date): string {
   return date.toLocaleDateString();
 }
 
-export function formatCountdown(targetDate: Date): { days: number; hours: number; minutes: number; seconds: number; isExpired: boolean } {
+export function formatCountdown(
+  targetDate?: Date | null
+): { days: number; hours: number; minutes: number; seconds: number; isExpired: boolean } {
+  if (!isValidDate(targetDate)) {
+    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
+  }
   const now = new Date();
-  const diff = targetDate.getTime() - now.getTime();
+  const getTime = (targetDate as { getTime?: unknown }).getTime;
+  if (typeof getTime !== "function") {
+    return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
+  }
+  const diff = (getTime as () => number).call(targetDate) - now.getTime();
 
   if (diff <= 0) {
     return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };

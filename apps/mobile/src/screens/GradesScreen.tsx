@@ -247,8 +247,9 @@ function GradeCard({ course }: { course: Grade }) {
   );
 }
 
-export function GradesScreen(props: any) {
-  const nav = props?.navigation;
+export function GradesScreen(props: Record<string, unknown>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = props?.navigation as any;
   const auth = useAuth();
   const { school } = useSchool();
 

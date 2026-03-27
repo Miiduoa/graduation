@@ -99,9 +99,9 @@ export function SettingsScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 14, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <AnimatedCard title="外觀設定" subtitle="個人化你的 App 外觀">
-          <View style={{ gap: 16 }}>
-            <View>
+        <AnimatedCard title="外觀" subtitle="">
+          <View style={{ gap: 0 }}>
+            <View style={{ paddingVertical: 14, paddingHorizontal: 16 }}>
               <Text
                 style={{
                   color: theme.colors.textSecondary,
@@ -125,25 +125,22 @@ export function SettingsScreen(props: any) {
             <ListItem
               icon="language-outline"
               title="語言設定"
-              subtitle="繁體中文 / English / 日本語 / 한국어"
               onPress={() => nav?.navigate?.('LanguageSettings')}
             />
             <ListItem
               icon="accessibility-outline"
               title="無障礙設定"
-              subtitle="文字大小、對比度、螢幕閱讀器"
               onPress={() => nav?.navigate?.('AccessibilitySettings')}
             />
             <ListItem
               icon="color-palette-outline"
               title="主題預覽"
-              subtitle="查看各學校品牌主題色"
               onPress={() => nav?.navigate?.('ThemePreview')}
             />
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="學校設定" subtitle={`目前：${school.name}`} delay={100}>
+        <AnimatedCard title="學校" subtitle="" delay={100}>
           {school.themeColor && (
             <View
               style={{
@@ -301,8 +298,8 @@ export function SettingsScreen(props: any) {
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="儲存空間" subtitle="管理 App 快取" delay={200}>
-          <View style={{ gap: 12 }}>
+        <AnimatedCard title="儲存空間" subtitle="" delay={200}>
+          <View style={{ gap: 0 }}>
             <ListItem
               icon="folder-outline"
               title="快取資料"
@@ -312,46 +309,37 @@ export function SettingsScreen(props: any) {
                   : '計算中...'
               }
             />
-            <Button
-              text="清除快取"
-              kind="accent-ghost"
-              icon="trash-outline"
-              onPress={handleClearCache}
-            />
+            <Divider spacing={0} />
+            <View style={{ paddingVertical: 14, paddingHorizontal: 16 }}>
+              <Button
+                text="清除快取"
+                kind="accent-ghost"
+                icon="trash-outline"
+                onPress={handleClearCache}
+              />
+            </View>
           </View>
-          <Text
-            style={{
-              color: theme.colors.textSecondary,
-              fontSize: 12,
-              marginTop: 10,
-              lineHeight: 18,
-            }}
-          >
-            清除快取可以釋放儲存空間，但會使 App 需要重新下載資料。
-          </Text>
         </AnimatedCard>
 
-        <AnimatedCard title="帳號與隱私" subtitle="管理您的資料" delay={300}>
-          <View style={{ gap: 2 }}>
+        <AnimatedCard title="帳號與隱私" subtitle="" delay={300}>
+          <View style={{ gap: 0 }}>
             <ListItem
               icon="download-outline"
               title="匯出我的資料"
-              subtitle="下載您的所有資料"
               onPress={() => nav?.navigate?.('DataExport')}
             />
             <Divider spacing={0} />
             <ListItem
               icon="trash-outline"
               title="刪除帳號"
-              subtitle="永久刪除您的帳號和資料"
               danger
               onPress={() => nav?.navigate?.('AccountDeletion')}
             />
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="關於" subtitle="App 資訊與連結" delay={400}>
-          <View style={{ gap: 2 }}>
+        <AnimatedCard title="關於" subtitle="" delay={400}>
+          <View style={{ gap: 0 }}>
             <ListItem icon="information-circle-outline" title="版本" rightText={APP_VERSION} />
             <ListItem icon="school-outline" title="開發團隊" rightText="畢業專題團隊" />
             <Divider spacing={4} />
@@ -363,7 +351,6 @@ export function SettingsScreen(props: any) {
             <ListItem
               icon="bug-outline"
               title="回報問題"
-              subtitle="發現 Bug？告訴我們"
               onPress={() => nav?.navigate?.('BugReport')}
             />
             <ListItem

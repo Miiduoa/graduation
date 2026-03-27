@@ -16,6 +16,7 @@ import {
 } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
+import { useAccessibility } from "../state/accessibility";
 
 type TextSize = "small" | "medium" | "large" | "xlarge";
 type ContrastMode = "normal" | "high";
@@ -61,34 +62,14 @@ const COLOR_BLIND_OPTIONS = [
 export function AccessibilitySettingsScreen(props: any) {
   const nav = props?.navigation;
 
-  const [settings, setSettings] = useState<AccessibilitySettings>(DEFAULT_SETTINGS);
+  const accessibility = useAccessibility();
+  const settings = accessibility.settings;
   const [systemReduceMotion, setSystemReduceMotion] = useState(false);
   const [screenReaderEnabled, setScreenReaderEnabled] = useState(false);
 
   useEffect(() => {
-    loadSettings();
     checkSystemAccessibility();
   }, []);
-
-  const loadSettings = async () => {
-    try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(stored) });
-      }
-    } catch (e) {
-      console.error("Failed to load accessibility settings:", e);
-    }
-  };
-
-  const saveSettings = async (newSettings: AccessibilitySettings) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newSettings));
-      setSettings(newSettings);
-    } catch (e) {
-      console.error("Failed to save accessibility settings:", e);
-    }
-  };
 
   const checkSystemAccessibility = async () => {
     const reduceMotion = await AccessibilityInfo.isReduceMotionEnabled();
@@ -115,8 +96,7 @@ export function AccessibilitySettingsScreen(props: any) {
     key: K,
     value: AccessibilitySettings[K]
   ) => {
-    const newSettings = { ...settings, [key]: value };
-    saveSettings(newSettings);
+    accessibility.updateSetting(key, value);
   };
 
   const resetToDefaults = () => {
@@ -125,7 +105,7 @@ export function AccessibilitySettingsScreen(props: any) {
       {
         text: "重設",
         style: "destructive",
-        onPress: () => saveSettings(DEFAULT_SETTINGS),
+        onPress: () => accessibility.resetToDefaults(),
       },
     ]);
   };
