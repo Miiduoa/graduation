@@ -579,6 +579,10 @@ export function createCachedSource(
 
 export async function clearAllCache(): Promise<void> {
   try {
+    pendingRequests.clear();
+    backgroundUpdateLocks.clear();
+    cacheVersionMap.clear();
+
     const keys = await AsyncStorage.getAllKeys();
     const cacheKeys = keys.filter((k) => k.startsWith(CACHE_PREFIX));
     if (cacheKeys.length > 0) {

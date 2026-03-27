@@ -1,3 +1,4 @@
+import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from "@campus/shared/src";
 import { BaseApiAdapter } from "./BaseAdapter";
 import type {
   AdapterCapabilities,
@@ -18,13 +19,8 @@ import type {
   AttendanceSession,
   AttendanceSummary,
 } from "../types";
-import Constants from "expo-constants";
-import { hasUsableFirebaseConfig } from "../../firebase";
 import {
   puLogin,
-  puFetchCourses,
-  puFetchGrades,
-  puFetchAnnouncements,
   type PUSession,
 } from "../../services/puDirectScraper";
 import {
@@ -45,6 +41,9 @@ import {
   getAnyCachedTCCourses,
   getAnyCachedTCActivities,
   refreshTCCourses,
+  refreshTCActivitiesForCourses,
+  refreshTCModulesForCourses,
+  refreshTCAttendance,
   refreshTCTodos,
 } from "../../services/puDataCache";
 import type {
@@ -53,6 +52,7 @@ import type {
   TCModule,
   TCAttendance,
 } from "../../services/tronClassClient";
+import { getCloudFunctionUrl } from "../../services/cloudFunctions";
 
 /**
  * Providence University (靜宜大學) adapter
@@ -76,25 +76,9 @@ export class PUAdapter extends BaseApiAdapter {
   private directSession: PUSession | null = null;
 
   private get useDirectMode(): boolean {
-    // Prefer Cloud Functions when Firebase is usable AND we have a sessionId,
-    // because it is more reliable across domains (alcat + mypu). Fall back to
-    // direct scraping when Firebase is not configured or sessionId is missing.
-    return !hasUsableFirebaseConfig() || (this.directSession != null && !this.sessionId);
-  }
-
-  private getCloudFunctionUrl(functionName: string): string {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const extra = (Constants.expoConfig as any)?.extra ?? {};
-    const projectId = extra.firebase?.projectId;
-    const region = extra.cloudFunctionRegion ?? "asia-east1";
-
-    if (!projectId) {
-      throw new Error(
-        "Firebase projectId not configured. Set EXPO_PUBLIC_FIREBASE_PROJECT_ID in env."
-      );
-    }
-
-    return `https://${region}-${projectId}.cloudfunctions.net/${functionName}`;
+    // Prefer backend campus proxy whenever a server-side session is available.
+    // Direct mode is only for local fallback when no backend campus session exists.
+    return !this.sessionId;
   }
 
   // ---------------------------------------------------------------------------
@@ -123,7 +107,7 @@ export class PUAdapter extends BaseApiAdapter {
 
     // ── Cloud Functions mode ──
     try {
-      const response = await fetch(this.getCloudFunctionUrl("puAuthenticate"), {
+      const response = await fetch(getCloudFunctionUrl("puAuthenticate"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -193,6 +177,76 @@ export class PUAdapter extends BaseApiAdapter {
     };
   }
 
+  setBackendSession(
+    sessionId: string,
+    studentId?: string | null,
+    studentName?: string | null,
+  ): void {
+    this.sessionId = sessionId.trim() || null;
+    if (studentId) {
+      this.studentId = studentId;
+    }
+    if (studentName) {
+      this.studentName = studentName;
+    }
+    this.directSession = null;
+    this.credentials = {
+      accessToken: this.sessionId || `pu-backend-${Date.now()}`,
+      userId: this.studentId ?? undefined,
+      studentId: this.studentId ?? undefined,
+    };
+  }
+
+  private async ensureTCCourses(): Promise<TCCourse[]> {
+    const cached = await getCachedTCCourses();
+    if (cached) return cached;
+
+    const stale = await getAnyCachedTCCourses();
+    try {
+      return (await refreshTCCourses()) ?? stale ?? [];
+    } catch (error) {
+      if (stale) {
+        console.warn("[PUAdapter] Falling back to stale TronClass courses:", error);
+        return stale;
+      }
+      throw error;
+    }
+  }
+
+  private async ensureTCActivitiesMap(courseIds: number[]): Promise<Record<number, TCActivity[]>> {
+    const cached = await getCachedTCActivities();
+    if (cached) return cached;
+
+    const stale = await getAnyCachedTCActivities();
+    try {
+      return await refreshTCActivitiesForCourses(courseIds);
+    } catch (error) {
+      if (stale) {
+        console.warn("[PUAdapter] Falling back to stale TronClass activities:", error);
+        return stale;
+      }
+      throw error;
+    }
+  }
+
+  private async ensureTCModulesMap(courseIds: number[]): Promise<Record<number, TCModule[]>> {
+    const cached = await getCachedTCModules();
+    if (cached) return cached;
+    return refreshTCModulesForCourses(courseIds);
+  }
+
+  private async ensureTCTodos(): Promise<TCActivity[]> {
+    const cached = await getCachedTCTodos();
+    if (cached) return cached;
+    return (await refreshTCTodos()) ?? [];
+  }
+
+  private async ensureTCAttendance(): Promise<TCAttendance[]> {
+    const cached = await getCachedTCAttendance();
+    if (cached) return cached;
+    return (await refreshTCAttendance()) ?? [];
+  }
+
   // ---------------------------------------------------------------------------
   // Data fetching helper (Cloud Functions mode only)
   // ---------------------------------------------------------------------------
@@ -204,23 +258,25 @@ export class PUAdapter extends BaseApiAdapter {
     }
 
     try {
-      const response = await fetch(this.getCloudFunctionUrl("puFetchData"), {
+      const response = await fetch(getCloudFunctionUrl("puFetchCampusData"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          data: { sessionId: this.sessionId, dataType, ...extra },
+          sessionId: this.sessionId,
+          dataType,
+          ...extra,
         }),
       });
 
       if (!response.ok) {
-        console.warn(`[PUAdapter] puFetchData(${dataType}) HTTP ${response.status}`);
+        console.warn(`[PUAdapter] puFetchCampusData(${dataType}) HTTP ${response.status}`);
         return null;
       }
 
-      const result = (await response.json()) as { result: T };
-      return result.result;
+      const result = (await response.json()) as { success?: boolean; result?: T };
+      return result.result ?? null;
     } catch (error) {
-      console.warn(`[PUAdapter] puFetchData(${dataType}) error:`, error);
+      console.warn(`[PUAdapter] puFetchCampusData(${dataType}) error:`, error);
       return null;
     }
   }
@@ -398,6 +454,18 @@ export class PUAdapter extends BaseApiAdapter {
       }));
   }
 
+  async getCourse(id: string): Promise<Course | null> {
+    const courses = await this.listCourses();
+    return (
+      courses.find((course) =>
+        course.id === id ||
+        course.code === id ||
+        id.includes(course.code) ||
+        id.includes(course.id)
+      ) ?? null
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Grades
   // ---------------------------------------------------------------------------
@@ -557,17 +625,15 @@ export class PUAdapter extends BaseApiAdapter {
           )[0].end_date!)
         : null,
       memberCount: tc.student_count,
-      schoolId: "tw-pu",
+      schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
     };
   }
 
   async listCourseSpaces(_userId?: string, _schoolId?: string): Promise<CourseSpace[]> {
-    // 1. 讀快取的 TC 課程
-    const courses = await getCachedTCCourses() ?? await getAnyCachedTCCourses() ?? [];
+    const courses = await this.ensureTCCourses();
     if (courses.length === 0) return [];
 
-    // 2. 讀快取的活動資料（可能為 null）
-    const activitiesMap = await getCachedTCActivities() ?? await getAnyCachedTCActivities() ?? {};
+    const activitiesMap = await this.ensureTCActivitiesMap(courses.map((course) => course.id));
 
     return courses.map((tc) =>
       this.mapTCCourseToCourseSpace(tc, activitiesMap[tc.id] ?? [])
@@ -584,7 +650,14 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   async listCourseModules(_userId?: string, courseSpaceId?: string): Promise<CourseModule[]> {
-    const modulesMap = await getCachedTCModules() ?? {};
+    const tcCourses = await this.ensureTCCourses();
+    const courseIds = courseSpaceId
+      ? [parseInt(courseSpaceId.replace("tc-", ""), 10)].filter((id) => !isNaN(id))
+      : tcCourses.map((course) => course.id);
+    const modulesMap =
+      courseIds.length > 0
+        ? await this.ensureTCModulesMap(courseIds)
+        : await getCachedTCModules() ?? {};
     const results: CourseModule[] = [];
 
     const processModules = (courseId: number, modules: TCModule[]) => {
@@ -666,8 +739,8 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   async listInboxTasks(_userId?: string): Promise<InboxTask[]> {
-    const todos = await getCachedTCTodos() ?? [];
-    const courses = await getCachedTCCourses() ?? await getAnyCachedTCCourses() ?? [];
+    const todos = await this.ensureTCTodos();
+    const courses = await this.ensureTCCourses();
     const courseMap = new Map(courses.map((c) => [c.id, c.name]));
 
     return todos
@@ -681,8 +754,14 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   async listQuizzes(_userId?: string, courseSpaceId?: string): Promise<Quiz[]> {
-    const activitiesMap = await getCachedTCActivities() ?? await getAnyCachedTCActivities() ?? {};
-    const courses = await getCachedTCCourses() ?? [];
+    const courses = await this.ensureTCCourses();
+    const courseIds = courseSpaceId
+      ? [parseInt(courseSpaceId.replace("tc-", ""), 10)].filter((id) => !isNaN(id))
+      : courses.map((course) => course.id);
+    const activitiesMap =
+      courseIds.length > 0
+        ? await this.ensureTCActivitiesMap(courseIds)
+        : await getCachedTCActivities() ?? await getAnyCachedTCActivities() ?? {};
     const courseMap = new Map(courses.map((c) => [c.id, c.name]));
     const results: Quiz[] = [];
 
@@ -727,7 +806,7 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   async listAttendanceSessions(_userId?: string, courseSpaceId?: string): Promise<AttendanceSession[]> {
-    const attendance = await getCachedTCAttendance() ?? [];
+    const attendance = await this.ensureTCAttendance();
 
     const filtered = courseSpaceId
       ? attendance.filter((a) => `tc-${a.course_id}` === courseSpaceId)
@@ -746,7 +825,7 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   async getAttendanceSummary(courseSpaceId: string): Promise<AttendanceSummary> {
-    const attendance = await getCachedTCAttendance() ?? [];
+    const attendance = await this.ensureTCAttendance();
     const courseId = parseInt(courseSpaceId.replace("tc-", ""), 10);
     const match = attendance.find((a) => a.course_id === courseId);
 
@@ -817,7 +896,7 @@ export class PUAdapter extends BaseApiAdapter {
       }
     }
     try {
-      const response = await fetch(this.getCloudFunctionUrl("puHealthCheck"), { method: "GET" });
+      const response = await fetch(getCloudFunctionUrl("puHealthCheck"), { method: "GET" });
       return response.ok;
     } catch {
       return false;

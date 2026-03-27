@@ -239,10 +239,22 @@ export function AIChatScreen(props: any) {
     [auth.user?.uid, school.id]
   );
 
-  const { items: announcements } = useAsyncList(() => ds.listAnnouncements(school.id), [ds, school.id]);
-  const { items: events } = useAsyncList(() => ds.listEvents(school.id), [ds, school.id]);
-  const { items: menus } = useAsyncList(() => ds.listMenus(school.id), [ds, school.id]);
-  const { items: pois } = useAsyncList(() => ds.listPois(school.id), [ds, school.id]);
+  const { items: announcements } = useAsyncList(
+    () => ds.listAnnouncements(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
+  const { items: events } = useAsyncList(
+    () => ds.listEvents(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
+  const { items: menus } = useAsyncList(
+    () => ds.listMenus(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
+  const { items: pois } = useAsyncList(
+    () => ds.listPois(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
 
   // 從 AsyncStorage 讀取對話記錄
   useEffect(() => {

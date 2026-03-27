@@ -2,6 +2,10 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import {
+  PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
+  PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+} from "@campus/shared/src";
 
 import { completeWebSSOCallback, signInWithCustomAuthToken } from "@/features/auth/client";
 import { appendSchoolContext, sanitizeInternalPath } from "@/lib/navigation";
@@ -26,8 +30,8 @@ function SSOCallbackContent() {
     let cancelled = false;
 
     async function run() {
-      const school = searchParams.get("school") || "";
-      const schoolId = searchParams.get("schoolId") || "";
+      const school = PROVIDENCE_UNIVERSITY_SCHOOL_CODE;
+      const schoolId = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
       const returnUrl = sanitizeInternalPath(searchParams.get("returnUrl"));
       const authError = searchParams.get("error");
       const callbackParams = readWebSsoCallbackParams(searchParams);
@@ -44,10 +48,10 @@ function SSOCallbackContent() {
         return;
       }
 
-      if (!schoolId || !callbackParams.provider || !transactionState) {
+      if (!callbackParams.provider || !transactionState) {
         if (!cancelled) {
           setStatus("error");
-          setMessage("缺少學校、登入方式或交易狀態，請重新從登入頁發起");
+          setMessage("缺少登入方式或交易狀態，請重新從登入頁發起");
         }
         return;
       }
@@ -88,9 +92,7 @@ function SSOCallbackContent() {
         setStatus("success");
         setMessage("登入成功！即將跳轉…");
 
-        const target = school
-          ? appendSchoolContext(returnUrl, { code: school, id: schoolId })
-          : returnUrl;
+        const target = appendSchoolContext(returnUrl, { code: school, id: schoolId });
 
         window.setTimeout(() => {
           if (!cancelled) {
@@ -124,12 +126,10 @@ function SSOCallbackContent() {
     error: "linear-gradient(135deg, var(--danger) 0%, #FF6B6B 100%)",
   };
   const loginQuery = new URLSearchParams();
-  const school = searchParams.get("school");
-  const schoolId = searchParams.get("schoolId");
   const returnUrl = searchParams.get("returnUrl");
 
-  if (school) loginQuery.set("school", school);
-  if (schoolId) loginQuery.set("schoolId", schoolId);
+  loginQuery.set("school", PROVIDENCE_UNIVERSITY_SCHOOL_CODE);
+  loginQuery.set("schoolId", PROVIDENCE_UNIVERSITY_SCHOOL_ID);
   if (returnUrl) loginQuery.set("returnUrl", returnUrl);
   const loginQueryString = loginQuery.toString();
 

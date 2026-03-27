@@ -304,7 +304,7 @@ export function MapScreen(props: Record<string, unknown>) {
           <EmptyState 
             title="沒有點位" 
             subtitle="目前沒有點位" 
-            hint="你可以切換學校或稍後再試。"
+            hint="你可以稍後再試，或重新整理資料。"
             actionText="重新載入"
             onAction={reload}
             icon="location-outline"

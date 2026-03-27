@@ -1,4 +1,8 @@
-import { resolveSchool } from "@campus/shared/src/schools";
+import {
+  PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
+  PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+} from "@campus/shared/src";
+import { findSchoolById, resolveSchool } from "@campus/shared/src/schools";
 import { buildSchoolSearch, type SchoolContext } from "./navigation";
 
 export type SchoolSearchParams = {
@@ -7,10 +11,13 @@ export type SchoolSearchParams = {
 };
 
 export function resolveSchoolPageContext(searchParams?: SchoolSearchParams) {
-  const school = resolveSchool({
-    school: searchParams?.school,
-    schoolId: searchParams?.schoolId,
-  });
+  void searchParams;
+  const school =
+    findSchoolById(PROVIDENCE_UNIVERSITY_SCHOOL_ID) ??
+    resolveSchool({
+      school: PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
+      schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+    });
   const context: SchoolContext = { code: school.code, id: school.id };
 
   return {

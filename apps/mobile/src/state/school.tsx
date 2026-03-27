@@ -1,10 +1,9 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { School } from '@campus/shared/src';
-import { mockSchools, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
+import { PROVIDENCE_UNIVERSITY_SCHOOL_CODE, PROVIDENCE_UNIVERSITY_SCHOOL_ID, type School } from '@campus/shared/src';
+import { findSchoolById, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
-import { isSchoolVisibleInDirectory } from '../services/release';
 import { applySchoolTheme, registerSchoolTheme } from '../ui/theme';
 
 export type SchoolSelection = {
@@ -27,11 +26,10 @@ const SchoolContext = createContext<SchoolContextValue | null>(null);
 
 const STORAGE_KEY = 'campus.schoolSelection.v1';
 
-function getDefaultVisibleSchool(): School {
+function getProvidenceSchool(): School {
   return (
-    mockSchools.find((candidate) =>
-      isSchoolVisibleInDirectory(candidate.id, candidate.integrationStatus),
-    ) ?? resolveSchool()
+    findSchoolById(PROVIDENCE_UNIVERSITY_SCHOOL_ID) ??
+    resolveSchool({ schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID, school: PROVIDENCE_UNIVERSITY_SCHOOL_CODE })
   );
 }
 
@@ -46,24 +44,8 @@ function toSelection(school: School): SchoolSelection {
   };
 }
 
-function normalizeSelection(selection: Partial<SchoolSelection>): SchoolSelection {
-  const requested = resolveSchool({
-    school: selection.code,
-    schoolId: selection.schoolId ?? undefined,
-  });
-
-  if (!isSchoolVisibleInDirectory(requested.id, requested.integrationStatus)) {
-    return toSelection(getDefaultVisibleSchool());
-  }
-
-  return {
-    code: normalizeSchoolCode(selection.code ?? requested.code),
-    schoolId: selection.schoolId ?? requested.id,
-    schoolName: selection.schoolName ?? requested.name,
-    shortName: selection.shortName ?? requested.shortName ?? null,
-    themeColor: selection.themeColor ?? requested.themeColor ?? null,
-    domains: selection.domains ?? requested.domains ?? null,
-  };
+function normalizeSelection(_selection: Partial<SchoolSelection>): SchoolSelection {
+  return toSelection(getProvidenceSchool());
 }
 
 export function SchoolProvider(props: {
@@ -71,12 +53,8 @@ export function SchoolProvider(props: {
   initial?: Partial<SchoolSelection>;
 }) {
   const initialSelection = normalizeSelection({
-    code: props.initial?.code ?? 'PU',
-    schoolId: props.initial?.schoolId ?? null,
-    schoolName: props.initial?.schoolName ?? null,
-    shortName: props.initial?.shortName ?? null,
-    themeColor: props.initial?.themeColor ?? null,
-    domains: props.initial?.domains ?? null,
+    code: props.initial?.code ?? PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
+    schoolId: props.initial?.schoolId ?? PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   });
   const [selection, setSelectionState] = useState<SchoolSelection>(initialSelection);
   const [loaded, setLoaded] = useState(false);
@@ -164,38 +142,8 @@ export function SchoolProvider(props: {
   }, [loaded, selection]);
 
   const school = useMemo(() => {
-    const resolved = resolveSchool({
-      school: selection.code,
-      schoolId: selection.schoolId ?? undefined,
-    });
-    if (!isSchoolVisibleInDirectory(resolved.id, resolved.integrationStatus)) {
-      return getDefaultVisibleSchool();
-    }
-
-    if (selection.schoolId && resolved.id !== selection.schoolId) {
-      const fallbackSchool: School = {
-        id: selection.schoolId,
-        code: selection.code || normalizeSchoolCode(selection.schoolId),
-        name: selection.schoolName ?? selection.shortName ?? selection.schoolId,
-        shortName: selection.shortName ?? undefined,
-        themeColor: selection.themeColor ?? undefined,
-        domains: selection.domains ?? undefined,
-      };
-
-      return isSchoolVisibleInDirectory(fallbackSchool.id, fallbackSchool.integrationStatus)
-        ? fallbackSchool
-        : getDefaultVisibleSchool();
-    }
-
-    return resolved;
-  }, [
-    selection.code,
-    selection.schoolId,
-    selection.schoolName,
-    selection.shortName,
-    selection.themeColor,
-    selection.domains,
-  ]);
+    return getProvidenceSchool();
+  }, []);
 
   useEffect(() => {
     if (!loaded || !school) return;

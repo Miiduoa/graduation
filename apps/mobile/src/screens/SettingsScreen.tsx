@@ -1,31 +1,27 @@
 /* eslint-disable */
 import React, { useMemo, useState, useEffect } from 'react';
-import { ScrollView, Text, TextInput, View, Alert, Linking, Pressable } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { ScrollView, Text, View, Alert, Linking } from 'react-native';
 import Constants from 'expo-constants';
+import { PROVIDENCE_UNIVERSITY_SCHOOL_CODE } from '@campus/shared/src';
 import {
   Screen,
-  Card,
   Button,
   Pill,
-  SectionTitle,
   AnimatedCard,
   ListItem,
   SegmentedControl,
-  ToggleSwitch,
   Divider,
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, softShadowStyle } from '../ui/theme';
 import { useDemo, type DemoMode } from '../state/demo';
 import { useThemeMode } from '../state/theme';
-import { mockSchools, normalizeSchoolCode } from '@campus/shared/src/schools';
 import { useSchool } from '../state/school';
 import { clearAllCache, getCacheSize } from '../data/cachedSource';
 import { getHybridSourceStatus } from '../data/hybridSource';
 import { getRuntimeDataSourcePolicy } from '../config/runtime';
 import { formatFileSize } from '../utils/format';
-import { getLegalUrl, getReleaseConfig, isSchoolVisibleInDirectory } from '../services/release';
+import { getLegalUrl, getReleaseConfig } from '../services/release';
 
 const APP_VERSION = Constants.expoConfig?.version ?? Constants.manifest?.version ?? '1.0.0';
 
@@ -40,17 +36,8 @@ export function SettingsScreen(props: any) {
   const nav = props?.navigation;
   const demo = useDemo();
   const themeMode = useThemeMode();
-  const { selection, setSelection, school } = useSchool();
+  const { school } = useSchool();
   const release = getReleaseConfig();
-  const visibleSchools = useMemo(
-    () =>
-      mockSchools.filter((candidate) =>
-        isSchoolVisibleInDirectory(candidate.id, candidate.integrationStatus),
-      ),
-    [],
-  );
-
-  const [codeInput, setCodeInput] = useState(selection.code);
   const [cacheInfo, setCacheInfo] = useState<{ count: number; approximateBytes: number } | null>(
     null,
   );
@@ -62,12 +49,6 @@ export function SettingsScreen(props: any) {
     schoolContextId: string | null;
   } | null>(null);
   const runtimePolicy = useMemo(() => getRuntimeDataSourcePolicy(), []);
-
-  const normalized = useMemo(() => normalizeSchoolCode(codeInput), [codeInput]);
-  const matches = useMemo(
-    () => visibleSchools.filter((candidate) => candidate.code === normalized),
-    [normalized, visibleSchools],
-  );
 
   useEffect(() => {
     getCacheSize().then(setCacheInfo);
@@ -189,101 +170,6 @@ export function SettingsScreen(props: any) {
             </View>
           )}
 
-          <Text
-            style={{
-              color: theme.colors.textSecondary,
-              marginBottom: 8,
-              fontSize: 13,
-              fontWeight: '500',
-            }}
-          >
-            輸入學校代碼切換
-          </Text>
-          <TextInput
-            value={codeInput}
-            onChangeText={(t) => {
-              setCodeInput(t);
-              setSelection({ code: t, schoolId: null });
-            }}
-            autoCapitalize="characters"
-            placeholder="例如 NCHU"
-            placeholderTextColor={theme.colors.muted}
-            style={{
-              paddingVertical: 13,
-              paddingHorizontal: 16,
-              borderRadius: theme.radius.md,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.surface,
-              color: theme.colors.text,
-              fontSize: 15,
-            }}
-          />
-
-          {normalized.length > 0 && matches.length === 0 && (
-            <View style={{ marginTop: 10 }}>
-              <Pill text="找不到此代碼（可先用 DEMO 測試）" size="sm" />
-            </View>
-          )}
-
-          {normalized.length > 0 && matches.length === 1 && (
-            <View style={{ marginTop: 12 }}>
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  marginBottom: 10,
-                  gap: 8,
-                }}
-              >
-                {matches[0].themeColor && (
-                  <View
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: theme.radius.full,
-                      backgroundColor: matches[0].themeColor,
-                    }}
-                  />
-                )}
-                <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
-                  {matches[0].themeColor ? `主題色：${matches[0].themeColor}` : '無自訂主題色'}
-                </Text>
-              </View>
-              <Button
-                text={`切換至 ${matches[0].name}`}
-                kind="primary"
-                onPress={() => setSelection({ code: matches[0].code, schoolId: matches[0].id })}
-              />
-            </View>
-          )}
-
-          {normalized.length > 0 && matches.length > 1 && (
-            <View style={{ marginTop: 12, gap: 10 }}>
-              <Text style={{ color: theme.colors.text, fontWeight: '700' }}>選擇學校：</Text>
-              {matches.map((s) => (
-                <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  {s.themeColor && (
-                    <View
-                      style={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: theme.radius.full,
-                        backgroundColor: s.themeColor,
-                      }}
-                    />
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <Button
-                      text={s.name}
-                      onPress={() => setSelection({ code: s.code, schoolId: s.id })}
-                    />
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-
           <View
             style={{
               marginTop: 14,
@@ -293,7 +179,7 @@ export function SettingsScreen(props: any) {
             }}
           >
             <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
-              可用學校代碼：{visibleSchools.map((s) => s.code).join(' / ')}
+              目前產品已鎖定為 {school.name}（{PROVIDENCE_UNIVERSITY_SCHOOL_CODE}），此版本不再提供校碼切換與多校模式。
             </Text>
           </View>
         </AnimatedCard>
