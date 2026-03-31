@@ -38,6 +38,11 @@ import {
   User,
 } from "firebase/auth";
 import {
+  getFunctions,
+  httpsCallable,
+  Functions,
+} from "firebase/functions";
+import {
   authenticateUniversalDevAccount,
   buildGroupCollectionPath,
   buildSchoolCollectionPath,
@@ -73,6 +78,7 @@ const firebaseConfig = {
 let app: FirebaseApp | null = null;
 let db: Firestore | null = null;
 let auth: Auth | null = null;
+let functionsInstance: Functions | null = null;
 
 function getApp(): FirebaseApp {
   if (app) return app;
@@ -105,6 +111,17 @@ export function getAuth(): Auth | null {
     console.error("[Firebase] Failed to initialize auth:", error);
     return null;
   }
+}
+
+function getFunctionsInstance(): Functions {
+  if (typeof window === "undefined") {
+    throw new Error("Firebase Functions can only be used in the browser.");
+  }
+
+  if (functionsInstance) return functionsInstance;
+  const region = process.env.NEXT_PUBLIC_CLOUD_FUNCTION_REGION || "asia-east1";
+  functionsInstance = getFunctions(getApp(), region);
+  return functionsInstance;
 }
 
 async function parseFunctionJsonResponse(
@@ -787,13 +804,43 @@ export type LibraryLoan = {
   id: string;
   userId: string;
   bookId: string;
+  schoolId?: string;
+  book?: LibraryBook;
   bookTitle?: string;
   bookAuthor?: string;
   borrowedAt: string;
-  dueAt: string;
+  dueAt?: string;
+  dueDate?: string;
   returnedAt?: string;
   renewCount: number;
   status: string;
+};
+
+export type LibrarySeat = {
+  id: string;
+  zone: string;
+  seatNumber: string;
+  name?: string;
+  floor?: string;
+  hasOutlet: boolean;
+  isQuietZone: boolean;
+  status: "available" | "occupied" | "reserved";
+  reservedBy?: string;
+  reservedUntil?: string;
+  schoolId?: string;
+};
+
+export type SeatReservation = {
+  id: string;
+  userId: string;
+  seatId: string;
+  schoolId?: string;
+  seat?: LibrarySeat;
+  date: string;
+  startTime: string;
+  endTime: string;
+  status: "active" | "completed" | "cancelled" | "noshow";
+  createdAt?: string;
 };
 
 export async function fetchGrades(
@@ -881,26 +928,177 @@ export async function fetchLibraryLoans(userId: string, schoolId?: string): Prom
 
   try {
     const firestore = getDb();
-    const constraints: QueryConstraint[] = [
-      where("userId", "==", userId),
-      where("status", "==", "active"),
-      orderBy("dueAt", "asc"),
-    ];
-
     const canonicalSnap = schoolId
-      ? await getDocs(query(collectionFromSegments(firestore, buildUserSchoolCollectionPath(userId, schoolId, "libraryLoans")), ...constraints)).catch(() => null)
+      ? await getDocs(collectionFromSegments(firestore, buildUserSchoolCollectionPath(userId, schoolId, "libraryLoans"))).catch(() => null)
       : null;
-    const snap = canonicalSnap && !canonicalSnap.empty
-      ? canonicalSnap
-      : await getDocs(query(collection(firestore, "libraryLoans"), ...constraints));
+
+    const fallbackConstraints: QueryConstraint[] = [where("userId", "==", userId)];
+    if (schoolId) {
+      fallbackConstraints.push(where("schoolId", "==", schoolId));
+    }
+
+    const snap =
+      canonicalSnap && !canonicalSnap.empty
+        ? canonicalSnap
+        : await getDocs(query(collection(firestore, "libraryLoans"), ...fallbackConstraints));
 
     return snap.docs
       .map((d) => parseDocument<LibraryLoan>({ id: d.id, data: () => d.data() }))
-      .filter((l): l is LibraryLoan => l !== null);
+      .filter((loan): loan is LibraryLoan => {
+        if (!loan) return false;
+        return ["borrowed", "active", "overdue"].includes(loan.status);
+      })
+      .sort((a, b) => {
+        const aTime = Date.parse(a.dueAt ?? a.dueDate ?? "");
+        const bTime = Date.parse(b.dueAt ?? b.dueDate ?? "");
+        if (Number.isNaN(aTime) && Number.isNaN(bTime)) return 0;
+        if (Number.isNaN(aTime)) return 1;
+        if (Number.isNaN(bTime)) return -1;
+        return aTime - bTime;
+      });
   } catch (error) {
     console.error("[Firebase] Failed to fetch library loans:", error);
     return [];
   }
+}
+
+export async function fetchLibrarySeats(
+  schoolId: string,
+  zone?: string
+): Promise<LibrarySeat[]> {
+  if (!isFirebaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const constraints = zone ? [where("zone", "==", zone)] : [];
+    const canonicalRows = await fetchCollectionAtPath<LibrarySeat>(
+      buildSchoolCollectionPath(schoolId, "librarySeats"),
+      constraints
+    ).catch(() => []);
+
+    if (canonicalRows.length > 0) {
+      return canonicalRows.sort((a, b) =>
+        `${a.zone}-${a.seatNumber}`.localeCompare(`${b.zone}-${b.seatNumber}`, "zh-TW")
+      );
+    }
+
+    const firestore = getDb();
+    const fallbackConstraints: QueryConstraint[] = [where("schoolId", "==", schoolId)];
+    if (zone) {
+      fallbackConstraints.push(where("zone", "==", zone));
+    }
+
+    const snap = await getDocs(query(collection(firestore, "librarySeats"), ...fallbackConstraints));
+    return snap.docs
+      .map((d) => parseDocument<LibrarySeat>({ id: d.id, data: () => d.data() }))
+      .filter((seat): seat is LibrarySeat => seat !== null)
+      .sort((a, b) => `${a.zone}-${a.seatNumber}`.localeCompare(`${b.zone}-${b.seatNumber}`, "zh-TW"));
+  } catch (error) {
+    console.error("[Firebase] Failed to fetch library seats:", error);
+    return [];
+  }
+}
+
+export async function fetchSeatReservations(
+  userId: string,
+  schoolId?: string
+): Promise<SeatReservation[]> {
+  if (!isFirebaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const firestore = getDb();
+    const canonicalSnap = schoolId
+      ? await getDocs(collectionFromSegments(firestore, buildUserSchoolCollectionPath(userId, schoolId, "seatReservations"))).catch(() => null)
+      : null;
+
+    const fallbackConstraints: QueryConstraint[] = [where("userId", "==", userId)];
+    if (schoolId) {
+      fallbackConstraints.push(where("schoolId", "==", schoolId));
+    }
+
+    const snap =
+      canonicalSnap && !canonicalSnap.empty
+        ? canonicalSnap
+        : await getDocs(query(collection(firestore, "seatReservations"), ...fallbackConstraints));
+
+    return snap.docs
+      .map((d) => parseDocument<SeatReservation>({ id: d.id, data: () => d.data() }))
+      .filter((reservation): reservation is SeatReservation => reservation !== null)
+      .sort((a, b) => {
+        const left = `${a.date}T${a.startTime}`;
+        const right = `${b.date}T${b.startTime}`;
+        return left.localeCompare(right, "zh-TW");
+      });
+  } catch (error) {
+    console.error("[Firebase] Failed to fetch seat reservations:", error);
+    return [];
+  }
+}
+
+export async function borrowLibraryBook(params: {
+  schoolId: string;
+  bookId: string;
+}): Promise<{ success?: boolean; loanId?: string; dueAt?: string }> {
+  const borrowBook = httpsCallable<
+    { schoolId: string; bookId: string },
+    { success?: boolean; loanId?: string; dueAt?: string }
+  >(getFunctionsInstance(), "borrowBook");
+  const result = await borrowBook(params);
+  return result.data ?? {};
+}
+
+export async function returnLibraryBook(params: {
+  schoolId: string;
+  loanId: string;
+}): Promise<{ success?: boolean }> {
+  const returnBook = httpsCallable<
+    { schoolId: string; loanId: string },
+    { success?: boolean }
+  >(getFunctionsInstance(), "returnBook");
+  const result = await returnBook(params);
+  return result.data ?? {};
+}
+
+export async function renewLibraryLoan(params: {
+  schoolId: string;
+  loanId: string;
+}): Promise<{ success?: boolean; newDueAt?: string; renewCount?: number }> {
+  const renewBook = httpsCallable<
+    { schoolId: string; loanId: string },
+    { success?: boolean; newDueAt?: string; renewCount?: number }
+  >(getFunctionsInstance(), "renewBook");
+  const result = await renewBook(params);
+  return result.data ?? {};
+}
+
+export async function reserveLibrarySeat(params: {
+  schoolId: string;
+  seatId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+}): Promise<{ success?: boolean; reservationId?: string }> {
+  const reserveSeat = httpsCallable<
+    { schoolId: string; seatId: string; date: string; startTime: string; endTime: string },
+    { success?: boolean; reservationId?: string }
+  >(getFunctionsInstance(), "reserveSeat");
+  const result = await reserveSeat(params);
+  return result.data ?? {};
+}
+
+export async function cancelLibrarySeatReservation(params: {
+  schoolId: string;
+  reservationId: string;
+}): Promise<{ success?: boolean }> {
+  const cancelSeatReservation = httpsCallable<
+    { schoolId: string; reservationId: string },
+    { success?: boolean }
+  >(getFunctionsInstance(), "cancelSeatReservation");
+  const result = await cancelSeatReservation(params);
+  return result.data ?? {};
 }
 
 export async function fetchGroupPosts(
