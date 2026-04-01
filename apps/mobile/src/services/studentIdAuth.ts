@@ -7,7 +7,7 @@ import type {
   PuStudentLoginResponse,
 } from '@campus/shared/src';
 
-import { clearAllCache } from '../data/cachedSource';
+import { clearAllCache, invalidateAllCacheForLogin } from '../data/cachedSource';
 import { getAdapter } from '../data/apiAdapters';
 import { PUAdapter } from '../data/apiAdapters/PUAdapter';
 import { PROVIDENCE_UNIVERSITY_INTERNAL_SCHOOL_ID } from '../data/schoolIds';
@@ -16,6 +16,9 @@ import { getCloudFunctionUrl } from './cloudFunctions';
 import { clearMockAuthSession, saveMockAuthSession, type MockAuthSession } from './mockAuth';
 import {
   clearPUCache,
+  getCachedAnnouncements,
+  getCachedCourses,
+  getCachedGrades,
   refreshAnnouncements,
   refreshCourses,
   refreshGrades,
@@ -291,8 +294,11 @@ async function hydratePuCampusBootstrapData(
   }
 
   if (grades) {
+    const gradesList = grades.grades ?? [];
+    const allSems = grades.allSemesters ?? [];
+    console.log(`[studentIdAuth] Bootstrap grades: ${gradesList.length} grades, ${allSems.length} semesters: [${allSems.join(', ')}]`);
     await seedCachedGrades({
-      grades: (grades.grades ?? []).map((grade) => ({
+      grades: gradesList.map((grade) => ({
         semester: grade.semester,
         courseName: grade.courseName,
         courseNameEn: grade.courseNameEn,
@@ -301,7 +307,7 @@ async function hydratePuCampusBootstrapData(
         credits: grade.credits,
         score: grade.score,
       })),
-      allSemesters: grades.allSemesters ?? [],
+      allSemesters: allSems,
       summary: grades.summary ?? {},
     });
   }
@@ -431,13 +437,23 @@ async function bootstrapPuDataSession(params: {
 
     try {
       const tcCourses = await refreshTCCourses();
-      void syncAllData(session, { tcCourses }).catch((error) => {
+      console.log(`[studentIdAuth] TC courses fetched: ${tcCourses?.length ?? 0} courses`);
+      // 背景同步延伸資料（不阻塞登入）
+      void syncAllData(session, { tcCourses }).then((result) => {
+        console.log('[studentIdAuth] deferred syncAllData completed:', {
+          tcActivities: result.tcActivities ? Object.keys(result.tcActivities).length : 0,
+          tcModules: result.tcModules ? Object.keys(result.tcModules).length : 0,
+          tcAttendance: result.tcAttendance?.length ?? 0,
+          tcTodos: result.tcTodos?.length ?? 0,
+        });
+      }).catch((error) => {
         console.warn('[studentIdAuth] deferred syncAllData failed:', error);
       });
     } catch (error) {
+      // TC 課程同步失敗不再阻塞登入，改為 warning
       const message =
         error instanceof Error ? error.message : '無法同步 TronClass 課程';
-      throw new Error(`TronClass 課程同步失敗：${message}`);
+      console.warn(`[studentIdAuth] TronClass 課程同步失敗（不影響登入）: ${message}`);
     }
 
     return {
@@ -525,13 +541,21 @@ async function bootstrapPuDataSession(params: {
 
   try {
     const tcCourses = await refreshTCCourses();
-    void syncAllData(session, { tcCourses }).catch((error) => {
-      console.warn('[studentIdAuth] deferred syncAllData failed:', error);
+    console.log(`[studentIdAuth] TC courses (direct): ${tcCourses?.length ?? 0} courses`);
+    void syncAllData(session, { tcCourses }).then((result) => {
+      console.log('[studentIdAuth] deferred syncAllData (direct) completed:', {
+        tcActivities: result.tcActivities ? Object.keys(result.tcActivities).length : 0,
+        tcModules: result.tcModules ? Object.keys(result.tcModules).length : 0,
+        tcAttendance: result.tcAttendance?.length ?? 0,
+        tcTodos: result.tcTodos?.length ?? 0,
+      });
+    }).catch((error) => {
+      console.warn('[studentIdAuth] deferred syncAllData (direct) failed:', error);
     });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : '無法同步 TronClass 課程';
-    throw new Error(`TronClass 課程同步失敗：${message}`);
+    console.warn(`[studentIdAuth] TronClass 課程同步失敗（不影響登入）: ${message}`);
   }
 
   return {
@@ -594,7 +618,64 @@ async function signInWithStudentIdFallback(params: {
     tronClassSessionId,
     tronClassUserId,
   });
-  await clearAllCache().catch(() => undefined);
+
+  // ── 登入後強制清除 CachedSource 快取 ──
+  // 使用 invalidateAllCacheForLogin 確保 pending requests 也被清除
+  await invalidateAllCacheForLogin().catch(() => undefined);
+
+  // ── 驗證 PU 快取是否正確寫入 ──
+  try {
+    const [verCourses, verGrades, verAnn] = await Promise.all([
+      getCachedCourses(),
+      getCachedGrades(),
+      getCachedAnnouncements(),
+    ]);
+    console.log('[studentIdAuth] Post-login PU cache verification:', {
+      courses: verCourses?.courses?.length ?? 0,
+      grades: verGrades?.grades?.length ?? 0,
+      announcements: verAnn?.length ?? 0,
+    });
+
+    // 如果 PU 快取是空的但 bootstrap 有資料，重新 seed
+    if ((!verCourses || verCourses.courses.length === 0) && courses) {
+      console.warn('[studentIdAuth] PU cache courses empty after bootstrap! Re-seeding...');
+      await seedCachedCourses({
+        courses: courses.courses ?? [],
+        studentInfo: {
+          studentId: courses.studentInfo?.studentId ?? warmed.studentId,
+          name: courses.studentInfo?.name ?? warmed.displayName,
+          className: courses.studentInfo?.className ?? courses.studentInfo?.class ?? null,
+          currentSemester: courses.studentInfo?.currentSemester ?? courses.semester ?? null,
+        },
+        semester: courses.semester ?? null,
+        totalCredits: courses.totalCredits ?? 0,
+      }).catch((e) => console.warn('[studentIdAuth] Re-seed courses failed:', e));
+    }
+    if ((!verGrades || verGrades.grades.length === 0) && grades) {
+      console.warn('[studentIdAuth] PU cache grades empty after bootstrap! Re-seeding...');
+      await seedCachedGrades({
+        grades: (grades.grades ?? []).map((g: any) => ({
+          semester: g.semester,
+          courseName: g.courseName,
+          courseNameEn: g.courseNameEn,
+          className: g.className ?? g.class ?? '',
+          courseType: g.courseType,
+          credits: g.credits,
+          score: g.score,
+        })),
+        allSemesters: grades.allSemesters ?? [],
+        summary: grades.summary ?? {},
+      }).catch((e) => console.warn('[studentIdAuth] Re-seed grades failed:', e));
+    }
+    if ((!verAnn || verAnn.length === 0) && announcements && announcements.length > 0) {
+      console.warn('[studentIdAuth] PU cache announcements empty after bootstrap! Re-seeding...');
+      await seedCachedAnnouncements(
+        announcements.map((a: any) => ({ title: a.title, url: a.url, date: a.date })),
+      ).catch((e) => console.warn('[studentIdAuth] Re-seed announcements failed:', e));
+    }
+  } catch (verifyErr) {
+    console.warn('[studentIdAuth] Post-login cache verification failed:', verifyErr);
+  }
 
   const email = `${warmed.studentId.toLowerCase()}@pu.edu.tw`;
   const uid = `pu-${warmed.studentId.toLowerCase()}`;
@@ -609,6 +690,12 @@ async function signInWithStudentIdFallback(params: {
   };
 
   await saveMockAuthSession(mockSession);
+
+  console.log('[studentIdAuth] signInWithStudentIdFallback complete:', {
+    uid,
+    displayName: warmed.displayName,
+    department: warmed.department,
+  });
 
   return {
     uid,
@@ -693,7 +780,7 @@ export async function signInWithStudentId(params: {
           : null,
     });
 
-    await clearAllCache().catch(() => undefined);
+    await invalidateAllCacheForLogin().catch(() => undefined);
     await signInWithCustomToken(getAuthInstance(), data.customToken);
 
     return {

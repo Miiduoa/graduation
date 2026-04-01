@@ -1,6 +1,12 @@
 const DEFAULT_ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
+  "http://localhost:8081",
+  "http://127.0.0.1:8081",
+  "http://localhost:19006",
+  /^http:\/\/192\.168\.\d+\.\d+/,  // local network (for physical device testing)
+  /^http:\/\/10\.\d+\.\d+\.\d+/,    // local network (for physical device testing)
+  /^http:\/\/172\.\d+\.\d+\.\d+/,   // local network (for physical device testing)
   /^https:\/\/.*\.web\.app$/,
   /^https:\/\/.*\.firebaseapp\.com$/,
 ];

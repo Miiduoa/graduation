@@ -7,7 +7,11 @@
     "rules": "backend/storage/storage.rules"
   },
   "emulators": {
-    "singleProjectMode": false
+    "singleProjectMode": false,
+    "functions": {
+      "port": 5001,
+      "host": "0.0.0.0"
+    }
   },
   "functions": [
     {

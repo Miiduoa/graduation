@@ -38,7 +38,7 @@ export function TeachingStack() {
       <Stack.Screen name="CourseHub" component={CourseHubScreen} options={{ title: "課程中樞" }} />
       <Stack.Screen name="CourseModules" component={CourseModulesScreen} options={{ title: "教材單元" }} />
       <Stack.Screen name="QuizCenter" component={QuizCenterScreen} options={{ title: "測驗中心" }} />
-      <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "點名中心" }} />
+      <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "出缺席" }} />
       <Stack.Screen name="CourseGradebook" component={CourseGradebookScreen} options={{ title: "課內成績簿" }} />
       <Stack.Screen name="Classroom" component={ClassroomScreen} options={{ title: "課堂互動" }} />
       <Stack.Screen name="Grades" component={GradesScreen} options={{ title: "成績查詢" }} />

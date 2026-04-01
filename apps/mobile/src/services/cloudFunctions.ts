@@ -43,6 +43,9 @@ function shouldUseEmulator(extra: CloudFunctionConfig, projectId: string): boole
 }
 
 function getEmulatorHost(): string {
+  // Allow override via env for physical device testing
+  const envHost = String(process.env.EXPO_PUBLIC_EMULATOR_HOST ?? "").trim();
+  if (envHost) return envHost;
   return Platform.OS === "android" ? "10.0.2.2" : "127.0.0.1";
 }
 

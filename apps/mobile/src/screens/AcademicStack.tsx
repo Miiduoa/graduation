@@ -35,7 +35,7 @@ function GuardedAddCourse(props: any) {
 
 function GuardedAttendance(props: any) {
   return (
-    <RouteGuard requires="courses.attendance">
+    <RouteGuard requires={["courses.view", "courses.attendance"]}>
       <AttendanceScreen {...props} />
     </RouteGuard>
   );
@@ -73,8 +73,8 @@ export function AcademicStack() {
       <Stack.Screen name="CourseHub" component={CourseHubScreen} options={{ title: "課程中樞" }} />
       <Stack.Screen name="CourseModules" component={CourseModulesScreen} options={{ title: "教材單元" }} />
       <Stack.Screen name="QuizCenter" component={QuizCenterScreen} options={{ title: "測驗中心" }} />
-      {/* 需要 courses.attendance 權限 — 教師/主管/管理員 */}
-      <Stack.Screen name="Attendance" component={GuardedAttendance} options={{ title: "點名中心" }} />
+      {/* 學生可查看出缺席；教師仍可管理點名 */}
+      <Stack.Screen name="Attendance" component={GuardedAttendance} options={{ title: "出缺席" }} />
       {/* 需要 courses.grade 權限 — 教師/主管/管理員 */}
       <Stack.Screen name="CourseGradebook" component={GuardedGradebook} options={{ title: "課內成績簿" }} />
       <Stack.Screen name="Classroom" component={ClassroomScreen} options={{ title: "課堂互動" }} />

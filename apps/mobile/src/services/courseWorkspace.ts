@@ -78,10 +78,17 @@ export type AttendanceSession = {
   groupName: string;
   active: boolean;
   attendeeCount?: number;
+  totalSessions?: number;
+  presentCount?: number;
+  absentCount?: number;
+  lateCount?: number;
+  leaveCount?: number;
+  attendanceRate?: number;
   startedAt: Date | null;
   endedAt: Date | null;
   source: "attendance" | "live";
   attendanceMode?: string | null;
+  sourceSystem?: "workspace" | "tronclass";
 };
 
 export type CourseGradebookAssignment = {

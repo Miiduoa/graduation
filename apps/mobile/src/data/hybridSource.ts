@@ -181,11 +181,18 @@ async function fetchWithFallback<T>(
       method.apply(adapter, args),
       timeoutPromise,
     ]);
-    
+
+    // 診斷 logging：印出 adapter 回傳的結果摘要
+    if (Array.isArray(result)) {
+      console.log(`[HybridSource] ${apiMethod}(${adapterSchoolId}) → ${result.length} items`);
+    } else {
+      console.log(`[HybridSource] ${apiMethod}(${adapterSchoolId}) → result ok`);
+    }
+
     return result as T;
-    
+
   } catch (error) {
-    console.warn(`[HybridSource] API error for ${apiMethod}:`, error);
+    console.warn(`[HybridSource] API error for ${apiMethod}(${adapterSchoolId}):`, error);
     
     if (config.fallbackToMock && !disableMockFallback) {
       console.info(`[HybridSource] Falling back to mock data for ${apiMethod}`);

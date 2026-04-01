@@ -389,6 +389,12 @@ const CACHEABLE_LIST_METHODS: Record<string, string> = {
   listLostFoundItems: "lostFound",
 };
 
+// 不允許快取空陣列的方法（避免登入前空結果被快取、登入後一直讀到空資料）
+const NEVER_CACHE_EMPTY_METHODS = new Set([
+  "listAnnouncements",
+  "listCourses",
+]);
+
 // 可被快取的單項目獲取方法（需要 id 參數）
 const CACHEABLE_GET_METHODS: Record<string, string> = {
   getAnnouncement: "announcement",
@@ -410,32 +416,45 @@ export function createCachedSource(
     cacheKey: string,
     schoolId: string,
     fetcher: () => Promise<T[]>,
-    expiryMs: number
+    expiryMs: number,
+    methodName?: string
   ): Promise<T[]> {
+    const skipCacheEmpty = methodName ? NEVER_CACHE_EMPTY_METHODS.has(methodName) : false;
+
     const cached = await getCache<T[]>(cacheKey, schoolId, { allowStale: true, expiryMs });
-    
+
     if (cached) {
-      if (cached.isStale && !backgroundUpdateLocks.has(cacheKey)) {
-        // 取得背景更新鎖
-        backgroundUpdateLocks.add(cacheKey);
-        const updateVersion = Date.now();
-        
-        fetchWithRetry(fetcher)
-          .then(async (fresh) => {
-            const saved = await setCache(cacheKey, fresh, schoolId, undefined, updateVersion);
-            if (saved) {
-              notifyCacheUpdate(cacheKey, fresh);
-            }
-          })
-          .catch((e) => {
-            console.warn("[cache] Background refresh failed:", cacheKey, e);
-            onBackgroundUpdateError?.(cacheKey, e);
-          })
-          .finally(() => {
-            backgroundUpdateLocks.delete(cacheKey);
-          });
+      // 如果快取是空陣列且屬於不允許快取空結果的方法，跳過快取直接重新取得
+      if (skipCacheEmpty && Array.isArray(cached.data) && cached.data.length === 0) {
+        console.log(`[cache] Skipping empty cached result for ${methodName} (${cacheKey})`);
+        // 不 return，讓它 fall through 到下面的 fetch 邏輯
+      } else {
+        if (cached.isStale && !backgroundUpdateLocks.has(cacheKey)) {
+          // 取得背景更新鎖
+          backgroundUpdateLocks.add(cacheKey);
+          const updateVersion = Date.now();
+
+          fetchWithRetry(fetcher)
+            .then(async (fresh) => {
+              if (skipCacheEmpty && Array.isArray(fresh) && fresh.length === 0) {
+                console.log(`[cache] Background refresh returned empty for ${methodName}, not caching`);
+                return;
+              }
+              const saved = await setCache(cacheKey, fresh, schoolId, undefined, updateVersion);
+              if (saved) {
+                notifyCacheUpdate(cacheKey, fresh);
+              }
+            })
+            .catch((e) => {
+              console.warn("[cache] Background refresh failed:", cacheKey, e);
+              onBackgroundUpdateError?.(cacheKey, e);
+            })
+            .finally(() => {
+              backgroundUpdateLocks.delete(cacheKey);
+            });
+        }
+        return cached.data;
       }
-      return cached.data;
     }
 
     // 請求去重：如果已經有相同的請求在進行中，等待它完成
@@ -448,6 +467,11 @@ export function createCachedSource(
       try {
         const updateVersion = Date.now();
         const fresh = await fetchWithRetry(fetcher);
+        // 不快取空陣列（對關鍵方法）
+        if (skipCacheEmpty && Array.isArray(fresh) && fresh.length === 0) {
+          console.log(`[cache] ${methodName} returned empty array, skipping cache write (${cacheKey})`);
+          return fresh;
+        }
         await setCache(cacheKey, fresh, schoolId, undefined, updateVersion);
         return fresh;
       } catch (e) {
@@ -540,6 +564,7 @@ export function createCachedSource(
 
       if (CACHEABLE_LIST_METHODS[prop]) {
         const cachePrefix = CACHEABLE_LIST_METHODS[prop];
+        const methodName = prop;
         const listMethod = originalMethod as (
           schoolId?: string,
           options?: QueryOptions
@@ -547,14 +572,15 @@ export function createCachedSource(
         return async (schoolId: string = "default", options?: QueryOptions) => {
           // 將 QueryOptions 序列化納入快取 key，確保不同查詢條件不會共用快取
           const optionsKey = options ? serializeQueryOptions(options) : "";
-          const cacheKey = optionsKey 
+          const cacheKey = optionsKey
             ? `${cachePrefix}_${schoolId}_${optionsKey}`
             : `${cachePrefix}_${schoolId}`;
           return fetchAndCacheListWithExpiry(
             cacheKey,
             schoolId,
             () => listMethod.call(target, schoolId, options),
-            expiryMs
+            expiryMs,
+            methodName
           );
         };
       }
@@ -588,8 +614,32 @@ export async function clearAllCache(): Promise<void> {
     if (cacheKeys.length > 0) {
       await AsyncStorage.multiRemove(cacheKeys);
     }
+    console.log(`[cache] clearAllCache: removed ${cacheKeys.length} entries, cleared ${pendingRequests.size} pending requests`);
   } catch (e) {
     console.warn("[cache] Failed to clear cache:", e);
+  }
+}
+
+/**
+ * 登入完成後呼叫：強制清除所有快取和正在進行的請求，
+ * 確保下次讀取會直接打到 adapter 而不是使用舊的快取/pending promise。
+ */
+export async function invalidateAllCacheForLogin(): Promise<void> {
+  // 1. 取消所有 pending 請求（它們可能帶著舊的空結果）
+  pendingRequests.clear();
+  backgroundUpdateLocks.clear();
+  cacheVersionMap.clear();
+
+  // 2. 刪除所有 @campus_cache_ 前綴的快取
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const cacheKeys = keys.filter((k) => k.startsWith(CACHE_PREFIX));
+    if (cacheKeys.length > 0) {
+      await AsyncStorage.multiRemove(cacheKeys);
+    }
+    console.log(`[cache] invalidateAllCacheForLogin: cleared ${cacheKeys.length} cache entries`);
+  } catch (e) {
+    console.warn("[cache] invalidateAllCacheForLogin failed:", e);
   }
 }
 
