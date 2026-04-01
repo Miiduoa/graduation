@@ -182,17 +182,23 @@ async function fetchTronClassBackend<T>(
     throw new Error("No TronClass backend session");
   }
 
-  const response = await fetch(getCloudFunctionUrl("puFetchTronClassData"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      sessionId: _tcBackendSessionId,
-      dataType,
-      ...extra,
-    }),
-  });
+  let response: Response;
+  try {
+    response = await fetch(getCloudFunctionUrl("puFetchTronClassData"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sessionId: _tcBackendSessionId,
+        dataType,
+        ...extra,
+      }),
+    });
+  } catch (networkErr) {
+    console.warn(`[TronClass] fetchTronClassBackend(${dataType}) network error:`, networkErr);
+    throw new Error(`TronClass 代理網路錯誤（${dataType}）`);
+  }
 
   const text = await response.text();
   let data: { success?: boolean; result?: T; error?: string; userId?: number | null } | null = null;
@@ -201,6 +207,7 @@ async function fetchTronClassBackend<T>(
     try {
       data = JSON.parse(text) as { success?: boolean; result?: T; error?: string; userId?: number | null };
     } catch {
+      console.warn(`[TronClass] fetchTronClassBackend(${dataType}) invalid JSON:`, text.slice(0, 200));
       data = null;
     }
   }
@@ -210,7 +217,9 @@ async function fetchTronClassBackend<T>(
       data?.error ||
       (response.status === 401 || response.status === 403
         ? "TronClass session 已失效，請重新登入"
-        : `TronClass 代理請求失敗（HTTP ${response.status}）`);
+        : `TronClass 代理請求失敗（${dataType}, HTTP ${response.status}）`);
+
+    console.warn(`[TronClass] fetchTronClassBackend(${dataType}) failed:`, errorMessage);
 
     if (response.status === 401 || response.status === 403) {
       await clearTCSession().catch(() => undefined);
@@ -230,6 +239,7 @@ async function fetchTronClassBackend<T>(
     ).catch(() => undefined);
   }
 
+  console.log(`[TronClass] fetchTronClassBackend(${dataType}) success`);
   return data.result as T;
 }
 

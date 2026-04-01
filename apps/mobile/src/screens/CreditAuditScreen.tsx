@@ -72,6 +72,8 @@ export function CreditAuditScreen(props: any) {
       ds.listGrades(auth.user.uid, undefined, school.id).catch(() => [] as Grade[]),
       ds.getGPA(auth.user.uid, school.id).catch(() => ({ gpa: 0, totalCredits: 0, totalPoints: 0 })),
     ]).then(([grades, gpa]) => {
+      const semesters = [...new Set(grades.map((g) => g.semester))];
+      console.log(`[CreditAudit] Loaded ${grades.length} grades across ${semesters.length} semesters: [${semesters.join(", ")}]`);
       setRealGrades(grades);
       setGpaData(gpa);
     });

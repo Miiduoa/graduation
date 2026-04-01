@@ -33,6 +33,9 @@ import {
   refreshCourses,
   refreshGrades,
   refreshAnnouncements,
+  seedCachedCourses,
+  seedCachedGrades as persistCachedGrades,
+  seedCachedAnnouncements,
   getCachedTCCourses,
   getCachedTCActivities,
   getCachedTCModules,
@@ -296,41 +299,41 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   async listAnnouncements(): Promise<Announcement[]> {
-    // ── Direct mode: 快取優先 ──
-    if (this.useDirectMode) {
-      // 1. 試讀未過期快取
-      const cached = await getCachedAnnouncements();
-      if (cached) return this.mapAnnouncements(cached);
+    console.log(`[PUAdapter] listAnnouncements called — mode=${this.useDirectMode ? "direct" : "backend"}, sessionId=${!!this.sessionId}`);
+    // ── 1. 快取優先（所有模式都先讀快取） ──
+    const cached = await getCachedAnnouncements();
+    if (cached && cached.length > 0) {
+      console.log(`[PUAdapter] listAnnouncements → PU cache hit: ${cached.length} items`);
+      return this.mapAnnouncements(cached);
+    }
+    console.log(`[PUAdapter] listAnnouncements → PU cache miss`);
 
-      // 2. 快取過期 → 重新抓取
-      if (this.directSession) {
+    // ── 2. 快取過期或空 → 嘗試遠端抓取 ──
+    try {
+      if (this.useDirectMode && this.directSession) {
         const fresh = await refreshAnnouncements(this.directSession);
-        if (fresh) return this.mapAnnouncements(fresh);
+        if (fresh && fresh.length > 0) return this.mapAnnouncements(fresh);
+      } else if (!this.useDirectMode) {
+        type AnnouncementResponse = {
+          success: boolean;
+          announcements: Array<{ title: string; url: string; date: string }>;
+        };
+        const data = await this.fetchData<AnnouncementResponse>("announcements");
+        if (data?.success && data.announcements?.length > 0) {
+          const items = data.announcements.map((a) => ({ title: a.title, url: a.url, date: a.date }));
+          await seedCachedAnnouncements(items).catch(() => {});
+          return this.mapAnnouncements(items);
+        }
       }
-
-      // 3. 抓取失敗 → 讀任何快取（離線模式）
-      const stale = await getAnyCachedAnnouncements();
-      if (stale) return this.mapAnnouncements(stale);
-
-      return [];
+    } catch (err) {
+      console.warn("[PUAdapter] listAnnouncements remote fetch failed:", err);
     }
 
-    // ── Cloud Functions mode ──
-    type AnnouncementResponse = {
-      success: boolean;
-      announcements: Array<{ title: string; url: string; date: string }>;
-    };
+    // ── 3. 遠端失敗 → 讀任何快取（離線模式） ──
+    const stale = await getAnyCachedAnnouncements();
+    if (stale && stale.length > 0) return this.mapAnnouncements(stale);
 
-    const data = await this.fetchData<AnnouncementResponse>("announcements");
-    if (!data?.success) return [];
-
-    return data.announcements.map((item, i): Announcement => ({
-      id: `pu-ann-${i}-${Date.now()}`,
-      title: item.title,
-      body: item.url,
-      publishedAt: new Date(item.date).toISOString(),
-      source: "靜宜大學 e校園",
-    }));
+    return [];
   }
 
   // ---------------------------------------------------------------------------
@@ -375,83 +378,114 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   async listCourses(_studentId?: string, semester?: string): Promise<Course[]> {
-    // ── Direct mode: 快取優先 ──
-    if (this.useDirectMode) {
-      // 1. 試讀未過期快取
-      const cached = await getCachedCourses();
-      if (cached) return this.mapCourses(cached, semester);
+    console.log(`[PUAdapter] listCourses called — mode=${this.useDirectMode ? "direct" : "backend"}, sessionId=${!!this.sessionId}, directSession=${!!this.directSession}`);
+    // ── 1. 快取優先（所有模式都先讀快取） ──
+    const cached = await getCachedCourses();
+    if (cached && cached.courses.length > 0) {
+      console.log(`[PUAdapter] listCourses → PU cache hit: ${cached.courses.length} courses`);
+      return this.mapCourses(cached, semester);
+    }
+    console.log(`[PUAdapter] listCourses → PU cache miss (cached=${cached ? 'empty' : 'null'})`);
 
-      // 2. 快取過期 → 重新抓取
-      if (this.directSession) {
+    // ── 2. 快取過期或空 → 嘗試遠端抓取 ──
+    try {
+      if (this.useDirectMode && this.directSession) {
         const fresh = await refreshCourses(this.directSession);
-        if (fresh) return this.mapCourses(fresh, semester);
+        if (fresh && fresh.courses.length > 0) return this.mapCourses(fresh, semester);
+      } else if (!this.useDirectMode) {
+        type CourseResponse = {
+          success: boolean;
+          courses: Array<{
+            code: string;
+            classOffered: string;
+            name: string;
+            nameEn: string;
+            courseType: string;
+            credits: number;
+            dayOfWeek: number | null;
+            periods: number[];
+            startTime: string | null;
+            endTime: string | null;
+            location: string;
+            timePlaceRaw: string;
+            teacherEmail: string;
+          }>;
+          studentInfo: {
+            class: string | null;
+            studentId: string | null;
+            name: string | null;
+          };
+          semester: string | null;
+          totalCredits: number;
+        };
+
+        const data = await this.fetchData<CourseResponse>("courses", { semester });
+        if (data?.success && data.courses?.length > 0) {
+          if (data.studentInfo?.studentId) this.studentId = data.studentInfo.studentId;
+          if (data.studentInfo?.name) this.studentName = data.studentInfo.name;
+
+          // 同步寫入快取
+          await seedCachedCourses({
+            courses: data.courses.map((c) => ({
+              code: c.code,
+              classOffered: c.classOffered ?? "",
+              name: c.name,
+              nameEn: c.nameEn ?? "",
+              courseType: c.courseType ?? "",
+              credits: c.credits,
+              dayOfWeek: c.dayOfWeek,
+              periods: c.periods ?? [],
+              startTime: c.startTime,
+              endTime: c.endTime,
+              location: c.location ?? "",
+              timePlaceRaw: c.timePlaceRaw ?? "",
+              teacherEmail: c.teacherEmail ?? "",
+            })),
+            studentInfo: {
+              studentId: data.studentInfo?.studentId ?? this.studentId,
+              name: data.studentInfo?.name ?? this.studentName,
+              className: data.studentInfo?.class ?? null,
+              currentSemester: data.semester ?? null,
+            },
+            semester: data.semester ?? null,
+            totalCredits: data.totalCredits ?? 0,
+          }).catch(() => {});
+
+          const detectedSemester = data.semester || semester || "未指定";
+          return data.courses
+            .filter((c) => c.dayOfWeek !== null)
+            .map((course): Course => ({
+              id: `pu-crs-${course.code}-${course.dayOfWeek}`,
+              code: course.code,
+              name: course.name,
+              instructor: course.teacherEmail.split("@")[0] || "未知教師",
+              teacher: course.teacherEmail.split("@")[0] || "未知教師",
+              credits: course.credits,
+              semester: detectedSemester,
+              schedule: [
+                {
+                  dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+                  startTime: course.startTime || "08:10",
+                  endTime: course.endTime || "09:00",
+                  location: course.location,
+                },
+              ],
+              dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+              startTime: course.startTime || "08:10",
+              endTime: course.endTime || "09:00",
+              location: course.location,
+            }));
+        }
       }
-
-      // 3. 抓取失敗 → 讀任何快取（離線模式）
-      const stale = await getAnyCachedCourses();
-      if (stale) return this.mapCourses(stale, semester);
-
-      return [];
+    } catch (err) {
+      console.warn("[PUAdapter] listCourses remote fetch failed:", err);
     }
 
-    // ── Cloud Functions mode ──
-    type CourseResponse = {
-      success: boolean;
-      courses: Array<{
-        code: string;
-        classOffered: string;
-        name: string;
-        nameEn: string;
-        courseType: string;
-        credits: number;
-        dayOfWeek: number | null;
-        periods: number[];
-        startTime: string | null;
-        endTime: string | null;
-        location: string;
-        timePlaceRaw: string;
-        teacherEmail: string;
-      }>;
-      studentInfo: {
-        class: string | null;
-        studentId: string | null;
-        name: string | null;
-      };
-      semester: string | null;
-      totalCredits: number;
-    };
+    // ── 3. 遠端失敗 → 讀任何快取（離線模式） ──
+    const stale = await getAnyCachedCourses();
+    if (stale && stale.courses.length > 0) return this.mapCourses(stale, semester);
 
-    const data = await this.fetchData<CourseResponse>("courses", { semester });
-    if (!data?.success || !data.courses) return [];
-
-    if (data.studentInfo?.studentId) this.studentId = data.studentInfo.studentId;
-    if (data.studentInfo?.name) this.studentName = data.studentInfo.name;
-
-    const detectedSemester = data.semester || semester || "未指定";
-
-    return data.courses
-      .filter((c) => c.dayOfWeek !== null)
-      .map((course): Course => ({
-        id: `pu-crs-${course.code}-${course.dayOfWeek}`,
-        code: course.code,
-        name: course.name,
-        instructor: course.teacherEmail.split("@")[0] || "未知教師",
-        teacher: course.teacherEmail.split("@")[0] || "未知教師",
-        credits: course.credits,
-        semester: detectedSemester,
-        schedule: [
-          {
-            dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-            startTime: course.startTime || "08:10",
-            endTime: course.endTime || "09:00",
-            location: course.location,
-          },
-        ],
-        dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-        startTime: course.startTime || "08:10",
-        endTime: course.endTime || "09:00",
-        location: course.location,
-      }));
+    return [];
   }
 
   async getCourse(id: string): Promise<Course | null> {
@@ -489,62 +523,86 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   async listGrades(studentId: string, semester?: string): Promise<Grade[]> {
-    // ── Direct mode: 快取優先 ──
-    if (this.useDirectMode) {
-      // 1. 試讀未過期快取
-      const cached = await getCachedGrades();
-      if (cached) return this.mapGrades(cached, studentId, semester);
+    console.log(`[PUAdapter] listGrades called — mode=${this.useDirectMode ? "direct" : "backend"}, sessionId=${!!this.sessionId}`);
+    // ── 1. 快取優先（所有模式都先讀快取） ──
+    const cached = await getCachedGrades();
+    if (cached && cached.grades.length > 0) {
+      console.log(`[PUAdapter] listGrades → PU cache hit: ${cached.grades.length} grades`);
+      return this.mapGrades(cached, studentId, semester);
+    }
+    console.log(`[PUAdapter] listGrades → PU cache miss`);
 
-      // 2. 快取過期 → 重新抓取
-      if (this.directSession) {
+    // ── 2. 快取過期或空 → 嘗試遠端抓取 ──
+    try {
+      if (this.useDirectMode && this.directSession) {
         const fresh = await refreshGrades(this.directSession);
-        if (fresh) return this.mapGrades(fresh, studentId, semester);
+        if (fresh && fresh.grades.length > 0) return this.mapGrades(fresh, studentId, semester);
+      } else if (!this.useDirectMode) {
+        type GradeResponse = {
+          success: boolean;
+          grades: Array<{
+            semester: string;
+            courseName: string;
+            courseNameEn: string;
+            class: string;
+            courseType: string;
+            credits: number;
+            score: number | string;
+          }>;
+          allSemesters: string[];
+          summary: Record<
+            string,
+            {
+              departmentRanking?: string;
+              classRanking?: string;
+              behaviorScore?: number | string;
+              semesterAverage?: number | string;
+            }
+          >;
+        };
+
+        const data = await this.fetchData<GradeResponse>("grades", { semester });
+        if (data?.success && data.grades?.length > 0) {
+          // 同步寫入快取
+          await persistCachedGrades({
+            grades: data.grades.map((g) => ({
+              semester: g.semester,
+              courseName: g.courseName,
+              courseNameEn: g.courseNameEn ?? "",
+              className: g.class ?? "",
+              courseType: g.courseType ?? "",
+              credits: g.credits,
+              score: typeof g.score === "number" ? g.score : parseFloat(String(g.score)) || 0,
+            })),
+            allSemesters: data.allSemesters ?? [],
+            summary: data.summary ?? {},
+          }).catch(() => {});
+
+          return data.grades.map((item, i): Grade => {
+            const score = typeof item.score === "number" ? item.score : parseFloat(String(item.score)) || 0;
+            return {
+              id: `pu-grade-${item.semester}-${i}`,
+              courseId: `pu-crs-${item.semester}-${i}`,
+              courseName: item.courseName,
+              credits: item.credits,
+              grade: score,
+              gradePoint: this.scoreToGradePoint(score),
+              score,
+              semester: item.semester,
+              userId: studentId || this.studentId || "",
+            };
+          });
+        }
       }
-
-      // 3. 抓取失敗 → 讀任何快取（離線模式）
-      const stale = await getAnyCachedGrades();
-      if (stale) return this.mapGrades(stale, studentId, semester);
-
-      return [];
+    } catch (err) {
+      console.warn("[PUAdapter] listGrades remote fetch failed:", err);
     }
 
-    // ── Cloud Functions mode ──
-    type GradeResponse = {
-      success: boolean;
-      grades: Array<{
-        semester: string;
-        courseName: string;
-        courseNameEn: string;
-        class: string;
-        courseType: string;
-        credits: number;
-        score: number | string;
-      }>;
-      allSemesters: string[];
-      summary: Record<
-        string,
-        {
-          departmentRanking?: string;
-          classRanking?: string;
-          behaviorScore?: number | string;
-          semesterAverage?: number | string;
-        }
-      >;
-    };
+    // ── 3. 遠端失敗 → 讀任何快取（離線模式） ──
+    const stale = await getAnyCachedGrades();
+    if (stale && stale.grades.length > 0) return this.mapGrades(stale, studentId, semester);
 
-    const data = await this.fetchData<GradeResponse>("grades", { semester });
-    if (!data?.success || !data.grades) return [];
-
-    return data.grades.map((item, i): Grade => ({
-      id: `pu-grade-${item.semester}-${i}`,
-      courseId: `pu-crs-${item.semester}-${i}`,
-      courseName: item.courseName,
-      credits: item.credits,
-      grade: typeof item.score === "number" ? item.score : parseFloat(String(item.score)) || 0,
-      gradePoint: 0,
-      semester: item.semester,
-      userId: studentId || this.studentId || "",
-    }));
+    return [];
   }
 
   // ---------------------------------------------------------------------------
@@ -630,10 +688,24 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   async listCourseSpaces(_userId?: string, _schoolId?: string): Promise<CourseSpace[]> {
-    const courses = await this.ensureTCCourses();
+    console.log(`[PUAdapter] listCourseSpaces called`);
+    let courses: TCCourse[];
+    try {
+      courses = await this.ensureTCCourses();
+    } catch (err) {
+      console.warn(`[PUAdapter] listCourseSpaces → ensureTCCourses failed:`, err);
+      return [];
+    }
+    console.log(`[PUAdapter] listCourseSpaces → TC courses: ${courses.length}`);
     if (courses.length === 0) return [];
 
-    const activitiesMap = await this.ensureTCActivitiesMap(courses.map((course) => course.id));
+    let activitiesMap: Record<number, TCActivity[]>;
+    try {
+      activitiesMap = await this.ensureTCActivitiesMap(courses.map((course) => course.id));
+    } catch (err) {
+      console.warn(`[PUAdapter] listCourseSpaces → ensureTCActivitiesMap failed:`, err);
+      activitiesMap = {};
+    }
 
     return courses.map((tc) =>
       this.mapTCCourseToCourseSpace(tc, activitiesMap[tc.id] ?? [])
@@ -739,8 +811,22 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   async listInboxTasks(_userId?: string): Promise<InboxTask[]> {
-    const todos = await this.ensureTCTodos();
-    const courses = await this.ensureTCCourses();
+    console.log(`[PUAdapter] listInboxTasks called`);
+    let todos: TCActivity[];
+    try {
+      todos = await this.ensureTCTodos();
+    } catch (err) {
+      console.warn(`[PUAdapter] listInboxTasks → ensureTCTodos failed:`, err);
+      todos = [];
+    }
+    let courses: TCCourse[];
+    try {
+      courses = await this.ensureTCCourses();
+    } catch (err) {
+      console.warn(`[PUAdapter] listInboxTasks → ensureTCCourses failed:`, err);
+      courses = [];
+    }
+    console.log(`[PUAdapter] listInboxTasks → todos=${todos.length}, courses=${courses.length}`);
     const courseMap = new Map(courses.map((c) => [c.id, c.name]));
 
     return todos
@@ -818,9 +904,17 @@ export class PUAdapter extends BaseApiAdapter {
       groupName: a.course_name,
       active: false,
       attendeeCount: a.attended,
+      totalSessions: a.total_sessions,
+      presentCount: a.attended,
+      absentCount: a.absent,
+      lateCount: a.late,
+      leaveCount: a.leave,
+      attendanceRate: a.rate,
       startedAt: null,
       endedAt: null,
       source: "attendance",
+      attendanceMode: "TronClass",
+      sourceSystem: "tronclass",
     }));
   }
 
@@ -829,12 +923,33 @@ export class PUAdapter extends BaseApiAdapter {
     const courseId = parseInt(courseSpaceId.replace("tc-", ""), 10);
     const match = attendance.find((a) => a.course_id === courseId);
 
+    const latestSession = match
+      ? {
+          id: `tc-att-${match.course_id}`,
+          groupId: `tc-${match.course_id}`,
+          groupName: match.course_name,
+          active: false,
+          attendeeCount: match.attended,
+          totalSessions: match.total_sessions,
+          presentCount: match.attended,
+          absentCount: match.absent,
+          lateCount: match.late,
+          leaveCount: match.leave,
+          attendanceRate: match.rate,
+          startedAt: null,
+          endedAt: null,
+          source: "attendance" as const,
+          attendanceMode: "TronClass",
+          sourceSystem: "tronclass" as const,
+        }
+      : null;
+
     return {
       groupId: courseSpaceId,
       totalSessions: match?.total_sessions ?? 0,
       activeSessions: 0,
       totalAttendees: match?.attended ?? 0,
-      latestSession: null,
+      latestSession,
     };
   }
 

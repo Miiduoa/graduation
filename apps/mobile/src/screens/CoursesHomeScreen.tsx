@@ -174,7 +174,7 @@ export function CoursesHomeScreen(props: any) {
                 transform: [{ scale: pressed ? 0.97 : 1 }],
               })}
             >
-              <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.text }}>出勤</Text>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.text }}>出缺席</Text>
             </Pressable>
           </View>
         </View>

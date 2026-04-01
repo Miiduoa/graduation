@@ -34,7 +34,8 @@ function getFirebaseConfig(): FirebaseWebConfig {
 function isMockRuntimeMode(): boolean {
   const mode = String(process.env.EXPO_PUBLIC_DATA_SOURCE_MODE ?? "").toLowerCase();
   const useMockData = String(process.env.EXPO_PUBLIC_USE_MOCK_DATA ?? "").toLowerCase() === "true";
-  return mode === "mock" || useMockData;
+  // hybrid 模式也允許使用 mock Firebase config（透過後端 proxy 取真實資料，不需要 client-side Firebase）
+  return mode === "mock" || mode === "hybrid" || useMockData;
 }
 
 function hasRealFirebaseValue(value?: string): boolean {

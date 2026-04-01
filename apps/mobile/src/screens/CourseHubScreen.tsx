@@ -358,7 +358,7 @@ export function CourseHubScreen(props: any) {
                 />
                 <ActionChip
                   icon="checkmark-done-outline"
-                  label="點名"
+                  label="出缺席"
                   tint="#DC2626"
                   onPress={() =>
                     nav?.navigate?.("Attendance", {

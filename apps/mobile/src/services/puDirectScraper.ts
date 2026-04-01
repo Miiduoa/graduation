@@ -376,80 +376,261 @@ export async function puFetchCourses(
 }
 
 /**
+ * 從 HTML 解析成績行。
+ */
+function parseGradeRows(html: string): { grades: PUGrade[]; summaryRows: { semester: string; label: string; value: string }[] } {
+  const rows = parseTable(html, "Score");
+  const grades: PUGrade[] = [];
+  const summaryRows: { semester: string; label: string; value: string }[] = [];
+
+  for (const cells of rows) {
+    if (cells.length < 6) continue;
+    if (cells[0].includes("Semester") || cells[0].includes("學期別")) continue;
+
+    const sem = cells[0];
+    const courseName = cells[1];
+    const score = cells[5];
+
+    if (
+      courseName.includes("排名") || courseName.includes("ranking") ||
+      courseName.includes("操行") || courseName.includes("Behavior") ||
+      courseName.includes("平均") || courseName.includes("average")
+    ) {
+      summaryRows.push({ semester: sem, label: courseName, value: score });
+      continue;
+    }
+
+    if (!/^\d{4}$/.test(sem)) continue;
+
+    const { zhName, enName } = parseCourseTitle(courseName);
+    grades.push({
+      semester: sem,
+      courseName: zhName,
+      courseNameEn: enName,
+      className: cells[2],
+      courseType: cells[3],
+      credits: parseInt(cells[4], 10) || 0,
+      score: score === "通過(Pass)" ? "Pass" : (parseFloat(score) || score),
+    });
+  }
+
+  return { grades, summaryRows };
+}
+
+/**
+ * 從下拉選單提取可用學期列表。
+ */
+function extractAvailableSemesters(html: string): string[] {
+  const semesters: string[] = [];
+  const optionRegex = /<option[^>]*value=["']?(\d{4})["']?[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = optionRegex.exec(html)) !== null) {
+    if (!semesters.includes(m[1])) semesters.push(m[1]);
+  }
+  return semesters;
+}
+
+/**
+ * 建構學期摘要物件。
+ */
+function buildGradeSummary(summaryRows: { semester: string; label: string; value: string }[]): PUGradeResult["summary"] {
+  const summary: PUGradeResult["summary"] = {};
+  for (const s of summaryRows) {
+    if (!summary[s.semester]) summary[s.semester] = {};
+    const entry = summary[s.semester];
+    if (s.label.includes("系排名") || s.label.includes("Department")) {
+      entry.departmentRanking = s.value;
+    } else if (s.label.includes("班排名") || s.label.includes("Class")) {
+      entry.classRanking = s.value;
+    } else if (s.label.includes("操行") || s.label.includes("Behavior")) {
+      entry.behaviorScore = parseFloat(s.value) || s.value;
+    } else if (s.label.includes("平均") || s.label.includes("average")) {
+      entry.semesterAverage = parseFloat(s.value) || s.value;
+    }
+  }
+  return summary;
+}
+
+/**
  * 取得成績（注意：成績在不同 domain — mypu.pu.edu.tw）。
+ *
+ * 策略：
+ * 1. 先 GET score_all.php 看回傳幾個學期
+ * 2. 如果只有 ≤1 學期，嘗試 POST 或帶參數取得全部
+ * 3. 如果頁面有學期下拉選單，逐學期抓取
  */
 export async function puFetchGrades(
   _session: PUSession,
   semester?: string
 ): Promise<{ success: boolean; data: PUGradeResult | null; error?: string }> {
   try {
+    // Step 1: Warm up mypu session (native cookie jar handles cross-domain)
+    try {
+      await nativeFetch(`${MYPU_BASE}/`);
+      console.log("[puFetchGrades] mypu warmup done");
+    } catch (e) {
+      console.warn("[puFetchGrades] mypu warmup failed (non-fatal):", e);
+    }
+
+    // Step 1b: Try alcat's score page (may proxy/redirect to mypu with SSO)
+    try {
+      const alcatGrade = await nativeFetch(`${ALCAT_BASE}${GRADE_PATH}`);
+      if (alcatGrade.status === 200) {
+        const alcatParsed = parseGradeRows(alcatGrade.html);
+        const alcatSems = [...new Set(alcatParsed.grades.map((g) => g.semester))];
+        console.log(`[puFetchGrades] alcat score_all: ${alcatParsed.grades.length} grades, ${alcatSems.length} semesters`);
+        if (alcatSems.length > 1) {
+          const filteredGrades = semester ? alcatParsed.grades.filter((g) => g.semester === semester) : alcatParsed.grades;
+          return {
+            success: true,
+            data: {
+              grades: filteredGrades,
+              allSemesters: alcatSems,
+              summary: buildGradeSummary(alcatParsed.summaryRows),
+            },
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[puFetchGrades] alcat grade bridge failed (non-fatal):", e);
+    }
+
+    // Step 2: Fetch grade page from mypu
     const result = await nativeFetch(`${MYPU_BASE}${GRADE_PATH}`);
     if (result.status !== 200) {
       return { success: false, data: null, error: `HTTP ${result.status}` };
     }
 
     const html = result.html;
-    const rows = parseTable(html, "Score");
+    console.log("[puFetchGrades] score_all.php HTML length:", html.length);
+    console.log("[puFetchGrades] score_all.php snippet:", html.slice(0, 500));
 
-    const grades: PUGrade[] = [];
-    const summaryRows: { semester: string; label: string; value: string }[] = [];
+    // Step 3: Parse initial response
+    let { grades, summaryRows } = parseGradeRows(html);
+    const initialSemesters = [...new Set(grades.map((g) => g.semester))];
+    console.log(`[puFetchGrades] Initial: ${grades.length} grades, ${initialSemesters.length} semesters: [${initialSemesters.join(", ")}]`);
 
-    for (const cells of rows) {
-      if (cells.length < 6) continue;
-      if (cells[0].includes("Semester") || cells[0].includes("學期別")) continue;
+    // Step 4: If only ≤1 semester, try additional approaches
+    if (initialSemesters.length <= 1) {
+      console.log("[puFetchGrades] Only 0-1 semesters — trying POST approaches…");
 
-      const sem = cells[0];
-      const courseName = cells[1];
-      const score = cells[5];
+      // Try POST with various form bodies
+      const postAttempts = [
+        { body: "", desc: "empty POST" },
+        { body: "semester=", desc: "semester=empty" },
+        { body: "qy=", desc: "qy=empty" },
+        { body: "sem=&submit=查詢", desc: "sem=empty+submit" },
+      ];
 
-      // 摘要行（排名、操行、平均）
-      if (
-        courseName.includes("排名") || courseName.includes("ranking") ||
-        courseName.includes("操行") || courseName.includes("Behavior") ||
-        courseName.includes("平均") || courseName.includes("average")
-      ) {
-        summaryRows.push({ semester: sem, label: courseName, value: score });
-        continue;
+      for (const attempt of postAttempts) {
+        try {
+          const postRes = await nativeFetch(`${MYPU_BASE}${GRADE_PATH}`, {
+            method: "POST",
+            body: attempt.body,
+            contentType: "application/x-www-form-urlencoded",
+          });
+          if (postRes.status === 200) {
+            const postParsed = parseGradeRows(postRes.html);
+            const postSemesters = [...new Set(postParsed.grades.map((g) => g.semester))];
+            console.log(`[puFetchGrades] POST (${attempt.desc}): ${postParsed.grades.length} grades, ${postSemesters.length} semesters`);
+
+            if (postParsed.grades.length > grades.length) {
+              grades = postParsed.grades;
+              summaryRows = postParsed.summaryRows;
+              console.log(`[puFetchGrades] POST (${attempt.desc}) returned MORE grades — using`);
+              break;
+            }
+          }
+        } catch (e) {
+          console.warn(`[puFetchGrades] POST (${attempt.desc}) failed:`, e);
+        }
       }
 
-      if (!/^\d{4}$/.test(sem)) continue;
+      // Per-semester fetch — use dropdown options, or generate semester codes
+      const allSemsSoFar = [...new Set(grades.map((g) => g.semester))];
+      const availableSemesters = extractAvailableSemesters(html);
+      let semestersToFetch = availableSemesters.filter((s) => !allSemsSoFar.includes(s));
 
-      const { zhName, enName } = parseCourseTitle(courseName);
-      grades.push({
-        semester: sem,
-        courseName: zhName,
-        courseNameEn: enName,
-        className: cells[2],
-        courseType: cells[3],
-        credits: parseInt(cells[4], 10) || 0,
-        score: score === "通過(Pass)" ? "Pass" : (parseFloat(score) || score),
-      });
+      // If no dropdown, generate plausible semester codes (last 4 years)
+      if (semestersToFetch.length === 0) {
+        const rocYear = new Date().getFullYear() - 1911;
+        const generated: string[] = [];
+        for (let y = rocYear; y >= rocYear - 4; y--) {
+          generated.push(`${y}2`, `${y}1`);
+        }
+        semestersToFetch = generated.filter((s) => !allSemsSoFar.includes(s));
+        console.log(`[puFetchGrades] No dropdown — generated ${semestersToFetch.length} semester codes`);
+      }
+
+      if (allSemsSoFar.length <= 1 && semestersToFetch.length > 0) {
+        console.log(`[puFetchGrades] Trying per-semester fetch for ${semestersToFetch.length} semesters…`);
+        const allGrades = [...grades];
+        const allSummary = [...summaryRows];
+        const fetched = new Set(allSemsSoFar);
+        let consecutiveEmpty = 0;
+
+        for (const sem of semestersToFetch) {
+          if (fetched.has(sem)) continue;
+          if (consecutiveEmpty >= 3) {
+            console.log("[puFetchGrades] Stopping after 3 consecutive empty semesters");
+            break;
+          }
+
+          let found = false;
+          try {
+            const semRes = await nativeFetch(`${MYPU_BASE}${GRADE_PATH}?semester=${sem}`);
+            if (semRes.status === 200) {
+              const parsed = parseGradeRows(semRes.html);
+              if (parsed.grades.length > 0) {
+                allGrades.push(...parsed.grades);
+                allSummary.push(...parsed.summaryRows);
+                fetched.add(sem);
+                found = true;
+                console.log(`[puFetchGrades] Semester ${sem}: +${parsed.grades.length} grades`);
+              }
+            }
+            if (!found) {
+              const semPost = await nativeFetch(`${MYPU_BASE}${GRADE_PATH}`, {
+                method: "POST",
+                body: `semester=${sem}`,
+                contentType: "application/x-www-form-urlencoded",
+              });
+              if (semPost.status === 200) {
+                const parsed = parseGradeRows(semPost.html);
+                if (parsed.grades.length > 0) {
+                  allGrades.push(...parsed.grades);
+                  allSummary.push(...parsed.summaryRows);
+                  fetched.add(sem);
+                  found = true;
+                  console.log(`[puFetchGrades] Semester ${sem} POST: +${parsed.grades.length} grades`);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`[puFetchGrades] Per-semester ${sem} failed:`, e);
+          }
+          consecutiveEmpty = found ? 0 : consecutiveEmpty + 1;
+        }
+
+        if (allGrades.length > grades.length) {
+          grades = allGrades;
+          summaryRows = allSummary;
+        }
+      }
     }
+
+    // Step 5: Build final result
+    const allSemesters = [...new Set(grades.map((g) => g.semester))];
+    console.log(`[puFetchGrades] Final: ${grades.length} grades, ${allSemesters.length} semesters: [${allSemesters.join(", ")}]`);
 
     const filteredGrades = semester ? grades.filter((g) => g.semester === semester) : grades;
-
-    // 按學期彙整摘要
-    const summary: PUGradeResult["summary"] = {};
-    for (const s of summaryRows) {
-      if (!summary[s.semester]) summary[s.semester] = {};
-      const entry = summary[s.semester];
-      if (s.label.includes("系排名") || s.label.includes("Department")) {
-        entry.departmentRanking = s.value;
-      } else if (s.label.includes("班排名") || s.label.includes("Class")) {
-        entry.classRanking = s.value;
-      } else if (s.label.includes("操行") || s.label.includes("Behavior")) {
-        entry.behaviorScore = parseFloat(s.value) || s.value;
-      } else if (s.label.includes("平均") || s.label.includes("average")) {
-        entry.semesterAverage = parseFloat(s.value) || s.value;
-      }
-    }
 
     return {
       success: true,
       data: {
         grades: filteredGrades,
-        allSemesters: [...new Set(grades.map((g) => g.semester))],
-        summary,
+        allSemesters,
+        summary: buildGradeSummary(summaryRows),
       },
     };
   } catch (err) {

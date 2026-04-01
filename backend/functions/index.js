@@ -53,6 +53,8 @@ const {
   puFetchGrades,
   puFetchAnnouncements,
   puFetchStudentInfo,
+  puFetchCreditAudit,
+  puDiscoverMenuLinks,
 } = require('./puScraper');
 const {
   tcLogin,
@@ -373,37 +375,64 @@ async function createPuTronClassSession({
   session,
 }) {
   const sessionId = nodeCrypto.randomBytes(16).toString('hex');
-  await db.collection('_puTronClassSessions').doc(sessionId).set(
-    {
-      studentId,
-      cookies,
-      userId: session?.userId ?? null,
-      userName: session?.userName ?? null,
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-    },
-    { merge: true },
-  );
+  const sessionData = {
+    studentId,
+    cookies,
+    userId: session?.userId ?? null,
+    userName: session?.userName ?? null,
+    createdAt: new Date(),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  };
+
+  try {
+    await db.collection('_puTronClassSessions').doc(sessionId).set(sessionData, { merge: true });
+  } catch (err) {
+    console.warn('[createPuTronClassSession] Firestore unavailable, using in-memory:', err.message);
+    _inMemorySessions.set(`tc-${sessionId}`, sessionData);
+  }
 
   return sessionId;
 }
+
+// In-memory session store (fallback when Firestore is unavailable)
+const _inMemorySessions = new Map();
 
 async function createPuCampusSession({
   studentId,
   cookies,
 }) {
   const sessionId = nodeCrypto.randomBytes(16).toString('hex');
-  await db.collection('_puSessions').doc(sessionId).set(
-    {
-      studentId,
-      cookies,
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-    },
-    { merge: true },
-  );
+  const sessionData = {
+    studentId,
+    cookies,
+    createdAt: new Date(),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  };
+
+  try {
+    await db.collection('_puSessions').doc(sessionId).set(sessionData, { merge: true });
+  } catch (err) {
+    // Firestore unavailable (e.g., emulator not running) — use in-memory fallback
+    console.warn('[createPuCampusSession] Firestore unavailable, using in-memory session:', err.message);
+    _inMemorySessions.set(sessionId, sessionData);
+  }
 
   return sessionId;
+}
+
+/**
+ * Retrieve a PU session from Firestore or in-memory store.
+ */
+async function getPuCampusSession(sessionId) {
+  // Try Firestore first
+  try {
+    const doc = await db.collection('_puSessions').doc(sessionId).get();
+    if (doc.exists) return doc.data();
+  } catch (err) {
+    // Firestore unavailable
+  }
+  // Fallback to in-memory
+  return _inMemorySessions.get(sessionId) || null;
 }
 
 async function ensurePuStudentAuthUser({
@@ -2645,6 +2674,37 @@ exports.signInPuStudentId = onRequest(
       const displayName = String(profile.name || loginResult.studentName || `${studentId} 同學`).trim();
       const department = String(profile.class || '').trim();
 
+      // Diagnostic: log grade results
+      if (gradesResult.success) {
+        console.log(`[signInPuStudentId] Grades: ${gradesResult.grades?.length ?? 0} grades, semesters: [${(gradesResult.allSemesters || []).join(', ')}]`);
+      } else {
+        console.warn(`[signInPuStudentId] Grade fetch failed:`, gradesResult.error);
+      }
+
+      // If grades only has 0-1 semesters, try credit audit discovery for more complete data
+      let finalGradesResult = gradesResult;
+      const gradeSemesters = gradesResult.success ? (gradesResult.allSemesters || []) : [];
+      if (gradeSemesters.length <= 1) {
+        console.log('[signInPuStudentId] Grades insufficient — trying credit audit discovery…');
+        try {
+          const auditResult = await puFetchCreditAudit(loginResult.cookies);
+          if (auditResult.success && auditResult.grades.length > (gradesResult.grades?.length || 0)) {
+            console.log(`[signInPuStudentId] Credit audit found MORE grades: ${auditResult.grades.length} grades, ${auditResult.allSemesters.length} semesters`);
+            finalGradesResult = {
+              success: true,
+              grades: auditResult.grades,
+              allSemesters: auditResult.allSemesters,
+              summary: auditResult.summary,
+            };
+          }
+          if (auditResult.creditAuditUrl) {
+            console.log(`[signInPuStudentId] Credit audit URL found: ${auditResult.creditAuditUrl}`);
+          }
+        } catch (e) {
+          console.warn('[signInPuStudentId] Credit audit discovery failed:', e.message);
+        }
+      }
+
       if (skipFirebase) {
         res.set('Cache-Control', 'no-store');
         res.json({
@@ -2672,11 +2732,11 @@ exports.signInPuStudentId = onRequest(
                 totalCredits: coursesResult.totalCredits ?? 0,
               }
             : null,
-          grades: gradesResult.success
+          grades: finalGradesResult.success
             ? {
-                grades: gradesResult.grades || [],
-                allSemesters: gradesResult.allSemesters || [],
-                summary: gradesResult.summary || {},
+                grades: finalGradesResult.grades || [],
+                allSemesters: finalGradesResult.allSemesters || [],
+                summary: finalGradesResult.summary || {},
               }
             : null,
           announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
@@ -2742,11 +2802,11 @@ exports.signInPuStudentId = onRequest(
               totalCredits: coursesResult.totalCredits ?? 0,
             }
           : null,
-        grades: gradesResult.success
+        grades: finalGradesResult.success
           ? {
-              grades: gradesResult.grades || [],
-              allSemesters: gradesResult.allSemesters || [],
-              summary: gradesResult.summary || {},
+              grades: finalGradesResult.grades || [],
+              allSemesters: finalGradesResult.allSemesters || [],
+              summary: finalGradesResult.summary || {},
             }
           : null,
         announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
@@ -7405,7 +7465,7 @@ exports.puFetchCampusData = onRequest(
       const sessionId = String(req.body?.sessionId || '').trim();
       const dataType = String(req.body?.dataType || '').trim();
       const semester = String(req.body?.semester || '').trim();
-      const allowedTypes = ['courses', 'grades', 'announcements', 'studentInfo'];
+      const allowedTypes = ['courses', 'grades', 'announcements', 'studentInfo', 'creditAudit', 'menuLinks'];
 
       if (!sessionId || !dataType) {
         res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
@@ -7424,17 +7484,34 @@ exports.puFetchCampusData = onRequest(
         windowMs: 5 * 60 * 1000,
       });
 
-      const sessionRef = db.collection('_puSessions').doc(sessionId);
-      const sessionDoc = await sessionRef.get();
-      if (!sessionDoc.exists) {
-        res.status(401).json({ error: 'Invalid or expired PU session' });
-        return;
+      // Try Firestore first, then in-memory fallback
+      let sessionData = null;
+      try {
+        const sessionRef = db.collection('_puSessions').doc(sessionId);
+        const sessionDoc = await sessionRef.get();
+        if (sessionDoc.exists) {
+          sessionData = sessionDoc.data();
+          const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
+          if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0 || !expiresAt || expiresAt < new Date()) {
+            await sessionRef.delete().catch(() => null);
+            sessionData = null;
+          }
+        }
+      } catch (err) {
+        // Firestore unavailable — try in-memory
+        console.warn('[puFetchCampusData] Firestore unavailable, trying in-memory:', err.message);
       }
 
-      const sessionData = sessionDoc.data();
-      const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
-      if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0 || !expiresAt || expiresAt < new Date()) {
-        await sessionRef.delete().catch(() => null);
+      // In-memory fallback
+      if (!sessionData) {
+        sessionData = _inMemorySessions.get(sessionId) || null;
+        if (sessionData) {
+          const expiresAt = sessionData.expiresAt instanceof Date ? sessionData.expiresAt : new Date(sessionData.expiresAt);
+          if (expiresAt < new Date()) sessionData = null;
+        }
+      }
+
+      if (!sessionData?.cookies) {
         res.status(401).json({ error: 'Invalid or expired PU session' });
         return;
       }
@@ -7452,6 +7529,12 @@ exports.puFetchCampusData = onRequest(
           break;
         case 'studentInfo':
           result = await puFetchStudentInfo(sessionData.cookies);
+          break;
+        case 'creditAudit':
+          result = await puFetchCreditAudit(sessionData.cookies);
+          break;
+        case 'menuLinks':
+          result = await puDiscoverMenuLinks(sessionData.cookies);
           break;
         default:
           res.status(400).json({ error: `Unknown dataType: ${dataType}` });
