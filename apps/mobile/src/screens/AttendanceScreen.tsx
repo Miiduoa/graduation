@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 
 import type { AttendanceSession, CourseSpace } from "../data";
@@ -11,6 +11,29 @@ import { useSchool } from "../state/school";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useDataSource } from "../hooks/useDataSource";
 import { canManageCourse, formatDateTime } from "../services/courseWorkspace";
+
+function isTronClassAttendanceSession(session: AttendanceSession): boolean {
+  return (
+    session.sourceSystem === "tronclass" ||
+    session.attendanceMode === "TronClass" ||
+    session.groupId.startsWith("tc-")
+  );
+}
+
+function toMetricValue(value?: number): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "0";
+}
+
+function toAttendanceRate(rate?: number): string {
+  return typeof rate === "number" && Number.isFinite(rate) ? `${Math.round(rate)}%` : "未提供";
+}
+
+function getAttendanceRateKind(rate?: number): "success" | "default" | "danger" | "muted" {
+  if (typeof rate !== "number" || !Number.isFinite(rate)) return "muted";
+  if (rate >= 90) return "success";
+  if (rate >= 75) return "default";
+  return "danger";
+}
 
 export function AttendanceScreen(props: any) {
   const nav = props?.navigation;
@@ -46,8 +69,68 @@ export function AttendanceScreen(props: any) {
   );
 
   const selectedMembership = memberships.find((membership) => membership.groupId === routeGroupId) ?? null;
-  const selectedCourseName = routeGroupName ?? selectedMembership?.name ?? "點名中心";
+  const selectedCourseName = routeGroupName ?? selectedMembership?.name ?? "出缺席";
   const canEditCourse = canManageCourse(selectedMembership?.role);
+  const isProvidenceAttendanceMode =
+    school.id === "pu" &&
+    (routeGroupId?.startsWith("tc-") ||
+      memberships.some((membership) => membership.groupId.startsWith("tc-")) ||
+      sessions.some(isTronClassAttendanceSession));
+
+  const tronClassSessions = useMemo(
+    () =>
+      sessions
+        .filter(isTronClassAttendanceSession)
+        .sort((left, right) => {
+          const leftRate = left.attendanceRate ?? Number.POSITIVE_INFINITY;
+          const rightRate = right.attendanceRate ?? Number.POSITIVE_INFINITY;
+          if (leftRate !== rightRate) return leftRate - rightRate;
+          return left.groupName.localeCompare(right.groupName, "zh-Hant");
+        }),
+    [sessions]
+  );
+
+  const tronClassOverview = useMemo(() => {
+    const totalCourses = tronClassSessions.length;
+    const totalSessions = tronClassSessions.reduce(
+      (sum, session) => sum + (session.totalSessions ?? 0),
+      0,
+    );
+    const presentCount = tronClassSessions.reduce(
+      (sum, session) => sum + (session.presentCount ?? session.attendeeCount ?? 0),
+      0,
+    );
+    const absentCount = tronClassSessions.reduce(
+      (sum, session) => sum + (session.absentCount ?? 0),
+      0,
+    );
+    const lateCount = tronClassSessions.reduce(
+      (sum, session) => sum + (session.lateCount ?? 0),
+      0,
+    );
+    const leaveCount = tronClassSessions.reduce(
+      (sum, session) => sum + (session.leaveCount ?? 0),
+      0,
+    );
+
+    const weightedRateTotal = tronClassSessions.reduce(
+      (sum, session) => sum + ((session.attendanceRate ?? 0) * (session.totalSessions ?? 0)),
+      0,
+    );
+    const attendanceRate =
+      totalSessions > 0 ? Math.round(weightedRateTotal / totalSessions) : null;
+
+    return {
+      totalCourses,
+      totalSessions,
+      presentCount,
+      absentCount,
+      lateCount,
+      leaveCount,
+      attendanceRate,
+    };
+  }, [tronClassSessions]);
+
   const activeSessions = sessions.filter((session) => session.active);
   const completedSessions = sessions.filter((session) => !session.active);
 
@@ -83,9 +166,9 @@ export function AttendanceScreen(props: any) {
   if (!auth.user) {
     return (
       <Screen>
-        <Card title="點名中心" subtitle="登入後即可查看課程點名與課堂簽到">
+        <Card title="出缺席" subtitle="登入後即可查看 TronClass 同步的正式出缺席資料">
           <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-            這裡會承接課堂簽到、出席記錄與 QR 點名，成為正式 LMS 的點名中心。
+            靜宜大學版本會直接對齊 TronClass 的出缺席統計，不再以 app 內自訂 QR 點名作為主體。
           </Text>
         </Card>
       </Screen>
@@ -93,12 +176,107 @@ export function AttendanceScreen(props: any) {
   }
 
   if (membershipsLoading || sessionsLoading) {
-    return <LoadingState title="點名中心" subtitle="整理課堂點名資料中..." rows={4} />;
+    return <LoadingState title="出缺席" subtitle="整理 TronClass 與課堂出席資料中..." rows={4} />;
   }
 
   const combinedError = membershipsError ?? sessionsError;
   if (combinedError) {
-    return <ErrorState title="點名中心" subtitle="讀取點名失敗" hint={combinedError} />;
+    return <ErrorState title="出缺席" subtitle="讀取出席資料失敗" hint={combinedError} />;
+  }
+
+  if (isProvidenceAttendanceMode) {
+    return (
+      <Screen noPadding>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ gap: 14, padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        >
+          <Card
+            title={routeGroupId ? `${selectedCourseName} 出缺席` : "出缺席"}
+            subtitle="依 TronClass 同步的正式出缺席資料"
+          >
+            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+              <Pill text={`${tronClassOverview.totalCourses} 門課`} kind="default" />
+              <Pill text={`${tronClassOverview.totalSessions} 堂`} kind="default" />
+              <Pill
+                text={`整體出席率 ${toAttendanceRate(tronClassOverview.attendanceRate)}`}
+                kind={getAttendanceRateKind(tronClassOverview.attendanceRate ?? undefined)}
+              />
+            </View>
+          </Card>
+
+          <Card title="同步規則" subtitle="以 TronClass 為準，不在 app 內另建一套點名紀錄">
+            <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+              這裡顯示的是 TronClass 已經確認的正式出缺席統計。若老師在 TronClass 補點、改成遲到或請假，下一次同步後就會反映在這裡。
+            </Text>
+          </Card>
+
+          {canEditCourse && routeGroupId ? (
+            <Card title="教師操作" subtitle="PU-only 模式下，正式點名仍以 TronClass 為主">
+              <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+                這個頁面現在只顯示 TronClass 的正式統計，不會在 app 內再建立平行的 QR 點名紀錄。
+              </Text>
+            </Card>
+          ) : null}
+
+          <Card title={routeGroupId ? "本課統計" : "課程統計"} subtitle="比照 TronClass 的課程別出缺席摘要">
+            <View style={{ gap: 10 }}>
+              {tronClassSessions.length === 0 ? (
+                <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+                  目前尚未同步到可顯示的 TronClass 出缺席資料。若你剛登入，可以稍後重新整理一次。
+                </Text>
+              ) : (
+                tronClassSessions.map((session) => (
+                  <Pressable
+                    key={`${session.groupId}-${session.id}`}
+                    onPress={() =>
+                      nav?.navigate?.("CourseHub", {
+                        groupId: session.groupId,
+                        groupName: session.groupName,
+                      })
+                    }
+                    style={({ pressed }) => ({
+                      borderRadius: theme.radius.lg,
+                      backgroundColor: theme.colors.surface2,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      padding: 14,
+                      opacity: pressed ? 0.82 : 1,
+                      gap: 10,
+                    })}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.colors.text, fontWeight: "700" }}>
+                          {session.groupName}
+                        </Text>
+                        <Text style={{ color: theme.colors.muted, marginTop: 4 }}>
+                          TronClass 正式出缺席統計
+                        </Text>
+                      </View>
+                      <Pill
+                        text={toAttendanceRate(session.attendanceRate)}
+                        kind={getAttendanceRateKind(session.attendanceRate)}
+                      />
+                    </View>
+
+                    <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                      <Pill
+                        text={`出席 ${toMetricValue(session.presentCount ?? session.attendeeCount)}/${toMetricValue(session.totalSessions)}`}
+                        kind="success"
+                      />
+                      <Pill text={`缺席 ${toMetricValue(session.absentCount)}`} kind="danger" />
+                      <Pill text={`遲到 ${toMetricValue(session.lateCount)}`} kind="default" />
+                      <Pill text={`請假 ${toMetricValue(session.leaveCount)}`} kind="muted" />
+                    </View>
+                  </Pressable>
+                ))
+              )}
+            </View>
+          </Card>
+        </ScrollView>
+      </Screen>
+    );
   }
 
   return (

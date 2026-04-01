@@ -393,88 +393,282 @@ async function puFetchCourses(cookies, semester) {
  * @param {string} [semester] - Filter to specific semester (e.g. "1141")
  * @returns {Promise<{success, grades, summary, error}>}
  */
+/**
+ * Parse grade rows from an HTML response.
+ * Returns { grades, summaryRows }.
+ */
+function parseGradeRows(html) {
+  const rows = parseTable(html, 'Score');
+  const grades = [];
+  const summaryRows = [];
+
+  for (const cells of rows) {
+    if (cells.length < 6) continue;
+    if (cells[0].includes('Semester') || cells[0].includes('學期別')) continue;
+
+    const sem = cells[0];
+    const courseName = cells[1];
+    const cls = cells[2];
+    const courseType = cells[3];
+    const credits = parseInt(cells[4], 10);
+    const score = cells[5];
+
+    if (
+      courseName.includes('排名') || courseName.includes('ranking') ||
+      courseName.includes('操行') || courseName.includes('Behavior') ||
+      courseName.includes('平均') || courseName.includes('average')
+    ) {
+      summaryRows.push({ semester: sem, label: courseName, value: score });
+      continue;
+    }
+
+    if (!/^\d{4}$/.test(sem)) continue;
+
+    const { zhName, enName } = parseCourseTitle(courseName);
+    grades.push({
+      semester: sem,
+      courseName: zhName,
+      courseNameEn: enName,
+      class: cls,
+      courseType,
+      credits: isNaN(credits) ? 0 : credits,
+      score: score === '通過(Pass)' ? 'Pass' : parseFloat(score) || score,
+    });
+  }
+
+  return { grades, summaryRows };
+}
+
+/**
+ * Build summary object from summary rows.
+ */
+function buildGradeSummary(summaryRows) {
+  const summary = {};
+  for (const s of summaryRows) {
+    if (!summary[s.semester]) summary[s.semester] = {};
+    if (s.label.includes('系排名') || s.label.includes('Department')) {
+      summary[s.semester].departmentRanking = s.value;
+    } else if (s.label.includes('班排名') || s.label.includes('Class')) {
+      summary[s.semester].classRanking = s.value;
+    } else if (s.label.includes('操行') || s.label.includes('Behavior')) {
+      summary[s.semester].behaviorScore = parseFloat(s.value) || s.value;
+    } else if (s.label.includes('平均') || s.label.includes('average')) {
+      summary[s.semester].semesterAverage = parseFloat(s.value) || s.value;
+    }
+  }
+  return summary;
+}
+
+/**
+ * Try to extract available semesters from the grade page's form/dropdown.
+ * Many PU pages have a <select> for semester selection.
+ */
+function extractAvailableSemesters(html) {
+  const semesters = [];
+  // Pattern: <option value="1132">113學年度第2學期</option>
+  const optionRegex = /<option[^>]*value=["']?(\d{4})["']?[^>]*>/gi;
+  let m;
+  while ((m = optionRegex.exec(html)) !== null) {
+    if (!semesters.includes(m[1])) semesters.push(m[1]);
+  }
+  return semesters;
+}
+
 async function puFetchGrades(cookies, semester) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
-    const res = await getFollowRedirect(MYPU_HOST, GRADE_PATH, cookies);
+    // ── Step 1: Establish mypu session ──
+    // alcat and mypu are on different subdomains of pu.edu.tw.
+    // We try multiple approaches to establish a valid mypu session:
+    //   A) Direct: send alcat cookies to mypu root (may share parent domain cookies)
+    //   B) SSO bridge: visit alcat's link to mypu (follows SSO redirect chain)
+    let mypuCookies = { ...cookies };
 
+    // Approach A: warm up mypu directly
+    try {
+      const warmup = await get(MYPU_HOST, '/', cookies);
+      mypuCookies = { ...cookies, ...warmup.cookies };
+      console.log('[puFetchGrades] mypu warmup status:', warmup.status, 'cookies:', Object.keys(mypuCookies).length);
+    } catch (e) {
+      console.warn('[puFetchGrades] mypu warmup failed (non-fatal):', e.message);
+    }
+
+    // Approach B: Try SSO bridge URLs from alcat → mypu
+    const bridgePaths = [
+      '/score_query/score_all.php',          // alcat might proxy to mypu
+      '/index_menu.php',                      // menu page might set cross-domain session
+    ];
+    for (const bp of bridgePaths) {
+      try {
+        const bridgeRes = await getFollowRedirect(ALCAT_HOST, bp, cookies);
+        if (bridgeRes.cookies && Object.keys(bridgeRes.cookies).length > Object.keys(mypuCookies).length) {
+          mypuCookies = { ...mypuCookies, ...bridgeRes.cookies };
+          console.log(`[puFetchGrades] Bridge ${bp} added cookies:`, Object.keys(bridgeRes.cookies).length);
+        }
+        // If alcat's score page actually returns grade data directly, use it
+        if (bp.includes('score') && bridgeRes.status === 200) {
+          const bridgeParsed = parseGradeRows(bridgeRes.data);
+          if (bridgeParsed.grades.length > 1) {
+            const bridgeSems = [...new Set(bridgeParsed.grades.map(g => g.semester))];
+            console.log(`[puFetchGrades] Bridge ${bp} returned ${bridgeParsed.grades.length} grades, ${bridgeSems.length} semesters!`);
+            if (bridgeSems.length > 1) {
+              // alcat's own score page has all semesters — use it
+              const summary = buildGradeSummary(bridgeParsed.summaryRows);
+              const filteredGrades = semester
+                ? bridgeParsed.grades.filter(g => g.semester === semester)
+                : bridgeParsed.grades;
+              return { success: true, grades: filteredGrades, allSemesters: bridgeSems, summary };
+            }
+          }
+        }
+      } catch (e) {
+        console.warn(`[puFetchGrades] Bridge ${bp} failed:`, e.message);
+      }
+    }
+
+    // ── Step 2: Fetch the grade page ──
+    const res = await getFollowRedirect(MYPU_HOST, GRADE_PATH, mypuCookies);
     if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
 
     const html = res.data;
+    const updatedCookies = res.cookies;
+    console.log('[puFetchGrades] score_all.php HTML length:', html.length);
+    console.log('[puFetchGrades] score_all.php snippet:', html.slice(0, 800).replace(/\s+/g, ' '));
 
-    // ---- Parse grade table ----
-    // Columns: 學期別 | 課程名稱 | 修課班級 | 修別 | 學分數 | 成績
-    const rows = parseTable(html, 'Score');
+    // ── Step 3: Parse initial response ──
+    let { grades, summaryRows } = parseGradeRows(html);
+    const initialSemesters = [...new Set(grades.map((g) => g.semester))];
+    console.log(`[puFetchGrades] Initial parse: ${grades.length} grades across ${initialSemesters.length} semesters: [${initialSemesters.join(', ')}]`);
 
-    const grades = [];
-    const summaryRows = [];
+    // ── Step 4: If only ≤1 semester, try to get ALL semesters ──
+    if (initialSemesters.length <= 1) {
+      console.log('[puFetchGrades] Only 0-1 semester found — trying additional approaches…');
 
-    for (const cells of rows) {
-      if (cells.length < 6) continue;
-      // Skip header rows
-      if (cells[0].includes('Semester') || cells[0].includes('學期別')) continue;
+      // Approach A: Check if the page has a form with semester dropdown
+      const availableSemesters = extractAvailableSemesters(html);
+      console.log(`[puFetchGrades] Available semesters from dropdown: [${availableSemesters.join(', ')}]`);
 
-      const sem = cells[0];
-      const courseName = cells[1];
-      const cls = cells[2];
-      const courseType = cells[3];
-      const credits = parseInt(cells[4], 10);
-      const score = cells[5];
+      // Approach B: Try POST with empty semester to request "all"
+      const postAttempts = [
+        // Try empty body POST
+        { body: '', desc: 'empty POST' },
+        // Try common form parameters for "all semesters"
+        { body: 'semester=', desc: 'semester=empty' },
+        { body: 'qy=', desc: 'qy=empty' },
+        { body: 'sem=&submit=查詢', desc: 'sem=empty+submit' },
+        { body: 'year=&sem=&btn=查詢', desc: 'year+sem=empty' },
+      ];
 
-      // Detect summary rows (排名, 操行, 平均)
-      if (
-        courseName.includes('排名') ||
-        courseName.includes('ranking') ||
-        courseName.includes('操行') ||
-        courseName.includes('Behavior') ||
-        courseName.includes('平均') ||
-        courseName.includes('average')
-      ) {
-        summaryRows.push({ semester: sem, label: courseName, value: score });
-        continue;
+      for (const attempt of postAttempts) {
+        try {
+          const postRes = await post(MYPU_HOST, GRADE_PATH, updatedCookies, attempt.body);
+          if (postRes.status === 200 && postRes.data.length > html.length * 0.5) {
+            const postParsed = parseGradeRows(postRes.data);
+            const postSemesters = [...new Set(postParsed.grades.map((g) => g.semester))];
+            console.log(`[puFetchGrades] POST (${attempt.desc}): ${postParsed.grades.length} grades, ${postSemesters.length} semesters: [${postSemesters.join(', ')}]`);
+
+            if (postParsed.grades.length > grades.length) {
+              grades = postParsed.grades;
+              summaryRows = postParsed.summaryRows;
+              console.log(`[puFetchGrades] POST (${attempt.desc}) returned MORE grades — using this result`);
+              break;
+            }
+          }
+        } catch (e) {
+          console.warn(`[puFetchGrades] POST (${attempt.desc}) failed:`, e.message);
+        }
       }
 
-      // Skip rows without a valid semester code
-      if (!/^\d{4}$/.test(sem)) continue;
+      // Approach C: Per-semester fetch — use dropdown options, or generate semester codes
+      const allSemestersSoFar = [...new Set(grades.map((g) => g.semester))];
+      let semestersToFetch = availableSemesters.filter(s => !allSemestersSoFar.includes(s));
 
-      const { zhName, enName } = parseCourseTitle(courseName);
+      // If no dropdown found, generate plausible semester codes (last 4 years = 8 semesters)
+      if (semestersToFetch.length === 0) {
+        const now = new Date();
+        const rocYear = now.getFullYear() - 1911;
+        const generated = [];
+        for (let y = rocYear; y >= rocYear - 4; y--) {
+          generated.push(`${y}2`, `${y}1`);
+        }
+        semestersToFetch = generated.filter(s => !allSemestersSoFar.includes(s));
+        console.log(`[puFetchGrades] No dropdown — generated ${semestersToFetch.length} semester codes to try`);
+      }
 
-      grades.push({
-        semester: sem,
-        courseName: zhName,
-        courseNameEn: enName,
-        class: cls,
-        courseType,
-        credits: isNaN(credits) ? 0 : credits,
-        score: score === '通過(Pass)' ? 'Pass' : parseFloat(score) || score,
-      });
+      if (allSemestersSoFar.length <= 1 && semestersToFetch.length > 0) {
+        console.log(`[puFetchGrades] Trying per-semester fetch for ${semestersToFetch.length} semesters…`);
+        const allGrades = [...grades];
+        const allSummaryRows = [...summaryRows];
+        const fetchedSemesters = new Set(allSemestersSoFar);
+        let consecutiveEmpty = 0;
+
+        for (const sem of semestersToFetch) {
+          if (fetchedSemesters.has(sem)) continue;
+
+          // Stop after 3 consecutive empty semesters (likely reached start of enrollment)
+          if (consecutiveEmpty >= 3) {
+            console.log(`[puFetchGrades] Stopping per-semester fetch after 3 consecutive empty semesters`);
+            break;
+          }
+
+          let found = false;
+          try {
+            // Try GET with query param
+            const semRes = await getFollowRedirect(MYPU_HOST, `${GRADE_PATH}?semester=${sem}`, updatedCookies);
+            if (semRes.status === 200) {
+              const semParsed = parseGradeRows(semRes.data);
+              if (semParsed.grades.length > 0) {
+                allGrades.push(...semParsed.grades);
+                allSummaryRows.push(...semParsed.summaryRows);
+                fetchedSemesters.add(sem);
+                found = true;
+                console.log(`[puFetchGrades] Semester ${sem}: +${semParsed.grades.length} grades`);
+              }
+            }
+
+            if (!found) {
+              // Try POST with specific semester
+              const semPostRes = await post(MYPU_HOST, GRADE_PATH, updatedCookies, `semester=${sem}`);
+              if (semPostRes.status === 200) {
+                const semParsed = parseGradeRows(semPostRes.data);
+                if (semParsed.grades.length > 0) {
+                  allGrades.push(...semParsed.grades);
+                  allSummaryRows.push(...semParsed.summaryRows);
+                  fetchedSemesters.add(sem);
+                  found = true;
+                  console.log(`[puFetchGrades] Semester ${sem} (POST): +${semParsed.grades.length} grades`);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`[puFetchGrades] Per-semester fetch for ${sem} failed:`, e.message);
+          }
+
+          consecutiveEmpty = found ? 0 : consecutiveEmpty + 1;
+        }
+
+        if (allGrades.length > grades.length) {
+          grades = allGrades;
+          summaryRows = allSummaryRows;
+        }
+      }
     }
 
-    // Optionally filter by semester
+    // ── Step 5: Final result ──
+    const allSemesters = [...new Set(grades.map((g) => g.semester))];
+    console.log(`[puFetchGrades] Final result: ${grades.length} grades across ${allSemesters.length} semesters: [${allSemesters.join(', ')}]`);
+
     const filteredGrades = semester
       ? grades.filter((g) => g.semester === semester)
       : grades;
 
-    // Group summary by semester
-    const summary = {};
-    for (const s of summaryRows) {
-      if (!summary[s.semester]) summary[s.semester] = {};
-      if (s.label.includes('系排名') || s.label.includes('Department')) {
-        summary[s.semester].departmentRanking = s.value;
-      } else if (s.label.includes('班排名') || s.label.includes('Class')) {
-        summary[s.semester].classRanking = s.value;
-      } else if (s.label.includes('操行') || s.label.includes('Behavior')) {
-        summary[s.semester].behaviorScore = parseFloat(s.value) || s.value;
-      } else if (s.label.includes('平均') || s.label.includes('average')) {
-        summary[s.semester].semesterAverage = parseFloat(s.value) || s.value;
-      }
-    }
+    const summary = buildGradeSummary(summaryRows);
 
     return {
       success: true,
       grades: filteredGrades,
-      allSemesters: [...new Set(grades.map((g) => g.semester))],
+      allSemesters,
       summary,
     };
   } catch (err) {
@@ -559,10 +753,160 @@ async function puFetchStudentInfo(cookies) {
   }
 }
 
+/**
+ * Discover all available links on the e-Campus menu page.
+ * Returns categorized links found on /index_menu.php.
+ * This helps identify URLs for credit audit, grade query, etc.
+ */
+async function puDiscoverMenuLinks(cookies) {
+  try {
+    if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
+
+    const res = await getFollowRedirect(ALCAT_HOST, '/index_menu.php', cookies);
+    if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+
+    const html = res.data;
+    const links = [];
+    const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match;
+    while ((match = linkRegex.exec(html)) !== null) {
+      const href = match[1];
+      const text = stripTags(match[2]).trim();
+      if (text && text.length > 1 && !href.includes('javascript:')) {
+        links.push({ text, href });
+      }
+    }
+
+    // Categorize links
+    const creditLinks = links.filter(l =>
+      l.text.includes('學分') || l.text.includes('credit') ||
+      l.text.includes('畢業') || l.text.includes('graduate') ||
+      l.text.includes('成績') || l.text.includes('score') ||
+      l.text.includes('修課') || l.text.includes('歷年')
+    );
+
+    console.log('[puDiscoverMenuLinks] Total links:', links.length);
+    console.log('[puDiscoverMenuLinks] Credit/grade related:', JSON.stringify(creditLinks, null, 2));
+    console.log('[puDiscoverMenuLinks] All links:', JSON.stringify(links.map(l => `${l.text}: ${l.href}`), null, 2));
+
+    return { success: true, links, creditLinks };
+  } catch (err) {
+    console.error('[puDiscoverMenuLinks] Error:', err);
+    return { success: false, links: [], creditLinks: [], error: err.message };
+  }
+}
+
+/**
+ * Fetch credit audit / historical grades from e-Campus.
+ * Tries multiple known URL patterns on both alcat and mypu.
+ *
+ * @param {object} cookies - Session cookies from puLogin
+ * @returns {Promise<{success, grades, allSemesters, summary, creditAudit, error}>}
+ */
+async function puFetchCreditAudit(cookies) {
+  try {
+    if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
+
+    // First, discover available links from the menu
+    const discovery = await puDiscoverMenuLinks(cookies);
+    const creditLinks = discovery.creditLinks || [];
+
+    // Build a list of URLs to try (from discovery + known patterns)
+    const urlsToTry = [];
+
+    // Add discovered credit-related links
+    for (const link of creditLinks) {
+      let href = link.href;
+      if (!href.startsWith('http')) {
+        href = `https://${ALCAT_HOST}/${href.replace(/^\//, '')}`;
+      }
+      urlsToTry.push({ url: href, desc: link.text, source: 'discovered' });
+    }
+
+    // Add known common PU URL patterns for credit audit
+    const knownPatterns = [
+      { host: ALCAT_HOST, path: '/stu_query/query_credit.html', desc: 'alcat credit query' },
+      { host: ALCAT_HOST, path: '/stu_query/credit_check.html', desc: 'alcat credit check' },
+      { host: ALCAT_HOST, path: '/stu_query/credit_calc.html', desc: 'alcat credit calc' },
+      { host: ALCAT_HOST, path: '/stu_query/query_score.html', desc: 'alcat score query' },
+      { host: ALCAT_HOST, path: '/stu_query/query_history.html', desc: 'alcat history query' },
+      { host: MYPU_HOST, path: '/score_query/credit_calc.php', desc: 'mypu credit calc' },
+      { host: MYPU_HOST, path: '/score_query/credit_check.php', desc: 'mypu credit check' },
+      { host: MYPU_HOST, path: '/score_query/score_history.php', desc: 'mypu score history' },
+      { host: MYPU_HOST, path: '/score_query/score_list.php', desc: 'mypu score list' },
+      { host: MYPU_HOST, path: '/credit_query/index.php', desc: 'mypu credit index' },
+      { host: MYPU_HOST, path: '/credit_query/credit_check.php', desc: 'mypu credit check2' },
+    ];
+
+    for (const p of knownPatterns) {
+      urlsToTry.push({ url: `https://${p.host}${p.path}`, desc: p.desc, source: 'pattern' });
+    }
+
+    // Try each URL and collect grade/credit data
+    let bestGrades = [];
+    let bestSummary = {};
+    let bestSemesters = [];
+    let creditAuditHtml = null;
+    let creditAuditUrl = null;
+
+    for (const { url, desc, source } of urlsToTry) {
+      try {
+        const parsed = new URL(url);
+        const res = await getFollowRedirect(parsed.hostname, parsed.pathname + parsed.search, cookies);
+
+        if (res.status !== 200) continue;
+        if (res.data.length < 100) continue; // Too small to be useful
+
+        const html = res.data;
+        console.log(`[puFetchCreditAudit] ${desc} (${source}): status=${res.status}, length=${html.length}`);
+
+        // Check if this page has grade tables
+        const parsed2 = parseGradeRows(html);
+        if (parsed2.grades.length > bestGrades.length) {
+          bestGrades = parsed2.grades;
+          bestSemesters = [...new Set(parsed2.grades.map(g => g.semester))];
+          bestSummary = buildGradeSummary(parsed2.summaryRows);
+          creditAuditUrl = url;
+          console.log(`[puFetchCreditAudit] ${desc}: ${parsed2.grades.length} grades, ${bestSemesters.length} semesters — BEST so far`);
+        }
+
+        // Check if this page has credit audit info (學分統計, 畢業門檻, etc.)
+        if (html.includes('學分') && (html.includes('畢業') || html.includes('必修') || html.includes('選修') || html.includes('通識'))) {
+          creditAuditHtml = html;
+          creditAuditUrl = url;
+          console.log(`[puFetchCreditAudit] ${desc}: appears to have credit audit data!`);
+
+          // Try to extract credit summary tables
+          const allTables = html.match(/<table[^>]*>[\s\S]*?<\/table>/gi) || [];
+          for (let i = 0; i < allTables.length; i++) {
+            console.log(`[puFetchCreditAudit] Table ${i} snippet:`, allTables[i].slice(0, 300).replace(/\s+/g, ' '));
+          }
+        }
+      } catch (e) {
+        // Silently skip failed URLs
+      }
+    }
+
+    return {
+      success: bestGrades.length > 0 || creditAuditHtml !== null,
+      grades: bestGrades,
+      allSemesters: bestSemesters,
+      summary: bestSummary,
+      creditAuditUrl,
+      creditAuditHtml: creditAuditHtml ? creditAuditHtml.slice(0, 5000) : null, // Truncate for safety
+    };
+  } catch (err) {
+    console.error('[puFetchCreditAudit] Error:', err);
+    return { success: false, grades: [], allSemesters: [], summary: {}, error: err.message };
+  }
+}
+
 module.exports = {
   puLogin,
   puFetchCourses,
   puFetchGrades,
   puFetchAnnouncements,
   puFetchStudentInfo,
+  puFetchCreditAudit,
+  puDiscoverMenuLinks,
 };
