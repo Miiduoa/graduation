@@ -329,33 +329,21 @@ export const hybridSource: DataSource = {
     // 優先用 PUAdapter（TronClass 資料）
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
-      try {
-        return await puAdapter.listCourseSpaces(userId, schoolId);
-      } catch (error) {
-        console.warn("[HybridSource] PUAdapter.listCourseSpaces failed, falling back to Firebase:", error);
-      }
+      return puAdapter.listCourseSpaces(userId, schoolId);
     }
     return listWorkspaceCourseSpaces(userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   getCourseSpace: async (courseSpaceId: string, userId: string, schoolId?: string) => {
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter && courseSpaceId.startsWith("tc-")) {
-      try {
-        return await puAdapter.getCourseSpace(courseSpaceId, userId);
-      } catch (error) {
-        console.warn("[HybridSource] PUAdapter.getCourseSpace failed, falling back to Firebase:", error);
-      }
+      return puAdapter.getCourseSpace(courseSpaceId, userId);
     }
     return getWorkspaceCourseSpace(courseSpaceId, userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
   listCourseModules: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter && (!courseSpaceId || courseSpaceId.startsWith("tc-"))) {
-      try {
-        return await puAdapter.listCourseModules(userId, courseSpaceId);
-      } catch (error) {
-        console.warn("[HybridSource] PUAdapter.listCourseModules failed, falling back to Firebase:", error);
-      }
+      return puAdapter.listCourseModules(userId, courseSpaceId);
     }
     return listWorkspaceCourseModules(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
@@ -369,11 +357,7 @@ export const hybridSource: DataSource = {
   listQuizzes: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
-      try {
-        return await puAdapter.listQuizzes(userId, courseSpaceId);
-      } catch (error) {
-        console.warn("[HybridSource] PUAdapter.listQuizzes failed, falling back to Firebase:", error);
-      }
+      return puAdapter.listQuizzes(userId, courseSpaceId);
     }
     return listWorkspaceQuizzes(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
@@ -389,11 +373,7 @@ export const hybridSource: DataSource = {
   listAttendanceSessions: async (userId: string, courseSpaceId?: string, schoolId?: string) => {
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
-      try {
-        return await puAdapter.listAttendanceSessions(userId, courseSpaceId);
-      } catch (error) {
-        console.warn("[HybridSource] PUAdapter.listAttendanceSessions failed, falling back to Firebase:", error);
-      }
+      return puAdapter.listAttendanceSessions(userId, courseSpaceId);
     }
     return listWorkspaceAttendanceSessions(userId, courseSpaceId, schoolId ?? currentSchoolContextId ?? undefined);
   },
@@ -406,22 +386,14 @@ export const hybridSource: DataSource = {
   getAttendanceSummary: async (courseSpaceId: string) => {
     const puAdapter = await getPUAdapterIfAvailable();
     if (puAdapter && courseSpaceId.startsWith("tc-")) {
-      try {
-        return await puAdapter.getAttendanceSummary(courseSpaceId);
-      } catch (error) {
-        console.warn("[HybridSource] PUAdapter.getAttendanceSummary failed, falling back to Firebase:", error);
-      }
+      return puAdapter.getAttendanceSummary(courseSpaceId);
     }
     return getCourseAttendanceSummary(courseSpaceId);
   },
   listInboxTasks: async (userId: string, schoolId?: string) => {
     const puAdapter = await getPUAdapterIfAvailable(schoolId);
     if (puAdapter) {
-      try {
-        return await puAdapter.listInboxTasks(userId);
-      } catch (error) {
-        console.warn("[HybridSource] PUAdapter.listInboxTasks failed, falling back to Firebase:", error);
-      }
+      return puAdapter.listInboxTasks(userId);
     }
     return listWorkspaceInboxTasks(userId, schoolId ?? currentSchoolContextId ?? undefined);
   },
