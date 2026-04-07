@@ -173,62 +173,6 @@ export async function clearTCSession(): Promise<void> {
   await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
 }
 
-/** 檢查是否有 TronClass session（不驗證有效性，只檢查是否存在） */
-export async function hasTCSession(): Promise<boolean> {
-  await ensureBackendSessionLoaded();
-  return !!_tcBackendSessionId;
-}
-
-/**
- * 驗證 TronClass session 是否仍然有效。
- * 嘗試呼叫 profile API — 如果 401/403 代表 session 已過期。
- * 回傳 true 表示有效，false 表示已過期或不存在。
- */
-export async function validateTCSession(): Promise<boolean> {
-  await ensureBackendSessionLoaded();
-  if (!_tcBackendSessionId) return false;
-
-  try {
-    const profile = await fetchTronClassBackend<TCUserProfile>("profile");
-    return !!profile?.id;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 重新建立 TronClass 後端 session。
- * 需要學號和密碼來重新登入 TronClass。
- */
-export async function refreshTCBackendSession(
-  studentId: string,
-  password: string,
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    const response = await fetch(getCloudFunctionUrl("puRefreshTronClassSession"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ studentId, password }),
-    });
-
-    const text = await response.text();
-    let data: { success?: boolean; tronClassSessionId?: string; tronClassUserId?: number | null; error?: string } | null = null;
-    if (text.trim()) {
-      try { data = JSON.parse(text); } catch { data = null; }
-    }
-
-    if (!response.ok || !data?.success || !data?.tronClassSessionId) {
-      return { success: false, error: data?.error || "TronClass session 刷新失敗" };
-    }
-
-    await setTCBackendSession(data.tronClassSessionId, data.tronClassUserId ?? null);
-    return { success: true };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : "連線失敗";
-    return { success: false, error: msg };
-  }
-}
-
 async function fetchTronClassBackend<T>(
   dataType: "profile" | "courses" | "activities" | "modules" | "attendance" | "todos",
   extra: Record<string, unknown> = {},
