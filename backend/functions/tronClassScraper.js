@@ -350,95 +350,91 @@ async function tcLogin(uid, password) {
 }
 
 async function tcFetchCourses(cookies, { userId, status = 'ongoing' } = {}) {
-  const resolvedUserId = await tcEnsureUserId(cookies, userId);
-  if (!resolvedUserId) {
+  // 2026-04: Use POST /api/my-courses (confirmed working endpoint)
+  const body = JSON.stringify({
+    conditions: { status: [status] },
+    page: 1,
+    page_size: 200,
+  });
+
+  const result = await httpsRequest(`${TC_BASE}/api/my-courses`, {
+    method: 'POST',
+    body,
+    cookies,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (result.status !== 200) {
+    throw new Error(`HTTP ${result.status}`);
+  }
+  if (result.body.trimStart().startsWith('<')) {
     throw new Error('TronClass session 已失效，請重新登入');
   }
 
-  const conditions = JSON.stringify({ status: [status] });
-  const fields =
-    'id,name,course_code,department_id,semester_id,start_date,end_date,status,enroll_role,cover,teacher,student_count';
-  const items = await tcFetchAllPages(
-    `api/users/${resolvedUserId}/courses`,
-    'courses',
-    cookies,
-    { conditions, fields },
-    50,
-  );
+  const data = JSON.parse(result.body);
+  const courses = data.courses ?? [];
 
-  return items.map((course) => ({
+  return courses.map((course) => ({
     id: course.id,
     name: course.name,
     course_code: course.course_code || '',
-    department_id: course.department_id ?? null,
-    semester_id: course.semester_id ?? null,
+    department_id: course.department?.id ?? null,
+    department_name: course.department?.name ?? null,
+    semester_id: course.semester?.id ?? null,
+    semester_name: course.semester?.name ?? null,
+    academic_year: course.academic_year?.name ?? null,
     start_date: course.start_date ?? null,
     end_date: course.end_date ?? null,
     status: course.status ?? status,
-    role: course.enroll_role ?? 'student',
-    teacher_name: course.teacher?.name ?? null,
-    cover_image_url: course.cover?.url ?? null,
-    student_count: course.student_count ?? 0,
+    role: 'student',
+    teacher_name: course.instructors?.[0]?.name ?? null,
+    cover_image_url: course.cover || null,
+    student_count: course.course_attributes?.student_count ?? 0,
+    credit: parseFloat(String(course.credit ?? '0')) || 0,
+    compulsory: course.compulsory ?? false,
+    grade_name: course.grade?.name ?? null,
+    klass_name: course.klass?.name ?? null,
+    instructors: (course.instructors ?? []).map((i) => ({ id: i.id, name: i.name })),
   }));
 }
 
 async function tcFetchModules(cookies, courseId) {
-  const endpoints = [
-    `${TC_BASE}/api/courses/${courseId}/course-modules`,
-    `${TC_BASE}/api/courses/${courseId}/modules`,
-  ];
-
-  for (const endpoint of endpoints) {
-    try {
-      const data = await tcFetchJson(endpoint, cookies);
-      if (Array.isArray(data) && data.length > 0) {
-        return data.map((module) => ({
-          id: module.id,
-          course_id: courseId,
-          title: module.title ?? `Module ${module.position ?? 0}`,
-          description: module.description ?? null,
-          position: module.position ?? 0,
-          published: module.published !== false,
-          activities: (module.activities ?? []).map((activity) => ({
-            id: activity.id,
-            course_id: courseId,
-            type: activity.type ?? 'material',
-            title: activity.title ?? '',
-            description: activity.description ?? null,
-            begin_date: activity.begin_date ?? null,
-            end_date: activity.end_date ?? null,
-            score: activity.score ?? null,
-            total_score: activity.total_score ?? null,
-            status: activity.status ?? 'pending',
-            weight: activity.weight ?? null,
-          })),
-        }));
-      }
-    } catch (error) {
-      if (endpoint === endpoints[endpoints.length - 1]) {
-        throw error;
-      }
-    }
+  // 2026-04: GET /api/courses/{id}/modules → { modules: [...] }
+  try {
+    const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/modules`, cookies);
+    const modules = data?.modules ?? [];
+    return modules
+      .filter((m) => m.is_hidden !== 1)
+      .map((module) => ({
+        id: module.id,
+        course_id: courseId,
+        title: module.name ?? `Module ${module.sort ?? 0}`,
+        description: null,
+        position: module.sort ?? 0,
+        published: true,
+        activities: [],
+      }));
+  } catch (error) {
+    console.warn(`[TronClass] tcFetchModules(${courseId}) error:`, error.message);
+    return [];
   }
-
-  return [];
 }
 
 async function tcFetchActivities(cookies, courseId) {
-  const activityData = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/activities`, cookies)
+  // 2026-04: GET /api/courses/{id}/activities?sub_course_id=0 + /api/courses/{id}/exams
+  const activityData = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/activities?sub_course_id=0`, cookies)
     .catch(() => ({ activities: [] }));
 
-  const homeworkData = await tcFetchAllPages(
-    `api/courses/${courseId}/homework-activities`,
-    'homework_activities',
-    cookies,
-    {},
-    50,
-  ).catch(() => []);
+  const examData = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/exams`, cookies)
+    .catch(() => ({ exams: [] }));
 
   const seen = new Set();
   const activities = [];
-  for (const activity of [...(activityData.activities ?? []), ...homeworkData]) {
+
+  for (const activity of (activityData.activities ?? [])) {
     if (seen.has(activity.id)) continue;
     seen.add(activity.id);
     activities.push({
@@ -446,13 +442,35 @@ async function tcFetchActivities(cookies, courseId) {
       course_id: courseId,
       type: activity.type ?? 'material',
       title: activity.title ?? '',
-      description: activity.description ?? null,
-      begin_date: activity.begin_date ?? null,
-      end_date: activity.end_date ?? null,
+      description: activity.data?.description ?? null,
+      begin_date: activity.start_time ?? null,
+      end_date: activity.end_time ?? null,
       score: activity.score ?? null,
-      total_score: activity.total_score ?? null,
-      status: activity.status ?? 'pending',
-      weight: activity.weight ?? null,
+      total_score: null,
+      status: 'pending',
+      weight: activity.score_percentage ? parseFloat(activity.score_percentage) : null,
+      module_id: activity.module_id ?? null,
+      completion_criterion: activity.completion_criterion_key ?? null,
+    });
+  }
+
+  for (const exam of (examData.exams ?? [])) {
+    if (seen.has(exam.id)) continue;
+    seen.add(exam.id);
+    activities.push({
+      id: exam.id,
+      course_id: courseId,
+      type: 'exam',
+      title: exam.title ?? '',
+      description: null,
+      begin_date: exam.start_time ?? null,
+      end_date: exam.end_time ?? null,
+      score: exam.score ?? null,
+      total_score: exam.total_score ?? null,
+      status: 'pending',
+      weight: null,
+      module_id: exam.module_id ?? null,
+      completion_criterion: null,
     });
   }
 
@@ -460,37 +478,44 @@ async function tcFetchActivities(cookies, courseId) {
 }
 
 async function tcFetchAttendance(cookies, { userId } = {}) {
-  const resolvedUserId = await tcEnsureUserId(cookies, userId);
-  const endpoints = [
-    resolvedUserId ? `${TC_BASE}/api/users/${resolvedUserId}/attendances` : null,
-    `${TC_BASE}/api/users/me/attendances`,
-    `${TC_BASE}/api/attendance/summary`,
-  ].filter(Boolean);
+  // 2026-04: Use per-course rollcall endpoints
+  // First fetch all ongoing courses, then get rollcall-score for each
+  let courses;
+  try {
+    courses = await tcFetchCourses(cookies, { userId, status: 'ongoing' });
+  } catch (error) {
+    console.warn('[TronClass] tcFetchAttendance: Failed to fetch courses:', error.message);
+    return [];
+  }
 
-  for (const endpoint of endpoints) {
+  const results = [];
+  for (const course of courses) {
     try {
-      const data = await tcFetchJson(endpoint, cookies);
-      const items = Array.isArray(data) ? data : data?.attendances;
-      if (Array.isArray(items) && items.length > 0) {
-        return items.map((attendance) => ({
-          course_id: attendance.course_id ?? 0,
-          course_name: attendance.course_name ?? '',
-          total_sessions: attendance.total ?? attendance.total_sessions ?? 0,
-          attended: attendance.attended ?? 0,
-          absent: attendance.absent ?? 0,
-          late: attendance.late ?? 0,
-          leave: attendance.leave ?? 0,
-          rate: attendance.rate ?? 0,
-        }));
+      const rollcallScore = await tcFetchJson(`${TC_BASE}/api/course/${course.id}/rollcall-score`, cookies);
+      if (rollcallScore) {
+        const totalSessions = rollcallScore.rollcall_count ?? 0;
+        const attended = rollcallScore.rollcall_times ?? 0;
+        const rate = totalSessions > 0
+          ? parseFloat(rollcallScore.score_percentage ?? '0')
+          : 0;
+        results.push({
+          course_id: course.id,
+          course_name: course.name,
+          total_sessions: totalSessions,
+          attended,
+          absent: Math.max(0, totalSessions - attended),
+          late: 0,
+          leave: 0,
+          rate,
+        });
       }
     } catch (error) {
-      if (String(error?.message || '').includes('session 已失效')) {
-        throw error;
-      }
+      // Skip individual course errors
+      console.warn(`[TronClass] tcFetchAttendance: Rollcall error for course ${course.id}:`, error.message);
     }
   }
 
-  return [];
+  return results;
 }
 
 async function tcFetchProfile(cookies, { userId } = {}) {
@@ -499,17 +524,7 @@ async function tcFetchProfile(cookies, { userId } = {}) {
     throw new Error('TronClass session 已失效，請重新登入');
   }
 
-  try {
-    const profile = await tcFetchJson(`${TC_BASE}/api/users/${resolvedUserId}`, cookies);
-    if (profile?.id) {
-      return profile;
-    }
-  } catch (error) {
-    if (String(error?.message || '').includes('session 已失效')) {
-      throw error;
-    }
-  }
-
+  // No direct profile API available; return basic info from userId
   return {
     id: resolvedUserId,
     name: '',
@@ -535,16 +550,18 @@ async function tcFetchTodos(cookies) {
 
   return items.map((item) => ({
     id: item.id,
-    course_id: item.course_id ?? item.course?.id ?? 0,
+    course_id: item.course_id ?? 0,
     type: item.type ?? 'homework',
     title: item.title ?? '',
-    description: item.description ?? null,
-    begin_date: item.begin_date ?? null,
-    end_date: item.end_date ?? null,
-    score: item.score ?? null,
-    total_score: item.total_score ?? null,
-    status: item.status ?? 'pending',
-    weight: item.weight ?? null,
+    description: item.course_name ?? null,
+    begin_date: item.start_time ?? null,
+    end_date: item.end_time ?? null,
+    score: null,
+    total_score: null,
+    status: item.is_locked ? 'locked' : 'pending',
+    weight: null,
+    module_id: null,
+    completion_criterion: null,
   }));
 }
 

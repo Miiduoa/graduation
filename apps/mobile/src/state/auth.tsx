@@ -11,7 +11,7 @@ import { clearMockAuthSession, loadMockAuthSession } from "../services/mockAuth"
 import { clearUserScopedStorage } from "../services/scopedStorage";
 import { clearPUCache } from "../services/puDataCache";
 import { clearPUSession } from "../services/studentIdAuth";
-import { clearTCSession } from "../services/tronClassClient";
+import { clearTCSessionFull } from "../services/tronClassClient";
 
 import type { UserRole as DataUserRole } from "../data/types";
 import type { MerchantAssignment } from "../data/types";
@@ -520,8 +520,8 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         console.warn("[auth] clearMockAuthSession failed:", e);
         throw e;
       }),
-      clearTCSession().catch((e) => {
-        console.warn("[auth] clearTCSession failed:", e);
+      clearTCSessionFull().catch((e) => {
+        console.warn("[auth] clearTCSessionFull failed:", e);
         throw e;
       }),
     ];

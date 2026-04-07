@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { collection, getDocs, query, where, orderBy, limit, doc, setDoc, serverTimestamp, writeBatch } from "firebase/firestore";
-import { getDb } from "../firebase";
+import { getDb, hasUsableFirebaseConfig } from "../firebase";
 import { useAuth } from "./auth";
 
 export type NotificationType =
@@ -40,7 +40,10 @@ const NotificationsContext = createContext<NotificationsContextValue | null>(nul
 
 export function NotificationsProvider(props: { children: React.ReactNode }) {
   const auth = useAuth();
-  const db = getDb();
+  const db = useMemo(() => {
+    if (!hasUsableFirebaseConfig()) return null;
+    return getDb();
+  }, []);
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
@@ -53,6 +56,13 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!db) {
+      setNotifications([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     if (!auth.user) {
       setNotifications([]);
       return;
@@ -102,7 +112,7 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   }, [notifications]);
 
   const markAsRead = useCallback(async (id: string) => {
-    if (!auth.user) return;
+    if (!auth.user || !db) return;
 
     // 使用 functional update 來獲取當前狀態的快照，避免閉包問題
     let notificationsSnapshot: Notification[] = [];
@@ -138,7 +148,7 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
   }, [auth.user, db]);
 
   const markAllAsRead = useCallback(async () => {
-    if (!auth.user) return;
+    if (!auth.user || !db) return;
 
     // 使用 functional update 來獲取當前狀態並計算需要更新的項目
     let unreadIds: string[] = [];
