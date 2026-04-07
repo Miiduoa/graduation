@@ -40,6 +40,9 @@ import {
   getCachedTCTodos,
   getAnyCachedTCCourses,
   getAnyCachedTCActivities,
+  getAnyCachedTCModules,
+  getAnyCachedTCTodos,
+  getAnyCachedTCAttendance,
   refreshTCCourses,
   refreshTCActivitiesForCourses,
   refreshTCModulesForCourses,
@@ -232,19 +235,49 @@ export class PUAdapter extends BaseApiAdapter {
   private async ensureTCModulesMap(courseIds: number[]): Promise<Record<number, TCModule[]>> {
     const cached = await getCachedTCModules();
     if (cached) return cached;
-    return refreshTCModulesForCourses(courseIds);
+
+    const stale = await getAnyCachedTCModules();
+    try {
+      return await refreshTCModulesForCourses(courseIds);
+    } catch (error) {
+      if (stale) {
+        console.warn("[PUAdapter] Falling back to stale TronClass modules:", error);
+        return stale;
+      }
+      throw error;
+    }
   }
 
   private async ensureTCTodos(): Promise<TCActivity[]> {
     const cached = await getCachedTCTodos();
     if (cached) return cached;
-    return (await refreshTCTodos()) ?? [];
+
+    const stale = await getAnyCachedTCTodos();
+    try {
+      return (await refreshTCTodos()) ?? stale ?? [];
+    } catch (error) {
+      if (stale) {
+        console.warn("[PUAdapter] Falling back to stale TronClass todos:", error);
+        return stale;
+      }
+      throw error;
+    }
   }
 
   private async ensureTCAttendance(): Promise<TCAttendance[]> {
     const cached = await getCachedTCAttendance();
     if (cached) return cached;
-    return (await refreshTCAttendance()) ?? [];
+
+    const stale = await getAnyCachedTCAttendance();
+    try {
+      return (await refreshTCAttendance()) ?? stale ?? [];
+    } catch (error) {
+      if (stale) {
+        console.warn("[PUAdapter] Falling back to stale TronClass attendance:", error);
+        return stale;
+      }
+      throw error;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -633,7 +666,12 @@ export class PUAdapter extends BaseApiAdapter {
     const courses = await this.ensureTCCourses();
     if (courses.length === 0) return [];
 
-    const activitiesMap = await this.ensureTCActivitiesMap(courses.map((course) => course.id));
+    let activitiesMap: Record<number, TCActivity[]> = {};
+    try {
+      activitiesMap = await this.ensureTCActivitiesMap(courses.map((course) => course.id));
+    } catch (error) {
+      console.warn("[PUAdapter] Failed to load activities, continuing with courses only:", error);
+    }
 
     return courses.map((tc) =>
       this.mapTCCourseToCourseSpace(tc, activitiesMap[tc.id] ?? [])

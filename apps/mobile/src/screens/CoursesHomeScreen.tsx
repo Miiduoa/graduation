@@ -13,6 +13,19 @@ import { theme } from "../ui/theme";
 import { ContextStrip, RoleCtaCard, TimelineCard } from "../ui/campusOs";
 import { formatDueWindow, isTeachingRole, resolveRoleMode, roleSummary } from "../utils/campusOs";
 
+function isTCSessionError(error: string | null): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return (
+    lower.includes("tronclass") ||
+    lower.includes("session") ||
+    lower.includes("已失效") ||
+    lower.includes("過期") ||
+    lower.includes("重新登入") ||
+    lower.includes("no tronclass backend session")
+  );
+}
+
 export function CoursesHomeScreen(props: any) {
   const nav = props?.navigation;
   const insets = useSafeAreaInsets();
@@ -27,6 +40,8 @@ export function CoursesHomeScreen(props: any) {
     loading,
     refreshing,
     refresh,
+    error: courseError,
+    reload: courseReload,
   } = useAsyncList<CourseSpace>(
     async () => {
       if (!auth.user) return [];
@@ -178,6 +193,54 @@ export function CoursesHomeScreen(props: any) {
             </Pressable>
           </View>
         </View>
+
+        {courseError && isTCSessionError(courseError) && (
+          <View
+            style={{
+              padding: 14,
+              borderRadius: theme.radius.lg,
+              backgroundColor: '#FEF3C7',
+              borderWidth: 1,
+              borderColor: '#F59E0B33',
+              gap: 8,
+            }}
+          >
+            <Text style={{ color: '#92400E', fontSize: 13, fontWeight: '700' }}>
+              TronClass 連線已過期
+            </Text>
+            <Text style={{ color: '#92400E', fontSize: 12, lineHeight: 18 }}>
+              課程資料可能不完整，請重新登入學校帳號。
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Pressable
+                onPress={() => nav?.navigate?.("我的", { screen: "SSOLogin" })}
+                style={({ pressed }) => ({
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                  borderRadius: theme.radius.lg,
+                  backgroundColor: '#F59E0B',
+                  opacity: pressed ? 0.82 : 1,
+                })}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>重新登入</Text>
+              </Pressable>
+              <Pressable
+                onPress={courseReload}
+                style={({ pressed }) => ({
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                  borderRadius: theme.radius.lg,
+                  backgroundColor: '#FEF3C7',
+                  borderWidth: 1,
+                  borderColor: '#F59E0B55',
+                  opacity: pressed ? 0.82 : 1,
+                })}
+              >
+                <Text style={{ color: '#92400E', fontWeight: '700', fontSize: 12 }}>重試</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
 
         {activeCourse && (
           <View style={{ gap: theme.space.md }}>

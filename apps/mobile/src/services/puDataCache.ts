@@ -256,6 +256,15 @@ export async function getAnyCachedTCCourses(): Promise<TCCourse[] | null> {
 export async function getAnyCachedTCActivities(): Promise<Record<number, TCActivity[]> | null> {
   return (await readCache<Record<number, TCActivity[]>>(KEYS.tcActivities))?.data ?? null;
 }
+export async function getAnyCachedTCModules(): Promise<Record<number, TCModule[]> | null> {
+  return (await readCache<Record<number, TCModule[]>>(KEYS.tcModules))?.data ?? null;
+}
+export async function getAnyCachedTCTodos(): Promise<TCActivity[] | null> {
+  return (await readCache<TCActivity[]>(KEYS.tcTodos))?.data ?? null;
+}
+export async function getAnyCachedTCAttendance(): Promise<TCAttendance[] | null> {
+  return (await readCache<TCAttendance[]>(KEYS.tcAttendance))?.data ?? null;
+}
 
 // ─── TronClass 刷新 ─────────────────────────────────────
 
