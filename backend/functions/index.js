@@ -380,7 +380,7 @@ async function createPuTronClassSession({
       userId: session?.userId ?? null,
       userName: session?.userName ?? null,
       createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     },
     { merge: true },
   );
@@ -398,7 +398,7 @@ async function createPuCampusSession({
       studentId,
       cookies,
       createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     },
     { merge: true },
   );
@@ -7575,7 +7575,7 @@ exports.puFetchTronClassData = onRequest(
       await sessionRef.set(
         {
           lastUsedAt: new Date(),
-          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
           ...(userId ? { userId } : {}),
         },
         { merge: true },
@@ -7596,6 +7596,63 @@ exports.puFetchTronClassData = onRequest(
 
       console.error('[puFetchTronClassData] Error:', error);
       res.status(502).json({ error: message });
+    }
+  },
+);
+
+exports.puRefreshTronClassSession = onRequest(
+  {
+    region: REGION,
+    cors: STRICT_CORS,
+  },
+  async (req, res) => {
+    try {
+      assertTrustedOrigin(req);
+      requirePostJson(req);
+
+      const studentId = normalizePuStudentId(req.body?.studentId);
+      const password = String(req.body?.password || '');
+
+      if (!studentId || !password) {
+        res.status(400).json({ error: 'Missing studentId or password' });
+        return;
+      }
+
+      enforceRateLimit({
+        scope: 'pu-tc-refresh',
+        key: studentId,
+        limit: 5,
+        windowMs: 15 * 60 * 1000,
+      });
+
+      const tronClassLoginResult = await tcLogin(studentId, password);
+      if (
+        !tronClassLoginResult.success ||
+        !tronClassLoginResult.cookies ||
+        Object.keys(tronClassLoginResult.cookies).length === 0 ||
+        !tronClassLoginResult.session
+      ) {
+        res.status(401).json({
+          error: tronClassLoginResult.error || 'TronClass 登入失敗',
+        });
+        return;
+      }
+
+      const tronClassSessionId = await createPuTronClassSession({
+        studentId,
+        cookies: tronClassLoginResult.cookies,
+        session: tronClassLoginResult.session,
+      });
+
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        success: true,
+        tronClassSessionId,
+        tronClassUserId: tronClassLoginResult.session.userId ?? null,
+      });
+    } catch (error) {
+      console.error('[puRefreshTronClassSession] Error:', error);
+      writeHttpError(res, error, 'TronClass session refresh failed');
     }
   },
 );
