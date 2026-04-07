@@ -43,9 +43,26 @@ function shouldUseEmulator(extra: CloudFunctionConfig, projectId: string): boole
 }
 
 function getEmulatorHost(): string {
-  // Allow override via env for physical device testing
+  // 1. Allow explicit override via env
   const envHost = String(process.env.EXPO_PUBLIC_EMULATOR_HOST ?? "").trim();
   if (envHost) return envHost;
+
+  // 2. Auto-detect host IP from Expo dev server URL (works on physical devices)
+  try {
+    const debuggerHost =
+      (Constants.expoConfig as any)?.hostUri ??
+      (Constants as any).manifest?.debuggerHost ??
+      (Constants as any).manifest2?.extra?.expoGo?.debuggerHost ??
+      "";
+    const host = String(debuggerHost).split(":")[0];
+    if (host && host !== "127.0.0.1" && host !== "localhost") {
+      return host;
+    }
+  } catch (_) {
+    // ignore
+  }
+
+  // 3. Fallback
   return Platform.OS === "android" ? "10.0.2.2" : "127.0.0.1";
 }
 

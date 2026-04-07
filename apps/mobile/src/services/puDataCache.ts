@@ -9,8 +9,13 @@
  *   - 學生資料: 30 天（幾乎不會變）
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getFirestore, doc, setDoc, getDoc } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import type { PuCreditAuditPayload } from "@campus/shared/src";
+import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from "@campus/shared/src";
 import {
   puFetchCourses,
+  puFetchCreditAudit,
   puFetchGrades,
   puFetchAnnouncements,
   puFetchStudentInfo,
@@ -41,6 +46,7 @@ const KEYS = {
   grades: `${PREFIX}grades`,
   announcements: `${PREFIX}announcements`,
   studentInfo: `${PREFIX}studentInfo`,
+  creditAudit: `${PREFIX}creditAudit`,
   tcCourses: `${PREFIX}tc_courses`,
   tcActivities: `${PREFIX}tc_activities`,
   tcModules: `${PREFIX}tc_modules`,
@@ -56,6 +62,7 @@ const TTL = {
   grades: 24 * 60 * 60 * 1000,              // 1 天
   announcements: 30 * 60 * 1000,            // 30 分鐘
   studentInfo: 30 * 24 * 60 * 60 * 1000,    // 30 天
+  creditAudit: 24 * 60 * 60 * 1000,         // 1 天
   tcCourses: 12 * 60 * 60 * 1000,           // 12 小時
   tcActivities: 2 * 60 * 60 * 1000,         // 2 小時（作業截止時間重要）
   tcModules: 12 * 60 * 60 * 1000,           // 12 小時
@@ -107,20 +114,121 @@ export async function seedCachedStudentInfo(data: PUStudentInfo): Promise<void> 
   await writeCache(KEYS.studentInfo, data);
 }
 
+export async function seedCachedCreditAudit(data: PuCreditAuditPayload): Promise<void> {
+  await writeCache(KEYS.creditAudit, data);
+}
+
 function isExpired(entry: CacheEntry<unknown> | null, ttl: number): boolean {
   if (!entry) return true;
   return Date.now() - entry.fetchedAt > ttl;
 }
 
 async function ensureTronClassSession(): Promise<void> {
+  // Session 驗證現在由 tcFetchJSON 內部的 auto re-login 機制處理
+  // 這裡只做輕量級檢查，不再阻塞
   try {
     const profile = await tcFetchProfile();
     if (!profile?.id) {
-      console.warn("[puDataCache] TronClass profile check returned no id — session may be expired, continuing with cache");
+      console.warn("[puDataCache] TronClass profile check returned no id — auto re-login will handle if needed");
     }
   } catch (err) {
-    console.warn("[puDataCache] TronClass session check failed (will use cached data):", err);
-    // 不再 throw — 讓呼叫者能繼續使用快取資料
+    console.warn("[puDataCache] TronClass session check failed (auto re-login will handle):", err);
+  }
+}
+
+// ─── Firestore Persistence ──────────────────────────────
+// 將學分試算資料寫入 Firestore，避免每次都要重新抓取
+
+async function writeCreditAuditToFirestore(data: PuCreditAuditPayload): Promise<void> {
+  try {
+    const auth = getAuth();
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      console.warn("[puDataCache] No authenticated user, skipping Firestore write");
+      return;
+    }
+    const db = getFirestore();
+    const schoolId = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
+    const docRef = doc(db, "users", uid, "schools", schoolId, "creditAudit", "latest");
+    await setDoc(docRef, {
+      ...data,
+      updatedAt: new Date().toISOString(),
+    });
+    console.log("[puDataCache] Credit audit written to Firestore successfully");
+  } catch (err) {
+    console.warn("[puDataCache] Firestore write failed (non-blocking):", err);
+  }
+}
+
+async function readCreditAuditFromFirestore(): Promise<PuCreditAuditPayload | null> {
+  try {
+    const auth = getAuth();
+    const uid = auth.currentUser?.uid;
+    if (!uid) return null;
+    const db = getFirestore();
+    const schoolId = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
+    const docRef = doc(db, "users", uid, "schools", schoolId, "creditAudit", "latest");
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    const data = snap.data() as PuCreditAuditPayload;
+    console.log("[puDataCache] Credit audit loaded from Firestore");
+    return data;
+  } catch (err) {
+    console.warn("[puDataCache] Firestore read failed:", err);
+    return null;
+  }
+}
+
+async function writeGradesToFirestore(data: PUGradeResult): Promise<void> {
+  try {
+    const auth = getAuth();
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const db = getFirestore();
+    const schoolId = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
+    const docRef = doc(db, "users", uid, "schools", schoolId, "grades", "latest");
+    await setDoc(docRef, {
+      ...data,
+      updatedAt: new Date().toISOString(),
+    });
+    console.log("[puDataCache] Grades written to Firestore");
+  } catch (err) {
+    console.warn("[puDataCache] Grades Firestore write failed:", err);
+  }
+}
+
+async function readGradesFromFirestore(): Promise<PUGradeResult | null> {
+  try {
+    const auth = getAuth();
+    const uid = auth.currentUser?.uid;
+    if (!uid) return null;
+    const db = getFirestore();
+    const schoolId = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
+    const docRef = doc(db, "users", uid, "schools", schoolId, "grades", "latest");
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return null;
+    return snap.data() as PUGradeResult;
+  } catch (err) {
+    console.warn("[puDataCache] Grades Firestore read failed:", err);
+    return null;
+  }
+}
+
+async function writeCoursesToFirestore(data: PUCourseResult): Promise<void> {
+  try {
+    const auth = getAuth();
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const db = getFirestore();
+    const schoolId = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
+    const docRef = doc(db, "users", uid, "schools", schoolId, "courses", "latest");
+    await setDoc(docRef, {
+      ...data,
+      updatedAt: new Date().toISOString(),
+    });
+    console.log("[puDataCache] Courses written to Firestore");
+  } catch (err) {
+    console.warn("[puDataCache] Courses Firestore write failed:", err);
   }
 }
 
@@ -154,6 +262,17 @@ export async function getCachedStudentInfo(): Promise<PUStudentInfo | null> {
   return entry!.data;
 }
 
+export async function getCachedCreditAudit(): Promise<PuCreditAuditPayload | null> {
+  const entry = await readCache<PuCreditAuditPayload>(KEYS.creditAudit);
+  if (isExpired(entry, TTL.creditAudit)) return null;
+  // Reject old format cache (no version field = legacy, should be re-fetched)
+  if (entry?.data && !(entry.data as any).version) {
+    console.log("[puDataCache] Discarding old format credit audit cache (no version field)");
+    return null;
+  }
+  return entry!.data;
+}
+
 /** 強制取得（不管過期），給離線模式用 */
 export async function getAnyCachedCourses(): Promise<PUCourseResult | null> {
   const entry = await readCache<PUCourseResult>(KEYS.courses);
@@ -175,6 +294,21 @@ export async function getAnyCachedStudentInfo(): Promise<PUStudentInfo | null> {
   return entry?.data ?? null;
 }
 
+export async function getAnyCachedCreditAudit(): Promise<PuCreditAuditPayload | null> {
+  // 1. Try local AsyncStorage cache first
+  const entry = await readCache<PuCreditAuditPayload>(KEYS.creditAudit);
+  // Reject old format cache (no version field)
+  if (entry?.data && (entry.data as any).version) return entry.data;
+  // 2. Fallback to Firestore (cloud persistence)
+  const firestoreData = await readCreditAuditFromFirestore();
+  if (firestoreData && (firestoreData as any).version) {
+    // Write back to local cache for faster access next time
+    await writeCache(KEYS.creditAudit, firestoreData);
+    return firestoreData;
+  }
+  return null;
+}
+
 // ─── 單項刷新 ────────────────────────────────────────────
 
 export async function refreshCourses(session: PUSession): Promise<PUCourseResult | null> {
@@ -182,6 +316,7 @@ export async function refreshCourses(session: PUSession): Promise<PUCourseResult
   const result = await puFetchCourses(session);
   if (result.success && result.data) {
     await writeCache(KEYS.courses, result.data);
+    void writeCoursesToFirestore(result.data);
     return result.data;
   }
   console.warn("[puDataCache] refreshCourses failed:", result.error);
@@ -193,6 +328,7 @@ export async function refreshGrades(session: PUSession): Promise<PUGradeResult |
   const result = await puFetchGrades(session);
   if (result.success && result.data) {
     await writeCache(KEYS.grades, result.data);
+    void writeGradesToFirestore(result.data);
     return result.data;
   }
   console.warn("[puDataCache] refreshGrades failed:", result.error);
@@ -218,6 +354,19 @@ export async function refreshStudentInfo(session: PUSession): Promise<PUStudentI
     return result.data;
   }
   console.warn("[puDataCache] refreshStudentInfo failed:", result.error);
+  return null;
+}
+
+export async function refreshCreditAudit(session: PUSession): Promise<PuCreditAuditPayload | null> {
+  console.log("[puDataCache] refreshing credit audit (v2)…");
+  const result = await puFetchCreditAudit(session);
+  if (result.success && result.data) {
+    // Write to both AsyncStorage (local cache) and Firestore (cloud persistence)
+    await writeCache(KEYS.creditAudit, result.data);
+    void writeCreditAuditToFirestore(result.data);
+    return result.data;
+  }
+  console.warn("[puDataCache] refreshCreditAudit failed:", result.error);
   return null;
 }
 
@@ -419,6 +568,11 @@ export async function syncAllData(
         }),
       ])
     : [null, null, null, null];
+
+  // 學分試算 — 背景同步（不論 includeEssential）
+  void refreshCreditAudit(session).catch((e) => {
+    console.warn("[puDataCache] creditAudit sync error:", e);
+  });
 
   const tcCourses =
     options.tcCourses ??

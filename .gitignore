@@ -16,6 +16,12 @@ firebase-debug.log*
 # OS
 .DS_Store
 
+# Cursor/AI
+.claude/
+
+# FUSE temp files (macOS)
+.fuse_hidden*
+
 # Next
 apps/web/.next/
 apps/web/out/
