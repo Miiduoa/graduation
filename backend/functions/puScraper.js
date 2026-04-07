@@ -27,6 +27,21 @@ const MYPU_HOST = 'mypu.pu.edu.tw';
 const LOGIN_PATH = '/index_check.php';
 const COURSE_RESULT_PATH = '/stu_query/query_course.html';
 const GRADE_PATH = '/score_query/score_all.php';
+const ALCAT_GRADE_ALL = '/stu_query/score_all.php'; // 歷年修課明細（學分試算表使用）
+const CREDIT_AUDIT_TAB1 = '/grade_review/tab_1.php'; // 學分試算總覽
+const CREDIT_AUDIT_CANDIDATE_PATHS = [
+  `https://${ALCAT_HOST}/stu_query/query_credit.html`,
+  `https://${ALCAT_HOST}/stu_query/credit_check.html`,
+  `https://${ALCAT_HOST}/stu_query/credit_calc.html`,
+  `https://${ALCAT_HOST}/stu_query/query_score.html`,
+  `https://${ALCAT_HOST}/stu_query/query_history.html`,
+  `https://${MYPU_HOST}/score_query/credit_calc.php`,
+  `https://${MYPU_HOST}/score_query/credit_check.php`,
+  `https://${MYPU_HOST}/score_query/score_history.php`,
+  `https://${MYPU_HOST}/score_query/score_list.php`,
+  `https://${MYPU_HOST}/credit_query/index.php`,
+  `https://${MYPU_HOST}/credit_query/credit_check.php`,
+];
 
 /** 靜宜大學節次 → 時間對照表 (verified from official schedule) */
 const PERIOD_TIME_MAP = {
@@ -180,6 +195,384 @@ function parseTable(html, headerHint) {
   }
 
   return allRows;
+}
+
+function parseAllTables(html) {
+  const tableRegex = /<table[^>]*>[\s\S]*?<\/table>/gi;
+  const tables = html.match(tableRegex) || [];
+
+  return tables.map((table) => {
+    const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    const allRows = [];
+    let m;
+    while ((m = rowRegex.exec(table)) !== null) {
+      const cellRegex = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+      const cells = [];
+      let c;
+      while ((c = cellRegex.exec(m[1])) !== null) {
+        cells.push(stripTags(c[1]));
+      }
+      if (cells.length > 0) allRows.push(cells);
+    }
+    return allRows;
+  });
+}
+
+function normalizeSemesterValue(raw) {
+  const value = String(raw || '').replace(/\s+/g, '').trim();
+  if (!value) return null;
+  if (/^\d{4}$/.test(value)) return value;
+
+  const rocMatch = value.match(/^(\d{3})[-年]?([12])$/);
+  if (rocMatch) return `${rocMatch[1]}${rocMatch[2]}`;
+
+  const fullMatch = value.match(/(\d{3})學年度第([12])學期/);
+  if (fullMatch) return `${fullMatch[1]}${fullMatch[2]}`;
+
+  return null;
+}
+
+function normalizeScoreValue(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return value;
+  if (value === '通過(Pass)' || value.toLowerCase() === 'pass') return 'Pass';
+  const numeric = parseFloat(value);
+  return Number.isFinite(numeric) ? numeric : value;
+}
+
+function parseGradeRowsFromTableRows(rows) {
+  const grades = [];
+  const summaryRows = [];
+
+  for (const cells of rows) {
+    if (cells.length < 6) continue;
+
+    const semester = normalizeSemesterValue(cells[0]);
+    const courseName = String(cells[1] || '').trim();
+    const score = String(cells[5] || '').trim();
+
+    if (!semester || !courseName || !score) continue;
+    if (courseName.includes('課程名稱') || courseName.includes('Course Name')) continue;
+
+    if (
+      courseName.includes('排名') || courseName.includes('ranking') ||
+      courseName.includes('操行') || courseName.includes('Behavior') ||
+      courseName.includes('平均') || courseName.includes('average')
+    ) {
+      summaryRows.push({ semester, label: courseName, value: score });
+      continue;
+    }
+
+    const { zhName, enName } = parseCourseTitle(courseName);
+    grades.push({
+      semester,
+      courseName: zhName,
+      courseNameEn: enName,
+      class: cells[2],
+      courseType: cells[3],
+      credits: parseInt(cells[4], 10) || 0,
+      score: normalizeScoreValue(score),
+    });
+  }
+
+  return { grades, summaryRows };
+}
+
+function dedupeGradeRows(grades) {
+  const seen = new Set();
+  const deduped = [];
+  for (const grade of grades) {
+    const key = [
+      grade.semester,
+      grade.courseName,
+      grade.credits,
+      String(grade.score),
+    ].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(grade);
+  }
+  return deduped;
+}
+
+function dedupeSummaryRows(rows) {
+  const seen = new Set();
+  const deduped = [];
+  for (const row of rows) {
+    const key = `${row.semester}|${row.label}|${row.value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(row);
+  }
+  return deduped;
+}
+
+function extractJavascriptUrl(raw) {
+  const absoluteMatch = String(raw || '').match(/https?:\/\/[^"')\s]+/i);
+  if (absoluteMatch) return absoluteMatch[0];
+
+  const quotedPathMatch = String(raw || '').match(/['"]([^'"]+\.(?:php|html)(?:\?[^'"]*)?)['"]/i);
+  if (quotedPathMatch) return quotedPathMatch[1];
+
+  const pathMatch = String(raw || '').match(/\/[A-Za-z0-9_./-]+\.(?:php|html)(?:\?[^"')\s]*)?/i);
+  if (pathMatch) return pathMatch[0];
+
+  return null;
+}
+
+function extractAnchorTarget(anchorHtml, rawHref) {
+  const candidates = [rawHref];
+  const onclickMatch = anchorHtml.match(/\bonclick=["']([^"']+)["']/i);
+  if (onclickMatch && onclickMatch[1]) {
+    candidates.push(onclickMatch[1]);
+  }
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (!value) continue;
+    if (!value.toLowerCase().startsWith('javascript:')) return value;
+
+    const extracted = extractJavascriptUrl(value);
+    if (extracted) return extracted;
+  }
+
+  return null;
+}
+
+function isCreditAuditLink(text, target) {
+  const haystack = `${text} ${target}`.toLowerCase();
+  return (
+    haystack.includes('學分') ||
+    haystack.includes('試算') ||
+    haystack.includes('畢業') ||
+    haystack.includes('修課') ||
+    haystack.includes('歷年') ||
+    haystack.includes('成績') ||
+    haystack.includes('credit') ||
+    haystack.includes('graduate') ||
+    haystack.includes('score')
+  );
+}
+
+function expandCreditAuditTargets(target) {
+  const urls = new Set();
+
+  try {
+    const resolved = new URL(target, `https://${ALCAT_HOST}/`);
+    urls.add(resolved.toString());
+
+    const path = `${resolved.pathname}${resolved.search}`;
+    if (resolved.hostname === ALCAT_HOST && /^\/(?:score_query|credit_query)\//.test(path)) {
+      urls.add(`https://${MYPU_HOST}${path}`);
+    }
+    if (resolved.hostname === MYPU_HOST && /^\/stu_query\//.test(path)) {
+      urls.add(`https://${ALCAT_HOST}${path}`);
+    }
+  } catch {
+    // Ignore malformed targets.
+  }
+
+  return Array.from(urls);
+}
+
+const CREDIT_AUDIT_CATEGORY_MATCHERS = [
+  { key: 'required', keywords: ['必修'] },
+  { key: 'elective', keywords: ['選修'] },
+  { key: 'general', keywords: ['通識', '博雅', '核心'] },
+  { key: 'english', keywords: ['英文', '英語', '外語'] },
+  { key: 'other', keywords: ['體育', '服務學習', '軍訓', '勞作', '其他'] },
+];
+
+function normalizeAuditCellText(text) {
+  return String(text || '').replace(/\s+/g, '').trim();
+}
+
+function detectAuditColumnRole(text) {
+  const normalized = normalizeAuditCellText(text);
+  if (!normalized) return null;
+  if (normalized.includes('類別') || normalized.includes('項目') || normalized.includes('名稱')) return 'label';
+  if (normalized.includes('已修') || normalized.includes('已得') || normalized.includes('已通過') || normalized.includes('累計')) return 'earned';
+  if (normalized.includes('應修') || normalized.includes('應得') || normalized.includes('需修') || normalized.includes('規定') || normalized.includes('門檻')) return 'required';
+  if (normalized.includes('尚缺') || normalized.includes('未修') || normalized.includes('未得') || normalized.includes('不足')) return 'remaining';
+  return null;
+}
+
+function extractAuditColumnRoles(rows) {
+  for (const row of rows.slice(0, 4)) {
+    const roles = {};
+    row.forEach((cell, index) => {
+      const role = detectAuditColumnRole(cell);
+      if (role && roles[role] == null) {
+        roles[role] = index;
+      }
+    });
+
+    if (Object.keys(roles).length >= 2) {
+      return roles;
+    }
+  }
+
+  return {};
+}
+
+function findCreditAuditCategory(text) {
+  const normalized = normalizeAuditCellText(text);
+  if (!normalized) return null;
+
+  for (const matcher of CREDIT_AUDIT_CATEGORY_MATCHERS) {
+    if (matcher.keywords.some((keyword) => normalized.includes(keyword))) {
+      return matcher.key;
+    }
+  }
+
+  return null;
+}
+
+function isCreditAuditTotalLabel(text) {
+  const normalized = normalizeAuditCellText(text);
+  if (!normalized) return false;
+
+  return (
+    normalized.includes('總計') ||
+    normalized.includes('合計') ||
+    normalized.includes('總學分') ||
+    normalized.includes('畢業學分') ||
+    normalized.includes('畢業門檻')
+  );
+}
+
+function parseAuditNumber(text) {
+  const match = String(text || '').match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const value = parseFloat(match[0]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function extractNamedAuditMetrics(text) {
+  const raw = String(text || '');
+  const earnedMatch = raw.match(/(?:已修|已得|已通過|累計)[^\d]{0,8}(-?\d+(?:\.\d+)?)/);
+  const requiredMatch = raw.match(/(?:應修|應得|需修|規定|門檻|畢業學分)[^\d]{0,8}(-?\d+(?:\.\d+)?)/);
+  const remainingMatch = raw.match(/(?:尚缺|未修|未得|不足)[^\d]{0,8}(-?\d+(?:\.\d+)?)/);
+
+  return {
+    earned: earnedMatch ? parseFloat(earnedMatch[1]) : null,
+    required: requiredMatch ? parseFloat(requiredMatch[1]) : null,
+    remaining: remainingMatch ? parseFloat(remainingMatch[1]) : null,
+  };
+}
+
+function buildAuditMetricsFromRow(cells, roles) {
+  const joined = cells.join(' ');
+  const namedMetrics = extractNamedAuditMetrics(joined);
+
+  const earned =
+    (roles.earned != null ? parseAuditNumber(cells[roles.earned] || '') : null) ??
+    namedMetrics.earned ??
+    null;
+  const required =
+    (roles.required != null ? parseAuditNumber(cells[roles.required] || '') : null) ??
+    namedMetrics.required ??
+    null;
+  const remaining =
+    (roles.remaining != null ? parseAuditNumber(cells[roles.remaining] || '') : null) ??
+    namedMetrics.remaining ??
+    null;
+
+  if (earned == null && required == null && remaining == null) {
+    return { earned: null, required: null, remaining: null };
+  }
+
+  return {
+    earned,
+    required,
+    remaining: remaining ?? (earned != null && required != null ? Math.max(0, required - earned) : null),
+  };
+}
+
+function mergeAuditSummaryEntry(current, next) {
+  return {
+    earned: current?.earned ?? next.earned ?? null,
+    required: current?.required ?? next.required ?? null,
+    remaining: current?.remaining ?? next.remaining ?? null,
+  };
+}
+
+function getCreditAuditCompleteness(payload) {
+  if (!payload) return 0;
+
+  let score = 0;
+  if (payload.total?.earned != null) score += 1;
+  if (payload.total?.required != null) score += 1;
+  if (payload.total?.remaining != null) score += 1;
+
+  for (const entry of Object.values(payload.byCategory || {})) {
+    if (!entry) continue;
+    score += 1;
+    if (entry.earned != null) score += 1;
+    if (entry.required != null) score += 1;
+    if (entry.remaining != null) score += 1;
+  }
+
+  return score;
+}
+
+function parseCreditAuditSummary(html, sourceUrl) {
+  const tables = parseAllTables(html);
+  let best = null;
+
+  for (const rows of tables) {
+    const roles = extractAuditColumnRoles(rows);
+    const payload = {
+      sourceUrl: sourceUrl || null,
+      total: {
+        earned: null,
+        required: null,
+        remaining: null,
+      },
+      byCategory: {},
+      rawCategoryRows: [],
+    };
+
+    for (const cells of rows) {
+      const joined = cells.join(' ').trim();
+      if (!joined) continue;
+
+      const labelCell =
+        (roles.label != null ? cells[roles.label] : null) ||
+        cells.find((cell) => findCreditAuditCategory(cell) || isCreditAuditTotalLabel(cell)) ||
+        cells[0] ||
+        '';
+      const category = findCreditAuditCategory(labelCell) || findCreditAuditCategory(joined);
+      const isTotal = !category && (isCreditAuditTotalLabel(labelCell) || isCreditAuditTotalLabel(joined));
+      if (!category && !isTotal) continue;
+
+      const metrics = buildAuditMetricsFromRow(cells, roles);
+      if (metrics.earned == null && metrics.required == null && metrics.remaining == null) continue;
+
+      payload.rawCategoryRows.push({
+        label: labelCell,
+        values: cells.slice(1),
+      });
+
+      if (category) {
+        const current = payload.byCategory[category];
+        payload.byCategory[category] = {
+          label: current?.label || String(labelCell).trim(),
+          earned: current?.earned ?? metrics.earned ?? null,
+          required: current?.required ?? metrics.required ?? null,
+          remaining: current?.remaining ?? metrics.remaining ?? null,
+        };
+      } else if (isTotal) {
+        payload.total = mergeAuditSummaryEntry(payload.total, metrics);
+      }
+    }
+
+    if (getCreditAuditCompleteness(payload) > getCreditAuditCompleteness(best)) {
+      best = payload;
+    }
+  }
+
+  return getCreditAuditCompleteness(best) > 0 ? best : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -397,46 +790,87 @@ async function puFetchCourses(cookies, semester) {
  * Parse grade rows from an HTML response.
  * Returns { grades, summaryRows }.
  */
-function parseGradeRows(html) {
-  const rows = parseTable(html, 'Score');
+/**
+ * 解析「歷年修課明細」格式 — 學期標題 + 每學期一個 table
+ * 格式: 學期別(Semester)：114 [ 1 ] → 下方 table 有 Course, Class, CourseType, Credits, Score
+ */
+function parsePerSemesterGrades(html) {
   const grades = [];
   const summaryRows = [];
 
-  for (const cells of rows) {
-    if (cells.length < 6) continue;
-    if (cells[0].includes('Semester') || cells[0].includes('學期別')) continue;
+  const semesterSections = html.split(/學期別\(Semester\)/);
+  if (semesterSections.length <= 1) return { grades: [], summaryRows: [] };
 
-    const sem = cells[0];
-    const courseName = cells[1];
-    const cls = cells[2];
-    const courseType = cells[3];
-    const credits = parseInt(cells[4], 10);
-    const score = cells[5];
+  for (let i = 1; i < semesterSections.length; i++) {
+    const section = semesterSections[i];
+    const semMatch = section.match(/[：:]\s*(\d{2,3})\s*\[\s*(\d+)\s*\]/);
+    if (!semMatch) continue;
+    const semester = `${semMatch[1]}${semMatch[2]}`;
 
-    if (
-      courseName.includes('排名') || courseName.includes('ranking') ||
-      courseName.includes('操行') || courseName.includes('Behavior') ||
-      courseName.includes('平均') || courseName.includes('average')
-    ) {
-      summaryRows.push({ semester: sem, label: courseName, value: score });
-      continue;
+    const tables = parseAllTables(section);
+    for (const rows of tables) {
+      for (const cells of rows) {
+        if (cells.length < 5) continue;
+        const courseName = (cells[0] || '').trim();
+        if (!courseName) continue;
+        if (courseName.includes('科目名稱') || courseName.includes('Course')) continue;
+
+        if (
+          courseName.includes('平均') || courseName.includes('average') ||
+          courseName.includes('操行') || courseName.includes('Behavior') ||
+          courseName.includes('排名') || courseName.includes('ranking')
+        ) {
+          const value = cells[cells.length - 1] || '';
+          if (value) summaryRows.push({ semester, label: courseName, value: value.trim() });
+          continue;
+        }
+
+        const scoreIdx = cells.length - 1;
+        const creditsIdx = cells.length - 2;
+        const courseTypeIdx = cells.length - 3;
+        const classIdx = cells.length - 4;
+
+        const score = (cells[scoreIdx] || '').trim();
+        if (!score) continue;
+
+        const { zhName, enName } = parseCourseTitle(courseName);
+        grades.push({
+          semester,
+          courseName: zhName,
+          courseNameEn: enName,
+          className: (cells[classIdx] || '').trim(),
+          courseType: (cells[courseTypeIdx] || '').trim(),
+          credits: parseInt(cells[creditsIdx] || '0', 10) || 0,
+          score: normalizeScoreValue(score),
+        });
+      }
     }
-
-    if (!/^\d{4}$/.test(sem)) continue;
-
-    const { zhName, enName } = parseCourseTitle(courseName);
-    grades.push({
-      semester: sem,
-      courseName: zhName,
-      courseNameEn: enName,
-      class: cls,
-      courseType,
-      credits: isNaN(credits) ? 0 : credits,
-      score: score === '通過(Pass)' ? 'Pass' : parseFloat(score) || score,
-    });
   }
 
-  return { grades, summaryRows };
+  return { grades: dedupeGradeRows(grades), summaryRows: dedupeSummaryRows(summaryRows) };
+}
+
+function parseGradeRows(html) {
+  // 優先嘗試「歷年修課明細」格式
+  const perSemResult = parsePerSemesterGrades(html);
+  if (perSemResult.grades.length > 0) {
+    console.log(`[parseGradeRows] Per-semester format: ${perSemResult.grades.length} grades`);
+    return perSemResult;
+  }
+
+  // Fallback: 原始格式
+  const parsedTables = parseAllTables(html)
+    .map((rows) => parseGradeRowsFromTableRows(rows))
+    .filter((candidate) => candidate.grades.length > 0 || candidate.summaryRows.length > 0);
+
+  if (parsedTables.length === 0) {
+    return { grades: [], summaryRows: [] };
+  }
+
+  return {
+    grades: dedupeGradeRows(parsedTables.flatMap((candidate) => candidate.grades)),
+    summaryRows: dedupeSummaryRows(parsedTables.flatMap((candidate) => candidate.summaryRows)),
+  };
 }
 
 /**
@@ -478,7 +912,29 @@ async function puFetchGrades(cookies, semester) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
-    // ── Step 1: Establish mypu session ──
+    // ── Strategy 0 (BEST): alcat /stu_query/score_all.php ──
+    // 學分試算表「歷年修課明細」使用的頁面，包含所有學期成績
+    try {
+      const alcatAll = await getFollowRedirect(ALCAT_HOST, ALCAT_GRADE_ALL, cookies);
+      if (alcatAll.status === 200 && alcatAll.data.length > 200) {
+        const parsed = parseGradeRows(alcatAll.data);
+        const sems = [...new Set(parsed.grades.map(g => g.semester))];
+        console.log(`[puFetchGrades] alcat stu_query/score_all: ${parsed.grades.length} grades, ${sems.length} semesters`);
+        if (sems.length >= 1) {
+          const filteredGrades = semester ? parsed.grades.filter(g => g.semester === semester) : parsed.grades;
+          return {
+            success: true,
+            grades: filteredGrades,
+            allSemesters: sems,
+            summary: buildGradeSummary(parsed.summaryRows),
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[puFetchGrades] Strategy 0 (alcat stu_query) failed:', e.message);
+    }
+
+    // ── Step 1: Establish mypu session (fallback) ──
     // alcat and mypu are on different subdomains of pu.edu.tw.
     // We try multiple approaches to establish a valid mypu session:
     //   A) Direct: send alcat cookies to mypu root (may share parent domain cookies)
@@ -655,8 +1111,41 @@ async function puFetchGrades(cookies, semester) {
       }
     }
 
-    // ── Step 5: Final result ──
-    const allSemesters = [...new Set(grades.map((g) => g.semester))];
+    // ── Step 5: Fallback to E-campus credit audit if the main grade page is still incomplete ──
+    let allSemesters = [...new Set(grades.map((g) => g.semester))];
+    if (allSemesters.length <= 1) {
+      try {
+        const auditResult = await puFetchCreditAudit(cookies);
+        if (auditResult.success && auditResult.grades.length > grades.length) {
+          console.log(`[puFetchGrades] Credit audit fallback improved result: ${auditResult.grades.length} grades, ${auditResult.allSemesters.length} semesters`);
+          grades = auditResult.grades;
+          summaryRows = dedupeSummaryRows([
+            ...summaryRows,
+            ...Object.entries(auditResult.summary || {}).flatMap(([semesterKey, value]) => {
+              const rows = [];
+              if (value.departmentRanking != null) {
+                rows.push({ semester: semesterKey, label: '系排名', value: String(value.departmentRanking) });
+              }
+              if (value.classRanking != null) {
+                rows.push({ semester: semesterKey, label: '班排名', value: String(value.classRanking) });
+              }
+              if (value.behaviorScore != null) {
+                rows.push({ semester: semesterKey, label: '操行', value: String(value.behaviorScore) });
+              }
+              if (value.semesterAverage != null) {
+                rows.push({ semester: semesterKey, label: '平均', value: String(value.semesterAverage) });
+              }
+              return rows;
+            }),
+          ]);
+          allSemesters = auditResult.allSemesters || [...new Set(grades.map((g) => g.semester))];
+        }
+      } catch (e) {
+        console.warn('[puFetchGrades] Credit audit fallback failed:', e.message);
+      }
+    }
+
+    // ── Step 6: Final result ──
     console.log(`[puFetchGrades] Final result: ${grades.length} grades across ${allSemesters.length} semesters: [${allSemesters.join(', ')}]`);
 
     const filteredGrades = semester
@@ -767,23 +1256,18 @@ async function puDiscoverMenuLinks(cookies) {
 
     const html = res.data;
     const links = [];
-    const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const linkRegex = /<a\b([^>]*)href=["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi;
     let match;
     while ((match = linkRegex.exec(html)) !== null) {
-      const href = match[1];
-      const text = stripTags(match[2]).trim();
-      if (text && text.length > 1 && !href.includes('javascript:')) {
-        links.push({ text, href });
-      }
+      const href = match[2];
+      const text = stripTags(match[4]).trim();
+      const target = extractAnchorTarget(match[0], href);
+      if (!text || text.length <= 1 || !target) continue;
+      links.push({ text, href: target });
     }
 
     // Categorize links
-    const creditLinks = links.filter(l =>
-      l.text.includes('學分') || l.text.includes('credit') ||
-      l.text.includes('畢業') || l.text.includes('graduate') ||
-      l.text.includes('成績') || l.text.includes('score') ||
-      l.text.includes('修課') || l.text.includes('歷年')
-    );
+    const creditLinks = links.filter((link) => isCreditAuditLink(link.text, link.href));
 
     console.log('[puDiscoverMenuLinks] Total links:', links.length);
     console.log('[puDiscoverMenuLinks] Credit/grade related:', JSON.stringify(creditLinks, null, 2));
@@ -816,36 +1300,22 @@ async function puFetchCreditAudit(cookies) {
 
     // Add discovered credit-related links
     for (const link of creditLinks) {
-      let href = link.href;
-      if (!href.startsWith('http')) {
-        href = `https://${ALCAT_HOST}/${href.replace(/^\//, '')}`;
+      const expandedTargets = expandCreditAuditTargets(link.href);
+      for (const href of expandedTargets) {
+        urlsToTry.push({ url: href, desc: link.text, source: 'discovered' });
       }
-      urlsToTry.push({ url: href, desc: link.text, source: 'discovered' });
     }
 
     // Add known common PU URL patterns for credit audit
-    const knownPatterns = [
-      { host: ALCAT_HOST, path: '/stu_query/query_credit.html', desc: 'alcat credit query' },
-      { host: ALCAT_HOST, path: '/stu_query/credit_check.html', desc: 'alcat credit check' },
-      { host: ALCAT_HOST, path: '/stu_query/credit_calc.html', desc: 'alcat credit calc' },
-      { host: ALCAT_HOST, path: '/stu_query/query_score.html', desc: 'alcat score query' },
-      { host: ALCAT_HOST, path: '/stu_query/query_history.html', desc: 'alcat history query' },
-      { host: MYPU_HOST, path: '/score_query/credit_calc.php', desc: 'mypu credit calc' },
-      { host: MYPU_HOST, path: '/score_query/credit_check.php', desc: 'mypu credit check' },
-      { host: MYPU_HOST, path: '/score_query/score_history.php', desc: 'mypu score history' },
-      { host: MYPU_HOST, path: '/score_query/score_list.php', desc: 'mypu score list' },
-      { host: MYPU_HOST, path: '/credit_query/index.php', desc: 'mypu credit index' },
-      { host: MYPU_HOST, path: '/credit_query/credit_check.php', desc: 'mypu credit check2' },
-    ];
-
-    for (const p of knownPatterns) {
-      urlsToTry.push({ url: `https://${p.host}${p.path}`, desc: p.desc, source: 'pattern' });
+    for (const url of CREDIT_AUDIT_CANDIDATE_PATHS) {
+      urlsToTry.push({ url, desc: url, source: 'pattern' });
     }
 
     // Try each URL and collect grade/credit data
     let bestGrades = [];
     let bestSummary = {};
     let bestSemesters = [];
+    let bestCreditAudit = null;
     let creditAuditHtml = null;
     let creditAuditUrl = null;
 
@@ -872,6 +1342,10 @@ async function puFetchCreditAudit(cookies) {
 
         // Check if this page has credit audit info (學分統計, 畢業門檻, etc.)
         if (html.includes('學分') && (html.includes('畢業') || html.includes('必修') || html.includes('選修') || html.includes('通識'))) {
+          const parsedCreditAudit = parseCreditAuditSummary(html, url);
+          if (getCreditAuditCompleteness(parsedCreditAudit) > getCreditAuditCompleteness(bestCreditAudit)) {
+            bestCreditAudit = parsedCreditAudit;
+          }
           creditAuditHtml = html;
           creditAuditUrl = url;
           console.log(`[puFetchCreditAudit] ${desc}: appears to have credit audit data!`);
@@ -888,16 +1362,17 @@ async function puFetchCreditAudit(cookies) {
     }
 
     return {
-      success: bestGrades.length > 0 || creditAuditHtml !== null,
+      success: bestGrades.length > 0 || creditAuditHtml !== null || bestCreditAudit !== null,
       grades: bestGrades,
       allSemesters: bestSemesters,
       summary: bestSummary,
+      creditAudit: bestCreditAudit,
       creditAuditUrl,
       creditAuditHtml: creditAuditHtml ? creditAuditHtml.slice(0, 5000) : null, // Truncate for safety
     };
   } catch (err) {
     console.error('[puFetchCreditAudit] Error:', err);
-    return { success: false, grades: [], allSemesters: [], summary: {}, error: err.message };
+    return { success: false, grades: [], allSemesters: [], summary: {}, creditAudit: null, error: err.message };
   }
 }
 

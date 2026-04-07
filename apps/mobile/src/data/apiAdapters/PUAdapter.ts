@@ -1,3 +1,4 @@
+import type { PuCreditAuditPayload } from "@campus/shared/src";
 import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from "@campus/shared/src";
 import { BaseApiAdapter } from "./BaseAdapter";
 import type {
@@ -21,21 +22,25 @@ import type {
 } from "../types";
 import {
   puLogin,
+  puFetchCreditAudit,
   type PUSession,
 } from "../../services/puDirectScraper";
 import {
   getCachedCourses,
   getCachedGrades,
   getCachedAnnouncements,
+  getCachedCreditAudit,
   getAnyCachedCourses,
   getAnyCachedGrades,
   getAnyCachedAnnouncements,
+  getAnyCachedCreditAudit,
   refreshCourses,
   refreshGrades,
   refreshAnnouncements,
   seedCachedCourses,
   seedCachedGrades as persistCachedGrades,
   seedCachedAnnouncements,
+  seedCachedCreditAudit,
   getCachedTCCourses,
   getCachedTCActivities,
   getCachedTCModules,
@@ -603,6 +608,48 @@ export class PUAdapter extends BaseApiAdapter {
     if (stale && stale.grades.length > 0) return this.mapGrades(stale, studentId, semester);
 
     return [];
+  }
+
+  async getCreditAudit(): Promise<PuCreditAuditPayload | null> {
+    // Only accept v2 format data — reject any old format
+    const isV2 = (d: PuCreditAuditPayload | null): d is PuCreditAuditPayload =>
+      d != null && (d as any).version === 2;
+
+    const cached = await getCachedCreditAudit();
+    if (isV2(cached)) {
+      console.log("[PUAdapter] getCreditAudit: returning v2 cached data, subtotal:", (cached as any).creditTotals?.subtotal);
+      return cached;
+    }
+
+    try {
+      if (this.useDirectMode && this.directSession) {
+        console.log("[PUAdapter] getCreditAudit: fetching fresh via direct scraping");
+        const fresh = await puFetchCreditAudit(this.directSession);
+        if (fresh.success && fresh.data && isV2(fresh.data)) {
+          await seedCachedCreditAudit(fresh.data).catch(() => undefined);
+          return fresh.data;
+        }
+        console.warn("[PUAdapter] getCreditAudit: direct fetch result:", fresh.success, "isV2:", isV2(fresh.data));
+      } else if (!this.useDirectMode) {
+        type CreditAuditResponse = {
+          success?: boolean;
+          creditAudit?: PuCreditAuditPayload | null;
+        };
+
+        const data = await this.fetchData<CreditAuditResponse>("creditAudit");
+        if (data?.creditAudit && isV2(data.creditAudit)) {
+          await seedCachedCreditAudit(data.creditAudit).catch(() => undefined);
+          return data.creditAudit;
+        }
+      }
+    } catch (err) {
+      console.warn("[PUAdapter] getCreditAudit remote fetch failed:", err);
+    }
+
+    const fallback = await getAnyCachedCreditAudit();
+    if (isV2(fallback)) return fallback;
+    console.warn("[PUAdapter] getCreditAudit: no v2 data available at all");
+    return null;
   }
 
   // ---------------------------------------------------------------------------

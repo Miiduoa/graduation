@@ -26,6 +26,15 @@ type FirebaseWebConfig = {
   appId?: string;
 };
 
+const FALLBACK_FIREBASE_CONFIG = {
+  apiKey: "mock-api-key",
+  authDomain: "mock-project.firebaseapp.com",
+  projectId: "mock-project",
+  storageBucket: "mock-project.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:mock",
+} as const;
+
 function getFirebaseConfig(): FirebaseWebConfig {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
   return (extra.firebase ?? {}) as FirebaseWebConfig;
@@ -36,6 +45,14 @@ function isMockRuntimeMode(): boolean {
   const useMockData = String(process.env.EXPO_PUBLIC_USE_MOCK_DATA ?? "").toLowerCase() === "true";
   // hybrid 模式也允許使用 mock Firebase config（透過後端 proxy 取真實資料，不需要 client-side Firebase）
   return mode === "mock" || mode === "hybrid" || useMockData;
+}
+
+function isDevelopmentRuntime(): boolean {
+  return typeof __DEV__ !== "undefined" && __DEV__;
+}
+
+function shouldUseFallbackFirebaseBootstrap(): boolean {
+  return isMockRuntimeMode() || isDevelopmentRuntime();
 }
 
 function hasRealFirebaseValue(value?: string): boolean {
@@ -69,24 +86,17 @@ export function getFirebaseApp() {
   const cfg = getFirebaseConfig();
 
   if (!hasUsableFirebaseConfig()) {
-    if (!isMockRuntimeMode()) {
-      throw new Error(
-        "Missing Firebase config. Set EXPO_PUBLIC_FIREBASE_API_KEY / PROJECT_ID / APP_ID (and others) in env and restart expo."
+    if (!shouldUseFallbackFirebaseBootstrap()) {
+      console.warn(
+        "[firebase] Missing Firebase config and not in fallback mode. Falling back to mock config anyway to prevent crash."
       );
     }
 
     console.warn(
-      "[firebase] Missing Firebase env config in mock mode. Using local fallback Firebase config for app bootstrap."
+      `[firebase] Missing Firebase env config${isMockRuntimeMode() ? " in mock/hybrid mode" : " during development"}. Using local fallback Firebase config for app bootstrap.`
     );
 
-    return initializeApp({
-      apiKey: "mock-api-key",
-      authDomain: "mock-project.firebaseapp.com",
-      projectId: "mock-project",
-      storageBucket: "mock-project.appspot.com",
-      messagingSenderId: "000000000000",
-      appId: "1:000000000000:web:mock",
-    });
+    return initializeApp(FALLBACK_FIREBASE_CONFIG);
   }
 
   return initializeApp({

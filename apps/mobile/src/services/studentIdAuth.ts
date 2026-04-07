@@ -22,6 +22,7 @@ import {
   refreshAnnouncements,
   refreshCourses,
   refreshGrades,
+  refreshCreditAudit,
   refreshTCCourses,
   seedCachedAnnouncements,
   seedCachedCourses,
@@ -30,7 +31,7 @@ import {
   syncAllData,
 } from './puDataCache';
 import { puFetchStudentInfo, puLogin, type PUSession } from './puDirectScraper';
-import { clearTCSession, setTCBackendSession, tcLogin } from './tronClassClient';
+import { clearTCSession, clearTCSessionFull, setTCBackendSession, tcLogin } from './tronClassClient';
 
 import type { UserRole } from '../state/auth';
 
@@ -331,7 +332,7 @@ async function hydratePuCampusBootstrapData(
 async function resetPuRuntimeState(): Promise<void> {
   clearPUSession();
   await clearAllCache().catch(() => undefined);
-  await clearTCSession().catch(() => undefined);
+  await clearTCSessionFull().catch(() => undefined);
   await clearMockAuthSession().catch(() => undefined);
   await clearPUCache().catch(() => undefined);
 
@@ -415,7 +416,8 @@ async function bootstrapPuDataSession(params: {
       if (!campusData.courses) failures.push('課表');
       if (!campusData.grades) failures.push('成績');
       if (!hasAnyCampusContent) failures.push('校務資料');
-      throw new Error(`E 校園資料同步失敗：${failures.join('、')}`);
+      // 不再 throw，只 warn — 讓使用者至少能登入
+      console.warn(`[studentIdAuth] E 校園部分資料同步失敗：${failures.join('、')}（不影響登入）`);
     }
 
     await primePuAdapterBackendSession({
@@ -432,7 +434,16 @@ async function bootstrapPuDataSession(params: {
         params.tronClassUserId ?? null,
       );
     } else {
-      throw new Error('TronClass 代理尚未就緒，請先部署最新的 Cloud Functions');
+      // TronClass 後端 session 不存在時，嘗試直連
+      console.warn('[studentIdAuth] 無 TronClass 後端 session，嘗試直連...');
+      try {
+        await tcLogin(
+          typeof params.studentId === 'string' ? params.studentId : '',
+          params.password,
+        );
+      } catch (tcErr) {
+        console.warn('[studentIdAuth] TronClass 直連也失敗（不影響登入）:', tcErr);
+      }
     }
 
     try {
@@ -516,7 +527,8 @@ async function bootstrapPuDataSession(params: {
   }
 
   if (campusFailures.length > 0) {
-    throw new Error(`E 校園資料同步失敗：${campusFailures.join('、')}`);
+    // 不再 throw — 讓使用者至少能登入，資料之後可重新整理
+    console.warn(`[studentIdAuth] E 校園部分資料同步失敗：${campusFailures.join('、')}（不影響登入）`);
   }
 
   await primePuAdapterSession(session, realStudentId);
@@ -528,14 +540,15 @@ async function bootstrapPuDataSession(params: {
       params.tronClassSessionId,
       params.tronClassUserId ?? null,
     );
-  } else if (hasUsableFirebaseConfig()) {
-    throw new Error('TronClass 代理尚未就緒，請先部署最新的 Cloud Functions');
   } else {
-    const tronClassLogin = await tcLogin(realStudentId, params.password);
-    if (!tronClassLogin.success) {
-      throw new Error(
-        `TronClass 登入失敗：${tronClassLogin.error ?? '無法建立 TronClass 工作階段'}`,
-      );
+    // 無後端 session → 直連 TronClass（失敗不阻塞登入）
+    try {
+      const tronClassLogin = await tcLogin(realStudentId, params.password);
+      if (!tronClassLogin.success) {
+        console.warn(`[studentIdAuth] TronClass 直連登入失敗: ${tronClassLogin.error}`);
+      }
+    } catch (tcDirectErr) {
+      console.warn('[studentIdAuth] TronClass 直連登入例外:', tcDirectErr);
     }
   }
 
@@ -566,12 +579,154 @@ async function bootstrapPuDataSession(params: {
   };
 }
 
+async function signInWithDirectScraping(params: {
+  studentId: string;
+  password: string;
+  schoolId: string;
+  onStageChange?: PuLoginStageChange;
+}): Promise<StudentIdLoginResult> {
+  // ── 1. 清除舊快取 ──
+  await invalidateAllCacheForLogin().catch(() => undefined);
+
+  // ── 2. 登入 E 校園 ──
+  emitStage(params.onStageChange, 'authenticating', '直接連線 E 校園...');
+
+  const loginResult = await puLogin(params.studentId, params.password);
+  if (!loginResult.success || !loginResult.session) {
+    throw new Error(
+      `E 校園登入失敗：${loginResult.error ?? '請確認學號與密碼是否正確'}`,
+    );
+  }
+
+  const session = loginResult.session;
+  _currentPUSession = session;
+
+  await primePuAdapterSession(session, params.studentId);
+
+  // ── 3. 同步 E 校園資料（課表、成績、公告、學生資料、學分試算） ──
+  emitStage(params.onStageChange, 'syncingCampus', '同步 E 校園資料...');
+
+  const [studentInfoResult, coursesResult, gradesResult, announcementsResult, creditAuditResult] =
+    await Promise.allSettled([
+      puFetchStudentInfo(session),
+      refreshCourses(session),
+      refreshGrades(session),
+      refreshAnnouncements(session),
+      refreshCreditAudit(session),
+    ]);
+
+  let displayName = session.studentName ?? `${params.studentId} 同學`;
+  let department = '';
+  let realStudentId = params.studentId;
+
+  // 處理學生資料
+  if (studentInfoResult.status === 'fulfilled' && studentInfoResult.value.success && studentInfoResult.value.data) {
+    const info = studentInfoResult.value.data;
+    if (info.name) displayName = info.name;
+    if (info.studentId) realStudentId = info.studentId;
+    if (info.className) department = info.className;
+    await seedCachedStudentInfo({
+      studentId: info.studentId,
+      name: info.name,
+      className: info.className,
+      currentSemester: info.currentSemester,
+    });
+  }
+
+  // 驗證必要資料（課表和成績至少要有一個成功）
+  const courseOk = coursesResult.status === 'fulfilled' && coursesResult.value != null;
+  const gradeOk = gradesResult.status === 'fulfilled' && gradesResult.value != null;
+
+  if (!courseOk && !gradeOk) {
+    const failures: string[] = [];
+    if (!courseOk) failures.push('課表');
+    if (!gradeOk) failures.push('成績');
+    console.warn(`[studentIdAuth] 直連模式：E 校園 ${failures.join('、')} 同步失敗`);
+    // 不 throw — 讓使用者至少能登入，之後可以手動重新整理
+  }
+
+  const creditAuditOk = creditAuditResult.status === 'fulfilled' && creditAuditResult.value != null;
+  console.log('[studentIdAuth] 直連 E 校園資料同步完成:', {
+    studentInfo: studentInfoResult.status === 'fulfilled',
+    courses: courseOk ? (coursesResult as PromiseFulfilledResult<any>).value?.courses?.length ?? 0 : 0,
+    grades: gradeOk ? (gradesResult as PromiseFulfilledResult<any>).value?.grades?.length ?? 0 : 0,
+    announcements: announcementsResult.status === 'fulfilled',
+    creditAudit: creditAuditOk,
+  });
+
+  // ── 4. 同步 TronClass ──
+  emitStage(params.onStageChange, 'syncingTronClass', '同步 TronClass...');
+
+  try {
+    const tronClassLogin = await tcLogin(realStudentId, params.password);
+    if (tronClassLogin.success) {
+      console.log('[studentIdAuth] TronClass 直連登入成功');
+      try {
+        const tcCourses = await refreshTCCourses();
+        console.log(`[studentIdAuth] TC courses: ${tcCourses?.length ?? 0}`);
+        // 背景同步延伸資料
+        void syncAllData(session, { tcCourses }).catch((err) =>
+          console.warn('[studentIdAuth] deferred syncAllData failed:', err),
+        );
+      } catch (tcErr) {
+        console.warn('[studentIdAuth] TronClass 課程同步失敗:', tcErr);
+      }
+    } else {
+      console.warn(`[studentIdAuth] TronClass 直連登入失敗: ${tronClassLogin.error}`);
+    }
+  } catch (tcErr) {
+    console.warn('[studentIdAuth] TronClass 直連登入例外:', tcErr);
+  }
+
+  // ── 5. 儲存登入狀態 ──
+  const email = `${realStudentId.toLowerCase()}@pu.edu.tw`;
+  const uid = `pu-${realStudentId.toLowerCase()}`;
+  const mockSession: MockAuthSession = {
+    uid,
+    email,
+    schoolId: params.schoolId,
+    displayName,
+    role: 'student',
+    department: department || null,
+    studentId: realStudentId,
+  };
+
+  await saveMockAuthSession(mockSession);
+
+  console.log('[studentIdAuth] signInWithDirectScraping complete:', { uid, displayName, department });
+
+  return {
+    uid,
+    email,
+    displayName,
+    studentId: realStudentId,
+    department,
+    role: 'student',
+    schoolId: params.schoolId,
+    session,
+  };
+}
+
 async function signInWithStudentIdFallback(params: {
   studentId: string;
   password: string;
   schoolId: string;
   onStageChange?: PuLoginStageChange;
 }): Promise<StudentIdLoginResult> {
+  // ── 先嘗試透過 Cloud Functions emulator 登入 ──
+  let backendLogin: Partial<PuStudentLoginResponse> & { error?: string };
+  try {
+    backendLogin = await requestPuBackendLogin({
+      studentId: params.studentId,
+      password: params.password,
+      skipFirebase: true,
+    });
+  } catch (networkErr) {
+    // emulator 連不到 → 改用純直連模式
+    console.warn('[studentIdAuth] Emulator 無法連線，改用直連模式:', networkErr);
+    return signInWithDirectScraping(params);
+  }
+
   let puSessionId: string | null = null;
   let tronClassSessionId: string | null = null;
   let tronClassUserId: number | null = null;
@@ -580,11 +735,6 @@ async function signInWithStudentIdFallback(params: {
   let grades: PuGradeResultPayload | null = null;
   let announcements: PuAnnouncementPayload[] | null = null;
 
-  const backendLogin = await requestPuBackendLogin({
-    studentId: params.studentId,
-    password: params.password,
-    skipFirebase: true,
-  });
   puSessionId =
     typeof backendLogin.puSessionId === 'string'
       ? backendLogin.puSessionId
@@ -603,7 +753,9 @@ async function signInWithStudentIdFallback(params: {
   announcements = (backendLogin.announcements as PuAnnouncementPayload[] | null | undefined) ?? null;
 
   if (!puSessionId) {
-    throw new Error('E 校園代理尚未就緒，請確認本機 Functions emulator 或後端部署狀態');
+    // 後端回應了但沒有 session → 也改用直連
+    console.warn('[studentIdAuth] 後端無 puSessionId，改用直連模式');
+    return signInWithDirectScraping(params);
   }
 
   const warmed = await bootstrapPuDataSession({

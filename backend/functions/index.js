@@ -2683,11 +2683,15 @@ exports.signInPuStudentId = onRequest(
 
       // If grades only has 0-1 semesters, try credit audit discovery for more complete data
       let finalGradesResult = gradesResult;
+      let finalCreditAuditResult = null;
       const gradeSemesters = gradesResult.success ? (gradesResult.allSemesters || []) : [];
       if (gradeSemesters.length <= 1) {
         console.log('[signInPuStudentId] Grades insufficient — trying credit audit discovery…');
         try {
           const auditResult = await puFetchCreditAudit(loginResult.cookies);
+          if (auditResult.creditAudit) {
+            finalCreditAuditResult = auditResult.creditAudit;
+          }
           if (auditResult.success && auditResult.grades.length > (gradesResult.grades?.length || 0)) {
             console.log(`[signInPuStudentId] Credit audit found MORE grades: ${auditResult.grades.length} grades, ${auditResult.allSemesters.length} semesters`);
             finalGradesResult = {
@@ -2739,6 +2743,7 @@ exports.signInPuStudentId = onRequest(
                 summary: finalGradesResult.summary || {},
               }
             : null,
+          creditAudit: finalCreditAuditResult,
           announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
         });
         return;
@@ -2809,6 +2814,7 @@ exports.signInPuStudentId = onRequest(
               summary: finalGradesResult.summary || {},
             }
           : null,
+        creditAudit: finalCreditAuditResult,
         announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
       });
     } catch (error) {
