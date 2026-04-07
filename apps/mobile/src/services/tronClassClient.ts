@@ -173,6 +173,29 @@ export async function clearTCSession(): Promise<void> {
   await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
 }
 
+/** 檢查是否有 TronClass session（不驗證有效性，只檢查是否存在） */
+export async function hasTCSession(): Promise<boolean> {
+  await ensureBackendSessionLoaded();
+  return !!_tcBackendSessionId;
+}
+
+/**
+ * 驗證 TronClass session 是否仍然有效。
+ * 嘗試呼叫 profile API — 如果 401/403 代表 session 已過期。
+ * 回傳 true 表示有效，false 表示已過期或不存在。
+ */
+export async function validateTCSession(): Promise<boolean> {
+  await ensureBackendSessionLoaded();
+  if (!_tcBackendSessionId) return false;
+
+  try {
+    const profile = await fetchTronClassBackend<TCUserProfile>("profile");
+    return !!profile?.id;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchTronClassBackend<T>(
   dataType: "profile" | "courses" | "activities" | "modules" | "attendance" | "todos",
   extra: Record<string, unknown> = {},
