@@ -16,6 +16,19 @@ import { useAmbientCues } from "../features/engagement";
 import { AmbientCueCard } from "../ui/campusOs";
 import { getFreshnessState, resolveRoleMode } from "../utils/campusOs";
 
+function isTCSessionError(error: string | null): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return (
+    lower.includes("tronclass") ||
+    lower.includes("session") ||
+    lower.includes("已失效") ||
+    lower.includes("過期") ||
+    lower.includes("重新登入") ||
+    lower.includes("no tronclass backend session")
+  );
+}
+
 function SocialSnippet(props: {
   memberCount?: number;
   activeCount?: number;
@@ -217,6 +230,47 @@ export function CourseHubScreen(props: any) {
   }
 
   if (error) {
+    if (isTCSessionError(error)) {
+      return (
+        <Screen>
+          <Card title="TronClass 連線已過期" subtitle="需要重新登入才能載入課程資料">
+            <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+              TronClass 的登入狀態已失效，請重新登入學校帳號以重新建立連線。
+            </Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+              <Pressable
+                onPress={() => nav?.navigate?.("我的", { screen: "SSOLogin" })}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  paddingVertical: 12,
+                  borderRadius: theme.radius.lg,
+                  backgroundColor: theme.colors.accent,
+                  alignItems: "center",
+                  opacity: pressed ? 0.82 : 1,
+                })}
+              >
+                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>重新登入</Text>
+              </Pressable>
+              <Pressable
+                onPress={reload}
+                style={({ pressed }) => ({
+                  paddingVertical: 12,
+                  paddingHorizontal: 16,
+                  borderRadius: theme.radius.lg,
+                  backgroundColor: theme.colors.surface,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  alignItems: "center",
+                  opacity: pressed ? 0.82 : 1,
+                })}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>重試</Text>
+              </Pressable>
+            </View>
+          </Card>
+        </Screen>
+      );
+    }
     return (
       <ErrorState
         title="課程中樞"
@@ -260,8 +314,25 @@ export function CourseHubScreen(props: any) {
         {selectedRows.length === 0 ? (
           <Card title="尚未找到課程空間" subtitle="目前沒有可用的 course group">
             <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-              下一步要先把課程加進你的課表或課程群組，課程主流程才會被完整啟用。
+              如果你已有課程，可能是 TronClass 連線已過期。嘗試重新登入學校帳號，或確認課程已加入課表。
             </Text>
+            <Pressable
+              onPress={() => nav?.navigate?.("我的", { screen: "SSOLogin" })}
+              style={({ pressed }) => ({
+                marginTop: 12,
+                paddingVertical: 10,
+                paddingHorizontal: 16,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                alignItems: "center",
+                alignSelf: "flex-start",
+                opacity: pressed ? 0.82 : 1,
+              })}
+            >
+              <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: 13 }}>重新登入</Text>
+            </Pressable>
           </Card>
         ) : null}
 
