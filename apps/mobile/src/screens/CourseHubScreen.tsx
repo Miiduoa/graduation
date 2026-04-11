@@ -1,6 +1,6 @@
 /* eslint-disable */
-import React, { useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import React, { useMemo, useState, useCallback } from "react";
+import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import type { CourseSpace } from "../data";
@@ -15,6 +15,8 @@ import { canManageCourse, formatDateTime } from "../services/courseWorkspace";
 import { useAmbientCues } from "../features/engagement";
 import { AmbientCueCard } from "../ui/campusOs";
 import { getFreshnessState, resolveRoleMode } from "../utils/campusOs";
+import { tcLogin } from "../services/tronClassClient";
+import { refreshTCCourses } from "../services/puDataCache";
 
 function SocialSnippet(props: {
   memberCount?: number;
@@ -171,6 +173,13 @@ export function CourseHubScreen(props: any) {
   const ds = useDataSource();
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
 
+  // TronClass 登入狀態
+  const [showLoginForm, setShowLoginForm] = useState(false);
+  const [tcPassword, setTcPassword] = useState("");
+  const [tcLoggingIn, setTcLoggingIn] = useState(false);
+  const [tcError, setTcError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
   const {
     items: courseSpaces,
     loading,
@@ -184,14 +193,73 @@ export function CourseHubScreen(props: any) {
     [ds, auth.user?.uid, school.id]
   );
 
-  const selectedMembership = routeGroupId
-    ? courseSpaces.find((membership) => membership.groupId === routeGroupId) ?? null
-    : null;
+  const studentId = auth.profile?.studentId ?? "";
 
-  const selectedRows = routeGroupId && selectedMembership ? [selectedMembership] : courseSpaces;
-  const totalDueSoon = courseSpaces.reduce((sum, summary) => sum + summary.dueSoonCount, 0);
-  const totalQuizCount = courseSpaces.reduce((sum, summary) => sum + summary.quizCount, 0);
-  const activeSessions = courseSpaces.filter((summary) => summary.activeSessionId).length;
+  const handleTCLogin = useCallback(async () => {
+    if (!studentId || !tcPassword) {
+      Alert.alert("提示", "請輸入密碼");
+      return;
+    }
+    setTcLoggingIn(true);
+    setTcError(null);
+    try {
+      const result = await tcLogin(studentId, tcPassword);
+      if (result.success) {
+        setShowLoginForm(false);
+        setTcPassword("");
+        setTcError(null);
+        // 登入成功後刷新課程
+        await refreshTCCourses();
+        reload();
+      } else {
+        setTcError(result.error ?? "登入失敗");
+      }
+    } catch (err) {
+      setTcError("連線失敗，請檢查網路");
+    } finally {
+      setTcLoggingIn(false);
+    }
+  }, [studentId, tcPassword, reload]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshTCCourses();
+      reload();
+    } catch { /* ignore */ }
+    setRefreshing(false);
+  }, [reload]);
+
+  const selectedMembership = useMemo(
+    () =>
+      routeGroupId
+        ? courseSpaces.find((membership) => membership.groupId === routeGroupId) ?? null
+        : null,
+    [routeGroupId, courseSpaces]
+  );
+
+  const selectedRows = useMemo(
+    () => (routeGroupId && selectedMembership ? [selectedMembership] : courseSpaces),
+    [routeGroupId, selectedMembership, courseSpaces]
+  );
+
+  const { totalDueSoon, totalQuizCount, activeSessions } = useMemo(() => {
+    let dueSoon = 0;
+    let quiz = 0;
+    let active = 0;
+
+    for (const summary of courseSpaces) {
+      dueSoon += summary.dueSoonCount;
+      quiz += summary.quizCount;
+      if (summary.activeSessionId) active += 1;
+    }
+
+    return {
+      totalDueSoon: dueSoon,
+      totalQuizCount: quiz,
+      activeSessions: active,
+    };
+  }, [courseSpaces]);
   const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
     schoolId: school.id,
     uid: auth.user?.uid ?? null,
@@ -216,7 +284,15 @@ export function CourseHubScreen(props: any) {
     return <LoadingState title="課程中樞" subtitle="整理課程空間中..." rows={4} />;
   }
 
-  if (error) {
+  // 如果錯誤是 TronClass session 過期，不顯示 ErrorState，
+  // 而是顯示空狀態 + TronClass 登入表單
+  const isTCSessionError = error && (
+    error.includes("TronClass session") ||
+    error.includes("TronClass 代理") ||
+    error.includes("重新登入")
+  );
+
+  if (error && !isTCSessionError) {
     return (
       <ErrorState
         title="課程中樞"
@@ -233,15 +309,35 @@ export function CourseHubScreen(props: any) {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 14, padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
-        <Card title="課程中樞" subtitle="把課程空間、教材、作業、測驗、點名與成績接成同一條主流程">
-          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-            <Pill text={`${selectedRows.length} 個課程空間`} kind="accent" />
-            <Pill text={`${totalDueSoon} 項近期截止`} kind={totalDueSoon > 0 ? "warning" : "success"} />
-            <Pill text={`${totalQuizCount} 項評量`} kind="default" />
-            <Pill text={`${activeSessions} 堂進行中`} kind={activeSessions > 0 ? "danger" : "muted"} />
-          </View>
-        </Card>
+        {/* 統計摘要 */}
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          {[
+            { icon: "book-outline" as const, count: selectedRows.length, label: "課程" },
+            { icon: "document-text-outline" as const, count: totalDueSoon, label: "待交" },
+            { icon: "help-circle-outline" as const, count: totalQuizCount, label: "測驗" },
+          ].map((stat) => (
+            <View
+              key={stat.label}
+              style={{
+                flex: 1,
+                alignItems: "center",
+                paddingVertical: 14,
+                borderRadius: 14,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <Ionicons name={stat.icon} size={20} color={theme.colors.muted} />
+              <Text style={{ fontSize: 22, fontWeight: "800", color: stat.count > 0 ? theme.colors.accent : theme.colors.text, marginTop: 4 }}>
+                {stat.count}
+              </Text>
+              <Text style={{ fontSize: 12, color: theme.colors.muted }}>{stat.label}</Text>
+            </View>
+          ))}
+        </View>
 
         {ambientCue ? (
           <AmbientCueCard
@@ -257,12 +353,84 @@ export function CourseHubScreen(props: any) {
           />
         ) : null}
 
-        {selectedRows.length === 0 ? (
-          <Card title="尚未找到課程空間" subtitle="目前沒有可用的 course group">
-            <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-              下一步要先把課程加進你的課表或課程群組，課程主流程才會被完整啟用。
+        {/* 空狀態：TronClass 登入 */}
+        {(selectedRows.length === 0 || isTCSessionError) ? (
+          <View style={{ alignItems: "center", paddingVertical: 30, gap: 12 }}>
+            <Ionicons name="school-outline" size={48} color={theme.colors.accent} style={{ opacity: 0.5 }} />
+            <Text style={{ fontSize: 17, fontWeight: "700", color: theme.colors.text }}>尚未取得課程資料</Text>
+            <Text style={{ color: theme.colors.muted, textAlign: "center", lineHeight: 20 }}>
+              TronClass 連線已過期，請重新連線以載入課程。
             </Text>
-          </Card>
+
+            {!showLoginForm ? (
+              <View style={{ gap: 10, marginTop: 8, alignItems: "center" }}>
+                <Pressable
+                  onPress={handleRefresh}
+                  style={({ pressed }) => ({
+                    paddingHorizontal: 28, paddingVertical: 12, borderRadius: 22,
+                    backgroundColor: theme.colors.accent, opacity: pressed ? 0.8 : 1,
+                  })}
+                >
+                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>重新載入</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setShowLoginForm(true)}
+                  style={({ pressed }) => ({
+                    paddingHorizontal: 28, paddingVertical: 12, borderRadius: 22,
+                    borderWidth: 1.5, borderColor: theme.colors.accent, opacity: pressed ? 0.8 : 1,
+                  })}
+                >
+                  <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: 15 }}>重新連線 TronClass</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={{
+                width: "100%", padding: 16, borderRadius: 14,
+                backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, gap: 12,
+              }}>
+                <Text style={{ fontWeight: "700", fontSize: 15, color: theme.colors.text }}>重新連線 TronClass</Text>
+                {studentId ? (
+                  <Text style={{ color: theme.colors.muted, fontSize: 13 }}>學號：{studentId}</Text>
+                ) : null}
+                <TextInput
+                  placeholder="輸入密碼（校務系統密碼）"
+                  placeholderTextColor={theme.colors.muted}
+                  secureTextEntry
+                  value={tcPassword}
+                  onChangeText={setTcPassword}
+                  editable={!tcLoggingIn}
+                  autoCapitalize="none"
+                  style={{
+                    borderWidth: 1, borderColor: tcError ? "#DC2626" : theme.colors.border,
+                    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
+                    fontSize: 15, color: theme.colors.text, backgroundColor: theme.colors.bg,
+                  }}
+                />
+                {tcError ? (
+                  <Text style={{ color: "#DC2626", fontSize: 13 }}>{tcError}</Text>
+                ) : null}
+                <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12, marginTop: 4 }}>
+                  <Pressable onPress={() => { setShowLoginForm(false); setTcError(null); }}>
+                    <Text style={{ color: theme.colors.muted, fontSize: 15, paddingVertical: 8 }}>取消</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleTCLogin}
+                    disabled={tcLoggingIn}
+                    style={({ pressed }) => ({
+                      paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20,
+                      backgroundColor: theme.colors.accent, opacity: (pressed || tcLoggingIn) ? 0.7 : 1,
+                    })}
+                  >
+                    {tcLoggingIn ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>連線</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          </View>
         ) : null}
 
         {selectedRows.map((membership) => {

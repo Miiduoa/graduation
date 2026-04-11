@@ -9,8 +9,6 @@ import type {
   UserRole,
 } from "../data/types";
 
-console.log("[debug][campusOs] module loaded");
-
 export function resolveRoleMode(role?: UserRole | null, isAuthenticated?: boolean): RoleMode {
   if (!isAuthenticated) return "guest";
   if (role === "admin" || role === "principal") return "admin";
@@ -19,7 +17,8 @@ export function resolveRoleMode(role?: UserRole | null, isAuthenticated?: boolea
 }
 
 export function isTeachingRole(role?: UserRole | null): boolean {
-  return resolveRoleMode(role, true) === "teacher" || resolveRoleMode(role, true) === "admin";
+  const mode = resolveRoleMode(role, true);
+  return mode === "teacher" || mode === "admin";
 }
 
 function safeGetTime(value: unknown): number | null {
@@ -245,13 +244,20 @@ function normalizeCourseTimes(course: Course) {
 
 export function getTodayCourses(courses: Course[], date: Date = new Date()) {
   const weekday = date.getDay();
-  return courses
-    .filter((course) => (course.dayOfWeek ?? course.schedule?.[0]?.dayOfWeek) === weekday)
-    .sort((a, b) => {
-      const aStart = normalizeCourseTimes(a).start;
-      const bStart = normalizeCourseTimes(b).start;
-      return toMinutes(aStart) - toMinutes(bStart);
-    });
+  const todayCourses = courses.filter(
+    (course) => (course.dayOfWeek ?? course.schedule?.[0]?.dayOfWeek) === weekday
+  );
+
+  // Precompute start minutes once per course to avoid repeated parsing during sort.
+  const startMinuteMap = new Map<Course, number>();
+  for (const course of todayCourses) {
+    const start = normalizeCourseTimes(course).start;
+    startMinuteMap.set(course, toMinutes(start));
+  }
+
+  return todayCourses.sort(
+    (a, b) => (startMinuteMap.get(a) ?? Number.MAX_SAFE_INTEGER) - (startMinuteMap.get(b) ?? Number.MAX_SAFE_INTEGER)
+  );
 }
 
 export function getNextCourse(courses: Course[], date: Date = new Date()): Course | null {

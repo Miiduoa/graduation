@@ -16,6 +16,9 @@ firebase-debug.log*
 # OS
 .DS_Store
 
+# Local agent / IDE tooling (do not commit)
+.claude/
+
 # Next
 apps/web/.next/
 apps/web/out/
