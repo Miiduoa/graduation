@@ -10,7 +10,6 @@ import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import {
   signInWithStudentId,
-  type PuLoginBootstrapStage,
 } from "../services/studentIdAuth";
 import { Screen, Button, AnimatedCard, Pill } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
@@ -65,20 +64,6 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     error: "登入失敗",
   };
 
-  const handleBootstrapStageChange = (
-    stage: PuLoginBootstrapStage,
-    detail: string,
-  ) => {
-    const nextStep: LoginStep =
-      stage === "authenticating"
-        ? "authenticating"
-        : stage === "syncingCampus"
-          ? "syncingCampus"
-          : "syncingTronClass";
-    setStep(nextStep);
-    setStageDetail(detail);
-  };
-
   const handleStudentIdLogin = async () => {
     setError(null);
     setIsRetryable(false);
@@ -91,7 +76,6 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
         password: studentPwInput,
         schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
         schoolName,
-        onStageChange: handleBootstrapStageChange,
       });
 
       setStep("linking");

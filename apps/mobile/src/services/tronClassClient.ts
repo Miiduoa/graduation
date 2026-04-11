@@ -21,17 +21,44 @@ import { getCloudFunctionUrl } from "./cloudFunctions";
 // ─── Constants ───────────────────────────────────────────
 
 const TC_BASE = "https://tronclass.pu.edu.tw";
+const TC_HOST = "tronclass.pu.edu.tw";
+const IDENTITY_HOST = "identity.pu.edu.tw";
 const IDENTITY_BASE = "https://identity.pu.edu.tw";
 const CAS_LOGIN_PATH = "/auth/realms/pu/protocol/cas/login";
 const TC_LOGIN_SERVICE_URL = `${TC_BASE}/login?next=/user/index`;
 const TC_BACKEND_SESSION_KEY = "@pu_cache:tc_backend_session";
 
+// ── Domain-fronting route ───────────────────────────────
+//
+// 靜宜的 identity.pu.edu.tw 與 tronclass.pu.edu.tw 在同一台主機 (140.128.5.203)
+// 後面是同一套 Tengine/nginx 反向代理。部分校外網路環境會過濾
+// identity.pu.edu.tw 的 SNI 或 DNS，但 tronclass.pu.edu.tw 仍可連線。
+// 解法：把要給 identity 的請求改成連 tronclass，加上 Host: identity.pu.edu.tw
+// header，後端仍會把它路由到 Keycloak 處理。已用 curl 驗證可行
+// （回應一致返回 Keycloak 登入頁與相同的 Set-Cookie）。
 const COMMON_HEADERS: Record<string, string> = {
   "User-Agent":
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
   Accept: "application/json, text/html, */*",
   "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
 };
+
+/**
+ * 若 URL 是 identity.pu.edu.tw，改寫為 tronclass.pu.edu.tw 並回傳 Host override。
+ * 若非 identity，原封不動。
+ */
+function rewriteIdentityUrl(url: string): { finalUrl: string; hostOverride: string | null } {
+  try {
+    const u = new URL(url);
+    if (u.hostname === IDENTITY_HOST) {
+      u.hostname = TC_HOST;
+      return { finalUrl: u.toString(), hostOverride: IDENTITY_HOST };
+    }
+  } catch {
+    // 非標準 URL，直接回傳
+  }
+  return { finalUrl: url, hostOverride: null };
+}
 
 // ─── 全域 userId（登入後從 /user/index 取得） ────────────
 let _tcUserId: number | null = null;
@@ -234,6 +261,16 @@ async function fetchTronClassBackend<T>(
 }
 
 // ─── Helper: Native Fetch ────────────────────────────────
+//
+// 實作策略：
+//   1. 先用 fetch + credentials:"include" + redirect:"follow"
+//      讓 iOS NSURLSession / Android OkHttp 的原生 cookie jar 自動管理 cookies。
+//      這個模式和 puDirectScraper.ts 完全一樣，已驗證可用。
+//   2. 不自己設 Cookie header — 原生 cookie jar 會自動處理；
+//      手動塞 Cookie header 在 iOS 上有時會被 NSURLSession 拒絕。
+//   3. 若 fetch 丟錯（例如網路暫時性失敗），用 XHR 當備援，
+//      但不做 header 手動注入，讓 withCredentials 走原生 cookie jar。
+//   4. 所有錯誤都帶上原始訊息 + URL，方便除錯。
 
 async function tcFetch(
   url: string,
@@ -244,20 +281,96 @@ async function tcFetch(
     accept?: string;
   } = {}
 ): Promise<{ body: string; status: number; url: string }> {
+  const method = options.method ?? "GET";
+
+  // ── Domain-fronting：若是 identity.pu.edu.tw，改走 tronclass host ──
+  const { finalUrl, hostOverride } = rewriteIdentityUrl(url);
+
   const headers: Record<string, string> = { ...COMMON_HEADERS };
   if (options.contentType) headers["Content-Type"] = options.contentType;
   if (options.accept) headers.Accept = options.accept;
+  if (hostOverride) {
+    headers["Host"] = hostOverride;
+    // Origin / Referer 用原 identity 位址，Keycloak CSRF 檢查才不會擋
+    headers["Origin"] = `https://${hostOverride}`;
+    headers["Referer"] = `https://${hostOverride}/auth/realms/pu/protocol/cas/login`;
+  }
 
-  const response = await fetch(url, {
-    method: options.method ?? "GET",
-    headers,
-    body: options.body,
-    credentials: "include",
-    redirect: "follow",
-  });
+  // 路由後的 request log（方便除錯）
+  if (hostOverride) {
+    console.log(`[tcFetch] ROUTE ${method} ${url.substring(0, 70)} → via ${finalUrl.substring(0, 70)} (Host: ${hostOverride})`);
+  }
 
-  const body = await response.text();
-  return { body, status: response.status, url: response.url };
+  // ── 嘗試 fetch（原生 cookie jar 模式）──
+  try {
+    const response = await fetch(finalUrl, {
+      method,
+      headers,
+      body: options.body,
+      credentials: "include",
+      redirect: "follow",
+    });
+    const body = await response.text();
+    console.log(`[tcFetch] ${method} ${finalUrl.substring(0, 80)} → ${response.status} (${body.length}B)`);
+    // 把 response.url 中的 tronclass host 還原為 identity host（如果有 override），
+    // 避免後續 parser 判斷錯誤
+    let respUrl = response.url;
+    if (hostOverride && respUrl.includes(TC_HOST) && url.includes(IDENTITY_HOST)) {
+      respUrl = respUrl.replace(TC_HOST, IDENTITY_HOST);
+    }
+    return { body, status: response.status, url: respUrl };
+  } catch (fetchErr) {
+    const errMsg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+    console.warn(`[tcFetch] fetch failed for ${finalUrl}: ${errMsg} — trying XHR…`);
+
+    // ── XHR 備援 ──
+    return new Promise<{ body: string; status: number; url: string }>((resolve, reject) => {
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, finalUrl, true);
+        xhr.withCredentials = true;   // 讓原生 cookie jar 自動帶 cookies
+        xhr.timeout = 30000;
+
+        // 只設 Content-Type / Accept；User-Agent 讓系統自己處理
+        if (options.contentType) {
+          try { xhr.setRequestHeader("Content-Type", options.contentType); } catch { /* ignore */ }
+        }
+        if (options.accept) {
+          try { xhr.setRequestHeader("Accept", options.accept); } catch { /* ignore */ }
+        }
+        try { xhr.setRequestHeader("Accept-Language", "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"); } catch { /* ignore */ }
+
+        // 設 Host override（domain fronting）
+        if (hostOverride) {
+          try { xhr.setRequestHeader("Host", hostOverride); } catch { /* 某些平台可能被擋 */ }
+          try { xhr.setRequestHeader("Origin", `https://${hostOverride}`); } catch { /* ignore */ }
+          try { xhr.setRequestHeader("Referer", `https://${hostOverride}/auth/realms/pu/protocol/cas/login`); } catch { /* ignore */ }
+        }
+
+        xhr.onload = () => {
+          let respUrl = xhr.responseURL || finalUrl;
+          if (hostOverride && respUrl.includes(TC_HOST) && url.includes(IDENTITY_HOST)) {
+            respUrl = respUrl.replace(TC_HOST, IDENTITY_HOST);
+          }
+          const body = xhr.responseText ?? "";
+          console.log(`[tcFetch/xhr] ${method} ${finalUrl.substring(0, 80)} → ${xhr.status} (${body.length}B)`);
+          resolve({ body, status: xhr.status, url: respUrl });
+        };
+        xhr.onerror = () => {
+          console.warn(`[tcFetch/xhr] XHR failed for ${finalUrl} (readyState=${xhr.readyState}, status=${xhr.status})`);
+          reject(new Error(`網路連線失敗，無法連到 ${new URL(finalUrl).hostname}（請確認手機網路是否連到靜宜校園網路或 VPN）`));
+        };
+        xhr.ontimeout = () => {
+          reject(new Error(`連線逾時：${new URL(finalUrl).hostname}`));
+        };
+
+        xhr.send(options.body ?? null);
+      } catch (xhrErr) {
+        const xhrMsg = xhrErr instanceof Error ? xhrErr.message : String(xhrErr);
+        reject(new Error(`無法建立 XHR 請求：${xhrMsg}`));
+      }
+    });
+  }
 }
 
 async function tcFetchJSON<T>(url: string): Promise<T | null> {
@@ -354,14 +467,39 @@ export async function tcLogin(
       ?? indexPage.body.match(/value=["'](\d+)["'][^>]*id=["']userId["']/i);
 
     if (!userIdMatch?.[1]) {
-      // 嘗試看看是不是帳密錯
-      if (
-        loginResult.body.includes("密碼錯誤") ||
-        loginResult.body.includes("Invalid") ||
-        loginResult.body.includes("error") ||
-        loginResult.body.includes("帳號或密碼")
-      ) {
+      // 記錄關鍵除錯資訊
+      console.warn("[TronClass] userId not found. POST landed on:", loginResult.url,
+        "index landed on:", indexPage.url,
+        "POST body len:", loginResult.body.length,
+        "index body len:", indexPage.body.length);
+
+      // 帳密錯誤偵測：
+      // 靜宜 Keycloak 驗證失敗時會回傳
+      //   <span id="error-message" style="color:red">無效的使用者名稱或密碼</span>
+      // （經 Chrome MCP 實測 2026-04 確認）
+      // 為避免誤判（例如網路問題讓 POST 落在其他頁面），同時符合
+      //   1) URL 仍在 identity / login-actions 下  或  body 仍含 Keycloak 登入表單
+      //   2) body 內出現明確錯誤字串
+      // 才判定為帳密錯誤。
+      const postUrlStillAtKeycloak =
+        loginResult.url.includes("identity.pu.edu.tw") ||
+        loginResult.url.includes("login-actions/authenticate") ||
+        loginResult.body.includes("/auth/realms/pu");
+      const hasExplicitErrorText =
+        loginResult.body.includes("無效的使用者名稱或密碼") ||
+        loginResult.body.includes("Invalid username or password") ||
+        /id=["']error-message["'][^>]*>[^<]+</i.test(loginResult.body);
+
+      if (postUrlStillAtKeycloak && hasExplicitErrorText) {
         return { success: false, session: null, error: "TronClass 帳號或密碼錯誤" };
+      }
+      // 若 index 頁仍被 redirect 回 CAS，代表 session cookie 沒成功建立
+      if (indexPage.url.includes("identity.pu.edu.tw") || indexPage.body.includes("/auth/realms/pu")) {
+        return {
+          success: false,
+          session: null,
+          error: "TronClass 登入失敗：session 未能建立，請確認密碼或稍後再試",
+        };
       }
       return { success: false, session: null, error: "TronClass 登入失敗，無法取得使用者 ID" };
     }

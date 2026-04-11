@@ -1,6 +1,9 @@
 # 校園助手（Campus One）
 
 <p align="center">
+  <a href="https://github.com/Miiduoa/graduation"><img src="https://img.shields.io/badge/GitHub-Miiduoa%2Fgraduation-181717?logo=github" alt="GitHub repository" /></a>
+  <a href="https://github.com/Miiduoa/graduation/actions"><img src="https://img.shields.io/github/actions/workflow/status/Miiduoa/graduation/ci.yml?branch=main&label=CI&logo=githubactions" alt="CI status" /></a>
+  <img src="https://img.shields.io/badge/License-MIT-22c55e" alt="License MIT" />
   <img src="https://img.shields.io/badge/Monorepo-pnpm%20workspace-0f766e" alt="pnpm workspace" />
   <img src="https://img.shields.io/badge/Mobile-Expo%2054%20%2B%20React%20Native%200.81-2563eb" alt="Expo 54 + React Native 0.81" />
   <img src="https://img.shields.io/badge/Web-Next.js%2016%20%2B%20React%2019-111827" alt="Next.js 16 + React 19" />
@@ -8,7 +11,18 @@
   <img src="https://img.shields.io/badge/Runtime-Node%2020%20%2F%20pnpm%2010-7c3aed" alt="Node 20 / pnpm 10" />
 </p>
 
-> 本 README 依據 2026-04-03 對目前 repo 程式碼、workspace 設定、GitHub workflow 與 env 範本的實際盤點重新整理。若其他文件與此處衝突，請先以本檔與程式碼本身為準。
+> **官方倉庫：** [github.com/Miiduoa/graduation](https://github.com/Miiduoa/graduation)  
+> 本 README 依據 **2026-04-11** 對目前 repo 程式碼、workspace 設定、GitHub workflow 與 env 範本的實際盤點整理。若其他文件與此處衝突，請先以本檔與程式碼本身為準。
+
+## 快速連結
+
+| 資源 | 網址 |
+| --- | --- |
+| 原始碼 | [github.com/Miiduoa/graduation](https://github.com/Miiduoa/graduation) |
+| CI（`main` / `develop`） | [Actions · CI workflow](https://github.com/Miiduoa/graduation/actions/workflows/ci.yml) |
+| Release / EAS | [`.github/workflows/`](https://github.com/Miiduoa/graduation/tree/main/.github/workflows) |
+| 安全通報 | 見 [`docs/SECURITY.md`](docs/SECURITY.md) |
+| 架構邊界 | [`docs/architecture/firebase-data-boundaries.md`](docs/architecture/firebase-data-boundaries.md) |
 
 ## 這個專案現在是什麼
 
@@ -28,13 +42,15 @@
 
 換句話說，**這不是一個只剩 demo mock 的作業倉庫**，也不是單純的畫面集合；它已經有明確的 client / backend / CI/CD / release workspace 結構，只是目前產品策略先收斂到 PU-only。
 
-## 專案快照
+## 專案快照（2026-04-11 驗證）
 
-| 面向 | 目前盤點結果 |
+下列數字以 repo 內實際檔案與 `backend/functions/index.js` 匯出為準（會隨開發變動，請以當下盤點為準）。
+
+| 面向 | 盤點結果 |
 | --- | --- |
 | Mobile | `81` 個 `*Screen.tsx`、`13` 個 `*Stack.tsx`，含 Today / 課程 / 校園 / 收件匣 / 我的主架構 |
-| Web | `20` 個 `page.tsx` 頁面、`4` 個 route handlers，定位為 school-aware PWA |
-| Backend | `64` 個 `onCall`、`13` 個 `onRequest`、`5` 個 `onSchedule`、`11` 個 Firestore triggers |
+| Web | `20` 個 `page.tsx` 頁面、`4` 個 `route.ts`（含 `.well-known`、SSO ACS、deep link 關聯檔），定位為 school-aware PWA |
+| Backend（`index.js`） | `64` 個 `onCall`、`13` 個 `onRequest`、`5` 個 `onSchedule`、**`14`** 個 Firestore `onDocument*` 類 trigger |
 | 測試 | Mobile `16` 個測試檔、Web `5` 個測試檔、Functions `1` 個測試檔、Rules `1` 個測試檔 |
 | GitHub 工作流 | `5` 個 workflow：CI、Release、EAS Build、Preview Deploy、Maestro E2E |
 | E2E | `apps/mobile/.maestro/flows/` 下有 `10` 個 Maestro flow |
@@ -185,7 +201,7 @@ Web 端還有這些明確能力：
 │   └── tests/                   # Rules / backend 測試
 ├── packages/
 │   └── shared/                  # 型別、release、tenant、school、PU auth 契約
-├── docs/                        # 架構、API、release、法務文件
+├── docs/                        # 架構、API、release、法務、安全
 ├── scripts/                     # seed、version bump、review 腳本
 └── .github/workflows/           # CI / release / preview / E2E
 ```
@@ -264,7 +280,7 @@ flowchart LR
 ### 需求
 
 - Node.js `>=20 <21`
-- pnpm `10.28.2`
+- pnpm `10.28.2`（見根目錄 `package.json` 的 `packageManager`）
 - Java 21
   - `pnpm test:rules` 會嘗試使用本機 OpenJDK 21
 - Firebase CLI
@@ -273,6 +289,8 @@ flowchart LR
 ### 安裝
 
 ```bash
+git clone https://github.com/Miiduoa/graduation.git
+cd graduation
 pnpm install
 ```
 
@@ -331,6 +349,12 @@ pnpm --filter mobile ios
 pnpm --filter mobile android
 ```
 
+### 疑難排解（常見）
+
+- **`pnpm install` 與 CI 版本不一致**：請使用與 `packageManager` 欄位一致的 pnpm 主版本，並優先使用 `pnpm install --frozen-lockfile`（與 CI 對齊）。
+- **Rules 測試找不到 Java**：確認已安裝 OpenJDK 21，或依 `package.json` 內 `test:rules` 的 Homebrew 路徑調整本機 `JAVA_HOME`。
+- **登入或校務資料異常**：先確認 runtime 模式（`apps/mobile/src/config/runtime.ts`）與後端 Functions / Firebase 專案是否指向同一組環境；真實整合需有效的 PU 帳密與後端設定。
+
 ## 常用指令
 
 | 指令 | 說明 |
@@ -362,21 +386,36 @@ pnpm --filter mobile android
 
 這代表 GitHub 層不是只有 code hosting，已經包含：
 
-- 基礎安全檢查
+- 基礎安全檢查（含 gitleaks、dependency audit）
 - lint / typecheck / test gate
 - Web build 驗證
 - Expo / EAS 整合
 - mobile preview update
 - E2E automation
 
-如果你想「更新 GitHub 首頁」而不是只改本地文件，根目錄 `README.md` 就是最重要的入口；這次重寫就是以這個目的為主。
+### 建議的 GitHub 倉庫設定（About）
+
+在 GitHub 專案頁 **About** 可手動補上，方便搜尋與協作：
+
+- **Description**（範例）：`Campus One — 靜宜大學學號登入為主的校園助手；Expo + Next.js + Firebase monorepo。`
+- **Website**（若有正式站）：填入 PWA 或官網 URL
+- **Topics**（建議）：`expo`、`react-native`、`nextjs`、`firebase`、`firestore`、`cloud-functions`、`pnpm`、`monorepo`、`campus`、`pwa`
+
+Secrets（例如 EAS token、Firebase service account）請一律放在 **GitHub Repository secrets**，不要寫進 README 或程式碼。
+
+## 安全與隱私
+
+- 漏洞通報流程與功能概覽：[`docs/SECURITY.md`](docs/SECURITY.md)
+- 隱私權條款、使用條款、資料安全說明：[`docs/legal/`](docs/legal/)
+- App Store 相關備註：[`docs/legal/app-store-review-notes.md`](docs/legal/app-store-review-notes.md)
 
 ## 文件導覽與可信度
 
 ### 可當主要入口的文件
 
-- `README.md`
+- `README.md`（本檔）
 - `docs/architecture/firebase-data-boundaries.md`
+- `docs/SECURITY.md`
 - `docs/legal/*`
 
 ### 可作為補充，但仍要回頭對照程式碼的文件
@@ -387,6 +426,8 @@ pnpm --filter mobile android
   - 架構思路有參考價值，但裡面部分檔案路徑與舊狀態描述不應直接當成現況
 - `docs/RELEASE.md`
   - 可用來理解 release 流程設計，但具體腳本與 workflow 細節仍應回頭對照 `package.json`、`apps/mobile/eas.json` 與 `.github/workflows/`
+- `docs/UI_GUIDELINES.md`
+  - UI 一致性與設計約束的參考
 
 ### 明顯帶有歷史狀態的文件
 
@@ -399,7 +440,7 @@ pnpm --filter mobile android
 
 - `apps/web/README.md`
   - 原本仍是 create-next-app 預設模板
-  - 已在這次整理中改成專案專用說明
+  - 已改成專案專用說明並連回根目錄 README
 
 ## 你在這個 repo 內最值得先看的檔案
 
