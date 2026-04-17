@@ -53,6 +53,8 @@ const {
   puFetchGrades,
   puFetchAnnouncements,
   puFetchStudentInfo,
+  puFetchAbsence,
+  puFetchCreditSummary,
 } = require('./puScraper');
 const {
   tcLogin,
@@ -62,6 +64,14 @@ const {
   tcFetchAttendance,
   tcFetchProfile,
   tcFetchTodos,
+  tcFetchCourseDetail,
+  tcFetchExams,
+  tcFetchScoreItems,
+  tcFetchSelfScore,
+  tcFetchHomeworkStatus,
+  tcFetchHomeworkScores,
+  tcFetchExamStatus,
+  tcFetchAnnouncements,
 } = require('./tronClassScraper');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
@@ -2611,24 +2621,30 @@ exports.signInPuStudentId = onRequest(
         return;
       }
 
-      const tronClassLoginResult = await tcLogin(rawStudentId, password);
-      if (
-        !tronClassLoginResult.success ||
-        !tronClassLoginResult.cookies ||
-        Object.keys(tronClassLoginResult.cookies).length === 0 ||
-        !tronClassLoginResult.session
-      ) {
-        res.status(503).json({
-          error: tronClassLoginResult.error || 'TronClass 登入失敗，請稍後再試',
-        });
-        return;
+      // TronClass 登入：失敗不阻塞 E校園登入（軟性失敗）
+      let tronClassSessionId = null;
+      let tronClassLoginResult = { success: false, cookies: null, session: null, error: null };
+      try {
+        tronClassLoginResult = await tcLogin(rawStudentId, password);
+        if (
+          tronClassLoginResult.success &&
+          tronClassLoginResult.cookies &&
+          Object.keys(tronClassLoginResult.cookies).length > 0 &&
+          tronClassLoginResult.session
+        ) {
+          tronClassSessionId = await createPuTronClassSession({
+            studentId: rawStudentId,
+            cookies: tronClassLoginResult.cookies,
+            session: tronClassLoginResult.session,
+          });
+          console.log('[signInPuStudentId] TronClass login OK, sessionId:', tronClassSessionId);
+        } else {
+          console.warn('[signInPuStudentId] TronClass login failed (soft):', tronClassLoginResult.error || 'unknown');
+        }
+      } catch (tcErr) {
+        console.warn('[signInPuStudentId] TronClass login threw (soft):', tcErr?.message || tcErr);
       }
 
-      const tronClassSessionId = await createPuTronClassSession({
-        studentId: rawStudentId,
-        cookies: tronClassLoginResult.cookies,
-        session: tronClassLoginResult.session,
-      });
       const puSessionId = await createPuCampusSession({
         studentId: rawStudentId,
         cookies: loginResult.cookies,
@@ -2656,7 +2672,8 @@ exports.signInPuStudentId = onRequest(
           isNewUser: false,
           puSessionId,
           tronClassSessionId,
-          tronClassUserId: tronClassLoginResult.session.userId ?? null,
+          tronClassUserId: tronClassLoginResult.session?.userId ?? null,
+          tronClassOk: !!tronClassSessionId,
           studentInfo: profileResult.success ? profileResult.studentInfo || null : null,
           courses: coursesResult.success
             ? {
@@ -2726,7 +2743,8 @@ exports.signInPuStudentId = onRequest(
         isNewUser,
         puSessionId,
         tronClassSessionId,
-        tronClassUserId: tronClassLoginResult.session.userId ?? null,
+        tronClassUserId: tronClassLoginResult.session?.userId ?? null,
+        tronClassOk: !!tronClassSessionId,
         studentInfo: profileResult.success ? profileResult.studentInfo || null : null,
         courses: coursesResult.success
           ? {
@@ -7405,7 +7423,7 @@ exports.puFetchCampusData = onRequest(
       const sessionId = String(req.body?.sessionId || '').trim();
       const dataType = String(req.body?.dataType || '').trim();
       const semester = String(req.body?.semester || '').trim();
-      const allowedTypes = ['courses', 'grades', 'announcements', 'studentInfo'];
+      const allowedTypes = ['courses', 'grades', 'announcements', 'studentInfo', 'absence', 'creditSummary'];
 
       if (!sessionId || !dataType) {
         res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
@@ -7453,6 +7471,12 @@ exports.puFetchCampusData = onRequest(
         case 'studentInfo':
           result = await puFetchStudentInfo(sessionData.cookies);
           break;
+        case 'absence':
+          result = await puFetchAbsence(sessionData.cookies);
+          break;
+        case 'creditSummary':
+          result = await puFetchCreditSummary(sessionData.cookies);
+          break;
         default:
           res.status(400).json({ error: `Unknown dataType: ${dataType}` });
           return;
@@ -7475,6 +7499,70 @@ exports.puFetchCampusData = onRequest(
   },
 );
 
+exports.puRefreshTronClassSession = onRequest(
+  {
+    region: REGION,
+    cors: STRICT_CORS,
+  },
+  async (req, res) => {
+    try {
+      assertTrustedOrigin(req);
+      requirePostJson(req);
+
+      const studentId = normalizePuStudentId(req.body?.studentId);
+      const password = String(req.body?.password || '');
+
+      if (!studentId || !password) {
+        res.status(400).json({ error: 'Missing required fields: studentId, password' });
+        return;
+      }
+
+      const ip = getClientIp(req);
+      enforceRateLimit({
+        scope: 'pu-tronclass-refresh',
+        key: ip,
+        limit: 10,
+        windowMs: 10 * 60 * 1000,
+      });
+      enforceRateLimit({
+        scope: 'pu-tronclass-refresh-student',
+        key: studentId,
+        limit: 5,
+        windowMs: 15 * 60 * 1000,
+      });
+
+      const loginResult = await tcLogin(studentId, password);
+      if (
+        !loginResult.success ||
+        !loginResult.cookies ||
+        Object.keys(loginResult.cookies).length === 0 ||
+        !loginResult.session
+      ) {
+        res.status(401).json({
+          error: loginResult.error || 'TronClass 登入失敗',
+        });
+        return;
+      }
+
+      const tronClassSessionId = await createPuTronClassSession({
+        studentId,
+        cookies: loginResult.cookies,
+        session: loginResult.session,
+      });
+
+      res.set('Cache-Control', 'no-store');
+      res.json({
+        success: true,
+        tronClassSessionId,
+        tronClassUserId: loginResult.session.userId ?? null,
+      });
+    } catch (error) {
+      console.error('[puRefreshTronClassSession] Error:', error);
+      writeHttpError(res, error, 'Failed to refresh TronClass session');
+    }
+  },
+);
+
 exports.puFetchTronClassData = onRequest(
   {
     region: REGION,
@@ -7487,7 +7575,7 @@ exports.puFetchTronClassData = onRequest(
 
       const sessionId = String(req.body?.sessionId || '').trim();
       const dataType = String(req.body?.dataType || '').trim();
-      const allowedTypes = ['profile', 'courses', 'activities', 'modules', 'attendance', 'todos'];
+      const allowedTypes = ['profile', 'courses', 'activities', 'modules', 'attendance', 'todos', 'courseDetail', 'exams', 'scoreItems', 'selfScore', 'homeworkStatus', 'homeworkScores', 'examStatus', 'announcements'];
 
       if (!sessionId || !dataType) {
         res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
@@ -7566,6 +7654,72 @@ exports.puFetchTronClassData = onRequest(
           break;
         case 'todos':
           result = await tcFetchTodos(cookies);
+          break;
+        case 'courseDetail': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchCourseDetail(cookies, courseId);
+          break;
+        }
+        case 'exams': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchExams(cookies, courseId);
+          break;
+        }
+        case 'scoreItems': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchScoreItems(cookies, courseId);
+          break;
+        }
+        case 'selfScore': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchSelfScore(cookies, courseId);
+          break;
+        }
+        case 'homeworkStatus': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchHomeworkStatus(cookies, courseId);
+          break;
+        }
+        case 'homeworkScores': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchHomeworkScores(cookies, courseId);
+          break;
+        }
+        case 'examStatus': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchExamStatus(cookies, courseId);
+          break;
+        }
+        case 'announcements':
+          result = await tcFetchAnnouncements(cookies);
           break;
         default:
           res.status(400).json({ error: `Unknown dataType: ${dataType}` });

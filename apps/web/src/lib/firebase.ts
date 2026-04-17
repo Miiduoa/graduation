@@ -10,6 +10,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   setDoc,
   addDoc,
   updateDoc,
@@ -21,6 +22,7 @@ import {
   Timestamp,
   QueryConstraint,
   Firestore,
+  type Unsubscribe,
   serverTimestamp,
   increment,
   runTransaction,
@@ -371,19 +373,46 @@ export type Poi = {
   schoolId?: string;
 };
 
+export type CafeteriaPilotStatus = "inactive" | "pilot" | "live";
+
+export type Cafeteria = {
+  id: string;
+  name: string;
+  merchantId?: string;
+  brandKey?: string;
+  location?: string;
+  openingHours?: string;
+  seatingCapacity?: number;
+  currentOccupancy?: number;
+  activeOperatorCount?: number;
+  orderingEnabled?: boolean;
+  pilotStatus?: CafeteriaPilotStatus;
+  rating?: number;
+  reviewCount?: number;
+  schoolId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type MenuItem = {
   id: string;
   name: string;
   cafeteria: string;
+  cafeteriaId?: string;
+  merchantId?: string;
   availableOn: string;
   price?: number;
   category?: string;
   description?: string;
   calories?: number;
   vegetarian?: boolean;
+  available?: boolean;
   rating?: number;
   soldOut?: boolean;
+  tags?: string[];
   schoolId?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type BusRoute = {
@@ -424,6 +453,230 @@ export type Group = {
 
 export function isFirebaseConfigured(): boolean {
   return Boolean(firebaseConfig.projectId);
+}
+
+function toOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function toOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const normalized = value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function normalizeCafeteriaPilotStatus(value: unknown): CafeteriaPilotStatus {
+  if (value === "pilot" || value === "live") {
+    return value;
+  }
+
+  return "inactive";
+}
+
+function normalizeCafeteriaRecord(row: Record<string, unknown>): Cafeteria {
+  return {
+    ...(row as Cafeteria),
+    id: String(row.id ?? ""),
+    name:
+      toOptionalString(row.name) ??
+      toOptionalString(row.cafeteria) ??
+      toOptionalString(row.merchantName) ??
+      "未命名餐廳",
+    merchantId: toOptionalString(row.merchantId),
+    brandKey: toOptionalString(row.brandKey),
+    location: toOptionalString(row.location),
+    openingHours: toOptionalString(row.openingHours),
+    seatingCapacity: toOptionalNumber(row.seatingCapacity),
+    currentOccupancy: toOptionalNumber(row.currentOccupancy),
+    activeOperatorCount: toOptionalNumber(row.activeOperatorCount),
+    orderingEnabled: row.orderingEnabled === true,
+    pilotStatus: normalizeCafeteriaPilotStatus(row.pilotStatus),
+    rating: toOptionalNumber(row.rating),
+    reviewCount: toOptionalNumber(row.reviewCount),
+    schoolId: toOptionalString(row.schoolId),
+    createdAt: toOptionalString(row.createdAt),
+    updatedAt: toOptionalString(row.updatedAt),
+  };
+}
+
+function normalizeMenuItemRecord(row: Record<string, unknown>): MenuItem {
+  const available = row.available !== false;
+  const soldOut = row.soldOut === true || available === false;
+  const cafeteria =
+    toOptionalString(row.cafeteria) ??
+    toOptionalString(row.cafeteriaName) ??
+    toOptionalString(row.merchantName) ??
+    "未命名餐廳";
+
+  return {
+    ...(row as MenuItem),
+    id: String(row.id ?? ""),
+    name:
+      toOptionalString(row.name) ??
+      toOptionalString(row.title) ??
+      toOptionalString(row.itemName) ??
+      "未命名餐點",
+    cafeteria,
+    cafeteriaId: toOptionalString(row.cafeteriaId),
+    merchantId: toOptionalString(row.merchantId),
+    availableOn:
+      toOptionalString(row.availableOn) ??
+      toOptionalString(row.available_date) ??
+      toOptionalString(row.date) ??
+      toOptionalString(row.updatedAt) ??
+      "",
+    price: toOptionalNumber(row.price),
+    category: toOptionalString(row.category),
+    description: toOptionalString(row.description),
+    calories: toOptionalNumber(row.calories),
+    vegetarian: row.vegetarian === true,
+    available,
+    rating: toOptionalNumber(row.rating),
+    soldOut,
+    tags: toOptionalStringArray(row.tags),
+    schoolId: toOptionalString(row.schoolId),
+    createdAt: toOptionalString(row.createdAt),
+    updatedAt: toOptionalString(row.updatedAt),
+  };
+}
+
+function compareCafeterias(a: Cafeteria, b: Cafeteria) {
+  return a.name.localeCompare(b.name, "zh-TW");
+}
+
+function toSortTimestamp(value?: string): number {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compareMenuItems(a: MenuItem, b: MenuItem) {
+  const timestampDiff =
+    toSortTimestamp(b.updatedAt ?? b.availableOn ?? b.createdAt) -
+    toSortTimestamp(a.updatedAt ?? a.availableOn ?? a.createdAt);
+
+  if (timestampDiff !== 0) {
+    return timestampDiff;
+  }
+
+  return a.name.localeCompare(b.name, "zh-TW");
+}
+
+function subscribeCollectionAtPath<T extends { id: string }>(
+  pathSegments: string[],
+  constraints: QueryConstraint[],
+  onData: (rows: T[]) => void,
+  onError: (error: unknown) => void
+): Unsubscribe {
+  const firestore = getDb();
+  const q = query(collectionFromSegments(firestore, pathSegments), ...constraints);
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      onData(
+        snap.docs
+          .map((d) => parseDocument<T>({ id: d.id, data: () => d.data() }))
+          .filter((row): row is T => row !== null)
+      );
+    },
+    onError
+  );
+}
+
+function subscribeRootCollection<T extends { id: string }>(
+  collectionName: string,
+  constraints: QueryConstraint[],
+  onData: (rows: T[]) => void,
+  onError: (error: unknown) => void
+): Unsubscribe {
+  const firestore = getDb();
+  const q = query(collection(firestore, collectionName), ...constraints);
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      onData(
+        snap.docs
+          .map((d) => parseDocument<T>({ id: d.id, data: () => d.data() }))
+          .filter((row): row is T => row !== null)
+      );
+    },
+    onError
+  );
+}
+
+function subscribePreferredCollection<T>(
+  sources: Array<{
+    key: string;
+    subscribe: (
+      onData: (rows: T[]) => void,
+      onError: (error: unknown) => void
+    ) => Unsubscribe;
+  }>,
+  onData: (rows: T[]) => void,
+  onError: (error: unknown) => void
+): Unsubscribe {
+  const snapshots = new Map<string, T[]>();
+  let failedSources = 0;
+
+  const emitPreferred = () => {
+    for (const source of sources) {
+      const rows = snapshots.get(source.key);
+      if (rows && rows.length > 0) {
+        onData(rows);
+        return;
+      }
+    }
+
+    for (const source of sources) {
+      if (snapshots.has(source.key)) {
+        onData(snapshots.get(source.key) ?? []);
+        return;
+      }
+    }
+  };
+
+  const unsubs = sources.map((source) =>
+    source.subscribe(
+      (rows) => {
+        snapshots.set(source.key, rows);
+        emitPreferred();
+      },
+      (error) => {
+        failedSources += 1;
+        console.warn(`[Firebase] Live subscription failed for ${source.key}:`, error);
+
+        if (failedSources >= sources.length) {
+          onError(error);
+        }
+      }
+    )
+  );
+
+  return () => {
+    unsubs.forEach((unsubscribe) => unsubscribe());
+  };
 }
 
 export async function fetchSchoolSSOConfig(schoolId: string): Promise<SchoolSSOConfig | null> {
@@ -647,6 +900,29 @@ export async function fetchPois(
   }
 }
 
+export async function fetchCafeterias(
+  schoolId: string,
+  maxItems: number = 100
+): Promise<Cafeteria[]> {
+  if (!isFirebaseConfigured()) {
+    return [];
+  }
+
+  try {
+    const rows = await fetchCollectionAtPath<Cafeteria>(
+      buildSchoolCollectionPath(schoolId, "cafeterias"),
+      [orderBy("name", "asc"), limit(maxItems)]
+    );
+
+    return rows
+      .map((row) => normalizeCafeteriaRecord(row as unknown as Record<string, unknown>))
+      .sort(compareCafeterias);
+  } catch (error) {
+    console.error("[Firebase] Failed to fetch cafeterias:", error);
+    return [];
+  }
+}
+
 export async function fetchMenus(
   schoolId: string,
   maxItems: number = 50
@@ -667,6 +943,102 @@ export async function fetchMenus(
     console.error("[Firebase] Failed to fetch menus:", error);
     return [];
   }
+}
+
+export function subscribeCafeterias(
+  schoolId: string,
+  onData: (rows: Cafeteria[]) => void,
+  onError: (error: unknown) => void = () => undefined
+): Unsubscribe {
+  if (!isFirebaseConfigured()) {
+    return () => undefined;
+  }
+
+  return subscribePreferredCollection<Cafeteria>(
+    [
+      {
+        key: `schools/${schoolId}/cafeterias`,
+        subscribe: (next, fail) =>
+          subscribeCollectionAtPath<Cafeteria>(
+            buildSchoolCollectionPath(schoolId, "cafeterias"),
+            [orderBy("name", "asc")],
+            (rows) =>
+              next(
+                rows
+                  .map((row) =>
+                    normalizeCafeteriaRecord(row as unknown as Record<string, unknown>)
+                  )
+                  .sort(compareCafeterias)
+              ),
+            fail
+          ),
+      },
+    ],
+    onData,
+    onError
+  );
+}
+
+export function subscribeMenus(
+  schoolId: string,
+  onData: (rows: MenuItem[]) => void,
+  onError: (error: unknown) => void = () => undefined
+): Unsubscribe {
+  if (!isFirebaseConfigured()) {
+    return () => undefined;
+  }
+
+  return subscribePreferredCollection<MenuItem>(
+    [
+      {
+        key: `schools/${schoolId}/menus`,
+        subscribe: (next, fail) =>
+          subscribeCollectionAtPath<MenuItem>(
+            buildSchoolCollectionPath(schoolId, "menus"),
+            [],
+            (rows) =>
+              next(
+                rows
+                  .map((row) => normalizeMenuItemRecord(row as unknown as Record<string, unknown>))
+                  .sort(compareMenuItems)
+              ),
+            fail
+          ),
+      },
+      {
+        key: `schools/${schoolId}/cafeteriaMenus`,
+        subscribe: (next, fail) =>
+          subscribeCollectionAtPath<MenuItem>(
+            buildSchoolCollectionPath(schoolId, "cafeteriaMenus"),
+            [],
+            (rows) =>
+              next(
+                rows
+                  .map((row) => normalizeMenuItemRecord(row as unknown as Record<string, unknown>))
+                  .sort(compareMenuItems)
+              ),
+            fail
+          ),
+      },
+      {
+        key: `menus?schoolId=${schoolId}`,
+        subscribe: (next, fail) =>
+          subscribeRootCollection<MenuItem>(
+            "menus",
+            [where("schoolId", "==", schoolId)],
+            (rows) =>
+              next(
+                rows
+                  .map((row) => normalizeMenuItemRecord(row as unknown as Record<string, unknown>))
+                  .sort(compareMenuItems)
+              ),
+            fail
+          ),
+      },
+    ],
+    onData,
+    onError
+  );
 }
 
 export async function fetchBusRoutes(

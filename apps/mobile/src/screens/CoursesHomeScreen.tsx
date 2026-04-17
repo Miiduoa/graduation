@@ -1,6 +1,7 @@
 /* eslint-disable */
 import React, { useMemo } from "react";
 import { RefreshControl, ScrollView, Text, View, Pressable } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { CourseSpace, InboxTask } from "../data";
@@ -12,6 +13,19 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { ContextStrip, RoleCtaCard, TimelineCard } from "../ui/campusOs";
 import { formatDueWindow, isTeachingRole, resolveRoleMode, roleSummary } from "../utils/campusOs";
+
+function isTCSessionError(error: string | null): boolean {
+  if (!error) return false;
+  const lower = error.toLowerCase();
+  return (
+    lower.includes("tronclass") ||
+    lower.includes("session") ||
+    lower.includes("已失效") ||
+    lower.includes("過期") ||
+    lower.includes("重新登入") ||
+    lower.includes("no tronclass backend session")
+  );
+}
 
 export function CoursesHomeScreen(props: any) {
   const nav = props?.navigation;
@@ -27,6 +41,8 @@ export function CoursesHomeScreen(props: any) {
     loading,
     refreshing,
     refresh,
+    error: courseError,
+    reload: courseReload,
   } = useAsyncList<CourseSpace>(
     async () => {
       if (!auth.user) return [];
@@ -179,6 +195,54 @@ export function CoursesHomeScreen(props: any) {
           </View>
         </View>
 
+        {courseError && isTCSessionError(courseError) && (
+          <View
+            style={{
+              padding: 14,
+              borderRadius: theme.radius.lg,
+              backgroundColor: '#FEF3C7',
+              borderWidth: 1,
+              borderColor: '#F59E0B33',
+              gap: 8,
+            }}
+          >
+            <Text style={{ color: '#92400E', fontSize: 13, fontWeight: '700' }}>
+              TronClass 連線已過期
+            </Text>
+            <Text style={{ color: '#92400E', fontSize: 12, lineHeight: 18 }}>
+              課程資料可能不完整，請重新登入學校帳號。
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Pressable
+                onPress={() => nav?.navigate?.("我的", { screen: "SSOLogin" })}
+                style={({ pressed }) => ({
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                  borderRadius: theme.radius.lg,
+                  backgroundColor: '#F59E0B',
+                  opacity: pressed ? 0.82 : 1,
+                })}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>重新登入</Text>
+              </Pressable>
+              <Pressable
+                onPress={courseReload}
+                style={({ pressed }) => ({
+                  paddingVertical: 8,
+                  paddingHorizontal: 14,
+                  borderRadius: theme.radius.lg,
+                  backgroundColor: '#FEF3C7',
+                  borderWidth: 1,
+                  borderColor: '#F59E0B55',
+                  opacity: pressed ? 0.82 : 1,
+                })}
+              >
+                <Text style={{ color: '#92400E', fontWeight: '700', fontSize: 12 }}>重試</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         {activeCourse && (
           <View style={{ gap: theme.space.md }}>
             <Text
@@ -250,6 +314,90 @@ export function CoursesHomeScreen(props: any) {
             </Pressable>
           </View>
         )}
+
+        <View style={{ gap: theme.space.md }}>
+          <Text
+            style={{
+              color: theme.colors.muted,
+              fontSize: theme.typography.overline.fontSize,
+              fontWeight: theme.typography.overline.fontWeight ?? '700',
+              letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
+              textTransform: 'uppercase',
+            }}
+          >
+            AI 工具
+          </Text>
+          <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
+            <Pressable
+              onPress={() => nav?.navigate?.("AIChat")}
+              style={({ pressed }) => ({
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: theme.space.sm,
+                paddingHorizontal: theme.space.md,
+                paddingVertical: theme.space.md,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                opacity: pressed ? 0.82 : 1,
+                transform: [{ scale: pressed ? 0.97 : 1 }],
+              })}
+            >
+              <View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 10,
+                  backgroundColor: '#FF6B9A14',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="sparkles" size={16} color="#FF6B9A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>AI 助理</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11 }}>課業問答</Text>
+              </View>
+            </Pressable>
+            <Pressable
+              onPress={() => nav?.navigate?.("AICourseAdvisor")}
+              style={({ pressed }) => ({
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: theme.space.sm,
+                paddingHorizontal: theme.space.md,
+                paddingVertical: theme.space.md,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                opacity: pressed ? 0.82 : 1,
+                transform: [{ scale: pressed ? 0.97 : 1 }],
+              })}
+            >
+              <View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 10,
+                  backgroundColor: '#8B5CF614',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="school" size={16} color="#8B5CF6" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>選課助理</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11 }}>AI 規劃</Text>
+              </View>
+            </Pressable>
+          </View>
+        </View>
       </ScrollView>
     </View>
   );

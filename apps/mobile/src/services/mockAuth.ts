@@ -10,6 +10,8 @@ export type MockAuthSession = {
   role: UserRole;
   department?: string | null;
   studentId?: string | null;
+  /** 使用者原始輸入的登入帳號（可能與學號不同，如 B11234567 vs 411211325） */
+  loginAccount?: string | null;
 };
 
 const STORAGE_KEY = "campus.mockAuthSession.v1";
@@ -32,6 +34,7 @@ export async function loadMockAuthSession(): Promise<MockAuthSession | null> {
       role: parsed.role,
       department: parsed.department ?? null,
       studentId: parsed.studentId ?? null,
+      loginAccount: parsed.loginAccount ?? null,
     };
   } catch {
     return null;

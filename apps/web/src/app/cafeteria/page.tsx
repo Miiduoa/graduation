@@ -1,195 +1,524 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties } from "react";
+import { mockMenus } from "@campus/shared/src/mockData";
 import { SiteShell } from "@/components/SiteShell";
+import {
+  fetchCafeterias,
+  fetchMenus,
+  subscribeCafeterias,
+  subscribeMenus,
+  type Cafeteria,
+  type MenuItem,
+} from "@/lib/firebase";
 import { resolveSchoolPageContext } from "@/lib/pageContext";
+import { useSchoolCollectionData } from "@/lib/useSchoolCollectionData";
 
-type MealPeriod = "breakfast" | "lunch" | "dinner";
+const ALL_CAFETERIAS_KEY = "all";
 
-interface MenuItem {
-  id: string;
-  name: string;
-  price: number;
-  cafeteria: string;
-  category: string;
-  rating: number;
-  calories?: number;
-  tags?: string[];
-  period: MealPeriod[];
+const DEMO_MENUS: MenuItem[] = mockMenus.map((menu) => ({
+  ...menu,
+  available: true,
+  soldOut: false,
+}));
+
+const DEMO_CAFETERIAS: Cafeteria[] = Array.from(
+  new Map(
+    DEMO_MENUS.map((menu) => [
+      menu.cafeteria,
+      {
+        id: `demo-${menu.cafeteria}`,
+        name: menu.cafeteria,
+      } satisfies Cafeteria,
+    ])
+  ).values()
+).sort((a, b) => a.name.localeCompare(b.name, "zh-TW"));
+
+function getCafeteriaKey(input: {
+  id?: string | null;
+  cafeteriaId?: string | null;
+  cafeteria?: string | null;
+  name?: string | null;
+}) {
+  return input.id || input.cafeteriaId || input.name || input.cafeteria || "";
 }
 
-const MOCK_MENUS: MenuItem[] = [
-  { id: "1", name: "雞腿便當", price: 85, cafeteria: "第一餐廳", category: "便當", rating: 4.6, calories: 650, tags: ["熱門"], period: ["lunch", "dinner"] },
-  { id: "2", name: "排骨飯", price: 75, cafeteria: "第一餐廳", category: "便當", rating: 4.2, calories: 580, tags: [], period: ["lunch"] },
-  { id: "3", name: "魚排飯", price: 70, cafeteria: "第二餐廳", category: "便當", rating: 4.4, calories: 520, tags: ["推薦"], period: ["lunch", "dinner"] },
-  { id: "4", name: "素食套餐", price: 60, cafeteria: "第二餐廳", category: "素食", rating: 4.1, calories: 420, tags: ["素食"], period: ["lunch"] },
-  { id: "5", name: "牛肉麵", price: 90, cafeteria: "小吃部", category: "麵食", rating: 4.8, calories: 680, tags: ["熱門", "限量"], period: ["lunch", "dinner"] },
-  { id: "6", name: "蔥油拌麵", price: 55, cafeteria: "小吃部", category: "麵食", rating: 4.3, calories: 400, tags: [], period: ["lunch"] },
-  { id: "7", name: "總匯三明治", price: 45, cafeteria: "輕食吧", category: "輕食", rating: 4.0, calories: 350, tags: [], period: ["breakfast", "lunch"] },
-  { id: "8", name: "豆漿油條", price: 30, cafeteria: "輕食吧", category: "輕食", rating: 4.5, calories: 280, tags: ["早餐"], period: ["breakfast"] },
-];
+function toSearchText(parts: Array<string | null | undefined>) {
+  return parts
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .join(" ")
+    .toLowerCase();
+}
 
-const CAFETERIAS = ["全部", "第一餐廳", "第二餐廳", "小吃部", "輕食吧"];
-const PERIODS: { key: MealPeriod; label: string; time: string }[] = [
-  { key: "breakfast", label: "早餐", time: "07:00–09:30" },
-  { key: "lunch", label: "午餐", time: "11:00–14:00" },
-  { key: "dinner", label: "晚餐", time: "17:00–20:00" },
-];
+function formatLastUpdated(value?: string) {
+  if (!value) {
+    return "等待同步";
+  }
 
-const nowPeriod = (): MealPeriod => {
-  const h = new Date().getHours();
-  if (h < 10) return "breakfast";
-  if (h < 15) return "lunch";
-  return "dinner";
-};
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "等待同步";
+  }
+
+  return date.toLocaleString("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getMenuIcon(category?: string) {
+  if (!category) return "🍽️";
+  if (category.includes("飯") || category.includes("便當") || category.includes("主餐")) return "🍱";
+  if (category.includes("麵")) return "🍜";
+  if (category.includes("素")) return "🥗";
+  if (category.includes("飲")) return "🥤";
+  if (category.includes("點心") || category.includes("輕食")) return "🥪";
+  return "🍽️";
+}
+
+function getCafeteriaStatus(cafeteria: Cafeteria) {
+  if (cafeteria.orderingEnabled && cafeteria.pilotStatus === "live") {
+    return {
+      label: "營運中",
+      color: "var(--success)",
+      background: "var(--success-soft)",
+    };
+  }
+
+  if (cafeteria.orderingEnabled && cafeteria.pilotStatus === "pilot") {
+    return {
+      label: "試營運",
+      color: "var(--warning)",
+      background: "var(--warning-soft)",
+    };
+  }
+
+  return {
+    label: "資訊展示",
+    color: "var(--muted)",
+    background: "var(--panel)",
+  };
+}
 
 export default function CafeteriaPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
-  const [selectedCafeteria, setSelectedCafeteria] = useState("全部");
-  const [period, setPeriod] = useState<MealPeriod>(nowPeriod());
+  const { schoolId, schoolName } = resolveSchoolPageContext(props.searchParams);
+  const [selectedCafeteria, setSelectedCafeteria] = useState(ALL_CAFETERIAS_KEY);
   const [search, setSearch] = useState("");
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [userRatings, setUserRatings] = useState<Record<string, number>>({});
 
-  const filtered = useMemo(
-    () =>
-      MOCK_MENUS.filter(
-        (m) =>
-          (selectedCafeteria === "全部" || m.cafeteria === selectedCafeteria) &&
-          m.period.includes(period) &&
-          (!search || m.name.includes(search) || m.cafeteria.includes(search))
-      ),
-    [selectedCafeteria, period, search]
-  );
+  const {
+    data: cafeteriaRows,
+    loading: cafeteriaLoading,
+    sourceMode: cafeteriaSourceMode,
+  } = useSchoolCollectionData<Cafeteria>(schoolId, fetchCafeterias, DEMO_CAFETERIAS, {
+    subscribeLive: subscribeCafeterias,
+  });
 
-  const byRestaurant = useMemo(() => {
-    const map: Record<string, MenuItem[]> = {};
-    for (const item of filtered) {
-      if (!map[item.cafeteria]) map[item.cafeteria] = [];
-      map[item.cafeteria].push(item);
+  const {
+    data: menuRows,
+    loading: menuLoading,
+    sourceMode: menuSourceMode,
+  } = useSchoolCollectionData<MenuItem>(schoolId, fetchMenus, DEMO_MENUS, {
+    subscribeLive: subscribeMenus,
+  });
+
+  const loading = cafeteriaLoading || menuLoading;
+
+  const cafeterias = useMemo(() => {
+    const merged = new Map<string, Cafeteria>();
+
+    cafeteriaRows.forEach((cafeteria) => {
+      const key = getCafeteriaKey(cafeteria);
+      if (!key) return;
+      merged.set(key, {
+        ...cafeteria,
+        id: cafeteria.id || key,
+        name: cafeteria.name || "未命名餐廳",
+      });
+    });
+
+    menuRows.forEach((menu) => {
+      const key = getCafeteriaKey(menu);
+      if (!key || merged.has(key)) return;
+
+      merged.set(key, {
+        id: menu.cafeteriaId || key,
+        name: menu.cafeteria || "未命名餐廳",
+      });
+    });
+
+    return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name, "zh-TW"));
+  }, [cafeteriaRows, menuRows]);
+
+  const menusByCafeteria = useMemo(() => {
+    const grouped = new Map<string, MenuItem[]>();
+
+    menuRows.forEach((menu) => {
+      const key = getCafeteriaKey(menu);
+      if (!key) return;
+
+      const bucket = grouped.get(key) ?? [];
+      bucket.push(menu);
+      grouped.set(key, bucket);
+    });
+
+    grouped.forEach((items, key) => {
+      grouped.set(
+        key,
+        [...items].sort((a, b) => {
+          const aTime = new Date(a.updatedAt ?? a.availableOn ?? a.createdAt ?? "").getTime() || 0;
+          const bTime = new Date(b.updatedAt ?? b.availableOn ?? b.createdAt ?? "").getTime() || 0;
+          if (bTime !== aTime) {
+            return bTime - aTime;
+          }
+          return a.name.localeCompare(b.name, "zh-TW");
+        })
+      );
+    });
+
+    return grouped;
+  }, [menuRows]);
+
+  const sections = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+
+    return cafeterias
+      .map((cafeteria) => {
+        const key = getCafeteriaKey(cafeteria);
+        const allItems = menusByCafeteria.get(key) ?? [];
+        const cafeteriaMatches =
+          needle.length === 0 ||
+          toSearchText([cafeteria.name, cafeteria.location, cafeteria.openingHours]).includes(needle);
+        const items =
+          needle.length === 0 || cafeteriaMatches
+            ? allItems
+            : allItems.filter((item) =>
+                toSearchText([item.name, item.category, item.description, item.cafeteria]).includes(needle)
+              );
+
+        if (selectedCafeteria !== ALL_CAFETERIAS_KEY && key !== selectedCafeteria) {
+          return null;
+        }
+
+        if (needle.length > 0 && !cafeteriaMatches && items.length === 0) {
+          return null;
+        }
+
+        return {
+          key,
+          cafeteria,
+          items,
+          totalCount: allItems.length,
+          availableCount: allItems.filter((item) => item.available !== false && item.soldOut !== true).length,
+        };
+      })
+      .filter((section): section is NonNullable<typeof section> => section !== null);
+  }, [cafeterias, menusByCafeteria, search, selectedCafeteria]);
+
+  const stats = useMemo(() => {
+    const liveOrdering = cafeterias.filter(
+      (cafeteria) => cafeteria.orderingEnabled && cafeteria.pilotStatus !== "inactive"
+    ).length;
+    const availableMenus = menuRows.filter(
+      (menu) => menu.available !== false && menu.soldOut !== true
+    ).length;
+    const soldOutMenus = menuRows.filter(
+      (menu) => menu.available === false || menu.soldOut === true
+    ).length;
+
+    return {
+      cafeterias: cafeterias.length,
+      menuItems: menuRows.length,
+      liveOrdering,
+      availableMenus,
+      soldOutMenus,
+    };
+  }, [cafeterias, menuRows]);
+
+  const lastUpdatedAt = useMemo(() => {
+    const timestamps = [
+      ...cafeterias.map((cafeteria) => cafeteria.updatedAt ?? cafeteria.createdAt),
+      ...menuRows.map((menu) => menu.updatedAt ?? menu.availableOn ?? menu.createdAt),
+    ]
+      .map((value) => (value ? new Date(value).getTime() : 0))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+    if (timestamps.length === 0) {
+      return undefined;
     }
-    return map;
-  }, [filtered]);
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const currentPeriod = PERIODS.find((p) => p.key === period)!;
+    return new Date(Math.max(...timestamps)).toISOString();
+  }, [cafeterias, menuRows]);
+
+  const sourceLabel =
+    cafeteriaSourceMode === "firebase" && menuSourceMode === "firebase"
+      ? "即時資料"
+      : cafeteriaSourceMode === "demo" && menuSourceMode === "demo"
+        ? "示範資料"
+        : "部分示範資料";
 
   return (
-    <SiteShell title="餐廳" subtitle="今日菜單與時段總覽" schoolName={schoolName}>
+    <SiteShell title="餐廳" subtitle="即時同步目前校內餐廳與菜單" schoolName={schoolName}>
       <div className="pageStack">
-        {/* ── Period Selector ── */}
-        <div className="metricGrid">
-          {PERIODS.map((p) => {
-            const isActive = period === p.key;
-            const now = new Date().getHours();
-            const isCurrent = (p.key === "breakfast" && now < 10) || (p.key === "lunch" && now < 15 && now >= 10) || (p.key === "dinner" && now >= 15);
-            return (
-              <button
-                key={p.key}
-                onClick={() => setPeriod(p.key)}
-                className="metricCard"
-                style={{
-                  cursor: "pointer",
-                  border: isActive ? "1px solid var(--brand)" : "1px solid var(--border)",
-                  background: isActive ? "var(--accent-soft)" : "var(--surface)",
-                  boxShadow: isActive ? "var(--shadow-sm)" : "var(--shadow-sm)",
-                  transition: "all 0.15s ease",
-                  textAlign: "left",
-                  "--tone": isActive ? "var(--brand)" : "var(--muted)",
-                } as CSSProperties}
-              >
-                <div className="metricIcon">
-                  {p.key === "breakfast" ? "🌅" : p.key === "lunch" ? "☀️" : "🌙"}
-                </div>
-                <div className="metricValue" style={{ fontSize: 18 }}>{p.label}</div>
-                <div className="metricLabel">{p.time}</div>
-                {isCurrent && <div className="metricMeta" style={{ color: "var(--success)", fontWeight: 700 }}>● 供應中</div>}
-              </button>
-            );
-          })}
+        <div className="toolbarPanel" style={{ alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span className={`pill${sourceLabel === "即時資料" ? " brand" : " subtle"}`}>{sourceLabel}</span>
+              <span style={{ fontSize: 13, color: "var(--muted)" }}>
+                最後同步：{formatLastUpdated(lastUpdatedAt)}
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
+              餐廳新增、下架或菜單異動會直接反映在這裡。
+            </p>
+          </div>
+          {loading ? <span className="pill subtle">同步中…</span> : null}
         </div>
 
-        {/* ── Search + Filter ── */}
+        <div className="metricGrid">
+          <div className="metricCard" style={{ "--tone": "var(--brand)" } as CSSProperties}>
+            <div className="metricIcon">🏫</div>
+            <div className="metricValue">{stats.cafeterias}</div>
+            <div className="metricLabel">校內餐廳</div>
+          </div>
+          <div className="metricCard" style={{ "--tone": "var(--success)" } as CSSProperties}>
+            <div className="metricIcon">🍽️</div>
+            <div className="metricValue">{stats.availableMenus}</div>
+            <div className="metricLabel">供應中菜色</div>
+          </div>
+          <div className="metricCard" style={{ "--tone": "var(--warning)" } as CSSProperties}>
+            <div className="metricIcon">🧾</div>
+            <div className="metricValue">{stats.menuItems}</div>
+            <div className="metricLabel">菜單總數</div>
+          </div>
+          <div className="metricCard" style={{ "--tone": "var(--info)" } as CSSProperties}>
+            <div className="metricIcon">🛒</div>
+            <div className="metricValue">{stats.liveOrdering}</div>
+            <div className="metricLabel">可點餐餐廳</div>
+          </div>
+        </div>
+
         <div className="toolbarPanel">
           <div className="toolbarGrow">
             <div style={{ position: "relative" }}>
-              <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 16, pointerEvents: "none" }}>🔍</span>
+              <span
+                style={{
+                  position: "absolute",
+                  left: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  fontSize: 16,
+                  pointerEvents: "none",
+                }}
+              >
+                🔍
+              </span>
               <input
                 className="input"
                 type="search"
-                placeholder="搜尋菜名或餐廳…"
+                placeholder="搜尋菜名、類別或餐廳…"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(event) => setSearch(event.target.value)}
                 style={{ paddingLeft: 38, minHeight: 42 }}
               />
             </div>
           </div>
           <div className="toolbarActions" style={{ gap: 6, flexWrap: "wrap" }}>
-            {CAFETERIAS.map((c) => (
-              <button
-                key={c}
-                onClick={() => setSelectedCafeteria(c)}
-                className={`pill${selectedCafeteria === c ? " brand" : " subtle"}`}
-                style={{ cursor: "pointer", border: "none", background: undefined }}
-              >
-                {c}
-              </button>
-            ))}
+            <button
+              type="button"
+              onClick={() => setSelectedCafeteria(ALL_CAFETERIAS_KEY)}
+              className={`pill${selectedCafeteria === ALL_CAFETERIAS_KEY ? " brand" : " subtle"}`}
+              style={{ cursor: "pointer", border: "none", background: undefined }}
+            >
+              全部餐廳
+            </button>
+            {cafeterias.map((cafeteria) => {
+              const key = getCafeteriaKey(cafeteria);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSelectedCafeteria(key)}
+                  className={`pill${selectedCafeteria === key ? " brand" : " subtle"}`}
+                  style={{ cursor: "pointer", border: "none", background: undefined }}
+                >
+                  {cafeteria.name}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* ── Menu by Restaurant ── */}
-        {Object.keys(byRestaurant).length === 0 ? (
+        {sections.length === 0 ? (
           <div className="emptyState">
-            <div className="emptyIcon">🍽</div>
-            <h3 className="emptyTitle">目前無菜單資料</h3>
-            <p className="emptyBody">此時段或餐廳暫無供應，請切換時段查看</p>
+            <div className="emptyIcon">🍽️</div>
+            <h3 className="emptyTitle">
+              {search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY ? "找不到符合的餐廳或菜單" : "目前沒有餐廳資料"}
+            </h3>
+            <p className="emptyBody">
+              {search.trim() || selectedCafeteria !== ALL_CAFETERIAS_KEY
+                ? "請調整搜尋關鍵字或切換其他餐廳。"
+                : "餐廳與菜單同步完成後會自動顯示在這裡。"}
+            </p>
           </div>
         ) : (
-          Object.entries(byRestaurant).map(([restaurant, items]) => (
-            <div key={restaurant} className="sectionCard">
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <h3 style={{ margin: 0, fontSize: 12, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--muted)", fontWeight: 600 }}>
-                  {restaurant}
-                </h3>
-                <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                <span style={{ fontSize: 12, color: "var(--muted)" }}>{items.length} 項</span>
-              </div>
-              <div className="insetGroup">
-                {items.map((item, i) => (
-                  <div key={item.id} className="insetGroupRow" style={{ borderTop: i === 0 ? "none" : undefined }}>
-                    <div
-                      className="insetGroupRowIcon"
-                      style={{ fontSize: 22, background: "var(--panel)", borderRadius: 10 }}
-                    >
-                      {item.category === "便當" ? "🍱" : item.category === "麵食" ? "🍜" : item.category === "素食" ? "🥗" : "🥪"}
+          sections.map(({ key, cafeteria, items, availableCount, totalCount }) => {
+            const status = getCafeteriaStatus(cafeteria);
+
+            return (
+              <div key={key} className="sectionCard">
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: 16,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <h3 style={{ margin: 0, fontSize: 22 }}>{cafeteria.name}</h3>
+                      <span
+                        className="pill"
+                        style={{
+                          background: status.background,
+                          color: status.color,
+                          border: "none",
+                          boxShadow: "none",
+                        }}
+                      >
+                        {status.label}
+                      </span>
+                      {cafeteria.brandKey ? <span className="pill subtle">{cafeteria.brandKey}</span> : null}
                     </div>
-                    <div className="insetGroupRowContent">
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span className="insetGroupRowTitle">{item.name}</span>
-                        {item.tags?.map((t) => (
-                          <span key={t} className="pill" style={{ fontSize: 10, padding: "2px 7px", background: "var(--warning-soft)", color: "var(--warning)", border: "none", boxShadow: "none" }}>
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                      <div className="insetGroupRowMeta">
-                        {"★".repeat(Math.round(item.rating))}{"☆".repeat(5 - Math.round(item.rating))}
-                        {" "}{item.rating.toFixed(1)}
-                        {item.calories ? ` · ${item.calories} kcal` : ""}
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "right", flexShrink: 0 }}>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: "var(--brand)", letterSpacing: "-0.04em" }}>
-                        ${item.price}
-                      </div>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", color: "var(--muted)", fontSize: 13 }}>
+                      {cafeteria.location ? <span>📍 {cafeteria.location}</span> : null}
+                      {cafeteria.openingHours ? <span>🕒 {cafeteria.openingHours}</span> : null}
+                      {typeof cafeteria.currentOccupancy === "number" ? (
+                        <span>👥 目前約 {cafeteria.currentOccupancy} 人</span>
+                      ) : null}
                     </div>
                   </div>
-                ))}
+                  <div style={{ textAlign: "right", minWidth: 120 }}>
+                    <div style={{ fontSize: 13, color: "var(--muted)" }}>供應中 / 菜單總數</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.04em" }}>
+                      {availableCount} / {totalCount}
+                    </div>
+                    {typeof cafeteria.rating === "number" ? (
+                      <div style={{ fontSize: 13, color: "var(--muted)" }}>
+                        ★ {cafeteria.rating.toFixed(1)}
+                        {typeof cafeteria.reviewCount === "number" ? ` · ${cafeteria.reviewCount} 則評價` : ""}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="insetGroup">
+                  {items.length === 0 ? (
+                    <div className="insetGroupRow" style={{ borderTop: "none" }}>
+                      <div className="insetGroupRowIcon" style={{ fontSize: 22, background: "var(--panel)", borderRadius: 10 }}>
+                        📭
+                      </div>
+                      <div className="insetGroupRowContent">
+                        <div className="insetGroupRowTitle">目前尚未上架菜單</div>
+                        <div className="insetGroupRowMeta">這間餐廳已在校內名單中，菜單同步後會即時顯示。</div>
+                      </div>
+                    </div>
+                  ) : (
+                    items.map((item, index) => (
+                      <div
+                        key={item.id}
+                        className="insetGroupRow"
+                        style={{
+                          borderTop: index === 0 ? "none" : undefined,
+                          opacity: item.available === false || item.soldOut === true ? 0.6 : 1,
+                        }}
+                      >
+                        <div
+                          className="insetGroupRowIcon"
+                          style={{ fontSize: 22, background: "var(--panel)", borderRadius: 10 }}
+                        >
+                          {getMenuIcon(item.category)}
+                        </div>
+                        <div className="insetGroupRowContent">
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <span className="insetGroupRowTitle">{item.name}</span>
+                            {item.category ? <span className="pill subtle">{item.category}</span> : null}
+                            <span
+                              className="pill"
+                              style={{
+                                background:
+                                  item.available === false || item.soldOut === true
+                                    ? "var(--danger-soft)"
+                                    : "var(--success-soft)",
+                                color:
+                                  item.available === false || item.soldOut === true
+                                    ? "var(--danger)"
+                                    : "var(--success)",
+                                border: "none",
+                                boxShadow: "none",
+                              }}
+                            >
+                              {item.available === false || item.soldOut === true ? "已售完" : "供應中"}
+                            </span>
+                            {item.tags?.map((tag) => (
+                              <span
+                                key={tag}
+                                className="pill"
+                                style={{
+                                  fontSize: 10,
+                                  padding: "2px 7px",
+                                  background: "var(--warning-soft)",
+                                  color: "var(--warning)",
+                                  border: "none",
+                                  boxShadow: "none",
+                                }}
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="insetGroupRowMeta">
+                            {typeof item.rating === "number" ? `★ ${item.rating.toFixed(1)} · ` : ""}
+                            {typeof item.calories === "number" ? `${item.calories} kcal · ` : ""}
+                            {item.updatedAt || item.availableOn
+                              ? `更新於 ${formatLastUpdated(item.updatedAt ?? item.availableOn)}`
+                              : "等待同步"}
+                          </div>
+                          {item.description ? (
+                            <div style={{ marginTop: 4, fontSize: 13, color: "var(--muted)" }}>
+                              {item.description}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 20,
+                              fontWeight: 800,
+                              color: "var(--brand)",
+                              letterSpacing: "-0.04em",
+                            }}
+                          >
+                            {typeof item.price === "number" ? `NT$${item.price}` : "未標價"}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
+
+        {stats.soldOutMenus > 0 ? (
+          <div className="card" style={{ color: "var(--muted)", fontSize: 13 }}>
+            目前共有 {stats.soldOutMenus} 項菜色標記為售完，若店家更新供應狀態，頁面會自動刷新。
+          </div>
+        ) : null}
       </div>
     </SiteShell>
   );

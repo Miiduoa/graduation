@@ -22,7 +22,15 @@ import { useAuth } from "../state/auth";
 import { useDataSource } from "../hooks/useDataSource";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useSchedule } from "../state/schedule";
-import { chatWithCampusAssistant, getAIStatus, type AIMessage, type AIContext } from "../services/ai";
+import {
+  chatWithCampusAssistant,
+  chatWithLocalLLMStreaming,
+  getAIStatus,
+  submitFeedback,
+  type AIMessage,
+  type AIContext,
+  type StreamingCallback,
+} from "../services/ai";
 import { toDate } from "../utils/format";
 import {
   clearAIChatHistory,
@@ -120,9 +128,11 @@ function MessageBubble(props: {
   message: Message;
   onAction?: (action: string, params?: Record<string, unknown>) => void;
   onSuggestion?: (text: string) => void;
+  onFeedback?: (messageId: string, rating: "thumbs_up" | "thumbs_down") => void;
 }) {
-  const { message, onAction, onSuggestion } = props;
+  const { message, onAction, onSuggestion, onFeedback } = props;
   const isUser = message.role === "user";
+  const [feedbackGiven, setFeedbackGiven] = useState<string | null>(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(isUser ? 20 : -20)).current;
@@ -211,9 +221,43 @@ function MessageBubble(props: {
         </View>
       )}
 
-      <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 4, marginLeft: 4 }}>
-        {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-      </Text>
+      <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4, marginLeft: 4, gap: 8 }}>
+        <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
+          {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        </Text>
+        {!isUser && message.id !== "greeting" && (
+          <View style={{ flexDirection: "row", gap: 4 }}>
+            <Pressable
+              onPress={() => {
+                setFeedbackGiven("thumbs_up");
+                onFeedback?.(message.id, "thumbs_up");
+              }}
+              style={{ padding: 4, opacity: feedbackGiven === "thumbs_down" ? 0.3 : 1 }}
+              disabled={!!feedbackGiven}
+            >
+              <Ionicons
+                name={feedbackGiven === "thumbs_up" ? "thumbs-up" : "thumbs-up-outline"}
+                size={14}
+                color={feedbackGiven === "thumbs_up" ? theme.colors.accent : theme.colors.muted}
+              />
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                setFeedbackGiven("thumbs_down");
+                onFeedback?.(message.id, "thumbs_down");
+              }}
+              style={{ padding: 4, opacity: feedbackGiven === "thumbs_up" ? 0.3 : 1 }}
+              disabled={!!feedbackGiven}
+            >
+              <Ionicons
+                name={feedbackGiven === "thumbs_down" ? "thumbs-down" : "thumbs-down-outline"}
+                size={14}
+                color={feedbackGiven === "thumbs_down" ? "#e74c3c" : theme.colors.muted}
+              />
+            </Pressable>
+          </View>
+        )}
+      </View>
     </Animated.View>
   );
 }
@@ -398,7 +442,7 @@ export function AIChatScreen(props: any) {
   }), [school.id, auth.user?.uid, auth.profile?.displayName, announcements, events, menus, pois, courses, pendingAssignments, weeklyReport]);
 
   useEffect(() => {
-    const providerLabel = aiStatus.provider === "cloud" ? "Campus Cloud" : "本地";
+    const providerLabel = aiStatus.provider === "local-llm" ? "本地 AI 引擎" : aiStatus.provider === "cloud" ? "Campus Cloud" : "本地";
     const name = auth.profile?.displayName?.split(" ")[0] ?? (auth.user ? "同學" : "同學");
     const courseCount = courses.length;
     const greetingContent = [
@@ -583,8 +627,14 @@ export function AIChatScreen(props: any) {
     };
   };
 
+  const abortRef = useRef<AbortController | null>(null);
+
   const handleSend = async () => {
     if (!input.trim()) return;
+
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
 
     const userMsg: Message = {
       id: `msg-${Date.now()}`,
@@ -599,7 +649,7 @@ export function AIChatScreen(props: any) {
 
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
 
-    let response: Message;
+    const responseId = `msg-${Date.now() + 1}`;
 
     if (USE_AI_SERVICE) {
       const aiMessages: AIMessage[] = messages
@@ -607,25 +657,89 @@ export function AIChatScreen(props: any) {
         .map((m) => ({ role: m.role, content: m.content }));
       aiMessages.push({ role: "user", content: userMsg.content });
 
-      const aiResponse = await chatWithCampusAssistant(aiMessages, aiContext);
-
-      response = {
-        id: `msg-${Date.now()}`,
+      const streamingPlaceholder: Message = {
+        id: responseId,
         role: "assistant",
-        content: aiResponse.error ? `抱歉，發生錯誤：${aiResponse.error}` : aiResponse.content,
+        content: "",
         timestamp: new Date(),
-        suggestions: aiResponse.suggestions,
-        actions: aiResponse.actions,
       };
-    } else {
-      response = await generateResponse(userMsg.content);
-    }
+      setMessages((prev) => [...prev, streamingPlaceholder]);
+      setIsTyping(false);
 
-    setIsTyping(false);
-    setMessages((prev) => [...prev, response]);
+      const onToken: StreamingCallback = (partial, done) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === responseId ? { ...m, content: partial } : m,
+          ),
+        );
+        scrollRef.current?.scrollToEnd({ animated: false });
+      };
+
+      try {
+        const aiResponse = await chatWithLocalLLMStreaming(
+          aiMessages,
+          aiContext,
+          onToken,
+          signal,
+        );
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === responseId
+              ? {
+                  ...m,
+                  content: aiResponse.error ? `抱歉，發生錯誤：${aiResponse.error}` : aiResponse.content,
+                  suggestions: aiResponse.suggestions,
+                  actions: aiResponse.actions,
+                }
+              : m,
+          ),
+        );
+      } catch (e: any) {
+        if (e.name !== "AbortError") {
+          const fallback = await chatWithCampusAssistant(aiMessages, aiContext);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === responseId
+                ? {
+                    ...m,
+                    content: fallback.content,
+                    suggestions: fallback.suggestions,
+                    actions: fallback.actions,
+                  }
+                : m,
+            ),
+          );
+        }
+      }
+    } else {
+      const response = await generateResponse(userMsg.content);
+      setIsTyping(false);
+      setMessages((prev) => [...prev, response]);
+    }
 
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   };
+
+  const handleFeedback = useCallback(
+    (messageId: string, rating: "thumbs_up" | "thumbs_down") => {
+      const targetMsg = messages.find((m) => m.id === messageId);
+      if (!targetMsg) return;
+
+      const previousUserMsg = [...messages]
+        .reverse()
+        .find((m) => m.role === "user" && messages.indexOf(m) < messages.indexOf(targetMsg));
+
+      submitFeedback({
+        messageId,
+        userMessage: previousUserMsg?.content ?? "",
+        assistantResponse: targetMsg.content,
+        rating,
+        userId: auth.user?.uid,
+      });
+    },
+    [messages, auth.user?.uid],
+  );
 
   const handleAction = async (action: string, params?: Record<string, unknown>) => {
     if (action === "navigate" && params) {
@@ -743,6 +857,7 @@ export function AIChatScreen(props: any) {
                 message={msg}
                 onAction={handleAction}
                 onSuggestion={handleSuggestion}
+                onFeedback={handleFeedback}
               />
             ))}
             {isTyping && (
