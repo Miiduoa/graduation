@@ -20,6 +20,7 @@ import {
   type PUAnnouncement,
   type PUStudentInfo,
 } from "./puDirectScraper";
+import { getCloudFunctionUrl } from "./cloudFunctions";
 import {
   tcFetchCourses,
   tcFetchActivities,
@@ -27,6 +28,7 @@ import {
   tcFetchAttendance,
   tcFetchProfile,
   tcFetchTodos,
+  autoRefreshTCSession,
   type TCCourse,
   type TCActivity,
   type TCModule,
@@ -112,11 +114,84 @@ function isExpired(entry: CacheEntry<unknown> | null, ttl: number): boolean {
   return Date.now() - entry.fetchedAt > ttl;
 }
 
+type PUCampusBackendDataType = "courses" | "grades" | "announcements" | "studentInfo";
+
+async function fetchPUCampusBackend<T>(
+  session: PUSession,
+  dataType: PUCampusBackendDataType,
+  extra: Record<string, unknown> = {},
+): Promise<T | null> {
+  const sessionId = session.backendSessionId?.trim();
+  if (!sessionId) return null;
+
+  const response = await fetch(getCloudFunctionUrl("puFetchCampusData"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      sessionId,
+      dataType,
+      ...extra,
+    }),
+  });
+
+  const text = await response.text();
+  let data: { success?: boolean; result?: T; error?: string } | null = null;
+  if (text.trim()) {
+    try {
+      data = JSON.parse(text) as { success?: boolean; result?: T; error?: string };
+    } catch {
+      data = null;
+    }
+  }
+
+  if (!response.ok || data?.success !== true || !data.result) {
+    throw new Error(data?.error || `PU campus backend request failed (HTTP ${response.status})`);
+  }
+
+  return data.result;
+}
+
+function normalizeStudentInfo(
+  raw:
+    | {
+        studentId?: string | null;
+        name?: string | null;
+        class?: string | null;
+        className?: string | null;
+        currentSemester?: string | null;
+        department?: string | null;
+        grade?: string | null;
+        enrollmentStatus?: string | null;
+      }
+    | null
+    | undefined,
+): PUStudentInfo {
+  return {
+    studentId: raw?.studentId ?? null,
+    name: raw?.name ?? null,
+    className: raw?.className ?? raw?.class ?? null,
+    currentSemester: raw?.currentSemester ?? null,
+    department: raw?.department ?? null,
+    grade: raw?.grade ?? null,
+    enrollmentStatus: raw?.enrollmentStatus ?? null,
+  };
+}
+
 async function ensureTronClassSession(): Promise<void> {
   const profile = await tcFetchProfile();
-  if (!profile?.id) {
-    throw new Error("TronClass session 已失效，請重新登入");
+  if (profile?.id) return; // session 有效
+
+  // session 失效 → 嘗試用儲存的帳密自動重新登入
+  console.log("[puDataCache] TronClass session expired, trying auto-refresh…");
+  const refreshed = await autoRefreshTCSession();
+  if (refreshed) {
+    console.log("[puDataCache] TronClass auto-refresh succeeded");
+    return;
   }
+
+  throw new Error("TronClass session 已失效，請重新登入");
 }
 
 // ─── Public API ──────────────────────────────────────────
@@ -174,6 +249,40 @@ export async function getAnyCachedStudentInfo(): Promise<PUStudentInfo | null> {
 
 export async function refreshCourses(session: PUSession): Promise<PUCourseResult | null> {
   console.log("[puDataCache] refreshing courses…");
+  if (session.backendSessionId) {
+    try {
+      const result = await fetchPUCampusBackend<{
+        success: boolean;
+        courses?: PUCourseResult["courses"];
+        studentInfo?: {
+          studentId?: string | null;
+          name?: string | null;
+          class?: string | null;
+          className?: string | null;
+          currentSemester?: string | null;
+          department?: string | null;
+          grade?: string | null;
+          enrollmentStatus?: string | null;
+        } | null;
+        semester?: string | null;
+        totalCredits?: number;
+      }>(session, "courses");
+
+      if (result?.success) {
+        const normalized: PUCourseResult = {
+          courses: result.courses ?? [],
+          studentInfo: normalizeStudentInfo(result.studentInfo),
+          semester: result.semester ?? null,
+          totalCredits: result.totalCredits ?? 0,
+        };
+        await writeCache(KEYS.courses, normalized);
+        return normalized;
+      }
+    } catch (error) {
+      console.warn("[puDataCache] refreshCourses backend failed:", error);
+    }
+  }
+
   const result = await puFetchCourses(session);
   if (result.success && result.data) {
     await writeCache(KEYS.courses, result.data);
@@ -185,6 +294,29 @@ export async function refreshCourses(session: PUSession): Promise<PUCourseResult
 
 export async function refreshGrades(session: PUSession): Promise<PUGradeResult | null> {
   console.log("[puDataCache] refreshing grades…");
+  if (session.backendSessionId) {
+    try {
+      const result = await fetchPUCampusBackend<{
+        success: boolean;
+        grades?: PUGradeResult["grades"];
+        allSemesters?: string[];
+        summary?: PUGradeResult["summary"];
+      }>(session, "grades");
+
+      if (result?.success) {
+        const normalized: PUGradeResult = {
+          grades: result.grades ?? [],
+          allSemesters: result.allSemesters ?? [],
+          summary: result.summary ?? {},
+        };
+        await writeCache(KEYS.grades, normalized);
+        return normalized;
+      }
+    } catch (error) {
+      console.warn("[puDataCache] refreshGrades backend failed:", error);
+    }
+  }
+
   const result = await puFetchGrades(session);
   if (result.success && result.data) {
     await writeCache(KEYS.grades, result.data);
@@ -196,6 +328,23 @@ export async function refreshGrades(session: PUSession): Promise<PUGradeResult |
 
 export async function refreshAnnouncements(session: PUSession): Promise<PUAnnouncement[] | null> {
   console.log("[puDataCache] refreshing announcements…");
+  if (session.backendSessionId) {
+    try {
+      const result = await fetchPUCampusBackend<{
+        success: boolean;
+        announcements?: PUAnnouncement[];
+      }>(session, "announcements");
+
+      if (result?.success) {
+        const normalized = result.announcements ?? [];
+        await writeCache(KEYS.announcements, normalized);
+        return normalized;
+      }
+    } catch (error) {
+      console.warn("[puDataCache] refreshAnnouncements backend failed:", error);
+    }
+  }
+
   const result = await puFetchAnnouncements(session);
   if (result.success) {
     await writeCache(KEYS.announcements, result.data);
@@ -207,6 +356,32 @@ export async function refreshAnnouncements(session: PUSession): Promise<PUAnnoun
 
 export async function refreshStudentInfo(session: PUSession): Promise<PUStudentInfo | null> {
   console.log("[puDataCache] refreshing studentInfo…");
+  if (session.backendSessionId) {
+    try {
+      const result = await fetchPUCampusBackend<{
+        success: boolean;
+        studentInfo?: {
+          studentId?: string | null;
+          name?: string | null;
+          class?: string | null;
+          className?: string | null;
+          currentSemester?: string | null;
+          department?: string | null;
+          grade?: string | null;
+          enrollmentStatus?: string | null;
+        } | null;
+      }>(session, "studentInfo");
+
+      if (result?.success) {
+        const normalized = normalizeStudentInfo(result.studentInfo);
+        await writeCache(KEYS.studentInfo, normalized);
+        return normalized;
+      }
+    } catch (error) {
+      console.warn("[puDataCache] refreshStudentInfo backend failed:", error);
+    }
+  }
+
   const result = await puFetchStudentInfo(session);
   if (result.success && result.data) {
     await writeCache(KEYS.studentInfo, result.data);
@@ -255,6 +430,15 @@ export async function getAnyCachedTCCourses(): Promise<TCCourse[] | null> {
 }
 export async function getAnyCachedTCActivities(): Promise<Record<number, TCActivity[]> | null> {
   return (await readCache<Record<number, TCActivity[]>>(KEYS.tcActivities))?.data ?? null;
+}
+export async function getAnyCachedTCModules(): Promise<Record<number, TCModule[]> | null> {
+  return (await readCache<Record<number, TCModule[]>>(KEYS.tcModules))?.data ?? null;
+}
+export async function getAnyCachedTCTodos(): Promise<TCActivity[] | null> {
+  return (await readCache<TCActivity[]>(KEYS.tcTodos))?.data ?? null;
+}
+export async function getAnyCachedTCAttendance(): Promise<TCAttendance[] | null> {
+  return (await readCache<TCAttendance[]>(KEYS.tcAttendance))?.data ?? null;
 }
 
 // ─── TronClass 刷新 ─────────────────────────────────────

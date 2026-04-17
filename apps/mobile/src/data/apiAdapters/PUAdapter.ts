@@ -40,6 +40,9 @@ import {
   getCachedTCTodos,
   getAnyCachedTCCourses,
   getAnyCachedTCActivities,
+  getAnyCachedTCModules,
+  getAnyCachedTCTodos,
+  getAnyCachedTCAttendance,
   refreshTCCourses,
   refreshTCActivitiesForCourses,
   refreshTCModulesForCourses,
@@ -53,6 +56,12 @@ import type {
   TCAttendance,
 } from "../../services/tronClassClient";
 import { getCloudFunctionUrl } from "../../services/cloudFunctions";
+
+function toValidDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 /**
  * Providence University (靜宜大學) adapter
@@ -197,6 +206,32 @@ export class PUAdapter extends BaseApiAdapter {
     };
   }
 
+  /**
+   * E校園課程 → TCCourse 格式轉換（TronClass 不可用時的 fallback）
+   */
+  private convertPUCoursesToTC(puCourses: import("../../services/puDirectScraper").PUCourse[]): TCCourse[] {
+    return puCourses.map((c, index) => ({
+      id: -(index + 1), // 負數 ID 表示來自 E校園
+      name: c.name || c.nameEn || c.code,
+      course_code: c.code,
+      department: null,
+      instructors: c.teacherName
+        ? [{ id: 0, name: c.teacherName }]
+        : [],
+      credit: c.credits,
+      semester: null,
+      klass: null,
+      grade: null,
+      course_outline: null,
+      start_date: null,
+      end_date: null,
+      status: "ongoing",
+      role: "student",
+      student_count: 0,
+      classroom_schedule: c.timePlaceRaw || null,
+    }));
+  }
+
   private async ensureTCCourses(): Promise<TCCourse[]> {
     const cached = await getCachedTCCourses();
     if (cached) return cached;
@@ -209,7 +244,16 @@ export class PUAdapter extends BaseApiAdapter {
         console.warn("[PUAdapter] Falling back to stale TronClass courses:", error);
         return stale;
       }
-      throw error;
+      // TronClass 完全不可用 → 嘗試用 E校園 課表資料
+      console.warn("[PUAdapter] TronClass unavailable, trying E-campus courses fallback:", error);
+      try {
+        const puData = await getCachedCourses() ?? await getAnyCachedCourses();
+        if (puData?.courses?.length) {
+          console.log("[PUAdapter] Using E-campus courses as fallback:", puData.courses.length, "courses");
+          return this.convertPUCoursesToTC(puData.courses);
+        }
+      } catch { /* ignore */ }
+      return []; // 不 throw，讓畫面顯示空狀態而非錯誤
     }
   }
 
@@ -232,19 +276,49 @@ export class PUAdapter extends BaseApiAdapter {
   private async ensureTCModulesMap(courseIds: number[]): Promise<Record<number, TCModule[]>> {
     const cached = await getCachedTCModules();
     if (cached) return cached;
-    return refreshTCModulesForCourses(courseIds);
+
+    const stale = await getAnyCachedTCModules();
+    try {
+      return await refreshTCModulesForCourses(courseIds);
+    } catch (error) {
+      if (stale) {
+        console.warn("[PUAdapter] Falling back to stale TronClass modules:", error);
+        return stale;
+      }
+      throw error;
+    }
   }
 
   private async ensureTCTodos(): Promise<TCActivity[]> {
     const cached = await getCachedTCTodos();
     if (cached) return cached;
-    return (await refreshTCTodos()) ?? [];
+
+    const stale = await getAnyCachedTCTodos();
+    try {
+      return (await refreshTCTodos()) ?? stale ?? [];
+    } catch (error) {
+      if (stale) {
+        console.warn("[PUAdapter] Falling back to stale TronClass todos:", error);
+        return stale;
+      }
+      throw error;
+    }
   }
 
   private async ensureTCAttendance(): Promise<TCAttendance[]> {
     const cached = await getCachedTCAttendance();
     if (cached) return cached;
-    return (await refreshTCAttendance()) ?? [];
+
+    const stale = await getAnyCachedTCAttendance();
+    try {
+      return (await refreshTCAttendance()) ?? stale ?? [];
+    } catch (error) {
+      if (stale) {
+        console.warn("[PUAdapter] Falling back to stale TronClass attendance:", error);
+        return stale;
+      }
+      throw error;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -539,11 +613,15 @@ export class PUAdapter extends BaseApiAdapter {
       id: `pu-grade-${item.semester}-${i}`,
       courseId: `pu-crs-${item.semester}-${i}`,
       courseName: item.courseName,
+      courseNameEn: item.courseNameEn || undefined,
+      courseCode: undefined,
       credits: item.credits,
       grade: typeof item.score === "number" ? item.score : parseFloat(String(item.score)) || 0,
       gradePoint: 0,
       semester: item.semester,
       userId: studentId || this.studentId || "",
+      courseType: item.courseType || undefined,
+      courseClass: item.class || undefined,
     }));
   }
 
@@ -598,8 +676,8 @@ export class PUAdapter extends BaseApiAdapter {
     );
     const now = Date.now();
     const dueSoon = homeworkActivities.filter((a) => {
-      if (!a.end_date) return false;
-      const due = new Date(a.end_date).getTime();
+      const due = toValidDate(a.end_time)?.getTime();
+      if (!due) return false;
       return due > now && due - now < 7 * 24 * 60 * 60 * 1000; // 7 天內
     });
     const quizzes = (activities ?? []).filter(
@@ -621,8 +699,9 @@ export class PUAdapter extends BaseApiAdapter {
       activeSessionId: null,
       latestDueAt: dueSoon.length > 0
         ? new Date(dueSoon.sort((a, b) =>
-            new Date(a.end_date!).getTime() - new Date(b.end_date!).getTime()
-          )[0].end_date!)
+            (toValidDate(a.end_time)?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+            (toValidDate(b.end_time)?.getTime() ?? Number.MAX_SAFE_INTEGER)
+          )[0].end_time!)
         : null,
       memberCount: tc.student_count,
       schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
@@ -633,7 +712,12 @@ export class PUAdapter extends BaseApiAdapter {
     const courses = await this.ensureTCCourses();
     if (courses.length === 0) return [];
 
-    const activitiesMap = await this.ensureTCActivitiesMap(courses.map((course) => course.id));
+    let activitiesMap: Record<number, TCActivity[]> = {};
+    try {
+      activitiesMap = await this.ensureTCActivitiesMap(courses.map((course) => course.id));
+    } catch (error) {
+      console.warn("[PUAdapter] Failed to load activities, continuing with courses only:", error);
+    }
 
     return courses.map((tc) =>
       this.mapTCCourseToCourseSpace(tc, activitiesMap[tc.id] ?? [])
@@ -651,6 +735,7 @@ export class PUAdapter extends BaseApiAdapter {
 
   async listCourseModules(_userId?: string, courseSpaceId?: string): Promise<CourseModule[]> {
     const tcCourses = await this.ensureTCCourses();
+    const courseMap = new Map(tcCourses.map((course) => [course.id, course.name]));
     const courseIds = courseSpaceId
       ? [parseInt(courseSpaceId.replace("tc-", ""), 10)].filter((id) => !isNaN(id))
       : tcCourses.map((course) => course.id);
@@ -662,30 +747,26 @@ export class PUAdapter extends BaseApiAdapter {
 
     const processModules = (courseId: number, modules: TCModule[]) => {
       const groupId = `tc-${courseId}`;
-      const courseName = modules[0]?.title ?? `Course ${courseId}`;
+      const courseName = courseMap.get(courseId) ?? `Course ${courseId}`;
 
       for (const mod of modules) {
-        const materials: CourseMaterial[] = mod.activities
-          .filter((a) => a.type === "material" || a.type === "discussion")
-          .map((a): CourseMaterial => ({
-            id: `tc-mat-${a.id}`,
-            moduleId: `tc-mod-${mod.id}`,
-            groupId,
-            type: a.type === "discussion" ? "link" : "document",
-            label: a.title,
-            description: a.description ?? undefined,
-          }));
+        const materials: CourseMaterial[] = (mod.syllabuses ?? []).map((syllabus): CourseMaterial => ({
+          id: `tc-mat-${syllabus.id}`,
+          moduleId: `tc-mod-${mod.id}`,
+          groupId,
+          type: "document",
+          label: syllabus.name?.trim() || `教材 ${syllabus.id}`,
+        }));
 
         results.push({
           id: `tc-mod-${mod.id}`,
           groupId,
           groupName: courseName,
-          title: mod.title,
-          description: mod.description ?? undefined,
-          week: mod.position,
-          order: mod.position,
-          resourceCount: mod.activities.length,
-          published: mod.published,
+          title: mod.name,
+          week: mod.sort || undefined,
+          order: mod.sort,
+          resourceCount: materials.length,
+          published: !mod.is_hidden,
           materials,
         });
       }
@@ -712,10 +793,11 @@ export class PUAdapter extends BaseApiAdapter {
   private mapTCActivityToInboxTask(activity: TCActivity, courseName: string): InboxTask {
     const isQuiz = activity.type === "quiz" || activity.type === "exam";
     const kind: InboxTask["kind"] = isQuiz ? "quiz" : "assignment";
+    const dueAt = toValidDate(activity.end_time);
 
     let priority = 50;
-    if (activity.end_date) {
-      const hoursUntilDue = (new Date(activity.end_date).getTime() - Date.now()) / (1000 * 60 * 60);
+    if (dueAt) {
+      const hoursUntilDue = (dueAt.getTime() - Date.now()) / (1000 * 60 * 60);
       if (hoursUntilDue < 0) priority = 10;        // 已過期
       else if (hoursUntilDue < 24) priority = 90;   // 24 小時內
       else if (hoursUntilDue < 72) priority = 70;   // 3 天內
@@ -727,12 +809,12 @@ export class PUAdapter extends BaseApiAdapter {
       groupId: `tc-${activity.course_id}`,
       groupName: courseName,
       title: activity.title,
-      subtitle: activity.end_date
-        ? `截止：${new Date(activity.end_date).toLocaleDateString("zh-TW")}`
+      subtitle: dueAt
+        ? `截止：${dueAt.toLocaleDateString("zh-TW")}`
         : activity.type,
       assignmentId: `tc-activity-${activity.id}`,
       priority,
-      dueAt: activity.end_date ? new Date(activity.end_date) : null,
+      dueAt,
       preferredIntent: isQuiz ? "submit" : "submit",
       actionLabel: isQuiz ? "開始測驗" : "繳交作業",
     };
@@ -777,7 +859,7 @@ export class PUAdapter extends BaseApiAdapter {
           groupName: courseMap.get(courseId) ?? "未知課程",
           title: a.title,
           description: a.description ?? undefined,
-          dueAt: a.end_date ? new Date(a.end_date) : null,
+          dueAt: toValidDate(a.end_time),
           type: a.type === "exam" ? "exam" : "quiz",
           gradesPublished: a.status === "graded",
           points: a.total_score ?? undefined,

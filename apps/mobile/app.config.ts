@@ -310,7 +310,8 @@ export default ({ config }: any) => {
       errorReportingEndpoint,
       firebase,
       cloudFunctionRegion: process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1',
-      aiProvider: process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'cloud',
+      aiProvider: process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'local-llm',
+      aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
       enableMockSSO: !isReleaseLike && process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === 'true',
       enableUniversalDevAccounts,
       eas: {

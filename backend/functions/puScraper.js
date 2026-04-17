@@ -182,6 +182,45 @@ function parseTable(html, headerHint) {
   return allRows;
 }
 
+function looksLikePuLoginPage(html) {
+  const normalized = String(html || '').toLowerCase();
+  return (
+    normalized.includes('action="index_check.php"') ||
+    normalized.includes("action='index_check.php'") ||
+    (normalized.includes('name="uid"') && normalized.includes('name="upassword"')) ||
+    (normalized.includes("name='uid'") && normalized.includes("name='upassword'"))
+  );
+}
+
+function hasPuStudentContext(html) {
+  const text = String(html || '');
+  return (
+    text.includes('學號(Student No.)') ||
+    text.includes('姓名(Student Name)') ||
+    text.includes('Student No.') ||
+    text.includes('query_course')
+  );
+}
+
+function normalizePuUrl(href) {
+  return new URL(String(href || ''), `https://${ALCAT_HOST}/`).toString();
+}
+
+function isUsefulAnnouncementLink(title, href, hasDate) {
+  if (!title || title.length < 4) return false;
+  if (!href || /^javascript:/i.test(href) || href.startsWith('#')) return false;
+  if (/index_check\.php|logout/i.test(href)) return false;
+  if (!hasDate && title.length < 8) return false;
+  return true;
+}
+
+function pushUniqueAnnouncement(target, seen, announcement) {
+  const key = `${announcement.title}::${announcement.url}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  target.push(announcement);
+}
+
 // ---------------------------------------------------------------------------
 // Time / Place parser
 // ---------------------------------------------------------------------------
@@ -235,6 +274,53 @@ function parseCourseTitle(raw) {
   return { zhName: raw.trim(), enName: '' };
 }
 
+/**
+ * Extract teacher name from teacher email.
+ * e.g., "changyi@pu.edu.tw" → "changyi"
+ */
+function extractTeacherName(email) {
+  if (!email) return '';
+  const match = email.match(/^([^@]+)@/);
+  return match ? match[1] : email;
+}
+
+/**
+ * Parse class name to extract department and grade.
+ * e.g., "資管三A" → { department: "資管系", grade: "三年級" }
+ */
+function parseClassInfo(className) {
+  if (!className) return { department: null, grade: null };
+
+  // Match pattern: 系名 + 年級(one or two Chinese characters) + optional suffix
+  // Examples: "資管三A", "會計四甲", "英文二"
+  const match = className.match(/^([^\d\w一二三四五六七八九\u4e00-\u9fff]*[\u4e00-\u9fff]+?)([一二三四五六七八九])(.*)$/);
+
+  if (match) {
+    let department = match[1];
+    const gradeChar = match[2];
+
+    // Normalize department name
+    if (department && !department.includes('系')) {
+      department += '系';
+    }
+
+    // Map grade character to year
+    const gradeMap = {
+      '一': '一年級',
+      '二': '二年級',
+      '三': '三年級',
+      '四': '四年級',
+      '五': '五年級',
+      '六': '六年級',
+    };
+    const grade = gradeMap[gradeChar] || null;
+
+    return { department, grade };
+  }
+
+  return { department: null, grade: null };
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -249,8 +335,9 @@ async function puLogin(uid, upassword) {
   try {
     if (!uid || !upassword) throw new Error('Missing uid or upassword');
 
+    const warmup = await get(ALCAT_HOST, '/', {});
     const body = `uid=${encodeURIComponent(uid)}&upassword=${encodeURIComponent(upassword)}&en_flag=zh`;
-    const res = await post(ALCAT_HOST, LOGIN_PATH, {}, body);
+    const res = await post(ALCAT_HOST, LOGIN_PATH, warmup.cookies, body);
 
     // Check for known error patterns
     if (
@@ -262,33 +349,35 @@ async function puLogin(uid, upassword) {
       return { success: false, cookies: {}, error: '帳號或密碼錯誤' };
     }
 
-    // Successful login usually redirects or shows the menu page
-    if (res.status === 302 || res.status === 200) {
-      // If redirected, follow to establish full session
-      let cookies = res.cookies;
-      if (res.status === 302 && res.headers.location) {
-        const followUp = await getFollowRedirect(ALCAT_HOST, res.headers.location, cookies);
-        cookies = followUp.cookies;
+    if (res.status !== 200 && res.status !== 302) {
+      return { success: false, cookies: {}, error: `HTTP ${res.status}` };
+    }
 
-        // Try to extract student name from menu page
-        const nameMatch = followUp.data.match(/([^\s<]+)同學您好/);
-        return {
-          success: true,
-          cookies,
-          studentName: nameMatch ? nameMatch[1] : undefined,
-        };
-      }
+    let cookies = res.cookies;
+    if (res.status === 302 && res.headers.location) {
+      const followUp = await getFollowRedirect(ALCAT_HOST, res.headers.location, cookies);
+      cookies = followUp.cookies;
+    }
 
-      // Try to extract name from direct 200 response
-      const nameMatch = res.data.match(/([^\s<]+)同學您好/);
+    const verify = await getFollowRedirect(ALCAT_HOST, COURSE_RESULT_PATH, cookies);
+    if (verify.status !== 200 || looksLikePuLoginPage(verify.data) || !hasPuStudentContext(verify.data)) {
       return {
-        success: true,
-        cookies,
-        studentName: nameMatch ? nameMatch[1] : undefined,
+        success: false,
+        cookies: {},
+        error: '無法驗證 E校園 登入狀態',
       };
     }
 
-    return { success: false, cookies: {}, error: `HTTP ${res.status}` };
+    const nameMatch =
+      verify.data.match(/姓名\(Student Name\)[：:]\s*([^\s<]+)/) ||
+      verify.data.match(/([^\s<]+)同學您好/) ||
+      res.data.match(/([^\s<]+)同學您好/);
+
+    return {
+      success: true,
+      cookies,
+      studentName: nameMatch ? nameMatch[1] : undefined,
+    };
   } catch (err) {
     console.error('[puLogin] Error:', err);
     return { success: false, cookies: {}, error: err.message };
@@ -315,6 +404,9 @@ async function puFetchCourses(cookies, semester) {
     if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
 
     const html = res.data;
+    if (looksLikePuLoginPage(html) || !hasPuStudentContext(html)) {
+      return { success: false, courses: [], error: 'E校園 session 已失效，請重新登入' };
+    }
 
     // ---- Extract student info ----
     const classMatch = html.match(/班級\(Class\)[：:]\s*([^\s<]+)/);
@@ -351,6 +443,7 @@ async function puFetchCourses(cookies, semester) {
 
       const { zhName, enName } = parseCourseTitle(titleRaw);
       const tp = parseTimePlace(timePlaceRaw);
+      const teacherName = extractTeacherName(teacherEmail);
 
       courses.push({
         code,
@@ -366,6 +459,7 @@ async function puFetchCourses(cookies, semester) {
         location: tp ? tp.location : '',
         timePlaceRaw,
         teacherEmail,
+        teacherName,
       });
     }
 
@@ -397,79 +491,100 @@ async function puFetchGrades(cookies, semester) {
   try {
     if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
 
-    const res = await getFollowRedirect(MYPU_HOST, GRADE_PATH, cookies);
+    // 優先用 alcat（和登入同 domain，cookie 確定能用），
+    // 若失敗或內容太短再試 mypu（不同 domain，cookie 可能無法共享）。
+    let res = await getFollowRedirect(ALCAT_HOST, '/stu_query/score_all.php', cookies);
+    if (res.status !== 200 || res.data.length < 200) {
+      console.log('[puFetchGrades] alcat fallback to mypu…');
+      res = await getFollowRedirect(MYPU_HOST, GRADE_PATH, cookies);
+    }
 
     if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
 
     const html = res.data;
-
-    // ---- Parse grade table ----
-    // Columns: 學期別 | 課程名稱 | 修課班級 | 修別 | 學分數 | 成績
-    const rows = parseTable(html, 'Score');
-
-    const grades = [];
-    const summaryRows = [];
-
-    for (const cells of rows) {
-      if (cells.length < 6) continue;
-      // Skip header rows
-      if (cells[0].includes('Semester') || cells[0].includes('學期別')) continue;
-
-      const sem = cells[0];
-      const courseName = cells[1];
-      const cls = cells[2];
-      const courseType = cells[3];
-      const credits = parseInt(cells[4], 10);
-      const score = cells[5];
-
-      // Detect summary rows (排名, 操行, 平均)
-      if (
-        courseName.includes('排名') ||
-        courseName.includes('ranking') ||
-        courseName.includes('操行') ||
-        courseName.includes('Behavior') ||
-        courseName.includes('平均') ||
-        courseName.includes('average')
-      ) {
-        summaryRows.push({ semester: sem, label: courseName, value: score });
-        continue;
-      }
-
-      // Skip rows without a valid semester code
-      if (!/^\d{4}$/.test(sem)) continue;
-
-      const { zhName, enName } = parseCourseTitle(courseName);
-
-      grades.push({
-        semester: sem,
-        courseName: zhName,
-        courseNameEn: enName,
-        class: cls,
-        courseType,
-        credits: isNaN(credits) ? 0 : credits,
-        score: score === '通過(Pass)' ? 'Pass' : parseFloat(score) || score,
-      });
+    if (looksLikePuLoginPage(html)) {
+      return { success: false, grades: [], error: 'E校園 session 已失效，請重新登入' };
     }
 
-    // Optionally filter by semester
+    // ---- Parse grade tables (2026-04 verified) ----
+    // Structure: Each semester has a <p>學期別(Semester)：YYY [ T ]</p>
+    //            followed by a 5-column table:
+    //            科目名稱(Course) | 修課班級(Class) | 修別(Course type) | 學分數(Credits) | 成績(Score)
+    //            Table footer rows: 學期平均成績, 操行成績, 班排名, 系排名
+
+    const grades = [];
+    const summary = {};
+
+    // 1. Extract semester codes from <p> headers
+    const semRegex = /學期別\(Semester\)[：:]\s*(\d+)\s*\[\s*(\d+)\s*\]/g;
+    const semesterCodes = [];
+    let semMatch;
+    while ((semMatch = semRegex.exec(html)) !== null) {
+      semesterCodes.push(`${semMatch[1]}${semMatch[2]}`);
+    }
+
+    // 2. Find all 5-column grade tables (contain "Score" or "成績" AND "Course" or "科目")
+    const tableRegex = /<table[^>]*>[\s\S]*?<\/table>/gi;
+    const allTables = html.match(tableRegex) || [];
+    const gradeTables = [];
+    for (const table of allTables) {
+      if (
+        (table.includes('Score') || table.includes('成績')) &&
+        (table.includes('Course') || table.includes('科目'))
+      ) {
+        gradeTables.push(table);
+      }
+    }
+
+    // 3. Parse each table, pair with semester
+    for (let i = 0; i < gradeTables.length; i++) {
+      const sem = semesterCodes[i] || `unknown_${i}`;
+      const rows = parseTable(gradeTables[i], '');
+
+      if (!summary[sem]) summary[sem] = {};
+
+      for (const cells of rows) {
+        if (cells.length < 5) continue;
+        if (cells[0].includes('Course') || cells[0].includes('科目名稱')) continue;
+
+        const courseName = cells[0];
+        const score = cells[4];
+
+        // Summary rows (average, behavior, ranking)
+        if (
+          courseName.includes('平均') || courseName.includes('average') ||
+          courseName.includes('操行') || courseName.includes('Behavior') ||
+          courseName.includes('排名') || courseName.includes('ranking')
+        ) {
+          if (courseName.includes('系排名') || courseName.includes('Department')) {
+            summary[sem].departmentRanking = score;
+          } else if (courseName.includes('班排名') || courseName.includes('Class')) {
+            summary[sem].classRanking = score;
+          } else if (courseName.includes('操行') || courseName.includes('Behavior')) {
+            summary[sem].behaviorScore = parseFloat(score) || score;
+          } else if (courseName.includes('平均') || courseName.includes('average')) {
+            summary[sem].semesterAverage = parseFloat(score) || score;
+          }
+          continue;
+        }
+
+        const { zhName, enName } = parseCourseTitle(courseName);
+
+        grades.push({
+          semester: sem,
+          courseName: zhName,
+          courseNameEn: enName,
+          class: cells[1],
+          courseType: cells[2],
+          credits: parseInt(cells[3], 10) || 0,
+          score: score === '通過(Pass)' ? 'Pass' : parseFloat(score) || score,
+        });
+      }
+    }
+
     const filteredGrades = semester
       ? grades.filter((g) => g.semester === semester)
       : grades;
-
-    // Group summary by semester
-    const summary = {};
-    for (const s of summaryRows) {
-      if (!summary[s.semester]) summary[s.semester] = {};
-      if (s.label.includes('系排名') || s.label.includes('Department')) {
-        summary[s.semester].departmentRanking = s.value;
-      } else if (s.label.includes('班排名') || s.label.includes('Class')) {
-        summary[s.semester].classRanking = s.value;
-      } else if (s.label.includes('操行') || s.label.includes('Behavior')) {
-        summary[s.semester].behaviorScore = parseFloat(s.value) || s.value;
-      } else if (s.label.includes('平均') || s.label.includes('average')) {
-        summary[s.semester].semesterAverage = parseFloat(s.value) || s.value;
-      }
-    }
 
     return {
       success: true,
@@ -481,6 +596,91 @@ async function puFetchGrades(cookies, semester) {
     console.error('[puFetchGrades] Error:', err);
     return { success: false, grades: [], error: err.message };
   }
+}
+
+/**
+ * Extract date from HTML context near a link.
+ * Tries multiple date patterns: YYYY-MM-DD, ROC year format (YY-MM-DD).
+ * Falls back to today's date if no date found.
+ */
+function extractDateFromContext(html, linkStartPos) {
+  if (!html || linkStartPos < 0) return new Date().toISOString().split('T')[0];
+
+  // Look in a window around the link (200 chars before and after)
+  const start = Math.max(0, linkStartPos - 200);
+  const end = Math.min(html.length, linkStartPos + 200);
+  const context = html.substring(start, end);
+
+  // Try AD year format first: YYYY/MM/DD, YYYY-MM-DD, YYYY.MM.DD
+  let match = context.match(/(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/);
+  if (match) {
+    const [, year, month, day] = match;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+
+  // Try ROC year format: YY/MM/DD, YY-MM-DD (add 1911 to ROC year)
+  match = context.match(/(\d{2,3})[/.-](\d{1,2})[/.-](\d{1,2})/);
+  if (match) {
+    const rocYear = parseInt(match[1], 10);
+    const adYear = rocYear + 1911;
+    const month = String(match[2]).padStart(2, '0');
+    const day = String(match[3]).padStart(2, '0');
+    return `${adYear}-${month}-${day}`;
+  }
+
+  // Fallback to today
+  return new Date().toISOString().split('T')[0];
+}
+
+function extractAnnouncementsFromHtml(html) {
+  const announcements = [];
+  const seen = new Set();
+  const today = new Date().toISOString().split('T')[0];
+
+  const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const rowHtml = rowMatch[0];
+    const rowText = stripTags(rowHtml);
+    const date = extractDateFromContext(rowText, 0) || extractDateFromContext(rowHtml, 0);
+    const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let linkMatch;
+
+    while ((linkMatch = linkRegex.exec(rowHtml)) !== null) {
+      const href = linkMatch[1]?.trim() || '';
+      const title = stripTags(linkMatch[2] || '');
+      if (!isUsefulAnnouncementLink(title, href, Boolean(date))) continue;
+
+      pushUniqueAnnouncement(announcements, seen, {
+        title,
+        url: normalizePuUrl(href),
+        date: date || today,
+        category: 'system',
+      });
+    }
+  }
+
+  if (announcements.length > 0) {
+    return announcements;
+  }
+
+  const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = linkRegex.exec(html)) !== null) {
+    const href = match[1]?.trim() || '';
+    const title = stripTags(match[2] || '');
+    const date = extractDateFromContext(html, match.index);
+    if (!isUsefulAnnouncementLink(title, href, Boolean(date))) continue;
+
+    pushUniqueAnnouncement(announcements, seen, {
+      title,
+      url: normalizePuUrl(href),
+      date: date || today,
+      category: 'system',
+    });
+  }
+
+  return announcements;
 }
 
 /**
@@ -499,27 +699,163 @@ async function puFetchAnnouncements(cookies) {
     if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
 
     const html = res.data;
-    const announcements = [];
-
-    // Extract links from the various sections on the menu page
-    const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-    let match;
-    while ((match = linkRegex.exec(html)) !== null) {
-      const href = match[1];
-      const text = stripTags(match[2]);
-      if (text && text.length > 2 && !href.includes('javascript:')) {
-        announcements.push({
-          title: text,
-          url: href.startsWith('http') ? href : `https://${ALCAT_HOST}/${href.replace(/^\//, '')}`,
-          date: new Date().toISOString().split('T')[0],
-        });
-      }
+    if (looksLikePuLoginPage(html)) {
+      return { success: false, announcements: [], error: 'E校園 session 已失效，請重新登入' };
     }
 
-    return { success: true, announcements };
+    return { success: true, announcements: extractAnnouncementsFromHtml(html) };
   } catch (err) {
     console.error('[puFetchAnnouncements] Error:', err);
     return { success: false, announcements: [], error: err.message };
+  }
+}
+
+/**
+ * Fetch absence/attendance records.
+ *
+ * URL: https://alcat.pu.edu.tw/stu_query/query_absence.html
+ *
+ * @param {object} cookies - Session cookies from puLogin
+ * @returns {Promise<{success, absences, error}>}
+ */
+async function puFetchAbsence(cookies) {
+  try {
+    if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
+
+    const res = await getFollowRedirect(ALCAT_HOST, '/stu_query/query_absence.html', cookies);
+
+    // Gracefully return empty array if page doesn't exist or user doesn't have access
+    if (res.status === 404 || res.status === 403) {
+      return { success: true, absences: [] };
+    }
+
+    if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+
+    const html = res.data;
+    const absences = [];
+
+    // Parse absence records table
+    // Expected columns: date | courseName | period | absenceType | status
+    const rows = parseTable(html, 'absence');
+
+    // Skip header row
+    for (const cells of rows) {
+      if (cells.length < 5) continue;
+      if (
+        cells[0].includes('date') ||
+        cells[0].includes('日期') ||
+        cells[0].includes('course')
+      ) {
+        continue;
+      }
+
+      const date = cells[0];
+      const courseName = cells[1];
+      const period = cells[2];
+      const absenceType = cells[3];
+      const status = cells[4];
+
+      absences.push({
+        date,
+        courseName,
+        period,
+        absenceType,
+        status,
+      });
+    }
+
+    return { success: true, absences };
+  } catch (err) {
+    console.error('[puFetchAbsence] Error:', err);
+    return { success: true, absences: [] };
+  }
+}
+
+/**
+ * Compute credit summary from grade data.
+ *
+ * Note: The dedicated credit page (/stu_query/query_credit.html) does NOT exist
+ * on alcat.pu.edu.tw. Instead, we derive credit info from grade records.
+ *
+ * @param {object} cookies - Session cookies from puLogin
+ * @returns {Promise<{success, creditSummary, error}>}
+ */
+async function puFetchCreditSummary(cookies) {
+  try {
+    if (!cookies || !Object.keys(cookies).length) throw new Error('No session cookies');
+
+    // 從成績頁取得所有成績資料
+    const gradeResult = await puFetchGrades(cookies);
+    if (!gradeResult.success || !gradeResult.grades || gradeResult.grades.length === 0) {
+      return { success: true, creditSummary: { totalRequired: 128, totalEarned: 0, categories: [], semesters: [] } };
+    }
+
+    // 依修別（courseType）分類統計
+    const categoryMap = {};
+    let totalEarned = 0;
+    let totalCourses = 0;
+
+    for (const g of gradeResult.grades) {
+      const ct = (g.courseType || '其他').trim();
+      const score = typeof g.score === 'number' ? g.score : parseFloat(String(g.score));
+      const passed = isNaN(score) ? String(g.score).includes('Pass') || String(g.score).includes('通過') : score >= 60;
+
+      if (!categoryMap[ct]) {
+        categoryMap[ct] = { category: ct, earned: 0, courses: 0, passedCourses: 0, failedCourses: 0, credits: 0 };
+      }
+      categoryMap[ct].courses += 1;
+      categoryMap[ct].credits += g.credits;
+      totalCourses += 1;
+
+      if (passed) {
+        categoryMap[ct].earned += g.credits;
+        categoryMap[ct].passedCourses += 1;
+        totalEarned += g.credits;
+      } else {
+        categoryMap[ct].failedCourses += 1;
+      }
+    }
+
+    const categories = Object.values(categoryMap).sort((a, b) => b.earned - a.earned);
+
+    // 每學期摘要
+    const semesterMap = {};
+    for (const g of gradeResult.grades) {
+      const sem = g.semester || 'unknown';
+      if (!semesterMap[sem]) semesterMap[sem] = { semester: sem, courses: 0, credits: 0, totalScore: 0, weightedScore: 0, weightedCredits: 0 };
+      semesterMap[sem].courses += 1;
+      const score = typeof g.score === 'number' ? g.score : parseFloat(String(g.score));
+      const passed = isNaN(score) ? String(g.score).includes('Pass') : score >= 60;
+      if (passed) semesterMap[sem].credits += g.credits;
+      if (!isNaN(score) && score > 0) {
+        semesterMap[sem].weightedScore += score * g.credits;
+        semesterMap[sem].weightedCredits += g.credits;
+      }
+    }
+
+    const semesters = Object.values(semesterMap)
+      .map((s) => ({
+        ...s,
+        average: s.weightedCredits > 0 ? Math.round((s.weightedScore / s.weightedCredits) * 100) / 100 : 0,
+        ranking: gradeResult.summary?.[s.semester] || {},
+      }))
+      .sort((a, b) => String(b.semester).localeCompare(String(a.semester)));
+
+    return {
+      success: true,
+      creditSummary: {
+        totalRequired: 128,
+        totalEarned,
+        totalCourses,
+        categories,
+        semesters,
+        allSemesters: gradeResult.allSemesters || [],
+        gradeSummary: gradeResult.summary || {},
+      },
+    };
+  } catch (err) {
+    console.error('[puFetchCreditSummary] Error:', err);
+    return { success: true, creditSummary: { totalRequired: 128, totalEarned: 0, categories: [], semesters: [] } };
   }
 }
 
@@ -538,18 +874,26 @@ async function puFetchStudentInfo(cookies) {
     if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
 
     const html = res.data;
+    if (looksLikePuLoginPage(html) || !hasPuStudentContext(html)) {
+      return { success: false, studentInfo: {}, error: 'E校園 session 已失效，請重新登入' };
+    }
 
     const classMatch = html.match(/班級\(Class\)[：:]\s*([^\s<]+)/);
     const idMatch = html.match(/學號\(Student No\.\)[：:]\s*(\d+)/);
     const nameMatch = html.match(/姓名\(Student Name\)[：:]\s*([^\s<]+)/);
     const semMatch = html.match(/(\d+)學年度\s*第(\d)學期/);
 
+    const className = classMatch ? classMatch[1] : null;
+    const { department, grade } = parseClassInfo(className);
+
     return {
       success: true,
       studentInfo: {
         studentId: idMatch ? idMatch[1] : null,
         name: nameMatch ? nameMatch[1] : null,
-        class: classMatch ? classMatch[1] : null,
+        class: className,
+        department,
+        grade,
         currentSemester: semMatch ? `${semMatch[1]}${semMatch[2]}` : null,
       },
     };
@@ -565,4 +909,6 @@ module.exports = {
   puFetchGrades,
   puFetchAnnouncements,
   puFetchStudentInfo,
+  puFetchAbsence,
+  puFetchCreditSummary,
 };

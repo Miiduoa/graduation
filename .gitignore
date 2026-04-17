@@ -32,3 +32,15 @@ apps/mobile/web-build/
 # Firebase
 backend/.firebase/
 backend/functions/lib/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# AI Server
+backend/ai-server/.venv/
+backend/ai-server/data/
+
+# Misc
+.fuse_hidden*

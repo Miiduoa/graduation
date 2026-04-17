@@ -17,7 +17,7 @@ import Constants from "expo-constants";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getFirebaseApp, hasUsableFirebaseConfig } from "../firebase";
 
-export type AIProvider = "cloud" | "mock";
+export type AIProvider = "cloud" | "mock" | "local-llm";
 
 // 重試配置
 const RETRY_CONFIG = {
@@ -162,9 +162,10 @@ const CONTEXT_LIMITS = {
 
 function getConfig() {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
-  const rawProvider = String(extra.aiProvider ?? process.env.EXPO_PUBLIC_AI_PROVIDER ?? "cloud").toLowerCase();
+  const rawProvider = String(extra.aiProvider ?? process.env.EXPO_PUBLIC_AI_PROVIDER ?? "local-llm").toLowerCase();
+  const provider: AIProvider = rawProvider === "mock" ? "mock" : rawProvider === "cloud" ? "cloud" : "local-llm";
   return {
-    aiProvider: (rawProvider === "mock" ? "mock" : "cloud") as AIProvider,
+    aiProvider: provider,
     maxTokens: extra.aiMaxTokens ?? process.env.EXPO_PUBLIC_AI_MAX_TOKENS ?? 1000,
   };
 }
@@ -470,6 +471,12 @@ export async function chatWithAI(
       return await mockAIResponse(messages, context, signal);
     }
 
+    if (config.aiProvider === "local-llm") {
+      const localResponse = await callLocalLLM(messages, context, signal);
+      if (localResponse) return localResponse;
+      return await mockAIResponse(messages, context, signal);
+    }
+
     const managedResponse = await callManagedAI(messages, context, signal);
     if (managedResponse) {
       return managedResponse;
@@ -492,6 +499,13 @@ export async function chatWithCampusAssistant(
   context: AIContext,
   signal?: AbortSignal
 ): Promise<AIResponse> {
+  const config = getConfig();
+
+  if (config.aiProvider === "local-llm") {
+    const localResponse = await callLocalLLM(messages, context, signal);
+    if (localResponse) return localResponse;
+  }
+
   const cloudResponse = await callManagedAI(messages, context, signal);
   if (cloudResponse) {
     return cloudResponse;
@@ -523,7 +537,10 @@ export function createCancellableChat() {
  */
 export function getAIStatus(): { provider: AIProvider; configured: boolean } {
   const config = getConfig();
-  const configured = config.aiProvider === "mock" || hasUsableFirebaseConfig();
+  const configured =
+    config.aiProvider === "mock" ||
+    config.aiProvider === "local-llm" ||
+    hasUsableFirebaseConfig();
 
   return { provider: config.aiProvider, configured };
 }
@@ -548,6 +565,168 @@ export async function generateSummary(text: string, maxLength = 100): Promise<st
 
   const response = await chatWithAI(messages, { schoolId: "unknown" });
   return response.content || text.slice(0, maxLength) + "...";
+}
+
+// ─── Local LLM (FastAPI) Integration ────────────────────────────────
+
+import { getAIServerBaseUrl } from "./cloudFunctions";
+
+/**
+ * 呼叫本地 LLM server（非 streaming）
+ */
+async function callLocalLLM(
+  messages: AIMessage[],
+  context: AIContext,
+  signal?: AbortSignal,
+): Promise<AIResponse | null> {
+  const baseUrl = getAIServerBaseUrl();
+  const lastMessage = messages[messages.length - 1]?.content ?? "";
+  const history = messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
+
+  try {
+    const resp = await fetch(`${baseUrl}/api/chat/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        message: lastMessage,
+        history,
+        context: {
+          schoolId: context.schoolId,
+          userId: context.userId,
+          userName: context.userName,
+          courses: context.courses,
+          pendingAssignments: context.pendingAssignments,
+          gradesSummary: context.gradesSummary,
+        },
+        stream: false,
+      }),
+    });
+
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return {
+      content: data.content ?? "",
+      suggestions: data.suggestions ?? extractSuggestions(data.content ?? ""),
+    };
+  } catch (e) {
+    console.warn("[AI] Local LLM call failed:", e);
+    return null;
+  }
+}
+
+export type StreamingCallback = (partial: string, done: boolean) => void;
+
+/**
+ * 呼叫本地 LLM server（SSE streaming），逐 token 回傳。
+ */
+export async function chatWithLocalLLMStreaming(
+  messages: AIMessage[],
+  context: AIContext,
+  onToken: StreamingCallback,
+  signal?: AbortSignal,
+): Promise<AIResponse> {
+  const baseUrl = getAIServerBaseUrl();
+  const lastMessage = messages[messages.length - 1]?.content ?? "";
+  const history = messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
+
+  let fullContent = "";
+
+  try {
+    const resp = await fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        message: lastMessage,
+        history,
+        context: {
+          schoolId: context.schoolId,
+          userId: context.userId,
+          userName: context.userName,
+          courses: context.courses,
+          pendingAssignments: context.pendingAssignments,
+          gradesSummary: context.gradesSummary,
+        },
+        stream: true,
+      }),
+    });
+
+    if (!resp.ok || !resp.body) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const payload = JSON.parse(line.slice(6));
+          if (payload.token) {
+            fullContent += payload.token;
+            onToken(fullContent, false);
+          }
+          if (payload.done) {
+            onToken(fullContent, true);
+          }
+        } catch {
+          // ignore malformed lines
+        }
+      }
+    }
+  } catch (e: any) {
+    if (e.name === "AbortError") {
+      return { content: fullContent || "", error: "請求已取消" };
+    }
+    console.warn("[AI] Streaming error:", e);
+    if (!fullContent) {
+      const fallback = await mockAIResponse(messages, context, signal);
+      return fallback;
+    }
+  }
+
+  return {
+    content: fullContent,
+    suggestions: extractSuggestions(fullContent),
+  };
+}
+
+/**
+ * 提交使用者回饋到本地 LLM server，驅動自我訓練。
+ */
+export async function submitFeedback(params: {
+  messageId: string;
+  userMessage: string;
+  assistantResponse: string;
+  rating: "thumbs_up" | "thumbs_down";
+  userId?: string;
+}): Promise<void> {
+  const baseUrl = getAIServerBaseUrl();
+  try {
+    await fetch(`${baseUrl}/api/feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message_id: params.messageId,
+        user_message: params.userMessage,
+        assistant_response: params.assistantResponse,
+        rating: params.rating,
+        user_id: params.userId,
+      }),
+    });
+  } catch (e) {
+    console.warn("[AI] Feedback submission failed:", e);
+  }
 }
 
 /**
