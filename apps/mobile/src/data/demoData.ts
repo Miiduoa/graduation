@@ -46,6 +46,11 @@ import type {
   UserAchievement,
   WashingMachine,
 } from './types';
+import {
+  getPuDiningCafeterias,
+  getPuDiningMenuItems,
+  isProvidenceDiningSchoolId,
+} from './puDiningCatalog';
 
 // ===== Helper Functions =====
 
@@ -2550,6 +2555,10 @@ export function getDemoPois(schoolId: string): Poi[] {
 }
 
 export function getDemoCafeterias(schoolId: string): Cafeteria[] {
+  if (isProvidenceDiningSchoolId(schoolId)) {
+    return getPuDiningCafeterias(schoolId);
+  }
+
   if (schoolId === 'tw-nchu') {
     return [
       {
@@ -2771,6 +2780,10 @@ export function getDemoCafeterias(schoolId: string): Cafeteria[] {
 }
 
 export function getDemoMenuItems(schoolId: string): MenuItem[] {
+  if (isProvidenceDiningSchoolId(schoolId)) {
+    return getPuDiningMenuItems(schoolId);
+  }
+
   if (schoolId === 'tw-nchu') {
     return [
       // 路易莎咖啡 (美食街1F)

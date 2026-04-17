@@ -10,6 +10,7 @@ import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import {
   signInWithStudentId,
+  type LoginProgress,
 } from "../services/studentIdAuth";
 import { Screen, Button, AnimatedCard, Pill } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
@@ -70,16 +71,22 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     setStep("authenticating");
     setStageDetail("驗證靜宜帳密");
 
+    const onProgress = (progressStep: LoginProgress, detail?: string) => {
+      setStep(progressStep);
+      if (detail) setStageDetail(detail);
+    };
+
     try {
       const result = await signInWithStudentId({
         studentId: studentIdInput,
         password: studentPwInput,
         schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
         schoolName,
+        onProgress,
       });
 
       setStep("linking");
-      setStageDetail("建立 Campus One 帳號");
+      setStageDetail("完成登入");
       await auth.refreshProfile();
       setStep("success");
 
@@ -162,10 +169,10 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
               <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 4 }}>學號</Text>
               <TextInput
                 value={studentIdInput}
-                onChangeText={(value) => setStudentIdInput(value.toUpperCase())}
-                placeholder="例如 B11234567"
+                onChangeText={setStudentIdInput}
+                placeholder="E校園帳號"
                 placeholderTextColor={theme.colors.muted}
-                autoCapitalize="characters"
+                autoCapitalize="none"
                 autoCorrect={false}
                 editable={!isBusy}
                 style={{ color: theme.colors.text, fontSize: 16, paddingVertical: 0 }}

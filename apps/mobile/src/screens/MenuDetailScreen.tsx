@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useMemo, useState, useEffect } from 'react';
-import { ScrollView, Text, View, Pressable, Share, Alert, TextInput, Image } from 'react-native';
+import { ScrollView, Text, View, Pressable, Share, Alert, TextInput, Image, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   doc,
@@ -198,6 +198,20 @@ export function MenuDetailScreen(props: any) {
   } = useAsyncList<any>(() => ds.listMenus(school.id), [ds, school.id]);
 
   const item = useMemo(() => findById(raw, id), [raw, id]);
+  const itemSourceMeta = useMemo(() => {
+    const parts: string[] = [];
+    if (typeof item?.sourceLabel === 'string' && item.sourceLabel.trim()) {
+      parts.push(item.sourceLabel.trim());
+    }
+    if (typeof item?.verifiedAt === 'string' && item.verifiedAt.trim()) {
+      const verifiedAt = toDate(item.verifiedAt);
+      const verifiedLabel = Number.isNaN(verifiedAt.getTime())
+        ? item.verifiedAt.trim()
+        : verifiedAt.toLocaleDateString('zh-TW');
+      parts.push(`最後查核 ${verifiedLabel}`);
+    }
+    return parts.join(' · ');
+  }, [item?.sourceLabel, item?.verifiedAt]);
 
   // Fetch Firebase reviews
   const {
@@ -629,6 +643,39 @@ export function MenuDetailScreen(props: any) {
                   </Text>
                 </View>
               ))}
+            </View>
+          )}
+
+          {(item.description || itemSourceMeta || item.sourceUrl) && (
+            <View
+              style={{
+                gap: 8,
+                marginBottom: 14,
+                padding: 14,
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.surface2,
+              }}
+            >
+              {item.description ? (
+                <Text style={{ color: theme.colors.text, lineHeight: 20 }}>{item.description}</Text>
+              ) : null}
+              {itemSourceMeta ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+                  {itemSourceMeta}
+                </Text>
+              ) : null}
+              {item.sourceUrl ? (
+                <Pressable
+                  onPress={() => {
+                    Linking.openURL(item.sourceUrl).catch(() => {
+                      Alert.alert('無法開啟', '目前無法打開資料來源連結');
+                    });
+                  }}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
+                >
+                  <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>查看資料來源</Text>
+                </Pressable>
+              ) : null}
             </View>
           )}
 

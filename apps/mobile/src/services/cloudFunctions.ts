@@ -29,7 +29,7 @@ function getRegion(extra: CloudFunctionConfig): string {
   ).trim();
 }
 
-function shouldUseEmulator(extra: CloudFunctionConfig, projectId: string): boolean {
+function shouldUseEmulator(extra: CloudFunctionConfig, _projectId: string): boolean {
   const explicit = String(
     extra.useCloudFunctionEmulator ?? process.env.EXPO_PUBLIC_USE_CLOUD_FUNCTION_EMULATOR ?? "",
   )
@@ -37,9 +37,8 @@ function shouldUseEmulator(extra: CloudFunctionConfig, projectId: string): boole
     .toLowerCase();
 
   if (explicit === "true") return true;
-  if (explicit === "false") return false;
-
-  return __DEV__ && !projectId;
+  // 預設不走 emulator — 即使在 dev 模式也直接連 Cloud Functions
+  return false;
 }
 
 function getEmulatorHost(): string {
@@ -63,13 +62,25 @@ export function getCloudFunctionBaseUrl(): string {
     return `http://${getEmulatorHost()}:5001/${projectId || DEFAULT_DEV_PROJECT_ID}/${region}`;
   }
 
-  if (!projectId) {
+  const effectiveProjectId = projectId || DEFAULT_DEV_PROJECT_ID;
+
+  if (!effectiveProjectId) {
     throw new Error("Firebase projectId not configured. 無法使用 Cloud Functions。");
   }
 
-  return `https://${region}-${projectId}.cloudfunctions.net`;
+  return `https://${region}-${effectiveProjectId}.cloudfunctions.net`;
 }
 
 export function getCloudFunctionUrl(functionName: string): string {
   return `${getCloudFunctionBaseUrl()}/${functionName}`;
+}
+
+export function getAIServerBaseUrl(): string {
+  const extra = getExpoExtra();
+  const configured = String(
+    (extra as any).aiServerBaseUrl ?? process.env.EXPO_PUBLIC_AI_SERVER_URL ?? "",
+  ).trim();
+  if (configured) return trimTrailingSlash(configured);
+  const host = Platform.OS === "android" ? "10.0.2.2" : "127.0.0.1";
+  return `http://${host}:8100`;
 }

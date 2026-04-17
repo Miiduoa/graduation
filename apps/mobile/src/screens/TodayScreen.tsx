@@ -20,6 +20,7 @@ import { useSchool } from "../state/school";
 import { usePermissions } from "../hooks/usePermissions";
 import { getStreakStorageKey, refreshUserStreak, useAmbientCues } from "../features/engagement";
 import { useSchedule } from "../state/schedule";
+import { useNotifications } from "../state/notifications";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { shadowStyle, theme } from "../ui/theme";
 import { HeroActionCard, TimelineCard, CompletionState, ConfidenceBadge, AmbientCueCard } from "../ui/campusOs";
@@ -208,6 +209,49 @@ function InboxTaskRow(props: {
   );
 }
 
+function QuickActionChip(props: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  tint: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={props.onPress}
+      style={({ pressed }) => ({
+        flex: 1,
+        minWidth: 72,
+        alignItems: "center",
+        paddingVertical: theme.space.sm,
+        paddingHorizontal: theme.space.xs,
+        borderRadius: theme.radius.lg,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        gap: 6,
+        opacity: pressed ? 0.78 : 1,
+        transform: [{ scale: pressed ? 0.96 : 1 }],
+      })}
+    >
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 12,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: `${props.tint}14`,
+        }}
+      >
+        <Ionicons name={props.icon} size={18} color={props.tint} />
+      </View>
+      <Text style={{ color: theme.colors.text, fontSize: 11, fontWeight: "600" }}>
+        {props.label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function SectionLabel({ children }: { children: string }) {
   return (
     <Text
@@ -241,6 +285,7 @@ export function TodayScreen(props: Record<string, unknown>) {
   const [streakDays, setStreakDays] = useState<number>(0);
   const streakPulse = useRef(new Animated.Value(1)).current;
 
+  const notifs = useNotifications();
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
   const roleCopy = roleSummary(roleMode);
   const teachingMode = isTeachingRole(auth.profile?.role);
@@ -476,9 +521,47 @@ export function TodayScreen(props: Record<string, unknown>) {
             <Text style={{ color: theme.colors.muted, fontSize: 13, fontWeight: "500" }}>
               {getDateString()}
             </Text>
-            <Animated.View style={{ transform: [{ scale: streakPulse }] }}>
-              <StreakBadge days={streakDays} />
-            </Animated.View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.sm }}>
+              <Animated.View style={{ transform: [{ scale: streakPulse }] }}>
+                <StreakBadge days={streakDays} />
+              </Animated.View>
+              <Pressable
+                onPress={() => nav?.navigate?.("我的", { screen: "Notifications" })}
+                style={({ pressed }) => ({
+                  width: 36,
+                  height: 36,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: theme.colors.surface,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  opacity: pressed ? 0.75 : 1,
+                })}
+              >
+                <Ionicons name="notifications-outline" size={18} color={theme.colors.text} />
+                {notifs.unreadCount > 0 && (
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 5,
+                      right: 5,
+                      minWidth: 14,
+                      height: 14,
+                      borderRadius: 7,
+                      paddingHorizontal: 3,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: theme.colors.danger,
+                    }}
+                  >
+                    <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>
+                      {notifs.unreadCount > 9 ? "9+" : notifs.unreadCount}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            </View>
           </View>
 
           <View style={{ gap: theme.space.xs }}>
@@ -697,6 +780,52 @@ export function TodayScreen(props: Record<string, unknown>) {
             ))}
           </View>
         )}
+
+        <View style={{ gap: theme.space.md }}>
+          <SectionLabel>快速入口</SectionLabel>
+          <View style={{ gap: theme.space.sm }}>
+            <View style={{ flexDirection: "row", gap: theme.space.sm }}>
+              <QuickActionChip
+                icon="sparkles-outline"
+                label="AI 助理"
+                tint="#FF6B9A"
+                onPress={() => nav?.navigate?.("AIChat")}
+              />
+              <QuickActionChip
+                icon="search-outline"
+                label="搜尋"
+                tint="#5AC8FA"
+                onPress={() => nav?.navigate?.("我的", { screen: "GlobalSearch" })}
+              />
+              <QuickActionChip
+                icon="bus-outline"
+                label="公車"
+                tint="#34C759"
+                onPress={() => nav?.navigate?.("校園", { screen: "BusSchedule" })}
+              />
+            </View>
+            <View style={{ flexDirection: "row", gap: theme.space.sm }}>
+              <QuickActionChip
+                icon="restaurant-outline"
+                label="餐廳"
+                tint="#FF9500"
+                onPress={() => nav?.navigate?.("校園", { screen: "餐廳總覽" })}
+              />
+              <QuickActionChip
+                icon="qr-code-outline"
+                label="QR 碼"
+                tint="#5B8CFF"
+                onPress={() => nav?.navigate?.("我的", { screen: "QRCode" })}
+              />
+              <QuickActionChip
+                icon="library-outline"
+                label="圖書館"
+                tint="#667EEA"
+                onPress={() => nav?.navigate?.("校園", { screen: "Library" })}
+              />
+            </View>
+          </View>
+        </View>
 
         <View style={{ gap: theme.space.md }}>
           <SectionLabel>Quick Links</SectionLabel>

@@ -94,6 +94,13 @@ import {
   startAttendanceSession as startCourseAttendanceSession,
   submitQuiz as submitCourseSpaceQuiz,
 } from './courseSpaceSource';
+import {
+  getPuDiningCafeterias,
+  getPuDiningMenuItems,
+  hasPuOfficialCafeteriaName,
+  hasPuOfficialMenuSignal,
+  isProvidenceDiningSchoolId,
+} from './puDiningCatalog';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -1018,24 +1025,57 @@ export const firebaseSource: DataSource = {
           [orderBy('name', 'asc')],
           options,
         );
-        return rows.map((row) => normalizeCafeteriaRecord(row as unknown as Record<string, unknown>));
+        const normalized = rows.map((row) =>
+          normalizeCafeteriaRecord(row as unknown as Record<string, unknown>),
+        );
+        if (
+          !isProvidenceDiningSchoolId(schoolId) ||
+          normalized.some((row) => hasPuOfficialCafeteriaName(row.name))
+        ) {
+          return normalized;
+        }
+        console.info(
+          '[firebaseSource] Falling back to curated PU cafeteria catalog because Firestore data does not match verified campus venues.',
+        );
       } catch (error) {
         console.warn('[firebaseSource] listCafeterias school-scoped read failed:', error);
       }
+    }
+
+    if (isProvidenceDiningSchoolId(schoolId)) {
+      return getPuDiningCafeterias(schoolId || 'pu');
     }
 
     return [];
   },
 
   async listMenus(schoolId, options) {
-    return fetchCanonicalSchoolCollection<MenuItem>({
-      schoolId,
-      canonicalCollections: ['menus', 'cafeteriaMenus'],
-      schoolConstraints: [orderBy('availableOn', 'desc')],
-      fallbackCollection: 'menus',
-      fallbackConstraints: [bySchool(schoolId), orderBy('availableOn', 'desc')],
-      options,
-    });
+    try {
+      const rows = await fetchCanonicalSchoolCollection<MenuItem>({
+        schoolId,
+        canonicalCollections: ['menus', 'cafeteriaMenus'],
+        schoolConstraints: [orderBy('availableOn', 'desc')],
+        fallbackCollection: 'menus',
+        fallbackConstraints: [bySchool(schoolId), orderBy('availableOn', 'desc')],
+        options,
+      });
+      if (
+        !isProvidenceDiningSchoolId(schoolId) ||
+        rows.some((row) => hasPuOfficialMenuSignal({ name: row.name, cafeteria: row.cafeteria }))
+      ) {
+        return rows;
+      }
+      console.info(
+        '[firebaseSource] Falling back to curated PU menu catalog because Firestore data does not match verified campus dining entries.',
+      );
+      return getPuDiningMenuItems(schoolId || 'pu');
+    } catch (error) {
+      if (isProvidenceDiningSchoolId(schoolId)) {
+        console.warn('[firebaseSource] listMenus falling back to curated PU catalog:', error);
+        return getPuDiningMenuItems(schoolId || 'pu');
+      }
+      throw error;
+    }
   },
 
   async getMenuItem(id) {

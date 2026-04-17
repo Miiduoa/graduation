@@ -139,6 +139,7 @@ export type Cafeteria = {
   id: string;
   schoolId?: string;
   name: string;
+  description?: string;
   merchantId?: string;
   brandKey?: string;
   location?: string;
@@ -150,6 +151,9 @@ export type Cafeteria = {
   activeOperatorCount?: number;
   rating?: number | string;
   reviewCount?: number;
+  sourceLabel?: string;
+  sourceUrl?: string;
+  verifiedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -191,6 +195,9 @@ export type MenuItem = {
   customizable?: boolean;
   popular?: boolean;
   waitTime?: number;
+  sourceLabel?: string;
+  sourceUrl?: string;
+  verifiedAt?: string;
   schoolId?: string;
   orderingEnabled?: boolean;
   pilotStatus?: CafeteriaPilotStatus;
@@ -330,6 +337,12 @@ export type Grade = {
   classSize?: number;
   publishedAt?: string;
   instructor?: string;
+  /** 修別：必修/選修/通識/體育… (from E校園 成績頁) */
+  courseType?: string;
+  /** 修課班級 */
+  courseClass?: string;
+  /** 英文課程名 */
+  courseNameEn?: string;
 };
 
 export type Assignment = {

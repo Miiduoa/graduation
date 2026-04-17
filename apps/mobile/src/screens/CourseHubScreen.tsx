@@ -15,7 +15,7 @@ import { canManageCourse, formatDateTime } from "../services/courseWorkspace";
 import { useAmbientCues } from "../features/engagement";
 import { AmbientCueCard } from "../ui/campusOs";
 import { getFreshnessState, resolveRoleMode } from "../utils/campusOs";
-import { tcLogin } from "../services/tronClassClient";
+import { refreshTCBackendSession, setTCSavedCredentials, tcLogin } from "../services/tronClassClient";
 import { refreshTCCourses } from "../services/puDataCache";
 
 function SocialSnippet(props: {
@@ -175,6 +175,7 @@ export function CourseHubScreen(props: any) {
 
   // TronClass 登入狀態
   const [showLoginForm, setShowLoginForm] = useState(false);
+  const [tcAccount, setTcAccount] = useState((auth.profile as any)?.loginAccount || "");
   const [tcPassword, setTcPassword] = useState("");
   const [tcLoggingIn, setTcLoggingIn] = useState(false);
   const [tcError, setTcError] = useState<string | null>(null);
@@ -196,30 +197,50 @@ export function CourseHubScreen(props: any) {
   const studentId = auth.profile?.studentId ?? "";
 
   const handleTCLogin = useCallback(async () => {
-    if (!studentId || !tcPassword) {
-      Alert.alert("提示", "請輸入密碼");
+    if (!tcAccount.trim() || !tcPassword) {
+      Alert.alert("提示", "請輸入帳號和密碼");
       return;
     }
+    const account = tcAccount.trim();
     setTcLoggingIn(true);
     setTcError(null);
     try {
-      const result = await tcLogin(studentId, tcPassword);
-      if (result.success) {
+      let success = false;
+      let lastError = "";
+
+      // tcLogin 內部已有完整 fallback（CAS IPv4 → 原生 API）
+      // 帳密跟 E校園 一樣，呼叫一次就好
+      try {
+        const r = await tcLogin(account, tcPassword);
+        if (r.success) { success = true; }
+        else { lastError = r.error ?? "登入失敗"; }
+      } catch { /* ignore */ }
+
+      // 後端代理（Cloud Functions 有部署才會通）
+      if (!success) {
+        try {
+          const r = await refreshTCBackendSession(account, tcPassword);
+          if (r.success) { success = true; }
+        } catch { /* backend 不可用 */ }
+      }
+
+      if (success) {
+        await setTCSavedCredentials(account, tcPassword);
         setShowLoginForm(false);
+        setTcAccount("");
         setTcPassword("");
         setTcError(null);
-        // 登入成功後刷新課程
         await refreshTCCourses();
         reload();
       } else {
-        setTcError(result.error ?? "登入失敗");
+        setTcError(lastError);
       }
     } catch (err) {
       setTcError("連線失敗，請檢查網路");
     } finally {
       setTcLoggingIn(false);
     }
-  }, [studentId, tcPassword, reload]);
+  }, [tcAccount, tcPassword, studentId, reload]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -389,11 +410,23 @@ export function CourseHubScreen(props: any) {
                 backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, gap: 12,
               }}>
                 <Text style={{ fontWeight: "700", fontSize: 15, color: theme.colors.text }}>重新連線 TronClass</Text>
-                {studentId ? (
-                  <Text style={{ color: theme.colors.muted, fontSize: 13 }}>學號：{studentId}</Text>
-                ) : null}
+                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>請輸入 E校園 帳號密碼（跟登入時一樣）</Text>
                 <TextInput
-                  placeholder="輸入密碼（校務系統密碼）"
+                  placeholder="E校園帳號"
+                  placeholderTextColor={theme.colors.muted}
+                  value={tcAccount}
+                  onChangeText={setTcAccount}
+                  editable={!tcLoggingIn}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{
+                    borderWidth: 1, borderColor: theme.colors.border,
+                    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12,
+                    fontSize: 15, color: theme.colors.text, backgroundColor: theme.colors.bg,
+                  }}
+                />
+                <TextInput
+                  placeholder="密碼"
                   placeholderTextColor={theme.colors.muted}
                   secureTextEntry
                   value={tcPassword}
