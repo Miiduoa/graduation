@@ -3,7 +3,7 @@
 from __future__ import annotations
 from datetime import datetime
 
-DAY_NAMES = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"]
+DAY_NAMES = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
 
 
 def build_system_prompt(
@@ -14,52 +14,78 @@ def build_system_prompt(
     school_id: str = "unknown",
 ) -> str:
     now = datetime.now()
-    day_name = DAY_NAMES[now.weekday() + 1] if now.weekday() < 6 else DAY_NAMES[0]
+    day_name = DAY_NAMES[now.weekday()]
     date_str = now.strftime("%Y/%m/%d %H:%M")
 
     parts: list[str] = [
-        "你是「校園智慧助理」，一個深度了解本校 APP 所有功能的 AI 助手。",
-        "你不只是聊天機器人，你是一個真正理解學生需求、熟悉校園生活的智慧夥伴。",
+        "你是「校園智慧助理」，一個深度了解校園 APP 每個功能的 AI。",
+        "你的回答必須具體、可操作、基於真實數據。不要編造不存在的資訊。",
         "",
-        "【核心能力】",
-        "1. 校園資訊查詢：公告、活動、課程、餐廳菜單、校園地點",
-        "2. 智慧選課建議：根據學分需求和修課歷史給予個人化建議",
-        "3. 學業分析：GPA 趨勢、作業追蹤、學習狀況摘要",
-        "4. APP 操作引導：教使用者如何使用 APP 的各項功能",
-        "5. 生活支持：餐廳推薦、路線導航、時間管理建議",
-        "6. 心理關懷：溫暖的傾聽、正向鼓勵、適時建議尋求專業協助",
+        "【你的身份】",
+        "- 你就是這個 APP 內建的 AI 助理，使用者正在 APP 裡跟你對話",
+        "- 你可以引導使用者去 APP 的任何畫面完成操作",
+        "- 你熟悉這個 APP 的每個按鈕、每個畫面、每個功能",
         "",
-        "【APP 功能地圖】",
-        "- 首頁 (Today)：今日儀表板、公告、活動、AI 助理",
-        "- 課程：課表、課程中樞、教材、測驗、點名、成績、學分試算",
-        "- 校園：地圖、POI、AR導航、公車、餐廳/菜單/點餐、圖書館、健康中心、宿舍、列印、失物招領、支付",
-        "- 訊息：群組討論、作業繳交、私訊",
-        "- 我的：個人資料、設定、通知、成就、資料匯出",
+        "【回答規則 — 嚴格遵守】",
+        "1. 使用繁體中文，語氣友善簡潔",
+        "2. 回答必須基於下方提供的【即時資料】和【校園知識庫】",
+        "3. 如果資料中沒有相關資訊，明確說「目前 APP 中沒有這筆資料」",
+        "4. 當使用者問到某個功能時，告訴他具體的操作路徑（例如：「你可以到底部選單的『校園』→『餐廳』查看」）",
+        "5. 列舉時用條列式，資訊要具體（餐廳名稱、位置、營業時間、櫃位名）",
+        "6. 不要說「根據我的資料」之類的話，直接回答就好",
+        "7. 回答結尾加「建議選項：」列出 1-3 個 2-6 字的後續選項",
         "",
-        "【回答原則】",
-        "- 使用繁體中文，語氣友善、簡潔、專業",
-        "- 列舉項目時用條列方便閱讀",
-        "- 引用具體數據（課程名稱、截止日期、地點名稱）",
-        "- 資料為空時如實告知，並建議替代查詢方向",
-        "- 涉及心理困擾時，先同理再建議，必要時推薦學校諮商資源",
-        "- 回答結尾可加「建議選項：」列出 1-3 個簡短後續選項（2-6 字）",
+        "【APP 底部選單結構】",
+        "五個分頁：Today（首頁）→ 課程 → 校園 → 訊息 → 我的",
         "",
-        f"【環境】學校：{school_id}，時間：{day_name} {date_str}",
+        f"【現在時間】{day_name} {date_str}",
+        f"【學校】{school_id}",
     ]
+
+    # ─── Real-time user data from APP ─────────────────────────────
 
     if user_context:
         if user_context.get("userName"):
-            parts.append(f"學生姓名：{user_context['userName']}")
+            parts.append(f"\n【使用者】{user_context['userName']}")
+
+        announcements = user_context.get("announcements", [])
+        if announcements:
+            parts.append("\n【最新公告（APP 即時資料）】")
+            for a in announcements[:5]:
+                src = f"（{a['source']}）" if a.get("source") else ""
+                parts.append(f"• {a.get('title', '未知')}{src}")
+
+        events = user_context.get("events", [])
+        if events:
+            parts.append("\n【近期活動（APP 即時資料）】")
+            for e in events[:5]:
+                loc = f"，地點：{e['location']}" if e.get("location") else ""
+                time = f"，時間：{e['startsAt']}" if e.get("startsAt") else ""
+                parts.append(f"• {e.get('title', '未知')}{loc}{time}")
+
+        menus = user_context.get("menus", [])
+        if menus:
+            parts.append("\n【今日餐點（APP 即時資料）】")
+            for m in menus[:10]:
+                price = f" ${m['price']}" if m.get("price") else ""
+                caf = f"（{m['cafeteria']}）" if m.get("cafeteria") else ""
+                parts.append(f"• {m.get('name', '未知')}{caf}{price}")
+
+        pois = user_context.get("pois", [])
+        if pois:
+            parts.append("\n【校園地點（APP 即時資料）】")
+            for p in pois[:10]:
+                cat = f"[{p['category']}]" if p.get("category") else ""
+                parts.append(f"• {p.get('name', '未知')} {cat}")
 
         courses = user_context.get("courses", [])
         if courses:
-            parts.append("")
-            parts.append("【你的課程列表】")
+            parts.append("\n【你的課程】")
             for i, c in enumerate(courses[:15], 1):
-                day = DAY_NAMES[c.get("dayOfWeek", 0)] if c.get("dayOfWeek") is not None else "未知"
-                line = f"{i}. {c.get('name', '未知課程')}（{day} 第{c.get('startPeriod', '?')}節"
+                dow = DAY_NAMES[c["dayOfWeek"] - 1] if c.get("dayOfWeek") else "未知"
+                line = f"{i}. {c.get('name', '未知')}（{dow} 第{c.get('startPeriod', '?')}節"
                 if c.get("teacher"):
-                    line += f"，授課：{c['teacher']}"
+                    line += f"，{c['teacher']}"
                 if c.get("credits"):
                     line += f"，{c['credits']}學分"
                 line += "）"
@@ -67,31 +93,32 @@ def build_system_prompt(
 
         assignments = user_context.get("pendingAssignments", [])
         if assignments:
-            parts.append("")
-            parts.append("【待繳作業（近期截止）】")
+            parts.append("\n【待繳作業】")
             for i, a in enumerate(assignments[:8], 1):
                 due = a.get("dueAt", "無截止日")
-                late = "，⚠️ 已逾期" if a.get("isLate") else ""
+                late = " ⚠️已逾期" if a.get("isLate") else ""
                 parts.append(f"{i}. {a.get('title', '?')}（{a.get('groupName', '')}，截止：{due}{late}）")
 
         grades = user_context.get("gradesSummary")
         if grades:
-            parts.append("")
-            parts.append("【成績概況】")
+            parts.append("\n【成績概況】")
             if grades.get("gpa"):
                 parts.append(f"GPA：{grades['gpa']:.2f}")
-            for i, c in enumerate(grades.get("courses", [])[:8], 1):
-                grade_str = f"：{c['grade']} 分" if c.get("grade") is not None else "（尚未公布）"
-                parts.append(f"{i}. {c.get('name', '?')}{grade_str}")
+
+        weekly = user_context.get("weeklyReport")
+        if weekly and weekly.get("summary"):
+            parts.append(f"\n【本週摘要】{weekly['summary']}")
+            stats = weekly.get("stats", {})
+            if stats:
+                parts.append(f"準時率：{stats.get('onTimeRate', 100)}%，繳交數：{stats.get('totalSubmissions', 0)}")
+
+    # ─── Static knowledge ────────────────────────────────────────
 
     if campus_knowledge:
-        parts.append("")
-        parts.append("【校園知識庫】")
-        parts.append(campus_knowledge)
+        parts.append(f"\n{campus_knowledge}")
 
     if rag_context:
-        parts.append("")
-        parts.append("【相關參考資料（即時檢索）】")
+        parts.append("\n【相關參考資料（即時檢索）】")
         parts.append(rag_context)
 
     return "\n".join(parts)
