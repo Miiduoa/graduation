@@ -67,15 +67,113 @@ function createId(schoolId: string, prefix: string, num: number): string {
   return `${schoolId}-${prefix}-${num}`;
 }
 
+/**
+ * Normalize school IDs so public-facing `pu` maps to the internal
+ * `tw-pu` branch used throughout demo switch/case statements.
+ */
+function normalizeDemoSchoolId(schoolId: string): string {
+  if (schoolId === 'pu') return 'tw-pu';
+  return schoolId;
+}
+
 // ===== School Demo Data (default: Providence University 靜宜大學) =====
 
 export function getDemoAnnouncements(schoolId: string): Announcement[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
+
+  if (schoolId === 'tw-pu') {
+    return [
+      {
+        id: createId(schoolId, 'ann', 1),
+        schoolId,
+        title: '114學年度第二學期期中考試日程',
+        body: '期中考訂於 2026/4/20（一）至 4/24（五）。考試教室與座位表已公告於 PUBOSS 系統，請同學提前登入查詢。期中考期間蓋夏圖書館（LB）延長開放至 23:00。',
+        source: '教務處',
+        category: 'academic',
+        publishedAt: getDateOffset(-10),
+        pinned: true,
+      },
+      {
+        id: createId(schoolId, 'ann', 2),
+        schoolId,
+        title: '114-2 加退選暨課程異動公告',
+        body: '加退選作業期間：4/28-5/2，請至 PUBOSS 教務系統操作。逾期不予受理。跨院選課須先取得開課院系同意書（至任垣樓 AK 各系辦領取）。',
+        source: '教務處',
+        category: 'academic',
+        publishedAt: getDateOffset(-8),
+      },
+      {
+        id: createId(schoolId, 'ann', 3),
+        schoolId,
+        title: '靜宜大學 65 週年校慶活動報名',
+        body: '校慶系列活動將於 5/10（六）舉行，含校友回娘家、園遊會、系際盃決賽。地點：伯鐸廣場 & 至善樓前草坪。報名表見學務處公告。',
+        source: '學務處',
+        category: 'event',
+        publishedAt: getDateOffset(-5),
+      },
+      {
+        id: createId(schoolId, 'ann', 4),
+        schoolId,
+        title: '主顧聖母堂彌撒時間調整',
+        body: '即日起每週三中午 12:10 於主顧聖母堂（校門口右側）增開彌撒一場，歡迎全校師生參加。平日彌撒維持每週二、四 07:30。',
+        source: '校牧室',
+        category: 'event',
+        publishedAt: getDateOffset(-4),
+      },
+      {
+        id: createId(schoolId, 'ann', 5),
+        schoolId,
+        title: '宜園學生餐廳 B1 新攤位試營運',
+        body: '宜園 B1 新增「韓一味」韓式料理攤位，試營運期間（4/14-4/25）全品項 9 折優惠。營業時間 11:00-14:00、16:30-19:00。',
+        source: '總務處',
+        category: 'event',
+        publishedAt: getDateOffset(-3),
+      },
+      {
+        id: createId(schoolId, 'ann', 6),
+        schoolId,
+        title: '校園無線網路 eduroam 升級通知',
+        body: '資訊處將於本週六（4/19）02:00-06:00 進行 eduroam 無線網路設備升級，施工期間校內 Wi-Fi 可能暫時中斷。建議先行下載離線教材。',
+        source: '資訊處',
+        category: 'system',
+        publishedAt: getDateOffset(-2),
+      },
+      {
+        id: createId(schoolId, 'ann', 7),
+        schoolId,
+        title: '蓋夏圖書館四月主題書展',
+        body: '本月主題：「AI 與人文的對話」，精選 120 冊相關藏書於 1F 大廳展示。借閱前 30 名可獲精美書籤。展期至 4/30。',
+        source: '蓋夏圖書館',
+        category: 'event',
+        publishedAt: getDateOffset(-2),
+      },
+      {
+        id: createId(schoolId, 'ann', 8),
+        schoolId,
+        title: '停車場管理新制公告',
+        body: '自 5/1 起靜宜大學汽車停車場改為電子計時收費（每小時 30 元）。持教職員證者免費，學生可申請學期停車證（$2,000/學期），至總務處（任垣樓 AK 1F）辦理。',
+        source: '總務處',
+        category: 'system',
+        publishedAt: getDateOffset(-6),
+      },
+      {
+        id: createId(schoolId, 'ann', 9),
+        schoolId,
+        title: '暑期海外交換申請開放',
+        body: '2026 暑期海外交換計畫開放申請，合作校包含日本上智大學、韓國西江大學、美國聖乘大學等 15 校。申請截止 5/15，詳情洽國際暨兩岸事務處（文興樓 WH 2F）。',
+        source: '國際暨兩岸事務處',
+        category: 'academic',
+        publishedAt: getDateOffset(-1),
+      },
+    ];
+  }
+
   const baseAnnouncements: Announcement[] = [
     {
       id: createId(schoolId, 'ann', 1),
       schoolId,
       title: '114學年度第二學期期中考時間公告',
-      body: '親愛同學，期中考定於2026年4月20日至4月24日舉辦。請詳見教務系統選課時間表。',
+      body: '期中考定於2026年4月20日至4月24日舉辦。請詳見教務系統選課時間表。',
       source: '教務處',
       category: 'academic',
       publishedAt: getDateOffset(-10),
@@ -85,7 +183,7 @@ export function getDemoAnnouncements(schoolId: string): Announcement[] {
       id: createId(schoolId, 'ann', 2),
       schoolId,
       title: '第二學期選課注意事項',
-      body: '選課時間為3月24日至3月28日。請務必於期限內完成選課，逾期不受理。建議同學預先瀏覽選課清單。',
+      body: '選課時間為3月24日至3月28日。請務必於期限內完成選課，逾期不受理。',
       source: '教務處',
       category: 'academic',
       publishedAt: getDateOffset(-8),
@@ -94,7 +192,7 @@ export function getDemoAnnouncements(schoolId: string): Announcement[] {
       id: createId(schoolId, 'ann', 3),
       schoolId,
       title: '碩博士班獎學金申請開放',
-      body: '即日起至4月15日，符合資格之碩博士班學生可向學務處申請各項獎學金。獎學金總額較去年增加30%。',
+      body: '即日起至4月15日，符合資格之碩博士班學生可向學務處申請各項獎學金。',
       source: '學務處',
       category: 'event',
       publishedAt: getDateOffset(-5),
@@ -102,8 +200,8 @@ export function getDemoAnnouncements(schoolId: string): Announcement[] {
     {
       id: createId(schoolId, 'ann', 4),
       schoolId,
-      title: '2026校園社團博覽會',
-      body: '時間：3月29日（週六）上午10:00-16:00\n地點：學生活動中心\n超過50個社團參展，等你來認識！',
+      title: '校園社團博覽會',
+      body: '時間：3月29日（週六）上午10:00-16:00，地點：學生活動中心。超過50個社團參展！',
       source: '學務處',
       category: 'event',
       publishedAt: getDateOffset(-3),
@@ -111,47 +209,11 @@ export function getDemoAnnouncements(schoolId: string): Announcement[] {
     {
       id: createId(schoolId, 'ann', 5),
       schoolId,
-      title: '圖書館2樓施工通知',
-      body: '為改善館舍設施，圖書館2樓將於3月25日至4月10日進行整修。期間該樓層閉館，造成不便敬請見諒。',
+      title: '圖書館施工通知',
+      body: '圖書館2樓將於3月25日至4月10日進行整修。期間該樓層閉館，造成不便敬請見諒。',
       source: '總務處',
       category: 'system',
       publishedAt: getDateOffset(-7),
-    },
-    {
-      id: createId(schoolId, 'ann', 6),
-      schoolId,
-      title: '校園停車場收費調整',
-      body: '自2026年4月1日起，校內停車費用調整為每小時50元。教職員停車證仍享受優惠。',
-      source: '總務處',
-      category: 'system',
-      publishedAt: getDateOffset(-6),
-    },
-    {
-      id: createId(schoolId, 'ann', 7),
-      schoolId,
-      title: '校園網路系統維護通知',
-      body: '資訊中心將於3月27日凌晨2:00-6:00進行校園Wi-Fi升級。期間網路服務可能中斷，請預先做好準備。',
-      source: '資訊中心',
-      category: 'system',
-      publishedAt: getDateOffset(-4),
-    },
-    {
-      id: createId(schoolId, 'ann', 8),
-      schoolId,
-      title: '圖書館新書到館通知',
-      body: '本週新到館200冊圖書，包括最新程式設計、人工智慧等領域專著。歡迎蒞臨借閱！',
-      source: '圖書館',
-      category: 'event',
-      publishedAt: getDateOffset(-2),
-    },
-    {
-      id: createId(schoolId, 'ann', 9),
-      schoolId,
-      title: '圖書館延長開放時間',
-      body: '配合期中考期間，圖書館自3月25日起延長開放時間至晚上12:00。讀書位置充足，歡迎自習。',
-      source: '圖書館',
-      category: 'event',
-      publishedAt: getDateOffset(-1),
     },
   ];
 
@@ -159,7 +221,6 @@ export function getDemoAnnouncements(schoolId: string): Announcement[] {
     return baseAnnouncements;
   }
 
-  // For demo uni, return slightly modified subset
   return baseAnnouncements.slice(0, 5).map((ann) => ({
     ...ann,
     id: ann.id.replace('tw-nchu', schoolId),
@@ -168,6 +229,7 @@ export function getDemoAnnouncements(schoolId: string): Announcement[] {
 }
 
 export function getDemoCourses(schoolId: string): Course[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   switch (schoolId) {
     case 'tw-nchu': {
       return [
@@ -1108,81 +1170,138 @@ export function getDemoCourses(schoolId: string): Course[] {
     }
 
     case 'tw-pu': {
-      // 靜宜大學 Providence University — 通用示範課表（非特定個人）
-      // 登入後會由 PUAdapter → puScraper 抓取該使用者的真實課表
       return [
         {
           id: createId(schoolId, 'crs', 1),
           schoolId,
-          code: 'DEMO-1',
-          name: '程式設計',
-          instructor: '王老師',
+          code: 'CS3021',
+          name: '人工智慧概論',
+          instructor: '張志勇',
           credits: 3,
           semester: '114-2',
+          department: '資訊工程學系',
+          description: '機器學習、深度學習基礎與應用實作',
           dayOfWeek: 1,
           startTime: '09:10',
           endTime: '12:00',
-          schedule: [{ dayOfWeek: 1, startTime: '09:10', endTime: '12:00', location: 'PH303' }],
+          schedule: [
+            { dayOfWeek: 1, startTime: '09:10', endTime: '12:00', location: '主顧樓 PH303' },
+          ],
           capacity: 60,
-          enrolled: 55,
+          enrolled: 56,
         },
         {
           id: createId(schoolId, 'crs', 2),
           schoolId,
-          code: 'DEMO-2',
-          name: '微積分',
-          instructor: '李老師',
+          code: 'CS2008',
+          name: '資料結構',
+          instructor: '陳隆彬',
           credits: 3,
           semester: '114-2',
+          department: '資訊工程學系',
+          description: '陣列、鏈結串列、樹、圖形等資料結構與演算法',
           dayOfWeek: 2,
           startTime: '10:10',
           endTime: '12:00',
-          schedule: [{ dayOfWeek: 2, startTime: '10:10', endTime: '12:00', location: 'PH217' }],
+          schedule: [
+            { dayOfWeek: 2, startTime: '10:10', endTime: '12:00', location: '主顧樓 PH217' },
+            { dayOfWeek: 4, startTime: '10:10', endTime: '12:00', location: '主顧樓 PH217' },
+          ],
           capacity: 60,
-          enrolled: 50,
+          enrolled: 52,
         },
         {
           id: createId(schoolId, 'crs', 3),
           schoolId,
-          code: 'DEMO-3',
-          name: '英文(一)',
-          instructor: '林老師',
+          code: 'GE1014',
+          name: '英文閱讀與寫作(二)',
+          instructor: 'Jason Miller',
           credits: 2,
           semester: '114-2',
+          department: '外國語文學系',
+          description: '中級英文閱讀與學術寫作訓練',
           dayOfWeek: 3,
           startTime: '09:10',
           endTime: '11:00',
-          schedule: [{ dayOfWeek: 3, startTime: '09:10', endTime: '11:00', location: 'SP201' }],
-          capacity: 40,
-          enrolled: 38,
+          schedule: [
+            { dayOfWeek: 3, startTime: '09:10', endTime: '11:00', location: '思源樓 SP201' },
+          ],
+          capacity: 35,
+          enrolled: 33,
         },
         {
           id: createId(schoolId, 'crs', 4),
           schoolId,
-          code: 'DEMO-4',
-          name: '通識講座',
-          instructor: '陳老師',
-          credits: 2,
+          code: 'CS3045',
+          name: '軟體工程',
+          instructor: '蔡篤堅',
+          credits: 3,
           semester: '114-2',
-          dayOfWeek: 4,
+          department: '資訊工程學系',
+          description: '軟體開發流程、敏捷方法、版本控制與團隊協作',
+          dayOfWeek: 3,
           startTime: '13:10',
-          endTime: '15:00',
-          schedule: [{ dayOfWeek: 4, startTime: '13:10', endTime: '15:00', location: 'SF101' }],
-          capacity: 80,
-          enrolled: 72,
+          endTime: '16:00',
+          schedule: [
+            { dayOfWeek: 3, startTime: '13:10', endTime: '16:00', location: '主顧樓 PH302' },
+          ],
+          capacity: 55,
+          enrolled: 50,
         },
         {
           id: createId(schoolId, 'crs', 5),
           schoolId,
-          code: 'DEMO-5',
-          name: '體育',
-          instructor: '體育室',
+          code: 'GE2031',
+          name: '當代社會議題',
+          instructor: '林雅惠',
+          credits: 2,
+          semester: '114-2',
+          department: '通識教育中心',
+          description: '探討環境、科技倫理、多元文化等當代議題',
+          dayOfWeek: 4,
+          startTime: '13:10',
+          endTime: '15:00',
+          schedule: [
+            { dayOfWeek: 4, startTime: '13:10', endTime: '15:00', location: '至善樓 SF101' },
+          ],
+          capacity: 80,
+          enrolled: 72,
+        },
+        {
+          id: createId(schoolId, 'crs', 6),
+          schoolId,
+          code: 'CS4012',
+          name: '畢業專題(二)',
+          instructor: '張志勇',
+          credits: 3,
+          semester: '114-2',
+          department: '資訊工程學系',
+          description: '畢業專題實作與論文撰寫',
+          dayOfWeek: 5,
+          startTime: '09:10',
+          endTime: '12:00',
+          schedule: [
+            { dayOfWeek: 5, startTime: '09:10', endTime: '12:00', location: '主顧樓 PH305' },
+          ],
+          capacity: 30,
+          enrolled: 12,
+        },
+        {
+          id: createId(schoolId, 'crs', 7),
+          schoolId,
+          code: 'PE1006',
+          name: '體育 — 羽球',
+          instructor: '李明德',
           credits: 0,
           semester: '114-2',
+          department: '體育室',
+          description: '羽球基礎技術與比賽規則',
           dayOfWeek: 5,
-          startTime: '10:10',
-          endTime: '12:00',
-          schedule: [{ dayOfWeek: 5, startTime: '10:10', endTime: '12:00', location: 'ST' }],
+          startTime: '13:10',
+          endTime: '15:00',
+          schedule: [
+            { dayOfWeek: 5, startTime: '13:10', endTime: '15:00', location: '體育館 ST' },
+          ],
           capacity: 50,
           enrolled: 48,
         },
@@ -1196,12 +1315,133 @@ export function getDemoCourses(schoolId: string): Course[] {
 
 
 export function getDemoEvents(schoolId: string): ClubEvent[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
+
+  if (schoolId === 'tw-pu') {
+    return [
+      {
+        id: createId(schoolId, 'evt', 1),
+        schoolId,
+        title: '資訊學院 AI 實作工作坊',
+        description: '由資工系主辦，邀請業界講師實作 ChatGPT API 與 LangChain。自備筆電，提供免費午餐。地點：主顧樓 PH303 電腦教室。',
+        startsAt: getDateOffset(5),
+        endsAt: getDateOffset(5, { hours: 4 }),
+        location: '主顧樓 PH303',
+        capacity: 60,
+        registeredCount: 48,
+        category: 'workshop',
+        organizer: '資訊工程學系',
+        fee: 0,
+        tags: ['AI', '程式設計', '工作坊'],
+      },
+      {
+        id: createId(schoolId, 'evt', 2),
+        schoolId,
+        title: '靜宜 65 週年校慶園遊會',
+        description: '各系攤位、美食市集、樂團表演、校友回娘家。主舞台在伯鐸廣場，園遊會攤位沿至善樓前草坪。當天憑學生證免費兌換紀念品。',
+        startsAt: getDateOffset(24),
+        endsAt: getDateOffset(24, { hours: 8 }),
+        location: '伯鐸廣場 & 至善樓前草坪',
+        capacity: 3000,
+        registeredCount: 1850,
+        category: 'social',
+        organizer: '學務處課外活動組',
+        tags: ['校慶', '園遊會', '表演'],
+      },
+      {
+        id: createId(schoolId, 'evt', 3),
+        schoolId,
+        title: '企業徵才博覽會',
+        description: '超過 40 家企業進校徵才，含台積電、緯創、精誠資訊、永豐金等。攜帶履歷可現場面試。',
+        startsAt: getDateOffset(10),
+        endsAt: getDateOffset(10, { hours: 6 }),
+        location: '至善樓 1F 大廳',
+        capacity: 500,
+        registeredCount: 380,
+        category: 'career',
+        organizer: '職涯發展暨校友服務處',
+        tags: ['徵才', '職涯', '面試'],
+      },
+      {
+        id: createId(schoolId, 'evt', 4),
+        schoolId,
+        title: '社團聯合成果發表',
+        description: '熱音社、熱舞社、日研社、攝影社等 30+ 社團展演。開放自由入場，伯鐸廣場同步進行文創市集。',
+        startsAt: getDateOffset(14),
+        endsAt: getDateOffset(14, { hours: 5 }),
+        location: '伯鐸廣場',
+        capacity: 800,
+        registeredCount: 520,
+        category: 'arts',
+        organizer: '課外活動組',
+        tags: ['社團', '表演', '成果展'],
+      },
+      {
+        id: createId(schoolId, 'evt', 5),
+        schoolId,
+        title: '系際盃籃球賽決賽',
+        description: '資工系 vs 財金系！歡迎全校師生到場加油。冠軍隊伍將代表靜宜參加大專盃。',
+        startsAt: getDateOffset(7),
+        endsAt: getDateOffset(7, { hours: 2 }),
+        location: '體育館 ST',
+        capacity: 400,
+        registeredCount: 310,
+        category: 'sports',
+        organizer: '體育室',
+        tags: ['籃球', '系際盃', '比賽'],
+      },
+      {
+        id: createId(schoolId, 'evt', 6),
+        schoolId,
+        title: '國際文化週 — 異國美食節',
+        description: '來自 15 國的交換生帶來家鄉料理！含日本、韓國、越南、印尼、法國等攤位。每道料理 $50-80。',
+        startsAt: getDateOffset(20),
+        endsAt: getDateOffset(23),
+        location: '文興樓 WH 前庭',
+        capacity: 600,
+        registeredCount: 420,
+        category: 'arts',
+        organizer: '國際暨兩岸事務處',
+        tags: ['國際', '美食', '交流'],
+      },
+      {
+        id: createId(schoolId, 'evt', 7),
+        schoolId,
+        title: '蓋夏圖書館電影之夜',
+        description: '每月一次的電影放映活動。本月片單：《乘風破浪》。免費入場，座位 80 位先搶先贏。',
+        startsAt: getDateOffset(12),
+        endsAt: getDateOffset(12, { hours: 3 }),
+        location: '蓋夏圖書館 LB B1 多媒體室',
+        capacity: 80,
+        registeredCount: 65,
+        category: 'arts',
+        organizer: '蓋夏圖書館',
+        tags: ['電影', '藝文', '免費'],
+      },
+      {
+        id: createId(schoolId, 'evt', 8),
+        schoolId,
+        title: '校園路跑 — 靜宜綠色之旅',
+        description: '環校園 5K 路跑，途經靜宜後山生態步道。完賽者獲紀念衫乙件。報名費 $100（含保險）。',
+        startsAt: getDateOffset(30),
+        endsAt: getDateOffset(30, { hours: 3 }),
+        location: '校門口集合出發',
+        capacity: 300,
+        registeredCount: 185,
+        category: 'sports',
+        organizer: '體育室',
+        fee: 100,
+        tags: ['路跑', '運動', '生態'],
+      },
+    ];
+  }
+
   const baseEvents: ClubEvent[] = [
     {
       id: createId(schoolId, 'evt', 1),
       schoolId,
       title: '資工系學會迎新',
-      description: '歡迎新生加入資訊工程學系大家庭！準備了精彩活動、系隊介紹、學長姐經驗分享。',
+      description: '歡迎新生加入資訊工程學系大家庭！',
       startsAt: getDateOffset(5),
       endsAt: getDateOffset(5, { hours: 3 }),
       location: '學生活動中心',
@@ -1230,7 +1470,7 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
       id: createId(schoolId, 'evt', 3),
       schoolId,
       title: '企業參訪日',
-      description: '走訪台灣知名科技企業，與業界人士交流，了解職場環境。包含台積電、聯發科等公司。',
+      description: '走訪台灣知名科技企業，與業界人士交流，了解職場環境。',
       startsAt: getDateOffset(18),
       endsAt: getDateOffset(18, { hours: 8 }),
       location: '台中工業區',
@@ -1245,7 +1485,7 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
       id: createId(schoolId, 'evt', 4),
       schoolId,
       title: '校園路跑活動',
-      description: '2026年校園路跑大賽，全校師生踴躍參加。設有5公里、10公里兩組。',
+      description: '校園路跑大賽，全校師生踴躍參加。設有5公里、10公里兩組。',
       startsAt: getDateOffset(25),
       endsAt: getDateOffset(25, { hours: 2 }),
       location: '校園周邊',
@@ -1256,69 +1496,13 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
       fee: 100,
       tags: ['運動', '路跑', '健身'],
     },
-    {
-      id: createId(schoolId, 'evt', 5),
-      schoolId,
-      title: '社團聯合博覽會',
-      description: '校內50餘個社團齊聚展示，歡迎新同學探索興趣，找到屬於自己的社團。',
-      startsAt: getDateOffset(7),
-      endsAt: getDateOffset(7, { hours: 6 }),
-      location: '中興大學操場',
-      capacity: 1000,
-      registeredCount: 678,
-      category: 'social',
-      organizer: '學務處',
-      tags: ['社團', '招生', '博覽會'],
-    },
-    {
-      id: createId(schoolId, 'evt', 6),
-      schoolId,
-      title: '國際文化週',
-      description: '展示世界各地文化特色。各國學生表演、美食攤位、文化展示區。',
-      startsAt: getDateOffset(30),
-      endsAt: getDateOffset(34),
-      location: '學生活動中心',
-      capacity: 800,
-      registeredCount: 520,
-      category: 'arts',
-      organizer: '國際事務處',
-      tags: ['文化', '國際', '交流'],
-    },
-    {
-      id: createId(schoolId, 'evt', 7),
-      schoolId,
-      title: 'AI應用講座',
-      description: '深入淺出介紹人工智慧在各產業的應用。特邀Google及Meta工程師主講。',
-      startsAt: getDateOffset(14),
-      endsAt: getDateOffset(14, { hours: 2 }),
-      location: '惠蓀堂',
-      capacity: 300,
-      registeredCount: 256,
-      category: 'workshop',
-      organizer: '資訊工程學系',
-      tags: ['AI', '講座', '技術'],
-    },
-    {
-      id: createId(schoolId, 'evt', 8),
-      schoolId,
-      title: '校慶運動會',
-      description: '中興大學114年校慶運動會，各系隊激烈競爭，展現系隊風采。',
-      startsAt: getDateOffset(50),
-      endsAt: getDateOffset(51),
-      location: '校園操場',
-      capacity: 2000,
-      registeredCount: 1200,
-      category: 'sports',
-      organizer: '體育室',
-      tags: ['校慶', '運動會', '系隊'],
-    },
   ];
 
   if (schoolId === 'tw-nchu') {
     return baseEvents;
   }
 
-  return baseEvents.slice(0, 4).map((evt) => ({
+  return baseEvents.map((evt) => ({
     ...evt,
     id: evt.id.replace('tw-nchu', schoolId),
     schoolId,
@@ -1326,6 +1510,7 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
 }
 
 export function getDemoPois(schoolId: string): Poi[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   switch (schoolId) {
     case 'tw-nchu': {
       // NCHU 中興大學
@@ -2555,6 +2740,7 @@ export function getDemoPois(schoolId: string): Poi[] {
 }
 
 export function getDemoCafeterias(schoolId: string): Cafeteria[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   if (isProvidenceDiningSchoolId(schoolId)) {
     return getPuDiningCafeterias(schoolId);
   }
@@ -2780,6 +2966,7 @@ export function getDemoCafeterias(schoolId: string): Cafeteria[] {
 }
 
 export function getDemoMenuItems(schoolId: string): MenuItem[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   if (isProvidenceDiningSchoolId(schoolId)) {
     return getPuDiningMenuItems(schoolId);
   }
@@ -3414,6 +3601,7 @@ export function getDemoMenuItems(schoolId: string): MenuItem[] {
 }
 
 export function getDemoGroups(schoolId: string): Group[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const baseGroups: Group[] = [
     {
       id: createId(schoolId, 'grp', 1),
@@ -3494,6 +3682,7 @@ export function getDemoGroups(schoolId: string): Group[] {
 }
 
 export function getDemoGroupPosts(schoolId: string, groupId: string): GroupPost[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const postsByGroup: Record<string, GroupPost[]> = {
     '1': [
       {
@@ -3612,6 +3801,7 @@ export function getDemoGroupPosts(schoolId: string, groupId: string): GroupPost[
 }
 
 export function getDemoUsers(schoolId: string): User[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const baseUsers: User[] = [
     {
       id: createId(schoolId, 'user', 1),
@@ -3749,6 +3939,7 @@ export function getDemoUsers(schoolId: string): User[] {
 }
 
 export function getDemoBusRoutes(schoolId: string): BusRoute[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const schoolRoutes: Record<string, BusRoute[]> = {
     'tw-nchu': [
       {
@@ -4003,6 +4194,7 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
 }
 
 export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const baseBooks: LibraryBook[] = [
     {
       id: createId(schoolId, 'book', 1),
@@ -4013,7 +4205,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: 'MIT Press',
       publishYear: 2009,
       category: 'Computer Science',
-      location: '圖書館2樓CS區',
+      location: '蓋夏圖書館 2F 資訊科學區',
       available: 3,
       total: 5,
     },
@@ -4026,7 +4218,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: 'John Wiley & Sons',
       publishYear: 2012,
       category: 'Computer Science',
-      location: '圖書館2樓CS區',
+      location: '蓋夏圖書館 2F 資訊科學區',
       available: 2,
       total: 4,
     },
@@ -4039,7 +4231,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: 'Pearson',
       publishYear: 2010,
       category: 'Computer Science',
-      location: '圖書館2樓CS區',
+      location: '蓋夏圖書館 2F 資訊科學區',
       available: 1,
       total: 3,
     },
@@ -4052,7 +4244,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: 'Addison-Wesley',
       publishYear: 2018,
       category: 'Programming',
-      location: '圖書館2樓Programming區',
+      location: '蓋夏圖書館 2F 程式設計區',
       available: 2,
       total: 3,
     },
@@ -4065,7 +4257,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: "O'Reilly",
       publishYear: 2004,
       category: 'Programming',
-      location: '圖書館2樓Programming區',
+      location: '蓋夏圖書館 2F 程式設計區',
       available: 4,
       total: 4,
     },
@@ -4078,7 +4270,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: 'Prentice Hall',
       publishYear: 2008,
       category: 'Software Engineering',
-      location: '圖書館2樓Programming區',
+      location: '蓋夏圖書館 2F 程式設計區',
       available: 0,
       total: 2,
     },
@@ -4091,7 +4283,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: 'Addison-Wesley',
       publishYear: 1994,
       category: 'Software Engineering',
-      location: '圖書館2樓Programming區',
+      location: '蓋夏圖書館 2F 程式設計區',
       available: 1,
       total: 3,
     },
@@ -4104,7 +4296,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: "O'Reilly",
       publishYear: 2007,
       category: 'Web Development',
-      location: '圖書館3樓Web區',
+      location: '蓋夏圖書館 3F 資訊應用區',
       available: 2,
       total: 2,
     },
@@ -4117,7 +4309,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: 'Independently published',
       publishYear: 2017,
       category: 'Machine Learning',
-      location: '圖書館3樓AI區',
+      location: '蓋夏圖書館 3F AI 專區',
       available: 3,
       total: 3,
     },
@@ -4130,7 +4322,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
       publisher: 'MIT Press',
       publishYear: 2016,
       category: 'Machine Learning',
-      location: '圖書館3樓AI區',
+      location: '蓋夏圖書館 3F AI 專區',
       available: 1,
       total: 2,
     },
@@ -4148,6 +4340,7 @@ export function getDemoLibraryBooks(schoolId: string): LibraryBook[] {
 }
 
 export function getDemoNotifications(schoolId: string, userId: string): Notification[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const baseNotifications: Notification[] = [
     {
       id: createId(schoolId, 'notif', 1),
@@ -4234,6 +4427,7 @@ export function getDemoNotifications(schoolId: string, userId: string): Notifica
 }
 
 export function getDemoAssignments(schoolId: string, groupId: string): Assignment[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const groupNum = groupId.split('-').pop() || '1';
 
   const assignmentsByGroup: Record<string, Assignment[]> = {
@@ -4301,6 +4495,92 @@ export function getDemoAssignments(schoolId: string, groupId: string): Assignmen
 }
 
 export function getDemoLostFoundItems(schoolId: string): LostFoundItem[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
+  if (schoolId === 'tw-pu') {
+    return [
+      {
+        id: createId(schoolId, 'lf', 1),
+        schoolId,
+        type: 'lost' as const,
+        title: 'AirPods Pro',
+        description: '黑色 AirPods Pro，遺失於蓋夏圖書館 2F 自習區。如撿獲請聯繫。',
+        category: 'electronics',
+        location: '蓋夏圖書館 2F',
+        date: getDateOffset(-5),
+        status: 'open' as const,
+        reporterId: createId(schoolId, 'user', 2),
+        createdAt: getDateOffset(-5),
+      },
+      {
+        id: createId(schoolId, 'lf', 2),
+        schoolId,
+        type: 'lost' as const,
+        title: '學生證',
+        description: '靜宜大學學生證，遺失於主顧樓 PH 3F 走廊',
+        category: 'cards',
+        location: '主顧樓 PH 3F',
+        date: getDateOffset(-8),
+        status: 'open' as const,
+        reporterId: createId(schoolId, 'user', 2),
+        createdAt: getDateOffset(-8),
+      },
+      {
+        id: createId(schoolId, 'lf', 3),
+        schoolId,
+        type: 'found' as const,
+        title: '棕色外套',
+        description: '在至善樓 1F 大廳拾獲棕色冬季外套，已送至學務處失物招領。',
+        category: 'clothing',
+        location: '至善樓 SF 1F',
+        date: getDateOffset(-3),
+        status: 'open' as const,
+        reporterId: createId(schoolId, 'user', 8),
+        createdAt: getDateOffset(-3),
+      },
+      {
+        id: createId(schoolId, 'lf', 4),
+        schoolId,
+        type: 'lost' as const,
+        title: '鑰匙組',
+        description: '鑰匙組（含宿舍鑰匙），遺失於宜園餐廳附近。',
+        category: 'keys',
+        location: '宜園餐廳',
+        date: getDateOffset(-2),
+        status: 'open' as const,
+        reporterId: createId(schoolId, 'user', 4),
+        createdAt: getDateOffset(-2),
+      },
+      {
+        id: createId(schoolId, 'lf', 5),
+        schoolId,
+        type: 'found' as const,
+        title: '保溫水瓶',
+        description: '紅色保溫水瓶，於任垣樓 AK 2F 教室拾獲，內有名字標籤。',
+        category: 'accessories',
+        location: '任垣樓 AK 2F',
+        date: getDateOffset(-1),
+        status: 'open' as const,
+        reporterId: createId(schoolId, 'user', 8),
+        createdAt: getDateOffset(-1),
+      },
+      {
+        id: createId(schoolId, 'lf', 6),
+        schoolId,
+        type: 'lost' as const,
+        title: '資料結構教科書',
+        description: '「資料結構 — 使用 C++」教科書，於主顧樓 PH217 教室遺失。',
+        category: 'books',
+        location: '主顧樓 PH217',
+        date: getDateOffset(-4),
+        status: 'claimed' as const,
+        reporterId: createId(schoolId, 'user', 3),
+        claimedBy: createId(schoolId, 'user', 3),
+        claimedAt: getDateOffset(-1),
+        createdAt: getDateOffset(-4),
+      },
+    ];
+  }
+
   const baseItems: LostFoundItem[] = [
     {
       id: createId(schoolId, 'lf', 1),
@@ -4320,9 +4600,9 @@ export function getDemoLostFoundItems(schoolId: string): LostFoundItem[] {
       schoolId,
       type: 'lost',
       title: '學生證',
-      description: '中興大學學生證，姓名：林佳蓉，證號S110234567',
+      description: '學生證遺失',
       category: 'cards',
-      location: '資訊科學大樓',
+      location: '教學大樓',
       date: getDateOffset(-8),
       status: 'open',
       reporterId: createId(schoolId, 'user', 2),
@@ -4348,39 +4628,11 @@ export function getDemoLostFoundItems(schoolId: string): LostFoundItem[] {
       title: '鑰匙組',
       description: '鑰匙組（含房間、宿舍鑰匙），遺失於學餐附近。',
       category: 'keys',
-      location: '第一學生餐廳',
+      location: '學生餐廳',
       date: getDateOffset(-2),
       status: 'open',
       reporterId: createId(schoolId, 'user', 4),
       createdAt: getDateOffset(-2),
-    },
-    {
-      id: createId(schoolId, 'lf', 5),
-      schoolId,
-      type: 'found',
-      title: '水瓶',
-      description: '紅色保溫水瓶，於資訊大樓發現，內有名字標籤。',
-      category: 'accessories',
-      location: '資訊科學大樓',
-      date: getDateOffset(-1),
-      status: 'open',
-      reporterId: createId(schoolId, 'user', 8),
-      createdAt: getDateOffset(-1),
-    },
-    {
-      id: createId(schoolId, 'lf', 6),
-      schoolId,
-      type: 'lost',
-      title: '程式設計教科書',
-      description: '「Introduction to C Programming」教科書，於課堂上遺失。',
-      category: 'books',
-      location: '資訊科學大樓201教室',
-      date: getDateOffset(-4),
-      status: 'claimed',
-      reporterId: createId(schoolId, 'user', 3),
-      claimedBy: createId(schoolId, 'user', 3),
-      claimedAt: getDateOffset(-1),
-      createdAt: getDateOffset(-4),
     },
   ];
 
@@ -4388,7 +4640,7 @@ export function getDemoLostFoundItems(schoolId: string): LostFoundItem[] {
     return baseItems;
   }
 
-  return baseItems.slice(0, 4).map((item) => ({
+  return baseItems.map((item) => ({
     ...item,
     id: item.id.replace('tw-nchu', schoolId),
     schoolId,
@@ -4396,6 +4648,7 @@ export function getDemoLostFoundItems(schoolId: string): LostFoundItem[] {
 }
 
 export function getDemoCalendarEvents(schoolId: string, userId: string): CalendarEvent[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const baseEvents: CalendarEvent[] = [
     {
       id: createId(schoolId, 'cal', 1),
@@ -4522,6 +4775,7 @@ export function getDemoCalendarEvents(schoolId: string, userId: string): Calenda
 }
 
 export function getDemoConversations(schoolId: string, userId: string): Conversation[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const baseConversations: Conversation[] = [
     {
       id: createId(schoolId, 'conv', 1),
@@ -4588,6 +4842,7 @@ export function getDemoConversations(schoolId: string, userId: string): Conversa
 // ===== getDemoMessages =====
 
 export function getDemoMessages(conversationId: string, schoolId: string = 'tw-nchu'): Message[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const convNumber = parseInt(conversationId.split('-').pop() || '0');
 
   let messages: Message[] = [];
@@ -4800,6 +5055,7 @@ export function getDemoMessages(conversationId: string, schoolId: string = 'tw-n
 // ===== getDemoGroupMembers =====
 
 export function getDemoGroupMembers(groupId: string, schoolId: string = 'tw-nchu'): GroupMember[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const members: GroupMember[] = [
     {
       id: createId(schoolId, 'gm', 1),
@@ -4879,6 +5135,7 @@ export function getDemoGroupMembers(groupId: string, schoolId: string = 'tw-nchu
 // ===== getDemoComments =====
 
 export function getDemoComments(postId: string, schoolId: string = 'tw-nchu'): Comment[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const comments: Comment[] = [
     {
       id: createId(schoolId, 'comment', 1),
@@ -4936,6 +5193,7 @@ export function getDemoComments(postId: string, schoolId: string = 'tw-nchu'): C
 // ===== getDemoSubmissions =====
 
 export function getDemoSubmissions(assignmentId: string, schoolId: string = 'tw-nchu'): Submission[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const assignNumber = parseInt(assignmentId.split('-').pop() || '0');
   const submissions: Submission[] = [];
 
@@ -4984,6 +5242,7 @@ export function getDemoSubmissions(assignmentId: string, schoolId: string = 'tw-
 // ===== getDemoLibraryLoans =====
 
 export function getDemoLibraryLoans(userId: string, schoolId: string = 'tw-nchu'): LibraryLoan[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const loans: LibraryLoan[] = [
     {
       id: createId(schoolId, 'loan', 1),
@@ -5087,13 +5346,14 @@ export function getDemoLibraryLoans(userId: string, schoolId: string = 'tw-nchu'
 // ===== getDemoLibrarySeats =====
 
 export function getDemoLibrarySeats(schoolId: string = 'tw-nchu'): LibrarySeat[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const seats: LibrarySeat[] = [];
 
-  // 自習區A (1F) - 8 seats
+  // 蓋夏圖書館 1F 開放自習區 - 8 seats
   for (let i = 1; i <= 8; i++) {
     seats.push({
       id: createId(schoolId, 'seat', i),
-      zone: '自習區A',
+      zone: '蓋夏 1F 開放自習區',
       seatNumber: `A${i}`,
       floor: '1F',
       hasOutlet: i % 2 === 0,
@@ -5103,11 +5363,11 @@ export function getDemoLibrarySeats(schoolId: string = 'tw-nchu'): LibrarySeat[]
     });
   }
 
-  // 安靜閱讀區 (2F) - 6 seats
+  // 蓋夏圖書館 2F 安靜閱讀區 - 6 seats
   for (let i = 9; i <= 14; i++) {
     seats.push({
       id: createId(schoolId, 'seat', i),
-      zone: '安靜閱讀區',
+      zone: '蓋夏 2F 安靜閱讀區',
       seatNumber: `B${i - 8}`,
       floor: '2F',
       hasOutlet: false,
@@ -5119,13 +5379,13 @@ export function getDemoLibrarySeats(schoolId: string = 'tw-nchu'): LibrarySeat[]
     });
   }
 
-  // 電腦區 (3F) - 6 seats
+  // 蓋夏圖書館 B1 多媒體區 - 6 seats
   for (let i = 15; i <= 20; i++) {
     seats.push({
       id: createId(schoolId, 'seat', i),
-      zone: '電腦區',
+      zone: '蓋夏 B1 多媒體區',
       seatNumber: `C${i - 14}`,
-      floor: '3F',
+      floor: 'B1',
       hasOutlet: true,
       isQuietZone: false,
       status: i % 2 === 0 ? 'occupied' : 'available',
@@ -5139,6 +5399,7 @@ export function getDemoLibrarySeats(schoolId: string = 'tw-nchu'): LibrarySeat[]
 // ===== getDemoAchievements =====
 
 export function getDemoAchievements(userId: string, schoolId: string = 'tw-nchu'): UserAchievement[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const achievements: UserAchievement[] = [
     {
       id: createId(schoolId, 'ach', 1),
@@ -5283,6 +5544,7 @@ export function getDemoAchievements(userId: string, schoolId: string = 'tw-nchu'
 // ===== Course Modules =====
 
 export function getDemoCourseModules(schoolId: string, courseSpaceId?: string): CourseModule[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const courseModulesByGroup: Record<string, CourseModule[]> = {
     '1': [
       {
@@ -5516,6 +5778,7 @@ export function getDemoCourseMaterials(courseSpaceId: string, moduleId?: string)
 // ===== Quizzes =====
 
 export function getDemoQuizzes(userId: string, courseSpaceId?: string, schoolId = 'tw-nchu'): Quiz[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const quizzes: Quiz[] = [
     {
       id: createId(schoolId, 'quiz', 1),
@@ -5635,6 +5898,7 @@ export function getDemoQuizzes(userId: string, courseSpaceId?: string, schoolId 
 // ===== Attendance Sessions =====
 
 export function getDemoAttendanceSessions(userId: string, courseSpaceId?: string, schoolId = 'tw-nchu'): AttendanceSession[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const sessions: AttendanceSession[] = [
     {
       id: createId(schoolId, 'ses', 1),
@@ -5729,6 +5993,7 @@ export function getDemoAttendanceSessions(userId: string, courseSpaceId?: string
 // ===== Inbox Tasks =====
 
 export function getDemoInboxTasks(userId: string, schoolId = 'tw-nchu'): InboxTask[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const tasks: InboxTask[] = [
     {
       id: createId(schoolId, 'task', 1),
@@ -5847,6 +6112,7 @@ export function getDemoInboxTasks(userId: string, schoolId = 'tw-nchu'): InboxTa
 // ===== Enrollments =====
 
 export function getDemoEnrollments(userId: string, semester = '114-2', schoolId = 'tw-nchu'): Enrollment[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const enrollments: Enrollment[] = [
     {
       id: createId(schoolId, 'enr', 1),
@@ -5910,7 +6176,7 @@ export function getDemoEnrollments(userId: string, semester = '114-2', schoolId 
 // ===== Grades =====
 
 export function getDemoGrades(userId: string, semester = '113-1', schoolId = 'tw-pu'): Grade[] {
-  // 通用示範成績 — 登入後由 PUAdapter → puScraper 抓取真實個人成績
+  schoolId = normalizeDemoSchoolId(schoolId);
   if (semester === '114-2') {
     return [];
   }
@@ -6004,6 +6270,7 @@ export function getDemoGPA(userId: string, _schoolId = 'tw-pu'): { gpa: number; 
 // ===== Dormitory =====
 
 export function getDemoDormitoryInfo(userId: string, schoolId = 'tw-pu'): DormitoryInfo | null {
+  schoolId = normalizeDemoSchoolId(schoolId);
   return {
     id: createId(schoolId, 'dorm', 1),
     building: '宜真樓',
@@ -6018,6 +6285,7 @@ export function getDemoDormitoryInfo(userId: string, schoolId = 'tw-pu'): Dormit
 }
 
 export function getDemoRepairRequests(userId: string, schoolId = 'tw-pu'): RepairRequest[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const requests: RepairRequest[] = [
     {
       id: createId(schoolId, 'repair', 1),
@@ -6064,6 +6332,7 @@ export function getDemoRepairRequests(userId: string, schoolId = 'tw-pu'): Repai
 }
 
 export function getDemoDormPackages(userId: string, schoolId = 'tw-nchu'): DormPackage[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const packages: DormPackage[] = [
     {
       id: createId(schoolId, 'pkg', 1),
@@ -6104,6 +6373,7 @@ export function getDemoDormPackages(userId: string, schoolId = 'tw-nchu'): DormP
 }
 
 export function getDemoDormAnnouncements(schoolId = 'tw-nchu'): DormAnnouncement[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const announcements: DormAnnouncement[] = [
     {
       id: createId(schoolId, 'annc', 1),
@@ -6149,6 +6419,7 @@ export function getDemoDormAnnouncements(schoolId = 'tw-nchu'): DormAnnouncement
 }
 
 export function getDemoWashingMachines(schoolId = 'tw-nchu'): WashingMachine[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const machines: WashingMachine[] = [
     // 男二舍1F Washers
     {
@@ -6241,6 +6512,7 @@ export function getDemoWashingMachines(schoolId = 'tw-nchu'): WashingMachine[] {
 }
 
 export function getDemoPrinters(schoolId = 'tw-nchu'): Printer[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const printers: Printer[] = [
     {
       id: createId(schoolId, 'printer', 1),
@@ -6295,6 +6567,7 @@ export function getDemoPrinters(schoolId = 'tw-nchu'): Printer[] {
 }
 
 export function getDemoPrintJobs(userId: string, schoolId = 'tw-nchu'): PrintJob[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const jobs: PrintJob[] = [
     {
       id: createId(schoolId, 'job', 1),
@@ -6346,6 +6619,7 @@ export function getDemoPrintJobs(userId: string, schoolId = 'tw-nchu'): PrintJob
 // ===== Health Center =====
 
 export function getDemoHealthAppointments(userId: string, schoolId = 'tw-nchu'): HealthAppointment[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const appointments: HealthAppointment[] = [
     {
       id: createId(schoolId, 'health', 1),
@@ -6388,6 +6662,7 @@ export function getDemoHealthAppointments(userId: string, schoolId = 'tw-nchu'):
 }
 
 export function getDemoHealthTimeSlots(department: string, date: string, schoolId = 'tw-nchu'): HealthTimeSlot[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const slots: HealthTimeSlot[] = [];
   const hours = [9, 10, 11, 12, 14, 15, 16];
   const minutes = [0, 30];
@@ -6414,6 +6689,7 @@ export function getDemoHealthTimeSlots(department: string, date: string, schoolI
 }
 
 export function getDemoHealthRecords(userId: string, schoolId = 'tw-nchu'): HealthRecord[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const records: HealthRecord[] = [
     {
       id: createId(schoolId, 'record', 1),
@@ -6457,6 +6733,7 @@ export function getDemoHealthRecords(userId: string, schoolId = 'tw-nchu'): Heal
 // ===== Cafeteria & Orders =====
 
 export function getDemoOrders(userId: string, schoolId = 'tw-nchu'): Order[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const orders: Order[] = [
     {
       id: createId(schoolId, 'order', 1),
@@ -6508,6 +6785,7 @@ export function getDemoOrders(userId: string, schoolId = 'tw-nchu'): Order[] {
 }
 
 export function getDemoTransactions(userId: string, schoolId = 'tw-nchu'): Transaction[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const transactions: Transaction[] = [
     {
       id: createId(schoolId, 'txn', 1),
@@ -6573,6 +6851,7 @@ export function getDemoTransactions(userId: string, schoolId = 'tw-nchu'): Trans
 }
 
 export function getDemoCourseGradebook(schoolId = 'tw-nchu'): CourseGradebookData {
+  schoolId = normalizeDemoSchoolId(schoolId);
   const assignments: CourseGradebookAssignment[] = [
     {
       id: createId(schoolId, 'assignment', 1),
