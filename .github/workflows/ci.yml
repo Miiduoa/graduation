@@ -277,10 +277,14 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Deploy to Firebase
-        if: ${{ secrets.FIREBASE_TOKEN != '' }}
-        run: pnpm -w firebase deploy --only functions
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "Skipping Firebase deploy: FIREBASE_TOKEN is not set."
+            exit 0
+          fi
+          pnpm -w firebase deploy --only functions
 
   summary:
     name: CI Summary
