@@ -529,28 +529,41 @@ async function tcLoginDirectCAS(
     console.log("[TronClass] POST status:", loginResult.status);
     console.log("[TronClass] Landed on:", loginResult.url);
 
-    // Step 3: 驗證登入 — 呼叫 /api/users/me
-    console.log("[TronClass] Direct CAS Step 3: verifying session via /api/users/me…");
-    const profile = await tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/users/me`);
-
-    if (!profile || !profile.id) {
-      if (
-        loginResult.body.includes("無效的使用者名稱或密碼") ||
-        loginResult.body.includes("Invalid username or password") ||
-        loginResult.body.includes("Invalid credentials") ||
-        loginResult.body.includes("帳號或密碼")
-      ) {
-        return { success: false, session: null, error: "TronClass 帳號或密碼錯誤" };
-      }
-      return { success: false, session: null, error: "TronClass 登入失敗，無法取得使用者資料" };
+    // Step 3: 驗證登入 — 先檢查帳密是否錯誤
+    if (
+      loginResult.body.includes("無效的使用者名稱或密碼") ||
+      loginResult.body.includes("Invalid username or password") ||
+      loginResult.body.includes("Invalid credentials") ||
+      loginResult.body.includes("帳號或密碼")
+    ) {
+      return { success: false, session: null, error: "TronClass 帳號或密碼錯誤" };
     }
 
-    _tcUserId = profile.id;
-    console.log("[TronClass] Login success! User:", profile.name, "ID:", profile.id);
-    return {
-      success: true,
-      session: { loggedIn: true, userId: profile.id, userName: profile.name },
-    };
+    // Step 4: 驗證 session — 用 /api/profile（玩課雲沒有 /api/users/me）
+    console.log("[TronClass] Direct CAS Step 4: verifying session via /api/profile…");
+    const profile = await tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/profile`);
+
+    if (profile?.id) {
+      _tcUserId = profile.id;
+      console.log("[TronClass] Login success! User:", profile.name, "ID:", profile.id);
+      return {
+        success: true,
+        session: { loggedIn: true, userId: profile.id, userName: profile.name },
+      };
+    }
+
+    // /api/profile 也失敗的話，嘗試 /api/my-departments 確認是否有 session
+    console.log("[TronClass] /api/profile failed, trying /api/my-departments…");
+    const depts = await tcFetchJSON<{ departments?: unknown[] }>(`${TC_BASE}/api/my-departments`);
+    if (depts?.departments) {
+      console.log("[TronClass] Login success (verified via my-departments)!");
+      return {
+        success: true,
+        session: { loggedIn: true, userId: null, userName: null },
+      };
+    }
+
+    return { success: false, session: null, error: "TronClass 登入失敗，無法取得使用者資料" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "連線失敗";
     console.warn("[TronClass] Direct CAS login error:", err);
@@ -717,7 +730,7 @@ async function tcFetchAllPages<T>(
   return allItems;
 }
 
-/** 取得已選課程清單 */
+/** 取得已選課程清單 — 使用 POST /api/my-courses（玩課雲版本） */
 export async function tcFetchCourses(
   status: "ongoing" | "ended" | "upcoming" = "ongoing"
 ): Promise<TCCourse[]> {
@@ -726,59 +739,88 @@ export async function tcFetchCourses(
     return await fetchTronClassBackend<TCCourse[]>("courses", { status });
   }
 
-  const userId = await ensureUserId();
-  if (!userId) {
-    console.warn("[TronClass] No userId, cannot fetch courses");
-    return [];
+  // 玩課雲用 POST /api/my-courses，不是 GET /api/users/{id}/courses
+  console.log("[TronClass] Fetching courses via POST /api/my-courses…");
+  const allCourses: TCCourse[] = [];
+  let page = 1;
+  const pageSize = 50;
+
+  while (true) {
+    const result = await tcFetch(`${TC_BASE}/api/my-courses`, {
+      method: "POST",
+      body: JSON.stringify({
+        conditions: { status: [status === "upcoming" ? "notStarted" : status] },
+        page,
+        page_size: pageSize,
+      }),
+      contentType: "application/json",
+      accept: "application/json",
+    });
+
+    if (result.status !== 200) {
+      console.warn("[TronClass] /api/my-courses returned:", result.status);
+      break;
+    }
+
+    let data: {
+      courses?: Array<{
+        id: number;
+        name: string;
+        course_code?: string;
+        department?: { id: number; name: string };
+        instructors?: Array<{ id: number; name: string; avatar_big_url?: string }>;
+        credit?: string | number;
+        semester?: { code: string; id: number; name: string };
+        klass?: { id: number; name: string };
+        grade?: { id: number; name: string };
+        course_outline?: string;
+        start_date?: string;
+        end_date?: string;
+        status?: string;
+        role?: string;
+        course_attributes?: { student_count?: number };
+        classroom_schedule?: unknown;
+      }>;
+      paging?: { pages?: number };
+    };
+    try {
+      data = JSON.parse(result.body);
+    } catch {
+      console.warn("[TronClass] /api/my-courses JSON parse failed");
+      break;
+    }
+
+    const courses = data.courses ?? [];
+    if (courses.length === 0) break;
+
+    for (const c of courses) {
+      allCourses.push({
+        id: c.id,
+        name: c.name,
+        course_code: c.course_code ?? "",
+        department: c.department ?? null,
+        instructors: c.instructors ?? [],
+        credit: typeof c.credit === "string" ? parseFloat(c.credit) || null : c.credit ?? null,
+        semester: c.semester ?? null,
+        klass: c.klass ?? null,
+        grade: c.grade ?? null,
+        course_outline: c.course_outline ?? null,
+        start_date: c.start_date ?? null,
+        end_date: c.end_date ?? null,
+        status: c.status ?? status,
+        role: c.role ?? "student",
+        student_count: c.course_attributes?.student_count ?? 0,
+        classroom_schedule: c.classroom_schedule ?? null,
+      });
+    }
+
+    const totalPages = data.paging?.pages ?? 1;
+    if (page >= totalPages) break;
+    page++;
   }
 
-  const conditions = JSON.stringify({ status: [status] });
-  type RawCourse = {
-    id: number;
-    name: string;
-    course_code?: string;
-    department?: { id: number; name: string };
-    teachers?: Array<{ id: number; name: string; avatar_url?: string }>;
-    instructors?: Array<{ id: number; name: string; avatar_big_url?: string }>;
-    credit?: number;
-    semester?: { code: string; id: number; name: string };
-    klass?: { id: number; name: string };
-    grade?: { id: number; name: string };
-    course_outline?: string;
-    start_date?: string;
-    end_date?: string;
-    status?: string;
-    role?: string;
-    cover_image_url?: string;
-    student_count?: number;
-    classroom_schedule?: unknown;
-  };
-
-  const courses = await tcFetchAllPages<RawCourse>(
-    `api/users/${userId}/courses`,
-    "courses",
-    { conditions, fields: "id,name,course_code,department(id,name),teachers(id,name,avatar_url),cover_image_url,student_count,status,role" },
-    50,
-  );
-
-  return courses.map((c): TCCourse => ({
-    id: c.id,
-    name: c.name,
-    course_code: c.course_code ?? "",
-    department: c.department ?? null,
-    instructors: c.instructors ?? c.teachers ?? [],
-    credit: c.credit ?? null,
-    semester: c.semester ?? null,
-    klass: c.klass ?? null,
-    grade: c.grade ?? null,
-    course_outline: c.course_outline ?? null,
-    start_date: c.start_date ?? null,
-    end_date: c.end_date ?? null,
-    status: c.status ?? status,
-    role: c.role ?? "student",
-    student_count: c.student_count ?? 0,
-    classroom_schedule: c.classroom_schedule ?? null,
-  }));
+  console.log(`[TronClass] Fetched ${allCourses.length} courses`);
+  return allCourses;
 }
 
 /** 取得課程的模組（週次/單元）*/
@@ -905,19 +947,37 @@ export async function tcFetchGrades(): Promise<TCGradeItem[]> {
   return [];
 }
 
-/** 取得使用者 Profile — 注意：/api/users/{id} endpoint 已停用 (403) */
+/** 取得使用者 Profile — 使用 /api/profile（玩課雲版本） */
 export async function tcFetchProfile(): Promise<TCUserProfile | null> {
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
     return await fetchTronClassBackend<TCUserProfile>("profile");
   }
 
-  const userId = await ensureUserId();
-  if (!userId) return null;
+  // 直連模式：用 /api/profile（玩課雲沒有 /api/users/me）
+  const data = await tcFetchJSON<{
+    id?: number;
+    name?: string;
+    user_no?: string;
+    email?: string;
+    avatar_big_url?: string;
+    role?: string;
+    login_name?: string;
+  }>(`${TC_BASE}/api/profile`);
 
-  // /api/users/{id} endpoint 已停用 (403)，只能回傳基本資訊
-  console.warn("[TronClass] /api/users/{id} endpoint is unavailable (403), returning basic profile");
-  return { id: userId, name: "", login_name: "", email: null, avatar_url: null, role: "student" };
+  if (data?.id) {
+    _tcUserId = data.id;
+    return {
+      id: data.id,
+      name: data.name ?? "",
+      login_name: data.login_name ?? data.user_no ?? "",
+      email: data.email ?? null,
+      avatar_url: data.avatar_big_url ?? null,
+      role: data.role ?? "student",
+    };
+  }
+
+  return null;
 }
 
 /** 取得待辦事項（即將到期的作業/測驗） */
