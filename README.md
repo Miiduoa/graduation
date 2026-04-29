@@ -12,7 +12,7 @@
 </p>
 
 > **官方倉庫：** [github.com/Miiduoa/graduation](https://github.com/Miiduoa/graduation)  
-> 本 README 依據 **2026-04-26** 對目前 repo 的實際檔案、workspace 設定、`package.json`、GitHub workflow、env 範本與登入畫面進行盤點整理。若其他文件與此處衝突，請先以 **本 README 與程式碼本身** 為準。
+> 本 README 依據 **2026-04-29** 對目前 repo 的實際檔案、workspace 設定、`package.json`、GitHub workflow、env 範本、登入畫面、runtime 設定與測試配置進行盤點整理。若其他文件與此處衝突，請先以 **本 README 與程式碼本身** 為準。
 
 ## 快速連結
 
@@ -25,6 +25,20 @@
 | 安全說明       | [`docs/SECURITY.md`](docs/SECURITY.md)                                                           |
 | 架構邊界       | [`docs/architecture/firebase-data-boundaries.md`](docs/architecture/firebase-data-boundaries.md) |
 | 法務文件       | [`docs/legal/`](docs/legal/)                                                                     |
+
+## 本次盤點範圍（2026-04-29）
+
+這次 README 更新不是只改日期，而是重新對照下列來源後整理：
+
+- Root workspace：`package.json`、`pnpm-workspace.yaml`、`pnpm-lock.yaml`、`tsconfig.json`、ESLint / Prettier 設定
+- Mobile：`apps/mobile/package.json`、`App.tsx`、`app.config.ts`、`src/config/runtime.ts`、登入與資料同步服務、測試目錄、Maestro flows
+- Web：`apps/web/package.json`、`src/app/` routes、`src/lib/` Firebase / SSO / navigation helper、PWA manifest / service worker
+- Backend：`backend/functions/package.json`、`index.js` 匯出、PU / TronClass scraper、SSO secret/config helper、security validation、rules 測試
+- Shared：`packages/shared/src/` 的型別、學校目錄、PU auth contract、release 設定
+- GitHub：`.github/workflows/` 內 5 條 workflow 的觸發條件、測試與 build gate
+- 文件：`docs/`、`apps/web/README.md`、各 `.env.example`
+
+本 README 的定位是「目前 repo 的接手入口」。`docs/API.md`、`docs/RELEASE.md`、`apps/mobile/DEMO.md` 等文件仍有參考價值，但若內容與目前程式碼或本 README 不一致，請優先回到程式碼與本 README 判斷。
 
 ## 這個專案現在是什麼
 
@@ -45,8 +59,9 @@
 - Firebase Auth / Firestore / Functions / Rules
 - GitHub CI、EAS Build、Preview Update、Maestro E2E
 - 多個校園服務面向：課務、校園、訊息、支付、圖書館、交通、AI、管理端
+- 一套已開始收斂的文件與 release / security / legal 支援面
 
-## 目前最重要的 5 個事實
+## 目前最重要的 7 個事實
 
 ### 1. 產品入口已收斂成 PU-only
 
@@ -112,7 +127,29 @@ Firestore / Storage security rules 測試仍是 repo 內可手動執行的檢查
 - `backend/functions/.env.example`
 - `backend/ai-server/.env.example`
 
-## 專案快照（2026-04-26 盤點）
+### 6. Web 端已是產品入口，不是附屬展示頁
+
+`apps/web` 已納入 workspace、CI、測試與 build gate。它目前包含：
+
+- PU 學號登入頁
+- school-aware navigation / page context
+- 公告、地圖、餐廳、圖書館、群組、課表、成績、搜尋、設定等頁面
+- PWA manifest、service worker、offline / update / install banner
+- Firebase helper 與 mock fallback
+
+所以 Web 端應被視為正式產品的一部分，而不是可忽略的 demo shell。
+
+### 7. Preview / production build 比本機 dev 嚴格很多
+
+本機可以靠 mock 或 hybrid fallback 跑起來，但 `apps/mobile/app.config.ts` 對 `preview` / `production` 會強制檢查 EAS、Firebase、legal URL、error reporting、Google Maps、released school、deep link 與 build number。
+
+換句話說：
+
+- `pnpm dev:mobile` 能跑，不代表 EAS preview 能送出
+- `pnpm --filter web build` 能過，不代表 mobile release env 已完整
+- release 前必須先檢查 GitHub secrets、EAS profile、Firebase project 與 legal URL
+
+## 專案快照（2026-04-29 盤點）
 
 下列數字來自 repo 內實際檔案與 `backend/functions/index.js` 的匯出盤點，之後若功能再增減，請以當下程式碼為準。
 
@@ -124,8 +161,10 @@ Firestore / Storage security rules 測試仍是 repo 內可手動執行的檢查
 | 測試檔              | Mobile `16`、Web `5`、Backend `4`（其中 Functions `3`、Rules `1`）                                  |
 | GitHub workflow     | `5` 個：CI、Release、EAS Build、Preview Deploy、Maestro E2E                                         |
 | E2E flow            | `10` 個 Maestro flow                                                                                |
+| Shared school list  | `24` 筆學校資料，其中目前產品入口收斂到 `pu`                                                        |
+| 文件檔              | `docs/` 內 `13` 個文件，含架構、API、release、安全與 legal                                          |
 | Repo utility script | 根層 `3` 個：`bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`                         |
-| AI server           | `backend/ai-server/` 一整套 Python service 與 self-training pipeline                                |
+| AI server           | `backend/ai-server/` 約 `27` 個檔案，含 Python service、RAG、self-training 與 cloud deploy 設定     |
 
 ## Monorepo 結構
 
@@ -172,6 +211,26 @@ Firestore / Storage security rules 測試仍是 repo 內可手動執行的檢查
 | Tooling           | ESLint 9、Prettier 3、Jest、Vitest、Maestro、EAS                                              |
 | AI server         | Python service，provider 可選 `ollama` / `Together` / `Groq` 類相容端點                       |
 
+## Workspace 對照表
+
+| Workspace / 區域    | 主要語言         | 入口與重點檔案                                                                                 | 常用指令                                     |
+| ------------------- | ---------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| root                | TS / JS tooling  | `package.json`、`pnpm-workspace.yaml`、`eslint.config.mjs`、`scripts/`                         | `pnpm lint`、`pnpm typecheck`、`pnpm format` |
+| `apps/mobile`       | TypeScript / TSX | `App.tsx`、`app.config.ts`、`src/config/runtime.ts`、`src/screens/`、`src/services/`           | `pnpm --filter mobile start/test/typecheck`  |
+| `apps/web`          | TypeScript / TSX | `src/app/`、`src/components/`、`src/lib/firebase.ts`、`src/lib/sso.ts`、`public/manifest.json` | `pnpm --filter web dev/test/build`           |
+| `backend/functions` | JavaScript       | `index.js`、`authz.js`、`securityUtils.js`、`puScraper.js`、`tronClassScraper.js`              | `pnpm --filter functions serve/test/lint`    |
+| `backend/ai-server` | Python           | `server.py`、`llm_client.py`、`rag/`、`training/`、`self_training/`、`run.sh`                  | `pnpm dev:ai`、`pnpm ai:prepare/train/eval`  |
+| `backend/firestore` | Firebase rules   | `firestore.rules`、`firestore.indexes.json`                                                    | `pnpm test:rules`                            |
+| `backend/storage`   | Firebase rules   | `storage.rules`                                                                                | `pnpm test:rules`                            |
+| `packages/shared`   | TypeScript       | `src/index.ts`、`src/schools.ts`、`src/puAuth.ts`、`src/release.ts`                            | `pnpm --filter @campus/shared typecheck`     |
+
+幾個維護上要注意的點：
+
+- Root `typecheck` 目前包含 mobile / web / shared，沒有對 `backend/functions` 做 TypeScript 檢查，因為 Functions 目前是 JavaScript。
+- Root `dev` 目前等同 `dev:web`，不是同時啟動 mobile、web、functions 與 AI server。
+- `backend/*` 也被納入 pnpm workspace，所以 `backend/functions` 的套件管理仍應走 pnpm，而不是在子目錄混用 npm lockfile。
+- `backend/ai-server` 是 Python 服務，雖然在 workspace 範圍內，但依賴安裝與執行主要走 `run.sh` / `requirements*.txt`。
+
 ## 現在產品的主要功能面
 
 ### Mobile
@@ -208,6 +267,15 @@ Firestore / Storage security rules 測試仍是 repo 內可手動執行的檢查
 - 推播通知：`src/services/notifications.ts`
 - 效能與錯誤回報：`src/services/performance.ts`、`src/services/errorReporting.ts`
 - iOS / Android widget：`ios-widget/`、`android-widget/`、`src/widgets/`
+
+`apps/mobile/App.tsx` 目前同時承擔 root navigation、provider composition、deep link config、offline sync toast、conflict modal 與 push notification bootstrap。接手 mobile 功能時，請先看清楚下列 provider / state 的分工：
+
+- `SchoolProvider`：目前選定學校與 school-aware context
+- `AuthProvider`：登入身份、角色與 auth state
+- `DemoProvider`：demo / mock runtime 相關狀態
+- `ThemeProvider`、`AccessibilityProvider`、`PreferencesProvider`：外觀、無障礙與偏好設定
+- `NotificationsProvider`、`SearchHistoryProvider`、`ScheduleProvider`、`FavoritesProvider`：功能性 shared state
+- `initializeRuntimeDataSource()`：在 app 啟動時決定使用 mock、firebase 或 hybrid data source
 
 ### Web
 
@@ -249,6 +317,8 @@ Web 端可明確確認的能力：
 - Firebase auth helper：`src/lib/firebase.ts`
 - Web SSO helper：`src/lib/sso.ts`
 
+Web 端資料讀取策略偏保守：Firebase 已設定時會讀 Firestore / Auth；Firebase 未設定或讀取失敗時，頁面多半會降級顯示 shared mock data，讓 UI 和 PWA shell 在沒有完整後端時仍可開發與展示。
+
 ### Backend（Firebase Functions）
 
 `backend/functions/index.js` 已經不是只有幾支登入 API，而是橫跨多個校園領域的 Functions 入口。從匯出名稱可以看到至少有：
@@ -266,6 +336,14 @@ Web 端可明確確認的能力：
 一句話理解目前 backend：
 
 > **Firebase 為中心的校園平台後端，目前同時負責登入、同步、通知、校務代理、校園服務與部分營運管理接口。**
+
+Functions 維護時要特別留意：
+
+- 主要匯出集中在 `backend/functions/index.js`，改動時容易影響多個產品面。
+- `puScraper.js` 與 `tronClassScraper.js` 是 PU / TronClass 整合的關鍵，不應在 client 重做敏感登入流程。
+- SSO 設定拆成 public / private 文件，private payload 透過 `sso/secretStore.js` 加密。
+- `securityUtils.js` 與 `security/validation.js` 處理 CORS、rate limit、runtime env、HTTP JSON 驗證等邊界。
+- `authz.js` 定義 school member / service role / admin/editor 等授權邏輯，新增管理端功能時應先對齊這裡。
 
 ## 執行模型與資料流
 
@@ -318,6 +396,17 @@ flowchart LR
 - 若後端不可用，再降級為部分 hybrid 流程
 - TronClass 登入不建議讓手機端直接處理
 
+### Auth / data contract 對照
+
+| 層級    | 目前責任                                                                         | 重要檔案                                                                                                                                 |
+| ------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Web     | 呈現 PU-only login、呼叫 Firebase / Functions helper、保留 SSO route 基礎        | `apps/web/src/app/login/page.tsx`、`apps/web/src/features/auth/client.ts`、`apps/web/src/lib/sso.ts`                                     |
+| Mobile  | 學號密碼輸入、登入進度、SecureStore credential/session handling、hybrid fallback | `apps/mobile/src/screens/SSOLoginScreen.tsx`、`apps/mobile/src/services/studentIdAuth.ts`、`apps/mobile/src/services/tronClassClient.ts` |
+| Backend | 驗證 PU 帳密、建立 session、代理 TronClass、回傳課表 / 成績 / 公告等資料         | `backend/functions/index.js`、`backend/functions/puScraper.js`、`backend/functions/tronClassScraper.js`                                  |
+| Shared  | 型別、學校資料、PU auth contract、release / tenant 基礎資料                      | `packages/shared/src/index.ts`、`packages/shared/src/schools.ts`、`packages/shared/src/puAuth.ts`                                        |
+
+目前不建議新增第二套登入主流程。若要重新啟用多校 SSO，應先把「PU-only 產品入口」與「多校 SSO 平台能力」拆成明確 feature flag / release strategy，避免 UI 顯示多入口但 backend / data sync 仍只對 PU 完整。
+
 ## 本機開發
 
 ### 需求
@@ -359,6 +448,22 @@ cp apps/web/.env.example apps/web/.env.local
 cp backend/functions/.env.example backend/functions/.env
 cp backend/ai-server/.env.example backend/ai-server/.env
 ```
+
+最小可開發組合可以分四種情境看：
+
+| 情境                  | 建議設定                                                                                                      | 適合用途                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 純 UI / demo          | mobile 使用 `EXPO_PUBLIC_DATA_SOURCE_MODE=mock`，Web Firebase 可留 mock placeholder                           | 畫面、navigation、mock data 展示             |
+| Firebase 整合         | 補齊 `EXPO_PUBLIC_FIREBASE_*`、`NEXT_PUBLIC_FIREBASE_*`、Functions emulator / project                         | Auth、Firestore、Functions 串接驗證          |
+| PU / TronClass hybrid | mobile 使用 `hybrid`，Functions 可連 PU / TronClass 代理，必要 secrets / region / project 都要正確            | 真實校務資料登入、課表、成績、TronClass 同步 |
+| Preview / production  | 補齊 EAS、Firebase、legal、error reporting、Google Maps、released schools、deep links、iOS/Android build 編號 | EAS build、release、商店提交                 |
+
+環境變數原則：
+
+- 不要把真實 `.env`、service account JSON、API key、token 或 webhook secret commit 到 repo。
+- Web client 可見的變數必須使用 `NEXT_PUBLIC_`；Mobile client 可見的變數必須使用 `EXPO_PUBLIC_`。
+- Functions secrets 優先用 Firebase Secret Manager / GitHub secrets，不要只依賴 `.env.example`。
+- `apps/mobile/.env.example` 的 `mock` 預設是為了安全展示；真實整合測試要明確改成 `hybrid` 或 `firebase`。
 
 ### Release-like build 額外要求
 
@@ -445,6 +550,57 @@ pnpm ai:grow
 
 它只會在 root `package.json` 存在 `version` 欄位時才更新 root 版本；目前 root `package.json` 沒有 `version` 欄位，因此不要假設 root package 也會一起 bump。
 
+### 建議的本機驗證順序
+
+小改 README / docs 時：
+
+```bash
+pnpm format:check
+```
+
+改 Web 時：
+
+```bash
+pnpm --filter web lint
+pnpm --filter web test
+pnpm --filter web typecheck
+pnpm --filter web build
+```
+
+改 Mobile 時：
+
+```bash
+pnpm --filter mobile lint
+pnpm --filter mobile test
+pnpm --filter mobile typecheck
+```
+
+改 Functions 或 rules 時：
+
+```bash
+pnpm --filter functions lint
+pnpm --filter functions test
+pnpm test:rules
+```
+
+改 shared package 時：
+
+```bash
+pnpm --filter @campus/shared lint
+pnpm --filter @campus/shared typecheck
+```
+
+跨 workspace 或 release 前：
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm --filter mobile test
+pnpm --filter web test
+pnpm --filter functions test
+pnpm --filter web build
+```
+
 ## GitHub / CI / Release 現況
 
 目前 `.github/workflows/` 內共有 5 個 workflow。
@@ -487,6 +643,16 @@ pnpm -w firebase deploy --only functions
 - `pnpm test:rules`
 - Android Maestro matrix
 - 全 repo 的 link / markdown 檢查
+
+### Workflow 維護注意事項
+
+- `security-gates` 會輸出 `audit-report.json` artifact；`pnpm audit --prod --json` 若找到問題，可能導致 job 失敗或需要人工判讀。
+- `test-mobile` 會跑 coverage 並上傳 mobile coverage artifact；目前 mobile 測試用 Jest / `jest-expo`。
+- `test-web` 走 Vitest；Web build 會使用 GitHub secrets，沒有 secrets 時用 mock Firebase 值補上。
+- `build-mobile` 不是本機編譯 APK/IPA，而是透過 Expo / EAS CLI 檢查設定並送出 preview Android / iOS build submission（`--no-wait`）。
+- `deploy-functions` 只在 `main` push 且通過 production environment 時執行 Firebase Functions deploy。
+- `preview-deploy.yml` 只有 PR 有 `preview` label 時才會發 EAS Update。
+- `maestro-e2e.yml` 會在 macOS runner 上跑 iOS simulator；它比一般 unit test 慢，適合 smoke/full flow 驗證。
 
 ### Release / Build 所需 secrets
 
@@ -566,6 +732,21 @@ Secrets 應放在 GitHub repository / environment secrets，不要寫入 README�
   - 仍描述 email/password、多校切換、展示腳本
 - 舊的多校登入敘述
   - 若與目前登入畫面衝突，請先以程式碼與本 README 為準
+
+## 接手風險與待清理項
+
+這些不是立即 bug，但會影響後續維護判斷：
+
+| 項目                         | 現況                                                                       | 建議處理方式                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| PU-only vs 多校願景          | UI 與登入主流程已收斂到 PU；shared / SSO / school directory 仍保留多校能力 | 未來若恢復多校，先定義 release flag、資料契約與每校支援等級                           |
+| `backend/functions/index.js` | Functions 匯出集中，檔案承擔多領域責任                                     | 大改前先補測試；中長期可依 auth、campus、commerce、notifications、integrations 分模組 |
+| `apps/mobile/App.tsx`        | root navigation、providers、sync、toast、deep linking 全集中               | 新增 cross-cutting 功能前先評估是否應拆到 app bootstrap / navigation helper           |
+| Security rules               | 有 `pnpm test:rules`，但 CI 尚未預設執行                                   | 影響 rules / Firestore schema 時務必本機跑，之後可加進 CI gate                        |
+| 文件一致性                   | `docs/API.md`、`docs/RELEASE.md`、`apps/mobile/DEMO.md` 部分內容較舊       | 修改 API / release / demo flow 時同步更新，或在文件頂部加上可信度與最後盤點日期       |
+| Web Firebase fallback        | Web 在 Firebase 未設定時會使用 mock fallback                               | 發布前要確認 production env 真正指向正確 Firebase project，而不是只看本機頁面能否打開 |
+| Release env                  | Preview / production 需要比 dev 更多 env                                   | 發版前用 EAS config / workflow preflight 檢查，不要只依賴 Expo dev server             |
+| Root `.env.example`          | 比目前產品入口更廣，包含願景型多校 / 多支付 / 多服務設定                   | 快速上手看子專案 `.env.example`；平台化規格再回頭整理 root env                        |
 
 ## 第一次接手時最值得先看的檔案
 
