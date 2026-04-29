@@ -213,6 +213,12 @@ export function CampusHubScreen(props: Record<string, unknown>) {
       screen: 'LostFound',
     },
     {
+      icon: 'bus-outline' as const,
+      label: '交通',
+      tint: '#3b82f6',
+      screen: 'TransportHub',
+    },
+    {
       icon: 'heart-outline' as const,
       label: '健康',
       tint: theme.colors.danger,

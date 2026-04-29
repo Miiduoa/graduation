@@ -15,8 +15,15 @@ import {
 import { Screen, Card, Button, Pill, AnimatedCard, Spinner, SegmentedControl } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
-import { calculateCredits, type CreditCategory } from "@campus/shared/src/creditAudit";
+import { calculateCredits, calculateDetailedCredits, type CreditCategory, type DetailedGradTemplate } from "@campus/shared/src/creditAudit";
 import { mockGradRuleTemplateV1, mockCourses, demoEnrollments } from "@campus/shared/src/mockData";
+import {
+  puCSIE_115,
+  puDetailedTemplates,
+  puDepartments,
+  flattenCategories,
+  mapDetailedToLegacyCategory,
+} from "@campus/shared/src/puGradRequirements";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import { analytics } from "../services/analytics";
@@ -43,7 +50,7 @@ function buildCsvContent(courses: SavedCourse[]): string {
     .join("\r\n");
 }
 
-const categories: Array<{ key: CreditCategory; label: string; color: string }> = [
+const legacyCategories: Array<{ key: CreditCategory; label: string; color: string }> = [
   { key: "required", label: "必修", color: "#EF4444" },
   { key: "elective", label: "選修", color: "#3B82F6" },
   { key: "general", label: "通識", color: "#10B981" },
@@ -52,10 +59,22 @@ const categories: Array<{ key: CreditCategory; label: string; color: string }> =
 ];
 
 const semesters = [
-  "111-1", "111-2", "112-1", "112-2", "113-1", "113-2", "114-1", "114-2",
+  "111-1", "111-2", "112-1", "112-2", "113-1", "113-2", "114-1", "114-2", "115-1", "115-2",
 ];
 
 const gradeOptions = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "E", "F"];
+
+/** Map legacy CreditCategory back to a reasonable detailed category key */
+function categoryToDetailedKey(cat: CreditCategory): string {
+  switch (cat) {
+    case "required": return "dept_required";
+    case "elective": return "dept_elective";
+    case "general": return "university_core";
+    case "english": return "university_core";
+    case "other": return "other_dept";
+    default: return "other_dept";
+  }
+}
 
 export function CreditAuditInputScreen(props: any) {
   const onAdded: ((x: any) => void) | undefined = props?.route?.params?.onAdded;
@@ -66,10 +85,26 @@ export function CreditAuditInputScreen(props: any) {
   const [name, setName] = useState("");
   const [credits, setCredits] = useState("3");
   const [category, setCategory] = useState<CreditCategory>("elective");
+  const [detailedCatKey, setDetailedCatKey] = useState("dept_elective");
+  const [detailedSubKey, setDetailedSubKey] = useState<string | undefined>(undefined);
   const [passed, setPassed] = useState(true);
   const [grade, setGrade] = useState("A");
-  const [semester, setSemester] = useState("113-1");
-  
+  const [semester, setSemester] = useState("114-1");
+
+  // Detailed graduation template (default to PU CSIE 115)
+  const [selectedTemplateId, setSelectedTemplateId] = useState(puCSIE_115.id);
+  const detailedTemplate = useMemo(
+    () => puDetailedTemplates.find((t) => t.id === selectedTemplateId) ?? puCSIE_115,
+    [selectedTemplateId]
+  );
+  const detailedCategoryOptions = useMemo(
+    () => flattenCategories(detailedTemplate),
+    [detailedTemplate]
+  );
+
+  // Non-credit requirement satisfaction (persisted per user later)
+  const [nonCreditSatisfied, setNonCreditSatisfied] = useState<Record<string, boolean>>({});
+
   const [savedCourses, setSavedCourses] = useState<SavedCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -118,45 +153,48 @@ export function CreditAuditInputScreen(props: any) {
     [auth.user, school.id]
   );
 
-  const preview = useMemo(() => {
-    const id = `manual-${Date.now()}`;
-    const newCourse = { 
-      id, 
-      departmentId: "dept-demo-cs", 
-      name: name || "（未命名課程）", 
-      credits: Number(credits) || 0, 
-      category 
-    };
-    
-    const savedCoursesForCalc = savedCourses.map(sc => ({
-      id: sc.id,
-      departmentId: "dept-demo-cs",
-      name: sc.name,
-      credits: sc.credits,
-      category: sc.category,
-    }));
-    
-    const savedEnrollments = savedCourses.map(sc => ({
-      id: `en-${sc.id}`,
-      uid: auth.user?.uid || "demo",
-      courseId: sc.id,
-      status: "completed" as const,
-      passed: sc.passed,
-    }));
-    
-    const coursesById = Object.fromEntries(
-      [...mockCourses, ...savedCoursesForCalc, newCourse].map((c) => [c.id, c])
-    );
-    
-    const enrollments = [
-      ...demoEnrollments,
-      ...savedEnrollments,
-      { id: `en-${id}`, uid: auth.user?.uid || "demo", courseId: id, status: "completed" as const, passed },
-    ];
-    
-    return calculateCredits({ template: mockGradRuleTemplateV1, coursesById, enrollments });
-  }, [name, credits, category, passed, savedCourses, auth.user?.uid]);
+  // --- Detailed audit calculations ---
+  const savedCoursesForDetailedCalc = useMemo(
+    () =>
+      savedCourses.map((sc) => ({
+        name: sc.name,
+        credits: sc.credits,
+        categoryKey: (sc as any).detailedCatKey ?? mapDetailedToLegacyCategory((sc as any).detailedCatKey ?? "") !== "other"
+          ? ((sc as any).detailedCatKey ?? categoryToDetailedKey(sc.category))
+          : categoryToDetailedKey(sc.category),
+        subCategoryKey: (sc as any).detailedSubKey,
+        passed: sc.passed,
+      })),
+    [savedCourses]
+  );
 
+  const detailedAudit = useMemo(
+    () =>
+      calculateDetailedCredits({
+        template: detailedTemplate,
+        courses: savedCoursesForDetailedCalc,
+        nonCreditSatisfied,
+      }),
+    [detailedTemplate, savedCoursesForDetailedCalc, nonCreditSatisfied]
+  );
+
+  const detailedPreview = useMemo(() => {
+    if (!name.trim()) return detailedAudit;
+    const previewCourse = {
+      name: name || "（未命名）",
+      credits: Number(credits) || 0,
+      categoryKey: detailedCatKey,
+      subCategoryKey: detailedSubKey,
+      passed,
+    };
+    return calculateDetailedCredits({
+      template: detailedTemplate,
+      courses: [...savedCoursesForDetailedCalc, previewCourse],
+      nonCreditSatisfied,
+    });
+  }, [name, credits, detailedCatKey, detailedSubKey, passed, detailedTemplate, savedCoursesForDetailedCalc, nonCreditSatisfied, detailedAudit]);
+
+  // Legacy calculation (kept for backward compat)
   const currentTotals = useMemo(() => {
     const savedCoursesForCalc = savedCourses.map(sc => ({
       id: sc.id,
@@ -165,7 +203,6 @@ export function CreditAuditInputScreen(props: any) {
       credits: sc.credits,
       category: sc.category,
     }));
-    
     const savedEnrollments = savedCourses.map(sc => ({
       id: `en-${sc.id}`,
       uid: auth.user?.uid || "demo",
@@ -173,13 +210,10 @@ export function CreditAuditInputScreen(props: any) {
       status: "completed" as const,
       passed: sc.passed,
     }));
-    
     const coursesById = Object.fromEntries(
       [...mockCourses, ...savedCoursesForCalc].map((c) => [c.id, c])
     );
-    
     const enrollments = [...demoEnrollments, ...savedEnrollments];
-    
     return calculateCredits({ template: mockGradRuleTemplateV1, coursesById, enrollments });
   }, [savedCourses, auth.user?.uid]);
 
@@ -197,6 +231,8 @@ export function CreditAuditInputScreen(props: any) {
         name: name.trim(),
         credits: Number(credits) || 0,
         category,
+        detailedCatKey,
+        detailedSubKey,
         passed,
         grade: passed ? grade : undefined,
         semester,
@@ -456,7 +492,7 @@ export function CreditAuditInputScreen(props: any) {
 
   const unsyncedCount = savedCourses.filter(c => !c.syncedToCloud).length;
 
-  const TABS = ["新增課程", "已儲存", "匯入/匯出"];
+  const TABS = ["新增課程", "畢業進度", "已儲存", "匯入/匯出"];
 
   if (loading) {
     return (
@@ -557,29 +593,81 @@ export function CreditAuditInputScreen(props: any) {
 
               <View style={{ height: 12 }} />
 
-              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>分類</Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
-                {categories.map((c) => (
-                  <Pressable 
-                    key={c.key}
-                    onPress={() => setCategory(c.key)}
-                    style={{
-                      paddingVertical: 10,
-                      paddingHorizontal: 16,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: category === c.key ? `${c.color}20` : theme.colors.surface2,
-                      borderWidth: 1,
-                      borderColor: category === c.key ? c.color : theme.colors.border,
-                    }}
-                  >
-                    <Text style={{ 
-                      color: category === c.key ? c.color : theme.colors.text,
-                      fontWeight: "600",
-                    }}>
-                      {c.label}
-                    </Text>
-                  </Pressable>
-                ))}
+              <Text style={{ color: theme.colors.muted, marginBottom: 4 }}>學分分類（依 {detailedTemplate.departmentName} 畢業規則）</Text>
+              <View style={{ gap: 6, marginTop: 4 }}>
+                {detailedTemplate.categories.map((cat) => {
+                  const isMainSelected = detailedCatKey === cat.key && !detailedSubKey;
+                  const hasSubs = cat.subCategories && cat.subCategories.length > 0;
+                  const catColor = cat.color || "#6366F1";
+                  return (
+                    <View key={cat.key}>
+                      <Pressable
+                        onPress={() => {
+                          setDetailedCatKey(cat.key);
+                          setDetailedSubKey(undefined);
+                          setCategory(mapDetailedToLegacyCategory(cat.key));
+                        }}
+                        style={{
+                          paddingVertical: 10,
+                          paddingHorizontal: 14,
+                          borderRadius: theme.radius.md,
+                          backgroundColor: detailedCatKey === cat.key ? `${catColor}15` : theme.colors.surface2,
+                          borderWidth: 1,
+                          borderColor: detailedCatKey === cat.key ? catColor : theme.colors.border,
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <Text style={{
+                          color: detailedCatKey === cat.key ? catColor : theme.colors.text,
+                          fontWeight: "600",
+                          fontSize: 14,
+                        }}>
+                          {cat.label}
+                        </Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                          {cat.minCredits}{cat.maxCredits != null ? `~${cat.maxCredits}` : "+"} 學分
+                        </Text>
+                      </Pressable>
+                      {hasSubs && detailedCatKey === cat.key && (
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6, marginLeft: 12 }}>
+                          <View style={{ flexDirection: "row", gap: 6 }}>
+                            {cat.subCategories!.map((sub) => {
+                              const isSubSel = detailedSubKey === sub.key;
+                              return (
+                                <Pressable
+                                  key={sub.key}
+                                  onPress={() => {
+                                    setDetailedCatKey(cat.key);
+                                    setDetailedSubKey(sub.key);
+                                    setCategory(mapDetailedToLegacyCategory(cat.key));
+                                  }}
+                                  style={{
+                                    paddingVertical: 8,
+                                    paddingHorizontal: 12,
+                                    borderRadius: theme.radius.sm,
+                                    backgroundColor: isSubSel ? `${catColor}25` : theme.colors.surface2,
+                                    borderWidth: 1,
+                                    borderColor: isSubSel ? catColor : theme.colors.border,
+                                  }}
+                                >
+                                  <Text style={{
+                                    color: isSubSel ? catColor : theme.colors.muted,
+                                    fontSize: 12,
+                                    fontWeight: "500",
+                                  }}>
+                                    {sub.label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        </ScrollView>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
 
               <View style={{ height: 12 }} />
@@ -644,77 +732,257 @@ export function CreditAuditInputScreen(props: any) {
               </View>
             </AnimatedCard>
 
-            <AnimatedCard title="即時試算預覽" subtitle="加入這門課後的學分變化" delay={100}>
+            <AnimatedCard title="即時試算預覽" subtitle={`${detailedTemplate.departmentName} ${detailedTemplate.academicYear} 學年度`} delay={100}>
               <View style={{ gap: 12 }}>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                   <Text style={{ color: theme.colors.muted }}>目前總學分</Text>
                   <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 18 }}>
-                    {currentTotals.total.earned} / {currentTotals.total.required}
+                    {detailedAudit.total.earned} / {detailedAudit.total.required}
                   </Text>
                 </View>
-                
-                <View style={{ 
-                  height: 8, 
-                  backgroundColor: theme.colors.border, 
+
+                <View style={{
+                  height: 8,
+                  backgroundColor: theme.colors.border,
                   borderRadius: 4,
                   overflow: "hidden",
                 }}>
-                  <View style={{ 
-                    width: `${Math.min((currentTotals.total.earned / currentTotals.total.required) * 100, 100)}%`,
+                  <View style={{
+                    width: `${Math.min((detailedAudit.total.earned / Math.max(detailedAudit.total.required, 1)) * 100, 100)}%`,
                     height: "100%",
                     backgroundColor: theme.colors.accent,
                     borderRadius: 4,
                   }} />
                 </View>
-                
+
                 {name.trim() && (
-                  <View style={{ 
-                    padding: 12, 
-                    backgroundColor: theme.colors.accentSoft, 
+                  <View style={{
+                    padding: 12,
+                    backgroundColor: theme.colors.accentSoft,
                     borderRadius: theme.radius.md,
                   }}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                       <Text style={{ color: theme.colors.accent }}>新增後總學分</Text>
                       <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: 18 }}>
-                        {preview.total.earned} / {preview.total.required}
+                        {detailedPreview.total.earned} / {detailedPreview.total.required}
                       </Text>
                     </View>
                     <Text style={{ color: theme.colors.accent, fontSize: 12, marginTop: 4 }}>
-                      +{Number(credits) || 0} 學分（{categories.find(c => c.key === category)?.label}）
+                      +{Number(credits) || 0} 學分（{detailedTemplate.categories.find(c => c.key === detailedCatKey)?.label ?? "其他"}）
                     </Text>
                   </View>
                 )}
-                
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                  {categories.map(c => {
-                    const catResult = currentTotals.byCategory[c.key];
-                    if (!catResult) return null;
+
+                <View style={{ gap: 6 }}>
+                  {detailedAudit.byCategory.map((cat) => {
+                    const catDef = detailedTemplate.categories.find(c => c.key === cat.key);
+                    const catColor = catDef?.color || "#6366F1";
+                    const pct = cat.required > 0 ? Math.min((cat.earned / cat.required) * 100, 100) : (cat.earned > 0 ? 100 : 0);
                     return (
-                      <View 
-                        key={c.key}
-                        style={{ 
-                          padding: 10, 
-                          backgroundColor: `${c.color}10`,
+                      <View
+                        key={cat.key}
+                        style={{
+                          padding: 10,
+                          backgroundColor: `${catColor}08`,
                           borderRadius: theme.radius.md,
                           borderWidth: 1,
-                          borderColor: `${c.color}30`,
-                          minWidth: 80,
+                          borderColor: `${catColor}20`,
                         }}
                       >
-                        <Text style={{ color: c.color, fontSize: 11, fontWeight: "600" }}>{c.label}</Text>
-                        <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700", marginTop: 2 }}>
-                          {catResult.earned}/{catResult.required}
-                        </Text>
+                        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                          <Text style={{ color: catColor, fontSize: 13, fontWeight: "600" }}>{cat.label}</Text>
+                          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>
+                            {cat.earned}/{cat.required}{catDef?.maxCredits != null ? ` (上限${catDef.maxCredits})` : ""}
+                          </Text>
+                        </View>
+                        <View style={{ height: 4, backgroundColor: `${catColor}20`, borderRadius: 2, marginTop: 6 }}>
+                          <View style={{ width: `${pct}%`, height: "100%", backgroundColor: catColor, borderRadius: 2 }} />
+                        </View>
                       </View>
                     );
                   })}
                 </View>
+
+                {detailedAudit.warnings.length > 0 && (
+                  <View style={{ padding: 10, backgroundColor: "#FEF3C7", borderRadius: theme.radius.md }}>
+                    {detailedAudit.warnings.map((w, i) => (
+                      <Text key={i} style={{ color: "#92400E", fontSize: 12, lineHeight: 18 }}>{w}</Text>
+                    ))}
+                  </View>
+                )}
               </View>
             </AnimatedCard>
           </>
         )}
 
         {tab === 1 && (
+          <>
+            {/* 系所選擇 */}
+            <AnimatedCard title="畢業規則" subtitle={`${detailedTemplate.schoolName} — ${detailedTemplate.departmentName}`}>
+              <View style={{ gap: 8 }}>
+                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                  {detailedTemplate.academicYear} 學年度入學 ／ {detailedTemplate.division} ／ {detailedTemplate.studentType}
+                </Text>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: "600" }}>畢業總學分</Text>
+                  <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 22 }}>
+                    {detailedAudit.total.earned} / {detailedTemplate.totalCreditsRequired}
+                  </Text>
+                </View>
+                <View style={{ height: 10, backgroundColor: theme.colors.border, borderRadius: 5, overflow: "hidden" }}>
+                  <View style={{
+                    width: `${Math.min((detailedAudit.total.earned / Math.max(detailedTemplate.totalCreditsRequired, 1)) * 100, 100)}%`,
+                    height: "100%",
+                    backgroundColor: detailedAudit.satisfied ? "#10B981" : theme.colors.accent,
+                    borderRadius: 5,
+                  }} />
+                </View>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "right" }}>
+                  {detailedAudit.total.remaining > 0 ? `還需 ${detailedAudit.total.remaining} 學分` : "已達標！"}
+                </Text>
+              </View>
+            </AnimatedCard>
+
+            {/* 各分類詳細進度 */}
+            {detailedAudit.byCategory.map((cat, idx) => {
+              const catDef = detailedTemplate.categories.find(c => c.key === cat.key);
+              const catColor = catDef?.color || "#6366F1";
+              const pct = cat.required > 0 ? Math.min((cat.earned / cat.required) * 100, 100) : (cat.earned > 0 ? 100 : 0);
+              return (
+                <AnimatedCard
+                  key={cat.key}
+                  title={cat.label}
+                  subtitle={`${cat.earned}/${cat.required} 學分${cat.remaining > 0 ? `（差 ${cat.remaining}）` : " ✓"}`}
+                  delay={idx * 60}
+                >
+                  <View style={{ gap: 8 }}>
+                    <View style={{ height: 6, backgroundColor: `${catColor}20`, borderRadius: 3 }}>
+                      <View style={{ width: `${pct}%`, height: "100%", backgroundColor: catColor, borderRadius: 3 }} />
+                    </View>
+
+                    {catDef?.notes && (
+                      <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 16 }}>{catDef.notes}</Text>
+                    )}
+
+                    {cat.subCategories && cat.subCategories.length > 0 && (
+                      <View style={{ gap: 6, marginTop: 4 }}>
+                        {cat.subCategories.map((sub) => {
+                          const subPct = sub.required > 0 ? Math.min((sub.earned / sub.required) * 100, 100) : (sub.earned > 0 ? 100 : 0);
+                          return (
+                            <View key={sub.key} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                                  <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: "500" }}>{sub.label}</Text>
+                                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{sub.earned}/{sub.required}</Text>
+                                </View>
+                                <View style={{ height: 3, backgroundColor: `${catColor}15`, borderRadius: 2, marginTop: 3 }}>
+                                  <View style={{ width: `${subPct}%`, height: "100%", backgroundColor: `${catColor}80`, borderRadius: 2 }} />
+                                </View>
+                              </View>
+                              {sub.remaining <= 0 && sub.required > 0 && (
+                                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                              )}
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+
+                    {catDef?.courses && catDef.courses.length > 0 && (
+                      <View style={{ marginTop: 4 }}>
+                        <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", marginBottom: 4 }}>
+                          課程清單（{catDef.courses.filter(c => c.required).length} 門必修）
+                        </Text>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+                          {catDef.courses.filter(c => c.required).map((c, i) => (
+                            <View key={i} style={{
+                              paddingVertical: 4,
+                              paddingHorizontal: 8,
+                              backgroundColor: `${catColor}10`,
+                              borderRadius: theme.radius.sm,
+                            }}>
+                              <Text style={{ color: catColor, fontSize: 11 }}>{c.name} ({c.credits})</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                </AnimatedCard>
+              );
+            })}
+
+            {/* 非學分畢業條件 */}
+            <AnimatedCard
+              title="其他畢業條件"
+              subtitle="非學分認證要求"
+              delay={detailedAudit.byCategory.length * 60}
+            >
+              <View style={{ gap: 10 }}>
+                {detailedTemplate.nonCreditRequirements.map((req) => {
+                  const satisfied = nonCreditSatisfied[req.key] ?? false;
+                  return (
+                    <Pressable
+                      key={req.key}
+                      onPress={() => {
+                        setNonCreditSatisfied((prev) => ({
+                          ...prev,
+                          [req.key]: !prev[req.key],
+                        }));
+                      }}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        padding: 12,
+                        backgroundColor: satisfied ? "#10B98110" : theme.colors.surface2,
+                        borderRadius: theme.radius.md,
+                        borderWidth: 1,
+                        borderColor: satisfied ? "#10B98140" : theme.colors.border,
+                        gap: 12,
+                      }}
+                    >
+                      <Ionicons
+                        name={satisfied ? "checkmark-circle" : "ellipse-outline"}
+                        size={24}
+                        color={satisfied ? "#10B981" : theme.colors.muted}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>{req.label}</Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2, lineHeight: 16 }}>
+                          {req.description}
+                        </Text>
+                        {req.alternatives && req.alternatives.length > 0 && (
+                          <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4, fontStyle: "italic" }}>
+                            替代方案：{req.alternatives.join("、")}
+                          </Text>
+                        )}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+                <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: "center" }}>
+                  點擊可切換完成狀態
+                </Text>
+              </View>
+            </AnimatedCard>
+
+            {/* 附註 */}
+            {detailedTemplate.otherRules && detailedTemplate.otherRules.length > 0 && (
+              <AnimatedCard title="附註" delay={detailedAudit.byCategory.length * 60 + 60}>
+                <View style={{ gap: 6 }}>
+                  {detailedTemplate.otherRules.map((rule, i) => (
+                    <View key={i} style={{ flexDirection: "row", gap: 6 }}>
+                      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>•</Text>
+                      <Text style={{ color: theme.colors.muted, fontSize: 12, flex: 1, lineHeight: 18 }}>{rule}</Text>
+                    </View>
+                  ))}
+                </View>
+              </AnimatedCard>
+            )}
+          </>
+        )}
+
+        {tab === 2 && (
           <>
             <AnimatedCard 
               title={`已儲存課程（${savedCourses.length}）`} 
@@ -735,7 +1003,7 @@ export function CreditAuditInputScreen(props: any) {
               ) : (
                 <View style={{ gap: 10 }}>
                   {savedCourses.map(course => {
-                    const catInfo = categories.find(c => c.key === course.category);
+                    const catInfo = legacyCategories.find(c => c.key === course.category);
                     return (
                       <View
                         key={course.id}
@@ -813,7 +1081,7 @@ export function CreditAuditInputScreen(props: any) {
           </>
         )}
 
-        {tab === 2 && (
+        {tab === 3 && (
           <>
             <AnimatedCard title="匯入課程" subtitle="從 CSV 檔案批量匯入">
               <Text style={{ color: theme.colors.muted, lineHeight: 20, marginBottom: 12 }}>

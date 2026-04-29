@@ -8,7 +8,7 @@ import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
 import { useDataSource } from "../hooks/useDataSource";
-import { getDb } from "../firebase";
+import { getDb, isFirebaseMockMode } from "../firebase";
 import {
   collection,
   doc,
@@ -68,6 +68,7 @@ export function ChatScreen(props: any) {
 
   const { items: convoRows, loading: convoLoading, error: convoError, reload: reloadConvo } = useAsyncList<Conversation>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!convoKey) return [];
       const snap = await getDoc(doc(db, "conversations", convoKey));
       if (!snap.exists()) return [];

@@ -29,6 +29,7 @@ import {
   tcFetchProfile,
   tcFetchTodos,
   autoRefreshTCSession,
+  hasTCSession,
   type TCCourse,
   type TCActivity,
   type TCModule,
@@ -180,14 +181,31 @@ function normalizeStudentInfo(
 }
 
 async function ensureTronClassSession(): Promise<void> {
-  const profile = await tcFetchProfile();
-  if (profile?.id) return; // session 有效
+  // 先嘗試一個輕量的 session 檢查
+  // tcFetchProfile 內部的 fetchTronClassBackend 遇到 401 會自動嘗試
+  // auto-refresh 一次，所以如果成功就代表 session 有效或已刷新。
+  try {
+    const profile = await tcFetchProfile();
+    if (profile?.id) return; // session 有效（或已自動刷新）
+  } catch (profileError) {
+    // fetchTronClassBackend 內部 auto-refresh 也失敗了
+    // → 這裡再獨立嘗試一次完整的 auto-refresh
+    console.warn("[puDataCache] tcFetchProfile threw:", profileError);
+  }
 
-  // session 失效 → 嘗試用儲存的帳密自動重新登入
-  console.log("[puDataCache] TronClass session expired, trying auto-refresh…");
+  // 第二道防線：手動呼叫 autoRefreshTCSession（可能用不同的 login 策略）
+  console.log("[puDataCache] TronClass session expired, trying manual auto-refresh…");
   const refreshed = await autoRefreshTCSession();
   if (refreshed) {
-    console.log("[puDataCache] TronClass auto-refresh succeeded");
+    console.log("[puDataCache] TronClass manual auto-refresh succeeded");
+    return;
+  }
+
+  // 最後一道防線：檢查是否有 session 但 profile 端點本身不可用
+  // （靜宜 TronClass 的 /api/users/{id} 會回 403，/api/profile 可能也不穩定）
+  const hasSession = await hasTCSession();
+  if (hasSession) {
+    console.log("[puDataCache] TronClass has session but profile endpoint failed — proceeding anyway");
     return;
   }
 

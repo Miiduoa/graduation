@@ -147,7 +147,11 @@ export function useAsyncList<T>(
         if (!keepPreviousData) {
           setItems([]);
         }
-        const errorMsg = e instanceof Error ? e.message : String(e);
+        let errorMsg = e instanceof Error ? e.message : String(e);
+        // Firebase offline → friendlier message
+        if (errorMsg.includes("offline") || errorMsg.includes("client is offline")) {
+          errorMsg = "無法連線到伺服器。請檢查網路連線，或確認 Firebase 設定是否正確。";
+        }
         setError(errorMsg);
         onLoadErrorRef.current?.(errorMsg);
       })

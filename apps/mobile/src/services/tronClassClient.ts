@@ -160,6 +160,180 @@ export type TCAnnouncementItem = {
   [key: string]: unknown;
 };
 
+// ── 新增詳細型別 ────────────────────────────────────────────
+
+export type TCAttachment = {
+  id: number;
+  name: string;
+  url: string;
+  size: number | null;
+  mime_type: string | null;
+  [key: string]: unknown;
+};
+
+export type TCRubric = {
+  id: number;
+  title: string | null;
+  criteria: Array<{
+    id: number;
+    description: string;
+    max_score: number;
+    levels?: Array<{ score: number; description: string }>;
+  }>;
+  [key: string]: unknown;
+};
+
+export type TCHomeworkDetail = {
+  id: number;
+  course_id: number;
+  type: string;
+  title: string;
+  description: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  score: number | null;
+  total_score: number | null;
+  status: string;
+  weight: number | null;
+  allow_late: boolean;
+  late_penalty_percent: number | null;
+  attachments: TCAttachment[];
+  rubric: TCRubric | null;
+  submission_type: string | null;
+  max_submissions: number | null;
+  [key: string]: unknown;
+};
+
+export type TCHomeworkSubmission = {
+  id: number;
+  homework_id: number;
+  student_id: number;
+  submitted_at: string | null;
+  status: string;
+  score: number | null;
+  total_score: number | null;
+  feedback: string | null;
+  attachments: TCAttachment[];
+  is_late: boolean;
+  graded_at: string | null;
+  [key: string]: unknown;
+};
+
+export type TCExamDetail = {
+  id: number;
+  course_id: number;
+  title: string;
+  description: string | null;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number | null;
+  question_count: number | null;
+  total_score: number | null;
+  max_attempts: number | null;
+  show_answers: boolean;
+  attempted: boolean;
+  [key: string]: unknown;
+};
+
+export type TCExamAttempt = {
+  id: number;
+  exam_id: number;
+  student_id: number;
+  started_at: string | null;
+  submitted_at: string | null;
+  score: number | null;
+  total_score: number | null;
+  status: string;
+  answers: Array<{
+    question_id: number;
+    answer: unknown;
+    score: number | null;
+    correct: boolean | null;
+  }> | null;
+  [key: string]: unknown;
+};
+
+export type TCDiscussion = {
+  id: number;
+  course_id: number;
+  title: string;
+  description: string | null;
+  post_count: number;
+  created_at: string | null;
+  last_post_at: string | null;
+  is_locked: boolean;
+  [key: string]: unknown;
+};
+
+export type TCDiscussionPost = {
+  id: number;
+  discussion_id: number;
+  author_id: number;
+  author_name: string | null;
+  content: string;
+  created_at: string;
+  updated_at: string | null;
+  parent_id: number | null;
+  likes_count: number;
+  attachments: TCAttachment[];
+  [key: string]: unknown;
+};
+
+export type TCMaterial = {
+  id: number;
+  course_id: number;
+  title: string;
+  type: string;
+  url: string | null;
+  file_name: string | null;
+  file_size: number | null;
+  mime_type: string | null;
+  description: string | null;
+  module_id: number | null;
+  created_at: string | null;
+  [key: string]: unknown;
+};
+
+export type TCGradeDetail = {
+  score_items: TCScoreItem[];
+  self_score: TCSelfScore | null;
+  item_scores: Array<{
+    item_id: number;
+    item_name: string;
+    score: number | null;
+    total_score: number | null;
+    weight: number | null;
+    weighted_score: number | null;
+  }> | null;
+  source: string;
+  [key: string]: unknown;
+};
+
+export type TCCourseMember = {
+  id: number;
+  name: string;
+  role: string;
+  avatar_url: string | null;
+  [key: string]: unknown;
+};
+
+export type TCCourseFullData = {
+  courseDetail: TCCourseDetail | null;
+  activities: TCActivity[];
+  modules: TCModule[];
+  exams: TCExam[];
+  scoreItems: TCScoreItem[];
+  selfScore: TCSelfScore | null;
+  homeworkStatus: TCHomeworkStatus | null;
+  homeworkScores: TCActivity[];
+  examStatus: unknown | null;
+  courseAnnouncements: TCAnnouncementItem[];
+  materials: TCMaterial[];
+  discussions: TCDiscussion[];
+  gradeDetails: TCGradeDetail | null;
+  learningActivities: TCActivity[];
+};
+
 async function ensureBackendSessionLoaded(): Promise<void> {
   if (_tcBackendSessionLoaded) return;
   _tcBackendSessionLoaded = true;
@@ -275,7 +449,7 @@ export async function refreshTCBackendSession(
 }
 
 async function fetchTronClassBackend<T>(
-  dataType: "profile" | "courses" | "activities" | "modules" | "attendance" | "todos" | "courseDetail" | "exams" | "scoreItems" | "selfScore" | "homeworkStatus" | "homeworkScores" | "examStatus" | "announcements",
+  dataType: "profile" | "courses" | "activities" | "modules" | "attendance" | "todos" | "courseDetail" | "exams" | "scoreItems" | "selfScore" | "homeworkStatus" | "homeworkScores" | "examStatus" | "announcements" | "activityDetail" | "homeworkDetail" | "homeworkSubmissions" | "examDetail" | "examAttempts" | "discussions" | "discussionPosts" | "courseAnnouncements" | "materials" | "gradeDetails" | "courseMembers" | "learningActivities" | "syllabus" | "courseFullData",
   extra: Record<string, unknown> = {},
 ): Promise<T> {
   await ensureBackendSessionLoaded();
@@ -1253,6 +1427,18 @@ export async function tcFetchHomeworkScores(courseId: number): Promise<TCActivit
   }));
 }
 
+/** 取得課程作業列表（含提交狀態） */
+export async function tcFetchHomeworkActivities(courseId: number): Promise<any[]> {
+  await ensureBackendSessionLoaded();
+  const url = `${TC_BASE}/api/courses/${courseId}/homework-activities?page_size=50`;
+  try {
+    const data = await tcFetchJSON<{ homework_activities?: any[] }>(url);
+    return data?.homework_activities ?? [];
+  } catch {
+    return [];
+  }
+}
+
 /** 取得考試狀態 */
 export async function tcFetchExamStatus(courseId: number): Promise<unknown | null> {
   await ensureBackendSessionLoaded();
@@ -1296,4 +1482,613 @@ export async function tcFetchAnnouncements(): Promise<TCAnnouncementItem[]> {
     created_at: a.created_at,
     ...a,
   }));
+}
+
+// ── 新增：詳細資料 fetch 函數 ────────────────────────────────
+
+/** 取得單一活動詳情 */
+export async function tcFetchActivityDetail(courseId: number, activityId: number): Promise<unknown | null> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend("activityDetail", { courseId, activityId });
+  }
+  return await tcFetchJSON(`${TC_BASE}/api/courses/${courseId}/activities/${activityId}`);
+}
+
+/** 取得作業詳情 (含描述、附件、rubric、配分) */
+export async function tcFetchHomeworkDetail(courseId: number, homeworkId: number): Promise<TCHomeworkDetail | null> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCHomeworkDetail>("homeworkDetail", { courseId, homeworkId });
+  }
+
+  const data = await tcFetchJSON<Record<string, unknown>>(
+    `${TC_BASE}/api/courses/${courseId}/homework-activities/${homeworkId}`
+  );
+  if (!data) {
+    // fallback
+    const fb = await tcFetchJSON<Record<string, unknown>>(
+      `${TC_BASE}/api/courses/${courseId}/activities/${homeworkId}`
+    );
+    if (!fb) return null;
+    return normalizeHomeworkDetail(fb, courseId);
+  }
+  return normalizeHomeworkDetail(data, courseId);
+}
+
+function normalizeHomeworkDetail(raw: Record<string, unknown>, courseId: number): TCHomeworkDetail {
+  return {
+    id: Number(raw.id) || 0,
+    course_id: courseId,
+    type: String(raw.type ?? "homework"),
+    title: String(raw.title ?? ""),
+    description: readOptionalString(raw.description) ?? readOptionalString((raw.data as Record<string, unknown>)?.description) ?? null,
+    start_time: readOptionalString(raw.start_time) ?? readOptionalString(raw.begin_date) ?? null,
+    end_time: readOptionalString(raw.end_time) ?? readOptionalString(raw.end_date) ?? null,
+    score: typeof raw.score === "number" ? raw.score : null,
+    total_score: typeof raw.total_score === "number" ? raw.total_score : null,
+    status: String(raw.status ?? "pending"),
+    weight: typeof raw.weight === "number" ? raw.weight : null,
+    allow_late: Boolean(raw.allow_late ?? raw.allow_late_submission ?? false),
+    late_penalty_percent: typeof raw.late_penalty_percent === "number" ? raw.late_penalty_percent : null,
+    attachments: normalizeAttachments(raw.attachments ?? raw.files ?? raw.resources),
+    rubric: raw.rubric ? (raw.rubric as TCRubric) : null,
+    submission_type: readOptionalString(raw.submission_type) ?? readOptionalString(raw.submit_type) ?? null,
+    max_submissions: typeof raw.max_submissions === "number" ? raw.max_submissions : null,
+    ...raw,
+  };
+}
+
+function normalizeAttachments(raw: unknown): TCAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((a: Record<string, unknown>) => ({
+    id: Number(a.id ?? 0),
+    name: String(a.name ?? a.file_name ?? a.title ?? ""),
+    url: String(a.url ?? a.download_url ?? a.file_url ?? ""),
+    size: typeof a.size === "number" ? a.size : (typeof a.file_size === "number" ? a.file_size : null),
+    mime_type: readOptionalString(a.mime_type) ?? readOptionalString(a.content_type) ?? null,
+    ...a,
+  }));
+}
+
+/** 取得作業提交記錄 (自己的) */
+export async function tcFetchHomeworkSubmissions(courseId: number, homeworkId: number): Promise<TCHomeworkSubmission[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCHomeworkSubmission[]>("homeworkSubmissions", { courseId, homeworkId });
+  }
+
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/homework-activities/${homeworkId}/student-submissions`,
+    `${TC_BASE}/api/courses/${courseId}/homework-activities/${homeworkId}/submissions`,
+    `${TC_BASE}/api/courses/${courseId}/activities/${homeworkId}/student-submissions`,
+  ];
+
+  for (const url of endpoints) {
+    const data = await tcFetchJSON<Record<string, unknown>>(url);
+    if (data) {
+      const items = (data.submissions ?? data.student_submissions ?? (Array.isArray(data) ? data : null)) as Record<string, unknown>[] | null;
+      if (items && Array.isArray(items)) {
+        return items.map((s): TCHomeworkSubmission => ({
+          id: Number(s.id ?? 0),
+          homework_id: homeworkId,
+          student_id: Number(s.student_id ?? s.user_id ?? 0),
+          submitted_at: readOptionalString(s.submitted_at) ?? readOptionalString(s.created_at) ?? null,
+          status: String(s.status ?? "submitted"),
+          score: typeof s.score === "number" ? s.score : null,
+          total_score: typeof s.total_score === "number" ? s.total_score : null,
+          feedback: readOptionalString(s.feedback) ?? readOptionalString(s.comment) ?? null,
+          attachments: normalizeAttachments(s.attachments ?? s.files),
+          is_late: Boolean(s.is_late ?? s.late ?? false),
+          graded_at: readOptionalString(s.graded_at) ?? null,
+          ...s,
+        }));
+      }
+    }
+  }
+  return [];
+}
+
+/** 取得考試詳情 */
+export async function tcFetchExamDetail(courseId: number, examId: number): Promise<TCExamDetail | null> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCExamDetail>("examDetail", { courseId, examId });
+  }
+
+  const data = await tcFetchJSON<Record<string, unknown>>(
+    `${TC_BASE}/api/courses/${courseId}/exams/${examId}`
+  );
+  if (!data) return null;
+
+  return {
+    id: Number(data.id ?? 0),
+    course_id: courseId,
+    title: String(data.title ?? ""),
+    description: readOptionalString(data.description) ?? null,
+    start_time: String(data.start_time ?? ""),
+    end_time: String(data.end_time ?? ""),
+    duration_minutes: typeof data.duration === "number" ? data.duration : (typeof data.duration_minutes === "number" ? data.duration_minutes : null),
+    question_count: typeof data.question_count === "number" ? data.question_count : (typeof data.total_questions === "number" ? data.total_questions : null),
+    total_score: typeof data.total_score === "number" ? data.total_score : null,
+    max_attempts: typeof data.max_attempts === "number" ? data.max_attempts : (typeof data.attempt_count === "number" ? data.attempt_count : null),
+    show_answers: Boolean(data.show_answers ?? data.show_answer ?? false),
+    attempted: Boolean(data.attempted ?? data.has_attempted ?? false),
+    ...data,
+  };
+}
+
+/** 取得考試作答記錄 */
+export async function tcFetchExamAttempts(courseId: number, examId: number): Promise<TCExamAttempt[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCExamAttempt[]>("examAttempts", { courseId, examId });
+  }
+
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/exams/${examId}/student-submissions`,
+    `${TC_BASE}/api/courses/${courseId}/exams/${examId}/submissions`,
+    `${TC_BASE}/api/courses/${courseId}/exams/${examId}/attempts`,
+  ];
+
+  for (const url of endpoints) {
+    const data = await tcFetchJSON<Record<string, unknown>>(url);
+    if (data) {
+      const items = (data.submissions ?? data.attempts ?? data.student_submissions ?? (Array.isArray(data) ? data : null)) as Record<string, unknown>[] | null;
+      if (items && Array.isArray(items)) {
+        return items.map((a): TCExamAttempt => ({
+          id: Number(a.id ?? 0),
+          exam_id: examId,
+          student_id: Number(a.student_id ?? a.user_id ?? 0),
+          started_at: readOptionalString(a.started_at) ?? readOptionalString(a.start_time) ?? null,
+          submitted_at: readOptionalString(a.submitted_at) ?? readOptionalString(a.end_time) ?? null,
+          score: typeof a.score === "number" ? a.score : null,
+          total_score: typeof a.total_score === "number" ? a.total_score : null,
+          status: String(a.status ?? "submitted"),
+          answers: Array.isArray(a.answers) ? a.answers as TCExamAttempt["answers"] : null,
+          ...a,
+        }));
+      }
+    }
+  }
+  return [];
+}
+
+/** 取得課程討論區列表 */
+export async function tcFetchDiscussions(courseId: number): Promise<TCDiscussion[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCDiscussion[]>("discussions", { courseId });
+  }
+
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/discussions`,
+    `${TC_BASE}/api/courses/${courseId}/forums`,
+  ];
+
+  for (const url of endpoints) {
+    const data = await tcFetchJSON<Record<string, unknown>>(url);
+    if (data) {
+      const items = (data.discussions ?? data.forums ?? (Array.isArray(data) ? data : null)) as Record<string, unknown>[] | null;
+      if (items && Array.isArray(items)) {
+        return items.map((d): TCDiscussion => ({
+          id: Number(d.id ?? 0),
+          course_id: courseId,
+          title: String(d.title ?? d.name ?? ""),
+          description: readOptionalString(d.description) ?? null,
+          post_count: Number(d.post_count ?? d.reply_count ?? 0),
+          created_at: readOptionalString(d.created_at) ?? null,
+          last_post_at: readOptionalString(d.last_post_at) ?? readOptionalString(d.updated_at) ?? null,
+          is_locked: Boolean(d.is_locked ?? d.locked ?? false),
+          ...d,
+        }));
+      }
+    }
+  }
+  return [];
+}
+
+/** 取得討論區貼文 */
+export async function tcFetchDiscussionPosts(courseId: number, discussionId: number): Promise<TCDiscussionPost[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCDiscussionPost[]>("discussionPosts", { courseId, discussionId });
+  }
+
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/discussions/${discussionId}/posts`,
+    `${TC_BASE}/api/courses/${courseId}/forums/${discussionId}/posts`,
+  ];
+
+  for (const url of endpoints) {
+    const data = await tcFetchJSON<Record<string, unknown>>(url);
+    if (data) {
+      const items = (data.posts ?? data.replies ?? (Array.isArray(data) ? data : null)) as Record<string, unknown>[] | null;
+      if (items && Array.isArray(items)) {
+        return items.map((p): TCDiscussionPost => ({
+          id: Number(p.id ?? 0),
+          discussion_id: discussionId,
+          author_id: Number(p.author_id ?? p.user_id ?? p.creator_id ?? 0),
+          author_name: readOptionalString(p.author_name) ?? readOptionalString(p.user_name) ?? readOptionalString(p.creator_name) ?? null,
+          content: String(p.content ?? p.body ?? p.text ?? ""),
+          created_at: String(p.created_at ?? ""),
+          updated_at: readOptionalString(p.updated_at) ?? null,
+          parent_id: typeof p.parent_id === "number" ? p.parent_id : null,
+          likes_count: Number(p.likes_count ?? p.like_count ?? 0),
+          attachments: normalizeAttachments(p.attachments ?? p.files),
+          ...p,
+        }));
+      }
+    }
+  }
+  return [];
+}
+
+/** 取得課程公告 (課程級別) */
+export async function tcFetchCourseAnnouncements(courseId: number): Promise<TCAnnouncementItem[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCAnnouncementItem[]>("courseAnnouncements", { courseId });
+  }
+
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/announcements`,
+    `${TC_BASE}/api/courses/${courseId}/notifications`,
+  ];
+
+  for (const url of endpoints) {
+    const data = await tcFetchJSON<Record<string, unknown>>(url);
+    if (data) {
+      const items = (data.announcements ?? data.notifications ?? (Array.isArray(data) ? data : null)) as Record<string, unknown>[] | null;
+      if (items && Array.isArray(items)) {
+        return items.map((a): TCAnnouncementItem => ({
+          id: Number(a.id ?? 0),
+          title: String(a.title ?? ""),
+          content: String(a.content ?? a.body ?? ""),
+          created_at: readOptionalString(a.created_at) ?? undefined,
+          ...a,
+        }));
+      }
+    }
+  }
+  return [];
+}
+
+/** 取得課程教材/資源 */
+export async function tcFetchMaterials(courseId: number): Promise<TCMaterial[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCMaterial[]>("materials", { courseId });
+  }
+
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/resources`,
+    `${TC_BASE}/api/courses/${courseId}/materials`,
+  ];
+
+  for (const url of endpoints) {
+    const data = await tcFetchJSON<Record<string, unknown>>(url);
+    if (data) {
+      const items = (data.resources ?? data.materials ?? (Array.isArray(data) ? data : null)) as Record<string, unknown>[] | null;
+      if (items && Array.isArray(items)) {
+        return items.map((m): TCMaterial => ({
+          id: Number(m.id ?? 0),
+          course_id: courseId,
+          title: String(m.title ?? m.name ?? ""),
+          type: String(m.type ?? m.resource_type ?? "file"),
+          url: readOptionalString(m.url) ?? readOptionalString(m.download_url) ?? null,
+          file_name: readOptionalString(m.file_name) ?? readOptionalString(m.name) ?? null,
+          file_size: typeof m.file_size === "number" ? m.file_size : (typeof m.size === "number" ? m.size : null),
+          mime_type: readOptionalString(m.mime_type) ?? readOptionalString(m.content_type) ?? null,
+          description: readOptionalString(m.description) ?? null,
+          module_id: typeof m.module_id === "number" ? m.module_id : null,
+          created_at: readOptionalString(m.created_at) ?? null,
+          ...m,
+        }));
+      }
+    }
+  }
+  return [];
+}
+
+/** 取得成績明細 */
+export async function tcFetchGradeDetails(courseId: number): Promise<TCGradeDetail | null> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCGradeDetail>("gradeDetails", { courseId });
+  }
+
+  // 嘗試 gradebook / grade-items
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/gradebook`,
+    `${TC_BASE}/api/courses/${courseId}/grade-items`,
+  ];
+
+  for (const url of endpoints) {
+    const data = await tcFetchJSON<Record<string, unknown>>(url);
+    if (data) return data as unknown as TCGradeDetail;
+  }
+
+  // Fallback: 組合 score-items + self-score
+  const scoreItems = await tcFetchScoreItems(courseId);
+  const selfScore = await tcFetchSelfScore(courseId);
+  return {
+    score_items: scoreItems,
+    self_score: selfScore,
+    item_scores: null,
+    source: "combined",
+  };
+}
+
+/** 取得課程成員 */
+export async function tcFetchCourseMembers(courseId: number): Promise<TCCourseMember[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCCourseMember[]>("courseMembers", { courseId });
+  }
+
+  const data = await tcFetchJSON<Record<string, unknown>>(
+    `${TC_BASE}/api/courses/${courseId}/members?page=1&page_size=200`
+  );
+  const members = (data?.members ?? (Array.isArray(data) ? data : null)) as Record<string, unknown>[] | null;
+  if (!members) return [];
+
+  return members.map((m): TCCourseMember => ({
+    id: Number(m.id ?? 0),
+    name: String(m.name ?? m.display_name ?? ""),
+    role: String(m.role ?? "student"),
+    avatar_url: readOptionalString(m.avatar_url) ?? readOptionalString(m.avatar_big_url) ?? null,
+    ...m,
+  }));
+}
+
+/** 取得學習活動 (含進度追蹤) */
+export async function tcFetchLearningActivities(courseId: number): Promise<TCActivity[]> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCActivity[]>("learningActivities", { courseId });
+  }
+
+  const data = await tcFetchJSON<Record<string, unknown>>(
+    `${TC_BASE}/api/courses/${courseId}/learning-activities`
+  );
+  const items = (data?.learning_activities ?? data?.activities ?? (Array.isArray(data) ? data : null)) as Record<string, unknown>[] | null;
+  if (!items) return [];
+
+  return items.map((a): TCActivity => ({
+    id: Number(a.id ?? 0),
+    course_id: courseId,
+    type: String(a.type ?? "material"),
+    title: String(a.title ?? ""),
+    description: readOptionalString(a.description) ?? null,
+    start_time: readOptionalString(a.start_time) ?? null,
+    end_time: readOptionalString(a.end_time) ?? null,
+    score: typeof a.score === "number" ? a.score : null,
+    total_score: typeof a.total_score === "number" ? a.total_score : null,
+    status: String(a.status ?? "pending"),
+    weight: typeof a.weight === "number" ? a.weight : null,
+    score_percentage: typeof a.score_percentage === "number" ? a.score_percentage : null,
+    published: Boolean(a.published ?? true),
+  }));
+}
+
+/** 取得教學大綱 */
+export async function tcFetchSyllabus(courseId: number): Promise<unknown | null> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend("syllabus", { courseId });
+  }
+
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/syllabus`,
+    `${TC_BASE}/api/courses/${courseId}/outline`,
+  ];
+
+  for (const url of endpoints) {
+    const data = await tcFetchJSON(url);
+    if (data) return data;
+  }
+  return null;
+}
+
+/** 一次取得課程所有詳細資料 (聚合端點) */
+export async function tcFetchCourseFullData(courseId: number): Promise<TCCourseFullData> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCCourseFullData>("courseFullData", { courseId });
+  }
+
+  // 平行呼叫所有端點
+  const [
+    courseDetail,
+    activities,
+    modules,
+    exams,
+    scoreItems,
+    selfScore,
+    homeworkStatus,
+    homeworkScores,
+    examStatus,
+    courseAnnouncements,
+    materials,
+    discussions,
+    gradeDetails,
+    learningActivities,
+  ] = await Promise.all([
+    tcFetchCourseDetail(courseId).catch(() => null),
+    tcFetchActivities(courseId).catch(() => []),
+    tcFetchModules(courseId).catch(() => []),
+    tcFetchExams(courseId).catch(() => []),
+    tcFetchScoreItems(courseId).catch(() => []),
+    tcFetchSelfScore(courseId).catch(() => null),
+    tcFetchHomeworkStatus(courseId).catch(() => null),
+    tcFetchHomeworkScores(courseId).catch(() => []),
+    tcFetchExamStatus(courseId).catch(() => null),
+    tcFetchCourseAnnouncements(courseId).catch(() => []),
+    tcFetchMaterials(courseId).catch(() => []),
+    tcFetchDiscussions(courseId).catch(() => []),
+    tcFetchGradeDetails(courseId).catch(() => null),
+    tcFetchLearningActivities(courseId).catch(() => []),
+  ]);
+
+  return {
+    courseDetail,
+    activities,
+    modules,
+    exams,
+    scoreItems,
+    selfScore,
+    homeworkStatus,
+    homeworkScores,
+    examStatus,
+    courseAnnouncements,
+    materials,
+    discussions,
+    gradeDetails,
+    learningActivities,
+  };
+}
+
+// ── 新增：課程內容頁專用 API ───────────────────────────────────
+
+/** 課程活動（含 uploads 檔案資訊） */
+export type TCCourseActivity = {
+  id: number;
+  title: string;
+  type: string; // "material" | "exam" | ...
+  module_id: number;
+  start_time: string | null;
+  end_time: string | null;
+  uploads: Array<{
+    id: number;
+    name: string;
+    key: string;
+    type: string;
+    size: number;
+    allow_download: boolean;
+  }>;
+};
+
+/** 考試提交（含學生分數） */
+export type TCExamSubmission = {
+  exam_score: number | null;
+  exam_final_score: number | null;
+  exam_score_rule: string;
+  submissions: Array<{
+    id: number;
+    exam_id: number;
+    score: string;
+    created_at: string;
+    submitted_at: string;
+    submit_method: string;
+  }>;
+};
+
+/** 考試基本資訊 */
+export type TCExamInfo = {
+  id: number;
+  title: string;
+  type: string;
+  module_id: number;
+  start_time: string | null;
+  end_time: string | null;
+  total_score: number | null;
+  submit_times: number;
+  submitted_times: number;
+  is_closed: boolean;
+  score_percentage: string;
+};
+
+/** 取得課程教材活動列表（含 uploads）— 用 /api/courses/{id}/activities?type=courseware_activity */
+export async function tcFetchCourseActivities(courseId: number): Promise<TCCourseActivity[]> {
+  const url = `${TC_BASE}/api/courses/${courseId}/activities?type=courseware_activity`;
+  const data = await tcFetchJSON<{ activities?: Record<string, unknown>[] }>(url);
+  if (!data?.activities) return [];
+
+  return data.activities.map((a): TCCourseActivity => ({
+    id: Number(a.id ?? 0),
+    title: String(a.title ?? ""),
+    type: String(a.type ?? ""),
+    module_id: Number(a.module_id ?? 0),
+    start_time: readOptionalString(a.start_time) ?? null,
+    end_time: readOptionalString(a.end_time) ?? null,
+    uploads: Array.isArray(a.uploads)
+      ? (a.uploads as Record<string, unknown>[]).map((u) => ({
+          id: Number(u.id ?? 0),
+          name: String(u.name ?? ""),
+          key: String(u.key ?? ""),
+          type: String(u.type ?? ""),
+          size: Number(u.size ?? 0),
+          allow_download: u.allow_download === true,
+        }))
+      : [],
+  }));
+}
+
+/** 取得課程考試列表 — 用 /api/courses/{id}/exams */
+export async function tcFetchCourseExams(courseId: number): Promise<TCExamInfo[]> {
+  const url = `${TC_BASE}/api/courses/${courseId}/exams`;
+  const data = await tcFetchJSON<{ exams?: Record<string, unknown>[] }>(url);
+  if (!data?.exams) return [];
+
+  return data.exams.map((e): TCExamInfo => {
+    // exam_submissions 是一個陣列（包含提交 ID），用它的長度判斷是否已提交
+    const examSubmissions = Array.isArray(e.exam_submissions) ? e.exam_submissions : [];
+    return {
+      id: Number(e.id ?? 0),
+      title: String(e.title ?? ""),
+      type: String(e.type ?? "exam"),
+      module_id: Number(e.module_id ?? 0),
+      start_time: readOptionalString(e.start_time) ?? null,
+      end_time: readOptionalString(e.end_time) ?? null,
+      total_score: typeof e.total_score === "number" ? e.total_score : null,
+      submit_times: Number(e.submit_times ?? 0),
+      submitted_times: examSubmissions.length,
+      is_closed: e.is_closed === true,
+      score_percentage: String(e.score_percentage ?? "0"),
+    };
+  });
+}
+
+/** 取得學生考試提交分數 — 用 /api/exams/{id}/submissions */
+export async function tcFetchExamSubmissions(examId: number): Promise<TCExamSubmission | null> {
+  const url = `${TC_BASE}/api/exams/${examId}/submissions`;
+  const data = await tcFetchJSON<Record<string, unknown>>(url);
+  if (!data) return null;
+
+  return {
+    exam_score: typeof data.exam_score === "number" ? data.exam_score : null,
+    exam_final_score: typeof data.exam_final_score === "number" ? data.exam_final_score : null,
+    exam_score_rule: String(data.exam_score_rule ?? "highest"),
+    submissions: Array.isArray(data.submissions)
+      ? (data.submissions as Record<string, unknown>[]).map((s) => ({
+          id: Number(s.id ?? 0),
+          exam_id: Number(s.exam_id ?? 0),
+          score: String(s.score ?? "0"),
+          created_at: String(s.created_at ?? ""),
+          submitted_at: String(s.submitted_at ?? ""),
+          submit_method: String(s.submit_method ?? ""),
+        }))
+      : [],
+  };
+}
+
+/** 構建教材檔案的下載/檢視 URL */
+export function tcBuildFileViewUrl(courseId: number, activityId: number): string {
+  return `${TC_BASE}/course/${courseId}/content#/activity/${activityId}`;
+}
+
+/** 構建教材檔案直接下載 URL（用 upload key）*/
+export function tcBuildFileDownloadUrl(uploadKey: string): string {
+  return `${TC_BASE}/api/uploads/${uploadKey}/blob`;
+}
+
+/** 構建考試檢視 URL */
+export function tcBuildExamViewUrl(courseId: number, examId: number): string {
+  return `${TC_BASE}/course/${courseId}/content#/exam/${examId}`;
+}
+
+/** 構建課程成績頁面 URL */
+export function tcBuildScoreUrl(courseId: number): string {
+  return `${TC_BASE}/course/${courseId}/score#/`;
 }

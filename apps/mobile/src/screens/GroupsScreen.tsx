@@ -7,7 +7,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
-import { getDb, getFunctionsInstance } from "../firebase";
+import { getDb, getFunctionsInstance, isFirebaseMockMode } from "../firebase";
 import {
   collection,
   getDocs,
@@ -108,6 +108,7 @@ export function GroupsScreen(props: any) {
   const { items: myGroups, loading, error, reload } = useAsyncList<UserGroup>(
     async () => {
       if (!auth.user) return [];
+      if (isFirebaseMockMode()) return [];
       const ref = collection(db, "users", auth.user.uid, "groups");
       // NOTE: Avoid composite index requirements for MVP by not combining orderBy with multiple where.
       const qy = query(ref, where("schoolId", "==", school.id), where("status", "==", "active"));
@@ -122,6 +123,7 @@ export function GroupsScreen(props: any) {
 
   const { items: myCourseMeta } = useAsyncList<Group>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       const ids = myCourseGroups.map((g) => g.groupId).filter(Boolean);
       if (ids.length === 0) return [];
 
@@ -146,6 +148,7 @@ export function GroupsScreen(props: any) {
 
   const { items: publishedCourses, reload: reloadPublishedCourses } = useAsyncList<Group>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       // NOTE: Avoid composite indexes in MVP: query by isPublished only, then filter by school/type.
       const qy = query(collection(db, "groups"), where("isPublished", "==", true), limit(100));
       const snap = await getDocs(qy);

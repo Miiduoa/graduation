@@ -5,7 +5,7 @@ import { Screen, Card, Button, Pill, LoadingState, ErrorState, AnimatedCard } fr
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
-import { getDb } from "../firebase";
+import { getDb, isFirebaseMockMode } from "../firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,6 +25,7 @@ export function DmsScreen(props: any) {
 
   const { items, loading, error, reload } = useAsyncList<Conversation>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!auth.user) return [];
       try {
         const ref = collection(db, "conversations");

@@ -9,7 +9,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, softShadowStyle } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
-import { getDb } from '../firebase';
+import { getDb, isFirebaseMockMode } from '../firebase';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { formatRelativeTime, toDate } from '../utils/format';
 
@@ -45,6 +45,10 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (isFirebaseMockMode()) {
+      setLoading(false);
+      return;
+    }
     if (!auth.user) {
       setLoading(false);
       return;

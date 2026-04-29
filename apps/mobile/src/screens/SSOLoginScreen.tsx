@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 
 import {
   PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
@@ -12,7 +13,7 @@ import {
   signInWithStudentId,
   type LoginProgress,
 } from "../services/studentIdAuth";
-import { Screen, Button, AnimatedCard, Pill } from "../ui/components";
+import { Screen, Button, AnimatedCard, Card, Pill } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 
@@ -125,7 +126,8 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <AnimatedCard title="靜宜大學" subtitle="Campus One 現階段僅開放 PU 學號登入">
+        {/* ── 學校資訊卡片 ── */}
+        <AnimatedCard title="選擇學校" subtitle="使用靜宜大學帳號登入">
           <View
             style={{
               padding: 16,
@@ -136,24 +138,38 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
               gap: 12,
             }}
           >
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-              <View style={{ gap: 6 }}>
-                <Text style={{ color: theme.colors.text, fontSize: 20, fontWeight: "800" }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <View
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 24,
+                  backgroundColor: school.themeColor ?? theme.colors.accentSoft,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons name="school" size={24} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: "800" }}>
                   {schoolName}
                 </Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
-                  目前產品已鎖定為 PU-only，登入後會同步課表、成績、TronClass 與校園資料。
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3 }}>
+                  {school.shortName ? `${school.shortName} · ` : ""}
+                  {PROVIDENCE_UNIVERSITY_SCHOOL_CODE}
                 </Text>
               </View>
               <Pill text={PROVIDENCE_UNIVERSITY_SCHOOL_CODE} kind="accent" />
             </View>
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              請使用靜宜 e 校園帳號密碼。登入成功後會建立 Firebase session，並初始化 PU 專用資料工作階段。
+              目前產品已鎖定為 PU-only，登入後會同步課表、成績、TronClass 與校園資料。
             </Text>
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="學號登入" subtitle="唯一登入方式">
+        {/* ── 學號登入表單 ── */}
+        <AnimatedCard title="學號登入" subtitle="使用 E 校園帳號密碼">
           <View style={{ gap: 14 }}>
             <View
               style={{
@@ -212,11 +228,12 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
             />
 
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              若你原本使用其他登入方式，這個版本已統一切換為靜宜學號登入，不再提供多校登入入口。
+              請使用靜宜大學 E 校園帳號與密碼登入。登入後會自動同步課表、成績與 TronClass 資料。
             </Text>
           </View>
         </AnimatedCard>
 
+        {/* ── 登入進度 ── */}
         {isBusy ? (
           <AnimatedCard title="登入處理中" subtitle={stepLabels[step]}>
             <View style={{ alignItems: "center", gap: 12, paddingVertical: 12 }}>
@@ -273,6 +290,31 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
           </AnimatedCard>
         ) : null}
 
+        {/* ── 登入成功 ── */}
+        {step === "success" ? (
+          <AnimatedCard title="登入進度" subtitle="">
+            <View style={{ alignItems: "center", paddingVertical: 16 }}>
+              <View
+                style={{
+                  width: 60,
+                  height: 60,
+                  borderRadius: 30,
+                  backgroundColor: `${theme.colors.success}20`,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <Ionicons name="checkmark-circle" size={36} color={theme.colors.success} />
+              </View>
+              <Text style={{ color: theme.colors.success, fontSize: 16, fontWeight: "700" }}>
+                登入成功！
+              </Text>
+            </View>
+          </AnimatedCard>
+        ) : null}
+
+        {/* ── 登入失敗 ── */}
         {step === "error" && error ? (
           <AnimatedCard title="登入失敗" subtitle="請檢查帳號密碼或稍後再試">
             <View style={{ gap: 14 }}>
@@ -290,6 +332,125 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
               {isRetryable ? <Button text="重新嘗試" onPress={handleRetry} kind="primary" /> : null}
             </View>
           </AnimatedCard>
+        ) : null}
+
+        {/* ── 關於學校帳號登入（說明卡片）── */}
+        {step === "idle" ? (
+          <Card title="關於學校帳號登入" subtitle="安全、快速、自動同步">
+            <View style={{ gap: 12 }}>
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: theme.colors.accentSoft,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Ionicons name="shield-checkmark" size={18} color={theme.colors.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: "700" }}>安全可靠</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2, lineHeight: 18 }}>
+                    透過學校 E 校園認證系統驗證身份，密碼僅用於本次登入驗證
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: theme.colors.accentSoft,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Ionicons name="flash" size={18} color={theme.colors.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: "700" }}>快速便捷</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2, lineHeight: 18 }}>
+                    使用現有學校帳號，無需另外註冊，登入後自動建立 Campus One 帳號
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: theme.colors.accentSoft,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Ionicons name="sync" size={18} color={theme.colors.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: "700" }}>自動同步</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2, lineHeight: 18 }}>
+                    自動同步您的姓名、學號、系所、課表、成績與 TronClass 課程資訊
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <View
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 18,
+                    backgroundColor: theme.colors.accentSoft,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Ionicons name="cloud-done" size={18} color={theme.colors.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: "700" }}>離線快取</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2, lineHeight: 18 }}>
+                    課表與成績會快取在本機，下次開啟不用重新抓取，定期自動更新
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </Card>
+        ) : null}
+
+        {/* ── 技術資訊 ── */}
+        {step === "idle" ? (
+          <Card title="技術資訊" subtitle="開發者參考">
+            <View style={{ gap: 8 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: theme.colors.muted }}>認證方式</Text>
+                <Text style={{ color: theme.colors.text, fontWeight: "600" }}>E 校園 + TronClass</Text>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: theme.colors.muted }}>E 校園端點</Text>
+                <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 11 }}>alcat.pu.edu.tw</Text>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: theme.colors.muted }}>TronClass 端點</Text>
+                <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 11 }}>tronclass.pu.edu.tw</Text>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: theme.colors.muted }}>資料快取</Text>
+                <Text style={{ color: theme.colors.text, fontWeight: "600" }}>AsyncStorage + TTL</Text>
+              </View>
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: theme.colors.muted }}>登入策略</Text>
+                <Text style={{ color: theme.colors.text, fontWeight: "600" }}>後端優先 + 手機直連降級</Text>
+              </View>
+            </View>
+          </Card>
         ) : null}
       </ScrollView>
     </Screen>

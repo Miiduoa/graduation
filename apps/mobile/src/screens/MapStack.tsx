@@ -7,6 +7,7 @@ import { PoiDetailScreen } from "./PoiDetailScreen";
 import { ARNavigationScreen } from "./ARNavigationScreen";
 import { AccessibleRouteScreen } from "./AccessibleRouteScreen";
 import { BusScheduleScreen } from "./BusScheduleScreen";
+import { TransportHubScreen } from "./TransportHubScreen";
 import { CafeteriaScreen } from "./CafeteriaScreen";
 import { MenuDetailScreen } from "./MenuDetailScreen";
 import { OrderingScreen } from "./OrderingScreen";
@@ -34,11 +35,12 @@ export function MapStack() {
       screenOptions={createStackScreenOptions()}
     >
       <Stack.Screen name="CampusHome" component={CampusHubScreen} options={{ title: "校園", headerShown: false }} />
-      <Stack.Screen name="Map" component={MapScreen} options={{ title: "地圖", headerShown: false }} />
+      <Stack.Screen name="Map" component={MapScreen} options={{ title: "校園地圖" }} />
       <Stack.Screen name="PoiDetail" component={PoiDetailScreen} options={{ title: "點位詳情" }} />
       <Stack.Screen name="ARNavigation" component={ARNavigationScreen} options={{ title: "AR 導航" }} />
       <Stack.Screen name="AccessibleRoute" component={AccessibleRouteScreen} options={{ title: "無障礙路線" }} />
       <Stack.Screen name="BusSchedule" component={BusScheduleScreen} options={{ title: "校園公車" }} />
+      <Stack.Screen name="TransportHub" component={TransportHubScreen} options={{ title: "交通資訊" }} />
       <Stack.Screen name="餐廳總覽" component={CafeteriaScreen} options={{ title: "餐廳" }} />
       <Stack.Screen name="MenuDetail" component={MenuDetailScreen} options={{ title: "餐點詳情" }} />
       <Stack.Screen name="Ordering" component={OrderingScreen} options={{ title: "線上點餐" }} />

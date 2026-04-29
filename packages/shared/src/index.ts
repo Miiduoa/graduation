@@ -62,5 +62,6 @@ export * from './notifications';
 export * from './schools';
 export * from './release';
 export * from './creditAudit';
+export * from './puGradRequirements';
 export * from './tenant';
 export * from './puAuth';

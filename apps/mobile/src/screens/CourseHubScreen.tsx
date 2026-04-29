@@ -539,12 +539,15 @@ export function CourseHubScreen(props: any) {
                   icon="document-text-outline"
                   label="作業"
                   tint="#F97316"
-                  onPress={() =>
-                    nav?.navigate?.("收件匣", {
-                      screen: "GroupAssignments",
-                      params: { groupId: membership.groupId },
-                    })
-                  }
+                  onPress={() => {
+                    // 導向新的課程首頁作業 tab，避免跨 tab 導航到收件匣
+                    const rootNav = nav?.getParent?.();
+                    if (rootNav?.navigate) {
+                      rootNav.navigate("課程", { screen: "CoursesHome", params: { initialTab: "homework" } });
+                    } else {
+                      nav?.navigate?.("CoursesHome", { initialTab: "homework" });
+                    }
+                  }}
                 />
                 <ActionChip
                   icon="help-circle-outline"

@@ -72,6 +72,21 @@ const {
   tcFetchHomeworkScores,
   tcFetchExamStatus,
   tcFetchAnnouncements,
+  // 新增詳細端點
+  tcFetchActivityDetail,
+  tcFetchHomeworkDetail,
+  tcFetchHomeworkSubmissions,
+  tcFetchExamDetail,
+  tcFetchExamAttempts,
+  tcFetchDiscussions,
+  tcFetchDiscussionPosts,
+  tcFetchCourseAnnouncements,
+  tcFetchMaterials,
+  tcFetchGradeDetails,
+  tcFetchCourseMembers,
+  tcFetchLearningActivities,
+  tcFetchSyllabus,
+  tcFetchCourseFullData,
 } = require('./tronClassScraper');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
@@ -390,7 +405,7 @@ async function createPuTronClassSession({
       userId: session?.userId ?? null,
       userName: session?.userName ?? null,
       createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
     },
     { merge: true },
   );
@@ -408,7 +423,7 @@ async function createPuCampusSession({
       studentId,
       cookies,
       createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
     },
     { merge: true },
   );
@@ -7299,7 +7314,7 @@ exports.puAuthenticate = onCall(
         uid,
         cookies: loginResult.cookies,
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour validity
+        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hour validity
       };
 
       // Store in Firestore temporarily
@@ -7721,6 +7736,141 @@ exports.puFetchTronClassData = onRequest(
         case 'announcements':
           result = await tcFetchAnnouncements(cookies);
           break;
+
+        // ── 新增詳細端點 ──────────────────────────────────────
+
+        case 'activityDetail': {
+          const courseId = Number(req.body?.courseId);
+          const activityId = Number(req.body?.activityId);
+          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(activityId) || activityId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId/activityId' });
+            return;
+          }
+          result = await tcFetchActivityDetail(cookies, courseId, activityId);
+          break;
+        }
+        case 'homeworkDetail': {
+          const courseId = Number(req.body?.courseId);
+          const homeworkId = Number(req.body?.homeworkId);
+          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(homeworkId) || homeworkId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId/homeworkId' });
+            return;
+          }
+          result = await tcFetchHomeworkDetail(cookies, courseId, homeworkId);
+          break;
+        }
+        case 'homeworkSubmissions': {
+          const courseId = Number(req.body?.courseId);
+          const homeworkId = Number(req.body?.homeworkId);
+          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(homeworkId) || homeworkId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId/homeworkId' });
+            return;
+          }
+          result = await tcFetchHomeworkSubmissions(cookies, courseId, homeworkId);
+          break;
+        }
+        case 'examDetail': {
+          const courseId = Number(req.body?.courseId);
+          const examId = Number(req.body?.examId);
+          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(examId) || examId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId/examId' });
+            return;
+          }
+          result = await tcFetchExamDetail(cookies, courseId, examId);
+          break;
+        }
+        case 'examAttempts': {
+          const courseId = Number(req.body?.courseId);
+          const examId = Number(req.body?.examId);
+          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(examId) || examId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId/examId' });
+            return;
+          }
+          result = await tcFetchExamAttempts(cookies, courseId, examId);
+          break;
+        }
+        case 'discussions': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchDiscussions(cookies, courseId);
+          break;
+        }
+        case 'discussionPosts': {
+          const courseId = Number(req.body?.courseId);
+          const discussionId = Number(req.body?.discussionId);
+          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(discussionId) || discussionId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId/discussionId' });
+            return;
+          }
+          result = await tcFetchDiscussionPosts(cookies, courseId, discussionId);
+          break;
+        }
+        case 'courseAnnouncements': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchCourseAnnouncements(cookies, courseId);
+          break;
+        }
+        case 'materials': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchMaterials(cookies, courseId);
+          break;
+        }
+        case 'gradeDetails': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchGradeDetails(cookies, courseId);
+          break;
+        }
+        case 'courseMembers': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchCourseMembers(cookies, courseId);
+          break;
+        }
+        case 'learningActivities': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchLearningActivities(cookies, courseId);
+          break;
+        }
+        case 'syllabus': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchSyllabus(cookies, courseId);
+          break;
+        }
+        case 'courseFullData': {
+          const courseId = Number(req.body?.courseId);
+          if (!Number.isFinite(courseId) || courseId <= 0) {
+            res.status(400).json({ error: 'Missing or invalid courseId' });
+            return;
+          }
+          result = await tcFetchCourseFullData(cookies, courseId);
+          break;
+        }
         default:
           res.status(400).json({ error: `Unknown dataType: ${dataType}` });
           return;
@@ -7729,7 +7879,7 @@ exports.puFetchTronClassData = onRequest(
       await sessionRef.set(
         {
           lastUsedAt: new Date(),
-          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
           ...(userId ? { userId } : {}),
         },
         { merge: true },
