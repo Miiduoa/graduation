@@ -12,7 +12,7 @@
 </p>
 
 > **官方倉庫：** [github.com/Miiduoa/graduation](https://github.com/Miiduoa/graduation)  
-> 本 README 依據 **2026-04-26** 對目前 repo 的實際檔案、workspace 設定、`package.json`、GitHub workflow、env 範本與登入畫面進行盤點整理。若其他文件與此處衝突，請先以 **本 README 與程式碼本身** 為準。
+> 本 README 依據 **2026-04-29** 對目前 repo 的實際檔案、workspace 設定、`package.json`、GitHub workflow、env 範本、登入畫面、Functions 匯出與測試配置進行盤點整理。若其他文件與此處衝突，請先以 **本 README 與程式碼本身** 為準。
 
 ## 快速連結
 
@@ -112,16 +112,16 @@ Firestore / Storage security rules 測試仍是 repo 內可手動執行的檢查
 - `backend/functions/.env.example`
 - `backend/ai-server/.env.example`
 
-## 專案快照（2026-04-26 盤點）
+## 專案快照（2026-04-29 盤點）
 
 下列數字來自 repo 內實際檔案與 `backend/functions/index.js` 的匯出盤點，之後若功能再增減，請以當下程式碼為準。
 
 | 面向                | 盤點結果                                                                                            |
 | ------------------- | --------------------------------------------------------------------------------------------------- |
-| Mobile UI           | `81` 個 `*Screen.tsx`、`13` 個 `*Stack.tsx`                                                         |
+| Mobile UI           | `84` 個 `*Screen.tsx`、`13` 個 `*Stack.tsx`                                                         |
 | Web 路由            | `20` 個 `page.tsx`、`4` 個 `route.ts`                                                               |
 | Backend Functions   | `64` 個 `onCall`、`14` 個 `onRequest`、`5` 個 `onSchedule`、`11` 個 Firestore `onDocument*` trigger |
-| 測試檔              | Mobile `16`、Web `5`、Backend `4`（其中 Functions `3`、Rules `1`）                                  |
+| 測試檔              | 排除 `node_modules` 後：Mobile `16`、Web `5`、Backend `4`（其中 Functions `3`、Rules `1`）          |
 | GitHub workflow     | `5` 個：CI、Release、EAS Build、Preview Deploy、Maestro E2E                                         |
 | E2E flow            | `10` 個 Maestro flow                                                                                |
 | Repo utility script | 根層 `3` 個：`bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`                         |
@@ -209,6 +209,25 @@ Firestore / Storage security rules 測試仍是 repo 內可手動執行的檢查
 - 效能與錯誤回報：`src/services/performance.ts`、`src/services/errorReporting.ts`
 - iOS / Android widget：`ios-widget/`、`android-widget/`、`src/widgets/`
 
+### Mobile 功能矩陣
+
+| 領域            | 代表畫面 / 模組                                                                                          | 目前定位                                     |
+| --------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 今日入口        | `TodayScreen`、`HomeStack`、`AnnouncementsStack`、`EventsStack`                                          | 以「今天下一步」為中心，降低首頁功能表化     |
+| 課程學習        | `CoursesHomeScreen`、`CourseHubScreen`、`CourseModulesScreen`、`ClassroomScreen`、`CourseScheduleScreen` | 課程、教材、教室、課表、學習活動的主要入口   |
+| 測驗 / 作業     | `QuizCenterScreen`、`QuizTakingScreen`、`AssignmentDetailScreen`、`GroupAssignmentsScreen`               | 支援測驗、作業、群組協作與課程任務追蹤       |
+| 成績 / 學習分析 | `GradesScreen`、`CourseGradebookScreen`、`LearningAnalyticsScreen`、`CreditAuditScreen`                  | 成績、修課狀態、學習分析與畢業學分盤點       |
+| 校園生活        | `CampusHubScreen`、`MapScreen`、`ARNavigationScreen`、`AccessibleRouteScreen`、`PoiDetailScreen`         | 校園地圖、AR 導航、無障礙路線與地點資訊      |
+| 交通 / 公車     | `TransportHubScreen`、`BusScheduleScreen`                                                                | 校園交通與即時公車資訊入口                   |
+| 餐飲 / 支付     | `CafeteriaScreen`、`MenuDetailScreen`、`OrderingScreen`、`PaymentScreen`、`MerchantHubScreen`            | 菜單、訂餐、支付、商家與餐廳管理             |
+| 圖書 / 服務     | `LibraryScreen`、`PrintServiceScreen`、`DormitoryScreen`、`HealthScreen`                                 | 圖書館、列印、宿舍、健康中心等校園服務       |
+| 失物招領        | `LostFoundScreen`、`LostFoundDetailScreen`、`LostFoundPostScreen`                                        | 失物列表、詳情與刊登                         |
+| 訊息 / 群組     | `InboxScreen`、`MessagesHomeScreen`、`GroupsScreen`、`GroupDetailScreen`、`DmsScreen`、`ChatScreen`      | 通知、群組、私訊、課程與校園互動訊息         |
+| 個人 / 設定     | `MeScreen`、`ProfileScreen`、`SettingsScreen`、`NotificationsScreen`、`AccountDeletionScreen`            | 個人資料、通知設定、帳號刪除、偏好與隱私     |
+| AI / 智慧輔助   | `AIChatScreen`、`AICourseAdvisorScreen`                                                                  | 校園助理、課程建議與學習支援                 |
+| 管理 / 角色入口 | `AdminDashboardScreen`、`DepartmentHubScreen`、`TeachingHubScreen`、`StaffHubScreen`                     | 依身份切換教師、職員、系辦、管理者等操作入口 |
+| 裝置整合        | `WidgetPreviewScreen`、`QRCodeScreen`                                                                    | Widget、QR Code、推播與裝置能力測試          |
+
 ### Web
 
 Web 端不是 `create-next-app` 預設模板，現在已經是校園入口型 PWA shell。
@@ -249,6 +268,30 @@ Web 端可明確確認的能力：
 - Firebase auth helper：`src/lib/firebase.ts`
 - Web SSO helper：`src/lib/sso.ts`
 
+### Web 功能矩陣
+
+| 路由                         | 功能定位                                                                                       |
+| ---------------------------- | ---------------------------------------------------------------------------------------------- |
+| `/`                          | Campus Learning OS 首頁，未登入時介紹 Today / 課程 / 校園 / 收件匣，登入後顯示 Today dashboard |
+| `/login`                     | PU-only 學號登入，成功後建立 Firebase session                                                  |
+| `/announcements`             | 公告列表與公開資訊入口                                                                         |
+| `/map`                       | 校園地圖入口，使用 Leaflet / react-leaflet                                                     |
+| `/cafeteria`                 | 餐廳與菜單資訊                                                                                 |
+| `/library`                   | 圖書館資訊                                                                                     |
+| `/groups`                    | 群組 / 課程協作入口                                                                            |
+| `/timetable`                 | 課表頁                                                                                         |
+| `/grades`                    | 成績頁                                                                                         |
+| `/profile`                   | 個人資料                                                                                       |
+| `/settings`                  | 使用者設定                                                                                     |
+| `/search`                    | 全站 / 校園搜尋                                                                                |
+| `/bus`                       | 公車資訊                                                                                       |
+| `/clubs`                     | 社團資訊                                                                                       |
+| `/join`                      | 加入 / 邀請入口                                                                                |
+| `/course/[courseId]`         | 學生課程頁                                                                                     |
+| `/teacher/course/[courseId]` | 教師課程頁                                                                                     |
+| `/privacy`、`/terms`         | 隱私權政策與服務條款                                                                           |
+| `/sso-callback`、`/sso/acs`  | SSO callback / ACS route                                                                       |
+
 ### Backend（Firebase Functions）
 
 `backend/functions/index.js` 已經不是只有幾支登入 API，而是橫跨多個校園領域的 Functions 入口。從匯出名稱可以看到至少有：
@@ -266,6 +309,22 @@ Web 端可明確確認的能力：
 一句話理解目前 backend：
 
 > **Firebase 為中心的校園平台後端，目前同時負責登入、同步、通知、校務代理、校園服務與部分營運管理接口。**
+
+### Backend 功能地圖
+
+| 領域          | 代表能力                                                               | 重要提醒                                                       |
+| ------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------- |
+| PU 學號登入   | `signInPuStudentId`、`puAuthenticate`                                  | 目前產品主登入入口，會回傳 Firebase session / token            |
+| PU 校務資料   | `puFetchData`、課表、成績、公告、學生資料、缺曠、學分摘要              | 敏感校務資料不應由前端直接存取外部校務系統                     |
+| TronClass     | 課程、模組、活動、點名、作業、測驗、教材、成員、公告、完整課程資料     | TronClass session refresh 與資料代理集中在後端                 |
+| SSO 管理      | `startSSOAuth`、`verifySSOCallback`、`getSSOConfig`、`updateSSOConfig` | 底層仍保留多校 SSO，但目前正式入口已收斂 PU-only               |
+| 權限 / 角色   | school member role、service role、school admin/editor                  | RBAC 與 service role 驗證應在 Functions 內檢查                 |
+| 公告 / 活動   | 公告、活動、daily brief、weekly report                                 | Firestore trigger 負責部分通知與聚合                           |
+| 群組 / 訊息   | 群組、貼文、作業、DM、reaction、通知                                   | 協作型資料適合 Firestore，但寫入規則仍需搭配 Rules / Functions |
+| 餐飲 / 支付   | 餐廳、菜單、點餐、錢包、付款、退款、webhook                            | 外部金流在 production 應只走後端與 webhook 驗證                |
+| 校園服務      | 圖書館、座位、宿舍、洗衣、健康、列印、公車                             | 外部 API key 應放 secret，不放 client bundle                   |
+| AI 助理       | `askCampusAssistant`                                                   | 可搭配 `backend/ai-server` 或 backend-managed AI proxy         |
+| 排程 / 觸發器 | `onSchedule`、Firestore `onDocument*` trigger                          | 負責定期同步、通知與資料維護                                   |
 
 ## 執行模型與資料流
 
@@ -318,6 +377,44 @@ flowchart LR
 - 若後端不可用，再降級為部分 hybrid 流程
 - TronClass 登入不建議讓手機端直接處理
 
+## 架構分層與開發原則
+
+### 分層視角
+
+| 層級               | 主要位置                                            | 責任                                                              |
+| ------------------ | --------------------------------------------------- | ----------------------------------------------------------------- |
+| Presentation / UI  | `apps/mobile/src/screens`、`apps/web/src/app`       | 畫面、導航、互動狀態、表單與使用者流程                            |
+| UI primitives      | `apps/mobile/src/ui`、`apps/web/src/components/ui`  | Button、Card、Modal、Toast、Skeleton、通用 list / form 元件       |
+| State / Context    | `apps/mobile/src/state`、`apps/web/src/lib`         | Auth、school context、theme、preferences、notifications、schedule |
+| Feature repository | `apps/mobile/src/features/*/repository.ts`          | 功能領域資料操作，避免 screen 直接處理資料來源細節                |
+| Data source        | `apps/mobile/src/data`                              | mock / firebase / hybrid source、API adapter、cache source        |
+| Client services    | `apps/mobile/src/services`、`apps/web/src/features` | 登入、通知、離線、AI、SSO、校園資料、權限、analytics              |
+| Shared contract    | `packages/shared/src`                               | 共用型別、學校設定、release、PU auth、通知與 mock data            |
+| Backend API        | `backend/functions`                                 | 認證、權限、資料代理、通知、支付、SSO、校務與 TronClass 整合      |
+| AI service         | `backend/ai-server`                                 | FastAPI AI server、RAG、training、self-training                   |
+| Security boundary  | `backend/firestore`、`backend/storage`、Functions   | Firestore / Storage Rules、server-side validation、secret 管理    |
+
+### 新功能應放在哪裡
+
+| 要做的事                          | 建議位置                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| 新增 mobile 畫面                  | `apps/mobile/src/screens/<Feature>Screen.tsx`，再接到對應 `*Stack.tsx`    |
+| 新增 web 頁面                     | `apps/web/src/app/<route>/page.tsx`                                       |
+| 新增 mobile 功能資料操作          | 優先放 `apps/mobile/src/features/<domain>/repository.ts` 或 `src/data`    |
+| 新增共用型別 / enum / school data | `packages/shared/src`                                                     |
+| 新增需要權限或 secret 的 API      | `backend/functions`                                                       |
+| 新增 Firestore collection         | 同步更新 rules、indexes、測試與文件                                       |
+| 新增正式外部整合                  | 後端代理 + env / secret + 錯誤處理 + fallback，不要直接暴露 secret 到 app |
+| 新增 AI 知識 / RAG                | `backend/ai-server/rag`、`backend/ai-server/prompts`                      |
+
+### 命名與邊界原則
+
+- Screen 只處理畫面狀態與使用者互動，不應直接塞入複雜 Firestore 查詢或校務爬蟲邏輯。
+- 涉及學號、密碼、session、金流、外部 API key 的流程，應留在 backend / Functions。
+- 能用 `packages/shared` 表達的 contract，不要讓 mobile、web、functions 各自複製一份。
+- Firestore 適合協作、即時、app-native data；校務、成績、支付、圖書館借閱等 authoritative data 應以 adapter / backend 為界。
+- `mock` 模式應服務 UI 開發與展示；正式整合測試應改用 `firebase` 或 `hybrid`。
+
 ## 本機開發
 
 ### 需求
@@ -360,6 +457,48 @@ cp backend/functions/.env.example backend/functions/.env
 cp backend/ai-server/.env.example backend/ai-server/.env
 ```
 
+### 最小可跑設定
+
+若只是要先看 UI / demo flow：
+
+```bash
+cp apps/mobile/.env.example apps/mobile/.env
+cp apps/web/.env.example apps/web/.env.local
+pnpm dev:web
+pnpm dev:mobile
+```
+
+這種情境通常會依範本落在 mock / demo 資料，適合畫面檢查、專題展示與不連外部校務系統的開發。
+
+若要測 PU 學號登入與 Firebase session：
+
+1. 在 `apps/web/.env.local` 補齊 `NEXT_PUBLIC_FIREBASE_*`
+2. 在 `apps/mobile/.env` 補齊 `EXPO_PUBLIC_FIREBASE_*`
+3. 在 `backend/functions/.env` 或 Firebase Functions secrets 補齊後端需要的設定
+4. 啟動 Firebase emulator 或部署 Functions
+5. 確認 client 使用的 region 是 `asia-east1`
+
+若要測 AI server：
+
+1. 複製 `backend/ai-server/.env.example`
+2. 本機開發可使用 `LLM_PROVIDER=ollama`
+3. 雲端可改 `together` 或 `groq` 類 OpenAI-compatible provider
+4. 執行 `pnpm dev:ai`
+
+### Env 分工表
+
+| 變數前綴 / 檔案                             | 誰會讀取                           | 說明                                                        |
+| ------------------------------------------- | ---------------------------------- | ----------------------------------------------------------- |
+| `EXPO_PUBLIC_*`                             | Expo / React Native client         | 會進入 client bundle，不要放 secret                         |
+| `NEXT_PUBLIC_*`                             | Next.js client                     | 會進入 browser bundle，不要放 secret                        |
+| `FIREBASE_SERVICE_ACCOUNT_BASE64`           | Next.js server route / server side | 只應放在 server-side 環境，不應暴露到 client                |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY`         | Functions / AI server              | 後端使用，避免放入 mobile/web public env                    |
+| `SSO_CONFIG_ENCRYPTION_KEY`                 | Functions secret                   | SSO secret config 加密用，正式環境應用 Firebase secret 管理 |
+| `TDX_CLIENT_ID` / `TDX_CLIENT_SECRET`       | Functions secret                   | TDX 公車 API OAuth2 憑證                                    |
+| `EXPO_TOKEN`                                | GitHub Actions / EAS               | EAS build / update / submit 使用                            |
+| `FIREBASE_TOKEN`                            | GitHub Actions / Firebase CLI      | Functions deploy 使用                                       |
+| `APPLE_ID` / `ASC_APP_ID` / `APPLE_TEAM_ID` | EAS submit / release workflow      | iOS submit 使用                                             |
+
 ### Release-like build 額外要求
 
 `apps/mobile/app.config.ts` 對 `preview` / `production` build 有更嚴格的 env 檢查。若要跑 release-like build，至少要補齊：
@@ -382,6 +521,18 @@ cp backend/ai-server/.env.example backend/ai-server/.env
   - release-like build 需要正整數
 
 能在 dev mode 跑起來，不代表能直接進 preview / production build。
+
+### 開發情境建議
+
+| 情境                         | 建議模式 / 指令                                                | 補充                                           |
+| ---------------------------- | -------------------------------------------------------------- | ---------------------------------------------- |
+| 只改 Web UI                  | `pnpm dev:web`、`pnpm --filter web test`                       | 需要 Firebase 時補 `apps/web/.env.local`       |
+| 只改 Mobile UI               | `pnpm dev:mobile`、`pnpm --filter mobile test`                 | 預設可用 mock 資料跑畫面                       |
+| 改 shared contract           | `pnpm typecheck:shared` 後再跑 mobile / web typecheck          | shared 會影響多個 workspace                    |
+| 改 Functions callable        | `pnpm --filter functions test`、必要時 `pnpm dev:functions`    | 涉及權限請補測試                               |
+| 改 Firestore / Storage rules | `pnpm test:rules`                                              | 需要 Java 21 與 Firebase emulator              |
+| 改 release / build 設定      | `pnpm --filter mobile exec eas-cli config` 或 workflow dry run | 注意 `app.config.ts` 的 env gate               |
+| 改 AI server                 | `pnpm dev:ai`、`pnpm ai:eval`                                  | 依 provider 準備 Ollama / Together / Groq 設定 |
 
 ### 啟動指令
 
@@ -488,6 +639,27 @@ pnpm -w firebase deploy --only functions
 - Android Maestro matrix
 - 全 repo 的 link / markdown 檢查
 
+### 建議的 PR 前本機檢查
+
+依變更範圍選擇，不一定每次都要全跑：
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm --filter mobile test
+pnpm --filter web test
+pnpm --filter functions test
+pnpm test:rules
+pnpm --filter web build
+```
+
+較保守的順序是：
+
+1. 先跑與自己改動最接近的 test / typecheck
+2. 若 touched shared、auth、rules、backend contract，再跑跨 workspace 檢查
+3. 發 PR 前至少確認 `pnpm lint`、`pnpm typecheck` 與相關測試
+4. release 前再確認 EAS / Firebase / env gate
+
 ### Release / Build 所需 secrets
 
 依 workflow 內容，常見會用到的 secrets 包括：
@@ -503,6 +675,77 @@ pnpm -w firebase deploy --only functions
 - Android submit 所需 service account key
 
 Secrets 應放在 GitHub repository / environment secrets，不要寫入 README、程式碼或 `.env.example` 真值。
+
+## 部署與發布
+
+### Web
+
+`apps/web` 是標準 Next.js app，可部署到支援 Next.js 的平台。現有 repo 內也有 `render.yaml`，但實際 web build 指令仍以 workspace script 為準：
+
+```bash
+pnpm --filter web build
+pnpm --filter web start
+```
+
+正式部署時至少需要：
+
+- `NEXT_PUBLIC_FIREBASE_API_KEY`
+- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
+- `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET`
+- `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID`
+- `NEXT_PUBLIC_FIREBASE_APP_ID`
+- `NEXT_PUBLIC_CLOUD_FUNCTION_REGION`
+
+### Firebase Functions
+
+Functions package 位於 `backend/functions`，部署指令：
+
+```bash
+pnpm --filter functions deploy
+```
+
+root CI 在 `main` push 且有 `FIREBASE_TOKEN` 時，會嘗試：
+
+```bash
+pnpm -w firebase deploy --only functions
+```
+
+正式部署前應確認：
+
+- Firebase project 與 region
+- Functions secrets
+- Firestore / Storage rules 是否同步部署
+- SSO / TDX / AI / payment 等外部服務憑證是否只存在 secret store
+
+### Mobile
+
+Mobile release 使用 EAS：
+
+```bash
+pnpm release:preview
+pnpm release:production
+pnpm submit:ios
+pnpm submit:android
+```
+
+`release.yml` 目前是手動 workflow，會做 preflight、建置 iOS / Android、可選 submit，並建立 draft GitHub Release。
+
+### AI server
+
+AI server 可獨立部署，入口在 `backend/ai-server/server.py`，本機啟動：
+
+```bash
+pnpm dev:ai
+```
+
+若用 Render 或其他容器平台，請參考：
+
+- `backend/ai-server/Dockerfile`
+- `backend/ai-server/render.yaml`
+- `backend/ai-server/requirements.txt`
+
+AI server 的 provider 由 `LLM_PROVIDER` 控制，本機預設較適合 `ollama`，雲端可接 Together / Groq 類 OpenAI-compatible endpoint。
 
 ## 測試與品質面
 
@@ -539,6 +782,98 @@ Secrets 應放在 GitHub repository / environment secrets，不要寫入 README�
 8. settings
 9. messages
 10. full user journey
+
+## 專題展示建議
+
+如果這個 repo 用於畢業專題展示，建議不要只從功能數量介紹，而是用「問題 -> 架構 -> 使用流程 -> 工程品質」的順序。
+
+### 3 分鐘短展示
+
+1. 說明問題：校園系統分散，學生每天要在課務、TronClass、公告、交通、餐飲、圖書館之間切換。
+2. 展示 Today：首頁只放今天最重要的下一步，而不是全部功能清單。
+3. 展示 PU-only 登入：使用靜宜學號與 e 校園密碼，登入後建立 Firebase session。
+4. 展示課程與校園：課程、成績、TronClass、地圖、公車、餐廳集中在同一套 mobile/web 體驗。
+5. 補一句工程面：monorepo 同時含 mobile、web、functions、shared package、AI server、CI/CD 與 E2E flow。
+
+### 8-10 分鐘完整展示
+
+| 段落       | 建議內容                                                                     |
+| ---------- | ---------------------------------------------------------------------------- |
+| 產品動機   | 校園資訊分散、登入流程割裂、學生不容易知道「下一步要做什麼」                 |
+| 使用者入口 | PU-only 學號登入、Today dashboard、5-tab navigation                          |
+| 學習主流程 | 課程、課表、教材、作業、測驗、成績、學習分析                                 |
+| 校園生活   | 地圖、AR、無障礙路線、公車、餐廳、圖書館、列印、宿舍、健康                   |
+| 協作與通知 | 收件匣、群組、訊息、推播、daily brief                                        |
+| 後端整合   | Firebase Functions、PU scraper、TronClass proxy、SSO / RBAC / Rules          |
+| AI 延伸    | Campus assistant、RAG、training / eval / self-training pipeline              |
+| 工程品質   | pnpm workspace、lint、typecheck、Jest、Vitest、Maestro、GitHub Actions       |
+| 風險與限制 | 真實校務系統依賴、secrets 管理、rules 測試尚未納入 CI gate、release env gate |
+
+### 答辯時可強調的技術點
+
+- 不是單一 app，而是 mobile + web + backend + shared + AI server 的 monorepo。
+- 目前產品策略是 PU-only，但資料與 SSO 架構仍保留多校擴充能力。
+- `mock` / `firebase` / `hybrid` 三種資料模式讓 UI 開發、展示與真實整合可以分開。
+- Sensitive operations 放在 Functions，client 不直接持有校務、金流、SSO、TDX 等 secret。
+- Firestore / Storage Rules 有測試，但目前還需要手動跑 `pnpm test:rules`。
+- Maestro flows 已覆蓋 onboarding、authentication、announcements、events、map、cafeteria、me、settings、messages、full journey。
+
+## 已知限制與後續建議
+
+| 類別               | 現況                                                                       | 建議下一步                                                            |
+| ------------------ | -------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| CI coverage        | `pnpm test:rules` 尚未進 CI gate                                           | 加入 `ci.yml`，並快取 Firebase emulator / Java setup                  |
+| 文件一致性         | 部分舊文件仍描述 email/password、多校入口或 demo 狀態                      | 逐步更新 `apps/mobile/DEMO.md`、`docs/API.md`、`docs/SECURITY.md`     |
+| Web / Mobile React | root overrides 固定 `react` / `react-dom` 19.1.0，但 web package 寫 19.2.3 | 若遇到 dependency resolution 問題，需重新檢查 workspace override 策略 |
+| Secret 管理        | `.env.example` 範圍廣，容易讓新接手者誤以為所有變數都必填                  | 依環境拆成 minimal / integration / production checklist               |
+| Release gate       | `app.config.ts` 對 preview / production env 很嚴格                         | README 已列出必要變數，後續可補 preflight script                      |
+| 多校能力           | 底層保留，但產品入口目前 PU-only                                           | 若要重啟多校，需同步更新登入 UI、SSO 文件、school onboarding 與測試   |
+| AI server          | 已有 server / RAG / training pipeline，但部署與監控需按 provider 補齊      | 補健康檢查、評測資料集、provider fallback 與成本控管                  |
+| Security docs      | 安全文件偏廣義，與目前 PU-only 主流程有些落差                              | 以 Functions / Rules / PU auth 實作為準重寫一版 threat model          |
+
+## Troubleshooting
+
+### `pnpm install --frozen-lockfile` 失敗
+
+- 確認 Node 符合 root `engines`：`>=20 <21`
+- 確認 pnpm 版本為 `10.28.2`
+- 不要混用 npm / yarn 安裝 workspace 依賴
+
+### Mobile 一直讀到 mock data
+
+- 檢查 `apps/mobile/.env`
+- 若從範本複製，預設是 `EXPO_PUBLIC_DATA_SOURCE_MODE=mock`
+- 要測整合路徑，改成 `firebase` 或 `hybrid`
+
+### PU 學號登入不可用
+
+- 確認 Firebase client env 已補齊
+- 確認 Cloud Functions region 是 `asia-east1`
+- 確認 Functions emulator / deployed Functions 可連線
+- 確認後端 `signInPuStudentId` 需要的外部依賴可用
+
+### Web 顯示 mock announcement
+
+- `apps/web/src/app/page.tsx` 會在 Firebase 未設定或讀取失敗時 fallback 到 `mockAnnouncements`
+- 檢查 `apps/web/.env.local` 的 `NEXT_PUBLIC_FIREBASE_*`
+
+### `pnpm test:rules` 無法啟動
+
+- 需要 Java 21
+- root script 會嘗試尋找 Homebrew 的 `openjdk@21`
+- 若不是 Homebrew 安裝，請手動設定 `JAVA_HOME` 與 `PATH`
+
+### EAS preview / production build 失敗
+
+- 檢查 `apps/mobile/app.config.ts` 要求的 env
+- preview / production 比 dev mode 嚴格
+- `IOS_BUILD_NUMBER` 與 `ANDROID_VERSION_CODE` 必須是有效版本值
+
+### Functions deploy 失敗
+
+- 確認 Firebase CLI 已登入或 CI 有 `FIREBASE_TOKEN`
+- 確認 project id、region、secrets
+- 若是 rules / index 問題，先確認 `backend/firestore` 與 `backend/storage`
 
 ## 文件導覽與可信度
 
