@@ -1009,30 +1009,35 @@ export function AIChatScreen(props: any) {
 
   // ── Agent Logic: Intent Detection + Tool Matching ──
   const detectIntentAndExecute = useCallback(async (userMessage: string) => {
-    const lowerMsg = userMessage.toLowerCase();
-    const { domain, confidence } = classifyDomain(lowerMsg);
+    try {
+      const lowerMsg = userMessage.toLowerCase();
+      const { domain, confidence } = classifyDomain(lowerMsg);
 
-    // 1. Check Task Chains first (multi-step workflows)
-    const chain = matchTaskChain(userMessage);
-    if (chain) {
-      return startTaskChain(chain, userMessage);
-    }
-
-    // 2. ALWAYS try smart contextual response first (Q&A, campus info)
-    //    This prevents tools from hijacking question-type queries
-    const smartResponse = generateSmartResponse(userMessage, domain);
-    if (smartResponse) return smartResponse;
-
-    // 3. Only match tools if it's an ACTION request with correct domain
-    if (isActionRequest(lowerMsg) || confidence >= 0.5) {
-      const toolMatch = matchDirectTool(lowerMsg, domain);
-      if (toolMatch) {
-        return startToolExecution(toolMatch, userMessage);
+      // 1. Check Task Chains first (multi-step workflows)
+      const chain = matchTaskChain(userMessage);
+      if (chain) {
+        return startTaskChain(chain, userMessage);
       }
-    }
 
-    // 4. Fallback to AI service (mock or real LLM)
-    return null;
+      // 2. ALWAYS try smart contextual response first (Q&A, campus info)
+      //    This prevents tools from hijacking question-type queries
+      const smartResponse = generateSmartResponse(userMessage, domain);
+      if (smartResponse) return smartResponse;
+
+      // 3. Only match tools if it's an ACTION request with correct domain
+      if (isActionRequest(lowerMsg) || confidence >= 0.5) {
+        const toolMatch = matchDirectTool(lowerMsg, domain);
+        if (toolMatch) {
+          return startToolExecution(toolMatch, userMessage);
+        }
+      }
+
+      // 4. Fallback to AI service (mock or real LLM)
+      return null;
+    } catch (err) {
+      console.warn("[AIChat] detectIntentAndExecute error:", err);
+      return null; // 出錯就交給 AI 引擎處理
+    }
   }, [announcements, events, menus, pois, courses, pendingAssignments, agentMemory]);
 
   function matchDirectTool(msg: string, domain: IntentDomain): AgentTool | null {
@@ -1120,9 +1125,12 @@ export function AIChatScreen(props: any) {
     const lowerMsg = msg.toLowerCase();
     const uid = () => genMsgId();
 
+    // ★ 防護：用 try/catch 包裝整個函數，避免任何 undefined 崩潰
+    try {
+
     // ── 學業核心：被當 / 不及格 / 課程風險分析 ──
     if (/被當|當掉|不及格|會不會過|能不能過|及格|二一|退學|延畢|重修/.test(lowerMsg)) {
-      if (courses.length === 0) {
+      if ((courses ?? []).length === 0) {
         return { id: uid(), role: "assistant", content: "目前沒有載入你的課程資料，無法進行分析。\n\n請先到設定中同步你的課表和成績資料，我才能幫你評估課程風險。", timestamp: new Date(), agentType: "text", suggestions: ["同步課表", "查成績"] };
       }
       const lateAssignments = pendingAssignments.filter(a => a.isLate);
@@ -1451,6 +1459,11 @@ export function AIChatScreen(props: any) {
     }
 
     return null; // No local match → fall through to AI service
+
+    } catch (smartErr) {
+      console.warn("[AIChat] generateSmartResponse error:", smartErr);
+      return null; // 出錯就跳過本地回答，讓 AI 引擎或 Gemini 接手
+    }
   }
 
   // ── Start Tool Execution (with param collection) ──
@@ -1641,9 +1654,10 @@ export function AIChatScreen(props: any) {
       case "request_leave": return `請假申請已提交！\n\n課程：${params.course || "課程"}\n假別：${params.reason === "sick" ? "病假" : "事假"}\n日期：${params.date || "今天"}\n\n狀態：待教師審核\n我會在教師回覆後通知你。`;
       case "check_grades": return "成績資料需要從教務系統即時查詢才能確保正確。\n\n正在前往成績查詢頁面...";
       case "check_assignments": {
-        if (pendingAssignments.length === 0) return "目前沒有查到待繳的作業資料。\n\n如有作業，請確認老師已在系統上發布。";
-        const list = pendingAssignments.map((a, i) => `${i + 1}. ${a.isLate ? "🔴" : "🟢"} ${a.title}（${a.groupName ?? ""}）${a.dueAt ? ` — 截止 ${new Date(a.dueAt.seconds * 1000).toLocaleDateString("zh-TW")}` : ""}${a.isLate ? " ⚠️已逾期" : ""}`).join("\n");
-        return `你有 ${pendingAssignments.length} 份待處理作業：\n\n${list}\n\n需要我設定提醒嗎？`;
+        const _pa = pendingAssignments ?? [];
+        if (_pa.length === 0) return "目前沒有查到待繳的作業資料。\n\n如有作業，請確認老師已在系統上發布。";
+        const list = _pa.map((a, i) => `${i + 1}. ${a.isLate ? "🔴" : "🟢"} ${a.title}（${a.groupName ?? ""}）${a.dueAt ? ` — 截止 ${new Date(a.dueAt.seconds * 1000).toLocaleDateString("zh-TW")}` : ""}${a.isLate ? " ⚠️已逾期" : ""}`).join("\n");
+        return `你有 ${_pa.length} 份待處理作業：\n\n${list}\n\n需要我設定提醒嗎？`;
       }
       case "check_bus": return "靜宜大學主要公車路線：\n\n• 300/307/308：往台中車站方向\n• 304：往清水方向\n• 統聯：往高鐵台中站\n\n⚠️ 即時到站時間請查看「台中公車」APP。";
       case "set_reminder": return `已設定提醒！\n\n內容：${params.title || "提醒"}\n時間：${params.datetime || "稍後"}\n\n到時間會推播通知你 🔔`;
@@ -2170,8 +2184,9 @@ export function AIChatScreen(props: any) {
       if ((msg.match(/[？?]/g) || []).length >= 2) return true;
       // 情感支持 / 開放式聊天
       if (/好煩|好累|壓力大|不想|焦慮|憂鬱|怎麼.*這麼|人生|未來|迷茫/.test(msg)) return true;
-      // 需要創意/建議類
-      if (/推薦.*[^餐飯]|規劃|計畫|安排|準備.*怎|面試|履歷|實習|打工|交換/.test(msg)) return true;
+      // 需要創意/建議類（但排除餐飲推薦，因為本地有完整資料）
+      if (/規劃|計畫|安排|準備.*怎|面試|履歷|實習|打工|交換/.test(msg)) return true;
+      if (/推薦/.test(msg) && !/吃|餐|飯|麵|午餐|晚餐|早餐|宵夜|美食|食物/.test(msg)) return true;
       // 一般知識問答（非校園特定）
       if (/是什麼意思|英文|翻譯|程式|code|bug|python|java|AI|機器學習/.test(msg)) return true;
       return false;
