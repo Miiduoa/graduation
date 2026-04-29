@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 
-import { getDb } from "../firebase";
+import { getDb, isFirebaseMockMode } from "../firebase";
 import {
   buildCourseSummaries,
   createCourseModule as createWorkspaceModule,
@@ -86,6 +86,7 @@ function canManageMembership(role?: string) {
 }
 
 export async function listCourseSpaces(userId: string, schoolId?: string): Promise<CourseSpace[]> {
+  if (isFirebaseMockMode()) return [];
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
   const summaries = await buildCourseSummaries(db, memberships);
@@ -368,6 +369,7 @@ export async function getAttendanceSummary(courseSpaceId: string): Promise<Atten
 }
 
 export async function listInboxTasks(userId: string, schoolId?: string): Promise<InboxTask[]> {
+  if (isFirebaseMockMode()) return [];
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
   if (memberships.length === 0) return [];

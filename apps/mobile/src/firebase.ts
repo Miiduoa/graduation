@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import Constants from "expo-constants";
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, memoryLocalCache } from "firebase/firestore";
 import { getFunctions, type Functions } from "firebase/functions";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { 
@@ -68,14 +68,8 @@ export function getFirebaseApp() {
   const cfg = getFirebaseConfig();
 
   if (!hasUsableFirebaseConfig()) {
-    if (!isMockRuntimeMode()) {
-      throw new Error(
-        "Missing Firebase config. Set EXPO_PUBLIC_FIREBASE_API_KEY / PROJECT_ID / APP_ID (and others) in env and restart expo."
-      );
-    }
-
     console.warn(
-      "[firebase] Missing Firebase env config in mock mode. Using local fallback Firebase config for app bootstrap."
+      "[firebase] Missing Firebase env config. Using local fallback Firebase config for app bootstrap."
     );
 
     return initializeApp({
@@ -98,8 +92,25 @@ export function getFirebaseApp() {
   });
 }
 
+let _db: ReturnType<typeof getFirestore> | null = null;
+
+export function isFirebaseMockMode(): boolean {
+  return !hasUsableFirebaseConfig();
+}
+
 export function getDb() {
-  return getFirestore(getFirebaseApp());
+  if (_db) return _db;
+  const app = getFirebaseApp();
+  try {
+    _db = initializeFirestore(app, {
+      experimentalForceLongPolling: true,
+      localCache: memoryLocalCache(),
+    });
+  } catch {
+    // Already initialized
+    _db = getFirestore(app);
+  }
+  return _db;
 }
 
 export function getCloudFunctionRegion(): string {

@@ -7,12 +7,12 @@ import * as Haptics from "expo-haptics";
 import { Magnetometer, Accelerometer } from "expo-sensors";
 import { Screen, Button, Pill, AnimatedCard } from "../ui/components";
 import { theme } from "../ui/theme";
-import { 
+import {
   buildOutdoorRoute,
   calculateBearing,
   calculateDistance,
   calculateRouteDistance,
-  calculateRelativeAngle, 
+  calculateRelativeAngle,
   getRouteProgress,
   getDirectionType,
   getDirectionInstruction,
@@ -24,6 +24,13 @@ import {
 import { useDataSource } from "../hooks/useDataSource";
 import { useGeolocation } from "../hooks/useGeolocation";
 import { useSchool } from "../state/school";
+import {
+  findShortestPath,
+  pathToNavigationSteps,
+  CAMPUS_PATH_NODES,
+  getCampusPoi,
+  type CampusPathNode,
+} from "../data/puCampusData";
 
 type ARMode = "preview" | "navigating" | "arrived";
 
@@ -35,25 +42,48 @@ type NavigationStep = {
   landmark?: string;
 };
 
-// Generate mock steps based on destination name and building
-function generateStepsForDestination(destinationName: string): NavigationStep[] {
-  const isIndoor = destinationName.includes("樓") || destinationName.includes("教室") || destinationName.includes("館");
-  const steps: NavigationStep[] = [
-    { id: "1", instruction: "直走約 50 公尺", distance: 50, direction: "straight", landmark: "沿主要路線前進" },
-    { id: "2", instruction: "右轉", distance: 0, direction: "right", landmark: "在路口" },
-    { id: "3", instruction: "直走約 30 公尺", distance: 30, direction: "straight" },
-  ];
-
-  if (isIndoor) {
-    steps.push(
-      { id: "4", instruction: "左轉進入建築", distance: 0, direction: "left", landmark: `進入 ${destinationName}` },
-      { id: "5", instruction: "搭乘電梯或樓梯", distance: 0, direction: "up" },
-      { id: "6", instruction: "直走約 20 公尺", distance: 20, direction: "straight" }
-    );
+/**
+ * 使用校園路網 A* 路徑規劃產生真實導航步驟
+ * 取代舊版 mock 步驟，根據使用者 GPS 位置 + 目的地座標計算
+ */
+function generateRealNavigationSteps(
+  userLat: number | null,
+  userLng: number | null,
+  destLat: number,
+  destLng: number,
+  destName: string,
+): NavigationStep[] {
+  // 沒有使用者位置 → 只產生目的地步驟
+  if (userLat === null || userLng === null) {
+    return [{ id: "1", instruction: `前往 ${destName}`, distance: 0, direction: "straight", landmark: "等待定位中..." }];
   }
 
-  steps.push({ id: String(steps.length + 1), instruction: `抵達 ${destinationName}`, distance: 0, direction: "destination", landmark: "目的地在視線範圍內" });
-  return steps;
+  // A* 路徑規劃
+  const pathNodes = findShortestPath(userLat, userLng, destLat, destLng);
+  const rawSteps = pathToNavigationSteps(pathNodes, destName);
+
+  // 轉換為 NavigationStep 格式
+  return rawSteps.map((s, i) => {
+    let dir: NavigationStep["direction"] = "straight";
+    if (s.direction === "left" || s.direction === "slight_left") dir = "left";
+    else if (s.direction === "right" || s.direction === "slight_right") dir = "right";
+    else if (s.direction === "destination") dir = "destination";
+
+    return {
+      id: String(i + 1),
+      instruction: s.instruction,
+      distance: s.distance,
+      direction: dir,
+      landmark: s.direction === "destination" ? "目的地在視線範圍內" : undefined,
+    };
+  });
+}
+
+/**
+ * 將校園路網節點轉為 ARLocation 陣列，用於路線吸附
+ */
+function campusNodesToARLocations(): ARLocation[] {
+  return CAMPUS_PATH_NODES.map((n) => ({ latitude: n.lat, longitude: n.lng }));
 }
 
 // Fallback steps when no destination is provided
@@ -171,25 +201,10 @@ export function ARNavigationScreen(props: any) {
     };
   }, [destination, destinationId, destinationLat, destinationLng, ds]);
 
+  // 直接使用校園路網節點（不再需要從 adapter 抓 POI 轉換）
   useEffect(() => {
-    let active = true;
-    const loadCampusNodes = async () => {
-      try {
-        const pois = await ds.listPois(school.id);
-        if (!active) return;
-        const nodes = pois
-          .filter((poi) => typeof poi.lat === "number" && typeof poi.lng === "number")
-          .map((poi) => ({ latitude: poi.lat, longitude: poi.lng }));
-        setCampusNodes(nodes);
-      } catch {
-        if (active) setCampusNodes([]);
-      }
-    };
-    loadCampusNodes();
-    return () => {
-      active = false;
-    };
-  }, [ds, school.id]);
+    setCampusNodes(campusNodesToARLocations());
+  }, []);
 
   useEffect(() => {
     if (mode === "navigating") {
@@ -263,8 +278,14 @@ export function ARNavigationScreen(props: any) {
 
   const generatedSteps = useMemo(() => {
     if (!target) return FALLBACK_STEPS;
-    return generateStepsForDestination(target.name);
-  }, [target]);
+    return generateRealNavigationSteps(
+      geo.latitude ?? null,
+      geo.longitude ?? null,
+      target.lat,
+      target.lng,
+      target.name,
+    );
+  }, [target, geo.latitude, geo.longitude]);
 
   const currentInstruction = useMemo(() => {
     if (mode !== "navigating") return generatedSteps[currentStep] ?? generatedSteps[0];
@@ -329,11 +350,20 @@ export function ARNavigationScreen(props: any) {
     const now = Date.now();
     if (lastRecalcAtRef.current && now - lastRecalcAtRef.current < ROUTE_RECALC_INTERVAL_MS) return;
 
-    const newRoute = buildOutdoorRoute(
-      routeProgress.snappedLocation,
-      { latitude: target.lat, longitude: target.lng },
-      campusNodes
+    // 重新使用 A* 路網規劃
+    const recalcPath = findShortestPath(
+      routeProgress.snappedLocation.latitude,
+      routeProgress.snappedLocation.longitude,
+      target.lat,
+      target.lng,
     );
+    const newRoute: ARLocation[] = recalcPath.length >= 2
+      ? recalcPath.map((n) => ({ latitude: n.lat, longitude: n.lng }))
+      : buildOutdoorRoute(
+          routeProgress.snappedLocation,
+          { latitude: target.lat, longitude: target.lng },
+          campusNodes,
+        );
     const newDistance = calculateRouteDistance(newRoute);
 
     setRoutePoints(newRoute);
@@ -383,7 +413,24 @@ export function ARNavigationScreen(props: any) {
     if (position && target) {
       const startLocation: ARLocation = { latitude: position.latitude!, longitude: position.longitude! };
       const destinationLocation: ARLocation = { latitude: target.lat, longitude: target.lng };
-      const route = buildOutdoorRoute(startLocation, destinationLocation, campusNodes);
+
+      // 使用校園路網 A* 路徑規劃產生精準路線點
+      const pathNodes = findShortestPath(
+        position.latitude!,
+        position.longitude!,
+        target.lat,
+        target.lng,
+      );
+      const routeFromPathNetwork: ARLocation[] = pathNodes.map((n) => ({
+        latitude: n.lat,
+        longitude: n.lng,
+      }));
+
+      // 如果路網節點太少，再用 buildOutdoorRoute 補間
+      const route = routeFromPathNetwork.length >= 2
+        ? routeFromPathNetwork
+        : buildOutdoorRoute(startLocation, destinationLocation, campusNodes);
+
       setRoutePoints(route);
       const routeDistance = calculateRouteDistance(route);
       setRouteTotalDistance(routeDistance);
@@ -788,7 +835,7 @@ export function ARNavigationScreen(props: any) {
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="導航路線預覽" subtitle={!target ? "請先選擇目的地" : `共 ${generatedSteps.length} 個步驟`} delay={100}>
+        <AnimatedCard title="導航路線預覽" subtitle={!target ? "請先選擇目的地" : `校園路網 A* 路徑規劃 · ${generatedSteps.length} 步驟`} delay={100}>
           <View style={{ gap: 8 }}>
             {(!target ? FALLBACK_STEPS : generatedSteps).map((step, idx) => (
               <View
@@ -830,24 +877,36 @@ export function ARNavigationScreen(props: any) {
           </View>
         </AnimatedCard>
 
-        <AnimatedCard title="功能說明" subtitle="" delay={200}>
+        <AnimatedCard title="導航技術" subtitle="校園路網 A* + 即時感測器" delay={200}>
           <View style={{ gap: 10 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <Ionicons name="git-network-outline" size={20} color={theme.colors.accent} />
+              <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
+                A* 路徑規劃（22 節點校園路網圖）
+              </Text>
+            </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
               <Ionicons name="videocam-outline" size={20} color={theme.colors.accent} />
               <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                使用相機即時顯示導航箭頭和指示
+                相機即時 AR 方向箭頭與距離疊加
               </Text>
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
               <Ionicons name="compass-outline" size={20} color={theme.colors.success} />
               <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                結合指南針確保方向準確
+                磁力計 + 加速計感測器融合，平滑方位
               </Text>
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-              <Ionicons name="accessibility-outline" size={20} color={theme.colors.success} />
+              <Ionicons name="locate-outline" size={20} color={theme.colors.success} />
               <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
-                支援觸覺回饋和語音提示
+                路線偏移偵測 + 自動重新規劃路徑
+              </Text>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <Ionicons name="accessibility-outline" size={20} color={theme.colors.info} />
+              <Text style={{ color: theme.colors.muted, flex: 1, lineHeight: 20 }}>
+                觸覺回饋 + 語音提示 + 角度轉彎偵測
               </Text>
             </View>
           </View>

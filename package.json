@@ -19,7 +19,9 @@
       "semver": "7.7.3",
       "svgo": "2.8.2",
       "tar": "7.5.12",
-      "undici": "6.24.1"
+      "undici": "6.24.1",
+      "react": "19.1.0",
+      "react-dom": "19.1.0"
     }
   },
   "scripts": {
@@ -55,13 +57,15 @@
     "submit:android": "pnpm --filter mobile exec eas submit --platform android --latest --non-interactive"
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "^5.0.0",
     "@eslint/js": "^9.39.2",
+    "@firebase/rules-unit-testing": "^5.0.0",
     "eslint": "^9.39.2",
     "eslint-plugin-react-hooks": "^7.0.1",
     "firebase-tools": "^15.4.0",
     "globals": "^17.4.0",
     "prettier": "^3.8.1",
     "typescript-eslint": "^8.57.1"
+  },
+  "dependencies": {
   }
 }

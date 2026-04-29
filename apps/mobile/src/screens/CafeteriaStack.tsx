@@ -2,9 +2,8 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { CafeteriaScreen } from "./CafeteriaScreen";
-import { MenuDetailScreen } from "./MenuDetailScreen";
-import { OrderingScreen } from "./OrderingScreen";
-import { MenuSubscriptionScreen } from "./MenuSubscriptionScreen";
+import { VendorManagementScreen } from "./VendorManagementScreen";
+import { AdminCafeteriaScreen } from "./AdminCafeteriaScreen";
 import { useThemeMode } from "../state/theme";
 import { createStackScreenOptions } from "../ui/navigationTheme";
 
@@ -20,9 +19,8 @@ export function CafeteriaStack() {
       screenOptions={createStackScreenOptions()}
     >
       <Stack.Screen name="Cafeteria" component={CafeteriaScreen} options={{ title: "餐廳", headerShown: false }} />
-      <Stack.Screen name="MenuDetail" component={MenuDetailScreen} options={{ title: "餐點詳情" }} />
-      <Stack.Screen name="Ordering" component={OrderingScreen} options={{ title: "線上點餐" }} />
-      <Stack.Screen name="MenuSubscription" component={MenuSubscriptionScreen} options={{ title: "菜單訂閱" }} />
+      <Stack.Screen name="VendorManagement" component={VendorManagementScreen} options={{ title: "店家管理", headerShown: false }} />
+      <Stack.Screen name="AdminCafeteria" component={AdminCafeteriaScreen} options={{ title: "餐廳管理", headerShown: false }} />
     </Stack.Navigator>
   );
 }

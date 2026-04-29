@@ -25,6 +25,10 @@ export type SavedCourse = {
   name: string;
   credits: number;
   category: CreditCategory;
+  /** Detailed category key (maps to DetailedCreditCategory.key) */
+  detailedCatKey?: string;
+  /** Detailed sub-category key (maps to CreditSubCategory.key) */
+  detailedSubKey?: string;
   passed: boolean;
   grade?: string;
   semester?: string;

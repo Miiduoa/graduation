@@ -16,7 +16,7 @@ import { Screen, Card, Button, Pill, LoadingState, ErrorState, AnimatedCard } fr
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme, softShadowStyle } from "../ui/theme";
 import { useAuth } from "../state/auth";
-import { getDb } from "../firebase";
+import { getDb, isFirebaseMockMode } from "../firebase";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   doc,
@@ -288,6 +288,10 @@ export function ClassroomScreen(props: any) {
 
   // 訂閱 Session 狀態
   useEffect(() => {
+    if (isFirebaseMockMode()) {
+      setLoading(false);
+      return;
+    }
     if (!groupId || !sessionId) return;
     const ref = doc(db, "groups", groupId, "liveSessions", sessionId);
     const unsub = onSnapshot(ref, (snap) => {
@@ -301,6 +305,7 @@ export function ClassroomScreen(props: any) {
 
   // 訂閱問答
   useEffect(() => {
+    if (isFirebaseMockMode()) return;
     if (!groupId || !sessionId) return;
     const ref = collection(db, "groups", groupId, "liveSessions", sessionId, "questions");
     const q = query(ref, orderBy("upvotes", "desc"), limit(30));
@@ -312,6 +317,7 @@ export function ClassroomScreen(props: any) {
 
   // 訂閱投票
   useEffect(() => {
+    if (isFirebaseMockMode()) return;
     if (!groupId || !sessionId) return;
     const ref = collection(db, "groups", groupId, "liveSessions", sessionId, "polls");
     const unsub = onSnapshot(query(ref, orderBy("createdAt", "desc")), (snap) => {

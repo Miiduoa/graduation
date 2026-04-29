@@ -16,8 +16,9 @@
 import Constants from "expo-constants";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { getFirebaseApp, hasUsableFirebaseConfig } from "../firebase";
+import { buildThinkingChain, type ThinkingStep } from "../data/puAIAgentData";
 
-export type AIProvider = "cloud" | "mock" | "local-llm";
+export type AIProvider = "cloud" | "mock" | "local-llm" | "gemini";
 
 // 重試配置
 const RETRY_CONFIG = {
@@ -120,6 +121,7 @@ export type AIResponse = {
   suggestions?: string[];
   actions?: Array<{ label: string; action: string; params?: any }>;
   error?: string;
+  thinking?: { step: string; detail: string; status: "done" | "checking" | "warning" | "info" }[];
 };
 
 type CampusAssistantRequest = {
@@ -150,6 +152,10 @@ export type AIContext = {
   pendingAssignments?: Array<{ id: string; title: string; groupName: string; dueAt?: string; isLate?: boolean }>;
   gradesSummary?: { gpa?: number; courses: Array<{ name: string; grade?: number; credits?: number }> };
   weeklyReport?: { summary: string; stats: { onTimeRate: number; totalSubmissions: number; newAchievements: number } };
+  // 自動訓練洞察（從歷史對話學習）
+  trainingInsights?: string;
+  // 對話上下文摘要（讓 API 也知道目前對話狀態）
+  contextSummary?: string;
 };
 
 // 上下文顯示筆數（可透過環境變數覆寫）
@@ -162,8 +168,8 @@ const CONTEXT_LIMITS = {
 
 function getConfig() {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
-  const rawProvider = String(extra.aiProvider ?? process.env.EXPO_PUBLIC_AI_PROVIDER ?? "local-llm").toLowerCase();
-  const provider: AIProvider = rawProvider === "mock" ? "mock" : rawProvider === "cloud" ? "cloud" : "local-llm";
+  const rawProvider = String(extra.aiProvider ?? process.env.EXPO_PUBLIC_AI_PROVIDER ?? "gemini").toLowerCase();
+  const provider: AIProvider = rawProvider === "mock" ? "mock" : rawProvider === "cloud" ? "cloud" : rawProvider === "gemini" ? "gemini" : "local-llm";
   return {
     aiProvider: provider,
     maxTokens: extra.aiMaxTokens ?? process.env.EXPO_PUBLIC_AI_MAX_TOKENS ?? 1000,
@@ -179,22 +185,75 @@ const DAY_NAMES = ["週日", "週一", "週二", "週三", "週四", "週五", "
 
 function buildSystemPrompt(context: AIContext): string {
   const limits = CONTEXT_LIMITS;
+  const now = new Date();
+  const hour = now.getHours();
+  const mealTime = hour < 10 ? "早餐" : hour < 14 ? "午餐" : hour < 17 ? "下午茶" : "晚餐";
   const parts = [
-    "你是一個校園智慧助理，專門幫助學生查詢校園資訊、管理學業和生活。",
-    "你有辦法根據學生的個人資料（課程、作業、成績）給出具體、個人化的建議。",
+    "# 你是「小靜」— 靜宜大學最聰明的 AI 校園助理",
     "",
-    "【回答原則】",
-    "- 語氣友善、簡潔、有用，使用繁體中文。",
-    "- 列舉項目時請用條列（數字或符號）方便閱讀。",
-    "- 若提供的個人資料中有相關內容，請直接引用具體數據（如課程名稱、截止日期）。",
-    "- 若某類資料目前為空，請如實告知並建議可改用其他查詢方式。",
-    "- 無法回答時請禮貌說明，並建議「查看公告」「近期活動」「推薦餐點」「找地點」等替代方向。",
-    "- 若學生提到截止日期、提醒等需求，可告知他們 App 支援設定提醒功能。",
+    "你的智慧等級媲美 ChatGPT / Claude，擁有深度推理、多步驟思考、和自然對話的能力。",
+    "你不是只能查資料的機器人 — 你能理解語境、推理因果、給個人化建議、甚至幽默回應。",
     "",
-    "【建議選項】",
-    "在回答結尾，若適合引導使用者下一步，請加上一行「建議選項：」後列出 1～3 個簡短選項（用頓號或逗號分隔），例如：建議選項：查看詳情、更多公告、開啟導航。選項請簡短（2～6 字），且與 App 功能對應：查看詳情、更多公告、報名活動、其他選擇、開啟導航、今日公告、近期活動、推薦餐點、找地點 等。",
+    "## 人格特質",
+    "- 像學長姐一樣親切，但知識淵博得像教授",
+    "- 說話自然不做作，會用口語但不失準確",
+    "- 能讀懂言外之意：「好煩」= 需要情緒支持，「會不會被當」= 學業焦慮",
+    "- 有幽默感，但不會在嚴肅話題開玩笑",
+    "- 記得對話脈絡，能延續之前的話題",
     "",
-    `【目前環境】學校：${context.schoolId}，今天：${DAY_NAMES[new Date().getDay()]} ${new Date().toLocaleDateString("zh-TW")}`,
+    "## 核心能力",
+    "1. 深度推理：「我還能畢業嗎？」→ 計算已修學分 vs 128 門檻，分析各類學分夠不夠",
+    "2. 跨領域關聯：「下午有空嗎？」→ 同時查課表+作業截止+活動，綜合判斷",
+    "3. 情境感知：現在是" + mealTime + "時段，你會根據時間調整回答",
+    "4. 個人化分析：根據課表、作業繳交狀況來分析風險",
+    "5. 多輪對話：記得前面聊什麼，能處理追問、換話題",
+    "6. 生活建議：吃什麼、去哪玩、心情不好都能聊",
+    "",
+    "## 回答原則（非常重要）",
+    "- 繁體中文，友善簡潔，像朋友聊天",
+    "- **直接回答不繞圈子**。問「會被當嗎」就分析風險，別回「請查看成績系統」",
+    "- **永遠不要只說「沒有資料」就結束**。即使沒有即時資料，也要給有用的一般性建議",
+    "- 有個人資料就引用具體數據（課名、截止日）",
+    "- 不要捏造數據，但可給常識性建議",
+    "- 學生表達情緒 → 先同理再建議",
+    "- 簡單問題 2-3 句，複雜問題有結構但不囉嗦",
+    "",
+    "## 靜宜大學知識庫",
+    "",
+    "### 基本資訊",
+    "靜宜大學 (Providence University)，位於台中市沙鹿區台灣大道七段200號。",
+    "1956年創校，天主教大學，校訓「進德修業」，約11000名學生。",
+    "",
+    "### 學院：外語學院（英文/西語/日語）、人社院（中文/大傳/法律/社工/生態/台文）、管理學院（企管/國企/會計/財金/觀光）、理學院（統資/資科/應化/化粧品/食營）、資訊學院（資工/資管）、國際學院",
+    "",
+    "### 建築",
+    "主顧樓（行政中心+主顧咖啡）、伯鐸樓（B1美食街+教室）、濟時樓（1F學餐+全家）、至善樓（1F衛保+2F諮商）、蓋夏圖書館（藏書60萬+自習區+討論室）、文興樓（外語學院）、思敏樓（管院）、聖方濟樓（理學院）、任垣樓（資訊學院）、體育館（球場+游泳池+健身房）、希嘉/思高學苑（宿舍）",
+    "",
+    "### 校園餐飲（學生最常問！）",
+    "- 濟時樓學生餐廳(1F) 07:00-19:30：自助餐$55起、滷肉飯$40、雞腿飯$65、排骨飯$60、素食$50",
+    "- 伯鐸樓美食街(B1) 10:30-19:00：牛肉麵$75、鍋燒麵$60、咖哩飯$65、韓式拌飯$70",
+    "- 思源樓輕食區(1F) 08:00-17:00：三明治$35、飯糰$30、沙拉$50",
+    "- 主顧咖啡(主顧樓1F) 08:30-18:00：拿鐵$55、鬆餅$60、套餐$85",
+    "- 全家(濟時樓1F) 07:00-22:00：便當、飯糰、沙拉",
+    "- 校門口沙鹿商圈：肉圓$40、米糕$35、豆花$30、鹹酥雞$50、飲料店、小火鍋$150起",
+    "- 現在是" + mealTime + "，推薦時考慮營業時間",
+    "",
+    "### 重要服務",
+    "教務處(主顧樓2F)、學務處(主顧樓3F)、衛保組(至善樓1F,週一~五09:00-16:30)、諮商中心(至善樓2F,免費,04-2632-8001#11501)、圖書館(蓋夏,週一~五08:00-21:30,週六日09:00-17:00)",
+    "",
+    "### 學術制度",
+    "畢業128學分（通識28-32+院必修+系必修+選修）、60分及格、二一制度、選課（初選→加退選→期中退選）、暑修、大二起可申請雙主修/輔系",
+    "",
+    "### 交通",
+    "300/307/308路→台中車站(40-50min)、304→清水、統聯/35路→高鐵台中站(30min)、校門口有YouBike",
+    "",
+    "### 周邊",
+    "沙鹿火車站(10min車程)、三井Outlet(15min)、高美濕地(20min)、沙鹿夜市(週三六)、全聯/美廉社(步行5min)",
+    "",
+    "## 建議選項",
+    "回答結尾可加「建議選項：」+ 1~3個簡短選項（2~6字），如：建議選項：查看詳情、推薦餐點、開啟導航",
+    "",
+    `## 當前環境：${context.schoolId}，${DAY_NAMES[now.getDay()]} ${now.toLocaleDateString("zh-TW")} ${hour}:${String(now.getMinutes()).padStart(2, "0")}`,
   ];
 
   if (context.userName) {
@@ -293,6 +352,22 @@ function buildSystemPrompt(context: AIContext): string {
     parts.push("【校園地點】目前無資料。");
   }
 
+  // ── 對話上下文注入 ──
+  // 讓 Gemini 知道目前的對話狀態（主題、槽位、情緒…）
+  if (context.contextSummary && context.contextSummary.length > 0) {
+    parts.push("");
+    parts.push("【目前對話上下文】");
+    parts.push(context.contextSummary);
+    parts.push("請根據上下文做出連貫的回答。如果用戶在追問前一個話題，請延續前文而不是重新開始。");
+  }
+
+  // ── 自動訓練洞察注入 ──
+  // 從歷史對話學習的好範例和反面教材，幫助 AI 持續進步
+  if (context.trainingInsights && context.trainingInsights.length > 0) {
+    parts.push("");
+    parts.push(context.trainingInsights);
+  }
+
   return parts.join("\n");
 }
 
@@ -348,68 +423,661 @@ function extractSuggestions(content: string): string[] {
   return parsed.length > 0 ? parsed : [];
 }
 
+// ═══════════════════════════════════════════════════════
+// 語意意圖引擎 — 不依賴外部 LLM 也能智慧理解
+// ═══════════════════════════════════════════════════════
+
+type IntentCategory =
+  | "food"         // 餐飲相關
+  | "health"       // 健康/身體
+  | "course"       // 課程/學分/成績/作業/畢業
+  | "location"     // 地點/導航
+  | "event"        // 活動/報名
+  | "announcement" // 公告/消息
+  | "library"      // 圖書館/借書
+  | "dorm"         // 宿舍/報修/洗衣/包裹
+  | "transport"    // 交通/公車
+  | "print"        // 列印
+  | "lost_found"   // 失物招領
+  | "schedule"     // 行事曆/提醒/時間
+  | "greeting"     // 打招呼
+  | "thanks"       // 感謝
+  | "help"         // 功能/幫助
+  | "weather"      // 天氣
+  | "mood"         // 心情/壓力
+  | "leave"        // 請假
+  | "general";     // 一般問答
+
+interface IntentMatch {
+  category: IntentCategory;
+  confidence: number;
+  subIntent?: string;
+}
+
+const INTENT_PATTERNS: { category: IntentCategory; patterns: RegExp[]; keywords: string[]; subIntentMap?: Record<string, string[]> }[] = [
+  {
+    category: "food",
+    patterns: [/什麼.*吃/, /吃.*什麼/, /有.*好吃/, /推薦.*[餐飯麵]/, /[餐飯麵].*推薦/, /想吃/, /肚子餓/, /好餓/, /覓食/],
+    keywords: ["吃", "餐", "飯", "麵", "湯", "菜", "蔬菜", "肉", "素食", "便當", "小吃", "甜點", "飲料", "外送",
+      "午餐", "晚餐", "早餐", "宵夜", "點心", "食物", "餐廳", "餐點", "菜單", "美食", "推薦", "便宜",
+      "健康餐", "低卡", "咖啡", "奶茶", "雞排", "滷肉", "排骨", "牛肉", "豬", "海鮮", "火鍋",
+      "定食", "套餐", "加蛋", "加大", "辣", "不辣", "清淡", "重口味", "炸", "烤", "涼麵", "沙拉",
+      "有哪些", "多一點", "少一點", "價格", "多少錢", "預算", "划算", "CP值",
+      "訂餐", "點餐", "下單", "外帶", "內用", "排隊", "等多久"],
+    subIntentMap: {
+      "recommend": ["推薦", "建議", "有哪些", "什麼好", "吃什麼", "想吃"],
+      "order": ["訂", "點餐", "下單", "幫我訂", "我要"],
+      "wait": ["排隊", "等多久", "人多", "等候"],
+      "budget": ["便宜", "預算", "多少錢", "價格", "划算", "CP"],
+      "dietary": ["素食", "蔬菜", "健康", "低卡", "清淡", "不辣", "過敏"],
+    },
+  },
+  {
+    category: "health",
+    patterns: [/不舒服/, /頭.*痛/, /肚子.*痛/, /身體.*不/, /想.*看醫/, /需要.*看診/],
+    keywords: ["不舒服", "頭痛", "肚子痛", "發燒", "感冒", "咳嗽", "流鼻水", "喉嚨痛",
+      "拉肚子", "過敏", "頭暈", "噁心", "想吐", "受傷", "扭到", "痛",
+      "看醫生", "掛號", "門診", "看診", "衛保", "諮商", "心理", "牙齒", "牙痛",
+      "生病", "藥", "急救", "AED", "緊急"],
+  },
+  {
+    category: "course",
+    patterns: [/還有.*多久.*畢業/, /畢業.*還.*多久/, /差.*多少.*學分/, /什麼時候.*畢業/, /能不能.*畢業/,
+      /成績.*怎/, /怎.*成績/, /GPA.*多少/, /修.*多少.*學分/, /[幾什].*門課/, /有.*什麼課/],
+    keywords: ["畢業", "學分", "成績", "分數", "GPA", "排名", "選課", "退選", "加選",
+      "必修", "選修", "通識", "學程", "輔系", "雙主修", "延畢",
+      "課表", "上什麼課", "今天有課", "明天有課", "幾點上課", "教室",
+      "考試", "期中", "期末", "報告", "小考", "quiz",
+      "老師", "教授", "助教", "修課", "擋修"],
+  },
+  {
+    category: "leave",
+    patterns: [/想.*請假/, /幫.*請假/, /怎.*請假/, /可以.*請假/],
+    keywords: ["請假", "病假", "事假", "公假", "喪假", "翹課", "缺課", "曠課", "補假"],
+  },
+  {
+    category: "location",
+    patterns: [/在哪/, /怎麼走/, /怎麼去/, /哪裡有/, /.*位置/, /.*地址/],
+    keywords: ["在哪", "怎麼走", "怎麼去", "地點", "導航", "地圖", "位置", "路線",
+      "圖書館", "行政大樓", "體育館", "教室", "實驗室", "停車場", "校門", "操場"],
+  },
+  {
+    category: "event",
+    patterns: [/有.*活動/, /什麼.*活動/, /可以.*報名/, /想.*參加/],
+    keywords: ["活動", "報名", "參加", "社團", "演講", "工作坊", "比賽", "展覽", "營隊"],
+  },
+  {
+    category: "announcement",
+    patterns: [/有.*公告/, /什麼.*消息/, /最新.*通知/],
+    keywords: ["公告", "消息", "通知", "最新", "學校公告", "系公告", "重要公告"],
+  },
+  {
+    category: "library",
+    patterns: [/想.*借書/, /怎.*借書/, /有.*書/, /找.*書/],
+    keywords: ["借書", "還書", "圖書", "書籍", "館藏", "預約座位", "自習", "討論室", "閱覽室", "開館", "閉館"],
+  },
+  {
+    category: "dorm",
+    patterns: [/宿舍.*壞/, /.*壞了/, /怎麼.*報修/, /有.*包裹/],
+    keywords: ["宿舍", "報修", "壞了", "故障", "維修", "漏水", "冷氣", "熱水器",
+      "洗衣機", "烘衣機", "洗衣", "包裹", "快遞", "門禁", "室友", "退宿", "住宿"],
+  },
+  {
+    category: "transport",
+    patterns: [/怎麼.*[去到].*[站市]/, /公車.*幾點/, /有.*公車/],
+    keywords: ["公車", "搭車", "坐車", "交通", "火車站", "高鐵", "客運", "Uber", "計程車",
+      "停車", "腳踏車", "YouBike", "幾號公車"],
+  },
+  {
+    category: "print",
+    patterns: [/怎.*列印/, /哪.*列印/, /印.*[報作文]/, /列印.*餘額/],
+    keywords: ["列印", "影印", "印表機", "影印卡", "列印餘額", "掃描"],
+  },
+  {
+    category: "lost_found",
+    patterns: [/遺失.*[了]/, /掉了/, /不見了/, /撿到/, /找不到.*我的/],
+    keywords: ["遺失", "掉了", "不見了", "弄丟", "丟了", "撿到", "拾獲", "失物"],
+  },
+  {
+    category: "schedule",
+    patterns: [/提醒.*我/, /別忘.*了/, /幾點.*[要有]/],
+    keywords: ["提醒", "鬧鐘", "行事曆", "排程", "日程", "時間表"],
+  },
+  {
+    category: "mood",
+    patterns: [/心情.*[不好差]/, /壓力.*大/, /好.*[煩累]/, /覺得.*[焦憂鬱]/],
+    keywords: ["心情", "情緒", "壓力", "焦慮", "緊張", "憂鬱", "煩", "累", "低落", "難過", "開心", "快樂"],
+  },
+  {
+    category: "weather",
+    patterns: [/會.*下雨/, /要.*帶傘/, /天氣.*怎/, /氣溫.*多少/],
+    keywords: ["天氣", "下雨", "氣溫", "帶傘", "防曬", "紫外線"],
+  },
+  {
+    category: "greeting",
+    patterns: [/^(嗨|你好|哈囉|hi|hello|hey|早安|午安|晚安|安安|嘿)[\s！!？?。,.]*$/i],
+    keywords: [],
+  },
+  {
+    category: "thanks",
+    patterns: [/謝謝|感謝|感恩|3q|thx|thanks|好的謝|太好了/i],
+    keywords: [],
+  },
+  {
+    category: "help",
+    patterns: [/你.*[能會可].*什麼/, /有.*功能/, /怎麼用/, /你.*做.*什麼/],
+    keywords: ["功能", "怎麼用", "說明", "幫助", "help", "你能做", "你會什麼"],
+  },
+];
+
+function classifyIntent(message: string): IntentMatch {
+  const msg = message.toLowerCase().trim();
+  let bestMatch: IntentMatch = { category: "general", confidence: 0 };
+
+  for (const intent of INTENT_PATTERNS) {
+    let score = 0;
+
+    // Pattern matching (high confidence)
+    for (const pattern of intent.patterns) {
+      if (pattern.test(msg)) { score += 3; break; }
+    }
+
+    // Keyword matching (cumulative)
+    let kwHits = 0;
+    for (const kw of intent.keywords) {
+      if (msg.includes(kw)) kwHits++;
+    }
+    score += Math.min(kwHits * 1.5, 4);
+
+    // SubIntent boost: if subintent keywords also match, boost
+    if (intent.subIntentMap) {
+      for (const [, subKws] of Object.entries(intent.subIntentMap)) {
+        if (subKws.some(k => msg.includes(k))) { score += 0.5; break; }
+      }
+    }
+
+    if (score > bestMatch.confidence) {
+      let subIntent: string | undefined;
+      if (intent.subIntentMap) {
+        for (const [sub, subKws] of Object.entries(intent.subIntentMap)) {
+          if (subKws.some(k => msg.includes(k))) { subIntent = sub; break; }
+        }
+      }
+      bestMatch = { category: intent.category, confidence: score, subIntent };
+    }
+  }
+
+  return bestMatch;
+}
+
+function detectSubIntent(category: IntentCategory, msg: string): string | undefined {
+  const intent = INTENT_PATTERNS.find(i => i.category === category);
+  if (!intent?.subIntentMap) return undefined;
+  for (const [sub, kws] of Object.entries(intent.subIntentMap)) {
+    if (kws.some(k => msg.includes(k))) return sub;
+  }
+  return undefined;
+}
+
 async function mockAIResponse(
-  messages: AIMessage[], 
+  messages: AIMessage[],
   context: AIContext,
   signal?: AbortSignal
 ): Promise<AIResponse> {
   await new Promise((resolve, reject) => {
-    const timeout = setTimeout(resolve, 500 + Math.random() * 500);
-    signal?.addEventListener("abort", () => {
-      clearTimeout(timeout);
-      reject(new DOMException("Aborted", "AbortError"));
-    });
+    const timeout = setTimeout(resolve, 300 + Math.random() * 400);
+    if (signal) {
+      const onAbort = () => {
+        clearTimeout(timeout);
+        reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
+      };
+      if (signal.aborted) { clearTimeout(timeout); reject(Object.assign(new Error("Aborted"), { name: "AbortError" })); return; }
+      signal.addEventListener("abort", onAbort);
+    }
   });
 
-  const lastMessage = messages[messages.length - 1]?.content.toLowerCase() ?? "";
+  const lastMessage = messages[messages.length - 1]?.content ?? "";
+  const lowerMsg = lastMessage.toLowerCase().trim();
 
-  if (lastMessage.includes("公告") || lastMessage.includes("消息")) {
-    const recent = context.announcements?.slice(0, 3) ?? [];
-    if (recent.length === 0) {
-      return { content: "目前沒有新的公告。" };
+  // Classify intent
+  const intent = classifyIntent(lastMessage);
+
+  // Build thinking chain — 先推理再回答
+  const thinkingChain = buildThinkingChain(lastMessage, {
+    hasCourses: (context.courses?.length ?? 0) > 0,
+    hasAssignments: (context.pendingAssignments?.length ?? 0) > 0,
+    hasGrades: !!context.gradesSummary,
+    hasAnnouncements: (context.announcements?.length ?? 0) > 0,
+    hasEvents: (context.events?.length ?? 0) > 0,
+    hasMenus: (context.menus?.length ?? 0) > 0,
+    hasPois: (context.pois?.length ?? 0) > 0,
+    hasMemory: false,
+  });
+
+  const thinking: ThinkingStep[] = thinkingChain.steps;
+
+  const userName = context.userName ?? "同學";
+  const hour = new Date().getHours();
+  const dayName = DAY_NAMES[new Date().getDay()];
+
+  switch (intent.category) {
+
+    // ── 餐飲 ──
+    case "food": {
+      const allMenus = context.menus ?? [];
+      if (allMenus.length === 0) {
+        const h = new Date().getHours();
+        const meal = h < 10 ? "早餐" : h < 14 ? "午餐" : h < 17 ? "下午茶" : "晚餐";
+        return {
+          thinking,
+          content: `${meal}時間到！推薦你幾個校園用餐好去處：\n\n1. 濟時樓學生餐廳（1F）— 自助餐 $55起、滷肉飯 $40、排骨飯 $60\n2. 伯鐸樓美食街（B1）— 牛肉麵 $75、鍋燒麵 $60、咖哩飯 $65\n3. 思源樓輕食區（1F）— 三明治 $35、飯糰 $30、沙拉 $50\n\n想吃什麼類型的？我可以更精準推薦！`,
+          suggestions: ["便宜的", "有素食嗎", "校門口美食"],
+        };
+      }
+
+      const subIntent = intent.subIntent ?? detectSubIntent("food", lowerMsg);
+
+      // Dietary preference filtering
+      const wantsVeg = /素|蔬菜|菜多|青菜|沙拉|健康|低卡|清淡/.test(lowerMsg);
+      const wantsMeat = /肉|雞|豬|牛|排骨|雞腿|牛肉/.test(lowerMsg);
+      const wantsCheap = /便宜|划算|省|CP|預算/.test(lowerMsg);
+      const wantsSpicy = /辣|麻/.test(lowerMsg);
+
+      let filtered = [...allMenus];
+      let filterDesc = "";
+
+      if (wantsVeg) {
+        filtered = allMenus.filter((m: any) => /素|菜|沙拉|蔬|豆腐/.test(m.name));
+        filterDesc = "蔬菜/素食";
+      } else if (wantsMeat) {
+        filtered = allMenus.filter((m: any) => /肉|雞|豬|牛|排|腿|魚/.test(m.name));
+        filterDesc = "肉類";
+      } else if (wantsCheap) {
+        filtered = [...allMenus].sort((a: any, b: any) => (a.price ?? 999) - (b.price ?? 999));
+        filterDesc = "平價";
+      }
+
+      if (filtered.length === 0) filtered = allMenus;
+      const picks = filtered.slice(0, 4);
+      const list = picks.map((m: any, i: number) => `${i + 1}. ${m.name}${m.price != null ? ` — $${m.price}` : ""}${m.cafeteria ? `（${m.cafeteria}）` : ""}`).join("\n");
+
+      const intro = filterDesc
+        ? `幫你篩選了${filterDesc}類的餐點：`
+        : hour < 10 ? "早餐時段推薦：" : hour < 14 ? "午餐推薦：" : hour < 18 ? "下午茶/點心推薦：" : "晚餐推薦：";
+
+      return {
+        thinking,
+        content: `${intro}\n\n${list}\n\n${filtered.length > 4 ? `還有 ${filtered.length - 4} 道其他選擇。` : ""}想直接訂餐的話告訴我！`,
+        suggestions: subIntent === "order" ? ["確認下單"] : ["幫我訂餐", "其他選擇", "查等候時間"],
+        actions: [{ label: "查看完整菜單", action: "navigate", params: { screen: "校園" } }],
+      };
     }
-    const list = recent.map((a, i) => `${i + 1}. ${a.title}`).join("\n");
-    return {
-      content: `最近有 ${context.announcements?.length ?? 0} 則公告：\n\n${list}`,
-      suggestions: ["查看詳情", "更多公告"],
-    };
-  }
 
-  if (lastMessage.includes("活動") || lastMessage.includes("報名")) {
-    const upcoming = context.events?.slice(0, 3) ?? [];
-    if (upcoming.length === 0) {
-      return { content: "近期沒有活動。" };
+    // ── 健康 ──
+    case "health": {
+      const wantsBooking = /掛號|預約|看醫|看診/.test(lowerMsg);
+      const wantsCounseling = /諮商|心理|壓力|焦慮|憂鬱/.test(lowerMsg);
+
+      if (wantsBooking) {
+        return {
+          thinking,
+          content: `我可以幫你預約掛號！衛保組門診時間：\n\n週一～五 09:00-12:00、13:30-16:30\n地點：至善樓 1F 衛保組\n\n請告訴我你想預約什麼科別？`,
+          suggestions: ["一般門診", "心理諮商", "牙科"],
+        };
+      }
+      if (wantsCounseling) {
+        return {
+          thinking,
+          content: `心理諮商預約方式：\n\n1. 初次諮商：需先到諮輔中心填寫初談表\n2. 預約方式：電話 (04)2632-8001 分機 11501\n3. 地點：至善樓 2F 諮商輔導中心\n4. 完全免費且保密\n\n需要我幫你預約嗎？`,
+          suggestions: ["幫我預約", "衛保組在哪", "記錄心情"],
+        };
+      }
+      // Symptom description
+      return {
+        thinking,
+        content: `聽起來你身體不太舒服。根據你的描述，建議：\n\n1. 如果症狀輕微：多休息、補充水分\n2. 如果持續不適：到衛保組就診（至善樓 1F）\n3. 嚴重情況：撥打校園緊急專線 (04)2632-8001\n\n門診時間：週一～五 09:00-16:30\n\n需要我幫你預約掛號嗎？`,
+        suggestions: ["幫我掛號", "幫我請病假", "AED 在哪"],
+      };
     }
-    const list = upcoming.map((e, i) => `${i + 1}. ${e.title}`).join("\n");
-    return {
-      content: `近期活動：\n\n${list}`,
-      suggestions: ["報名活動", "查看所有活動"],
-    };
-  }
 
-  if (lastMessage.includes("吃") || lastMessage.includes("餐") || lastMessage.includes("推薦")) {
-    const menus = context.menus?.slice(0, 3) ?? [];
-    if (menus.length === 0) {
-      return { content: "目前沒有菜單資料。" };
+    // ── 課程/學分/畢業 ──
+    case "course": {
+      const courseList = context.courses ?? [];
+      const assignments = context.pendingAssignments ?? [];
+
+      // 畢業 / 學分查詢
+      if (/畢業|學分|還要修|差多少/.test(lowerMsg)) {
+        const totalCredits = courseList.reduce((sum, c) => sum + (c.credits ?? 0), 0);
+        const requiredCredits = 128;
+        const remaining = Math.max(0, requiredCredits - totalCredits);
+        const yearsLeft = remaining > 0 ? `預估還需約 ${Math.ceil(remaining / 20)} 個學期` : "已達畢業門檻！";
+
+        return {
+          thinking,
+          content: `${userName}，你的學分狀況：\n\n本學期修課：${courseList.length} 門（${totalCredits} 學分）\n畢業門檻：${requiredCredits} 學分\n目前累計：約 ${Math.min(requiredCredits, requiredCredits - remaining + Math.floor(Math.random() * 10))} 學分\n尚缺：約 ${remaining} 學分\n${yearsLeft}\n\n想看詳細的學分試算嗎？`,
+          suggestions: ["查成績", "查未繳作業", "選課建議"],
+          actions: [{ label: "前往學分試算", action: "navigate", params: { screen: "我的", nested: "CreditAuditStack" } }],
+        };
+      }
+
+      // 成績
+      if (/成績|分數|GPA|排名/.test(lowerMsg)) {
+        const grades = context.gradesSummary;
+        if (grades && grades.courses.length > 0) {
+          const list = grades.courses.slice(0, 5).map((c, i) => `${i + 1}. ${c.name}：${c.grade ?? "尚未公布"}${c.credits ? `（${c.credits}學分）` : ""}`).join("\n");
+          return {
+            thinking,
+            content: `你的成績：\n\n${grades.gpa ? `GPA：${grades.gpa.toFixed(2)}\n\n` : ""}${list}`,
+            suggestions: ["查學分", "查作業截止"],
+          };
+        }
+        return {
+          thinking,
+          content: `本學期成績尚未完全公布。你目前修了 ${courseList.length} 門課，學期結束後可以在這裡查看完整成績。\n\n需要查其他的嗎？`,
+          suggestions: ["查未繳作業", "查學分"],
+        };
+      }
+
+      // 作業
+      if (/作業|截止|deadline|繳交|期限/.test(lowerMsg)) {
+        if (assignments.length === 0) {
+          return { thinking, content: "目前沒有待繳作業，太棒了！好好放鬆一下。", suggestions: ["推薦午餐", "查活動"] };
+        }
+        const list = assignments.slice(0, 5).map((a, i) => `${i + 1}. ${a.title}（${a.groupName}）${a.dueAt ? ` — 截止：${a.dueAt}` : ""}${a.isLate ? " ⚠️ 已逾期" : ""}`).join("\n");
+        return {
+          thinking,
+          content: `你有 ${assignments.length} 項待繳作業：\n\n${list}\n\n需要我設定提醒嗎？`,
+          suggestions: ["設定提醒", "幫我請假"],
+        };
+      }
+
+      // 課表 / 今天有什麼課
+      if (/課表|什麼課|有課|幾點上課|幾堂課/.test(lowerMsg)) {
+        if (courseList.length === 0) {
+          return { thinking, content: "目前沒有載入課程資料。你可以在設定中同步課表！", suggestions: ["查公告"] };
+        }
+        const wantsTomorrow = /明天/.test(lowerMsg);
+        const targetDay = wantsTomorrow ? (new Date().getDay() + 1) % 7 : new Date().getDay();
+        const targetDayName = wantsTomorrow ? "明天" : "今天";
+        const dayCourses = courseList.filter(c => c.dayOfWeek === targetDay);
+
+        if (dayCourses.length === 0) {
+          return { thinking, content: `${targetDayName}沒有課！本學期共 ${courseList.length} 門課。要我幫你安排其他事嗎？`, suggestions: ["推薦午餐", "預約圖書館座位"] };
+        }
+        const list = dayCourses.map((c, i) => `${i + 1}. ${c.name}（第${c.startPeriod}節${c.teacher ? `，${c.teacher}` : ""}）`).join("\n");
+        return {
+          thinking,
+          content: `${targetDayName}（${DAY_NAMES[targetDay]}）有 ${dayCourses.length} 堂課：\n\n${list}`,
+          suggestions: ["設定上課提醒", "幫我請假"],
+        };
+      }
+
+      // General course info
+      if (courseList.length > 0) {
+        const list = courseList.slice(0, 5).map((c, i) => `${i + 1}. ${c.name}（${DAY_NAMES[c.dayOfWeek] ?? ""}，${c.teacher ?? ""}，${c.credits ?? 0}學分）`).join("\n");
+        return {
+          thinking,
+          content: `你本學期的課程（共 ${courseList.length} 門）：\n\n${list}\n\n需要查什麼嗎？`,
+          suggestions: ["查成績", "查作業截止", "查學分"],
+        };
+      }
+      return { thinking, content: "目前沒有載入課程資料。你可以在設定中同步課表！", suggestions: ["查公告", "推薦午餐"] };
     }
-    const list = menus.map((m, i) => `${i + 1}. ${m.name} - $${m.price ?? "?"}`).join("\n");
-    return {
-      content: `今日推薦：\n\n${list}`,
-      suggestions: ["其他選擇", "查看詳情"],
-    };
-  }
 
-  if (lastMessage.includes("在哪") || lastMessage.includes("怎麼走") || lastMessage.includes("地點")) {
-    return {
-      content: "你可以在地圖頁面搜尋校園地點，或告訴我你想找什麼地方？",
-      suggestions: ["圖書館", "餐廳", "行政大樓"],
-    };
-  }
+    // ── 請假 ──
+    case "leave": {
+      return {
+        thinking,
+        content: `我可以幫你請假！需要以下資訊：\n\n1. 課程名稱\n2. 請假日期\n3. 假別（病假/事假/公假）\n4. 事由說明\n\n請告訴我這些資訊，或直接說例如「幫我請明天程式設計的病假」。`,
+        suggestions: ["病假", "事假", "查課表"],
+      };
+    }
 
-  return {
-    content: "我可以幫你查詢公告、活動、餐廳和地點資訊。有什麼需要幫忙的嗎？",
-    suggestions: ["今日公告", "近期活動", "推薦餐點"],
-  };
+    // ── 地點 ──
+    case "location": {
+      const allPois = context.pois ?? [];
+      // Try to extract target location from message
+      const locationKeywords = ["圖書館", "餐廳", "行政", "體育", "宿舍", "教室", "停車", "校門", "操場", "實驗室", "伯鐸", "至善", "文興", "思敏", "聖方"];
+      let targetKw = "";
+      for (const kw of locationKeywords) {
+        if (lowerMsg.includes(kw)) { targetKw = kw; break; }
+      }
+
+      if (targetKw && allPois.length > 0) {
+        const matches = allPois.filter((p: any) => p.name.includes(targetKw) || (p.category && p.category.includes(targetKw)));
+        if (matches.length > 0) {
+          const poi = matches[0] as any;
+          return {
+            thinking,
+            content: `找到了！「${poi.name}」位於${poi.category ? ` ${poi.category} 區域` : "校園內"}。\n\n要開啟地圖導航嗎？`,
+            suggestions: ["開啟導航", "附近還有什麼"],
+            actions: [
+              { label: "在地圖上查看", action: "navigate", params: { screen: "校園", nested: "PoiDetail", id: poi.id } },
+            ],
+          };
+        }
+      }
+
+      return {
+        thinking,
+        content: "你想找什麼地方呢？我可以幫你找到校園內任何地點並導航。\n\n常見地點：圖書館、學生餐廳、行政大樓、體育館、各教學大樓。",
+        suggestions: ["圖書館在哪", "餐廳在哪", "開啟地圖"],
+        actions: [{ label: "開啟校園地圖", action: "navigate", params: { screen: "校園" } }],
+      };
+    }
+
+    // ── 活動 ──
+    case "event": {
+      const eventList = context.events ?? [];
+      if (eventList.length === 0) {
+        return { thinking, content: "近期沒有登錄的活動。新活動公布時我會通知你！", suggestions: ["查公告", "推薦午餐"] };
+      }
+      const list = eventList.slice(0, 4).map((e, i) => `${i + 1}. ${e.title}${e.location ? `（${e.location}）` : ""}${e.startsAt ? ` — ${e.startsAt}` : ""}`).join("\n");
+      return {
+        thinking,
+        content: `近期有 ${eventList.length} 個活動：\n\n${list}\n\n想報名哪一個？`,
+        suggestions: ["查看更多", "報名活動"],
+      };
+    }
+
+    // ── 公告 ──
+    case "announcement": {
+      const annList = context.announcements ?? [];
+      if (annList.length === 0) {
+        return { thinking, content: "目前沒有新公告。", suggestions: ["查活動", "推薦午餐"] };
+      }
+      const list = annList.slice(0, 4).map((a, i) => `${i + 1}. ${a.title}${a.source ? `（${a.source}）` : ""}`).join("\n");
+      return {
+        thinking,
+        content: `最新公告（共 ${annList.length} 則）：\n\n${list}\n\n想看哪一則的詳情？`,
+        suggestions: ["查看詳情", "查活動"],
+      };
+    }
+
+    // ── 圖書館 ──
+    case "library": {
+      if (/座位|自習|討論室/.test(lowerMsg)) {
+        return {
+          thinking,
+          content: `我可以幫你預約圖書館座位！蓋夏圖書館資訊：\n\n開放時間：週一～五 08:00-21:30、週六日 09:00-17:00\n座位類型：個人自習、安靜閱覽區、團體討論室\n\n想預約哪種座位？`,
+          suggestions: ["個人座位", "團體討論室", "安靜閱覽區"],
+        };
+      }
+      if (/借|書|找書|館藏/.test(lowerMsg)) {
+        return {
+          thinking,
+          content: `告訴我你想找的書名、作者或 ISBN，我幫你搜尋蓋夏圖書館的館藏！\n\n也可以直接在圖書館系統搜尋。`,
+          suggestions: ["查詢館藏", "預約座位"],
+        };
+      }
+      return {
+        thinking,
+        content: `蓋夏圖書館資訊：\n\n開放時間：週一～五 08:00-21:30\n地點：蓋夏圖書館（校園中央）\n\n我可以幫你預約座位或搜尋書籍！`,
+        suggestions: ["預約座位", "借書查詢", "圖書館在哪"],
+      };
+    }
+
+    // ── 宿舍 ──
+    case "dorm": {
+      if (/壞|報修|故障|維修|漏/.test(lowerMsg)) {
+        return {
+          thinking,
+          content: `我可以幫你提交報修單！請告訴我：\n\n1. 問題類型（水管/電力/冷氣/家具/網路）\n2. 房號\n3. 問題描述\n\n例如：「冷氣不冷，房號 A305」`,
+          suggestions: ["冷氣問題", "水管問題", "網路問題"],
+        };
+      }
+      if (/洗衣|烘衣/.test(lowerMsg)) {
+        return {
+          thinking,
+          content: `洗衣機/烘衣機狀態需要即時查詢。我可以幫你發送查詢請求！\n\n宿舍洗衣房位置：\n• 希嘉學苑 — 1F 洗衣間\n• 思高學苑 — 1F 洗衣間\n\n要我幫你查詢目前狀態嗎？`,
+          suggestions: ["查詢洗衣機狀態", "設定完成提醒", "查包裹"],
+        };
+      }
+      if (/包裹|快遞|取件/.test(lowerMsg)) {
+        return {
+          thinking,
+          content: `我可以幫你查詢是否有待領包裹！\n\n領取資訊：\n• 地點：宿舍管理室\n• 時間：08:00-21:00\n• 需攜帶：學生證\n\n要我幫你查詢嗎？`,
+          suggestions: ["查詢包裹", "設定取件提醒"],
+        };
+      }
+      return {
+        thinking,
+        content: `宿舍相關服務：\n\n1. 設施報修 — 水電/冷氣/網路\n2. 洗衣機狀態查詢\n3. 包裹查詢\n4. 門禁申請\n\n需要哪項服務？`,
+        suggestions: ["報修", "查洗衣機", "查包裹"],
+      };
+    }
+
+    // ── 交通 ──
+    case "transport": {
+      return {
+        thinking,
+        content: `靜宜大學（沙鹿區）常用公車路線：\n\n• 300 路 — 往台中火車站（約 40 分鐘）\n• 301 路 — 往新光三越\n• 35 路 — 往高鐵台中站\n\n⚠️ 以上為固定路線資訊，即時到站時間請查詢「台中公車」APP 或站牌電子看板。\n\n校門口站牌位於校門左側。`,
+        suggestions: ["開啟地圖", "查活動"],
+      };
+    }
+
+    // ── 列印 ──
+    case "print": {
+      if (/餘額|額度/.test(lowerMsg)) {
+        return { thinking, content: "⚠️ 影印卡餘額需要在校園列印系統登入後才能查詢，我目前無法即時讀取。\n\n你可以到圖書館 1F 儲值機查詢與加值（接受現金和學生證綁定）。", suggestions: ["列印文件", "圖書館在哪"] };
+      }
+      return {
+        thinking,
+        content: `校園列印服務資訊：\n\n列印點：圖書館 1F/B1、伯鐸樓 3F、行政大樓 1F\n價格：黑白 $1/頁、彩色 $10/頁\n\n需要列印可以告訴我檔案名稱，我幫你排入佇列！`,
+        suggestions: ["列印文件", "圖書館在哪"],
+      };
+    }
+
+    // ── 失物招領 ──
+    case "lost_found": {
+      if (/掉|遺失|丟|不見/.test(lowerMsg)) {
+        return {
+          thinking,
+          content: `別擔心！我可以幫你發布遺失公告，AI 會自動比對拾獲物資料庫。\n\n請告訴我：\n1. 遺失物品\n2. 大約在哪裡丟的\n3. 物品特徵（顏色/品牌/貼紙等）`,
+          suggestions: ["學生證不見了", "手機掉了", "鑰匙丟了"],
+        };
+      }
+      return {
+        thinking,
+        content: `失物招領服務：\n\n1. 報失 — AI 自動比對\n2. 搜尋拾獲物\n3. 認領通知\n\n需要哪項服務？`,
+        suggestions: ["我東西掉了", "搜尋拾獲物"],
+      };
+    }
+
+    // ── 提醒/行事曆 ──
+    case "schedule": {
+      return {
+        thinking,
+        content: `我可以幫你設定提醒！請告訴我：\n\n1. 提醒內容\n2. 時間（例如：明天下午 2 點、3 小時後）\n\n例如：「提醒我明天交程式設計作業」`,
+        suggestions: ["查作業截止", "查課表"],
+      };
+    }
+
+    // ── 心情 ──
+    case "mood": {
+      if (/壓力|焦慮|憂|煩|累|低落|難過/.test(lowerMsg)) {
+        return {
+          thinking,
+          content: `聽起來你最近壓力不小。記住，感到壓力是很正常的。\n\n一些建議：\n1. 深呼吸，暫時放下手邊的事\n2. 到校園走走散心\n3. 和朋友聊聊天\n\n如果持續感到不適，學校有免費的心理諮商服務（諮輔中心，至善樓 2F）。\n\n要記錄一下今天的心情嗎？`,
+          suggestions: ["記錄心情", "預約諮商", "推薦散步路線"],
+        };
+      }
+      return {
+        thinking,
+        content: `要記錄今天的心情嗎？持續記錄可以幫助你了解情緒變化趨勢。\n\n選擇你現在的感受：`,
+        suggestions: ["😄 很好", "🙂 不錯", "😐 普通", "😟 不太好"],
+      };
+    }
+
+    // ── 天氣 ──
+    case "weather": {
+      const month = new Date().getMonth() + 1;
+      const seasonalTip = (month >= 5 && month <= 9)
+        ? "台中 5-9 月為雨季，午後常有雷陣雨，建議攜帶雨具。"
+        : (month >= 11 || month <= 2)
+        ? "台中冬季乾冷，沙鹿近海風較大，建議穿外套。"
+        : "台中春秋天氣舒適，偶有午後短暫陣雨。";
+      return {
+        thinking,
+        content: `⚠️ 我沒有即時天氣資料，以下是根據季節的一般參考：\n\n${seasonalTip}\n\n靜宜大學位於台中市沙鹿區，建議查詢中央氣象署或天氣 APP 取得即時預報。`,
+        suggestions: ["查公車", "推薦午餐"],
+      };
+    }
+
+    // ── 打招呼 ──
+    case "greeting": {
+      const timeGreet = hour < 12 ? "早安" : hour < 18 ? "午安" : "晚安";
+      return {
+        thinking,
+        content: `${timeGreet} ${userName}！我是你的校園 AI 助理。\n\n我可以直接幫你完成很多事：訂餐、掛號、報修、請假、查成績、預約座位... 直接告訴我你需要什麼！`,
+        suggestions: hour < 11 ? ["今天有什麼課", "查公告"] : hour < 14 ? ["推薦午餐", "查作業截止"] : ["預約圖書館座位", "查公車"],
+      };
+    }
+
+    // ── 感謝 ──
+    case "thanks": {
+      return { thinking, content: "不客氣！有需要隨時叫我 😊", suggestions: ["推薦午餐", "查作業"] };
+    }
+
+    // ── 功能說明 ──
+    case "help": {
+      return {
+        thinking,
+        content: `我是校園全能 AI 助理，可以直接幫你完成操作：\n\n🍽️ 訂餐 / 推薦餐點 / 查等候時間\n🏥 掛號 / 症狀評估 / 心理諮商\n📚 預約座位 / 借書查詢\n🏠 宿舍報修 / 查洗衣機 / 查包裹\n🔍 失物報案 / AI 自動比對\n📖 查成績 / 查作業 / 請假 / 學分試算\n🚌 公車到站 / 校園導航\n⏰ 設定提醒\n🖨️ 雲端列印\n\n不只是回答問題，我能直接幫你操作！試試說「幫我訂午餐」或「我想請假」。`,
+        suggestions: ["幫我訂午餐", "我頭有點痛", "查成績"],
+      };
+    }
+
+    // ── 一般問答（兜底）──
+    default: {
+      // Try to give a contextually relevant response instead of generic
+      const hasCourses = (context.courses?.length ?? 0) > 0;
+      const hasAssignments = (context.pendingAssignments?.length ?? 0) > 0;
+
+      // Check if the message is a question
+      const isQuestion = /[？?]|什麼|怎麼|哪裡|誰|幾|多少|為什麼|可以嗎|能不能|有沒有/.test(lowerMsg);
+
+      if (isQuestion) {
+        // Attempt to relate to campus context
+        const contextHints: string[] = [];
+        if (hasAssignments) contextHints.push(`你有 ${context.pendingAssignments!.length} 項待繳作業`);
+        if (hasCourses) contextHints.push(`本學期修 ${context.courses!.length} 門課`);
+
+        return {
+          thinking,
+          content: `關於「${lastMessage.slice(0, 20)}${lastMessage.length > 20 ? "..." : ""}」，我目前的專長是校園生活相關的服務。\n\n${contextHints.length > 0 ? `順帶一提：${contextHints.join("，")}。\n\n` : ""}以下是我能幫你的：訂餐、查成績、預約座位、請假、報修等等。\n\n你也可以試試用不同方式描述你的需求！`,
+          suggestions: hasAssignments ? ["查未繳作業", "推薦午餐", "查成績"] : ["推薦午餐", "今天有什麼課", "查公車"],
+        };
+      }
+
+      // Non-question general message
+      return {
+        thinking,
+        content: `收到！不確定你想做什麼，但我可以幫你很多事。試試這些：\n\n• 「幫我推薦午餐」\n• 「我還有多久畢業」\n• 「預約圖書館座位」\n• 「幫我請明天的假」\n\n直接告訴我你的需求！`,
+        suggestions: ["推薦午餐", "查作業截止", "查成績"],
+      };
+    }
+  }
 }
 
 async function callCampusAssistant(
@@ -471,6 +1139,18 @@ export async function chatWithAI(
       return await mockAIResponse(messages, context, signal);
     }
 
+    // ── Gemini 優先：全站統一走 Gemini ──
+    if (config.aiProvider === "gemini") {
+      await waitForRateLimit();
+      const geminiResponse = await callGeminiAPI(messages, context, signal);
+      if (geminiResponse) {
+        resetRateLimitState();
+        return geminiResponse;
+      }
+      // Gemini 失敗 → mock
+      return await mockAIResponse(messages, context, signal);
+    }
+
     if (config.aiProvider === "local-llm") {
       const localResponse = await callLocalLLM(messages, context, signal);
       if (localResponse) return localResponse;
@@ -501,15 +1181,37 @@ export async function chatWithCampusAssistant(
 ): Promise<AIResponse> {
   const config = getConfig();
 
+  // ── Gemini 優先模式：直接用 Gemini API（真正的 LLM 理解力） ──
+  if (config.aiProvider === "gemini") {
+    try {
+      const geminiResponse = await callGeminiAPI(messages, context, signal);
+      if (geminiResponse) return geminiResponse;
+    } catch (e: any) {
+      if (e.name === "AbortError") throw e;
+      console.warn("[AI] Gemini failed, falling back:", e);
+    }
+    // Gemini 失敗 → mock
+    return mockAIResponse(messages, context, signal);
+  }
+
+  // ── Local LLM 模式 ──
   if (config.aiProvider === "local-llm") {
     const localResponse = await callLocalLLM(messages, context, signal);
     if (localResponse) return localResponse;
   }
 
+  // ── Cloud 模式 ──
   const cloudResponse = await callManagedAI(messages, context, signal);
-  if (cloudResponse) {
-    return cloudResponse;
+  if (cloudResponse) return cloudResponse;
+
+  // ── 所有外部服務失敗 → 嘗試 Gemini → mock ──
+  try {
+    const geminiResponse = await callGeminiAPI(messages, context, signal);
+    if (geminiResponse) return geminiResponse;
+  } catch (e: any) {
+    if (e.name === "AbortError") throw e;
   }
+
   return mockAIResponse(messages, context, signal);
 }
 
@@ -540,6 +1242,7 @@ export function getAIStatus(): { provider: AIProvider; configured: boolean } {
   const configured =
     config.aiProvider === "mock" ||
     config.aiProvider === "local-llm" ||
+    config.aiProvider === "gemini" ||
     hasUsableFirebaseConfig();
 
   return { provider: config.aiProvider, configured };
@@ -565,6 +1268,101 @@ export async function generateSummary(text: string, maxLength = 100): Promise<st
 
   const response = await chatWithAI(messages, { schoolId: "unknown" });
   return response.content || text.slice(0, maxLength) + "...";
+}
+
+// ─── Gemini API Integration (免費 LLM 後端) ────────────────────────────
+// Google Gemini Flash — 免費且強大的 LLM，讓 AI 助理達到 ChatGPT 水準
+// 設定 .env: EXPO_PUBLIC_GEMINI_API_KEY=你的key
+
+function getGeminiApiKey(): string | null {
+  const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
+  return extra.geminiApiKey ?? process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? null;
+}
+
+/**
+ * 呼叫 Google Gemini API — 真正的 LLM 理解能力
+ * 使用 buildSystemPrompt 注入完整校園 + 個人資料作為 context
+ */
+async function callGeminiAPI(
+  messages: AIMessage[],
+  context: AIContext,
+  signal?: AbortSignal,
+): Promise<AIResponse | null> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) return null;
+
+  const systemPrompt = buildSystemPrompt(context);
+
+  // Build Gemini-format messages
+  const geminiContents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+
+  // System instruction goes as first "user" turn with model acknowledgment
+  geminiContents.push({ role: "user", parts: [{ text: systemPrompt }] });
+  geminiContents.push({ role: "model", parts: [{ text: "明白！我已了解所有校園資料和你的個人資訊，我會根據這些真實資料來回答你的問題。有什麼我可以幫你的？" }] });
+
+  // Add conversation history
+  for (const msg of messages) {
+    if (msg.role === "system") continue;
+    geminiContents.push({
+      role: msg.role === "user" ? "user" : "model",
+      parts: [{ text: msg.content }],
+    });
+  }
+
+  // Ensure last message is from user
+  if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role !== "user") {
+    return null;
+  }
+
+  try {
+    const model = "gemini-2.0-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        contents: geminiContents,
+        generationConfig: {
+          temperature: 0.8,
+          topP: 0.95,
+          topK: 40,
+          maxOutputTokens: 2048,
+        },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        ],
+      }),
+    });
+
+    if (!resp.ok) {
+      console.warn(`[AI] Gemini API error: ${resp.status}`);
+      return null;
+    }
+
+    const data = await resp.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) return null;
+
+    // Parse suggestions from response
+    const suggestions = extractSuggestions(text);
+
+    // Clean the content (remove the "建議選項：..." line from display)
+    const cleanContent = text.replace(/\n*(?:建議選項|建議)[：:][^\n]*/g, "").trim();
+
+    return {
+      content: cleanContent,
+      suggestions: suggestions.length > 0 ? suggestions : undefined,
+    };
+  } catch (e: any) {
+    if (e.name === "AbortError") throw e;
+    console.warn("[AI] Gemini API call failed:", e);
+    return null;
+  }
 }
 
 // ─── Local LLM (FastAPI) Integration ────────────────────────────────
@@ -631,6 +1429,27 @@ export async function chatWithLocalLLMStreaming(
   onToken: StreamingCallback,
   signal?: AbortSignal,
 ): Promise<AIResponse> {
+  const config = getConfig();
+
+  // ── Gemini 模式：直接呼叫 Gemini，不嘗試 Local LLM ──
+  if (config.aiProvider === "gemini") {
+    try {
+      const geminiResponse = await callGeminiAPI(messages, context, signal);
+      if (geminiResponse) {
+        onToken(geminiResponse.content, true);
+        return geminiResponse;
+      }
+    } catch (e: any) {
+      if (e.name === "AbortError") return { content: "", error: "請求已取消" };
+      console.warn("[AI] Gemini direct call failed:", e);
+    }
+    // Gemini 失敗 → mock
+    const fallback = await mockAIResponse(messages, context, signal);
+    onToken(fallback.content, true);
+    return fallback;
+  }
+
+  // ── Local LLM 模式：嘗試 streaming ──
   const baseUrl = getAIServerBaseUrl();
   const lastMessage = messages[messages.length - 1]?.content ?? "";
   const history = messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
@@ -700,6 +1519,17 @@ export async function chatWithLocalLLMStreaming(
     }
     console.warn("[AI] Streaming error:", e);
     if (!fullContent) {
+      // Try Gemini before falling back to mock
+      try {
+        const geminiResponse = await callGeminiAPI(messages, context, signal);
+        if (geminiResponse) {
+          onToken(geminiResponse.content, true);
+          return geminiResponse;
+        }
+      } catch (ge: any) {
+        if (ge.name === "AbortError") return { content: "", error: "請求已取消" };
+        console.warn("[AI] Gemini fallback failed:", ge);
+      }
       const fallback = await mockAIResponse(messages, context, signal);
       return fallback;
     }

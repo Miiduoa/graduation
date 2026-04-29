@@ -9,7 +9,7 @@ import { theme, softShadowStyle } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { useAuth } from "../state/auth";
 import { useAsyncList } from "../hooks/useAsyncList";
-import { getDb } from "../firebase";
+import { getDb, isFirebaseMockMode } from "../firebase";
 import {
   addDoc,
   collection,
@@ -86,6 +86,7 @@ export function GroupDetailScreen(props: any) {
 
   const { items: groupMeta, loading: groupLoading, error: groupError, reload: reloadGroup } = useAsyncList<Group>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId) return [];
       const snap = await getDoc(doc(db, "groups", groupId));
       if (!snap.exists()) return [];
@@ -99,6 +100,7 @@ export function GroupDetailScreen(props: any) {
 
   const { items: myMemberRows, reload: reloadMember } = useAsyncList<{ role?: string }>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId) return [];
       if (!auth.user) return [];
       const snap = await getDoc(doc(db, "groups", groupId, "members", auth.user.uid));
@@ -114,6 +116,7 @@ export function GroupDetailScreen(props: any) {
 
   const { items: posts, loading: postsLoading, error: postsError, reload: reloadPosts } = useAsyncList<Post>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId) return [];
       const ref = collection(db, "groups", groupId, "posts");
       const qy = query(ref, orderBy("createdAt", "desc"), limit(50));
@@ -135,6 +138,7 @@ export function GroupDetailScreen(props: any) {
   // Load last comment for each post and comment count using batch queries
   const { items: lastCommentRows, reload: reloadComments } = useAsyncList<{ postId: string; comment: Comment | null; commentCount: number }>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId || posts.length === 0) return [];
 
       // Batch fetch: limit concurrent requests to avoid overwhelming Firestore
