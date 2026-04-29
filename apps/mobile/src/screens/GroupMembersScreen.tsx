@@ -7,7 +7,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
-import { getDb } from "../firebase";
+import { getDb, isFirebaseMockMode } from "../firebase";
 import { collection, doc, getDoc, getDocs, query, where, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { fetchSchoolDirectoryProfiles } from "../services/memberDirectory";
@@ -76,6 +76,7 @@ export function GroupMembersScreen(props: any) {
 
   const { items: groupMeta, reload: reloadGroup } = useAsyncList<Group>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId) return [];
       const snap = await getDoc(doc(db, "groups", groupId));
       if (!snap.exists()) return [];
@@ -88,6 +89,7 @@ export function GroupMembersScreen(props: any) {
 
   const { items, loading, error, reload } = useAsyncList<Member>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId) return [];
       const ref = collection(db, "groups", groupId, "members");
       const qy = query(ref, where("status", "==", "active"));
@@ -99,6 +101,7 @@ export function GroupMembersScreen(props: any) {
 
   const { items: myMemberRows } = useAsyncList<{ role?: MemberRole }>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId || !auth.user) return [];
       const snap = await getDoc(doc(db, "groups", groupId, "members", auth.user.uid));
       if (!snap.exists()) return [];
@@ -112,6 +115,7 @@ export function GroupMembersScreen(props: any) {
 
   const { items: userProfiles } = useAsyncList<UserProfile>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (items.length === 0) return [];
       return fetchSchoolDirectoryProfiles(
         school.id,

@@ -21,7 +21,7 @@ import { theme } from "../ui/theme";
 import { useAsyncList } from "../hooks/useAsyncList";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
-import { getDb } from "../firebase";
+import { getDb, isFirebaseMockMode } from "../firebase";
 import { fetchSchoolDirectoryProfiles } from "../services/memberDirectory";
 
 type Group = {
@@ -105,6 +105,7 @@ export function AssignmentDetailScreen(props: any) {
 
   const { items: groupMeta } = useAsyncList<Group>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId) return [];
       const snap = await getDoc(doc(db, "groups", groupId));
       if (!snap.exists()) return [];
@@ -117,6 +118,7 @@ export function AssignmentDetailScreen(props: any) {
 
   const { items: myMemberRows } = useAsyncList<{ role?: string }>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId) return [];
       if (!auth.user) return [];
       const snap = await getDoc(doc(db, "groups", groupId, "members", auth.user.uid));
@@ -136,6 +138,7 @@ export function AssignmentDetailScreen(props: any) {
     reload: reloadAssignment,
   } = useAsyncList<Assignment>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId || !assignmentId) return [];
       const snap = await getDoc(doc(db, "groups", groupId, "assignments", assignmentId));
       if (!snap.exists()) return [];
@@ -153,6 +156,7 @@ export function AssignmentDetailScreen(props: any) {
     reload: reloadMySubmission,
   } = useAsyncList<Submission>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId || !assignmentId) return [];
       if (!auth.user) return [];
       const snap = await getDoc(doc(db, "groups", groupId, "assignments", assignmentId, "submissions", auth.user.uid));
@@ -181,6 +185,7 @@ export function AssignmentDetailScreen(props: any) {
     reload: reloadSubmissions,
   } = useAsyncList<Submission>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId || !assignmentId) return [];
       if (!canManageCourse) return [];
       const ref = collection(db, "groups", groupId, "assignments", assignmentId, "submissions");
@@ -194,6 +199,7 @@ export function AssignmentDetailScreen(props: any) {
   // Fetch user profiles for submissions display
   const { items: userProfiles } = useAsyncList<UserProfile>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       const uids = [
         ...(canManageCourse ? submissions.map((submission) => submission.uid) : []),
         ...(myReviewTask ? [myReviewTask.submissionOwnerId] : []),
@@ -714,7 +720,15 @@ export function AssignmentDetailScreen(props: any) {
   if (assignmentError) return <ErrorState title="作業" subtitle="讀取作業失敗" hint={assignmentError} />;
 
   if (!assignment) {
-    return <ErrorState title="作業" subtitle="找不到作業" actionText="返回" onAction={() => nav?.goBack?.()} />;
+    return (
+      <ErrorState
+        title="作業"
+        subtitle={isFirebaseMockMode() ? "Firebase 尚未設定" : "找不到作業"}
+        hint={isFirebaseMockMode() ? "此功能需要 Firebase 連線。請到「課程」Tab 查看 TronClass 作業。" : "發生未知錯誤，請重試。"}
+        actionText="返回"
+        onAction={() => nav?.goBack?.()}
+      />
+    );
   }
 
   const dueDate = assignment.dueAt?.toDate?.() ?? (assignment.dueAt ? new Date(assignment.dueAt) : null);

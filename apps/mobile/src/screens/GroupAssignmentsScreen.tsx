@@ -1,414 +1,320 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useMemo, useState } from "react";
-import { ScrollView, Text, TextInput, View } from "react-native";
-import { addDoc, collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc } from "firebase/firestore";
-import { Screen, Card, Button, Pill, LoadingState, ErrorState, SectionTitle } from "../ui/components";
+import React, { useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import * as WebBrowser from "expo-web-browser";
+
+import { Screen, Card, Pill, LoadingState, ErrorState, SectionTitle } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
-import { useAsyncList } from "../hooks/useAsyncList";
 import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
-import { getDb } from "../firebase";
+import { getCachedTCCourses, refreshTCCourses } from "../services/puDataCache";
+import { tcFetchHomeworkActivities } from "../services/tronClassClient";
+import type { TCCourse } from "../services/tronClassClient";
 
-type Group = {
-  id: string;
-  type: "course" | "club" | "admin";
-  name: string;
-  finalScores?: { published?: boolean; publishedAt?: any };
-};
-
-type Assignment = {
-  id: string;
+// ── TronClass 作業型別 ─────────────────────────
+type TCHomework = {
+  id: number;
   title: string;
-  description: string;
-  dueAt?: any;
-  allowLate?: boolean;
-  weight?: number;
-  createdAt?: any;
-  createdBy: string;
-  createdByEmail?: string | null;
-  gradesPublished?: boolean;
+  courseId: number;
+  courseName: string;
+  end_time: string | null;
+  is_closed: boolean;
+  module_id: number;
+  submit_times: number | null;
+  homework_submissions: number[];
 };
 
-export function GroupAssignmentsScreen(props: any) {
-  const nav = props?.navigation;
-  const groupId: string | undefined = props?.route?.params?.groupId;
+// ── TronClass 作業 API ─────────────────────────
+async function fetchHomeworkForCourse(courseId: number): Promise<any[]> {
+  return tcFetchHomeworkActivities(courseId);
+}
 
-  const auth = useAuth();
-  const { school } = useSchool();
-  const db = getDb();
+// ── 日期格式化 ──────────────────────────────────
+function formatDate(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  } catch {
+    return "";
+  }
+}
 
-  const [err, setErr] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  // Formal: teacher enters a due datetime in local time.
-  const [dueAtText, setDueAtText] = useState("");
-  // Weight (%) for final score computation (0-100). Default 10.
-  const [weightText, setWeightText] = useState("10");
+// ── 作業卡片 ────────────────────────────────────
+function HomeworkCard(props: { hw: TCHomework }) {
+  const { hw } = props;
+  const now = new Date();
+  const endTime = hw.end_time ? new Date(hw.end_time) : null;
+  const isOverdue = endTime ? endTime < now : false;
+  const hasSubmission = (hw.homework_submissions?.length ?? 0) > 0;
 
-  const { items: groupMeta } = useAsyncList<Group>(
-    async () => {
-      if (!groupId) return [];
-      const snap = await getDoc(doc(db, "groups", groupId));
-      if (!snap.exists()) return [];
-      return [{ id: snap.id, ...(snap.data() as any) } as Group];
-    },
-    [db, groupId]
-  );
+  let statusColor = theme.colors.accent;
+  let statusText = "進行中";
+  let statusIcon: keyof typeof Ionicons.glyphMap = "time-outline";
 
-  const group = groupMeta[0];
-
-  const { items: myMemberRows } = useAsyncList<{ role?: string }>(
-    async () => {
-      if (!groupId) return [];
-      if (!auth.user) return [];
-      const snap = await getDoc(doc(db, "groups", groupId, "members", auth.user.uid));
-      if (!snap.exists()) return [];
-      return [snap.data() as any];
-    },
-    [db, groupId, auth.user?.uid]
-  );
-
-  const myRole = myMemberRows[0]?.role as any;
-  const canManageCourse = group?.type === "course" && (myRole === "owner" || myRole === "instructor" || myRole === "moderator");
-
-  const {
-    items: assignments,
-    loading: assignmentsLoading,
-    error: assignmentsError,
-    reload: reloadAssignments,
-  } = useAsyncList<Assignment>(
-    async () => {
-      if (!groupId) return [];
-      const ref = collection(db, "groups", groupId, "assignments");
-      const qy = query(ref, orderBy("createdAt", "desc"));
-      const snap = await getDocs(qy);
-      return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as any;
-    },
-    [db, groupId]
-  );
-
-  const canCreate = canManageCourse;
-
-  const assignmentCountText = useMemo(() => `作業數：${assignments.length}`, [assignments.length]);
-
-  const onCreateAssignment = async () => {
-    setErr(null);
-    if (!groupId) return;
-    if (!auth.user) {
-      setErr("請先登入");
-      return;
+  if (hasSubmission) {
+    statusColor = "#16A34A";
+    statusText = "已繳交";
+    statusIcon = "checkmark-circle";
+  } else if (hw.is_closed || isOverdue) {
+    statusColor = "#DC2626";
+    statusText = "已截止";
+    statusIcon = "close-circle-outline";
+  } else if (endTime) {
+    // 檢查是否快到截止時間（24小時內）
+    const hoursLeft = (endTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+    if (hoursLeft <= 24 && hoursLeft > 0) {
+      statusColor = "#F59E0B";
+      statusText = `剩 ${Math.floor(hoursLeft)} 小時`;
+      statusIcon = "alarm-outline";
     }
-    if (!canCreate) {
-      setErr("你沒有權限建立作業");
-      return;
-    }
-    if (!title.trim() || !description.trim()) {
-      setErr("請輸入作業標題與說明");
-      return;
-    }
+  }
 
-    // Parse due datetime: YYYY-MM-DD HH:mm
-    const rawDue = (dueAtText ?? "").trim();
-    let dueAt: Date | null = null;
-    if (rawDue.length) {
-      const m = rawDue.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
-      if (!m) {
-        setErr("截止時間格式需為 YYYY-MM-DD HH:mm，例如 2026-02-01 23:59");
-        return;
-      }
-      const y = Number(m[1]);
-      const mo = Number(m[2]);
-      const d = Number(m[3]);
-      const hh = Number(m[4]);
-      const mm = Number(m[5]);
-      dueAt = new Date(y, mo - 1, d, hh, mm, 0, 0);
-      if (Number.isNaN(dueAt.getTime())) {
-        setErr("截止時間無效，請檢查日期與時間");
-        return;
-      }
-    }
-
-    try {
-      const wRaw = (weightText ?? "").trim();
-      const weight = wRaw.length ? Number(wRaw) : 0;
-      if (!Number.isFinite(weight) || weight < 0 || weight > 100) {
-        setErr("權重請輸入 0~100 的數字（%）");
-        return;
-      }
-
-      await addDoc(collection(db, "groups", groupId, "assignments"), {
-        title: title.trim(),
-        description: description.trim(),
-        dueAt: dueAt ?? null,
-        allowLate: true,
-        weight,
-        createdAt: serverTimestamp(),
-        createdBy: auth.user.uid,
-        createdByEmail: auth.user.email ?? null,
-        gradesPublished: false,
-        schoolId: school.id,
-      });
-      setTitle("");
-      setDescription("");
-      setDueAtText("");
-      setWeightText("10");
-      reloadAssignments();
-    } catch (e: any) {
-      setErr(e?.message ?? "建立作業失敗");
-    }
+  const onPress = () => {
+    const url = `https://tronclass.pu.edu.tw/course/${hw.courseId}/content#/homework/${hw.id}`;
+    WebBrowser.openBrowserAsync(url).catch(() => {});
   };
-
-  const publishFinalScores = async () => {
-    setErr(null);
-    if (!groupId) return;
-    if (!auth.user) {
-      setErr("請先登入");
-      return;
-    }
-    if (!canManageCourse) {
-      setErr("你沒有權限發布期末成績");
-      return;
-    }
-
-    try {
-      // Compute weighted final score = sum(grade * weight)/sum(weight) over graded assignments.
-      // NOTE: MVP approach; for large classes, move to Cloud Functions.
-      const passingScore = 60;
-
-      const membersSnap = await getDocs(query(collection(db, "groups", groupId, "members")));
-      const memberUids = membersSnap.docs
-        .map((d) => ({ uid: d.id, ...(d.data() as any) }))
-        .filter((m: any) => m.status === "active")
-        .map((m: any) => String(m.uid));
-
-      const assignmentsRef = collection(db, "groups", groupId, "assignments");
-      const aSnap = await getDocs(query(assignmentsRef, orderBy("createdAt", "desc")));
-      const assignments = aSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as any[];
-
-      const sums: Record<string, { wSum: number; gwSum: number; graded: number }> = {};
-      for (const uid of memberUids) sums[uid] = { wSum: 0, gwSum: 0, graded: 0 };
-
-      for (const a of assignments) {
-        const w = typeof a.weight === "number" ? a.weight : 0;
-        if (!w || w <= 0) continue;
-
-        for (const uid of memberUids) {
-          const sDoc = await getDoc(doc(db, "groups", groupId, "assignments", a.id, "submissions", uid));
-          if (!sDoc.exists()) continue;
-          const s = sDoc.data() as any;
-          if (typeof s.grade !== "number") continue;
-          sums[uid].wSum += w;
-          sums[uid].gwSum += s.grade * w;
-          sums[uid].graded += 1;
-        }
-      }
-
-      for (const uid of memberUids) {
-        const row = sums[uid];
-        const finalScore = row.wSum > 0 ? Math.round((row.gwSum / row.wSum) * 10) / 10 : null;
-        const result = typeof finalScore === "number" ? (finalScore >= passingScore ? "passed" : "failed") : "incomplete";
-
-        await setDoc(
-          doc(db, "groups", groupId, "gradebook", uid),
-          {
-            uid,
-            finalScore,
-            passingScore,
-            result,
-            published: true,
-            publishedAt: serverTimestamp(),
-            publishedBy: auth.user.uid,
-            computedFrom: { assignments: assignments.length, gradedAssignments: row.graded, weightSum: row.wSum },
-          },
-          { merge: true }
-        );
-
-        // Write per-user milestone (verified result) when published.
-        await setDoc(
-          doc(db, "users", uid, "milestones", `course:${groupId}`),
-          {
-            kind: "course",
-            groupId,
-            courseName: group?.name ?? null,
-            schoolId: school.id,
-            status: "verified",
-            result,
-            passingScore,
-            finalScore,
-            verifiedBy: auth.user.uid,
-            verifiedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
-
-      await setDoc(
-        doc(db, "groups", groupId),
-        {
-          finalScores: {
-            published: true,
-            publishedAt: serverTimestamp(),
-            publishedBy: auth.user.uid,
-          },
-        },
-        { merge: true }
-      );
-
-      // Group-level milestone for back-office / admin review.
-      await setDoc(
-        doc(db, "groups", groupId, "milestones", "finalScores"),
-        {
-          kind: "finalScores",
-          status: "pending_verification",
-          publishedAt: serverTimestamp(),
-          publishedBy: auth.user.uid,
-        },
-        { merge: true }
-      );
-
-      reloadAssignments();
-    } catch (e: any) {
-      setErr(e?.message ?? "發布期末成績失敗");
-    }
-  };
-
-  if (!groupId) return <ErrorState title="作業" subtitle="缺少 groupId" />;
 
   return (
-    <Screen>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
-        <Card title="作業" subtitle={group?.name ? `${group.name}｜${assignmentCountText}` : assignmentCountText}>
-          <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-            <Pill text={canManageCourse ? "教師模式" : "學生模式"} kind={canManageCourse ? "accent" : "default"} />
-            {group?.finalScores?.published ? <Pill text="期末成績：已發布" kind="accent" /> : <Pill text="期末成績：未發布" />}
-          </View>
-
-          {err ? (
-            <View style={{ marginTop: 10 }}>
-              <Pill text={err} />
-            </View>
-          ) : null}
-
-          {canManageCourse ? (
-            <View style={{ marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-              <Button text="發布期末成績" kind="primary" onPress={publishFinalScores} />
-            </View>
-          ) : null}
-        </Card>
-
-        {canCreate ? (
-          <Card title="建立作業（教師）" subtitle="(MVP) 文字作業；學生可繳交文字＋連結；逾期仍可交但會標記。">
-            <TextInput
-              value={title}
-              onChangeText={setTitle}
-              placeholder="作業標題"
-              placeholderTextColor="rgba(168,176,194,0.6)"
-              style={{
-                marginTop: 10,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                borderRadius: theme.radius.md,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.surface2,
-                color: theme.colors.text,
-              }}
-            />
-            <TextInput
-              value={description}
-              onChangeText={setDescription}
-              placeholder="作業說明"
-              placeholderTextColor="rgba(168,176,194,0.6)"
-              multiline
-              style={{
-                marginTop: 10,
-                minHeight: 90,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                borderRadius: theme.radius.md,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.surface2,
-                color: theme.colors.text,
-                textAlignVertical: "top",
-              }}
-            />
-            <TextInput
-              value={dueAtText}
-              onChangeText={setDueAtText}
-              placeholder="截止時間（YYYY-MM-DD HH:mm），可留空"
-              placeholderTextColor="rgba(168,176,194,0.6)"
-              style={{
-                marginTop: 10,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                borderRadius: theme.radius.md,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.surface2,
-                color: theme.colors.text,
-              }}
-            />
-            <Text style={{ color: theme.colors.muted, marginTop: 8, fontSize: 12, lineHeight: 18 }}>
-              逾期仍可交（會標記逾期）。建議格式：2026-02-01 23:59
-            </Text>
-
-            <TextInput
-              value={weightText}
-              onChangeText={setWeightText}
-              placeholder="權重（0~100，%）例如 10"
-              placeholderTextColor="rgba(168,176,194,0.6)"
-              keyboardType="numeric"
-              style={{
-                marginTop: 10,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                borderRadius: theme.radius.md,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.surface2,
-                color: theme.colors.text,
-              }}
-            />
-            <Text style={{ color: theme.colors.muted, marginTop: 8, fontSize: 12, lineHeight: 18 }}>
-              期末成績會依各作業權重做加權平均（只計入已評分作業）。
-            </Text>
-
-            <View style={{ marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-              <Button text={auth.user ? "建立" : "請先登入"} kind="primary" disabled={!auth.user} onPress={onCreateAssignment} />
-              <Button text="重新整理" onPress={reloadAssignments} />
-            </View>
-          </Card>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        padding: 14,
+        borderRadius: 14,
+        backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+        borderWidth: 1,
+        borderColor: hasSubmission ? "#16A34A30" : (hw.is_closed || isOverdue) ? "#DC262620" : theme.colors.border,
+        opacity: pressed ? 0.8 : 1,
+      })}
+    >
+      <View
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 12,
+          backgroundColor: `${statusColor}14`,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons name={statusIcon} size={20} color={statusColor} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }} numberOfLines={2}>
+          {hw.title}
+        </Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+          {hw.courseName}
+        </Text>
+        {hw.end_time ? (
+          <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+            截止：{formatDate(hw.end_time)}
+          </Text>
         ) : null}
+      </View>
+      <View style={{ alignItems: "flex-end", gap: 4 }}>
+        <Text style={{ color: statusColor, fontWeight: "700", fontSize: 13 }}>
+          {statusText}
+        </Text>
+        <Ionicons name="open-outline" size={12} color={theme.colors.muted} />
+      </View>
+    </Pressable>
+  );
+}
 
-        {assignmentsLoading ? (
-          <LoadingState title="作業" subtitle="載入中..." rows={3} />
-        ) : assignmentsError ? (
-          <ErrorState title="作業" subtitle="讀取作業失敗" hint={assignmentsError} actionText="重試" onAction={reloadAssignments} />
+// ── 主畫面 ──────────────────────────────────────
+export function GroupAssignmentsScreen(props: any) {
+  const nav = props?.navigation;
+  const auth = useAuth();
+
+  const [homeworks, setHomeworks] = useState<TCHomework[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // 載入所有課程的作業
+  useEffect(() => {
+    if (!auth.user) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        // 先取得課程列表
+        let courses: TCCourse[] = (await getCachedTCCourses().catch(() => null)) ?? [];
+        if (courses.length === 0) {
+          courses = (await refreshTCCourses().catch(() => null)) ?? [];
+        }
+
+        if (courses.length === 0) {
+          if (!cancelled) {
+            setHomeworks([]);
+            setLoading(false);
+          }
+          return;
+        }
+
+        // 平行取得每門課的作業
+        const allHomeworks: TCHomework[] = [];
+        const results = await Promise.allSettled(
+          courses.map(async (course) => {
+            const rawHomeworks = await fetchHomeworkForCourse(course.id);
+            return rawHomeworks.map((hw: any) => ({
+              id: hw.id,
+              title: hw.title ?? "",
+              courseId: course.id,
+              courseName: course.name,
+              end_time: hw.end_time ?? null,
+              is_closed: hw.is_closed === true,
+              module_id: hw.module_id ?? 0,
+              submit_times: hw.submit_times ?? null,
+              homework_submissions: Array.isArray(hw.homework_submissions) ? hw.homework_submissions : [],
+            }));
+          })
+        );
+
+        for (const r of results) {
+          if (r.status === "fulfilled") {
+            allHomeworks.push(...r.value);
+          }
+        }
+
+        // 依截止時間排序：未截止的排前面，已截止的排後面
+        allHomeworks.sort((a, b) => {
+          const aEnded = a.is_closed || (a.end_time ? new Date(a.end_time) < new Date() : false);
+          const bEnded = b.is_closed || (b.end_time ? new Date(b.end_time) < new Date() : false);
+          if (aEnded !== bEnded) return aEnded ? 1 : -1;
+          // 都未截止：按截止時間近到遠
+          if (a.end_time && b.end_time) return new Date(a.end_time).getTime() - new Date(b.end_time).getTime();
+          if (a.end_time) return -1;
+          if (b.end_time) return 1;
+          return 0;
+        });
+
+        if (!cancelled) {
+          setHomeworks(allHomeworks);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? "載入作業失敗");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [auth.user?.uid]);
+
+  const reload = () => {
+    setHomeworks([]);
+    setLoading(true);
+    setError(null);
+    // 重新觸發 useEffect
+    // trick: 透過設定一個 dummy 來觸發
+    setTimeout(() => {
+      setLoading(false);
+      setLoading(true);
+    }, 0);
+  };
+
+  // 統計
+  const pendingCount = useMemo(
+    () => homeworks.filter(hw => {
+      const hasSubmission = (hw.homework_submissions?.length ?? 0) > 0;
+      const isEnded = hw.is_closed || (hw.end_time ? new Date(hw.end_time) < new Date() : false);
+      return !hasSubmission && !isEnded;
+    }).length,
+    [homeworks]
+  );
+  const submittedCount = useMemo(
+    () => homeworks.filter(hw => (hw.homework_submissions?.length ?? 0) > 0).length,
+    [homeworks]
+  );
+
+  if (!auth.user) {
+    return (
+      <Screen>
+        <Card title="作業" subtitle="請先登入以查看作業">
+          <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+            登入後即可查看各課程的作業繳交狀態。
+          </Text>
+        </Card>
+      </Screen>
+    );
+  }
+
+  if (loading) {
+    return <LoadingState title="作業" subtitle="正在載入所有課程的作業..." rows={4} />;
+  }
+
+  if (error) {
+    return (
+      <ErrorState
+        title="作業"
+        subtitle="載入作業失敗"
+        hint={error}
+        actionText="重試"
+        onAction={reload}
+      />
+    );
+  }
+
+  return (
+    <Screen noPadding>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ gap: 14, padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+      >
+        {/* 統計概覽 */}
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <View style={{
+            flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14,
+            backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border,
+          }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 24 }}>
+              {homeworks.length}
+            </Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 11 }}>全部作業</Text>
+          </View>
+          <View style={{
+            flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14,
+            backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border,
+          }}>
+            <Text style={{ color: pendingCount > 0 ? "#F59E0B" : theme.colors.muted, fontWeight: "900", fontSize: 24 }}>
+              {pendingCount}
+            </Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 11 }}>待繳交</Text>
+          </View>
+          <View style={{
+            flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14,
+            backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border,
+          }}>
+            <Text style={{ color: "#16A34A", fontWeight: "900", fontSize: 24 }}>
+              {submittedCount}
+            </Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已繳交</Text>
+          </View>
+        </View>
+
+        {/* 作業列表 */}
+        {homeworks.length > 0 ? (
+          <View style={{ gap: 8 }}>
+            <SectionTitle text={`共 ${homeworks.length} 份作業`} />
+            {homeworks.map((hw) => (
+              <HomeworkCard key={`hw-${hw.courseId}-${hw.id}`} hw={hw} />
+            ))}
+          </View>
         ) : (
-          <Card title="作業列表" subtitle="點進去繳交 / 批改">
-            <SectionTitle text={`共 ${assignments.length} 份`} />
-            <View style={{ marginTop: 10, gap: 10 }}>
-              {assignments.map((a) => (
-                <Card
-                  key={a.id}
-                  title={a.title}
-                  subtitle={`${a.gradesPublished ? "成績：已發布" : "成績：未發布"}${typeof a.weight === "number" ? `｜權重：${a.weight}%` : ""}${a.dueAt ? `｜截止：${new Date(a.dueAt?.toDate?.() ?? a.dueAt).toLocaleString()}` : ""}`}
-                >
-                  <Text style={{ color: theme.colors.text, lineHeight: 20 }}>{a.description}</Text>
-                  <View style={{ marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-                    <Button
-                      text="查看 / 繳交 / 批改"
-                      kind="primary"
-                      onPress={() => nav?.navigate?.("AssignmentDetail", { groupId, assignmentId: a.id })}
-                    />
-                  </View>
-                </Card>
-              ))}
-              {assignments.length === 0 ? <Text style={{ color: theme.colors.muted }}>目前沒有作業。</Text> : null}
-            </View>
+          <Card title="目前沒有作業" subtitle="所有課程都沒有指派作業">
+            <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+              當老師在 TronClass 上指派作業時，會顯示在這裡。
+            </Text>
           </Card>
         )}
       </ScrollView>

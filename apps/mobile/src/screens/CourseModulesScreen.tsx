@@ -1,875 +1,1289 @@
 /* eslint-disable */
-import React, { useMemo, useState, useEffect } from "react";
-import { Linking, Pressable, ScrollView, Text, TextInput, View, ActivityIndicator } from "react-native";
+import React, { useMemo, useState, useCallback } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as WebBrowser from "expo-web-browser";
+import * as Sharing from "expo-sharing";
 
-import type { CourseModule, CourseSpace } from "../data";
-import { Button, Card, ErrorState, LoadingState, Pill, Screen } from "../ui/components";
+import { Card, ErrorState, LoadingState, Pill, Screen, SectionTitle } from "../ui/components";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
 import { useAsyncList } from "../hooks/useAsyncList";
-import { useDataSource } from "../hooks/useDataSource";
-import { canManageCourse } from "../services/courseWorkspace";
+import {
+  tcFetchModules,
+  tcFetchCourseActivities,
+  tcFetchCourseExams,
+  tcFetchExamSubmissions,
+  tcFetchExamDetail,
+  tcFetchExamAttempts,
+  tcFetchHomeworkActivities,
+  tcFetchHomeworkDetail,
+  tcFetchHomeworkSubmissions,
+  tcBuildFileViewUrl,
+  tcBuildFileDownloadUrl,
+  tcBuildExamViewUrl,
+  tcBuildScoreUrl,
+  type TCModule,
+  type TCCourseActivity,
+  type TCExamInfo,
+  type TCExamSubmission,
+  type TCExamDetail,
+  type TCExamAttempt,
+  type TCHomeworkDetail,
+  type TCHomeworkSubmission as TCHWSubmission,
+} from "../services/tronClassClient";
 
-type ContentType = "pdf" | "video" | "document" | "link" | "slide";
-type CompletionStatus = "not_started" | "in_progress" | "completed";
+// ── 型別定義 ──────────────────────────────────────
 
-interface ContentItem {
-  id: string;
-  type: ContentType;
-  label: string;
-  url?: string;
-  duration?: number;
-}
-
-interface ModuleProgress {
-  moduleId: string;
-  status: CompletionStatus;
-  completedAt?: string;
-}
-
-function ModuleRow(props: {
+type HomeworkItem = {
+  id: number;
   title: string;
-  subtitle: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  tint: string;
-  onPress?: () => void;
-  footer?: React.ReactNode;
+  end_time: string | null;
+  is_closed: boolean;
+  module_id: number;
+  homework_submissions: number[];
+  detail?: TCHomeworkDetail | null;
+  submissions?: TCHWSubmission[];
+};
+
+type ExamWithDetails = TCExamInfo & {
+  submission?: TCExamSubmission | null;
+  detail?: TCExamDetail | null;
+  attempts?: TCExamAttempt[];
+};
+
+type ModuleWithContent = {
+  module: TCModule;
+  materials: TCCourseActivity[];
+  exams: ExamWithDetails[];
+  homeworks: HomeworkItem[];
+};
+
+const SCREEN_WIDTH = Dimensions.get("window").width;
+
+// ── 小工具 ─────────────────────────────────────
+
+function getFileIcon(name: string): keyof typeof Ionicons.glyphMap {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".pdf")) return "document-text-outline";
+  if (lower.endsWith(".pptx") || lower.endsWith(".ppt")) return "easel-outline";
+  if (lower.endsWith(".mp4") || lower.endsWith(".mov") || lower.endsWith(".avi")) return "play-circle-outline";
+  if (lower.endsWith(".docx") || lower.endsWith(".doc")) return "document-outline";
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "grid-outline";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".gif") || lower.endsWith(".webp")) return "image-outline";
+  if (lower.endsWith(".zip") || lower.endsWith(".rar") || lower.endsWith(".7z")) return "archive-outline";
+  return "attach-outline";
+}
+
+function getFileColor(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".pdf")) return "#DC2626";
+  if (lower.endsWith(".pptx") || lower.endsWith(".ppt")) return "#F59E0B";
+  if (lower.endsWith(".mp4") || lower.endsWith(".mov")) return "#7C3AED";
+  if (lower.endsWith(".docx") || lower.endsWith(".doc")) return "#2563EB";
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) return "#16A34A";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".gif")) return "#EC4899";
+  return theme.colors.accent;
+}
+
+function isImageFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  return [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"].some(ext => lower.endsWith(ext));
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  } catch {
+    return "";
+  }
+}
+
+function formatFullDate(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    const d = new Date(iso);
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+  } catch {
+    return "";
+  }
+}
+
+// ── 圖片預覽 Modal ────────────────────────────────
+
+function ImagePreviewModal(props: {
+  visible: boolean;
+  imageUrl: string;
+  title: string;
+  onClose: () => void;
 }) {
   return (
+    <Modal visible={props.visible} transparent animationType="fade" onRequestClose={props.onClose}>
+      <Pressable
+        onPress={props.onClose}
+        style={{
+          flex: 1,
+          backgroundColor: "rgba(0,0,0,0.9)",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <View style={{ position: "absolute", top: 60, right: 20, zIndex: 10 }}>
+          <Pressable onPress={props.onClose} style={{ padding: 8 }}>
+            <Ionicons name="close-circle" size={32} color="#fff" />
+          </Pressable>
+        </View>
+        <Text style={{ color: "#fff", fontSize: 14, fontWeight: "600", marginBottom: 12 }}>
+          {props.title}
+        </Text>
+        <Image
+          source={{ uri: props.imageUrl }}
+          style={{ width: SCREEN_WIDTH - 32, height: SCREEN_WIDTH - 32, borderRadius: 12 }}
+          resizeMode="contain"
+        />
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ── 教材檔案卡片（支援本地預覽）──────────────────────
+
+function MaterialCard(props: {
+  activity: TCCourseActivity;
+  courseId: number;
+  onPreviewImage: (url: string, title: string) => void;
+}) {
+  const { activity, courseId, onPreviewImage } = props;
+  const upload = activity.uploads[0];
+  const icon = upload ? getFileIcon(upload.name) : "document-outline";
+  const color = upload ? getFileColor(upload.name) : theme.colors.accent;
+  const [downloading, setDownloading] = useState(false);
+
+  const handlePress = useCallback(async () => {
+    if (!upload) {
+      // 沒有附件，開網頁
+      WebBrowser.openBrowserAsync(tcBuildFileViewUrl(courseId, activity.id)).catch(() => {});
+      return;
+    }
+
+    // 圖片：直接預覽
+    if (isImageFile(upload.name)) {
+      const imageUrl = tcBuildFileDownloadUrl(upload.key);
+      onPreviewImage(imageUrl, upload.name);
+      return;
+    }
+
+    // 其他檔案：嘗試下載後用系統分享開啟，失敗則退回網頁
+    try {
+      setDownloading(true);
+      const downloadUrl = tcBuildFileDownloadUrl(upload.key);
+
+      // 使用 fetch 下載到 blob，再透過 Sharing 分享
+      const resp = await fetch(downloadUrl);
+      if (resp.ok) {
+        // 取得 blob 並建立本地 URI
+        const blob = await resp.blob();
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve, reject) => {
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+
+        // 建立臨時檔案用 sharing
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          // 如果可以分享，用 WebBrowser 開啟（因為 fetch blob sharing 需要 native 模組）
+          // 直接用 WebBrowser 打開下載 URL 讓系統處理
+          await WebBrowser.openBrowserAsync(downloadUrl);
+        } else {
+          WebBrowser.openBrowserAsync(tcBuildFileViewUrl(courseId, activity.id)).catch(() => {});
+        }
+      } else {
+        WebBrowser.openBrowserAsync(tcBuildFileViewUrl(courseId, activity.id)).catch(() => {});
+      }
+    } catch (err) {
+      console.warn("Download failed, fallback to web:", err);
+      WebBrowser.openBrowserAsync(tcBuildFileViewUrl(courseId, activity.id)).catch(() => {});
+    } finally {
+      setDownloading(false);
+    }
+  }, [upload, courseId, activity.id, onPreviewImage]);
+
+  return (
     <Pressable
-      onPress={props.onPress}
-      disabled={!props.onPress}
+      onPress={handlePress}
+      disabled={downloading}
       style={({ pressed }) => ({
-        gap: 10,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
         padding: 14,
-        borderRadius: theme.radius.lg,
-        backgroundColor: theme.colors.surface2,
+        borderRadius: 14,
+        backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
         borderWidth: 1,
         borderColor: theme.colors.border,
-        opacity: pressed && props.onPress ? 0.8 : 1,
+        opacity: pressed || downloading ? 0.7 : 1,
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <View
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 12,
+          backgroundColor: `${color}14`,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {downloading ? (
+          <ActivityIndicator size="small" color={color} />
+        ) : (
+          <Ionicons name={icon} size={20} color={color} />
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }} numberOfLines={2}>
+          {activity.title}
+        </Text>
+        {upload ? (
+          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+            {upload.name} · {formatFileSize(upload.size)}
+          </Text>
+        ) : null}
+        {activity.start_time ? (
+          <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+            {formatDate(activity.start_time)}
+          </Text>
+        ) : null}
+      </View>
+      <View style={{ alignItems: "center", gap: 2 }}>
+        {isImageFile(upload?.name ?? "") ? (
+          <Ionicons name="eye-outline" size={16} color={theme.colors.accent} />
+        ) : (
+          <Ionicons name="download-outline" size={16} color={theme.colors.accent} />
+        )}
+        <Text style={{ color: theme.colors.muted, fontSize: 9 }}>
+          {isImageFile(upload?.name ?? "") ? "預覽" : "下載"}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+// ── 考試成績卡片（可展開看作答紀錄）─────────────────
+
+function ExamCard(props: {
+  exam: ExamWithDetails;
+  courseId: number;
+}) {
+  const { exam, courseId } = props;
+  const [expanded, setExpanded] = useState(false);
+
+  const score = exam.submission?.exam_score;
+  const hasScore = typeof score === "number";
+  const isSubmitted = exam.submitted_times > 0 || (exam.submission?.submissions?.length ?? 0) > 0;
+  const isEnded = exam.is_closed || (exam.end_time ? new Date(exam.end_time) < new Date() : false);
+
+  let statusColor = theme.colors.muted;
+  let statusText = "未作答";
+  let statusIcon: keyof typeof Ionicons.glyphMap = "time-outline";
+
+  if (hasScore) {
+    statusColor = score >= 60 ? "#16A34A" : "#DC2626";
+    statusText = `${score} 分`;
+    statusIcon = "checkmark-circle";
+  } else if (isSubmitted) {
+    statusColor = "#2563EB";
+    statusText = "已交卷";
+    statusIcon = "checkmark-done-outline";
+  } else if (isEnded) {
+    statusColor = "#DC2626";
+    statusText = "已結束";
+    statusIcon = "close-circle-outline";
+  } else if (exam.end_time) {
+    const hoursLeft = (new Date(exam.end_time).getTime() - Date.now()) / (1000 * 60 * 60);
+    if (hoursLeft > 0 && hoursLeft <= 24) {
+      statusColor = "#F59E0B";
+      statusText = `剩 ${Math.floor(hoursLeft)}h`;
+      statusIcon = "alarm-outline";
+    } else {
+      statusColor = "#F59E0B";
+      statusText = `截止：${formatDate(exam.end_time)}`;
+      statusIcon = "alarm-outline";
+    }
+  }
+
+  const submissions = exam.submission?.submissions ?? [];
+  const detail = exam.detail;
+  const attempts = exam.attempts ?? [];
+
+  return (
+    <View>
+      <Pressable
+        onPress={() => setExpanded(!expanded)}
+        style={({ pressed }) => ({
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 12,
+          padding: 14,
+          borderRadius: expanded ? 14 : 14,
+          borderBottomLeftRadius: expanded ? 0 : 14,
+          borderBottomRightRadius: expanded ? 0 : 14,
+          backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+          borderWidth: 1,
+          borderColor: hasScore ? (score >= 60 ? "#16A34A30" : "#DC262630") : theme.colors.border,
+          borderBottomWidth: expanded ? 0 : 1,
+          opacity: pressed ? 0.8 : 1,
+        })}
+      >
         <View
           style={{
-            width: 42,
-            height: 42,
-            borderRadius: 14,
-            backgroundColor: `${props.tint}16`,
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            backgroundColor: `${statusColor}14`,
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          <Ionicons name={props.icon} size={20} color={props.tint} />
+          <Ionicons name={statusIcon} size={20} color={statusColor} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{props.title}</Text>
-          <Text style={{ color: theme.colors.muted, marginTop: 3, lineHeight: 20 }}>{props.subtitle}</Text>
+          <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }} numberOfLines={2}>
+            {exam.title}
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+            {exam.start_time ? formatDate(exam.start_time) : ""}
+            {exam.start_time && exam.end_time ? " ~ " : ""}
+            {exam.end_time ? formatDate(exam.end_time) : ""}
+          </Text>
+          {exam.total_score ? (
+            <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }}>
+              滿分 {exam.total_score} · 佔比 {exam.score_percentage}%
+            </Text>
+          ) : null}
         </View>
-        {props.onPress ? <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} /> : null}
-      </View>
-      {props.footer}
-    </Pressable>
-  );
-}
+        <View style={{ alignItems: "flex-end", gap: 2 }}>
+          <Text style={{ color: statusColor, fontWeight: "700", fontSize: hasScore ? 18 : 13 }}>
+            {statusText}
+          </Text>
+          <Ionicons
+            name={expanded ? "chevron-up" : "chevron-down"}
+            size={14}
+            color={theme.colors.muted}
+          />
+        </View>
+      </Pressable>
 
-function Field(props: {
-  label: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder: string;
-  multiline?: boolean;
-}) {
-  return (
-    <View style={{ gap: 6 }}>
-      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{props.label}</Text>
-      <TextInput
-        value={props.value}
-        onChangeText={props.onChangeText}
-        placeholder={props.placeholder}
-        placeholderTextColor={theme.colors.muted}
-        multiline={props.multiline}
-        style={{
-          minHeight: props.multiline ? 88 : undefined,
-          paddingHorizontal: 12,
-          paddingVertical: props.multiline ? 12 : 10,
-          borderRadius: theme.radius.md,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface2,
-          color: theme.colors.text,
-          textAlignVertical: props.multiline ? "top" : "center",
-        }}
-      />
+      {/* 展開的詳細資訊 */}
+      {expanded && (
+        <View
+          style={{
+            padding: 14,
+            borderRadius: 14,
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            backgroundColor: theme.colors.surface2,
+            borderWidth: 1,
+            borderColor: hasScore ? (score >= 60 ? "#16A34A30" : "#DC262630") : theme.colors.border,
+            borderTopWidth: 0,
+            gap: 10,
+          }}
+        >
+          {/* 考試基本資訊 */}
+          {detail && (
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>考試資訊</Text>
+              <View style={{ gap: 3 }}>
+                {detail.question_count != null && (
+                  <InfoRow label="題目數" value={`${detail.question_count} 題`} />
+                )}
+                {detail.duration_minutes != null && (
+                  <InfoRow label="作答時間" value={`${detail.duration_minutes} 分鐘`} />
+                )}
+                {detail.max_attempts != null && (
+                  <InfoRow label="最多嘗試" value={`${detail.max_attempts} 次`} />
+                )}
+                {detail.total_score != null && (
+                  <InfoRow label="總分" value={`${detail.total_score} 分`} />
+                )}
+                <InfoRow label="可看答案" value={detail.show_answers ? "是" : "否"} />
+              </View>
+            </View>
+          )}
+
+          {/* 提交紀錄 */}
+          {submissions.length > 0 && (
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
+                提交紀錄（{submissions.length} 次）
+              </Text>
+              {submissions.map((sub, idx) => (
+                <View
+                  key={sub.id}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 8,
+                    backgroundColor: theme.colors.surface,
+                  }}
+                >
+                  <View
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: 11,
+                      backgroundColor: `${theme.colors.accent}20`,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "700" }}>
+                      {idx + 1}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: theme.colors.text, fontSize: 12 }}>
+                      {formatFullDate(sub.submitted_at)}
+                    </Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
+                      {sub.submit_method === "auto" ? "自動提交" : "手動提交"}
+                    </Text>
+                  </View>
+                  <Text
+                    style={{
+                      color: Number(sub.score) >= 60 ? "#16A34A" : Number(sub.score) > 0 ? "#DC2626" : theme.colors.muted,
+                      fontWeight: "700",
+                      fontSize: 15,
+                    }}
+                  >
+                    {sub.score ?? "—"}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* 作答紀錄（如果有 attempts 且含答案） */}
+          {attempts.length > 0 && (
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
+                作答紀錄
+              </Text>
+              {attempts.map((attempt, idx) => (
+                <View
+                  key={attempt.id}
+                  style={{
+                    paddingVertical: 8,
+                    paddingHorizontal: 10,
+                    borderRadius: 8,
+                    backgroundColor: theme.colors.surface,
+                    gap: 4,
+                  }}
+                >
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: "600" }}>
+                      第 {idx + 1} 次作答
+                    </Text>
+                    <Text
+                      style={{
+                        color: (attempt.score ?? 0) >= 60 ? "#16A34A" : "#DC2626",
+                        fontWeight: "700",
+                        fontSize: 14,
+                      }}
+                    >
+                      {attempt.score != null ? `${attempt.score} / ${attempt.total_score ?? "?"}` : "—"}
+                    </Text>
+                  </View>
+                  <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
+                    開始：{formatFullDate(attempt.started_at)} → 提交：{formatFullDate(attempt.submitted_at)}
+                  </Text>
+
+                  {/* 各題答案 */}
+                  {attempt.answers && attempt.answers.length > 0 && (
+                    <View style={{ gap: 3, marginTop: 4 }}>
+                      {attempt.answers.map((ans, qIdx) => (
+                        <View
+                          key={`q-${ans.question_id}`}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            paddingVertical: 3,
+                            paddingHorizontal: 6,
+                            borderRadius: 6,
+                            backgroundColor: ans.correct === true
+                              ? "#16A34A10"
+                              : ans.correct === false
+                                ? "#DC262610"
+                                : "transparent",
+                          }}
+                        >
+                          <Ionicons
+                            name={
+                              ans.correct === true
+                                ? "checkmark-circle"
+                                : ans.correct === false
+                                  ? "close-circle"
+                                  : "remove-circle-outline"
+                            }
+                            size={14}
+                            color={
+                              ans.correct === true ? "#16A34A" : ans.correct === false ? "#DC2626" : theme.colors.muted
+                            }
+                          />
+                          <Text style={{ color: theme.colors.text, fontSize: 11, flex: 1 }}>
+                            第 {qIdx + 1} 題
+                          </Text>
+                          <Text
+                            style={{
+                              color: ans.score != null ? (ans.score > 0 ? "#16A34A" : "#DC2626") : theme.colors.muted,
+                              fontSize: 11,
+                              fontWeight: "600",
+                            }}
+                          >
+                            {ans.score != null ? `${ans.score} 分` : "—"}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* 最終成績 */}
+          {exam.submission && (
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+                paddingTop: 8,
+                borderTopWidth: 1,
+                borderTopColor: theme.colors.border,
+              }}
+            >
+              <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: "600" }}>
+                最終成績 ({exam.submission.exam_score_rule === "highest" ? "取最高" : exam.submission.exam_score_rule === "latest" ? "取最新" : exam.submission.exam_score_rule === "average" ? "取平均" : exam.submission.exam_score_rule || "—"})
+              </Text>
+              <Text
+                style={{
+                  color: (exam.submission.exam_score ?? 0) >= 60 ? "#16A34A" : "#DC2626",
+                  fontWeight: "800",
+                  fontSize: 20,
+                }}
+              >
+                {exam.submission.exam_score ?? "—"}
+              </Text>
+            </View>
+          )}
+
+          {/* 在 TronClass 開啟 */}
+          <Pressable
+            onPress={() => WebBrowser.openBrowserAsync(tcBuildExamViewUrl(courseId, exam.id)).catch(() => {})}
+            style={({ pressed }) => ({
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              paddingVertical: 8,
+              borderRadius: 8,
+              backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface,
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <Ionicons name="open-outline" size={12} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>
+              在 TronClass 開啟
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
 
-function getContentTypeIcon(type: ContentType): keyof typeof Ionicons.glyphMap {
-  switch (type) {
-    case "pdf":
-      return "document-text-outline";
-    case "video":
-      return "play-circle-outline";
-    case "document":
-      return "document-outline";
-    case "slide":
-      return "easel-outline";
-    case "link":
-    default:
-      return "open-outline";
+// ── 作業卡片（可展開看繳交紀錄）────────────────────
+
+function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
+  const { hw, courseId } = props;
+  const [expanded, setExpanded] = useState(false);
+
+  const hasSubmission = (hw.homework_submissions?.length ?? 0) > 0;
+  const now = new Date();
+  const endTime = hw.end_time ? new Date(hw.end_time) : null;
+  const isOverdue = endTime ? endTime < now : false;
+  const isEnded = hw.is_closed || isOverdue;
+
+  let statusColor = theme.colors.accent;
+  let statusText = "進行中";
+  let statusIcon: keyof typeof Ionicons.glyphMap = "time-outline";
+
+  if (hasSubmission) {
+    statusColor = "#16A34A";
+    statusText = "已繳交";
+    statusIcon = "checkmark-circle";
+  } else if (isEnded) {
+    statusColor = "#DC2626";
+    statusText = "已截止";
+    statusIcon = "close-circle-outline";
+  } else if (endTime) {
+    const hoursLeft = (endTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+    if (hoursLeft <= 24 && hoursLeft > 0) {
+      statusColor = "#F59E0B";
+      statusText = `剩 ${Math.floor(hoursLeft)}h`;
+      statusIcon = "alarm-outline";
+    }
   }
-}
 
-function getContentTypeLabel(type: ContentType): string {
-  switch (type) {
-    case "pdf":
-      return "PDF";
-    case "video":
-      return "影片";
-    case "document":
-      return "文件";
-    case "slide":
-      return "投影片";
-    case "link":
-    default:
-      return "連結";
-  }
-}
-
-function ContentItemCard(props: {
-  item: ContentItem;
-  onPress?: () => void;
-}) {
-  const icon = getContentTypeIcon(props.item.type);
-  const label = getContentTypeLabel(props.item.type);
-
-  const iconColor =
-    props.item.type === "video"
-      ? theme.colors.danger
-      : props.item.type === "pdf"
-      ? theme.colors.accent
-      : props.item.type === "slide"
-      ? theme.colors.warning
-      : theme.colors.info;
+  const detail = hw.detail;
+  const subs = hw.submissions ?? [];
 
   return (
-    <Pressable
-      onPress={props.onPress}
-      disabled={!props.onPress}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        padding: 12,
-        borderRadius: theme.radius.md,
-        backgroundColor: pressed && props.onPress ? theme.colors.surface3 : theme.colors.surface2,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        opacity: pressed && props.onPress ? 0.8 : 1,
-      })}
-    >
-      <View
-        style={{
-          width: 36,
-          height: 36,
-          borderRadius: 10,
-          backgroundColor: `${iconColor}16`,
+    <View>
+      <Pressable
+        onPress={() => setExpanded(!expanded)}
+        style={({ pressed }) => ({
+          flexDirection: "row",
           alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Ionicons name={icon} size={18} color={iconColor} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 13 }}>
-          {props.item.label}
-        </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
-          {label}
-          {props.item.duration ? ` • ${props.item.duration} 分` : ""}
-        </Text>
-      </View>
-      {props.onPress ? <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} /> : null}
-    </Pressable>
-  );
-}
-
-function ProgressIndicator(props: { status: CompletionStatus; size?: number }) {
-  const size = props.size ?? 20;
-  if (props.status === "completed") {
-    return (
-      <View
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          backgroundColor: theme.colors.success,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Ionicons name="checkmark" size={size * 0.6} color="white" />
-      </View>
-    );
-  } else if (props.status === "in_progress") {
-    return (
-      <View
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size / 2,
-          borderWidth: 2,
-          borderColor: theme.colors.accent,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
+          gap: 12,
+          padding: 14,
+          borderRadius: 14,
+          borderBottomLeftRadius: expanded ? 0 : 14,
+          borderBottomRightRadius: expanded ? 0 : 14,
+          backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+          borderWidth: 1,
+          borderColor: hasSubmission ? "#16A34A30" : isEnded ? "#DC262620" : theme.colors.border,
+          borderBottomWidth: expanded ? 0 : 1,
+          opacity: pressed ? 0.8 : 1,
+        })}
       >
         <View
           style={{
-            width: size * 0.4,
-            height: size * 0.4,
-            borderRadius: size * 0.2,
-            backgroundColor: theme.colors.accent,
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            backgroundColor: `${statusColor}14`,
+            alignItems: "center",
+            justifyContent: "center",
           }}
-        />
-      </View>
-    );
-  }
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 2,
-        borderWidth: 2,
-        borderColor: theme.colors.border,
-      }}
-    />
+        >
+          <Ionicons name={statusIcon} size={20} color={statusColor} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }} numberOfLines={2}>
+            {hw.title}
+          </Text>
+          {hw.end_time ? (
+            <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+              截止：{formatDate(hw.end_time)}
+            </Text>
+          ) : null}
+        </View>
+        <View style={{ alignItems: "flex-end", gap: 2 }}>
+          <Text style={{ color: statusColor, fontWeight: "700", fontSize: 13 }}>{statusText}</Text>
+          <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={14} color={theme.colors.muted} />
+        </View>
+      </Pressable>
+
+      {expanded && (
+        <View
+          style={{
+            padding: 14,
+            borderRadius: 14,
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            backgroundColor: theme.colors.surface2,
+            borderWidth: 1,
+            borderColor: hasSubmission ? "#16A34A30" : isEnded ? "#DC262620" : theme.colors.border,
+            borderTopWidth: 0,
+            gap: 8,
+          }}
+        >
+          {/* 作業詳情 */}
+          {detail && (
+            <View style={{ gap: 4 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>作業資訊</Text>
+              {detail.description ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }} numberOfLines={5}>
+                  {detail.description.replace(/<[^>]*>/g, "").trim()}
+                </Text>
+              ) : null}
+              {detail.total_score != null && <InfoRow label="滿分" value={`${detail.total_score}`} />}
+              {detail.submission_type && <InfoRow label="繳交方式" value={detail.submission_type} />}
+              {detail.max_submissions != null && <InfoRow label="最多繳交" value={`${detail.max_submissions} 次`} />}
+              {detail.allow_late && <InfoRow label="允許遲交" value="是" />}
+              {detail.late_penalty_percent != null && (
+                <InfoRow label="遲交扣分" value={`${detail.late_penalty_percent}%`} />
+              )}
+              {/* 附件 */}
+              {detail.attachments.length > 0 && (
+                <View style={{ gap: 3, marginTop: 4 }}>
+                  <Text style={{ color: theme.colors.muted, fontSize: 11 }}>附件：</Text>
+                  {detail.attachments.map((att) => (
+                    <Pressable
+                      key={att.id}
+                      onPress={() => {
+                        if (att.url) WebBrowser.openBrowserAsync(att.url).catch(() => {});
+                      }}
+                      style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+                    >
+                      <Ionicons name="attach" size={12} color={theme.colors.accent} />
+                      <Text style={{ color: theme.colors.accent, fontSize: 11 }}>{att.name}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* 繳交紀錄 */}
+          {subs.length > 0 && (
+            <View style={{ gap: 4 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
+                繳交紀錄（{subs.length} 次）
+              </Text>
+              {subs.map((sub, idx) => (
+                <View
+                  key={sub.id}
+                  style={{
+                    paddingVertical: 6,
+                    paddingHorizontal: 10,
+                    borderRadius: 8,
+                    backgroundColor: theme.colors.surface,
+                    gap: 2,
+                  }}
+                >
+                  <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                    <Text style={{ color: theme.colors.text, fontSize: 12 }}>
+                      第 {idx + 1} 次 · {formatFullDate(sub.submitted_at)}
+                    </Text>
+                    {sub.score != null && (
+                      <Text
+                        style={{
+                          color: sub.score >= 60 ? "#16A34A" : "#DC2626",
+                          fontWeight: "700",
+                          fontSize: 14,
+                        }}
+                      >
+                        {sub.score} / {sub.total_score ?? "?"}
+                      </Text>
+                    )}
+                  </View>
+                  {sub.is_late && (
+                    <Text style={{ color: "#F59E0B", fontSize: 10 }}>遲交</Text>
+                  )}
+                  {sub.feedback && (
+                    <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+                      老師評語：{sub.feedback}
+                    </Text>
+                  )}
+                  {sub.graded_at && (
+                    <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
+                      評分時間：{formatFullDate(sub.graded_at)}
+                    </Text>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* 在 TronClass 開啟 */}
+          <Pressable
+            onPress={() =>
+              WebBrowser.openBrowserAsync(
+                `https://tronclass.pu.edu.tw/course/${courseId}/content#/homework/${hw.id}`
+              ).catch(() => {})
+            }
+            style={({ pressed }) => ({
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              paddingVertical: 8,
+              borderRadius: 8,
+              backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface,
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <Ionicons name="open-outline" size={12} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>
+              在 TronClass 開啟
+            </Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
   );
 }
 
-const DEMO_MODULES: CourseModule[] = [
-  {
-    id: "demo-1",
-    groupId: "demo",
-    groupName: "示例課程",
-    title: "第 1 週｜課程介紹",
-    description: "了解本學期課程目標、評分方式與教材結構",
-    week: 1,
-    order: 1,
-    estimatedMinutes: 45,
-    published: true,
-    materials: [
-      {
-        id: "mat-1-1",
-        moduleId: "demo-1",
-        groupId: "demo",
-        type: "file",
-        label: "課程大綱與評分標準",
-      },
-      {
-        id: "mat-1-2",
-        moduleId: "demo-1",
-        groupId: "demo",
-        type: "video",
-        label: "授課教授課程介紹影片",
-      },
-    ],
-  },
-  {
-    id: "demo-2",
-    groupId: "demo",
-    groupName: "示例課程",
-    title: "第 2 週｜基礎概念",
-    description: "學習本課程的基礎概念與理論基礎",
-    week: 2,
-    order: 2,
-    estimatedMinutes: 90,
-    published: true,
-    materials: [
-      {
-        id: "mat-2-1",
-        moduleId: "demo-2",
-        groupId: "demo",
-        type: "file",
-        label: "基礎概念投影片",
-      },
-      {
-        id: "mat-2-2",
-        moduleId: "demo-2",
-        groupId: "demo",
-        type: "document",
-        label: "補充講義與筆記",
-      },
-    ],
-  },
-  {
-    id: "demo-3",
-    groupId: "demo",
-    groupName: "示例課程",
-    title: "第 3 週｜進階主題",
-    description: "深入探討進階主題與實際應用",
-    week: 3,
-    order: 3,
-    estimatedMinutes: 120,
-    published: true,
-    materials: [
-      {
-        id: "mat-3-1",
-        moduleId: "demo-3",
-        groupId: "demo",
-        type: "video",
-        label: "進階主題講解",
-      },
-      {
-        id: "mat-3-2",
-        moduleId: "demo-3",
-        groupId: "demo",
-        type: "file",
-        label: "個案研究與實例分析",
-      },
-    ],
-  },
-  {
-    id: "demo-4",
-    groupId: "demo",
-    groupName: "示例課程",
-    title: "第 4 週｜實作練習",
-    description: "動手做練習，應用學習的知識",
-    week: 4,
-    order: 4,
-    estimatedMinutes: 60,
-    published: true,
-    materials: [
-      {
-        id: "mat-4-1",
-        moduleId: "demo-4",
-        groupId: "demo",
-        type: "link",
-        label: "線上實作環境",
-        url: "https://example.com/practice",
-      },
-      {
-        id: "mat-4-2",
-        moduleId: "demo-4",
-        groupId: "demo",
-        type: "document",
-        label: "練習題與解答",
-      },
-    ],
-  },
-];
+// ── InfoRow ───────────────────────────────────
+
+function InfoRow(props: { label: string; value: string }) {
+  return (
+    <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 2 }}>
+      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{props.label}</Text>
+      <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: "600" }}>{props.value}</Text>
+    </View>
+  );
+}
+
+// ── 成績總覽卡片 ──────────────────────────────────
+
+function ScoreOverview(props: {
+  exams: ExamWithDetails[];
+  courseId: number;
+}) {
+  const { exams, courseId } = props;
+  const scoredExams = exams.filter((e) => typeof e.submission?.exam_score === "number");
+
+  if (scoredExams.length === 0) return null;
+
+  const totalScore = scoredExams.reduce((sum, e) => sum + (e.submission?.exam_score ?? 0), 0);
+  const avgScore = totalScore / scoredExams.length;
+
+  // 計算加權 vs 平均
+  const hasWeights = scoredExams.some((e) => Number(e.score_percentage) > 0);
+  let finalScore = avgScore;
+  if (hasWeights) {
+    const weighted = scoredExams.filter((e) => Number(e.score_percentage) > 0);
+    const totalPct = weighted.reduce((s, e) => s + Number(e.score_percentage), 0);
+    const weightedSum = weighted.reduce(
+      (s, e) => s + (e.submission?.exam_score ?? 0) * Number(e.score_percentage),
+      0
+    );
+    if (totalPct > 0) finalScore = weightedSum / totalPct;
+  }
+
+  return (
+    <Card title="成績概覽" subtitle={`${scoredExams.length} 項已評分`}>
+      <View style={{ gap: 10 }}>
+        <View
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+            paddingBottom: 10,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.colors.border,
+          }}
+        >
+          <Text style={{ color: theme.colors.text, fontSize: 14 }}>
+            {hasWeights ? "加權預估成績" : "平均分數"}
+          </Text>
+          <Text
+            style={{
+              color: finalScore >= 60 ? "#16A34A" : "#DC2626",
+              fontWeight: "800",
+              fontSize: 24,
+            }}
+          >
+            {finalScore.toFixed(1)}
+          </Text>
+        </View>
+
+        {scoredExams.map((exam) => (
+          <View
+            key={exam.id}
+            style={{
+              flexDirection: "row",
+              justifyContent: "space-between",
+              alignItems: "center",
+              paddingVertical: 4,
+            }}
+          >
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={{ color: theme.colors.text, fontSize: 13 }}>{exam.title}</Text>
+              {Number(exam.score_percentage) > 0 && (
+                <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
+                  佔 {exam.score_percentage}%
+                </Text>
+              )}
+            </View>
+            <Text
+              style={{
+                color: (exam.submission?.exam_score ?? 0) >= 60 ? "#16A34A" : "#DC2626",
+                fontWeight: "700",
+                fontSize: 16,
+              }}
+            >
+              {exam.submission?.exam_score}
+            </Text>
+          </View>
+        ))}
+
+        <Pressable
+          onPress={() => WebBrowser.openBrowserAsync(tcBuildScoreUrl(courseId)).catch(() => {})}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            paddingVertical: 10,
+            borderRadius: 10,
+            backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            marginTop: 4,
+            opacity: pressed ? 0.8 : 1,
+          })}
+        >
+          <Ionicons name="stats-chart-outline" size={14} color={theme.colors.accent} />
+          <Text style={{ color: theme.colors.accent, fontWeight: "600", fontSize: 13 }}>
+            在 TronClass 查看完整成績
+          </Text>
+        </Pressable>
+      </View>
+    </Card>
+  );
+}
+
+// ── 章節區塊 ────────────────────────────────────
+
+function ModuleSection(props: {
+  data: ModuleWithContent;
+  courseId: number;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onPreviewImage: (url: string, title: string) => void;
+}) {
+  const { data, courseId, isExpanded, onToggle, onPreviewImage } = props;
+  const { module: mod, materials, exams, homeworks } = data;
+  const totalItems = materials.length + exams.length + homeworks.length;
+
+  return (
+    <View style={{ gap: 8 }}>
+      <Pressable
+        onPress={onToggle}
+        style={({ pressed }) => ({
+          padding: 14,
+          borderRadius: 14,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          opacity: pressed ? 0.8 : 1,
+        })}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              backgroundColor: `${theme.colors.accent}14`,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: "800", fontSize: 14 }}>
+              {mod.sort}
+            </Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 15 }}>
+              {mod.name}
+            </Text>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+              {materials.length > 0 && <Pill text={`${materials.length} 份教材`} kind="default" />}
+              {exams.length > 0 && <Pill text={`${exams.length} 項測驗`} kind="accent" />}
+              {homeworks.length > 0 && <Pill text={`${homeworks.length} 份作業`} kind="default" />}
+              {totalItems === 0 && <Pill text="暫無內容" kind="default" />}
+            </View>
+          </View>
+          <Ionicons
+            name={isExpanded ? "chevron-up" : "chevron-down"}
+            size={18}
+            color={theme.colors.muted}
+          />
+        </View>
+      </Pressable>
+
+      {isExpanded && totalItems > 0 && (
+        <View style={{ gap: 8, paddingLeft: 8 }}>
+          {/* 教材 */}
+          {materials.length > 0 && (
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", paddingLeft: 4 }}>
+                教材
+              </Text>
+              {materials.map((m) => (
+                <MaterialCard
+                  key={`mat-${m.id}`}
+                  activity={m}
+                  courseId={courseId}
+                  onPreviewImage={onPreviewImage}
+                />
+              ))}
+            </View>
+          )}
+
+          {/* 作業 */}
+          {homeworks.length > 0 && (
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", paddingLeft: 4 }}>
+                作業
+              </Text>
+              {homeworks.map((hw) => (
+                <HomeworkCard key={`hw-${hw.id}`} hw={hw} courseId={courseId} />
+              ))}
+            </View>
+          )}
+
+          {/* 測驗 */}
+          {exams.length > 0 && (
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", paddingLeft: 4 }}>
+                測驗
+              </Text>
+              {exams.map((e) => (
+                <ExamCard key={`exam-${e.id}`} exam={e} courseId={courseId} />
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
+      {isExpanded && totalItems === 0 && (
+        <View style={{ paddingLeft: 46, paddingVertical: 8 }}>
+          <Text style={{ color: theme.colors.muted, fontSize: 13 }}>此章節尚無教材或測驗</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── 主畫面 ────────────────────────────────────────
 
 export function CourseModulesScreen(props: any) {
   const nav = props?.navigation;
-  const routeGroupId = props?.route?.params?.groupId as string | undefined;
-  const routeGroupName = props?.route?.params?.groupName as string | undefined;
+  const courseId = Number(props?.route?.params?.groupId ?? 0);
+  const courseName = String(props?.route?.params?.groupName ?? "課程");
   const auth = useAuth();
-  const { school } = useSchool();
-  const ds = useDataSource();
 
-  const [err, setErr] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [weekText, setWeekText] = useState("");
-  const [orderText, setOrderText] = useState("");
-  const [durationText, setDurationText] = useState("");
-  const [resourceLabel, setResourceLabel] = useState("");
-  const [resourceUrl, setResourceUrl] = useState("");
-  const [expandedModuleId, setExpandedModuleId] = useState<string | null>(null);
-  const [moduleProgress, setModuleProgress] = useState<Record<string, ModuleProgress>>({});
-  const [loadingProgress, setLoadingProgress] = useState(true);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
 
-  // Load progress from AsyncStorage
-  useEffect(() => {
-    const loadProgress = async () => {
-      try {
-        setLoadingProgress(true);
-        const progressKey = `course_progress_${routeGroupId}`;
-        const stored = await AsyncStorage.getItem(progressKey);
-        if (stored) {
-          setModuleProgress(JSON.parse(stored));
-        }
-      } catch (error) {
-        console.error("Failed to load progress:", error);
-      } finally {
-        setLoadingProgress(false);
-      }
-    };
+  const handlePreviewImage = useCallback((url: string, title: string) => {
+    setPreviewImage({ url, title });
+  }, []);
 
-    if (routeGroupId) {
-      loadProgress();
-    }
-  }, [routeGroupId]);
-
-  const saveProgress = async (progress: Record<string, ModuleProgress>) => {
-    try {
-      const progressKey = `course_progress_${routeGroupId}`;
-      await AsyncStorage.setItem(progressKey, JSON.stringify(progress));
-    } catch (error) {
-      console.error("Failed to save progress:", error);
-    }
-  };
-
-  const toggleModuleCompletion = async (moduleId: string) => {
-    const current = moduleProgress[moduleId];
-    const newStatus: CompletionStatus =
-      current?.status === "completed" ? "not_started" : "completed";
-
-    const newProgress = {
-      ...moduleProgress,
-      [moduleId]: {
-        moduleId,
-        status: newStatus,
-        completedAt: newStatus === "completed" ? new Date().toISOString() : undefined,
-      },
-    };
-
-    setModuleProgress(newProgress);
-    await saveProgress(newProgress);
-  };
-
+  // 載入所有資料
   const {
-    items: memberships,
-    loading: membershipsLoading,
-    error: membershipsError,
-  } = useAsyncList<CourseSpace>(
+    items: moduleData,
+    loading,
+    error,
+    reload,
+  } = useAsyncList<ModuleWithContent>(
     async () => {
-      if (!auth.user) return [];
-      return ds.listCourseSpaces(auth.user.uid, school.id);
+      if (!auth.user || !courseId || isNaN(courseId)) return [];
+
+      // 同時抓取：模組、活動（教材）、考試、作業
+      const [modules, activities, exams, rawHomeworks] = await Promise.all([
+        tcFetchModules(courseId).catch(() => [] as TCModule[]),
+        tcFetchCourseActivities(courseId).catch(() => [] as TCCourseActivity[]),
+        tcFetchCourseExams(courseId).catch(() => [] as TCExamInfo[]),
+        tcFetchHomeworkActivities(courseId).catch(() => [] as any[]),
+      ]);
+
+      if (modules.length === 0) return [];
+
+      // 批量取得考試分數 + 詳細資訊 + 作答紀錄
+      const examWithDetails = await Promise.all(
+        exams.map(async (exam): Promise<ExamWithDetails> => {
+          const [submission, detail, attempts] = await Promise.all([
+            tcFetchExamSubmissions(exam.id).catch(() => null),
+            tcFetchExamDetail(courseId, exam.id).catch(() => null),
+            tcFetchExamAttempts(courseId, exam.id).catch(() => [] as TCExamAttempt[]),
+          ]);
+          return { ...exam, submission, detail, attempts };
+        })
+      );
+
+      // 批量取得作業詳細資訊 + 繳交紀錄
+      const homeworkItems: HomeworkItem[] = await Promise.all(
+        rawHomeworks.map(async (hw: any): Promise<HomeworkItem> => {
+          const hwId = Number(hw.id ?? 0);
+          const [detail, submissions] = await Promise.all([
+            tcFetchHomeworkDetail(courseId, hwId).catch(() => null),
+            tcFetchHomeworkSubmissions(courseId, hwId).catch(() => [] as TCHWSubmission[]),
+          ]);
+          return {
+            id: hwId,
+            title: String(hw.title ?? ""),
+            end_time: hw.end_time ?? null,
+            is_closed: hw.is_closed === true,
+            module_id: Number(hw.module_id ?? 0),
+            homework_submissions: Array.isArray(hw.homework_submissions) ? hw.homework_submissions : [],
+            detail,
+            submissions,
+          };
+        })
+      );
+
+      // 組合每個 module 的教材、考試、作業
+      return modules
+        .filter((m) => !m.is_hidden)
+        .sort((a, b) => a.sort - b.sort)
+        .map((mod) => ({
+          module: mod,
+          materials: activities.filter((a) => a.module_id === mod.id && a.type === "material"),
+          exams: examWithDetails.filter((e) => e.module_id === mod.id),
+          homeworks: homeworkItems.filter((h) => h.module_id === mod.id),
+        }));
     },
-    [ds, auth.user?.uid, school.id]
+    [auth.user?.uid, courseId]
   );
 
-  const {
-    items: modules,
-    loading: modulesLoading,
-    error: modulesError,
-    reload: reloadModules,
-  } = useAsyncList<CourseModule>(
-    async () => {
-      if (!auth.user) return [];
-      const realModules = await ds.listCourseModules(auth.user.uid, routeGroupId, school.id);
-      // Show demo data if no real modules
-      if (realModules.length === 0 && !routeGroupId?.startsWith("real-")) {
-        return DEMO_MODULES;
-      }
-      return realModules;
-    },
-    [ds, auth.user?.uid, routeGroupId, school.id, memberships.map((membership) => membership.groupId).join("|")]
-  );
+  // 所有考試（跨 module）
+  const allExams = useMemo(() => moduleData.flatMap((d) => d.exams), [moduleData]);
 
-  const selectedMembership = memberships.find((membership) => membership.groupId === routeGroupId) ?? null;
-  const selectedCourseName = routeGroupName ?? selectedMembership?.name ?? "教材單元";
-  const canEditCourse = canManageCourse(selectedMembership?.role);
-
-  const moduleCountByGroup = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const row of modules) {
-      map[row.groupId] = (map[row.groupId] ?? 0) + 1;
-    }
-    return map;
-  }, [modules]);
-
-  const completionStats = useMemo(() => {
-    if (!modules.length) return { completed: 0, total: 0, percentage: 0 };
-
-    const completed = modules.filter((m) => moduleProgress[m.id]?.status === "completed").length;
-    const total = modules.length;
-    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-
-    return { completed, total, percentage };
-  }, [modules, moduleProgress]);
-
-  const onCreateModule = async () => {
-    setErr(null);
-    setSuccessMsg(null);
-    if (!routeGroupId || !auth.user) {
-      setErr("缺少課程或登入狀態");
-      return;
-    }
-    if (!canEditCourse) {
-      setErr("你沒有權限建立教材單元");
-      return;
-    }
-    if (!title.trim()) {
-      setErr("請輸入單元標題");
-      return;
-    }
-
-    const week = weekText.trim() ? Number(weekText.trim()) : undefined;
-    const order = orderText.trim() ? Number(orderText.trim()) : undefined;
-    const estimatedMinutes = durationText.trim() ? Number(durationText.trim()) : undefined;
-
-    if ((weekText.trim() && !Number.isFinite(week)) || (orderText.trim() && !Number.isFinite(order))) {
-      setErr("週次與排序需為數字");
-      return;
-    }
-    if (durationText.trim() && (!Number.isFinite(estimatedMinutes) || estimatedMinutes! <= 0)) {
-      setErr("預估時間需為正數分鐘");
-      return;
-    }
-    if (resourceUrl.trim() && !/^https?:\/\//.test(resourceUrl.trim())) {
-      setErr("教材連結需以 http:// 或 https:// 開頭");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await ds.createCourseModule({
-        courseSpaceId: routeGroupId,
-        title,
-        description,
-        week,
-        order,
-        estimatedMinutes,
-        resourceLabel,
-        resourceUrl,
-        createdBy: auth.user.uid,
-        createdByEmail: auth.user.email ?? null,
-        schoolId: school.id,
-      });
-      setTitle("");
-      setDescription("");
-      setWeekText("");
-      setOrderText("");
-      setDurationText("");
-      setResourceLabel("");
-      setResourceUrl("");
-      setSuccessMsg("教材單元已建立");
-      reloadModules();
-    } catch (error: unknown) {
-      setErr(error instanceof Error ? error.message : "建立教材單元失敗");
-    } finally {
-      setSaving(false);
-    }
-  };
+  // 統計
+  const totalMaterials = useMemo(() => moduleData.reduce((s, d) => s + d.materials.length, 0), [moduleData]);
+  const totalExams = allExams.length;
+  const totalHomeworks = useMemo(() => moduleData.reduce((s, d) => s + d.homeworks.length, 0), [moduleData]);
 
   if (!auth.user) {
     return (
       <Screen>
-        <Card title="教材單元" subtitle="登入後即可看到課程教材與學習內容">
+        <Card title="教材單元" subtitle="請先登入以查看課程教材">
           <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-            教材模組會承接每週內容、附件、影片與外部資源，成為正式 LMS 的學習骨架。
+            登入後即可查看各課程的教材、考試與成績。
           </Text>
         </Card>
       </Screen>
     );
   }
 
-  if (membershipsLoading || modulesLoading || loadingProgress) {
-    return <LoadingState title="教材單元" subtitle="整理教材模組中..." rows={4} />;
+  if (!courseId || isNaN(courseId)) {
+    return (
+      <Screen>
+        <ErrorState
+          title="教材單元"
+          subtitle="缺少課程資訊"
+          actionText="返回"
+          onAction={() => nav?.goBack?.()}
+        />
+      </Screen>
+    );
   }
 
-  const combinedError = membershipsError ?? modulesError;
-  if (combinedError) {
-    return <ErrorState title="教材單元" subtitle="載入教材失敗" hint={combinedError} />;
+  if (loading) {
+    return <LoadingState title="教材單元" subtitle={`正在載入 ${courseName} 的教材...`} rows={4} />;
+  }
+
+  if (error) {
+    return (
+      <ErrorState
+        title="教材單元"
+        subtitle="載入教材失敗"
+        hint={error}
+        actionText="重試"
+        onAction={reload}
+      />
+    );
+  }
+
+  if (moduleData.length === 0) {
+    return (
+      <Screen>
+        <Card title={courseName} subtitle="此課程目前沒有教材模組">
+          <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
+            老師尚未在 TronClass 上建立章節內容。
+          </Text>
+          <Pressable
+            onPress={() =>
+              WebBrowser.openBrowserAsync(`https://tronclass.pu.edu.tw/course/${courseId}/content#/`).catch(() => {})
+            }
+            style={({ pressed }) => ({
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              paddingVertical: 10,
+              borderRadius: 10,
+              backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              marginTop: 12,
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <Ionicons name="open-outline" size={14} color={theme.colors.accent} />
+            <Text style={{ color: theme.colors.accent, fontWeight: "600", fontSize: 13 }}>
+              在 TronClass 網頁開啟
+            </Text>
+          </Pressable>
+        </Card>
+      </Screen>
+    );
   }
 
   return (
     <Screen noPadding>
+      {/* 圖片預覽 Modal */}
+      {previewImage && (
+        <ImagePreviewModal
+          visible={!!previewImage}
+          imageUrl={previewImage.url}
+          title={previewImage.title}
+          onClose={() => setPreviewImage(null)}
+        />
+      )}
+
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 14, padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <Card
-          title={routeGroupId ? `${selectedCourseName} 教材單元` : "教材單元"}
-          subtitle="教材、檔案、影片與學習內容的正式入口"
-        >
+        {/* 課程標題 */}
+        <Card title={courseName} subtitle="TronClass 課程內容">
           <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-            <Pill text={`${modules.length} 個模組`} kind="accent" />
-            <Pill text={routeGroupId ? selectedCourseName : `${memberships.length} 門課`} kind="default" />
-            {routeGroupId && canEditCourse ? <Pill text="教師可直接新增模組" kind="success" /> : null}
+            <Pill text={`${moduleData.length} 個章節`} kind="accent" />
+            <Pill text={`${totalMaterials} 份教材`} kind="default" />
+            {totalExams > 0 && <Pill text={`${totalExams} 項測驗`} kind="default" />}
+            {totalHomeworks > 0 && <Pill text={`${totalHomeworks} 份作業`} kind="default" />}
           </View>
         </Card>
 
-        {err ? (
-          <Card variant="filled">
-            <Text style={{ color: theme.colors.danger }}>{err}</Text>
-          </Card>
-        ) : null}
-        {successMsg ? (
-          <Card variant="filled">
-            <Text style={{ color: theme.colors.success }}>{successMsg}</Text>
-          </Card>
-        ) : null}
+        {/* 成績概覽 */}
+        <ScoreOverview exams={allExams} courseId={courseId} />
 
-        {!routeGroupId ? (
-          memberships.map((membership) => (
-            <Card
-              key={membership.groupId}
-              title={membership.name}
-              subtitle={`目前 ${moduleCountByGroup[membership.groupId] ?? 0} 個教材模組`}
-            >
-              <ModuleRow
-                title="進入本課教材"
-                subtitle="查看單元、教材、學習內容與課程節奏"
-                icon="albums-outline"
-                tint="#2563EB"
-                onPress={() =>
-                  nav?.navigate?.("CourseModules", {
-                    groupId: membership.groupId,
-                    groupName: membership.name,
-                  })
-                }
-              />
-            </Card>
-          ))
-        ) : null}
-
-        {routeGroupId && canEditCourse ? (
-          <Card title="建立教材模組" subtitle="教師可直接新增週次、教材連結與學習時長">
-            <View style={{ gap: 10 }}>
-              <Field label="單元標題" value={title} onChangeText={setTitle} placeholder="例如：第 5 週｜排序與搜尋" />
-              <Field
-                label="單元說明"
-                value={description}
-                onChangeText={setDescription}
-                placeholder="輸入本週學習重點、作業提醒或預習要求"
-                multiline
-              />
-              <View style={{ flexDirection: "row", gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Field label="週次" value={weekText} onChangeText={setWeekText} placeholder="5" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Field label="排序" value={orderText} onChangeText={setOrderText} placeholder="5" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Field label="時長(分)" value={durationText} onChangeText={setDurationText} placeholder="45" />
-                </View>
-              </View>
-              <Field label="資源名稱" value={resourceLabel} onChangeText={setResourceLabel} placeholder="例如：本週投影片" />
-              <Field
-                label="資源連結"
-                value={resourceUrl}
-                onChangeText={setResourceUrl}
-                placeholder="https://..."
-              />
-              <Button text={saving ? "建立中..." : "建立教材模組"} kind="primary" disabled={saving} onPress={onCreateModule} />
-            </View>
-          </Card>
-        ) : null}
-
-        {routeGroupId ? (
-          <>
-            {modules.length > 0 ? (
-              <>
-                {/* 進度概覽 */}
-                <Card>
-                  <View style={{ gap: 10 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                      <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
-                        已完成 {completionStats.completed}/{completionStats.total} 單元
-                      </Text>
-                      <Text style={{ color: theme.colors.success, fontWeight: "700", fontSize: 14 }}>
-                        {completionStats.percentage}%
-                      </Text>
-                    </View>
-                    <View
-                      style={{
-                        height: 8,
-                        borderRadius: 4,
-                        backgroundColor: theme.colors.surface3,
-                        overflow: "hidden",
-                      }}
-                    >
-                      <View
-                        style={{
-                          height: "100%",
-                          width: `${completionStats.percentage}%`,
-                          backgroundColor: theme.colors.success,
-                          borderRadius: 4,
-                        }}
-                      />
-                    </View>
-                  </View>
-                </Card>
-
-                {/* 教材模組列表 */}
-                <Card title="正式教材模組" subtitle="依週次與單元整理的內容">
-                  <View style={{ gap: 10 }}>
-                    {modules.map((module) => {
-                      const isExpanded = expandedModuleId === module.id;
-                      const progress = moduleProgress[module.id];
-                      const status = progress?.status ?? "not_started";
-                      const materials = (module.materials || []) as ContentItem[];
-
-                      return (
-                        <View key={module.id} style={{ gap: 8 }}>
-                          <Pressable
-                            onPress={() => setExpandedModuleId(isExpanded ? null : module.id)}
-                            style={({ pressed }) => ({
-                              gap: 10,
-                              padding: 14,
-                              borderRadius: theme.radius.lg,
-                              backgroundColor: status === "completed" ? theme.colors.surface3 : theme.colors.surface2,
-                              borderWidth: 1,
-                              borderColor:
-                                status === "completed" ? theme.colors.success : theme.colors.border,
-                              opacity: pressed ? 0.8 : 1,
-                            })}
-                          >
-                            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
-                              <Pressable
-                                onPress={() => toggleModuleCompletion(module.id)}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                              >
-                                <ProgressIndicator status={status} size={24} />
-                              </Pressable>
-
-                              <View style={{ flex: 1 }}>
-                                <Text
-                                  style={{
-                                    color: theme.colors.text,
-                                    fontWeight: "700",
-                                    textDecorationLine:
-                                      status === "completed" ? "line-through" : "none",
-                                  }}
-                                >
-                                  {module.title || `第 ${module.week ?? module.order ?? "-"} 單元`}
-                                </Text>
-                                <Text
-                                  style={{
-                                    color: theme.colors.muted,
-                                    marginTop: 3,
-                                    lineHeight: 20,
-                                    textDecorationLine:
-                                      status === "completed" ? "line-through" : "none",
-                                  }}
-                                >
-                                  {module.description || "教材模組"}
-                                </Text>
-                              </View>
-
-                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                                {status === "completed" && (
-                                  <Ionicons name="checkmark-done" size={16} color={theme.colors.success} />
-                                )}
-                                <Ionicons
-                                  name={isExpanded ? "chevron-up" : "chevron-down"}
-                                  size={18}
-                                  color={theme.colors.muted}
-                                />
-                              </View>
-                            </View>
-
-                            {/* 模組標籤 */}
-                            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginLeft: 36 }}>
-                              {module.week ? (
-                                <Pill text={`第 ${module.week} 週`} kind="default" />
-                              ) : null}
-                              {module.estimatedMinutes ? (
-                                <Pill
-                                  text={`${module.estimatedMinutes} 分鐘`}
-                                  kind="default"
-                                />
-                              ) : null}
-                              {materials.length > 0 && (
-                                <Pill
-                                  text={`${materials.length} 項內容`}
-                                  kind="accent"
-                                />
-                              )}
-                              {module.published ? <Pill text="已發布" kind="success" /> : null}
-                            </View>
-                          </Pressable>
-
-                          {/* 展開的內容項目 */}
-                          {isExpanded && materials.length > 0 && (
-                            <View style={{ gap: 8, paddingLeft: 36 }}>
-                              {materials.map((item) => (
-                                <ContentItemCard
-                                  key={item.id}
-                                  item={item}
-                                  onPress={
-                                    item.url
-                                      ? () => {
-                                          if (item.type === "video" || item.type === "link") {
-                                            Linking.openURL(item.url!).catch((err) =>
-                                              console.error("Failed to open URL:", err)
-                                            );
-                                          }
-                                        }
-                                      : undefined
-                                  }
-                                />
-                              ))}
-                            </View>
-                          )}
-
-                          {/* 展開但無內容 */}
-                          {isExpanded && materials.length === 0 && module.resourceUrl && (
-                            <View style={{ gap: 8, paddingLeft: 36 }}>
-                              <ContentItemCard
-                                item={{
-                                  id: `${module.id}-legacy`,
-                                  type: "link",
-                                  label: module.resourceLabel || "外部教材",
-                                  url: module.resourceUrl,
-                                }}
-                                onPress={() =>
-                                  Linking.openURL(module.resourceUrl!).catch((err) =>
-                                    console.error("Failed to open URL:", err)
-                                  )
-                                }
-                              />
-                            </View>
-                          )}
-                        </View>
-                      );
-                    })}
-                  </View>
-                </Card>
-              </>
-            ) : (
-              <Card title="這門課尚未建立教材模組" subtitle="現在已可直接建立正式 modules 資料">
-                <View style={{ gap: 10 }}>
-                  <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-                    目前這個入口已接上正式 `modules` collection，不再只是設計骨架。教師可先建立週次與教材連結，後續再擴充檔案與影音。
-                  </Text>
-                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                    <Pill text="單元教材" kind="accent" />
-                    <Pill text="外部連結" kind="default" />
-                    <Pill text="週次節奏" kind="default" />
-                    <Pill text="學習時長" kind="default" />
-                  </View>
-                </View>
-              </Card>
-            )}
-
-            <Card title="目前可沿用的課程資產" subtitle="把既有課程頁內容逐步搬進教材模組">
-              <View style={{ gap: 10 }}>
-                <ModuleRow
-                  title="課程動態與公告"
-                  subtitle="沿用現有課程群組的公告、貼文與 Q&A"
-                  icon="newspaper-outline"
-                  tint={theme.colors.accent}
-                  onPress={() => nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: routeGroupId } })}
-                />
-                <ModuleRow
-                  title="作業與評量"
-                  subtitle="把單元內容與作業、測驗對應起來，形成完整學習節奏"
-                  icon="document-text-outline"
-                  tint="#F97316"
-                  onPress={() =>
-                    nav?.navigate?.("收件匣", {
-                      screen: "GroupAssignments",
-                      params: { groupId: routeGroupId },
-                    })
-                  }
-                />
-              </View>
-            </Card>
-          </>
-        ) : null}
+        {/* 章節列表 */}
+        <SectionTitle text="章節與教材" />
+        {moduleData.map((data) => (
+          <ModuleSection
+            key={data.module.id}
+            data={data}
+            courseId={courseId}
+            isExpanded={expandedId === data.module.id}
+            onToggle={() => setExpandedId(expandedId === data.module.id ? null : data.module.id)}
+            onPreviewImage={handlePreviewImage}
+          />
+        ))}
       </ScrollView>
     </Screen>
   );

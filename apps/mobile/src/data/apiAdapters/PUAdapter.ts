@@ -19,6 +19,7 @@ import type {
   AttendanceSession,
   AttendanceSummary,
 } from "../types";
+import { CAMPUS_POIS, type CampusPoiCategory } from "../puCampusData";
 import {
   puLogin,
   type PUSession,
@@ -558,6 +559,9 @@ export class PUAdapter extends BaseApiAdapter {
         score,
         semester: item.semester,
         userId: studentId || this.studentId || "",
+        courseType: item.courseType || undefined,
+        courseClass: item.className || undefined,
+        courseNameEn: item.courseNameEn || undefined,
       };
     });
   }
@@ -634,35 +638,37 @@ export class PUAdapter extends BaseApiAdapter {
   }
 
   // ---------------------------------------------------------------------------
-  // POIs (hardcoded campus landmarks with real coordinates)
+  // POIs — 使用 puCampusData.ts 完整校園 POI 資料庫（50+ 地點 / 精準 GPS）
   // ---------------------------------------------------------------------------
 
   async listPois(): Promise<Poi[]> {
-    const pois: Array<{ name: string; code: string; cat: Poi["category"]; lat: number; lng: number; desc: string }> = [
-      { name: "主顧樓 Providence Hall", code: "PH", cat: "building", lat: 24.22712, lng: 120.56517, desc: "主要教學大樓" },
-      { name: "任垣樓 Anthony Kuo Hall", code: "AK", cat: "building", lat: 24.22765, lng: 120.56453, desc: "教學大樓・計算機中心(AK-3C)" },
-      { name: "伯鐸樓 St. Peter Hall", code: "SP", cat: "building", lat: 24.22695, lng: 120.56398, desc: "教學大樓" },
-      { name: "靜安樓 Jing An Hall", code: "JA", cat: "building", lat: 24.22630, lng: 120.56490, desc: "教學大樓" },
-      { name: "格倫樓 Theodore Guerin Hall", code: "TG", cat: "building", lat: 24.22680, lng: 120.56570, desc: "教學大樓" },
-      { name: "方濟樓 St. Francis Hall", code: "SF", cat: "building", lat: 24.22740, lng: 120.56600, desc: "教學大樓" },
-      { name: "思源樓 Si Yuan Hall", code: "SY", cat: "building", lat: 24.22810, lng: 120.56530, desc: "教學大樓" },
-      { name: "第一研究大樓", code: "1R", cat: "building", lat: 24.22850, lng: 120.56480, desc: "研究大樓" },
-      { name: "第二研究大樓", code: "2R", cat: "building", lat: 24.22870, lng: 120.56420, desc: "研究大樓" },
-      { name: "體育館 John Paul II Sports Hall", code: "ST", cat: "building", lat: 24.22580, lng: 120.56350, desc: "體育設施" },
-      { name: "田徑場", code: "SD", cat: "building", lat: 24.22520, lng: 120.56400, desc: "運動場" },
-      { name: "蓋夏圖書館", code: "LIB", cat: "building", lat: 24.22750, lng: 120.56350, desc: "圖書館" },
-      { name: "主顧聖母堂", code: "CH", cat: "building", lat: 24.22660, lng: 120.56320, desc: "校園聖殿" },
-      { name: "學生餐廳", code: "CAFE", cat: "food", lat: 24.22620, lng: 120.56450, desc: "學生餐飲" },
-      { name: "行政中心", code: "ADMIN", cat: "office", lat: 24.22720, lng: 120.56380, desc: "校務行政" },
-    ];
+    const categoryMap: Record<CampusPoiCategory, Poi["category"]> = {
+      academic: "building",
+      admin: "office",
+      library: "library",
+      cafeteria: "cafeteria",
+      dormitory: "dormitory",
+      sports: "sports",
+      parking: "parking",
+      convenience: "convenience",
+      medical: "medical",
+      religious: "other",
+      gate: "other",
+      research: "building",
+      other: "other",
+    };
 
-    return pois.map((p): Poi => ({
-      id: `pu-poi-${p.code}`,
-      name: p.name,
-      category: p.cat,
+    return CAMPUS_POIS.map((p): Poi => ({
+      id: p.id,
+      name: `${p.name} ${p.nameEn}`,
+      category: categoryMap[p.category] ?? "other",
       lat: p.lat,
       lng: p.lng,
-      description: p.desc,
+      description: p.description,
+      building: p.code,
+      facilities: p.facilities,
+      accessible: p.accessible,
+      imageUrl: p.imageUrl ?? undefined,
     }));
   }
 

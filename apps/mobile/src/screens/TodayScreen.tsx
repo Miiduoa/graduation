@@ -478,11 +478,11 @@ export function TodayScreen(props: Record<string, unknown>) {
     }
     return {
       icon: "bus-outline" as const,
-      title: "公車班次",
-      description: "查看回家班車或夜間校園公車時刻",
+      title: "交通資訊",
+      description: "公車即時到站、台鐵高鐵、YouBike",
       meta: "交通",
       tint: theme.colors.calm,
-      onPress: () => nav?.navigate?.("校園", { screen: "BusSchedule" }),
+      onPress: () => nav?.navigate?.("校園", { screen: "TransportHub" }),
     };
   }, [segment, announcements, menus, events]);
 
@@ -799,9 +799,9 @@ export function TodayScreen(props: Record<string, unknown>) {
               />
               <QuickActionChip
                 icon="bus-outline"
-                label="公車"
+                label="交通"
                 tint="#34C759"
-                onPress={() => nav?.navigate?.("校園", { screen: "BusSchedule" })}
+                onPress={() => nav?.navigate?.("校園", { screen: "TransportHub" })}
               />
             </View>
             <View style={{ flexDirection: "row", gap: theme.space.sm }}>

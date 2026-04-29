@@ -98,6 +98,15 @@ export function PersonalHubScreen(props: any) {
     return auth.profile?.displayName ?? auth.user.email ?? "校園使用者";
   }, [auth.profile?.displayName, auth.user]);
 
+  // auth 還在載入時不要顯示登入按鈕（避免閃現登入畫面）
+  if (auth.loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: "center", alignItems: "center" }}>
+        <ActivityIndicator size="large" color={theme.colors.accent} />
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView

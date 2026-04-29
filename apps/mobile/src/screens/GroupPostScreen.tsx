@@ -6,7 +6,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
-import { getDb } from "../firebase";
+import { getDb, isFirebaseMockMode } from "../firebase";
 import { 
   addDoc, collection, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, 
   updateDoc, deleteDoc, arrayUnion, arrayRemove, increment 
@@ -83,6 +83,7 @@ export function GroupPostScreen(props: any) {
 
   useAsyncList<Group>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId) return [];
       const snap = await getDoc(doc(db, "groups", groupId));
       if (!snap.exists()) return [];
@@ -94,6 +95,7 @@ export function GroupPostScreen(props: any) {
   // Get my membership role
   const { items: myMemberRows } = useAsyncList<{ role?: MemberRole }>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId || !auth.user) return [];
       const snap = await getDoc(doc(db, "groups", groupId, "members", auth.user.uid));
       if (!snap.exists()) return [];
@@ -107,6 +109,7 @@ export function GroupPostScreen(props: any) {
 
   const { items: postRows, loading: postLoading, error: postError, reload: reloadPost } = useAsyncList<Post>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId || !postId) return [];
       const snap = await getDoc(doc(db, "groups", groupId, "posts", postId));
       if (!snap.exists()) return [];
@@ -127,6 +130,7 @@ export function GroupPostScreen(props: any) {
 
   const { items: comments, loading: cLoading, error: cError, reload: reloadComments } = useAsyncList<Comment>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       if (!groupId || !postId) return [];
       const ref = collection(db, "groups", groupId, "posts", postId, "comments");
       const qy = query(ref, orderBy("createdAt", "asc"), limit(200));
@@ -139,6 +143,7 @@ export function GroupPostScreen(props: any) {
   // Fetch user profiles for comments
   const { items: userProfiles } = useAsyncList<UserProfile>(
     async () => {
+      if (isFirebaseMockMode()) return [];
       const uids = [
         ...new Set([
           ...(post ? [post.authorId] : []),

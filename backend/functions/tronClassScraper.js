@@ -708,6 +708,341 @@ async function tcFetchAnnouncements(cookies) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 新增: 詳細資料端點 (評量/作業/考試/討論/教材/成績)
+// ---------------------------------------------------------------------------
+
+/**
+ * 取得單一活動詳情 (含完整描述、附件、評分規則)
+ */
+async function tcFetchActivityDetail(cookies, courseId, activityId) {
+  try {
+    const data = await tcFetchJson(
+      `${TC_BASE}/api/courses/${courseId}/activities/${activityId}`,
+      cookies
+    );
+    return data ?? null;
+  } catch (error) {
+    if (String(error?.message || '').includes('session 已失效')) throw error;
+    return null;
+  }
+}
+
+/**
+ * 取得單一作業活動詳情 (含完整描述、附件、截止日、評分規則、配分)
+ */
+async function tcFetchHomeworkDetail(cookies, courseId, homeworkId) {
+  try {
+    const data = await tcFetchJson(
+      `${TC_BASE}/api/courses/${courseId}/homework-activities/${homeworkId}`,
+      cookies
+    );
+    return data ?? null;
+  } catch (error) {
+    if (String(error?.message || '').includes('session 已失效')) throw error;
+
+    // 部分版本用 activities 端點
+    try {
+      const fallback = await tcFetchJson(
+        `${TC_BASE}/api/courses/${courseId}/activities/${homeworkId}`,
+        cookies
+      );
+      return fallback ?? null;
+    } catch { return null; }
+  }
+}
+
+/**
+ * 取得作業的學生提交記錄 (自己的)
+ * 回傳: 提交時間、檔案、批改結果、教師評語
+ */
+async function tcFetchHomeworkSubmissions(cookies, courseId, homeworkId) {
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/homework-activities/${homeworkId}/student-submissions`,
+    `${TC_BASE}/api/courses/${courseId}/homework-activities/${homeworkId}/submissions`,
+    `${TC_BASE}/api/courses/${courseId}/activities/${homeworkId}/student-submissions`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await tcFetchJson(url, cookies);
+      if (data) {
+        // 回傳可能是 { submissions: [...] } 或直接是 array
+        const submissions = data.submissions ?? data.student_submissions ?? (Array.isArray(data) ? data : null);
+        if (submissions) return submissions;
+      }
+    } catch (error) {
+      if (String(error?.message || '').includes('session 已失效')) throw error;
+    }
+  }
+  return [];
+}
+
+/**
+ * 取得單一考試詳情 (含考試說明、時長、題數、作答次數限制)
+ */
+async function tcFetchExamDetail(cookies, courseId, examId) {
+  try {
+    const data = await tcFetchJson(
+      `${TC_BASE}/api/courses/${courseId}/exams/${examId}`,
+      cookies
+    );
+    return data ?? null;
+  } catch (error) {
+    if (String(error?.message || '').includes('session 已失效')) throw error;
+    return null;
+  }
+}
+
+/**
+ * 取得考試作答記錄 / 考試結果
+ */
+async function tcFetchExamAttempts(cookies, courseId, examId) {
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/exams/${examId}/student-submissions`,
+    `${TC_BASE}/api/courses/${courseId}/exams/${examId}/submissions`,
+    `${TC_BASE}/api/courses/${courseId}/exams/${examId}/attempts`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await tcFetchJson(url, cookies);
+      if (data) {
+        const attempts = data.submissions ?? data.attempts ?? data.student_submissions ?? (Array.isArray(data) ? data : null);
+        if (attempts) return attempts;
+      }
+    } catch (error) {
+      if (String(error?.message || '').includes('session 已失效')) throw error;
+    }
+  }
+  return [];
+}
+
+/**
+ * 取得課程討論區列表
+ */
+async function tcFetchDiscussions(cookies, courseId) {
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/discussions`,
+    `${TC_BASE}/api/courses/${courseId}/forums`,
+    `${TC_BASE}/api/courses/${courseId}/activities?type=forum`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await tcFetchJson(url, cookies);
+      if (data) {
+        const items = data.discussions ?? data.forums ?? data.activities ?? (Array.isArray(data) ? data : null);
+        if (items && Array.isArray(items)) return items;
+      }
+    } catch (error) {
+      if (String(error?.message || '').includes('session 已失效')) throw error;
+    }
+  }
+  return [];
+}
+
+/**
+ * 取得討論區內的貼文
+ */
+async function tcFetchDiscussionPosts(cookies, courseId, discussionId) {
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/discussions/${discussionId}/posts`,
+    `${TC_BASE}/api/courses/${courseId}/forums/${discussionId}/posts`,
+    `${TC_BASE}/api/courses/${courseId}/activities/${discussionId}/posts`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await tcFetchJson(url, cookies);
+      if (data) {
+        const posts = data.posts ?? data.replies ?? (Array.isArray(data) ? data : null);
+        if (posts) return posts;
+      }
+    } catch (error) {
+      if (String(error?.message || '').includes('session 已失效')) throw error;
+    }
+  }
+  return [];
+}
+
+/**
+ * 取得課程公告 (課程級別，非全站)
+ */
+async function tcFetchCourseAnnouncements(cookies, courseId) {
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/announcements`,
+    `${TC_BASE}/api/courses/${courseId}/notifications`,
+    `${TC_BASE}/api/courses/${courseId}/activities?type=announcement`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await tcFetchJson(url, cookies);
+      if (data) {
+        const items = data.announcements ?? data.notifications ?? data.activities ?? (Array.isArray(data) ? data : null);
+        if (items && Array.isArray(items)) return items;
+      }
+    } catch (error) {
+      if (String(error?.message || '').includes('session 已失效')) throw error;
+    }
+  }
+  return [];
+}
+
+/**
+ * 取得課程教材/資源清單 (檔案、連結、影片等)
+ */
+async function tcFetchMaterials(cookies, courseId) {
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/resources`,
+    `${TC_BASE}/api/courses/${courseId}/materials`,
+    `${TC_BASE}/api/courses/${courseId}/activities?type=material`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await tcFetchJson(url, cookies);
+      if (data) {
+        const items = data.resources ?? data.materials ?? data.activities ?? (Array.isArray(data) ? data : null);
+        if (items && Array.isArray(items)) return items;
+      }
+    } catch (error) {
+      if (String(error?.message || '').includes('session 已失效')) throw error;
+    }
+  }
+  return [];
+}
+
+/**
+ * 取得課程成績明細 (每項評量的分數、權重、排名)
+ * 比 score-items 更詳細：含學生實際得分
+ */
+async function tcFetchGradeDetails(cookies, courseId) {
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/gradebook`,
+    `${TC_BASE}/api/courses/${courseId}/grade-items`,
+    `${TC_BASE}/api/courses/${courseId}/score-groups`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await tcFetchJson(url, cookies);
+      if (data) return data;
+    } catch (error) {
+      if (String(error?.message || '').includes('session 已失效')) throw error;
+    }
+  }
+
+  // Fallback: 組合 score-items + self-score
+  try {
+    const scoreItems = await tcFetchScoreItems(cookies, courseId);
+    const selfScore = await tcFetchSelfScore(cookies, courseId);
+    return {
+      score_items: scoreItems,
+      self_score: selfScore,
+      source: 'combined',
+    };
+  } catch { return null; }
+}
+
+/**
+ * 取得課程成員清單 (同學、老師、助教)
+ */
+async function tcFetchCourseMembers(cookies, courseId) {
+  try {
+    const data = await tcFetchAllPages(
+      `api/courses/${courseId}/members`,
+      'members',
+      cookies,
+      {},
+      50,
+    );
+    return data;
+  } catch (error) {
+    if (String(error?.message || '').includes('session 已失效')) throw error;
+    return [];
+  }
+}
+
+/**
+ * 取得課程的所有學習活動 (完整版，含進度追蹤)
+ */
+async function tcFetchLearningActivities(cookies, courseId) {
+  try {
+    const data = await tcFetchJson(
+      `${TC_BASE}/api/courses/${courseId}/learning-activities`,
+      cookies
+    );
+    return data?.learning_activities ?? data?.activities ?? (Array.isArray(data) ? data : []);
+  } catch (error) {
+    if (String(error?.message || '').includes('session 已失效')) throw error;
+    return [];
+  }
+}
+
+/**
+ * 取得課程的 Syllabus / 教學大綱 (有些學校在 modules 下有額外的 syllabus 資料)
+ */
+async function tcFetchSyllabus(cookies, courseId) {
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/syllabus`,
+    `${TC_BASE}/api/courses/${courseId}/outline`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const data = await tcFetchJson(url, cookies);
+      if (data) return data;
+    } catch (error) {
+      if (String(error?.message || '').includes('session 已失效')) throw error;
+    }
+  }
+  return null;
+}
+
+/**
+ * 一次性取得課程的完整詳細資料 (聚合多個端點)
+ * 適合課程頁面一次載入所有資料
+ */
+async function tcFetchCourseFullData(cookies, courseId) {
+  const results = await Promise.allSettled([
+    tcFetchCourseDetail(cookies, courseId),
+    tcFetchActivities(cookies, courseId),
+    tcFetchModules(cookies, courseId),
+    tcFetchExams(cookies, courseId),
+    tcFetchScoreItems(cookies, courseId),
+    tcFetchSelfScore(cookies, courseId),
+    tcFetchHomeworkStatus(cookies, courseId),
+    tcFetchHomeworkScores(cookies, courseId),
+    tcFetchExamStatus(cookies, courseId),
+    tcFetchCourseAnnouncements(cookies, courseId),
+    tcFetchMaterials(cookies, courseId),
+    tcFetchDiscussions(cookies, courseId),
+    tcFetchGradeDetails(cookies, courseId),
+    tcFetchLearningActivities(cookies, courseId),
+  ]);
+
+  const val = (idx) => results[idx]?.status === 'fulfilled' ? results[idx].value : null;
+
+  return {
+    courseDetail: val(0),
+    activities: val(1) ?? [],
+    modules: val(2) ?? [],
+    exams: val(3) ?? [],
+    scoreItems: val(4) ?? [],
+    selfScore: val(5),
+    homeworkStatus: val(6),
+    homeworkScores: val(7) ?? [],
+    examStatus: val(8),
+    courseAnnouncements: val(9) ?? [],
+    materials: val(10) ?? [],
+    discussions: val(11) ?? [],
+    gradeDetails: val(12),
+    learningActivities: val(13) ?? [],
+  };
+}
+
 module.exports = {
   tcLogin,
   tcFetchCourses,
@@ -724,4 +1059,19 @@ module.exports = {
   tcFetchHomeworkScores,
   tcFetchExamStatus,
   tcFetchAnnouncements,
+  // ── 新增端點 ──
+  tcFetchActivityDetail,
+  tcFetchHomeworkDetail,
+  tcFetchHomeworkSubmissions,
+  tcFetchExamDetail,
+  tcFetchExamAttempts,
+  tcFetchDiscussions,
+  tcFetchDiscussionPosts,
+  tcFetchCourseAnnouncements,
+  tcFetchMaterials,
+  tcFetchGradeDetails,
+  tcFetchCourseMembers,
+  tcFetchLearningActivities,
+  tcFetchSyllabus,
+  tcFetchCourseFullData,
 };
