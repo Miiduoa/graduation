@@ -9,25 +9,31 @@ node_modules/
 !**/.env.example
 
 # Logs
+*.log
 npm-debug.log*
 pnpm-debug.log*
 firebase-debug.log*
+firestore-debug.log*
 
 # OS
 .DS_Store
 
 # Local agent / IDE tooling (do not commit)
 .claude/
+.cursor/
+.playwright-cli/
 
 # Next
 apps/web/.next/
 apps/web/out/
+next-env.d.ts
 
 # Expo
 .expo/
 apps/mobile/.expo/
 apps/mobile/dist/
 apps/mobile/web-build/
+expo-env.d.ts
 
 # Firebase
 backend/.firebase/
@@ -44,3 +50,6 @@ backend/ai-server/data/
 
 # Misc
 .fuse_hidden*
+*.tsbuildinfo
+outputs/
+tmp/

@@ -48,6 +48,17 @@ const {
   resolveCafeteriaOrderingMetadata,
 } = require('./cafeterias');
 const {
+  answerWithServerWebSearch,
+  buildAgentSystemPrompt,
+  callAssistantModel,
+  createRequestId,
+  hashUserId,
+  normalizeAssistantActions,
+  rankKnowledgeChunks,
+  resolvePermissionScope: resolveAgentPermissionScope,
+  shouldUseServerWebSearch,
+} = require('./assistantAgent');
+const {
   puLogin,
   puFetchCourses,
   puFetchGrades,
@@ -1127,6 +1138,9 @@ function detectCampusAssistantIntent(rawText) {
   const text = normalizeAssistantText(rawText).toLowerCase();
 
   if (!text) return 'general';
+  if (includesAnyKeyword(text, ['請假', '病假', '事假', '公假'])) return 'leave_request';
+  if (includesAnyKeyword(text, ['拆作業', '拆解', '分解作業', '安排作業', '讀書計畫']))
+    return 'assignment_planning';
   if (includesAnyKeyword(text, ['作業', '截止', 'deadline', '待辦', '繳交', 'due']))
     return 'assignment_status';
   if (includesAnyKeyword(text, ['公告', '消息', '通知'])) return 'announcements';
@@ -1172,6 +1186,74 @@ function formatAssistantDate(value, includeTime = false) {
       ? { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }
       : { month: 'numeric', day: 'numeric' },
   ).format(date);
+}
+
+function assistantAction({
+  label,
+  action,
+  params = {},
+  requiresConfirmation = false,
+  sensitivity = 'low',
+  evidenceRefs = [],
+  permissionScope = 'school_public',
+}) {
+  return {
+    label,
+    action,
+    params,
+    requiresConfirmation,
+    sensitivity,
+    permissionScope,
+    evidenceRefs,
+    status: requiresConfirmation ? 'pending_confirmation' : 'proposed',
+  };
+}
+
+const ASSISTANT_ROLE_ACTION_ALLOWLIST = {
+  student: new Set([
+    'navigate',
+    'start_navigation',
+    'schedule_reminder',
+    'create_reminder_draft',
+    'split_assignment',
+    'draft_message',
+    'queue_action',
+    'open_url',
+  ]),
+  teacher: new Set([
+    'navigate',
+    'start_navigation',
+    'schedule_reminder',
+    'create_reminder_draft',
+    'draft_message',
+    'submit_draft',
+    'queue_action',
+    'open_url',
+  ]),
+  staff: new Set(['navigate', 'start_navigation', 'draft_message', 'submit_draft', 'queue_action', 'open_url']),
+  department: new Set(['navigate', 'start_navigation', 'draft_message', 'submit_draft', 'queue_action', 'open_url']),
+  admin: new Set(['navigate', 'start_navigation', 'draft_message', 'submit_draft', 'queue_action', 'open_url']),
+  school: new Set(['navigate', 'start_navigation', 'draft_message', 'submit_draft', 'queue_action', 'open_url']),
+};
+
+function resolveAssistantActorRole(rawRole) {
+  const role = String(rawRole || '').toLowerCase();
+  if (role === 'teacher' || role === 'professor') return 'teacher';
+  if (role === 'staff') return 'staff';
+  if (role === 'admin' || role === 'principal') return 'admin';
+  if (role === 'department') return 'department';
+  if (role === 'school') return 'school';
+  return 'student';
+}
+
+function resolvePermissionScope(intent, hasAuth) {
+  return resolveAgentPermissionScope(intent, hasAuth);
+}
+
+function filterAssistantActionsByRole(actions, role, permissionScope = 'school_public') {
+  if (!Array.isArray(actions) || actions.length === 0) return [];
+  const allowlist = ASSISTANT_ROLE_ACTION_ALLOWLIST[role] || ASSISTANT_ROLE_ACTION_ALLOWLIST.student;
+  return normalizeAssistantActions(actions, permissionScope).filter((item) => item && allowlist.has(item.action));
 }
 
 function mapDocData(docSnap) {
@@ -1413,6 +1495,262 @@ function buildPoiResponse(queryText, pois) {
     .sort((a, b) => b.score - a.score)[0];
 
   return best?.score > 0 ? best.poi : pois[0];
+}
+
+async function isAssistantGroupMember(uid, groupId) {
+  if (!uid || !groupId) return false;
+
+  const userGroupDoc = await db
+    .collection('users')
+    .doc(uid)
+    .collection('groups')
+    .doc(groupId)
+    .get()
+    .catch(() => null);
+  if (userGroupDoc?.exists && userGroupDoc.data()?.status === 'active') return true;
+
+  const memberDoc = await db
+    .collection('groups')
+    .doc(groupId)
+    .collection('members')
+    .doc(uid)
+    .get()
+    .catch(() => null);
+  return Boolean(memberDoc?.exists && memberDoc.data()?.status !== 'inactive');
+}
+
+async function fetchAssistantKnowledgeChunks({ uid, schoolId, groupId, queryText }) {
+  if (!schoolId) return [];
+
+  const schoolSnap = await db
+    .collection('schools')
+    .doc(schoolId)
+    .collection('aiKnowledge')
+    .limit(60)
+    .get()
+    .catch(() => null);
+
+  const schoolChunks = (schoolSnap?.docs ?? [])
+    .map(mapDocData)
+    .filter((chunk) => {
+      const visibility = chunk.visibility || 'school';
+      return visibility === 'public' || visibility === 'school';
+    })
+    .map((chunk) => ({ ...chunk, scope: 'school', source: `schools/${schoolId}/aiKnowledge/${chunk.id}` }));
+
+  let groupChunks = [];
+  if (groupId && uid && (await isAssistantGroupMember(uid, groupId))) {
+    const groupSnap = await db
+      .collection('groups')
+      .doc(groupId)
+      .collection('aiKnowledge')
+      .limit(60)
+      .get()
+      .catch(() => null);
+    groupChunks = (groupSnap?.docs ?? []).map(mapDocData).map((chunk) => ({
+      ...chunk,
+      scope: 'group',
+      groupId,
+      source: `groups/${groupId}/aiKnowledge/${chunk.id}`,
+    }));
+  }
+
+  return rankKnowledgeChunks(queryText, [...schoolChunks, ...groupChunks], 8);
+}
+
+function compactAssistantItems(items, fields, limit = 5) {
+  return (items || []).slice(0, limit).map((item) => {
+    const row = { id: item.id };
+    fields.forEach((field) => {
+      if (item[field] != null) row[field] = item[field];
+    });
+    return row;
+  });
+}
+
+function buildAuthorizedAssistantContext({
+  schoolId,
+  displayName,
+  actorRole,
+  intent,
+  announcements = [],
+  events = [],
+  menus = [],
+  pois = [],
+  pendingAssignments = [],
+  weeklyReport = null,
+}) {
+  return {
+    schoolId,
+    displayName,
+    actorRole,
+    intent,
+    announcements: compactAssistantItems(announcements, ['title', 'source', 'publishedAt'], 5),
+    events: compactAssistantItems(events, ['title', 'location', 'startsAt'], 5),
+    menus: compactAssistantItems(menus, ['name', 'title', 'price', 'cafeteria'], 6),
+    pois: compactAssistantItems(pois, ['name', 'category', 'description', 'openingHours'], 8),
+    pendingAssignments: compactAssistantItems(
+      pendingAssignments,
+      ['title', 'groupId', 'groupName', 'dueAt'],
+      6,
+    ),
+    weeklyReport: weeklyReport?.summary ? { summary: weeklyReport.summary } : null,
+  };
+}
+
+function extractAssistantSuggestions(content) {
+  const match = String(content || '').match(/(?:建議選項|建議)[：:]\s*([^\n]+)/);
+  if (!match) return [];
+  return match[1]
+    .replace(/[、,，;；]/g, '、')
+    .split('、')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && item.length <= 12)
+    .slice(0, 3);
+}
+
+function webSourcesToCitations(sources) {
+  return (sources || []).slice(0, 4).map((source) => ({
+    type: 'web',
+    id: source.url || source.title,
+    label: source.title || source.source || '公開來源',
+    source: source.url,
+  }));
+}
+
+async function buildModelBackedAssistantResponse({
+  rawMessages,
+  lastUserMessage,
+  schoolId,
+  actorRole,
+  permissionScope,
+  structuredContext,
+  knowledgeChunks,
+  webAnswer,
+}) {
+  const systemPrompt = buildAgentSystemPrompt({
+    schoolId,
+    actorRole,
+    permissionScope,
+    structuredContext,
+    knowledgeChunks,
+    webAnswer,
+  });
+
+  const history = rawMessages
+    .slice(-8)
+    .filter((message) => message?.role === 'user' || message?.role === 'assistant')
+    .map((message) => ({
+      role: message.role,
+      content: normalizeAssistantText(message.content).slice(0, 1600),
+    }));
+
+  if (history.length === 0 || history[history.length - 1].role !== 'user') {
+    history.push({ role: 'user', content: lastUserMessage });
+  }
+
+  const modelResult = await callAssistantModel({
+    messages: [
+      { role: 'system', content: systemPrompt },
+      ...history,
+    ],
+  });
+
+  if (!modelResult?.content) {
+    return { modelResult, response: null };
+  }
+
+  const cleanContent = String(modelResult.content)
+    .replace(/\n*(?:建議選項|建議)[：:][^\n]*/g, '')
+    .trim();
+
+  return {
+    modelResult,
+    response: {
+      content: cleanContent,
+      suggestions: extractAssistantSuggestions(modelResult.content),
+      actions: [],
+      citations: [
+        ...knowledgeChunks.slice(0, 3).map((chunk) => ({
+          type: chunk.scope === 'group' ? 'course' : 'system',
+          id: chunk.sourceId || chunk.id,
+          label: chunk.title || chunk.sourceType || 'AI 知識',
+          source: chunk.source,
+        })),
+        ...webSourcesToCitations(webAnswer?.sources || []),
+      ],
+    },
+  };
+}
+
+async function queueAssistantActionDrafts(uid, actions, {
+  schoolId,
+  actorRole,
+  permissionScope,
+  requestId,
+}) {
+  if (!uid || !Array.isArray(actions) || actions.length === 0) return actions;
+
+  await Promise.all(
+    actions.map(async (action, index) => {
+      if (!action?.requiresConfirmation) return;
+      const safeRequestId = String(requestId || createRequestId()).replace(/[^a-zA-Z0-9_-]/g, '');
+      const actionId = `assistant_${safeRequestId}_${index}`;
+      const ref = db.collection('users').doc(uid).collection('actionQueue').doc(actionId);
+      await ref.set(
+        {
+          userId: uid,
+          schoolId: schoolId || null,
+          label: action.label,
+          action: action.action,
+          params: action.params || {},
+          requiresConfirmation: true,
+          sensitivity: action.sensitivity || 'medium',
+          status: 'pending_confirmation',
+          actorRole,
+          permissionScope,
+          evidenceRefs: action.evidenceRefs || [],
+          source: 'ai',
+          requestId,
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      action.params = { ...(action.params || {}), actionQueueId: actionId };
+    }),
+  );
+
+  return actions;
+}
+
+async function writeAssistantAuditLog({
+  uid,
+  schoolId,
+  intent,
+  provider,
+  model,
+  latencyMs,
+  tokenUsage,
+  sources,
+  actionCount,
+  errorCode,
+  requestId,
+}) {
+  await db.collection('aiLogs').doc(requestId).set({
+    uidHash: hashUserId(uid, schoolId),
+    schoolId: schoolId || null,
+    intent,
+    provider: provider || 'structured',
+    model: model || null,
+    latencyMs,
+    tokenUsage: tokenUsage || null,
+    sources: sources || [],
+    actionCount: actionCount || 0,
+    errorCode: errorCode || null,
+    requestId,
+    createdAt: FieldValue.serverTimestamp(),
+  });
 }
 
 // =====================================================
@@ -1829,6 +2167,8 @@ exports.askCampusAssistant = onCall(
     region: REGION,
   },
   async (request) => {
+    const requestId = createRequestId();
+    const startedAt = Date.now();
     const uid = request.auth?.uid ?? null;
     const rateLimitKey = uid || getClientIp(request.rawRequest || {});
     enforceRateLimit({
@@ -1846,13 +2186,35 @@ exports.askCampusAssistant = onCall(
     const userProfile = uid ? await fetchAssistantUserProfile(uid) : null;
     const schoolId = userProfile?.schoolId ?? context.schoolId ?? null;
     const displayName = userProfile?.displayName ?? request.auth?.token?.name ?? null;
+    const actorRole = resolveAssistantActorRole(userProfile?.role ?? request.auth?.token?.role);
+    const permissionScope = resolvePermissionScope(intent, Boolean(uid));
+    const source = 'cloud_functions';
+    const freshness = 'live';
+    let modelTrace = { provider: 'structured', model: null, usage: null, errors: [] };
 
     if (!schoolId) {
+      await writeAssistantAuditLog({
+        uid,
+        schoolId: null,
+        intent,
+        provider: 'structured',
+        model: null,
+        latencyMs: Date.now() - startedAt,
+        tokenUsage: null,
+        sources: [],
+        actionCount: 0,
+        errorCode: 'missing_school',
+        requestId,
+      }).catch((error) => console.warn('[AI] audit log failed:', error?.message || error));
       return {
         content: '目前無法判斷你所屬的學校。請先選擇學校，或登入後再試一次。',
         suggestions: ['今日公告', '近期活動', '推薦餐點'],
-        debug: { intent, route: 'structured_v1', sourcesUsed: 0 },
+        debug: { intent, route: 'structured_v1', sourcesUsed: 0, source, freshness, permissionScope, actorRole, requestId },
       };
+    }
+
+    if (uid) {
+      await assertActiveSchoolMember(schoolId, uid);
     }
 
     const response = {
@@ -1860,15 +2222,206 @@ exports.askCampusAssistant = onCall(
       suggestions: [],
       actions: [],
       citations: [],
-      debug: { intent, route: 'structured_v1', sourcesUsed: 0, hasAuth: Boolean(uid) },
+      debug: { intent, route: 'structured_v1', sourcesUsed: 0, hasAuth: Boolean(uid), source, freshness, permissionScope, actorRole, requestId },
     };
+    const finalizeResponse = async () => {
+      response.actions = filterAssistantActionsByRole(response.actions, actorRole, permissionScope);
+      await queueAssistantActionDrafts(uid, response.actions, {
+        schoolId,
+        actorRole,
+        permissionScope,
+        requestId,
+      }).catch((error) => {
+        console.warn('[AI] action queue draft failed:', error?.message || error);
+        response.debug.actionQueueError = 'write_failed';
+      });
+      response.usage = modelTrace.usage || undefined;
+      response.debug.permissionScope = permissionScope;
+      response.debug.actorRole = actorRole;
+      response.debug.source = source;
+      response.debug.freshness = freshness;
+      response.debug.modelProvider = modelTrace.provider;
+      response.debug.model = modelTrace.model;
+      if (modelTrace.errors?.length) response.debug.modelErrors = modelTrace.errors.slice(0, 2);
+      await writeAssistantAuditLog({
+        uid,
+        schoolId,
+        intent,
+        provider: modelTrace.provider,
+        model: modelTrace.model,
+        latencyMs: Date.now() - startedAt,
+        tokenUsage: modelTrace.usage,
+        sources: response.citations.map((citation) => citation.source || `${citation.type}:${citation.id}`).slice(0, 12),
+        actionCount: response.actions.length,
+        errorCode: response.error ? 'response_error' : null,
+        requestId,
+      }).catch((error) => console.warn('[AI] audit log failed:', error?.message || error));
+      return response;
+    };
+
+    if (shouldUseServerWebSearch(lastUserMessage, intent)) {
+      const webAnswer = await answerWithServerWebSearch(lastUserMessage);
+      if (webAnswer) {
+        response.content = webAnswer.content;
+        response.suggestions = webAnswer.suggestions || ['看來源', '再查一次', '換個問法'];
+        response.citations = webSourcesToCitations(webAnswer.sources);
+        response.debug.route = 'agent_web_search';
+        response.debug.sourcesUsed = webAnswer.sources?.length || 0;
+        response.debug.webConfidence = webAnswer.confidence;
+        return await finalizeResponse();
+      }
+    }
+
+    const modelEligibleIntents = new Set([
+      'general',
+      'help',
+      'announcements',
+      'events',
+      'menus',
+      'pois',
+      'credit_audit',
+    ]);
+    if (modelEligibleIntents.has(intent) && lastUserMessage) {
+      const [announcements, events, menus, pois, knowledgeChunks] = await Promise.all([
+        fetchAssistantAnnouncements(schoolId),
+        fetchAssistantEvents(schoolId),
+        fetchAssistantMenus(schoolId),
+        fetchAssistantPois(schoolId),
+        fetchAssistantKnowledgeChunks({
+          uid,
+          schoolId,
+          groupId: context.groupId,
+          queryText: lastUserMessage,
+        }),
+      ]);
+      const structuredContext = buildAuthorizedAssistantContext({
+        schoolId,
+        displayName,
+        actorRole,
+        intent,
+        announcements,
+        events,
+        menus,
+        pois,
+      });
+      const modelBacked = await buildModelBackedAssistantResponse({
+        rawMessages,
+        lastUserMessage,
+        schoolId,
+        actorRole,
+        permissionScope,
+        structuredContext,
+        knowledgeChunks,
+        webAnswer: null,
+      });
+      modelTrace = {
+        provider: modelBacked.modelResult?.provider || 'none',
+        model: modelBacked.modelResult?.model || null,
+        usage: modelBacked.modelResult?.usage || null,
+        errors: modelBacked.modelResult?.errors || [],
+      };
+      if (modelBacked.response) {
+        response.content = modelBacked.response.content;
+        response.suggestions = modelBacked.response.suggestions.length > 0
+          ? modelBacked.response.suggestions
+          : ['查看詳情', '今日摘要', '推薦餐點'];
+        response.actions = modelBacked.response.actions;
+        response.citations = modelBacked.response.citations;
+        response.debug.route = 'agent_model_rag';
+        response.debug.sourcesUsed = knowledgeChunks.length + announcements.length + events.length + menus.length + pois.length;
+        return await finalizeResponse();
+      }
+    }
+
+    if (intent === 'leave_request') {
+      if (!uid) {
+        response.content = '請假草稿需要知道你的身分與課程情境。請先登入後再讓我幫你整理。';
+        response.suggestions = ['今日公告', '查課表', '功能說明'];
+        return await finalizeResponse();
+      }
+
+      response.content = [
+        '我可以先幫你整理請假草稿，但不會直接送出。',
+        '',
+        '草稿內容：',
+        '您好，我因身體不適／個人事由，想申請相關課程請假。請協助確認是否需要補交證明文件，謝謝。',
+        '',
+        '送出前請確認日期、課程、假別與證明文件。'
+      ].join('\n');
+      response.suggestions = ['補上日期', '改成病假', '查請假規則'];
+      response.actions = [
+        assistantAction({
+          label: '建立請假草稿',
+          action: 'draft_message',
+          params: { screen: 'Today', nested: 'AIChat', draftType: 'leave_request' },
+          requiresConfirmation: true,
+          sensitivity: 'high',
+          evidenceRefs: [{ type: 'system', id: 'leave-request-draft', label: '請假草稿' }],
+        }),
+      ];
+      response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];
+      return await finalizeResponse();
+    }
+
+    if (intent === 'assignment_planning') {
+      if (!uid) {
+        response.content = '要依你的作業截止時間拆解任務，請先登入。我可以先提供一般讀書計畫模板。';
+        response.suggestions = ['一般讀書計畫', '今日公告', '功能說明'];
+        return await finalizeResponse();
+      }
+
+      const pendingAssignments = await fetchAssistantPendingAssignments(uid, context.groupId);
+      response.debug.sourcesUsed = pendingAssignments.length;
+      const target = pendingAssignments[0];
+
+      if (!target) {
+        response.content = '目前沒有抓到快截止的作業。你可以指定一份作業名稱，我會幫你拆成可執行步驟。';
+        response.suggestions = ['今日摘要', '查作業', '查公告'];
+        return await finalizeResponse();
+      }
+
+      response.content = [
+        `我先用「${target.title ?? '未命名作業'}」幫你拆成今天可執行的計畫：`,
+        '',
+        '1. 先讀題目與評分規準，列出交付物。',
+        '2. 用 25 分鐘完成資料收集或大綱。',
+        '3. 用 45 分鐘完成第一版內容。',
+        '4. 截止前預留 20 分鐘檢查格式與附件。',
+        '',
+        `截止時間：${formatAssistantDate(target.dueAt, true) || '未設定'}`
+      ].join('\n');
+      response.suggestions = ['設定提醒', '更細拆步驟', '查看作業'];
+      response.actions = [
+        assistantAction({
+          label: '拆成待辦',
+          action: 'split_assignment',
+          params: { assignmentId: target.id, groupId: target.groupId },
+          requiresConfirmation: true,
+          sensitivity: 'medium',
+          evidenceRefs: [{ type: 'assignment', id: target.id, label: target.title ?? '作業' }],
+        }),
+        assistantAction({
+          label: '設定提醒',
+          action: 'schedule_reminder',
+          params: {
+            title: target.title ?? '作業提醒',
+            dueDate: toJsDate(target.dueAt)?.toISOString() ?? undefined,
+          },
+          requiresConfirmation: true,
+          sensitivity: 'medium',
+          evidenceRefs: [{ type: 'assignment', id: target.id, label: target.title ?? '作業' }],
+        }),
+      ];
+      response.citations = [{ type: 'assignment', id: target.id, label: target.title ?? '作業' }];
+      return await finalizeResponse();
+    }
 
     if (intent === 'assignment_status' || intent === 'study_summary') {
       if (!uid) {
         response.content =
           '要查詢個人作業、週報或學習摘要，請先登入帳號。我也可以先幫你看公開的公告、活動或餐點資訊。';
         response.suggestions = ['今日公告', '近期活動', '推薦餐點'];
-        return response;
+        return await finalizeResponse();
       }
 
       const [pendingAssignments, weeklyReport, announcements] = await Promise.all([
@@ -1885,7 +2438,7 @@ exports.askCampusAssistant = onCall(
           response.content =
             '目前沒有快到期的待繳作業。你可以改問我近期公告、活動，或請我幫你規劃今天的學習重點。';
           response.suggestions = ['今日摘要', '近期活動', '今日公告'];
-          return response;
+          return await finalizeResponse();
         }
 
         const earliest = pendingAssignments[0];
@@ -1907,21 +2460,24 @@ exports.askCampusAssistant = onCall(
           .join('\n');
         response.suggestions = ['設定提醒', '今日摘要', '今日公告'];
         response.actions = [
-          {
+          assistantAction({
             label: '設定提醒',
             action: 'schedule_reminder',
             params: {
               title: earliest.title ?? '作業提醒',
               dueDate: toJsDate(earliest.dueAt)?.toISOString() ?? undefined,
             },
-          },
+            requiresConfirmation: true,
+            sensitivity: 'medium',
+            evidenceRefs: [{ type: 'assignment', id: earliest.id, label: earliest.title ?? '作業' }],
+          }),
         ];
         response.citations = pendingAssignments.slice(0, 3).map((assignment) => ({
           type: 'assignment',
           id: assignment.id,
           label: assignment.title ?? '未命名作業',
         }));
-        return response;
+        return await finalizeResponse();
       }
 
       const lines = [];
@@ -1951,17 +2507,20 @@ exports.askCampusAssistant = onCall(
       response.suggestions = ['設定提醒', '今日公告', '近期活動'];
       if (pendingAssignments[0]) {
         response.actions = [
-          {
+          assistantAction({
             label: '設定提醒',
             action: 'schedule_reminder',
             params: {
               title: pendingAssignments[0].title ?? '作業提醒',
               dueDate: toJsDate(pendingAssignments[0].dueAt)?.toISOString() ?? undefined,
             },
-          },
+            requiresConfirmation: true,
+            sensitivity: 'medium',
+            evidenceRefs: [{ type: 'assignment', id: pendingAssignments[0].id, label: pendingAssignments[0].title ?? '作業' }],
+          }),
         ];
       }
-      return response;
+      return await finalizeResponse();
     }
 
     if (intent === 'announcements') {
@@ -1972,7 +2531,7 @@ exports.askCampusAssistant = onCall(
         response.content =
           '目前沒有可用的公告資料。你可以稍後再試，或改問我近期活動、餐點與校園地點。';
         response.suggestions = ['近期活動', '推薦餐點', '找地點'];
-        return response;
+        return await finalizeResponse();
       }
 
       response.content = [
@@ -1987,17 +2546,18 @@ exports.askCampusAssistant = onCall(
           .join('\n'),
       ].join('\n');
       response.suggestions = ['查看詳情', '近期活動', '推薦餐點'];
-      response.actions = announcements.slice(0, 2).map((announcement) => ({
+      response.actions = announcements.slice(0, 2).map((announcement) => assistantAction({
         label: `查看「${String(announcement.title ?? '公告').slice(0, 10)}」`,
         action: 'navigate',
         params: { screen: 'Today', nested: '公告詳情', id: announcement.id },
+        evidenceRefs: [{ type: 'announcement', id: announcement.id, label: announcement.title ?? '公告' }],
       }));
       response.citations = announcements.slice(0, 3).map((announcement) => ({
         type: 'announcement',
         id: announcement.id,
         label: announcement.title ?? '未命名公告',
       }));
-      return response;
+      return await finalizeResponse();
     }
 
     if (intent === 'events') {
@@ -2013,7 +2573,7 @@ exports.askCampusAssistant = onCall(
       if (events.length === 0) {
         response.content = '近期沒有查到即將開始的活動。你可以先看看最新公告，或等晚一點再來查詢。';
         response.suggestions = ['今日公告', '推薦餐點', '找地點'];
-        return response;
+        return await finalizeResponse();
       }
 
       response.content = [
@@ -2028,17 +2588,18 @@ exports.askCampusAssistant = onCall(
           .join('\n'),
       ].join('\n');
       response.suggestions = ['查看詳情', '今日公告', '找地點'];
-      response.actions = events.slice(0, 2).map((event) => ({
+      response.actions = events.slice(0, 2).map((event) => assistantAction({
         label: `查看「${String(event.title ?? '活動').slice(0, 10)}」`,
         action: 'navigate',
         params: { screen: 'Today', nested: '活動詳情', id: event.id },
+        evidenceRefs: [{ type: 'event', id: event.id, label: event.title ?? '活動' }],
       }));
       response.citations = events.slice(0, 3).map((event) => ({
         type: 'event',
         id: event.id,
         label: event.title ?? '未命名活動',
       }));
-      return response;
+      return await finalizeResponse();
     }
 
     if (intent === 'menus') {
@@ -2048,7 +2609,7 @@ exports.askCampusAssistant = onCall(
       if (menus.length === 0) {
         response.content = '目前沒有可用的菜單資料。你可以改問我校園地點或近期活動。';
         response.suggestions = ['找地點', '近期活動', '今日公告'];
-        return response;
+        return await finalizeResponse();
       }
 
       response.content = [
@@ -2063,17 +2624,18 @@ exports.askCampusAssistant = onCall(
           .join('\n'),
       ].join('\n');
       response.suggestions = ['其他選擇', '找地點', '近期活動'];
-      response.actions = menus.slice(0, 2).map((menu) => ({
+      response.actions = menus.slice(0, 2).map((menu) => assistantAction({
         label: `查看「${String(menu.name ?? menu.title ?? '餐點').slice(0, 10)}」`,
         action: 'navigate',
         params: { screen: '校園', nested: 'MenuDetail', id: menu.id },
+        evidenceRefs: [{ type: 'menu', id: menu.id, label: menu.name ?? menu.title ?? '餐點' }],
       }));
       response.citations = menus.slice(0, 3).map((menu) => ({
         type: 'menu',
         id: menu.id,
         label: menu.name ?? menu.title ?? '未命名餐點',
       }));
-      return response;
+      return await finalizeResponse();
     }
 
     if (intent === 'pois') {
@@ -2085,7 +2647,7 @@ exports.askCampusAssistant = onCall(
         response.content =
           '我目前找不到符合的校園地點。你可以再說更具體一點，例如圖書館、行政大樓、餐廳或宿舍。';
         response.suggestions = ['圖書館', '行政大樓', '餐廳'];
-        return response;
+        return await finalizeResponse();
       }
 
       response.content = [
@@ -2098,19 +2660,22 @@ exports.askCampusAssistant = onCall(
         .join('\n');
       response.suggestions = ['查看詳情', '開啟導航', '其他地點'];
       response.actions = [
-        {
+        assistantAction({
           label: '查看詳情',
           action: 'navigate',
           params: { screen: '校園', nested: 'PoiDetail', id: poi.id },
-        },
-        {
+          evidenceRefs: [{ type: 'poi', id: poi.id, label: poi.name ?? '地點' }],
+        }),
+        assistantAction({
           label: '開始導航',
-          action: 'navigate',
-          params: { screen: '校園', nested: 'PoiDetail', id: poi.id },
-        },
+          action: 'start_navigation',
+          params: { screen: '校園', nested: 'PoiDetail', id: poi.id, destinationId: poi.id },
+          requiresConfirmation: false,
+          evidenceRefs: [{ type: 'poi', id: poi.id, label: poi.name ?? '地點' }],
+        }),
       ];
       response.citations = [{ type: 'poi', id: poi.id, label: poi.name ?? '未命名地點' }];
-      return response;
+      return await finalizeResponse();
     }
 
     if (intent === 'credit_audit') {
@@ -2118,13 +2683,14 @@ exports.askCampusAssistant = onCall(
         '學分試算與選課建議目前建議搭配既有的「學分試算」功能使用。後續可以再把畢業條件與修課紀錄接進 AI，做更精準的選課推薦。';
       response.suggestions = ['前往學分試算', '今日摘要', '近期活動'];
       response.actions = [
-        {
+        assistantAction({
           label: '前往學分試算',
           action: 'navigate',
           params: { screen: '我的', nested: 'CreditAuditStack' },
-        },
+          evidenceRefs: [{ type: 'system', id: 'credit-audit', label: '學分試算' }],
+        }),
       ];
-      return response;
+      return await finalizeResponse();
     }
 
     if (intent === 'help') {
@@ -2135,7 +2701,7 @@ exports.askCampusAssistant = onCall(
         uid ? '3. 查看你的待繳作業與學習摘要' : '3. 登入後查看個人作業與學習摘要',
       ].join('\n');
       response.suggestions = ['今日公告', '近期活動', '推薦餐點'];
-      return response;
+      return await finalizeResponse();
     }
 
     const [announcements, events] = await Promise.all([
@@ -2155,7 +2721,298 @@ exports.askCampusAssistant = onCall(
     response.suggestions = uid
       ? ['我有哪些作業快截止？', '今天有什麼公告？', '推薦午餐']
       : ['今天有什麼公告？', '近期活動', '推薦午餐'];
-    return response;
+    return await finalizeResponse();
+  },
+);
+
+function clampPulseLevel(value) {
+  const level = Number(value);
+  if (!Number.isFinite(level)) return 3;
+  return Math.min(5, Math.max(1, Math.round(level)));
+}
+
+function normalizePulseCategory(value) {
+  const allowed = new Set(['library', 'dining', 'parking', 'gym', 'study', 'classroom', 'service', 'other']);
+  return allowed.has(value) ? value : 'other';
+}
+
+function hashPulseReporter(uid, schoolId) {
+  const day = new Date().toISOString().slice(0, 10);
+  return nodeCrypto
+    .createHash('sha256')
+    .update(`${schoolId}:${uid}:${day}`)
+    .digest('hex')
+    .slice(0, 20);
+}
+
+exports.submitPulseReport = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const schoolId = String(request.data?.schoolId || '').trim();
+    const locationId = String(request.data?.locationId || '').trim();
+    if (!schoolId || !locationId) {
+      throw new HttpsError('invalid-argument', 'Missing schoolId or locationId');
+    }
+
+    await assertActiveSchoolMember(schoolId, uid);
+    enforceRateLimit({
+      scope: 'pulse-report',
+      key: `${schoolId}:${uid}`,
+      limit: 10,
+      windowMs: 60 * 60 * 1000,
+    });
+
+    const level = clampPulseLevel(request.data?.level);
+    const locationName = String(request.data?.locationName || locationId).slice(0, 80);
+    const category = normalizePulseCategory(request.data?.category);
+    const now = FieldValue.serverTimestamp();
+    const aggregateRef = db.collection('schools').doc(schoolId).collection('pulseAggregates').doc(locationId);
+    const reportRef = db.collection('schools').doc(schoolId).collection('pulseReports').doc();
+
+    await db.runTransaction(async (transaction) => {
+      const aggregateDoc = await transaction.get(aggregateRef);
+      const previous = aggregateDoc.exists ? aggregateDoc.data() : {};
+      const previousLevel = Number(previous.currentLevel || level);
+      const previousSampleSize = Number(previous.sampleSize || 0);
+      const sampleSize = Math.min(previousSampleSize + 1, 5000);
+      const currentLevel = Math.round((previousLevel * 0.72 + level * 0.28) * 10) / 10;
+      const roundedLevel = clampPulseLevel(currentLevel);
+      const previousRounded = clampPulseLevel(previousLevel);
+      const trend =
+        roundedLevel > previousRounded ? 'rising' : roundedLevel < previousRounded ? 'falling' : 'stable';
+      const reportCount24h = Number(previous.reportCount24h || 0) + 1;
+
+      transaction.set(reportRef, {
+        schoolId,
+        locationId,
+        locationName,
+        category,
+        level,
+        reporterHash: hashPulseReporter(uid, schoolId),
+        createdAt: now,
+      });
+
+      transaction.set(
+        aggregateRef,
+        {
+          schoolId,
+          locationId,
+          locationName,
+          category,
+          currentLevel: roundedLevel,
+          confidence: Math.min(0.95, 0.35 + Math.sqrt(sampleSize) / 12),
+          sampleSize,
+          reportCount24h,
+          trend,
+          bestTimeToVisit: previous.bestTimeToVisit || (roundedLevel >= 4 ? '尖峰後 30 分鐘' : '現在可前往'),
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+    });
+
+    return { success: true };
+  },
+);
+
+exports.listPulseAggregates = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const schoolId = String(request.data?.schoolId || '').trim();
+    if (!schoolId) {
+      throw new HttpsError('invalid-argument', 'Missing schoolId');
+    }
+
+    const snap = await db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('pulseAggregates')
+      .orderBy('updatedAt', 'desc')
+      .limit(20)
+      .get()
+      .catch(() => null);
+
+    return {
+      aggregates:
+        snap?.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        })) ?? [],
+    };
+  },
+);
+
+exports.getStudentRiskSnapshots = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const schoolId = String(request.data?.schoolId || '').trim();
+    if (schoolId) {
+      await assertActiveSchoolMember(schoolId, uid);
+    }
+
+    const baseRef = schoolId
+      ? db.collection('users').doc(uid).collection('schools').doc(schoolId).collection('riskSnapshots')
+      : db.collection('users').doc(uid).collection('riskSnapshots');
+
+    const existing = await baseRef.orderBy('generatedAt', 'desc').limit(5).get().catch(() => null);
+    if (existing && !existing.empty) {
+      return {
+        snapshots: existing.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })),
+      };
+    }
+
+    const pendingAssignments = await fetchAssistantPendingAssignments(uid);
+    const highPressure = pendingAssignments.filter((assignment) => {
+      const due = toJsDate(assignment.dueAt)?.getTime();
+      return due && due - Date.now() <= 72 * 60 * 60 * 1000;
+    });
+    const score = Math.min(95, pendingAssignments.length * 10 + highPressure.length * 15);
+    const level = score >= 70 ? 'critical' : score >= 45 ? 'warning' : score >= 20 ? 'watch' : 'safe';
+    const snapshotRef = baseRef.doc();
+    const generatedAt = Timestamp.now();
+    const snapshot = {
+      id: snapshotRef.id,
+      userId: uid,
+      schoolId: schoolId || null,
+      level,
+      score,
+      summary:
+        pendingAssignments.length > 0
+          ? `目前有 ${pendingAssignments.length} 份待處理作業，其中 ${highPressure.length} 份在 72 小時內截止。`
+          : '目前沒有高壓作業，建議維持課程節奏。',
+      signals: pendingAssignments.slice(0, 3).map((assignment, index) => ({
+        id: `assignment-${assignment.id}`,
+        userId: uid,
+        schoolId: schoolId || null,
+        type: highPressure.includes(assignment) ? 'workload_spike' : 'positive_momentum',
+        severity: Math.max(0.2, 0.9 - index * 0.2),
+        title: assignment.title || '作業',
+        description: `截止：${formatAssistantDate(assignment.dueAt, true) || '未設定'}`,
+        groupId: assignment.groupId,
+        evidenceRefs: [{ type: 'assignment', id: assignment.id, label: assignment.title || '作業' }],
+        createdAt: generatedAt,
+      })),
+      recommendedActions: pendingAssignments.slice(0, 3).map((assignment, index) => ({
+        id: `risk-action-${assignment.id}`,
+        title: assignment.title || '作業',
+        description: `先處理 ${assignment.groupName || assignment.groupId} 的近期作業。`,
+        priority: index,
+        urgency: index === 0 ? 'high' : 'medium',
+        reason: '這是目前最接近截止或最容易累積壓力的課務。',
+        nextStep: '查看作業內容並拆成小步驟。',
+        actionLabel: '查看作業',
+        actionTarget: {
+          tab: '收件匣',
+          screen: 'AssignmentDetail',
+          params: { groupId: assignment.groupId, assignmentId: assignment.id },
+        },
+        evidenceRefs: [{ type: 'assignment', id: assignment.id, label: assignment.title || '作業' }],
+        requiresConfirmation: false,
+        source: 'risk',
+        dueAt: assignment.dueAt || null,
+      })),
+      generatedAt,
+    };
+
+    await snapshotRef.set(snapshot);
+    return { snapshots: [snapshot] };
+  },
+);
+
+exports.enqueueAssistantAction = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const action = String(request.data?.action || '').trim();
+    const label = String(request.data?.label || action || 'AI 建議').slice(0, 80);
+    if (!action) {
+      throw new HttpsError('invalid-argument', 'Missing action');
+    }
+
+    const enqueueActionAllowlist = new Set([
+      'navigate',
+      'start_navigation',
+      'schedule_reminder',
+      'create_reminder_draft',
+      'split_assignment',
+      'draft_message',
+      'queue_action',
+      'reserve_draft',
+      'submit_draft',
+      'check_in',
+      'open_url',
+    ]);
+    if (!enqueueActionAllowlist.has(action)) {
+      throw new HttpsError('invalid-argument', 'Unsupported assistant action');
+    }
+
+    const sensitiveActions = new Set([
+      'submit_draft',
+      'reserve_draft',
+      'draft_message',
+      'schedule_reminder',
+      'create_reminder_draft',
+      'split_assignment',
+      'queue_action',
+      'check_in',
+    ]);
+    const requiresConfirmation = true;
+    if (request.data?.requiresConfirmation === false && sensitiveActions.has(action)) {
+      throw new HttpsError('failed-precondition', 'Sensitive actions require confirmation');
+    }
+
+    const userProfile = await fetchAssistantUserProfile(uid);
+    const actorRole = resolveAssistantActorRole(userProfile?.role ?? request.auth?.token?.role);
+    const requestedPermissionScope = String(request.data?.permissionScope || '').trim();
+    const permissionScope = [
+      'public',
+      'school_public',
+      'user_private',
+      'academic_private',
+    ].includes(requestedPermissionScope)
+      ? requestedPermissionScope
+      : 'user_private';
+
+    const ref = db.collection('users').doc(uid).collection('actionQueue').doc();
+    await ref.set({
+      userId: uid,
+      schoolId: userProfile?.schoolId || request.data?.schoolId || null,
+      label,
+      action,
+      params: request.data?.params && typeof request.data.params === 'object' ? request.data.params : {},
+      requiresConfirmation,
+      sensitivity: request.data?.sensitivity || (requiresConfirmation ? 'medium' : 'low'),
+      status: 'pending_confirmation',
+      actorRole,
+      permissionScope,
+      evidenceRefs: Array.isArray(request.data?.evidenceRefs) ? request.data.evidenceRefs : [],
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    return { success: true, actionId: ref.id };
   },
 );
 

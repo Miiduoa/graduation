@@ -22,6 +22,7 @@ import { theme } from "../ui/theme";
 import { useSchool } from "../state/school";
 import { formatDateTime, toDate, formatRelativeTime } from "../utils/format";
 import type { ClubEvent } from "../data/types";
+import { earnXP } from "../services/gamificationEngine";
 
 export function EventDetailScreen(props: any) {
   const { school } = useSchool();
@@ -65,7 +66,8 @@ export function EventDetailScreen(props: any) {
       } else {
         setItem(event);
         setNotFound(false);
-        
+        earnXP("explore_campus").catch(() => {});
+
         // 載入相似活動
         try {
           const allEvents = await ds.listEvents(school.id);

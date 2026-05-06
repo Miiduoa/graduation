@@ -9,13 +9,17 @@ import { useAsyncStorage } from "../hooks/useStorage";
 import { analytics } from "../services/analytics";
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
+import { PureQRCode } from "../ui/PureQRCode";
+import { navigateToCourseScreen } from "../utils/courseNavigation";
 
-let QRCode: any = null;
+let QRCodeNative: any = null;
 try {
-  QRCode = require("react-native-qrcode-svg").default;
+  QRCodeNative = require("react-native-qrcode-svg").default;
 } catch {
-  QRCode = null;
+  QRCodeNative = null;
 }
+// Always have QR support via our pure-JS fallback
+const QRCode = QRCodeNative;
 
 type QRMode = "scan" | "generate";
 type QRType = "checkin" | "group" | "profile" | "custom";
@@ -168,7 +172,7 @@ export function QRCodeScreen(props: any) {
 
   const [cameraPermission, requestCameraPermission] = useResolvedCameraPermissions();
   const hasCameraSupport = CameraView !== null && useCameraPermissions !== null;
-  const hasQRCodeSupport = QRCode !== null;
+  const hasQRCodeSupport = true; // Always true: native or pure-JS fallback
 
   useEffect(() => {
     if (storedScans) {
@@ -395,6 +399,37 @@ export function QRCodeScreen(props: any) {
   return (
     <Screen>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+        {/* 智慧點名入口 — Smart Attendance Entry */}
+        <Pressable
+          onPress={() => navigateToCourseScreen(nav, auth.profile?.role, "Attendance")}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+            padding: 14,
+            borderRadius: theme.radius.lg,
+            backgroundColor: `${theme.colors.accent}10`,
+            borderWidth: 1,
+            borderColor: `${theme.colors.accent}30`,
+            opacity: pressed ? 0.8 : 1,
+          })}
+        >
+          <View style={{
+            width: 40, height: 40, borderRadius: 10,
+            backgroundColor: theme.colors.accent,
+            alignItems: "center", justifyContent: "center",
+          }}>
+            <Ionicons name="shield-checkmark" size={22} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>智慧點名系統</Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }}>
+              動態 QR · 數字密碼 · 藍牙 · GPS · NFC · 多重驗證 · 手動
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.accent} />
+        </Pressable>
+
         <SegmentedControl
           options={[
             { key: "generate", label: "產生 QR 碼" },
@@ -467,8 +502,8 @@ export function QRCodeScreen(props: any) {
                     padding: 10,
                   }}
                 >
-                  {hasQRCodeSupport && generatedQR ? (
-                    <QRCode
+                  {QRCodeNative && generatedQR ? (
+                    <QRCodeNative
                       value={generatedQR}
                       size={180}
                       color="#333"
@@ -480,54 +515,23 @@ export function QRCodeScreen(props: any) {
                       logoBorderRadius={8}
                       getRef={(ref: any) => (qrRef.current = ref)}
                     />
-                  ) : (
-                    <View
-                      style={{
-                        width: 180,
-                        height: 180,
-                        borderWidth: 2,
-                        borderColor: "#333",
-                        borderRadius: 8,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor: "#f9f9f9",
-                      }}
-                    >
-                      <View style={{ flexDirection: "row", gap: 4 }}>
-                        {[0, 1, 2, 3, 4, 5].map((row) => (
-                          <View key={row} style={{ gap: 4 }}>
-                            {[0, 1, 2, 3, 4, 5].map((col) => {
-                              const hash = (row * 7 + col * 11 + generatedQR.length) % 10;
-                              return (
-                                <View
-                                  key={col}
-                                  style={{
-                                    width: 18,
-                                    height: 18,
-                                    backgroundColor: hash > 4 ? "#333" : "#fff",
-                                    borderRadius: 2,
-                                  }}
-                                />
-                              );
-                            })}
-                          </View>
-                        ))}
-                      </View>
-                      <View
-                        style={{
-                          position: "absolute",
-                          width: 44,
-                          height: 44,
-                          backgroundColor: theme.colors.accent,
-                          borderRadius: 10,
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <Ionicons name="school" size={26} color="#fff" />
-                      </View>
-                    </View>
-                  )}
+                  ) : generatedQR ? (
+                    <PureQRCode
+                      value={generatedQR}
+                      size={200}
+                      color="#333"
+                      backgroundColor="#fff"
+                      logo={
+                        <View style={{
+                          width: 36, height: 36, backgroundColor: theme.colors.accent,
+                          borderRadius: 8, alignItems: "center", justifyContent: "center",
+                        }}>
+                          <Ionicons name="school" size={22} color="#fff" />
+                        </View>
+                      }
+                      logoSize={44}
+                    />
+                  ) : null}
                 </View>
 
                 {expiresAt && (
@@ -539,11 +543,7 @@ export function QRCodeScreen(props: any) {
                   </View>
                 )}
 
-                {!hasQRCodeSupport && (
-                  <Text style={{ color: theme.colors.danger, fontSize: 11, marginTop: 8 }}>
-                    提示：安裝 react-native-qrcode-svg 以顯示真實 QR 碼
-                  </Text>
-                )}
+                {/* QR code always rendered via native or pure-JS fallback */}
               </View>
 
               <View style={{ flexDirection: "row", gap: 10, justifyContent: "center" }}>

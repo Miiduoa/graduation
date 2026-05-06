@@ -1,4 +1,6 @@
 import type {
+  AgentActionKind,
+  CampusActorRole,
   Course,
   InboxItem,
   InboxIntent,
@@ -8,17 +10,31 @@ import type {
   RoleMode,
   UserRole,
 } from "../data/types";
+import { getRoleGroup, type AppRole } from "../services/permissions";
 
 export function resolveRoleMode(role?: UserRole | null, isAuthenticated?: boolean): RoleMode {
   if (!isAuthenticated) return "guest";
-  if (role === "admin" || role === "principal") return "admin";
-  if (role === "teacher" || role === "professor" || role === "staff") return "teacher";
-  return "student";
+  return getRoleGroup((role ?? "student") as AppRole);
 }
 
 export function isTeachingRole(role?: UserRole | null): boolean {
   const mode = resolveRoleMode(role, true);
-  return mode === "teacher" || mode === "admin";
+  return mode === "teacher" || mode === "department_head" || mode === "admin";
+}
+
+const ROLE_ACTION_GRAPH: Record<CampusActorRole, Set<AgentActionKind | string>> = {
+  student: new Set(["navigate", "start_navigation", "schedule_reminder", "create_reminder_draft", "split_assignment", "draft_message", "queue_action", "open_url", "check_in"]),
+  teacher: new Set(["navigate", "start_navigation", "schedule_reminder", "create_reminder_draft", "draft_message", "queue_action", "submit_draft", "open_url", "check_in"]),
+  staff: new Set(["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"]),
+  department: new Set(["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"]),
+  department_head: new Set(["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"]),
+  admin: new Set(["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"]),
+  school: new Set(["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"]),
+};
+
+export function canRoleUseAction(role: CampusActorRole | undefined, action: AgentActionKind | string): boolean {
+  const resolvedRole: CampusActorRole = role ?? "student";
+  return ROLE_ACTION_GRAPH[resolvedRole]?.has(action) ?? false;
 }
 
 function safeGetTime(value: unknown): number | null {
@@ -292,6 +308,16 @@ export function roleSummary(roleMode: RoleMode) {
       return {
         label: "教學模式",
         hint: "先處理課堂節奏與待發佈項目",
+      };
+    case "staff":
+      return {
+        label: "服務模式",
+        hint: "先處理被授權的校園服務項目",
+      };
+    case "department_head":
+      return {
+        label: "審核模式",
+        hint: "先查看部門彙總、待核准與教學風險",
       };
     case "admin":
       return {

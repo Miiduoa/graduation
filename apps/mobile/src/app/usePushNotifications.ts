@@ -41,6 +41,12 @@ function navigateFromNotificationData(
       : {};
 
   switch (data.type) {
+    case "ai_proactive":
+      nav.navigate("Today", {
+        screen: "AIChat",
+        params: typeof data.reportId === "string" ? { proactiveReportId: data.reportId } : undefined,
+      });
+      break;
     case "announcement":
       if (data.announcementId) {
         nav.navigate("Today", { screen: "公告詳情", params: { id: data.announcementId } });

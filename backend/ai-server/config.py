@@ -55,6 +55,7 @@ EMBEDDING_MODEL = "BAAI/bge-m3"
 # ─── RAG ─────────────────────────────────────────────────────────────
 
 ENABLE_RAG: bool = os.getenv("ENABLE_RAG", "true").lower() == "true"
+ENABLE_WEB_SEARCH: bool = os.getenv("ENABLE_WEB_SEARCH", "true").lower() == "true"
 RAG_TOP_K = 5
 RAG_CHUNK_SIZE = 512
 RAG_CHUNK_OVERLAP = 64
@@ -64,7 +65,7 @@ RAG_CHUNK_OVERLAP = 64
 SELF_TRAIN_INTERVAL_HOURS = int(os.getenv("SELF_TRAIN_INTERVAL_HOURS", "6"))
 SELF_TRAIN_MIN_FEEDBACK = 50
 SELF_TRAIN_BATCH_SIZE = 200
-ENABLE_SELF_TRAIN_LOOP: bool = os.getenv("ENABLE_SELF_TRAIN_LOOP", "true").lower() == "true"
+ENABLE_SELF_TRAIN_LOOP: bool = os.getenv("ENABLE_SELF_TRAIN_LOOP", "false").lower() == "true"
 
 # ─── Firebase (optional – only for Firestore sync) ──────────────────
 

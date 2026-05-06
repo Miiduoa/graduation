@@ -112,16 +112,28 @@ function getStatusColor(status: OrderStatus): string {
   }
 }
 
+function normalizeOrderText(value: unknown): string {
+  return String(value ?? "").toLowerCase().replace(/\s+/g, "");
+}
+
 export function OrderingScreen(props: any) {
   const nav = props?.navigation;
   const initialCafeteriaName = props?.route?.params?.cafeteria ?? null;
   const initialCafeteriaId = props?.route?.params?.cafeteriaId ?? null;
+  const initialMenuItemId = typeof props?.route?.params?.menuItemId === "string" ? props.route.params.menuItemId : null;
+  const initialItemName = typeof props?.route?.params?.itemName === "string" ? props.route.params.itemName : null;
+  const initialQuantity = typeof props?.route?.params?.quantity === "number" ? Math.max(1, props.route.params.quantity) : 1;
+  const initialNote = typeof props?.route?.params?.note === "string" ? props.route.params.note : undefined;
+  const initialTab = typeof props?.route?.params?.initialTab === "number" && props.route.params.initialTab >= 0 && props.route.params.initialTab <= 2
+    ? props.route.params.initialTab
+    : 0;
+  const aiPrefill = props?.route?.params?.aiPrefill === true;
 
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
   
-  const [selectedTab, setSelectedTab] = useState(0);
+  const [selectedTab, setSelectedTab] = useState(initialTab);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("全部");
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -137,6 +149,7 @@ export function OrderingScreen(props: any) {
   const [submittingOrder, setSubmittingOrder] = useState(false);
 
   const previousCafeteriaKeyRef = useRef<string | null>(null);
+  const aiPrefillKeyRef = useRef<string | null>(null);
 
   const TABS = ["菜單", "購物車", "我的訂單"];
 
@@ -167,7 +180,8 @@ export function OrderingScreen(props: any) {
     if (initialCafeteriaName) {
       setSelectedCafeteriaName(initialCafeteriaName);
     }
-  }, [initialCafeteriaId, initialCafeteriaName]);
+    setSelectedTab(initialTab);
+  }, [initialCafeteriaId, initialCafeteriaName, initialTab]);
 
   const loadMenu = useCallback(async () => {
     if (!school?.id) return;
@@ -208,7 +222,9 @@ export function OrderingScreen(props: any) {
         const converted: MenuItem[] = dataMenus
           .filter((m: DataMenuItem) => {
             if (resolvedCafeteria?.id && m.cafeteriaId) {
-              return m.cafeteriaId === resolvedCafeteria.id;
+              if (m.cafeteriaId === resolvedCafeteria.id) return true;
+              if (resolvedCafeteria?.name && m.cafeteria === resolvedCafeteria.name) return true;
+              return false;
             }
             if (resolvedCafeteria?.name) {
               return m.cafeteria === resolvedCafeteria.name;
@@ -342,6 +358,49 @@ export function OrderingScreen(props: any) {
     }
     return items;
   }, [menuItems, selectedCategory, searchQuery]);
+
+  useEffect(() => {
+    if (!aiPrefill || menuItems.length === 0) return;
+
+    const prefillKey = `${selectedCafeteria?.id ?? selectedCafeteriaName ?? ""}:${initialMenuItemId ?? ""}:${initialItemName ?? ""}:${initialQuantity}:${initialNote ?? ""}`;
+    if (aiPrefillKeyRef.current === prefillKey) return;
+
+    const normalizedItemName = normalizeOrderText(initialItemName);
+    const target = menuItems.find((item) => {
+      if (initialMenuItemId && item.id === initialMenuItemId) return true;
+      const itemName = normalizeOrderText(item.name);
+      return Boolean(normalizedItemName) && (itemName.includes(normalizedItemName) || normalizedItemName.includes(itemName));
+    });
+
+    aiPrefillKeyRef.current = prefillKey;
+    if (!target) {
+      if (initialItemName) setSearchQuery(initialItemName);
+      setSelectedTab(0);
+      return;
+    }
+
+    setCart((prev) => {
+      const existing = prev.find((entry) => entry.menuItem.id === target.id);
+      if (existing) {
+        return prev.map((entry) =>
+          entry.menuItem.id === target.id
+            ? { ...entry, quantity: Math.max(entry.quantity, initialQuantity), notes: initialNote ?? entry.notes }
+            : entry
+        );
+      }
+      return [...prev, { menuItem: target, quantity: initialQuantity, notes: initialNote }];
+    });
+    setSelectedTab(1);
+  }, [
+    aiPrefill,
+    initialItemName,
+    initialMenuItemId,
+    initialNote,
+    initialQuantity,
+    menuItems,
+    selectedCafeteria?.id,
+    selectedCafeteriaName,
+  ]);
 
   const cartTotal = useMemo(() => {
     return cart.reduce((sum, item) => sum + item.menuItem.price * item.quantity, 0);

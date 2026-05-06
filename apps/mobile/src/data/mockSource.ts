@@ -2,6 +2,7 @@
 import type { DataSource } from './source';
 import type {
   Announcement,
+  ActionQueueItem,
   Assignment,
   AttendanceSession,
   AttendanceSummary,
@@ -35,17 +36,20 @@ import type {
   MenuItem,
   Message,
   InboxTask,
+  NextBestAction,
   Notification,
   Order,
   Poi,
   PoiCrowdReport,
   PoiReport,
   PoiReview,
+  PulseAggregate,
   Printer,
   PrintJob,
   Quiz,
   RepairRequest,
   SeatReservation,
+  StudentRiskSnapshot,
   Submission,
   Transaction,
   User,
@@ -140,6 +144,7 @@ const mockPosts: GroupPost[] = getDemoGroupPosts(DEFAULT_SCHOOL, 'group1');
 const mockPoiReviews = new Map<string, PoiReview[]>();
 const mockPoiCrowdReports = new Map<string, PoiCrowdReport[]>();
 const mockPoiReports = new Map<string, PoiReport[]>();
+const mockActionQueue: ActionQueueItem[] = [];
 
 // Mock 課程資料 - start with demo data
 const mockCourses: Course[] = getDemoCourses(DEFAULT_SCHOOL);
@@ -432,6 +437,105 @@ export const mockSource: DataSource = {
     // For demo purposes, return gradebook for any course
     if (!groupId) return null;
     return getDemoCourseGradebook(DEFAULT_SCHOOL);
+  },
+  async listNextBestActions(userId: string, schoolId?: string): Promise<NextBestAction[]> {
+    const tasks = getDemoInboxTasks(userId, schoolId || DEFAULT_SCHOOL);
+    const firstTask = tasks[0];
+    const actions: NextBestAction[] = tasks.slice(0, 4).map((task, index) => ({
+      id: `mock-nba-${task.id}`,
+      title: task.title,
+      description: task.subtitle,
+      priority: index,
+      urgency: index === 0 ? 'high' : index < 3 ? 'medium' : 'low',
+      reason: task.reason ?? 'Campus Agent OS 依照課程待辦、截止時間與今日情境排序。',
+      consequence: task.consequence ?? '延後處理可能增加後續壓力。',
+      nextStep: task.nextStep ?? '先打開項目確認細節。',
+      actionLabel: task.actionLabel ?? '前往處理',
+      actionTarget: {
+        tab: task.kind === 'group' ? '收件匣' : '課程',
+        screen: task.kind === 'live' ? 'Classroom' : task.kind === 'group' ? 'GroupDetail' : 'AssignmentDetail',
+        params: {
+          groupId: task.groupId,
+          assignmentId: task.assignmentId,
+          sessionId: task.sessionId,
+        },
+      },
+      evidenceRefs: [{ type: task.kind === 'live' ? 'attendance' : 'assignment', id: task.assignmentId ?? task.sessionId ?? task.groupId, label: task.title }],
+      requiresConfirmation: false,
+      source: 'inbox',
+      dueAt: task.dueAt ?? null,
+      createdAt: new Date(),
+    }));
+
+    return actions.length > 0
+      ? actions
+      : [
+          {
+            id: 'mock-nba-ai',
+            title: '讓 AI 幫你安排今天',
+            description: '目前沒有高壓待辦，可以先生成今日學習與校園行動順序。',
+            priority: 3,
+            urgency: 'medium',
+            reason: '空檔時做主動規劃，可以降低晚點才發現截止事項的風險。',
+            nextStep: '打開 AI 助理',
+            actionLabel: '生成今日計畫',
+            actionTarget: { tab: 'Today', screen: 'AIChat' },
+            evidenceRefs: [{ type: 'system', id: 'demo-agent-os', label: 'Campus Agent OS' }],
+            requiresConfirmation: false,
+            source: 'ai',
+            createdAt: new Date(),
+          },
+        ];
+  },
+  async listRiskSnapshots(userId: string, schoolId?: string): Promise<StudentRiskSnapshot[]> {
+    const actions = await mockSource.listNextBestActions(userId, schoolId);
+    return [
+      {
+        id: 'mock-risk-today',
+        userId,
+        schoolId: schoolId || DEFAULT_SCHOOL,
+        level: actions.some((action) => action.urgency === 'high' || action.urgency === 'critical') ? 'watch' : 'safe',
+        score: actions.length * 12,
+        summary: `今日有 ${actions.length} 個代理建議，其中前 3 個已排入 Today。`,
+        signals: actions.slice(0, 3).map((action, index) => ({
+          id: `mock-signal-${index}`,
+          userId,
+          schoolId: schoolId || DEFAULT_SCHOOL,
+          type: index === 0 ? 'workload_spike' : 'positive_momentum',
+          severity: Math.max(0.2, 0.8 - index * 0.2),
+          title: action.title,
+          description: action.reason,
+          evidenceRefs: action.evidenceRefs,
+          createdAt: new Date(),
+        })),
+        recommendedActions: actions.slice(0, 3),
+        generatedAt: new Date(),
+      },
+    ];
+  },
+  async listPulseAggregates(schoolId?: string): Promise<PulseAggregate[]> {
+    const sid = schoolId || DEFAULT_SCHOOL;
+    return [
+      { id: 'lib_main', schoolId: sid, locationId: 'lib_main', locationName: '蓋夏圖書館', category: 'library', currentLevel: 3, confidence: 0.68, sampleSize: 16, reportCount24h: 42, trend: 'stable', bestTimeToVisit: '14:00-15:00', updatedAt: new Date() },
+      { id: 'cafe_main', schoolId: sid, locationId: 'cafe_main', locationName: '學生餐廳', category: 'dining', currentLevel: 4, confidence: 0.74, sampleSize: 22, reportCount24h: 58, trend: 'rising', bestTimeToVisit: '13:30 後', updatedAt: new Date() },
+      { id: 'parking_main', schoolId: sid, locationId: 'parking_main', locationName: '主停車場', category: 'parking', currentLevel: 3, confidence: 0.52, sampleSize: 9, reportCount24h: 19, trend: 'falling', bestTimeToVisit: '10:30 後', updatedAt: new Date() },
+    ];
+  },
+  async submitPulseReport(): Promise<void> {
+    console.info('[MockSource] submitPulseReport 模擬成功');
+  },
+  async createActionQueueItem(input): Promise<ActionQueueItem> {
+    const now = new Date();
+    const item: ActionQueueItem = {
+      ...input,
+      id: input.id ?? generateId(),
+      status: input.requiresConfirmation ? 'pending_confirmation' : 'draft',
+      createdAt: now,
+      updatedAt: now,
+      confirmedAt: null,
+    };
+    mockActionQueue.unshift(item);
+    return item;
   },
   async listEnrollments(userId: string, semester?: string, schoolId?: string): Promise<Enrollment[]> {
     return getDemoEnrollments(userId, semester, schoolId || DEFAULT_SCHOOL);
@@ -889,14 +993,15 @@ export const mockSource: DataSource = {
   async listDormPackages(userId: string, options?: any, schoolId?: string): Promise<DormPackage[]> {
     return getDemoDormPackages(userId, schoolId || DEFAULT_SCHOOL);
   },
-  async createRepairRequest(): Promise<RepairRequest> {
+  async createRepairRequest(data: any): Promise<RepairRequest> {
     return {
+      ...data,
       id: generateId(),
-      userId: 'mock',
-      type: 'other',
-      title: 'Mock issue',
-      description: 'Mock description',
-      room: 'Mock room',
+      userId: data?.userId ?? 'mock',
+      type: data?.type ?? 'other',
+      title: data?.title ?? 'Mock issue',
+      description: data?.description ?? 'Mock description',
+      room: data?.room ?? 'Mock room',
       status: 'pending',
       createdAt: new Date().toISOString(),
     };
@@ -946,16 +1051,17 @@ export const mockSource: DataSource = {
   async listPrintJobs(userId: string, options?: any, schoolId?: string): Promise<PrintJob[]> {
     return getDemoPrintJobs(userId, schoolId || DEFAULT_SCHOOL);
   },
-  async createPrintJob(): Promise<PrintJob> {
+  async createPrintJob(data: any): Promise<PrintJob> {
     return {
+      ...data,
       id: generateId(),
-      userId: 'mock',
-      printerId: 'mock',
-      fileName: 'mock.pdf',
-      pages: 10,
-      copies: 1,
-      color: false,
-      duplex: false,
+      userId: data?.userId ?? 'mock',
+      printerId: data?.printerId ?? 'mock',
+      fileName: data?.fileName ?? 'mock.pdf',
+      pages: data?.pages ?? 10,
+      copies: data?.copies ?? 1,
+      color: data?.color ?? false,
+      duplex: data?.duplex ?? false,
       status: 'pending',
       cost: 10,
       createdAt: new Date().toISOString(),

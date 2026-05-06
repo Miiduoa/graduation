@@ -2,6 +2,7 @@
 import type { DataSource } from './source';
 import type {
   Announcement,
+  ActionQueueItem,
   Assignment,
   BusArrival,
   BusRoute,
@@ -75,6 +76,7 @@ import {
   buildSchoolCollectionPath,
   buildUserCollectionPath,
   buildUserSchoolCollectionPath,
+  PROVIDENCE_UNIVERSITY_SCHOOL_ID,
 } from '@campus/shared/src';
 import { collectionFromSegments, docFromSegments } from './firestorePath';
 import {
@@ -94,6 +96,12 @@ import {
   startAttendanceSession as startCourseAttendanceSession,
   submitQuiz as submitCourseSpaceQuiz,
 } from './courseSpaceSource';
+import {
+  listNextBestActions as listAgentNextBestActions,
+  listPulseAggregates as listAgentPulseAggregates,
+  listRiskSnapshots as listAgentRiskSnapshots,
+  submitPulseReport as submitAgentPulseReport,
+} from './campusAgentSource';
 import {
   getPuDiningCafeterias,
   getPuDiningMenuItems,
@@ -119,7 +127,7 @@ export class FirebaseDataError extends Error {
 
 // ===== 工具函數 =====
 
-const DEFAULT_SCHOOL_ID = 'tw-nchu';
+const DEFAULT_SCHOOL_ID = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
 
 function bySchool(schoolId?: string): QueryConstraint {
   return where('schoolId', '==', schoolId || DEFAULT_SCHOOL_ID);
@@ -1199,6 +1207,67 @@ export const firebaseSource: DataSource = {
     return getCourseGradebook(courseSpaceId);
   },
 
+  async listNextBestActions(userId, schoolId) {
+    return listAgentNextBestActions(userId, schoolId);
+  },
+
+  async listRiskSnapshots(userId, schoolId) {
+    return listAgentRiskSnapshots(userId, schoolId);
+  },
+
+  async listPulseAggregates(schoolId) {
+    return listAgentPulseAggregates(schoolId);
+  },
+
+  async submitPulseReport(input) {
+    return submitAgentPulseReport(input);
+  },
+
+  async createActionQueueItem(input) {
+    const uid = input.userId || getAuthInstance().currentUser?.uid;
+    if (!uid) {
+      throw new Error('請先登入');
+    }
+
+    const enqueueAssistantAction = httpsCallable<
+      {
+        action: string;
+        label?: string;
+        params?: Record<string, unknown>;
+        requiresConfirmation?: boolean;
+        sensitivity?: string;
+        schoolId?: string;
+        actorRole?: string;
+        permissionScope?: string;
+        evidenceRefs?: unknown[];
+      },
+      { success?: boolean; actionId?: string }
+    >(getFunctionsInstance(), 'enqueueAssistantAction');
+
+    const result = await enqueueAssistantAction({
+      action: input.action,
+      label: input.label,
+      params: input.params,
+      requiresConfirmation: input.requiresConfirmation,
+      sensitivity: input.sensitivity,
+      schoolId: input.schoolId,
+      actorRole: input.actorRole,
+      permissionScope: input.permissionScope,
+      evidenceRefs: input.evidenceRefs,
+    });
+
+    const now = new Date();
+    return {
+      ...input,
+      id: result.data?.actionId ?? `${input.action}_${Date.now()}`,
+      userId: uid,
+      status: input.requiresConfirmation ? 'pending_confirmation' : 'draft',
+      createdAt: now,
+      updatedAt: now,
+      confirmedAt: null,
+    } as ActionQueueItem;
+  },
+
   // ===== 選課 =====
   async listEnrollments(userId, semester, schoolId = undefined) {
     const constraints: (QueryConstraint | null)[] = [byUser(userId)];
@@ -1827,7 +1896,7 @@ export const firebaseSource: DataSource = {
         where('schoolId', '==', resolvedSchoolId),
         orderBy('updatedAt', 'desc'),
       ],
-      undefined,
+      resolvedSchoolId,
       options,
     );
 

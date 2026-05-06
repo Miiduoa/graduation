@@ -1,6 +1,7 @@
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, View, Platform } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import type { AmbientCueSignalType } from "../data/types";
 import { shadowStyle, theme } from "./theme";
 
@@ -71,12 +72,10 @@ export function ContextStrip(props: {
     <View
       style={{
         padding: theme.space.lg,
-        borderRadius: theme.radius.lg,
+        borderRadius: 22,
         backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
         gap: theme.space.sm,
-        ...shadowStyle(theme.shadows.sm),
+        ...shadowStyle(theme.shadows.md),
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: theme.space.md }}>
@@ -124,19 +123,18 @@ export function ConfidenceBadge(props: {
     <View
       style={{
         alignSelf: "flex-start",
-        paddingHorizontal: theme.space.sm,
-        paddingVertical: theme.space.xs,
-        borderRadius: theme.radius.full,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 20,
         backgroundColor: colors.bg,
-        borderWidth: 1,
-        borderColor: `${colors.fg}30`,
       }}
     >
-      <Text style={{ color: colors.fg, fontSize: 11, fontWeight: "700" }}>{props.label}</Text>
+      <Text style={{ color: colors.fg, fontSize: 11, fontWeight: "700", letterSpacing: 0.1 }}>{props.label}</Text>
     </View>
   );
 }
 
+// ─── Hero Action Card — full gradient background ────────
 export function HeroActionCard(props: {
   icon: IconName;
   eyebrow: string;
@@ -149,82 +147,111 @@ export function HeroActionCard(props: {
 }) {
   const palette =
     props.tone === "warning"
-      ? { bg: theme.colors.warningSoft, fg: theme.colors.warning, border: `${theme.colors.warning}30` }
+      ? { colors: ["#FEF3C7", "#FDE68A"] as [string, string], fg: "#D97706", iconBg: "#FEF3C720" }
       : props.tone === "success"
-        ? { bg: theme.colors.successSoft, fg: theme.colors.success, border: `${theme.colors.success}30` }
+        ? { colors: ["#D1FAE5", "#A7F3D0"] as [string, string], fg: "#059669", iconBg: "#D1FAE520" }
         : props.tone === "danger"
-          ? { bg: theme.colors.dangerSoft, fg: theme.colors.danger, border: `${theme.colors.danger}30` }
-          : { bg: theme.colors.accentSoft, fg: theme.colors.accent, border: `${theme.colors.accent}30` };
+          ? { colors: ["#FEE2E2", "#FECACA"] as [string, string], fg: "#DC2626", iconBg: "#FEE2E220" }
+          : { colors: ["#EDE9FE", "#DDD6FE"] as [string, string], fg: "#5B21B6", iconBg: "#EDE9FE40" };
+
+  // Dark mode adjustments
+  const isDark = theme.mode === "dark";
+  const gradColors = isDark
+    ? props.tone === "warning"
+      ? ["#422006", "#451A03"]
+      : props.tone === "success"
+        ? ["#064E3B", "#052E16"]
+        : props.tone === "danger"
+          ? ["#450A0A", "#7F1D1D"]
+          : ["#2E1065", "#1E1B4B"]
+    : palette.colors;
+  const fg = isDark
+    ? props.tone === "warning"
+      ? "#FBBF24"
+      : props.tone === "success"
+        ? "#34D399"
+        : props.tone === "danger"
+          ? "#F87171"
+          : "#A78BFA"
+    : palette.fg;
 
   const content = (
-    <View
+    <LinearGradient
+      colors={gradColors as [string, string]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
       style={{
-        padding: theme.space.lg,
-        borderRadius: theme.radius.lg,
-        backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        gap: theme.space.md,
-        ...shadowStyle(theme.shadows.sm),
+        padding: 22,
+        borderRadius: 22,
+        gap: 16,
+        ...shadowStyle(theme.shadows.lg),
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.md }}>
+      {/* Top row: icon + meta */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <View
           style={{
-            width: 48,
-            height: 48,
-            borderRadius: 12,
+            width: 52,
+            height: 52,
+            borderRadius: 18,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: palette.bg,
-            borderWidth: 1,
-            borderColor: palette.border,
+            backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.6)",
           }}
         >
-          <Ionicons name={props.icon} size={22} color={palette.fg} />
+          <Ionicons name={props.icon} size={24} color={fg} />
         </View>
         {props.meta ? <ConfidenceBadge state="live" label={props.meta} /> : null}
       </View>
-      <View style={{ gap: theme.space.xs }}>
+
+      {/* Content */}
+      <View style={{ gap: 6 }}>
         <Text style={{
-          color: palette.fg,
-          fontSize: theme.typography.overline.fontSize,
-          fontWeight: theme.typography.overline.fontWeight ?? "700",
-          letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
+          color: fg,
+          fontSize: 11,
+          fontWeight: "800",
+          letterSpacing: 1.5,
           textTransform: "uppercase",
+          opacity: 0.8,
         }}>
           {props.eyebrow}
         </Text>
         <Text style={{
-          color: theme.colors.text,
-          fontSize: theme.typography.h2.fontSize,
-          fontWeight: theme.typography.h2.fontWeight ?? "700",
-          letterSpacing: theme.typography.h2.letterSpacing,
+          color: isDark ? "#F5F3FF" : "#1A1333",
+          fontSize: 20,
+          fontWeight: "700",
+          letterSpacing: -0.4,
+          lineHeight: 26,
         }}>
           {props.title}
         </Text>
         {props.description && (
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
+          <Text style={{
+            color: isDark ? "rgba(245,243,255,0.7)" : "rgba(26,19,51,0.6)",
+            fontSize: 14,
+            lineHeight: 21,
+            marginTop: 2,
+          }}>
             {props.description}
           </Text>
         )}
       </View>
+
+      {/* Action Button */}
       {props.actionLabel ? (
         <View
           style={{
             alignSelf: "flex-start",
-            paddingHorizontal: theme.space.md,
-            paddingVertical: theme.space.sm,
-            borderRadius: theme.radius.md,
-            backgroundColor: palette.bg,
-            borderWidth: 1,
-            borderColor: palette.border,
+            paddingHorizontal: 18,
+            paddingVertical: 10,
+            borderRadius: 14,
+            backgroundColor: isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.7)",
           }}
         >
-          <Text style={{ color: palette.fg, fontSize: 13, fontWeight: "700" }}>{props.actionLabel}</Text>
+          <Text style={{ color: fg, fontSize: 14, fontWeight: "700" }}>{props.actionLabel}</Text>
         </View>
       ) : null}
-    </View>
+    </LinearGradient>
   );
 
   if (!props.onPress) return content;
@@ -234,7 +261,7 @@ export function HeroActionCard(props: {
       onPress={props.onPress}
       style={({ pressed }) => ({
         opacity: pressed ? 0.85 : 1,
-        transform: [{ scale: pressed ? 0.985 : 1 }],
+        transform: [{ scale: pressed ? 0.98 : 1 }],
       })}
     >
       {content}
@@ -242,6 +269,7 @@ export function HeroActionCard(props: {
   );
 }
 
+// ─── Timeline Card (redesigned) ─────────────────────────
 export function TimelineCard(props: {
   icon: IconName;
   title: string;
@@ -257,44 +285,51 @@ export function TimelineCard(props: {
       disabled={!props.onPress}
       onPress={props.onPress}
       style={({ pressed }) => ({
-        padding: theme.space.md,
-        borderRadius: theme.radius.lg,
+        padding: 16,
+        borderRadius: 20,
         backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: pressed ? theme.colors.accent + "40" : theme.colors.border,
-        gap: theme.space.sm,
-        opacity: pressed ? 0.88 : 1,
-        transform: [{ scale: pressed ? 0.99 : 1 }],
-        ...shadowStyle(theme.shadows.sm),
+        gap: 10,
+        opacity: pressed ? 0.85 : 1,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
+        ...shadowStyle(theme.shadows.md),
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.md }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.md, flex: 1 }}>
-          <View
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 14 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14, flex: 1 }}>
+          <LinearGradient
+            colors={[`${tint}25`, `${tint}10`]}
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 12,
+              width: 44,
+              height: 44,
+              borderRadius: 14,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: `${tint}14`,
             }}
           >
-            <Ionicons name={props.icon} size={18} color={tint} />
-          </View>
+            <Ionicons name={props.icon} size={20} color={tint} />
+          </LinearGradient>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>{props.title}</Text>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "600" }}>{props.title}</Text>
             {props.description && (
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: theme.space.xs, lineHeight: 18 }}>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: 3, lineHeight: 19 }}>
                 {props.description}
               </Text>
             )}
           </View>
         </View>
-        {props.meta ? <Text style={{ color: tint, fontSize: 12, fontWeight: "700" }}>{props.meta}</Text> : null}
+        {props.meta ? (
+          <View style={{
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            borderRadius: 10,
+            backgroundColor: `${tint}12`,
+          }}>
+            <Text style={{ color: tint, fontSize: 11, fontWeight: "700" }}>{props.meta}</Text>
+          </View>
+        ) : null}
       </View>
       {props.hint ? (
-        <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18, paddingLeft: 52 }}>{props.hint}</Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18, paddingLeft: 58 }}>{props.hint}</Text>
       ) : null}
     </Pressable>
   );
@@ -323,34 +358,32 @@ export function ActionableInboxRow(props: {
     <Pressable
       onPress={props.onPress}
       style={({ pressed }) => ({
-        padding: theme.space.md,
-        borderRadius: theme.radius.lg,
+        padding: 18,
+        borderRadius: 22,
         backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: pressed ? `${palette.fg}30` : theme.colors.border,
-        gap: theme.space.md,
+        gap: 14,
         opacity: pressed ? 0.85 : 1,
-        transform: [{ scale: pressed ? 0.99 : 1 }],
-        ...shadowStyle(theme.shadows.sm),
+        transform: [{ scale: pressed ? 0.97 : 1 }],
+        ...shadowStyle(theme.shadows.md),
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: theme.space.md }}>
-        <View style={{ flexDirection: "row", gap: theme.space.md, flex: 1 }}>
-          <View
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 14 }}>
+        <View style={{ flexDirection: "row", gap: 14, flex: 1 }}>
+          <LinearGradient
+            colors={[`${palette.fg}25`, `${palette.fg}10`]}
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 12,
+              width: 44,
+              height: 44,
+              borderRadius: 14,
               alignItems: "center",
               justifyContent: "center",
-              backgroundColor: palette.bg,
             }}
           >
-            <Ionicons name={props.icon} size={18} color={palette.fg} />
-          </View>
-          <View style={{ flex: 1, gap: theme.space.xs }}>
-            <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700" }}>{props.title}</Text>
-            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
+            <Ionicons name={props.icon} size={20} color={palette.fg} />
+          </LinearGradient>
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>{props.title}</Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 19 }}>
               {props.reason}
             </Text>
           </View>
@@ -363,27 +396,23 @@ export function ActionableInboxRow(props: {
 
       <View
         style={{
-          padding: theme.space.sm,
-          borderRadius: theme.radius.md,
+          padding: 12,
+          borderRadius: 14,
           backgroundColor: theme.colors.surface2,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          gap: theme.space.xs,
+          gap: 4,
         }}
       >
-        <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: "600" }}>影響：{props.consequence}</Text>
+        <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: "600" }}>影響：{props.consequence}</Text>
         <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>下一步：{props.nextStep}</Text>
       </View>
 
       <View
         style={{
           alignSelf: "flex-start",
-          paddingHorizontal: theme.space.md,
-          paddingVertical: theme.space.sm,
-          borderRadius: theme.radius.md,
+          paddingHorizontal: 16,
+          paddingVertical: 10,
+          borderRadius: 14,
           backgroundColor: palette.bg,
-          borderWidth: 1,
-          borderColor: `${palette.fg}30`,
         }}
       >
         <Text style={{ color: palette.fg, fontSize: 13, fontWeight: "700" }}>{props.actionLabel}</Text>
@@ -392,6 +421,7 @@ export function ActionableInboxRow(props: {
   );
 }
 
+// ─── Ambient Cue Card ───────────────────────────────────
 export function AmbientCueCard(props: {
   signalType: AmbientCueSignalType;
   headline: string;
@@ -408,78 +438,70 @@ export function AmbientCueCard(props: {
       disabled={!props.onPress}
       onPress={props.onPress}
       style={({ pressed }) => ({
-        padding: theme.space.md,
-        borderRadius: theme.radius.lg,
+        padding: 18,
+        borderRadius: 22,
         backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: pressed ? palette.border : theme.colors.border,
-        gap: theme.space.md,
-        opacity: pressed ? 0.88 : 1,
-        transform: [{ scale: pressed ? 0.995 : 1 }],
-        ...shadowStyle(theme.shadows.sm),
+        gap: 14,
+        opacity: pressed ? 0.85 : 1,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
+        ...shadowStyle(theme.shadows.md),
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: theme.space.md }}>
-        <View
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
+        <LinearGradient
+          colors={[`${palette.fg}25`, `${palette.fg}10`]}
           style={{
-            width: 40,
-            height: 40,
-            borderRadius: 12,
+            width: 44,
+            height: 44,
+            borderRadius: 14,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: palette.bg,
-            borderWidth: 1,
-            borderColor: palette.border,
           }}
         >
-          <Ionicons name={palette.icon} size={18} color={palette.fg} />
-        </View>
+          <Ionicons name={palette.icon} size={20} color={palette.fg} />
+        </LinearGradient>
 
-        <View style={{ flex: 1, gap: theme.space.xs }}>
-          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "700", lineHeight: 20 }}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700", lineHeight: 21 }}>
             {props.headline}
           </Text>
           {props.body && (
-            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 19 }}>
               {props.body}
             </Text>
           )}
         </View>
 
         {props.onDismiss ? (
-          <Pressable onPress={props.onDismiss} hitSlop={8} style={{ padding: theme.space.xs }}>
+          <Pressable onPress={props.onDismiss} hitSlop={8} style={{ padding: 4 }}>
             <Ionicons name="close" size={16} color={theme.colors.muted} />
           </Pressable>
         ) : null}
       </View>
 
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space.md }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         {props.metric ? (
           <View
             style={{
-              paddingHorizontal: theme.space.sm,
-              paddingVertical: theme.space.xs,
-              borderRadius: theme.radius.full,
+              paddingHorizontal: 10,
+              paddingVertical: 5,
+              borderRadius: 12,
               backgroundColor: palette.bg,
-              borderWidth: 1,
-              borderColor: palette.border,
             }}
           >
-            <Text style={{ color: palette.fg, fontSize: 11, fontWeight: "700" }}>{props.metric}</Text>
+            <Text style={{ color: palette.fg, fontSize: 12, fontWeight: "700" }}>{props.metric}</Text>
           </View>
         ) : <View />}
 
         <View
           style={{
-            paddingHorizontal: theme.space.md,
-            paddingVertical: theme.space.sm,
-            borderRadius: theme.radius.md,
+            paddingHorizontal: 16,
+            paddingVertical: 8,
+            borderRadius: 14,
             backgroundColor: palette.bg,
-            borderWidth: 1,
-            borderColor: palette.border,
           }}
         >
-          <Text style={{ color: palette.fg, fontSize: 12, fontWeight: "700" }}>{props.actionLabel}</Text>
+          <Text style={{ color: palette.fg, fontSize: 13, fontWeight: "700" }}>{props.actionLabel}</Text>
         </View>
       </View>
     </Pressable>
@@ -497,117 +519,157 @@ export function RoleCtaCard(props: {
 }) {
   const palette =
     props.tone === "teacher"
-      ? { bg: theme.colors.successSoft, fg: theme.colors.success }
+      ? { colors: ["#D1FAE5", "#A7F3D0"] as const, fg: "#059669" }
       : props.tone === "admin"
-        ? { bg: theme.colors.warningSoft, fg: theme.colors.warning }
-        : { bg: theme.colors.accentSoft, fg: theme.colors.accent };
+        ? { colors: ["#FEF3C7", "#FDE68A"] as const, fg: "#D97706" }
+        : { colors: ["#EDE9FE", "#DDD6FE"] as const, fg: "#5B21B6" };
+
+  const isDark = theme.mode === "dark";
+  const gradColors = isDark
+    ? props.tone === "teacher"
+      ? ["#064E3B", "#052E16"]
+      : props.tone === "admin"
+        ? ["#422006", "#451A03"]
+        : ["#2E1065", "#1E1B4B"]
+    : palette.colors;
+  const fg = isDark
+    ? props.tone === "teacher" ? "#34D399" : props.tone === "admin" ? "#FBBF24" : "#A78BFA"
+    : palette.fg;
 
   return (
     <Pressable
       onPress={props.onPress}
       style={({ pressed }) => ({
-        padding: theme.space.lg,
-        borderRadius: theme.radius.lg,
-        backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: pressed ? `${palette.fg}40` : theme.colors.border,
-        gap: theme.space.md,
         opacity: pressed ? 0.85 : 1,
-        transform: [{ scale: pressed ? 0.99 : 1 }],
-        ...shadowStyle(theme.shadows.sm),
+        transform: [{ scale: pressed ? 0.97 : 1 }],
       })}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.md }}>
-        <View
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 12,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: palette.bg,
-            borderWidth: 1,
-            borderColor: `${palette.fg}20`,
-          }}
-        >
-          <Ionicons name={props.icon} size={20} color={palette.fg} />
+      <LinearGradient
+        colors={gradColors as unknown as [string, string, ...string[]]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{
+          padding: 22,
+          borderRadius: 22,
+          gap: 14,
+          ...shadowStyle(theme.shadows.md),
+        }}
+      >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+          <View
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 16,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.6)",
+            }}
+          >
+            <Ionicons name={props.icon} size={22} color={fg} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{
+              color: fg,
+              fontSize: 11,
+              fontWeight: "800",
+              letterSpacing: 1.5,
+              textTransform: "uppercase",
+              opacity: 0.8,
+            }}>
+              {props.roleLabel}
+            </Text>
+            <Text style={{
+              color: isDark ? "#F5F3FF" : "#1A1333",
+              fontSize: 16,
+              fontWeight: "700",
+              marginTop: 3,
+            }}>
+              {props.title}
+            </Text>
+          </View>
         </View>
-        <View style={{ flex: 1 }}>
+        {props.description && (
           <Text style={{
-            color: palette.fg,
-            fontSize: theme.typography.overline.fontSize,
-            fontWeight: theme.typography.overline.fontWeight ?? "700",
-            letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
-            textTransform: "uppercase",
+            color: isDark ? "rgba(245,243,255,0.7)" : "rgba(26,19,51,0.6)",
+            lineHeight: 21,
+            fontSize: 14,
           }}>
-            {props.roleLabel}
+            {props.description}
           </Text>
-          <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700", marginTop: theme.space.xs }}>{props.title}</Text>
+        )}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Text style={{ color: fg, fontSize: 14, fontWeight: "700" }}>{props.actionLabel}</Text>
+          <Ionicons name="arrow-forward" size={14} color={fg} />
         </View>
-      </View>
-      {props.description && (
-        <Text style={{ color: theme.colors.textSecondary, lineHeight: 20, fontSize: 13 }}>{props.description}</Text>
-      )}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.xs }}>
-        <Text style={{ color: palette.fg, fontSize: 13, fontWeight: "700" }}>{props.actionLabel}</Text>
-        <Ionicons name="arrow-forward" size={13} color={palette.fg} />
-      </View>
+      </LinearGradient>
     </Pressable>
   );
 }
 
+// ─── Completion State (redesigned with gradient) ────────
 export function CompletionState(props: {
   title: string;
   description: string;
   actionLabel?: string;
   onPress?: () => void;
 }) {
+  const isDark = theme.mode === "dark";
   return (
-    <View
+    <LinearGradient
+      colors={isDark ? ["#064E3B", "#052E16"] : ["#D1FAE5", "#ECFDF5"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
       style={{
-        padding: theme.space.lg,
-        borderRadius: theme.radius.lg,
-        backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
+        padding: 24,
+        borderRadius: 22,
         alignItems: "center",
-        gap: theme.space.md,
-        ...shadowStyle(theme.shadows.sm),
+        gap: 14,
+        ...shadowStyle(theme.shadows.md),
       }}
     >
       <View
         style={{
-          width: 56,
-          height: 56,
+          width: 60,
+          height: 60,
           borderRadius: 20,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: theme.colors.successSoft,
-          borderWidth: 1,
-          borderColor: `${theme.colors.success}30`,
+          backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.7)",
         }}
       >
-        <Ionicons name="checkmark-done" size={26} color={theme.colors.success} />
+        <Ionicons name="checkmark-done" size={28} color={isDark ? "#34D399" : "#059669"} />
       </View>
-      <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "700" }}>{props.title}</Text>
-      <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20, textAlign: "center" }}>
+      <Text style={{
+        color: isDark ? "#F5F3FF" : "#1A1333",
+        fontSize: 17,
+        fontWeight: "700",
+      }}>
+        {props.title}
+      </Text>
+      <Text style={{
+        color: isDark ? "rgba(245,243,255,0.7)" : "rgba(26,19,51,0.6)",
+        fontSize: 14,
+        lineHeight: 21,
+        textAlign: "center",
+      }}>
         {props.description}
       </Text>
       {props.actionLabel && props.onPress ? (
         <Pressable
           onPress={props.onPress}
           style={({ pressed }) => ({
-            marginTop: theme.space.sm,
-            paddingHorizontal: theme.space.lg,
-            paddingVertical: theme.space.sm,
-            borderRadius: theme.radius.md,
-            backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
-            opacity: pressed ? 0.9 : 1,
+            marginTop: 4,
+            paddingHorizontal: 22,
+            paddingVertical: 12,
+            borderRadius: 14,
+            backgroundColor: isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.7)",
+            opacity: pressed ? 0.8 : 1,
           })}
         >
-          <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>{props.actionLabel}</Text>
+          <Text style={{ color: isDark ? "#34D399" : "#059669", fontSize: 14, fontWeight: "700" }}>{props.actionLabel}</Text>
         </Pressable>
       ) : null}
-    </View>
+    </LinearGradient>
   );
 }

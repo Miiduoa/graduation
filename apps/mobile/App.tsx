@@ -55,6 +55,8 @@ import { DepartmentStack } from "./src/screens/DepartmentStack";
 import { AdminStack } from "./src/screens/AdminStack";
 import { OnboardingScreen, hasSeenOnboarding } from "./src/screens/OnboardingScreen";
 import { usePushNotifications } from "./src/app/usePushNotifications";
+import { useProactiveAIReporter } from "./src/app/useProactiveAIReporter";
+import { useWebLearningSync } from "./src/app/useWebLearningSync";
 import { initializeRuntimeDataSource } from "./src/config/runtime";
 import { usePermissions } from "./src/hooks/usePermissions";
 
@@ -703,6 +705,8 @@ function AppNavigation({
 }) {
   const auth = useAuth();
   usePushNotifications(navigationRef, auth.user?.uid);
+  useProactiveAIReporter();
+  useWebLearningSync();
 
   const navTheme = {
     ...DefaultTheme,

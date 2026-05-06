@@ -10,6 +10,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
 import { theme } from "../ui/theme";
 import { formatDateTime, formatRelativeTime, toDate } from "../utils/format";
 import type { Announcement } from "../data/types";
+import { earnXP } from "../services/gamificationEngine";
 
 type ExtractedDate = {
   date: Date;
@@ -187,7 +188,8 @@ export function AnnouncementDetailScreen(props: any) {
       } else {
         setItem(announcement);
         setNotFound(false);
-        
+        earnXP("read_announcement").catch(() => {});
+
         // 載入相關公告（使用相同的 abort controller）
         try {
           const allAnnouncements = await ds.listAnnouncements(school.id);

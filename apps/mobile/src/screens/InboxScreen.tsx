@@ -19,6 +19,7 @@ import {
   TimelineCard,
 } from "../ui/campusOs";
 import { formatDueWindow, isTeachingRole, resolveRoleMode, toInboxItem } from "../utils/campusOs";
+import { navigateToCourseHome, navigateToCourseScreen } from "../utils/courseNavigation";
 
 export function InboxScreen(props: any) {
   const nav = props?.navigation;
@@ -74,9 +75,10 @@ export function InboxScreen(props: any) {
 
   const openItem = (item: (typeof inboxItems)[number]) => {
     if (item.kind === "live" && item.sessionId) {
-      nav?.navigate?.("課程", {
-        screen: "Classroom",
-        params: { groupId: item.groupId, sessionId: item.sessionId, isTeacher: teachingMode },
+      navigateToCourseScreen(nav, auth.profile?.role, "Classroom", {
+        groupId: item.groupId,
+        sessionId: item.sessionId,
+        isTeacher: teachingMode,
       });
       return;
     }
@@ -150,7 +152,7 @@ export function InboxScreen(props: any) {
             title="目前沒有待辦項目"
             description="一切就緒，你可以回到課程或探索其他功能。"
             actionLabel="打開課程"
-            onPress={() => nav?.navigate?.("課程", { screen: "CourseHub" })}
+            onPress={() => navigateToCourseHome(nav, auth.profile?.role)}
           />
         ) : null}
 
@@ -207,7 +209,7 @@ export function InboxScreen(props: any) {
                 快速存取
               </Text>
               <Pressable
-                onPress={() => nav?.navigate?.("課程", { screen: "CourseHub" })}
+                onPress={() => navigateToCourseHome(nav, auth.profile?.role)}
                 style={({ pressed }) => ({
                   paddingHorizontal: theme.space.md,
                   paddingVertical: theme.space.md,
@@ -220,7 +222,7 @@ export function InboxScreen(props: any) {
                 })}
               >
                 <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
-                  課程中樞
+                  課程入口
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 4 }}>
                   {courseSpaces.length} 門課

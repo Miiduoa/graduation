@@ -23,11 +23,22 @@ source .venv/bin/activate
 # 安裝依賴
 pip install -q -r requirements.txt 2>/dev/null
 
-# 確保 Ollama 在執行中
-if ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+# 確保 Ollama 在執行中（只有 ollama provider 需要）
+LLM_PROVIDER_VALUE="${LLM_PROVIDER:-}"
+if [ -f ".env" ] && [ -z "$LLM_PROVIDER_VALUE" ]; then
+    LLM_PROVIDER_VALUE="$(grep -E '^LLM_PROVIDER=' .env | tail -1 | cut -d= -f2- | tr -d '\"')"
+fi
+LLM_PROVIDER_VALUE="${LLM_PROVIDER_VALUE:-ollama}"
+
+if [ "$LLM_PROVIDER_VALUE" = "ollama" ] && ! curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
     echo "啟動 Ollama 服務..."
-    brew services start ollama
-    sleep 3
+    if command -v brew >/dev/null 2>&1; then
+        brew services start ollama
+        sleep 3
+    else
+        echo "找不到 brew，請先自行啟動 Ollama 或改用 LLM_PROVIDER=groq。"
+        exit 1
+    fi
 fi
 
 case "${1:-serve}" in

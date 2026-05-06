@@ -39,6 +39,7 @@ export type PermissionResult = {
 };
 
 const PUSH_TOKEN_STORAGE_KEY = "@notifications.pushToken";
+const NOTIFICATION_PREFS_STORAGE_PREFIX = "@notifications.preferences";
 
 function getExpoProjectId(): string | undefined {
   const expoConfig = (Constants.expoConfig as any) ?? {};
@@ -176,6 +177,11 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
         description: "私人訊息",
         importance: Notifications.AndroidImportance.MAX,
       }),
+      Notifications.setNotificationChannelAsync("ai-agent", {
+        name: "AI 主動回報",
+        description: "課表、作業與重要校園事件的 AI 主動提醒",
+        importance: Notifications.AndroidImportance.HIGH,
+      }),
     ]);
   }
 
@@ -283,6 +289,49 @@ export async function refreshPushTokenIfNeeded(uid: string): Promise<void> {
 
 export { defaultNotificationPreferences, type NotificationPreferences };
 
+function getNotificationPreferencesStorageKey(uid: string): string {
+  return `${NOTIFICATION_PREFS_STORAGE_PREFIX}:${uid}`;
+}
+
+function isOfflineFirestoreError(error: unknown): boolean {
+  const code = typeof (error as { code?: unknown })?.code === "string"
+    ? String((error as { code: string }).code).toLowerCase()
+    : "";
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+
+  return (
+    code === "unavailable" ||
+    code === "failed-precondition" && message.includes("offline") ||
+    message.includes("client is offline") ||
+    message.includes("offline")
+  );
+}
+
+async function readCachedNotificationPreferences(uid: string): Promise<NotificationPreferences | null> {
+  try {
+    const raw = await AsyncStorage.getItem(getNotificationPreferencesStorageKey(uid));
+    if (!raw) return null;
+    return normalizeNotificationPreferences(JSON.parse(raw) as Partial<NotificationPreferences>);
+  } catch (error) {
+    console.warn("[Notifications] Failed to read cached preferences:", error);
+    return null;
+  }
+}
+
+async function cacheNotificationPreferences(
+  uid: string,
+  prefs: NotificationPreferences,
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      getNotificationPreferencesStorageKey(uid),
+      JSON.stringify(normalizeNotificationPreferences(prefs)),
+    );
+  } catch (error) {
+    console.warn("[Notifications] Failed to cache preferences:", error);
+  }
+}
+
 export async function syncPushTokenForUser(uid: string): Promise<string | null> {
   const token = await registerForPushNotificationsAsync();
   if (!token) return null;
@@ -293,12 +342,28 @@ export async function syncPushTokenForUser(uid: string): Promise<string | null> 
 
 export async function loadNotificationPreferences(uid: string): Promise<NotificationPreferences> {
   const db = getDb();
-  const snap = await getDoc(doc(db, "users", uid, "settings", "notifications"));
-  if (!snap.exists()) {
-    return defaultNotificationPreferences;
-  }
+  const cached = await readCachedNotificationPreferences(uid);
 
-  return normalizeNotificationPreferences(snap.data() as Partial<NotificationPreferences>);
+  try {
+    const snap = await getDoc(doc(db, "users", uid, "settings", "notifications"));
+    if (!snap.exists()) {
+      return cached ?? defaultNotificationPreferences;
+    }
+
+    const prefs = normalizeNotificationPreferences(snap.data() as Partial<NotificationPreferences>);
+    await cacheNotificationPreferences(uid, prefs);
+    return prefs;
+  } catch (error) {
+    if (isOfflineFirestoreError(error)) {
+      console.warn("[Notifications] Firestore offline; using cached/default notification preferences.");
+      return cached ?? defaultNotificationPreferences;
+    }
+    if (cached) {
+      console.warn("[Notifications] Failed to load remote preferences; using cached preferences:", error);
+      return cached;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -309,26 +374,36 @@ export async function saveNotificationPreferences(
   prefs: NotificationPreferences
 ): Promise<void> {
   const db = getDb();
+  const normalizedPrefs = normalizeNotificationPreferences(prefs);
+  await cacheNotificationPreferences(uid, normalizedPrefs);
   
-  await withRetry(
-    () => setDoc(
-      doc(db, "users", uid, "settings", "notifications"),
+  try {
+    await withRetry(
+      () => setDoc(
+        doc(db, "users", uid, "settings", "notifications"),
+        {
+          ...normalizedPrefs,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ),
       {
-        ...prefs,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    ),
-    {
-      maxRetries: 2,
-      baseDelayMs: 500,
+        maxRetries: 2,
+        baseDelayMs: 500,
+      }
+    );
+  } catch (error) {
+    if (isOfflineFirestoreError(error)) {
+      console.warn("[Notifications] Firestore offline; saved notification preferences locally.");
+      return;
     }
-  );
+    throw error;
+  }
   
   trackEvent("notification_preferences_updated", {
-    enabled: prefs.enabled,
-    announcements: prefs.announcements,
-    events: prefs.events,
+    enabled: normalizedPrefs.enabled,
+    announcements: normalizedPrefs.announcements,
+    events: normalizedPrefs.events,
   });
 }
 
@@ -385,15 +460,21 @@ export async function scheduleLocalNotification(
   title: string,
   body: string,
   data?: Record<string, any>,
-  trigger?: Notifications.NotificationTriggerInput
+  trigger?: Notifications.NotificationTriggerInput,
+  channelId?: string
 ): Promise<string> {
+  const content: any = {
+    title,
+    body,
+    data,
+    sound: true,
+  };
+  if (Platform.OS === "android") {
+    content.channelId = channelId ?? "default";
+  }
+
   return Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      data,
-      sound: true,
-    },
+    content,
     trigger: trigger ?? null,
   });
 }
