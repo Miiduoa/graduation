@@ -10,6 +10,9 @@
     "web": "expo start --web",
     "lint": "eslint App.tsx src --ext .ts,.tsx",
     "test": "NODE_OPTIONS='--max-old-space-size=4096' jest --runInBand",
+    "test:ai:self": "NODE_OPTIONS='--max-old-space-size=4096' EXPO_PUBLIC_AI_PROVIDER=offline EXPO_PUBLIC_AI_TEST_FAST=1 AI_SELF_TEST_ROUNDS=${AI_SELF_TEST_ROUNDS:-10000} jest src/__tests__/services/aiSelfDialog.test.ts --runInBand",
+    "test:ai:proactive": "NODE_OPTIONS='--max-old-space-size=4096' jest src/__tests__/services/proactiveAI.test.ts --runInBand",
+    "test:ai:web": "NODE_OPTIONS='--max-old-space-size=4096' jest src/__tests__/services/webSearch.test.ts src/__tests__/services/webLearning.test.ts src/__tests__/services/aiWebSearchIntegration.test.ts --runInBand",
     "test:watch": "NODE_OPTIONS='--max-old-space-size=4096' jest --watch --runInBand",
     "test:coverage": "NODE_OPTIONS='--max-old-space-size=4096' jest --coverage --runInBand",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -61,8 +64,9 @@
     "react-native": "0.81.5",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0",
+    "react-native-web": "^0.21.2",
     "react-native-webview": "~13.13.5",
-    "react-native-web": "^0.21.2"
+    "llama.rn": "^0.4.8"
   },
   "devDependencies": {
     "@testing-library/jest-native": "^5.4.3",

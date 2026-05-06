@@ -2,23 +2,39 @@
 /**
  * AI Service - 校園智慧助理 API 整合層
  *
- * 支援：後端代理 AI、本地模擬（開發用）
+ * 支援：裝置端離線 AI、後端代理 AI、本地模擬（開發用）
  *
  * 使用方式：
  * 1. 在 .env 設定 AI 模式與選用參數
  * 2. 呼叫 chatWithAI() 發送對話
  *
  * 選用環境變數：
- * - EXPO_PUBLIC_AI_PROVIDER = cloud | mock
+ * - EXPO_PUBLIC_AI_PROVIDER = offline | local-llm | cloud | gemini | mock
  * - EXPO_PUBLIC_AI_MAX_TOKENS（預設 1000）
  */
 
 import Constants from "expo-constants";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import type {
+  AssistantActionProposal,
+  CampusActorRole,
+  EvidenceRef,
+  RoleActionPolicy,
+} from "../data";
 import { getFirebaseApp, hasUsableFirebaseConfig } from "../firebase";
 import { buildThinkingChain, type ThinkingStep } from "../data/puAIAgentData";
+import { answerWithOnlineSearch, shouldUseWebSearch } from "./webSearch";
+import {
+  buildAnswerFromLearnedWebItem,
+  findRelevantWebLearningItem,
+  saveWebLearningAnswer,
+} from "./webLearning";
+import {
+  buildAssistantCapabilityPrompt,
+  getAssistantIdentityAnswer,
+} from "../data/aiAssistantProfile";
 
-export type AIProvider = "cloud" | "mock" | "local-llm" | "gemini";
+export type AIProvider = "offline" | "cloud" | "mock" | "local-llm" | "gemini";
 
 // 重試配置
 const RETRY_CONFIG = {
@@ -119,7 +135,8 @@ export type AIMessage = {
 export type AIResponse = {
   content: string;
   suggestions?: string[];
-  actions?: Array<{ label: string; action: string; params?: any }>;
+  actions?: AssistantActionProposal[];
+  citations?: EvidenceRef[];
   error?: string;
   thinking?: { step: string; detail: string; status: "done" | "checking" | "warning" | "info" }[];
 };
@@ -128,13 +145,16 @@ type CampusAssistantRequest = {
   messages: AIMessage[];
   context: {
     schoolId?: string;
-    userId?: string;
-    userName?: string;
+    screen?: string;
+    groupId?: string;
+    courseId?: string;
+    locale?: string;
+    timezone?: string;
+    clientCapabilities?: string[];
   };
 };
 
 type CampusAssistantResponse = AIResponse & {
-  citations?: Array<{ type: string; id: string; label: string }>;
   debug?: Record<string, unknown>;
 };
 
@@ -142,21 +162,108 @@ export type AIContext = {
   schoolId: string;
   userId?: string;
   userName?: string;
+  role?: CampusActorRole;
   // 公開校園資料
   announcements?: Array<{ id: string; title: string; source?: string }>;
   events?: Array<{ id: string; title: string; location?: string; startsAt?: string }>;
   menus?: Array<{ id: string; name: string; price?: number; cafeteria?: string }>;
   pois?: Array<{ id: string; name: string; category?: string }>;
   // 個人化學習資料（新增）
-  courses?: Array<{ id: string; name: string; teacher?: string; dayOfWeek: number; startPeriod: number; credits?: number }>;
+  courses?: Array<{
+    id: string;
+    name: string;
+    teacher?: string;
+    dayOfWeek?: number;
+    startPeriod?: number;
+    endPeriod?: number;
+    startTime?: string;
+    endTime?: string;
+    location?: string;
+    credits?: number;
+    schedule?: Array<{
+      dayOfWeek?: number;
+      startPeriod?: number;
+      endPeriod?: number;
+      startTime?: string;
+      endTime?: string;
+      location?: string;
+    }>;
+  }>;
   pendingAssignments?: Array<{ id: string; title: string; groupName: string; dueAt?: string; isLate?: boolean }>;
   gradesSummary?: { gpa?: number; courses: Array<{ name: string; grade?: number; credits?: number }> };
   weeklyReport?: { summary: string; stats: { onTimeRate: number; totalSubmissions: number; newAchievements: number } };
+  // 全 App 資料與即時脈動摘要（由 aiAppContext 聚合）
+  appPulseSummary?: string;
+  appDataCoverage?: Array<{
+    key: string;
+    label: string;
+    count: number;
+    state: "live" | "empty" | "missing" | "blocked";
+    detail?: string;
+  }>;
   // 自動訓練洞察（從歷史對話學習）
   trainingInsights?: string;
   // 對話上下文摘要（讓 API 也知道目前對話狀態）
   contextSummary?: string;
 };
+
+const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
+  {
+    role: "student",
+    allowedActions: ["navigate", "start_navigation", "schedule_reminder", "create_reminder_draft", "split_assignment", "draft_message", "queue_action", "open_url", "check_in"],
+    preconditions: ["signed_in", "is_self", "school_member"],
+    effects: ["navigate_only", "create_draft", "schedule_local_reminder", "write_user_queue"],
+  },
+  {
+    role: "teacher",
+    allowedActions: ["navigate", "start_navigation", "schedule_reminder", "create_reminder_draft", "draft_message", "queue_action", "submit_draft", "open_url", "check_in"],
+    preconditions: ["signed_in", "school_member", "teaching_staff"],
+    effects: ["navigate_only", "create_draft", "write_group_data", "write_user_queue"],
+  },
+  {
+    role: "staff",
+    allowedActions: ["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"],
+    preconditions: ["signed_in", "school_member", "service_staff"],
+    effects: ["navigate_only", "create_draft", "write_school_data"],
+  },
+  {
+    role: "department",
+    allowedActions: ["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"],
+    preconditions: ["signed_in", "school_member", "service_staff"],
+    effects: ["navigate_only", "create_draft", "write_school_data"],
+  },
+  {
+    role: "department_head",
+    allowedActions: ["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"],
+    preconditions: ["signed_in", "school_member", "teaching_staff"],
+    effects: ["navigate_only", "create_draft", "write_school_data"],
+  },
+  {
+    role: "admin",
+    allowedActions: ["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"],
+    preconditions: ["signed_in", "school_member", "admin"],
+    effects: ["navigate_only", "create_draft", "write_school_data"],
+  },
+  {
+    role: "school",
+    allowedActions: ["navigate", "start_navigation", "draft_message", "queue_action", "submit_draft", "open_url"],
+    preconditions: ["signed_in", "school_member", "admin"],
+    effects: ["navigate_only", "create_draft", "write_school_data"],
+  },
+];
+
+function getRolePolicy(role?: CampusActorRole): RoleActionPolicy {
+  return ROLE_ACTION_POLICIES.find((policy) => policy.role === role) ?? ROLE_ACTION_POLICIES[0];
+}
+
+function filterActionsByRole(
+  actions: AssistantActionProposal[] | undefined,
+  role?: CampusActorRole,
+): AssistantActionProposal[] | undefined {
+  if (!actions || actions.length === 0) return actions;
+  const policy = getRolePolicy(role);
+  return actions.filter((action) => policy.allowedActions.includes(action.action));
+}
 
 // 上下文顯示筆數（可透過環境變數覆寫）
 const CONTEXT_LIMITS = {
@@ -168,12 +275,40 @@ const CONTEXT_LIMITS = {
 
 function getConfig() {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
-  const rawProvider = String(extra.aiProvider ?? process.env.EXPO_PUBLIC_AI_PROVIDER ?? "gemini").toLowerCase();
-  const provider: AIProvider = rawProvider === "mock" ? "mock" : rawProvider === "cloud" ? "cloud" : rawProvider === "gemini" ? "gemini" : "local-llm";
+  const rawProvider = String(extra.aiProvider ?? process.env.EXPO_PUBLIC_AI_PROVIDER ?? "offline").toLowerCase();
+  const rawWebSearch = extra.aiWebSearchEnabled ?? process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH;
+  const rawAppEnv = String(extra.appEnv ?? process.env.APP_ENV ?? process.env.EXPO_PUBLIC_API_ENV ?? "").toLowerCase();
+  const isReleaseLike =
+    extra.isReleaseLike === true ||
+    String(extra.isReleaseLike).toLowerCase() === "true" ||
+    rawAppEnv === "preview" ||
+    rawAppEnv === "production";
+  const provider: AIProvider =
+    rawProvider === "mock" ? "mock" :
+    rawProvider === "cloud" ? "cloud" :
+    rawProvider === "gemini" ? "gemini" :
+    rawProvider === "local-llm" ? "local-llm" :
+    "offline";
   return {
     aiProvider: provider,
     maxTokens: extra.aiMaxTokens ?? process.env.EXPO_PUBLIC_AI_MAX_TOKENS ?? 1000,
+    isReleaseLike,
+    webSearchEnabled:
+      rawWebSearch == null
+        ? process.env.NODE_ENV !== "test"
+        : rawWebSearch === true || String(rawWebSearch).toLowerCase() === "true",
   };
+}
+
+function isDeviceOnlyProvider(provider: AIProvider): boolean {
+  return provider === "offline" || provider === "mock";
+}
+
+function isStrictRealDataMode(): boolean {
+  const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
+  const forceFlag = extra.forceRealData ?? process.env.EXPO_PUBLIC_FORCE_REAL_DATA;
+  const apiEnv = String(extra.apiEnv ?? process.env.EXPO_PUBLIC_API_ENV ?? "").toLowerCase();
+  return forceFlag === true || String(forceFlag).toLowerCase() === "true" || apiEnv === "production";
 }
 
 function getCloudFunctionRegion(): string {
@@ -183,16 +318,105 @@ function getCloudFunctionRegion(): string {
 
 const DAY_NAMES = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
 
+type CourseContextItem = NonNullable<AIContext["courses"]>[number];
+type CourseMeeting = NonNullable<CourseContextItem["schedule"]>[number];
+
+function getCourseMeetings(course: CourseContextItem): CourseMeeting[] {
+  if (Array.isArray(course.schedule) && course.schedule.length > 0) {
+    return course.schedule.filter((meeting) => typeof meeting.dayOfWeek === "number");
+  }
+  if (typeof course.dayOfWeek === "number") {
+    return [{
+      dayOfWeek: course.dayOfWeek,
+      startPeriod: course.startPeriod,
+      endPeriod: course.endPeriod,
+      startTime: course.startTime,
+      endTime: course.endTime,
+      location: course.location,
+    }];
+  }
+  return [];
+}
+
+function getCourseDayOfWeek(course: CourseContextItem): number | undefined {
+  return getCourseMeetings(course)[0]?.dayOfWeek;
+}
+
+function getMeetingSortValue(meeting?: CourseMeeting): number {
+  if (!meeting) return Number.MAX_SAFE_INTEGER;
+  if (typeof meeting.startPeriod === "number") return meeting.startPeriod * 100;
+  if (meeting.startTime) {
+    const [hour, minute] = meeting.startTime.split(":").map(Number);
+    if (Number.isFinite(hour) && Number.isFinite(minute)) return hour * 60 + minute;
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function formatMeetingTime(meeting: CourseMeeting): string {
+  if (typeof meeting.startPeriod === "number") {
+    const end = typeof meeting.endPeriod === "number" && meeting.endPeriod !== meeting.startPeriod
+      ? `-${meeting.endPeriod}`
+      : "";
+    return `第${meeting.startPeriod}${end}節`;
+  }
+  if (meeting.startTime && meeting.endTime) return `${meeting.startTime}-${meeting.endTime}`;
+  if (meeting.startTime) return meeting.startTime;
+  return "時間未提供";
+}
+
+function formatCourseMeeting(meeting: CourseMeeting): string {
+  const day = typeof meeting.dayOfWeek === "number" ? DAY_NAMES[meeting.dayOfWeek] : "日期未提供";
+  const location = meeting.location ? `，${meeting.location}` : "";
+  return `${day} ${formatMeetingTime(meeting)}${location}`;
+}
+
+function formatCourseSummary(course: CourseContextItem): string {
+  const meetings = getCourseMeetings(course);
+  const meetingText = meetings.length > 0
+    ? meetings.map(formatCourseMeeting).join("；")
+    : "時間未提供";
+  const teacher = course.teacher ? `，授課：${course.teacher}` : "";
+  const credits = typeof course.credits === "number" ? `，${course.credits}學分` : "";
+  return `${course.name}（${meetingText}${teacher}${credits}）`;
+}
+
+function parseRequestedDay(message: string): { day: number; label: string } {
+  if (/明天/.test(message)) {
+    const day = (new Date().getDay() + 1) % 7;
+    return { day, label: "明天" };
+  }
+  if (/後天/.test(message)) {
+    const day = (new Date().getDay() + 2) % 7;
+    return { day, label: "後天" };
+  }
+  const dayMatch = message.match(/(?:星期|週|禮拜)(一|二|三|四|五|六|日|天)/);
+  if (dayMatch) {
+    const dayMap: Record<string, number> = { "日": 0, "天": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6 };
+    const day = dayMap[dayMatch[1]] ?? new Date().getDay();
+    return { day, label: DAY_NAMES[day] };
+  }
+  const day = new Date().getDay();
+  return { day, label: "今天" };
+}
+
 function buildSystemPrompt(context: AIContext): string {
   const limits = CONTEXT_LIMITS;
   const now = new Date();
   const hour = now.getHours();
   const mealTime = hour < 10 ? "早餐" : hour < 14 ? "午餐" : hour < 17 ? "下午茶" : "晚餐";
+  const config = getConfig();
   const parts = [
     "# 你是「小靜」— 靜宜大學最聰明的 AI 校園助理",
     "",
-    "你的智慧等級媲美 ChatGPT / Claude，擁有深度推理、多步驟思考、和自然對話的能力。",
-    "你不是只能查資料的機器人 — 你能理解語境、推理因果、給個人化建議、甚至幽默回應。",
+    "你的目標是用 App 真實資料、工具執行器、動作草稿與多步驟推理，提供接近通用助理的校園代理體驗。",
+    "不要宣稱自己和 ChatGPT、Claude、Codex 或任何雲端模型有相同參數量；使用者問模型參數時要誠實說明限制與可提升的能力面。",
+    "",
+    buildAssistantCapabilityPrompt({
+      role: context.role,
+      provider: config.aiProvider,
+      hasSignedInUser: Boolean(context.userId),
+      hasSchoolId: Boolean(context.schoolId),
+    }),
     "",
     "## 人格特質",
     "- 像學長姐一樣親切，但知識淵博得像教授",
@@ -230,12 +454,9 @@ function buildSystemPrompt(context: AIContext): string {
     "主顧樓（行政中心+主顧咖啡）、伯鐸樓（B1美食街+教室）、濟時樓（1F學餐+全家）、至善樓（1F衛保+2F諮商）、蓋夏圖書館（藏書60萬+自習區+討論室）、文興樓（外語學院）、思敏樓（管院）、聖方濟樓（理學院）、任垣樓（資訊學院）、體育館（球場+游泳池+健身房）、希嘉/思高學苑（宿舍）",
     "",
     "### 校園餐飲（學生最常問！）",
-    "- 濟時樓學生餐廳(1F) 07:00-19:30：自助餐$55起、滷肉飯$40、雞腿飯$65、排骨飯$60、素食$50",
-    "- 伯鐸樓美食街(B1) 10:30-19:00：牛肉麵$75、鍋燒麵$60、咖哩飯$65、韓式拌飯$70",
-    "- 思源樓輕食區(1F) 08:00-17:00：三明治$35、飯糰$30、沙拉$50",
-    "- 主顧咖啡(主顧樓1F) 08:30-18:00：拿鐵$55、鬆餅$60、套餐$85",
-    "- 全家(濟時樓1F) 07:00-22:00：便當、飯糰、沙拉",
-    "- 校門口沙鹿商圈：肉圓$40、米糕$35、豆花$30、鹹酥雞$50、飲料店、小火鍋$150起",
+    "- 以 App 今日菜單、餐廳資料與 DataSource 回傳內容為準。",
+    "- 若菜單沒有價格，不要自行排序最便宜；請說「價格未提供」並建議現場或餐廳頁確認。",
+    "- 若餐廳未開通接單、營業狀態未知或品項無法確認，不可說已下單；改為草稿或導到點餐頁。",
     "- 現在是" + mealTime + "，推薦時考慮營業時間",
     "",
     "### 重要服務",
@@ -265,8 +486,7 @@ function buildSystemPrompt(context: AIContext): string {
     parts.push("");
     parts.push("【你的課程列表】");
     context.courses.slice(0, 15).forEach((c, i) => {
-      const dayName = DAY_NAMES[c.dayOfWeek] ?? "未知";
-      parts.push(`${i + 1}. ${c.name}（${dayName} 第${c.startPeriod}節${c.teacher ? `，授課：${c.teacher}` : ""}${c.credits ? `，${c.credits}學分` : ""}）`);
+      parts.push(`${i + 1}. ${formatCourseSummary(c)}`);
     });
   }
 
@@ -300,6 +520,21 @@ function buildSystemPrompt(context: AIContext): string {
     parts.push(`【本週學習報告】${context.weeklyReport.summary}`);
     const s = context.weeklyReport.stats;
     parts.push(`準時繳交率：${s.onTimeRate}%，本週繳交 ${s.totalSubmissions} 份，新解鎖成就 ${s.newAchievements} 個`);
+  }
+
+  if (context.appPulseSummary && context.appPulseSummary.length > 0) {
+    parts.push("");
+    parts.push("【全 App 即時脈動】");
+    parts.push(context.appPulseSummary);
+    parts.push("請把這段視為目前使用者狀態與 App 最新資料總覽；回答時優先處理 high/critical、逾期、即將截止、擁擠、未讀或進行中的事項。");
+  }
+
+  if (context.appDataCoverage && context.appDataCoverage.length > 0) {
+    parts.push("");
+    parts.push("【App 資料覆蓋】");
+    context.appDataCoverage.slice(0, 18).forEach((row) => {
+      parts.push(`- ${row.label}：${row.state}，${row.detail ?? `${row.count} 筆`}`);
+    });
   }
 
   // ── 校園公開資料 ──
@@ -462,7 +697,7 @@ const INTENT_PATTERNS: { category: IntentCategory; patterns: RegExp[]; keywords:
       "午餐", "晚餐", "早餐", "宵夜", "點心", "食物", "餐廳", "餐點", "菜單", "美食", "推薦", "便宜",
       "健康餐", "低卡", "咖啡", "奶茶", "雞排", "滷肉", "排骨", "牛肉", "豬", "海鮮", "火鍋",
       "定食", "套餐", "加蛋", "加大", "辣", "不辣", "清淡", "重口味", "炸", "烤", "涼麵", "沙拉",
-      "有哪些", "多一點", "少一點", "價格", "多少錢", "預算", "划算", "CP值",
+      "有哪些", "其他選擇", "還有其他", "別的", "換一個", "多一點", "少一點", "價格", "多少錢", "預算", "划算", "CP值", "平價", "省錢",
       "訂餐", "點餐", "下單", "外帶", "內用", "排隊", "等多久"],
     subIntentMap: {
       "recommend": ["推薦", "建議", "有哪些", "什麼好", "吃什麼", "想吃"],
@@ -483,17 +718,17 @@ const INTENT_PATTERNS: { category: IntentCategory; patterns: RegExp[]; keywords:
   {
     category: "course",
     patterns: [/還有.*多久.*畢業/, /畢業.*還.*多久/, /差.*多少.*學分/, /什麼時候.*畢業/, /能不能.*畢業/,
-      /成績.*怎/, /怎.*成績/, /GPA.*多少/, /修.*多少.*學分/, /[幾什].*門課/, /有.*什麼課/],
-    keywords: ["畢業", "學分", "成績", "分數", "GPA", "排名", "選課", "退選", "加選",
-      "必修", "選修", "通識", "學程", "輔系", "雙主修", "延畢",
+      /成績.*怎/, /怎.*成績/, /gpa.*多少/, /修.*多少.*學分/, /[幾什].*門課/, /有.*什麼課/, /有課嗎/, /星期.*有課/, /週.*有課/, /禮拜.*有課/],
+    keywords: ["畢業", "學分", "成績", "分數", "gpa", "排名", "選課", "退選", "加選",
+      "必修", "選修", "通識", "學程", "輔系", "雙主修", "延畢", "本學期", "哪些課", "幾門課",
       "課表", "上什麼課", "今天有課", "明天有課", "幾點上課", "教室",
       "考試", "期中", "期末", "報告", "小考", "quiz",
-      "老師", "教授", "助教", "修課", "擋修"],
+      "老師", "教授", "助教", "修課", "擋修", "有課", "作業", "待繳", "截止", "繳交", "期限", "幾分"],
   },
   {
     category: "leave",
-    patterns: [/想.*請假/, /幫.*請假/, /怎.*請假/, /可以.*請假/],
-    keywords: ["請假", "病假", "事假", "公假", "喪假", "翹課", "缺課", "曠課", "補假"],
+    patterns: [/想.*請假/, /幫.*請假/, /幫.*請.*假/, /請.*假/, /怎.*請假/, /可以.*請假/],
+    keywords: ["請假", "請病假", "病假", "事假", "公假", "喪假", "翹課", "缺課", "曠課", "補假", "請明天的假", "請今天的假"],
   },
   {
     category: "location",
@@ -619,28 +854,92 @@ function detectSubIntent(category: IntentCategory, msg: string): string | undefi
   return undefined;
 }
 
+function buildOfflineTransitAnswer(message: string): { content: string; suggestions: string[] } | null {
+  const q = message.toLowerCase();
+  const asksDirections = /怎麼去|怎樣去|如何去|怎麼到|到.*怎麼走|搭什麼|搭哪|幾號公車|路線|交通/.test(q);
+  const wantsTaichungStation = /台中車站|臺中車站|台中火車站|臺中火車站|台中.*車站|臺中.*車站/.test(q);
+  const wantsHsr = /高鐵|烏日/.test(q);
+  const wantsShaluStation = /沙鹿.*(車站|火車站)|沙鹿火車站/.test(q);
+
+  if (!asksDirections && !wantsTaichungStation && !wantsHsr && !wantsShaluStation) return null;
+
+  if (wantsHsr) {
+    return {
+      content: [
+        "從靜宜大學到高鐵台中站：",
+        "",
+        "1. 公車/客運：在校門口一帶搭往高鐵台中站方向的客運或 35 路，約 30-40 分鐘。",
+        "2. 計程車或共乘：約 20-30 分鐘，費用較高但最快。",
+        "",
+        "離線模式沒有即時到站資訊，建議出發前查台中公車 App。",
+      ].join("\n"),
+      suggestions: ["怎麼去台中車站", "去沙鹿火車站", "查公車"],
+    };
+  }
+
+  if (wantsTaichungStation || (/台中/.test(q) && /車站|火車站|站/.test(q))) {
+    return {
+      content: [
+        "從靜宜大學到台中車站：",
+        "",
+        "1. 直達公車：到校門口台灣大道上的站牌，搭 300、307 或 308 往台中車站方向，約 40-50 分鐘，尖峰可能更久。",
+        "2. 台鐵轉乘：先到沙鹿火車站，再搭區間車到台中車站，約 20-30 分鐘車程，但要多一次轉乘。",
+        "",
+        "離線模式不能查即時班次，出門前請用台中公車 App 或台鐵 App 確認下一班。",
+      ].join("\n"),
+      suggestions: ["怎麼去高鐵", "去沙鹿火車站", "查公車"],
+    };
+  }
+
+  if (wantsShaluStation) {
+    return {
+      content: [
+        "從靜宜大學到沙鹿火車站：",
+        "",
+        "1. 最快：計程車或共乘，約 10 分鐘。",
+        "2. 省錢：到校門口周邊搭往沙鹿市區方向的公車，班次請用台中公車 App 確認。",
+        "3. 要去台中車站的話，可從沙鹿火車站搭台鐵區間車到台中車站。",
+      ].join("\n"),
+      suggestions: ["怎麼去台中車站", "怎麼去高鐵", "校門口公車"],
+    };
+  }
+
+  return null;
+}
+
 async function mockAIResponse(
   messages: AIMessage[],
   context: AIContext,
   signal?: AbortSignal
 ): Promise<AIResponse> {
-  await new Promise((resolve, reject) => {
-    const timeout = setTimeout(resolve, 300 + Math.random() * 400);
-    if (signal) {
-      const onAbort = () => {
-        clearTimeout(timeout);
-        reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
-      };
-      if (signal.aborted) { clearTimeout(timeout); reject(Object.assign(new Error("Aborted"), { name: "AbortError" })); return; }
-      signal.addEventListener("abort", onAbort);
-    }
-  });
+  const skipMockDelay = process.env.NODE_ENV === "test" || process.env.EXPO_PUBLIC_AI_TEST_FAST === "1";
+  if (!skipMockDelay) {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(resolve, 300 + Math.random() * 400);
+      if (signal) {
+        const onAbort = () => {
+          clearTimeout(timeout);
+          reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
+        };
+        if (signal.aborted) { clearTimeout(timeout); reject(Object.assign(new Error("Aborted"), { name: "AbortError" })); return; }
+        signal.addEventListener("abort", onAbort);
+      }
+    });
+  }
 
   const lastMessage = messages[messages.length - 1]?.content ?? "";
   const lowerMsg = lastMessage.toLowerCase().trim();
 
   // Classify intent
-  const intent = classifyIntent(lastMessage);
+  let intent = classifyIntent(lastMessage);
+  if (intent.category === "general") {
+    const lastAssistant = [...messages].reverse().find(m => m.role === "assistant")?.content ?? "";
+    const diningFollowUp = /便宜|平價|划算|省錢|其他|還有|別的|換|素食|蔬菜|健康|清淡|不辣|第[一二三四五六七八九十\d]+|編號|那道|這道|哪一道/.test(lowerMsg);
+    const lastWasDining = /餐|飯|麵|菜單|餐廳|餐點|吃|濟時|伯鐸|靜園|主顧|白鬍子|Morning House|飲料|吐司|蛋餅|鐵板麵|水果杯/.test(lastAssistant);
+    if (lastWasDining && diningFollowUp) {
+      intent = { category: "food", confidence: 3, subIntent: /便宜|平價|划算|省錢/.test(lowerMsg) ? "budget" : "recommend" };
+    }
+  }
 
   // Build thinking chain — 先推理再回答
   const thinkingChain = buildThinkingChain(lastMessage, {
@@ -659,6 +958,75 @@ async function mockAIResponse(
   const userName = context.userName ?? "同學";
   const hour = new Date().getHours();
   const dayName = DAY_NAMES[new Date().getDay()];
+  const config = getConfig();
+  const forceOnlineSearch = config.webSearchEnabled && shouldUseWebSearch(lastMessage, intent.category);
+  const transitAnswer = forceOnlineSearch ? null : buildOfflineTransitAnswer(lowerMsg);
+  if (transitAnswer) {
+    return {
+      thinking,
+      content: transitAnswer.content,
+      suggestions: transitAnswer.suggestions,
+    };
+  }
+
+  const unsafeOrDishonestRequest = /偽造|竄改|作弊|偷看|帳號密碼|密碼|駭|破解|繞過|入侵|盜用/.test(lowerMsg);
+  if (unsafeOrDishonestRequest) {
+    return {
+      thinking,
+      content: "這個要求我不能協助，也不會提供偽造、偷看帳號、破解或繞過系統的方法。\n\n如果你是遇到帳號、成績、系統操作或申訴問題，我可以幫你整理正式詢問信、申訴草稿，或告訴你該找哪個校內單位。",
+      suggestions: ["幫我寫正式詢問信", "帳號登入有問題", "成績申訴怎麼寫"],
+    };
+  }
+
+  const wantsDraft = /草稿|幫我寫|寫一封|寫信|寫訊息|訊息跟|公告|email|mail|改寫|潤飾/.test(lowerMsg);
+  if (wantsDraft) {
+    const cleaned = lastMessage.replace(/幫我寫|寫一封|寫信|寫訊息|草稿|改寫|潤飾/g, "").trim();
+    return {
+      thinking,
+      content: `我先幫你整理一版草稿：\n\n「您好，我想說明：${cleaned || "請在這裡補上具體內容"}。若需要補充資料或調整語氣，我可以再修改。謝謝。」\n\n如果你要更精準，請補上對象、目的、日期和希望語氣。`,
+      suggestions: ["正式一點", "短一點", "加上日期"],
+    };
+  }
+
+  if (forceOnlineSearch) {
+    const webAnswer = await answerWithOnlineSearch(lastMessage, signal);
+    if (webAnswer) {
+      await saveWebLearningAnswer(lastMessage, webAnswer).catch(() => undefined);
+      return {
+        thinking: [
+          ...thinking,
+          { step: "連網搜尋", detail: `已查詢 ${webAnswer.sources.length} 個公開來源`, status: "done" },
+          { step: "證據整理", detail: "已把搜尋結果整理成結論、依據與來源", status: "done" },
+          { step: "本機學習", detail: "已存入來源可追溯的本地 web-learning 知識庫", status: "done" },
+        ],
+        content: webAnswer.content,
+        suggestions: webAnswer.suggestions ?? ["再查一次", "換個關鍵字", "問校園資料"],
+      };
+    }
+
+    const learnedItem = await findRelevantWebLearningItem(lastMessage, { allowStale: true }).catch(() => null);
+    if (learnedItem) {
+      const learnedAnswer = buildAnswerFromLearnedWebItem(lastMessage, learnedItem);
+      return {
+        thinking: [
+          ...thinking,
+          { step: "連網搜尋", detail: "新搜尋沒有取得可靠結果", status: "warning" },
+          { step: "本機知識庫", detail: "改用先前已保存且有來源的 web-learning 資料", status: "done" },
+        ],
+        content: learnedAnswer.content,
+        suggestions: learnedAnswer.suggestions,
+      };
+    }
+
+    return {
+      thinking: [
+        ...thinking,
+        { step: "連網搜尋", detail: "有嘗試查詢公開來源，但沒有取得可驗證結果", status: "warning" },
+      ],
+      content: "我有嘗試連網搜尋，但這次沒有取得足夠可靠的公開來源，所以不會亂編答案。\n\n你可以換一個更具體的關鍵字，或指定要查的網站/機構名稱。",
+      suggestions: ["換個關鍵字", "指定來源網站", "問校園資料"],
+    };
+  }
 
   switch (intent.category) {
 
@@ -680,8 +1048,24 @@ async function mockAIResponse(
       // Dietary preference filtering
       const wantsVeg = /素|蔬菜|菜多|青菜|沙拉|健康|低卡|清淡/.test(lowerMsg);
       const wantsMeat = /肉|雞|豬|牛|排骨|雞腿|牛肉/.test(lowerMsg);
-      const wantsCheap = /便宜|划算|省|CP|預算/.test(lowerMsg);
+      const wantsCheap = /便宜|划算|省|cp|預算/i.test(lowerMsg);
       const wantsSpicy = /辣|麻/.test(lowerMsg);
+      const hasAnyMenuPrice = allMenus.some((m: any) => typeof m.price === "number");
+
+      if (wantsCheap && !hasAnyMenuPrice) {
+        return {
+          thinking,
+          content: [
+            "目前離線資料裡的官方菜單沒有單品價格，我不能亂排「最便宜」。",
+            "",
+            "省錢優先可以先看：",
+            "1. 校內便利商店鮮食：飯糰、三明治、微波食品。",
+            "2. 靜園餐廳早餐/點心類：吐司、蛋餅、飲料類。",
+            "3. 學生餐廳主食類：有現場價格時再決定比較準。",
+          ].join("\n"),
+          suggestions: ["還有其他選擇嗎", "有素食嗎", "不想吃飯想吃麵"],
+        };
+      }
 
       let filtered = [...allMenus];
       let filterDesc = "";
@@ -699,7 +1083,7 @@ async function mockAIResponse(
 
       if (filtered.length === 0) filtered = allMenus;
       const picks = filtered.slice(0, 4);
-      const list = picks.map((m: any, i: number) => `${i + 1}. ${m.name}${m.price != null ? ` — $${m.price}` : ""}${m.cafeteria ? `（${m.cafeteria}）` : ""}`).join("\n");
+      const list = picks.map((m: any, i: number) => `${i + 1}. ${m.name}${m.price != null ? ` — $${m.price}` : " — 價格未提供"}${m.cafeteria ? `（${m.cafeteria}）` : ""}`).join("\n");
 
       const intro = filterDesc
         ? `幫你篩選了${filterDesc}類的餐點：`
@@ -707,8 +1091,8 @@ async function mockAIResponse(
 
       return {
         thinking,
-        content: `${intro}\n\n${list}\n\n${filtered.length > 4 ? `還有 ${filtered.length - 4} 道其他選擇。` : ""}想直接訂餐的話告訴我！`,
-        suggestions: subIntent === "order" ? ["確認下單"] : ["幫我訂餐", "其他選擇", "查等候時間"],
+        content: `${intro}\n\n${list}\n\n${filtered.length > 4 ? `還有 ${filtered.length - 4} 道其他選擇。` : ""}想看哪一道的詳細資訊，或想換條件，直接告訴我。`,
+        suggestions: subIntent === "order" ? ["整理點餐內容"] : ["便宜一點的", "其他選擇", "有素食嗎"],
         actions: [{ label: "查看完整菜單", action: "navigate", params: { screen: "校園" } }],
       };
     }
@@ -721,8 +1105,8 @@ async function mockAIResponse(
       if (wantsBooking) {
         return {
           thinking,
-          content: `我可以幫你預約掛號！衛保組門診時間：\n\n週一～五 09:00-12:00、13:30-16:30\n地點：至善樓 1F 衛保組\n\n請告訴我你想預約什麼科別？`,
-          suggestions: ["一般門診", "心理諮商", "牙科"],
+          content: `離線模式不能真的送出掛號，但我可以先幫你整理預約資訊。\n\n衛保組門診時間：\n週一～五 09:00-12:00、13:30-16:30\n地點：至善樓 1F 衛保組\n\n你可以補上科別、日期和症狀，我會整理成可送出的掛號內容。`,
+          suggestions: ["一般門診草稿", "心理諮商資訊", "衛保組在哪"],
         };
       }
       if (wantsCounseling) {
@@ -747,21 +1131,22 @@ async function mockAIResponse(
 
       // 畢業 / 學分查詢
       if (/畢業|學分|還要修|差多少/.test(lowerMsg)) {
-        const totalCredits = courseList.reduce((sum, c) => sum + (c.credits ?? 0), 0);
+        const currentCredits = courseList.reduce((sum, c) => sum + (c.credits ?? 0), 0);
         const requiredCredits = 128;
-        const remaining = Math.max(0, requiredCredits - totalCredits);
-        const yearsLeft = remaining > 0 ? `預估還需約 ${Math.ceil(remaining / 20)} 個學期` : "已達畢業門檻！";
+        const list = courseList.length > 0
+          ? courseList.slice(0, 8).map((c, i) => `${i + 1}. ${c.name}${typeof c.credits === "number" ? `（${c.credits}學分）` : ""}`).join("\n")
+          : "目前沒有載入本學期課程。";
 
         return {
           thinking,
-          content: `${userName}，你的學分狀況：\n\n本學期修課：${courseList.length} 門（${totalCredits} 學分）\n畢業門檻：${requiredCredits} 學分\n目前累計：約 ${Math.min(requiredCredits, requiredCredits - remaining + Math.floor(Math.random() * 10))} 學分\n尚缺：約 ${remaining} 學分\n${yearsLeft}\n\n想看詳細的學分試算嗎？`,
+          content: `${userName}，目前我只拿得到已載入的課程資料，不會亂推歷年累計學分。\n\n已載入課程：${courseList.length} 門\n已載入課程合計：${currentCredits} 學分\n畢業門檻參考：${requiredCredits} 學分\n\n${list}\n\n要精準計算「還差多少學分」，需要同步歷年修課/學分試算資料；目前不能只用本學期課表推估。`,
           suggestions: ["查成績", "查未繳作業", "選課建議"],
           actions: [{ label: "前往學分試算", action: "navigate", params: { screen: "我的", nested: "CreditAuditStack" } }],
         };
       }
 
       // 成績
-      if (/成績|分數|GPA|排名/.test(lowerMsg)) {
+      if (/成績|分數|gpa|排名|幾分/.test(lowerMsg)) {
         const grades = context.gradesSummary;
         if (grades && grades.courses.length > 0) {
           const list = grades.courses.slice(0, 5).map((c, i) => `${i + 1}. ${c.name}：${c.grade ?? "尚未公布"}${c.credits ? `（${c.credits}學分）` : ""}`).join("\n");
@@ -773,7 +1158,7 @@ async function mockAIResponse(
         }
         return {
           thinking,
-          content: `本學期成績尚未完全公布。你目前修了 ${courseList.length} 門課，學期結束後可以在這裡查看完整成績。\n\n需要查其他的嗎？`,
+          content: `目前沒有載入你的成績資料，所以我不能推測分數、GPA 或排名。\n\n已載入課程數：${courseList.length} 門。若你要查成績，請先同步成績資料或到成績查詢頁查看。`,
           suggestions: ["查未繳作業", "查學分"],
         };
       }
@@ -796,25 +1181,38 @@ async function mockAIResponse(
         if (courseList.length === 0) {
           return { thinking, content: "目前沒有載入課程資料。你可以在設定中同步課表！", suggestions: ["查公告"] };
         }
-        const wantsTomorrow = /明天/.test(lowerMsg);
-        const targetDay = wantsTomorrow ? (new Date().getDay() + 1) % 7 : new Date().getDay();
-        const targetDayName = wantsTomorrow ? "明天" : "今天";
-        const dayCourses = courseList.filter(c => c.dayOfWeek === targetDay);
+        const asksSpecificDay = /今天|明天|後天|星期|週|禮拜|有課|幾點上課|什麼課/.test(lowerMsg) && !/查.*課表|我的課表|本學期/.test(lowerMsg);
+        if (!asksSpecificDay) {
+          const list = courseList.slice(0, 8).map((c, i) => `${i + 1}. ${formatCourseSummary(c)}`).join("\n");
+          return {
+            thinking,
+            content: `你本學期的課程（共 ${courseList.length} 門）：\n\n${list}\n\n需要查某一天的課也可以直接問，例如「週一有什麼課」。`,
+            suggestions: ["週一有什麼課", "查作業截止", "查學分"],
+          };
+        }
+        const { day: targetDay, label: targetDayName } = parseRequestedDay(lowerMsg);
+        const dayRows = courseList
+          .flatMap((course) => getCourseMeetings(course)
+            .filter((meeting) => meeting.dayOfWeek === targetDay)
+            .map((meeting) => ({ course, meeting })))
+          .sort((a, b) => getMeetingSortValue(a.meeting) - getMeetingSortValue(b.meeting));
 
-        if (dayCourses.length === 0) {
+        if (dayRows.length === 0) {
           return { thinking, content: `${targetDayName}沒有課！本學期共 ${courseList.length} 門課。要我幫你安排其他事嗎？`, suggestions: ["推薦午餐", "預約圖書館座位"] };
         }
-        const list = dayCourses.map((c, i) => `${i + 1}. ${c.name}（第${c.startPeriod}節${c.teacher ? `，${c.teacher}` : ""}）`).join("\n");
+        const list = dayRows.map(({ course, meeting }, i) =>
+          `${i + 1}. ${course.name}（${formatMeetingTime(meeting)}${meeting.location ? `，${meeting.location}` : ""}${course.teacher ? `，${course.teacher}` : ""}）`
+        ).join("\n");
         return {
           thinking,
-          content: `${targetDayName}（${DAY_NAMES[targetDay]}）有 ${dayCourses.length} 堂課：\n\n${list}`,
+          content: `${targetDayName}（${DAY_NAMES[targetDay]}）有 ${dayRows.length} 堂課：\n\n${list}`,
           suggestions: ["設定上課提醒", "幫我請假"],
         };
       }
 
       // General course info
       if (courseList.length > 0) {
-        const list = courseList.slice(0, 5).map((c, i) => `${i + 1}. ${c.name}（${DAY_NAMES[c.dayOfWeek] ?? ""}，${c.teacher ?? ""}，${c.credits ?? 0}學分）`).join("\n");
+        const list = courseList.slice(0, 8).map((c, i) => `${i + 1}. ${formatCourseSummary(c)}`).join("\n");
         return {
           thinking,
           content: `你本學期的課程（共 ${courseList.length} 門）：\n\n${list}\n\n需要查什麼嗎？`,
@@ -828,8 +1226,8 @@ async function mockAIResponse(
     case "leave": {
       return {
         thinking,
-        content: `我可以幫你請假！需要以下資訊：\n\n1. 課程名稱\n2. 請假日期\n3. 假別（病假/事假/公假）\n4. 事由說明\n\n請告訴我這些資訊，或直接說例如「幫我請明天程式設計的病假」。`,
-        suggestions: ["病假", "事假", "查課表"],
+        content: `離線模式不能真的送出請假申請，但我可以先幫你整理請假草稿。\n\n需要以下資訊：\n1. 課程名稱\n2. 請假日期\n3. 假別（病假/事假/公假）\n4. 事由說明\n\n你可以直接說「明天程式設計病假，原因是發燒」，我會整理成可貼到系統的內容。`,
+        suggestions: ["病假草稿", "事假草稿", "查課表"],
       };
     }
 
@@ -922,8 +1320,8 @@ async function mockAIResponse(
       if (/壞|報修|故障|維修|漏/.test(lowerMsg)) {
         return {
           thinking,
-          content: `我可以幫你提交報修單！請告訴我：\n\n1. 問題類型（水管/電力/冷氣/家具/網路）\n2. 房號\n3. 問題描述\n\n例如：「冷氣不冷，房號 A305」`,
-          suggestions: ["冷氣問題", "水管問題", "網路問題"],
+          content: `離線模式不能真的提交報修單，但我可以幫你整理報修草稿。\n\n請補上：\n1. 問題類型（水管/電力/冷氣/家具/網路）\n2. 房號\n3. 問題描述\n\n例如：「冷氣不冷，房號 A305」。`,
+          suggestions: ["冷氣報修草稿", "水管報修草稿", "網路報修草稿"],
         };
       }
       if (/洗衣|烘衣/.test(lowerMsg)) {
@@ -1029,7 +1427,7 @@ async function mockAIResponse(
       const timeGreet = hour < 12 ? "早安" : hour < 18 ? "午安" : "晚安";
       return {
         thinking,
-        content: `${timeGreet} ${userName}！我是你的校園 AI 助理。\n\n我可以直接幫你完成很多事：訂餐、掛號、報修、請假、查成績、預約座位... 直接告訴我你需要什麼！`,
+        content: `${timeGreet} ${userName}！我是校園 AI 助理。\n\n我可以回答校園資訊、整理課表作業、推薦餐點與交通路線，也能幫你寫請假、報修、失物公告等草稿。當 App 資料源支援且你按下確認卡時，我可以把訂餐、掛號、報修、預約座位、提醒等動作交給 executor 執行。\n\n離線對話本身不呼叫雲端 LLM；如果資料源不可用，我會退回草稿，不會假裝已送出。`,
         suggestions: hour < 11 ? ["今天有什麼課", "查公告"] : hour < 14 ? ["推薦午餐", "查作業截止"] : ["預約圖書館座位", "查公車"],
       };
     }
@@ -1043,8 +1441,8 @@ async function mockAIResponse(
     case "help": {
       return {
         thinking,
-        content: `我是校園全能 AI 助理，可以直接幫你完成操作：\n\n🍽️ 訂餐 / 推薦餐點 / 查等候時間\n🏥 掛號 / 症狀評估 / 心理諮商\n📚 預約座位 / 借書查詢\n🏠 宿舍報修 / 查洗衣機 / 查包裹\n🔍 失物報案 / AI 自動比對\n📖 查成績 / 查作業 / 請假 / 學分試算\n🚌 公車到站 / 校園導航\n⏰ 設定提醒\n🖨️ 雲端列印\n\n不只是回答問題，我能直接幫你操作！試試說「幫我訂午餐」或「我想請假」。`,
-        suggestions: ["幫我訂午餐", "我頭有點痛", "查成績"],
+        content: `我是校園 AI 代理，能幫你做這些事：\n\n🍽️ 推薦餐點 / 查餐廳資訊 / 確認後送出支援的點餐\n🏥 健康建議 / 衛保組與心理諮商資訊 / 確認後掛號或建草稿\n📚 圖書館位置、借書與座位資訊 / 確認後預約可用座位\n🏠 宿舍報修、洗衣、包裹資訊 / 確認後提交支援的報修\n📖 課表、作業、成績與學分資料整理\n🚌 靜宜到台中車站、高鐵、沙鹿火車站等交通建議\n📝 請假信、失物公告、訊息與課程發布草稿\n🔔 本地主動回報：課前提醒、作業截止/逾期、每日摘要、重要公告\n\n會寫入或通知他人的動作都會先停在確認卡；缺 API 或缺識別資料時只建立草稿/導頁。`,
+        suggestions: ["推薦午餐", "我頭有點痛", "怎麼去台中車站"],
       };
     }
 
@@ -1053,9 +1451,36 @@ async function mockAIResponse(
       // Try to give a contextually relevant response instead of generic
       const hasCourses = (context.courses?.length ?? 0) > 0;
       const hasAssignments = (context.pendingAssignments?.length ?? 0) > 0;
+      const isIdentityQuestion = /你是誰|你是什麼|什麼模型|模型|離線|本地|chatgpt|gpt|codex|智商|多聰明|參數|parameter|權重|訓練|跟.*一樣/.test(lowerMsg);
+      const isComplaint = /笨|很爛|不好用|答錯|錯了|不聰明|沒用|廢|亂回|答非所問/.test(lowerMsg);
+      const wantsDraft = /草稿|幫我寫|寫一封|寫信|寫訊息|訊息跟|公告|email|mail|改寫|潤飾/.test(lowerMsg);
+
+      if (isComplaint) {
+        return {
+          thinking,
+          content: `你說得對，離線版目前不是雲端大模型，所以如果問題太開放，我可能會答得很死板。\n\n我會比較擅長這幾類：\n1. 校園生活資訊：餐廳、圖書館、宿舍、交通、健康\n2. 個人資料整理：課表、作業、學分、提醒\n3. 草稿生成：請假信、報修單、失物公告、群組訊息\n\n你可以直接把剛剛那題再貼一次，我會用「先判斷需求 → 找本地資料 → 給可執行建議」的方式回答。`,
+          suggestions: ["重新回答", "你能做什麼", "請假信草稿"],
+        };
+      }
+
+      if (isIdentityQuestion) {
+        return {
+          thinking,
+          content: getAssistantIdentityAnswer(config.aiProvider),
+          suggestions: ["你能做什麼", "推薦午餐", "幫我寫草稿"],
+        };
+      }
+
+      if (wantsDraft) {
+        return {
+          thinking,
+          content: `我先幫你整理一版可修改的草稿：\n\n「您好，我想說明：${lastMessage.replace(/幫我寫|寫一封|草稿|改寫|潤飾/g, "").trim() || "請在這裡補上具體內容"}。若需要我補充資料或調整語氣，我可以再修改。謝謝。」\n\n如果你要更像正式信件，請補上對象、目的、日期和希望語氣。`,
+          suggestions: ["正式一點", "短一點", "加上日期"],
+        };
+      }
 
       // Check if the message is a question
-      const isQuestion = /[？?]|什麼|怎麼|哪裡|誰|幾|多少|為什麼|可以嗎|能不能|有沒有/.test(lowerMsg);
+      const isQuestion = /[？?]|嗎|什麼|怎麼|哪裡|誰|幾|多少|為什麼|可以嗎|能不能|有沒有/.test(lowerMsg);
 
       if (isQuestion) {
         // Attempt to relate to campus context
@@ -1065,7 +1490,7 @@ async function mockAIResponse(
 
         return {
           thinking,
-          content: `關於「${lastMessage.slice(0, 20)}${lastMessage.length > 20 ? "..." : ""}」，我目前的專長是校園生活相關的服務。\n\n${contextHints.length > 0 ? `順帶一提：${contextHints.join("，")}。\n\n` : ""}以下是我能幫你的：訂餐、查成績、預約座位、請假、報修等等。\n\n你也可以試試用不同方式描述你的需求！`,
+          content: `這題我沒有足夠的離線知識可以可靠回答，所以不亂編。\n\n我目前比較擅長校園情境：餐飲、課表、作業、圖書館、宿舍、交通、健康、請假/報修草稿。\n\n${contextHints.length > 0 ? `順帶一提：${contextHints.join("，")}。\n\n` : ""}你可以把問題改成「在校園 App 裡我要怎麼做？」或直接給我具體任務，我會比較準。`,
           suggestions: hasAssignments ? ["查未繳作業", "推薦午餐", "查成績"] : ["推薦午餐", "今天有什麼課", "查公車"],
         };
       }
@@ -1103,16 +1528,21 @@ async function callCampusAssistant(
       messages: messages.slice(-12),
       context: {
         schoolId: context.schoolId,
-        userId: context.userId,
-        userName: context.userName,
+        screen: (context as any).screen,
+        groupId: (context as any).groupId,
+        courseId: (context as any).courseId,
+        locale: "zh-TW",
+        timezone: "Asia/Taipei",
       },
     });
 
     const data = result.data;
+    const filteredActions = filterActionsByRole(data.actions, context.role);
     return {
       content: data.content ?? "",
       suggestions: data.suggestions ?? extractSuggestions(data.content ?? ""),
-      actions: data.actions,
+      actions: filteredActions,
+      citations: data.citations,
       error: data.error,
     };
   } catch (e: any) {
@@ -1135,7 +1565,16 @@ export async function chatWithAI(
   const config = getConfig();
 
   try {
-    if (config.aiProvider === "mock") {
+    if (config.isReleaseLike) {
+      const managedResponse = await callManagedAI(messages, context, signal);
+      if (managedResponse) return managedResponse;
+      return {
+        content: "",
+        error: "AI 服務目前無法連線；上架版本只允許透過後端代理呼叫 AI。",
+      };
+    }
+
+    if (isDeviceOnlyProvider(config.aiProvider)) {
       return await mockAIResponse(messages, context, signal);
     }
 
@@ -1162,6 +1601,13 @@ export async function chatWithAI(
       return managedResponse;
     }
 
+    if (isStrictRealDataMode()) {
+      return {
+        content: "",
+        error: "AI 服務目前無法連線；已停用 mock 回退以確保真實資料路徑。",
+      };
+    }
+
     return await mockAIResponse(messages, context, signal);
   } catch (e: any) {
     if (e.name === "AbortError") {
@@ -1180,6 +1626,20 @@ export async function chatWithCampusAssistant(
   signal?: AbortSignal
 ): Promise<AIResponse> {
   const config = getConfig();
+
+  if (config.isReleaseLike) {
+    const cloudResponse = await callManagedAI(messages, context, signal);
+    if (cloudResponse) return cloudResponse;
+    return {
+      content: "",
+      error: "Campus Assistant 暫時不可用；上架版本只允許透過後端代理呼叫 AI。",
+    };
+  }
+
+  // ── Offline 模式：完全不呼叫雲端或本地 server ──
+  if (isDeviceOnlyProvider(config.aiProvider)) {
+    return mockAIResponse(messages, context, signal);
+  }
 
   // ── Gemini 優先模式：直接用 Gemini API（真正的 LLM 理解力） ──
   if (config.aiProvider === "gemini") {
@@ -1203,6 +1663,13 @@ export async function chatWithCampusAssistant(
   // ── Cloud 模式 ──
   const cloudResponse = await callManagedAI(messages, context, signal);
   if (cloudResponse) return cloudResponse;
+
+  if (isStrictRealDataMode()) {
+    return {
+      content: "",
+      error: "Campus Assistant 暫時不可用；已停用 mock 回退以維持真實資料策略。",
+    };
+  }
 
   // ── 所有外部服務失敗 → 嘗試 Gemini → mock ──
   try {
@@ -1237,15 +1704,17 @@ export function createCancellableChat() {
 /**
  * 檢查 AI 服務是否可用
  */
-export function getAIStatus(): { provider: AIProvider; configured: boolean } {
+export function getAIStatus(): { provider: AIProvider; configured: boolean; webSearchEnabled: boolean } {
   const config = getConfig();
-  const configured =
-    config.aiProvider === "mock" ||
-    config.aiProvider === "local-llm" ||
-    config.aiProvider === "gemini" ||
-    hasUsableFirebaseConfig();
+  const configured = config.isReleaseLike
+    ? hasUsableFirebaseConfig()
+    : config.aiProvider === "offline" ||
+      config.aiProvider === "mock" ||
+      config.aiProvider === "local-llm" ||
+      config.aiProvider === "gemini" ||
+      hasUsableFirebaseConfig();
 
-  return { provider: config.aiProvider, configured };
+  return { provider: config.aiProvider, configured, webSearchEnabled: config.webSearchEnabled };
 }
 
 /**
@@ -1254,7 +1723,7 @@ export function getAIStatus(): { provider: AIProvider; configured: boolean } {
 export async function generateSummary(text: string, maxLength = 100): Promise<string> {
   const config = getConfig();
 
-  if (config.aiProvider === "mock") {
+  if (isDeviceOnlyProvider(config.aiProvider)) {
     const sentences = text.split(/[。！？\n]/).filter(Boolean);
     return sentences.slice(0, 2).join("。") + (sentences.length > 2 ? "..." : "");
   }
@@ -1270,9 +1739,9 @@ export async function generateSummary(text: string, maxLength = 100): Promise<st
   return response.content || text.slice(0, maxLength) + "...";
 }
 
-// ─── Gemini API Integration (免費 LLM 後端) ────────────────────────────
-// Google Gemini Flash — 免費且強大的 LLM，讓 AI 助理達到 ChatGPT 水準
-// 設定 .env: EXPO_PUBLIC_GEMINI_API_KEY=你的key
+// ─── Gemini API Integration (development-only direct mode) ─────────────
+// 正式/上架 build 不能直接使用 EXPO_PUBLIC_GEMINI_API_KEY；production 只走後端代理。
+// 僅限本機測試時設定 .env: EXPO_PUBLIC_GEMINI_API_KEY=你的key
 
 function getGeminiApiKey(): string | null {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
@@ -1280,8 +1749,8 @@ function getGeminiApiKey(): string | null {
 }
 
 /**
- * 呼叫 Google Gemini API — 真正的 LLM 理解能力
- * 使用 buildSystemPrompt 注入完整校園 + 個人資料作為 context
+ * 呼叫 Google Gemini API（開發測試用 direct mode）。
+ * 正式版本會在進入這裡前改走 callManagedAI。
  */
 async function callGeminiAPI(
   messages: AIMessage[],
@@ -1401,6 +1870,8 @@ async function callLocalLLM(
           pendingAssignments: context.pendingAssignments,
           gradesSummary: context.gradesSummary,
           weeklyReport: context.weeklyReport,
+          appPulseSummary: context.appPulseSummary,
+          appDataCoverage: context.appDataCoverage,
         },
         stream: false,
       }),
@@ -1430,6 +1901,52 @@ export async function chatWithLocalLLMStreaming(
   signal?: AbortSignal,
 ): Promise<AIResponse> {
   const config = getConfig();
+
+  if (config.isReleaseLike) {
+    const cloudResponse = await callManagedAI(messages, context, signal);
+    if (cloudResponse) {
+      onToken(cloudResponse.content, true);
+      return cloudResponse;
+    }
+    const errorResponse = {
+      content: "",
+      error: "Campus Assistant 暫時不可用；上架版本只允許透過後端代理呼叫 AI。",
+    };
+    onToken("", true);
+    return errorResponse;
+  }
+
+  // ── Offline / Mock 模式：用內建語意引擎產生完整答案，不發送任何網路請求 ──
+  if (isDeviceOnlyProvider(config.aiProvider)) {
+    const fallback = await mockAIResponse(messages, context, signal);
+    onToken(fallback.content, true);
+    return fallback;
+  }
+
+  // ── On-Device LLM 模式：完全本地推理（llama.rn） ──
+  if (config.aiProvider === "local-llm") {
+    try {
+      const { localAssistant } = await import("./localAssistant");
+      if (localAssistant.isModelReady()) {
+        const lastMsg = messages[messages.length - 1]?.content ?? "";
+        const result = await localAssistant.chat(lastMsg, {
+          onToken: (token) => onToken(token, false),
+          signal,
+        });
+        onToken(result.content, true);
+        return {
+          content: result.content,
+          suggestions: extractSuggestions(result.content),
+        };
+      }
+    } catch (e: any) {
+      console.warn("[AI] On-device LLM failed:", e);
+    }
+    // On-device LLM 不可用 → fallback to offline engine
+    const fallback = await mockAIResponse(messages, context, signal);
+    onToken(fallback.content, true);
+    return fallback;
+  }
 
   // ── Gemini 模式：直接呼叫 Gemini，不嘗試 Local LLM ──
   if (config.aiProvider === "gemini") {
@@ -1476,6 +1993,8 @@ export async function chatWithLocalLLMStreaming(
           pendingAssignments: context.pendingAssignments,
           gradesSummary: context.gradesSummary,
           weeklyReport: context.weeklyReport,
+          appPulseSummary: context.appPulseSummary,
+          appDataCoverage: context.appDataCoverage,
         },
         stream: true,
       }),
@@ -1551,6 +2070,11 @@ export async function submitFeedback(params: {
   rating: "thumbs_up" | "thumbs_down";
   userId?: string;
 }): Promise<void> {
+  const config = getConfig();
+  if (isDeviceOnlyProvider(config.aiProvider)) {
+    return;
+  }
+
   const baseUrl = getAIServerBaseUrl();
   try {
     await fetch(`${baseUrl}/api/feedback`, {

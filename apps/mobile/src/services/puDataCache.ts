@@ -110,6 +110,16 @@ export async function seedCachedStudentInfo(data: PUStudentInfo): Promise<void> 
   await writeCache(KEYS.studentInfo, data);
 }
 
+/** 外部引擎收集到 TronClass 課程後回寫快取（確保資料一致性） */
+export async function seedCachedTCCourses(data: TCCourse[]): Promise<void> {
+  await writeCache(KEYS.tcCourses, data);
+}
+
+/** 外部引擎收集到 TronClass 出席後回寫快取 */
+export async function seedCachedTCAttendance(data: TCAttendance[]): Promise<void> {
+  await writeCache(KEYS.tcAttendance, data);
+}
+
 function isExpired(entry: CacheEntry<unknown> | null, ttl: number): boolean {
   if (!entry) return true;
   return Date.now() - entry.fetchedAt > ttl;
@@ -125,33 +135,65 @@ async function fetchPUCampusBackend<T>(
   const sessionId = session.backendSessionId?.trim();
   if (!sessionId) return null;
 
-  const response = await fetch(getCloudFunctionUrl("puFetchCampusData"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      sessionId,
-      dataType,
-      ...extra,
-    }),
-  });
+  const url = getCloudFunctionUrl("puFetchCampusData");
+  console.log(`[puDataCache] fetchPUCampusBackend: ${dataType} → ${url}`);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10 秒逾時
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        sessionId,
+        dataType,
+        ...extra,
+      }),
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const text = await response.text();
-  let data: { success?: boolean; result?: T; error?: string } | null = null;
+  let data: Record<string, unknown> | null = null;
   if (text.trim()) {
     try {
-      data = JSON.parse(text) as { success?: boolean; result?: T; error?: string };
+      data = JSON.parse(text) as Record<string, unknown>;
     } catch {
       data = null;
     }
   }
 
-  if (!response.ok || data?.success !== true || !data.result) {
-    throw new Error(data?.error || `PU campus backend request failed (HTTP ${response.status})`);
+  if (!response.ok || !data) {
+    throw new Error((data?.error as string) || `PU campus backend request failed (HTTP ${response.status})`);
   }
 
-  return data.result;
+  // 後端可能回傳兩種格式：
+  //   格式 A: { success: true, result: { ... } }     — result 包裝
+  //   格式 B: { success: true, courses: [...], ... }  — 直接攤平
+  // 都要支援。
+
+  if (data.success !== true && data.success !== undefined) {
+    throw new Error((data.error as string) || "Backend returned success=false");
+  }
+
+  // 格式 A: 有 result 欄位
+  if (data.result && typeof data.result === "object") {
+    console.log(`[puDataCache] fetchPUCampusBackend ${dataType}: got wrapped result`);
+    return data.result as T;
+  }
+
+  // 格式 B: 資料直接在頂層（移除 success/error 後就是資料本身）
+  const { success: _s, error: _e, ...rest } = data;
+  if (Object.keys(rest).length > 0) {
+    console.log(`[puDataCache] fetchPUCampusBackend ${dataType}: got flat result, keys:`, Object.keys(rest));
+    return rest as T;
+  }
+
+  throw new Error(`PU campus backend returned empty result for ${dataType}`);
 }
 
 function normalizeStudentInfo(
@@ -270,7 +312,7 @@ export async function refreshCourses(session: PUSession): Promise<PUCourseResult
   if (session.backendSessionId) {
     try {
       const result = await fetchPUCampusBackend<{
-        success: boolean;
+        success?: boolean;
         courses?: PUCourseResult["courses"];
         studentInfo?: {
           studentId?: string | null;
@@ -286,7 +328,8 @@ export async function refreshCourses(session: PUSession): Promise<PUCourseResult
         totalCredits?: number;
       }>(session, "courses");
 
-      if (result?.success) {
+      // fetchPUCampusBackend 已驗證外層 success，這裡只需檢查 result 存在
+      if (result) {
         const normalized: PUCourseResult = {
           courses: result.courses ?? [],
           studentInfo: normalizeStudentInfo(result.studentInfo),
@@ -294,13 +337,24 @@ export async function refreshCourses(session: PUSession): Promise<PUCourseResult
           totalCredits: result.totalCredits ?? 0,
         };
         await writeCache(KEYS.courses, normalized);
+        console.log(`[puDataCache] refreshCourses backend OK: ${normalized.courses.length} courses`);
         return normalized;
       }
     } catch (error) {
       console.warn("[puDataCache] refreshCourses backend failed:", error);
+      // 後端模式失敗時不要 fallback 到直連（沒有 native cookie）
+      // 改為嘗試讀取已有快取
+      const cached = await getAnyCachedCourses();
+      if (cached) {
+        console.log("[puDataCache] refreshCourses: using existing cache as fallback");
+        return cached;
+      }
     }
+    // 後端模式下不 fallback 到 nativeFetch（無 cookie）
+    return null;
   }
 
+  // 直連模式（hybrid login）— native cookie jar 有效
   const result = await puFetchCourses(session);
   if (result.success && result.data) {
     await writeCache(KEYS.courses, result.data);
@@ -315,24 +369,31 @@ export async function refreshGrades(session: PUSession): Promise<PUGradeResult |
   if (session.backendSessionId) {
     try {
       const result = await fetchPUCampusBackend<{
-        success: boolean;
+        success?: boolean;
         grades?: PUGradeResult["grades"];
         allSemesters?: string[];
         summary?: PUGradeResult["summary"];
       }>(session, "grades");
 
-      if (result?.success) {
+      if (result) {
         const normalized: PUGradeResult = {
           grades: result.grades ?? [],
           allSemesters: result.allSemesters ?? [],
           summary: result.summary ?? {},
         };
         await writeCache(KEYS.grades, normalized);
+        console.log(`[puDataCache] refreshGrades backend OK: ${normalized.grades.length} grades`);
         return normalized;
       }
     } catch (error) {
       console.warn("[puDataCache] refreshGrades backend failed:", error);
+      const cached = await getAnyCachedGrades();
+      if (cached) {
+        console.log("[puDataCache] refreshGrades: using existing cache as fallback");
+        return cached;
+      }
     }
+    return null;
   }
 
   const result = await puFetchGrades(session);
@@ -349,18 +410,25 @@ export async function refreshAnnouncements(session: PUSession): Promise<PUAnnoun
   if (session.backendSessionId) {
     try {
       const result = await fetchPUCampusBackend<{
-        success: boolean;
+        success?: boolean;
         announcements?: PUAnnouncement[];
       }>(session, "announcements");
 
-      if (result?.success) {
+      if (result) {
         const normalized = result.announcements ?? [];
         await writeCache(KEYS.announcements, normalized);
+        console.log(`[puDataCache] refreshAnnouncements backend OK: ${normalized.length} items`);
         return normalized;
       }
     } catch (error) {
       console.warn("[puDataCache] refreshAnnouncements backend failed:", error);
+      const cached = await getAnyCachedAnnouncements();
+      if (cached) {
+        console.log("[puDataCache] refreshAnnouncements: using existing cache as fallback");
+        return cached;
+      }
     }
+    return null;
   }
 
   const result = await puFetchAnnouncements(session);
@@ -377,7 +445,7 @@ export async function refreshStudentInfo(session: PUSession): Promise<PUStudentI
   if (session.backendSessionId) {
     try {
       const result = await fetchPUCampusBackend<{
-        success: boolean;
+        success?: boolean;
         studentInfo?: {
           studentId?: string | null;
           name?: string | null;
@@ -390,14 +458,21 @@ export async function refreshStudentInfo(session: PUSession): Promise<PUStudentI
         } | null;
       }>(session, "studentInfo");
 
-      if (result?.success) {
+      if (result) {
         const normalized = normalizeStudentInfo(result.studentInfo);
         await writeCache(KEYS.studentInfo, normalized);
+        console.log(`[puDataCache] refreshStudentInfo backend OK: ${normalized.name}`);
         return normalized;
       }
     } catch (error) {
       console.warn("[puDataCache] refreshStudentInfo backend failed:", error);
+      const cached = await getAnyCachedStudentInfo();
+      if (cached) {
+        console.log("[puDataCache] refreshStudentInfo: using existing cache as fallback");
+        return cached;
+      }
     }
+    return null;
   }
 
   const result = await puFetchStudentInfo(session);
@@ -539,6 +614,9 @@ export type SyncAllOptions = {
 /**
  * 登入成功後呼叫：補抓延伸資料並存入快取。
  * 必要資料（學生資料/課表/成績/公告/TronClass 課程）應由登入 bootstrap 先完成。
+ *
+ * 重要：如果登入 bootstrap 已經 seed 了快取，這裡會先檢查快取是否已存在，
+ * 避免覆蓋或浪費網路請求。
  */
 export async function syncAllData(
   session: PUSession,
@@ -548,26 +626,55 @@ export async function syncAllData(
 
   const includeEssential = options.includeEssential === true;
 
-  const [courses, grades, announcements, studentInfo] = includeEssential
-    ? await Promise.all([
-        refreshCourses(session).catch((e) => {
-          console.warn("[puDataCache] courses sync error:", e);
-          return null;
-        }),
-        refreshGrades(session).catch((e) => {
-          console.warn("[puDataCache] grades sync error:", e);
-          return null;
-        }),
-        refreshAnnouncements(session).catch((e) => {
-          console.warn("[puDataCache] announcements sync error:", e);
-          return null;
-        }),
-        refreshStudentInfo(session).catch((e) => {
-          console.warn("[puDataCache] studentInfo sync error:", e);
-          return null;
-        }),
-      ])
-    : [null, null, null, null];
+  let courses: PUCourseResult | null = null;
+  let grades: PUGradeResult | null = null;
+  let announcements: PUAnnouncement[] | null = null;
+  let studentInfo: PUStudentInfo | null = null;
+
+  if (includeEssential) {
+    // 先檢查是否已有快取（登入 bootstrap 可能已 seed）
+    const [cachedCourses, cachedGrades, cachedAnn, cachedInfo] = await Promise.all([
+      getAnyCachedCourses(),
+      getAnyCachedGrades(),
+      getAnyCachedAnnouncements(),
+      getAnyCachedStudentInfo(),
+    ]);
+
+    // 只刷新尚未有快取的項目
+    const refreshTasks = await Promise.all([
+      cachedCourses
+        ? Promise.resolve(cachedCourses)
+        : refreshCourses(session).catch((e) => {
+            console.warn("[puDataCache] courses sync error:", e);
+            return null;
+          }),
+      cachedGrades
+        ? Promise.resolve(cachedGrades)
+        : refreshGrades(session).catch((e) => {
+            console.warn("[puDataCache] grades sync error:", e);
+            return null;
+          }),
+      cachedAnn
+        ? Promise.resolve(cachedAnn)
+        : refreshAnnouncements(session).catch((e) => {
+            console.warn("[puDataCache] announcements sync error:", e);
+            return null;
+          }),
+      cachedInfo
+        ? Promise.resolve(cachedInfo)
+        : refreshStudentInfo(session).catch((e) => {
+            console.warn("[puDataCache] studentInfo sync error:", e);
+            return null;
+          }),
+    ]);
+    [courses, grades, announcements, studentInfo] = refreshTasks;
+    console.log(
+      `[puDataCache] essential data: courses=${courses ? (courses as PUCourseResult).courses?.length ?? 0 : 'null'}, ` +
+      `grades=${grades ? (grades as PUGradeResult).grades?.length ?? 0 : 'null'}, ` +
+      `announcements=${announcements ? (announcements as PUAnnouncement[]).length : 'null'}, ` +
+      `studentInfo=${studentInfo ? (studentInfo as PUStudentInfo).name : 'null'}`
+    );
+  }
 
   const tcCourses =
     options.tcCourses ??

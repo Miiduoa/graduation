@@ -52,7 +52,15 @@ export type Permission =
   | "approval.reports"
   | "approval.department";
 
-export type AppRole = "student" | "teacher" | "professor" | "staff" | "principal" | "admin" | "alumni";
+export type AppRole =
+  | "student"
+  | "teacher"
+  | "professor"
+  | "staff"
+  | "department_head"
+  | "principal"
+  | "admin"
+  | "alumni";
 
 // Map roles to their effective role group for tab/feature decisions
 export type RoleGroup = "student" | "teacher" | "staff" | "department_head" | "admin";
@@ -64,6 +72,7 @@ export function getRoleGroup(role: AppRole): RoleGroup {
       return "teacher";
     case "staff":
       return "staff";
+    case "department_head":
     case "principal":
       return "department_head";
     case "admin":
@@ -303,6 +312,7 @@ export function getRoleDisplayName(role: AppRole): string {
     teacher: "教師",
     professor: "教授",
     staff: "職員",
+    department_head: "系所主管",
     principal: "系所主管",
     admin: "管理員",
     alumni: "校友",

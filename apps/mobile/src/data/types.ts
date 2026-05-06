@@ -234,12 +234,15 @@ export type UserRole =
   | 'student'
   | 'teacher'
   | 'professor'
+  | 'department_head'
   | 'principal'
   | 'admin'
   | 'staff'
   | 'alumni';
 
-export type RoleMode = 'guest' | 'student' | 'teacher' | 'admin';
+export type RoleGroup = 'student' | 'teacher' | 'staff' | 'department_head' | 'admin';
+
+export type RoleMode = 'guest' | RoleGroup;
 
 export type UserSettings = {
   language?: string;
@@ -412,7 +415,14 @@ export type AmbientCueSurface =
   | 'admin'
   | 'staff';
 
-export type AmbientCueRole = 'guest' | 'student' | 'teacher' | 'staff' | 'department' | 'admin';
+export type AmbientCueRole =
+  | 'guest'
+  | 'student'
+  | 'teacher'
+  | 'staff'
+  | 'department'
+  | 'department_head'
+  | 'admin';
 
 export type AmbientCueSignalType =
   | 'course_completion'
@@ -442,6 +452,292 @@ export type AmbientCue = {
   distinctUserCount: number;
   updatedAt: Date | null;
   dismissKey: string;
+};
+
+// ===== Campus Agent OS =====
+
+export type AgentActionKind =
+  | 'navigate'
+  | 'schedule_reminder'
+  | 'create_reminder_draft'
+  | 'split_assignment'
+  | 'start_navigation'
+  | 'draft_message'
+  | 'queue_action'
+  | 'reserve_draft'
+  | 'submit_draft'
+  | 'check_in'
+  | 'open_url';
+
+export type CampusActorRole =
+  | 'student'
+  | 'teacher'
+  | 'staff'
+  | 'department'
+  | 'department_head'
+  | 'admin'
+  | 'school';
+
+export type ActionPrecondition =
+  | 'signed_in'
+  | 'is_self'
+  | 'school_member'
+  | 'group_member'
+  | 'group_manager'
+  | 'teaching_staff'
+  | 'service_staff'
+  | 'admin';
+
+export type ActionEffect =
+  | 'navigate_only'
+  | 'create_draft'
+  | 'schedule_local_reminder'
+  | 'write_user_queue'
+  | 'write_group_data'
+  | 'write_school_data';
+
+export type RoleActionPolicy = {
+  role: CampusActorRole;
+  allowedActions: Array<AgentActionKind | string>;
+  preconditions: ActionPrecondition[];
+  effects: ActionEffect[];
+};
+
+export type AcademicAuthoritySource = 'tronclass' | 'e_campus' | 'firebase_projection';
+
+export type AcademicSourceSnapshot = {
+  id: string;
+  userId: string;
+  schoolId: string;
+  sources: CampusRoleDataSource[];
+  sourceAuthority: AcademicAuthoritySource[];
+  courses?: Course[];
+  grades?: Grade[];
+  attendance?: AttendanceSummary[];
+  inboxTasks?: InboxTask[];
+  generatedAt: Date | null;
+  expiresAt?: Date | null;
+};
+
+export type AuthorizedAcademicContext = {
+  userId: string;
+  schoolId: string;
+  roleGroup: Exclude<CampusActorRole, 'department' | 'school'>;
+  snapshot: AcademicSourceSnapshot;
+  canReadOwnAcademicProjection: boolean;
+  managedCourseIds: string[];
+  serviceDomains: string[];
+};
+
+export type ActionQueueStatus = 'draft' | 'pending_confirmation' | 'confirmed' | 'dismissed';
+
+export type ActionQueuePermissionScope =
+  | 'public'
+  | 'school_public'
+  | 'user_private'
+  | 'academic_private';
+
+export type ActionQueueItem = {
+  id: string;
+  userId: string;
+  schoolId?: string;
+  label: string;
+  action: AgentActionKind | string;
+  params?: Record<string, unknown>;
+  requiresConfirmation: true;
+  sensitivity?: 'low' | 'medium' | 'high' | 'sensitive';
+  evidenceRefs?: EvidenceRef[];
+  status: ActionQueueStatus;
+  actorRole: CampusActorRole;
+  permissionScope: ActionQueuePermissionScope;
+  createdAt?: Date | null;
+  updatedAt?: Date | null;
+  confirmedAt?: Date | null;
+};
+
+export type EvidenceRef = {
+  type:
+    | 'assignment'
+    | 'course'
+    | 'announcement'
+    | 'event'
+    | 'poi'
+    | 'menu'
+    | 'grade'
+    | 'attendance'
+    | 'pulse'
+    | 'risk'
+    | 'web'
+    | 'system';
+  id: string;
+  label?: string;
+  source?: string;
+};
+
+export type AssistantActionProposal = {
+  label: string;
+  action: AgentActionKind | string;
+  params?: Record<string, unknown>;
+  requiresConfirmation?: boolean;
+  sensitivity?: 'low' | 'medium' | 'high' | 'sensitive';
+  permissionScope?: ActionQueuePermissionScope;
+  evidenceRefs?: EvidenceRef[];
+  status?: 'proposed' | 'draft' | 'pending_confirmation' | 'confirmed' | 'dismissed';
+};
+
+export type NextBestAction = {
+  id: string;
+  title: string;
+  description: string;
+  priority: number;
+  urgency: InboxUrgency;
+  reason: string;
+  consequence?: string;
+  nextStep: string;
+  actionLabel: string;
+  actionTarget?: {
+    tab?: string;
+    screen?: string;
+    params?: Record<string, unknown>;
+  };
+  evidenceRefs: EvidenceRef[];
+  requiresConfirmation: boolean;
+  source: 'inbox' | 'ai' | 'risk' | 'pulse' | 'system';
+  dueAt?: Date | null;
+  createdAt?: Date | null;
+};
+
+export type CampusContextNode = {
+  id: string;
+  type: EvidenceRef['type'] | 'user' | 'time' | 'location';
+  label: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type CampusContextEdge = {
+  from: string;
+  to: string;
+  relation:
+    | 'scheduled_at'
+    | 'located_at'
+    | 'requires'
+    | 'affects'
+    | 'recommended_for'
+    | 'evidenced_by'
+    | 'owned_by';
+  weight?: number;
+};
+
+export type CampusContextGraph = {
+  id: string;
+  schoolId: string;
+  userId?: string;
+  nodes: CampusContextNode[];
+  edges: CampusContextEdge[];
+  updatedAt?: Date | null;
+};
+
+export type LearningSignal = {
+  id: string;
+  userId: string;
+  schoolId?: string;
+  type: 'late_assignment' | 'missing_submission' | 'low_grade' | 'attendance_drop' | 'workload_spike' | 'positive_momentum';
+  severity: number;
+  title: string;
+  description: string;
+  courseId?: string;
+  groupId?: string;
+  evidenceRefs: EvidenceRef[];
+  createdAt?: Date | null;
+};
+
+export type AgentRiskLevel = 'safe' | 'watch' | 'warning' | 'critical';
+
+export type StudentRiskSnapshot = {
+  id: string;
+  userId: string;
+  schoolId?: string;
+  level: AgentRiskLevel;
+  score: number;
+  summary: string;
+  signals: LearningSignal[];
+  recommendedActions: NextBestAction[];
+  generatedAt?: Date | null;
+};
+
+export type PulseAggregate = {
+  id: string;
+  schoolId: string;
+  locationId: string;
+  locationName: string;
+  category: 'library' | 'dining' | 'parking' | 'gym' | 'study' | 'classroom' | 'service' | 'other';
+  currentLevel: 1 | 2 | 3 | 4 | 5;
+  confidence: number;
+  sampleSize: number;
+  reportCount24h: number;
+  trend: 'rising' | 'falling' | 'stable';
+  bestTimeToVisit?: string;
+  updatedAt?: Date | null;
+};
+
+export type CampusRoleDataState = 'real' | 'authorized' | 'missing' | 'blocked';
+
+export type CampusRoleActionStatus =
+  | 'live'
+  | 'ready'
+  | 'needs_data'
+  | 'needs_confirmation'
+  | 'blocked';
+
+export type CampusRoleDataSource = {
+  key: string;
+  label: string;
+  state: CampusRoleDataState;
+  detail: string;
+  evidenceRefs?: EvidenceRef[];
+};
+
+export type CampusRoleActionNode = {
+  id: string;
+  role: CampusActorRole;
+  label: string;
+  title: string;
+  description: string;
+  status: CampusRoleActionStatus;
+  sourceState: CampusRoleDataState;
+  count?: number;
+  countLabel?: string;
+  active: boolean;
+  actionLabel: string;
+  actionTarget?: {
+    tab?: string;
+    screen?: string;
+    params?: Record<string, unknown>;
+  };
+  evidenceRefs: EvidenceRef[];
+};
+
+export type CampusRoleActionEdge = {
+  id: string;
+  from: CampusActorRole;
+  to: CampusActorRole;
+  trigger: string;
+  result: string;
+  status: CampusRoleActionStatus;
+  dataContract: string;
+  confirmationPolicy: 'none' | 'user_confirm' | 'operator_confirm' | 'admin_confirm';
+  evidenceRefs: EvidenceRef[];
+};
+
+export type CampusRoleActionGraph = {
+  id: string;
+  userId?: string;
+  schoolId?: string;
+  activeRoles: CampusActorRole[];
+  nodes: CampusRoleActionNode[];
+  edges: CampusRoleActionEdge[];
+  dataSources: CampusRoleDataSource[];
+  generatedAt: Date;
 };
 
 export type CourseMaterial = {

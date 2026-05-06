@@ -7,3 +7,5 @@ export * from "./cachedSource";
 export * from "./hybridSource";
 export * from "./apiConfig";
 export * from "./courseSpaceSource";
+export * from "./campusAgentSource";
+export * from "./aiAssistantProfile";

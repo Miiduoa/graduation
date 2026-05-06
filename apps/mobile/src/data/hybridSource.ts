@@ -35,6 +35,12 @@ import {
   startAttendanceSession as startCourseAttendanceSession,
   submitQuiz as submitCourseSpaceQuiz,
 } from "./courseSpaceSource";
+import {
+  listNextBestActions as listAgentNextBestActions,
+  listPulseAggregates as listAgentPulseAggregates,
+  listRiskSnapshots as listAgentRiskSnapshots,
+  submitPulseReport as submitAgentPulseReport,
+} from "./campusAgentSource";
 import { firebaseSource } from "./firebaseSource";
 import { mockSource } from "./mockSource";
 import {
@@ -83,6 +89,7 @@ async function listProvidenceEnrollments(
 export type HybridSourceConfig = {
   preferRealApi: boolean;
   fallbackToMock: boolean;
+  enforceRealDataForCriticalDomains: boolean;
   cacheRealApiResults: boolean;
   realApiTimeout: number;
 };
@@ -90,6 +97,7 @@ export type HybridSourceConfig = {
 const defaultConfig: HybridSourceConfig = {
   preferRealApi: true,
   fallbackToMock: true,
+  enforceRealDataForCriticalDomains: false,
   cacheRealApiResults: true,
   realApiTimeout: 10000,
 };
@@ -100,6 +108,16 @@ const PROVIDENCE_NO_MOCK_FALLBACK_METHODS = new Set([
   "listAnnouncements",
   "listCourses",
   "listGrades",
+]);
+const CRITICAL_NO_MOCK_FALLBACK_METHODS = new Set([
+  "listAnnouncements",
+  "listCourses",
+  "listGrades",
+  "listEnrollments",
+  "listAssignments",
+  "listAttendanceSessions",
+  "listInboxTasks",
+  "listQuizzes",
 ]);
 
 export function configureHybridSource(newConfig: Partial<HybridSourceConfig>): void {
@@ -149,9 +167,13 @@ async function fetchWithFallback<T>(
   const disableMockFallback =
     isProvidenceSchoolId(publicSchoolId) &&
     PROVIDENCE_NO_MOCK_FALLBACK_METHODS.has(apiMethod);
+  const disableCriticalFallback =
+    config.enforceRealDataForCriticalDomains &&
+    CRITICAL_NO_MOCK_FALLBACK_METHODS.has(apiMethod);
+  const shouldDisableFallback = disableMockFallback || disableCriticalFallback;
 
   if (!config.preferRealApi || !hasAdapter(adapterSchoolId)) {
-    if (disableMockFallback) {
+    if (shouldDisableFallback) {
       throw new Error(`Providence adapter unavailable for ${apiMethod}`);
     }
     return mockMethod();
@@ -161,7 +183,7 @@ async function fetchWithFallback<T>(
     const adapter = await getAdapter(adapterSchoolId);
     if (!adapter) {
       console.warn(`[HybridSource] No adapter for ${adapterSchoolId}, using mock`);
-      if (disableMockFallback) {
+      if (shouldDisableFallback) {
         throw new Error(`Providence adapter unavailable for ${apiMethod}`);
       }
       return mockMethod();
@@ -187,7 +209,7 @@ async function fetchWithFallback<T>(
   } catch (error) {
     console.warn(`[HybridSource] API error for ${apiMethod}:`, error);
     
-    if (config.fallbackToMock && !disableMockFallback) {
+    if (config.fallbackToMock && !shouldDisableFallback) {
       console.info(`[HybridSource] Falling back to mock data for ${apiMethod}`);
       return mockMethod();
     }
@@ -399,6 +421,45 @@ export const hybridSource: DataSource = {
   },
   getCourseGradebook: async (courseSpaceId: string) => {
     return getCourseGradebook(courseSpaceId);
+  },
+  listNextBestActions: async (userId: string, schoolId?: string) => {
+    return listAgentNextBestActions(userId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  listRiskSnapshots: async (userId: string, schoolId?: string) => {
+    return listAgentRiskSnapshots(userId, schoolId ?? currentSchoolContextId ?? undefined);
+  },
+  listPulseAggregates: async (schoolId?: string) => {
+    return listAgentPulseAggregates(schoolId ?? currentSchoolContextId ?? DEFAULT_SCHOOL);
+  },
+  submitPulseReport: async (input) => {
+    return submitAgentPulseReport({
+      ...input,
+      schoolId: input.schoolId ?? currentSchoolContextId ?? DEFAULT_SCHOOL,
+    });
+  },
+  createActionQueueItem: async (input) => {
+    try {
+      if (!firebaseSource.createActionQueueItem) {
+        throw new Error("Firebase action queue is not available");
+      }
+      return await firebaseSource.createActionQueueItem({
+        ...input,
+        schoolId: input.schoolId ?? currentSchoolContextId ?? undefined,
+      });
+    } catch (error) {
+      if (input.sensitivity === "high" || input.sensitivity === "sensitive") {
+        console.warn("[HybridSource] createActionQueueItem failed for sensitive action; not falling back to mock:", error);
+        throw error;
+      }
+      console.warn("[HybridSource] Falling back to mock action queue:", error);
+      if (!mockSource.createActionQueueItem) {
+        throw error;
+      }
+      return mockSource.createActionQueueItem({
+        ...input,
+        schoolId: input.schoolId ?? currentSchoolContextId ?? DEFAULT_SCHOOL,
+      });
+    }
   },
   
   listEnrollments: async (userId: string, semester?: string, schoolId?: string) => {
@@ -653,8 +714,8 @@ export const hybridSource: DataSource = {
     try {
       return await firebaseSource.createOrder(data);
     } catch (error) {
-      console.warn("[HybridSource] Falling back to mock createOrder:", error);
-      return mockSource.createOrder(data);
+      console.warn("[HybridSource] createOrder failed; not falling back to mock because orders must reach the restaurant ordering backend:", error);
+      throw error;
     }
   },
   updateOrderStatus: async (id: string, status: Order["status"], userId?: string, schoolId?: string) => {

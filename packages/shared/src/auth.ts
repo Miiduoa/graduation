@@ -1,6 +1,8 @@
 export type SSOProvider = "oidc" | "cas" | "saml";
 
-export type AuthRole = "student" | "teacher" | "admin" | "staff";
+export type AuthRole = "student" | "teacher" | "admin" | "staff" | "department_head";
+
+export type RoleGroup = "student" | "teacher" | "staff" | "department_head" | "admin";
 
 export type SchoolMemberRole = "member" | "editor" | "admin";
 
@@ -364,8 +366,18 @@ export function normalizeSSOUserInfo(value: unknown): SSOUserInfo | null {
 export function normalizeAuthRole(value?: string | null): AuthRole {
   const normalized = (value ?? "").trim().toLowerCase();
 
-  if (normalized.includes("admin") || normalized.includes("principal")) {
+  if (normalized.includes("admin")) {
     return "admin";
+  }
+  if (
+    normalized.includes("department_head") ||
+    normalized.includes("principal") ||
+    normalized.includes("chair") ||
+    normalized.includes("director") ||
+    normalized.includes("系主任") ||
+    normalized.includes("主管")
+  ) {
+    return "department_head";
   }
   if (
     normalized.includes("teacher") ||
@@ -393,6 +405,14 @@ export function determineAuthRole(
   const type = (userInfo.userType ?? userInfo.affiliation ?? "").toLowerCase();
 
   if (type.includes("faculty") || type.includes("teacher") || type.includes("staff") || type.includes("employee")) {
+    if (
+      department.includes("系主任") ||
+      department.includes("主管") ||
+      department.includes("chair") ||
+      department.includes("director")
+    ) {
+      return "department_head";
+    }
     if (department.includes("admin") || department.includes("行政")) {
       return "admin";
     }
@@ -408,8 +428,12 @@ export function determineAuthRole(
 
 export function toSchoolMemberRole(role: AuthRole): SchoolMemberRole {
   if (role === "admin") return "admin";
-  if (role === "teacher" || role === "staff") return "editor";
+  if (role === "teacher" || role === "staff" || role === "department_head") return "editor";
   return "member";
+}
+
+export function getRoleGroupForAuthRole(role: AuthRole): RoleGroup {
+  return role;
 }
 
 export function getSSOProviderName(schoolConfig?: SchoolSSOConfig | null): string {

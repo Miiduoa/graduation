@@ -24,6 +24,7 @@ import { FeedbackScreen } from "./FeedbackScreen";
 import { HelpScreen } from "./HelpScreen";
 import { MerchantHubScreen } from "./MerchantHubScreen";
 import { CreditAuditStack } from "./CreditAuditStack";
+import AIModelManagerScreen from "./AIModelManagerScreen";
 import { useThemeMode } from "../state/theme";
 import { createStackScreenOptions } from "../ui/navigationTheme";
 import { RouteGuard } from "../ui/RouteGuard";
@@ -70,6 +71,7 @@ export function MeStack() {
       <Stack.Screen name="WidgetPreview" component={WidgetPreviewScreen} options={{ title: "小工具" }} />
       <Stack.Screen name="CreditAuditStack" component={CreditAuditStack} options={{ headerShown: false }} />
 
+      <Stack.Screen name="AIModelManager" component={AIModelManagerScreen} options={{ title: "AI 模型管理" }} />
       <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: "設定" }} />
       <Stack.Screen name="LanguageSettings" component={LanguageSettingsScreen} options={{ title: "語言設定" }} />
       <Stack.Screen name="AccessibilitySettings" component={AccessibilitySettingsScreen} options={{ title: "無障礙設定" }} />

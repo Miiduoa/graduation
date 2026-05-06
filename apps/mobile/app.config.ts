@@ -217,6 +217,8 @@ export default ({ config }: any) => {
     ],
     ...(featureAvailability.widgets ? ['./src/widgets/expo-widget-plugin.js'] : []),
   ];
+  const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'offline';
+  const releaseAiProvider = isReleaseLike ? 'cloud' : configuredAiProvider;
 
   const androidIntentFilters = [
     {
@@ -310,8 +312,13 @@ export default ({ config }: any) => {
       errorReportingEndpoint,
       firebase,
       cloudFunctionRegion: process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1',
-      aiProvider: process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'local-llm',
-      aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? 'https://campus-ai-server-7jws.onrender.com',
+      // Release builds must always use the backend proxy. Local Ollama/offline AI is only
+      // for development, training, and evaluation; it cannot be an App Store dependency.
+      aiProvider: releaseAiProvider,
+      aiRuntimeMode: isReleaseLike ? 'production-backend' : 'development-configured',
+      aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
+      aiWebSearchEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, true),
+      aiWebLearningEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, true),
       enableMockSSO: !isReleaseLike && process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === 'true',
       enableUniversalDevAccounts,
       eas: {

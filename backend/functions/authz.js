@@ -53,16 +53,39 @@ function hasActiveCafeteriaOperator(value = {}) {
   return normalizeCafeteriaOperatorRecord(value).status === "active";
 }
 
+function toRoleGroup(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  if (normalized === "admin") return "admin";
+  if (
+    normalized === "department_head" ||
+    normalized === "principal" ||
+    normalized === "department" ||
+    normalized.includes("chair") ||
+    normalized.includes("director") ||
+    normalized.includes("系主任") ||
+    normalized.includes("主管")
+  ) {
+    return "department_head";
+  }
+  if (normalized === "teacher" || normalized === "professor" || normalized === "faculty") return "teacher";
+  if (normalized === "staff" || normalized === "employee") return "staff";
+  return "student";
+}
+
 function toSchoolMemberRole(role) {
-  if (role === "admin") return "admin";
-  if (role === "teacher" || role === "staff") return "editor";
+  const roleGroup = toRoleGroup(role);
+  if (roleGroup === "admin") return "admin";
+  if (roleGroup === "teacher" || roleGroup === "staff" || roleGroup === "department_head") return "editor";
   return "member";
 }
 
 function resolveDirectoryRoleLabel(membershipRole, appRole = null) {
-  if (membershipRole === "admin" || appRole === "admin") return "管理員";
+  const roleGroup = toRoleGroup(appRole);
+  if (membershipRole === "admin" || roleGroup === "admin") return "管理員";
+  if (roleGroup === "department_head") return "系所主管";
   if (membershipRole === "editor") return "編輯者";
-  if (appRole === "teacher" || appRole === "staff") return "教學成員";
+  if (roleGroup === "teacher") return "教學成員";
+  if (roleGroup === "staff") return "職員";
   return "學生";
 }
 
@@ -212,5 +235,6 @@ module.exports = {
   normalizeCafeteriaOperatorRecord,
   normalizeServiceRoleRecord,
   resolveDirectoryRoleLabel,
+  toRoleGroup,
   toSchoolMemberRole,
 };

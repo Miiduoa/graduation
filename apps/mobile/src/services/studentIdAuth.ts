@@ -125,7 +125,7 @@ async function tryBackendUnifiedLogin(
     console.log("[studentIdAuth] Trying backend unified login…");
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000); // 8 秒逾時
+    const timeout = setTimeout(() => controller.abort(), 2000); // 2 秒逾時（Cloud Functions 未部署時快速失敗）
 
     let response: Response;
     try {
@@ -262,18 +262,20 @@ async function handleBackendLoginSuccess(
   } catch { /* Adapter 尚未註冊 */ }
 
   // 快取後端回傳的資料（如果有的話）
+  let seededCount = 0;
   if (data.courses) {
-    try { await seedCachedCourses(data.courses); } catch { /* ignore */ }
+    try { await seedCachedCourses(data.courses); seededCount++; } catch (e) { console.warn("[studentIdAuth] seed courses error:", e); }
   }
   if (data.grades) {
-    try { await seedCachedGrades(data.grades); } catch { /* ignore */ }
+    try { await seedCachedGrades(data.grades); seededCount++; } catch (e) { console.warn("[studentIdAuth] seed grades error:", e); }
   }
   if (data.studentInfo) {
-    try { await seedCachedStudentInfo(data.studentInfo); } catch { /* ignore */ }
+    try { await seedCachedStudentInfo(data.studentInfo); seededCount++; } catch (e) { console.warn("[studentIdAuth] seed studentInfo error:", e); }
   }
   if (data.announcements) {
-    try { await seedCachedAnnouncements(data.announcements); } catch { /* ignore */ }
+    try { await seedCachedAnnouncements(data.announcements); seededCount++; } catch (e) { console.warn("[studentIdAuth] seed announcements error:", e); }
   }
+  console.log(`[studentIdAuth] Seeded ${seededCount}/4 data types from backend`);
 
   // ── 建立帳號（先存 auth session，讓使用者立刻看到登入成功）──
   progress('linking', '建立 Campus One 帳號');
@@ -339,12 +341,13 @@ async function handleBackendLoginSuccess(
 }
 
 /**
- * 策略 B: 手機直連 E校園 + 後端代理 TronClass
+ * 策略 B: 手機直連 E校園 + TronClass
  *
  * 當後端統一登入不可用時（Cloud Functions 未部署、網路問題等），
  * 降級為：
  *   1. 手機直接連 alcat.pu.edu.tw 登入 E校園
  *   2. 同一組帳密直接登入 TronClass（原生 API /api/login）
+ *   3. 如果 E校園 失敗但 TronClass 成功 → 仍允許登入（TronClass-only 模式）
  *
  * 重要：E校園 和 TronClass 共用同一組帳密（使用者輸入的那組）。
  *       帳號 ≠ 學號（例如帳號 B11234567，學號 411211325）。
@@ -356,63 +359,124 @@ async function handleHybridLogin(
 ): Promise<StudentIdLoginResult> {
   const password = params.password;
 
-  // ── Step 1: 手機直連 E校園 ──
-  progress('authenticating', '連線 E 校園');
-  const loginResult = await puLogin(userAccount, password);
-  if (!loginResult.success || !loginResult.session) {
-    throw new Error(loginResult.error ?? '登入失敗，請確認學號和密碼是否正確');
+  // ── Step 1: 同時嘗試 E校園 + TronClass 登入（平行化加速） ──
+  progress('authenticating', '連線校園系統');
+
+  // 先嘗試 TronClass 原生 API（快速、可靠）
+  let tcLoginOk = false;
+  let tcSession: { userId: number | null; userName: string | null } | null = null;
+  const tcLoginPromise = (async () => {
+    try {
+      console.log('[studentIdAuth] Hybrid: TronClass login (parallel)…');
+      const { tcLogin } = await import('./tronClassClient');
+      const tcResult = await tcLogin(userAccount, password);
+      if (tcResult.success && tcResult.session) {
+        tcLoginOk = true;
+        tcSession = { userId: tcResult.session.userId, userName: tcResult.session.userName };
+        console.log('[studentIdAuth] Hybrid: TronClass login OK, user:', tcResult.session.userName);
+      } else {
+        console.warn('[studentIdAuth] Hybrid: TronClass login failed:', tcResult.error);
+      }
+      return tcResult;
+    } catch (err) {
+      console.warn('[studentIdAuth] Hybrid: TronClass login error:', err);
+      return null;
+    }
+  })();
+
+  // 同時嘗試 E校園 直連
+  let puLoginOk = false;
+  let session: PUSession | null = null;
+  const puLoginPromise = (async () => {
+    try {
+      console.log('[studentIdAuth] Hybrid: E-campus login (parallel)…');
+      const loginResult = await puLogin(userAccount, password);
+      if (loginResult.success && loginResult.session) {
+        puLoginOk = true;
+        session = loginResult.session;
+        console.log('[studentIdAuth] Hybrid: E-campus login OK');
+      } else {
+        console.warn('[studentIdAuth] Hybrid: E-campus login failed:', loginResult.error);
+      }
+      return loginResult;
+    } catch (err) {
+      console.warn('[studentIdAuth] Hybrid: E-campus login error:', err);
+      return null;
+    }
+  })();
+
+  // 等待兩者完成
+  await Promise.allSettled([tcLoginPromise, puLoginPromise]);
+
+  // ── 判斷登入結果 ──
+  if (!puLoginOk && !tcLoginOk) {
+    // 兩邊都失敗 → 可能是真的帳密錯誤
+    throw new Error('帳號或密碼錯誤，請確認後再試（E校園和 TronClass 均無法登入）');
   }
 
-  const session = loginResult.session;
-  _currentPUSession = session;
+  // 如果 E校園 成功，使用它的 session
+  if (puLoginOk && session) {
+    _currentPUSession = session;
+    try {
+      const adapter = await getAdapter('tw-pu');
+      if (adapter && adapter instanceof PUAdapter) {
+        adapter.setDirectSession(session, userAccount);
+      }
+    } catch { /* Adapter 尚未註冊 */ }
+  } else {
+    // E校園 失敗但 TronClass 成功 → 建立一個最小 session
+    console.log('[studentIdAuth] Hybrid: E-campus failed, using TronClass-only mode');
+    session = { loggedIn: true, studentName: tcSession?.userName ?? null };
+    _currentPUSession = session;
+  }
 
-  // 注入 PUAdapter
-  try {
-    const adapter = await getAdapter('tw-pu');
-    if (adapter && adapter instanceof PUAdapter) {
-      adapter.setDirectSession(session, userAccount);
-    }
-  } catch { /* Adapter 尚未註冊 */ }
-
-  // ── Step 2: 同步抓取 E 校園核心資料 ──
-  progress('syncingCampus', '同步 E 校園資料');
-  console.log('[studentIdAuth] Hybrid: fetching E-campus data…');
-  const [studentInfoResult] = await Promise.allSettled([
-    refreshStudentInfo(session),
-    refreshCourses(session),
-    refreshGrades(session),
-    refreshAnnouncements(session),
-  ]);
-
-  let displayName = session.studentName ?? `${userAccount} 同學`;
+  // ── Step 2: 嘗試同步 E校園 資料（如果 E校園 有連上） ──
+  let displayName = session!.studentName ?? tcSession?.userName ?? `${userAccount} 同學`;
   let department = '';
   let realStudentId = userAccount;
 
-  if (studentInfoResult.status === 'fulfilled' && studentInfoResult.value) {
-    const info = studentInfoResult.value;
-    if (info.name) displayName = info.name;
-    if (info.studentId) realStudentId = info.studentId;
-    if (info.className) department = info.className;
-  } else {
+  if (puLoginOk) {
+    progress('syncingCampus', '同步 E 校園資料');
+    console.log('[studentIdAuth] Hybrid: fetching E-campus data…');
+    const [studentInfoResult] = await Promise.allSettled([
+      refreshStudentInfo(session!),
+      refreshCourses(session!),
+      refreshGrades(session!),
+      refreshAnnouncements(session!),
+    ]);
+
+    if (studentInfoResult.status === 'fulfilled' && studentInfoResult.value) {
+      const info = studentInfoResult.value;
+      if (info.name) displayName = info.name;
+      if (info.studentId) realStudentId = info.studentId;
+      if (info.className) department = info.className;
+    } else {
+      try {
+        const infoResult = await puFetchStudentInfo(session!);
+        if (infoResult.success && infoResult.data) {
+          if (infoResult.data.name) displayName = infoResult.data.name;
+          if (infoResult.data.studentId) realStudentId = infoResult.data.studentId;
+          if (infoResult.data.className) department = infoResult.data.className;
+        }
+      } catch { /* ignore */ }
+    }
+
+    // 重新注入 PUAdapter（用 realStudentId）
     try {
-      const infoResult = await puFetchStudentInfo(session);
-      if (infoResult.success && infoResult.data) {
-        if (infoResult.data.name) displayName = infoResult.data.name;
-        if (infoResult.data.studentId) realStudentId = infoResult.data.studentId;
-        if (infoResult.data.className) department = infoResult.data.className;
+      const adapter = await getAdapter('tw-pu');
+      if (adapter && adapter instanceof PUAdapter) {
+        adapter.setDirectSession(session!, realStudentId);
       }
     } catch { /* ignore */ }
+  } else {
+    progress('syncingCampus', 'E校園暫時無法連線，使用 TronClass 資料');
+    // TronClass-only mode: 從 TronClass 取得基本使用者資訊
+    if (tcSession?.userName) {
+      displayName = tcSession.userName;
+    }
   }
 
-  // 重新注入 PUAdapter（用 realStudentId）
-  try {
-    const adapter = await getAdapter('tw-pu');
-    if (adapter && adapter instanceof PUAdapter) {
-      adapter.setDirectSession(session, realStudentId);
-    }
-  } catch { /* ignore */ }
-
-  // ── Step 3: 建立帳號（先存 auth session，讓使用者立刻看到登入成功）──
+  // ── Step 3: 建立帳號 ──
   progress('linking', '建立 Campus One 帳號');
 
   const email = `${realStudentId.toLowerCase()}@pu.edu.tw`;
@@ -439,26 +503,36 @@ async function handleHybridLogin(
     department,
     role: 'student',
     schoolId: params.schoolId,
-    session,
+    session: session!,
   };
 
-  // ── Step 4: TronClass 登入 + 資料同步（必須等待完成）──
-  progress('syncingTronClass', '登入 TronClass');
-  try {
-    console.log('[studentIdAuth] Hybrid: TronClass login…');
-    const { tcLogin } = await import('./tronClassClient');
-    const tcResult = await tcLogin(userAccount, password);
-    console.log('[studentIdAuth] Hybrid: TronClass', tcResult.success ? 'OK' : 'FAILED');
-  } catch (err) {
-    console.warn('[studentIdAuth] Hybrid: TronClass login error (continuing):', err);
-  }
+  // ── Step 4: TronClass 資料同步（如果 TronClass 已登入就同步資料）──
+  if (tcLoginOk) {
+    progress('syncingTronClass', '同步 TronClass 課程資料');
+    try {
+      await syncAllData(session!, { includeEssential: true });
+      console.log('[studentIdAuth] Hybrid: syncAllData completed');
+    } catch (err) {
+      console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
+    }
+  } else if (!tcLoginOk && puLoginOk) {
+    // E校園 成功但 TronClass 失敗 → 再試一次 TronClass
+    progress('syncingTronClass', '登入 TronClass');
+    try {
+      const { tcLogin } = await import('./tronClassClient');
+      const retryResult = await tcLogin(userAccount, password);
+      console.log('[studentIdAuth] Hybrid: TronClass retry', retryResult.success ? 'OK' : 'FAILED');
+    } catch (err) {
+      console.warn('[studentIdAuth] Hybrid: TronClass retry error (continuing):', err);
+    }
 
-  progress('syncingTronClass', '同步 TronClass 課程資料');
-  try {
-    await syncAllData(session, { includeEssential: true });
-    console.log('[studentIdAuth] Hybrid: syncAllData completed');
-  } catch (err) {
-    console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
+    progress('syncingTronClass', '同步 TronClass 課程資料');
+    try {
+      await syncAllData(session!, { includeEssential: true });
+      console.log('[studentIdAuth] Hybrid: syncAllData completed');
+    } catch (err) {
+      console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
+    }
   }
 
   return result;

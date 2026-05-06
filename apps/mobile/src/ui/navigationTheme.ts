@@ -5,8 +5,7 @@ import { Platform } from "react-native";
 
 /**
  * 浮動 Tab Bar 所需的 ScrollView 底部留白。
- * Tab Bar 高度 72px + 底部偏移 ~44px（含 safe area）= 116px，加 8px 喘息空間 = 124px。
- * 此值供所有 ScrollView/FlatList 的 contentContainerStyle.paddingBottom 使用。
+ * Tab Bar 高度 68px + 底部偏移 ~44px（含 safe area）= 112px，加 12px 喘息空間 = 124px。
  */
 export const TAB_BAR_CONTENT_BOTTOM_PADDING = 124;
 
@@ -14,7 +13,7 @@ export function createStackScreenOptions(): NativeStackNavigationOptions {
   const isDark = theme.mode === "dark";
   return {
     headerStyle: {
-      backgroundColor: isDark ? theme.colors.surface : "#FFFFFF",
+      backgroundColor: isDark ? theme.colors.surface : theme.colors.bg,
     },
     headerTitleStyle: {
       color: theme.colors.text,
@@ -32,36 +31,35 @@ export function createStackScreenOptions(): NativeStackNavigationOptions {
 
 export function createTabScreenOptions(_routeName: string): BottomTabNavigationOptions {
   const isDark = theme.mode === "dark";
-  const shadow = theme.shadows.md;
   return {
     headerShown: false,
     tabBarStyle: {
       position: "absolute",
-      left: 16,
-      right: 16,
-      bottom: Platform.OS === "ios" ? 28 : 16,
-      backgroundColor: isDark ? theme.colors.surface : "#FFFFFF",
+      left: 20,
+      right: 20,
+      bottom: Platform.OS === "ios" ? 30 : 18,
+      backgroundColor: isDark ? theme.colors.surface : "#FFFFFFEE",
       borderTopColor: "transparent",
       borderTopWidth: 0,
       borderRadius: theme.radius.xl,
-      height: 72,
-      paddingTop: 9,
-      paddingBottom: 9,
-      paddingHorizontal: 10,
-      borderWidth: 1,
-      borderColor: isDark ? theme.colors.border : "#E5E5EA",
-      ...shadowStyle(shadow),
+      height: 68,
+      paddingTop: 8,
+      paddingBottom: 8,
+      paddingHorizontal: 8,
+      borderWidth: isDark ? 1 : 0,
+      borderColor: isDark ? theme.colors.border : "transparent",
+      ...shadowStyle(theme.shadows.lg),
     },
     tabBarLabelStyle: {
       fontSize: 10,
       fontWeight: "600",
-      letterSpacing: 0.2,
-      marginTop: 2,
+      letterSpacing: 0.3,
+      marginTop: 1,
     },
     tabBarActiveTintColor: theme.colors.accent,
     tabBarInactiveTintColor: theme.colors.muted,
     tabBarItemStyle: {
-      borderRadius: theme.radius.sm,
+      borderRadius: theme.radius.md,
       paddingVertical: 4,
     },
     sceneStyle: { backgroundColor: theme.colors.bg },

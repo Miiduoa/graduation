@@ -1,8 +1,10 @@
 /* eslint-disable */
 import React, { useMemo } from "react";
-import { Alert, Pressable, ScrollView, Text, View } from "react-native";
+import { Alert, Pressable, ScrollView, Text, View, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
+import { BlurView } from "expo-blur";
 
 import { useAuth } from "../state/auth";
 import { useSchool } from "../state/school";
@@ -31,22 +33,42 @@ type SettingRow = {
   badge?: number;
 };
 
-function SoftPanel(props: {
+// ─── Glass Panel ────────────────────────────────────────
+function GlassPanel(props: {
   children: React.ReactNode;
-  tint?: string;
   padding?: number;
   style?: any;
 }) {
+  const isDark = theme.mode === "dark";
+  const padding = props.padding ?? 20;
+
+  if (Platform.OS === "ios") {
+    return (
+      <View style={[{ borderRadius: 22, overflow: "hidden" }, props.style]}>
+        <BlurView
+          intensity={40}
+          tint={isDark ? "dark" : "light"}
+          style={{
+            padding,
+            borderRadius: 22,
+            overflow: "hidden",
+            backgroundColor: isDark ? "rgba(26,22,37,0.75)" : "rgba(255,255,255,0.72)",
+          }}
+        >
+          {props.children}
+        </BlurView>
+      </View>
+    );
+  }
+
   return (
     <View
       style={[
         {
-          borderRadius: theme.radius.lg,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface,
-          padding: props.padding ?? 20,
-          ...softShadowStyle(theme.shadows.soft),
+          backgroundColor: isDark ? theme.colors.surface : "#FFFFFF",
+          borderRadius: 22,
+          padding,
+          ...shadowStyle(theme.shadows.md),
         },
         props.style,
       ]}
@@ -56,75 +78,71 @@ function SoftPanel(props: {
   );
 }
 
-function SectionHeading(props: { eyebrow: string; title: string }) {
+// ─── Section Header ─────────────────────────────────────
+function SectionHeader({ title }: { title: string }) {
   return (
-    <View style={{ marginBottom: 14, gap: 3 }}>
-      <Text
-        style={{
-          color: theme.colors.muted,
-          fontSize: 11,
-          fontWeight: "700",
-          letterSpacing: 0.8,
-          textTransform: "uppercase",
-        }}
-      >
-        {props.eyebrow}
-      </Text>
-      <Text style={{ color: theme.colors.text, fontSize: 24, fontWeight: "800", letterSpacing: -0.6 }}>
-        {props.title}
-      </Text>
-    </View>
-  );
-}
-
-function ProfileStat(props: { label: string; value: string; accent: string }) {
-  return (
-    <View
+    <Text
       style={{
-        flex: 1,
-        borderRadius: theme.radius.md,
-        paddingVertical: 14,
-        paddingHorizontal: 12,
-        backgroundColor: theme.colors.surface2,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        alignItems: "center",
+        color: theme.colors.text,
+        fontSize: 18,
+        fontWeight: "700",
+        letterSpacing: -0.3,
+        marginBottom: 14,
       }}
     >
-      <Text style={{ color: props.accent, fontSize: 20, fontWeight: "800", letterSpacing: -0.4 }}>{props.value}</Text>
-      <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}>{props.label}</Text>
+      {title}
+    </Text>
+  );
+}
+
+// ─── Profile Stat (redesigned with gradient) ────────────
+function ProfileStat(props: { label: string; value: string; accent: string }) {
+  return (
+    <View style={{ flex: 1 }}>
+      <LinearGradient
+        colors={[`${props.accent}20`, `${props.accent}08`]}
+        style={{
+          borderRadius: 16,
+          paddingVertical: 16,
+          paddingHorizontal: 14,
+          alignItems: "center",
+        }}
+      >
+        <Text style={{ color: props.accent, fontSize: 24, fontWeight: "800", letterSpacing: -0.6 }}>{props.value}</Text>
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 11, marginTop: 4, fontWeight: "600" }}>{props.label}</Text>
+      </LinearGradient>
     </View>
   );
 }
 
+// ─── Service Tile (redesigned) ──────────────────────────
 function ServiceTile({ item }: { item: ServiceItem }) {
   return (
     <Pressable
       onPress={item.onPress}
       style={({ pressed }) => ({
         flex: 1,
-        borderRadius: theme.radius.md,
+        borderRadius: 20,
         paddingHorizontal: 16,
-        paddingVertical: 16,
-        backgroundColor: theme.colors.surface2,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        transform: [{ scale: pressed ? 0.97 : 1 }],
+        paddingVertical: 18,
+        backgroundColor: `${item.color}06`,
+        transform: [{ scale: pressed ? 0.95 : 1 }],
+        opacity: pressed ? 0.8 : 1,
       })}
     >
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-        <View
+        <LinearGradient
+          colors={[`${item.color}25`, `${item.color}10`]}
           style={{
-            width: 46,
-            height: 46,
+            width: 48,
+            height: 48,
             borderRadius: 16,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: `${item.color}18`,
           }}
         >
           <Ionicons name={item.icon} size={22} color={item.color} />
-        </View>
+        </LinearGradient>
         {item.badge ? (
           <View
             style={{
@@ -140,11 +158,20 @@ function ServiceTile({ item }: { item: ServiceItem }) {
             <Text style={{ color: "#FFFFFF", fontSize: 11, fontWeight: "800" }}>{item.badge}</Text>
           </View>
         ) : (
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
+          <View style={{
+            width: 28,
+            height: 28,
+            borderRadius: 14,
+            backgroundColor: `${item.color}08`,
+            alignItems: "center",
+            justifyContent: "center",
+          }}>
+            <Ionicons name="chevron-forward" size={14} color={item.color} />
+          </View>
         )}
       </View>
       <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>{item.label}</Text>
-      <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{item.hint}</Text>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{item.hint}</Text>
     </Pressable>
   );
 }
@@ -169,6 +196,7 @@ function ServiceGrid({ items }: { items: ServiceItem[] }) {
   );
 }
 
+// ─── Setting Row (redesigned) ───────────────────────────
 function ListRowItem({ row }: { row: SettingRow }) {
   const iconColor = row.danger ? theme.colors.danger : row.color;
 
@@ -180,22 +208,23 @@ function ListRowItem({ row }: { row: SettingRow }) {
         alignItems: "center",
         paddingHorizontal: 6,
         paddingVertical: 14,
-        opacity: pressed ? 0.72 : 1,
+        opacity: pressed ? 0.7 : 1,
+        transform: [{ scale: pressed ? 0.99 : 1 }],
       })}
     >
-      <View
+      <LinearGradient
+        colors={row.danger ? [theme.colors.dangerSoft, `${theme.colors.danger}10`] : [`${row.color}22`, `${row.color}08`]}
         style={{
           width: 38,
           height: 38,
-          borderRadius: 14,
+          borderRadius: 12,
           alignItems: "center",
           justifyContent: "center",
           marginRight: 14,
-          backgroundColor: row.danger ? theme.colors.dangerSoft : `${row.color}18`,
         }}
       >
         <Ionicons name={row.icon} size={18} color={iconColor} />
-      </View>
+      </LinearGradient>
       <View style={{ flex: 1 }}>
         <Text style={{ color: iconColor, fontSize: 15, fontWeight: row.danger ? "700" : "600" }}>{row.label}</Text>
       </View>
@@ -216,7 +245,18 @@ function ListRowItem({ row }: { row: SettingRow }) {
         </View>
       ) : null}
       {row.value ? <Text style={{ color: theme.colors.muted, fontSize: 12, marginRight: 8 }}>{row.value}</Text> : null}
-      {!row.danger ? <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} /> : null}
+      {!row.danger ? (
+        <View style={{
+          width: 24,
+          height: 24,
+          borderRadius: 12,
+          backgroundColor: `${theme.colors.accent}08`,
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <Ionicons name="chevron-forward" size={14} color={theme.colors.muted} />
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -224,21 +264,22 @@ function ListRowItem({ row }: { row: SettingRow }) {
 function ListSection(props: { title: string; rows: SettingRow[] }) {
   return (
     <View>
-      <SectionHeading eyebrow="Grouped List" title={props.title} />
-      <SoftPanel tint="rgba(226,234,245,0.7)" padding={10}>
+      <SectionHeader title={props.title} />
+      <GlassPanel padding={12}>
         {props.rows.map((row, index) => (
           <View key={row.label}>
             <ListRowItem row={row} />
             {index < props.rows.length - 1 ? (
-              <View style={{ height: 1, marginLeft: 58, backgroundColor: theme.colors.border }} />
+              <View style={{ height: 1, marginLeft: 58, backgroundColor: `${theme.colors.border}60` }} />
             ) : null}
           </View>
         ))}
-      </SoftPanel>
+      </GlassPanel>
     </View>
   );
 }
 
+// ─── Main Screen ────────────────────────────────────────
 export function MeScreen(props: any) {
   const nav = props?.navigation;
   const insets = useSafeAreaInsets();
@@ -267,68 +308,47 @@ export function MeScreen(props: any) {
   );
 
   const frequentServices: ServiceItem[] = [
-    { icon: "qr-code-outline", label: "QR 碼", hint: "校園身份與通行", color: "#5B8CFF", onPress: () => nav?.navigate?.("QRCode") },
-    { icon: "search-outline", label: "全站搜尋", hint: "快速找課程與公告", color: "#5AC8FA", onPress: () => nav?.navigate?.("GlobalSearch") },
-    { icon: "library-outline", label: "圖書館", hint: "借閱、空位與書單", color: "#667EEA", onPress: () => nav?.navigate?.("Library") },
-    { icon: "bus-outline", label: "校園公車", hint: "查看即時班次", color: "#34C759", onPress: () => nav?.navigate?.("校園", { screen: "BusSchedule" }) },
+    { icon: "qr-code-outline", label: "QR 碼", hint: "校園身份與通行", color: "#5B21B6", onPress: () => nav?.navigate?.("QRCode") },
+    { icon: "search-outline", label: "全站搜尋", hint: "快速找課程與公告", color: "#6366F1", onPress: () => nav?.navigate?.("GlobalSearch") },
+    { icon: "library-outline", label: "圖書館", hint: "借閱、空位與書單", color: "#A78BFA", onPress: () => nav?.navigate?.("Library") },
+    { icon: "bus-outline", label: "校園公車", hint: "查看即時班次", color: "#10B981", onPress: () => nav?.navigate?.("校園", { screen: "BusSchedule" }) },
   ];
 
   const campusLifeServices: ServiceItem[] = [
-    { icon: "medkit-outline", label: "健康中心", hint: "掛號與服務資訊", color: "#FF6B6B", onPress: () => nav?.navigate?.("Health") },
-    { icon: "bed-outline", label: "宿舍服務", hint: "住宿與報修入口", color: "#A78BFA", onPress: () => nav?.navigate?.("Dormitory") },
-    { icon: "print-outline", label: "列印服務", hint: "影印與輸出需求", color: "#FF9500", onPress: () => nav?.navigate?.("PrintService") },
-    { icon: "help-buoy-outline", label: "失物招領", hint: "刊登與查找物品", color: "#FF6FA9", onPress: () => nav?.navigate?.("LostFound") },
+    { icon: "medkit-outline", label: "健康中心", hint: "掛號與服務資訊", color: "#EF4444", onPress: () => nav?.navigate?.("Health") },
+    { icon: "bed-outline", label: "宿舍服務", hint: "住宿與報修入口", color: "#7C3AED", onPress: () => nav?.navigate?.("Dormitory") },
+    { icon: "print-outline", label: "列印服務", hint: "影印與輸出需求", color: "#D4A843", onPress: () => nav?.navigate?.("PrintService") },
+    { icon: "help-buoy-outline", label: "失物招領", hint: "刊登與查找物品", color: "#EC4899", onPress: () => nav?.navigate?.("LostFound") },
   ];
 
   const otherServices: ServiceItem[] = [
-    { icon: "wallet-outline", label: "校園支付", hint: "錢包與付款紀錄", color: "#22C7A9", onPress: () => nav?.navigate?.("Payment") },
-    { icon: "trophy-outline", label: "成就積分", hint: "任務與排行榜", color: "#F5B700", onPress: () => nav?.navigate?.("Achievements") },
-    { icon: "phone-portrait-outline", label: "桌面小工具", hint: "Widget 預覽與設定", color: "#5B8CFF", onPress: () => nav?.navigate?.("WidgetPreview") },
+    { icon: "wallet-outline", label: "校園支付", hint: "錢包與付款紀錄", color: "#10B981", onPress: () => nav?.navigate?.("Payment") },
+    { icon: "trophy-outline", label: "成就積分", hint: "任務與排行榜", color: "#D4A843", onPress: () => nav?.navigate?.("Achievements") },
+    { icon: "phone-portrait-outline", label: "桌面小工具", hint: "Widget 預覽與設定", color: "#6366F1", onPress: () => nav?.navigate?.("WidgetPreview") },
   ];
 
   const accountRows: SettingRow[] = auth.user
     ? [
-        {
-          icon: "person-outline",
-          label: "編輯個人資料",
-          color: theme.colors.accent,
-          onPress: () => nav?.navigate?.("ProfileEdit"),
-        },
-        {
-          icon: "notifications-outline",
-          label: "通知中心",
-          color: "#FF9500",
-          onPress: () => nav?.navigate?.("Notifications"),
-          badge: notifs.unreadCount > 0 ? notifs.unreadCount : undefined,
-        },
-        {
-          icon: isDark ? "sunny-outline" : "moon-outline",
-          label: isDark ? "切換淺色模式" : "切換深色模式",
-          color: "#667EEA",
-          onPress: () => themeMode.setMode(isDark ? "light" : "dark"),
-        },
+        { icon: "person-outline", label: "編輯個人資料", color: theme.colors.accent, onPress: () => nav?.navigate?.("ProfileEdit") },
+        { icon: "notifications-outline", label: "通知中心", color: "#D4A843", onPress: () => nav?.navigate?.("Notifications"), badge: notifs.unreadCount > 0 ? notifs.unreadCount : undefined },
+        { icon: isDark ? "sunny-outline" : "moon-outline", label: isDark ? "切換淺色模式" : "切換深色模式", color: "#7C3AED", onPress: () => themeMode.setMode(isDark ? "light" : "dark") },
       ]
     : [
-        {
-          icon: "log-in-outline",
-          label: "學校帳號登入",
-          color: theme.colors.accent,
-          onPress: () => nav?.navigate?.("SSOLogin"),
-        },
+        { icon: "log-in-outline", label: "學校帳號登入", color: theme.colors.accent, onPress: () => nav?.navigate?.("SSOLogin") },
       ];
 
   const settingRows: SettingRow[] = [
     { icon: "settings-outline", label: "設定", color: theme.colors.textSecondary, onPress: () => nav?.navigate?.("Settings") },
-    { icon: "notifications-outline", label: "通知設定", color: "#FF9500", onPress: () => nav?.navigate?.("NotificationSettings") },
-    { icon: "language-outline", label: "語言", color: "#5AC8FA", onPress: () => nav?.navigate?.("LanguageSettings"), value: "繁體中文" },
-    { icon: "accessibility-outline", label: "無障礙設定", color: "#34C759", onPress: () => nav?.navigate?.("AccessibilitySettings") },
-    { icon: "color-palette-outline", label: "主題預覽", color: "#FF6FA9", onPress: () => nav?.navigate?.("ThemePreview") },
+    { icon: "notifications-outline", label: "通知設定", color: "#D4A843", onPress: () => nav?.navigate?.("NotificationSettings") },
+    { icon: "language-outline", label: "語言", color: "#6366F1", onPress: () => nav?.navigate?.("LanguageSettings"), value: "繁體中文" },
+    { icon: "accessibility-outline", label: "無障礙設定", color: "#10B981", onPress: () => nav?.navigate?.("AccessibilitySettings") },
+    { icon: "color-palette-outline", label: "主題預覽", color: "#A78BFA", onPress: () => nav?.navigate?.("ThemePreview") },
   ];
 
   const supportRows: SettingRow[] = [
-    { icon: "help-circle-outline", label: "幫助中心", color: "#5AC8FA", onPress: () => nav?.navigate?.("Help") },
-    { icon: "chatbox-outline", label: "意見回饋", color: "#34C759", onPress: () => nav?.navigate?.("Feedback") },
-    { icon: "bug-outline", label: "回報問題", color: "#FF9500", onPress: () => nav?.navigate?.("BugReport") },
+    { icon: "help-circle-outline", label: "幫助中心", color: "#6366F1", onPress: () => nav?.navigate?.("Help") },
+    { icon: "chatbox-outline", label: "意見回饋", color: "#10B981", onPress: () => nav?.navigate?.("Feedback") },
+    { icon: "bug-outline", label: "回報問題", color: "#D4A843", onPress: () => nav?.navigate?.("BugReport") },
   ];
 
   const dangerRows: SettingRow[] = auth.user
@@ -359,176 +379,176 @@ export function MeScreen(props: any) {
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING, paddingHorizontal: 20 }}
+        contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
-        <View style={{ paddingTop: insets.top + 12, paddingBottom: 26 }}>
-          <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" }}>
-            Profile
-          </Text>
-          <Text style={{ color: theme.colors.text, fontSize: 34, fontWeight: "800", letterSpacing: -1, marginTop: 8 }}>
-            我的
-          </Text>
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 22, marginTop: 10 }}>
-            集中管理帳號、服務入口與個人化設定。
-          </Text>
-        </View>
+        {/* ═══ Profile Header with Gradient ═══ */}
+        <LinearGradient
+          colors={isDark ? ["#2E1065", "#1A1040", "#0C0A13"] : ["#EDE9FE", "#F0EBFF", "#FAF9FC"]}
+          style={{
+            paddingTop: insets.top + 16,
+            paddingHorizontal: 20,
+            paddingBottom: 28,
+          }}
+        >
+          {/* Top row: Title + Settings */}
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: "800", letterSpacing: -0.6 }}>
+              我的
+            </Text>
+            <Pressable
+              onPress={() => nav?.navigate?.("Settings")}
+              style={({ pressed }) => ({
+                width: 42,
+                height: 42,
+                borderRadius: 14,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(91,33,182,0.06)",
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Ionicons name="settings-outline" size={20} color={theme.colors.textSecondary} />
+            </Pressable>
+          </View>
 
-        <View style={{ gap: 24 }}>
-          <SoftPanel tint={theme.colors.accentSoft}>
-            <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
-              <View style={{ flexDirection: "row", gap: 16, flex: 1 }}>
-                <View
-                  style={{
-                    width: 76,
-                    height: 76,
-                    borderRadius: 28,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: `${theme.colors.accent}18`,
-                    borderWidth: 1,
-                    borderColor: `${theme.colors.accent}28`,
-                  }}
-                >
-                  <Text style={{ color: theme.colors.accent, fontSize: 30, fontWeight: "800", letterSpacing: -0.8 }}>
-                    {avatarInitial}
-                  </Text>
+          {/* Avatar + Identity */}
+          <View style={{ flexDirection: "row", gap: 16, alignItems: "center" }}>
+            <LinearGradient
+              colors={isDark ? ["#7C3AED", "#5B21B6"] : ["#A78BFA", "#7C3AED"]}
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 24,
+                alignItems: "center",
+                justifyContent: "center",
+                shadowColor: "#5B21B6",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.3,
+                shadowRadius: 12,
+                elevation: 8,
+              }}
+            >
+              <Text style={{ color: "#FFFFFF", fontSize: 28, fontWeight: "800" }}>
+                {avatarInitial}
+              </Text>
+            </LinearGradient>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: "800", letterSpacing: -0.4 }} numberOfLines={1}>
+                {identity}
+              </Text>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: 4 }} numberOfLines={1}>
+                {auth.user ? auth.user.email ?? "已登入校園帳號" : "登入後同步你的校務資料"}
+              </Text>
+
+              {/* Tags */}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                <View style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 10,
+                  backgroundColor: isDark ? "rgba(167,139,250,0.15)" : "rgba(91,33,182,0.1)",
+                }}>
+                  <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "700" }}>{school.code}</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontSize: 24, fontWeight: "800", letterSpacing: -0.6 }} numberOfLines={1}>
-                    {identity}
+                <View style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 4,
+                  borderRadius: 10,
+                  backgroundColor: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                }}>
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 11, fontWeight: "600" }}>
+                    {auth.profile?.department ?? school.name}
                   </Text>
-                  <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: 6 }} numberOfLines={1}>
-                    {auth.user ? auth.user.email ?? "已登入校園帳號" : "登入後同步你的校務資料與通知"}
-                  </Text>
-
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-                    <View
-                      style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 7,
-                        borderRadius: theme.radius.full,
-                        backgroundColor: theme.colors.accentSoft,
-                        borderWidth: 1,
-                        borderColor: "transparent",
-                      }}
-                    >
-                      <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "800" }}>{school.code}</Text>
-                    </View>
-                    <View
-                      style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 7,
-                        borderRadius: theme.radius.full,
-                        backgroundColor: theme.colors.surface2,
-                        borderWidth: 1,
-                        borderColor: theme.colors.border,
-                      }}
-                    >
-                      <Text style={{ color: theme.colors.textSecondary, fontSize: 11, fontWeight: "700" }}>
-                        {auth.profile?.department ?? school.name}
-                      </Text>
-                    </View>
-                    <View
-                      style={{
-                        paddingHorizontal: 12,
-                        paddingVertical: 7,
-                        borderRadius: theme.radius.full,
-                        backgroundColor: theme.colors.surface2,
-                        borderWidth: 1,
-                        borderColor: theme.colors.border,
-                      }}
-                    >
-                      <Text style={{ color: theme.colors.textSecondary, fontSize: 11, fontWeight: "700" }}>
-                        {isDark ? "深色模式" : "淺色模式"}
-                      </Text>
-                    </View>
-                  </View>
                 </View>
               </View>
-
-              <Pressable
-                onPress={() => nav?.navigate?.("Settings")}
-                style={({ pressed }) => ({
-                  width: 46,
-                  height: 46,
-                  borderRadius: theme.radius.sm,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: theme.colors.surface2,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  transform: [{ scale: pressed ? 0.94 : 1 }],
-                })}
-              >
-                <Ionicons name="settings-outline" size={20} color={theme.colors.textSecondary} />
-              </Pressable>
             </View>
+          </View>
 
-            {auth.user ? (
-              <View style={{ flexDirection: "row", gap: 12, marginTop: 22 }}>
-                <ProfileStat label="修課數" value={`${courses.length}`} accent={theme.colors.accent} />
-                <ProfileStat label="總學分" value={`${totalCredits}`} accent={theme.colors.success} />
-                <ProfileStat label="未讀通知" value={`${notifs.unreadCount}`} accent={theme.colors.warning} />
-              </View>
-            ) : (
-              <Pressable
-                onPress={() => nav?.navigate?.("SSOLogin")}
-                style={({ pressed }) => ({
-                  marginTop: 22,
-                  borderRadius: 22,
-                  paddingVertical: 14,
-                  paddingHorizontal: 18,
-                  backgroundColor: theme.colors.accent,
+          {/* Stats or Login CTA */}
+          {auth.user ? (
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 22 }}>
+              <ProfileStat label="修課數" value={`${courses.length}`} accent={theme.colors.accent} />
+              <ProfileStat label="總學分" value={`${totalCredits}`} accent={theme.colors.success} />
+              <ProfileStat label="未讀通知" value={`${notifs.unreadCount}`} accent="#D4A843" />
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => nav?.navigate?.("SSOLogin")}
+              style={({ pressed }) => ({
+                marginTop: 22,
+                opacity: pressed ? 0.85 : 1,
+                transform: [{ scale: pressed ? 0.98 : 1 }],
+              })}
+            >
+              <LinearGradient
+                colors={["#5B21B6", "#7C3AED"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={{
+                  borderRadius: 16,
+                  paddingVertical: 16,
+                  paddingHorizontal: 20,
                   flexDirection: "row",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 8,
-                  transform: [{ scale: pressed ? 0.98 : 1 }],
-                })}
+                  gap: 10,
+                }}
               >
-                <Ionicons name="log-in-outline" size={18} color="#FFFFFF" />
-                <Text style={{ color: "#FFFFFF", fontSize: 15, fontWeight: "700" }}>立即登入校園帳號</Text>
-              </Pressable>
-            )}
-          </SoftPanel>
+                <Ionicons name="log-in-outline" size={20} color="#FFFFFF" />
+                <Text style={{ color: "#FFFFFF", fontSize: 16, fontWeight: "700" }}>立即登入校園帳號</Text>
+              </LinearGradient>
+            </Pressable>
+          )}
+        </LinearGradient>
 
+        {/* ═══ Main Content ═══ */}
+        <View style={{ paddingHorizontal: 20, gap: 28, marginTop: 4 }}>
+
+          {/* Admin Panel */}
           {(auth.isAdmin || auth.isEditor) ? (
-            <Pressable onPress={() => nav?.navigate?.("AdminDashboard")}>
-              {({ pressed }) => (
-                <SoftPanel tint={theme.colors.accentSoft} style={{ opacity: pressed ? 0.84 : 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
-                    <View
-                      style={{
-                        width: 50,
-                        height: 50,
-                        borderRadius: 18,
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor: theme.colors.accentSoft,
-                      }}
-                    >
-                      <Ionicons name="shield-checkmark" size={22} color={theme.colors.accent} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "700" }}>管理控制台</Text>
-                      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>審核、發布與後台維運入口</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={theme.colors.accent} />
-                  </View>
-                </SoftPanel>
-              )}
+            <Pressable onPress={() => nav?.navigate?.("AdminDashboard")} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] })}>
+              <LinearGradient
+                colors={isDark ? ["#422006", "#451A03"] : ["#FEF3C7", "#FDE68A"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={{
+                  borderRadius: 22,
+                  padding: 20,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 16,
+                  ...shadowStyle(theme.shadows.md),
+                }}
+              >
+                <View style={{
+                  width: 50,
+                  height: 50,
+                  borderRadius: 18,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.6)",
+                }}>
+                  <Ionicons name="shield-checkmark" size={24} color={isDark ? "#FBBF24" : "#D97706"} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: isDark ? "#F5F3FF" : "#1A1333", fontSize: 17, fontWeight: "700" }}>管理控制台</Text>
+                  <Text style={{ color: isDark ? "rgba(245,243,255,0.6)" : "rgba(26,19,51,0.5)", fontSize: 13, marginTop: 3 }}>審核、發布與後台維運入口</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={isDark ? "#FBBF24" : "#D97706"} />
+              </LinearGradient>
             </Pressable>
           ) : null}
 
+          {/* Account shortcuts */}
           <View>
-            <SectionHeading eyebrow="Account" title="帳號捷徑" />
-            <SoftPanel tint="rgba(226,234,245,0.7)" padding={16}>
+            <SectionHeader title="帳號捷徑" />
+            <GlassPanel padding={16}>
               <ServiceGrid
                 items={[
                   {
                     icon: "person-outline",
                     label: "個人資料",
-                    hint: auth.user ? "編輯基本資訊" : "登入後可編輯",
+                    hint: auth.user ? "編輯��本資訊" : "登入後可編輯",
                     color: theme.colors.accent,
                     onPress: () => (auth.user ? nav?.navigate?.("ProfileEdit") : nav?.navigate?.("SSOLogin")),
                   },
@@ -536,7 +556,7 @@ export function MeScreen(props: any) {
                     icon: "notifications-outline",
                     label: "通知",
                     hint: "訊息與提醒中心",
-                    color: "#FF9500",
+                    color: "#D4A843",
                     onPress: () => nav?.navigate?.("Notifications"),
                     badge: notifs.unreadCount > 0 ? String(notifs.unreadCount) : undefined,
                   },
@@ -544,7 +564,7 @@ export function MeScreen(props: any) {
                     icon: isDark ? "sunny-outline" : "moon-outline",
                     label: isDark ? "切回淺色" : "切換深色",
                     hint: "調整整體觀感",
-                    color: "#667EEA",
+                    color: "#7C3AED",
                     onPress: () => themeMode.setMode(isDark ? "light" : "dark"),
                   },
                   {
@@ -556,28 +576,28 @@ export function MeScreen(props: any) {
                   },
                 ]}
               />
-            </SoftPanel>
+            </GlassPanel>
           </View>
 
           <View>
-            <SectionHeading eyebrow="Services" title="常用入口" />
-            <SoftPanel tint="rgba(226,234,245,0.7)" padding={16}>
+            <SectionHeader title="常用入口" />
+            <GlassPanel padding={16}>
               <ServiceGrid items={frequentServices} />
-            </SoftPanel>
+            </GlassPanel>
           </View>
 
           <View>
-            <SectionHeading eyebrow="Campus Life" title="校園生活" />
-            <SoftPanel tint="rgba(226,234,245,0.7)" padding={16}>
+            <SectionHeader title="校園生活" />
+            <GlassPanel padding={16}>
               <ServiceGrid items={campusLifeServices} />
-            </SoftPanel>
+            </GlassPanel>
           </View>
 
           <View>
-            <SectionHeading eyebrow="More Tools" title="其他工具" />
-            <SoftPanel tint="rgba(226,234,245,0.7)" padding={16}>
+            <SectionHeader title="其他工具" />
+            <GlassPanel padding={16}>
               <ServiceGrid items={otherServices} />
-            </SoftPanel>
+            </GlassPanel>
           </View>
 
           <ListSection title="帳號與偏好" rows={accountRows} />

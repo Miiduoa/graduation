@@ -1,3 +1,6 @@
+import { getAssistantProfileTrainingSeeds } from "./aiAssistantProfile";
+import { getPuDiningMenuItems } from "./puDiningCatalog";
+
 /**
  * 靜宜大學 AI 代理式助理 — 完整架構 + 真實資料
  *
@@ -78,15 +81,17 @@ export const AGENT_TOOLS: AgentTool[] = [
   // ── 餐廳模組 ──
   {
     id: "order_meal", category: "cafeteria", name: "訂餐", icon: "restaurant-outline", color: "#F59E0B",
-    description: "從校園餐廳預訂餐點，確認後幫你下單",
+    description: "從校園餐廳整理餐點，確認後送到餐廳點餐功能",
     parameters: [
       { name: "cafeteria", type: "select", label: "餐廳", required: true, options: [
-        { value: "main_cafeteria", label: "學生餐廳（濟時樓）" },
-        { value: "faculty_dining", label: "教職員餐廳" },
-        { value: "convenience", label: "便利商店" },
-        { value: "drinks", label: "飲料店" },
+        { value: "jingyuan", label: "靜園餐廳" },
+        { value: "yiyuan", label: "宜園餐廳" },
+        { value: "zhishan-1f", label: "至善美食廣場一樓" },
+        { value: "zhishan-2f", label: "至善美食廣場二樓" },
+        { value: "shawmu", label: "小木屋鬆餅" },
+        { value: "okmart", label: "OK 便利商店" },
       ]},
-      { name: "items", type: "string", label: "餐點內容", required: true, hint: "例如：排骨飯、滷肉飯加蛋" },
+      { name: "items", type: "string", label: "餐點內容", required: true, hint: "例如：Morning House 蛋餅、白鬍子飲料、四海遊龍鍋貼" },
       { name: "pickup_time", type: "time", label: "取餐時間", required: false, hint: "不填則為盡快" },
       { name: "note", type: "string", label: "備註", required: false, hint: "例如：不要香菜、少辣" },
     ],
@@ -408,11 +413,14 @@ export const AGENT_TOOLS: AgentTool[] = [
   },
   {
     id: "group_order", category: "cafeteria", name: "揪團訂餐", icon: "fast-food-outline", color: "#F97316",
-    description: "AI 統整多人點餐偏好，合併下單、自動分攤費用",
+    description: "AI 統整多人點餐偏好，建立合併訂餐草稿並計算分攤費用",
     parameters: [
       { name: "group", type: "string", label: "群組/好友", required: true },
       { name: "cafeteria", type: "select", label: "餐廳", required: false, options: [
-        { value: "main", label: "學生餐廳" }, { value: "campus", label: "校園餐廳" },
+        { value: "jingyuan", label: "靜園餐廳" },
+        { value: "yiyuan", label: "宜園餐廳" },
+        { value: "zhishan-1f", label: "至善美食廣場一樓" },
+        { value: "zhishan-2f", label: "至善美食廣場二樓" },
       ]},
     ],
     requiresConfirmation: true, isReversible: true, estimatedDuration: "2-3 分鐘",
@@ -551,7 +559,7 @@ export interface TaskStep {
 
 export const TASK_CHAINS: TaskChain[] = [
   {
-    id: "sick_day", trigger: "我生病|我不舒服|想請病假",
+    id: "sick_day", trigger: "我生病|我不舒服|想請病假|頭痛|發燒|感冒|喉嚨痛|身體不適",
     name: "生病處理", description: "症狀評估 → 掛號 → 請假 → 通知組員",
     icon: "medical-outline", color: "#EF4444",
     steps: [
@@ -572,7 +580,7 @@ export const TASK_CHAINS: TaskChain[] = [
     ],
   },
   {
-    id: "study_session", trigger: "我要去圖書館|我要讀書|準備考試",
+    id: "study_session", trigger: "我要去圖書館|我要讀書|準備考試|我要自習|想讀書|想自習|考試要到了",
     name: "備考模式", description: "預約座位 → 設定讀書計時 → 關閉社群通知",
     icon: "book-outline", color: "#8B5CF6",
     steps: [
@@ -583,17 +591,17 @@ export const TASK_CHAINS: TaskChain[] = [
   },
   {
     id: "lunch_order", trigger: "幫我訂午餐|幫我訂餐|我要訂餐|訂午餐|我要點餐",
-    name: "午餐助手", description: "推薦餐點 → 查等候 → 下單 → 提醒取餐",
+    name: "午餐助手", description: "推薦餐點 → 查等候資料 → 建立訂餐單 → 提醒取餐",
     icon: "restaurant-outline", color: "#10B981",
     steps: [
       { order: 1, toolId: "recommend_meal", label: "推薦餐點" },
       { order: 2, toolId: "check_wait_time", label: "查詢等候時間" },
-      { order: 3, toolId: "order_meal", label: "確認下單", dependsOn: 1 },
+      { order: 3, toolId: "order_meal", label: "確認訂餐單", dependsOn: 1 },
       { order: 4, toolId: "set_reminder", label: "設定取餐提醒", autoParams: { title: "去取餐啦！" }, optional: true },
     ],
   },
   {
-    id: "dorm_issue", trigger: "宿舍壞了|馬桶|水管|冷氣壞",
+    id: "dorm_issue", trigger: "宿舍壞了|馬桶|水管|冷氣壞|冷氣壞了|宿舍冷氣|幫我報修|我要報修",
     name: "宿舍報修", description: "回報問題 → 提交報修 → 追蹤進度",
     icon: "construct-outline", color: "#DC2626",
     steps: [
@@ -615,12 +623,12 @@ export const TASK_CHAINS: TaskChain[] = [
   },
   {
     id: "group_lunch", trigger: "揪團|一起吃|揪人訂|大家一起點",
-    name: "揪團訂餐", description: "建團 → 收集��好 → 合併下單 → 分攤",
+    name: "揪團訂餐", description: "建團 → 收集偏好 → 合併訂餐草稿 → 分攤",
     icon: "fast-food-outline", color: "#F97316",
     steps: [
       { order: 1, toolId: "group_order", label: "建立揪團" },
       { order: 2, toolId: "recommend_meal", label: "AI 推薦大家都喜歡的", dependsOn: 1 },
-      { order: 3, toolId: "order_meal", label: "合併下單", dependsOn: 2 },
+      { order: 3, toolId: "order_meal", label: "建立合併訂餐單", dependsOn: 2 },
       { order: 4, toolId: "send_message", label: "通知取餐", dependsOn: 3, optional: true },
     ],
   },
@@ -1017,7 +1025,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
   {
     id: "lunch_time", type: "time_based", name: "午餐時間",
     condition: "11:30-12:30 且未訂餐", icon: "restaurant-outline", color: "#F59E0B",
-    message: "到了午餐時間！今天想吃什麼？我可以幫你推薦或直接訂餐。",
+    message: "到了午餐時間！今天想吃什麼？餐廳有開通接單時我可以幫你送出點餐。",
     suggestedTool: "recommend_meal", priority: "low",
   },
   {
@@ -1072,7 +1080,7 @@ export const AGENT_ROLE_CONFIG: AgentRoleConfig[] = [
     role: "student", label: "學生", icon: "school-outline", color: "#3B82F6",
     toolCategories: ["cafeteria", "health", "library", "dorm", "lost_found", "print", "course", "transport", "calendar", "social"],
     proactiveCapabilities: ["class_soon", "assignment_due", "package_arrived", "lunch_time", "laundry_done", "mood_check", "library_closing", "rain_alert"],
-    description: "完整校園生活代理：訂餐/掛號/借書/報修/請假/找東西 全都幫你搞定",
+    description: "完整校園生活代理：餐廳點餐/掛號資料/借書查詢/報修/請假/找東西都能協助",
   },
   {
     role: "faculty", label: "教師", icon: "person-outline", color: "#DC2626",
@@ -1118,7 +1126,7 @@ export const AGENT_ROLE_INTERACTIONS: AgentRoleInteraction[] = [
       { id: "peer_review", label: "同儕互評", icon: "people-outline", description: "AI 分配作業互評、引導評分標準、彙整回饋" },
       { id: "study_group_match", label: "組隊配對", icon: "git-merge-outline", description: "AI 根據課表/興趣/能力自動配對讀書夥伴或專題組員" },
       { id: "share_notes", label: "共享筆記", icon: "document-attach-outline", description: "AI 整理筆記重點、分享至群組、標記精華" },
-      { id: "group_order", label: "揪團訂餐", icon: "fast-food-outline", description: "AI 統整多人點餐偏好、合併下單、分攤費用" },
+      { id: "group_order", label: "揪團訂餐", icon: "fast-food-outline", description: "AI 統整多人點餐偏好、建立合併訂餐草稿、分攤費用" },
       { id: "lost_found_notify", label: "失物互助通知", icon: "search-outline", description: "AI 自動比對失物/拾獲，通知相關同學" },
       { id: "tutoring_request", label: "課業求助", icon: "school-outline", description: "AI 媒合學長姐/高手同學進行課業輔導" },
       { id: "event_invite", label: "活動邀約", icon: "calendar-outline", description: "AI 根據共同興趣推薦活動、發送邀約" },
@@ -1151,7 +1159,7 @@ export const AGENT_ROLE_INTERACTIONS: AgentRoleInteraction[] = [
   {
     from: "student", to: "vendor",
     actions: [
-      { id: "auto_order", label: "AI 代理訂餐", icon: "restaurant-outline", description: "AI 根據偏好選餐、確認後下單、通知取餐" },
+      { id: "auto_order", label: "AI 代理訂餐", icon: "restaurant-outline", description: "AI 根據偏好選餐、確認後送到餐廳點餐功能、通知取餐" },
       { id: "feedback_submit", label: "餐點回饋", icon: "star-outline", description: "AI 代為提交用餐評價" },
     ],
   },
@@ -1262,7 +1270,7 @@ export function simulateAgentGreeting(userName: string, role: AgentRole): string
 
 export function simulateRecentExecutions(): ToolExecution[] {
   return [
-    { id: "exec-1", toolId: "order_meal", status: "success", params: { cafeteria: "main_cafeteria", items: "滷肉飯加蛋" }, result: "已成功下單！取餐號碼 A-037，預計 12:15 可取餐", startedAt: "2026-04-27T11:50:00", completedAt: "2026-04-27T11:50:05" },
+    { id: "exec-1", toolId: "order_meal", status: "success", params: { cafeteria: "jingyuan", items: "Morning House｜蛋餅" }, result: "餐廳點餐系統已收到：Morning House｜蛋餅，靜園餐廳，狀態待店家確認", startedAt: "2026-04-27T11:50:00", completedAt: "2026-04-27T11:50:05" },
     { id: "exec-2", toolId: "reserve_seat", status: "success", params: { type: "individual", floor: "3F", time_slot: "afternoon" }, result: "已預約圖書館 3F 座位 A-23，下午時段", startedAt: "2026-04-27T09:30:00", completedAt: "2026-04-27T09:30:03" },
     { id: "exec-3", toolId: "set_reminder", status: "success", params: { title: "程式設計作業截止", datetime: "明天 23:59" }, result: "已設定提醒：明天 23:59 前提醒你程式設計作業截止", startedAt: "2026-04-26T20:00:00", completedAt: "2026-04-26T20:00:02" },
   ];
@@ -1274,7 +1282,7 @@ export function simulateProactiveMessages(): { trigger: ProactiveTrigger; messag
 
   if (hour >= 11 && hour <= 13) {
     const trigger = PROACTIVE_TRIGGERS.find(t => t.id === "lunch_time")!;
-    messages.push({ trigger, message: "到了午餐時間！今天想吃什麼？我可以幫你推薦或直接訂餐。" });
+    messages.push({ trigger, message: "到了午餐時間！今天想吃什麼？餐廳有開通接單時我可以幫你送出點餐。" });
   }
   if (hour >= 20 && hour <= 22) {
     const trigger = PROACTIVE_TRIGGERS.find(t => t.id === "mood_check")!;
@@ -1634,18 +1642,39 @@ export interface LocalTrainingDB {
 }
 
 export function getDefaultTrainingDB(): LocalTrainingDB {
+  const profileSeeds = getAssistantProfileTrainingSeeds();
   return {
-    pairs: [],
+    pairs: profileSeeds.pairs,
     templates: [],
     idfTable: {},
-    antiPatterns: [],
-    goodExamples: [],
+    antiPatterns: profileSeeds.antiPatterns,
+    goodExamples: profileSeeds.goodExamples,
     stats: {
       totalInteractions: 0,
       localAnswers: 0,
       apiCalls: 0,
-      avgQuality: 3,
+      avgQuality: 5,
       lastTrainedAt: new Date().toISOString(),
+    },
+  };
+}
+
+export function normalizeLocalTrainingDB(input?: Partial<LocalTrainingDB> | null): LocalTrainingDB {
+  const fallback = getDefaultTrainingDB();
+  const stats = input?.stats ?? fallback.stats;
+
+  return {
+    pairs: Array.isArray(input?.pairs) ? input!.pairs : fallback.pairs,
+    templates: Array.isArray(input?.templates) ? input!.templates : fallback.templates,
+    idfTable: input?.idfTable && typeof input.idfTable === "object" ? input.idfTable : fallback.idfTable,
+    antiPatterns: Array.isArray(input?.antiPatterns) ? input!.antiPatterns : fallback.antiPatterns,
+    goodExamples: Array.isArray(input?.goodExamples) ? input!.goodExamples : fallback.goodExamples,
+    stats: {
+      totalInteractions: typeof stats.totalInteractions === "number" ? stats.totalInteractions : fallback.stats.totalInteractions,
+      localAnswers: typeof stats.localAnswers === "number" ? stats.localAnswers : fallback.stats.localAnswers,
+      apiCalls: typeof stats.apiCalls === "number" ? stats.apiCalls : fallback.stats.apiCalls,
+      avgQuality: typeof stats.avgQuality === "number" ? stats.avgQuality : fallback.stats.avgQuality,
+      lastTrainedAt: typeof stats.lastTrainedAt === "string" ? stats.lastTrainedAt : fallback.stats.lastTrainedAt,
     },
   };
 }
@@ -1783,7 +1812,7 @@ const TAG_RULES: Array<[RegExp, string]> = [
   [/心情|壓力|焦慮|開心|難過|累|煩|沮喪/, "emotion"],
   [/畢業|學位|必修|選修|通識|學程/, "graduation"],
   [/天氣|下雨|溫度|氣象|颱風/, "weather"],
-  [/公車|校車|交通|停車|腳踏車/, "transport"],
+  [/公車|校車|交通|停車|腳踏車|怎麼去|怎樣去|怎麼到|搭車|坐車|車站|火車站|高鐵|客運|台中車站|臺中車站/, "transport"],
   [/健康|頭痛|感冒|不舒服|診所|保健/, "health"],
   [/獎學金|助學|減免|補助/, "scholarship"],
   [/請假|缺曠|翹課|出席/, "attendance"],
@@ -2118,7 +2147,7 @@ function handleFollowUp(
           if (topic === "dining") {
             const menu = data.menus.find(m => m.name.includes(item));
             if (menu) {
-              return `你選的是「${menu.name}」${menu.price != null ? `，$${menu.price}` : ""}${menu.cafeteria ? `，在${menu.cafeteria}` : ""}。需要幫你訂餐嗎？`;
+              return `你選的是「${menu.name}」${menu.price != null ? `，$${menu.price}` : "，價格未提供"}${menu.cafeteria ? `，在${menu.cafeteria}` : ""}。需要看更多細節或換其他選擇嗎？`;
             }
           }
           if (topic === "academic") {
@@ -2152,7 +2181,14 @@ function handleFollowUp(
       const mentionedNames = mentioned.split(", ").map(s => s.replace(/^\d+\.\s*/, "").trim());
       let filtered = data.menus.filter(m => !mentionedNames.some(name => m.name.includes(name)));
 
-      if (/太貴|便宜/.test(q)) filtered = filtered.filter(m => m.price != null && m.price <= 80);
+      if (/太貴|便宜/.test(q)) {
+        const pricedCheap = filtered.filter(m => m.price != null && m.price <= 80);
+        if (pricedCheap.length > 0) {
+          filtered = pricedCheap;
+        } else {
+          return "目前官方菜單沒有單品價格，所以不能準確排序最便宜。\n\n省錢優先可先看便利商店鮮食、早餐/點心類，或到靜園/宜園現場確認自助餐與主食品項價格。";
+        }
+      }
       if (/不辣|不要辣/.test(q)) filtered = filtered.filter(m => !/辣/.test(m.name));
 
       if (filtered.length > 0) {
@@ -2204,7 +2240,7 @@ function handleFollowUp(
       if (firstName) {
         const menu = data.menus.find(m => m.name.includes(firstName));
         if (menu) {
-          return `「${menu.name}」的詳細資訊：\n• 價格：${menu.price != null ? `$${menu.price}` : "未標價"}\n• 供應地點：${menu.cafeteria ?? "未知"}\n需要幫你訂這道嗎？`;
+          return `「${menu.name}」的詳細資訊：\n• 價格：${menu.price != null ? `$${menu.price}` : "未提供"}\n• 供應地點：${menu.cafeteria ?? "未知"}\n需要看其他餐點嗎？`;
         }
       }
     }
@@ -2263,7 +2299,7 @@ function handleFollowUp(
   if (/謝謝|感謝|太好了|不錯|厲害/.test(q)) {
     if (topic) {
       const topicHints: Record<string, string> = {
-        dining: "還需要幫你訂餐或查其他餐廳嗎？",
+        dining: "還需要查其他餐點或餐廳嗎？",
         academic: "還有其他課程相關的問題嗎？",
         assignment: "還有其他作業需要查詢嗎？",
         event: "還有其他活動想了解嗎？",
@@ -2319,6 +2355,7 @@ export function generateLocalAnswer(
   learningState: ActiveLearningState,
   ctx?: LocalAnswerContext,
 ): { answer: string; confidence: number; source: "local" } | null {
+  templates = Array.isArray(templates) ? templates : [];
   const q = question.toLowerCase();
   const today = new Date();
   const todayDay = today.getDay();
@@ -2446,6 +2483,12 @@ export function generateLocalAnswer(
         }
       }
 
+      if (/便宜|平價|划算|省|cp/i.test(q) && !data.menus.some(m => m.price != null)) {
+        answer = "目前官方菜單沒有單品價格，所以我不能準確排序最便宜。\n\n省錢優先可先看便利商店鮮食、早餐/點心類，或到靜園/宜園現場確認自助餐與主食品項價格。";
+        confidence = 0.85;
+        return { answer, confidence, source: "local" };
+      }
+
       if (prefSlot) {
         const pref = prefSlot.toLowerCase();
         if (/素食/.test(pref)) filtered = filtered.filter(m => /素|蔬/.test(m.name));
@@ -2480,7 +2523,7 @@ export function generateLocalAnswer(
       if (filtered.length === 0) filtered = data.menus; // fallback
 
       const list = filtered.slice(0, 8).map((m, i) =>
-        `${i + 1}. ${m.name}${m.price != null ? ` — $${m.price}` : ""}${m.cafeteria ? `（${m.cafeteria}）` : ""}`
+        `${i + 1}. ${m.name}${m.price != null ? ` — $${m.price}` : " — 價格未提供"}${m.cafeteria ? `（${m.cafeteria}）` : ""}`
       ).join("\n");
 
       // 4. 自然的介紹語（上下文感知 + 風格多變）
@@ -2507,7 +2550,30 @@ export function generateLocalAnswer(
         answer += "\n\n可以問我「第幾個多少錢」「哪個比較推薦」等問題。";
       }
     } else {
-      answer = "目前還沒有今日餐點資料，可能是餐廳尚未更新。";
+      const hour = today.getHours();
+      const mealLabel = hour < 10 ? "早餐" : hour < 14 ? "午餐" : hour < 17 ? "下午茶" : "晚餐";
+      const wantsVeg = /素|蔬菜|沙拉|健康|清淡/.test(q);
+      const wantsCheap = /便宜|划算|省|CP/.test(q);
+
+      const fallbackMenus = getPuDiningMenuItems("pu");
+      let picks = [...fallbackMenus];
+      if (wantsVeg) picks = picks.filter(m => m.vegetarian || /素|蔬|水果|沙拉|豆漿|麻醬麵|蛋炒飯/.test(m.name));
+      if (wantsCheap && !fallbackMenus.some(m => m.price != null)) {
+        answer = `目前官方菜單沒有單品價格，所以我不能準確推薦「最便宜」。\n\n${mealLabel}可先看：\n1. OK 便利商店或至善美食廣場的一般鮮食\n2. 靜園餐廳 Morning House 的早餐/點心類\n3. 宜園餐廳或靜園餐廳的自助餐/主食櫃位\n\n實際價格仍以現場或店家菜單為準。`;
+        confidence = 0.88;
+        return { answer, confidence, source: "local" };
+      }
+      if (wantsCheap) picks = picks.filter(m => m.price == null || m.price <= 80);
+      const shuffled = picks.slice(0, 5);
+
+      const list = shuffled.map((m, i) =>
+        `${i + 1}. ${m.name} — ${m.price != null ? `$${m.price}` : "價格未提供"}（${m.cafeteria}）`
+      ).join("\n");
+
+      answer = `${mealLabel}推薦：\n${list}`;
+      if (wantsVeg) answer += "\n\n以上都有素食選項！";
+      else if (wantsCheap) answer += "\n\n都是平價好選擇！";
+      else answer += "\n\n想知道更多可以跟我說～";
     }
     confidence = 0.9;
   }
@@ -2561,52 +2627,89 @@ export function generateLocalAnswer(
 
   // ── 圖書館 ──
   else if (tags.includes("library")) {
-    const libPois = data.pois.filter(p => /圖書/.test(p.name));
-    answer = "關於圖書館服務：\n• 借還書、座位預約等功能可以在 APP 的圖書館頁面操作\n• 目前可借閱冊數、到期日等資訊請查看圖書館系統";
-    if (libPois.length > 0) {
-      answer += `\n• 圖書館位置：${libPois.map(p => p.name).join("、")}`;
+    if (/座位|自習|討論室|預約/.test(q)) {
+      answer = "蓋夏圖書館座位預約資訊：\n\n1. 個人自習區 — 1F-4F 均有座位\n2. 安靜閱覽區 — 3F（禁止交談）\n3. 團體討論室 — 2F（需提前預約，4-8人）\n\n開放時間：週一～五 08:00-21:30，週六日 09:00-17:00\n\n要幫你預約座位嗎？";
+    } else if (/借書|還書|找書|館藏/.test(q)) {
+      answer = "蓋夏圖書館借閱服務：\n\n• 藏書量：超過 60 萬冊\n• 每人可借 30 冊，借期 30 天\n• 可線上續借 2 次\n• 逾期每冊每日罰 $2\n\n告訴我書名，我幫你查查館藏！";
+    } else {
+      answer = "蓋夏圖書館資訊：\n\n位置：校園中央\n開放時間：週一～五 08:00-21:30，週六日 09:00-17:00\n藏書量：60萬冊+\n設施：自習區、討論室、數位學習區、咖啡角\n\n需要預約座位或找書嗎？";
     }
-    confidence = 0.75;
+    confidence = 0.88;
   }
 
   // ── 宿舍 ──
   else if (tags.includes("dormitory")) {
-    answer = "關於宿舍服務：\n• 報修、洗衣、包裹領取等功能可以在 APP 的宿舍頁面操作\n• 門禁時間和相關規定請查看學校公告";
-    confidence = 0.7;
-  }
-
-  // ── 健康 ──
-  else if (tags.includes("health")) {
-    const symptoms = q.match(/頭痛|肚子痛|發燒|感冒|咳嗽|不舒服|過敏|拉肚子|噁心/);
-    if (symptoms) {
-      answer = `你提到${symptoms[0]}的症狀，建議先到學校保健室看看，保健室在校園內可以免費就診。如果症狀嚴重，建議到鄰近的診所或醫院就醫。\n\n保健室服務時間通常是週一到週五上班時間，記得帶學生證。`;
+    if (/報修|壞了|故障|漏水|冷氣/.test(q)) {
+      answer = "宿舍報修流程：\n\n1. 在 APP 提交維修單（或到管理室填表）\n2. 選擇類別：水電/冷氣/家具/網路\n3. 填寫房號和問題描述\n4. 預計 1-3 個工作天處理\n\n要幫你提交報修單嗎？";
+    } else if (/洗衣|烘衣/.test(q)) {
+      answer = "宿舍洗衣資訊：\n\n洗衣房位置：\n• 希嘉學苑 1F\n• 思高學苑 1F\n\n費用：洗衣 $20/次，烘衣 $10/次\n營業：24小時，但建議避開尖峰（晚上8-10點）\n\n要我幫你查詢目前機台狀態嗎？";
+    } else if (/包裹|快遞|取件/.test(q)) {
+      answer = "包裹領取資訊：\n\n領取地點：宿舍管理室\n領取時間：08:00-21:00\n需要攜帶：學生證\n\n到件通知會透過 APP 推送，也可以在 APP 查詢待領包裹。";
     } else {
-      answer = "如果身體不舒服，可以到學校保健室就診（免費），或使用 APP 的健康服務功能。";
-    }
-    confidence = 0.8;
-  }
-
-  // ── 情緒支援 ──
-  else if (tags.includes("emotion")) {
-    const negative = /壓力|焦慮|難過|累|煩|沮喪|崩潰|撐不住/.test(q);
-    if (negative) {
-      answer = "聽起來你最近壓力蠻大的，這很正常，大學生活確實有不少挑戰。\n\n如果覺得需要聊聊，學校諮商中心有免費的心理諮商服務，可以預約跟專業的心理師談談。你不需要一個人扛著，找人聊聊會有幫助的。";
-    } else {
-      answer = "很高興聽到！希望你每天都過得開心，有什麼需要幫忙的儘管說。";
+      answer = "宿舍服務一覽：\n\n• 設施報修 — 水電/冷氣/網路問題\n• 洗衣烘衣 — 24小時自助\n• 包裹領取 — 管理室 08:00-21:00\n• 門禁時間 — 23:00-06:00\n• 宿舍：希嘉學苑、思高學苑\n\n需要哪項服務？";
     }
     confidence = 0.85;
   }
 
+  // ── 健康 ──
+  else if (tags.includes("health")) {
+    const symptoms = q.match(/頭痛|肚子痛|發燒|感冒|咳嗽|不舒服|過敏|拉肚子|噁心|想吐|頭暈|喉嚨痛|流鼻水|受傷|扭到/);
+    if (/掛號|預約|看醫|看診/.test(q)) {
+      answer = "衛保組掛號資訊：\n\n地點：至善樓 1F 衛保組\n看診時間：週一～五 09:00-12:00、13:30-16:30\n費用：免費（持學生證）\n\n需要我幫你預約掛號嗎？";
+    } else if (/諮商|心理/.test(q)) {
+      answer = "心理諮商服務（完全免費且保密）：\n\n地點：至善樓 2F 諮商輔導中心\n預約電話：(04)2632-8001 分機 11501\n初次諮商需先填寫初談表\n\n你的感受很重要，不用獨自承擔。要幫你預約嗎？";
+    } else if (symptoms) {
+      answer = `你提到有${symptoms[0]}的症狀，先別擔心。建議：\n\n1. 輕微症狀：多休息、多喝水\n2. 持續不適：到衛保組看診（至善樓 1F，免費）\n3. 嚴重情況：撥打校園緊急專線 (04)2632-8001\n\n衛保組看診時間：週一～五 09:00-16:30\n\n需要我幫你預約嗎？`;
+    } else {
+      answer = "校園健康服務：\n\n• 衛保組（至善樓 1F）— 免費看診，週一～五 09:00-16:30\n• 諮商中心（至善樓 2F）— 免費心理諮商\n• 校園 AED 位置：圖書館 1F、體育館 1F、各大樓 1F\n• 緊急專線：(04)2632-8001";
+    }
+    confidence = 0.88;
+  }
+
+  // ── 情緒支援 ──
+  else if (tags.includes("emotion")) {
+    const negative = /壓力|焦慮|難過|累|煩|沮喪|崩潰|撐不住|不想|心情不好|低落/.test(q);
+    if (negative) {
+      answer = "聽起來你最近不太好受，這很正常 — 大學生活確實有不少壓力。\n\n先深呼吸，你不是一個人在面對這些。\n\n幾個建議：\n1. 到校園走走散心（靜園的花園很舒服）\n2. 跟朋友聊聊天\n3. 學校有免費心理諮商（至善樓 2F，(04)2632-8001 #11501）\n\n你不需要一個人扛著，找人聊聊真的會有幫助的 ❤️";
+    } else {
+      answer = "很高興聽到！希望你每天都過得開心 😊\n有什麼需要幫忙的隨時說！";
+    }
+    confidence = 0.90;
+  }
+
   // ── 出席/請假 ──
   else if (tags.includes("attendance")) {
-    answer = "關於請假：\n• 線上請假可以透過學校請假系統操作\n• 病假需要附上就醫證明\n• 事假建議提前申請\n• 缺曠達一定時數可能影響學期成績，要注意各科的規定";
-    confidence = 0.75;
+    answer = "請假流程：\n\n1. 病假 — 需附就醫證明，3 天內上網補假\n2. 事假 — 需提前申請，由授課教師核准\n3. 公假 — 學校活動/比賽，需附公文\n\n注意：各科缺曠超過 1/3 可能被扣考！\n\n要我幫你線上請假嗎？";
+    confidence = 0.85;
   }
 
   // ── 交通 ──
   else if (tags.includes("transport")) {
-    answer = "關於校園交通：\n• 校車和公車時刻表可以在 APP 的交通頁面查看\n• 停車場位置可以使用導航功能尋找";
-    confidence = 0.7;
+    if (/沙鹿.*(火車站|車站)|沙鹿火車站/.test(q)) {
+      answer = "從靜宜大學到沙鹿火車站：\n\n1. 最快：計程車或共乘，約 10 分鐘。\n2. 省錢：到校門口周邊搭往沙鹿市區方向的公車，班次請用台中公車 App 確認。\n3. 要去台中車站的話，可從沙鹿火車站搭台鐵區間車。";
+    } else if (/台中|臺中|火車站|車站/.test(q)) {
+      answer = "從靜宜大學到台中車站：\n\n1. 直達公車：到校門口台灣大道上的站牌，搭 300、307 或 308 往台中車站方向，約 40-50 分鐘；尖峰可能更久。\n2. 台鐵轉乘：先到沙鹿火車站，再搭台鐵區間車到台中車站，約 20-30 分鐘車程，但要多一次轉乘。\n\n離線模式不能查即時班次，出門前請用台中公車 App 或台鐵 App 確認下一班。";
+    } else if (/高鐵/.test(q)) {
+      answer = "到高鐵台中站的方式：\n\n1. 統聯客運 — 約 30 分鐘\n2. 35 路公車 — 約 40 分鐘\n3. 計程車 — 約 20 分鐘，$300 左右\n\n都可以在校門口搭乘。";
+    } else {
+      answer = "靜宜大學交通資訊：\n\n主要公車路線（校門口搭）：\n• 300/307/308 → 台中火車站（40-50min）\n• 304 → 清水\n• 統聯/35路 → 高鐵台中站（30min）\n\nYouBike 站點：校門口\n\n即時到站資訊請查看「台中公車」APP。";
+    }
+    confidence = 0.88;
+  }
+
+  // ── 離線助理自我說明 / 使用者抱怨 / 草稿需求 ──
+  else if (/你是誰|你是什麼|什麼模型|模型|離線|本地|chatgpt|gpt|codex|智商|多聰明|參數|parameter|權重|訓練|跟.*一樣/.test(q)) {
+    answer = "我不能把 App 端模型參數量變成和 ChatGPT/Codex 一樣，也不會假裝自己有相同權重。\n\n我能變強的方式是：\n1. 使用更完整的助理能力設定與本地訓練範例\n2. 讀取 App 內的課表、作業、餐飲、圖書館、宿舍與校園資料\n3. 對可執行工具產生確認卡，確認後交給 DataSource 執行\n4. 沒有正式 API 或缺資料時建立草稿/導頁，不偽造完成\n5. 透過使用者回饋累積本地記憶與回答品質";
+    confidence = 0.9;
+  }
+  else if (/笨|很爛|不好用|答錯|錯了|不聰明|沒用|亂回|答非所問/.test(q)) {
+    answer = "你說得對，離線版目前不是雲端大模型，所以開放式問題會比較弱。\n\n我會把回答收斂在能可靠處理的範圍：校園資訊、課表作業、餐飲交通、健康宿舍、請假/報修/失物草稿。你可以把剛剛那題再問一次，盡量加上具體情境，我會用本地資料重新回答。";
+    confidence = 0.88;
+  }
+  else if (/草稿|幫我寫|寫一封|寫信|訊息|公告|email|mail|改寫|潤飾/.test(q)) {
+    const cleaned = question.replace(/幫我寫|寫一封|草稿|改寫|潤飾/g, "").trim();
+    answer = `我先幫你整理一版草稿：\n\n「您好，我想說明：${cleaned || "請在這裡補上具體內容"}。若需要補充資料或調整語氣，我可以再修改。謝謝。」\n\n如果你要更精準，請補上對象、目的、日期和希望語氣。`;
+    confidence = 0.82;
   }
 
   // ── 嘗試用模板匹配 ──
@@ -2694,6 +2797,7 @@ export function addTrainingPair(
     poiNames?: string[];
   },
 ): LocalTrainingDB {
+  db = normalizeLocalTrainingDB(db);
   const tags = autoTagQuestion(question);
   const pairId = `qa_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
 
@@ -2756,6 +2860,7 @@ export function updatePairQuality(
   delta: number,
   followedUp?: boolean,
 ): LocalTrainingDB {
+  db = normalizeLocalTrainingDB(db);
   const updatedPairs = db.pairs.map(p => {
     if (p.id !== pairId) return p;
     return { ...p, quality: Math.max(1, Math.min(5, p.quality + delta)), followedUp: followedUp ?? p.followedUp };
@@ -2809,6 +2914,7 @@ export function findSimilarByTfIdf(
   question: string,
   topK = 5,
 ): Array<{ pair: QAPair; similarity: number }> {
+  db = normalizeLocalTrainingDB(db);
   if (db.pairs.length === 0) return [];
   const idf = Object.keys(db.idfTable).length > 0 ? db.idfTable : rebuildIDF(db.pairs);
   const queryTokens = tokenize(question);
@@ -2831,6 +2937,7 @@ export function getLocalConfidence(
   tags: string[],
   db: LocalTrainingDB,
 ): number {
+  db = normalizeLocalTrainingDB(db);
   let confidence = 0;
 
   // 1. 標籤覆蓋度（是否為已知領域）
@@ -2860,6 +2967,7 @@ export function getLocalConfidence(
 
 /** 匯出訓練洞察 — 注入 system prompt */
 export function exportTrainingInsights(db: LocalTrainingDB): string {
+  db = normalizeLocalTrainingDB(db);
   const lines: string[] = [];
 
   if (db.goodExamples.length > 0) {

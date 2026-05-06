@@ -15,6 +15,7 @@ import { canManageCourse, formatDateTime } from "../services/courseWorkspace";
 import { useAmbientCues } from "../features/engagement";
 import { AmbientCueCard } from "../ui/campusOs";
 import { getFreshnessState, resolveRoleMode } from "../utils/campusOs";
+import { navigateToCourseHome } from "../utils/courseNavigation";
 import { refreshTCBackendSession, setTCSavedCredentials, tcLogin } from "../services/tronClassClient";
 import { refreshTCCourses } from "../services/puDataCache";
 
@@ -165,9 +166,182 @@ function ActionChip(props: {
   );
 }
 
+function CourseOpsHero(props: {
+  courseCount: number;
+  dueSoon: number;
+  quizCount: number;
+  activeSessions: number;
+  roleMode: string;
+  onOpenToday: () => void;
+  onOpenAI: () => void;
+}) {
+  const load = Math.min(100, props.courseCount * 12 + props.dueSoon * 18 + props.quizCount * 10 + props.activeSessions * 24);
+  const primaryState =
+    props.activeSessions > 0
+      ? "課堂控制台進行中"
+      : props.dueSoon > 0
+        ? "近期待辦需要拆解"
+        : props.courseCount > 0
+          ? "課程節奏穩定"
+          : "等待 TronClass 同步";
+  const stages = [
+    { key: "sync", label: "同步", icon: "cloud-done-outline" as const, active: props.courseCount > 0, color: theme.colors.info },
+    { key: "plan", label: "課前", icon: "map-outline" as const, active: props.dueSoon > 0 || props.courseCount > 0, color: theme.colors.accent },
+    { key: "live", label: "課中", icon: "radio-outline" as const, active: props.activeSessions > 0, color: theme.colors.success },
+    { key: "review", label: "課後", icon: "analytics-outline" as const, active: props.quizCount > 0 || props.dueSoon > 0, color: theme.colors.warning },
+  ];
+
+  return (
+    <View
+      style={{
+        padding: 18,
+        borderRadius: theme.radius.xl,
+        backgroundColor: "#07111F",
+        borderWidth: 1,
+        borderColor: "#1C2E46",
+        overflow: "hidden",
+      }}
+    >
+      <View
+        style={{
+          position: "absolute",
+          right: -36,
+          top: -44,
+          width: 142,
+          height: 142,
+          borderRadius: 71,
+          borderWidth: 1,
+          borderColor: `${theme.colors.accent}2E`,
+          backgroundColor: `${theme.colors.accent}0D`,
+        }}
+      />
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 14 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: "#7E91AA", fontSize: 11, fontWeight: "900" }}>Course Operating System</Text>
+          <Text style={{ color: "#FFFFFF", fontSize: 23, lineHeight: 30, fontWeight: "900", marginTop: 8 }}>
+            {primaryState}
+          </Text>
+          <Text style={{ color: "#A8B7CC", fontSize: 12, lineHeight: 19, marginTop: 7 }}>
+            {props.roleMode === "teacher"
+              ? "教材、點名、互動、評分與課後摘要集中在同一門課。"
+              : "教材、作業、測驗、點名、成績與 AI 拆解接回 Today。"}
+          </Text>
+        </View>
+        <View
+          style={{
+            width: 62,
+            height: 62,
+            borderRadius: 22,
+            backgroundColor: "#0E1B2D",
+            borderWidth: 1,
+            borderColor: "#253A58",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Text style={{ color: "#FFFFFF", fontSize: 18, fontWeight: "900" }}>{load}</Text>
+          <Text style={{ color: "#7E91AA", fontSize: 9, fontWeight: "700" }}>LOAD</Text>
+        </View>
+      </View>
+
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginTop: 18 }}>
+        {stages.map((stage, index) => (
+          <React.Fragment key={stage.key}>
+            <View style={{ alignItems: "center", flex: 1 }}>
+              <View
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 14,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: stage.active ? `${stage.color}22` : "#0E1B2D",
+                  borderWidth: 1,
+                  borderColor: stage.active ? `${stage.color}55` : "#253A58",
+                }}
+              >
+                <Ionicons name={stage.icon} size={17} color={stage.active ? stage.color : "#637089"} />
+              </View>
+              <Text style={{ color: stage.active ? "#D9E8FF" : "#637089", fontSize: 10, fontWeight: "800", marginTop: 6 }}>
+                {stage.label}
+              </Text>
+            </View>
+            {index < stages.length - 1 ? (
+              <View style={{ width: 18, height: 2, borderRadius: 1, backgroundColor: stages[index + 1].active ? "#335070" : "#1A2A41", marginBottom: 20 }} />
+            ) : null}
+          </React.Fragment>
+        ))}
+      </View>
+
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 18 }}>
+        {[
+          { label: "課程", value: props.courseCount, color: theme.colors.info },
+          { label: "待交", value: props.dueSoon, color: theme.colors.warning },
+          { label: "測驗", value: props.quizCount, color: theme.colors.social },
+          { label: "Live", value: props.activeSessions, color: theme.colors.success },
+        ].map((item) => (
+          <View
+            key={item.label}
+            style={{
+              flex: 1,
+              minWidth: "22%",
+              paddingVertical: 10,
+              borderRadius: 13,
+              backgroundColor: "#0B1828",
+              borderWidth: 1,
+              borderColor: "#1F314C",
+              alignItems: "center",
+            }}
+          >
+            <Text style={{ color: item.color, fontSize: 18, fontWeight: "900" }}>{item.value}</Text>
+            <Text style={{ color: "#7E91AA", fontSize: 10, fontWeight: "700", marginTop: 2 }}>{item.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
+        <Pressable
+          onPress={props.onOpenToday}
+          style={({ pressed }) => ({
+            flex: 1,
+            minHeight: 44,
+            borderRadius: 14,
+            backgroundColor: theme.colors.accent,
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "row",
+            gap: 7,
+            opacity: pressed ? 0.76 : 1,
+          })}
+        >
+          <Ionicons name="flash" size={16} color="#FFFFFF" />
+          <Text style={{ color: "#FFFFFF", fontSize: 13, fontWeight: "900" }}>回 Today 排序</Text>
+        </Pressable>
+        <Pressable
+          onPress={props.onOpenAI}
+          style={({ pressed }) => ({
+            width: 54,
+            minHeight: 44,
+            borderRadius: 14,
+            backgroundColor: "#0E1B2D",
+            borderWidth: 1,
+            borderColor: "#253A58",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: pressed ? 0.72 : 1,
+          })}
+        >
+          <Ionicons name="sparkles-outline" size={18} color="#D9E8FF" />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export function CourseHubScreen(props: any) {
   const nav = props?.navigation;
   const routeGroupId = props?.route?.params?.groupId as string | undefined;
+  const routeGroupName = props?.route?.params?.groupName as string | undefined;
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
@@ -260,8 +434,25 @@ export function CourseHubScreen(props: any) {
   );
 
   const selectedRows = useMemo(
-    () => (routeGroupId && selectedMembership ? [selectedMembership] : courseSpaces),
-    [routeGroupId, selectedMembership, courseSpaces]
+    () => {
+      if (!routeGroupId) return courseSpaces;
+      if (selectedMembership) return [selectedMembership];
+      if (!routeGroupName) return courseSpaces;
+
+      return [{
+        id: routeGroupId,
+        groupId: routeGroupId,
+        name: routeGroupName,
+        unreadCount: 0,
+        assignmentCount: 0,
+        dueSoonCount: 0,
+        quizCount: 0,
+        moduleCount: 0,
+        activeSessionId: null,
+        latestDueAt: null,
+      } satisfies CourseSpace];
+    },
+    [routeGroupId, routeGroupName, selectedMembership, courseSpaces]
   );
 
   const { totalDueSoon, totalQuizCount, activeSessions } = useMemo(() => {
@@ -332,6 +523,16 @@ export function CourseHubScreen(props: any) {
         contentContainerStyle={{ gap: 14, padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
+        <CourseOpsHero
+          courseCount={selectedRows.length}
+          dueSoon={totalDueSoon}
+          quizCount={totalQuizCount}
+          activeSessions={activeSessions}
+          roleMode={roleMode}
+          onOpenToday={() => nav?.navigate?.("Today", { screen: "TodayHome" })}
+          onOpenAI={() => nav?.navigate?.("Today", { screen: "AIChat" })}
+        />
+
         {/* 統計摘要 */}
         <View style={{ flexDirection: "row", gap: 10 }}>
           {[
@@ -359,6 +560,33 @@ export function CourseHubScreen(props: any) {
             </View>
           ))}
         </View>
+
+        <Card title="課程作業系統" subtitle="課前、課中、課後都從同一門課延伸">
+          <View style={{ gap: 10 }}>
+            {[
+              { icon: "navigate-outline" as const, title: "課前", body: "Today 會把下一堂課、教室、公告、教材與導航排成下一步。" },
+              { icon: "pulse-outline" as const, title: "課中", body: "課堂模式集中點名、匿名提問、投票、理解度回饋與即時互動。" },
+              { icon: "analytics-outline" as const, title: "課後", body: "作業、測驗、成績簿、學習分析與 AI 拆解任務會接回收件匣。" },
+            ].map((item) => (
+              <View key={item.title} style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+                <View style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 12,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: `${theme.colors.accent}14`,
+                }}>
+                  <Ionicons name={item.icon} size={17} color={theme.colors.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: "800" }}>{item.title}</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 19, marginTop: 2 }}>{item.body}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </Card>
 
         {ambientCue ? (
           <AmbientCueCard
@@ -541,12 +769,8 @@ export function CourseHubScreen(props: any) {
                   tint="#F97316"
                   onPress={() => {
                     // 導向新的課程首頁作業 tab，避免跨 tab 導航到收件匣
-                    const rootNav = nav?.getParent?.();
-                    if (rootNav?.navigate) {
-                      rootNav.navigate("課程", { screen: "CoursesHome", params: { initialTab: "homework" } });
-                    } else {
-                      nav?.navigate?.("CoursesHome", { initialTab: "homework" });
-                    }
+                    const rootNav = nav?.getParent?.() ?? nav;
+                    navigateToCourseHome(rootNav, auth.profile?.role, { initialTab: "homework" });
                   }}
                 />
                 <ActionChip
@@ -607,12 +831,12 @@ export function CourseHubScreen(props: any) {
           );
         })}
 
-        <SectionTitle text="TronClass Parity" />
-        <Card subtitle="目前主幹已經接成正式課程工作流">
+        <SectionTitle text="Campus Agent OS" />
+        <Card subtitle="LMS 主幹 + 校園行動代理">
           <View style={{ gap: 10 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: "700" }}>已接入的主模組</Text>
+            <Text style={{ color: theme.colors.text, fontWeight: "700" }}>不可被單一競品取代的主流程</Text>
             <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-              課程空間、教材單元、作業、測驗、點名、課內成績簿、學習分析與課堂互動都已進入同一條課程主流程。
+              課程空間、教材單元、作業、測驗、點名、成績簿、學習分析、課堂互動、Today 行動中樞與收件匣已接成同一條課程閉環。
             </Text>
           </View>
         </Card>

@@ -79,6 +79,8 @@ jest.mock('firebase/firestore', () => ({
   addDoc: jest.fn(),
   updateDoc: jest.fn(),
   deleteDoc: jest.fn(),
+  setDoc: jest.fn(),
+  serverTimestamp: jest.fn(() => ({ __type: 'serverTimestamp' })),
   query: jest.fn(),
   where: jest.fn(),
   orderBy: jest.fn(),

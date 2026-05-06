@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
+// UI v2 — gradient + glass redesign
 import React, { useCallback, useMemo, useRef, useState, useEffect } from "react";
 import {
   Animated,
@@ -7,9 +8,13 @@ import {
   ScrollView,
   Text,
   View,
+  StyleSheet,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LinearGradient } from "expo-linear-gradient";
+import { BlurView } from "expo-blur";
 import * as Haptics from "expo-haptics";
 
 import type { ClubEvent, InboxTask, MenuItem } from "../data";
@@ -33,8 +38,16 @@ import {
   roleSummary,
   toInboxItem,
 } from "../utils/campusOs";
+import { navigateToCourseHome, navigateToCourseScreen } from "../utils/courseNavigation";
 
 console.log("[debug][TodayScreen] module loaded");
+
+// ─── Design Tokens ──────────────────────────────────────
+const HEADER_GRADIENT_LIGHT = ["#F0EBFF", "#FAF9FC", "#FAF9FC"] as const;
+const HEADER_GRADIENT_DARK = ["#1A1040", "#0C0A13", "#0C0A13"] as const;
+const CARD_BG_LIGHT = "rgba(255,255,255,0.72)";
+const CARD_BG_DARK = "rgba(26,22,37,0.75)";
+const GLASS_INTENSITY = Platform.OS === "ios" ? 40 : 0; // BlurView only works well on iOS
 
 type TimeSegment = "morning" | "class" | "afternoon" | "evening" | "night";
 
@@ -58,36 +71,99 @@ function getGreeting(): string {
   return "夜深了";
 }
 
+function getGreetingEmoji(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return "🌙";
+  if (hour < 9) return "🌅";
+  if (hour < 12) return "☀️";
+  if (hour < 14) return "🍜";
+  if (hour < 18) return "🌤";
+  if (hour < 22) return "🌆";
+  return "🌙";
+}
+
 function getDateString(): string {
   const now = new Date();
   const weekdays = ["週日", "週一", "週二", "週三", "週四", "週五", "週六"];
   return `${now.getMonth() + 1} 月 ${now.getDate()} 日 ${weekdays[now.getDay()]}`;
 }
 
-function StreakBadge({ days }: { days: number }) {
-  if (days < 2) return null;
+// ─── Glass Card Wrapper ─────────────────────────────────
+function GlassCard({
+  children,
+  style,
+  noPadding,
+}: {
+  children: React.ReactNode;
+  style?: object;
+  noPadding?: boolean;
+}) {
+  const isDark = theme.mode === "dark";
+  const cardBg = isDark ? CARD_BG_DARK : CARD_BG_LIGHT;
+  const padding = noPadding ? 0 : theme.space.lg;
+
+  if (Platform.OS === "ios") {
+    return (
+      <View style={[{ borderRadius: 22, overflow: "hidden" }, style]}>
+        <BlurView
+          intensity={GLASS_INTENSITY}
+          tint={isDark ? "dark" : "light"}
+          style={{
+            padding,
+            borderRadius: 22,
+            overflow: "hidden",
+            backgroundColor: cardBg,
+          }}
+        >
+          {children}
+        </BlurView>
+      </View>
+    );
+  }
+
   return (
     <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: theme.radius.full,
-        backgroundColor: theme.colors.streakSoft,
-        borderWidth: 1,
-        borderColor: `${theme.colors.streak}30`,
-      }}
+      style={[
+        {
+          backgroundColor: isDark ? theme.colors.surface : "#FFFFFF",
+          borderRadius: 22,
+          padding,
+          ...shadowStyle(theme.shadows.md),
+        },
+        style,
+      ]}
     >
-      <Ionicons name="flame" size={12} color={theme.colors.streak} />
-      <Text style={{ color: theme.colors.streak, fontSize: 11, fontWeight: "700" }}>
-        {days} 天
-      </Text>
+      {children}
     </View>
   );
 }
 
+// ─── Streak Badge (redesigned) ──────────────────────────
+function StreakBadge({ days }: { days: number }) {
+  if (days < 2) return null;
+  return (
+    <LinearGradient
+      colors={["#FF6B35", "#FF8C42"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 0 }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+      }}
+    >
+      <Ionicons name="flame" size={13} color="#FFF" />
+      <Text style={{ color: "#FFF", fontSize: 12, fontWeight: "800" }}>
+        {days} 天
+      </Text>
+    </LinearGradient>
+  );
+}
+
+// ─── Course Timeline Item (redesigned) ──────────────────
 function CourseTimelineItem(props: {
   name: string;
   teacher?: string;
@@ -95,6 +171,7 @@ function CourseTimelineItem(props: {
   time?: string;
   isNow?: boolean;
   isDone?: boolean;
+  isLast?: boolean;
   onPress?: () => void;
 }) {
   const statusColor = props.isNow
@@ -109,56 +186,80 @@ function CourseTimelineItem(props: {
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "flex-start",
-        gap: theme.space.md,
+        gap: 14,
         opacity: pressed ? 0.85 : 1,
-        paddingVertical: theme.space.sm,
+        paddingVertical: 12,
       })}
     >
-      <View style={{ alignItems: "center", width: 18, paddingTop: 4 }}>
+      {/* Timeline spine */}
+      <View style={{ alignItems: "center", width: 24 }}>
         <View
           style={{
-            width: 10,
-            height: 10,
-            borderRadius: 5,
-            backgroundColor: props.isDone ? theme.colors.muted : statusColor,
-            borderWidth: props.isNow ? 2 : 0,
-            borderColor: props.isNow ? theme.colors.success : "transparent",
+            width: props.isNow ? 14 : 10,
+            height: props.isNow ? 14 : 10,
+            borderRadius: 7,
+            backgroundColor: props.isNow ? statusColor : props.isDone ? `${theme.colors.muted}40` : `${statusColor}30`,
+            borderWidth: props.isNow ? 3 : 0,
+            borderColor: `${statusColor}40`,
+            ...(props.isNow ? {
+              shadowColor: statusColor,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.5,
+              shadowRadius: 6,
+              elevation: 4,
+            } : {}),
           }}
         />
+        {!props.isLast && (
+          <View
+            style={{
+              width: 2,
+              flex: 1,
+              minHeight: 20,
+              backgroundColor: `${theme.colors.border}80`,
+              marginTop: 4,
+              borderRadius: 1,
+            }}
+          />
+        )}
       </View>
 
-      <View style={{ flex: 1 }}>
+      <View style={{ flex: 1, paddingBottom: props.isLast ? 0 : 4 }}>
         <Text
           style={{
             color: props.isDone ? theme.colors.muted : theme.colors.text,
-            fontSize: 14,
+            fontSize: 15,
             fontWeight: "600",
             textDecorationLine: props.isDone ? "line-through" : "none",
           }}
         >
           {props.name}
         </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 1 }}>
-          {[props.time, props.teacher, props.location].filter(Boolean).join("  ·  ")}
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: 3, lineHeight: 18 }}>
+          {[props.time, props.location, props.teacher].filter(Boolean).join("  ·  ")}
         </Text>
       </View>
 
       {props.isNow && (
-        <View
+        <LinearGradient
+          colors={[theme.colors.success, "#34D399"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
           style={{
-            paddingHorizontal: 8,
-            paddingVertical: 3,
-            borderRadius: theme.radius.full,
-            backgroundColor: theme.colors.successSoft,
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            borderRadius: 12,
+            marginTop: 2,
           }}
         >
-          <Text style={{ color: theme.colors.success, fontSize: 10, fontWeight: "700" }}>進行中</Text>
-        </View>
+          <Text style={{ color: "#FFF", fontSize: 10, fontWeight: "800", letterSpacing: 0.5 }}>NOW</Text>
+        </LinearGradient>
       )}
     </Pressable>
   );
 }
 
+// ─── Inbox Task Row (redesigned) ────────────────────────
 function InboxTaskRow(props: {
   title: string;
   label: string;
@@ -181,34 +282,54 @@ function InboxTaskRow(props: {
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
-        gap: theme.space.md,
-        paddingVertical: theme.space.sm,
-        paddingHorizontal: theme.space.xs,
-        opacity: pressed ? 0.8 : 1,
+        gap: 14,
+        paddingVertical: 14,
+        paddingHorizontal: 4,
+        opacity: pressed ? 0.75 : 1,
+        transform: [{ scale: pressed ? 0.98 : 1 }],
       })}
     >
       <View
         style={{
-          width: 8,
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: urgencyColor,
-          marginTop: 1,
+          width: 36,
+          height: 36,
+          borderRadius: 12,
+          backgroundColor: `${urgencyColor}15`,
+          alignItems: "center",
+          justifyContent: "center",
         }}
-      />
+      >
+        <Ionicons
+          name={props.urgency === "critical" ? "alert-circle" : props.urgency === "high" ? "warning" : "document-text"}
+          size={18}
+          color={urgencyColor}
+        />
+      </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "500" }} numberOfLines={1}>
+        <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "600" }} numberOfLines={1}>
           {props.title}
         </Text>
-        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 1 }}>
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
           {props.label}{props.dueAt ? `  ·  ${props.dueAt}` : ""}
         </Text>
       </View>
-      <Ionicons name="chevron-forward" size={14} color={theme.colors.muted} />
+      <View
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 14,
+          backgroundColor: `${theme.colors.accent}10`,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Ionicons name="chevron-forward" size={14} color={theme.colors.accent} />
+      </View>
     </Pressable>
   );
 }
 
+// ─── Quick Action Chip (completely redesigned) ──────────
 function QuickActionChip(props: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
@@ -222,53 +343,59 @@ function QuickActionChip(props: {
         flex: 1,
         minWidth: 72,
         alignItems: "center",
-        paddingVertical: theme.space.sm,
-        paddingHorizontal: theme.space.xs,
-        borderRadius: theme.radius.lg,
-        backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        gap: 6,
-        opacity: pressed ? 0.78 : 1,
-        transform: [{ scale: pressed ? 0.96 : 1 }],
+        paddingVertical: 16,
+        paddingHorizontal: 4,
+        borderRadius: 20,
+        backgroundColor: `${props.tint}08`,
+        gap: 8,
+        opacity: pressed ? 0.7 : 1,
+        transform: [{ scale: pressed ? 0.92 : 1 }],
       })}
     >
-      <View
+      <LinearGradient
+        colors={[`${props.tint}25`, `${props.tint}10`]}
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: 12,
+          width: 48,
+          height: 48,
+          borderRadius: 16,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: `${props.tint}14`,
         }}
       >
-        <Ionicons name={props.icon} size={18} color={props.tint} />
-      </View>
-      <Text style={{ color: theme.colors.text, fontSize: 11, fontWeight: "600" }}>
+        <Ionicons name={props.icon} size={22} color={props.tint} />
+      </LinearGradient>
+      <Text style={{ color: theme.colors.text, fontSize: 11, fontWeight: "700", letterSpacing: 0.2 }}>
         {props.label}
       </Text>
     </Pressable>
   );
 }
 
-function SectionLabel({ children }: { children: string }) {
+// ─── Section Header (redesigned) ────────────────────────
+function SectionHeader({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
   return (
-    <Text
-      style={{
-        color: theme.colors.muted,
-        fontSize: theme.typography.overline.fontSize,
-        fontWeight: theme.typography.overline.fontWeight ?? "700",
-        letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
-        textTransform: "uppercase",
-        marginBottom: theme.space.sm,
-      }}
-    >
-      {children}
-    </Text>
+    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+      <Text
+        style={{
+          color: theme.colors.text,
+          fontSize: 18,
+          fontWeight: "700",
+          letterSpacing: -0.3,
+        }}
+      >
+        {title}
+      </Text>
+      {action && onAction && (
+        <Pressable onPress={onAction} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+          <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: "600" }}>{action}</Text>
+          <Ionicons name="chevron-forward" size={14} color={theme.colors.accent} />
+        </Pressable>
+      )}
+    </View>
   );
 }
 
+// ─── Main Screen ────────────────────────────────────────
 export function TodayScreen(props: Record<string, unknown>) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nav = props?.navigation as any;
@@ -277,6 +404,7 @@ export function TodayScreen(props: Record<string, unknown>) {
   const { school } = useSchool();
   const ds = useDataSource();
   const schedule = useSchedule();
+  const isDark = theme.mode === "dark";
   const streakStorageKey = useMemo(
     () => getStreakStorageKey(auth.user?.uid ?? null, school.id),
     [auth.user?.uid, school.id]
@@ -284,6 +412,7 @@ export function TodayScreen(props: Record<string, unknown>) {
 
   const [streakDays, setStreakDays] = useState<number>(0);
   const streakPulse = useRef(new Animated.Value(1)).current;
+  const headerFade = useRef(new Animated.Value(0)).current;
 
   const notifs = useNotifications();
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
@@ -330,7 +459,6 @@ export function TodayScreen(props: Record<string, unknown>) {
     [inboxTasks]
   );
 
-  // Hero Action — 最重要的下一步（注意瓶頸理論）
   const nextAction = useMemo(() => {
     if (!auth.user) return null;
     return rankedInboxItems[0] ?? null;
@@ -339,30 +467,18 @@ export function TodayScreen(props: Record<string, unknown>) {
   const nextCourse = useMemo(() => getNextCourse(schedule.courses), [schedule.courses]);
   const todayCourses = useMemo(() => getTodayCourses(schedule.courses), [schedule.courses]);
 
-  // 今日截止任務（Zeigarnik Effect）
   const dueTodayTasks = useMemo(() => {
     const today = new Date();
     return inboxTasks
       .filter((t) => {
         if (!t.dueAt) return false;
-        // Manually parse here (避免直接呼叫可能不是 Date/不是可呼叫 getTime 的值)
         const raw = t.dueAt as unknown;
         let d: Date | null = null;
         if (raw instanceof Date) {
           const gt = (raw as { getTime?: unknown }).getTime;
-          if (typeof gt !== "function") {
-            // #region agent log
-            console.warn("[debug][TodayScreen][dueTodayTasks] raw is Date instance but getTime is not callable", {
-              hypothesisId: "H1_dueTodayTasks_direct_getTime_call",
-              typeofGetTime: typeof gt,
-            });
-            // #endregion
-            return false;
-          }
+          if (typeof gt !== "function") return false;
           const tms = gt.call(raw);
-          if (typeof tms === "number" && !isNaN(tms)) {
-            d = raw as Date;
-          }
+          if (typeof tms === "number" && !isNaN(tms)) d = raw as Date;
         } else if (typeof (raw as { toDate?: unknown }).toDate === "function") {
           d = (raw as { toDate: () => Date }).toDate();
         } else if (typeof (raw as { _seconds?: unknown })._seconds === "number") {
@@ -384,45 +500,45 @@ export function TodayScreen(props: Record<string, unknown>) {
       .slice(0, 3);
   }, [inboxTasks]);
 
+  // Entrance animation
+  useEffect(() => {
+    Animated.timing(headerFade, {
+      toValue: 1,
+      duration: 600,
+      useNativeDriver: true,
+    }).start();
+  }, []);
+
   useEffect(() => {
     const update = async () => {
       try {
         const { streak, didChange } = await refreshUserStreak(streakStorageKey);
         setStreakDays(streak.currentStreak);
 
-        if (!didChange) {
-          return;
-        }
+        if (!didChange) return;
 
         try {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        } catch {
-          // ignore haptics failures (e.g. platform)
-        }
+        } catch { /* ignore */ }
         streakPulse.setValue(1);
         Animated.sequence([
-          Animated.timing(streakPulse, { toValue: 1.12, duration: 220, useNativeDriver: true }),
-          Animated.timing(streakPulse, { toValue: 1.0, duration: 220, useNativeDriver: true }),
+          Animated.timing(streakPulse, { toValue: 1.15, duration: 200, useNativeDriver: true }),
+          Animated.timing(streakPulse, { toValue: 1.0, duration: 200, useNativeDriver: true }),
         ]).start();
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
     };
-
     update();
   }, [streakPulse, streakStorageKey]);
 
-  const urgentTasks = useMemo(() =>
-    rankedInboxItems.slice(0, 3),
-    [rankedInboxItems]
-  );
+  const urgentTasks = useMemo(() => rankedInboxItems.slice(0, 3), [rankedInboxItems]);
 
   const handleNextActionPress = () => {
     if (!nextAction) return;
     if (nextAction.kind === "live" && nextAction.sessionId) {
-      nav?.navigate?.("課程", {
-        screen: "Classroom",
-        params: { groupId: nextAction.groupId, sessionId: nextAction.sessionId, isTeacher: teachingMode },
+      navigateToCourseScreen(nav, auth.profile?.role, "Classroom", {
+        groupId: nextAction.groupId,
+        sessionId: nextAction.sessionId,
+        isTeacher: teachingMode,
       });
       return;
     }
@@ -433,10 +549,7 @@ export function TodayScreen(props: Record<string, unknown>) {
       });
       return;
     }
-    nav?.navigate?.("收件匣", {
-      screen: "GroupDetail",
-      params: { groupId: nextAction.groupId },
-    });
+    nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: nextAction.groupId } });
   };
 
   const handleRefresh = useCallback(async () => {
@@ -497,6 +610,8 @@ export function TodayScreen(props: Record<string, unknown>) {
         : `已整理 ${totalToday} 件事項`
       : "今天沒有需要你立刻處理的事項";
 
+  const headerGradient = isDark ? HEADER_GRADIENT_DARK : HEADER_GRADIENT_LIGHT;
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
@@ -508,345 +623,304 @@ export function TodayScreen(props: Record<string, unknown>) {
             colors={[theme.colors.accent]}
           />
         }
-        contentContainerStyle={{
-          paddingTop: insets.top + theme.space.xs,
-          paddingHorizontal: theme.space.lg,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + theme.space.xs,
-          gap: theme.space.xl,
-        }}
+        contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 20 }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ gap: theme.space.md }}>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-            <Text style={{ color: theme.colors.muted, fontSize: 13, fontWeight: "500" }}>
-              {getDateString()}
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: theme.space.sm }}>
-              <Animated.View style={{ transform: [{ scale: streakPulse }] }}>
-                <StreakBadge days={streakDays} />
-              </Animated.View>
-              <Pressable
-                onPress={() => nav?.navigate?.("我的", { screen: "Notifications" })}
-                style={({ pressed }) => ({
-                  width: 36,
-                  height: 36,
-                  borderRadius: 12,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: theme.colors.surface,
-                  borderWidth: 1,
-                  borderColor: theme.colors.border,
-                  opacity: pressed ? 0.75 : 1,
-                })}
-              >
-                <Ionicons name="notifications-outline" size={18} color={theme.colors.text} />
-                {notifs.unreadCount > 0 && (
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 5,
-                      right: 5,
-                      minWidth: 14,
-                      height: 14,
-                      borderRadius: 7,
-                      paddingHorizontal: 3,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      backgroundColor: theme.colors.danger,
-                    }}
-                  >
-                    <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>
-                      {notifs.unreadCount > 9 ? "9+" : notifs.unreadCount}
-                    </Text>
-                  </View>
-                )}
-              </Pressable>
+        {/* ═══ Hero Header with Gradient ═══ */}
+        <LinearGradient
+          colors={headerGradient as unknown as [string, string, ...string[]]}
+          style={{
+            paddingTop: insets.top + 12,
+            paddingHorizontal: 20,
+            paddingBottom: 28,
+          }}
+        >
+          <Animated.View style={{ opacity: headerFade }}>
+            {/* Top Bar: Date + Actions */}
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 14, fontWeight: "500", letterSpacing: 0.2 }}>
+                {getDateString()}
+              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Animated.View style={{ transform: [{ scale: streakPulse }] }}>
+                  <StreakBadge days={streakDays} />
+                </Animated.View>
+                <Pressable
+                  onPress={() => nav?.navigate?.("我的", { screen: "Notifications" })}
+                  style={({ pressed }) => ({
+                    width: 42,
+                    height: 42,
+                    borderRadius: 14,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(91,33,182,0.06)",
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <Ionicons name="notifications-outline" size={20} color={theme.colors.text} />
+                  {notifs.unreadCount > 0 && (
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 6,
+                        right: 6,
+                        minWidth: 16,
+                        height: 16,
+                        borderRadius: 8,
+                        paddingHorizontal: 4,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: theme.colors.danger,
+                      }}
+                    >
+                      <Text style={{ color: "#fff", fontSize: 9, fontWeight: "800" }}>
+                        {notifs.unreadCount > 9 ? "9+" : notifs.unreadCount}
+                      </Text>
+                    </View>
+                  )}
+                </Pressable>
+              </View>
             </View>
-          </View>
 
-          <View style={{ gap: theme.space.xs }}>
-            <Text style={{
-              color: theme.colors.text,
-              fontSize: theme.typography.display.fontSize,
-              fontWeight: theme.typography.display.fontWeight ?? "800",
-              letterSpacing: theme.typography.display.letterSpacing,
-            }}>
-              {getGreeting()}，{displayName ?? roleFallbackName}
-            </Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 14, lineHeight: 21 }}>
-              {totalToday > 0 ? completionText : roleCopy.hint}
-            </Text>
-          </View>
+            {/* Greeting */}
+            <View style={{ gap: 6 }}>
+              <Text style={{
+                color: theme.colors.text,
+                fontSize: 32,
+                fontWeight: "800",
+                letterSpacing: -0.8,
+                lineHeight: 38,
+              }}>
+                {getGreeting()} {getGreetingEmoji()}
+              </Text>
+              <Text style={{
+                color: theme.colors.text,
+                fontSize: 22,
+                fontWeight: "700",
+                letterSpacing: -0.4,
+                opacity: 0.85,
+              }}>
+                {displayName ?? roleFallbackName}
+              </Text>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 15, lineHeight: 22, marginTop: 4 }}>
+                {totalToday > 0 ? completionText : roleCopy.hint}
+              </Text>
+            </View>
 
-          {totalToday > 0 && (
-            <View style={{ gap: theme.space.sm }}>
+            {/* Progress bar */}
+            {totalToday > 0 && (
               <View
                 style={{
-                  height: 4,
-                  borderRadius: 2,
-                  backgroundColor: theme.colors.border,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: isDark ? "rgba(255,255,255,0.08)" : "rgba(91,33,182,0.08)",
                   overflow: "hidden",
+                  marginTop: 16,
                 }}
               >
-                <View
+                <LinearGradient
+                  colors={
+                    highPressureCount === 0
+                      ? [theme.colors.growth, "#34D399"]
+                      : highPressureCount === totalToday
+                        ? [theme.colors.urgent, "#F87171"]
+                        : [theme.colors.warning, "#FBBF24"]
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
                   style={{
                     height: "100%",
-                    borderRadius: 2,
-                    backgroundColor:
-                      highPressureCount === 0
-                        ? theme.colors.growth
-                        : highPressureCount === totalToday
-                          ? theme.colors.urgent
-                          : theme.colors.warning,
-                    width: `${
-                      highPressureCount === 0
-                        ? 100
-                        : Math.max((highPressureCount / totalToday) * 100, 12)
-                    }%`,
+                    borderRadius: 3,
+                    width: `${highPressureCount === 0 ? 100 : Math.max((highPressureCount / totalToday) * 100, 12)}%`,
                   }}
                 />
               </View>
-            </View>
-          )}
-        </View>
+            )}
+          </Animated.View>
+        </LinearGradient>
 
-        {!auth.user ? (
-          <HeroActionCard
-            icon="school-outline"
-            eyebrow="開始你的校園體驗"
-            title="選學校，建立你的日常節奏"
-            description="選好學校和身份後，Campus 會自動整理你的課程、截止日、公告和校園服務。"
-            actionLabel="立即設定"
-            onPress={() => nav?.navigate?.("我的", { screen: "SSOLogin" })}
-          />
-        ) : nextAction ? (
-          <HeroActionCard
-            icon={nextAction.kind === "live" ? "pulse" : nextAction.kind === "group" ? "people" : "document-text"}
-            eyebrow="下一步"
-            title={nextAction.title}
-            description={nextAction.reason}
-            meta={nextAction.dueAt ? formatDueWindow(nextAction.dueAt) : undefined}
-            tone={
-              nextAction.urgency === "critical"
-                ? "danger"
-                : nextAction.urgency === "high"
-                  ? "warning"
-                  : "accent"
-            }
-            actionLabel={nextAction.actionLabel ?? "前往處理"}
-            onPress={handleNextActionPress}
-          />
-        ) : (
-          roleMode === "teacher" ? (
-            <CompletionState
-              title="目前沒有待批改或待發布的課務"
-              description="可以回到教學中樞整理教材、檢查點名，或提前安排下一堂課。"
-              actionLabel="打開教學中樞"
-              onPress={() => nav?.navigate?.("教學", { screen: "TeachingHub" })}
+        {/* ═══ Main Content ═══ */}
+        <View style={{ paddingHorizontal: 20, gap: 24, marginTop: -4 }}>
+
+          {/* Hero Action Card */}
+          {!auth.user ? (
+            <HeroActionCard
+              icon="school-outline"
+              eyebrow="開始你的校園體驗"
+              title="選學校，建立你的日常節奏"
+              description="選好學校和身份後，Campus 會自動整理你的課程、截止日、公告和校園服務。"
+              actionLabel="立即設定"
+              onPress={() => nav?.navigate?.("我的", { screen: "SSOLogin" })}
             />
-          ) : roleMode === "admin" ? (
-            <CompletionState
-              title="目前沒有需要立刻介入的校務事項"
-              description="可以前往管理控制台檢查公告、活動與成員權限狀態。"
-              actionLabel="打開管理台"
-              onPress={() => nav?.navigate?.("管理", { screen: "AdminDashboard" })}
+          ) : nextAction ? (
+            <HeroActionCard
+              icon={nextAction.kind === "live" ? "pulse" : nextAction.kind === "group" ? "people" : "document-text"}
+              eyebrow="下一步"
+              title={nextAction.title}
+              description={nextAction.reason}
+              meta={nextAction.dueAt ? formatDueWindow(nextAction.dueAt) : undefined}
+              tone={
+                nextAction.urgency === "critical"
+                  ? "danger"
+                  : nextAction.urgency === "high"
+                    ? "warning"
+                    : "accent"
+              }
+              actionLabel={nextAction.actionLabel ?? "前往處理"}
+              onPress={handleNextActionPress}
             />
           ) : (
-            <CompletionState
-              title="今天的主任務都完成了"
-              description="目前沒有急需處理的事項。可以看看課程進度或規劃明天。"
-              actionLabel="查看課程"
-              onPress={() => nav?.navigate?.("課程", { screen: "CoursesHome" })}
+            roleMode === "teacher" ? (
+              <CompletionState
+                title="目前沒有待批改或待發布的課務"
+                description="可以回到教學中樞整理教材、檢查點名，或提前安排下一堂課。"
+                actionLabel="打開教學中樞"
+                onPress={() => nav?.navigate?.("教學", { screen: "TeachingHub" })}
+              />
+            ) : roleMode === "admin" ? (
+              <CompletionState
+                title="目前沒有需要立刻介入的校務事項"
+                description="可以前往管理控制台檢查公告、活動與成員權限狀態。"
+                actionLabel="打開管理台"
+                onPress={() => nav?.navigate?.("管理", { screen: "AdminDashboard" })}
+              />
+            ) : (
+              <CompletionState
+                title="今天的主任務都完成了"
+                description="目前沒有急需處理的事項。可以看看課程進度或規劃明天。"
+                actionLabel="查看課程"
+                onPress={() => navigateToCourseHome(nav, auth.profile?.role)}
+              />
+            )
+          )}
+
+          {/* Ambient Cue */}
+          {ambientCue ? (
+            <AmbientCueCard
+              signalType={ambientCue.signalType}
+              headline={ambientCue.headline}
+              body={ambientCue.body}
+              metric={ambientCue.metric}
+              actionLabel={ambientCue.ctaLabel}
+              onPress={() => openAmbientCue(ambientCue, nav)}
+              onDismiss={() => { void dismissAmbientCue(ambientCue); }}
             />
-          )
-        )}
+          ) : null}
 
-        {ambientCue ? (
-          <AmbientCueCard
-            signalType={ambientCue.signalType}
-            headline={ambientCue.headline}
-            body={ambientCue.body}
-            metric={ambientCue.metric}
-            actionLabel={ambientCue.ctaLabel}
-            onPress={() => openAmbientCue(ambientCue, nav)}
-            onDismiss={() => {
-              void dismissAmbientCue(ambientCue);
-            }}
-          />
-        ) : null}
-
-        {todayCourses.length > 0 && (
-          <View
-            style={{
-              backgroundColor: theme.colors.surface,
-              borderRadius: theme.radius.xl,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              padding: theme.space.lg,
-              gap: 0,
-            }}
-          >
-            <SectionLabel>今日課程</SectionLabel>
+          {/* ═══ Today's Courses — Glass Card ═══ */}
+          {todayCourses.length > 0 && (
             <View>
-              {todayCourses.map((course, i) => {
-                const now = new Date();
-                const nowMinutes = now.getHours() * 60 + now.getMinutes();
-                const startMinutes = course.startTime ? parseInt(course.startTime.split(":")[0]) * 60 + parseInt(course.startTime.split(":")[1]) : 0;
-                const endMinutes = course.endTime ? parseInt(course.endTime.split(":")[0]) * 60 + parseInt(course.endTime.split(":")[1]) : 0;
-                const todayDayOfWeek = now.getDay();
-                const courseDayOfWeek = course.dayOfWeek ?? ((now.getDay() || 7) % 7);
-                const isNow = todayDayOfWeek === courseDayOfWeek && nowMinutes >= startMinutes && nowMinutes < endMinutes;
-                const isDone = todayDayOfWeek === courseDayOfWeek && nowMinutes >= endMinutes;
-                return (
-                  <View key={course.id ?? i}>
+              <SectionHeader
+                title="今日課程"
+                action="完整課表"
+                onAction={() => navigateToCourseScreen(nav, auth.profile?.role, "CourseSchedule")}
+              />
+              <GlassCard>
+                {todayCourses.map((course, i) => {
+                  const now = new Date();
+                  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+                  const startMinutes = course.startTime ? parseInt(course.startTime.split(":")[0]) * 60 + parseInt(course.startTime.split(":")[1]) : 0;
+                  const endMinutes = course.endTime ? parseInt(course.endTime.split(":")[0]) * 60 + parseInt(course.endTime.split(":")[1]) : 0;
+                  const todayDayOfWeek = now.getDay();
+                  const courseDayOfWeek = course.dayOfWeek ?? ((now.getDay() || 7) % 7);
+                  const isNow = todayDayOfWeek === courseDayOfWeek && nowMinutes >= startMinutes && nowMinutes < endMinutes;
+                  const isDone = todayDayOfWeek === courseDayOfWeek && nowMinutes >= endMinutes;
+                  return (
                     <CourseTimelineItem
+                      key={course.id ?? i}
                       name={course.name}
                       teacher={course.teacher ?? course.instructor}
                       location={course.location}
                       time={course.startTime ?? course.schedule?.[0]?.startTime}
                       isNow={isNow}
                       isDone={isDone}
-                      onPress={() => nav?.navigate?.("課程", { screen: "CourseHub" })}
+                      isLast={i === todayCourses.length - 1}
+                      onPress={() => navigateToCourseHome(nav, auth.profile?.role, { initialTab: "schedule" })}
                     />
-                    {i < todayCourses.length - 1 && (
-                      <View
-                        style={{
-                          height: 1,
-                          backgroundColor: theme.colors.border,
-                          marginLeft: 30,
-                        }}
-                      />
+                  );
+                })}
+              </GlassCard>
+            </View>
+          )}
+
+          {/* ═══ Urgent Tasks — Glass Card ═══ */}
+          {auth.user && urgentTasks.length > 0 && (
+            <View>
+              <SectionHeader
+                title="待處理事項"
+                action={inboxTasks.length > 3 ? `全部 ${inboxTasks.length} 件` : undefined}
+                onAction={inboxTasks.length > 3 ? () => nav?.navigate?.("收件匣", { screen: "Inbox" }) : undefined}
+              />
+              <GlassCard>
+                {urgentTasks.map((task, i) => (
+                  <View key={task.groupId + i}>
+                    <InboxTaskRow
+                      title={task.title}
+                      label={task.kind === "live" ? "課堂" : task.kind === "assignment" ? "作業" : "群組"}
+                      dueAt={task.dueAt ? formatDueWindow(task.dueAt) : undefined}
+                      urgency={task.urgency}
+                      onPress={() => {
+                        if (task.kind === "live" && task.sessionId) {
+                          navigateToCourseScreen(nav, auth.profile?.role, "Classroom", {
+                            groupId: task.groupId,
+                            sessionId: task.sessionId,
+                            isTeacher: teachingMode,
+                          });
+                        } else if (task.assignmentId) {
+                          nav?.navigate?.("收件匣", { screen: "AssignmentDetail", params: { groupId: task.groupId, assignmentId: task.assignmentId } });
+                        } else {
+                          nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: task.groupId } });
+                        }
+                      }}
+                    />
+                    {i < urgentTasks.length - 1 && (
+                      <View style={{ height: 1, backgroundColor: `${theme.colors.border}60`, marginLeft: 50 }} />
                     )}
                   </View>
-                );
-              })}
+                ))}
+              </GlassCard>
             </View>
-            {nextCourse && (
-              <Pressable
-                onPress={() => nav?.navigate?.("課程", { screen: "CourseSchedule" })}
-                style={{ marginTop: 10, flexDirection: "row", alignItems: "center", gap: 4 }}
-              >
-                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>查看完整課表</Text>
-                <Ionicons name="arrow-forward" size={12} color={theme.colors.accent} />
-              </Pressable>
-            )}
-          </View>
-        )}
+          )}
 
-        {auth.user && urgentTasks.length > 0 && (
-          <View
-            style={{
-              backgroundColor: theme.colors.surface,
-              borderRadius: theme.radius.xl,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              padding: theme.space.lg,
-            }}
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 2 }}>
-              <SectionLabel>待處理事項</SectionLabel>
-              {inboxTasks.length > 3 && (
-                <Pressable onPress={() => nav?.navigate?.("收件匣", { screen: "Inbox" })}>
-                  <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" }}>
-                    全部 {inboxTasks.length} 件
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-            {urgentTasks.map((task, i) => (
-              <View key={task.groupId + i}>
-                <InboxTaskRow
-                  title={task.title}
-                  label={task.kind === "live" ? "課堂" : task.kind === "assignment" ? "作業" : "群組"}
-                  dueAt={task.dueAt ? formatDueWindow(task.dueAt) : undefined}
-                  urgency={task.urgency}
-                  onPress={() => {
-                    if (task.kind === "live" && task.sessionId) {
-                      nav?.navigate?.("課程", {
-                        screen: "Classroom",
-                        params: { groupId: task.groupId, sessionId: task.sessionId, isTeacher: teachingMode },
-                      });
-                    } else if (task.assignmentId) {
-                      nav?.navigate?.("收件匣", { screen: "AssignmentDetail", params: { groupId: task.groupId, assignmentId: task.assignmentId } });
-                    } else {
-                      nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: task.groupId } });
-                    }
-                  }}
-                />
-                {i < urgentTasks.length - 1 && (
-                  <View style={{ height: 1, backgroundColor: theme.colors.border }} />
-                )}
+          {/* ═══ Quick Actions — Gradient Grid ═══ */}
+          <View>
+            <SectionHeader title="快速入口" />
+            <View style={{ gap: 10 }}>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <QuickActionChip icon="sparkles-outline" label="AI 助理" tint="#7C3AED" onPress={() => nav?.navigate?.("AIChat")} />
+                <QuickActionChip icon="search-outline" label="搜尋" tint="#6366F1" onPress={() => nav?.navigate?.("我的", { screen: "GlobalSearch" })} />
+                <QuickActionChip icon="bus-outline" label="交通" tint="#10B981" onPress={() => nav?.navigate?.("校園", { screen: "TransportHub" })} />
               </View>
-            ))}
-          </View>
-        )}
-
-        <View style={{ gap: theme.space.md }}>
-          <SectionLabel>快速入口</SectionLabel>
-          <View style={{ gap: theme.space.sm }}>
-            <View style={{ flexDirection: "row", gap: theme.space.sm }}>
-              <QuickActionChip
-                icon="sparkles-outline"
-                label="AI 助理"
-                tint="#FF6B9A"
-                onPress={() => nav?.navigate?.("AIChat")}
-              />
-              <QuickActionChip
-                icon="search-outline"
-                label="搜尋"
-                tint="#5AC8FA"
-                onPress={() => nav?.navigate?.("我的", { screen: "GlobalSearch" })}
-              />
-              <QuickActionChip
-                icon="bus-outline"
-                label="交通"
-                tint="#34C759"
-                onPress={() => nav?.navigate?.("校園", { screen: "TransportHub" })}
-              />
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <QuickActionChip icon="restaurant-outline" label="餐廳" tint="#D4A843" onPress={() => nav?.navigate?.("校園", { screen: "餐廳總覽" })} />
+                <QuickActionChip icon="qr-code-outline" label="QR 碼" tint="#5B21B6" onPress={() => nav?.navigate?.("我的", { screen: "QRCode" })} />
+                <QuickActionChip icon="library-outline" label="圖書館" tint="#A78BFA" onPress={() => nav?.navigate?.("校園", { screen: "Library" })} />
+              </View>
             </View>
-            <View style={{ flexDirection: "row", gap: theme.space.sm }}>
-              <QuickActionChip
-                icon="restaurant-outline"
-                label="餐廳"
-                tint="#FF9500"
-                onPress={() => nav?.navigate?.("校園", { screen: "餐廳總覽" })}
+          </View>
+
+          {/* ═══ Contextual Links ═══ */}
+          <View>
+            <SectionHeader title="探索" />
+            <View style={{ gap: 12 }}>
+              <TimelineCard
+                icon={contextCard.icon}
+                title={contextCard.title}
+                description={contextCard.description}
+                meta={contextCard.meta}
+                tint={contextCard.tint}
+                onPress={contextCard.onPress}
               />
-              <QuickActionChip
-                icon="qr-code-outline"
-                label="QR 碼"
-                tint="#5B8CFF"
-                onPress={() => nav?.navigate?.("我的", { screen: "QRCode" })}
-              />
-              <QuickActionChip
-                icon="library-outline"
-                label="圖書館"
-                tint="#667EEA"
-                onPress={() => nav?.navigate?.("校園", { screen: "Library" })}
+              <TimelineCard
+                icon="navigate-circle-outline"
+                title="校園地圖"
+                description="教室位置、路線導覽、周邊服務"
+                meta="Campus"
+                tint={theme.colors.accent}
+                onPress={() => nav?.navigate?.("校園", { screen: "Map" })}
               />
             </View>
           </View>
-        </View>
-
-        <View style={{ gap: theme.space.md }}>
-          <SectionLabel>Quick Links</SectionLabel>
-
-          <TimelineCard
-            icon={contextCard.icon}
-            title={contextCard.title}
-            description={contextCard.description}
-            meta={contextCard.meta}
-            tint={contextCard.tint}
-            onPress={contextCard.onPress}
-          />
-
-          <TimelineCard
-            icon="navigate-circle-outline"
-            title="Map"
-            description="Find routes and locations"
-            meta="Campus"
-            tint={theme.colors.accent}
-            onPress={() => nav?.navigate?.("校園", { screen: "Map" })}
-          />
         </View>
       </ScrollView>
     </View>
