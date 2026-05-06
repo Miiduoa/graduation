@@ -487,7 +487,7 @@ Users can request deletion of their account and associated data through Settings
 
 #### AI Query History
 - **Collected?** YES
-- **Shared?** NO (sent to Google Gemini API for response only)
+- **Shared?** NO for advertising or data resale; AI processing is routed through the backend proxy and then to configured AI providers (free-first: Groq, then Google Gemini)
 - **Purpose:**
   - Generate AI responses
   - Improve AI assistant accuracy
@@ -498,7 +498,9 @@ Users can request deletion of their account and associated data through Settings
   - Sensitive queries (containing PII): 90 days encrypted, then auto-deleted
   - User ratings: Retained separately (anonymized)
 - **Processing:**
-  - Sent encrypted to Google Gemini API
+  - Sent encrypted to Campus Helper backend AI proxy
+  - Backend sends only permission-scoped, minimized context to the configured AI provider
+  - Public web search uses public query strings only; private course, assignment, and grade data is not sent to public search services
   - Processed to generate response
   - Stored encrypted locally
   - Not used to train public AI models
@@ -514,7 +516,7 @@ Users can request deletion of their account and associated data through Settings
 - **Purpose:** Not applicable
 - **Required?** NO
 - **Retention:** Not applicable
-- **Processing:** Queries may improve Campus Helper's AI model only, not Google's public models
+- **Processing:** Queries, ratings, and anonymized metadata may improve Campus Helper prompts, RAG data, and evals only; they are not used to train public AI models
 
 ---
 
@@ -718,13 +720,13 @@ Users can request deletion of their account and associated data through Settings
 **Data Agreement:** Yes
 **Link:** https://cloud.google.com/terms/data-processing-terms
 
-### 3.3 Google Gemini API
+### 3.3 Backend AI Providers
 
 **Services Used:**
 - AI assistant responses
 
 **Data Shared:**
-- User search queries (sent for processing)
+- Minimized user AI query context (sent for processing)
 - AI evaluation feedback (anonymized)
 
 **Purpose:**
@@ -732,7 +734,7 @@ Users can request deletion of their account and associated data through Settings
 - Improve AI quality
 
 **Data Agreement:** Yes
-**Link:** https://ai.google.dev/privacy
+**Links:** Groq and Google Gemini provider privacy terms; actual provider depends on backend configuration
 
 ### 3.4 Stripe
 

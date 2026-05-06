@@ -33,12 +33,14 @@ from config import (
     SELF_TRAIN_INTERVAL_HOURS,
     ENABLE_SELF_TRAIN_LOOP,
     ENABLE_RAG,
+    ENABLE_WEB_SEARCH,
     FEEDBACK_DIR,
     PORT,
 )
 import llm_client
 from prompts.system import build_system_prompt
 from prompts.campus_knowledge import get_full_knowledge_text
+from web_search import search_public_web, format_web_context, should_use_web_search
 
 if ENABLE_RAG:
     from rag.retriever import retrieve, format_context
@@ -127,6 +129,10 @@ class FeedbackRequest(BaseModel):
     user_id: str | None = None
 
 
+class WebSearchRequest(BaseModel):
+    query: str
+
+
 # ─── Chat Endpoints ──────────────────────────────────────────────────
 
 async def _build_messages(req: ChatRequest) -> list[dict]:
@@ -136,9 +142,18 @@ async def _build_messages(req: ChatRequest) -> list[dict]:
     else:
         rag_context = ""
 
+    web_context = ""
+    if ENABLE_WEB_SEARCH and should_use_web_search(req.message):
+        try:
+            web_content, web_sources = await search_public_web(req.message)
+            web_context = format_web_context(web_content, web_sources)
+        except Exception as e:
+            logger.warning("Web search failed: %s", e)
+
     system_prompt = build_system_prompt(
         campus_knowledge=_campus_knowledge,
         rag_context=rag_context,
+        web_context=web_context,
         user_context=req.context,
         school_id=req.context.get("schoolId", "unknown"),
     )
@@ -190,6 +205,18 @@ async def chat(req: ChatRequest):
 async def chat_sync(req: ChatRequest):
     req.stream = False
     return await chat(req)
+
+
+@app.post("/api/tools/web-search")
+async def web_search(req: WebSearchRequest):
+    if not ENABLE_WEB_SEARCH:
+        return {"enabled": False, "content": "", "sources": []}
+    content, sources = await search_public_web(req.query)
+    return {
+        "enabled": True,
+        "content": content,
+        "sources": [source.__dict__ for source in sources],
+    }
 
 
 def _extract_suggestions(text: str) -> list[str]:

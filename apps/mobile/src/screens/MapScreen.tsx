@@ -55,7 +55,7 @@ function smartSearch(query: string, userLat: number | null, userLng: number | nu
   // 1. Try intent matching first
   for (const intent of INTENT_MAP) {
     if (intent.keywords.some((kw) => q.includes(kw))) {
-      let results = CAMPUS_POIS.filter((p) => intent.categories.includes(p.category));
+      const results = CAMPUS_POIS.filter((p) => intent.categories.includes(p.category));
       if (userLat !== null && userLng !== null) {
         results.sort((a, b) => haverDist(userLat, userLng, a.lat, a.lng) - haverDist(userLat, userLng, b.lat, b.lng));
       }
@@ -374,18 +374,18 @@ export function MapScreen(props: Record<string, unknown>) {
   const filtered = useMemo(() => {
     // Active scenario filter
     if (activeScenario !== null) {
-      let pois = QUICK_SCENARIOS[activeScenario].filter(CAMPUS_POIS);
+      const pois = QUICK_SCENARIOS[activeScenario].filter(CAMPUS_POIS);
       if (uLat !== null && uLng !== null) pois.sort((a, b) => haverDist(uLat, uLng, a.lat, a.lng) - haverDist(uLat, uLng, b.lat, b.lng));
       return pois;
     }
     // Search query
     if (debouncedQ.trim()) {
-      let pois = smartSearch(debouncedQ.trim(), uLat, uLng);
+      const pois = smartSearch(debouncedQ.trim(), uLat, uLng);
       if (uLat !== null && uLng !== null) pois.sort((a, b) => haverDist(uLat, uLng, a.lat, a.lng) - haverDist(uLat, uLng, b.lat, b.lng));
       return pois;
     }
     // Default: all by distance
-    let pois = [...CAMPUS_POIS];
+    const pois = [...CAMPUS_POIS];
     if (uLat !== null && uLng !== null) pois.sort((a, b) => haverDist(uLat, uLng, a.lat, a.lng) - haverDist(uLat, uLng, b.lat, b.lng));
     else pois.sort((a, b) => a.name.localeCompare(b.name, "zh-Hant"));
     return pois;

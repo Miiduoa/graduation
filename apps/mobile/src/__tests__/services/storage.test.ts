@@ -1,8 +1,8 @@
 /* eslint-disable */
 import { storage } from '../../services/storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
-jest.mock('expo-file-system', () => ({
+jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///mock/documents/',
   cacheDirectory: 'file:///mock/cache/',
   writeAsStringAsync: jest.fn(() => Promise.resolve()),
@@ -69,9 +69,7 @@ describe('StorageService', () => {
     });
 
     it('should return null on error', async () => {
-      (FileSystem.getInfoAsync as jest.Mock).mockRejectedValue(
-        new Error('File access error')
-      );
+      (FileSystem.getInfoAsync as jest.Mock).mockRejectedValue(new Error('File access error'));
 
       const info = await storage.getFileInfo('file:///test/error.jpg');
 
@@ -386,7 +384,7 @@ describe('StorageService', () => {
               return { status: 200, body: JSON.stringify({ url: 'test' }) };
             }),
           };
-        }
+        },
       );
 
       const file = {
@@ -417,7 +415,7 @@ describe('StorageService', () => {
 
       const result = await storage.downloadFile(
         'https://cdn.example.com/file.jpg',
-        'downloaded.jpg'
+        'downloaded.jpg',
       );
 
       expect(result).toBe('file:///mock/cache/uploads/downloaded.jpg');
@@ -430,7 +428,7 @@ describe('StorageService', () => {
 
       const result = await storage.downloadFile(
         'https://cdn.example.com/file.jpg',
-        'downloaded.jpg'
+        'downloaded.jpg',
       );
 
       expect(result).toBeNull();
@@ -512,8 +510,8 @@ describe('StorageService', () => {
       expect(storage.isDocument('text/plain')).toBe(true);
       expect(
         storage.isDocument(
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        )
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ),
       ).toBe(true);
       expect(storage.isDocument('image/jpeg')).toBe(false);
     });

@@ -4,6 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Course, CourseSchedule, CalendarEvent } from "../data/types";
 import { useAuth } from "./auth";
 import { getDataSource, hasDataSource } from "../data";
+import { getRuntimeDataSourcePolicy } from "../config/runtime";
 import { useSchool } from "./school";
 import { getFirstStorageValue, getScopedStorageKey } from "../services/scopedStorage";
 
@@ -78,6 +79,11 @@ const LEGACY_STORAGE_KEYS = {
   FILTER: "@schedule_filter",
 };
 
+const RUNTIME_DATA_POLICY = getRuntimeDataSourcePolicy();
+const SHOULD_SKIP_REMOTE_SCHEDULE_SYNC =
+  RUNTIME_DATA_POLICY.requestedMode === "mock" ||
+  (RUNTIME_DATA_POLICY.requestedMode === "hybrid" && !RUNTIME_DATA_POLICY.hybridPreferRealApi);
+
 function getScheduleStorageKeys(userId: string | null, schoolId: string | null) {
   return {
     COURSES: getScopedStorageKey("schedule-courses", { uid: userId, schoolId }),
@@ -86,6 +92,26 @@ function getScheduleStorageKeys(userId: string | null, schoolId: string | null) 
     VIEW: getScopedStorageKey("schedule-view", { uid: userId, schoolId }),
     FILTER: getScopedStorageKey("schedule-filter", { uid: userId, schoolId }),
   };
+}
+
+function isDemoCourse(course: Course): boolean {
+  const id = String(course.id ?? "");
+  const schoolId = String(course.schoolId ?? "");
+  return /^(tw-(pu|nchu)|pu)-crs-\d+$/i.test(id) || /^(tw-(pu|nchu)|pu)$/i.test(schoolId) && /-crs-\d+$/i.test(id);
+}
+
+function parseStoredCourses(raw: string | null): Course[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return SHOULD_SKIP_REMOTE_SCHEDULE_SYNC
+      ? parsed.filter((course) => !isDemoCourse(course))
+      : parsed;
+  } catch (error) {
+    console.warn("[Schedule] Failed to parse stored courses:", error);
+    return [];
+  }
 }
 
 // ===== Context =====
@@ -252,7 +278,7 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
 
         if (cancelled) return;
 
-        setCourses(storedCourses ? JSON.parse(storedCourses) : []);
+        setCourses(parseStoredCourses(storedCourses));
         setPersonalEvents(storedEvents ? JSON.parse(storedEvents) : []);
         setCurrentSemesterState(storedSemester || getCurrentSemester());
         setViewState(storedView ? (storedView as ScheduleView) : "week");
@@ -303,6 +329,11 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
 
     // 用戶改變時重置
     if (!currentUserId) {
+      return;
+    }
+
+    if (SHOULD_SKIP_REMOTE_SCHEDULE_SYNC) {
+      hasFetchedRef.current = true;
       return;
     }
     
@@ -464,6 +495,11 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
 
   const refreshSchedule = useCallback(async () => {
     if (!user?.uid) return;
+
+    if (SHOULD_SKIP_REMOTE_SCHEDULE_SYNC) {
+      setCourses((prev) => prev.filter((course) => !isDemoCourse(course)));
+      return;
+    }
     
     setLoading(true);
     setError(null);

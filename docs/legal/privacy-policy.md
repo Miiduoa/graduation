@@ -292,8 +292,9 @@ Campus Helper (hereinafter referred to as "the Application" or "the Service") re
 ## 9. AI 助手資料處理 (AI Assistant Data Handling)
 
 ### 9.1 AI 提示和查詢 (AI Prompts and Queries)
-- 使用者的提示被發送到 AI 處理服務（Google Gemini API 或類似）
-- 提示用於生成回應並改進 AI 模型
+- 使用者的提示會先送到校園助手後端 AI 代理，再由後端依權限呼叫免費優先的 AI 處理服務（Groq 與 Google Gemini API）
+- 後端只傳送回答所需的最小資料；個人課表、作業、成績等資料不會送往公開搜尋服務
+- 提示用於生成回應、建立可確認動作草稿、產生引用來源與改進 AI 品質
 - 使用者可在應用程式設定中禁用 AI 功能和資料收集
 
 ### 9.2 資料分類 (Data Classification)
@@ -302,8 +303,8 @@ Campus Helper (hereinafter referred to as "the Application" or "the Service") re
 - **AI 評分：** 使用者可標記回應為有幫助/無幫助 - 用於改進但與原始查詢解耦
 
 ### 9.3 第三方 AI 提供商 (Third-Party AI Providers)
-- Google Gemini API（主要 AI 提供商）
-- 備用提供商可能包括其他已驗證的安全 AI 服務
+- 免費優先的正式設定使用 Groq 與 Google Gemini API
+- 公開網路查詢可能使用 Open-Meteo、Wikipedia、DuckDuckGo Instant Answer、Google Maps 連結或官方公開來源
 - 所有 AI 提供商均承諾不將使用者資料用於廣告目的
 
 ### 9.4 AI 資料政策 (AI Data Policies)
@@ -313,7 +314,7 @@ Campus Helper (hereinafter referred to as "the Application" or "the Service") re
 
 ### 9.5 模型訓練透明度 (Model Training Transparency)
 - 使用者查詢不用於訓練公開可用的 AI 模型
-- 查詢可用於改進應用程式專用的 AI 模型
+- 查詢、評分與匿名化 metadata 可用於改進應用程式專用的 AI prompt、檢索資料與評測；正式環境預設不把完整聊天內容直接用於自動微調
 - 校園助手定期進行倫理審查，確保 AI 行為符合教育和隱私標準
 
 ---
@@ -442,7 +443,8 @@ campus-helper-export-2026-03-20.zip
 |------|------|--------|--------|
 | **Google Firebase** | 帳戶、資料庫、分析 | 匿名使用統計 | https://firebase.google.com/support/privacy |
 | **Google Cloud Functions** | 後端處理 | 僅交易記錄 | https://cloud.google.com/terms/cloud-privacy-notice |
-| **Google Gemini API** | AI 助手 | 查詢內容（受隱私模式限制） | https://ai.google.dev/privacy |
+| **Groq / Google Gemini（免費優先）** | AI 助手 | 最小化後的查詢內容與授權上下文 | 供應商官方隱私政策 |
+| **Open-Meteo / Wikipedia / DuckDuckGo / Google Maps** | AI 公開來源查詢 | 公開查詢字串，不含個人課表、作業、成績 | 供應商官方隱私政策 |
 | **Firebase Cloud Messaging** | 推播通知 | 推播令牌 | https://firebase.google.com/support/privacy |
 | **Stripe** | 信用卡支付 | 支付令牌 | https://stripe.com/privacy |
 | **TapPay** | 臺灣支付 | 支付令牌 | https://www.tappay.com/privacy |

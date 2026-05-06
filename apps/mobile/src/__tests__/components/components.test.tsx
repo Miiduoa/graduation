@@ -28,7 +28,7 @@ describe('UI Components', () => {
       const { getByText } = render(
         <Screen title="Test">
           <Button text="Test Button" />
-        </Screen>
+        </Screen>,
       );
       expect(getByText('Test Button')).toBeTruthy();
     });
@@ -36,9 +36,7 @@ describe('UI Components', () => {
 
   describe('Card', () => {
     it('should render title and subtitle', () => {
-      const { getByText } = render(
-        <Card title="Card Title" subtitle="Card Subtitle" />
-      );
+      const { getByText } = render(<Card title="Card Title" subtitle="Card Subtitle" />);
       expect(getByText('Card Title')).toBeTruthy();
       expect(getByText('Card Subtitle')).toBeTruthy();
     });
@@ -47,15 +45,13 @@ describe('UI Components', () => {
       const { getByText } = render(
         <Card>
           <Button text="Child Button" />
-        </Card>
+        </Card>,
       );
       expect(getByText('Child Button')).toBeTruthy();
     });
 
     it('should have accessible label when title provided', () => {
-      const { getByLabelText } = render(
-        <Card title="Accessible Card" subtitle="With subtitle" />
-      );
+      const { getByLabelText } = render(<Card title="Accessible Card" subtitle="With subtitle" />);
       expect(getByLabelText('Accessible Card, With subtitle')).toBeTruthy();
     });
   });
@@ -67,9 +63,15 @@ describe('UI Components', () => {
     });
 
     it('should apply different styles for different kinds', () => {
-      const kinds: Array<'default' | 'accent' | 'success' | 'muted' | 'danger' | 'warning'> = 
-        ['default', 'accent', 'success', 'muted', 'danger', 'warning'];
-      
+      const kinds: Array<'default' | 'accent' | 'success' | 'muted' | 'danger' | 'warning'> = [
+        'default',
+        'accent',
+        'success',
+        'muted',
+        'danger',
+        'warning',
+      ];
+
       kinds.forEach((kind) => {
         const { getByText } = render(<Pill text={`${kind} pill`} kind={kind} />);
         expect(getByText(`${kind} pill`)).toBeTruthy();
@@ -92,9 +94,7 @@ describe('UI Components', () => {
 
     it('should not call onPress when disabled', () => {
       const onPress = jest.fn();
-      const { getByRole } = render(
-        <Button text="Disabled" onPress={onPress} disabled />
-      );
+      const { getByRole } = render(<Button text="Disabled" onPress={onPress} disabled />);
       fireEvent.press(getByRole('button'));
       expect(onPress).not.toHaveBeenCalled();
     });
@@ -124,7 +124,7 @@ describe('UI Components', () => {
   describe('SearchBar', () => {
     it('should render with placeholder', () => {
       const { getByPlaceholderText } = render(
-        <SearchBar value="" onChange={() => {}} placeholder="搜尋..." />
+        <SearchBar value="" onChange={() => {}} placeholder="搜尋..." />,
       );
       expect(getByPlaceholderText('搜尋...')).toBeTruthy();
     });
@@ -132,24 +132,20 @@ describe('UI Components', () => {
     it('should call onChange when text changes', () => {
       const onChange = jest.fn();
       const { getByPlaceholderText } = render(
-        <SearchBar value="" onChange={onChange} placeholder="搜尋" />
+        <SearchBar value="" onChange={onChange} placeholder="搜尋" />,
       );
       fireEvent.changeText(getByPlaceholderText('搜尋'), 'test query');
       expect(onChange).toHaveBeenCalledWith('test query');
     });
 
     it('should show clear button when value is not empty', () => {
-      const { getByLabelText } = render(
-        <SearchBar value="test" onChange={() => {}} />
-      );
+      const { getByLabelText } = render(<SearchBar value="test" onChange={() => {}} />);
       expect(getByLabelText('清除搜尋')).toBeTruthy();
     });
 
     it('should clear value when clear button is pressed', () => {
       const onChange = jest.fn();
-      const { getByLabelText } = render(
-        <SearchBar value="test" onChange={onChange} />
-      );
+      const { getByLabelText } = render(<SearchBar value="test" onChange={onChange} />);
       fireEvent.press(getByLabelText('清除搜尋'));
       expect(onChange).toHaveBeenCalledWith('');
     });
@@ -163,11 +159,7 @@ describe('UI Components', () => {
 
     it('should render custom content', () => {
       const { getByText } = render(
-        <EmptyState 
-          title="沒有結果" 
-          subtitle="找不到符合的項目" 
-          hint="嘗試其他搜尋條件"
-        />
+        <EmptyState title="沒有結果" subtitle="找不到符合的項目" hint="嘗試其他搜尋條件" />,
       );
       expect(getByText('沒有結果')).toBeTruthy();
       expect(getByText('找不到符合的項目')).toBeTruthy();
@@ -176,9 +168,7 @@ describe('UI Components', () => {
 
     it('should render action button', () => {
       const onAction = jest.fn();
-      const { getByText } = render(
-        <EmptyState actionText="重新載入" onAction={onAction} />
-      );
+      const { getByText } = render(<EmptyState actionText="重新載入" onAction={onAction} />);
       fireEvent.press(getByText('重新載入'));
       expect(onAction).toHaveBeenCalled();
     });
@@ -191,9 +181,7 @@ describe('UI Components', () => {
     });
 
     it('should render custom loading message', () => {
-      const { getByText } = render(
-        <LoadingState title="正在處理" subtitle="請稍候..." />
-      );
+      const { getByText } = render(<LoadingState title="正在處理" subtitle="請稍候..." />);
       expect(getByText('正在處理')).toBeTruthy();
       expect(getByText('請稍候...')).toBeTruthy();
     });
@@ -201,9 +189,14 @@ describe('UI Components', () => {
 
   describe('StatusBadge', () => {
     it('should render different statuses', () => {
-      const statuses: Array<'open' | 'closed' | 'busy' | 'online' | 'offline'> = 
-        ['open', 'closed', 'busy', 'online', 'offline'];
-      
+      const statuses: Array<'open' | 'closed' | 'busy' | 'online' | 'offline'> = [
+        'open',
+        'closed',
+        'busy',
+        'online',
+        'offline',
+      ];
+
       statuses.forEach((status) => {
         const { getByText } = render(<StatusBadge status={status} />);
         expect(getByText).toBeTruthy();
@@ -239,9 +232,7 @@ describe('UI Components', () => {
 
     it('should be interactive when enabled', () => {
       const onChange = jest.fn();
-      const { getAllByRole } = render(
-        <RatingStars rating={3} interactive onChange={onChange} />
-      );
+      const { getAllByRole } = render(<RatingStars rating={3} interactive onChange={onChange} />);
       const buttons = getAllByRole('button');
       fireEvent.press(buttons[0]);
       expect(onChange).toHaveBeenCalledWith(1);
@@ -262,7 +253,7 @@ describe('UI Components', () => {
 
     it('should render all options', () => {
       const { getByText } = render(
-        <FilterChips options={options} selected={[]} onChange={() => {}} />
+        <FilterChips options={options} selected={[]} onChange={() => {}} />,
       );
       expect(getByText('全部')).toBeTruthy();
       expect(getByText('進行中')).toBeTruthy();
@@ -272,7 +263,7 @@ describe('UI Components', () => {
     it('should call onChange with single selection', () => {
       const onChange = jest.fn();
       const { getByText } = render(
-        <FilterChips options={options} selected={[]} onChange={onChange} />
+        <FilterChips options={options} selected={[]} onChange={onChange} />,
       );
       fireEvent.press(getByText('進行中'));
       expect(onChange).toHaveBeenCalledWith(['active']);
@@ -281,12 +272,7 @@ describe('UI Components', () => {
     it('should support multiple selection', () => {
       const onChange = jest.fn();
       const { getByText } = render(
-        <FilterChips 
-          options={options} 
-          selected={['all']} 
-          onChange={onChange} 
-          multiple 
-        />
+        <FilterChips options={options} selected={['all']} onChange={onChange} multiple />,
       );
       fireEvent.press(getByText('進行中'));
       expect(onChange).toHaveBeenCalledWith(['all', 'active']);
@@ -301,7 +287,7 @@ describe('UI Components', () => {
 
     it('should render all options', () => {
       const { getByText } = render(
-        <SegmentedControl options={options} selected="tab1" onChange={() => {}} />
+        <SegmentedControl options={options} selected="tab1" onChange={() => {}} />,
       );
       expect(getByText('標籤一')).toBeTruthy();
       expect(getByText('標籤二')).toBeTruthy();
@@ -310,7 +296,7 @@ describe('UI Components', () => {
     it('should call onChange when option is pressed', () => {
       const onChange = jest.fn();
       const { getByText } = render(
-        <SegmentedControl options={options} selected="tab1" onChange={onChange} />
+        <SegmentedControl options={options} selected="tab1" onChange={onChange} />,
       );
       fireEvent.press(getByText('標籤二'));
       expect(onChange).toHaveBeenCalledWith('tab2');
@@ -319,14 +305,10 @@ describe('UI Components', () => {
     it('should support string array options', () => {
       const onChange = jest.fn();
       const { getByText } = render(
-        <SegmentedControl 
-          options={['選項 A', '選項 B']} 
-          selected={0} 
-          onChange={onChange} 
-        />
+        <SegmentedControl options={['選項 A', '選項 B']} selected="選項 A" onChange={onChange} />,
       );
       fireEvent.press(getByText('選項 B'));
-      expect(onChange).toHaveBeenCalledWith(1);
+      expect(onChange).toHaveBeenCalledWith('選項 B');
     });
   });
 
@@ -376,26 +358,20 @@ describe('UI Components', () => {
     });
 
     it('should render subtitle', () => {
-      const { getByText } = render(
-        <ListItem title="Title" subtitle="Subtitle text" />
-      );
+      const { getByText } = render(<ListItem title="Title" subtitle="Subtitle text" />);
       expect(getByText('Subtitle text')).toBeTruthy();
     });
 
     it('should call onPress when pressed', () => {
       const onPress = jest.fn();
-      const { getByRole } = render(
-        <ListItem title="Clickable" onPress={onPress} />
-      );
+      const { getByRole } = render(<ListItem title="Clickable" onPress={onPress} />);
       fireEvent.press(getByRole('button'));
       expect(onPress).toHaveBeenCalled();
     });
 
     it('should not be pressable when disabled', () => {
       const onPress = jest.fn();
-      const { queryByRole } = render(
-        <ListItem title="Disabled" onPress={onPress} disabled />
-      );
+      const { queryByRole } = render(<ListItem title="Disabled" onPress={onPress} disabled />);
       expect(queryByRole('button')).toBeNull();
     });
   });
@@ -413,18 +389,14 @@ describe('UI Components', () => {
 
     it('should call onChange when toggled', () => {
       const onChange = jest.fn();
-      const { getByRole } = render(
-        <ToggleSwitch value={false} onChange={onChange} />
-      );
+      const { getByRole } = render(<ToggleSwitch value={false} onChange={onChange} />);
       fireEvent.press(getByRole('switch'));
       expect(onChange).toHaveBeenCalledWith(true);
     });
 
     it('should not toggle when disabled', () => {
       const onChange = jest.fn();
-      const { getByRole } = render(
-        <ToggleSwitch value={false} onChange={onChange} disabled />
-      );
+      const { getByRole } = render(<ToggleSwitch value={false} onChange={onChange} disabled />);
       fireEvent.press(getByRole('switch'));
       expect(onChange).not.toHaveBeenCalled();
     });
@@ -449,9 +421,7 @@ describe('UI Components', () => {
     });
 
     it('should render with custom dimensions', () => {
-      const { root } = render(
-        <Skeleton width={200} height={40} borderRadius={8} />
-      );
+      const { root } = render(<Skeleton width={200} height={40} borderRadius={8} />);
       expect(root).toBeTruthy();
     });
   });
@@ -463,32 +433,20 @@ describe('UI Components', () => {
     });
 
     it('should render custom error message', () => {
-      const { getByText } = render(
-        <ErrorState 
-          title="連線失敗" 
-          subtitle="無法連接到伺服器" 
-        />
-      );
+      const { getByText } = render(<ErrorState title="連線失敗" subtitle="無法連接到伺服器" />);
       expect(getByText('連線失敗')).toBeTruthy();
       expect(getByText('無法連接到伺服器')).toBeTruthy();
     });
 
     it('should render action button', () => {
       const onAction = jest.fn();
-      const { getByText } = render(
-        <ErrorState onAction={onAction} actionText="重試" />
-      );
+      const { getByText } = render(<ErrorState onAction={onAction} actionText="重試" />);
       fireEvent.press(getByText('重試'));
       expect(onAction).toHaveBeenCalled();
     });
 
     it('should show error code when showDetails is true', () => {
-      const { getByText } = render(
-        <ErrorState 
-          errorCode="ERR_NETWORK" 
-          showDetails 
-        />
-      );
+      const { getByText } = render(<ErrorState errorCode="ERR_NETWORK" showDetails />);
       expect(getByText(/ERR_NETWORK/)).toBeTruthy();
     });
   });

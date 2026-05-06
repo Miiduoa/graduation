@@ -7,6 +7,7 @@ jest.mock("../../data", () => ({
   mockSource: { kind: "mock" },
   setApiEnvironment: jest.fn(),
   setDataSource: jest.fn(),
+  setDataSourceEvidence: jest.fn(),
 }));
 
 import {
@@ -42,6 +43,7 @@ describe("runtime data source policy", () => {
     expect(policy.designTargetMode).toBe("hybrid");
     expect(policy.defaultRuntimeMode).toBe(DEFAULT_RUNTIME_DATA_SOURCE_MODE);
     expect(["mock", "firebase", "hybrid"]).toContain(policy.requestedMode);
+    expect(["mock", "firebase", "hybrid"]).toContain(policy.resolvedMode);
     expect(["development", "staging", "production"]).toContain(policy.apiEnvironment);
   });
 });

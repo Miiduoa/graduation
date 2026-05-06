@@ -48,7 +48,7 @@ Campus Helper is a comprehensive campus information and services platform design
 - Student clubs and organizations directory
 
 **2.4 Smart Features**
-- AI assistant for campus-related queries (powered by Google Gemini API)
+- AI assistant for campus-related queries (server-side AI proxy; provider configured on backend)
 - Location-based campus service recommendations
 - Push notifications for important updates
 - Personalized course reminders
@@ -582,13 +582,14 @@ Refund: All test transactions reversible
 
 **How It Works:**
 - Users input questions about campus, courses, events, services
-- Queries sent to Google Gemini API (or similar LLM)
-- Response cached and filtered for appropriateness
-- AI trained on general knowledge + campus-specific context
+- Queries sent to a backend AI proxy, which applies Firebase Auth, school/group permissions, rate limiting, RAG, and safe tool policies
+- Public web search is handled server-side and returns citations; private course, assignment, and grade data is not sent to public search services
+- Responses are filtered for appropriateness and sensitive actions are returned as confirmation-required drafts
+- AI uses general model knowledge plus campus-specific context retrieved from authorized data
 
 **Data Handling:**
-- User queries stored encrypted for 180 days
-- Sensitive queries (containing personal IDs) encrypted and deleted after 90 days
+- AI metadata logs store request id, provider/model, latency, source ids, and hashed user id; full sensitive text is minimized by default
+- User-visible AI chat history can be deleted by the user
 - Privacy mode available: disable query logging
 - Queries never used to train public AI models
 
@@ -599,8 +600,8 @@ Refund: All test transactions reversible
 - Moderation of user feedback
 
 **Why It's Trustworthy:**
-- Uses established Google Gemini API
-- No personal data in prompts
+- Uses a backend-managed free-first provider order: Groq, then Google Gemini API
+- Personal data is minimized and permission-scoped before model calls
 - Fully transparent data usage
 - User can delete history anytime
 - In-app privacy controls

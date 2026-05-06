@@ -26,6 +26,31 @@
 - 後端已有排程型摘要能力，例如每日簡報與週報，位於 [backend/functions/index.js](/Volumes/外接硬碟/畢業專題/backend/functions/index.js)。
 - Firestore 規則已具備 `school`、`group`、`user` 分層，可作為 AI 權限基礎，位於 [backend/firestore/firestore.rules](/Volumes/外接硬碟/畢業專題/backend/firestore/firestore.rules)。
 
+### 2.1 開發/展示模式與上架模式
+
+目前 Mobile App 在開發時可切到 `EXPO_PUBLIC_AI_PROVIDER=offline` 或 `local-llm`：
+
+- `offline`：不用付費、不需要 API key、可離線展示，但能力有限，只適合 demo fallback。
+- `local-llm`：連到本機/內網 AI server，可搭配 Ollama 做本地訓練、評測、prompt/RAG 調整。
+
+上架版不可依賴使用者手機或開發者電腦上的 Ollama。`APP_ENV=preview` 或 `production` 時，[apps/mobile/app.config.ts](/Volumes/外接硬碟/畢業專題/apps/mobile/app.config.ts) 會強制 `aiProvider=cloud`，正式 AI 呼叫只走 `askCampusAssistant` 後端代理。免費優先的 production provider order 是 `Groq -> Gemini`。
+
+開發/展示模式的行為：
+
+- `offline` 回答在裝置端完成，不呼叫模型 API、Cloud Functions 或 AI server。
+- 使用 `apps/mobile/src/services/localAIEngine.ts` 的本地語意引擎、意圖分類、上下文記憶、回饋學習與檢索索引。
+- 使用 `apps/mobile/src/data/puAIAgentData.ts` 的靜宜大學校園知識、工具模擬與本地回答模板。
+- 使用 `apps/mobile/src/services/proactiveAI.ts` 的本地主動回報規則，偵測課前提醒、作業截止/逾期、每日摘要與重要公告。
+- 主動回報會寫入本機 AI report storage，並在使用者允許通知時用 `expo-notifications` 發出本地通知；打開 AI 助理後也會以對話訊息顯示。
+- 使用 `apps/mobile/src/services/webSearch.ts` 的公開來源查詢能力，在 `EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH=true` 時可查 Wikipedia/Wikimedia、DuckDuckGo Instant Answer、Open-Meteo 與路線來源。
+- 連網搜尋會用在外部知識、路線、天氣、現任人物、最新資訊與使用者明確要求搜尋的公開資料；個人課表、作業、成績、請假等問題仍只走 App 內資料，避免把個資送到公開搜尋。
+- 搜尋型回答必須先抽取證據、整理結論，再附資料來源與查詢時間；若沒有可靠來源，AI 應明確說「無法驗證」，不得猜答案。
+- 使用 `apps/mobile/src/services/webLearning.ts` 的本地 web-learning 知識庫，在 `EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED=true` 時低頻預抓公開來源並保存「問題、答案、來源、查詢時間」作為可追溯 RAG 資料。這不是在手機端訓練模型權重，而是把來源可靠的搜尋結果變成本地檢索資料。
+- `.env` 建議使用 `EXPO_PUBLIC_DATA_SOURCE_MODE=hybrid` 與 `EXPO_PUBLIC_USE_MOCK_DATA=false`，讓 AI 優先讀真實使用者資料；只有 API 失敗時才回退快取或展示資料。
+- 如果之後要升級雲端模型，只調整後端 `ASSISTANT_MODEL_PROVIDERS` 與 server-side secrets，不需要重寫聊天畫面或把 key 放進 App。
+
+離線/本機模式適合作為上架前開發、評測與畢業專題展示，但不應宣稱具備雲端前沿大模型等級的通用推理能力。若啟用連網搜尋與 web-learning，應在隱私說明中揭露「使用者查詢字串可能送往公開資料來源 API」與「公開來源結果會保存在本機，用於後續回答」。
+
 ### 目前做法的主要問題
 
 1. AI provider 是從前端直接呼叫，正式環境不適合承載敏感資料。
@@ -56,7 +81,7 @@ flowchart TD
     D --> F["Knowledge Retriever"]
     E --> G["Prompt Builder"]
     F --> G
-    G --> H["LLM Gateway (OpenAI / Gemini)"]
+    G --> H["LLM Gateway (Groq / Gemini)"]
     H --> I["Action Mapper"]
     I --> J["AI Response"]
     B --> K["Audit Log / Feedback"]
@@ -397,7 +422,7 @@ AI 層必須遵守跟 App 一樣的資料權限，不可以因為是後端就直
 
 - [apps/mobile/src/services/ai.ts](/Volumes/外接硬碟/畢業專題/apps/mobile/src/services/ai.ts)
   - 改成前端 SDK 包裝層。
-  - 不再直接持有 OpenAI / Gemini 呼叫邏輯。
+  - 上架版不再直接持有模型 provider 呼叫邏輯。
 
 ### 後端
 
@@ -415,7 +440,7 @@ AI 層必須遵守跟 App 一樣的資料權限，不可以因為是後端就直
 
 ## 15. 不建議的做法
 
-- 不要把 `EXPO_PUBLIC_OPENAI_API_KEY` 當正式方案。
+- 不要把任何 `EXPO_PUBLIC_*` 模型金鑰當正式方案。
 - 不要每次都把所有公告、所有作業、所有群組留言送進 LLM。
 - 不要讓 AI 直接讀完整 `users` 集合。
 - 不要直接訓練自己的聊天大模型當第一版。

@@ -258,7 +258,7 @@ export function createClassifierWeights(): ClassifierWeights {
     academic: ["課", "修", "學分", "老師", "上課", "教授", "課表", "選課"],
     assignment: ["作業", "繳交", "截止", "報告", "考試", "期中", "期末"],
     grades: ["成績", "分數", "及格", "被當", "GPA", "二一", "排名"],
-    dining: ["吃", "餐", "飯", "午餐", "晚餐", "素食", "便當", "餐廳", "美食", "外送"],
+    dining: ["吃", "餐", "飯", "午餐", "晚餐", "素食", "便當", "餐廳", "美食", "外送", "便宜", "平價", "其他選擇", "還有其他"],
     navigation: ["哪裡", "怎麼走", "位置", "導航", "地圖", "在哪"],
     announcement: ["公告", "通知", "消息", "新聞"],
     event: ["活動", "報名", "講座", "比賽", "社團"],
@@ -266,7 +266,7 @@ export function createClassifierWeights(): ClassifierWeights {
     dormitory: ["宿舍", "寢室", "報修", "洗衣", "包裹", "門禁"],
     health: ["頭痛", "感冒", "不舒服", "看醫生", "保健室", "發燒", "診所"],
     emotion: ["壓力", "焦慮", "難過", "累", "煩", "開心", "心情", "沮喪"],
-    transport: ["公車", "校車", "停車", "腳踏車", "交通"],
+    transport: ["公車", "校車", "停車", "腳踏車", "交通", "怎麼去", "車站", "火車站", "高鐵", "客運", "台中車站", "臺中車站"],
     weather: ["天氣", "下雨", "溫度", "颱風"],
     printing: ["列印", "影印", "印表"],
     scholarship: ["獎學金", "助學", "補助"],
@@ -1068,7 +1068,7 @@ export function createNgramModel(): NgramModel {
   const defaultEnders: Record<string, string[]> = {
     general: ["還有什麼需要幫忙的嗎？", "有其他問題隨時問我。", "希望這有幫助！"],
     academic: ["如果需要更詳細的資訊，可以再問我。", "加油！"],
-    dining: ["祝用餐愉快！", "需要幫你訂餐嗎？"],
+    dining: ["祝用餐愉快！", "要看其他餐廳的選擇嗎？"],
     health: ["祝你早日康復！", "記得多休息。", "如果症狀持續，建議去看醫生。"],
     emotion: ["你不是一個人面對。", "有需要的話學校諮商中心可以幫助你。", "希望你快點好起來。"],
   };
@@ -1143,7 +1143,7 @@ export function generateWithNgram(
 ): string {
   if (model.totalTokens < 100) return ""; // 訓練不足
 
-  let result = prefix;
+  const result = prefix;
   const chars = result.split("");
 
   for (let step = 0; step < maxLen; step++) {
@@ -1682,7 +1682,6 @@ export function fuzzyMatch(
     }
 
     // 形近字替換後再比較
-    let altInput = input;
     for (let i = 0; i < input.length; i++) {
       const alts = SIMILAR_CHARS[input[i]];
       if (alts) {
@@ -2834,7 +2833,7 @@ export function composeStructuredResponse(
   const actionSuggestions: Record<string, string[]> = {
     health: ["需要幫你查附近診所嗎？", "要幫你預約保健室嗎？"],
     assignment: ["需要幫你設定提醒嗎？", "要幫你查看其他作業截止日嗎？"],
-    dining: ["需要幫你訂餐嗎？", "要看其他餐廳的選擇嗎？"],
+    dining: ["要看其他餐廳的選擇嗎？", "想換成便宜或素食選項嗎？"],
     event: ["需要幫你報名嗎？", "要幫你加到行事曆嗎？"],
     navigation: ["需要幫你導航嗎？", "要查公車時刻表嗎？"],
     academic: ["需要看更詳細的課程資訊嗎？", "要幫你查教學大綱嗎？"],

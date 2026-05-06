@@ -82,29 +82,46 @@ export async function listPendingAssignmentsForUserGroups(
   const db = getDb();
   const groups = await listActiveUserGroups(uid, options.maxGroups ?? 10);
   const now = Timestamp.now();
+  const nowSeconds = now.seconds;
+  const assignmentsPerGroup = options.assignmentsPerGroup ?? 5;
   const groupAssignments = await Promise.all(
     groups.slice(0, options.maxGroups ?? 8).map(async (group) => {
-      const assignmentsSnapshot = await getDocs(
-        query(
-          collection(db, 'groups', group.id, 'assignments'),
-          where('dueAt', '>', now),
-          orderBy('dueAt', 'asc'),
-          limit(options.assignmentsPerGroup ?? 5)
-        )
-      ).catch(() => null);
+      const [upcomingSnapshot, lateSnapshot] = await Promise.all([
+        getDocs(
+          query(
+            collection(db, 'groups', group.id, 'assignments'),
+            where('dueAt', '>', now),
+            orderBy('dueAt', 'asc'),
+            limit(assignmentsPerGroup)
+          )
+        ).catch(() => null),
+        getDocs(
+          query(
+            collection(db, 'groups', group.id, 'assignments'),
+            where('dueAt', '<=', now),
+            orderBy('dueAt', 'desc'),
+            limit(Math.max(2, Math.ceil(assignmentsPerGroup / 2)))
+          )
+        ).catch(() => null),
+      ]);
+
+      const docsById = new Map<string, { id: string; data: () => unknown }>();
+      upcomingSnapshot?.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
+      lateSnapshot?.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
 
       return (
-        assignmentsSnapshot?.docs.map((docSnap) => {
+        Array.from(docsById.values()).map((docSnap) => {
           const raw = toRecord(docSnap.data());
+          const dueAt = toTimestampLike(raw.dueAt);
           return {
             id: docSnap.id,
             groupId: group.id,
             groupName: group.name,
             title: readString(raw.title, '未命名作業'),
-            dueAt: toTimestampLike(raw.dueAt),
-            isLate: raw.isLate === true,
+            dueAt,
+            isLate: raw.isLate === true || (dueAt?.seconds ?? Number.POSITIVE_INFINITY) <= nowSeconds,
           };
-        }) ?? []
+        })
       );
     })
   );

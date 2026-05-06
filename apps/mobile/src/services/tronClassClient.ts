@@ -424,11 +424,20 @@ export async function refreshTCBackendSession(
   password: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await fetch(getCloudFunctionUrl("puRefreshTronClassSession"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ studentId, password }),
-    });
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 2000); // 2 秒逾時，Cloud Functions 未部署時快速失敗
+
+    let response: Response;
+    try {
+      response = await fetch(getCloudFunctionUrl("puRefreshTronClassSession"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ studentId, password }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(abortTimer);
+    }
 
     const text = await response.text();
     let data: { success?: boolean; tronClassSessionId?: string; tronClassUserId?: number | null; error?: string } | null = null;
@@ -457,17 +466,26 @@ async function fetchTronClassBackend<T>(
     throw new Error("No TronClass backend session");
   }
 
-  const response = await fetch(getCloudFunctionUrl("puFetchTronClassData"), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      sessionId: _tcBackendSessionId,
-      dataType,
-      ...extra,
-    }),
-  });
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), 5000); // 5 秒逾時
+
+  let response: Response;
+  try {
+    response = await fetch(getCloudFunctionUrl("puFetchTronClassData"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sessionId: _tcBackendSessionId,
+        dataType,
+        ...extra,
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(abortTimer);
+  }
 
   const text = await response.text();
   let data: { success?: boolean; result?: T; error?: string; userId?: number | null } | null = null;
@@ -656,21 +674,111 @@ async function tcLoginDirectCAS(
     // 清除之前的 X-SESSION-ID，避免 tcFetch 跳過 cookie（CAS 靠 cookie 運作）
     _tcXSessionId = null;
 
+    // ── 策略 A: 先嘗試 TronClass 原生 /api/login（最可靠） ──
+    console.log("[TronClass] Trying native /api/login endpoint…");
+    try {
+      const nativeLoginResult = await tcFetch(`${TC_BASE}/api/login`, {
+        method: "POST",
+        body: JSON.stringify({ user_name: uid, password }),
+        contentType: "application/json",
+        accept: "application/json",
+        timeoutMs: 10000,
+      });
+      console.log("[TronClass] Native /api/login status:", nativeLoginResult.status);
+
+      if (nativeLoginResult.status === 200) {
+        try {
+          const nativeData = JSON.parse(nativeLoginResult.body);
+          // 有些 TronClass 實例回傳 session_id 在 header 或 body
+          const sessionId = nativeData?.session_id ?? nativeData?.token ?? null;
+          if (sessionId) {
+            _tcXSessionId = sessionId;
+          }
+          // 嘗試取得 profile 驗證
+          const profile = await tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/profile`);
+          if (profile?.id) {
+            _tcUserId = profile.id;
+            console.log("[TronClass] Native login success! User:", profile.name);
+            return { success: true, session: { loggedIn: true, userId: profile.id, userName: profile.name } };
+          }
+          // 即使沒 profile，如果 /api/login 回 200 也算成功
+          if (nativeData?.id || nativeData?.user_id) {
+            _tcUserId = nativeData.id ?? nativeData.user_id;
+            console.log("[TronClass] Native login success (from response body)!");
+            return { success: true, session: { loggedIn: true, userId: _tcUserId, userName: nativeData.name ?? null } };
+          }
+        } catch { /* JSON parse failed, try CAS */ }
+      } else if (nativeLoginResult.status === 400 || nativeLoginResult.status === 401 || nativeLoginResult.status === 403) {
+        // 帳密錯 → 不需要繼續嘗試 CAS
+        try {
+          const errData = JSON.parse(nativeLoginResult.body);
+          const errCode = errData?.errors?.code ?? "";
+          const errMsg = JSON.stringify(errData?.errors ?? errData?.error ?? errData?.message ?? "");
+          if (
+            errCode === "_INVALID_PASSWORD_" ||
+            errMsg.includes("密碼") ||
+            errMsg.includes("password") ||
+            errMsg.includes("Invalid") ||
+            errMsg.includes("does not match")
+          ) {
+            return { success: false, session: null, error: "TronClass 帳號或密碼錯誤" };
+          }
+        } catch { /* continue to CAS */ }
+      }
+      console.log("[TronClass] Native /api/login didn't work, falling back to CAS…");
+    } catch (nativeErr) {
+      console.warn("[TronClass] Native /api/login error (trying CAS):", nativeErr);
+    }
+
+    // ── 策略 B: Keycloak CAS 登入 ──
     const serviceUrl = `${TC_BASE}/login`;
     const casUrl = `${IDENTITY_BASE}${CAS_LOGIN_PATH}?service=${encodeURIComponent(serviceUrl)}&locale=zh_TW`;
 
     // Step 1: GET CAS login page
     console.log("[TronClass] Direct CAS Step 1: GET CAS login page…");
-    const loginPage = await tcFetch(casUrl, { accept: "text/html", timeoutMs: 12000 });
+    const loginPage = await tcFetch(casUrl, { accept: "text/html", timeoutMs: 15000 });
     console.log("[TronClass] CAS page status:", loginPage.status);
+    console.log("[TronClass] CAS page url:", loginPage.url);
+    console.log("[TronClass] CAS body length:", loginPage.body.length);
 
-    // 解析 form action URL
-    const formActionMatch = loginPage.body.match(/<form[^>]+action=["']([^"']+)["']/i);
-    const formAction = formActionMatch?.[1]?.replace(/&amp;/g, "&") ?? loginPage.url;
+    // 如果已經被 redirect 到 TronClass（表示已登入），直接驗證
+    if (loginPage.url.includes("tronclass.pu.edu.tw") && !loginPage.body.includes("<form")) {
+      console.log("[TronClass] Already redirected to TronClass (session active)");
+      const profile = await tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/profile`);
+      if (profile?.id) {
+        _tcUserId = profile.id;
+        return { success: true, session: { loggedIn: true, userId: profile.id, userName: profile.name } };
+      }
+    }
 
-    // 解析隱藏欄位
+    // 解析 form action URL（支援多種 Keycloak HTML 格式）
+    // 嘗試多種 regex 模式匹配 form action
+    let formAction: string | null = null;
+    const formPatterns = [
+      /<form[^>]+id=["']kc-form-login["'][^>]+action=["']([^"']+)["']/i,
+      /<form[^>]+action=["']([^"']+)["'][^>]+id=["']kc-form-login["']/i,
+      /<form[^>]+action=["'](https?:\/\/identity[^"']+)["']/i,
+      /<form[^>]+action=["']([^"']+authenticate[^"']*?)["']/i,
+      /<form[^>]+action=["']([^"']+)["']/i, // 最寬鬆的 fallback
+    ];
+    for (const pattern of formPatterns) {
+      const match = loginPage.body.match(pattern);
+      if (match?.[1]) {
+        formAction = match[1].replace(/&amp;/g, "&");
+        console.log("[TronClass] Matched form action with pattern:", pattern.source.slice(0, 40));
+        break;
+      }
+    }
+
+    if (!formAction) {
+      console.warn("[TronClass] Could not find form action in CAS page");
+      console.warn("[TronClass] CAS body snippet:", loginPage.body.slice(0, 1000));
+      formAction = loginPage.url; // fallback 到 CAS URL 本身
+    }
+
+    // 解析隱藏欄位（增強版：支援更多 HTML 格式）
     const hiddenFields: Record<string, string> = {};
-    const hiddenRegex = /<input[^>]+type=["']hidden["'][^>]*>/gi;
+    const hiddenRegex = /<input[^>]*type=["']hidden["'][^>]*\/?>/gi;
     let hMatch: RegExpExecArray | null;
     while ((hMatch = hiddenRegex.exec(loginPage.body)) !== null) {
       const nameMatch = hMatch[0].match(/name=["']([^"']+)["']/);
@@ -679,6 +787,7 @@ async function tcLoginDirectCAS(
         hiddenFields[nameMatch[1]] = valueMatch?.[1] ?? "";
       }
     }
+    console.log("[TronClass] Hidden fields found:", Object.keys(hiddenFields).join(", "));
 
     // Step 2: POST credentials
     console.log("[TronClass] Direct CAS Step 2: POST credentials…");
@@ -691,57 +800,94 @@ async function tcLoginDirectCAS(
     const postUrl = formAction.startsWith("http")
       ? formAction
       : `${IDENTITY_BASE}${formAction}`;
+    console.log("[TronClass] POST URL:", postUrl);
 
     const loginResult = await tcFetch(postUrl, {
       method: "POST",
       body: formData.toString(),
       contentType: "application/x-www-form-urlencoded",
       accept: "text/html",
-      timeoutMs: 12000,
+      timeoutMs: 15000,
     });
 
     console.log("[TronClass] POST status:", loginResult.status);
     console.log("[TronClass] Landed on:", loginResult.url);
 
-    // Step 3: 驗證登入 — 先檢查帳密是否錯誤
-    if (
-      loginResult.body.includes("無效的使用者名稱或密碼") ||
-      loginResult.body.includes("Invalid username or password") ||
-      loginResult.body.includes("Invalid credentials") ||
-      loginResult.body.includes("帳號或密碼")
-    ) {
-      return { success: false, session: null, error: "TronClass 帳號或密碼錯誤" };
+    // Step 3: 驗證登入 — 檢查帳密是否錯誤
+    const errorIndicators = [
+      "無效的使用者名稱或密碼",
+      "Invalid username or password",
+      "Invalid credentials",
+      "帳號或密碼",
+      "登入失敗",
+      "Login failed",
+      "kc-feedback-text",
+      "input-error",
+    ];
+    const isCredentialError = errorIndicators.some(indicator => loginResult.body.includes(indicator));
+
+    if (isCredentialError) {
+      // 再次確認是否真的是帳密錯誤（排除只是表單殘留）
+      const stillOnLoginPage = loginResult.body.includes("kc-form-login") || loginResult.body.includes("id=\"password\"");
+      if (stillOnLoginPage) {
+        return { success: false, session: null, error: "TronClass 帳號或密碼錯誤" };
+      }
     }
 
-    // Step 4: 驗證 session — 用 /api/profile（玩課雲沒有 /api/users/me）
-    console.log("[TronClass] Direct CAS Step 4: verifying session via /api/profile…");
-    const profile = await tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/profile`);
+    // Step 3.5: 如果 POST 後 redirect 回 TronClass，嘗試手動跟隨 ticket URL
+    if (loginResult.url.includes("identity.pu.edu.tw") && loginResult.status === 200) {
+      // 可能 POST 成功但 redirect 沒被 follow 到 TronClass
+      // 找 redirect URL（meta refresh 或 Location 模擬）
+      const ticketMatch = loginResult.body.match(/url=["']?([^"'\s>]+tronclass[^"'\s>]*)/i)
+        ?? loginResult.body.match(/href=["']([^"']*tronclass[^"']*ticket=[^"']+)/i);
+      if (ticketMatch?.[1]) {
+        console.log("[TronClass] Following ticket redirect manually…");
+        const ticketUrl = ticketMatch[1].replace(/&amp;/g, "&");
+        await tcFetch(ticketUrl.startsWith("http") ? ticketUrl : `${TC_BASE}${ticketUrl}`, {
+          accept: "text/html",
+          timeoutMs: 10000,
+        });
+      }
+    }
 
+    // Step 4: 驗證 session — 多重驗證
+    console.log("[TronClass] Direct CAS Step 4: verifying session…");
+
+    // 4a: /api/profile
+    const profile = await tcFetchJSON<TCUserProfile>(`${TC_BASE}/api/profile`);
     if (profile?.id) {
       _tcUserId = profile.id;
       console.log("[TronClass] Login success! User:", profile.name, "ID:", profile.id);
-      return {
-        success: true,
-        session: { loggedIn: true, userId: profile.id, userName: profile.name },
-      };
+      return { success: true, session: { loggedIn: true, userId: profile.id, userName: profile.name } };
     }
 
-    // /api/profile 也失敗的話，嘗試 /api/my-departments 確認是否有 session
+    // 4b: /api/my-departments
     console.log("[TronClass] /api/profile failed, trying /api/my-departments…");
     const depts = await tcFetchJSON<{ departments?: unknown[] }>(`${TC_BASE}/api/my-departments`);
     if (depts?.departments) {
       console.log("[TronClass] Login success (verified via my-departments)!");
-      return {
-        success: true,
-        session: { loggedIn: true, userId: null, userName: null },
-      };
+      return { success: true, session: { loggedIn: true, userId: null, userName: null } };
     }
 
-    return { success: false, session: null, error: "TronClass 登入失敗，無法取得使用者資料" };
+    // 4c: /api/my-courses（有些版本的 profile 被關閉但 courses 可用）
+    console.log("[TronClass] Trying /api/my-courses as final verification…");
+    const coursesCheck = await tcFetchJSON<{ courses?: unknown[] }>(`${TC_BASE}/api/my-courses`);
+    if (coursesCheck?.courses) {
+      console.log("[TronClass] Login success (verified via my-courses)!");
+      return { success: true, session: { loggedIn: true, userId: null, userName: null } };
+    }
+
+    // 最後檢查：是否到了 TronClass 主頁面（HTML 裡有使用者標記）
+    if (loginResult.url.includes("tronclass.pu.edu.tw")) {
+      console.log("[TronClass] Landed on TronClass domain, treating as partial success");
+      return { success: true, session: { loggedIn: true, userId: null, userName: null } };
+    }
+
+    return { success: false, session: null, error: "TronClass 登入後無法驗證 session，可能是伺服器暫時不穩定，請稍後再試" };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "連線失敗";
     console.warn("[TronClass] Direct CAS login error:", err);
-    return { success: false, session: null, error: `TronClass 直連登入失敗：${msg}` };
+    return { success: false, session: null, error: `TronClass 登入失敗：${msg}` };
   }
 }
 

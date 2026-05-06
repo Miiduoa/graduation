@@ -1,6 +1,8 @@
 /* eslint-disable */
 import type { 
   Announcement, 
+  AcademicSourceSnapshot,
+  ActionQueueItem,
   Assignment,
   Attachment,
   AttendanceSession,
@@ -18,6 +20,7 @@ import type {
   CourseMaterial,
   CourseModule,
   CourseSpace,
+  CampusRoleActionGraph,
   DormAnnouncement,
   DormitoryInfo,
   DormPackage,
@@ -37,6 +40,7 @@ import type {
   Message,
   InboxTask,
   Notification,
+  NextBestAction,
   Order,
   Quiz,
   PaginatedResult,
@@ -44,11 +48,13 @@ import type {
   PoiCrowdReport,
   PoiReportType,
   PoiReview,
+  PulseAggregate,
   Printer,
   PrintJob,
   QueryOptions,
   RepairRequest,
   SeatReservation,
+  StudentRiskSnapshot,
   Submission,
   Transaction,
   User,
@@ -60,6 +66,12 @@ import type {
 export type { QueryOptions } from "./types";
 
 // ===== DataSource 介面定義 =====
+export type DataSourceEvidence = {
+  mode: "mock" | "firebase" | "hybrid";
+  requestedMode?: "mock" | "firebase" | "hybrid";
+  sourceLabel: "real" | "mock";
+  forceRealDataPath?: boolean;
+};
 
 export type DataSource = {
   // 公告
@@ -180,6 +192,24 @@ export type DataSource = {
   getAttendanceSummary: (courseSpaceId: string) => Promise<AttendanceSummary>;
   listInboxTasks: (userId: string, schoolId?: string) => Promise<InboxTask[]>;
   getCourseGradebook: (courseSpaceId: string) => Promise<CourseGradebookData | null>;
+
+  // Campus Agent OS
+  syncAcademicContext?: (userId: string, schoolId: string) => Promise<AcademicSourceSnapshot>;
+  getRoleActionGraph?: (userId: string, schoolId: string) => Promise<CampusRoleActionGraph>;
+  createActionQueueItem?: (input: Omit<ActionQueueItem, "id" | "createdAt" | "updatedAt" | "confirmedAt"> & {
+    id?: string;
+  }) => Promise<ActionQueueItem>;
+  confirmActionQueueItem?: (actionId: string, userId?: string, schoolId?: string) => Promise<ActionQueueItem | null>;
+  listNextBestActions?: (userId: string, schoolId?: string) => Promise<NextBestAction[]>;
+  listRiskSnapshots?: (userId: string, schoolId?: string) => Promise<StudentRiskSnapshot[]>;
+  listPulseAggregates?: (schoolId?: string) => Promise<PulseAggregate[]>;
+  submitPulseReport?: (input: {
+    schoolId: string;
+    locationId: string;
+    locationName?: string;
+    category?: PulseAggregate["category"];
+    level: PulseAggregate["currentLevel"];
+  }) => Promise<void>;
   
   // 選課
   listEnrollments: (userId: string, semester?: string, schoolId?: string) => Promise<Enrollment[]>;
@@ -386,9 +416,18 @@ export type DataSource = {
 // ===== 全域 DataSource 管理 =====
 
 let _source: DataSource | null = null;
+let _sourceEvidence: DataSourceEvidence | null = null;
 
 export function setDataSource(ds: DataSource) {
   _source = ds;
+}
+
+export function setDataSourceEvidence(evidence: DataSourceEvidence) {
+  _sourceEvidence = evidence;
+}
+
+export function getDataSourceEvidence(): DataSourceEvidence | null {
+  return _sourceEvidence;
 }
 
 export function getDataSource(): DataSource {

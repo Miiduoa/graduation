@@ -413,6 +413,95 @@ describe("firestore security rules", () => {
       unrelatedDb.collection("groups").doc("group-1").collection("assignments").doc("assignment-1").collection("submissions").doc("bob").get()
     );
   });
+
+  test("allow public pulse aggregate reads but deny raw pulse reports and aggregate writes", async () => {
+    await seedFirestore(async (db) => {
+      await db.collection("schools").doc("tw-demo-uni").collection("pulseAggregates").doc("library").set({
+        schoolId: "tw-demo-uni",
+        locationId: "library",
+        locationName: "Library",
+        currentLevel: 3,
+      });
+      await db.collection("schools").doc("tw-demo-uni").collection("pulseReports").doc("report-1").set({
+        reporterHash: "anonymous",
+        level: 4,
+      });
+    });
+
+    const publicDb = testEnv.unauthenticatedContext().firestore();
+    await assertSucceeds(
+      publicDb.collection("schools").doc("tw-demo-uni").collection("pulseAggregates").doc("library").get()
+    );
+    await assertFails(
+      publicDb.collection("schools").doc("tw-demo-uni").collection("pulseReports").doc("report-1").get()
+    );
+
+    const aliceDb = testEnv.authenticatedContext("alice").firestore();
+    await assertFails(
+      aliceDb.collection("schools").doc("tw-demo-uni").collection("pulseAggregates").doc("library").set({
+        currentLevel: 5,
+      })
+    );
+  });
+
+  test("protect Campus Agent OS private risk snapshots and action queue", async () => {
+    await seedFirestore(async (db) => {
+      await db.collection("users").doc("alice").collection("riskSnapshots").doc("today").set({
+        userId: "alice",
+        score: 44,
+      });
+      await db.collection("users").doc("alice").collection("aiSessions").doc("session-1").set({
+        title: "Private AI session",
+      });
+    });
+
+    const aliceDb = testEnv.authenticatedContext("alice").firestore();
+    await assertSucceeds(
+      aliceDb.collection("users").doc("alice").collection("riskSnapshots").doc("today").get()
+    );
+    await assertSucceeds(
+      aliceDb.collection("users").doc("alice").collection("actionQueue").doc("action-1").set({
+        userId: "alice",
+        action: "draft_message",
+        label: "請假草稿",
+        requiresConfirmation: true,
+        status: "pending_confirmation",
+        actorRole: "student",
+        permissionScope: "user_private",
+      })
+    );
+    await assertFails(
+      aliceDb.collection("users").doc("alice").collection("actionQueue").doc("action-2").set({
+        userId: "alice",
+        action: "draft_message",
+        label: "unsafe",
+        requiresConfirmation: false,
+        status: "confirmed",
+        actorRole: "student",
+        permissionScope: "user_private",
+      })
+    );
+
+    await assertFails(
+      aliceDb.collection("users").doc("alice").collection("actionQueue").doc("action-3").set({
+        userId: "alice",
+        action: "draft_message",
+        label: "invalid-role",
+        requiresConfirmation: true,
+        status: "pending_confirmation",
+        actorRole: "guest",
+        permissionScope: "user_private",
+      })
+    );
+
+    const malloryDb = testEnv.authenticatedContext("mallory").firestore();
+    await assertFails(
+      malloryDb.collection("users").doc("alice").collection("riskSnapshots").doc("today").get()
+    );
+    await assertFails(
+      malloryDb.collection("users").doc("alice").collection("aiSessions").doc("session-1").get()
+    );
+  });
 });
 
 describe("storage security rules", () => {

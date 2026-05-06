@@ -131,6 +131,11 @@ service cloud.firestore {
         || (isSignedIn() && data.submissionOwnerId == request.auth.uid && data.submittedAt != null);
     }
 
+    // AI server-side metadata logs are written by Admin SDK only.
+    match /aiLogs/{logId} {
+      allow read, write: if false;
+    }
+
     // School directory (public readable)
     match /schools/{schoolId} {
       allow read: if true;
@@ -354,6 +359,22 @@ service cloud.firestore {
         allow read: if hasEditorRole(schoolId);
         allow write: if false;
       }
+
+      match /pulseAggregates/{aggregateId} {
+        allow read: if true;
+        allow write: if false;
+      }
+
+      match /pulseReports/{reportId} {
+        allow read, write: if false;
+      }
+
+      match /aiKnowledge/{chunkId} {
+        allow read: if resource.data.visibility == 'public'
+          || (resource.data.visibility == 'school' && isSchoolMember(schoolId))
+          || hasEditorRole(schoolId);
+        allow write: if false;
+      }
     }
 
     // Conversations (DMs and group chats)
@@ -418,6 +439,11 @@ service cloud.firestore {
       match /knowledgeBase/{entryId} {
         allow read: if isActiveGroupMember(groupId);
         allow create, update, delete: if canManageGroup(groupId);
+      }
+
+      match /aiKnowledge/{chunkId} {
+        allow read: if isActiveGroupMember(groupId);
+        allow write: if false;
       }
 
       match /modules/{moduleId} {
@@ -592,6 +618,16 @@ service cloud.firestore {
           allow write: if false;
         }
 
+        match /nextBestActions/{actionId} {
+          allow read: if isSelf(uid);
+          allow write: if false;
+        }
+
+        match /riskSnapshots/{snapshotId} {
+          allow read: if isSelf(uid);
+          allow write: if false;
+        }
+
         match /{document=**} {
           allow read: if isSelf(uid);
           allow write: if false;
@@ -642,6 +678,42 @@ service cloud.firestore {
       }
 
       match /dailyBriefs/{briefId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+
+      match /aiSessions/{sessionId} {
+        allow read, create, update, delete: if isSelf(uid);
+
+        match /messages/{messageId} {
+          allow read, create, update, delete: if isSelf(uid);
+        }
+      }
+
+      match /actionQueue/{actionId} {
+        allow read: if isSelf(uid);
+        allow create: if isSelf(uid)
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.requiresConfirmation == true
+          && request.resource.data.status in ['draft', 'pending_confirmation']
+          && request.resource.data.actorRole in ['student', 'teacher', 'staff', 'department', 'admin', 'school']
+          && request.resource.data.permissionScope in ['public', 'school_public', 'user_private', 'academic_private'];
+        allow update: if isSelf(uid)
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.action == resource.data.action
+          && request.resource.data.status in ['draft', 'pending_confirmation', 'confirmed', 'dismissed']
+          && request.resource.data.actorRole == resource.data.actorRole
+          && request.resource.data.permissionScope == resource.data.permissionScope;
+        allow delete: if false;
+      }
+
+      match /nextBestActions/{actionId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+
+      match /riskSnapshots/{snapshotId} {
         allow read: if isSelf(uid);
         allow write: if false;
       }

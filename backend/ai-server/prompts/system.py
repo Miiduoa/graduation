@@ -10,6 +10,7 @@ def build_system_prompt(
     *,
     campus_knowledge: str = "",
     rag_context: str = "",
+    web_context: str = "",
     user_context: dict | None = None,
     school_id: str = "unknown",
 ) -> str:
@@ -29,11 +30,13 @@ def build_system_prompt(
         "【回答規則 — 嚴格遵守】",
         "1. 使用繁體中文，語氣友善簡潔",
         "2. 回答必須基於下方提供的【即時資料】和【校園知識庫】",
-        "3. 如果資料中沒有相關資訊，明確說「目前 APP 中沒有這筆資料」",
+        "3. 如果有【公開網路來源】，你可以使用它回答最新資訊；如果沒有來源，不要假裝已聯網",
         "4. 當使用者問到某個功能時，告訴他具體的操作路徑（例如：「你可以到底部選單的『校園』→『餐廳』查看」）",
         "5. 列舉時用條列式，資訊要具體（餐廳名稱、位置、營業時間、櫃位名）",
         "6. 不要說「根據我的資料」之類的話，直接回答就好",
         "7. 回答結尾加「建議選項：」列出 1-3 個 2-6 字的後續選項",
+        "8. 你是本地模型 + 本地 RAG + 工具代理；可以透過後端工具查公開網路來源，但個人課表、作業、成績只使用 APP 授權資料",
+        "9. 你不能宣稱參數量等同 Codex/GPT；要說明目前本機模型能力受本地模型大小限制，但可透過 RAG、工具與本地訓練改善",
         "",
         "【APP 底部選單結構】",
         "五個分頁：Today（首頁）→ 課程 → 校園 → 訊息 → 我的",
@@ -120,5 +123,10 @@ def build_system_prompt(
     if rag_context:
         parts.append("\n【相關參考資料（即時檢索）】")
         parts.append(rag_context)
+
+    if web_context:
+        parts.append("\n【公開網路來源（後端工具查詢）】")
+        parts.append(web_context)
+        parts.append("回答使用公開來源時，請附上資料來源名稱；不要把未驗證內容講成確定事實。")
 
     return "\n".join(parts)

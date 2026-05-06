@@ -18,6 +18,8 @@ import { LearningAnalyticsScreen } from "./LearningAnalyticsScreen";
 import { CourseGradebookScreen } from "./CourseGradebookScreen";
 import { QuizTakingScreen } from "./QuizTakingScreen";
 import { PeerReviewScreen } from "./PeerReviewScreen";
+import AttendanceLiveScreen from "./AttendanceLiveScreen";
+import AttendanceAnalyticsScreen from "./AttendanceAnalyticsScreen";
 import { useThemeMode } from "../state/theme";
 import { createStackScreenOptions } from "../ui/navigationTheme";
 import { RouteGuard } from "../ui/RouteGuard";
@@ -73,8 +75,8 @@ export function AcademicStack() {
       <Stack.Screen name="CourseHub" component={CourseHubScreen} options={{ title: "課程中樞" }} />
       <Stack.Screen name="CourseModules" component={CourseModulesScreen} options={{ title: "教材單元" }} />
       <Stack.Screen name="QuizCenter" component={QuizCenterScreen} options={{ title: "測驗中心" }} />
-      {/* 需要 courses.attendance 權限 — 教師/主管/管理員 */}
-      <Stack.Screen name="Attendance" component={GuardedAttendance} options={{ title: "點名中心" }} />
+      {/* 智慧點名 — 角色內部自動偵測，所有使用者均可進入 */}
+      <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "智慧點名", headerShown: false }} />
       {/* 需要 courses.grade 權限 — 教師/主管/管理員 */}
       <Stack.Screen name="CourseGradebook" component={GuardedGradebook} options={{ title: "課內成績簿" }} />
       <Stack.Screen name="Classroom" component={ClassroomScreen} options={{ title: "課堂互動" }} />
@@ -87,6 +89,8 @@ export function AcademicStack() {
       <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: "AI 校園助理" }} />
       <Stack.Screen name="QuizTaking" component={QuizTakingScreen} options={{ title: "作答中", headerShown: false }} />
       <Stack.Screen name="PeerReview" component={PeerReviewScreen} options={{ title: "同儕互評" }} />
+      <Stack.Screen name="AttendanceLive" component={AttendanceLiveScreen} options={{ title: "即時點名", headerShown: false }} />
+      <Stack.Screen name="AttendanceAnalytics" component={AttendanceAnalyticsScreen} options={{ title: "出席分析", headerShown: false }} />
     </Stack.Navigator>
   );
 }

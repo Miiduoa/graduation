@@ -17,6 +17,7 @@ import { analytics } from '../../services/analytics';
 import { loadPersistedValue, savePersistedValue } from '../../services/persistedStorage';
 import { getReleaseConfig } from '../../services/release';
 import { getScopedStorageKey } from '../../services/scopedStorage';
+import { buildNavigationTarget, navigateToTarget } from '../../utils/courseNavigation';
 
 const AMBIENT_CUE_MIN_DISTINCT_USERS = 3;
 const AMBIENT_CUE_DEFAULT_STALE_MS = 24 * 60 * 60 * 1000;
@@ -566,16 +567,19 @@ export async function listAmbientCues(params: {
   return dismissed.filter((entry) => !entry.isDismissed).map((entry) => entry.cue);
 }
 
-export function openAmbientCueTarget(navigation: NavigationLike, cue: AmbientCue): void {
+export function openAmbientCueTarget(
+  navigation: NavigationLike,
+  cue: AmbientCue,
+  role?: AmbientCueRole | null,
+): void {
   const target = cue.target;
   if (!target) return;
 
   if (target.tab) {
-    if (target.screen) {
-      navigation?.navigate?.(target.tab, { screen: target.screen, params: target.params });
-      return;
-    }
-    navigation?.navigate?.(target.tab, target.params);
+    navigateToTarget(
+      navigation,
+      buildNavigationTarget(role, target.tab, target.screen, target.params),
+    );
     return;
   }
 
@@ -652,8 +656,8 @@ export function useAmbientCues(params: {
       surface: cue.surface,
       distinct_count: cue.distinctUserCount,
     });
-    openAmbientCueTarget(navigation, cue);
-  }, []);
+    openAmbientCueTarget(navigation, cue, params.role ?? null);
+  }, [params.role]);
 
   return {
     cues,

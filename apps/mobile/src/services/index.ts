@@ -1,6 +1,9 @@
 export * from "./notifications";
 export * from "./ical";
 export * from "./ai";
+export * from "./aiAppContext";
+export * from "./webSearch";
+export * from "./webLearning";
 export * from "./sso";
 export * from "./ssoSession";
 export * from "./offline";
@@ -13,3 +16,6 @@ export { PerformanceMonitor } from "./performanceMonitor";
 export * from "./cacheWarming";
 export * from "./privacy";
 export * from "./memberDirectory";
+export { localLLM, MODEL_REGISTRY, estimateTokens } from "./localLLMInference";
+export { agentReason, registerTool, getRegisteredTools } from "./agentReasoningEngine";
+export { localAssistant } from "./localAssistant";

@@ -408,7 +408,7 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
           <Pressable
             key={course.id}
             onPress={() =>
-              props.nav?.navigate?.("CourseHub", { groupId: String(course.id) })
+              props.nav?.navigate?.("CourseHub", { groupId: String(course.id), groupName: course.name })
             }
             style={({ pressed }) => ({
               padding: 14,
@@ -1197,6 +1197,38 @@ export function CoursesHomeScreen(props: any) {
             <TCLoginSection onSuccess={handleLoginSuccess} profile={auth.profile} />
           )
         )}
+
+        {/* Smart Attendance Entry — 智慧點名入口 */}
+        <Pressable
+          onPress={() => nav?.navigate?.("Attendance")}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+            padding: 16,
+            marginTop: 6,
+            borderRadius: 16,
+            backgroundColor: theme.colors.surface,
+            borderWidth: 1,
+            borderColor: theme.colors.accent + "40",
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <View style={{
+            width: 44, height: 44, borderRadius: 12,
+            backgroundColor: theme.colors.accentSoft,
+            alignItems: "center", justifyContent: "center",
+          }}>
+            <Ionicons name="qr-code-outline" size={24} color={theme.colors.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>智慧點名</Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+              7 種點名模式 · 動態 QR · 反作弊驗證 · AI 分析
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+        </Pressable>
 
         {/* Quick links at bottom */}
         <View style={{ gap: 8, marginTop: 6 }}>

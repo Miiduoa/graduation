@@ -118,6 +118,12 @@ export function SettingsScreen(props: any) {
               title="主題預覽"
               onPress={() => nav?.navigate?.('ThemePreview')}
             />
+            <Divider spacing={0} />
+            <ListItem
+              icon="hardware-chip-outline"
+              title="AI 模型管理"
+              onPress={() => nav?.navigate?.('AIModelManager')}
+            />
           </View>
         </AnimatedCard>
 
