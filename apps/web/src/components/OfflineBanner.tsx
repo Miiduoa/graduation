@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
+import { useState, useEffect } from 'react';
 
 export function OfflineBanner() {
   const [isOffline, setIsOffline] = useState(() => {
-    if (typeof navigator === "undefined") return false;
+    if (typeof navigator === 'undefined') return false;
     return !navigator.onLine;
   });
 
@@ -12,20 +12,20 @@ export function OfflineBanner() {
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
 
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
     return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
   }, []);
 
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--top-offset", isOffline ? "44px" : "0px");
+    root.style.setProperty('--top-offset', isOffline ? '44px' : '0px');
     return () => {
-      root.style.setProperty("--top-offset", "0px");
+      root.style.setProperty('--top-offset', '0px');
     };
   }, [isOffline]);
 

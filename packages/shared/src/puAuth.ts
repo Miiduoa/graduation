@@ -1,5 +1,5 @@
-export const PROVIDENCE_UNIVERSITY_SCHOOL_ID = "pu";
-export const PROVIDENCE_UNIVERSITY_SCHOOL_CODE = "PU";
+export const PROVIDENCE_UNIVERSITY_SCHOOL_ID = 'pu';
+export const PROVIDENCE_UNIVERSITY_SCHOOL_CODE = 'PU';
 
 export type PuStudentInfoPayload = {
   studentId: string | null;

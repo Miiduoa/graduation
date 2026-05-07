@@ -223,7 +223,9 @@ export const mockSource: DataSource = {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const current = getPoiReviews(data.poiId, data.schoolId).filter((review) => review.id !== nextReview.id);
+    const current = getPoiReviews(data.poiId, data.schoolId).filter(
+      (review) => review.id !== nextReview.id,
+    );
     mockPoiReviews.set(key, [nextReview, ...current]);
   },
   async submitPoiCrowdReport(data) {
@@ -355,10 +357,7 @@ export const mockSource: DataSource = {
         latestDueAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       }));
   },
-  async getCourseSpace(
-    id: string,
-    _userId?: string,
-  ): Promise<CourseSpace | null> {
+  async getCourseSpace(id: string, _userId?: string): Promise<CourseSpace | null> {
     const group = mockGroups.find((g) => g.id === id);
     if (!group || group.type !== 'course') return null;
     return {
@@ -377,21 +376,34 @@ export const mockSource: DataSource = {
       latestDueAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     };
   },
-  async listCourseModules(_userId: string, courseSpaceId?: string, schoolId?: string): Promise<CourseModule[]> {
+  async listCourseModules(
+    _userId: string,
+    courseSpaceId?: string,
+    schoolId?: string,
+  ): Promise<CourseModule[]> {
     return getDemoCourseModules(schoolId || DEFAULT_SCHOOL, courseSpaceId);
   },
   async createCourseModule(_input): Promise<{ id: string }> {
     return { id: generateId() };
   },
-  async listCourseMaterials(courseSpaceId: string, moduleId?: string, schoolId?: string): Promise<CourseMaterial[]> {
+  async listCourseMaterials(
+    courseSpaceId: string,
+    moduleId?: string,
+    schoolId?: string,
+  ): Promise<CourseMaterial[]> {
     return getDemoCourseMaterials(courseSpaceId, moduleId);
   },
   async listQuizzes(userId: string, courseSpaceId?: string, schoolId?: string): Promise<Quiz[]> {
     return getDemoQuizzes(userId, courseSpaceId, schoolId || DEFAULT_SCHOOL);
   },
-  async getQuiz(quizId: string, userId: string, courseSpaceId?: string, schoolId?: string): Promise<Quiz | null> {
+  async getQuiz(
+    quizId: string,
+    userId: string,
+    courseSpaceId?: string,
+    schoolId?: string,
+  ): Promise<Quiz | null> {
     const quizzes = getDemoQuizzes(userId, courseSpaceId, schoolId || DEFAULT_SCHOOL);
-    return quizzes.find(q => q.id === quizId) || null;
+    return quizzes.find((q) => q.id === quizId) || null;
   },
   async createQuiz(_input): Promise<{ id: string }> {
     return { id: generateId() };
@@ -407,7 +419,11 @@ export const mockSource: DataSource = {
       status: 'submitted',
     };
   },
-  async listAttendanceSessions(userId: string, courseSpaceId?: string, schoolId?: string): Promise<AttendanceSession[]> {
+  async listAttendanceSessions(
+    userId: string,
+    courseSpaceId?: string,
+    schoolId?: string,
+  ): Promise<AttendanceSession[]> {
     return getDemoAttendanceSessions(userId, courseSpaceId, schoolId || DEFAULT_SCHOOL);
   },
   async startAttendanceSession(): Promise<{
@@ -453,14 +469,25 @@ export const mockSource: DataSource = {
       actionLabel: task.actionLabel ?? '前往處理',
       actionTarget: {
         tab: task.kind === 'group' ? '收件匣' : '課程',
-        screen: task.kind === 'live' ? 'Classroom' : task.kind === 'group' ? 'GroupDetail' : 'AssignmentDetail',
+        screen:
+          task.kind === 'live'
+            ? 'Classroom'
+            : task.kind === 'group'
+              ? 'GroupDetail'
+              : 'AssignmentDetail',
         params: {
           groupId: task.groupId,
           assignmentId: task.assignmentId,
           sessionId: task.sessionId,
         },
       },
-      evidenceRefs: [{ type: task.kind === 'live' ? 'attendance' : 'assignment', id: task.assignmentId ?? task.sessionId ?? task.groupId, label: task.title }],
+      evidenceRefs: [
+        {
+          type: task.kind === 'live' ? 'attendance' : 'assignment',
+          id: task.assignmentId ?? task.sessionId ?? task.groupId,
+          label: task.title,
+        },
+      ],
       requiresConfirmation: false,
       source: 'inbox',
       dueAt: task.dueAt ?? null,
@@ -494,7 +521,9 @@ export const mockSource: DataSource = {
         id: 'mock-risk-today',
         userId,
         schoolId: schoolId || DEFAULT_SCHOOL,
-        level: actions.some((action) => action.urgency === 'high' || action.urgency === 'critical') ? 'watch' : 'safe',
+        level: actions.some((action) => action.urgency === 'high' || action.urgency === 'critical')
+          ? 'watch'
+          : 'safe',
         score: actions.length * 12,
         summary: `今日有 ${actions.length} 個代理建議，其中前 3 個已排入 Today。`,
         signals: actions.slice(0, 3).map((action, index) => ({
@@ -516,9 +545,48 @@ export const mockSource: DataSource = {
   async listPulseAggregates(schoolId?: string): Promise<PulseAggregate[]> {
     const sid = schoolId || DEFAULT_SCHOOL;
     return [
-      { id: 'lib_main', schoolId: sid, locationId: 'lib_main', locationName: '蓋夏圖書館', category: 'library', currentLevel: 3, confidence: 0.68, sampleSize: 16, reportCount24h: 42, trend: 'stable', bestTimeToVisit: '14:00-15:00', updatedAt: new Date() },
-      { id: 'cafe_main', schoolId: sid, locationId: 'cafe_main', locationName: '學生餐廳', category: 'dining', currentLevel: 4, confidence: 0.74, sampleSize: 22, reportCount24h: 58, trend: 'rising', bestTimeToVisit: '13:30 後', updatedAt: new Date() },
-      { id: 'parking_main', schoolId: sid, locationId: 'parking_main', locationName: '主停車場', category: 'parking', currentLevel: 3, confidence: 0.52, sampleSize: 9, reportCount24h: 19, trend: 'falling', bestTimeToVisit: '10:30 後', updatedAt: new Date() },
+      {
+        id: 'lib_main',
+        schoolId: sid,
+        locationId: 'lib_main',
+        locationName: '蓋夏圖書館',
+        category: 'library',
+        currentLevel: 3,
+        confidence: 0.68,
+        sampleSize: 16,
+        reportCount24h: 42,
+        trend: 'stable',
+        bestTimeToVisit: '14:00-15:00',
+        updatedAt: new Date(),
+      },
+      {
+        id: 'cafe_main',
+        schoolId: sid,
+        locationId: 'cafe_main',
+        locationName: '學生餐廳',
+        category: 'dining',
+        currentLevel: 4,
+        confidence: 0.74,
+        sampleSize: 22,
+        reportCount24h: 58,
+        trend: 'rising',
+        bestTimeToVisit: '13:30 後',
+        updatedAt: new Date(),
+      },
+      {
+        id: 'parking_main',
+        schoolId: sid,
+        locationId: 'parking_main',
+        locationName: '主停車場',
+        category: 'parking',
+        currentLevel: 3,
+        confidence: 0.52,
+        sampleSize: 9,
+        reportCount24h: 19,
+        trend: 'falling',
+        bestTimeToVisit: '10:30 後',
+        updatedAt: new Date(),
+      },
     ];
   },
   async submitPulseReport(): Promise<void> {
@@ -537,7 +605,11 @@ export const mockSource: DataSource = {
     mockActionQueue.unshift(item);
     return item;
   },
-  async listEnrollments(userId: string, semester?: string, schoolId?: string): Promise<Enrollment[]> {
+  async listEnrollments(
+    userId: string,
+    semester?: string,
+    schoolId?: string,
+  ): Promise<Enrollment[]> {
     return getDemoEnrollments(userId, semester, schoolId || DEFAULT_SCHOOL);
   },
   async enrollCourse(userId: string, courseId: string, semester: string): Promise<Enrollment> {
@@ -672,7 +744,11 @@ export const mockSource: DataSource = {
     }
     return [];
   },
-  async getAssignment(id?: string, groupId?: string, schoolId?: string): Promise<Assignment | null> {
+  async getAssignment(
+    id?: string,
+    groupId?: string,
+    schoolId?: string,
+  ): Promise<Assignment | null> {
     if (id && groupId) {
       const assignments = getDemoAssignments(schoolId || DEFAULT_SCHOOL, groupId);
       return assignments.find((a) => a.id === id) || null;
@@ -695,12 +771,20 @@ export const mockSource: DataSource = {
   },
 
   // ===== 作業繳交 =====
-  async listSubmissions(assignmentId: string, options?: any, groupId?: string): Promise<Submission[]> {
+  async listSubmissions(
+    assignmentId: string,
+    options?: any,
+    groupId?: string,
+  ): Promise<Submission[]> {
     return getDemoSubmissions(assignmentId, options?.schoolId || DEFAULT_SCHOOL);
   },
-  async getSubmission(assignmentId: string, userId: string, groupId?: string): Promise<Submission | null> {
+  async getSubmission(
+    assignmentId: string,
+    userId: string,
+    groupId?: string,
+  ): Promise<Submission | null> {
     const subs = getDemoSubmissions(assignmentId, DEFAULT_SCHOOL);
-    return subs.find(s => s.userId === userId) || null;
+    return subs.find((s) => s.userId === userId) || null;
   },
   async submitAssignment(data): Promise<Submission> {
     return {
@@ -724,7 +808,11 @@ export const mockSource: DataSource = {
   },
 
   // ===== 訊息 =====
-  async listConversations(userId?: string, options?: any, schoolId?: string): Promise<Conversation[]> {
+  async listConversations(
+    userId?: string,
+    options?: any,
+    schoolId?: string,
+  ): Promise<Conversation[]> {
     if (userId) {
       return getDemoConversations(schoolId || DEFAULT_SCHOOL, userId);
     }
@@ -732,12 +820,12 @@ export const mockSource: DataSource = {
   },
   async getConversation(id: string, schoolId?: string): Promise<Conversation | null> {
     const convs = getDemoConversations(schoolId || DEFAULT_SCHOOL, 'user1');
-    return convs.find(c => c.id === id) || null;
+    return convs.find((c) => c.id === id) || null;
   },
   async createConversation(
     participantIds: string[],
     schoolId?: string,
-    conversationId?: string
+    conversationId?: string,
   ): Promise<Conversation> {
     return {
       id: conversationId || generateId(),
@@ -898,7 +986,12 @@ export const mockSource: DataSource = {
   },
 
   // ===== 行事曆 =====
-  async listCalendarEvents(userId?: string, startDate?: string, endDate?: string, schoolId?: string): Promise<CalendarEvent[]> {
+  async listCalendarEvents(
+    userId?: string,
+    startDate?: string,
+    endDate?: string,
+    schoolId?: string,
+  ): Promise<CalendarEvent[]> {
     if (userId) {
       return getDemoCalendarEvents(schoolId || DEFAULT_SCHOOL, userId);
     }
@@ -933,7 +1026,7 @@ export const mockSource: DataSource = {
   },
   async getOrder(id: string, userId?: string, schoolId?: string): Promise<Order | null> {
     const orders = getDemoOrders(userId || 'user1', schoolId || DEFAULT_SCHOOL);
-    return orders.find(o => o.id === id) || null;
+    return orders.find((o) => o.id === id) || null;
   },
   async createOrder(data): Promise<Order> {
     return {
@@ -970,7 +1063,11 @@ export const mockSource: DataSource = {
   async getUserAchievements(userId: string, schoolId?: string): Promise<UserAchievement[]> {
     return getDemoAchievements(userId, schoolId || DEFAULT_SCHOOL);
   },
-  async updateAchievementProgress(_userId: string, achievementId: string, progress: number): Promise<UserAchievement> {
+  async updateAchievementProgress(
+    _userId: string,
+    achievementId: string,
+    progress: number,
+  ): Promise<UserAchievement> {
     return {
       id: achievementId,
       name: 'Mock Achievement',
@@ -1008,7 +1105,11 @@ export const mockSource: DataSource = {
   },
 
   // ===== 健康與醫療 =====
-  async listHealthAppointments(userId: string, options?: any, schoolId?: string): Promise<HealthAppointment[]> {
+  async listHealthAppointments(
+    userId: string,
+    options?: any,
+    schoolId?: string,
+  ): Promise<HealthAppointment[]> {
     return getDemoHealthAppointments(userId, schoolId || DEFAULT_SCHOOL);
   },
   async createHealthAppointment(data: any): Promise<HealthAppointment> {
@@ -1033,10 +1134,18 @@ export const mockSource: DataSource = {
       createdAt: new Date().toISOString(),
     };
   },
-  async listHealthRecords(userId: string, options?: any, schoolId?: string): Promise<HealthRecord[]> {
+  async listHealthRecords(
+    userId: string,
+    options?: any,
+    schoolId?: string,
+  ): Promise<HealthRecord[]> {
     return getDemoHealthRecords(userId, schoolId || DEFAULT_SCHOOL);
   },
-  async listHealthTimeSlots(department: string, date: string, schoolId?: string): Promise<HealthTimeSlot[]> {
+  async listHealthTimeSlots(
+    department: string,
+    date: string,
+    schoolId?: string,
+  ): Promise<HealthTimeSlot[]> {
     return getDemoHealthTimeSlots(department as any, date, schoolId || DEFAULT_SCHOOL);
   },
 
@@ -1046,7 +1155,7 @@ export const mockSource: DataSource = {
   },
   async getPrinter(id: string, schoolId?: string): Promise<Printer | null> {
     const printers = getDemoPrinters(schoolId || DEFAULT_SCHOOL);
-    return printers.find(p => p.id === id) || null;
+    return printers.find((p) => p.id === id) || null;
   },
   async listPrintJobs(userId: string, options?: any, schoolId?: string): Promise<PrintJob[]> {
     return getDemoPrintJobs(userId, schoolId || DEFAULT_SCHOOL);
@@ -1094,7 +1203,11 @@ export const mockSource: DataSource = {
   },
 
   // ===== 維修 =====
-  async listRepairRequests(userId: string, options?: any, schoolId?: string): Promise<RepairRequest[]> {
+  async listRepairRequests(
+    userId: string,
+    options?: any,
+    schoolId?: string,
+  ): Promise<RepairRequest[]> {
     return getDemoRepairRequests(userId, schoolId || DEFAULT_SCHOOL);
   },
   async updateRepairRequest(id: string, data: Partial<RepairRequest>): Promise<RepairRequest> {
@@ -1126,7 +1239,11 @@ export const mockSource: DataSource = {
       return { success: false, errorCode: 'MIN_TOPUP_AMOUNT', errorMessage: '最低儲值金額為 $100' };
     }
     if (data.amount > 10000) {
-      return { success: false, errorCode: 'MAX_TOPUP_AMOUNT', errorMessage: '單次儲值上限為 $10,000' };
+      return {
+        success: false,
+        errorCode: 'MAX_TOPUP_AMOUNT',
+        errorMessage: '單次儲值上限為 $10,000',
+      };
     }
     return {
       success: true,
@@ -1166,5 +1283,4 @@ export const mockSource: DataSource = {
     await delay(500);
     return { id: `visitor_${Date.now()}` };
   },
-
 };

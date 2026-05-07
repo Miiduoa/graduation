@@ -74,23 +74,19 @@ function sanitizeContext(context: ErrorContext): ErrorContext {
   return Object.fromEntries(
     Object.entries(context)
       .filter(([key]) => !SENSITIVE_KEY_PATTERN.test(key))
-      .map(([key, value]) => [
-        key,
-        typeof value === 'string' ? sanitizeText(value) : value,
-      ]),
+      .map(([key, value]) => [key, typeof value === 'string' ? sanitizeText(value) : value]),
   ) as ErrorContext;
 }
 
-function sanitizeBreadcrumbData(data?: Record<string, unknown>): Record<string, unknown> | undefined {
+function sanitizeBreadcrumbData(
+  data?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   if (!data) return undefined;
 
   const sanitized = Object.fromEntries(
     Object.entries(data)
       .filter(([key]) => !SENSITIVE_KEY_PATTERN.test(key))
-      .map(([key, value]) => [
-        key,
-        typeof value === 'string' ? sanitizeText(value) : value,
-      ]),
+      .map(([key, value]) => [key, typeof value === 'string' ? sanitizeText(value) : value]),
   );
 
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;

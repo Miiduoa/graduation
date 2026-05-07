@@ -169,12 +169,36 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 // (已移除硬編碼假課程 — 改由 puDataCache 統一快取提供真實課表資料)
 
 const FALLBACK_STUDENTS = [
-  '陳浩然', '劉思媗', '黃子軒', '李欣怡', '王彥程',
-  '張冠文', '簡芷昱', '吳昱鋮', '林昱彬', '楊庭昕',
-  '鍾承鴻', '洪晉熙', '謝承洋', '曾奕晴', '郭昱辰',
-  '何欣諺', '盧昀希', '蕭岑芮', '徐昱軒', '陳旻琪',
-  '邱品澐', '賈昕妤', '江冠廷', '許庭佑', '彭昱涵',
-  '林昱陞', '李芯昀', '王昀軒', '朱昱彤', '周旻樂',
+  '陳浩然',
+  '劉思媗',
+  '黃子軒',
+  '李欣怡',
+  '王彥程',
+  '張冠文',
+  '簡芷昱',
+  '吳昱鋮',
+  '林昱彬',
+  '楊庭昕',
+  '鍾承鴻',
+  '洪晉熙',
+  '謝承洋',
+  '曾奕晴',
+  '郭昱辰',
+  '何欣諺',
+  '盧昀希',
+  '蕭岑芮',
+  '徐昱軒',
+  '陳旻琪',
+  '邱品澐',
+  '賈昕妤',
+  '江冠廷',
+  '許庭佑',
+  '彭昱涵',
+  '林昱陞',
+  '李芯昀',
+  '王昀軒',
+  '朱昱彤',
+  '周旻樂',
 ];
 
 // ============================================================================
@@ -194,7 +218,12 @@ export function generateRotatingQR(sessionId: string, secret: string, timestamp?
   return (hash >>> 0).toString().padStart(10, '0').substring(0, 8);
 }
 
-export function validateRotatingQR(sessionId: string, secret: string, code: string, tolerance = 1): boolean {
+export function validateRotatingQR(
+  sessionId: string,
+  secret: string,
+  code: string,
+  tolerance = 1,
+): boolean {
   const now = Date.now();
   for (let i = -tolerance; i <= tolerance; i++) {
     if (generateRotatingQR(sessionId, secret, now + i * 3000) === code) return true;
@@ -235,7 +264,11 @@ export async function getAttendanceCourses(): Promise<AttendanceCourse[]> {
           tcId: c.id,
           name: c.name,
           courseCode: c.course_code || c.name,
-          role: (c.role === 'teacher' ? 'teacher' : c.role === 'ta' ? 'ta' : 'student') as AttendanceCourse['role'],
+          role: (c.role === 'teacher'
+            ? 'teacher'
+            : c.role === 'ta'
+              ? 'ta'
+              : 'student') as AttendanceCourse['role'],
           studentCount: c.student_count || 30,
           instructorName: c.instructors?.[0]?.name || '教師',
           semester: c.semester?.code || '1131',
@@ -275,7 +308,11 @@ export async function getAttendanceCourses(): Promise<AttendanceCourse[]> {
           tcId: c.id,
           name: c.name,
           courseCode: c.course_code || c.name,
-          role: (c.role === 'teacher' ? 'teacher' : c.role === 'ta' ? 'ta' : 'student') as AttendanceCourse['role'],
+          role: (c.role === 'teacher'
+            ? 'teacher'
+            : c.role === 'ta'
+              ? 'ta'
+              : 'student') as AttendanceCourse['role'],
           studentCount: c.student_count || 30,
           instructorName: c.instructors?.[0]?.name || '教師',
           semester: c.semester?.code || '1131',
@@ -291,7 +328,9 @@ export async function getAttendanceCourses(): Promise<AttendanceCourse[]> {
       });
       await AsyncStorage.setItem(STORAGE.COURSES, JSON.stringify(courses));
       await AsyncStorage.setItem(STORAGE.COURSES_TS, Date.now().toString());
-      console.log(`[Attendance] Loaded ${courses.length} courses from puDataCache (same as schedule)`);
+      console.log(
+        `[Attendance] Loaded ${courses.length} courses from puDataCache (same as schedule)`,
+      );
       return courses;
     }
   } catch (_) {}
@@ -345,9 +384,13 @@ export async function getCoursesWithAttendance(): Promise<AttendanceCourse[]> {
 }
 
 /** 取得課程的真實學生名冊 */
-export async function getCourseStudents(courseId: number): Promise<{
-  id: string; name: string; avatarUrl: string | null;
-}[]> {
+export async function getCourseStudents(courseId: number): Promise<
+  {
+    id: string;
+    name: string;
+    avatarUrl: string | null;
+  }[]
+> {
   try {
     if (await hasTCSession()) {
       const members = await tcFetchCourseMembers(courseId);
@@ -474,7 +517,9 @@ export async function getActiveSessions(): Promise<AttendanceSession[]> {
  * 2. 必須是教師已啟動的進行中場次（status === 'active'）
  * 3. 兩個條件缺一不可
  */
-export async function getActiveSessionsForStudent(enrolledCourseIds?: string[]): Promise<AttendanceSession[]> {
+export async function getActiveSessionsForStudent(
+  enrolledCourseIds?: string[],
+): Promise<AttendanceSession[]> {
   const sessions = await getAllSessions();
   const active = sessions.filter((s) => s.status === 'active');
 
@@ -490,7 +535,7 @@ export async function getActiveSessionsForStudent(enrolledCourseIds?: string[]):
     if (cachedRaw) {
       const cachedCourses: AttendanceCourse[] = JSON.parse(cachedRaw);
       const studentCourseIds = new Set(
-        cachedCourses.filter((c) => c.role === 'student').map((c) => c.id)
+        cachedCourses.filter((c) => c.role === 'student').map((c) => c.id),
       );
       if (studentCourseIds.size > 0) {
         return active.filter((s) => studentCourseIds.has(s.courseId));
@@ -517,9 +562,10 @@ export async function endSession(sessionId: string): Promise<void> {
   await AsyncStorage.setItem(STORAGE.SESSIONS, JSON.stringify(sessions));
 
   // Emit event → 出席分析 + 風險預警
-  const rate = session.totalStudents > 0
-    ? Math.round(((session.presentCount + session.lateCount) / session.totalStudents) * 100)
-    : 0;
+  const rate =
+    session.totalStudents > 0
+      ? Math.round(((session.presentCount + session.lateCount) / session.totalStudents) * 100)
+      : 0;
   campusEventBus.emit('session:ended', {
     sessionId,
     courseId: session.courseId,
@@ -542,7 +588,8 @@ export async function checkIn(
   const session = sessions.find((s) => s.id === sessionId);
 
   if (!session) return { success: false, status: 'absent', message: '點名場次不存在' };
-  if (session.status !== 'active') return { success: false, status: 'absent', message: '點名已結束' };
+  if (session.status !== 'active')
+    return { success: false, status: 'absent', message: '點名已結束' };
 
   const elapsed = (Date.now() - session.startTime) / 60000;
   const isLate = elapsed > session.lateThresholdMinutes;
@@ -588,7 +635,10 @@ export async function checkIn(
   return {
     success: true,
     status,
-    message: status === 'present' ? '簽到成功！準時出席' : `簽到成功，但已遲到 ${Math.round(elapsed)} 分鐘`,
+    message:
+      status === 'present'
+        ? '簽到成功！準時出席'
+        : `簽到成功，但已遲到 ${Math.round(elapsed)} 分鐘`,
   };
 }
 
@@ -607,7 +657,8 @@ export async function updateStudentStatus(
   if (record) {
     record.status = newStatus;
     if (note) record.note = note;
-    if (newStatus === 'present' || newStatus === 'late') record.checkInTime = record.checkInTime || Date.now();
+    if (newStatus === 'present' || newStatus === 'late')
+      record.checkInTime = record.checkInTime || Date.now();
   }
 
   session.presentCount = session.records.filter((r) => r.status === 'present').length;
@@ -647,7 +698,11 @@ export async function submitLeaveRequest(req: {
   return newReq;
 }
 
-export async function reviewLeaveRequest(requestId: string, approved: boolean, note?: string): Promise<void> {
+export async function reviewLeaveRequest(
+  requestId: string,
+  approved: boolean,
+  note?: string,
+): Promise<void> {
   const requests = await getLeaveRequests();
   const req = requests.find((r) => r.id === requestId);
   if (req) {
@@ -666,7 +721,10 @@ export async function reviewLeaveRequest(requestId: string, approved: boolean, n
   }
 }
 
-export async function getLeaveRequests(courseId?: string, studentId?: string): Promise<LeaveRequest[]> {
+export async function getLeaveRequests(
+  courseId?: string,
+  studentId?: string,
+): Promise<LeaveRequest[]> {
   const data = await AsyncStorage.getItem(STORAGE.LEAVE_REQUESTS);
   let requests: LeaveRequest[] = data ? JSON.parse(data) : [];
   if (courseId) requests = requests.filter((r) => r.courseId === courseId);
@@ -693,9 +751,10 @@ export async function getStudentAnalytics(studentId?: string): Promise<StudentAn
     rate: c.rate,
   }));
 
-  const overallRate = courseBreakdown.length > 0
-    ? Math.round(courseBreakdown.reduce((sum, c) => sum + c.rate, 0) / courseBreakdown.length)
-    : 0;
+  const overallRate =
+    courseBreakdown.length > 0
+      ? Math.round(courseBreakdown.reduce((sum, c) => sum + c.rate, 0) / courseBreakdown.length)
+      : 0;
 
   return {
     studentId: studentId || '',
@@ -704,22 +763,33 @@ export async function getStudentAnalytics(studentId?: string): Promise<StudentAn
     streak: { current: 5, best: 12 },
     riskLevel: overallRate >= 85 ? 'safe' : overallRate >= 70 ? 'warning' : 'danger',
     weekdayPattern: [
-      { day: '一', rate: 92 }, { day: '二', rate: 88 },
-      { day: '三', rate: 85 }, { day: '四', rate: 80 }, { day: '五', rate: 78 },
+      { day: '一', rate: 92 },
+      { day: '二', rate: 88 },
+      { day: '三', rate: 85 },
+      { day: '四', rate: 80 },
+      { day: '五', rate: 78 },
     ],
   };
 }
 
 export async function getTeacherAnalytics(courseId?: string): Promise<TeacherAnalytics> {
   const courses = await getAttendanceCourses();
-  const course = courseId ? courses.find((c) => c.id === courseId) : courses.find((c) => c.role === 'teacher' || c.role === 'ta');
+  const course = courseId
+    ? courses.find((c) => c.id === courseId)
+    : courses.find((c) => c.role === 'teacher' || c.role === 'ta');
 
   const sessions = await getAllSessions(courseId);
   const completedSessions = sessions.filter((s) => s.status === 'completed');
 
-  const avgRate = completedSessions.length > 0
-    ? Math.round(completedSessions.reduce((sum, s) => sum + (s.presentCount + s.lateCount) / s.totalStudents * 100, 0) / completedSessions.length)
-    : course?.rate || 0;
+  const avgRate =
+    completedSessions.length > 0
+      ? Math.round(
+          completedSessions.reduce(
+            (sum, s) => sum + ((s.presentCount + s.lateCount) / s.totalStudents) * 100,
+            0,
+          ) / completedSessions.length,
+        )
+      : course?.rate || 0;
 
   // Identify risk students from completed sessions
   const studentAbsences = new Map<string, { name: string; absences: number; total: number }>();
@@ -798,13 +868,20 @@ export const getCurrentClass = async () => {
 };
 export const predictAbsenceRisk = async (studentId: string) => {
   const analytics = await getStudentAnalytics(studentId);
-  return { risk: analytics.riskLevel === 'danger' ? 80 : analytics.riskLevel === 'warning' ? 40 : 10, factors: [] };
+  return {
+    risk: analytics.riskLevel === 'danger' ? 80 : analytics.riskLevel === 'warning' ? 40 : 10,
+    factors: [],
+  };
 };
-export const sendEngagementPulse = async () => ({} as any);
+export const sendEngagementPulse = async () => ({}) as any;
 export const respondToEngagementPulse = async () => {};
-export const markAbsent = async (sessionId: string, studentId: string) => updateStudentStatus(sessionId, studentId, 'absent');
+export const markAbsent = async (sessionId: string, studentId: string) =>
+  updateStudentStatus(sessionId, studentId, 'absent');
 export const updateStatus = updateStudentStatus;
-export const generateNumberCode_legacy = (sessionId: string) => ({ code: generateNumberCode(), expiresAt: Date.now() + 30000 });
+export const generateNumberCode_legacy = (sessionId: string) => ({
+  code: generateNumberCode(),
+  expiresAt: Date.now() + 30000,
+});
 export const validateNumberCode = (sessionId: string, code: string) => /^\d{6}$/.test(code);
 export const validateRotatingQR_legacy = validateRotatingQR;
 export const calculateFraudScore = () => ({ score: 0, flags: [] });

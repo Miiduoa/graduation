@@ -3,9 +3,16 @@ import { getDocs, limit, orderBy, query } from 'firebase/firestore';
 
 import { collectionFromSegments } from '../../data/firestorePath';
 import { getDb } from '../../firebase';
-import { loadPersistedValue, removePersistedValue, savePersistedValue } from '../../services/persistedStorage';
+import {
+  loadPersistedValue,
+  removePersistedValue,
+  savePersistedValue,
+} from '../../services/persistedStorage';
 import { getScopedStorageKey } from '../../services/scopedStorage';
-import { listPendingAssignmentsForUserGroups, type PendingGroupAssignment } from '../groups/repository';
+import {
+  listPendingAssignmentsForUserGroups,
+  type PendingGroupAssignment,
+} from '../groups/repository';
 
 export const LEGACY_CHAT_HISTORY_KEY = 'ai_chat_history';
 
@@ -68,7 +75,9 @@ export async function loadAIChatHistory(storageKey: string): Promise<PersistedAi
           actions: Array.isArray(entry.actions)
             ? entry.actions
                 .map((action) => toRecord(action))
-                .filter((action) => typeof action.label === 'string' && typeof action.action === 'string')
+                .filter(
+                  (action) => typeof action.label === 'string' && typeof action.action === 'string',
+                )
                 .map((action) => ({
                   label: String(action.label),
                   action: String(action.action),
@@ -83,7 +92,7 @@ export async function loadAIChatHistory(storageKey: string): Promise<PersistedAi
 export async function saveAIChatHistory(
   storageKey: string,
   messages: PersistedAiMessage[],
-  maxItems: number
+  maxItems: number,
 ): Promise<void> {
   await savePersistedValue(storageKey, messages.slice(-maxItems));
 }
@@ -100,10 +109,13 @@ export async function loadAiPersonalContext(params: {
   const pendingAssignmentsPromise = listPendingAssignmentsForUserGroups(params.uid);
   const canonicalWeeklySnapshot = await getDocs(
     query(
-      collectionFromSegments(db, buildUserSchoolCollectionPath(params.uid, params.schoolId, 'weeklyReports')),
+      collectionFromSegments(
+        db,
+        buildUserSchoolCollectionPath(params.uid, params.schoolId, 'weeklyReports'),
+      ),
       orderBy('generatedAt', 'desc'),
-      limit(1)
-    )
+      limit(1),
+    ),
   ).catch(() => null);
 
   let weeklyReport: WeeklyReportRecord | null = null;
@@ -112,7 +124,11 @@ export async function loadAiPersonalContext(params: {
     weeklyReport = toRecord(canonicalWeeklySnapshot.docs[0]?.data?.()) as WeeklyReportRecord;
   } else {
     const legacyWeeklySnapshot = await getDocs(
-      query(collectionFromSegments(db, ['users', params.uid, 'weeklyReports']), orderBy('generatedAt', 'desc'), limit(1))
+      query(
+        collectionFromSegments(db, ['users', params.uid, 'weeklyReports']),
+        orderBy('generatedAt', 'desc'),
+        limit(1),
+      ),
     ).catch(() => null);
 
     if (legacyWeeklySnapshot && !legacyWeeklySnapshot.empty) {

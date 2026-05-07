@@ -1,8 +1,8 @@
 /**
  * Campus App Widgets
- * 
+ *
  * 這個模組提供主畫面小工具的資料和配置。
- * 
+ *
  * 支援的 Widget 類型：
  * - TodayScheduleWidget: 今日課表
  * - NextClassWidget: 下一堂課
@@ -14,6 +14,6 @@
  * - QuickActionsWidget: 快捷功能
  */
 
-export * from "./types";
-export * from "./dataProvider";
-export * from "./config";
+export * from './types';
+export * from './dataProvider';
+export * from './config';

@@ -49,14 +49,20 @@ export async function loadCreditAuditSavedCourses(storageKey: string): Promise<S
   });
 }
 
-export async function saveCreditAuditSavedCourses(storageKey: string, courses: SavedCourse[]): Promise<void> {
+export async function saveCreditAuditSavedCourses(
+  storageKey: string,
+  courses: SavedCourse[],
+): Promise<void> {
   await savePersistedValue(storageKey, courses);
 }
 
-export async function listStoredEnrollments(uid: string, schoolId: string): Promise<StoredEnrollment[]> {
+export async function listStoredEnrollments(
+  uid: string,
+  schoolId: string,
+): Promise<StoredEnrollment[]> {
   const db = getDb();
   const canonicalSnapshot = await getDocs(
-    collectionFromSegments(db, buildUserSchoolCollectionPath(uid, schoolId, 'enrollments'))
+    collectionFromSegments(db, buildUserSchoolCollectionPath(uid, schoolId, 'enrollments')),
   ).catch(() => null);
 
   if (canonicalSnapshot && !canonicalSnapshot.empty) {
@@ -88,7 +94,10 @@ export async function upsertCreditAuditEnrollment(params: {
 }): Promise<void> {
   const db = getDb();
   await setDoc(
-    docFromSegments(db, buildUserSchoolCollectionPath(params.uid, params.schoolId, 'enrollments', params.course.id)),
+    docFromSegments(
+      db,
+      buildUserSchoolCollectionPath(params.uid, params.schoolId, 'enrollments', params.course.id),
+    ),
     {
       courseId: params.course.id,
       courseName: params.course.name,
@@ -102,7 +111,7 @@ export async function upsertCreditAuditEnrollment(params: {
       source: 'credit-audit-input',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    }
+    },
   );
 }
 
@@ -113,7 +122,15 @@ export async function deleteCreditAuditEnrollment(params: {
 }): Promise<void> {
   const db = getDb();
   await deleteDoc(
-    docFromSegments(db, buildUserSchoolCollectionPath(params.uid, params.schoolId, 'enrollments', params.enrollmentId))
+    docFromSegments(
+      db,
+      buildUserSchoolCollectionPath(
+        params.uid,
+        params.schoolId,
+        'enrollments',
+        params.enrollmentId,
+      ),
+    ),
   );
 }
 
@@ -127,7 +144,10 @@ export async function syncCreditAuditCoursesToCloud(params: {
 
   params.courses.forEach((course) => {
     batch.set(
-      docFromSegments(db, buildUserSchoolCollectionPath(params.uid, params.schoolId, 'enrollments', course.id)),
+      docFromSegments(
+        db,
+        buildUserSchoolCollectionPath(params.uid, params.schoolId, 'enrollments', course.id),
+      ),
       {
         courseId: course.id,
         courseName: course.name,
@@ -143,7 +163,7 @@ export async function syncCreditAuditCoursesToCloud(params: {
         updatedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
       },
-      { merge: true }
+      { merge: true },
     );
   });
 

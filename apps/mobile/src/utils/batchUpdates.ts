@@ -1,4 +1,4 @@
-import { unstable_batchedUpdates } from "react-native";
+import { unstable_batchedUpdates } from 'react-native';
 
 export type BatchCallback = () => void;
 
@@ -8,7 +8,7 @@ let batchTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export function batchUpdate(callback: BatchCallback): void {
   pendingCallbacks.push(callback);
-  
+
   if (!isBatching) {
     scheduleBatch();
   }
@@ -16,7 +16,7 @@ export function batchUpdate(callback: BatchCallback): void {
 
 function scheduleBatch(): void {
   if (batchTimeout) return;
-  
+
   batchTimeout = setTimeout(() => {
     flushBatch();
   }, 0);
@@ -37,7 +37,7 @@ function flushBatch(): void {
       try {
         cb();
       } catch (error) {
-        console.error("[BatchUpdates] 執行回調時發生錯誤:", error);
+        console.error('[BatchUpdates] 執行回調時發生錯誤:', error);
       }
     });
   });
@@ -56,7 +56,7 @@ export function batchUpdateSync(callbacks: BatchCallback[]): void {
       try {
         cb();
       } catch (error) {
-        console.error("[BatchUpdates] 執行回調時發生錯誤:", error);
+        console.error('[BatchUpdates] 執行回調時發生錯誤:', error);
       }
     });
   });
@@ -71,7 +71,7 @@ export class UpdateQueue<T> {
 
   constructor(
     processor: (items: T[]) => void,
-    options: { batchSize?: number; delay?: number } = {}
+    options: { batchSize?: number; delay?: number } = {},
   ) {
     this.processor = processor;
     this.batchSize = options.batchSize ?? 50;
@@ -129,7 +129,7 @@ export class UpdateQueue<T> {
 
 export function createThrottledUpdater<T>(
   setter: (value: T) => void,
-  interval: number = 16
+  interval: number = 16,
 ): (value: T) => void {
   let lastUpdate = 0;
   let pendingValue: T | undefined;
@@ -137,22 +137,25 @@ export function createThrottledUpdater<T>(
 
   return (value: T) => {
     const now = Date.now();
-    
+
     if (now - lastUpdate >= interval) {
       lastUpdate = now;
       setter(value);
     } else {
       pendingValue = value;
-      
+
       if (!timeout) {
-        timeout = setTimeout(() => {
-          if (pendingValue !== undefined) {
-            lastUpdate = Date.now();
-            setter(pendingValue);
-            pendingValue = undefined;
-          }
-          timeout = null;
-        }, interval - (now - lastUpdate));
+        timeout = setTimeout(
+          () => {
+            if (pendingValue !== undefined) {
+              lastUpdate = Date.now();
+              setter(pendingValue);
+              pendingValue = undefined;
+            }
+            timeout = null;
+          },
+          interval - (now - lastUpdate),
+        );
       }
     }
   };
@@ -160,7 +163,7 @@ export function createThrottledUpdater<T>(
 
 export function createDebouncedUpdater<T>(
   setter: (value: T) => void,
-  delay: number = 100
+  delay: number = 100,
 ): (value: T) => void {
   let timeout: ReturnType<typeof setTimeout> | null = null;
 

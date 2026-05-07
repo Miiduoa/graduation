@@ -26,44 +26,40 @@
  *   - Peak-End Rule：在關鍵時刻出現的提醒最有效
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  getAnyCachedCourses,
-  getAnyCachedGrades,
-  getAnyCachedAnnouncements,
-} from "./puDataCache";
-import { getFullAcademicInsights } from "./academicInsightsEngine";
-import { getCampusPulseSnapshot } from "./campusPulseEngine";
-import { getGamificationState } from "./gamificationEngine";
-import type { PUCourse, PUGradeResult } from "./puDirectScraper";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAnyCachedCourses, getAnyCachedGrades, getAnyCachedAnnouncements } from './puDataCache';
+import { getFullAcademicInsights } from './academicInsightsEngine';
+import { getCampusPulseSnapshot } from './campusPulseEngine';
+import { getGamificationState } from './gamificationEngine';
+import type { PUCourse, PUGradeResult } from './puDirectScraper';
 
 // ─── Types ───────────────────────────────────────────────
 
 export type NudgeType =
-  | "deadline_warning"      // 作業/考試截止提醒
-  | "gpa_alert"             // GPA 趨勢警告
-  | "study_opportunity"     // 「圖書館現在人少」
-  | "streak_risk"           // Streak 即將中斷
-  | "social_proof"          // 「87% 同學已完成」
-  | "achievement_close"     // 接近解鎖成就
-  | "study_reminder"        // 該讀書了
-  | "break_reminder"        // 休息提醒
-  | "campus_event"          // 校園活動即將開始
-  | "grade_celebration"     // 成績出來了，表現不錯
-  | "weather_alert"         // 天氣變化影響行程
-  | "class_prep"            // 下節課提醒
-  | "weekly_review"         // 每週回顧
-  | "goal_progress"         // 目標進度
-  | "crowd_alert"           // 人潮異常提醒
-  | "smart_suggestion";     // AI 智慧建議
+  | 'deadline_warning' // 作業/考試截止提醒
+  | 'gpa_alert' // GPA 趨勢警告
+  | 'study_opportunity' // 「圖書館現在人少」
+  | 'streak_risk' // Streak 即將中斷
+  | 'social_proof' // 「87% 同學已完成」
+  | 'achievement_close' // 接近解鎖成就
+  | 'study_reminder' // 該讀書了
+  | 'break_reminder' // 休息提醒
+  | 'campus_event' // 校園活動即將開始
+  | 'grade_celebration' // 成績出來了，表現不錯
+  | 'weather_alert' // 天氣變化影響行程
+  | 'class_prep' // 下節課提醒
+  | 'weekly_review' // 每週回顧
+  | 'goal_progress' // 目標進度
+  | 'crowd_alert' // 人潮異常提醒
+  | 'smart_suggestion'; // AI 智慧建議
 
-export type NudgePriority = "critical" | "high" | "medium" | "low" | "info";
+export type NudgePriority = 'critical' | 'high' | 'medium' | 'low' | 'info';
 
 export type NudgeAction = {
   label: string;
-  route?: string;          // navigation route
+  route?: string; // navigation route
   params?: Record<string, any>;
-  actionId?: string;       // for handling in-app actions
+  actionId?: string; // for handling in-app actions
 };
 
 export type SmartNudge = {
@@ -75,14 +71,14 @@ export type SmartNudge = {
   icon: string;
   color: string;
   timestamp: number;
-  expiresAt?: number;      // auto-dismiss after this time
+  expiresAt?: number; // auto-dismiss after this time
   actions: NudgeAction[];
   metadata: {
     source: string;
-    confidence: number;    // 0-1
+    confidence: number; // 0-1
     personalizedFor?: string;
-    socialProof?: string;  // "87% 的同學已完成"
-    urgencyLevel: number;  // 0-10
+    socialProof?: string; // "87% 的同學已完成"
+    urgencyLevel: number; // 0-10
     category: string;
   };
   dismissed: boolean;
@@ -93,30 +89,30 @@ export type ProactiveState = {
   nudges: SmartNudge[];
   lastScanAt: number;
   scanCount: number;
-  interactionRate: number;  // ratio of nudges interacted with
+  interactionRate: number; // ratio of nudges interacted with
   preferences: NudgePreferences;
 };
 
 export type NudgePreferences = {
   enabled: boolean;
-  quietHoursStart: number;  // e.g. 22 (10pm)
-  quietHoursEnd: number;    // e.g. 7 (7am)
+  quietHoursStart: number; // e.g. 22 (10pm)
+  quietHoursEnd: number; // e.g. 7 (7am)
   maxDailyNudges: number;
   disabledTypes: NudgeType[];
-  sensitivity: "high" | "medium" | "low";
+  sensitivity: 'high' | 'medium' | 'low';
 };
 
 // ─── Constants ──────────────────────────────────────────
 
-const STORAGE_KEY = "@proactive:state";
-const NUDGE_HISTORY_KEY = "@proactive:history";
+const STORAGE_KEY = '@proactive:state';
+const NUDGE_HISTORY_KEY = '@proactive:history';
 const DEFAULT_PREFS: NudgePreferences = {
   enabled: true,
   quietHoursStart: 23,
   quietHoursEnd: 7,
   maxDailyNudges: 8,
   disabledTypes: [],
-  sensitivity: "medium",
+  sensitivity: 'medium',
 };
 
 const PRIORITY_WEIGHTS: Record<NudgePriority, number> = {
@@ -129,11 +125,11 @@ const PRIORITY_WEIGHTS: Record<NudgePriority, number> = {
 
 // Priority color mapping
 const PRIORITY_COLORS: Record<NudgePriority, string> = {
-  critical: "#EF4444",
-  high: "#F97316",
-  medium: "#3B82F6",
-  low: "#6B7280",
-  info: "#8B5CF6",
+  critical: '#EF4444',
+  high: '#F97316',
+  medium: '#3B82F6',
+  low: '#6B7280',
+  info: '#8B5CF6',
 };
 
 // ─── Storage ────────────────────────────────────────────
@@ -156,7 +152,7 @@ async function saveState(state: ProactiveState): Promise<void> {
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (e) {
-    console.warn("[Proactive] saveState error:", e);
+    console.warn('[Proactive] saveState error:', e);
   }
 }
 
@@ -189,23 +185,23 @@ function checkDeadlines(courses: PUCourse[]): SmartNudge[] {
       if (hoursLeft <= 24) {
         nudges.push({
           id: generateId(),
-          type: "deadline_warning",
-          priority: hoursLeft <= 6 ? "critical" : hoursLeft <= 12 ? "high" : "medium",
-          title: hoursLeft <= 6 ? "⚠️ 作業即將截止！" : "📝 作業提醒",
-          body: `「${targetCourse}」的作業還有約 ${hoursLeft} 小時截止。${hoursLeft <= 6 ? "趕快完成吧！" : "記得抽空完成喔。"}`,
-          icon: hoursLeft <= 6 ? "alert-circle" : "document-text-outline",
-          color: hoursLeft <= 6 ? "#EF4444" : "#F97316",
+          type: 'deadline_warning',
+          priority: hoursLeft <= 6 ? 'critical' : hoursLeft <= 12 ? 'high' : 'medium',
+          title: hoursLeft <= 6 ? '⚠️ 作業即將截止！' : '📝 作業提醒',
+          body: `「${targetCourse}」的作業還有約 ${hoursLeft} 小時截止。${hoursLeft <= 6 ? '趕快完成吧！' : '記得抽空完成喔。'}`,
+          icon: hoursLeft <= 6 ? 'alert-circle' : 'document-text-outline',
+          color: hoursLeft <= 6 ? '#EF4444' : '#F97316',
           timestamp: now,
           expiresAt: now + hoursLeft * 60 * 60 * 1000,
           actions: [
-            { label: "前往 TRONCLASS", route: "校園", params: { screen: "CampusHome" } },
-            { label: "稍後提醒", actionId: "snooze_1h" },
+            { label: '前往 TRONCLASS', route: '校園', params: { screen: 'CampusHome' } },
+            { label: '稍後提醒', actionId: 'snooze_1h' },
           ],
           metadata: {
-            source: "deadline_checker",
+            source: 'deadline_checker',
             confidence: 0.8,
             urgencyLevel: hoursLeft <= 6 ? 9 : hoursLeft <= 12 ? 7 : 5,
-            category: "academic",
+            category: 'academic',
           },
           dismissed: false,
         });
@@ -228,74 +224,72 @@ async function checkGpaTrend(): Promise<SmartNudge[]> {
     const { gpaPrediction, riskAssessment } = insights;
 
     // GPA declining
-    if (gpaPrediction.direction === "declining") {
+    if (gpaPrediction.direction === 'declining') {
       nudges.push({
         id: generateId(),
-        type: "gpa_alert",
-        priority: "high",
-        title: "📉 GPA 趨勢下降中",
-        body: `你的 GPA 目前呈下降趨勢（預測 ${gpaPrediction.predictedNext.toFixed(2)}）。建議多花時間在弱科上，特別是${insights.academicProfile.weakCategories.slice(0, 2).join("、") || "核心科目"}。`,
-        icon: "trending-down",
-        color: "#EF4444",
+        type: 'gpa_alert',
+        priority: 'high',
+        title: '📉 GPA 趨勢下降中',
+        body: `你的 GPA 目前呈下降趨勢（預測 ${gpaPrediction.predictedNext.toFixed(2)}）。建議多花時間在弱科上，特別是${insights.academicProfile.weakCategories.slice(0, 2).join('、') || '核心科目'}。`,
+        icon: 'trending-down',
+        color: '#EF4444',
         timestamp: now,
         actions: [
-          { label: "查看學業分析", route: "AcademicInsightsScreen" },
-          { label: "找學伴幫忙", route: "StudyBuddyScreen" },
+          { label: '查看學業分析', route: 'AcademicInsightsScreen' },
+          { label: '找學伴幫忙', route: 'StudyBuddyScreen' },
         ],
         metadata: {
-          source: "gpa_analyzer",
+          source: 'gpa_analyzer',
           confidence: gpaPrediction.confidence,
           urgencyLevel: 7,
-          category: "academic",
+          category: 'academic',
         },
         dismissed: false,
       });
     }
 
     // High risk
-    if (riskAssessment.overallRisk === "warning" || riskAssessment.overallRisk === "critical") {
+    if (riskAssessment.overallRisk === 'warning' || riskAssessment.overallRisk === 'critical') {
       nudges.push({
         id: generateId(),
-        type: "gpa_alert",
-        priority: "critical",
-        title: "🚨 學業風險警告",
-        body: `你的學業風險評分為 ${riskAssessment.riskScore}/100（${riskAssessment.overallRisk === "critical" ? "警戒" : "高風險"}）。${riskAssessment.suggestions[0] || "建議立即調整學習策略。"}`,
-        icon: "warning",
-        color: "#EF4444",
+        type: 'gpa_alert',
+        priority: 'critical',
+        title: '🚨 學業風險警告',
+        body: `你的學業風險評分為 ${riskAssessment.riskScore}/100（${riskAssessment.overallRisk === 'critical' ? '警戒' : '高風險'}）。${riskAssessment.suggestions[0] || '建議立即調整學習策略。'}`,
+        icon: 'warning',
+        color: '#EF4444',
         timestamp: now,
         actions: [
-          { label: "查看風險報告", route: "AcademicInsightsScreen" },
-          { label: "AI 助理幫忙", route: "AIChat" },
+          { label: '查看風險報告', route: 'AcademicInsightsScreen' },
+          { label: 'AI 助理幫忙', route: 'AIChat' },
         ],
         metadata: {
-          source: "risk_assessor",
+          source: 'risk_assessor',
           confidence: 0.85,
           urgencyLevel: 9,
-          category: "academic",
+          category: 'academic',
         },
         dismissed: false,
       });
     }
 
     // GPA improving — positive reinforcement
-    if (gpaPrediction.direction === "improving") {
+    if (gpaPrediction.direction === 'improving') {
       nudges.push({
         id: generateId(),
-        type: "grade_celebration",
-        priority: "info",
-        title: "🎉 GPA 上升中！",
+        type: 'grade_celebration',
+        priority: 'info',
+        title: '🎉 GPA 上升中！',
         body: `太棒了！你的 GPA 呈上升趨勢（預測 ${gpaPrediction.predictedNext.toFixed(2)}）。繼續保持！`,
-        icon: "trending-up",
-        color: "#10B981",
+        icon: 'trending-up',
+        color: '#10B981',
         timestamp: now,
-        actions: [
-          { label: "查看詳情", route: "AcademicInsightsScreen" },
-        ],
+        actions: [{ label: '查看詳情', route: 'AcademicInsightsScreen' }],
         metadata: {
-          source: "gpa_analyzer",
+          source: 'gpa_analyzer',
           confidence: gpaPrediction.confidence,
           urgencyLevel: 2,
-          category: "celebration",
+          category: 'celebration',
         },
         dismissed: false,
       });
@@ -316,29 +310,27 @@ async function checkCampusOpportunities(): Promise<SmartNudge[]> {
 
     // Find unusually empty spots
     const quietSpots = pulse.locations.filter(
-      (l) => l.currentLevel <= 2 && (l.category === "library" || l.category === "study")
+      (l) => l.currentLevel <= 2 && (l.category === 'library' || l.category === 'study'),
     );
 
     if (quietSpots.length > 0) {
       const best = quietSpots.sort((a, b) => a.currentLevel - b.currentLevel)[0];
       nudges.push({
         id: generateId(),
-        type: "study_opportunity",
-        priority: "low",
-        title: "📚 最佳讀書時機",
+        type: 'study_opportunity',
+        priority: 'low',
+        title: '📚 最佳讀書時機',
         body: `${best.name}現在人很少（${best.currentLevel}/5），是靜心讀書的好時機！最佳到訪時段：${best.bestTimeToVisit}`,
-        icon: "book-outline",
-        color: "#3B82F6",
+        icon: 'book-outline',
+        color: '#3B82F6',
         timestamp: now,
         expiresAt: now + 2 * 60 * 60 * 1000,
-        actions: [
-          { label: "查看校園脈動", route: "CampusPulseScreen" },
-        ],
+        actions: [{ label: '查看校園脈動', route: 'CampusPulseScreen' }],
         metadata: {
-          source: "campus_pulse",
+          source: 'campus_pulse',
           confidence: best.confidence,
           urgencyLevel: 2,
-          category: "opportunity",
+          category: 'opportunity',
         },
         dismissed: false,
       });
@@ -346,31 +338,29 @@ async function checkCampusOpportunities(): Promise<SmartNudge[]> {
 
     // Crowded dining — suggest alternatives
     const crowdedDining = pulse.locations.filter(
-      (l) => l.currentLevel >= 4 && l.category === "dining"
+      (l) => l.currentLevel >= 4 && l.category === 'dining',
     );
     const quietDining = pulse.locations.filter(
-      (l) => l.currentLevel <= 2 && l.category === "dining"
+      (l) => l.currentLevel <= 2 && l.category === 'dining',
     );
 
     if (crowdedDining.length > 0 && quietDining.length > 0) {
       nudges.push({
         id: generateId(),
-        type: "crowd_alert",
-        priority: "low",
-        title: "🍽️ 用餐建議",
+        type: 'crowd_alert',
+        priority: 'low',
+        title: '🍽️ 用餐建議',
         body: `${crowdedDining[0].name}現在很擠（${crowdedDining[0].currentLevel}/5），建議改去${quietDining[0].name}（${quietDining[0].currentLevel}/5）。`,
-        icon: "restaurant-outline",
-        color: "#F59E0B",
+        icon: 'restaurant-outline',
+        color: '#F59E0B',
         timestamp: now,
         expiresAt: now + 1 * 60 * 60 * 1000,
-        actions: [
-          { label: "查看校園脈動", route: "CampusPulseScreen" },
-        ],
+        actions: [{ label: '查看校園脈動', route: 'CampusPulseScreen' }],
         metadata: {
-          source: "campus_pulse",
+          source: 'campus_pulse',
           confidence: 0.7,
           urgencyLevel: 3,
-          category: "campus",
+          category: 'campus',
         },
         dismissed: false,
       });
@@ -378,27 +368,25 @@ async function checkCampusOpportunities(): Promise<SmartNudge[]> {
 
     // Parking alert
     const fullParking = pulse.locations.filter(
-      (l) => l.currentLevel >= 4 && l.category === "parking"
+      (l) => l.currentLevel >= 4 && l.category === 'parking',
     );
     if (fullParking.length > 0) {
       nudges.push({
         id: generateId(),
-        type: "crowd_alert",
-        priority: "medium",
-        title: "🅿️ 停車位緊張",
-        body: `${fullParking.map((p) => p.name).join("和")}目前幾乎滿位。${pulse.locations.find((l) => l.category === "parking" && l.currentLevel <= 3) ? "建議改停" + pulse.locations.find((l) => l.category === "parking" && l.currentLevel <= 3)!.name : "建議提早到校。"}`,
-        icon: "car-outline",
-        color: "#F97316",
+        type: 'crowd_alert',
+        priority: 'medium',
+        title: '🅿️ 停車位緊張',
+        body: `${fullParking.map((p) => p.name).join('和')}目前幾乎滿位。${pulse.locations.find((l) => l.category === 'parking' && l.currentLevel <= 3) ? '建議改停' + pulse.locations.find((l) => l.category === 'parking' && l.currentLevel <= 3)!.name : '建議提早到校。'}`,
+        icon: 'car-outline',
+        color: '#F97316',
         timestamp: now,
         expiresAt: now + 2 * 60 * 60 * 1000,
-        actions: [
-          { label: "查看停車狀況", route: "CampusPulseScreen" },
-        ],
+        actions: [{ label: '查看停車狀況', route: 'CampusPulseScreen' }],
         metadata: {
-          source: "campus_pulse",
+          source: 'campus_pulse',
           confidence: 0.75,
           urgencyLevel: 5,
-          category: "campus",
+          category: 'campus',
         },
         dismissed: false,
       });
@@ -420,30 +408,30 @@ async function checkGamificationNudges(): Promise<SmartNudge[]> {
     const hour = new Date().getHours();
 
     // Streak about to break (evening, haven't checked in today)
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toISOString().split('T')[0];
     const checkedInToday = state.streak.lastCheckIn === today;
 
     if (!checkedInToday && hour >= 19 && state.streak.current > 0) {
       nudges.push({
         id: generateId(),
-        type: "streak_risk",
-        priority: state.streak.current >= 7 ? "high" : "medium",
+        type: 'streak_risk',
+        priority: state.streak.current >= 7 ? 'high' : 'medium',
         title: `🔥 ${state.streak.current} 天 Streak 即將中斷！`,
         body: `你今天還沒簽到！連續 ${state.streak.current} 天的紀錄要斷了嗎？只需要打開 APP 就能保持 Streak。`,
-        icon: "flame",
-        color: "#EF4444",
+        icon: 'flame',
+        color: '#EF4444',
         timestamp: now,
         expiresAt: now + (24 - hour) * 60 * 60 * 1000,
         actions: [
-          { label: "立即簽到", actionId: "daily_checkin" },
-          { label: "查看成就", route: "GamificationScreen" },
+          { label: '立即簽到', actionId: 'daily_checkin' },
+          { label: '查看成就', route: 'GamificationScreen' },
         ],
         metadata: {
-          source: "gamification",
+          source: 'gamification',
           confidence: 0.95,
           socialProof: `目前排行榜第一名已連續 ${state.leaderboard?.[0]?.streakDays || 30} 天`,
           urgencyLevel: state.streak.current >= 7 ? 8 : 6,
-          category: "engagement",
+          category: 'engagement',
         },
         dismissed: false,
       });
@@ -451,7 +439,11 @@ async function checkGamificationNudges(): Promise<SmartNudge[]> {
 
     // Close to achievement unlock
     const closeAchievements = state.achievements.filter(
-      (a) => !a.unlockedAt && a.progress != null && a.maxProgress != null && a.progress / a.maxProgress >= 0.7
+      (a) =>
+        !a.unlockedAt &&
+        a.progress != null &&
+        a.maxProgress != null &&
+        a.progress / a.maxProgress >= 0.7,
     );
 
     for (const ach of closeAchievements.slice(0, 2)) {
@@ -459,21 +451,20 @@ async function checkGamificationNudges(): Promise<SmartNudge[]> {
       const max = ach.maxProgress!;
       nudges.push({
         id: generateId(),
-        type: "achievement_close",
-        priority: "low",
+        type: 'achievement_close',
+        priority: 'low',
         title: `🏆 即將解鎖「${ach.title}」`,
-        body: `進度 ${progress}/${max}（${Math.round(progress / max * 100)}%）— ${ach.description}。再努力一下就能解鎖！`,
+        body: `進度 ${progress}/${max}（${Math.round((progress / max) * 100)}%）— ${ach.description}。再努力一下就能解鎖！`,
         icon: ach.icon,
-        color: ach.rarity === "legendary" ? "#F59E0B" : ach.rarity === "epic" ? "#8B5CF6" : "#3B82F6",
+        color:
+          ach.rarity === 'legendary' ? '#F59E0B' : ach.rarity === 'epic' ? '#8B5CF6' : '#3B82F6',
         timestamp: now,
-        actions: [
-          { label: "查看成就", route: "GamificationScreen" },
-        ],
+        actions: [{ label: '查看成就', route: 'GamificationScreen' }],
         metadata: {
-          source: "gamification",
+          source: 'gamification',
           confidence: 0.9,
           urgencyLevel: 3,
-          category: "engagement",
+          category: 'engagement',
         },
         dismissed: false,
       });
@@ -483,21 +474,19 @@ async function checkGamificationNudges(): Promise<SmartNudge[]> {
     if (state.xpProgress >= 0.85) {
       nudges.push({
         id: generateId(),
-        type: "goal_progress",
-        priority: "low",
+        type: 'goal_progress',
+        priority: 'low',
         title: `⬆️ 即將升級到 Lv.${state.level + 1}！`,
         body: `只差 ${state.xpToNextLevel} XP 就能升到下一級了！完成一些小任務就能達成。`,
-        icon: "arrow-up-circle",
-        color: "#8B5CF6",
+        icon: 'arrow-up-circle',
+        color: '#8B5CF6',
         timestamp: now,
-        actions: [
-          { label: "查看如何獲得 XP", route: "GamificationScreen" },
-        ],
+        actions: [{ label: '查看如何獲得 XP', route: 'GamificationScreen' }],
         metadata: {
-          source: "gamification",
+          source: 'gamification',
           confidence: 0.95,
           urgencyLevel: 2,
-          category: "engagement",
+          category: 'engagement',
         },
         dismissed: false,
       });
@@ -520,24 +509,24 @@ function checkScheduleNudges(courses: PUCourse[]): SmartNudge[] {
     if (courseCount > 0) {
       nudges.push({
         id: generateId(),
-        type: "study_reminder",
-        priority: "low",
-        title: "📖 今日複習時間",
+        type: 'study_reminder',
+        priority: 'low',
+        title: '📖 今日複習時間',
         body: `晚上是複習的黃金時段。你這學期有 ${courseCount} 門課，建議每天至少複習 30 分鐘。`,
-        icon: "book-outline",
-        color: "#6366F1",
+        icon: 'book-outline',
+        color: '#6366F1',
         timestamp: now,
         expiresAt: now + 3 * 60 * 60 * 1000,
         actions: [
-          { label: "開始專注", actionId: "start_pomodoro" },
-          { label: "找讀書夥伴", route: "StudyBuddyScreen" },
+          { label: '開始專注', actionId: 'start_pomodoro' },
+          { label: '找讀書夥伴', route: 'StudyBuddyScreen' },
         ],
         metadata: {
-          source: "schedule",
+          source: 'schedule',
           confidence: 0.7,
-          socialProof: "根據統計，晚間 7-9 點是圖書館最熱門的時段",
+          socialProof: '根據統計，晚間 7-9 點是圖書館最熱門的時段',
           urgencyLevel: 3,
-          category: "study",
+          category: 'study',
         },
         dismissed: false,
       });
@@ -548,22 +537,20 @@ function checkScheduleNudges(courses: PUCourse[]): SmartNudge[] {
   if (hour >= 14 && hour <= 17 && dayOfWeek >= 1 && dayOfWeek <= 5) {
     nudges.push({
       id: generateId(),
-      type: "break_reminder",
-      priority: "info",
-      title: "☕ 休息一下",
-      body: "連續學習太久了嗎？研究顯示每 45 分鐘休息 10 分鐘能提升 20% 的學習效率。",
-      icon: "cafe-outline",
-      color: "#8B5CF6",
+      type: 'break_reminder',
+      priority: 'info',
+      title: '☕ 休息一下',
+      body: '連續學習太久了嗎？研究顯示每 45 分鐘休息 10 分鐘能提升 20% 的學習效率。',
+      icon: 'cafe-outline',
+      color: '#8B5CF6',
       timestamp: now,
       expiresAt: now + 1 * 60 * 60 * 1000,
-      actions: [
-        { label: "查看校園脈動", route: "CampusPulseScreen" },
-      ],
+      actions: [{ label: '查看校園脈動', route: 'CampusPulseScreen' }],
       metadata: {
-        source: "wellbeing",
+        source: 'wellbeing',
         confidence: 0.6,
         urgencyLevel: 1,
-        category: "wellbeing",
+        category: 'wellbeing',
       },
       dismissed: false,
     });
@@ -573,23 +560,23 @@ function checkScheduleNudges(courses: PUCourse[]): SmartNudge[] {
   if (dayOfWeek === 0 && hour >= 18 && hour <= 20) {
     nudges.push({
       id: generateId(),
-      type: "weekly_review",
-      priority: "medium",
-      title: "📊 每週學習回顧",
-      body: "週末結束前回顧一下這週的學習成果吧！看看 GPA 趨勢和本週獲得的 XP。",
-      icon: "analytics-outline",
-      color: "#6366F1",
+      type: 'weekly_review',
+      priority: 'medium',
+      title: '📊 每週學習回顧',
+      body: '週末結束前回顧一下這週的學習成果吧！看看 GPA 趨勢和本週獲得的 XP。',
+      icon: 'analytics-outline',
+      color: '#6366F1',
       timestamp: now,
       expiresAt: now + 4 * 60 * 60 * 1000,
       actions: [
-        { label: "查看學業分析", route: "AcademicInsightsScreen" },
-        { label: "查看成就", route: "GamificationScreen" },
+        { label: '查看學業分析', route: 'AcademicInsightsScreen' },
+        { label: '查看成就', route: 'GamificationScreen' },
       ],
       metadata: {
-        source: "schedule",
+        source: 'schedule',
         confidence: 0.8,
         urgencyLevel: 4,
-        category: "review",
+        category: 'review',
       },
       dismissed: false,
     });
@@ -620,21 +607,19 @@ async function checkAnnouncementNudges(): Promise<SmartNudge[]> {
     if (recent.length > 0) {
       nudges.push({
         id: generateId(),
-        type: "campus_event",
-        priority: "medium",
+        type: 'campus_event',
+        priority: 'medium',
         title: `📢 ${recent.length} 則新公告`,
-        body: `最新：${recent[0].title || "校園公告"}${recent.length > 1 ? `...等 ${recent.length} 則` : ""}`,
-        icon: "megaphone-outline",
-        color: "#3B82F6",
+        body: `最新：${recent[0].title || '校園公告'}${recent.length > 1 ? `...等 ${recent.length} 則` : ''}`,
+        icon: 'megaphone-outline',
+        color: '#3B82F6',
         timestamp: now,
-        actions: [
-          { label: "查看公告", route: "公告總覽" },
-        ],
+        actions: [{ label: '查看公告', route: '公告總覽' }],
         metadata: {
-          source: "announcements",
+          source: 'announcements',
           confidence: 0.9,
           urgencyLevel: 4,
-          category: "info",
+          category: 'info',
         },
         dismissed: false,
       });
@@ -662,7 +647,7 @@ export async function runProactiveScan(): Promise<SmartNudge[]> {
   // Check quiet hours
   const hour = new Date().getHours();
   if (hour >= state.preferences.quietHoursStart || hour < state.preferences.quietHoursEnd) {
-    return state.nudges.filter((n) => !n.dismissed && n.priority === "critical");
+    return state.nudges.filter((n) => !n.dismissed && n.priority === 'critical');
   }
 
   // Gather data
@@ -673,14 +658,15 @@ export async function runProactiveScan(): Promise<SmartNudge[]> {
   } catch {}
 
   // Run all checkers in parallel
-  const [deadlines, gpaTrend, campusOpps, gamification, scheduleNudges, announcements] = await Promise.all([
-    Promise.resolve(checkDeadlines(courses)),
-    checkGpaTrend(),
-    checkCampusOpportunities(),
-    checkGamificationNudges(),
-    Promise.resolve(checkScheduleNudges(courses)),
-    checkAnnouncementNudges(),
-  ]);
+  const [deadlines, gpaTrend, campusOpps, gamification, scheduleNudges, announcements] =
+    await Promise.all([
+      Promise.resolve(checkDeadlines(courses)),
+      checkGpaTrend(),
+      checkCampusOpportunities(),
+      checkGamificationNudges(),
+      Promise.resolve(checkScheduleNudges(courses)),
+      checkAnnouncementNudges(),
+    ]);
 
   const allNudges = [
     ...deadlines,
@@ -692,9 +678,7 @@ export async function runProactiveScan(): Promise<SmartNudge[]> {
   ];
 
   // Filter disabled types
-  const filtered = allNudges.filter(
-    (n) => !state.preferences.disabledTypes.includes(n.type)
-  );
+  const filtered = allNudges.filter((n) => !state.preferences.disabledTypes.includes(n.type));
 
   // Dedup by type (keep highest priority per type)
   const byType = new Map<NudgeType, SmartNudge>();
@@ -745,9 +729,7 @@ export async function dismissNudge(nudgeId: string): Promise<void> {
 /**
  * 更新推播偏好
  */
-export async function updateNudgePreferences(
-  partial: Partial<NudgePreferences>,
-): Promise<void> {
+export async function updateNudgePreferences(partial: Partial<NudgePreferences>): Promise<void> {
   const state = await loadState();
   state.preferences = { ...state.preferences, ...partial };
   await saveState(state);
@@ -759,9 +741,7 @@ export async function updateNudgePreferences(
 export async function getActiveNudges(): Promise<SmartNudge[]> {
   const state = await loadState();
   const now = Date.now();
-  return state.nudges.filter(
-    (n) => !n.dismissed && (!n.expiresAt || n.expiresAt > now),
-  );
+  return state.nudges.filter((n) => !n.dismissed && (!n.expiresAt || n.expiresAt > now));
 }
 
 /**
@@ -785,9 +765,7 @@ export async function getNudgeStats(): Promise<{
 }> {
   const state = await loadState();
   const now = Date.now();
-  const active = state.nudges.filter(
-    (n) => !n.dismissed && (!n.expiresAt || n.expiresAt > now),
-  );
+  const active = state.nudges.filter((n) => !n.dismissed && (!n.expiresAt || n.expiresAt > now));
 
   const typeCounts = new Map<NudgeType, number>();
   for (const n of state.nudges) {
@@ -828,9 +806,7 @@ export async function triggerAttendanceNudge(courseId: string, courseName: strin
     color: '#FF6B35',
     timestamp: now,
     expiresAt: now + 30 * 60 * 1000, // 30 分鐘後過期
-    actions: [
-      { label: '前往簽到', route: 'AttendanceLive', params: { courseId } },
-    ],
+    actions: [{ label: '前往簽到', route: 'AttendanceLive', params: { courseId } }],
     dismissed: false,
     metadata: {
       source: 'cross_module_connector',

@@ -2,27 +2,27 @@
  * Widget 類型定義
  */
 
-export type WidgetSize = "small" | "medium" | "large";
+export type WidgetSize = 'small' | 'medium' | 'large';
 
-export type WidgetFamily = 
-  | "systemSmall"    // iOS 小型 (2x2)
-  | "systemMedium"   // iOS 中型 (4x2)
-  | "systemLarge"    // iOS 大型 (4x4)
-  | "accessoryCircular"  // iOS 鎖定畫面圓形
-  | "accessoryRectangular" // iOS 鎖定畫面矩形
-  | "accessoryInline";  // iOS 鎖定畫面行內
+export type WidgetFamily =
+  | 'systemSmall' // iOS 小型 (2x2)
+  | 'systemMedium' // iOS 中型 (4x2)
+  | 'systemLarge' // iOS 大型 (4x4)
+  | 'accessoryCircular' // iOS 鎖定畫面圓形
+  | 'accessoryRectangular' // iOS 鎖定畫面矩形
+  | 'accessoryInline'; // iOS 鎖定畫面行內
 
-export type WidgetType = 
-  | "todaySchedule"
-  | "nextClass"
-  | "cafeteriaMenu"
-  | "busArrival"
-  | "library"
-  | "eventCountdown"
-  | "announcement"
-  | "quickActions"
-  | "grades"
-  | "lostFound";
+export type WidgetType =
+  | 'todaySchedule'
+  | 'nextClass'
+  | 'cafeteriaMenu'
+  | 'busArrival'
+  | 'library'
+  | 'eventCountdown'
+  | 'announcement'
+  | 'quickActions'
+  | 'grades'
+  | 'lostFound';
 
 export interface WidgetConfig {
   type: WidgetType;
@@ -42,7 +42,7 @@ export interface WidgetData {
 
 // 今日課表 Widget 資料
 export interface TodayScheduleWidgetData extends WidgetData {
-  type: "todaySchedule";
+  type: 'todaySchedule';
   data: {
     date: string;
     dayOfWeek: string;
@@ -60,7 +60,7 @@ export interface TodayScheduleWidgetData extends WidgetData {
 
 // 下一堂課 Widget 資料
 export interface NextClassWidgetData extends WidgetData {
-  type: "nextClass";
+  type: 'nextClass';
   data: {
     hasNextClass: boolean;
     course?: {
@@ -78,10 +78,10 @@ export interface NextClassWidgetData extends WidgetData {
 
 // 餐廳菜單 Widget 資料
 export interface CafeteriaMenuWidgetData extends WidgetData {
-  type: "cafeteriaMenu";
+  type: 'cafeteriaMenu';
   data: {
     cafeteriaName: string;
-    mealType: "breakfast" | "lunch" | "dinner";
+    mealType: 'breakfast' | 'lunch' | 'dinner';
     items: Array<{
       id: string;
       name: string;
@@ -96,7 +96,7 @@ export interface CafeteriaMenuWidgetData extends WidgetData {
 
 // 公車到站 Widget 資料
 export interface BusArrivalWidgetData extends WidgetData {
-  type: "busArrival";
+  type: 'busArrival';
   data: {
     stopName: string;
     arrivals: Array<{
@@ -104,14 +104,14 @@ export interface BusArrivalWidgetData extends WidgetData {
       routeName: string;
       estimatedMinutes: number;
       vehicleId?: string;
-      crowdLevel?: "low" | "medium" | "high" | "full";
+      crowdLevel?: 'low' | 'medium' | 'high' | 'full';
     }>;
   };
 }
 
 // 圖書館 Widget 資料
 export interface LibraryWidgetData extends WidgetData {
-  type: "library";
+  type: 'library';
   data: {
     borrowedCount: number;
     dueSoonCount: number;
@@ -127,7 +127,7 @@ export interface LibraryWidgetData extends WidgetData {
 
 // 活動倒數 Widget 資料
 export interface EventCountdownWidgetData extends WidgetData {
-  type: "eventCountdown";
+  type: 'eventCountdown';
   data: {
     hasUpcoming: boolean;
     event?: {
@@ -144,7 +144,7 @@ export interface EventCountdownWidgetData extends WidgetData {
 
 // 公告 Widget 資料
 export interface AnnouncementWidgetData extends WidgetData {
-  type: "announcement";
+  type: 'announcement';
   data: {
     announcements: Array<{
       id: string;
@@ -159,7 +159,7 @@ export interface AnnouncementWidgetData extends WidgetData {
 
 // 快捷功能 Widget 資料
 export interface QuickActionsWidgetData extends WidgetData {
-  type: "quickActions";
+  type: 'quickActions';
   data: {
     actions: Array<{
       id: string;
@@ -172,7 +172,7 @@ export interface QuickActionsWidgetData extends WidgetData {
 
 // 成績 Widget 資料
 export interface GradesWidgetData extends WidgetData {
-  type: "grades";
+  type: 'grades';
   data: {
     currentGPA: number;
     semesterCredits: number;
@@ -186,11 +186,11 @@ export interface GradesWidgetData extends WidgetData {
 
 // 失物招領 Widget 資料
 export interface LostFoundWidgetData extends WidgetData {
-  type: "lostFound";
+  type: 'lostFound';
   data: {
     recentItems: Array<{
       id: string;
-      type: "lost" | "found";
+      type: 'lost' | 'found';
       title: string;
       category: string;
       date: string;
@@ -201,7 +201,7 @@ export interface LostFoundWidgetData extends WidgetData {
 }
 
 // 所有 Widget 資料類型聯合
-export type AllWidgetData = 
+export type AllWidgetData =
   | TodayScheduleWidgetData
   | NextClassWidgetData
   | CafeteriaMenuWidgetData

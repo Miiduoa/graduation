@@ -1,4 +1,4 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next';
 
 const contentSecurityPolicy = [
   "default-src 'self'",
@@ -11,7 +11,7 @@ const contentSecurityPolicy = [
   "style-src 'self' 'unsafe-inline' https:",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net https://*.web.app https://*.firebaseapp.com wss:",
-].join("; ");
+].join('; ');
 
 const securityHeaders = [
   { key: 'X-DNS-Prefetch-Control', value: 'on' },
@@ -28,24 +28,24 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: "/:path*",
+        source: '/:path*',
         headers: [
-          { key: "Content-Security-Policy", value: contentSecurityPolicy },
+          { key: 'Content-Security-Policy', value: contentSecurityPolicy },
           ...securityHeaders,
         ],
       },
       {
-        source: "/sso-callback",
+        source: '/sso-callback',
         headers: [
-          { key: "Cache-Control", value: "no-store, max-age=0" },
-          { key: "Pragma", value: "no-cache" },
+          { key: 'Cache-Control', value: 'no-store, max-age=0' },
+          { key: 'Pragma', value: 'no-cache' },
         ],
       },
       {
-        source: "/sso/acs",
+        source: '/sso/acs',
         headers: [
-          { key: "Cache-Control", value: "no-store, max-age=0" },
-          { key: "Pragma", value: "no-cache" },
+          { key: 'Cache-Control', value: 'no-store, max-age=0' },
+          { key: 'Pragma', value: 'no-cache' },
         ],
       },
     ];

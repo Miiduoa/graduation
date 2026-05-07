@@ -9,7 +9,6 @@ tags:
   - onboarding
 
 ---
-
 # 清除 App 資料以模擬首次使用
 - clearState
 
@@ -18,7 +17,7 @@ tags:
 
 # 等待 Onboarding 畫面載入
 - assertVisible:
-    text: "歡迎使用校園助手"
+    text: '歡迎使用校園助手'
     timeout: 10000
 
 # 截圖 - Onboarding 第一頁
@@ -31,7 +30,7 @@ tags:
 
 # 驗證第二頁內容
 - assertVisible:
-    text: "探索校園"
+    text: '探索校園'
 
 # 截圖 - Onboarding 第二頁
 - takeScreenshot: onboarding_page_2
@@ -43,7 +42,7 @@ tags:
 
 # 驗證第三頁內容
 - assertVisible:
-    text: "即時資訊"
+    text: '即時資訊'
 
 # 截圖 - Onboarding 第三頁
 - takeScreenshot: onboarding_page_3
@@ -55,18 +54,18 @@ tags:
 
 # 驗證第四頁（最後一頁）
 - assertVisible:
-    text: "開始使用"
+    text: '開始使用'
 
 # 截圖 - Onboarding 第四頁
 - takeScreenshot: onboarding_page_4
 
 # 點擊開始使用按鈕
 - tapOn:
-    text: "開始使用"
+    text: '開始使用'
 
 # 等待主畫面載入
 - assertVisible:
-    text: "公告"
+    text: '公告'
     timeout: 10000
 
 # 截圖 - 主畫面
@@ -74,10 +73,10 @@ tags:
 
 # 驗證底部導覽列
 - assertVisible:
-    text: "活動"
+    text: '活動'
 - assertVisible:
-    text: "地圖"
+    text: '地圖'
 - assertVisible:
-    text: "餐廳"
+    text: '餐廳'
 - assertVisible:
-    text: "我的"
+    text: '我的'

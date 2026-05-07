@@ -1,10 +1,10 @@
-import type { SchoolSSOConfig, SSOProvider } from "@campus/shared/src";
+import type { SchoolSSOConfig, SSOProvider } from '@campus/shared/src';
 
-type WebSearchParams = Pick<URLSearchParams, "get">;
-type SSOConfig = NonNullable<SchoolSSOConfig["ssoConfig"]>;
+type WebSearchParams = Pick<URLSearchParams, 'get'>;
+type SSOConfig = NonNullable<SchoolSSOConfig['ssoConfig']>;
 
-export const PENDING_SAML_RESPONSE_KEY = "campus.web.sso.pendingSamlResponse";
-const PENDING_WEB_SSO_TRANSACTION_PREFIX = "campus.web.sso.tx.";
+export const PENDING_SAML_RESPONSE_KEY = 'campus.web.sso.pendingSamlResponse';
+const PENDING_WEB_SSO_TRANSACTION_PREFIX = 'campus.web.sso.tx.';
 
 export type PendingWebSsoTransaction = {
   transactionId: string;
@@ -24,11 +24,11 @@ export type WebSsoCallbackParams = {
 };
 
 function toBase64(value: string): string {
-  if (typeof window !== "undefined" && typeof window.btoa === "function") {
+  if (typeof window !== 'undefined' && typeof window.btoa === 'function') {
     return window.btoa(value);
   }
 
-  return Buffer.from(value, "utf8").toString("base64");
+  return Buffer.from(value, 'utf8').toString('base64');
 }
 
 function generateSamlRequestId(): string {
@@ -44,51 +44,51 @@ export function buildWebSsoStartUrl(
     state?: string;
     nonce?: string;
     codeChallenge?: string;
-  }
+  },
 ): string {
   switch (config.provider) {
-    case "oidc": {
+    case 'oidc': {
       if (!config.clientId || !config.authorizationEndpoint) {
-        throw new Error("OIDC 設定不完整");
+        throw new Error('OIDC 設定不完整');
       }
 
       const url = new URL(config.authorizationEndpoint);
-      url.searchParams.set("client_id", config.clientId);
-      url.searchParams.set("redirect_uri", options.redirectUri);
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("scope", (config.scopes ?? ["openid", "profile", "email"]).join(" "));
+      url.searchParams.set('client_id', config.clientId);
+      url.searchParams.set('redirect_uri', options.redirectUri);
+      url.searchParams.set('response_type', 'code');
+      url.searchParams.set('scope', (config.scopes ?? ['openid', 'profile', 'email']).join(' '));
 
       for (const [key, value] of Object.entries(config.customParams ?? {})) {
         url.searchParams.set(key, value);
       }
 
       if (options.state) {
-        url.searchParams.set("state", options.state);
+        url.searchParams.set('state', options.state);
       }
       if (options.nonce) {
-        url.searchParams.set("nonce", options.nonce);
+        url.searchParams.set('nonce', options.nonce);
       }
       if (options.codeChallenge) {
-        url.searchParams.set("code_challenge", options.codeChallenge);
-        url.searchParams.set("code_challenge_method", "S256");
+        url.searchParams.set('code_challenge', options.codeChallenge);
+        url.searchParams.set('code_challenge_method', 'S256');
       }
 
       return url.toString();
     }
 
-    case "cas": {
+    case 'cas': {
       if (!config.casServerUrl) {
-        throw new Error("CAS 設定不完整");
+        throw new Error('CAS 設定不完整');
       }
 
-      const url = new URL("/login", config.casServerUrl);
-      url.searchParams.set("service", options.redirectUri);
+      const url = new URL('/login', config.casServerUrl);
+      url.searchParams.set('service', options.redirectUri);
       return url.toString();
     }
 
-    case "saml": {
+    case 'saml': {
       if (!config.samlEntryPoint || !options.samlAcsUrl) {
-        throw new Error("SAML 設定不完整");
+        throw new Error('SAML 設定不完整');
       }
 
       const samlRequest = toBase64(
@@ -99,33 +99,33 @@ export function buildWebSsoStartUrl(
           ' Version="2.0"',
           ` IssueInstant="${new Date().toISOString()}"`,
           ` AssertionConsumerServiceURL="${options.samlAcsUrl}">`,
-          `  <saml:Issuer>${config.samlIssuer || "campus-web"}</saml:Issuer>`,
-          "</samlp:AuthnRequest>",
-        ].join("")
+          `  <saml:Issuer>${config.samlIssuer || 'campus-web'}</saml:Issuer>`,
+          '</samlp:AuthnRequest>',
+        ].join(''),
       );
 
       const url = new URL(config.samlEntryPoint);
-      url.searchParams.set("SAMLRequest", samlRequest);
+      url.searchParams.set('SAMLRequest', samlRequest);
       if (options.samlRelayState) {
-        url.searchParams.set("RelayState", options.samlRelayState);
+        url.searchParams.set('RelayState', options.samlRelayState);
       }
       return url.toString();
     }
 
     default:
-      throw new Error("不支援的 SSO 協議");
+      throw new Error('不支援的 SSO 協議');
   }
 }
 
 export function readWebSsoCallbackParams(searchParams: WebSearchParams): WebSsoCallbackParams {
-  const providerValue = searchParams.get("provider");
+  const providerValue = searchParams.get('provider');
   const provider =
-    providerValue === "oidc" || providerValue === "cas" || providerValue === "saml"
+    providerValue === 'oidc' || providerValue === 'cas' || providerValue === 'saml'
       ? providerValue
       : null;
-  const code = searchParams.get("code");
-  const ticket = searchParams.get("ticket");
-  const samlResponse = searchParams.get("SAMLResponse");
+  const code = searchParams.get('code');
+  const ticket = searchParams.get('ticket');
+  const samlResponse = searchParams.get('SAMLResponse');
 
   return {
     provider,
@@ -137,45 +137,41 @@ export function readWebSsoCallbackParams(searchParams: WebSearchParams): WebSsoC
 }
 
 export function getSsoTransactionState(searchParams: WebSearchParams): string | null {
-  return searchParams.get("state") || searchParams.get("tx_state");
+  return searchParams.get('state') || searchParams.get('tx_state');
 }
 
 export function buildCurrentSsoRedirectUri(url: URL): string {
   const redirectUrl = new URL(url.toString());
-  redirectUrl.searchParams.delete("code");
-  redirectUrl.searchParams.delete("ticket");
-  redirectUrl.searchParams.delete("SAMLResponse");
-  redirectUrl.searchParams.delete("state");
-  redirectUrl.searchParams.delete("error");
+  redirectUrl.searchParams.delete('code');
+  redirectUrl.searchParams.delete('ticket');
+  redirectUrl.searchParams.delete('SAMLResponse');
+  redirectUrl.searchParams.delete('state');
+  redirectUrl.searchParams.delete('error');
   return redirectUrl.toString();
 }
 
 export function createRandomString(length = 32): string {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, length);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, length);
 }
 
 function toBase64Url(bytes: Uint8Array): string {
-  let binary = "";
+  let binary = '';
   bytes.forEach((byte) => {
     binary += String.fromCharCode(byte);
   });
 
-  return toBase64(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+  return toBase64(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 export async function createPkcePair(): Promise<{ codeVerifier: string; codeChallenge: string }> {
   const verifierBytes = new Uint8Array(48);
   crypto.getRandomValues(verifierBytes);
   const codeVerifier = toBase64Url(verifierBytes);
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(codeVerifier)
-  );
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(codeVerifier));
   const codeChallenge = toBase64Url(new Uint8Array(digest));
 
   return {
@@ -190,26 +186,26 @@ function getPendingTransactionStorageKey(state: string): string {
 
 export function savePendingWebSsoTransaction(
   state: string,
-  transaction: Omit<PendingWebSsoTransaction, "createdAt">
+  transaction: Omit<PendingWebSsoTransaction, 'createdAt'>,
 ): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === 'undefined') return;
 
   window.sessionStorage.setItem(
     getPendingTransactionStorageKey(state),
     JSON.stringify({
       ...transaction,
       createdAt: Date.now(),
-    } satisfies PendingWebSsoTransaction)
+    } satisfies PendingWebSsoTransaction),
   );
 }
 
 export function clearPendingWebSsoTransaction(state: string): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === 'undefined') return;
   window.sessionStorage.removeItem(getPendingTransactionStorageKey(state));
 }
 
 export function consumePendingWebSsoTransaction(state: string): PendingWebSsoTransaction | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === 'undefined') return null;
 
   const key = getPendingTransactionStorageKey(state);
   const raw = window.sessionStorage.getItem(key);
@@ -231,7 +227,7 @@ export function consumePendingWebSsoTransaction(state: string): PendingWebSsoTra
 }
 
 export function consumePendingSamlResponse(callbackUrl: string): string | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === 'undefined') return null;
 
   try {
     const raw = window.name;
@@ -243,12 +239,12 @@ export function consumePendingSamlResponse(callbackUrl: string): string | null {
       samlResponse?: string;
     };
 
-    window.name = "";
+    window.name = '';
 
     if (
       payload.marker !== PENDING_SAML_RESPONSE_KEY ||
       payload.callbackUrl !== callbackUrl ||
-      typeof payload.samlResponse !== "string" ||
+      typeof payload.samlResponse !== 'string' ||
       !payload.samlResponse
     ) {
       return null;
@@ -256,7 +252,7 @@ export function consumePendingSamlResponse(callbackUrl: string): string | null {
 
     return payload.samlResponse;
   } catch {
-    window.name = "";
+    window.name = '';
     return null;
   }
 }

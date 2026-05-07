@@ -4,9 +4,7 @@ async function getSecureStore() {
   try {
     const module = await import('expo-secure-store');
     const available =
-      typeof module.isAvailableAsync === 'function'
-        ? await module.isAvailableAsync()
-        : true;
+      typeof module.isAvailableAsync === 'function' ? await module.isAvailableAsync() : true;
 
     return available ? module : null;
   } catch {
@@ -28,8 +26,7 @@ export async function secureSetItem(key: string, value: string): Promise<void> {
   if (secureStore?.setItemAsync) {
     await secureStore.setItemAsync(key, value, {
       keychainAccessible:
-        secureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY ??
-        secureStore.AFTER_FIRST_UNLOCK,
+        secureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY ?? secureStore.AFTER_FIRST_UNLOCK,
     });
     return;
   }

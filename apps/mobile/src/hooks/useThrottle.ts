@@ -1,6 +1,6 @@
 /* eslint-disable */
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useLatestValue } from "./useLatestValue";
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useLatestValue } from './useLatestValue';
 
 /**
  * 節流 hook - 限制值更新頻率
@@ -34,7 +34,7 @@ export function useThrottle<T>(value: T, interval: number = 300): T {
  */
 export function useThrottledCallback<T extends (...args: unknown[]) => unknown>(
   callback: T,
-  interval: number = 300
+  interval: number = 300,
 ): T {
   const lastExecuted = useRef<number>(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,7 +64,7 @@ export function useThrottledCallback<T extends (...args: unknown[]) => unknown>(
         }
       }
     },
-    [interval]
+    [interval],
   ) as T;
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export function useThrottledCallback<T extends (...args: unknown[]) => unknown>(
  */
 export function usePreventDoubleClick<T extends (...args: unknown[]) => unknown>(
   callback: T,
-  delay: number = 1000
+  delay: number = 1000,
 ): { execute: T; isBlocked: boolean } {
   const [isBlocked, setIsBlocked] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -101,7 +101,7 @@ export function usePreventDoubleClick<T extends (...args: unknown[]) => unknown>
         timeoutRef.current = null;
       }, delay);
     },
-    [isBlocked, delay]
+    [isBlocked, delay],
   ) as T;
 
   useEffect(() => {

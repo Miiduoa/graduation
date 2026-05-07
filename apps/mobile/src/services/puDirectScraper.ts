@@ -15,33 +15,45 @@
 
 // ─── Constants ───────────────────────────────────────────
 
-const ALCAT_BASE = "https://alcat.pu.edu.tw";
-const MYPU_BASE = "https://mypu.pu.edu.tw";
-const LOGIN_PATH = "/index_check.php";
-const COURSE_PATH = "/stu_query/query_course.html";
-const GRADE_PATH = "/score_query/score_all.php";
-const MENU_PATH = "/index_menu.php";
+const ALCAT_BASE = 'https://alcat.pu.edu.tw';
+const MYPU_BASE = 'https://mypu.pu.edu.tw';
+const LOGIN_PATH = '/index_check.php';
+const COURSE_PATH = '/stu_query/query_course.html';
+const GRADE_PATH = '/score_query/score_all.php';
+const MENU_PATH = '/index_menu.php';
 
 /** 靜宜大學節次 → 時間對照表 */
 const PERIOD_TIME_MAP: Record<number, { start: string; end: string }> = {
-  1: { start: "08:10", end: "09:00" },
-  2: { start: "09:10", end: "10:00" },
-  3: { start: "10:10", end: "11:00" },
-  4: { start: "11:10", end: "12:00" },
-  5: { start: "13:10", end: "14:00" },
-  6: { start: "14:10", end: "15:00" },
-  7: { start: "15:10", end: "16:00" },
-  8: { start: "16:10", end: "17:00" },
-  9: { start: "17:10", end: "18:00" },
-  10: { start: "18:30", end: "19:20" },
-  11: { start: "19:25", end: "20:15" },
-  12: { start: "20:20", end: "21:10" },
-  13: { start: "21:15", end: "22:05" },
+  1: { start: '08:10', end: '09:00' },
+  2: { start: '09:10', end: '10:00' },
+  3: { start: '10:10', end: '11:00' },
+  4: { start: '11:10', end: '12:00' },
+  5: { start: '13:10', end: '14:00' },
+  6: { start: '14:10', end: '15:00' },
+  7: { start: '15:10', end: '16:00' },
+  8: { start: '16:10', end: '17:00' },
+  9: { start: '17:10', end: '18:00' },
+  10: { start: '18:30', end: '19:20' },
+  11: { start: '19:25', end: '20:15' },
+  12: { start: '20:20', end: '21:10' },
+  13: { start: '21:15', end: '22:05' },
 };
 
 const DAY_MAP: Record<string, number> = {
-  "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7,
-  Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  日: 7,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
 };
 
 // ─── Types ───────────────────────────────────────────────
@@ -150,13 +162,13 @@ export type PUDetailedAnnouncement = {
 
 function stripTags(html: string): string {
   return html
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ")
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -191,19 +203,19 @@ function parseTable(html: string, headerHint: string): string[][] {
 function looksLikePuLoginPage(html: string): boolean {
   const normalized = html.toLowerCase();
   return (
-    normalized.includes("action=\"index_check.php\"") ||
+    normalized.includes('action="index_check.php"') ||
     normalized.includes("action='index_check.php'") ||
-    (normalized.includes("name=\"uid\"") && normalized.includes("name=\"upassword\"")) ||
+    (normalized.includes('name="uid"') && normalized.includes('name="upassword"')) ||
     (normalized.includes("name='uid'") && normalized.includes("name='upassword'"))
   );
 }
 
 function hasPuStudentContext(html: string): boolean {
   return (
-    html.includes("學號(Student No.)") ||
-    html.includes("姓名(Student Name)") ||
-    html.includes("Student No.") ||
-    html.includes("query_course")
+    html.includes('學號(Student No.)') ||
+    html.includes('姓名(Student Name)') ||
+    html.includes('Student No.') ||
+    html.includes('query_course')
   );
 }
 
@@ -211,13 +223,13 @@ function normalizePuUrl(href: string): string {
   try {
     return new URL(href, `${ALCAT_BASE}/`).toString();
   } catch {
-    return `${ALCAT_BASE}/${href.replace(/^\//, "")}`;
+    return `${ALCAT_BASE}/${href.replace(/^\//, '')}`;
   }
 }
 
 function isUsefulAnnouncementLink(title: string, href: string, hasDate: boolean): boolean {
   if (!title || title.length < 4) return false;
-  if (!href || /^javascript:/i.test(href) || href.startsWith("#")) return false;
+  if (!href || /^javascript:/i.test(href) || href.startsWith('#')) return false;
   if (/index_check\.php|logout/i.test(href)) return false;
   if (!hasDate && title.length < 8) return false;
   return true;
@@ -237,7 +249,7 @@ function pushUniqueAnnouncement(
 function extractAnnouncementsFromHtml(html: string): PUAnnouncement[] {
   const announcements: PUAnnouncement[] = [];
   const seen = new Set<string>();
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = new Date().toISOString().split('T')[0];
 
   const rowRegex = /<tr[^>]*>[\s\S]*?<\/tr>/gi;
   let rowMatch: RegExpExecArray | null;
@@ -249,8 +261,8 @@ function extractAnnouncementsFromHtml(html: string): PUAnnouncement[] {
     let linkMatch: RegExpExecArray | null;
 
     while ((linkMatch = linkRegex.exec(rowHtml)) !== null) {
-      const href = linkMatch[1]?.trim() ?? "";
-      const title = stripTags(linkMatch[2] ?? "");
+      const href = linkMatch[1]?.trim() ?? '';
+      const title = stripTags(linkMatch[2] ?? '');
       if (!isUsefulAnnouncementLink(title, href, Boolean(extractedDate))) {
         continue;
       }
@@ -270,8 +282,8 @@ function extractAnnouncementsFromHtml(html: string): PUAnnouncement[] {
   const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let linkMatch: RegExpExecArray | null;
   while ((linkMatch = linkRegex.exec(html)) !== null) {
-    const href = linkMatch[1]?.trim() ?? "";
-    const title = stripTags(linkMatch[2] ?? "");
+    const href = linkMatch[1]?.trim() ?? '';
+    const title = stripTags(linkMatch[2] ?? '');
     const context = html.slice(
       Math.max(0, linkMatch.index - 160),
       Math.min(html.length, linkMatch.index + linkMatch[0].length + 160),
@@ -302,22 +314,22 @@ function parseTimePlace(raw: string): {
   endTime: string;
 } | null {
   if (!raw?.trim()) return null;
-  const s = raw.replace(/\u3000/g, " ").trim();
+  const s = raw.replace(/\u3000/g, ' ').trim();
 
   const match = s.match(/^([一二三四五六日])\((\w+)\)\s*([\d,\s]+):?(.*)$/);
   if (!match) return null;
 
   const dayOfWeek = DAY_MAP[match[1]] ?? 1;
   const periods = match[3]
-    .split(",")
+    .split(',')
     .map((p) => parseInt(p.trim(), 10))
     .filter((n) => !isNaN(n));
-  const location = match[4]?.trim() ?? "";
+  const location = match[4]?.trim() ?? '';
 
   const firstPeriod = Math.min(...periods);
   const lastPeriod = Math.max(...periods);
-  const startTime = PERIOD_TIME_MAP[firstPeriod]?.start ?? "08:10";
-  const endTime = PERIOD_TIME_MAP[lastPeriod]?.end ?? "09:00";
+  const startTime = PERIOD_TIME_MAP[firstPeriod]?.start ?? '08:10';
+  const endTime = PERIOD_TIME_MAP[lastPeriod]?.end ?? '09:00';
 
   return { dayOfWeek, periods, location, startTime, endTime };
 }
@@ -327,7 +339,7 @@ function parseCourseTitle(raw: string): { zhName: string; enName: string } {
   if (boundary > 0) {
     return { zhName: raw.slice(0, boundary).trim(), enName: raw.slice(boundary).trim() };
   }
-  return { zhName: raw.trim(), enName: "" };
+  return { zhName: raw.trim(), enName: '' };
 }
 
 // ─── Fetch Helpers ───────────────────────────────────────
@@ -337,25 +349,25 @@ function parseCourseTitle(raw: string): { zhName: string; enName: string } {
 // iOS (NSURLSession) / Android (OkHttp) 的原生 cookie jar 自動處理。
 
 const COMMON_HEADERS: Record<string, string> = {
-  "User-Agent":
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+  'User-Agent':
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
 };
 
 async function nativeFetch(
   url: string,
-  options: { method?: string; body?: string; contentType?: string } = {}
+  options: { method?: string; body?: string; contentType?: string } = {},
 ): Promise<{ html: string; status: number }> {
   const headers: Record<string, string> = { ...COMMON_HEADERS };
-  if (options.body && options.contentType) headers["Content-Type"] = options.contentType;
+  if (options.body && options.contentType) headers['Content-Type'] = options.contentType;
 
   const response = await fetch(url, {
-    method: options.method ?? "GET",
+    method: options.method ?? 'GET',
     headers,
     body: options.body,
-    credentials: "include", // 讓原生 cookie jar 管理 cookie
-    redirect: "follow",     // 讓原生層自動跟隨 redirect
+    credentials: 'include', // 讓原生 cookie jar 管理 cookie
+    redirect: 'follow', // 讓原生層自動跟隨 redirect
   });
 
   const html = await response.text();
@@ -370,33 +382,33 @@ async function nativeFetch(
  */
 export async function puLogin(
   uid: string,
-  password: string
+  password: string,
 ): Promise<{ success: boolean; session: PUSession | null; error?: string }> {
   try {
-    if (!uid || !password) return { success: false, session: null, error: "請輸入學號和密碼" };
+    if (!uid || !password) return { success: false, session: null, error: '請輸入學號和密碼' };
 
     // ── Step 0: 先 GET 登入頁，讓原生 cookie jar 拿到初始 session cookie ──
-    console.log("[puLogin] Step 0: warming up cookie jar…");
+    console.log('[puLogin] Step 0: warming up cookie jar…');
     await nativeFetch(`${ALCAT_BASE}/`);
 
     // ── Step 1: POST 登入表單 ──
     const body = `uid=${encodeURIComponent(uid)}&upassword=${encodeURIComponent(password)}&en_flag=zh`;
-    console.log("[puLogin] Step 1: POST login…");
+    console.log('[puLogin] Step 1: POST login…');
     const loginResult = await nativeFetch(`${ALCAT_BASE}${LOGIN_PATH}`, {
-      method: "POST",
+      method: 'POST',
       body,
-      contentType: "application/x-www-form-urlencoded",
+      contentType: 'application/x-www-form-urlencoded',
     });
-    console.log("[puLogin] POST status:", loginResult.status);
-    console.log("[puLogin] POST html length:", loginResult.html.length);
-    console.log("[puLogin] POST html snippet:", loginResult.html.slice(0, 500));
+    console.log('[puLogin] POST status:', loginResult.status);
+    console.log('[puLogin] POST html length:', loginResult.html.length);
+    console.log('[puLogin] POST html snippet:', loginResult.html.slice(0, 500));
 
     // ── Step 2: 不靠 POST 回傳頁的文字判斷，直接試抓受保護的課表頁 ──
-    console.log("[puLogin] Step 2: verifying session via course page…");
+    console.log('[puLogin] Step 2: verifying session via course page…');
     const verifyResult = await nativeFetch(`${ALCAT_BASE}${COURSE_PATH}`);
-    console.log("[puLogin] verify status:", verifyResult.status);
-    console.log("[puLogin] verify html length:", verifyResult.html.length);
-    console.log("[puLogin] verify html snippet:", verifyResult.html.slice(0, 500));
+    console.log('[puLogin] verify status:', verifyResult.status);
+    console.log('[puLogin] verify html length:', verifyResult.html.length);
+    console.log('[puLogin] verify html snippet:', verifyResult.html.slice(0, 500));
 
     const vHtml = verifyResult.html;
 
@@ -408,19 +420,19 @@ export async function puLogin(
       // 從 POST 回傳頁嘗試取得伺服器的錯誤訊息
       const postHtml = loginResult.html;
       if (
-        postHtml.includes("帳號或密碼錯誤") ||
-        postHtml.includes("密碼錯誤") ||
-        postHtml.includes("login_fail") ||
-        postHtml.includes("Login Failed")
+        postHtml.includes('帳號或密碼錯誤') ||
+        postHtml.includes('密碼錯誤') ||
+        postHtml.includes('login_fail') ||
+        postHtml.includes('Login Failed')
       ) {
-        return { success: false, session: null, error: "帳號或密碼錯誤" };
+        return { success: false, session: null, error: '帳號或密碼錯誤' };
       }
       return {
         success: false,
         session: null,
         error: looksLikePuLoginPage(vHtml)
-          ? "E校園 登入失敗，伺服器未建立有效工作階段"
-          : "無法驗證登入狀態，請確認帳號密碼後再試",
+          ? 'E校園 登入失敗，伺服器未建立有效工作階段'
+          : '無法驗證登入狀態，請確認帳號密碼後再試',
       };
     }
 
@@ -430,14 +442,14 @@ export async function puLogin(
       loginResult.html.match(/([^\s<]+)同學您好/);
     const studentName = nameMatch?.[1] ?? null;
 
-    console.log("[puLogin] success! studentName =", studentName);
+    console.log('[puLogin] success! studentName =', studentName);
     return {
       success: true,
       session: { loggedIn: true, studentName },
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "連線失敗";
-    console.error("[puLogin] Error:", err);
+    const msg = err instanceof Error ? err.message : '連線失敗';
+    console.error('[puLogin] Error:', err);
     return { success: false, session: null, error: `登入失敗：${msg}` };
   }
 }
@@ -447,7 +459,7 @@ export async function puLogin(
  */
 export async function puFetchCourses(
   _session: PUSession,
-  _semester?: string
+  _semester?: string,
 ): Promise<{ success: boolean; data: PUCourseResult | null; error?: string }> {
   try {
     const result = await nativeFetch(`${ALCAT_BASE}${COURSE_PATH}`);
@@ -457,7 +469,7 @@ export async function puFetchCourses(
 
     const html = result.html;
     if (looksLikePuLoginPage(html) || !hasPuStudentContext(html)) {
-      return { success: false, data: null, error: "E校園 session 已失效，請重新登入" };
+      return { success: false, data: null, error: 'E校園 session 已失效，請重新登入' };
     }
 
     // 學生資訊
@@ -467,7 +479,9 @@ export async function puFetchCourses(
     const semMatch = html.match(/(\d+)學年度\s*第(\d)學期/);
     const creditsMatch = html.match(/學期總學分[：:]\s*(\d+)/);
     const className = classMatch?.[1] ?? null;
-    const { department, grade } = className ? parseClassName(className) : { department: null, grade: null };
+    const { department, grade } = className
+      ? parseClassName(className)
+      : { department: null, grade: null };
     const enrollStatusMatch = html.match(/學籍狀態[：:]\s*([^\s<]+)|Status[：:]\s*([^\s<]+)/);
 
     const studentInfo: PUStudentInfo = {
@@ -484,12 +498,12 @@ export async function puFetchCourses(
     const detectedSemester = semMatch ? `${semMatch[1]}${semMatch[2]}` : null;
 
     // 解析課表
-    const rows = parseTable(html, "course code");
+    const rows = parseTable(html, 'course code');
     const courses: PUCourse[] = [];
 
     for (const cells of rows) {
       if (cells.length < 7) continue;
-      if (cells[0].includes("course code") || cells[0].includes("選課代號")) continue;
+      if (cells[0].includes('course code') || cells[0].includes('選課代號')) continue;
 
       const { zhName, enName } = parseCourseTitle(cells[2]);
       const tp = parseTimePlace(cells[5]);
@@ -505,7 +519,7 @@ export async function puFetchCourses(
         periods: tp?.periods ?? [],
         startTime: tp?.startTime ?? null,
         endTime: tp?.endTime ?? null,
-        location: tp?.location ?? "",
+        location: tp?.location ?? '',
         timePlaceRaw: cells[5],
         teacherEmail: cells[6],
         teacherName: extractTeacherName(cells[6]),
@@ -517,8 +531,12 @@ export async function puFetchCourses(
       data: { courses, studentInfo, semester: detectedSemester, totalCredits },
     };
   } catch (err) {
-    console.error("[puFetchCourses]", err);
-    return { success: false, data: null, error: err instanceof Error ? err.message : "抓取課表失敗" };
+    console.error('[puFetchCourses]', err);
+    return {
+      success: false,
+      data: null,
+      error: err instanceof Error ? err.message : '抓取課表失敗',
+    };
   }
 }
 
@@ -527,14 +545,14 @@ export async function puFetchCourses(
  */
 export async function puFetchGrades(
   _session: PUSession,
-  semester?: string
+  semester?: string,
 ): Promise<{ success: boolean; data: PUGradeResult | null; error?: string }> {
   try {
     // 優先用 alcat（和登入同 domain，cookie 確定能用），
     // 若失敗再試 mypu。
     let result = await nativeFetch(`${ALCAT_BASE}/stu_query/score_all.php`);
     if (result.status !== 200 || result.html.length < 200) {
-      console.log("[puFetchGrades] alcat fallback to mypu…");
+      console.log('[puFetchGrades] alcat fallback to mypu…');
       result = await nativeFetch(`${MYPU_BASE}${GRADE_PATH}`);
     }
     if (result.status !== 200) {
@@ -543,7 +561,7 @@ export async function puFetchGrades(
 
     const html = result.html;
     if (looksLikePuLoginPage(html)) {
-      return { success: false, data: null, error: "E校園 session 已失效，請重新登入" };
+      return { success: false, data: null, error: 'E校園 session 已失效，請重新登入' };
     }
 
     // ── 成績頁結構（2026-04 實測確認）：
@@ -552,7 +570,7 @@ export async function puFetchGrades(
     //   表尾有: 學期平均成績, 操行成績, 班排名, 系排名
 
     const grades: PUGrade[] = [];
-    const summary: PUGradeResult["summary"] = {};
+    const summary: PUGradeResult['summary'] = {};
 
     // 1. 找出所有學期代碼：學期別(Semester)：YYY [ T ] → "YYYT"
     const semRegex = /學期別\(Semester\)[：:]\s*(\d+)\s*\[\s*(\d+)\s*\]/g;
@@ -569,8 +587,8 @@ export async function puFetchGrades(
     for (const table of allTables) {
       // 只取含 "Score" 或 "成績" 的 5 欄表格
       if (
-        (table.includes("Score") || table.includes("成績")) &&
-        (table.includes("Course") || table.includes("科目"))
+        (table.includes('Score') || table.includes('成績')) &&
+        (table.includes('Course') || table.includes('科目'))
       ) {
         gradeTables.push(table);
       }
@@ -579,32 +597,35 @@ export async function puFetchGrades(
     // 3. 逐個表格配對學期並解析
     for (let i = 0; i < gradeTables.length; i++) {
       const sem = semesterCodes[i] ?? `unknown_${i}`;
-      const rows = parseTable(gradeTables[i], "");
+      const rows = parseTable(gradeTables[i], '');
 
       if (!summary[sem]) summary[sem] = {};
 
       for (const cells of rows) {
         if (cells.length < 5) continue;
         // 跳過表頭
-        if (cells[0].includes("Course") || cells[0].includes("科目名稱")) continue;
+        if (cells[0].includes('Course') || cells[0].includes('科目名稱')) continue;
 
         const courseName = cells[0];
         const score = cells[4];
 
         // 摘要行（平均、操行、排名）
         if (
-          courseName.includes("平均") || courseName.includes("average") ||
-          courseName.includes("操行") || courseName.includes("Behavior") ||
-          courseName.includes("排名") || courseName.includes("ranking")
+          courseName.includes('平均') ||
+          courseName.includes('average') ||
+          courseName.includes('操行') ||
+          courseName.includes('Behavior') ||
+          courseName.includes('排名') ||
+          courseName.includes('ranking')
         ) {
           const entry = summary[sem];
-          if (courseName.includes("系排名") || courseName.includes("Department")) {
+          if (courseName.includes('系排名') || courseName.includes('Department')) {
             entry.departmentRanking = score;
-          } else if (courseName.includes("班排名") || courseName.includes("Class")) {
+          } else if (courseName.includes('班排名') || courseName.includes('Class')) {
             entry.classRanking = score;
-          } else if (courseName.includes("操行") || courseName.includes("Behavior")) {
+          } else if (courseName.includes('操行') || courseName.includes('Behavior')) {
             entry.behaviorScore = parseFloat(score) || score;
-          } else if (courseName.includes("平均") || courseName.includes("average")) {
+          } else if (courseName.includes('平均') || courseName.includes('average')) {
             entry.semesterAverage = parseFloat(score) || score;
           }
           continue;
@@ -618,7 +639,7 @@ export async function puFetchGrades(
           className: cells[1],
           courseType: cells[2],
           credits: parseInt(cells[3], 10) || 0,
-          score: score === "通過(Pass)" ? "Pass" : (parseFloat(score) || score),
+          score: score === '通過(Pass)' ? 'Pass' : parseFloat(score) || score,
         });
       }
     }
@@ -634,8 +655,12 @@ export async function puFetchGrades(
       },
     };
   } catch (err) {
-    console.error("[puFetchGrades]", err);
-    return { success: false, data: null, error: err instanceof Error ? err.message : "抓取成績失敗" };
+    console.error('[puFetchGrades]', err);
+    return {
+      success: false,
+      data: null,
+      error: err instanceof Error ? err.message : '抓取成績失敗',
+    };
   }
 }
 
@@ -650,7 +675,7 @@ function extractDateFromText(text: string): string | null {
   const modernMatch = text.match(/(\d{4})[/.-](\d{1,2})[/.-](\d{1,2})/);
   if (modernMatch) {
     const [, year, month, day] = modernMatch;
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
   // Try ROC year pattern (YYY/MM/DD, e.g., 113/04/13 = 2024/04/13)
@@ -659,7 +684,7 @@ function extractDateFromText(text: string): string | null {
     const [, rocYear, month, day] = rocMatch;
     const yearNum = parseInt(rocYear, 10);
     const gregorianYear = yearNum >= 1000 ? yearNum : yearNum + 1911; // ROC year = AD - 1911
-    return `${gregorianYear}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    return `${gregorianYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
   return null;
@@ -669,7 +694,7 @@ function extractDateFromText(text: string): string | null {
  * 取得公告。
  */
 export async function puFetchAnnouncements(
-  _session: PUSession
+  _session: PUSession,
 ): Promise<{ success: boolean; data: PUAnnouncement[]; error?: string }> {
   try {
     const result = await nativeFetch(`${ALCAT_BASE}${MENU_PATH}`);
@@ -679,13 +704,13 @@ export async function puFetchAnnouncements(
 
     const html = result.html;
     if (looksLikePuLoginPage(html)) {
-      return { success: false, data: [], error: "E校園 session 已失效，請重新登入" };
+      return { success: false, data: [], error: 'E校園 session 已失效，請重新登入' };
     }
 
     return { success: true, data: extractAnnouncementsFromHtml(html) };
   } catch (err) {
-    console.error("[puFetchAnnouncements]", err);
-    return { success: false, data: [], error: err instanceof Error ? err.message : "抓取公告失敗" };
+    console.error('[puFetchAnnouncements]', err);
+    return { success: false, data: [], error: err instanceof Error ? err.message : '抓取公告失敗' };
   }
 }
 
@@ -709,7 +734,7 @@ function parseClassName(className: string): { department: string | null; grade: 
  * If email like "changyi@pu.edu.tw", returns "changyi" as display name.
  */
 function extractTeacherName(emailOrText: string): string {
-  if (!emailOrText) return "";
+  if (!emailOrText) return '';
 
   // If it's an email, extract the prefix
   const emailMatch = emailOrText.match(/^([^@]+)@/);
@@ -723,7 +748,7 @@ function extractTeacherName(emailOrText: string): string {
  * 取得學生基本資料。
  */
 export async function puFetchStudentInfo(
-  _session: PUSession
+  _session: PUSession,
 ): Promise<{ success: boolean; data: PUStudentInfo | null; error?: string }> {
   try {
     const result = await nativeFetch(`${ALCAT_BASE}${COURSE_PATH}`);
@@ -733,7 +758,7 @@ export async function puFetchStudentInfo(
 
     const html = result.html;
     if (looksLikePuLoginPage(html) || !hasPuStudentContext(html)) {
-      return { success: false, data: null, error: "E校園 session 已失效，請重新登入" };
+      return { success: false, data: null, error: 'E校園 session 已失效，請重新登入' };
     }
     const classMatch = html.match(/班級\(Class\)[：:]\s*([^\s<]+)/);
     const idMatch = html.match(/學號\(Student No\.\)[：:]\s*(\d+)/);
@@ -741,7 +766,9 @@ export async function puFetchStudentInfo(
     const semMatch = html.match(/(\d+)學年度\s*第(\d)學期/);
 
     const className = classMatch?.[1] ?? null;
-    const { department, grade } = className ? parseClassName(className) : { department: null, grade: null };
+    const { department, grade } = className
+      ? parseClassName(className)
+      : { department: null, grade: null };
 
     // Try to extract enrollment status from HTML (e.g., "在學", "休學")
     const enrollStatusMatch = html.match(/學籍狀態[：:]\s*([^\s<]+)|Status[：:]\s*([^\s<]+)/);
@@ -760,8 +787,12 @@ export async function puFetchStudentInfo(
       },
     };
   } catch (err) {
-    console.error("[puFetchStudentInfo]", err);
-    return { success: false, data: null, error: err instanceof Error ? err.message : "抓取學生資料失敗" };
+    console.error('[puFetchStudentInfo]', err);
+    return {
+      success: false,
+      data: null,
+      error: err instanceof Error ? err.message : '抓取學生資料失敗',
+    };
   }
 }
 
@@ -769,14 +800,14 @@ export async function puFetchStudentInfo(
  * 取得缺曠紀錄。
  */
 export async function puFetchAbsence(
-  _session: PUSession
+  _session: PUSession,
 ): Promise<{ success: boolean; data: PUAbsence[]; error?: string }> {
   try {
     // Try multiple possible absence page URLs
     const possiblePaths = [
-      "/stu_query/query_absence.html",
-      "/stu_query/absence.html",
-      "/stu_query/query_abs.html",
+      '/stu_query/query_absence.html',
+      '/stu_query/absence.html',
+      '/stu_query/query_abs.html',
     ];
 
     let result: { html: string; status: number } | null = null;
@@ -790,7 +821,7 @@ export async function puFetchAbsence(
     }
 
     if (!result) {
-      return { success: false, data: [], error: "無法取得缺曠紀錄頁面" };
+      return { success: false, data: [], error: '無法取得缺曠紀錄頁面' };
     }
 
     const html = result.html;
@@ -798,33 +829,37 @@ export async function puFetchAbsence(
 
     // Parse absence table: typically contains columns like:
     // 日期 | 課程 | 節次 | 缺曠類別 | 狀態
-    const rows = parseTable(html, "");
+    const rows = parseTable(html, '');
 
     for (const cells of rows) {
       if (cells.length < 5) continue;
       // Skip header rows
       if (
-        cells[0].includes("日期") ||
-        cells[0].includes("Date") ||
-        cells[0].includes("課程") ||
-        cells[0].includes("Course")
+        cells[0].includes('日期') ||
+        cells[0].includes('Date') ||
+        cells[0].includes('課程') ||
+        cells[0].includes('Course')
       ) {
         continue;
       }
 
       absences.push({
-        date: cells[0] || "",
-        courseName: cells[1] || "",
-        period: cells[2] || "",
-        absenceType: cells[3] || "",
-        status: cells[4] || "",
+        date: cells[0] || '',
+        courseName: cells[1] || '',
+        period: cells[2] || '',
+        absenceType: cells[3] || '',
+        status: cells[4] || '',
       });
     }
 
     return { success: true, data: absences };
   } catch (err) {
-    console.error("[puFetchAbsence]", err);
-    return { success: false, data: [], error: err instanceof Error ? err.message : "抓取缺曠紀錄失敗" };
+    console.error('[puFetchAbsence]', err);
+    return {
+      success: false,
+      data: [],
+      error: err instanceof Error ? err.message : '抓取缺曠紀錄失敗',
+    };
   }
 }
 
@@ -832,14 +867,14 @@ export async function puFetchAbsence(
  * 取得學分統計。
  */
 export async function puFetchCreditSummary(
-  _session: PUSession
+  _session: PUSession,
 ): Promise<{ success: boolean; data: PUCreditSummary | null; error?: string }> {
   try {
     // Try multiple possible credit page URLs
     const possiblePaths = [
-      "/stu_query/query_credit.html",
-      "/stu_query/credit_check.html",
-      "/stu_query/credit.html",
+      '/stu_query/query_credit.html',
+      '/stu_query/credit_check.html',
+      '/stu_query/credit.html',
     ];
 
     let result: { html: string; status: number } | null = null;
@@ -853,22 +888,22 @@ export async function puFetchCreditSummary(
     }
 
     if (!result) {
-      return { success: false, data: null, error: "無法取得學分統計頁面" };
+      return { success: false, data: null, error: '無法取得學分統計頁面' };
     }
 
     const html = result.html;
-    const categories: PUCreditSummary["categories"] = [];
+    const categories: PUCreditSummary['categories'] = [];
     let totalRequired = 0;
     let totalEarned = 0;
 
     // Parse credit table: typically contains columns like:
     // 科目類別 | 應修學分 | 已修學分 | 狀態
-    const rows = parseTable(html, "");
+    const rows = parseTable(html, '');
 
     for (const cells of rows) {
       if (cells.length < 3) continue;
       // Skip header rows
-      if (cells[0].includes("類別") || cells[0].includes("Category") || cells[0].includes("應修")) {
+      if (cells[0].includes('類別') || cells[0].includes('Category') || cells[0].includes('應修')) {
         continue;
       }
 
@@ -888,8 +923,12 @@ export async function puFetchCreditSummary(
       data: { totalRequired, totalEarned, categories },
     };
   } catch (err) {
-    console.error("[puFetchCreditSummary]", err);
-    return { success: false, data: null, error: err instanceof Error ? err.message : "抓取學分統計失敗" };
+    console.error('[puFetchCreditSummary]', err);
+    return {
+      success: false,
+      data: null,
+      error: err instanceof Error ? err.message : '抓取學分統計失敗',
+    };
   }
 }
 
@@ -897,11 +936,11 @@ export async function puFetchCreditSummary(
  * 取得詳細的公告（從主要portal頁面，包含多個公告源）。
  */
 export async function puFetchDetailedAnnouncements(
-  _session: PUSession
+  _session: PUSession,
 ): Promise<{ success: boolean; data: PUDetailedAnnouncement[]; error?: string }> {
   try {
     // Try to fetch the main portal/menu page
-    const possiblePaths = ["/index_frame.php", "/index_menu.php", "/"];
+    const possiblePaths = ['/index_frame.php', '/index_menu.php', '/'];
 
     let result: { html: string; status: number } | null = null;
 
@@ -914,7 +953,7 @@ export async function puFetchDetailedAnnouncements(
     }
 
     if (!result) {
-      return { success: false, data: [], error: "無法取得公告頁面" };
+      return { success: false, data: [], error: '無法取得公告頁面' };
     }
 
     const html = result.html;
@@ -924,7 +963,7 @@ export async function puFetchDetailedAnnouncements(
     // Look for sections like: <h3>系統公告</h3>, <h3>校園公告</h3>, etc.
     const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
 
-    let currentCategory = "其他";
+    let currentCategory = '其他';
 
     // First pass: identify category sections
     const sectionRegex = /(<h[2-4][^>]*>([^<]+)<\/h[2-4]>[\s\S]*?)(?=<h[2-4]|$)/gi;
@@ -947,9 +986,10 @@ export async function puFetchDetailedAnnouncements(
         const linkContent = linkMatch[2];
         const linkText = stripTags(linkContent);
 
-        if (linkText && linkText.length > 2 && !href.includes("javascript:")) {
+        if (linkText && linkText.length > 2 && !href.includes('javascript:')) {
           // Extract date if available
-          const dateStr = extractDateFromText(linkContent) || new Date().toISOString().split("T")[0];
+          const dateStr =
+            extractDateFromText(linkContent) || new Date().toISOString().split('T')[0];
 
           // Check for "new" or "important" indicators (e.g., <img src="new.gif">, <span class="new">)
           const isNew = /new|最新|NEW/i.test(linkContent);
@@ -957,7 +997,7 @@ export async function puFetchDetailedAnnouncements(
 
           announcements.push({
             title: linkText,
-            url: href.startsWith("http") ? href : `${ALCAT_BASE}/${href.replace(/^\//, "")}`,
+            url: href.startsWith('http') ? href : `${ALCAT_BASE}/${href.replace(/^\//, '')}`,
             date: dateStr,
             category: currentCategory,
             isNew,
@@ -969,11 +1009,11 @@ export async function puFetchDetailedAnnouncements(
 
     return { success: true, data: announcements };
   } catch (err) {
-    console.error("[puFetchDetailedAnnouncements]", err);
+    console.error('[puFetchDetailedAnnouncements]', err);
     return {
       success: false,
       data: [],
-      error: err instanceof Error ? err.message : "抓取詳細公告失敗",
+      error: err instanceof Error ? err.message : '抓取詳細公告失敗',
     };
   }
 }

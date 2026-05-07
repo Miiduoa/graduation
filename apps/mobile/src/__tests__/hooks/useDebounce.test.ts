@@ -1,9 +1,5 @@
 import { renderHook, act } from '@testing-library/react-native';
-import {
-  useDebounce,
-  useDebounceWithPending,
-  useSearchDebounce,
-} from '../../hooks/useDebounce';
+import { useDebounce, useDebounceWithPending, useSearchDebounce } from '../../hooks/useDebounce';
 
 describe('useDebounce', () => {
   beforeEach(() => {
@@ -20,10 +16,9 @@ describe('useDebounce', () => {
   });
 
   it('should debounce value updates', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useDebounce(value, 300),
-      { initialProps: { value: 'initial' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+      initialProps: { value: 'initial' },
+    });
 
     expect(result.current).toBe('initial');
 
@@ -38,10 +33,9 @@ describe('useDebounce', () => {
   });
 
   it('should reset timer on rapid changes', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useDebounce(value, 300),
-      { initialProps: { value: 'a' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useDebounce(value, 300), {
+      initialProps: { value: 'a' },
+    });
 
     rerender({ value: 'b' });
     act(() => {
@@ -64,10 +58,9 @@ describe('useDebounce', () => {
   });
 
   it('should use custom delay', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useDebounce(value, 500),
-      { initialProps: { value: 'initial' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useDebounce(value, 500), {
+      initialProps: { value: 'initial' },
+    });
 
     rerender({ value: 'updated' });
 
@@ -99,10 +92,9 @@ describe('useDebounceWithPending', () => {
   });
 
   it('should set isPending true during debounce', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useDebounceWithPending(value, 300),
-      { initialProps: { value: 'initial' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useDebounceWithPending(value, 300), {
+      initialProps: { value: 'initial' },
+    });
 
     rerender({ value: 'updated' });
     expect(result.current.isPending).toBe(true);
@@ -135,10 +127,9 @@ describe('useSearchDebounce', () => {
   });
 
   it('should handle search input', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useSearchDebounce(value, 300, 2),
-      { initialProps: { value: '' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useSearchDebounce(value, 300, 2), {
+      initialProps: { value: '' },
+    });
 
     rerender({ value: 'te' });
     expect(result.current.isSearching).toBe(true);
@@ -154,10 +145,9 @@ describe('useSearchDebounce', () => {
   });
 
   it('should trim whitespace', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useSearchDebounce(value, 300),
-      { initialProps: { value: '' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useSearchDebounce(value, 300), {
+      initialProps: { value: '' },
+    });
 
     rerender({ value: '  test  ' });
 
@@ -169,10 +159,9 @@ describe('useSearchDebounce', () => {
   });
 
   it('should respect minLength', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useSearchDebounce(value, 300, 3),
-      { initialProps: { value: '' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useSearchDebounce(value, 300, 3), {
+      initialProps: { value: '' },
+    });
 
     rerender({ value: 'ab' });
     expect(result.current.shouldSearch).toBe(false);

@@ -1,6 +1,6 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { UserRole } from "../state/auth";
+import type { UserRole } from '../state/auth';
 
 export type MockAuthSession = {
   uid: string;
@@ -14,7 +14,7 @@ export type MockAuthSession = {
   loginAccount?: string | null;
 };
 
-const STORAGE_KEY = "campus.mockAuthSession.v1";
+const STORAGE_KEY = 'campus.mockAuthSession.v1';
 
 export async function loadMockAuthSession(): Promise<MockAuthSession | null> {
   try {

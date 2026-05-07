@@ -9,22 +9,21 @@ tags:
   - me
 
 ---
-
 # 啟動 App
 - launchApp
 
 # 等待主畫面載入
 - assertVisible:
-    text: "公告"
+    text: '公告'
     timeout: 10000
 
 # 導航到「我的」頁面
 - tapOn:
-    text: "我的"
+    text: '我的'
 
 # 等待頁面載入
 - assertVisible:
-    text: "快捷功能"
+    text: '快捷功能'
     timeout: 5000
 
 # 截圖 - 我的頁面
@@ -32,11 +31,11 @@ tags:
 
 # === 測試 QR 碼功能 ===
 - tapOn:
-    text: "QR 碼"
+    text: 'QR 碼'
 
 # 等待 QR 碼頁面
 - assertVisible:
-    text: "QR 碼"
+    text: 'QR 碼'
     timeout: 5000
 
 # 截圖 - QR 碼頁面
@@ -46,11 +45,11 @@ tags:
 
 # === 測試課表功能 ===
 - tapOn:
-    text: "課表"
+    text: '課表'
 
 # 等待課表頁面
 - assertVisible:
-    text: "課表"
+    text: '課表'
     timeout: 5000
 
 # 截圖 - 課表頁面
@@ -58,7 +57,7 @@ tags:
 
 # 測試週/日/列表切換
 - tapOn:
-    text: "日檢視"
+    text: '日檢視'
     optional: true
 
 # 截圖 - 日檢視
@@ -68,11 +67,11 @@ tags:
 
 # === 測試支付功能 ===
 - tapOn:
-    text: "支付"
+    text: '支付'
 
 # 等待支付頁面
 - assertVisible:
-    text: "校園支付"
+    text: '校園支付'
     timeout: 5000
 
 # 截圖 - 支付頁面
@@ -82,11 +81,11 @@ tags:
 
 # === 測試公車功能 ===
 - tapOn:
-    text: "公車"
+    text: '公車'
 
 # 等待公車頁面
 - assertVisible:
-    text: "校園公車"
+    text: '校園公車'
     timeout: 5000
 
 # 截圖 - 公車頁面
@@ -96,11 +95,11 @@ tags:
 
 # === 測試圖書館功能 ===
 - tapOn:
-    text: "圖書館"
+    text: '圖書館'
 
 # 等待圖書館頁面
 - assertVisible:
-    text: "圖書館"
+    text: '圖書館'
     timeout: 5000
 
 # 截圖 - 圖書館頁面
@@ -110,11 +109,11 @@ tags:
 
 # === 測試 AI 助理功能 ===
 - tapOn:
-    text: "AI 助理"
+    text: 'AI 助理'
 
 # 等待 AI 助理頁面
 - assertVisible:
-    text: "校園助理"
+    text: '校園助理'
     timeout: 5000
 
 # 截圖 - AI 助理頁面
@@ -122,13 +121,13 @@ tags:
 
 # 測試快捷指令
 - tapOn:
-    text: "今日公告"
+    text: '今日公告'
     optional: true
 
 # 等待 AI 回覆
 - extendedWaitUntil:
     notVisible:
-      text: "思考中"
+      text: '思考中'
     timeout: 15000
     optional: true
 
@@ -140,15 +139,15 @@ tags:
 # === 測試成就功能 ===
 - scrollUntilVisible:
     element:
-      text: "成就"
+      text: '成就'
     direction: DOWN
 
 - tapOn:
-    text: "成就"
+    text: '成就'
 
 # 等待成就頁面
 - assertVisible:
-    text: "成就與積分"
+    text: '成就與積分'
     timeout: 5000
 
 # 截圖 - 成就頁面

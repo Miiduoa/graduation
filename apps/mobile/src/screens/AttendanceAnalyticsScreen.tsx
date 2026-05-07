@@ -8,30 +8,23 @@
  *
  * 使用真實 TronClass 資料 + 簡潔 iOS 風格視覺
  */
-import React, { useEffect, useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  RefreshControl,
-  Dimensions,
-  StyleSheet,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
-import { theme } from "../ui/theme";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { usePermissions } from "../hooks/usePermissions";
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, ScrollView, RefreshControl, Dimensions, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { theme } from '../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { usePermissions } from '../hooks/usePermissions';
 import {
   type StudentAnalytics,
   type TeacherAnalytics,
   getStudentAnalytics,
   getTeacherAnalytics,
   getRiskColor,
-} from "../services/smartAttendanceEngine";
+} from '../services/smartAttendanceEngine';
 
-const { width: SCREEN_W } = Dimensions.get("window");
+const { width: SCREEN_W } = Dimensions.get('window');
 
 // ============================================================================
 // Sub-components
@@ -43,26 +36,39 @@ function RateGauge({ rate, size = 140, label }: { rate: number; size?: number; l
   const strokeWidth = 10;
 
   return (
-    <View style={{ alignItems: "center" }}>
-      <View style={{ width: size, height: size, justifyContent: "center", alignItems: "center" }}>
+    <View style={{ alignItems: 'center' }}>
+      <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
         {/* Background ring */}
-        <View style={{
-          position: "absolute", width: size, height: size, borderRadius: size / 2,
-          borderWidth: strokeWidth, borderColor: theme.colors.border, opacity: 0.3,
-        }} />
+        <View
+          style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: strokeWidth,
+            borderColor: theme.colors.border,
+            opacity: 0.3,
+          }}
+        />
         {/* Foreground ring (simplified as colored border) */}
-        <View style={{
-          position: "absolute", width: size, height: size, borderRadius: size / 2,
-          borderWidth: strokeWidth, borderColor: color,
-          borderTopColor: rate >= 25 ? color : "transparent",
-          borderRightColor: rate >= 50 ? color : "transparent",
-          borderBottomColor: rate >= 75 ? color : "transparent",
-          borderLeftColor: rate >= 100 ? color : "transparent",
-          transform: [{ rotate: "-90deg" }],
-        }} />
+        <View
+          style={{
+            position: 'absolute',
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            borderWidth: strokeWidth,
+            borderColor: color,
+            borderTopColor: rate >= 25 ? color : 'transparent',
+            borderRightColor: rate >= 50 ? color : 'transparent',
+            borderBottomColor: rate >= 75 ? color : 'transparent',
+            borderLeftColor: rate >= 100 ? color : 'transparent',
+            transform: [{ rotate: '-90deg' }],
+          }}
+        />
         {/* Center text */}
-        <View style={{ alignItems: "center" }}>
-          <Text style={{ color, fontSize: size * 0.24, fontWeight: "900" }}>
+        <View style={{ alignItems: 'center' }}>
+          <Text style={{ color, fontSize: size * 0.24, fontWeight: '900' }}>
             {Math.round(rate)}%
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>{label}</Text>
@@ -73,23 +79,42 @@ function RateGauge({ rate, size = 140, label }: { rate: number; size?: number; l
 }
 
 /** 長條圖 */
-function BarChart({ data, height = 120 }: { data: { label: string; value: number }[]; height?: number }) {
-  const maxVal = Math.max(...data.map(d => d.value), 1);
+function BarChart({
+  data,
+  height = 120,
+}: {
+  data: { label: string; value: number }[];
+  height?: number;
+}) {
+  const maxVal = Math.max(...data.map((d) => d.value), 1);
   const barWidth = Math.min(36, (SCREEN_W - 80) / data.length - 8);
 
   return (
     <View style={{ height: height + 24, paddingHorizontal: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "flex-end", height, gap: 6, justifyContent: "center" }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          height,
+          gap: 6,
+          justifyContent: 'center',
+        }}
+      >
         {data.map((item, i) => {
           const barH = Math.max(4, (item.value / maxVal) * height * 0.8);
           const color = item.value >= 80 ? '#10B981' : item.value >= 60 ? '#F59E0B' : '#EF4444';
           return (
-            <View key={i} style={{ alignItems: "center", width: barWidth }}>
+            <View key={i} style={{ alignItems: 'center', width: barWidth }}>
               <Text style={{ color: theme.colors.muted, fontSize: 9, marginBottom: 2 }}>
                 {Math.round(item.value)}%
               </Text>
-              <View style={{ width: barWidth, height: barH, backgroundColor: color, borderRadius: 4 }} />
-              <Text style={{ color: theme.colors.muted, fontSize: 9, marginTop: 4 }} numberOfLines={1}>
+              <View
+                style={{ width: barWidth, height: barH, backgroundColor: color, borderRadius: 4 }}
+              />
+              <Text
+                style={{ color: theme.colors.muted, fontSize: 9, marginTop: 4 }}
+                numberOfLines={1}
+              >
                 {item.label}
               </Text>
             </View>
@@ -102,9 +127,7 @@ function BarChart({ data, height = 120 }: { data: { label: string; value: number
 
 /** 分組卡片 */
 function Card({ children, style }: { children: React.ReactNode; style?: any }) {
-  return (
-    <View style={[s.card, style]}>{children}</View>
-  );
+  return <View style={[s.card, style]}>{children}</View>;
 }
 
 // ============================================================================
@@ -142,7 +165,9 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
     }
   }, [isTeacher, route?.params?.courseId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -164,19 +189,24 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
   return (
     <View style={[s.container, { paddingTop: insets.top }]}>
       {/* Header */}
-      <LinearGradient colors={['#6C5CE7', '#A29BFE']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.header}>
+      <LinearGradient
+        colors={['#6C5CE7', '#A29BFE']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={s.header}
+      >
         <View style={s.headerContent}>
           <Text style={s.headerTitle}>出席分析</Text>
-          <Text style={s.headerSubtitle}>
-            {isTeacher ? '班級出席狀況一覽' : '個人出席追蹤'}
-          </Text>
+          <Text style={s.headerSubtitle}>{isTeacher ? '班級出席狀況一覽' : '個人出席追蹤'}</Text>
         </View>
       </LinearGradient>
 
       <ScrollView
         style={s.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={{ paddingBottom: insets.bottom + TAB_BAR_CONTENT_BOTTOM_PADDING + 20 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + TAB_BAR_CONTENT_BOTTOM_PADDING + 20,
+        }}
       >
         {/* ══════════════════════════════════════════════════════
            TEACHER VIEW
@@ -217,15 +247,29 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                 <Text style={s.cardTitle}>需關注學生</Text>
                 {teacherData.riskStudents.map((stu) => (
                   <View key={stu.studentId} style={s.riskItem}>
-                    <View style={[s.riskAvatar, { backgroundColor: getRiskColor(stu.rate < 60 ? 'danger' : 'warning') }]}>
+                    <View
+                      style={[
+                        s.riskAvatar,
+                        { backgroundColor: getRiskColor(stu.rate < 60 ? 'danger' : 'warning') },
+                      ]}
+                    >
                       <Text style={s.riskAvatarText}>{stu.studentName[0]}</Text>
                     </View>
                     <View style={s.riskInfo}>
                       <Text style={s.riskName}>{stu.studentName}</Text>
-                      <Text style={s.riskDetail}>缺席 {stu.absences} 次 · 出席率 {stu.rate}%</Text>
+                      <Text style={s.riskDetail}>
+                        缺席 {stu.absences} 次 · 出席率 {stu.rate}%
+                      </Text>
                     </View>
-                    <View style={[s.riskBadge, { backgroundColor: stu.rate < 60 ? '#FEE2E2' : '#FEF3C7' }]}>
-                      <Text style={[s.riskBadgeText, { color: stu.rate < 60 ? '#EF4444' : '#F59E0B' }]}>
+                    <View
+                      style={[
+                        s.riskBadge,
+                        { backgroundColor: stu.rate < 60 ? '#FEE2E2' : '#FEF3C7' },
+                      ]}
+                    >
+                      <Text
+                        style={[s.riskBadgeText, { color: stu.rate < 60 ? '#EF4444' : '#F59E0B' }]}
+                      >
                         {stu.rate < 60 ? '高風險' : '注意'}
                       </Text>
                     </View>
@@ -256,9 +300,17 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                   <Text style={s.summaryLabel}>最佳紀錄</Text>
                 </View>
                 <View style={s.summaryItem}>
-                  <Ionicons name={'shield-checkmark' as any} size={16} color={getRiskColor(studentData.riskLevel)} />
+                  <Ionicons
+                    name={'shield-checkmark' as any}
+                    size={16}
+                    color={getRiskColor(studentData.riskLevel)}
+                  />
                   <Text style={[s.summaryNum, { color: getRiskColor(studentData.riskLevel) }]}>
-                    {studentData.riskLevel === 'safe' ? '安全' : studentData.riskLevel === 'warning' ? '注意' : '危險'}
+                    {studentData.riskLevel === 'safe'
+                      ? '安全'
+                      : studentData.riskLevel === 'warning'
+                        ? '注意'
+                        : '危險'}
                   </Text>
                   <Text style={s.summaryLabel}>風險等級</Text>
                 </View>
@@ -287,7 +339,12 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                     const color = d.rate >= 85 ? '#10B981' : d.rate >= 70 ? '#F59E0B' : '#EF4444';
                     return (
                       <View key={d.day} style={s.weekdayItem}>
-                        <View style={[s.weekdayBar, { height: Math.max(8, d.rate * 0.8), backgroundColor: color }]} />
+                        <View
+                          style={[
+                            s.weekdayBar,
+                            { height: Math.max(8, d.rate * 0.8), backgroundColor: color },
+                          ]}
+                        />
                         <Text style={s.weekdayLabel}>{d.day}</Text>
                         <Text style={[s.weekdayRate, { color }]}>{d.rate}%</Text>
                       </View>
@@ -309,7 +366,12 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                     </Text>
                   </View>
                   <View style={s.courseDetailRate}>
-                    <Text style={[s.courseDetailRateText, { color: c.rate >= 80 ? '#10B981' : c.rate >= 60 ? '#F59E0B' : '#EF4444' }]}>
+                    <Text
+                      style={[
+                        s.courseDetailRateText,
+                        { color: c.rate >= 80 ? '#10B981' : c.rate >= 60 ? '#F59E0B' : '#EF4444' },
+                      ]}
+                    >
                       {c.rate}%
                     </Text>
                   </View>
@@ -333,7 +395,13 @@ const s = StyleSheet.create({
   loadingText: { fontSize: 16, color: theme.colors.muted, marginTop: 12 },
 
   // Header
-  header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20, borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 20,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
   headerContent: {},
   headerTitle: { fontSize: 24, fontWeight: '800', color: '#FFFFFF' },
   headerSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
@@ -364,7 +432,13 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
   },
-  riskAvatar: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  riskAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   riskAvatarText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
   riskInfo: { flex: 1, marginLeft: 12 },
   riskName: { fontSize: 14, fontWeight: '600', color: theme.colors.text },
@@ -373,7 +447,13 @@ const s = StyleSheet.create({
   riskBadgeText: { fontSize: 11, fontWeight: '700' },
 
   // Weekday pattern (student)
-  weekdayRow: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'flex-end', height: 100, paddingTop: 8 },
+  weekdayRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+    height: 100,
+    paddingTop: 8,
+  },
   weekdayItem: { alignItems: 'center' },
   weekdayBar: { width: 28, borderRadius: 4, minHeight: 8 },
   weekdayLabel: { fontSize: 12, fontWeight: '600', color: theme.colors.text, marginTop: 6 },

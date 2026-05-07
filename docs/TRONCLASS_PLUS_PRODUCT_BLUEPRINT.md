@@ -29,17 +29,17 @@
 
 ### 可直接保留並升級的能力
 
-| 現有資產 | 現況 | 可升級方向 |
-|---|---|---|
-| `apps/mobile/App.tsx` 的多分頁主架構 | 已成型 | 重新調整 IA，不重寫整個 App Shell |
-| `HomeScreen.tsx` 的時間情境首頁 | 已有雛形 | 升級成 `Today / 今日駕駛艙` |
-| `GroupDetailScreen.tsx` | 已有課程群組、公告、Q&A、貼文 | 升級成真正的 `Course Hub` 動態牆 |
-| `GroupAssignmentsScreen.tsx` + `AssignmentDetailScreen.tsx` | 已有作業、繳交、批改、發布、同儕互評雛形 | 升級成正式作業與評量系統 |
-| `ClassroomScreen.tsx` | 已有即時反應、匿名提問、投票 | 升級成課中互動主畫面 |
-| `LearningAnalyticsScreen.tsx` | 已有學習分析畫面，但尚未接入導航 | 升級成差異化核心功能 |
-| `sso.ts` + `AdapterRegistry.ts` + `NCHUAdapter.ts` | 已有多校 SSO / API adapter 架構 | 可作為多校深整合底座 |
-| `backend/functions/index.js` | 已有推播、提醒、live session callable functions | 可升級為事件驅動後端 |
-| 地圖/公車/餐廳/圖書館/宿舍/健康/支付 | 已有大量校園服務 | 這是超越 TronClass 的主戰場 |
+| 現有資產                                                    | 現況                                            | 可升級方向                        |
+| ----------------------------------------------------------- | ----------------------------------------------- | --------------------------------- |
+| `apps/mobile/App.tsx` 的多分頁主架構                        | 已成型                                          | 重新調整 IA，不重寫整個 App Shell |
+| `HomeScreen.tsx` 的時間情境首頁                             | 已有雛形                                        | 升級成 `Today / 今日駕駛艙`       |
+| `GroupDetailScreen.tsx`                                     | 已有課程群組、公告、Q&A、貼文                   | 升級成真正的 `Course Hub` 動態牆  |
+| `GroupAssignmentsScreen.tsx` + `AssignmentDetailScreen.tsx` | 已有作業、繳交、批改、發布、同儕互評雛形        | 升級成正式作業與評量系統          |
+| `ClassroomScreen.tsx`                                       | 已有即時反應、匿名提問、投票                    | 升級成課中互動主畫面              |
+| `LearningAnalyticsScreen.tsx`                               | 已有學習分析畫面，但尚未接入導航                | 升級成差異化核心功能              |
+| `sso.ts` + `AdapterRegistry.ts` + `NCHUAdapter.ts`          | 已有多校 SSO / API adapter 架構                 | 可作為多校深整合底座              |
+| `backend/functions/index.js`                                | 已有推播、提醒、live session callable functions | 可升級為事件驅動後端              |
+| 地圖/公車/餐廳/圖書館/宿舍/健康/支付                        | 已有大量校園服務                                | 這是超越 TronClass 的主戰場       |
 
 ### 目前的隱性問題
 
@@ -54,22 +54,22 @@
 
 我整理出的 TronClass parity 必備能力如下：
 
-| 類別 | TronClass 基準 | 你目前狀態 | 判定 |
-|---|---|---|---|
-| 課程空間 | 課程首頁、課程管理、課程內容整理 | 目前以群組/課表分散呈現 | `必補` |
-| 教材內容 | 單元、教材、檔案、影片、學習內容 | 目前缺正式教材模組 | `必補` |
-| 課程公告 | 有 | 已有 | `可沿用` |
-| 作業與繳交 | 有 | 已有不錯雛形 | `強化即可` |
-| 測驗/考試 | 有 | 型別有 `quiz/exam`，但缺完整引擎 | `必補` |
-| 題庫 | 有 | 缺 | `必補` |
-| 點名/出缺席 | 有 | 只有活動簽到，不是課程點名 | `必補` |
-| 成績簿/成績發布 | 有 | 有部分成績頁與作業分數，但不是完整 gradebook | `必補` |
-| 討論/Q&A | 有 | 已有 | `可沿用` |
-| 分組/協作 | 有 | 已有群組、貼文、成員、私訊 | `強化即可` |
-| 課中互動 | 有課堂互動/點名/即時操作 | 你有投票、匿名提問、反應條 | `可升級成亮點` |
-| 學習分析 | 有 | 你有隱藏雛形 | `要正式化` |
-| 行動端與通知 | 有 | 你已有推播/離線/Widget/多語 | `優勢` |
-| SSO/權限/管理 | 有 | 已有架構 | `強化即可` |
+| 類別            | TronClass 基準                   | 你目前狀態                                   | 判定           |
+| --------------- | -------------------------------- | -------------------------------------------- | -------------- |
+| 課程空間        | 課程首頁、課程管理、課程內容整理 | 目前以群組/課表分散呈現                      | `必補`         |
+| 教材內容        | 單元、教材、檔案、影片、學習內容 | 目前缺正式教材模組                           | `必補`         |
+| 課程公告        | 有                               | 已有                                         | `可沿用`       |
+| 作業與繳交      | 有                               | 已有不錯雛形                                 | `強化即可`     |
+| 測驗/考試       | 有                               | 型別有 `quiz/exam`，但缺完整引擎             | `必補`         |
+| 題庫            | 有                               | 缺                                           | `必補`         |
+| 點名/出缺席     | 有                               | 只有活動簽到，不是課程點名                   | `必補`         |
+| 成績簿/成績發布 | 有                               | 有部分成績頁與作業分數，但不是完整 gradebook | `必補`         |
+| 討論/Q&A        | 有                               | 已有                                         | `可沿用`       |
+| 分組/協作       | 有                               | 已有群組、貼文、成員、私訊                   | `強化即可`     |
+| 課中互動        | 有課堂互動/點名/即時操作         | 你有投票、匿名提問、反應條                   | `可升級成亮點` |
+| 學習分析        | 有                               | 你有隱藏雛形                                 | `要正式化`     |
+| 行動端與通知    | 有                               | 你已有推播/離線/Widget/多語                  | `優勢`         |
+| SSO/權限/管理   | 有                               | 已有架構                                     | `強化即可`     |
 
 ## 4. 不要做成「TronClass + 校園工具很多」
 
@@ -470,4 +470,3 @@ users/{uid}
 - [TronClass 學生快速指引 PDF](https://support.tronclass.com/quickguidance_student/WGTCQuickGuidance%28students%29.pdf)
 - [TronClass 課程管理相關說明](https://support.tronclass.com/tw/question/course)
 - [TronClass 學習分析相關說明](https://support.tronclass.com/tw/question/analytics/)
-

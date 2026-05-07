@@ -12,7 +12,7 @@
 
 export type DeadlineInfo = {
   dueAt: Date;
-  taskType?: "assignment" | "quiz" | "registration" | "general";
+  taskType?: 'assignment' | 'quiz' | 'registration' | 'general';
   estimatedMinutes?: number;
 };
 
@@ -20,11 +20,14 @@ export type DeadlineInfo = {
  * 將截止時間轉為「正向框架」的人性化描述
  * 取代傳統的「距截止 X 小時」「已逾期」等負向表達
  */
-export function positiveDeadlineLabel(due: Date, estimatedMinutes?: number): {
+export function positiveDeadlineLabel(
+  due: Date,
+  estimatedMinutes?: number,
+): {
   label: string;
   subLabel?: string;
-  urgency: "done" | "comfortable" | "soon" | "today" | "overdue";
-  color: "growth" | "calm" | "gentleWarn" | "achievement" | "muted";
+  urgency: 'done' | 'comfortable' | 'soon' | 'today' | 'overdue';
+  color: 'growth' | 'calm' | 'gentleWarn' | 'achievement' | 'muted';
 } {
   const now = new Date();
   const diffMs = due.getTime() - now.getTime();
@@ -36,55 +39,55 @@ export function positiveDeadlineLabel(due: Date, estimatedMinutes?: number): {
     const overdueHours = Math.abs(diffHours);
     if (overdueHours < 24) {
       return {
-        label: "還有機會聯絡教師",
-        subLabel: "截止剛過，及早溝通",
-        urgency: "overdue",
-        color: "calm",
+        label: '還有機會聯絡教師',
+        subLabel: '截止剛過，及早溝通',
+        urgency: 'overdue',
+        color: 'calm',
       };
     }
     return {
-      label: "需要處理",
-      subLabel: "聯絡教師了解補救方式",
-      urgency: "overdue",
-      color: "muted",
+      label: '需要處理',
+      subLabel: '聯絡教師了解補救方式',
+      urgency: 'overdue',
+      color: 'muted',
     };
   }
 
   if (diffHours < 2) {
     // 2 小時內 → 強調「現在就完成」
-    const estText = estimatedMinutes ? `預計 ${estimatedMinutes} 分鐘` : "";
+    const estText = estimatedMinutes ? `預計 ${estimatedMinutes} 分鐘` : '';
     return {
-      label: "今天完成就好",
+      label: '今天完成就好',
       subLabel: estText || `還有 ${Math.round(diffHours * 60)} 分鐘`,
-      urgency: "today",
-      color: "gentleWarn",
+      urgency: 'today',
+      color: 'gentleWarn',
     };
   }
 
   if (diffHours < 6) {
     return {
-      label: "今天內完成",
+      label: '今天內完成',
       subLabel: `還有 ${Math.round(diffHours)} 小時`,
-      urgency: "today",
-      color: "gentleWarn",
+      urgency: 'today',
+      color: 'gentleWarn',
     };
   }
 
   if (diffDays < 1) {
     return {
-      label: "今天可以完成",
-      subLabel: "今日截止",
-      urgency: "soon",
-      color: "calm",
+      label: '今天可以完成',
+      subLabel: '今日截止',
+      urgency: 'soon',
+      color: 'calm',
     };
   }
 
   if (diffDays < 3) {
     return {
       label: `還有 ${Math.ceil(diffDays)} 天`,
-      subLabel: "計畫一下，輕鬆完成",
-      urgency: "soon",
-      color: "calm",
+      subLabel: '計畫一下，輕鬆完成',
+      urgency: 'soon',
+      color: 'calm',
     };
   }
 
@@ -92,23 +95,27 @@ export function positiveDeadlineLabel(due: Date, estimatedMinutes?: number): {
     return {
       label: `本週截止`,
       subLabel: `${Math.ceil(diffDays)} 天後`,
-      urgency: "comfortable",
-      color: "calm",
+      urgency: 'comfortable',
+      color: 'calm',
     };
   }
 
   return {
     label: `${Math.ceil(diffDays)} 天後截止`,
-    subLabel: "時間充裕，從容準備",
-    urgency: "comfortable",
-    color: "muted",
+    subLabel: '時間充裕，從容準備',
+    urgency: 'comfortable',
+    color: 'muted',
   };
 }
 
 /**
  * 出席率的正向框架：強調「再出席幾次就能達標」而非「目前不達標」
  */
-export function positiveAttendanceLabel(current: number, required: number, total: number): {
+export function positiveAttendanceLabel(
+  current: number,
+  required: number,
+  total: number,
+): {
   label: string;
   subLabel: string;
   isOnTrack: boolean;
@@ -131,7 +138,7 @@ export function positiveAttendanceLabel(current: number, required: number, total
 
   if (currentNeededClasses <= 0) {
     return {
-      label: "即將達標！",
+      label: '即將達標！',
       subLabel: `只差一點點`,
       isOnTrack: false,
     };
@@ -147,28 +154,36 @@ export function positiveAttendanceLabel(current: number, required: number, total
 /**
  * 成績的正向框架：強調進步空間而非失分
  */
-export function positiveGradeLabel(score: number, maxScore: number, passingScore?: number): {
+export function positiveGradeLabel(
+  score: number,
+  maxScore: number,
+  passingScore?: number,
+): {
   label: string;
   subLabel: string;
-  sentiment: "excellent" | "good" | "growing" | "needs-attention";
+  sentiment: 'excellent' | 'good' | 'growing' | 'needs-attention';
 } {
   const pct = maxScore > 0 ? (score / maxScore) * 100 : 0;
 
   if (pct >= 90) {
-    return { label: "表現優秀！", subLabel: `${score}/${maxScore}`, sentiment: "excellent" };
+    return { label: '表現優秀！', subLabel: `${score}/${maxScore}`, sentiment: 'excellent' };
   }
   if (pct >= 70) {
-    return { label: "表現不錯", subLabel: `還有 ${Math.round(maxScore - score)} 分進步空間`, sentiment: "good" };
+    return {
+      label: '表現不錯',
+      subLabel: `還有 ${Math.round(maxScore - score)} 分進步空間`,
+      sentiment: 'good',
+    };
   }
   if (pct >= (passingScore ?? 60)) {
-    return { label: "持續進步中", subLabel: `專注可以更好`, sentiment: "growing" };
+    return { label: '持續進步中', subLabel: `專注可以更好`, sentiment: 'growing' };
   }
 
   const pointsToPass = passingScore ? Math.ceil((passingScore / 100) * maxScore) - score : 0;
   return {
-    label: "需要關注",
-    subLabel: pointsToPass > 0 ? `再努力 ${pointsToPass} 分就及格` : "聯絡老師了解補救方式",
-    sentiment: "needs-attention",
+    label: '需要關注',
+    subLabel: pointsToPass > 0 ? `再努力 ${pointsToPass} 分就及格` : '聯絡老師了解補救方式',
+    sentiment: 'needs-attention',
   };
 }
 
@@ -176,11 +191,13 @@ export function positiveGradeLabel(score: number, maxScore: number, passingScore
  * 任務優先度排序（Fogg BJ Model）：
  * 高動機 × 高能力 = 最先顯示（截止近 + 預計時間短）
  */
-export function sortByFoggModel<T extends {
-  dueAt?: Date | null;
-  estimatedMinutes?: number;
-  priority?: number;
-}>(items: T[]): T[] {
+export function sortByFoggModel<
+  T extends {
+    dueAt?: Date | null;
+    estimatedMinutes?: number;
+    priority?: number;
+  },
+>(items: T[]): T[] {
   return [...items].sort((a, b) => {
     const now = Date.now();
     const aDue = a.dueAt ? a.dueAt.getTime() : Infinity;
@@ -189,8 +206,10 @@ export function sortByFoggModel<T extends {
     const bEst = b.estimatedMinutes ?? 30;
 
     // 緊迫度分數（越近越高）
-    const aUrgency = aDue < Infinity ? Math.max(0, 1 - (aDue - now) / (7 * 24 * 60 * 60 * 1000)) : 0;
-    const bUrgency = bDue < Infinity ? Math.max(0, 1 - (bDue - now) / (7 * 24 * 60 * 60 * 1000)) : 0;
+    const aUrgency =
+      aDue < Infinity ? Math.max(0, 1 - (aDue - now) / (7 * 24 * 60 * 60 * 1000)) : 0;
+    const bUrgency =
+      bDue < Infinity ? Math.max(0, 1 - (bDue - now) / (7 * 24 * 60 * 60 * 1000)) : 0;
 
     // 能力分數（預計時間越短越高 = 容易完成）
     const aAbility = Math.max(0, 1 - aEst / 120);

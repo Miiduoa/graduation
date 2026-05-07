@@ -1,7 +1,7 @@
-import Constants from "expo-constants";
-import { Platform } from "react-native";
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
-const DEFAULT_DEV_PROJECT_ID = "campus-demo-3a869";
+const DEFAULT_DEV_PROJECT_ID = 'campus-demo-3a869';
 
 type CloudFunctionConfig = {
   firebase?: { projectId?: string };
@@ -11,7 +11,7 @@ type CloudFunctionConfig = {
 };
 
 function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, "");
+  return value.replace(/\/+$/, '');
 }
 
 function getExpoExtra(): CloudFunctionConfig {
@@ -20,35 +20,37 @@ function getExpoExtra(): CloudFunctionConfig {
 }
 
 function getProjectId(extra: CloudFunctionConfig): string {
-  return String(extra.firebase?.projectId ?? process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? "").trim();
+  return String(
+    extra.firebase?.projectId ?? process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? '',
+  ).trim();
 }
 
 function getRegion(extra: CloudFunctionConfig): string {
   return String(
-    extra.cloudFunctionRegion ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? "asia-east1",
+    extra.cloudFunctionRegion ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1',
   ).trim();
 }
 
 function shouldUseEmulator(extra: CloudFunctionConfig, _projectId: string): boolean {
   const explicit = String(
-    extra.useCloudFunctionEmulator ?? process.env.EXPO_PUBLIC_USE_CLOUD_FUNCTION_EMULATOR ?? "",
+    extra.useCloudFunctionEmulator ?? process.env.EXPO_PUBLIC_USE_CLOUD_FUNCTION_EMULATOR ?? '',
   )
     .trim()
     .toLowerCase();
 
-  if (explicit === "true") return true;
+  if (explicit === 'true') return true;
   // 預設不走 emulator — 即使在 dev 模式也直接連 Cloud Functions
   return false;
 }
 
 function getEmulatorHost(): string {
-  return Platform.OS === "android" ? "10.0.2.2" : "127.0.0.1";
+  return Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
 }
 
 export function getCloudFunctionBaseUrl(): string {
   const extra = getExpoExtra();
   const configuredBaseUrl = String(
-    extra.cloudFunctionBaseUrl ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ?? "",
+    extra.cloudFunctionBaseUrl ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ?? '',
   ).trim();
 
   if (configuredBaseUrl) {
@@ -65,7 +67,7 @@ export function getCloudFunctionBaseUrl(): string {
   const effectiveProjectId = projectId || DEFAULT_DEV_PROJECT_ID;
 
   if (!effectiveProjectId) {
-    throw new Error("Firebase projectId not configured. 無法使用 Cloud Functions。");
+    throw new Error('Firebase projectId not configured. 無法使用 Cloud Functions。');
   }
 
   return `https://${region}-${effectiveProjectId}.cloudfunctions.net`;
@@ -78,9 +80,9 @@ export function getCloudFunctionUrl(functionName: string): string {
 export function getAIServerBaseUrl(): string {
   const extra = getExpoExtra();
   const configured = String(
-    (extra as any).aiServerBaseUrl ?? process.env.EXPO_PUBLIC_AI_SERVER_URL ?? "",
+    (extra as any).aiServerBaseUrl ?? process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
   ).trim();
   if (configured) return trimTrailingSlash(configured);
-  const host = Platform.OS === "android" ? "10.0.2.2" : "127.0.0.1";
+  const host = Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
   return `http://${host}:8100`;
 }

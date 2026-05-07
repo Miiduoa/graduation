@@ -1,15 +1,15 @@
-import type { 
-  Announcement, 
-  ClubEvent, 
-  Course, 
-  MenuItem, 
+import type {
+  Announcement,
+  ClubEvent,
+  Course,
+  MenuItem,
   Poi,
   Grade,
   LibraryBook,
   LibraryLoan,
   BusRoute,
   BusArrival,
-} from "../types";
+} from '../types';
 
 export type ApiConfig = {
   baseUrl: string;
@@ -46,36 +46,36 @@ export interface SchoolApiAdapter {
   readonly schoolId: string;
   readonly schoolName: string;
   readonly apiVersion: string;
-  
+
   initialize(config: ApiConfig): Promise<void>;
-  
+
   authenticate?(username: string, password: string): Promise<AuthCredentials>;
   refreshAuth?(refreshToken: string): Promise<AuthCredentials>;
   logout?(): Promise<void>;
-  
+
   listAnnouncements(): Promise<Announcement[]>;
   getAnnouncement?(id: string): Promise<Announcement | null>;
-  
+
   listEvents(): Promise<ClubEvent[]>;
   getEvent?(id: string): Promise<ClubEvent | null>;
-  
+
   listCourses?(studentId?: string, semester?: string): Promise<Course[]>;
   getCourse?(id: string): Promise<Course | null>;
-  
+
   listGrades?(studentId: string, semester?: string): Promise<Grade[]>;
-  
+
   listMenu(): Promise<MenuItem[]>;
-  
+
   listPois(): Promise<Poi[]>;
-  
+
   searchLibraryBooks?(query: string): Promise<LibraryBook[]>;
   listLibraryLoans?(studentId: string): Promise<LibraryLoan[]>;
-  
+
   listBusRoutes?(): Promise<BusRoute[]>;
   getBusArrivals?(stopId: string): Promise<BusArrival[]>;
-  
+
   isHealthy(): Promise<boolean>;
-  
+
   getCapabilities(): AdapterCapabilities;
 }
 
@@ -207,9 +207,9 @@ export type RawPoiData = {
 
 export function normalizeAnnouncement(raw: RawAnnouncementData, schoolId: string): Announcement {
   const id = raw.id || `${schoolId}-ann-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const title = raw.title || "無標題";
-  const body = raw.body || raw.content || raw.text || "";
-  
+  const title = raw.title || '無標題';
+  const body = raw.body || raw.content || raw.text || '';
+
   let publishedAt: string;
   if (raw.publishedAt) {
     publishedAt = raw.publishedAt;
@@ -222,9 +222,9 @@ export function normalizeAnnouncement(raw: RawAnnouncementData, schoolId: string
   } else {
     publishedAt = new Date().toISOString();
   }
-  
+
   const source = raw.source || raw.department || raw.category;
-  
+
   return {
     id,
     title,
@@ -236,10 +236,10 @@ export function normalizeAnnouncement(raw: RawAnnouncementData, schoolId: string
 
 export function normalizeEvent(raw: RawEventData, schoolId: string): ClubEvent {
   const id = raw.id || `${schoolId}-evt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const title = raw.title || raw.name || "無標題";
-  const description = raw.description || raw.content || "";
+  const title = raw.title || raw.name || '無標題';
+  const description = raw.description || raw.content || '';
   const location = raw.location || raw.venue || raw.place;
-  
+
   let startsAt: string;
   if (raw.startsAt) {
     startsAt = raw.startsAt;
@@ -250,7 +250,7 @@ export function normalizeEvent(raw: RawEventData, schoolId: string): ClubEvent {
   } else {
     startsAt = new Date().toISOString();
   }
-  
+
   let endsAt: string | undefined;
   if (raw.endsAt) {
     endsAt = raw.endsAt;
@@ -259,10 +259,10 @@ export function normalizeEvent(raw: RawEventData, schoolId: string): ClubEvent {
   } else if (raw.end_date) {
     endsAt = new Date(raw.end_date).toISOString();
   }
-  
+
   const capacity = raw.capacity || raw.maxParticipants;
   const registeredCount = raw.registeredCount || raw.currentParticipants || 0;
-  
+
   return {
     id,
     title,
@@ -278,31 +278,52 @@ export function normalizeEvent(raw: RawEventData, schoolId: string): ClubEvent {
 export function normalizeCourse(raw: RawCourseData, schoolId: string): Course {
   const id = raw.id || raw.courseId || raw.code || `${schoolId}-crs-${Date.now()}`;
   const code = raw.code || raw.courseId || id;
-  const name = raw.name || raw.title || "未知課程";
-  const teacher = raw.teacher || raw.instructor || raw.professor || "未知教師";
-  const location = String(raw.location || raw.room || raw.classroom || "未指定地點");
-  
+  const name = raw.name || raw.title || '未知課程';
+  const teacher = raw.teacher || raw.instructor || raw.professor || '未知教師';
+  const location = String(raw.location || raw.room || raw.classroom || '未指定地點');
+
   let dayOfWeek: 1 | 2 | 3 | 4 | 5 | 6 | 7 = 1;
-  if (typeof raw.dayOfWeek === "number") {
+  if (typeof raw.dayOfWeek === 'number') {
     dayOfWeek = Math.max(1, Math.min(7, raw.dayOfWeek)) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
-  } else if (typeof raw.day === "number") {
+  } else if (typeof raw.day === 'number') {
     dayOfWeek = Math.max(1, Math.min(7, raw.day)) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
   } else if (raw.weekday) {
     const weekdayMap: Record<string, number> = {
-      "monday": 1, "mon": 1, "一": 1, "週一": 1,
-      "tuesday": 2, "tue": 2, "二": 2, "週二": 2,
-      "wednesday": 3, "wed": 3, "三": 3, "週三": 3,
-      "thursday": 4, "thu": 4, "四": 4, "週四": 4,
-      "friday": 5, "fri": 5, "五": 5, "週五": 5,
-      "saturday": 6, "sat": 6, "六": 6, "週六": 6,
-      "sunday": 7, "sun": 7, "日": 7, "週日": 7,
+      monday: 1,
+      mon: 1,
+      一: 1,
+      週一: 1,
+      tuesday: 2,
+      tue: 2,
+      二: 2,
+      週二: 2,
+      wednesday: 3,
+      wed: 3,
+      三: 3,
+      週三: 3,
+      thursday: 4,
+      thu: 4,
+      四: 4,
+      週四: 4,
+      friday: 5,
+      fri: 5,
+      五: 5,
+      週五: 5,
+      saturday: 6,
+      sat: 6,
+      六: 6,
+      週六: 6,
+      sunday: 7,
+      sun: 7,
+      日: 7,
+      週日: 7,
     };
     dayOfWeek = (weekdayMap[raw.weekday.toLowerCase()] || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7;
   }
-  
-  const startTime = raw.startTime || "08:00";
-  const endTime = raw.endTime || "09:00";
-  
+
+  const startTime = raw.startTime || '08:00';
+  const endTime = raw.endTime || '09:00';
+
   return {
     id,
     code,
@@ -310,7 +331,7 @@ export function normalizeCourse(raw: RawCourseData, schoolId: string): Course {
     instructor: teacher,
     teacher,
     credits: raw.credits ?? 0,
-    semester: typeof raw.semester === "string" ? raw.semester : "未指定",
+    semester: typeof raw.semester === 'string' ? raw.semester : '未指定',
     schedule: [
       {
         dayOfWeek,
@@ -328,29 +349,29 @@ export function normalizeCourse(raw: RawCourseData, schoolId: string): Course {
 
 export function normalizeMenuItem(raw: RawMenuData, schoolId: string): MenuItem {
   const id = raw.id || `${schoolId}-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const name = raw.name || raw.title || "未知餐點";
-  const cafeteria = raw.cafeteria || raw.restaurant || raw.location || "未知餐廳";
-  
+  const name = raw.name || raw.title || '未知餐點';
+  const cafeteria = raw.cafeteria || raw.restaurant || raw.location || '未知餐廳';
+
   let price: number | undefined;
-  if (typeof raw.price === "number") {
+  if (typeof raw.price === 'number') {
     price = raw.price;
-  } else if (typeof raw.cost === "number") {
+  } else if (typeof raw.cost === 'number') {
     price = raw.cost;
-  } else if (typeof raw.price === "string") {
+  } else if (typeof raw.price === 'string') {
     price = parseFloat(raw.price) || undefined;
   }
-  
+
   let availableOn: string;
   if (raw.availableOn) {
     availableOn = raw.availableOn;
   } else if (raw.date) {
-    availableOn = raw.date.split("T")[0];
+    availableOn = raw.date.split('T')[0];
   } else if (raw.available_date) {
     availableOn = raw.available_date;
   } else {
-    availableOn = new Date().toISOString().split("T")[0];
+    availableOn = new Date().toISOString().split('T')[0];
   }
-  
+
   return {
     id,
     name,
@@ -362,19 +383,32 @@ export function normalizeMenuItem(raw: RawMenuData, schoolId: string): MenuItem 
 
 export function normalizePoi(raw: RawPoiData, schoolId: string): Poi {
   const id = raw.id || `${schoolId}-poi-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const name = raw.name || raw.title || "未知地點";
-  
-  let category: "building" | "food" | "office" | "other" = "other";
-  const rawCategory = (raw.category || raw.type || "").toLowerCase();
-  if (rawCategory.includes("building") || rawCategory.includes("教學") || rawCategory.includes("大樓")) {
-    category = "building";
-  } else if (rawCategory.includes("food") || rawCategory.includes("餐") || rawCategory.includes("食")) {
-    category = "food";
-  } else if (rawCategory.includes("office") || rawCategory.includes("辦公") || rawCategory.includes("行政")) {
-    category = "office";
+  const name = raw.name || raw.title || '未知地點';
+
+  let category: 'building' | 'food' | 'office' | 'other' = 'other';
+  const rawCategory = (raw.category || raw.type || '').toLowerCase();
+  if (
+    rawCategory.includes('building') ||
+    rawCategory.includes('教學') ||
+    rawCategory.includes('大樓')
+  ) {
+    category = 'building';
+  } else if (
+    rawCategory.includes('food') ||
+    rawCategory.includes('餐') ||
+    rawCategory.includes('食')
+  ) {
+    category = 'food';
+  } else if (
+    rawCategory.includes('office') ||
+    rawCategory.includes('辦公') ||
+    rawCategory.includes('行政')
+  ) {
+    category = 'office';
   }
-  
-  let lat = 0, lng = 0;
+
+  let lat = 0,
+    lng = 0;
   if (raw.lat !== undefined && raw.lng !== undefined) {
     lat = raw.lat;
     lng = raw.lng;
@@ -387,15 +421,15 @@ export function normalizePoi(raw: RawPoiData, schoolId: string): Poi {
   } else if (raw.coordinates && raw.coordinates.length === 2) {
     [lat, lng] = raw.coordinates;
   }
-  
+
   const description = raw.description || raw.info || raw.address;
-  
+
   return {
     id,
     name,
     category,
     lat,
     lng,
-    description: description || "",
+    description: description || '',
   };
 }

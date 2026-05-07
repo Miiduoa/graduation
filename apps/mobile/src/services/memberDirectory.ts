@@ -17,11 +17,7 @@ export async function fetchSchoolDirectoryProfiles(
   db: Firestore = getDb(),
 ): Promise<SchoolDirectoryProfile[]> {
   const uniqueUids = Array.from(
-    new Set(
-      uids
-        .map((value) => (typeof value === 'string' ? value.trim() : ''))
-        .filter(Boolean),
-    ),
+    new Set(uids.map((value) => (typeof value === 'string' ? value.trim() : '')).filter(Boolean)),
   );
 
   if (!schoolId || uniqueUids.length === 0) {

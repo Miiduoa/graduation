@@ -25,7 +25,8 @@ const FAQ_DATA: FAQItem[] = [
   {
     id: '1',
     question: '目前支援哪個學校？',
-    answer: '目前這個版本已鎖定為靜宜大學（PU），登入、課表、成績與 TronClass 同步都以靜宜校園為主，不再提供校碼切換。',
+    answer:
+      '目前這個版本已鎖定為靜宜大學（PU），登入、課表、成績與 TronClass 同步都以靜宜校園為主，不再提供校碼切換。',
     category: '基本操作',
   },
   {

@@ -1,14 +1,14 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { isFirebaseConfigured } from "./firebase";
+import { useEffect, useState } from 'react';
+import { isFirebaseConfigured } from './firebase';
 
-export type SchoolCollectionSource = "demo" | "firebase";
+export type SchoolCollectionSource = 'demo' | 'firebase';
 
 type SubscribeLiveCollection<T> = (
   schoolId: string,
   onData: (data: T[]) => void,
-  onError: (error: unknown) => void
+  onError: (error: unknown) => void,
 ) => () => void;
 
 export function useSchoolCollectionData<T>(
@@ -17,12 +17,12 @@ export function useSchoolCollectionData<T>(
   demoData: readonly T[],
   options?: {
     subscribeLive?: SubscribeLiveCollection<T>;
-  }
+  },
 ) {
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
   const [sourceMode, setSourceMode] = useState<SchoolCollectionSource>(
-    isFirebaseConfigured() ? "firebase" : "demo"
+    isFirebaseConfigured() ? 'firebase' : 'demo',
   );
   const subscribeLive = options?.subscribeLive;
 
@@ -36,7 +36,7 @@ export function useSchoolCollectionData<T>(
       if (!isFirebaseConfigured()) {
         if (active) {
           setData([...demoData]);
-          setSourceMode("demo");
+          setSourceMode('demo');
           setLoading(false);
         }
         return;
@@ -50,24 +50,24 @@ export function useSchoolCollectionData<T>(
               if (!active) return;
 
               setData(liveData);
-              setSourceMode("firebase");
+              setSourceMode('firebase');
               setLoading(false);
             },
             (error) => {
-              console.error("[SchoolCollectionData] Failed to subscribe to live data:", error);
+              console.error('[SchoolCollectionData] Failed to subscribe to live data:', error);
               if (!active) return;
 
               setData([...demoData]);
-              setSourceMode("demo");
+              setSourceMode('demo');
               setLoading(false);
-            }
+            },
           );
         } catch (error) {
-          console.error("[SchoolCollectionData] Failed to initialize live subscription:", error);
+          console.error('[SchoolCollectionData] Failed to initialize live subscription:', error);
           if (!active) return;
 
           setData([...demoData]);
-          setSourceMode("demo");
+          setSourceMode('demo');
           setLoading(false);
         }
         return;
@@ -76,7 +76,7 @@ export function useSchoolCollectionData<T>(
       if (!loadLive) {
         if (active) {
           setData([...demoData]);
-          setSourceMode("demo");
+          setSourceMode('demo');
           setLoading(false);
         }
         return;
@@ -87,13 +87,13 @@ export function useSchoolCollectionData<T>(
         if (!active) return;
 
         setData(liveData);
-        setSourceMode("firebase");
+        setSourceMode('firebase');
       } catch (error) {
-        console.error("[SchoolCollectionData] Failed to load live data:", error);
+        console.error('[SchoolCollectionData] Failed to load live data:', error);
         if (!active) return;
 
         setData([...demoData]);
-        setSourceMode("demo");
+        setSourceMode('demo');
       } finally {
         if (active) {
           setLoading(false);
@@ -113,7 +113,7 @@ export function useSchoolCollectionData<T>(
     data,
     loading,
     sourceMode,
-    usingDemo: sourceMode === "demo",
+    usingDemo: sourceMode === 'demo',
     firebaseEnabled: isFirebaseConfigured(),
   };
 }

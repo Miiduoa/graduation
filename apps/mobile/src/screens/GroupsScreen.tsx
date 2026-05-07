@@ -1,32 +1,33 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React, { useMemo, useState } from "react";
-import { ScrollView, Text, TextInput, View, Pressable } from "react-native";
-import { Screen, Card, Button, Pill, SectionTitle, LoadingState, ErrorState } from "../ui/components";
-import { normalizeJoinCode, formatJoinCode, isValidJoinCode } from "../utils/joinCode";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
-import { useSchool } from "../state/school";
-import { useAuth } from "../state/auth";
-import { getDb, getFunctionsInstance, isFirebaseMockMode } from "../firebase";
+import React, { useMemo, useState } from 'react';
+import { ScrollView, Text, TextInput, View, Pressable } from 'react-native';
 import {
-  collection,
-  getDocs,
-  limit,
-  query,
-  where,
-  documentId,
-} from "firebase/firestore";
-import { httpsCallable } from "firebase/functions";
-import { useAsyncList } from "../hooks/useAsyncList";
+  Screen,
+  Card,
+  Button,
+  Pill,
+  SectionTitle,
+  LoadingState,
+  ErrorState,
+} from '../ui/components';
+import { normalizeJoinCode, formatJoinCode, isValidJoinCode } from '../utils/joinCode';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { useSchool } from '../state/school';
+import { useAuth } from '../state/auth';
+import { getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
+import { collection, getDocs, limit, query, where, documentId } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import { useAsyncList } from '../hooks/useAsyncList';
 
 type Group = {
   id: string;
   schoolId: string;
-  type: "course" | "club" | "admin";
+  type: 'course' | 'club' | 'admin';
   name: string;
   joinCode: string;
   isPublished?: boolean;
-  verification?: { status?: "unverified" | "verified_teacher" | "verified_org" };
+  verification?: { status?: 'unverified' | 'verified_teacher' | 'verified_org' };
   createdAt?: any;
   createdBy?: string;
 };
@@ -34,18 +35,18 @@ type Group = {
 type UserGroup = {
   groupId: string;
   schoolId: string;
-  type: Group["type"];
+  type: Group['type'];
   name: string;
   joinCode: string;
-  role: "owner" | "moderator" | "member" | "instructor";
-  status: "active" | "left";
+  role: 'owner' | 'moderator' | 'member' | 'instructor';
+  status: 'active' | 'left';
   joinedAt?: any;
 };
 
 // joinCode helpers moved to src/utils/joinCode
 
-const AVATAR_COLORS_G = ["#5E6AD2", "#34C759", "#FF9500", "#007AFF", "#BF5AF2"];
-const AVATAR_EMOJIS_G = ["🧑‍💻", "👩‍🎓", "👨‍🎓", "🙋", "👩‍💻"];
+const AVATAR_COLORS_G = ['#5E6AD2', '#34C759', '#FF9500', '#007AFF', '#BF5AF2'];
+const AVATAR_EMOJIS_G = ['🧑‍💻', '👩‍🎓', '👨‍🎓', '🙋', '👩‍💻'];
 
 function hashCodeG(str: string) {
   let h = 0;
@@ -61,8 +62,8 @@ function GroupSocialBadge({ groupId }: { groupId: string }) {
     color: AVATAR_COLORS_G[(seed + i) % AVATAR_COLORS_G.length],
   }));
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 }}>
-      <View style={{ flexDirection: "row" }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 }}>
+      <View style={{ flexDirection: 'row' }}>
         {avatars.map((a, i) => (
           <View
             key={i}
@@ -73,8 +74,8 @@ function GroupSocialBadge({ groupId }: { groupId: string }) {
               backgroundColor: `${a.color}20`,
               borderWidth: 1.5,
               borderColor: theme.colors.bg,
-              alignItems: "center",
-              justifyContent: "center",
+              alignItems: 'center',
+              justifyContent: 'center',
               marginLeft: i === 0 ? 0 : -4,
             }}
           >
@@ -82,10 +83,8 @@ function GroupSocialBadge({ groupId }: { groupId: string }) {
           </View>
         ))}
       </View>
-      <Text style={{ fontSize: 11, color: theme.colors.muted }}>
-        {active} 位同學今日活躍
-      </Text>
-      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#34C759" }} />
+      <Text style={{ fontSize: 11, color: theme.colors.muted }}>{active} 位同學今日活躍</Text>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#34C759' }} />
     </View>
   );
 }
@@ -95,7 +94,7 @@ export function GroupsScreen(props: any) {
   const { school } = useSchool();
   const auth = useAuth();
 
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [isJoining, setIsJoining] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -103,42 +102,41 @@ export function GroupsScreen(props: any) {
   const db = getDb();
   const functions = getFunctionsInstance();
 
-  const [newCourseName, setNewCourseName] = useState("");
+  const [newCourseName, setNewCourseName] = useState('');
 
-  const { items: myGroups, loading, error, reload } = useAsyncList<UserGroup>(
-    async () => {
-      if (!auth.user) return [];
-      if (isFirebaseMockMode()) return [];
-      const ref = collection(db, "users", auth.user.uid, "groups");
-      // NOTE: Avoid composite index requirements for MVP by not combining orderBy with multiple where.
-      const qy = query(ref, where("schoolId", "==", school.id), where("status", "==", "active"));
+  const {
+    items: myGroups,
+    loading,
+    error,
+    reload,
+  } = useAsyncList<UserGroup>(async () => {
+    if (!auth.user) return [];
+    if (isFirebaseMockMode()) return [];
+    const ref = collection(db, 'users', auth.user.uid, 'groups');
+    // NOTE: Avoid composite index requirements for MVP by not combining orderBy with multiple where.
+    const qy = query(ref, where('schoolId', '==', school.id), where('status', '==', 'active'));
+    const snap = await getDocs(qy);
+    return snap.docs.map((d) => d.data() as any);
+  }, [db, auth.user?.uid, school.id]);
+
+  const myCourseGroups = useMemo(() => myGroups.filter((g) => g.type === 'course'), [myGroups]);
+  const myOtherGroups = useMemo(() => myGroups.filter((g) => g.type !== 'course'), [myGroups]);
+
+  const { items: myCourseMeta } = useAsyncList<Group>(async () => {
+    if (isFirebaseMockMode()) return [];
+    const ids = myCourseGroups.map((g) => g.groupId).filter(Boolean);
+    if (ids.length === 0) return [];
+
+    // Firestore "in" supports up to 10 items; chunk to avoid indexes.
+    const out: Group[] = [];
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const qy = query(collection(db, 'groups'), where(documentId(), 'in', chunk));
       const snap = await getDocs(qy);
-      return snap.docs.map((d) => d.data() as any);
-    },
-    [db, auth.user?.uid, school.id]
-  );
-
-  const myCourseGroups = useMemo(() => myGroups.filter((g) => g.type === "course"), [myGroups]);
-  const myOtherGroups = useMemo(() => myGroups.filter((g) => g.type !== "course"), [myGroups]);
-
-  const { items: myCourseMeta } = useAsyncList<Group>(
-    async () => {
-      if (isFirebaseMockMode()) return [];
-      const ids = myCourseGroups.map((g) => g.groupId).filter(Boolean);
-      if (ids.length === 0) return [];
-
-      // Firestore "in" supports up to 10 items; chunk to avoid indexes.
-      const out: Group[] = [];
-      for (let i = 0; i < ids.length; i += 10) {
-        const chunk = ids.slice(i, i + 10);
-        const qy = query(collection(db, "groups"), where(documentId(), "in", chunk));
-        const snap = await getDocs(qy);
-        out.push(...(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as any));
-      }
-      return out;
-    },
-    [db, myCourseGroups.map((g) => g.groupId).join(",")]
-  );
+      out.push(...(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as any));
+    }
+    return out;
+  }, [db, myCourseGroups.map((g) => g.groupId).join(',')]);
 
   const courseMetaById = useMemo(() => {
     const m: Record<string, Group> = {};
@@ -146,28 +144,26 @@ export function GroupsScreen(props: any) {
     return m;
   }, [myCourseMeta]);
 
-  const { items: publishedCourses, reload: reloadPublishedCourses } = useAsyncList<Group>(
-    async () => {
+  const { items: publishedCourses, reload: reloadPublishedCourses } =
+    useAsyncList<Group>(async () => {
       if (isFirebaseMockMode()) return [];
       // NOTE: Avoid composite indexes in MVP: query by isPublished only, then filter by school/type.
-      const qy = query(collection(db, "groups"), where("isPublished", "==", true), limit(100));
+      const qy = query(collection(db, 'groups'), where('isPublished', '==', true), limit(100));
       const snap = await getDocs(qy);
       return snap.docs
         .map((d) => ({ id: d.id, ...(d.data() as any) }))
-        .filter((g: any) => g.schoolId === school.id && g.type === "course") as any;
-    },
-    [db, school.id]
-  );
+        .filter((g: any) => g.schoolId === school.id && g.type === 'course') as any;
+    }, [db, school.id]);
 
   const onJoin = async () => {
     setErr(null);
     const code = normalizeJoinCode(joinCode);
     if (code.length !== 8) {
-      setErr("加入碼需要 8 碼英數");
+      setErr('加入碼需要 8 碼英數');
       return;
     }
     if (!auth.user) {
-      setErr("請先到『我的』登入後再加入群組");
+      setErr('請先到『我的』登入後再加入群組');
       return;
     }
 
@@ -176,14 +172,14 @@ export function GroupsScreen(props: any) {
       const joinGroupByCode = httpsCallable<
         { joinCode: string; schoolId: string },
         { success: boolean; groupId: string; groupName?: string }
-      >(functions, "joinGroupByCode");
+      >(functions, 'joinGroupByCode');
       const result = await joinGroupByCode({ joinCode: code, schoolId: school.id });
 
-      setJoinCode("");
+      setJoinCode('');
       reload();
-      nav?.navigate?.("GroupDetail", { groupId: result.data.groupId });
+      nav?.navigate?.('GroupDetail', { groupId: result.data.groupId });
     } catch (e: any) {
-      setErr(e?.message ?? "加入失敗");
+      setErr(e?.message ?? '加入失敗');
     } finally {
       setIsJoining(false);
     }
@@ -192,23 +188,26 @@ export function GroupsScreen(props: any) {
   const onLeave = async (groupId: string) => {
     if (!auth.user) return;
     try {
-      const leaveGroup = httpsCallable<{ groupId: string }, { success: boolean }>(functions, "leaveGroup");
+      const leaveGroup = httpsCallable<{ groupId: string }, { success: boolean }>(
+        functions,
+        'leaveGroup',
+      );
       await leaveGroup({ groupId });
       reload();
     } catch (e: any) {
-      setErr(e?.message ?? "退出失敗");
+      setErr(e?.message ?? '退出失敗');
     }
   };
 
   const onCreateCourse = async () => {
     setErr(null);
     if (!auth.user) {
-      setErr("請先登入");
+      setErr('請先登入');
       return;
     }
     const name = newCourseName.trim();
     if (!name) {
-      setErr("請輸入課程名稱");
+      setErr('請輸入課程名稱');
       return;
     }
 
@@ -218,30 +217,30 @@ export function GroupsScreen(props: any) {
         {
           name: string;
           description?: string;
-          type: Group["type"];
+          type: Group['type'];
           schoolId: string;
           isPrivate?: boolean;
           isPublished?: boolean;
-          verification?: { status?: "unverified" | "verified_teacher" | "verified_org" };
+          verification?: { status?: 'unverified' | 'verified_teacher' | 'verified_org' };
         },
         { success: boolean; groupId: string; joinCode?: string | null }
-      >(functions, "createGroup");
+      >(functions, 'createGroup');
       const result = await createGroup({
         schoolId: school.id,
         name,
-        type: "course",
-        description: "",
+        type: 'course',
+        description: '',
         isPrivate: false,
         isPublished: false,
-        verification: { status: "unverified" },
+        verification: { status: 'unverified' },
       });
 
-      setNewCourseName("");
+      setNewCourseName('');
       reload();
       reloadPublishedCourses();
-      nav?.navigate?.("GroupDetail", { groupId: result.data.groupId });
+      nav?.navigate?.('GroupDetail', { groupId: result.data.groupId });
     } catch (e: any) {
-      setErr(e?.message ?? "建立課程失敗");
+      setErr(e?.message ?? '建立課程失敗');
     } finally {
       setIsCreating(false);
     }
@@ -252,21 +251,44 @@ export function GroupsScreen(props: any) {
       {loading ? (
         <LoadingState title="群組" subtitle="載入中..." rows={3} />
       ) : error ? (
-        <ErrorState title="群組" subtitle="讀取群組失敗" hint={error} actionText="重試" onAction={reload} />
+        <ErrorState
+          title="群組"
+          subtitle="讀取群組失敗"
+          hint={error}
+          actionText="重試"
+          onAction={reload}
+        />
       ) : (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        >
           <Card title="加入群組" subtitle="輸入加入碼（8 碼英數）。">
             {err ? <Pill text={err} /> : null}
 
             {auth.isAdmin ? (
               <View style={{ marginBottom: 10 }}>
-                <Button text="管理員：課程認證" onPress={() => nav?.navigate?.("AdminCourseVerify")} />
+                <Button
+                  text="管理員：課程認證"
+                  onPress={() => nav?.navigate?.('AdminCourseVerify')}
+                />
               </View>
             ) : null}
 
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
               <Text style={{ color: theme.colors.muted }}>加入碼</Text>
-              <Text style={{ color: joinCode.length === 8 ? theme.colors.success : theme.colors.muted, fontSize: 12 }}>
+              <Text
+                style={{
+                  color: joinCode.length === 8 ? theme.colors.success : theme.colors.muted,
+                  fontSize: 12,
+                }}
+              >
                 {joinCode.length}/8
               </Text>
             </View>
@@ -288,17 +310,17 @@ export function GroupsScreen(props: any) {
                 color: theme.colors.text,
                 letterSpacing: 2,
                 fontSize: 16,
-                fontWeight: "600",
+                fontWeight: '600',
               }}
             />
-            <View style={{ marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-              <Button 
-                text={isJoining ? "加入中..." : "加入"} 
-                kind="primary" 
-                onPress={onJoin} 
+            <View style={{ marginTop: 12, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+              <Button
+                text={isJoining ? '加入中...' : '加入'}
+                kind="primary"
+                onPress={onJoin}
                 disabled={isJoining || !isValidJoinCode(joinCode)}
               />
-              <Button text="清除" onPress={() => setJoinCode("")} disabled={isJoining} />
+              <Button text="清除" onPress={() => setJoinCode('')} disabled={isJoining} />
             </View>
             <View style={{ marginTop: 10 }}>
               <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
@@ -327,10 +349,10 @@ export function GroupsScreen(props: any) {
                   color: theme.colors.text,
                 }}
               />
-              <View style={{ marginTop: 12, flexDirection: "row", gap: 10, flexWrap: "wrap" }}>
-                <Button 
-                  text={isCreating ? "建立中..." : "建立課程"} 
-                  kind="primary" 
+              <View style={{ marginTop: 12, flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+                <Button
+                  text={isCreating ? '建立中...' : '建立課程'}
+                  kind="primary"
                   onPress={onCreateCourse}
                   disabled={isCreating || !newCourseName.trim()}
                 />
@@ -346,20 +368,23 @@ export function GroupsScreen(props: any) {
             <View style={{ marginTop: 10, gap: 10 }}>
               {myCourseGroups.map((g) => {
                 const meta = courseMetaById[g.groupId];
-                const v = meta?.verification?.status ?? "unverified";
+                const v = meta?.verification?.status ?? 'unverified';
                 return (
                   <Pressable
                     key={g.groupId}
-                    onPress={() => nav?.navigate?.("GroupDetail", { groupId: g.groupId })}
+                    onPress={() => nav?.navigate?.('GroupDetail', { groupId: g.groupId })}
                     style={{ borderRadius: theme.radius.lg }}
                     accessible
                     accessibilityRole="button"
                     accessibilityLabel={`進入課程：${g.name}`}
                   >
                     <Card title={g.name} subtitle={`course｜${g.joinCode}`}>
-                      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                        <Pill text={v === "verified_teacher" ? "老師認證" : "未驗證"} kind={v === "verified_teacher" ? "accent" : "default"} />
-                        <Pill text={meta?.isPublished ? "已發布" : "未發布"} />
+                      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                        <Pill
+                          text={v === 'verified_teacher' ? '老師認證' : '未驗證'}
+                          kind={v === 'verified_teacher' ? 'accent' : 'default'}
+                        />
+                        <Pill text={meta?.isPublished ? '已發布' : '未發布'} />
                       </View>
                       <GroupSocialBadge groupId={g.groupId} />
                       <View style={{ marginTop: 12 }}>
@@ -369,7 +394,9 @@ export function GroupsScreen(props: any) {
                   </Pressable>
                 );
               })}
-              {myCourseGroups.length === 0 ? <Text style={{ color: theme.colors.muted }}>你目前尚未加入任何課程。</Text> : null}
+              {myCourseGroups.length === 0 ? (
+                <Text style={{ color: theme.colors.muted }}>你目前尚未加入任何課程。</Text>
+              ) : null}
             </View>
           </Card>
 
@@ -379,17 +406,17 @@ export function GroupsScreen(props: any) {
               {myOtherGroups.map((g) => (
                 <Pressable
                   key={g.groupId}
-                  onPress={() => nav?.navigate?.("GroupDetail", { groupId: g.groupId })}
+                  onPress={() => nav?.navigate?.('GroupDetail', { groupId: g.groupId })}
                   style={{ borderRadius: theme.radius.lg }}
                   accessible
                   accessibilityRole="button"
                   accessibilityLabel={`進入群組：${g.name}`}
                 >
                   <Card title={g.name} subtitle={`${g.type}｜${g.joinCode}`}>
-                    <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                    <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                       <Pill text="公告" kind="accent" />
                       <Pill text="Q&A" kind="accent" />
-                      <Pressable onPress={() => nav?.navigate?.("收件匣", { screen: "Dms" })}>
+                      <Pressable onPress={() => nav?.navigate?.('收件匣', { screen: 'Dms' })}>
                         <Pill text="私訊" kind="accent" />
                       </Pressable>
                     </View>
@@ -400,7 +427,9 @@ export function GroupsScreen(props: any) {
                 </Pressable>
               ))}
 
-              {myOtherGroups.length === 0 ? <Text style={{ color: theme.colors.muted }}>你目前尚未加入其他群組。</Text> : null}
+              {myOtherGroups.length === 0 ? (
+                <Text style={{ color: theme.colors.muted }}>你目前尚未加入其他群組。</Text>
+              ) : null}
             </View>
           </Card>
 
@@ -409,19 +438,36 @@ export function GroupsScreen(props: any) {
             <View style={{ marginTop: 10, gap: 10 }}>
               {publishedCourses.map((g) => (
                 <Card key={g.id} title={g.name} subtitle={`course｜${g.id}`}>
-                  <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                  <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                     <Pill
-                      text={(g.verification?.status ?? "unverified") === "verified_teacher" ? "老師認證" : "未驗證"}
-                      kind={(g.verification?.status ?? "unverified") === "verified_teacher" ? "accent" : "default"}
+                      text={
+                        (g.verification?.status ?? 'unverified') === 'verified_teacher'
+                          ? '老師認證'
+                          : '未驗證'
+                      }
+                      kind={
+                        (g.verification?.status ?? 'unverified') === 'verified_teacher'
+                          ? 'accent'
+                          : 'default'
+                      }
                     />
                     <Pill text="已發布" />
                   </View>
-                  <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18, marginTop: 10 }}>
+                  <Text
+                    style={{
+                      color: theme.colors.muted,
+                      fontSize: 12,
+                      lineHeight: 18,
+                      marginTop: 10,
+                    }}
+                  >
                     加入方式：請向老師索取加入碼後，在上方輸入加入。
                   </Text>
                 </Card>
               ))}
-              {publishedCourses.length === 0 ? <Text style={{ color: theme.colors.muted }}>目前沒有公開課程。</Text> : null}
+              {publishedCourses.length === 0 ? (
+                <Text style={{ color: theme.colors.muted }}>目前沒有公開課程。</Text>
+              ) : null}
             </View>
           </Card>
         </ScrollView>

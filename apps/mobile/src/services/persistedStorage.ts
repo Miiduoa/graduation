@@ -1,5 +1,5 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getFirstStorageValue } from "./scopedStorage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getFirstStorageValue } from './scopedStorage';
 
 type Deserialize<T> = (raw: string) => T;
 type Serialize<T> = (value: T) => string;
@@ -32,7 +32,7 @@ export async function loadPersistedValue<T>(params: {
 export async function savePersistedValue<T>(
   storageKey: string,
   value: T,
-  serialize: Serialize<T> = JSON.stringify
+  serialize: Serialize<T> = JSON.stringify,
 ): Promise<void> {
   await AsyncStorage.setItem(storageKey, serialize(value));
 }

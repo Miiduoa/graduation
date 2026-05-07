@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,17 +9,17 @@ import {
   Alert,
   Animated,
   ActivityIndicator,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { theme } from "../ui/theme";
-import { Screen, Card, Button, AnimatedCard, Pill } from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { theme } from '../ui/theme';
+import { Screen, Card, Button, AnimatedCard, Pill } from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 
 // ============================================================================
 // Type Definitions
 // ============================================================================
 
-type QuestionType = "single_choice" | "multiple_choice" | "true_false" | "fill_in_blank";
+type QuestionType = 'single_choice' | 'multiple_choice' | 'true_false' | 'fill_in_blank';
 
 interface QuizQuestion {
   id: string;
@@ -56,88 +56,98 @@ interface QuizResult {
 function generateDemoQuestions(count: number = 8): QuizQuestion[] {
   const singleChoiceQuestions = [
     {
-      id: "q1",
+      id: 'q1',
       questionNum: 1,
-      prompt: "下列何者為市場經濟的主要特徵？",
-      type: "single_choice" as const,
-      options: ["A. 政府完全控制生產", "B. 供求關係決定價格", "C. 計劃經濟制度", "D. 公社集體生產"],
-      correctAnswers: ["B. 供求關係決定價格"],
+      prompt: '下列何者為市場經濟的主要特徵？',
+      type: 'single_choice' as const,
+      options: ['A. 政府完全控制生產', 'B. 供求關係決定價格', 'C. 計劃經濟制度', 'D. 公社集體生產'],
+      correctAnswers: ['B. 供求關係決定價格'],
       points: 10,
     },
     {
-      id: "q2",
+      id: 'q2',
       questionNum: 2,
-      prompt: "以下哪個選項正確表示光合作用的過程？",
-      type: "single_choice" as const,
-      options: ["A. 水和氮 → 葡萄糖", "B. 水和二氧化碳 + 光照 → 葡萄糖和氧氣", "C. 葡萄糖 → 能量", "D. 磷和鉀 → 蛋白質"],
-      correctAnswers: ["B. 水和二氧化碳 + 光照 → 葡萄糖和氧氣"],
+      prompt: '以下哪個選項正確表示光合作用的過程？',
+      type: 'single_choice' as const,
+      options: [
+        'A. 水和氮 → 葡萄糖',
+        'B. 水和二氧化碳 + 光照 → 葡萄糖和氧氣',
+        'C. 葡萄糖 → 能量',
+        'D. 磷和鉀 → 蛋白質',
+      ],
+      correctAnswers: ['B. 水和二氧化碳 + 光照 → 葡萄糖和氧氣'],
       points: 10,
     },
     {
-      id: "q3",
+      id: 'q3',
       questionNum: 3,
-      prompt: "法國大革命發生於哪一年？",
-      type: "single_choice" as const,
-      options: ["A. 1789 年", "B. 1815 年", "C. 1848 年", "D. 1871 年"],
-      correctAnswers: ["A. 1789 年"],
+      prompt: '法國大革命發生於哪一年？',
+      type: 'single_choice' as const,
+      options: ['A. 1789 年', 'B. 1815 年', 'C. 1848 年', 'D. 1871 年'],
+      correctAnswers: ['A. 1789 年'],
       points: 10,
     },
   ];
 
   const multipleChoiceQuestions = [
     {
-      id: "q4",
+      id: 'q4',
       questionNum: 4,
-      prompt: "下列哪些物質是必需胺基酸？（可複選）",
-      type: "multiple_choice" as const,
-      options: ["A. 異白胺酸", "B. 麩胺酸", "C. 白胺酸", "D. 絲胺酸"],
-      correctAnswers: ["A. 異白胺酸", "C. 白胺酸"],
+      prompt: '下列哪些物質是必需胺基酸？（可複選）',
+      type: 'multiple_choice' as const,
+      options: ['A. 異白胺酸', 'B. 麩胺酸', 'C. 白胺酸', 'D. 絲胺酸'],
+      correctAnswers: ['A. 異白胺酸', 'C. 白胺酸'],
       points: 15,
     },
     {
-      id: "q5",
+      id: 'q5',
       questionNum: 5,
-      prompt: "以下何者屬於再生能源？（可複選）",
-      type: "multiple_choice" as const,
-      options: ["A. 太陽能", "B. 煤炭", "C. 風力能", "D. 天然氣"],
-      correctAnswers: ["A. 太陽能", "C. 風力能"],
+      prompt: '以下何者屬於再生能源？（可複選）',
+      type: 'multiple_choice' as const,
+      options: ['A. 太陽能', 'B. 煤炭', 'C. 風力能', 'D. 天然氣'],
+      correctAnswers: ['A. 太陽能', 'C. 風力能'],
       points: 15,
     },
   ];
 
   const trueFalseQuestions = [
     {
-      id: "q6",
+      id: 'q6',
       questionNum: 6,
-      prompt: "地球上最高的山峰是喜馬拉雅山的聖母峰。",
-      type: "true_false" as const,
-      options: ["True（正確）", "False（錯誤）"],
-      correctAnswers: ["True（正確）"],
+      prompt: '地球上最高的山峰是喜馬拉雅山的聖母峰。',
+      type: 'true_false' as const,
+      options: ['True（正確）', 'False（錯誤）'],
+      correctAnswers: ['True（正確）'],
       points: 5,
     },
     {
-      id: "q7",
+      id: 'q7',
       questionNum: 7,
-      prompt: "一個八邊形有 8 條對角線。",
-      type: "true_false" as const,
-      options: ["True（正確）", "False（錯誤）"],
-      correctAnswers: ["False（錯誤）"],
+      prompt: '一個八邊形有 8 條對角線。',
+      type: 'true_false' as const,
+      options: ['True（正確）', 'False（錯誤）'],
+      correctAnswers: ['False（錯誤）'],
       points: 5,
     },
   ];
 
   const fillInBlankQuestions = [
     {
-      id: "q8",
+      id: 'q8',
       questionNum: 8,
-      prompt: "杜甫是唐代著名詩人，被尊稱為「______」。",
-      type: "fill_in_blank" as const,
-      correctAnswers: ["詩聖"],
+      prompt: '杜甫是唐代著名詩人，被尊稱為「______」。',
+      type: 'fill_in_blank' as const,
+      correctAnswers: ['詩聖'],
       points: 10,
     },
   ];
 
-  const all = [...singleChoiceQuestions, ...multipleChoiceQuestions, ...trueFalseQuestions, ...fillInBlankQuestions];
+  const all = [
+    ...singleChoiceQuestions,
+    ...multipleChoiceQuestions,
+    ...trueFalseQuestions,
+    ...fillInBlankQuestions,
+  ];
   return all.slice(0, count);
 }
 
@@ -180,8 +190,8 @@ function CountdownTimer({
   return (
     <View
       style={{
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
         gap: 8,
         paddingHorizontal: 12,
         paddingVertical: 8,
@@ -197,11 +207,11 @@ function CountdownTimer({
       <Text
         style={{
           color: isLowTime ? theme.colors.danger : theme.colors.accent,
-          fontWeight: "700",
+          fontWeight: '700',
           fontSize: 14,
         }}
       >
-        {minutes}:{seconds.toString().padStart(2, "0")}
+        {minutes}:{seconds.toString().padStart(2, '0')}
       </Text>
     </View>
   );
@@ -233,10 +243,8 @@ function QuestionNavigator({
         backgroundColor: theme.colors.surface2,
       }}
     >
-      <Text style={{ fontSize: 12, color: theme.colors.muted, fontWeight: "600" }}>
-        題目進度
-      </Text>
-      <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+      <Text style={{ fontSize: 12, color: theme.colors.muted, fontWeight: '600' }}>題目進度</Text>
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
         {Array.from({ length: totalQuestions }, (_, i) => {
           const questionNum = i + 1;
           const isAnswered = answeredQuestions.has(`q${questionNum}`);
@@ -257,19 +265,15 @@ function QuestionNavigator({
                     : theme.colors.surface,
                 borderWidth: isCurrent ? 2 : 1,
                 borderColor: isCurrent ? theme.colors.accentHover : theme.colors.border,
-                alignItems: "center",
-                justifyContent: "center",
+                alignItems: 'center',
+                justifyContent: 'center',
                 opacity: pressed ? 0.8 : 1,
               })}
             >
               <Text
                 style={{
-                  color: isCurrent
-                    ? "#FFF"
-                    : isAnswered
-                      ? theme.colors.success
-                      : theme.colors.text,
-                  fontWeight: "700",
+                  color: isCurrent ? '#FFF' : isAnswered ? theme.colors.success : theme.colors.text,
+                  fontWeight: '700',
                   fontSize: 13,
                 }}
               >
@@ -287,22 +291,14 @@ function QuestionNavigator({
 // Progress Bar Component
 // ============================================================================
 
-function ProgressBar({
-  answeredCount,
-  totalCount,
-}: {
-  answeredCount: number;
-  totalCount: number;
-}) {
+function ProgressBar({ answeredCount, totalCount }: { answeredCount: number; totalCount: number }) {
   const progress = (answeredCount / totalCount) * 100;
 
   return (
     <View style={{ gap: 6, paddingHorizontal: 16 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <Text style={{ fontSize: 13, color: theme.colors.muted, fontWeight: "600" }}>
-          進度
-        </Text>
-        <Text style={{ fontSize: 13, color: theme.colors.accent, fontWeight: "700" }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text style={{ fontSize: 13, color: theme.colors.muted, fontWeight: '600' }}>進度</Text>
+        <Text style={{ fontSize: 13, color: theme.colors.accent, fontWeight: '700' }}>
           {answeredCount} / {totalCount}
         </Text>
       </View>
@@ -311,12 +307,12 @@ function ProgressBar({
           height: 6,
           borderRadius: theme.radius.full,
           backgroundColor: theme.colors.surface2,
-          overflow: "hidden",
+          overflow: 'hidden',
         }}
       >
         <Animated.View
           style={{
-            height: "100%",
+            height: '100%',
             width: `${progress}%`,
             backgroundColor: theme.colors.success,
           }}
@@ -351,8 +347,8 @@ function SingleChoiceQuestion({
             key={`option-${idx}`}
             onPress={() => onChange(option)}
             style={({ pressed }) => ({
-              flexDirection: "row",
-              alignItems: "center",
+              flexDirection: 'row',
+              alignItems: 'center',
               padding: 12,
               borderRadius: theme.radius.md,
               borderWidth: 2,
@@ -368,22 +364,20 @@ function SingleChoiceQuestion({
                 borderRadius: 10,
                 borderWidth: 2,
                 borderColor: isSelected ? theme.colors.accent : theme.colors.border,
-                backgroundColor: isSelected ? theme.colors.accent : "transparent",
-                alignItems: "center",
-                justifyContent: "center",
+                backgroundColor: isSelected ? theme.colors.accent : 'transparent',
+                alignItems: 'center',
+                justifyContent: 'center',
                 marginRight: 12,
               }}
             >
-              {isSelected && (
-                <Ionicons name="checkmark" size={14} color="#FFF" />
-              )}
+              {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
             </View>
             <Text
               style={{
                 flex: 1,
                 color: theme.colors.text,
                 fontSize: 15,
-                fontWeight: "500",
+                fontWeight: '500',
               }}
             >
               {option}
@@ -428,8 +422,8 @@ function MultipleChoiceQuestion({
             key={`option-${idx}`}
             onPress={() => toggleOption(option)}
             style={({ pressed }) => ({
-              flexDirection: "row",
-              alignItems: "center",
+              flexDirection: 'row',
+              alignItems: 'center',
               padding: 12,
               borderRadius: theme.radius.md,
               borderWidth: 2,
@@ -445,22 +439,20 @@ function MultipleChoiceQuestion({
                 borderRadius: 4,
                 borderWidth: 2,
                 borderColor: isSelected ? theme.colors.accent : theme.colors.border,
-                backgroundColor: isSelected ? theme.colors.accent : "transparent",
-                alignItems: "center",
-                justifyContent: "center",
+                backgroundColor: isSelected ? theme.colors.accent : 'transparent',
+                alignItems: 'center',
+                justifyContent: 'center',
                 marginRight: 12,
               }}
             >
-              {isSelected && (
-                <Ionicons name="checkmark" size={14} color="#FFF" />
-              )}
+              {isSelected && <Ionicons name="checkmark" size={14} color="#FFF" />}
             </View>
             <Text
               style={{
                 flex: 1,
                 color: theme.colors.text,
                 fontSize: 15,
-                fontWeight: "500",
+                fontWeight: '500',
               }}
             >
               {option}
@@ -489,7 +481,7 @@ function TrueFalseQuestion({
 
   return (
     <View style={{ gap: 12 }}>
-      {["True（正確）", "False（錯誤）"].map((option) => {
+      {['True（正確）', 'False（錯誤）'].map((option) => {
         const isSelected = currentAnswer === option;
 
         return (
@@ -502,7 +494,7 @@ function TrueFalseQuestion({
               borderWidth: 2,
               borderColor: isSelected ? theme.colors.accent : theme.colors.border,
               backgroundColor: isSelected ? theme.colors.accentSoft : theme.colors.surface2,
-              alignItems: "center",
+              alignItems: 'center',
               opacity: pressed ? 0.8 : 1,
             })}
           >
@@ -510,7 +502,7 @@ function TrueFalseQuestion({
               style={{
                 color: theme.colors.text,
                 fontSize: 15,
-                fontWeight: "600",
+                fontWeight: '600',
               }}
             >
               {option}
@@ -535,7 +527,7 @@ function FillInBlankQuestion({
   answer: string | string[] | undefined;
   onChange: (value: string) => void;
 }) {
-  const currentAnswer = Array.isArray(answer) ? answer[0] : answer || "";
+  const currentAnswer = Array.isArray(answer) ? answer[0] : answer || '';
 
   return (
     <View style={{ gap: 12 }}>
@@ -556,7 +548,7 @@ function FillInBlankQuestion({
           fontSize: 15,
         }}
       />
-      <Text style={{ fontSize: 12, color: theme.colors.muted, fontStyle: "italic" }}>
+      <Text style={{ fontSize: 12, color: theme.colors.muted, fontStyle: 'italic' }}>
         提示：請仔細檢查拼寫和標點符號
       </Text>
     </View>
@@ -586,10 +578,10 @@ function ResultsScreen({
   const correctCount = results.filter((r) => r.isCorrect).length;
 
   const getResultStatus = (): { color: string; label: string } => {
-    if (percentage >= 90) return { color: theme.colors.success, label: "優秀" };
-    if (percentage >= 80) return { color: theme.colors.accent, label: "良好" };
-    if (percentage >= 70) return { color: theme.colors.warning, label: "及格" };
-    return { color: theme.colors.danger, label: "未及格" };
+    if (percentage >= 90) return { color: theme.colors.success, label: '優秀' };
+    if (percentage >= 80) return { color: theme.colors.accent, label: '良好' };
+    if (percentage >= 70) return { color: theme.colors.warning, label: '及格' };
+    return { color: theme.colors.danger, label: '未及格' };
   };
 
   const status = getResultStatus();
@@ -599,10 +591,14 @@ function ResultsScreen({
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.bg }}
-      contentContainerStyle={{ gap: 16, padding: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+      contentContainerStyle={{
+        gap: 16,
+        padding: 16,
+        paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
+      }}
     >
       <AnimatedCard title="測驗成績" delay={0}>
-        <View style={{ alignItems: "center", gap: 16 }}>
+        <View style={{ alignItems: 'center', gap: 16 }}>
           {/* Score Circle */}
           <View
             style={{
@@ -610,26 +606,26 @@ function ResultsScreen({
               height: 120,
               borderRadius: 60,
               backgroundColor: status.color,
-              alignItems: "center",
-              justifyContent: "center",
+              alignItems: 'center',
+              justifyContent: 'center',
               opacity: 0.15,
-              position: "relative",
+              position: 'relative',
             }}
           >
             <View
               style={{
-                position: "absolute",
+                position: 'absolute',
                 width: 100,
                 height: 100,
                 borderRadius: 50,
                 borderWidth: 3,
                 borderColor: status.color,
-                alignItems: "center",
-                justifyContent: "center",
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              <View style={{ alignItems: "center" }}>
-                <Text style={{ fontSize: 32, fontWeight: "800", color: status.color }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontSize: 32, fontWeight: '800', color: status.color }}>
                   {percentage}%
                 </Text>
                 <Text style={{ fontSize: 12, color: theme.colors.muted, marginTop: 2 }}>
@@ -639,8 +635,8 @@ function ResultsScreen({
             </View>
           </View>
 
-          <View style={{ gap: 8, width: "100%", alignItems: "center" }}>
-            <Text style={{ fontSize: 18, fontWeight: "700", color: theme.colors.text }}>
+          <View style={{ gap: 8, width: '100%', alignItems: 'center' }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: theme.colors.text }}>
               {quizTitle}
             </Text>
             <Text style={{ fontSize: 14, color: theme.colors.muted }}>
@@ -654,41 +650,41 @@ function ResultsScreen({
         <View style={{ gap: 10 }}>
           <View
             style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
+              flexDirection: 'row',
+              justifyContent: 'space-between',
               paddingVertical: 8,
               borderBottomWidth: 1,
               borderBottomColor: theme.colors.border,
             }}
           >
             <Text style={{ color: theme.colors.muted }}>正確題數</Text>
-            <Text style={{ color: theme.colors.success, fontWeight: "700" }}>
+            <Text style={{ color: theme.colors.success, fontWeight: '700' }}>
               {correctCount} / {results.length}
             </Text>
           </View>
           <View
             style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
+              flexDirection: 'row',
+              justifyContent: 'space-between',
               paddingVertical: 8,
               borderBottomWidth: 1,
               borderBottomColor: theme.colors.border,
             }}
           >
             <Text style={{ color: theme.colors.muted }}>作答時間</Text>
-            <Text style={{ color: theme.colors.accent, fontWeight: "700" }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
               {minutes} 分 {seconds} 秒
             </Text>
           </View>
           <View
             style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
+              flexDirection: 'row',
+              justifyContent: 'space-between',
               paddingVertical: 8,
             }}
           >
             <Text style={{ color: theme.colors.muted }}>答題速度</Text>
-            <Text style={{ color: theme.colors.text, fontWeight: "700" }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
               {(timeTaken / results.length).toFixed(1)} 秒/題
             </Text>
           </View>
@@ -720,19 +716,21 @@ function ResultsScreen({
                   borderLeftColor: result.isCorrect ? theme.colors.success : theme.colors.danger,
                 }}
               >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <View
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}
+                >
                   <Ionicons
-                    name={result.isCorrect ? "checkmark-circle" : "close-circle"}
+                    name={result.isCorrect ? 'checkmark-circle' : 'close-circle'}
                     size={18}
                     color={result.isCorrect ? theme.colors.success : theme.colors.danger}
                   />
-                  <Text style={{ flex: 1, fontWeight: "700", color: theme.colors.text }}>
+                  <Text style={{ flex: 1, fontWeight: '700', color: theme.colors.text }}>
                     第 {result.questionNum || idx + 1} 題
                   </Text>
                   <Text
                     style={{
                       color: result.isCorrect ? theme.colors.success : theme.colors.danger,
-                      fontWeight: "700",
+                      fontWeight: '700',
                     }}
                   >
                     {result.earnedPoints} / {result.points || 10} 分
@@ -745,7 +743,7 @@ function ResultsScreen({
 
                 <View style={{ gap: 6 }}>
                   <View>
-                    <Text style={{ fontSize: 11, color: theme.colors.muted, fontWeight: "600" }}>
+                    <Text style={{ fontSize: 11, color: theme.colors.muted, fontWeight: '600' }}>
                       你的答案：
                     </Text>
                     <Text
@@ -755,15 +753,13 @@ function ResultsScreen({
                         paddingLeft: 8,
                       }}
                     >
-                      {answerArray.length > 0
-                        ? answerArray.join(", ")
-                        : "（未回答）"}
+                      {answerArray.length > 0 ? answerArray.join(', ') : '（未回答）'}
                     </Text>
                   </View>
 
                   {!result.isCorrect && correctArray.length > 0 && (
                     <View>
-                      <Text style={{ fontSize: 11, color: theme.colors.muted, fontWeight: "600" }}>
+                      <Text style={{ fontSize: 11, color: theme.colors.muted, fontWeight: '600' }}>
                         正確答案：
                       </Text>
                       <Text
@@ -773,7 +769,7 @@ function ResultsScreen({
                           paddingLeft: 8,
                         }}
                       >
-                        {correctArray.join(", ")}
+                        {correctArray.join(', ')}
                       </Text>
                     </View>
                   )}
@@ -784,12 +780,7 @@ function ResultsScreen({
         </View>
       </AnimatedCard>
 
-      <Button
-        text="返回測驗列表"
-        kind="primary"
-        fullWidth
-        onPress={onRestart}
-      />
+      <Button text="返回測驗列表" kind="primary" fullWidth onPress={onRestart} />
     </ScrollView>
   );
 }
@@ -825,7 +816,7 @@ export function QuizTakingScreen(props: any) {
         const demoQuestions = generateDemoQuestions(params?.questionCount || 8);
         setQuestions(demoQuestions);
       } catch (error) {
-        console.error("Error loading questions:", error);
+        console.error('Error loading questions:', error);
         // Fallback to demo questions
         const demoQuestions = generateDemoQuestions(params?.questionCount || 8);
         setQuestions(demoQuestions);
@@ -850,8 +841,8 @@ export function QuizTakingScreen(props: any) {
       if (Array.isArray(answer.answer)) {
         return answer.answer.length > 0;
       }
-      return answer.answer && answer.answer.trim() !== "";
-    })
+      return answer.answer && answer.answer.trim() !== '';
+    }),
   );
 
   const handleAnswerChange = (value: string | string[]) => {
@@ -871,14 +862,10 @@ export function QuizTakingScreen(props: any) {
     const unansweredCount = questions.length - answeredQuestions.size;
 
     if (unansweredCount > 0 && !timeExpired) {
-      Alert.alert(
-        "警告",
-        `還有 ${unansweredCount} 題未回答。確定要提交嗎？`,
-        [
-          { text: "繼續作答", onPress: () => {} },
-          { text: "確認提交", onPress: () => performSubmit() },
-        ]
-      );
+      Alert.alert('警告', `還有 ${unansweredCount} 題未回答。確定要提交嗎？`, [
+        { text: '繼續作答', onPress: () => {} },
+        { text: '確認提交', onPress: () => performSubmit() },
+      ]);
     } else {
       performSubmit();
     }
@@ -888,7 +875,7 @@ export function QuizTakingScreen(props: any) {
     // Calculate results
     const results: QuizResult[] = questions.map((q) => {
       const userAnswer = answers[`q${q.questionNum}`];
-      const userAnswerValue = userAnswer?.answer || "";
+      const userAnswerValue = userAnswer?.answer || '';
       const correctAnswers = q.correctAnswers || [];
 
       // Simple answer checking
@@ -896,12 +883,14 @@ export function QuizTakingScreen(props: any) {
       let earnedPoints = 0;
       const maxPoints = q.points || 10;
 
-      if (q.type === "fill_in_blank") {
+      if (q.type === 'fill_in_blank') {
         // For fill in blank, do simple string comparison (case insensitive)
-        const userStr = (typeof userAnswerValue === "string" ? userAnswerValue : "").toLowerCase().trim();
+        const userStr = (typeof userAnswerValue === 'string' ? userAnswerValue : '')
+          .toLowerCase()
+          .trim();
         isCorrect = correctAnswers.some((ca) => ca.toLowerCase().trim() === userStr);
         earnedPoints = isCorrect ? maxPoints : 0;
-      } else if (q.type === "multiple_choice") {
+      } else if (q.type === 'multiple_choice') {
         // For multiple choice, must match all correct answers
         const userAnswers = Array.isArray(userAnswerValue)
           ? userAnswerValue.sort()
@@ -962,7 +951,7 @@ export function QuizTakingScreen(props: any) {
   if (loading) {
     return (
       <Screen>
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 16 }}>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}>
           <ActivityIndicator size="large" color={theme.colors.accent} />
           <Text style={{ color: theme.colors.muted }}>正在加載題目...</Text>
         </View>
@@ -974,18 +963,20 @@ export function QuizTakingScreen(props: any) {
   if (showResults) {
     const results: QuizResult[] = questions.map((q) => {
       const userAnswer = answers[`q${q.questionNum}`];
-      const userAnswerValue = userAnswer?.answer || "";
+      const userAnswerValue = userAnswer?.answer || '';
       const correctAnswers = q.correctAnswers || [];
 
       let isCorrect = false;
       let earnedPoints = 0;
       const maxPoints = q.points || 10;
 
-      if (q.type === "fill_in_blank") {
-        const userStr = (typeof userAnswerValue === "string" ? userAnswerValue : "").toLowerCase().trim();
+      if (q.type === 'fill_in_blank') {
+        const userStr = (typeof userAnswerValue === 'string' ? userAnswerValue : '')
+          .toLowerCase()
+          .trim();
         isCorrect = correctAnswers.some((ca) => ca.toLowerCase().trim() === userStr);
         earnedPoints = isCorrect ? maxPoints : 0;
-      } else if (q.type === "multiple_choice") {
+      } else if (q.type === 'multiple_choice') {
         const userAnswers = Array.isArray(userAnswerValue)
           ? userAnswerValue.sort()
           : userAnswerValue
@@ -1018,7 +1009,7 @@ export function QuizTakingScreen(props: any) {
 
     return (
       <ResultsScreen
-        quizTitle={params?.title || "測驗"}
+        quizTitle={params?.title || '測驗'}
         totalPoints={totalPoints}
         earnedPoints={earnedPoints}
         results={results}
@@ -1043,21 +1034,17 @@ export function QuizTakingScreen(props: any) {
             gap: 10,
           }}
         >
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Text style={{ fontSize: 16, fontWeight: "700", color: theme.colors.text, flex: 1 }}>
-              {params?.title || "測驗"}
+          <View
+            style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text, flex: 1 }}>
+              {params?.title || '測驗'}
             </Text>
             {params?.duration && (
-              <CountdownTimer
-                initialSeconds={params.duration * 60}
-                onExpire={handleTimeExpire}
-              />
+              <CountdownTimer initialSeconds={params.duration * 60} onExpire={handleTimeExpire} />
             )}
           </View>
-          <ProgressBar
-            answeredCount={answeredQuestions.size}
-            totalCount={questions.length}
-          />
+          <ProgressBar answeredCount={answeredQuestions.size} totalCount={questions.length} />
         </View>
 
         {/* Question Navigator */}
@@ -1081,9 +1068,9 @@ export function QuizTakingScreen(props: any) {
             {/* Time Expired Warning */}
             {timeExpired && (
               <Card variant="filled">
-                <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
                   <Ionicons name="alert-circle" size={18} color={theme.colors.danger} />
-                  <Text style={{ color: theme.colors.danger, flex: 1, fontWeight: "600" }}>
+                  <Text style={{ color: theme.colors.danger, flex: 1, fontWeight: '600' }}>
                     時間已到，測驗已自動提交
                   </Text>
                 </View>
@@ -1107,7 +1094,7 @@ export function QuizTakingScreen(props: any) {
 
                 {/* Question Type Renderer */}
                 <View style={{ marginTop: 8 }}>
-                  {currentQuestionData.type === "single_choice" && (
+                  {currentQuestionData.type === 'single_choice' && (
                     <SingleChoiceQuestion
                       question={currentQuestionData}
                       answer={answers[`q${currentQuestion}`]?.answer}
@@ -1115,7 +1102,7 @@ export function QuizTakingScreen(props: any) {
                     />
                   )}
 
-                  {currentQuestionData.type === "multiple_choice" && (
+                  {currentQuestionData.type === 'multiple_choice' && (
                     <MultipleChoiceQuestion
                       question={currentQuestionData}
                       answer={answers[`q${currentQuestion}`]?.answer}
@@ -1123,7 +1110,7 @@ export function QuizTakingScreen(props: any) {
                     />
                   )}
 
-                  {currentQuestionData.type === "true_false" && (
+                  {currentQuestionData.type === 'true_false' && (
                     <TrueFalseQuestion
                       question={currentQuestionData}
                       answer={answers[`q${currentQuestion}`]?.answer}
@@ -1131,7 +1118,7 @@ export function QuizTakingScreen(props: any) {
                     />
                   )}
 
-                  {currentQuestionData.type === "fill_in_blank" && (
+                  {currentQuestionData.type === 'fill_in_blank' && (
                     <FillInBlankQuestion
                       question={currentQuestionData}
                       answer={answers[`q${currentQuestion}`]?.answer}
@@ -1147,7 +1134,7 @@ export function QuizTakingScreen(props: any) {
         {/* Navigation Buttons */}
         <View
           style={{
-            position: "absolute",
+            position: 'absolute',
             bottom: 0,
             left: 0,
             right: 0,
@@ -1160,7 +1147,7 @@ export function QuizTakingScreen(props: any) {
             gap: 10,
           }}
         >
-          <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
             <Button
               text="上一題"
               kind="secondary"
@@ -1194,10 +1181,10 @@ export function QuizTakingScreen(props: any) {
 // Helper function to get question type label (moved outside since can't use this)
 function getQuestionTypeLabel(type: QuestionType): string {
   const labels: Record<QuestionType, string> = {
-    single_choice: "單選題",
-    multiple_choice: "多選題",
-    true_false: "是非題",
-    fill_in_blank: "填空題",
+    single_choice: '單選題',
+    multiple_choice: '多選題',
+    true_false: '是非題',
+    fill_in_blank: '填空題',
   };
-  return labels[type] || "問題";
+  return labels[type] || '問題';
 }

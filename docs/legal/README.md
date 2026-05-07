@@ -10,11 +10,13 @@ This directory contains all enterprise-grade legal documents for the Campus Help
 ## Documents Overview
 
 ### 1. `privacy-policy.md` (隱私權政策)
+
 **Size:** ~34 KB | **Language:** Traditional Chinese + English
 
 Comprehensive privacy policy covering all data collection, processing, and protection practices.
 
 **Key Sections:**
+
 - Data collection methods (location, camera, photos, device info, etc.)
 - Firebase services and third-party integrations
 - School SSO integration
@@ -29,12 +31,14 @@ Comprehensive privacy policy covering all data collection, processing, and prote
 - Security measures and encryption standards
 
 **Compliant With:**
+
 - Taiwan's Personal Data Protection Act (個人資料保護法)
 - GDPR (EU/UK/Swiss residents)
 - CCPA/CPRA (California residents)
 - COPPA (for under-13 protections)
 
 **Use For:**
+
 - App Store product page (link in Privacy Policy)
 - Google Play Store
 - Website privacy statement
@@ -44,11 +48,13 @@ Comprehensive privacy policy covering all data collection, processing, and prote
 ---
 
 ### 2. `terms-of-service.md` (服務條款)
+
 **Size:** ~24 KB | **Language:** Traditional Chinese + English
 
 Complete terms of service governing use of the Campus Helper application.
 
 **Key Sections:**
+
 - Service description and scope
 - User eligibility requirements (18+, university students/staff)
 - Account creation and responsibility
@@ -63,6 +69,7 @@ Complete terms of service governing use of the Campus Helper application.
 - Contact information
 
 **Compliant With:**
+
 - Taiwan civil law
 - Consumer Protection Law (消費者保護法)
 - E-Commerce regulations
@@ -70,6 +77,7 @@ Complete terms of service governing use of the Campus Helper application.
 - Google Play Store policies
 
 **Use For:**
+
 - App Store terms of service link
 - Google Play Store
 - In-app terms acceptance
@@ -79,11 +87,13 @@ Complete terms of service governing use of the Campus Helper application.
 ---
 
 ### 3. `app-store-review-notes.md`
+
 **Size:** ~25 KB | **Language:** English
 
 Detailed explanation of app features, permissions, and testing instructions specifically for app store review teams.
 
 **Key Sections:**
+
 - App functionality overview
 - Permission usage justification (location, camera, photos)
 - School SSO integration explanation
@@ -100,11 +110,13 @@ Detailed explanation of app features, permissions, and testing instructions spec
 - Common review concerns and responses
 
 **Includes:**
+
 - Demo account credentials (ready for review)
 - Test payment information
 - Feature testing guide
 
 **Use For:**
+
 - Apple App Review team review
 - Google Play Store review
 - TestFlight testers
@@ -114,11 +126,13 @@ Detailed explanation of app features, permissions, and testing instructions spec
 ---
 
 ### 4. `data-safety.md`
+
 **Size:** ~34 KB | **Language:** English
 
 Google Play Store Data Safety form mapping. Comprehensive documentation of all data types collected, shared, and retained.
 
 **Key Sections:**
+
 - Data collection summary
 - Detailed data types (16 categories):
   - Personal information
@@ -146,12 +160,14 @@ Google Play Store Data Safety form mapping. Comprehensive documentation of all d
 - International data transfers
 
 **Structured For:**
+
 - Google Play Data Safety form fields
 - Regulatory compliance documentation
 - Data subject access requests
 - Privacy impact assessments
 
 **Use For:**
+
 - Google Play Store Data Safety form submission
 - GDPR data controller documentation
 - Privacy audit documentation
@@ -161,11 +177,13 @@ Google Play Store Data Safety form mapping. Comprehensive documentation of all d
 ---
 
 ### 5. `apple-privacy-nutrition-labels.md`
+
 **Size:** ~19 KB | **Language:** English
 
 Apple's App Privacy Details framework. Maps all data practices to Apple's privacy categories.
 
 **Key Sections:**
+
 - Data used to track you (IDFA, cookies, cross-app tracking)
 - Data linked to you (user-identified data)
 - Data not linked to you (anonymized data)
@@ -187,11 +205,13 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 - Privacy label verification and accuracy
 
 **Structured For:**
+
 - Apple App Store Privacy Details form
 - App Store product page privacy section
 - User privacy understanding
 
 **Use For:**
+
 - Apple App Store Privacy Details submission
 - iOS app privacy label generation
 - User privacy transparency
@@ -201,13 +221,13 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 
 ## Quick Reference Table
 
-| Document | Format | Language | Size | Purpose | Platform |
-|----------|--------|----------|------|---------|----------|
-| Privacy Policy | Markdown | ZH + EN | 34 KB | Data handling & privacy practices | Universal |
-| Terms of Service | Markdown | ZH + EN | 24 KB | Usage terms & legal agreement | Universal |
-| App Store Review Notes | Markdown | EN | 25 KB | Review team guidance | iOS + Android |
-| Data Safety | Markdown | EN | 34 KB | Data collection mapping | Google Play |
-| Privacy Nutrition Labels | Markdown | EN | 19 KB | Privacy category mapping | Apple App Store |
+| Document                 | Format   | Language | Size  | Purpose                           | Platform        |
+| ------------------------ | -------- | -------- | ----- | --------------------------------- | --------------- |
+| Privacy Policy           | Markdown | ZH + EN  | 34 KB | Data handling & privacy practices | Universal       |
+| Terms of Service         | Markdown | ZH + EN  | 24 KB | Usage terms & legal agreement     | Universal       |
+| App Store Review Notes   | Markdown | EN       | 25 KB | Review team guidance              | iOS + Android   |
+| Data Safety              | Markdown | EN       | 34 KB | Data collection mapping           | Google Play     |
+| Privacy Nutrition Labels | Markdown | EN       | 19 KB | Privacy category mapping          | Apple App Store |
 
 ---
 
@@ -216,6 +236,7 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 ### For App Store Submission
 
 **Apple App Store (iOS):**
+
 1. Copy content from `privacy-policy.md` (Taiwan PDPA + GDPR sections)
 2. Add link to full Privacy Policy on website
 3. Copy content from `terms-of-service.md` for Terms of Service link
@@ -223,6 +244,7 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 5. Reference `app-store-review-notes.md` when communicating with review team
 
 **Google Play Store (Android):**
+
 1. Copy content from `privacy-policy.md`
 2. Copy content from `terms-of-service.md`
 3. Use `data-safety.md` to fill Data Safety form
@@ -270,11 +292,13 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 ### Data Protection Features
 
 ✓ **Encryption:**
+
 - TLS 1.3 for all data in transit
 - AES-256 for sensitive data at rest
 - bcrypt for passwords
 
 ✓ **User Controls:**
+
 - Granular privacy settings for each feature
 - Data export (JSON/CSV format)
 - Account deletion with 30-day cooling-off
@@ -283,12 +307,14 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 - Location toggle
 
 ✓ **Data Minimization:**
+
 - Collects only necessary data
 - Automatic deletion of old data (30-90 days)
 - No data sale or marketing use
 - Limited third-party sharing
 
 ✓ **Transparency:**
+
 - Clear explanation of data use
 - User-visible privacy settings
 - Regular policy updates with notification
@@ -297,12 +323,14 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 ### Regulatory Compliance
 
 ✓ **Taiwan Personal Data Protection Act (個人資料保護法)**
+
 - Full compliance with local regulations
 - Chinese language documentation
 - Data subject rights implementation
 - Explicit consent collection
 
 ✓ **GDPR (General Data Protection Regulation)**
+
 - For EU/UK/Swiss residents
 - Data Processing Agreements in place
 - Right to access, correct, delete
@@ -310,12 +338,14 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 - Data Protection Officer contact
 
 ✓ **COPPA (Children's Online Privacy Protection)**
+
 - Under-13 users cannot create accounts
 - Parental controls for 13-17 year-olds
 - No behavioral advertising to children
 - Data minimization for minors
 
 ✓ **CCPA/CPRA (California Consumer Privacy Act)**
+
 - Right to know, delete, opt-out
 - No sale of personal data
 - Privacy policy disclosure
@@ -323,6 +353,7 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 ### App Store Compliance
 
 ✓ **Apple App Store:**
+
 - All privacy requirements met
 - App Privacy Details form filled
 - No hidden data collection
@@ -330,6 +361,7 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 - Age-appropriate content
 
 ✓ **Google Play Store:**
+
 - Data Safety form complete
 - All data types declared
 - Security practices documented
@@ -342,18 +374,22 @@ Apple's App Privacy Details framework. Maps all data practices to Apple's privac
 For questions about these legal documents:
 
 **Privacy Team:**
+
 - Email: privacy@campushelper.app
 - Response Time: 7-14 business days
 
 **Legal Team:**
+
 - Email: legal@campushelper.app
 - For: Legal document questions, contracts, disputes
 
 **Support:**
+
 - Email: support@campushelper.app
 - For: User privacy questions, data requests
 
 **Security:**
+
 - Email: security@campushelper.app
 - For: Vulnerability reports, security concerns
 
@@ -378,6 +414,7 @@ For questions about these legal documents:
 ### Update Triggers
 
 Documents will be updated when:
+
 - New data collection features are added
 - Third-party services are added/removed
 - Legal requirements change
@@ -421,12 +458,14 @@ Before app store submission, verify:
 ## Additional Resources
 
 ### Related Documents
+
 - App architecture documentation: `../API.md`
 - AI assistant architecture: `../AI_ASSISTANT_ARCHITECTURE.md`
 - Product blueprint: `../TRONCLASS_PLUS_PRODUCT_BLUEPRINT.md`
 - UI guidelines: `../UI_GUIDELINES.md`
 
 ### External References
+
 - Taiwan PDPA: https://law.moj.gov.tw/ENG/LawClass/LawAll.aspx?pcode=I0030030
 - GDPR: https://gdpr-info.eu/
 - COPPA: https://www.ftc.gov/enforcement/rules/rulemaking-regulatory-process/coppa-rule

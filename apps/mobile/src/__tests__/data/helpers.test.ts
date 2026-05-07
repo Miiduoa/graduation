@@ -1,8 +1,4 @@
-import {
-  findById,
-  findByIdStrict,
-  findByIdOrFirst,
-} from '../../data/helpers';
+import { findById, findByIdStrict, findByIdOrFirst } from '../../data/helpers';
 
 describe('Data Helpers', () => {
   const testItems = [

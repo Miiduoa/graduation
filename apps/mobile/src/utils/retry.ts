@@ -22,7 +22,7 @@ export interface RetryConfig {
   signal?: AbortSignal;
 }
 
-const DEFAULT_CONFIG: Required<Omit<RetryConfig, "shouldRetry" | "onRetry" | "signal">> = {
+const DEFAULT_CONFIG: Required<Omit<RetryConfig, 'shouldRetry' | 'onRetry' | 'signal'>> = {
   maxRetries: 3,
   baseDelayMs: 1000,
   maxDelayMs: 30000,
@@ -37,17 +37,17 @@ export function isRetryableError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
 
   const message = error.message.toLowerCase();
-  const name = error.name?.toLowerCase() || "";
+  const name = error.name?.toLowerCase() || '';
 
   // 網路錯誤通常可重試
   const networkErrors = [
-    "network",
-    "timeout",
-    "econnrefused",
-    "econnreset",
-    "enotfound",
-    "socket hang up",
-    "fetch failed",
+    'network',
+    'timeout',
+    'econnrefused',
+    'econnreset',
+    'enotfound',
+    'socket hang up',
+    'fetch failed',
   ];
   if (networkErrors.some((e) => message.includes(e) || name.includes(e))) {
     return true;
@@ -62,10 +62,10 @@ export function isRetryableError(error: unknown): boolean {
 
   // Firebase 特定錯誤
   const firebaseRetryableCodes = [
-    "unavailable",
-    "resource-exhausted",
-    "deadline-exceeded",
-    "internal",
+    'unavailable',
+    'resource-exhausted',
+    'deadline-exceeded',
+    'internal',
   ];
   if (firebaseRetryableCodes.some((code) => message.includes(code))) {
     return true;
@@ -79,7 +79,7 @@ export function isRetryableError(error: unknown): boolean {
  */
 function calculateDelay(
   attempt: number,
-  config: Required<Omit<RetryConfig, "shouldRetry" | "onRetry" | "signal">>
+  config: Required<Omit<RetryConfig, 'shouldRetry' | 'onRetry' | 'signal'>>,
 ): number {
   let delay = config.baseDelayMs;
 
@@ -102,22 +102,22 @@ function calculateDelay(
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(new Error("Aborted"));
+      reject(new Error('Aborted'));
       return;
     }
 
     const timer = setTimeout(resolve, ms);
 
-    signal?.addEventListener("abort", () => {
+    signal?.addEventListener('abort', () => {
       clearTimeout(timer);
-      reject(new Error("Aborted"));
+      reject(new Error('Aborted'));
     });
   });
 }
 
 /**
  * 帶重試的異步函數執行器
- * 
+ *
  * @example
  * ```ts
  * const result = await withRetry(
@@ -126,10 +126,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * );
  * ```
  */
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  config: RetryConfig = {}
-): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, config: RetryConfig = {}): Promise<T> {
   const mergedConfig = { ...DEFAULT_CONFIG, ...config };
   const { maxRetries, shouldRetry, onRetry, signal } = {
     ...mergedConfig,
@@ -144,7 +141,7 @@ export async function withRetry<T>(
   while (attempt <= maxRetries) {
     // 檢查是否已取消
     if (signal?.aborted) {
-      throw new Error("Aborted");
+      throw new Error('Aborted');
     }
 
     try {
@@ -178,7 +175,7 @@ export async function withRetry<T>(
 export function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
-  message = "Operation timed out"
+  message = 'Operation timed out',
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -200,9 +197,10 @@ export function withTimeout<T>(
 /**
  * 建立可取消的 Promise
  */
-export function createCancellable<T>(
-  fn: (signal: AbortSignal) => Promise<T>
-): { promise: Promise<T>; cancel: () => void } {
+export function createCancellable<T>(fn: (signal: AbortSignal) => Promise<T>): {
+  promise: Promise<T>;
+  cancel: () => void;
+} {
   const controller = new AbortController();
 
   return {
@@ -217,7 +215,7 @@ export function createCancellable<T>(
 export async function withConcurrencyLimit<T, R>(
   items: T[],
   fn: (item: T, index: number) => Promise<R>,
-  concurrency = 5
+  concurrency = 5,
 ): Promise<R[]> {
   const results: R[] = [];
   const executing: Promise<void>[] = [];
@@ -233,7 +231,7 @@ export async function withConcurrencyLimit<T, R>(
       await Promise.race(executing);
       executing.splice(
         executing.findIndex((p) => p === promise),
-        1
+        1,
       );
     }
   }

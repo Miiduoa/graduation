@@ -1,18 +1,18 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
-import React, { useEffect, useState } from "react";
-import { ScrollView, Text, View, Switch, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Screen, Card, Button, Pill, SectionTitle } from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
-import { useAuth } from "../state/auth";
+import React, { useEffect, useState } from 'react';
+import { ScrollView, Text, View, Switch, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Screen, Card, Button, Pill, SectionTitle } from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { useAuth } from '../state/auth';
 import {
   type NotificationPreferences,
   defaultNotificationPreferences,
   loadNotificationPreferences,
   saveNotificationPreferences,
   syncPushTokenForUser,
-} from "../services/notifications";
+} from '../services/notifications';
 
 type ToggleRowProps = {
   icon: string;
@@ -27,8 +27,8 @@ function ToggleRow({ icon, label, description, value, onValueChange, disabled }:
   return (
     <View
       style={{
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
         paddingVertical: 12,
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.border,
@@ -36,11 +36,17 @@ function ToggleRow({ icon, label, description, value, onValueChange, disabled }:
       }}
     >
       <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        name={icon as any} size={22} color={theme.colors.muted} style={{ marginRight: 12 }} />
+        name={icon as any}
+        size={22}
+        color={theme.colors.muted}
+        style={{ marginRight: 12 }}
+      />
       <View style={{ flex: 1 }}>
-        <Text style={{ color: theme.colors.text, fontWeight: "600" }}>{label}</Text>
+        <Text style={{ color: theme.colors.text, fontWeight: '600' }}>{label}</Text>
         {description ? (
-          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>{description}</Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+            {description}
+          </Text>
         ) : null}
       </View>
       <Switch
@@ -48,7 +54,7 @@ function ToggleRow({ icon, label, description, value, onValueChange, disabled }:
         onValueChange={onValueChange}
         disabled={disabled}
         trackColor={{ false: theme.colors.border, true: theme.colors.accent }}
-        thumbColor={value ? "#fff" : theme.colors.muted}
+        thumbColor={value ? '#fff' : theme.colors.muted}
       />
     </View>
   );
@@ -62,16 +68,16 @@ type TimePickerProps = {
 };
 
 function TimePicker({ label, value, onChange, disabled }: TimePickerProps) {
-  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, "0"));
-  const [h, m] = value.split(":");
+  const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
+  const [h, m] = value.split(':');
 
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
       <Text style={{ color: theme.colors.muted, minWidth: 40 }}>{label}</Text>
       <Pressable
         onPress={() => {
           if (disabled) return;
-          const nextH = ((parseInt(h, 10) + 1) % 24).toString().padStart(2, "0");
+          const nextH = ((parseInt(h, 10) + 1) % 24).toString().padStart(2, '0');
           onChange(`${nextH}:${m}`);
         }}
         style={{
@@ -84,7 +90,7 @@ function TimePicker({ label, value, onChange, disabled }: TimePickerProps) {
           opacity: disabled ? 0.5 : 1,
         }}
       >
-        <Text style={{ color: theme.colors.text, fontWeight: "700" }}>{value}</Text>
+        <Text style={{ color: theme.colors.text, fontWeight: '700' }}>{value}</Text>
       </Pressable>
     </View>
   );
@@ -98,7 +104,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
-  const [permissionStatus, setPermissionStatus] = useState<string>("unknown");
+  const [permissionStatus, setPermissionStatus] = useState<string>('unknown');
 
   useEffect(() => {
     if (!auth.user) return;
@@ -108,7 +114,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
       try {
         setPrefs(await loadNotificationPreferences(uid));
       } catch (e) {
-        console.error("Failed to load notification preferences:", e);
+        console.error('Failed to load notification preferences:', e);
       } finally {
         setLoading(false);
       }
@@ -117,7 +123,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
 
   const updatePref = <K extends keyof NotificationPreferences>(
     key: K,
-    value: NotificationPreferences[K]
+    value: NotificationPreferences[K],
   ) => {
     setPrefs((p) => ({ ...p, [key]: value }));
   };
@@ -128,7 +134,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
     try {
       await saveNotificationPreferences(auth.user.uid, prefs);
     } catch (e) {
-      console.error("Failed to save preferences:", e);
+      console.error('Failed to save preferences:', e);
     } finally {
       setSaving(false);
     }
@@ -139,21 +145,22 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
     const token = await syncPushTokenForUser(auth.user.uid);
     if (token) {
       setPushToken(token);
-      setPermissionStatus("granted");
-      updatePref("enabled", true);
+      setPermissionStatus('granted');
+      updatePref('enabled', true);
     } else {
-      setPermissionStatus("denied");
+      setPermissionStatus('denied');
     }
   };
 
   if (!auth.user) {
     return (
       <Screen>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        >
           <Card title="通知設定" subtitle="尚未登入">
-            <Text style={{ color: theme.colors.muted }}>
-              請先到『我的』登入後才能設定通知。
-            </Text>
+            <Text style={{ color: theme.colors.muted }}>請先到『我的』登入後才能設定通知。</Text>
           </Card>
         </ScrollView>
       </Screen>
@@ -162,9 +169,12 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
 
   return (
     <Screen>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+      >
         <Card title="推播通知" subtitle="開啟後即使 App 未開啟也能收到通知">
-          {permissionStatus === "denied" ? (
+          {permissionStatus === 'denied' ? (
             <View style={{ marginBottom: 12 }}>
               <Pill text="通知權限被拒絕，請到系統設定開啟" />
             </View>
@@ -189,7 +199,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
             label="通知總開關"
             description="關閉後將不會收到任何推播通知"
             value={prefs.enabled}
-            onValueChange={(v) => updatePref("enabled", v)}
+            onValueChange={(v) => updatePref('enabled', v)}
           />
         </Card>
 
@@ -199,7 +209,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
             label="公告通知"
             description="學校公告、系所公告"
             value={prefs.announcements}
-            onValueChange={(v) => updatePref("announcements", v)}
+            onValueChange={(v) => updatePref('announcements', v)}
             disabled={!prefs.enabled}
           />
           <ToggleRow
@@ -207,7 +217,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
             label="活動通知"
             description="活動提醒、報名確認"
             value={prefs.events}
-            onValueChange={(v) => updatePref("events", v)}
+            onValueChange={(v) => updatePref('events', v)}
             disabled={!prefs.enabled}
           />
           <ToggleRow
@@ -215,7 +225,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
             label="群組通知"
             description="群組新貼文、公告"
             value={prefs.groups}
-            onValueChange={(v) => updatePref("groups", v)}
+            onValueChange={(v) => updatePref('groups', v)}
             disabled={!prefs.enabled}
           />
           <ToggleRow
@@ -223,7 +233,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
             label="作業通知"
             description="新作業、截止提醒"
             value={prefs.assignments}
-            onValueChange={(v) => updatePref("assignments", v)}
+            onValueChange={(v) => updatePref('assignments', v)}
             disabled={!prefs.enabled}
           />
           <ToggleRow
@@ -231,7 +241,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
             label="成績通知"
             description="成績發布通知"
             value={prefs.grades}
-            onValueChange={(v) => updatePref("grades", v)}
+            onValueChange={(v) => updatePref('grades', v)}
             disabled={!prefs.enabled}
           />
           <ToggleRow
@@ -239,7 +249,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
             label="私訊通知"
             description="私人訊息"
             value={prefs.messages}
-            onValueChange={(v) => updatePref("messages", v)}
+            onValueChange={(v) => updatePref('messages', v)}
             disabled={!prefs.enabled}
           />
         </Card>
@@ -249,7 +259,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
             icon="moon"
             label="啟用免打擾"
             value={prefs.quietHoursEnabled}
-            onValueChange={(v) => updatePref("quietHoursEnabled", v)}
+            onValueChange={(v) => updatePref('quietHoursEnabled', v)}
             disabled={!prefs.enabled}
           />
 
@@ -258,12 +268,12 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
               <TimePicker
                 label="開始"
                 value={prefs.quietHoursStart}
-                onChange={(v) => updatePref("quietHoursStart", v)}
+                onChange={(v) => updatePref('quietHoursStart', v)}
               />
               <TimePicker
                 label="結束"
                 value={prefs.quietHoursEnd}
-                onChange={(v) => updatePref("quietHoursEnd", v)}
+                onChange={(v) => updatePref('quietHoursEnd', v)}
               />
               <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
                 點擊時間可調整（每次 +1 小時）
@@ -274,7 +284,7 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
 
         <View style={{ paddingHorizontal: 16 }}>
           <Button
-            text={saving ? "儲存中..." : "儲存設定"}
+            text={saving ? '儲存中...' : '儲存設定'}
             kind="primary"
             onPress={handleSave}
             disabled={saving || loading}
@@ -283,10 +293,9 @@ export function NotificationSettingsScreen(props: Record<string, unknown>) {
 
         <Card title="說明" subtitle="">
           <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
-            • 推播通知需要在實機上才能使用{"\n"}
-            • 首次啟用時會詢問通知權限{"\n"}
-            • 若權限被拒絕，請到系統設定 → 通知 → 找到此 App 並開啟{"\n"}
-            • 免打擾時段內的通知會在時段結束後一次顯示
+            • 推播通知需要在實機上才能使用{'\n'}• 首次啟用時會詢問通知權限{'\n'}•
+            若權限被拒絕，請到系統設定 → 通知 → 找到此 App 並開啟{'\n'}•
+            免打擾時段內的通知會在時段結束後一次顯示
           </Text>
         </Card>
       </ScrollView>

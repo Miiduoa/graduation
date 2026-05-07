@@ -1,16 +1,25 @@
 /* eslint-disable */
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, Animated, Pressable, Modal, ScrollView, Dimensions, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { theme } from "./theme";
-import { useNetworkStatus } from "../hooks/useNetworkStatus";
-import { getOfflineQueueLength } from "../services/offline";
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  Animated,
+  Pressable,
+  Modal,
+  ScrollView,
+  Dimensions,
+  StyleSheet,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { theme } from './theme';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { getOfflineQueueLength } from '../services/offline';
 
-const OFFLINE_GUIDE_KEY = "@offline_guide_shown";
-const OFFLINE_TIPS_DISMISSED_KEY = "@offline_tips_dismissed";
+const OFFLINE_GUIDE_KEY = '@offline_guide_shown';
+const OFFLINE_TIPS_DISMISSED_KEY = '@offline_tips_dismissed';
 
-type BannerType = "offline" | "reconnected" | "syncing";
+type BannerType = 'offline' | 'reconnected' | 'syncing';
 
 type OfflineBannerProps = {
   visible?: boolean;
@@ -20,29 +29,37 @@ type OfflineBannerProps = {
 };
 
 /** 內部共用的橫幅 UI，避免 NetworkStatusBanner 依賴 OfflineBanner 名稱造成載入順序錯誤 */
-function BannerView({ type, message, onDismiss }: { type: BannerType; message?: string; onDismiss?: () => void }) {
+function BannerView({
+  type,
+  message,
+  onDismiss,
+}: {
+  type: BannerType;
+  message?: string;
+  onDismiss?: () => void;
+}) {
   const getConfig = () => {
     switch (type) {
-      case "offline":
+      case 'offline':
         return {
-          icon: "cloud-offline" as const,
-          color: "#F59E0B",
-          bgColor: "#F59E0B15",
-          text: message || "目前處於離線模式",
+          icon: 'cloud-offline' as const,
+          color: '#F59E0B',
+          bgColor: '#F59E0B15',
+          text: message || '目前處於離線模式',
         };
-      case "reconnected":
+      case 'reconnected':
         return {
-          icon: "cloud-done" as const,
-          color: "#22C55E",
-          bgColor: "#22C55E15",
-          text: message || "已重新連線",
+          icon: 'cloud-done' as const,
+          color: '#22C55E',
+          bgColor: '#22C55E15',
+          text: message || '已重新連線',
         };
-      case "syncing":
+      case 'syncing':
         return {
-          icon: "sync" as const,
+          icon: 'sync' as const,
           color: theme.colors.accent,
           bgColor: theme.colors.accentSoft,
-          text: message || "正在同步資料...",
+          text: message || '正在同步資料...',
         };
     }
   };
@@ -53,13 +70,13 @@ function BannerView({ type, message, onDismiss }: { type: BannerType; message?: 
         backgroundColor: config.bgColor,
         paddingVertical: 10,
         paddingHorizontal: 16,
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
         gap: 10,
       }}
     >
       <Ionicons name={config.icon} size={18} color={config.color} />
-      <Text style={{ color: config.color, flex: 1, fontWeight: "600", fontSize: 13 }}>
+      <Text style={{ color: config.color, flex: 1, fontWeight: '600', fontSize: 13 }}>
         {config.text}
       </Text>
       {onDismiss && (
@@ -73,7 +90,7 @@ function BannerView({ type, message, onDismiss }: { type: BannerType; message?: 
 
 export function OfflineBanner({
   visible,
-  type = "offline",
+  type = 'offline',
   message,
   onDismiss,
 }: OfflineBannerProps) {
@@ -82,11 +99,12 @@ export function OfflineBanner({
 }
 
 export function NetworkStatusBanner() {
-  const { isConnected, isOnline, showReconnectedBanner, dismissReconnectedBanner, wasOffline } = useNetworkStatus();
+  const { isConnected, isOnline, showReconnectedBanner, dismissReconnectedBanner, wasOffline } =
+    useNetworkStatus();
   const [pendingCount, setPendingCount] = useState(0);
   const [showTips, setShowTips] = useState(false);
   const [tipsDismissed, setTipsDismissed] = useState(false);
-  
+
   // 檢查離線佇列中的待同步項目
   useEffect(() => {
     const checkQueue = async () => {
@@ -97,23 +115,23 @@ export function NetworkStatusBanner() {
         // 忽略錯誤
       }
     };
-    
+
     checkQueue();
     const interval = setInterval(checkQueue, 10000);
     return () => clearInterval(interval);
   }, []);
-  
+
   // 檢查是否已關閉提示
   useEffect(() => {
     AsyncStorage.getItem(OFFLINE_TIPS_DISMISSED_KEY).then((value) => {
-      setTipsDismissed(value === "true");
+      setTipsDismissed(value === 'true');
     });
   }, []);
-  
+
   const dismissTips = useCallback(async () => {
     setShowTips(false);
     setTipsDismissed(true);
-    await AsyncStorage.setItem(OFFLINE_TIPS_DISMISSED_KEY, "true");
+    await AsyncStorage.setItem(OFFLINE_TIPS_DISMISSED_KEY, 'true');
   }, []);
 
   if (!isConnected) {
@@ -125,7 +143,7 @@ export function NetworkStatusBanner() {
             message={pendingCount > 0 ? `離線模式 · ${pendingCount} 項待同步` : undefined}
           />
         </Pressable>
-        
+
         {/* 離線提示擴展面板 */}
         {showTips && !tipsDismissed && (
           <View style={styles.tipsContainer}>
@@ -160,7 +178,7 @@ export function NetworkStatusBanner() {
   if (showReconnectedBanner) {
     return (
       <BannerView
-        type={pendingCount > 0 ? "syncing" : "reconnected"}
+        type={pendingCount > 0 ? 'syncing' : 'reconnected'}
         message={pendingCount > 0 ? `正在同步 ${pendingCount} 項變更...` : undefined}
         onDismiss={dismissReconnectedBanner}
       />
@@ -179,14 +197,14 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.colors.border,
   },
   tipsHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 10,
   },
   tipsTitle: {
     color: theme.colors.text,
-    fontWeight: "700",
+    fontWeight: '700',
     fontSize: 13,
   },
   tipsClose: {
@@ -194,8 +212,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   tipItem: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     marginBottom: 6,
   },
@@ -214,20 +232,20 @@ export function OfflineIndicator() {
   return (
     <View
       style={{
-        position: "absolute",
+        position: 'absolute',
         top: 8,
         right: 8,
-        backgroundColor: "#F59E0B",
+        backgroundColor: '#F59E0B',
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 12,
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
         gap: 4,
       }}
     >
       <Ionicons name="cloud-offline" size={12} color="#fff" />
-      <Text style={{ color: "#fff", fontSize: 10, fontWeight: "700" }}>離線</Text>
+      <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>離線</Text>
     </View>
   );
 }
@@ -242,7 +260,7 @@ export function OfflineDataNotice({ cachedAt }: { cachedAt?: number }) {
 
   let ageText: string;
   if (ageMinutes < 1) {
-    ageText = "剛剛";
+    ageText = '剛剛';
   } else if (ageMinutes < 60) {
     ageText = `${ageMinutes} 分鐘前`;
   } else if (ageHours < 24) {
@@ -254,8 +272,8 @@ export function OfflineDataNotice({ cachedAt }: { cachedAt?: number }) {
   return (
     <View
       style={{
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
         gap: 6,
         paddingVertical: 8,
         paddingHorizontal: 12,
@@ -265,9 +283,7 @@ export function OfflineDataNotice({ cachedAt }: { cachedAt?: number }) {
       }}
     >
       <Ionicons name="time-outline" size={14} color={theme.colors.muted} />
-      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-        離線資料 · 更新於 {ageText}
-      </Text>
+      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>離線資料 · 更新於 {ageText}</Text>
     </View>
   );
 }

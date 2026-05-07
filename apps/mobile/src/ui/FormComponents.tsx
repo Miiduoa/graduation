@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback } from 'react';
 import {
   Animated,
   Pressable,
@@ -9,9 +9,9 @@ import {
   View,
   TextInputProps,
   ScrollView,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { theme } from "./theme";
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { theme } from './theme';
 
 // ===== TextInput =====
 
@@ -42,8 +42,8 @@ export function Input({
   const borderColor = error
     ? theme.colors.danger
     : isFocused
-    ? theme.colors.accent
-    : theme.colors.border;
+      ? theme.colors.accent
+      : theme.colors.border;
 
   return (
     <View style={styles.inputContainer}>
@@ -53,7 +53,7 @@ export function Input({
           {required && <Text style={styles.required}>*</Text>}
         </View>
       )}
-      
+
       <View style={[styles.inputWrapper, { borderColor }, disabled && styles.inputDisabled]}>
         {leftIcon && (
           <Ionicons
@@ -63,7 +63,7 @@ export function Input({
             style={styles.inputLeftIcon}
           />
         )}
-        
+
         <TextInput
           style={[styles.input, leftIcon && styles.inputWithLeftIcon, style]}
           placeholderTextColor={theme.colors.muted}
@@ -78,7 +78,7 @@ export function Input({
           }}
           {...props}
         />
-        
+
         {rightIcon && (
           <Pressable
             onPress={onRightIconPress}
@@ -92,11 +92,9 @@ export function Input({
           </Pressable>
         )}
       </View>
-      
+
       {(error || hint) && (
-        <Text style={[styles.hint, error && styles.errorText]}>
-          {error || hint}
-        </Text>
+        <Text style={[styles.hint, error && styles.errorText]}>{error || hint}</Text>
       )}
     </View>
   );
@@ -104,7 +102,7 @@ export function Input({
 
 // ===== Password Input =====
 
-type PasswordInputProps = Omit<InputProps, "secureTextEntry" | "rightIcon" | "onRightIconPress">;
+type PasswordInputProps = Omit<InputProps, 'secureTextEntry' | 'rightIcon' | 'onRightIconPress'>;
 
 export function PasswordInput(props: PasswordInputProps) {
   const [showPassword, setShowPassword] = useState(false);
@@ -113,7 +111,7 @@ export function PasswordInput(props: PasswordInputProps) {
     <Input
       {...props}
       secureTextEntry={!showPassword}
-      rightIcon={showPassword ? "eye-off" : "eye"}
+      rightIcon={showPassword ? 'eye-off' : 'eye'}
       onRightIconPress={() => setShowPassword(!showPassword)}
     />
   );
@@ -127,13 +125,7 @@ type TextAreaProps = InputProps & {
   showCount?: boolean;
 };
 
-export function TextArea({
-  rows = 4,
-  maxLength,
-  showCount,
-  value,
-  ...props
-}: TextAreaProps) {
+export function TextArea({ rows = 4, maxLength, showCount, value, ...props }: TextAreaProps) {
   const charCount = value?.length ?? 0;
 
   return (
@@ -201,7 +193,7 @@ export function Checkbox({
             {checked && <Ionicons name="checkmark" size={16} color="#fff" />}
           </View>
         </View>
-        
+
         {(label || description) && (
           <View style={styles.checkboxContent}>
             {label && (
@@ -209,13 +201,11 @@ export function Checkbox({
                 {label}
               </Text>
             )}
-            {description && (
-              <Text style={styles.checkboxDescription}>{description}</Text>
-            )}
+            {description && <Text style={styles.checkboxDescription}>{description}</Text>}
           </View>
         )}
       </Pressable>
-      
+
       {error && <Text style={styles.errorTextSmall}>{error}</Text>}
     </View>
   );
@@ -250,7 +240,7 @@ export function RadioGroup<T>({
   return (
     <View style={styles.radioGroupContainer}>
       {label && <Text style={styles.radioGroupLabel}>{label}</Text>}
-      
+
       <View style={[styles.radioGroup, horizontal && styles.radioGroupHorizontal]}>
         {options.map((option, index) => {
           const isSelected = value === option.value;
@@ -283,7 +273,7 @@ export function RadioGroup<T>({
                   {isSelected && <View style={styles.radioInner} />}
                 </View>
               </View>
-              
+
               <View style={styles.radioContent}>
                 <Text style={[styles.radioLabel, isDisabled && styles.radioLabelDisabled]}>
                   {option.label}
@@ -296,7 +286,7 @@ export function RadioGroup<T>({
           );
         })}
       </View>
-      
+
       {error && <Text style={styles.errorTextSmall}>{error}</Text>}
     </View>
   );
@@ -325,7 +315,7 @@ export function Select<T>({
   onChange,
   options,
   label,
-  placeholder = "請選擇",
+  placeholder = '請選擇',
   error,
   disabled,
   onPress,
@@ -335,7 +325,7 @@ export function Select<T>({
   return (
     <View style={styles.inputContainer}>
       {label && <Text style={styles.label}>{label}</Text>}
-      
+
       <Pressable
         onPress={onPress}
         disabled={disabled}
@@ -346,17 +336,12 @@ export function Select<T>({
           pressed && styles.selectPressed,
         ]}
       >
-        <Text
-          style={[
-            styles.selectText,
-            !selectedOption && styles.selectPlaceholder,
-          ]}
-        >
+        <Text style={[styles.selectText, !selectedOption && styles.selectPlaceholder]}>
           {selectedOption?.label || placeholder}
         </Text>
         <Ionicons name="chevron-down" size={20} color={theme.colors.muted} />
       </Pressable>
-      
+
       {error && <Text style={styles.errorTextSmall}>{error}</Text>}
     </View>
   );
@@ -395,7 +380,7 @@ export function Slider({
       // This is a simplified implementation
       // For a full slider, consider using @react-native-community/slider
     },
-    [disabled]
+    [disabled],
   );
 
   return (
@@ -406,12 +391,12 @@ export function Slider({
           {showValue && <Text style={styles.sliderValue}>{formatValue(value)}</Text>}
         </View>
       )}
-      
+
       <View style={[styles.sliderTrack, disabled && styles.sliderDisabled]}>
         <View style={[styles.sliderFill, { width: `${percentage}%` }]} />
         <View style={[styles.sliderThumb, { left: `${percentage}%` }]} />
       </View>
-      
+
       <View style={styles.sliderLabels}>
         <Text style={styles.sliderMinMax}>{formatValue(min)}</Text>
         <Text style={styles.sliderMinMax}>{formatValue(max)}</Text>
@@ -442,19 +427,24 @@ export function FormSection({ title, description, children }: FormSectionProps) 
 
 type FormActionsProps = {
   children: React.ReactNode;
-  align?: "left" | "center" | "right" | "stretch";
+  align?: 'left' | 'center' | 'right' | 'stretch';
 };
 
-export function FormActions({ children, align = "right" }: FormActionsProps) {
+export function FormActions({ children, align = 'right' }: FormActionsProps) {
   const justifyContent = {
-    left: "flex-start",
-    center: "center",
-    right: "flex-end",
-    stretch: "flex-start",
-  }[align] as "flex-start" | "center" | "flex-end";
+    left: 'flex-start',
+    center: 'center',
+    right: 'flex-end',
+    stretch: 'flex-start',
+  }[align] as 'flex-start' | 'center' | 'flex-end';
 
   return (
-    <View style={[styles.formActions, { justifyContent, alignSelf: align === "stretch" ? "stretch" : "auto" }]}>
+    <View
+      style={[
+        styles.formActions,
+        { justifyContent, alignSelf: align === 'stretch' ? 'stretch' : 'auto' },
+      ]}
+    >
       {children}
     </View>
   );
@@ -468,12 +458,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   labelRow: {
-    flexDirection: "row",
+    flexDirection: 'row',
     marginBottom: 8,
   },
   label: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
     color: theme.colors.text,
   },
   required: {
@@ -481,15 +471,15 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   inputWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.surface2,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   inputDisabled: {
-    backgroundColor: "rgba(255, 255, 255, 0.03)",
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
     opacity: 0.6,
   },
   input: {
@@ -509,7 +499,7 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   inputRightIconPressed: {
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   hint: {
     fontSize: 12,
@@ -525,7 +515,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   charCount: {
-    position: "absolute",
+    position: 'absolute',
     bottom: 8,
     right: 12,
     fontSize: 11,
@@ -536,8 +526,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   checkboxRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     minHeight: 44,
   },
   checkboxRowPressed: {
@@ -546,8 +536,8 @@ const styles = StyleSheet.create({
   checkboxTouchArea: {
     width: 44,
     height: 44,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 4,
   },
   checkbox: {
@@ -556,8 +546,8 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 2,
     borderColor: theme.colors.border,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   checkboxChecked: {
     backgroundColor: theme.colors.accent,
@@ -575,7 +565,7 @@ const styles = StyleSheet.create({
   checkboxLabel: {
     fontSize: 15,
     color: theme.colors.text,
-    fontWeight: "500",
+    fontWeight: '500',
   },
   checkboxLabelDisabled: {
     color: theme.colors.muted,
@@ -592,7 +582,7 @@ const styles = StyleSheet.create({
   },
   radioGroupLabel: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
     color: theme.colors.text,
     marginBottom: 12,
   },
@@ -600,13 +590,13 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   radioGroupHorizontal: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 16,
   },
   radioRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     minHeight: 44,
   },
   radioRowPressed: {
@@ -618,8 +608,8 @@ const styles = StyleSheet.create({
   radioTouchArea: {
     width: 44,
     height: 44,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 4,
   },
   radio: {
@@ -628,8 +618,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 2,
     borderColor: theme.colors.border,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   radioSelected: {
     borderColor: theme.colors.accent,
@@ -652,7 +642,7 @@ const styles = StyleSheet.create({
   radioLabel: {
     fontSize: 15,
     color: theme.colors.text,
-    fontWeight: "500",
+    fontWeight: '500',
   },
   radioLabelDisabled: {
     color: theme.colors.muted,
@@ -665,9 +655,9 @@ const styles = StyleSheet.create({
   },
   // Select
   select: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.radius.md,
@@ -697,55 +687,55 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sliderHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
   },
   sliderLabel: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
     color: theme.colors.text,
   },
   sliderValue: {
     fontSize: 14,
-    fontWeight: "700",
+    fontWeight: '700',
     color: theme.colors.accent,
   },
   sliderTrack: {
     height: 6,
     borderRadius: 3,
     backgroundColor: theme.colors.border,
-    position: "relative",
+    position: 'relative',
   },
   sliderDisabled: {
     opacity: 0.5,
   },
   sliderFill: {
-    position: "absolute",
+    position: 'absolute',
     left: 0,
     top: 0,
-    height: "100%",
+    height: '100%',
     backgroundColor: theme.colors.accent,
     borderRadius: 3,
   },
   sliderThumb: {
-    position: "absolute",
+    position: 'absolute',
     top: -9,
     marginLeft: -12,
     width: 24,
     height: 24,
     borderRadius: 12,
     backgroundColor: theme.colors.accent,
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
   },
   sliderLabels: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginTop: 8,
   },
   sliderMinMax: {
@@ -758,7 +748,7 @@ const styles = StyleSheet.create({
   },
   formSectionTitle: {
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: '700',
     color: theme.colors.text,
     marginBottom: 4,
   },
@@ -773,7 +763,7 @@ const styles = StyleSheet.create({
   },
   // Form Actions
   formActions: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 12,
     marginTop: 8,
   },

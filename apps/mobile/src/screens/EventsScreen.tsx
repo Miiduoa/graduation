@@ -1,22 +1,41 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
-import { ScrollView, Text, View, Pressable, FlatList, RefreshControl, Platform } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAsyncList } from "../hooks/useAsyncList";
-import { useDataSource } from "../hooks/useDataSource";
-import { useDebounce } from "../hooks/useDebounce";
-import { useNetworkStatus } from "../hooks/useNetworkStatus";
-import { Card, Pill, LoadingState, EmptyState, ErrorState, SearchBar, SegmentedControl, FilterChips, StatusBadge, SortButton } from "../ui/components";
-import { OfflineDataNotice } from "../ui/OfflineBanner";
-import { useSchool } from "../state/school";
-import { useDemo } from "../state/demo";
-import { useFavorites } from "../state/favorites";
-import { useToast } from "../ui/Toast";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, softShadowStyle } from "../ui/theme";
-import { formatDateTime, toDate, formatRelativeTime } from "../utils/format";
+import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import {
+  ScrollView,
+  Text,
+  View,
+  Pressable,
+  FlatList,
+  RefreshControl,
+  Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAsyncList } from '../hooks/useAsyncList';
+import { useDataSource } from '../hooks/useDataSource';
+import { useDebounce } from '../hooks/useDebounce';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import {
+  Card,
+  Pill,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+  SearchBar,
+  SegmentedControl,
+  FilterChips,
+  StatusBadge,
+  SortButton,
+} from '../ui/components';
+import { OfflineDataNotice } from '../ui/OfflineBanner';
+import { useSchool } from '../state/school';
+import { useDemo } from '../state/demo';
+import { useFavorites } from '../state/favorites';
+import { useToast } from '../ui/Toast';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme, softShadowStyle } from '../ui/theme';
+import { formatDateTime, toDate, formatRelativeTime } from '../utils/format';
 
 type ClubEvent = {
   id: string;
@@ -29,38 +48,38 @@ type ClubEvent = {
   registeredCount?: number;
 };
 
-type TimeFilter = "all" | "today" | "week" | "month" | "past";
-type SortOption = "date_asc" | "date_desc" | "name";
-type ViewMode = "list" | "card";
+type TimeFilter = 'all' | 'today' | 'week' | 'month' | 'past';
+type SortOption = 'date_asc' | 'date_desc' | 'name';
+type ViewMode = 'list' | 'card';
 
 const TIME_FILTERS = [
-  { key: "all", label: "全部" },
-  { key: "today", label: "今天" },
-  { key: "week", label: "本週" },
-  { key: "month", label: "本月" },
-  { key: "past", label: "已結束" },
+  { key: 'all', label: '全部' },
+  { key: 'today', label: '今天' },
+  { key: 'week', label: '本週' },
+  { key: 'month', label: '本月' },
+  { key: 'past', label: '已結束' },
 ];
 
 const SORT_OPTIONS = [
-  { key: "date_asc", label: "時間由近到遠" },
-  { key: "date_desc", label: "時間由遠到近" },
-  { key: "name", label: "名稱 A-Z" },
+  { key: 'date_asc', label: '時間由近到遠' },
+  { key: 'date_desc', label: '時間由遠到近' },
+  { key: 'name', label: '名稱 A-Z' },
 ];
 
-function getEventStatus(startsAt: any, endsAt: any): "upcoming" | "ongoing" | "ended" {
+function getEventStatus(startsAt: any, endsAt: any): 'upcoming' | 'ongoing' | 'ended' {
   const now = new Date();
   const start = toDate(startsAt);
   const end = toDate(endsAt);
-  
+
   if (!start) {
-    if (end && now > end) return "ended";
-    return "upcoming";
+    if (end && now > end) return 'ended';
+    return 'upcoming';
   }
-  
-  if (now < start) return "upcoming";
-  if (end && now > end) return "ended";
-  if (now >= start) return "ongoing";
-  return "upcoming";
+
+  if (now < start) return 'upcoming';
+  if (end && now > end) return 'ended';
+  if (now >= start) return 'ongoing';
+  return 'upcoming';
 }
 
 function isEventFull(capacity: number | undefined, registeredCount: number | undefined): boolean {
@@ -69,14 +88,17 @@ function isEventFull(capacity: number | undefined, registeredCount: number | und
   return (registeredCount ?? 0) >= capacity;
 }
 
-function hasAvailableSpots(capacity: number | undefined, registeredCount: number | undefined): boolean {
+function hasAvailableSpots(
+  capacity: number | undefined,
+  registeredCount: number | undefined,
+): boolean {
   if (capacity === undefined || capacity === null) return true;
   if (capacity === 0) return false;
   return (registeredCount ?? 0) < capacity;
 }
 
 function isInTimeRange(date: Date | null, filter: TimeFilter): boolean {
-  if (!date) return filter === "all";
+  if (!date) return filter === 'all';
 
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -85,15 +107,15 @@ function isInTimeRange(date: Date | null, filter: TimeFilter): boolean {
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
   switch (filter) {
-    case "all":
+    case 'all':
       return true;
-    case "today":
+    case 'today':
       return date >= today && date < tomorrow;
-    case "week":
+    case 'week':
       return date >= today && date < weekEnd;
-    case "month":
+    case 'month':
       return date >= today && date <= monthEnd;
-    case "past":
+    case 'past':
       return date < now;
     default:
       return true;
@@ -101,15 +123,15 @@ function isInTimeRange(date: Date | null, filter: TimeFilter): boolean {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  ongoing: "#22C55E",
-  upcoming: "#F59E0B",
-  ended: "#71717A",
+  ongoing: '#22C55E',
+  upcoming: '#F59E0B',
+  ended: '#71717A',
 };
 
 const CARD_BANNER_COLORS: Record<string, string> = {
-  ongoing: "#22C55E",
-  upcoming: "#5E6AD2",
-  ended: "#71717A",
+  ongoing: '#22C55E',
+  upcoming: '#5E6AD2',
+  ended: '#71717A',
 };
 
 export function EventsScreen(props: any) {
@@ -125,14 +147,14 @@ export function EventsScreen(props: any) {
 
   const demo = useDemo();
 
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState('');
   const [lastFetchTime, setLastFetchTime] = useState<number | undefined>(undefined);
   const debouncedQuery = useDebounce(q, 300);
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState<SortOption>("date_asc");
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [sortBy, setSortBy] = useState<SortOption>('date_asc');
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
   const [showAvailableOnly, setShowAvailableOnly] = useState(false);
 
@@ -143,10 +165,10 @@ export function EventsScreen(props: any) {
   const handleRefreshError = useCallback((error: string) => {
     toastRef.current.show({
       message: `更新失敗：${error}`,
-      type: "error",
+      type: 'error',
       duration: 4000,
       action: {
-        text: "重試",
+        text: '重試',
         onPress: () => {
           if (refreshRef.current) {
             refreshRef.current();
@@ -156,18 +178,17 @@ export function EventsScreen(props: any) {
     });
   }, []);
 
-  const { 
-    items: raw, 
-    error: loadError, 
-    loading: loadLoading, 
+  const {
+    items: raw,
+    error: loadError,
+    loading: loadLoading,
     refreshing,
     reload,
-    refresh 
-  } = useAsyncList<ClubEvent>(
-    () => ds.listEvents(school.id),
-    [ds, school.id],
-    { keepPreviousData: true, onRefreshError: handleRefreshError }
-  );
+    refresh,
+  } = useAsyncList<ClubEvent>(() => ds.listEvents(school.id), [ds, school.id], {
+    keepPreviousData: true,
+    onRefreshError: handleRefreshError,
+  });
 
   React.useEffect(() => {
     refreshRef.current = refresh;
@@ -179,15 +200,17 @@ export function EventsScreen(props: any) {
     }
   }, [loadLoading, raw.length]);
 
-  const isLoading = demo.mode === "loading" || (demo.mode === "normal" && loadLoading && raw.length === 0);
-  const error = demo.mode === "error" ? "(demo) 讀取活動失敗" : demo.mode === "normal" ? loadError : null;
+  const isLoading =
+    demo.mode === 'loading' || (demo.mode === 'normal' && loadLoading && raw.length === 0);
+  const error =
+    demo.mode === 'error' ? '(demo) 讀取活動失敗' : demo.mode === 'normal' ? loadError : null;
 
   const handleRefresh = useCallback(async () => {
-    if (demo.mode !== "normal") return;
+    if (demo.mode !== 'normal') return;
     if (isOffline) {
       toastRef.current.show({
-        message: "目前處於離線模式，無法更新",
-        type: "warning",
+        message: '目前處於離線模式，無法更新',
+        type: 'warning',
         duration: 2000,
       });
       return;
@@ -200,20 +223,20 @@ export function EventsScreen(props: any) {
     raw.forEach((e) => {
       if (e.location) locations.add(e.location);
     });
-    return Array.from(locations).map((l) => ({ key: l, label: l, icon: "location-outline" }));
+    return Array.from(locations).map((l) => ({ key: l, label: l, icon: 'location-outline' }));
   }, [raw]);
 
   const stats = useMemo(() => {
     const now = new Date();
-    const base = demo.mode === "empty" ? [] : raw;
+    const base = demo.mode === 'empty' ? [] : raw;
     let upcoming = 0;
     let ongoing = 0;
     let today = 0;
 
     base.forEach((e) => {
       const status = getEventStatus(e.startsAt, e.endsAt);
-      if (status === "upcoming") upcoming++;
-      if (status === "ongoing") ongoing++;
+      if (status === 'upcoming') upcoming++;
+      if (status === 'ongoing') ongoing++;
 
       const startDate = toDate(e.startsAt);
       if (startDate) {
@@ -227,23 +250,25 @@ export function EventsScreen(props: any) {
   }, [demo.mode, raw]);
 
   const items = useMemo(() => {
-    let base = demo.mode === "empty" ? [] : [...raw];
+    let base = demo.mode === 'empty' ? [] : [...raw];
 
     if (debouncedQuery.trim()) {
       const needle = debouncedQuery.trim().toLowerCase();
       base = base.filter((e) => {
-        const hay = `${e.title}\n${e.description}\n${e.location ?? ""}`.toLowerCase();
+        const hay = `${e.title}\n${e.description}\n${e.location ?? ''}`.toLowerCase();
         return hay.includes(needle);
       });
     }
 
-    if (timeFilter !== "all") {
-      if (timeFilter === "past") {
-        base = base.filter((e) => getEventStatus(e.startsAt, e.endsAt) === "ended");
+    if (timeFilter !== 'all') {
+      if (timeFilter === 'past') {
+        base = base.filter((e) => getEventStatus(e.startsAt, e.endsAt) === 'ended');
       } else {
         base = base.filter((e) => {
           const startDate = toDate(e.startsAt);
-          return isInTimeRange(startDate, timeFilter) && getEventStatus(e.startsAt, e.endsAt) !== "ended";
+          return (
+            isInTimeRange(startDate, timeFilter) && getEventStatus(e.startsAt, e.endsAt) !== 'ended'
+          );
         });
       }
     }
@@ -253,46 +278,56 @@ export function EventsScreen(props: any) {
     }
 
     if (showFavoritesOnly) {
-      base = base.filter((e) => fav.isFavorite("event", e.id));
+      base = base.filter((e) => fav.isFavorite('event', e.id));
     }
 
     if (showAvailableOnly) {
       base = base.filter((e) => {
         const status = getEventStatus(e.startsAt, e.endsAt);
-        if (status === "ended") return false;
+        if (status === 'ended') return false;
         return hasAvailableSpots(e.capacity, e.registeredCount);
       });
     }
 
     switch (sortBy) {
-      case "date_asc":
+      case 'date_asc':
         base.sort((a, b) => {
           const aDate = toDate(a.startsAt)?.getTime() ?? 0;
           const bDate = toDate(b.startsAt)?.getTime() ?? 0;
           return aDate - bDate;
         });
         break;
-      case "date_desc":
+      case 'date_desc':
         base.sort((a, b) => {
           const aDate = toDate(a.startsAt)?.getTime() ?? 0;
           const bDate = toDate(b.startsAt)?.getTime() ?? 0;
           return bDate - aDate;
         });
         break;
-      case "name":
-        base.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "", "zh-TW"));
+      case 'name':
+        base.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? '', 'zh-TW'));
         break;
     }
 
     return base;
-  }, [demo.mode, debouncedQuery, raw, timeFilter, selectedLocations, sortBy, showFavoritesOnly, showAvailableOnly, fav]);
+  }, [
+    demo.mode,
+    debouncedQuery,
+    raw,
+    timeFilter,
+    selectedLocations,
+    sortBy,
+    showFavoritesOnly,
+    showAvailableOnly,
+    fav,
+  ]);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
     if (selectedLocations.length > 0) count++;
     if (showFavoritesOnly) count++;
     if (showAvailableOnly) count++;
-    if (timeFilter !== "all") count++;
+    if (timeFilter !== 'all') count++;
     return count;
   }, [selectedLocations, showFavoritesOnly, showAvailableOnly, timeFilter]);
 
@@ -300,7 +335,7 @@ export function EventsScreen(props: any) {
     setSelectedLocations([]);
     setShowFavoritesOnly(false);
     setShowAvailableOnly(false);
-    setTimeFilter("all");
+    setTimeFilter('all');
   };
 
   return (
@@ -317,7 +352,7 @@ export function EventsScreen(props: any) {
           style={{
             color: theme.colors.text,
             fontSize: 34,
-            fontWeight: "800",
+            fontWeight: '800',
             letterSpacing: -1,
             marginBottom: 16,
           }}
@@ -325,30 +360,66 @@ export function EventsScreen(props: any) {
           活動
         </Text>
 
-        <View style={{ flexDirection: "row", justifyContent: "space-around", gap: 10 }}>
-          <View style={{
-            flex: 1, alignItems: "center", paddingVertical: 10,
-            borderRadius: theme.radius.md, backgroundColor: theme.colors.surface,
-            borderWidth: 1, borderColor: theme.colors.border,
-          }}>
-            <Text style={{ color: theme.colors.success, fontWeight: "900", fontSize: 22 }}>{stats.today}</Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", marginTop: 2 }}>今日</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-around', gap: 10 }}>
+          <View
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              paddingVertical: 10,
+              borderRadius: theme.radius.md,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 22 }}>
+              {stats.today}
+            </Text>
+            <Text
+              style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600', marginTop: 2 }}
+            >
+              今日
+            </Text>
           </View>
-          <View style={{
-            flex: 1, alignItems: "center", paddingVertical: 10,
-            borderRadius: theme.radius.md, backgroundColor: theme.colors.surface,
-            borderWidth: 1, borderColor: theme.colors.border,
-          }}>
-            <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 22 }}>{stats.ongoing}</Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", marginTop: 2 }}>進行中</Text>
+          <View
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              paddingVertical: 10,
+              borderRadius: theme.radius.md,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 22 }}>
+              {stats.ongoing}
+            </Text>
+            <Text
+              style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600', marginTop: 2 }}
+            >
+              進行中
+            </Text>
           </View>
-          <View style={{
-            flex: 1, alignItems: "center", paddingVertical: 10,
-            borderRadius: theme.radius.md, backgroundColor: theme.colors.surface,
-            borderWidth: 1, borderColor: theme.colors.border,
-          }}>
-            <Text style={{ color: theme.colors.warning, fontWeight: "900", fontSize: 22 }}>{stats.upcoming}</Text>
-            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600", marginTop: 2 }}>即將開始</Text>
+          <View
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              paddingVertical: 10,
+              borderRadius: theme.radius.md,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <Text style={{ color: theme.colors.warning, fontWeight: '900', fontSize: 22 }}>
+              {stats.upcoming}
+            </Text>
+            <Text
+              style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600', marginTop: 2 }}
+            >
+              即將開始
+            </Text>
           </View>
         </View>
       </View>
@@ -365,20 +436,29 @@ export function EventsScreen(props: any) {
             hint={error}
             actionText="重試"
             onAction={() => {
-              demo.setMode("normal");
+              demo.setMode('normal');
               reload();
             }}
           />
         </View>
       ) : (
-        <View style={{ flex: 1, gap: theme.space.md, paddingHorizontal: theme.space.lg, paddingTop: theme.space.md }}>
-          {isOffline && lastFetchTime && (
-            <OfflineDataNotice cachedAt={lastFetchTime} />
-          )}
+        <View
+          style={{
+            flex: 1,
+            gap: theme.space.md,
+            paddingHorizontal: theme.space.lg,
+            paddingTop: theme.space.md,
+          }}
+        >
+          {isOffline && lastFetchTime && <OfflineDataNotice cachedAt={lastFetchTime} />}
 
           <SearchBar value={q} onChange={setQ} placeholder="搜尋活動（標題/描述/地點）" />
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8 }}
+          >
             {TIME_FILTERS.map((f) => (
               <Pressable
                 key={f.key}
@@ -389,15 +469,16 @@ export function EventsScreen(props: any) {
                   borderRadius: theme.radius.full,
                   borderWidth: timeFilter === f.key ? 0 : 1,
                   borderColor: theme.colors.border,
-                  backgroundColor: timeFilter === f.key ? theme.colors.accent : theme.colors.surface,
+                  backgroundColor:
+                    timeFilter === f.key ? theme.colors.accent : theme.colors.surface,
                   transform: [{ scale: pressed ? 0.97 : 1 }],
                   ...softShadowStyle(theme.shadows.soft),
                 })}
               >
                 <Text
                   style={{
-                    color: timeFilter === f.key ? "#fff" : theme.colors.muted,
-                    fontWeight: "700",
+                    color: timeFilter === f.key ? '#fff' : theme.colors.muted,
+                    fontWeight: '700',
                     fontSize: theme.typography.bodySmall.fontSize,
                   }}
                 >
@@ -407,41 +488,50 @@ export function EventsScreen(props: any) {
             ))}
           </ScrollView>
 
-          <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
             <Pressable
               onPress={() => setShowFilters(!showFilters)}
               style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
+                flexDirection: 'row',
+                alignItems: 'center',
                 gap: 6,
                 paddingHorizontal: 14,
                 paddingVertical: 10,
                 borderRadius: theme.radius.md,
                 borderWidth: 1,
                 borderColor: activeFilterCount > 0 ? theme.colors.accent : theme.colors.border,
-                backgroundColor: activeFilterCount > 0 ? theme.colors.accentSoft : theme.colors.surface,
+                backgroundColor:
+                  activeFilterCount > 0 ? theme.colors.accentSoft : theme.colors.surface,
                 transform: [{ scale: pressed ? 0.97 : 1 }],
                 ...softShadowStyle(theme.shadows.soft),
               })}
             >
-              <Ionicons name="options" size={16} color={activeFilterCount > 0 ? theme.colors.accent : theme.colors.muted} />
+              <Ionicons
+                name="options"
+                size={16}
+                color={activeFilterCount > 0 ? theme.colors.accent : theme.colors.muted}
+              />
               <Text
                 style={{
                   color: activeFilterCount > 0 ? theme.colors.accent : theme.colors.textSecondary,
-                  fontWeight: "600",
+                  fontWeight: '600',
                   fontSize: theme.typography.bodySmall.fontSize,
                 }}
               >
-                更多篩選{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+                更多篩選{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
               </Text>
             </Pressable>
 
-            <SortButton options={SORT_OPTIONS} selected={sortBy} onChange={(k) => setSortBy(k as SortOption)} />
+            <SortButton
+              options={SORT_OPTIONS}
+              selected={sortBy}
+              onChange={(k) => setSortBy(k as SortOption)}
+            />
 
             <View style={{ flex: 1 }} />
 
             <Pressable
-              onPress={() => setViewMode(viewMode === "list" ? "card" : "list")}
+              onPress={() => setViewMode(viewMode === 'list' ? 'card' : 'list')}
               style={({ pressed }) => ({
                 padding: 10,
                 borderRadius: theme.radius.md,
@@ -452,7 +542,11 @@ export function EventsScreen(props: any) {
                 ...softShadowStyle(theme.shadows.soft),
               })}
             >
-              <Ionicons name={viewMode === "list" ? "albums-outline" : "list-outline"} size={18} color={theme.colors.muted} />
+              <Ionicons
+                name={viewMode === 'list' ? 'albums-outline' : 'list-outline'}
+                size={18}
+                color={theme.colors.muted}
+              />
             </Pressable>
           </View>
 
@@ -465,14 +559,20 @@ export function EventsScreen(props: any) {
                 borderColor: theme.colors.border,
                 backgroundColor: theme.colors.surface,
                 gap: 14,
-                  ...softShadowStyle(theme.shadows.soft),
+                ...softShadowStyle(theme.shadows.soft),
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
                 }}
               >
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                 <Text
                   style={{
                     color: theme.colors.text,
-                    fontWeight: "700",
+                    fontWeight: '700',
                     fontSize: theme.typography.h3.fontSize,
                   }}
                 >
@@ -480,15 +580,35 @@ export function EventsScreen(props: any) {
                 </Text>
                 {activeFilterCount > 0 && (
                   <Pressable onPress={clearFilters}>
-                    <Text style={{ color: theme.colors.accent, fontSize: theme.typography.bodySmall.fontSize }}>清除全部</Text>
+                    <Text
+                      style={{
+                        color: theme.colors.accent,
+                        fontSize: theme.typography.bodySmall.fontSize,
+                      }}
+                    >
+                      清除全部
+                    </Text>
                   </Pressable>
                 )}
               </View>
 
               {locationOptions.length > 0 && (
                 <View>
-                  <Text style={{ color: theme.colors.textSecondary, fontSize: theme.typography.labelSmall.fontSize, marginBottom: 8 }}>活動地點</Text>
-                  <FilterChips options={locationOptions} selected={selectedLocations} onChange={setSelectedLocations} multiple />
+                  <Text
+                    style={{
+                      color: theme.colors.textSecondary,
+                      fontSize: theme.typography.labelSmall.fontSize,
+                      marginBottom: 8,
+                    }}
+                  >
+                    活動地點
+                  </Text>
+                  <FilterChips
+                    options={locationOptions}
+                    selected={selectedLocations}
+                    onChange={setSelectedLocations}
+                    multiple
+                  />
                 </View>
               )}
 
@@ -496,8 +616,8 @@ export function EventsScreen(props: any) {
                 <Pressable
                   onPress={() => setShowFavoritesOnly(!showFavoritesOnly)}
                   style={({ pressed }) => ({
-                    flexDirection: "row",
-                    alignItems: "center",
+                    flexDirection: 'row',
+                    alignItems: 'center',
                     gap: 10,
                     transform: [{ scale: pressed ? 0.97 : 1 }],
                   })}
@@ -509,21 +629,25 @@ export function EventsScreen(props: any) {
                       borderRadius: theme.radius.xs,
                       borderWidth: 2,
                       borderColor: showFavoritesOnly ? theme.colors.accent : theme.colors.border,
-                      backgroundColor: showFavoritesOnly ? theme.colors.accent : "transparent",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      backgroundColor: showFavoritesOnly ? theme.colors.accent : 'transparent',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
                     {showFavoritesOnly && <Ionicons name="checkmark" size={14} color="#fff" />}
                   </View>
-                  <Text style={{ color: theme.colors.text, fontSize: theme.typography.label.fontSize }}>只顯示收藏的活動</Text>
+                  <Text
+                    style={{ color: theme.colors.text, fontSize: theme.typography.label.fontSize }}
+                  >
+                    只顯示收藏的活動
+                  </Text>
                 </Pressable>
 
                 <Pressable
                   onPress={() => setShowAvailableOnly(!showAvailableOnly)}
                   style={({ pressed }) => ({
-                    flexDirection: "row",
-                    alignItems: "center",
+                    flexDirection: 'row',
+                    alignItems: 'center',
                     gap: 10,
                     transform: [{ scale: pressed ? 0.97 : 1 }],
                   })}
@@ -535,56 +659,79 @@ export function EventsScreen(props: any) {
                       borderRadius: theme.radius.xs,
                       borderWidth: 2,
                       borderColor: showAvailableOnly ? theme.colors.accent : theme.colors.border,
-                      backgroundColor: showAvailableOnly ? theme.colors.accent : "transparent",
-                      alignItems: "center",
-                      justifyContent: "center",
+                      backgroundColor: showAvailableOnly ? theme.colors.accent : 'transparent',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
                     {showAvailableOnly && <Ionicons name="checkmark" size={14} color="#fff" />}
                   </View>
-                  <Text style={{ color: theme.colors.text, fontSize: theme.typography.label.fontSize }}>只顯示可報名的活動</Text>
+                  <Text
+                    style={{ color: theme.colors.text, fontSize: theme.typography.label.fontSize }}
+                  >
+                    只顯示可報名的活動
+                  </Text>
                 </Pressable>
               </View>
             </View>
           )}
 
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Text style={{ color: theme.colors.muted, fontSize: theme.typography.bodySmall.fontSize }}>
+          <View
+            style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+          >
+            <Text
+              style={{ color: theme.colors.muted, fontSize: theme.typography.bodySmall.fontSize }}
+            >
               {`找到 ${items.length} 場活動`}
             </Text>
             {refreshing && (
-              <Text style={{ color: theme.colors.accent, fontSize: theme.typography.bodySmall.fontSize }}>更新中...</Text>
+              <Text
+                style={{
+                  color: theme.colors.accent,
+                  fontSize: theme.typography.bodySmall.fontSize,
+                }}
+              >
+                更新中...
+              </Text>
             )}
           </View>
 
           {items.length === 0 ? (
             <EmptyState
               title={
-                debouncedQuery.trim() && (activeFilterCount > 0)
+                debouncedQuery.trim() && activeFilterCount > 0
                   ? `找不到「${debouncedQuery}」相關的活動`
                   : debouncedQuery.trim()
                     ? `找不到「${debouncedQuery}」相關的活動`
                     : activeFilterCount > 0
-                      ? "目前篩選條件下沒有活動"
-                      : "沒有活動"
+                      ? '目前篩選條件下沒有活動'
+                      : '沒有活動'
               }
               subtitle={
                 debouncedQuery.trim() || activeFilterCount > 0
-                  ? "請換個關鍵字或調整篩選條件"
-                  : "目前沒有活動"
+                  ? '請換個關鍵字或調整篩選條件'
+                  : '目前沒有活動'
               }
               hint="下拉刷新或稍後再試。"
-              actionText={activeFilterCount > 0 || debouncedQuery.trim() ? "清除篩選" : "重新載入"}
+              actionText={activeFilterCount > 0 || debouncedQuery.trim() ? '清除篩選' : '重新載入'}
               onAction={
                 activeFilterCount > 0 || debouncedQuery.trim()
                   ? () => {
                       clearFilters();
-                      setQ("");
+                      setQ('');
                     }
                   : reload
               }
-              icon={debouncedQuery.trim() ? "search-outline" : activeFilterCount > 0 ? "filter-outline" : "calendar-outline"}
-              variant={debouncedQuery.trim() ? "search" : activeFilterCount > 0 ? "filter" : "default"}
+              icon={
+                debouncedQuery.trim()
+                  ? 'search-outline'
+                  : activeFilterCount > 0
+                    ? 'filter-outline'
+                    : 'calendar-outline'
+              }
+              variant={
+                debouncedQuery.trim() ? 'search' : activeFilterCount > 0 ? 'filter' : 'default'
+              }
             />
           ) : (
             <FlatList
@@ -602,38 +749,38 @@ export function EventsScreen(props: any) {
               renderItem={({ item: e }) => {
                 const goDetail = () => {
                   try {
-                    if (nav && typeof nav.navigate === "function") {
-                      nav.navigate("EventDetail", { id: e.id });
+                    if (nav && typeof nav.navigate === 'function') {
+                      nav.navigate('EventDetail', { id: e.id });
                     } else {
                       toastRef.current.show({
-                        message: "導航暫時無法使用",
-                        type: "warning",
+                        message: '導航暫時無法使用',
+                        type: 'warning',
                         duration: 2000,
                       });
                     }
                   } catch (error) {
                     toastRef.current.show({
-                      message: "開啟活動詳情失敗",
-                      type: "error",
+                      message: '開啟活動詳情失敗',
+                      type: 'error',
                       duration: 2000,
                     });
                   }
                 };
                 const range = `${formatDateTime(e.startsAt)} ~ ${formatDateTime(e.endsAt)}`;
-                const isFav = fav.isFavorite("event", e.id);
+                const isFav = fav.isFavorite('event', e.id);
                 const status = getEventStatus(e.startsAt, e.endsAt);
                 const startDate = toDate(e.startsAt);
                 const statusColor = STATUS_COLORS[status];
-                const bannerColor = CARD_BANNER_COLORS[status] ?? "#5E6AD2";
+                const bannerColor = CARD_BANNER_COLORS[status] ?? '#5E6AD2';
 
-                if (viewMode === "card") {
+                if (viewMode === 'card') {
                   return (
                     <Pressable
                       key={e.id}
                       onPress={goDetail}
                       style={({ pressed }) => ({
                         borderRadius: theme.radius.lg,
-                        overflow: "hidden",
+                        overflow: 'hidden',
                         transform: [{ scale: pressed ? 0.97 : 1 }],
                       })}
                     >
@@ -643,65 +790,89 @@ export function EventsScreen(props: any) {
                           borderWidth: 1,
                           borderColor: theme.colors.border,
                           backgroundColor: theme.colors.surface,
-                          overflow: "hidden",
-                          }}
+                          overflow: 'hidden',
+                        }}
                       >
                         <View
                           style={{
                             height: 100,
-                            alignItems: "center",
-                            justifyContent: "center",
+                            alignItems: 'center',
+                            justifyContent: 'center',
                             backgroundColor: bannerColor,
                           }}
                         >
                           <Ionicons name="calendar" size={40} color="rgba(255,255,255,0.85)" />
-                          {status === "ongoing" && (
+                          {status === 'ongoing' && (
                             <View
                               style={{
-                                position: "absolute",
+                                position: 'absolute',
                                 top: 10,
                                 right: 10,
                                 paddingHorizontal: 10,
                                 paddingVertical: 4,
                                 borderRadius: theme.radius.full,
-                                backgroundColor: "rgba(255,255,255,0.25)",
+                                backgroundColor: 'rgba(255,255,255,0.25)',
                               }}
                             >
-                              <Text style={{ color: "#fff", fontSize: theme.typography.caption.fontSize, fontWeight: "700" }}>進行中</Text>
+                              <Text
+                                style={{
+                                  color: '#fff',
+                                  fontSize: theme.typography.caption.fontSize,
+                                  fontWeight: '700',
+                                }}
+                              >
+                                進行中
+                              </Text>
                             </View>
                           )}
-                          {status === "upcoming" && (
+                          {status === 'upcoming' && (
                             <View
                               style={{
-                                position: "absolute",
+                                position: 'absolute',
                                 top: 10,
                                 right: 10,
                                 paddingHorizontal: 10,
                                 paddingVertical: 4,
                                 borderRadius: theme.radius.full,
-                                backgroundColor: "rgba(255,255,255,0.25)",
+                                backgroundColor: 'rgba(255,255,255,0.25)',
                               }}
                             >
-                              <Text style={{ color: "#fff", fontSize: theme.typography.caption.fontSize, fontWeight: "700" }}>即將開始</Text>
+                              <Text
+                                style={{
+                                  color: '#fff',
+                                  fontSize: theme.typography.caption.fontSize,
+                                  fontWeight: '700',
+                                }}
+                              >
+                                即將開始
+                              </Text>
                             </View>
                           )}
-                          {status === "ended" && (
+                          {status === 'ended' && (
                             <View
                               style={{
-                                position: "absolute",
+                                position: 'absolute',
                                 top: 10,
                                 right: 10,
                                 paddingHorizontal: 10,
                                 paddingVertical: 4,
                                 borderRadius: theme.radius.full,
-                                backgroundColor: "rgba(0,0,0,0.25)",
+                                backgroundColor: 'rgba(0,0,0,0.25)',
                               }}
                             >
-                              <Text style={{ color: "#fff", fontSize: theme.typography.caption.fontSize, fontWeight: "700" }}>已結束</Text>
+                              <Text
+                                style={{
+                                  color: '#fff',
+                                  fontSize: theme.typography.caption.fontSize,
+                                  fontWeight: '700',
+                                }}
+                              >
+                                已結束
+                              </Text>
                             </View>
                           )}
                           {isFav && (
-                            <View style={{ position: "absolute", top: 10, left: 10 }}>
+                            <View style={{ position: 'absolute', top: 10, left: 10 }}>
                               <Ionicons name="heart" size={22} color="#fff" />
                             </View>
                           )}
@@ -710,7 +881,7 @@ export function EventsScreen(props: any) {
                           <Text
                             style={{
                               color: theme.colors.text,
-                              fontWeight: "800",
+                              fontWeight: '800',
                               fontSize: theme.typography.h3.fontSize,
                               lineHeight: theme.typography.h3.lineHeight,
                             }}
@@ -718,29 +889,50 @@ export function EventsScreen(props: any) {
                           >
                             {e.title}
                           </Text>
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             <Ionicons name="time-outline" size={14} color={theme.colors.muted} />
-                            <Text style={{ color: theme.colors.textSecondary, fontSize: theme.typography.labelSmall.fontSize }}>
-                              {startDate ? formatRelativeTime(startDate) : formatDateTime(e.startsAt)}
+                            <Text
+                              style={{
+                                color: theme.colors.textSecondary,
+                                fontSize: theme.typography.labelSmall.fontSize,
+                              }}
+                            >
+                              {startDate
+                                ? formatRelativeTime(startDate)
+                                : formatDateTime(e.startsAt)}
                             </Text>
                           </View>
                           {e.location && (
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                              <Ionicons name="location-outline" size={14} color={theme.colors.muted} />
-                              <Text style={{ color: theme.colors.textSecondary, fontSize: theme.typography.labelSmall.fontSize }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons
+                                name="location-outline"
+                                size={14}
+                                color={theme.colors.muted}
+                              />
+                              <Text
+                                style={{
+                                  color: theme.colors.textSecondary,
+                                  fontSize: theme.typography.labelSmall.fontSize,
+                                }}
+                              >
                                 {e.location}
                               </Text>
                             </View>
                           )}
-                          <View style={{ flexDirection: "row", gap: 6, marginTop: 4 }}>
+                          <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
                             {e.capacity ? (
                               <Pill
                                 text={`${e.registeredCount ?? 0}/${e.capacity} 人`}
-                                kind={(e.registeredCount ?? 0) >= e.capacity ? "danger" : "accent"}
+                                kind={(e.registeredCount ?? 0) >= e.capacity ? 'danger' : 'accent'}
                                 size="sm"
                               />
                             ) : (
-                              <Pill text={e.registeredCount ? `${e.registeredCount} 人報名` : "不限人數"} size="sm" />
+                              <Pill
+                                text={
+                                  e.registeredCount ? `${e.registeredCount} 人報名` : '不限人數'
+                                }
+                                size="sm"
+                              />
                             )}
                           </View>
                         </View>
@@ -762,12 +954,12 @@ export function EventsScreen(props: any) {
                   >
                     <View
                       style={{
-                        flexDirection: "row",
+                        flexDirection: 'row',
                         borderRadius: theme.radius.lg,
                         backgroundColor: theme.colors.surface,
                         borderWidth: 1,
                         borderColor: theme.colors.border,
-                        overflow: "hidden",
+                        overflow: 'hidden',
                         ...softShadowStyle(theme.shadows.soft),
                       }}
                     >
@@ -778,7 +970,7 @@ export function EventsScreen(props: any) {
                         }}
                       />
                       <View style={{ flex: 1, padding: theme.space.lg, gap: 10 }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                           <View
                             style={{
                               width: 10,
@@ -791,7 +983,7 @@ export function EventsScreen(props: any) {
                             style={{
                               flex: 1,
                               fontSize: theme.typography.h3.fontSize,
-                              fontWeight: "800",
+                              fontWeight: '800',
                               lineHeight: theme.typography.h3.lineHeight,
                               letterSpacing: theme.typography.h3.letterSpacing,
                               color: theme.colors.text,
@@ -803,7 +995,7 @@ export function EventsScreen(props: any) {
                           {isFav && <Ionicons name="heart" size={16} color={theme.colors.danger} />}
                         </View>
 
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                           <Ionicons name="time-outline" size={13} color={theme.colors.muted} />
                           <Text
                             style={{
@@ -817,8 +1009,12 @@ export function EventsScreen(props: any) {
                         </View>
 
                         {e.location && (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                            <Ionicons name="location-outline" size={13} color={theme.colors.muted} />
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Ionicons
+                              name="location-outline"
+                              size={13}
+                              color={theme.colors.muted}
+                            />
                             <Text
                               style={{
                                 color: theme.colors.textSecondary,
@@ -830,8 +1026,8 @@ export function EventsScreen(props: any) {
                           </View>
                         )}
 
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                          {status === "ongoing" && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          {status === 'ongoing' && (
                             <View
                               style={{
                                 paddingHorizontal: 10,
@@ -840,12 +1036,18 @@ export function EventsScreen(props: any) {
                                 backgroundColor: theme.colors.successSoft,
                               }}
                             >
-                              <Text style={{ color: theme.colors.success, fontSize: theme.typography.caption.fontSize, fontWeight: "700" }}>
+                              <Text
+                                style={{
+                                  color: theme.colors.success,
+                                  fontSize: theme.typography.caption.fontSize,
+                                  fontWeight: '700',
+                                }}
+                              >
                                 進行中
                               </Text>
                             </View>
                           )}
-                          {status === "upcoming" && startDate && (
+                          {status === 'upcoming' && startDate && (
                             <View
                               style={{
                                 paddingHorizontal: 10,
@@ -854,12 +1056,18 @@ export function EventsScreen(props: any) {
                                 backgroundColor: theme.colors.warningSoft,
                               }}
                             >
-                              <Text style={{ color: theme.colors.warning, fontSize: theme.typography.caption.fontSize, fontWeight: "700" }}>
+                              <Text
+                                style={{
+                                  color: theme.colors.warning,
+                                  fontSize: theme.typography.caption.fontSize,
+                                  fontWeight: '700',
+                                }}
+                              >
                                 {formatRelativeTime(startDate)}
                               </Text>
                             </View>
                           )}
-                          {status === "ended" && (
+                          {status === 'ended' && (
                             <View
                               style={{
                                 paddingHorizontal: 10,
@@ -868,7 +1076,13 @@ export function EventsScreen(props: any) {
                                 backgroundColor: theme.colors.disabledBg,
                               }}
                             >
-                              <Text style={{ color: theme.colors.muted, fontSize: theme.typography.caption.fontSize, fontWeight: "700" }}>
+                              <Text
+                                style={{
+                                  color: theme.colors.muted,
+                                  fontSize: theme.typography.caption.fontSize,
+                                  fontWeight: '700',
+                                }}
+                              >
                                 已結束
                               </Text>
                             </View>
@@ -888,15 +1102,21 @@ export function EventsScreen(props: any) {
                           </Text>
                         ) : null}
 
-                        <View style={{ marginTop: 4, flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                        <View
+                          style={{ marginTop: 4, flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}
+                        >
                           {e.capacity ? (
                             <Pill
                               text={`${e.registeredCount ?? 0}/${e.capacity} 人報名`}
-                              kind={(e.registeredCount ?? 0) >= e.capacity ? "danger" : "accent"}
+                              kind={(e.registeredCount ?? 0) >= e.capacity ? 'danger' : 'accent'}
                               size="sm"
                             />
                           ) : (
-                            <Pill text={e.registeredCount ? `${e.registeredCount} 人報名` : "名額不限"} kind="accent" size="sm" />
+                            <Pill
+                              text={e.registeredCount ? `${e.registeredCount} 人報名` : '名額不限'}
+                              kind="accent"
+                              size="sm"
+                            />
                           )}
                         </View>
                       </View>

@@ -1,19 +1,23 @@
-import React, { useState } from "react";
-import { Ionicons } from "@expo/vector-icons";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 
-import { Button } from "../ui/components";
-import { theme } from "../ui/theme";
+import { Button } from '../ui/components';
+import { theme } from '../ui/theme';
 import {
   findSchoolById,
   PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-} from "@campus/shared/src";
-import { loadPersistedValue, removePersistedValue, savePersistedValue } from "../services/persistedStorage";
+} from '@campus/shared/src';
+import {
+  loadPersistedValue,
+  removePersistedValue,
+  savePersistedValue,
+} from '../services/persistedStorage';
 
-const ONBOARDING_KEY = "@has_seen_onboarding";
-const SCHOOL_SELECTION_KEY = "campus.schoolSelection.v1";
-const ONBOARDING_PROFILE_KEY = "campus.onboarding.profile.v2";
+const ONBOARDING_KEY = '@has_seen_onboarding';
+const SCHOOL_SELECTION_KEY = 'campus.schoolSelection.v1';
+const ONBOARDING_PROFILE_KEY = 'campus.onboarding.profile.v2';
 
 type SchoolOption = {
   code: string;
@@ -22,106 +26,118 @@ type SchoolOption = {
   schoolId: string;
 };
 
-type StepId = "school" | "role" | "goal" | "notifications";
+type StepId = 'school' | 'role' | 'goal' | 'notifications';
 const PROVIDENCE_SCHOOL = (() => {
   const school = findSchoolById(PROVIDENCE_UNIVERSITY_SCHOOL_ID);
   return {
     code: school?.code ?? PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
-    name: school?.name ?? "靜宜大學",
-    shortName: school?.shortName ?? "靜宜",
+    name: school?.name ?? '靜宜大學',
+    shortName: school?.shortName ?? '靜宜',
     schoolId: school?.id ?? PROVIDENCE_UNIVERSITY_SCHOOL_ID,
   } satisfies SchoolOption;
 })();
 
 const ROLE_OPTIONS = [
   {
-    id: "student",
-    title: "我是學生",
-    description: "優先看到 Today、課程節奏、截止與收件匣",
-    icon: "school-outline",
-    tint: "#0891B2",
+    id: 'student',
+    title: '我是學生',
+    description: '優先看到 Today、課程節奏、截止與收件匣',
+    icon: 'school-outline',
+    tint: '#0891B2',
   },
   {
-    id: "teacher",
-    title: "我是教師 / 助教",
-    description: "優先看到課程空間、教材、評量與課堂節奏",
-    icon: "construct-outline",
-    tint: "#2563EB",
+    id: 'teacher',
+    title: '我是教師 / 助教',
+    description: '優先看到課程空間、教材、評量與課堂節奏',
+    icon: 'construct-outline',
+    tint: '#2563EB',
   },
   {
-    id: "admin",
-    title: "我是管理者",
-    description: "保留管理入口，但不占用主導航",
-    icon: "shield-checkmark-outline",
-    tint: "#C2410C",
+    id: 'admin',
+    title: '我是管理者',
+    description: '保留管理入口，但不占用主導航',
+    icon: 'shield-checkmark-outline',
+    tint: '#C2410C',
   },
 ] as const;
 
 const GOAL_OPTIONS = [
   {
-    id: "clarity",
-    title: "少迷路",
-    description: "我想快速找到今天最重要的一步",
-    icon: "compass-outline",
+    id: 'clarity',
+    title: '少迷路',
+    description: '我想快速找到今天最重要的一步',
+    icon: 'compass-outline',
   },
   {
-    id: "discipline",
-    title: "少漏交",
-    description: "我想先把截止、作業與評量整理清楚",
-    icon: "checkmark-done-outline",
+    id: 'discipline',
+    title: '少漏交',
+    description: '我想先把截止、作業與評量整理清楚',
+    icon: 'checkmark-done-outline',
   },
   {
-    id: "teaching",
-    title: "教學節奏穩定",
-    description: "我想更快整理教材、點名與課堂互動",
-    icon: "layers-outline",
+    id: 'teaching',
+    title: '教學節奏穩定',
+    description: '我想更快整理教材、點名與課堂互動',
+    icon: 'layers-outline',
   },
   {
-    id: "campus",
-    title: "校園行動更順",
-    description: "我想把地圖、公車、餐廳與辦事集中起來",
-    icon: "map-outline",
+    id: 'campus',
+    title: '校園行動更順',
+    description: '我想把地圖、公車、餐廳與辦事集中起來',
+    icon: 'map-outline',
   },
 ] as const;
 
 const NOTIFICATION_OPTIONS = [
   {
-    id: "deadlines",
-    title: "截止提醒",
-    description: "作業、測驗、待辦壓力變化",
-    icon: "alarm-outline",
+    id: 'deadlines',
+    title: '截止提醒',
+    description: '作業、測驗、待辦壓力變化',
+    icon: 'alarm-outline',
   },
   {
-    id: "classroom",
-    title: "課堂提醒",
-    description: "簽到、課堂互動、課程異動",
-    icon: "pulse-outline",
+    id: 'classroom',
+    title: '課堂提醒',
+    description: '簽到、課堂互動、課程異動',
+    icon: 'pulse-outline',
   },
   {
-    id: "campus",
-    title: "校園提醒",
-    description: "交通、活動、服務變更",
-    icon: "navigate-outline",
+    id: 'campus',
+    title: '校園提醒',
+    description: '交通、活動、服務變更',
+    icon: 'navigate-outline',
   },
 ] as const;
 
 const STEPS: Array<{ id: StepId; title: string; hint: string }> = [
-  { id: "school", title: "確認校園", hint: "目前 Campus One 僅支援靜宜大學版本" },
-  { id: "role", title: "選擇角色", hint: "不同角色要看到的第一步不同" },
-  { id: "goal", title: "設定主要目標", hint: "先決定這個 App 最該幫你什麼" },
-  { id: "notifications", title: "提醒偏好", hint: "只打開你真正需要的提醒" },
+  { id: 'school', title: '確認校園', hint: '目前 Campus One 僅支援靜宜大學版本' },
+  { id: 'role', title: '選擇角色', hint: '不同角色要看到的第一步不同' },
+  { id: 'goal', title: '設定主要目標', hint: '先決定這個 App 最該幫你什麼' },
+  { id: 'notifications', title: '提醒偏好', hint: '只打開你真正需要的提醒' },
 ];
 
 function StepHeader(props: { step: number; title: string; hint: string }) {
   return (
     <View style={{ gap: 8 }}>
-      <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" }}>
+      <Text
+        style={{
+          color: theme.colors.muted,
+          fontSize: 11,
+          fontWeight: '700',
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
+        }}
+      >
         Step {props.step} / {STEPS.length}
       </Text>
-      <Text style={{ color: theme.colors.text, fontSize: 30, fontWeight: "900", letterSpacing: -0.7 }}>
+      <Text
+        style={{ color: theme.colors.text, fontSize: 30, fontWeight: '900', letterSpacing: -0.7 }}
+      >
         {props.title}
       </Text>
-      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>{props.hint}</Text>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>
+        {props.hint}
+      </Text>
     </View>
   );
 }
@@ -143,9 +159,9 @@ function SelectCard(props: {
         backgroundColor: props.selected ? `${props.tint}12` : theme.colors.surface,
         borderWidth: 1.5,
         borderColor: props.selected ? props.tint : theme.colors.border,
-        flexDirection: "row",
+        flexDirection: 'row',
         gap: 14,
-        alignItems: "center",
+        alignItems: 'center',
         opacity: pressed ? 0.85 : 1,
       })}
     >
@@ -155,15 +171,19 @@ function SelectCard(props: {
           height: 48,
           borderRadius: 18,
           backgroundColor: props.selected ? props.tint : `${props.tint}16`,
-          alignItems: "center",
-          justifyContent: "center",
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
-        <Ionicons name={props.icon} size={22} color={props.selected ? "#FFFFFF" : props.tint} />
+        <Ionicons name={props.icon} size={22} color={props.selected ? '#FFFFFF' : props.tint} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: "800" }}>{props.title}</Text>
-        <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 3 }}>
+        <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '800' }}>
+          {props.title}
+        </Text>
+        <Text
+          style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 3 }}
+        >
           {props.description}
         </Text>
       </View>
@@ -174,10 +194,10 @@ function SelectCard(props: {
 
 export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
   const [stepIndex, setStepIndex] = useState(0);
-  const [selectedRole, setSelectedRole] = useState<string>("student");
-  const [selectedGoal, setSelectedGoal] = useState<string>("clarity");
+  const [selectedRole, setSelectedRole] = useState<string>('student');
+  const [selectedGoal, setSelectedGoal] = useState<string>('clarity');
   // 偏好設定：兩選一（避免決策負擔）
-  const [selectedNotifications, setSelectedNotifications] = useState<string>("deadlines");
+  const [selectedNotifications, setSelectedNotifications] = useState<string>('deadlines');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -187,11 +207,11 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
   const toggleNotification = (id: string) => setSelectedNotifications(id);
 
   const canProceed =
-    currentStep.id === "school"
+    currentStep.id === 'school'
       ? true
-      : currentStep.id === "role"
+      : currentStep.id === 'role'
         ? !!selectedRole
-        : currentStep.id === "goal"
+        : currentStep.id === 'goal'
           ? !!selectedGoal
           : true;
 
@@ -222,8 +242,8 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
       await savePersistedValue(ONBOARDING_KEY, true);
       onComplete();
     } catch (saveError) {
-      console.error("Failed to save onboarding:", saveError);
-      setError("儲存失敗，請再試一次");
+      console.error('Failed to save onboarding:', saveError);
+      setError('儲存失敗，請再試一次');
       setSaving(false);
     }
   };
@@ -239,7 +259,7 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
         }}
       >
         <View style={{ gap: 12 }}>
-          <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
             {STEPS.map((step, index) => (
               <View
                 key={step.id}
@@ -267,24 +287,30 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
               gap: 8,
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "800" }}>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '800' }}>
               你會在 Today 看到什麼？
             </Text>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
-              以「{selectedGoal === "clarity" ? "少迷路" : selectedGoal === "discipline" ? "少漏交" : selectedGoal}」為節奏，
-              並且優先提醒：{selectedNotifications === "deadlines" ? "作業截止" : "課堂開始"}。
+              以「
+              {selectedGoal === 'clarity'
+                ? '少迷路'
+                : selectedGoal === 'discipline'
+                  ? '少漏交'
+                  : selectedGoal}
+              」為節奏， 並且優先提醒：
+              {selectedNotifications === 'deadlines' ? '作業截止' : '課堂開始'}。
               完成後，你的下一步會被放在頁面最上方。
             </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <Ionicons name="sparkles-outline" size={18} color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "700" }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '700' }}>
                 已有 12,430 位同校同學完成設定
               </Text>
             </View>
           </View>
         ) : null}
 
-        {currentStep.id === "school" ? (
+        {currentStep.id === 'school' ? (
           <View style={{ gap: 14 }}>
             <SelectCard
               title={selectedSchool.name}
@@ -304,17 +330,18 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
                 gap: 8,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 15 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>
                 這個版本固定使用靜宜校園
               </Text>
               <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
-                目前登入、課表、成績、TronClass 與校園資料同步都只支援靜宜大學。之後若擴充其他校園，會再重新開放校園選擇。
+                目前登入、課表、成績、TronClass
+                與校園資料同步都只支援靜宜大學。之後若擴充其他校園，會再重新開放校園選擇。
               </Text>
             </View>
           </View>
         ) : null}
 
-        {currentStep.id === "role" ? (
+        {currentStep.id === 'role' ? (
           <View style={{ gap: 14 }}>
             {ROLE_OPTIONS.map((role) => (
               <SelectCard
@@ -330,10 +357,10 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
           </View>
         ) : null}
 
-        {currentStep.id === "goal" ? (
+        {currentStep.id === 'goal' ? (
           <View style={{ gap: 14 }}>
             {/* 兩選一：減少決策疲勞 */}
-            {GOAL_OPTIONS.filter((g) => g.id === "clarity" || g.id === "discipline").map((goal) => (
+            {GOAL_OPTIONS.filter((g) => g.id === 'clarity' || g.id === 'discipline').map((goal) => (
               <SelectCard
                 key={goal.id}
                 title={goal.title}
@@ -347,20 +374,22 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
           </View>
         ) : null}
 
-        {currentStep.id === "notifications" ? (
+        {currentStep.id === 'notifications' ? (
           <View style={{ gap: 14 }}>
             {/* 兩選一：截止提醒 vs 課堂提醒 */}
-            {NOTIFICATION_OPTIONS.filter((n) => n.id === "deadlines" || n.id === "classroom").map((notification) => (
-              <SelectCard
-                key={notification.id}
-                title={notification.title}
-                description={notification.description}
-                icon={notification.icon}
-                tint={theme.colors.warning}
-                selected={selectedNotifications === notification.id}
-                onPress={() => toggleNotification(notification.id)}
-              />
-            ))}
+            {NOTIFICATION_OPTIONS.filter((n) => n.id === 'deadlines' || n.id === 'classroom').map(
+              (notification) => (
+                <SelectCard
+                  key={notification.id}
+                  title={notification.title}
+                  description={notification.description}
+                  icon={notification.icon}
+                  tint={theme.colors.warning}
+                  selected={selectedNotifications === notification.id}
+                  onPress={() => toggleNotification(notification.id)}
+                />
+              ),
+            )}
             <View
               style={{
                 padding: 16,
@@ -370,10 +399,17 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
                 borderColor: theme.colors.border,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
                 設計原則
               </Text>
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 8 }}>
+              <Text
+                style={{
+                  color: theme.colors.textSecondary,
+                  fontSize: 13,
+                  lineHeight: 20,
+                  marginTop: 8,
+                }}
+              >
                 只保留你最需要的提醒：減少焦慮、避免決策疲勞。你的收件匣會幫你排序下一步。
               </Text>
             </View>
@@ -381,18 +417,24 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
         ) : null}
 
         {error ? (
-          <Text style={{ color: theme.colors.danger, fontSize: 13, fontWeight: "600" }}>{error}</Text>
+          <Text style={{ color: theme.colors.danger, fontSize: 13, fontWeight: '600' }}>
+            {error}
+          </Text>
         ) : null}
 
-        <View style={{ flexDirection: "row", gap: 12 }}>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
           {stepIndex > 0 ? (
             <View style={{ flex: 1 }}>
-              <Button text="上一步" kind="secondary" onPress={() => setStepIndex((prev) => Math.max(0, prev - 1))} />
+              <Button
+                text="上一步"
+                kind="secondary"
+                onPress={() => setStepIndex((prev) => Math.max(0, prev - 1))}
+              />
             </View>
           ) : null}
           <View style={{ flex: 1 }}>
             <Button
-              text={stepIndex === STEPS.length - 1 ? "開始使用" : "下一步"}
+              text={stepIndex === STEPS.length - 1 ? '開始使用' : '下一步'}
               kind="primary"
               loading={saving}
               disabled={!canProceed}
@@ -414,7 +456,9 @@ export function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
               gap: 8,
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "900" }}>你的校園助理準備好了</Text>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '900' }}>
+              你的校園助理準備好了
+            </Text>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}>
               完成後，你的 Today 會把「下一步」放到最前面，並用情境卡片幫你把選擇變得更容易。
             </Text>

@@ -85,5 +85,13 @@ target 'mobile' do
         File.write(xcconfig_path, text.gsub('-std=c++17', '-std=c++20'))
       end
     end
+
+    installer.pods_project.targets.each do |target|
+      next unless target.name.start_with?('RNFB')
+
+      target.build_configurations.each do |configuration|
+        configuration.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      end
+    end
   end
 end

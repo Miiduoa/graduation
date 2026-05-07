@@ -21,16 +21,16 @@ import {
   type LLMState,
   type ModelDownloadProgress,
   MODEL_REGISTRY,
-} from "./localLLMInference";
+} from './localLLMInference';
 import {
   agentReason,
   saveToMemory,
   findRelevantMemory,
   type AgentResponse,
   type ReasoningStep,
-} from "./agentReasoningEngine";
-import "./agentToolkit"; // 自動註冊工具
-import AsyncStorage from "@react-native-async-storage/async-storage";
+} from './agentReasoningEngine';
+import './agentToolkit'; // 自動註冊工具
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ═══════════════════════════════════════════════════
 // Types
@@ -38,7 +38,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export interface AssistantMessage {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: number;
   reasoning?: ReasoningStep[];
@@ -46,7 +46,7 @@ export interface AssistantMessage {
   confidence?: number;
   tokensPerSecond?: number;
   totalTimeMs?: number;
-  source?: "llm" | "local-nlp" | "agent" | "cached";
+  source?: 'llm' | 'local-nlp' | 'agent' | 'cached';
 }
 
 export interface AssistantConfig {
@@ -61,7 +61,7 @@ export interface AssistantConfig {
   /** 自動降級：LLM 不可用時使用 Local NLP */
   autoFallback: boolean;
   /** 回答語言 */
-  language: "zh-TW" | "en";
+  language: 'zh-TW' | 'en';
 }
 
 export interface AssistantStatus {
@@ -81,22 +81,22 @@ export type OnStatusCallback = (status: AssistantStatus) => void;
 // ═══════════════════════════════════════════════════
 
 const DEFAULT_ASSISTANT_CONFIG: AssistantConfig = {
-  modelId: "qwen2.5-3b",
+  modelId: 'qwen2.5-3b',
   enableAgent: true,
   enableWebSearch: true,
   showThinking: true,
   autoFallback: true,
-  language: "zh-TW",
+  language: 'zh-TW',
 };
 
-const CONFIG_KEY = "@assistant:config";
-const HISTORY_KEY = "@assistant:history";
+const CONFIG_KEY = '@assistant:config';
+const HISTORY_KEY = '@assistant:history';
 
 // ═══════════════════════════════════════════════════
 // Smart Router — 決定使用哪個引擎
 // ═══════════════════════════════════════════════════
 
-type RoutingDecision = "local-nlp" | "agent" | "full-llm";
+type RoutingDecision = 'local-nlp' | 'agent' | 'full-llm';
 
 /**
  * 智慧路由：根據問題複雜度決定處理方式
@@ -106,31 +106,31 @@ function routeQuery(message: string): RoutingDecision {
   const len = msg.length;
 
   // 極短問題或問候 → Local NLP
-  if (len < 5) return "local-nlp";
+  if (len < 5) return 'local-nlp';
   if (/^(嗨|你好|哈囉|hi|hello|hey|早安|晚安|掰掰|謝謝|好的|了解)/.test(msg)) {
-    return "local-nlp";
+    return 'local-nlp';
   }
 
   // 需要工具的查詢 → Agent
   if (/課表|成績|出席|公告|天氣|搜尋|計算|算|行事曆|提醒|公車|圖書館|菜單/.test(msg)) {
-    return "agent";
+    return 'agent';
   }
 
   // 需要資料查詢
   if (/查|找|搜|哪|誰|何時|幾|多少/.test(msg)) {
-    return "agent";
+    return 'agent';
   }
 
   // 需要深度推理
   if (/為什麼|如何|怎樣|分析|比較|建議|規劃|幫我想|解釋/.test(msg)) {
-    return "full-llm";
+    return 'full-llm';
   }
 
   // 長文本 → LLM
-  if (len > 50) return "full-llm";
+  if (len > 50) return 'full-llm';
 
   // 預設 Agent（中等複雜度）
-  return "agent";
+  return 'agent';
 }
 
 // ═══════════════════════════════════════════════════
@@ -146,42 +146,42 @@ async function localNLPResponse(message: string): Promise<string> {
   // 問候
   if (/^(嗨|你好|哈囉|hi|hello|hey)/.test(msg)) {
     const greetings = [
-      "嗨！我是靜宜小幫手，有什麼我可以幫你的嗎？",
-      "你好！需要我幫你查什麼嗎？課表、成績、校園資訊都可以問我喔！",
-      "哈囉！今天想了解什麼呢？",
+      '嗨！我是靜宜小幫手，有什麼我可以幫你的嗎？',
+      '你好！需要我幫你查什麼嗎？課表、成績、校園資訊都可以問我喔！',
+      '哈囉！今天想了解什麼呢？',
     ];
     return greetings[Math.floor(Math.random() * greetings.length)];
   }
 
   // 自我介紹
   if (/你是誰|你叫什麼|介紹一下/.test(msg)) {
-    return "我是靜宜小幫手，一個完全在你手機上運行的 AI 助理。我可以幫你查課表、看成績、搜尋資訊、管理行事曆等等。所有功能都不需要網路也能使用（除了搜尋功能）。有什麼需要幫忙的嗎？";
+    return '我是靜宜小幫手，一個完全在你手機上運行的 AI 助理。我可以幫你查課表、看成績、搜尋資訊、管理行事曆等等。所有功能都不需要網路也能使用（除了搜尋功能）。有什麼需要幫忙的嗎？';
   }
 
   // 能力查詢
   if (/你能做什麼|功能|你會什麼/.test(msg)) {
-    return "我可以幫你：\n1. 查詢課表、成績、出席紀錄\n2. 搜尋網路資訊\n3. 查天氣\n4. 管理行事曆和提醒\n5. 數學計算\n6. 查校園資訊（圖書館、餐廳、公車等）\n7. 回答各種問題\n\n直接問我就好，我會盡力幫你！";
+    return '我可以幫你：\n1. 查詢課表、成績、出席紀錄\n2. 搜尋網路資訊\n3. 查天氣\n4. 管理行事曆和提醒\n5. 數學計算\n6. 查校園資訊（圖書館、餐廳、公車等）\n7. 回答各種問題\n\n直接問我就好，我會盡力幫你！';
   }
 
   // 時間
   if (/現在幾點|什麼時間|今天幾號/.test(msg)) {
     const now = new Date();
-    const weekday = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
-    return `現在是 ${now.toLocaleDateString("zh-TW")} 星期${weekday} ${now.toLocaleTimeString("zh-TW")}`;
+    const weekday = ['日', '一', '二', '三', '四', '五', '六'][now.getDay()];
+    return `現在是 ${now.toLocaleDateString('zh-TW')} 星期${weekday} ${now.toLocaleTimeString('zh-TW')}`;
   }
 
   // 道別
   if (/掰掰|再見|bye|晚安/.test(msg)) {
-    return "掰掰！有需要隨時找我 👋";
+    return '掰掰！有需要隨時找我 👋';
   }
 
   // 感謝
   if (/謝謝|感謝|thank/.test(msg)) {
-    return "不客氣！還有什麼需要幫忙的嗎？";
+    return '不客氣！還有什麼需要幫忙的嗎？';
   }
 
   // 預設
-  return "我了解你的問題，讓我想想怎麼回答比較好。你可以試著問得更具體一點，例如「明天有什麼課」「幫我查天氣」「圖書館幾點開」之類的！";
+  return '我了解你的問題，讓我想想怎麼回答比較好。你可以試著問得更具體一點，例如「明天有什麼課」「幫我查天氣」「圖書館幾點開」之類的！';
 }
 
 // ═══════════════════════════════════════════════════
@@ -230,7 +230,7 @@ class LocalAssistant {
     return {
       llmState,
       modelDownloaded: downloaded,
-      modelReady: llmState.status === "ready",
+      modelReady: llmState.status === 'ready',
       totalConversations: stats.totalInferences,
       averageTps: stats.avgTps,
     };
@@ -256,7 +256,7 @@ class LocalAssistant {
   }
 
   isModelReady(): boolean {
-    return localLLM.getState().status === "ready";
+    return localLLM.getState().status === 'ready';
   }
 
   // ── Chat (Main Entry Point) ──
@@ -280,7 +280,7 @@ class LocalAssistant {
     // 記錄使用者訊息
     const userMsg: AssistantMessage = {
       id: `user_${msgId}`,
-      role: "user",
+      role: 'user',
       content: message,
       timestamp: Date.now(),
     };
@@ -288,24 +288,24 @@ class LocalAssistant {
 
     // 決定路由
     const route = forceMode ?? routeQuery(message);
-    const llmReady = localLLM.getState().status === "ready";
+    const llmReady = localLLM.getState().status === 'ready';
 
     try {
       let response: AssistantMessage;
 
       // 路由決策
-      if (route === "local-nlp" || (!llmReady && this.config.autoFallback)) {
+      if (route === 'local-nlp' || (!llmReady && this.config.autoFallback)) {
         // 快速本地回答
         const content = await localNLPResponse(message);
         response = {
           id: msgId,
-          role: "assistant",
+          role: 'assistant',
           content,
           timestamp: Date.now(),
-          source: "local-nlp",
+          source: 'local-nlp',
           totalTimeMs: Date.now() - startTime,
         };
-      } else if (route === "agent" && this.config.enableAgent) {
+      } else if (route === 'agent' && this.config.enableAgent) {
         // Agent 推理 + 工具使用
         const agentResult = await agentReason(
           message,
@@ -322,14 +322,14 @@ class LocalAssistant {
 
         response = {
           id: msgId,
-          role: "assistant",
+          role: 'assistant',
           content: agentResult.content,
           timestamp: Date.now(),
           reasoning: agentResult.reasoning,
           toolsUsed: agentResult.toolsUsed,
           confidence: agentResult.confidence,
           totalTimeMs: agentResult.totalTimeMs,
-          source: "agent",
+          source: 'agent',
         };
 
         // 存入記憶
@@ -340,19 +340,19 @@ class LocalAssistant {
         let systemPrompt = `你是靜宜大學的 AI 助理「靜宜小幫手」。用親切、簡潔的繁體中文回答。`;
 
         if (relevantMemory.length > 0) {
-          systemPrompt += `\n\n你之前回答過類似的問題：\n${relevantMemory.map((m) => `Q: ${m.question}\nA: ${m.answer}`).join("\n")}`;
+          systemPrompt += `\n\n你之前回答過類似的問題：\n${relevantMemory.map((m) => `Q: ${m.question}\nA: ${m.answer}`).join('\n')}`;
         }
 
         const result = await localLLM.chat(message, systemPrompt, onToken, signal);
 
         response = {
           id: msgId,
-          role: "assistant",
+          role: 'assistant',
           content: result.content,
           timestamp: Date.now(),
           tokensPerSecond: result.tokensPerSecond,
           totalTimeMs: result.totalTimeMs,
-          source: "llm",
+          source: 'llm',
         };
       }
 
@@ -367,10 +367,10 @@ class LocalAssistant {
         const fallbackContent = await localNLPResponse(message);
         const fallbackMsg: AssistantMessage = {
           id: msgId,
-          role: "assistant",
-          content: fallbackContent + "\n\n（AI 模型暫時不可用，使用基本回答）",
+          role: 'assistant',
+          content: fallbackContent + '\n\n（AI 模型暫時不可用，使用基本回答）',
           timestamp: Date.now(),
-          source: "local-nlp",
+          source: 'local-nlp',
           totalTimeMs: Date.now() - startTime,
         };
         this.history.push(fallbackMsg);

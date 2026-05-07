@@ -1,7 +1,4 @@
-import {
-  buildCourseNavigationTarget,
-  buildNavigationTarget,
-} from '../../utils/courseNavigation';
+import { buildCourseNavigationTarget, buildNavigationTarget } from '../../utils/courseNavigation';
 
 describe('courseNavigation utilities', () => {
   it('routes the student course entry to CoursesHome', () => {

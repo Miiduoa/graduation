@@ -23,6 +23,7 @@ Please upgrade to the latest version to receive all security updates.
 ### 1. Device Attestation (App Check)
 
 **Mobile App Protection:**
+
 - Firebase App Check integration with device attestation
 - iOS: DeviceCheck (production) / Debug provider (development)
 - Android: Play Integrity API (production) / Debug provider (development)
@@ -30,6 +31,7 @@ Please upgrade to the latest version to receive all security updates.
 - Advisory detection for jailbroken/rooted devices
 
 **Implementation:**
+
 - `/apps/mobile/src/services/appCheck.ts` — Token management
 - `/apps/mobile/src/services/securityService.ts` — Runtime security checks
 - Automatic token refresh with 60-second buffer before expiry
@@ -37,33 +39,39 @@ Please upgrade to the latest version to receive all security updates.
 ### 2. Transport Security (TLS/HTTPS)
 
 **All Communication Encrypted:**
+
 - HTTPS enforced for all web traffic
 - TLS 1.2+ minimum (enforced by Firebase)
 - HSTS preload enabled: `max-age=63072000; includeSubDomains; preload`
 - Certificate pinning recommended for high-security API endpoints
 
 **Firebase Realtime Database & Firestore:**
+
 - All data in transit encrypted with TLS
 - WSS (WebSocket Secure) for real-time subscriptions
 
 ### 3. Data Encryption at Rest
 
 **Firebase Firestore:**
+
 - Automatic server-side encryption with Google-managed keys
 - Optional customer-managed encryption keys (CMEK) available
 - Data encrypted before storage
 
 **Firebase Realtime Database:**
+
 - Automatic encryption at rest
 - All data encrypted before persisting to disk
 
 **Cloud Storage:**
+
 - Server-side encryption by default (AES-256)
 - CMEK integration available for compliance requirements
 
 ### 4. Authentication Security
 
 **Firebase Authentication:**
+
 - Multi-factor authentication (MFA) support
   - SMS-based MFA
   - TOTP via Google Authenticator
@@ -72,12 +80,14 @@ Please upgrade to the latest version to receive all security updates.
 - Session management with automatic token refresh
 
 **Single Sign-On (SSO):**
+
 - SAML 2.0 integration with institutional identity providers
 - OAuth 2.0 / OpenID Connect support
 - Secure token exchange with server-side validation
 - Session validation before granting access
 
 **Implementation Details:**
+
 - Auth tokens stored in secure storage (iOS Keychain / Android Keystore)
 - Token refresh happens transparently before expiry
 - Logout clears all session data
@@ -86,12 +96,14 @@ Please upgrade to the latest version to receive all security updates.
 ### 5. Content Security Policy (CSP)
 
 **Browser-based defenses:**
+
 - Strict CSP headers prevent XSS attacks
 - Inline script execution restricted to trusted sources
 - External resource loading whitelisted
 - Frame ancestors policy prevents clickjacking
 
 **Web App Headers:**
+
 ```
 X-Frame-Options: SAMEORIGIN
 X-Content-Type-Options: nosniff
@@ -99,24 +111,28 @@ X-XSS-Protection: 1; mode=block
 ```
 
 **Mobile Web Views:**
+
 - CSP enforced for any embedded web content
 - External navigation validated before allowing
 
 ### 6. API Safety & Rate Limiting
 
 **Client-Side Defenses:**
+
 - Request rate limiting (per endpoint)
 - Input sanitization to prevent injection attacks
 - URL validation before navigation
 - Safe URL scheme whitelist (https, http, mailto, tel)
 
 **Server-Side Security:**
+
 - Cloud Functions enforce per-user and per-IP rate limits
 - Request signature validation
 - Authentication required for all data modification
 - Authorization checks on all Firestore operations
 
 **Implementation:**
+
 - `/apps/mobile/src/utils/apiSafety.ts` — Client-side validation
 - `/backend/functions/index.js` — App Check verification middleware
 - `/backend/functions/securityUtils.js` — Rate limiting and CORS enforcement
@@ -124,6 +140,7 @@ X-XSS-Protection: 1; mode=block
 ### 7. Payment Security
 
 **PCI Compliance:**
+
 - Payment processing handled by vetted third-party providers
 - Stripe integration for tuition payments
 - Credit card details never touch our servers
@@ -131,6 +148,7 @@ X-XSS-Protection: 1; mode=block
 - Tokens encrypted in database
 
 **Payment Data:**
+
 - Transaction records encrypted at rest
 - Audit logs of all payment operations
 - Compliance with PCI DSS Level 1
@@ -139,17 +157,20 @@ X-XSS-Protection: 1; mode=block
 ### 8. Database Security
 
 **Firestore Security Rules:**
+
 - Role-based access control (RBAC)
 - User can only access their own data unless explicitly shared
 - Admin-only operations restricted to service roles
 - School data protected from unauthorized modification
 
 **Real-time Database Rules:**
+
 - Public read-only access for campus directory
 - Authenticated write access only
 - Automatic data expiry for temporary records (e.g., join codes)
 
 **Backup & Recovery:**
+
 - Daily automated backups (retained 30 days)
 - Encrypted backup storage
 - Point-in-time recovery available
@@ -158,12 +179,14 @@ X-XSS-Protection: 1; mode=block
 ### 9. Admin Console Security
 
 **Access Control:**
+
 - Two-factor authentication required for all admin accounts
 - IP allowlisting for admin dashboard
 - Session timeout after 30 minutes of inactivity
 - Detailed audit logs of all admin actions
 
 **Permissions Model:**
+
 - Principle of least privilege
 - Service role-based (school admin, system admin)
 - Granular permission scoping
@@ -172,12 +195,14 @@ X-XSS-Protection: 1; mode=block
 ### 10. Dependency Management
 
 **Supply Chain Security:**
+
 - Dependencies pinned to specific versions
 - Regular security audits with `npm audit` / `pnpm audit`
 - Automated dependency updates with testing
 - Known vulnerability monitoring (Snyk integration)
 
 **Code Review:**
+
 - All code changes require peer review
 - Security-focused code review checklist
 - Automated static analysis (ESLint security rules)
@@ -187,16 +212,16 @@ X-XSS-Protection: 1; mode=block
 
 The following security headers are configured on all web routes:
 
-| Header | Value | Purpose |
-|--------|-------|---------|
-| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` | HSTS preload list eligibility |
-| `X-Content-Type-Options` | `nosniff` | Prevent MIME type sniffing |
-| `X-Frame-Options` | `SAMEORIGIN` | Clickjacking protection |
-| `X-XSS-Protection` | `1; mode=block` | Legacy browser XSS filter |
-| `Content-Security-Policy` | Strict whitelist | XSS and injection prevention |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` | Referrer header control |
-| `Permissions-Policy` | Restricted features | Camera, microphone, geolocation control |
-| `X-DNS-Prefetch-Control` | `on` | DNS prefetch optimization |
+| Header                      | Value                                          | Purpose                                 |
+| --------------------------- | ---------------------------------------------- | --------------------------------------- |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` | HSTS preload list eligibility           |
+| `X-Content-Type-Options`    | `nosniff`                                      | Prevent MIME type sniffing              |
+| `X-Frame-Options`           | `SAMEORIGIN`                                   | Clickjacking protection                 |
+| `X-XSS-Protection`          | `1; mode=block`                                | Legacy browser XSS filter               |
+| `Content-Security-Policy`   | Strict whitelist                               | XSS and injection prevention            |
+| `Referrer-Policy`           | `strict-origin-when-cross-origin`              | Referrer header control                 |
+| `Permissions-Policy`        | Restricted features                            | Camera, microphone, geolocation control |
+| `X-DNS-Prefetch-Control`    | `on`                                           | DNS prefetch optimization               |
 
 ## Incident Response
 

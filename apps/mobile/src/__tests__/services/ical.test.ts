@@ -212,32 +212,20 @@ END:VCALENDAR`;
 
   describe('generateSubscriptionUrl', () => {
     it('should generate URL with schoolId', () => {
-      const url = generateSubscriptionUrl(
-        'https://api.example.com',
-        'school123'
-      );
+      const url = generateSubscriptionUrl('https://api.example.com', 'school123');
 
-      expect(url).toBe(
-        'https://api.example.com/api/calendar/subscribe?schoolId=school123'
-      );
+      expect(url).toBe('https://api.example.com/api/calendar/subscribe?schoolId=school123');
     });
 
     it('should include userId when provided', () => {
-      const url = generateSubscriptionUrl(
-        'https://api.example.com',
-        'school123',
-        'user456'
-      );
+      const url = generateSubscriptionUrl('https://api.example.com', 'school123', 'user456');
 
       expect(url).toContain('schoolId=school123');
       expect(url).toContain('userId=user456');
     });
 
     it('should encode special characters', () => {
-      const url = generateSubscriptionUrl(
-        'https://api.example.com',
-        'school with space'
-      );
+      const url = generateSubscriptionUrl('https://api.example.com', 'school with space');
 
       // URL encoding may use + or %20 for spaces depending on implementation
       expect(url).toMatch(/school(\+|%20)with(\+|%20)space/);

@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type DemoMode = "normal" | "loading" | "empty" | "error";
+export type DemoMode = 'normal' | 'loading' | 'empty' | 'error';
 
 type DemoContextValue = {
   mode: DemoMode;
@@ -10,15 +10,15 @@ type DemoContextValue = {
 
 const DemoContext = createContext<DemoContextValue | null>(null);
 
-const STORAGE_KEY = "campus.demoMode.v1";
+const STORAGE_KEY = 'campus.demoMode.v1';
 
 function isMode(x: unknown): x is DemoMode {
-  return x === "normal" || x === "loading" || x === "empty" || x === "error";
+  return x === 'normal' || x === 'loading' || x === 'empty' || x === 'error';
 }
 
 export function DemoProvider(props: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(false);
-  const [mode, setModeState] = useState<DemoMode>("normal");
+  const [mode, setModeState] = useState<DemoMode>('normal');
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +53,6 @@ export function DemoProvider(props: { children: React.ReactNode }) {
 
 export function useDemo() {
   const ctx = useContext(DemoContext);
-  if (!ctx) throw new Error("useDemo must be used within DemoProvider");
+  if (!ctx) throw new Error('useDemo must be used within DemoProvider');
   return ctx;
 }

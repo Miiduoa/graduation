@@ -5,12 +5,12 @@ module.exports = {
     es2022: true,
   },
   parserOptions: {
-    ecmaVersion: "latest",
-    sourceType: "script",
+    ecmaVersion: 'latest',
+    sourceType: 'script',
   },
-  extends: ["eslint:recommended"],
+  extends: ['eslint:recommended'],
   rules: {
-    "no-unused-vars": "warn",
-    "no-console": "off",
+    'no-unused-vars': 'warn',
+    'no-console': 'off',
   },
 };

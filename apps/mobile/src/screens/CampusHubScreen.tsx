@@ -72,9 +72,7 @@ function ServiceTile(props: {
         paddingVertical: theme.space.md,
         paddingHorizontal: theme.space.xs,
         borderRadius: theme.radius.lg,
-        backgroundColor: props.highlight
-          ? `${props.tint}12`
-          : theme.colors.surface,
+        backgroundColor: props.highlight ? `${props.tint}12` : theme.colors.surface,
         borderWidth: 1,
         borderColor: props.highlight ? `${props.tint}30` : theme.colors.border,
         alignItems: 'center',
@@ -316,7 +314,11 @@ export function CampusHubScreen(props: Record<string, unknown>) {
     [ds, school.id],
   );
 
-  const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
+  const {
+    cue: ambientCue,
+    dismissCue: dismissAmbientCue,
+    openCue: openAmbientCue,
+  } = useAmbientCues({
     schoolId: school.id,
     uid: auth.user?.uid ?? null,
     role: 'student',
@@ -328,216 +330,219 @@ export function CampusHubScreen(props: Record<string, unknown>) {
   // Service Categories — ALL app features organized
   // ═══════════════════════════════════════════════════════
 
-  const serviceSections: ServiceSection[] = useMemo(() => [
-    {
-      title: '快捷入口',
-      emoji: '⚡',
-      items: [
-        {
-          icon: 'sparkles-outline',
-          label: 'AI 助理',
-          tint: theme.colors.accent,
-          crossTab: { tab: 'Today', screen: 'AIChat' },
-          keywords: ['ai', '助理', '聊天', '問問題'],
-        },
-        {
-          icon: 'map-outline',
-          label: '校園地圖',
-          tint: '#3b82f6',
-          screen: 'Map',
-          keywords: ['地圖', '導航', '位置', '在哪'],
-        },
-        {
-          icon: 'search-outline',
-          label: '全校搜尋',
-          tint: '#8b5cf6',
-          crossTab: { tab: '我的', screen: 'GlobalSearch' },
-          keywords: ['搜尋', '找', '查詢'],
-        },
-        {
-          icon: 'qr-code-outline',
-          label: 'QR Code',
-          tint: '#6366f1',
-          crossTab: { tab: '我的', screen: 'QRCode' },
-          keywords: ['qr', 'code', '掃碼', '條碼'],
-        },
-      ],
-    },
-    {
-      title: '校園生活',
-      emoji: '🏫',
-      items: [
-        {
-          icon: 'restaurant-outline',
-          label: '餐廳',
-          tint: theme.colors.achievement,
-          screen: '餐廳總覽',
-          keywords: ['餐廳', '吃', '食堂', '餐飲', '菜單', '點餐'],
-        },
-        {
-          icon: 'library-outline',
-          label: '圖書館',
-          tint: theme.colors.calm,
-          screen: 'Library',
-          keywords: ['圖書館', '借書', '還書', '自習', '蓋夏'],
-        },
-        {
-          icon: 'home-outline',
-          label: '宿舍',
-          tint: theme.colors.growth,
-          screen: 'Dormitory',
-          keywords: ['宿舍', '住宿', '寢室', '報修'],
-        },
-        {
-          icon: 'bus-outline',
-          label: '交通',
-          tint: '#3b82f6',
-          screen: 'TransportHub',
-          keywords: ['交通', '公車', '搭車', '車站', '高鐵'],
-        },
-      ],
-    },
-    {
-      title: '學業工具',
-      emoji: '📖',
-      items: [
-        {
-          icon: 'stats-chart-outline',
-          label: '成績查詢',
-          tint: '#f59e0b',
-          crossTab: { tab: '課程', screen: 'Grades' },
-          keywords: ['成績', '分數', 'gpa', '學期成績'],
-        },
-        {
-          icon: 'document-text-outline',
-          label: '作業',
-          tint: '#ef4444',
-          crossTab: { tab: '課程', screen: 'CourseHub' },
-          keywords: ['作業', '報告', '繳交', '截止'],
-        },
-        {
-          icon: 'calendar-outline',
-          label: '行事曆',
-          tint: '#8b5cf6',
-          crossTab: { tab: '課程', screen: 'Calendar' },
-          keywords: ['行事曆', '日曆', '日程', '排程'],
-        },
-        {
-          icon: 'checkbox-outline',
-          label: '出席紀錄',
-          tint: '#10b981',
-          crossTab: { tab: '課程', screen: 'Attendance' },
-          keywords: ['出席', '點名', '缺席', '曠課'],
-        },
-      ],
-    },
-    {
-      title: '服務與支援',
-      emoji: '🔧',
-      items: [
-        {
-          icon: 'print-outline',
-          label: '列印',
-          tint: theme.colors.social,
-          screen: 'PrintService',
-          keywords: ['列印', '印表機', '影印', '掃描'],
-        },
-        {
-          icon: 'search-circle-outline',
-          label: '失物招領',
-          tint: theme.colors.warning,
-          screen: 'LostFound',
-          keywords: ['失物', '招領', '撿到', '遺失'],
-        },
-        ...(paymentsEnabled
-          ? [
-              {
-                icon: 'card-outline' as keyof typeof Ionicons.glyphMap,
-                label: '付款',
-                tint: theme.colors.streak,
-                screen: 'Payment',
-                keywords: ['付款', '支付', '繳費', '儲值'],
-              },
-            ]
-          : []),
-        {
-          icon: 'heart-outline',
-          label: '健康',
-          tint: theme.colors.danger,
-          screen: 'Health',
-          keywords: ['健康', '醫療', '診所', '保健'],
-        },
-      ],
-    },
-    {
-      title: '社群與資訊',
-      emoji: '📢',
-      items: [
-        {
-          icon: 'megaphone-outline',
-          label: '公告',
-          tint: '#f97316',
-          crossTab: { tab: 'Today', screen: '公告總覽' },
-          keywords: ['公告', '通知', '新聞', '消息'],
-        },
-        {
-          icon: 'calendar-number-outline',
-          label: '活動',
-          tint: '#ec4899',
-          crossTab: { tab: 'Today', screen: '活動總覽' },
-          keywords: ['活動', '講座', '比賽', '報名'],
-        },
-        {
-          icon: 'people-outline',
-          label: '社團',
-          tint: '#06b6d4',
-          crossTab: { tab: '收件匣', screen: 'Groups' },
-          keywords: ['社團', '群組', '加入'],
-        },
-        {
-          icon: 'trophy-outline',
-          label: '成就',
-          tint: '#eab308',
-          crossTab: { tab: '我的', screen: 'Achievements' },
-          keywords: ['成就', '積分', '徽章', '獎勵'],
-        },
-      ],
-    },
-    {
-      title: '更多',
-      emoji: '⚙️',
-      items: [
-        {
-          icon: 'accessibility-outline',
-          label: '無障礙路線',
-          tint: '#0ea5e9',
-          screen: 'AccessibleRoute',
-          keywords: ['無障礙', '輪椅', '電梯', '坡道'],
-        },
-        {
-          icon: 'navigate-circle-outline',
-          label: 'AR 導航',
-          tint: theme.colors.accent,
-          screen: 'ARNavigation',
-          keywords: ['ar', '導航', '擴增實境'],
-        },
-        {
-          icon: 'bug-outline',
-          label: '回報問題',
-          tint: '#78716c',
-          crossTab: { tab: '我的', screen: 'BugReport' },
-          keywords: ['回報', 'bug', '問題', '建議'],
-        },
-        {
-          icon: 'download-outline',
-          label: '資料匯出',
-          tint: '#64748b',
-          crossTab: { tab: '我的', screen: 'DataExport' },
-          keywords: ['匯出', '下載', '備份', '資料'],
-        },
-      ],
-    },
-  ], [paymentsEnabled]);
+  const serviceSections: ServiceSection[] = useMemo(
+    () => [
+      {
+        title: '快捷入口',
+        emoji: '⚡',
+        items: [
+          {
+            icon: 'sparkles-outline',
+            label: 'AI 助理',
+            tint: theme.colors.accent,
+            crossTab: { tab: 'Today', screen: 'AIChat' },
+            keywords: ['ai', '助理', '聊天', '問問題'],
+          },
+          {
+            icon: 'map-outline',
+            label: '校園地圖',
+            tint: '#3b82f6',
+            screen: 'Map',
+            keywords: ['地圖', '導航', '位置', '在哪'],
+          },
+          {
+            icon: 'search-outline',
+            label: '全校搜尋',
+            tint: '#8b5cf6',
+            crossTab: { tab: '我的', screen: 'GlobalSearch' },
+            keywords: ['搜尋', '找', '查詢'],
+          },
+          {
+            icon: 'qr-code-outline',
+            label: 'QR Code',
+            tint: '#6366f1',
+            crossTab: { tab: '我的', screen: 'QRCode' },
+            keywords: ['qr', 'code', '掃碼', '條碼'],
+          },
+        ],
+      },
+      {
+        title: '校園生活',
+        emoji: '🏫',
+        items: [
+          {
+            icon: 'restaurant-outline',
+            label: '餐廳',
+            tint: theme.colors.achievement,
+            screen: '餐廳總覽',
+            keywords: ['餐廳', '吃', '食堂', '餐飲', '菜單', '點餐'],
+          },
+          {
+            icon: 'library-outline',
+            label: '圖書館',
+            tint: theme.colors.calm,
+            screen: 'Library',
+            keywords: ['圖書館', '借書', '還書', '自習', '蓋夏'],
+          },
+          {
+            icon: 'home-outline',
+            label: '宿舍',
+            tint: theme.colors.growth,
+            screen: 'Dormitory',
+            keywords: ['宿舍', '住宿', '寢室', '報修'],
+          },
+          {
+            icon: 'bus-outline',
+            label: '交通',
+            tint: '#3b82f6',
+            screen: 'TransportHub',
+            keywords: ['交通', '公車', '搭車', '車站', '高鐵'],
+          },
+        ],
+      },
+      {
+        title: '學業工具',
+        emoji: '📖',
+        items: [
+          {
+            icon: 'stats-chart-outline',
+            label: '成績查詢',
+            tint: '#f59e0b',
+            crossTab: { tab: '課程', screen: 'Grades' },
+            keywords: ['成績', '分數', 'gpa', '學期成績'],
+          },
+          {
+            icon: 'document-text-outline',
+            label: '作業',
+            tint: '#ef4444',
+            crossTab: { tab: '課程', screen: 'CourseHub' },
+            keywords: ['作業', '報告', '繳交', '截止'],
+          },
+          {
+            icon: 'calendar-outline',
+            label: '行事曆',
+            tint: '#8b5cf6',
+            crossTab: { tab: '課程', screen: 'Calendar' },
+            keywords: ['行事曆', '日曆', '日程', '排程'],
+          },
+          {
+            icon: 'checkbox-outline',
+            label: '出席紀錄',
+            tint: '#10b981',
+            crossTab: { tab: '課程', screen: 'Attendance' },
+            keywords: ['出席', '點名', '缺席', '曠課'],
+          },
+        ],
+      },
+      {
+        title: '服務與支援',
+        emoji: '🔧',
+        items: [
+          {
+            icon: 'print-outline',
+            label: '列印',
+            tint: theme.colors.social,
+            screen: 'PrintService',
+            keywords: ['列印', '印表機', '影印', '掃描'],
+          },
+          {
+            icon: 'search-circle-outline',
+            label: '失物招領',
+            tint: theme.colors.warning,
+            screen: 'LostFound',
+            keywords: ['失物', '招領', '撿到', '遺失'],
+          },
+          ...(paymentsEnabled
+            ? [
+                {
+                  icon: 'card-outline' as keyof typeof Ionicons.glyphMap,
+                  label: '付款',
+                  tint: theme.colors.streak,
+                  screen: 'Payment',
+                  keywords: ['付款', '支付', '繳費', '儲值'],
+                },
+              ]
+            : []),
+          {
+            icon: 'heart-outline',
+            label: '健康',
+            tint: theme.colors.danger,
+            screen: 'Health',
+            keywords: ['健康', '醫療', '診所', '保健'],
+          },
+        ],
+      },
+      {
+        title: '社群與資訊',
+        emoji: '📢',
+        items: [
+          {
+            icon: 'megaphone-outline',
+            label: '公告',
+            tint: '#f97316',
+            crossTab: { tab: 'Today', screen: '公告總覽' },
+            keywords: ['公告', '通知', '新聞', '消息'],
+          },
+          {
+            icon: 'calendar-number-outline',
+            label: '活動',
+            tint: '#ec4899',
+            crossTab: { tab: 'Today', screen: '活動總覽' },
+            keywords: ['活動', '講座', '比賽', '報名'],
+          },
+          {
+            icon: 'people-outline',
+            label: '社團',
+            tint: '#06b6d4',
+            crossTab: { tab: '收件匣', screen: 'Groups' },
+            keywords: ['社團', '群組', '加入'],
+          },
+          {
+            icon: 'trophy-outline',
+            label: '成就',
+            tint: '#eab308',
+            crossTab: { tab: '我的', screen: 'Achievements' },
+            keywords: ['成就', '積分', '徽章', '獎勵'],
+          },
+        ],
+      },
+      {
+        title: '更多',
+        emoji: '⚙️',
+        items: [
+          {
+            icon: 'accessibility-outline',
+            label: '無障礙路線',
+            tint: '#0ea5e9',
+            screen: 'AccessibleRoute',
+            keywords: ['無障礙', '輪椅', '電梯', '坡道'],
+          },
+          {
+            icon: 'navigate-circle-outline',
+            label: 'AR 導航',
+            tint: theme.colors.accent,
+            screen: 'ARNavigation',
+            keywords: ['ar', '導航', '擴增實境'],
+          },
+          {
+            icon: 'bug-outline',
+            label: '回報問題',
+            tint: '#78716c',
+            crossTab: { tab: '我的', screen: 'BugReport' },
+            keywords: ['回報', 'bug', '問題', '建議'],
+          },
+          {
+            icon: 'download-outline',
+            label: '資料匯出',
+            tint: '#64748b',
+            crossTab: { tab: '我的', screen: 'DataExport' },
+            keywords: ['匯出', '下載', '備份', '資料'],
+          },
+        ],
+      },
+    ],
+    [paymentsEnabled],
+  );
 
   // ═══════════════════════════════════════════════════════
   // Search filter
@@ -551,8 +556,7 @@ export function CampusHubScreen(props: Record<string, unknown>) {
     for (const section of serviceSections) {
       const matchedItems = section.items.filter(
         (item) =>
-          item.label.toLowerCase().includes(q) ||
-          (item.keywords ?? []).some((k) => k.includes(q)),
+          item.label.toLowerCase().includes(q) || (item.keywords ?? []).some((k) => k.includes(q)),
       );
       if (matchedItems.length > 0) {
         result.push({ ...section, items: matchedItems });
@@ -688,9 +692,7 @@ export function CampusHubScreen(props: Record<string, unknown>) {
                 {section.items.slice(rowIdx * 4, rowIdx * 4 + 4).length < 4 &&
                   Array.from(
                     { length: 4 - section.items.slice(rowIdx * 4, rowIdx * 4 + 4).length },
-                    (_, i) => (
-                      <View key={`empty-${i}`} style={{ flex: 1, minWidth: 72 }} />
-                    ),
+                    (_, i) => <View key={`empty-${i}`} style={{ flex: 1, minWidth: 72 }} />,
                   )}
               </View>
             ))}

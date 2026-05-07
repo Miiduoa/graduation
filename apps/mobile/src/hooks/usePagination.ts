@@ -1,6 +1,6 @@
 /* eslint-disable */
-import { useState, useCallback, useRef, useEffect } from "react";
-import { useLatestValue } from "./useLatestValue";
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { useLatestValue } from './useLatestValue';
 
 export type PaginationOptions = {
   initialPage?: number;
@@ -32,7 +32,7 @@ export type PaginationResult<T> = {
  */
 export function usePagination<T>(
   fetchFn: (page: number, pageSize: number) => Promise<{ data: T[]; total: number }>,
-  options: PaginationOptions = {}
+  options: PaginationOptions = {},
 ): PaginationResult<T> {
   const { initialPage = 1, pageSize: initialPageSize = 20, totalItems: initialTotal } = options;
 
@@ -45,7 +45,7 @@ export function usePagination<T>(
   const [error, setError] = useState<string | null>(null);
 
   const fetchFnRef = useLatestValue(fetchFn);
-  
+
   // 追蹤當前請求以便取消
   const abortControllerRef = useRef<AbortController | null>(null);
   const requestIdRef = useRef(0);
@@ -61,9 +61,9 @@ export function usePagination<T>(
         abortControllerRef.current.abort();
       }
       abortControllerRef.current = new AbortController();
-      
+
       const currentRequestId = ++requestIdRef.current;
-      
+
       if (append) {
         setLoadingMore(true);
       } else {
@@ -73,23 +73,23 @@ export function usePagination<T>(
 
       try {
         const result = await fetchFnRef.current(pageNum, pageSize);
-        
+
         // 檢查這個請求是否仍然是最新的
         if (currentRequestId !== requestIdRef.current) {
           return;
         }
-        
+
         if (append) {
           setItems((prev) => [...prev, ...result.data]);
         } else {
           setItems(result.data);
         }
-        
+
         setTotalItems(result.total);
         setPage(pageNum);
       } catch (e) {
         // 忽略已取消的請求錯誤
-        if (e instanceof Error && e.name === "AbortError") {
+        if (e instanceof Error && e.name === 'AbortError') {
           return;
         }
         // 確保這是最新的請求
@@ -103,9 +103,9 @@ export function usePagination<T>(
         }
       }
     },
-    [pageSize]
+    [pageSize],
   );
-  
+
   // 清理函數
   useEffect(() => {
     return () => {
@@ -125,7 +125,7 @@ export function usePagination<T>(
         fetchPage(pageNum);
       }
     },
-    [fetchPage, page, totalPages]
+    [fetchPage, page, totalPages],
   );
 
   const nextPage = useCallback(() => {
@@ -153,7 +153,7 @@ export function usePagination<T>(
 
   // 使用 ref 追蹤待處理的 pageSize 變更，避免競態條件
   const pendingPageSizeRef = useRef<number | null>(null);
-  
+
   const setPageSize = useCallback(
     (size: number) => {
       if (size !== pageSize && size !== pendingPageSizeRef.current) {
@@ -164,9 +164,9 @@ export function usePagination<T>(
         // 不在這裡直接調用 fetchPage，而是透過 useEffect 監聽 pageSize 變化
       }
     },
-    [pageSize]
+    [pageSize],
   );
-  
+
   // 監聽 pageSize 變化來觸發重新載入
   useEffect(() => {
     if (pendingPageSizeRef.current !== null) {
@@ -200,7 +200,7 @@ export function usePagination<T>(
  */
 export function useInfiniteScroll<T>(
   fetchFn: (cursor?: string) => Promise<{ data: T[]; nextCursor?: string; hasMore: boolean }>,
-  deps: React.DependencyList = []
+  deps: React.DependencyList = [],
 ): {
   items: T[];
   loading: boolean;
@@ -228,7 +228,7 @@ export function useInfiniteScroll<T>(
   useEffect(() => {
     cursorRef.current = cursor;
   }, [cursor]);
-  
+
   // 追蹤是否已卸載
   useEffect(() => {
     isMountedRef.current = true;
@@ -240,7 +240,7 @@ export function useInfiniteScroll<T>(
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isLoadingRef.current) return;
     isLoadingRef.current = true;
-    
+
     const currentRequestId = ++requestIdRef.current;
 
     if (isRefresh) {
@@ -255,18 +255,18 @@ export function useInfiniteScroll<T>(
     try {
       const currentCursor = isRefresh ? undefined : cursorRef.current;
       const result = await fetchFnRef.current(currentCursor);
-      
+
       // 檢查是否是最新請求且元件仍掛載
       if (currentRequestId !== requestIdRef.current || !isMountedRef.current) {
         return;
       }
-      
+
       if (isRefresh) {
         setItems(result.data);
       } else {
         setItems((prev) => [...prev, ...result.data]);
       }
-      
+
       setCursor(result.nextCursor);
       cursorRef.current = result.nextCursor;
       setHasMore(result.hasMore);
@@ -286,7 +286,6 @@ export function useInfiniteScroll<T>(
 
   useEffect(() => {
     fetchData(true);
-     
   }, deps);
 
   const refresh = useCallback(async () => {

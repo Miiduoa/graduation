@@ -1,17 +1,17 @@
 /* eslint-disable */
-import React, { useState, useEffect, useCallback } from "react";
-import { RefreshControl, ScrollView, Text, View, Pressable, ActivityIndicator } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { theme } from "../ui/theme";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { useDataSource } from "../hooks/useDataSource";
-import { useSchedule } from "../state/schedule";
-import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
-import { useAmbientCues } from "../features/engagement";
-import { AmbientCueCard } from "../ui/campusOs";
-import type { Course, Assignment, AttendanceSession } from "../data/types";
+import React, { useState, useEffect, useCallback } from 'react';
+import { RefreshControl, ScrollView, Text, View, Pressable, ActivityIndicator } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { theme } from '../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { useDataSource } from '../hooks/useDataSource';
+import { useSchedule } from '../state/schedule';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { useAmbientCues } from '../features/engagement';
+import { AmbientCueCard } from '../ui/campusOs';
+import type { Course, Assignment, AttendanceSession } from '../data/types';
 
 type CourseStats = {
   course: Course;
@@ -32,11 +32,15 @@ export function TeachingHubScreen(props: any) {
   const [todayClasses, setTodayClasses] = React.useState<Course[]>([]);
   const [courseStats, setCourseStats] = React.useState<CourseStats[]>([]);
   const [totalPendingAssignments, setTotalPendingAssignments] = React.useState(0);
-  const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
+  const {
+    cue: ambientCue,
+    dismissCue: dismissAmbientCue,
+    openCue: openAmbientCue,
+  } = useAmbientCues({
     schoolId: schoolId ?? null,
     uid: user?.uid ?? null,
-    role: "teacher",
-    surface: "teachingHub",
+    role: 'teacher',
+    surface: 'teachingHub',
     limit: 1,
   });
 
@@ -54,7 +58,7 @@ export function TeachingHubScreen(props: any) {
       const now = new Date();
       const dayScheduleEvents = getDaySchedule(now);
       const todayScheduleClasses = dayScheduleEvents
-        .filter((event) => event.courseId && event.type === "class")
+        .filter((event) => event.courseId && event.type === 'class')
         .map((event) => ({
           courseId: event.courseId,
           courseName: event.title,
@@ -68,7 +72,7 @@ export function TeachingHubScreen(props: any) {
       try {
         allCourses = await ds.listCourses(schoolId);
       } catch (e) {
-        console.warn("[TeachingHub] Failed to load courses:", e);
+        console.warn('[TeachingHub] Failed to load courses:', e);
         allCourses = [];
       }
 
@@ -96,7 +100,7 @@ export function TeachingHubScreen(props: any) {
               } catch {
                 return 0;
               }
-            })
+            }),
           );
           pendingCount = assignmentsWithSubmissions.reduce((a, b) => a + b, 0);
         } catch (e) {
@@ -111,7 +115,9 @@ export function TeachingHubScreen(props: any) {
           if (courseSessions.length > 0) {
             // attendeeCount is total who attended; use ratio of active vs total sessions
             const sessionsWithAttendees = courseSessions.filter((s) => (s.attendeeCount ?? 0) > 0);
-            attendanceRate = Math.round((sessionsWithAttendees.length / courseSessions.length) * 100);
+            attendanceRate = Math.round(
+              (sessionsWithAttendees.length / courseSessions.length) * 100,
+            );
           }
         } catch (e) {
           console.warn(`[TeachingHub] Failed to load attendance for course ${course.id}:`, e);
@@ -132,7 +138,7 @@ export function TeachingHubScreen(props: any) {
       const total = stats.reduce((sum, stat) => sum + stat.pendingAssignmentCount, 0);
       setTotalPendingAssignments(total);
     } catch (e) {
-      console.error("[TeachingHub] Failed to load data:", e);
+      console.error('[TeachingHub] Failed to load data:', e);
     } finally {
       setLoading(false);
     }
@@ -151,27 +157,27 @@ export function TeachingHubScreen(props: any) {
 
   const quickActions = [
     {
-      label: "評分",
-      icon: "checkmark-circle-outline" as const,
+      label: '評分',
+      icon: 'checkmark-circle-outline' as const,
       onPress: () => {
         if (courseStats.length > 0) {
-          nav?.navigate?.("CourseGradebook", { courseId: courseStats[0].course.id });
+          nav?.navigate?.('CourseGradebook', { courseId: courseStats[0].course.id });
         } else {
-          nav?.navigate?.("CourseGradebook");
+          nav?.navigate?.('CourseGradebook');
         }
       },
       color: theme.colors.success,
     },
     {
-      label: "發公告",
-      icon: "megaphone-outline" as const,
-      onPress: () => nav?.navigate?.("CourseHub"),
+      label: '發公告',
+      icon: 'megaphone-outline' as const,
+      onPress: () => nav?.navigate?.('CourseHub'),
       color: theme.colors.accent,
     },
     {
-      label: "出缺勤",
-      icon: "clipboard-outline" as const,
-      onPress: () => nav?.navigate?.("Attendance"),
+      label: '出缺勤',
+      icon: 'clipboard-outline' as const,
+      onPress: () => nav?.navigate?.('Attendance'),
       color: theme.colors.warning,
     },
   ];
@@ -179,7 +185,14 @@ export function TeachingHubScreen(props: any) {
   // Show loading state if DataSource is not available
   if (!ds) {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: "center", alignItems: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme.colors.bg,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
         <ActivityIndicator size="large" color={theme.colors.accent} />
         <Text style={{ marginTop: 12, color: theme.colors.textSecondary }}>初始化中...</Text>
       </View>
@@ -189,7 +202,14 @@ export function TeachingHubScreen(props: any) {
   // Show loading spinner while loading
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: "center", alignItems: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme.colors.bg,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
         <ActivityIndicator size="large" color={theme.colors.accent} />
       </View>
     );
@@ -215,8 +235,12 @@ export function TeachingHubScreen(props: any) {
       >
         {/* Header */}
         <View style={{ gap: 4 }}>
-          <Text style={{ fontSize: 28, fontWeight: "800", color: theme.colors.text }}>教學主流程</Text>
-          <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>管理課程、評分與互動</Text>
+          <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
+            教學主流程
+          </Text>
+          <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>
+            管理課程、評分與互動
+          </Text>
         </View>
 
         {ambientCue ? (
@@ -246,9 +270,11 @@ export function TeachingHubScreen(props: any) {
             }}
           >
             <View style={{ gap: 4 }}>
-              <Text style={{ fontSize: 14, fontWeight: "600", color: theme.colors.text }}>今日課程</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>
+                今日課程
+              </Text>
               <Text style={{ fontSize: 12, color: theme.colors.textSecondary }}>
-                {todayClasses.length} {todayClasses.length === 1 ? "堂課" : "堂課"}
+                {todayClasses.length} {todayClasses.length === 1 ? '堂課' : '堂課'}
               </Text>
             </View>
             <View style={{ gap: 8 }}>
@@ -256,26 +282,26 @@ export function TeachingHubScreen(props: any) {
                 const scheduleEntry = cls.schedule?.[0];
                 const time = scheduleEntry
                   ? `${scheduleEntry.startTime} - ${scheduleEntry.endTime}`
-                  : "時間未定";
-                const room = scheduleEntry?.location || "教室未定";
+                  : '時間未定';
+                const room = scheduleEntry?.location || '教室未定';
 
                 return (
                   <Pressable
                     key={i}
                     style={({ pressed }) => ({
-                      flexDirection: "row",
+                      flexDirection: 'row',
                       gap: 12,
                       padding: 10,
-                      backgroundColor: pressed ? theme.colors.surface2 : "transparent",
+                      backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
                       borderRadius: 8,
                       opacity: pressed ? 0.8 : 1,
                     })}
                   >
-                    <View style={{ justifyContent: "center" }}>
+                    <View style={{ justifyContent: 'center' }}>
                       <Ionicons name="time-outline" size={16} color={theme.colors.accent} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: "600", color: theme.colors.text }}>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.text }}>
                         {cls.name}
                       </Text>
                       <Text style={{ fontSize: 12, color: theme.colors.textSecondary }}>
@@ -296,8 +322,8 @@ export function TeachingHubScreen(props: any) {
               gap: 12,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              alignItems: "center",
-              justifyContent: "center",
+              alignItems: 'center',
+              justifyContent: 'center',
               minHeight: 100,
             }}
           >
@@ -318,32 +344,41 @@ export function TeachingHubScreen(props: any) {
           }}
         >
           <View style={{ gap: 4 }}>
-            <Text style={{ fontSize: 14, fontWeight: "600", color: theme.colors.text }}>待批改作業</Text>
-            <Text style={{ fontSize: 12, color: totalPendingAssignments > 0 ? theme.colors.danger : theme.colors.success }}>
-              {totalPendingAssignments} 份{totalPendingAssignments === 0 ? "已批改" : "未批改"}
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>
+              待批改作業
+            </Text>
+            <Text
+              style={{
+                fontSize: 12,
+                color: totalPendingAssignments > 0 ? theme.colors.danger : theme.colors.success,
+              }}
+            >
+              {totalPendingAssignments} 份{totalPendingAssignments === 0 ? '已批改' : '未批改'}
             </Text>
           </View>
           <Pressable
             style={({ pressed }) => ({
               padding: 10,
-              backgroundColor: pressed ? theme.colors.surface2 : "transparent",
+              backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
               borderRadius: 8,
-              flexDirection: "row",
-              alignItems: "center",
+              flexDirection: 'row',
+              alignItems: 'center',
               gap: 12,
               opacity: pressed ? 0.8 : 1,
             })}
             onPress={() => {
               if (courseStats.length > 0) {
-                nav?.navigate?.("CourseGradebook", { courseId: courseStats[0].course.id });
+                nav?.navigate?.('CourseGradebook', { courseId: courseStats[0].course.id });
               } else {
-                nav?.navigate?.("CourseGradebook");
+                nav?.navigate?.('CourseGradebook');
               }
             }}
           >
             <Ionicons name="list-outline" size={16} color={theme.colors.warning} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 13, fontWeight: "600", color: theme.colors.text }}>查看所有未批改作業</Text>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.text }}>
+                查看所有未批改作業
+              </Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
           </Pressable>
@@ -362,16 +397,25 @@ export function TeachingHubScreen(props: any) {
             }}
           >
             <View style={{ gap: 4 }}>
-              <Text style={{ fontSize: 14, fontWeight: "600", color: theme.colors.text }}>出缺勤統計</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>
+                出缺勤統計
+              </Text>
               <Text style={{ fontSize: 12, color: theme.colors.textSecondary }}>課程概覽</Text>
             </View>
             <View style={{ gap: 8 }}>
               {courseStats.slice(0, 3).map((stat, i) => (
-                <View key={i} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <View
+                  key={i}
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
                   <Text style={{ fontSize: 13, color: theme.colors.text }}>{stat.course.name}</Text>
-                  <View style={{ alignItems: "flex-end" }}>
-                    <Text style={{ fontSize: 12, fontWeight: "600", color: theme.colors.success }}>
-                      {stat.attendanceRate > 0 ? `${stat.attendanceRate}%` : "-"}
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.success }}>
+                      {stat.attendanceRate > 0 ? `${stat.attendanceRate}%` : '-'}
                     </Text>
                     <Text style={{ fontSize: 11, color: theme.colors.textSecondary }}>出席率</Text>
                   </View>
@@ -383,8 +427,10 @@ export function TeachingHubScreen(props: any) {
 
         {/* Quick Actions */}
         <View style={{ gap: 10 }}>
-          <Text style={{ fontSize: 14, fontWeight: "600", color: theme.colors.text }}>快速入口</Text>
-          <View style={{ flexDirection: "row", gap: 10, justifyContent: "space-between" }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>
+            快速入口
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'space-between' }}>
             {quickActions.map((action, i) => (
               <Pressable
                 key={i}
@@ -394,7 +440,7 @@ export function TeachingHubScreen(props: any) {
                   backgroundColor: theme.colors.surface,
                   borderRadius: 12,
                   padding: 16,
-                  alignItems: "center",
+                  alignItems: 'center',
                   gap: 8,
                   borderWidth: 1,
                   borderColor: theme.colors.border,
@@ -402,7 +448,14 @@ export function TeachingHubScreen(props: any) {
                 })}
               >
                 <Ionicons name={action.icon} size={28} color={action.color} />
-                <Text style={{ fontSize: 12, fontWeight: "600", color: theme.colors.text, textAlign: "center" }}>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: '600',
+                    color: theme.colors.text,
+                    textAlign: 'center',
+                  }}
+                >
                   {action.label}
                 </Text>
               </Pressable>
@@ -420,13 +473,15 @@ export function TeachingHubScreen(props: any) {
               gap: 12,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              alignItems: "center",
-              justifyContent: "center",
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             <Ionicons name="folder-open-outline" size={40} color={theme.colors.muted} />
-            <Text style={{ fontSize: 16, fontWeight: "600", color: theme.colors.text }}>尚未有任何課程</Text>
-            <Text style={{ fontSize: 13, color: theme.colors.textSecondary, textAlign: "center" }}>
+            <Text style={{ fontSize: 16, fontWeight: '600', color: theme.colors.text }}>
+              尚未有任何課程
+            </Text>
+            <Text style={{ fontSize: 13, color: theme.colors.textSecondary, textAlign: 'center' }}>
               您目前沒有指派任何課程。請聯絡系統管理員以新增課程。
             </Text>
           </View>

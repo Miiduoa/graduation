@@ -25,8 +25,8 @@ artifacts:
 
 # Timeout settings
 timeout:
-  default: 30000  # 30 seconds
-  flow: 300000    # 5 minutes per flow
+  default: 30000 # 30 seconds
+  flow: 300000 # 5 minutes per flow
 
 # Retry settings
 retry:

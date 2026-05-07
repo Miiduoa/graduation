@@ -1,5 +1,5 @@
-import { calculateCredits } from "./creditAudit";
-import { mockCourses, demoEnrollments, mockGradRuleTemplateV1 } from "./mockData";
+import { calculateCredits } from './creditAudit';
+import { mockCourses, demoEnrollments, mockGradRuleTemplateV1 } from './mockData';
 
 // Simple non-runtime helper for examples / manual testing.
 // This file is not meant to be imported by app bundles.

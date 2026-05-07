@@ -1,23 +1,23 @@
 /* eslint-disable */
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from 'react';
+import { ScrollView, Text, View, Pressable, RefreshControl, TextInput, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { buildUserSchoolCollectionPath } from '@campus/shared/src';
 import {
-  ScrollView,
-  Text,
-  View,
-  Pressable,
-  RefreshControl,
-  TextInput,
-  Alert,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { buildUserSchoolCollectionPath } from "@campus/shared/src";
-import { Screen, Card, AnimatedCard, Button, Pill, LoadingState, ProgressRing } from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, softShadowStyle } from "../ui/theme";
-import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
-import { useSchedule } from "../state/schedule";
-import { getDb } from "../firebase";
+  Screen,
+  Card,
+  AnimatedCard,
+  Button,
+  Pill,
+  LoadingState,
+  ProgressRing,
+} from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme, softShadowStyle } from '../ui/theme';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { useSchedule } from '../state/schedule';
+import { getDb } from '../firebase';
 import {
   collection,
   getDocs,
@@ -30,8 +30,8 @@ import {
   doc,
   setDoc,
   serverTimestamp,
-} from "firebase/firestore";
-import { collectionFromSegments } from "../data/firestorePath";
+} from 'firebase/firestore';
+import { collectionFromSegments } from '../data/firestorePath';
 
 type SubmissionRecord = {
   id: string;
@@ -86,7 +86,7 @@ function SimpleLineChart({
   return (
     <View style={{ height: height + 30, width, marginVertical: 8 }}>
       {/* 折線用View疊出來 */}
-      <View style={{ position: "absolute", width, height }}>
+      <View style={{ position: 'absolute', width, height }}>
         {pts.slice(0, -1).map((pt, i) => {
           const next = pts[i + 1];
           const dx = next.x - pt.x;
@@ -97,13 +97,13 @@ function SimpleLineChart({
             <View
               key={i}
               style={{
-                position: "absolute",
+                position: 'absolute',
                 left: pt.x,
                 top: pt.y,
                 width: lineLength,
                 height: 2,
                 backgroundColor: color,
-                transformOrigin: "left center",
+                transformOrigin: 'left center',
                 transform: [{ rotate: `${angle}deg` }],
               }}
             />
@@ -114,7 +114,7 @@ function SimpleLineChart({
           <View
             key={`dot-${i}`}
             style={{
-              position: "absolute",
+              position: 'absolute',
               left: pt.x - 5,
               top: pt.y - 5,
               width: 10,
@@ -128,7 +128,15 @@ function SimpleLineChart({
         ))}
       </View>
       {/* 標籤 */}
-      <View style={{ position: "absolute", top: height + 6, width, flexDirection: "row", justifyContent: "space-between" }}>
+      <View
+        style={{
+          position: 'absolute',
+          top: height + 6,
+          width,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+        }}
+      >
         {labels.map((label, i) => (
           <Text key={i} style={{ color: theme.colors.muted, fontSize: 10 }}>
             {label}
@@ -156,10 +164,10 @@ function RadarChart({ axes, values, color }: { axes: string[]; values: number[];
   }
 
   return (
-    <View style={{ width: size, height: size + 20, alignItems: "center" }}>
+    <View style={{ width: size, height: size + 20, alignItems: 'center' }}>
       {/* 背景網格（60% 和 100%） */}
       {[0.6, 1.0].map((scale, si) => (
-        <View key={si} style={{ position: "absolute", top: 0, left: 0, width: size, height: size }}>
+        <View key={si} style={{ position: 'absolute', top: 0, left: 0, width: size, height: size }}>
           {axes.map((_, i) => {
             const pt = getCoord(i, scale * 100);
             const next = getCoord((i + 1) % n, scale * 100);
@@ -171,13 +179,13 @@ function RadarChart({ axes, values, color }: { axes: string[]; values: number[];
               <View
                 key={i}
                 style={{
-                  position: "absolute",
+                  position: 'absolute',
                   left: pt.x,
                   top: pt.y,
                   width: len,
                   height: 1,
                   backgroundColor: `${theme.colors.border}80`,
-                  transformOrigin: "left center",
+                  transformOrigin: 'left center',
                   transform: [{ rotate: `${angle}deg` }],
                 }}
               />
@@ -186,7 +194,7 @@ function RadarChart({ axes, values, color }: { axes: string[]; values: number[];
         </View>
       ))}
       {/* 資料多邊形 */}
-      <View style={{ position: "absolute", top: 0, left: 0, width: size, height: size }}>
+      <View style={{ position: 'absolute', top: 0, left: 0, width: size, height: size }}>
         {axes.map((_, i) => {
           const pt = getCoord(i, values[i]);
           const next = getCoord((i + 1) % n, values[(i + 1) % n]);
@@ -198,13 +206,13 @@ function RadarChart({ axes, values, color }: { axes: string[]; values: number[];
             <View
               key={i}
               style={{
-                position: "absolute",
+                position: 'absolute',
                 left: pt.x,
                 top: pt.y,
                 width: len,
                 height: 2,
                 backgroundColor: color,
-                transformOrigin: "left center",
+                transformOrigin: 'left center',
                 transform: [{ rotate: `${angle}deg` }],
               }}
             />
@@ -217,7 +225,7 @@ function RadarChart({ axes, values, color }: { axes: string[]; values: number[];
             <React.Fragment key={i}>
               <View
                 style={{
-                  position: "absolute",
+                  position: 'absolute',
                   left: dotPt.x - 5,
                   top: dotPt.y - 5,
                   width: 10,
@@ -228,14 +236,14 @@ function RadarChart({ axes, values, color }: { axes: string[]; values: number[];
               />
               <Text
                 style={{
-                  position: "absolute",
+                  position: 'absolute',
                   left: pt.x - 18,
                   top: pt.y - 8,
                   width: 36,
                   color: theme.colors.text,
                   fontSize: 10,
-                  fontWeight: "700",
-                  textAlign: "center",
+                  fontWeight: '700',
+                  textAlign: 'center',
                 }}
               >
                 {label}
@@ -251,21 +259,28 @@ function RadarChart({ axes, values, color }: { axes: string[]; values: number[];
 // ── 熱圖元件 ──
 function HeatmapGrid({ title, data }: { title: string; data: number[][] }) {
   const hours = [8, 10, 12, 14, 16, 18, 20, 22];
-  const days = ["日", "一", "二", "三", "四", "五", "六"];
+  const days = ['日', '一', '二', '三', '四', '五', '六'];
   const max = Math.max(...data.flat(), 1);
 
   return (
     <View>
-      <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 8 }}>{title}</Text>
-      <View style={{ flexDirection: "row", gap: 4 }}>
-        <View style={{ gap: 4, justifyContent: "space-around" }}>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+        {title}
+      </Text>
+      <View style={{ flexDirection: 'row', gap: 4 }}>
+        <View style={{ gap: 4, justifyContent: 'space-around' }}>
           {hours.map((h) => (
-            <Text key={h} style={{ color: theme.colors.muted, fontSize: 9, width: 20, textAlign: "right" }}>{h}</Text>
+            <Text
+              key={h}
+              style={{ color: theme.colors.muted, fontSize: 9, width: 20, textAlign: 'right' }}
+            >
+              {h}
+            </Text>
           ))}
         </View>
         <View style={{ gap: 4 }}>
           {hours.map((_, hi) => (
-            <View key={hi} style={{ flexDirection: "row", gap: 4 }}>
+            <View key={hi} style={{ flexDirection: 'row', gap: 4 }}>
               {days.map((_, di) => {
                 const val = data[hi]?.[di] ?? 0;
                 const intensity = val / max;
@@ -276,18 +291,24 @@ function HeatmapGrid({ title, data }: { title: string; data: number[][] }) {
                       width: 30,
                       height: 14,
                       borderRadius: 3,
-                      backgroundColor: intensity > 0
-                        ? `rgba(99,102,241,${0.1 + intensity * 0.9})`
-                        : theme.colors.surface2,
+                      backgroundColor:
+                        intensity > 0
+                          ? `rgba(99,102,241,${0.1 + intensity * 0.9})`
+                          : theme.colors.surface2,
                     }}
                   />
                 );
               })}
             </View>
           ))}
-          <View style={{ flexDirection: "row", gap: 4 }}>
+          <View style={{ flexDirection: 'row', gap: 4 }}>
             {days.map((d, di) => (
-              <Text key={di} style={{ color: theme.colors.muted, fontSize: 9, width: 30, textAlign: "center" }}>{d}</Text>
+              <Text
+                key={di}
+                style={{ color: theme.colors.muted, fontSize: 9, width: 30, textAlign: 'center' }}
+              >
+                {d}
+              </Text>
             ))}
           </View>
         </View>
@@ -323,7 +344,10 @@ export function LearningAnalyticsScreen(props: any) {
     for (let i = 0; i < 4; i++) {
       sems.push(`${y}-${s}`);
       s--;
-      if (s < 1) { s = 2; y--; }
+      if (s < 1) {
+        s = 2;
+        y--;
+      }
     }
     return sems;
   }, []);
@@ -336,13 +360,21 @@ export function LearningAnalyticsScreen(props: any) {
   });
 
   const loadData = async () => {
-    if (!auth.user) { setLoading(false); return; }
+    if (!auth.user) {
+      setLoading(false);
+      return;
+    }
     const uid = auth.user.uid;
 
     try {
       // 讀取作業繳交紀錄（透過 collectionGroup）
       const submissionsSnap = await getDocs(
-        query(collectionGroup(db, "submissions"), where("uid", "==", uid), orderBy("submittedAt", "desc"), limit(50))
+        query(
+          collectionGroup(db, 'submissions'),
+          where('uid', '==', uid),
+          orderBy('submittedAt', 'desc'),
+          limit(50),
+        ),
       ).catch(() => ({ docs: [] as any[] }));
 
       const subs: SubmissionRecord[] = await Promise.all(
@@ -350,8 +382,10 @@ export function LearningAnalyticsScreen(props: any) {
           const data = d.data();
           const assignmentRef = d.ref.parent.parent;
           const assignSnap = assignmentRef ? await getDoc(assignmentRef).catch(() => null) : null;
-          const groupId = assignmentRef?.parent?.parent?.id ?? "";
-          const groupSnap = groupId ? await getDoc(doc(db, "groups", groupId)).catch(() => null) : null;
+          const groupId = assignmentRef?.parent?.parent?.id ?? '';
+          const groupSnap = groupId
+            ? await getDoc(doc(db, 'groups', groupId)).catch(() => null)
+            : null;
           const groupSchoolId = groupSnap?.data()?.schoolId as string | undefined;
           if (groupSchoolId && groupSchoolId !== school.id) {
             return null;
@@ -359,38 +393,49 @@ export function LearningAnalyticsScreen(props: any) {
           return {
             id: d.id,
             groupId,
-            assignmentTitle: assignSnap?.data()?.title ?? "作業",
+            assignmentTitle: assignSnap?.data()?.title ?? '作業',
             isLate: data.isLate ?? false,
             grade: data.grade,
             submittedAt: data.submittedAt,
           };
-        })
+        }),
       );
       setSubmissions(subs.filter(Boolean) as SubmissionRecord[]);
 
       // 讀取成績資料
       const canonicalGradesSnap = await getDocs(
         query(
-          collectionFromSegments(db, buildUserSchoolCollectionPath(uid, school.id, "grades")),
-          orderBy("semester", "desc"),
-          limit(30)
-        )
+          collectionFromSegments(db, buildUserSchoolCollectionPath(uid, school.id, 'grades')),
+          orderBy('semester', 'desc'),
+          limit(30),
+        ),
       ).catch(() => ({ empty: true, docs: [] as any[] }));
       const gradesSnap = canonicalGradesSnap.empty
-        ? await getDocs(query(collection(db, "users", uid, "grades"), orderBy("semester", "desc"), limit(30))).catch(() => ({ docs: [] as any[] }))
+        ? await getDocs(
+            query(collection(db, 'users', uid, 'grades'), orderBy('semester', 'desc'), limit(30)),
+          ).catch(() => ({ docs: [] as any[] }))
         : canonicalGradesSnap;
       setSemesterGrades(gradesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as SemesterGrade[]);
 
       // 讀取週報
       const canonicalReportsSnap = await getDocs(
         query(
-          collectionFromSegments(db, buildUserSchoolCollectionPath(uid, school.id, "weeklyReports")),
-          orderBy("generatedAt", "desc"),
-          limit(8)
-        )
+          collectionFromSegments(
+            db,
+            buildUserSchoolCollectionPath(uid, school.id, 'weeklyReports'),
+          ),
+          orderBy('generatedAt', 'desc'),
+          limit(8),
+        ),
       ).catch(() => ({ empty: true, docs: [] as any[] }));
       const reportsSnap = canonicalReportsSnap.empty
-        ? await getDocs(query(collection(db, "users", uid, "weeklyReports"), orderBy("generatedAt", "desc"), limit(8))).catch(() => ({ docs: [] as any[] }))
+        ? await getDocs(
+            query(
+              collection(db, 'users', uid, 'weeklyReports'),
+              orderBy('generatedAt', 'desc'),
+              limit(8),
+            ),
+          ).catch(() => ({ docs: [] as any[] }))
         : canonicalReportsSnap;
       setWeeklyReports(reportsSnap.docs.map((d) => d.data()) as WeeklyReport[]);
     } finally {
@@ -399,7 +444,9 @@ export function LearningAnalyticsScreen(props: any) {
     }
   };
 
-  useEffect(() => { loadData(); }, [auth.user?.uid, school.id]);
+  useEffect(() => {
+    loadData();
+  }, [auth.user?.uid, school.id]);
 
   // 計算準時繳交率
   const submissionStats = useMemo(() => {
@@ -456,28 +503,53 @@ export function LearningAnalyticsScreen(props: any) {
   }, [submissions]);
 
   // 儲存手動輸入的成績
-  const saveGrade = async (courseId: string, courseName: string, credits: number, semester: string) => {
+  const saveGrade = async (
+    courseId: string,
+    courseName: string,
+    credits: number,
+    semester: string,
+  ) => {
     if (!auth.user) return;
-    const grade = parseFloat(gradeInputs[courseId] ?? "");
+    const grade = parseFloat(gradeInputs[courseId] ?? '');
     if (isNaN(grade) || grade < 0 || grade > 100) {
-      Alert.alert("輸入錯誤", "請輸入 0-100 的有效分數");
+      Alert.alert('輸入錯誤', '請輸入 0-100 的有效分數');
       return;
     }
-    await setDoc(doc(db, "users", auth.user.uid, "grades", courseId), {
-      courseName, credits, grade, semester,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-    setGradeInputs((prev) => ({ ...prev, [courseId]: "" }));
+    await setDoc(
+      doc(db, 'users', auth.user.uid, 'grades', courseId),
+      {
+        courseName,
+        credits,
+        grade,
+        semester,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    setGradeInputs((prev) => ({ ...prev, [courseId]: '' }));
     loadData();
   };
 
   if (!auth.user) {
     return (
       <Screen>
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 32 }}>
+        <View
+          style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 32 }}
+        >
           <Ionicons name="bar-chart-outline" size={48} color={theme.colors.muted} />
-          <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 18, textAlign: "center" }}>學習分析</Text>
-          <Text style={{ color: theme.colors.muted, textAlign: "center" }}>登入後即可查看你的完整學習分析報告</Text>
+          <Text
+            style={{
+              color: theme.colors.text,
+              fontWeight: '700',
+              fontSize: 18,
+              textAlign: 'center',
+            }}
+          >
+            學習分析
+          </Text>
+          <Text style={{ color: theme.colors.muted, textAlign: 'center' }}>
+            登入後即可查看你的完整學習分析報告
+          </Text>
         </View>
       </Screen>
     );
@@ -491,12 +563,28 @@ export function LearningAnalyticsScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 16, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData(); }} tintColor={theme.colors.accent} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              loadData();
+            }}
+            tintColor={theme.colors.accent}
+          />
         }
       >
         {/* 標頭 */}
         <View style={{ padding: 16, paddingBottom: 0 }}>
-          <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: "800", letterSpacing: -0.6 }}>學習分析</Text>
+          <Text
+            style={{
+              color: theme.colors.text,
+              fontSize: 28,
+              fontWeight: '800',
+              letterSpacing: -0.6,
+            }}
+          >
+            學習分析
+          </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 4 }}>
             根據你的作業與成績資料自動生成
           </Text>
@@ -509,21 +597,21 @@ export function LearningAnalyticsScreen(props: any) {
               <Text style={{ color: theme.colors.text, lineHeight: 22, marginBottom: 12 }}>
                 {weeklyReports[0].summary}
               </Text>
-              <View style={{ flexDirection: "row", gap: 16 }}>
-                <View style={{ alignItems: "center" }}>
-                  <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 22 }}>
+              <View style={{ flexDirection: 'row', gap: 16 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 22 }}>
                     {weeklyReports[0].stats.onTimeRate}%
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>準時率</Text>
                 </View>
-                <View style={{ alignItems: "center" }}>
-                  <Text style={{ color: theme.colors.success, fontWeight: "900", fontSize: 22 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 22 }}>
                     {weeklyReports[0].stats.totalSubmissions}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>繳交作業</Text>
                 </View>
-                <View style={{ alignItems: "center" }}>
-                  <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 22 }}>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 22 }}>
                     {weeklyReports[0].stats.newAchievements}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>新成就</Text>
@@ -535,8 +623,12 @@ export function LearningAnalyticsScreen(props: any) {
 
         {/* 準時繳交率 */}
         <View style={{ paddingHorizontal: 16 }}>
-          <AnimatedCard title="作業繳交狀況" subtitle={`共 ${submissionStats.total} 份紀錄`} delay={100}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 20 }}>
+          <AnimatedCard
+            title="作業繳交狀況"
+            subtitle={`共 ${submissionStats.total} 份紀錄`}
+            delay={100}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
               <ProgressRing
                 progress={submissionStats.rate / 100}
                 size={88}
@@ -545,32 +637,56 @@ export function LearningAnalyticsScreen(props: any) {
                 showLabel={false}
               />
               <View style={{ flex: 1, gap: 10 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <Text style={{ color: theme.colors.success, fontWeight: "700" }}>準時繳交</Text>
-                  <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 18 }}>{submissionStats.onTime}</Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <Text style={{ color: theme.colors.success, fontWeight: '700' }}>準時繳交</Text>
+                  <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+                    {submissionStats.onTime}
+                  </Text>
                 </View>
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <Text style={{ color: theme.colors.danger, fontWeight: "700" }}>逾期繳交</Text>
-                  <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 18 }}>{submissionStats.late}</Text>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <Text style={{ color: theme.colors.danger, fontWeight: '700' }}>逾期繳交</Text>
+                  <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+                    {submissionStats.late}
+                  </Text>
                 </View>
                 <View
                   style={{
                     height: 8,
                     borderRadius: 4,
                     backgroundColor: theme.colors.border,
-                    overflow: "hidden",
+                    overflow: 'hidden',
                     marginTop: 4,
                   }}
                 >
                   <View
                     style={{
                       width: `${submissionStats.rate}%`,
-                      height: "100%",
-                      backgroundColor: submissionStats.rate >= 80 ? theme.colors.success : theme.colors.warning,
+                      height: '100%',
+                      backgroundColor:
+                        submissionStats.rate >= 80 ? theme.colors.success : theme.colors.warning,
                     }}
                   />
                 </View>
-                <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 24, textAlign: "center" }}>
+                <Text
+                  style={{
+                    color: theme.colors.accent,
+                    fontWeight: '900',
+                    fontSize: 24,
+                    textAlign: 'center',
+                  }}
+                >
                   {submissionStats.rate}%
                 </Text>
               </View>
@@ -578,21 +694,35 @@ export function LearningAnalyticsScreen(props: any) {
 
             {submissions.length > 0 && (
               <View style={{ marginTop: 14, gap: 6 }}>
-                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: "600", marginBottom: 4 }}>
+                <Text
+                  style={{
+                    color: theme.colors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: '600',
+                    marginBottom: 4,
+                  }}
+                >
                   最近繳交紀錄
                 </Text>
                 {submissions.slice(0, 4).map((s) => (
-                  <View key={s.id} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons
-                      name={s.isLate ? "warning-outline" : "checkmark-circle-outline"}
+                      name={s.isLate ? 'warning-outline' : 'checkmark-circle-outline'}
                       size={16}
                       color={s.isLate ? theme.colors.danger : theme.colors.success}
                     />
-                    <Text style={{ flex: 1, color: theme.colors.text, fontSize: 13 }} numberOfLines={1}>
+                    <Text
+                      style={{ flex: 1, color: theme.colors.text, fontSize: 13 }}
+                      numberOfLines={1}
+                    >
                       {s.assignmentTitle}
                     </Text>
                     {s.grade != null && (
-                      <Pill text={`${s.grade} 分`} kind={s.grade >= 60 ? "success" : "danger"} size="sm" />
+                      <Pill
+                        text={`${s.grade} 分`}
+                        kind={s.grade >= 60 ? 'success' : 'danger'}
+                        size="sm"
+                      />
                     )}
                   </View>
                 ))}
@@ -603,9 +733,13 @@ export function LearningAnalyticsScreen(props: any) {
 
         {/* GPA 軌跡 */}
         <View style={{ paddingHorizontal: 16 }}>
-          <AnimatedCard title="GPA 軌跡" subtitle={gpaInfo ? `整體 GPA：${gpaInfo.overall.toFixed(2)}` : "尚無成績資料"} delay={150}>
+          <AnimatedCard
+            title="GPA 軌跡"
+            subtitle={gpaInfo ? `整體 GPA：${gpaInfo.overall.toFixed(2)}` : '尚無成績資料'}
+            delay={150}
+          >
             {gpaInfo && gpaInfo.semesters.length >= 2 ? (
-              <View style={{ alignItems: "flex-start" }}>
+              <View style={{ alignItems: 'flex-start' }}>
                 <SimpleLineChart
                   data={gpaInfo.semesters.map((s) => s.gpa)}
                   labels={gpaInfo.semesters.map((s) => s.sem.slice(-4))}
@@ -614,25 +748,44 @@ export function LearningAnalyticsScreen(props: any) {
                 />
               </View>
             ) : (
-              <Text style={{ color: theme.colors.muted, textAlign: "center", paddingVertical: 12 }}>
+              <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 12 }}>
                 輸入兩個以上學期的成績後，即可看到 GPA 趨勢
               </Text>
             )}
 
             {/* 手動輸入成績 */}
             <View style={{ marginTop: 14 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: "600" }}>手動輸入課程成績</Text>
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 8,
+                }}
+              >
+                <Text
+                  style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: '600' }}
+                >
+                  手動輸入課程成績
+                </Text>
                 <Pressable onPress={() => setEditingGrade(!editingGrade)}>
-                  <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "700" }}>
-                    {editingGrade ? "完成" : "編輯"}
+                  <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>
+                    {editingGrade ? '完成' : '編輯'}
                   </Text>
                 </Pressable>
               </View>
               {editingGrade && (
                 <View style={{ marginBottom: 12 }}>
-                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 6 }}>選擇學期</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  <Text
+                    style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 6 }}
+                  >
+                    選擇學期
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ gap: 8 }}
+                  >
                     {availableSemesters.map((sem) => (
                       <Pressable
                         key={sem}
@@ -641,12 +794,20 @@ export function LearningAnalyticsScreen(props: any) {
                           paddingHorizontal: 14,
                           paddingVertical: 6,
                           borderRadius: theme.radius.full,
-                          backgroundColor: selectedSemester === sem ? theme.colors.accent : theme.colors.surface2,
+                          backgroundColor:
+                            selectedSemester === sem ? theme.colors.accent : theme.colors.surface2,
                           borderWidth: 1,
-                          borderColor: selectedSemester === sem ? theme.colors.accent : theme.colors.border,
+                          borderColor:
+                            selectedSemester === sem ? theme.colors.accent : theme.colors.border,
                         }}
                       >
-                        <Text style={{ color: selectedSemester === sem ? "#fff" : theme.colors.text, fontSize: 13, fontWeight: "600" }}>
+                        <Text
+                          style={{
+                            color: selectedSemester === sem ? '#fff' : theme.colors.text,
+                            fontSize: 13,
+                            fontWeight: '600',
+                          }}
+                        >
                           {sem}
                         </Text>
                       </Pressable>
@@ -654,46 +815,70 @@ export function LearningAnalyticsScreen(props: any) {
                   </ScrollView>
                 </View>
               )}
-              {editingGrade && courses.slice(0, 8).map((course) => {
-                const existing = semesterGrades.find((g) => g.id === course.id);
-                return (
-                  <View key={course.id} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                    <Text style={{ flex: 1, color: theme.colors.text, fontSize: 13 }} numberOfLines={1}>
-                      {course.name}
-                    </Text>
-                    <TextInput
-                      value={gradeInputs[course.id] ?? (existing?.grade?.toString() ?? "")}
-                      onChangeText={(v) => setGradeInputs((p) => ({ ...p, [course.id]: v }))}
-                      placeholder={existing ? `${existing.grade}` : "分數"}
-                      placeholderTextColor={theme.colors.muted}
-                      keyboardType="numeric"
+              {editingGrade &&
+                courses.slice(0, 8).map((course) => {
+                  const existing = semesterGrades.find((g) => g.id === course.id);
+                  return (
+                    <View
+                      key={course.id}
                       style={{
-                        width: 60,
-                        textAlign: "center",
-                        color: theme.colors.text,
-                        borderWidth: 1,
-                        borderColor: theme.colors.border,
-                        borderRadius: theme.radius.sm,
-                        padding: 6,
-                        backgroundColor: theme.colors.surface2,
-                        fontSize: 13,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginBottom: 8,
                       }}
-                    />
-                    <Pressable
-                      onPress={() => saveGrade(course.id, course.name, course.credits ?? 3, selectedSemester)}
-                      style={{ padding: 6 }}
                     >
-                      <Ionicons name="checkmark" size={18} color={theme.colors.success} />
-                    </Pressable>
-                  </View>
-                );
-              })}
+                      <Text
+                        style={{ flex: 1, color: theme.colors.text, fontSize: 13 }}
+                        numberOfLines={1}
+                      >
+                        {course.name}
+                      </Text>
+                      <TextInput
+                        value={gradeInputs[course.id] ?? existing?.grade?.toString() ?? ''}
+                        onChangeText={(v) => setGradeInputs((p) => ({ ...p, [course.id]: v }))}
+                        placeholder={existing ? `${existing.grade}` : '分數'}
+                        placeholderTextColor={theme.colors.muted}
+                        keyboardType="numeric"
+                        style={{
+                          width: 60,
+                          textAlign: 'center',
+                          color: theme.colors.text,
+                          borderWidth: 1,
+                          borderColor: theme.colors.border,
+                          borderRadius: theme.radius.sm,
+                          padding: 6,
+                          backgroundColor: theme.colors.surface2,
+                          fontSize: 13,
+                        }}
+                      />
+                      <Pressable
+                        onPress={() =>
+                          saveGrade(course.id, course.name, course.credits ?? 3, selectedSemester)
+                        }
+                        style={{ padding: 6 }}
+                      >
+                        <Ionicons name="checkmark" size={18} color={theme.colors.success} />
+                      </Pressable>
+                    </View>
+                  );
+                })}
               {semesterGrades.length > 0 && !editingGrade && (
                 <View style={{ gap: 6 }}>
                   {semesterGrades.slice(0, 5).map((g) => (
-                    <View key={g.id} style={{ flexDirection: "row", alignItems: "center" }}>
-                      <Text style={{ flex: 1, color: theme.colors.text, fontSize: 13 }} numberOfLines={1}>{g.courseName}</Text>
-                      <Text style={{ color: g.grade >= 60 ? theme.colors.success : theme.colors.danger, fontWeight: "700" }}>
+                    <View key={g.id} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Text
+                        style={{ flex: 1, color: theme.colors.text, fontSize: 13 }}
+                        numberOfLines={1}
+                      >
+                        {g.courseName}
+                      </Text>
+                      <Text
+                        style={{
+                          color: g.grade >= 60 ? theme.colors.success : theme.colors.danger,
+                          fontWeight: '700',
+                        }}
+                      >
                         {g.grade} 分
                       </Text>
                     </View>
@@ -708,18 +893,27 @@ export function LearningAnalyticsScreen(props: any) {
         {radarData && (
           <View style={{ paddingHorizontal: 16 }}>
             <AnimatedCard title="科目強弱分析" subtitle="依照各科成績分布" delay={200}>
-              <View style={{ alignItems: "center" }}>
+              <View style={{ alignItems: 'center' }}>
                 <RadarChart
                   axes={radarData.axes}
                   values={radarData.values}
                   color={theme.colors.accent}
                 />
               </View>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
                 {radarData.axes.map((axis, i) => (
-                  <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: theme.colors.accent }} />
-                    <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{axis}: {radarData.values[i]}%</Text>
+                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <View
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 5,
+                        backgroundColor: theme.colors.accent,
+                      }}
+                    />
+                    <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
+                      {axis}: {radarData.values[i]}%
+                    </Text>
                   </View>
                 ))}
               </View>
@@ -741,22 +935,43 @@ export function LearningAnalyticsScreen(props: any) {
         {/* 課程負載 */}
         {courses.length > 0 && (
           <View style={{ paddingHorizontal: 16 }}>
-            <AnimatedCard title="本學期課程負載" subtitle={`${courses.length} 門課，共 ${courses.reduce((s, c) => s + (c.credits ?? 0), 0)} 學分`} delay={300}>
+            <AnimatedCard
+              title="本學期課程負載"
+              subtitle={`${courses.length} 門課，共 ${courses.reduce((s, c) => s + (c.credits ?? 0), 0)} 學分`}
+              delay={300}
+            >
               <View style={{ gap: 8 }}>
                 {courses.slice(0, 6).map((course) => {
                   const credits = course.credits ?? 3;
                   const maxCredits = Math.max(...courses.map((c) => c.credits ?? 3), 1);
                   return (
                     <View key={course.id}>
-                      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-                        <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={1}>{course.name}</Text>
-                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{credits} 學分</Text>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          justifyContent: 'space-between',
+                          marginBottom: 4,
+                        }}
+                      >
+                        <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={1}>
+                          {course.name}
+                        </Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                          {credits} 學分
+                        </Text>
                       </View>
-                      <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.border, overflow: "hidden" }}>
+                      <View
+                        style={{
+                          height: 6,
+                          borderRadius: 3,
+                          backgroundColor: theme.colors.border,
+                          overflow: 'hidden',
+                        }}
+                      >
                         <View
                           style={{
                             width: `${(credits / maxCredits) * 100}%`,
-                            height: "100%",
+                            height: '100%',
                             backgroundColor: course.color ?? theme.colors.accent,
                           }}
                         />

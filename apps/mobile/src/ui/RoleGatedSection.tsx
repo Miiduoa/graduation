@@ -1,8 +1,7 @@
- 
-import React from "react";
-import { usePermissions } from "../hooks/usePermissions";
-import type { Permission } from "../services/permissions";
-import type { RoleGroup } from "../services/permissions";
+import React from 'react';
+import { usePermissions } from '../hooks/usePermissions';
+import type { Permission } from '../services/permissions';
+import type { RoleGroup } from '../services/permissions';
 
 type RoleGatedSectionProps = {
   /** Show only if user has this permission */

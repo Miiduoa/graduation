@@ -84,8 +84,7 @@ function parseUserIdFromHtml(body) {
 
 function parseUserNameFromHtml(body, fallback) {
   const nameMatch =
-    body.match(/class=["']user-?name["'][^>]*>([^<]+)</i) ||
-    body.match(/"name"\s*:\s*"([^"]+)"/);
+    body.match(/class=["']user-?name["'][^>]*>([^<]+)</i) || body.match(/"name"\s*:\s*"([^"]+)"/);
   return nameMatch?.[1]?.trim() || fallback || null;
 }
 
@@ -159,13 +158,7 @@ function httpsRequest(url, { method = 'GET', body, cookies = {}, headers = {} } 
 
 async function requestFollowRedirects(
   url,
-  {
-    method = 'GET',
-    body,
-    cookies = {},
-    headers = {},
-    maxRedirects = 8,
-  } = {},
+  { method = 'GET', body, cookies = {}, headers = {}, maxRedirects = 8 } = {},
 ) {
   let currentUrl = normalizeRequestUrl(url).toString();
   let currentMethod = method;
@@ -184,10 +177,7 @@ async function requestFollowRedirects(
     currentCookies = result.cookies;
 
     const location = result.headers.location;
-    if (
-      !location ||
-      ![301, 302, 303, 307, 308].includes(result.status)
-    ) {
+    if (!location || ![301, 302, 303, 307, 308].includes(result.status)) {
       return {
         ...result,
         cookies: currentCookies,
@@ -301,13 +291,21 @@ async function tcLoginNativeApi(uid, password) {
   if (result.status === 200) {
     // 成功！解析回傳的使用者資訊
     let data;
-    try { data = JSON.parse(result.body); } catch { data = {}; }
+    try {
+      data = JSON.parse(result.body);
+    } catch {
+      data = {};
+    }
 
     const userId =
-      data.user_id || data.id || data.userId ||
+      data.user_id ||
+      data.id ||
+      data.userId ||
       (typeof data.user === 'object' ? data.user.id || data.user.user_id : null);
     const userName =
-      data.name || data.user_name || data.display_name ||
+      data.name ||
+      data.user_name ||
+      data.display_name ||
       (typeof data.user === 'object' ? data.user.name || data.user.display_name : null) ||
       uid;
 
@@ -389,20 +387,34 @@ async function tcLoginCas(uid, password) {
     const errMsgMatch = loginResult.body.match(
       /<span[^>]*id=["']error-message["'][^>]*>([\s\S]*?)<\/span>/i,
     );
-    const keycloakErrorText = errMsgMatch?.[1]
-      ?.replace(/<[^>]+>/g, '')
-      .replace(/\s+/g, ' ')
-      .trim() ?? '';
+    const keycloakErrorText =
+      errMsgMatch?.[1]
+        ?.replace(/<[^>]+>/g, '')
+        .replace(/\s+/g, ' ')
+        .trim() ?? '';
 
     if (keycloakErrorText) {
-      return { success: false, cookies: {}, session: null, error: `TronClass CAS：${keycloakErrorText}` };
+      return {
+        success: false,
+        cookies: {},
+        session: null,
+        error: `TronClass CAS：${keycloakErrorText}`,
+      };
     }
 
-    if (indexPage.url.includes('identity.pu.edu.tw') || indexPage.body.includes('/auth/realms/pu')) {
+    if (
+      indexPage.url.includes('identity.pu.edu.tw') ||
+      indexPage.body.includes('/auth/realms/pu')
+    ) {
       return { success: false, cookies: {}, session: null, error: 'TronClass CAS session 未建立' };
     }
 
-    return { success: false, cookies: {}, session: null, error: 'TronClass CAS 登入失敗，無法取得使用者 ID' };
+    return {
+      success: false,
+      cookies: {},
+      session: null,
+      error: 'TronClass CAS 登入失敗，無法取得使用者 ID',
+    };
   }
 
   return {
@@ -437,7 +449,10 @@ async function tcLogin(uid, password) {
         const hasCookies = nativeResult.cookies && Object.keys(nativeResult.cookies).length > 0;
 
         if (hasCookies) {
-          console.log('[tcLogin] Native API login succeeded with cookies, userId:', nativeResult.session?.userId);
+          console.log(
+            '[tcLogin] Native API login succeeded with cookies, userId:',
+            nativeResult.session?.userId,
+          );
 
           if (!nativeResult.session?.userId) {
             const fallbackUserId = await tcEnsureUserId(nativeResult.cookies);
@@ -525,8 +540,10 @@ async function tcFetchModules(cookies, courseId) {
 }
 
 async function tcFetchActivities(cookies, courseId) {
-  const activityData = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/activities?sub_course_id=0`, cookies)
-    .catch(() => ({ activities: [] }));
+  const activityData = await tcFetchJson(
+    `${TC_BASE}/api/courses/${courseId}/activities?sub_course_id=0`,
+    cookies,
+  ).catch(() => ({ activities: [] }));
 
   const homeworkData = await tcFetchAllPages(
     `api/courses/${courseId}/homework-activities`,
@@ -662,7 +679,10 @@ async function tcFetchSelfScore(cookies, courseId) {
 
 async function tcFetchHomeworkStatus(cookies, courseId) {
   try {
-    const data = await tcFetchJson(`${TC_BASE}/api/course/${courseId}/homework-student-status`, cookies);
+    const data = await tcFetchJson(
+      `${TC_BASE}/api/course/${courseId}/homework-student-status`,
+      cookies,
+    );
     return data;
   } catch (error) {
     if (String(error?.message || '').includes('session 已失效')) {
@@ -686,7 +706,10 @@ async function tcFetchHomeworkScores(cookies, courseId) {
 
 async function tcFetchExamStatus(cookies, courseId) {
   try {
-    const data = await tcFetchJson(`${TC_BASE}/api/course/${courseId}/exam-student-status`, cookies);
+    const data = await tcFetchJson(
+      `${TC_BASE}/api/course/${courseId}/exam-student-status`,
+      cookies,
+    );
     return data;
   } catch (error) {
     if (String(error?.message || '').includes('session 已失效')) {
@@ -719,7 +742,7 @@ async function tcFetchActivityDetail(cookies, courseId, activityId) {
   try {
     const data = await tcFetchJson(
       `${TC_BASE}/api/courses/${courseId}/activities/${activityId}`,
-      cookies
+      cookies,
     );
     return data ?? null;
   } catch (error) {
@@ -735,7 +758,7 @@ async function tcFetchHomeworkDetail(cookies, courseId, homeworkId) {
   try {
     const data = await tcFetchJson(
       `${TC_BASE}/api/courses/${courseId}/homework-activities/${homeworkId}`,
-      cookies
+      cookies,
     );
     return data ?? null;
   } catch (error) {
@@ -745,10 +768,12 @@ async function tcFetchHomeworkDetail(cookies, courseId, homeworkId) {
     try {
       const fallback = await tcFetchJson(
         `${TC_BASE}/api/courses/${courseId}/activities/${homeworkId}`,
-        cookies
+        cookies,
       );
       return fallback ?? null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -768,7 +793,8 @@ async function tcFetchHomeworkSubmissions(cookies, courseId, homeworkId) {
       const data = await tcFetchJson(url, cookies);
       if (data) {
         // 回傳可能是 { submissions: [...] } 或直接是 array
-        const submissions = data.submissions ?? data.student_submissions ?? (Array.isArray(data) ? data : null);
+        const submissions =
+          data.submissions ?? data.student_submissions ?? (Array.isArray(data) ? data : null);
         if (submissions) return submissions;
       }
     } catch (error) {
@@ -783,10 +809,7 @@ async function tcFetchHomeworkSubmissions(cookies, courseId, homeworkId) {
  */
 async function tcFetchExamDetail(cookies, courseId, examId) {
   try {
-    const data = await tcFetchJson(
-      `${TC_BASE}/api/courses/${courseId}/exams/${examId}`,
-      cookies
-    );
+    const data = await tcFetchJson(`${TC_BASE}/api/courses/${courseId}/exams/${examId}`, cookies);
     return data ?? null;
   } catch (error) {
     if (String(error?.message || '').includes('session 已失效')) throw error;
@@ -808,7 +831,11 @@ async function tcFetchExamAttempts(cookies, courseId, examId) {
     try {
       const data = await tcFetchJson(url, cookies);
       if (data) {
-        const attempts = data.submissions ?? data.attempts ?? data.student_submissions ?? (Array.isArray(data) ? data : null);
+        const attempts =
+          data.submissions ??
+          data.attempts ??
+          data.student_submissions ??
+          (Array.isArray(data) ? data : null);
         if (attempts) return attempts;
       }
     } catch (error) {
@@ -832,7 +859,8 @@ async function tcFetchDiscussions(cookies, courseId) {
     try {
       const data = await tcFetchJson(url, cookies);
       if (data) {
-        const items = data.discussions ?? data.forums ?? data.activities ?? (Array.isArray(data) ? data : null);
+        const items =
+          data.discussions ?? data.forums ?? data.activities ?? (Array.isArray(data) ? data : null);
         if (items && Array.isArray(items)) return items;
       }
     } catch (error) {
@@ -880,7 +908,11 @@ async function tcFetchCourseAnnouncements(cookies, courseId) {
     try {
       const data = await tcFetchJson(url, cookies);
       if (data) {
-        const items = data.announcements ?? data.notifications ?? data.activities ?? (Array.isArray(data) ? data : null);
+        const items =
+          data.announcements ??
+          data.notifications ??
+          data.activities ??
+          (Array.isArray(data) ? data : null);
         if (items && Array.isArray(items)) return items;
       }
     } catch (error) {
@@ -904,7 +936,11 @@ async function tcFetchMaterials(cookies, courseId) {
     try {
       const data = await tcFetchJson(url, cookies);
       if (data) {
-        const items = data.resources ?? data.materials ?? data.activities ?? (Array.isArray(data) ? data : null);
+        const items =
+          data.resources ??
+          data.materials ??
+          data.activities ??
+          (Array.isArray(data) ? data : null);
         if (items && Array.isArray(items)) return items;
       }
     } catch (error) {
@@ -943,7 +979,9 @@ async function tcFetchGradeDetails(cookies, courseId) {
       self_score: selfScore,
       source: 'combined',
     };
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -972,7 +1010,7 @@ async function tcFetchLearningActivities(cookies, courseId) {
   try {
     const data = await tcFetchJson(
       `${TC_BASE}/api/courses/${courseId}/learning-activities`,
-      cookies
+      cookies,
     );
     return data?.learning_activities ?? data?.activities ?? (Array.isArray(data) ? data : []);
   } catch (error) {
@@ -1023,7 +1061,7 @@ async function tcFetchCourseFullData(cookies, courseId) {
     tcFetchLearningActivities(cookies, courseId),
   ]);
 
-  const val = (idx) => results[idx]?.status === 'fulfilled' ? results[idx].value : null;
+  const val = (idx) => (results[idx]?.status === 'fulfilled' ? results[idx].value : null);
 
   return {
     courseDetail: val(0),

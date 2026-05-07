@@ -115,7 +115,11 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
 
                 if (otherUserId) {
                   try {
-                    const [profile] = await fetchSchoolDirectoryProfiles(school.id, [otherUserId], db);
+                    const [profile] = await fetchSchoolDirectoryProfiles(
+                      school.id,
+                      [otherUserId],
+                      db,
+                    );
                     participantName = profile?.displayName || '用戶';
                   } catch {
                     // ignore
@@ -133,7 +137,8 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
                   id: d.id,
                   participantName,
                   lastMessage: data.lastMessage?.content || data.lastMessageText,
-                  lastMessageAt: lastMessageAt || (data.updatedAt ? toDate(data.updatedAt) : undefined),
+                  lastMessageAt:
+                    lastMessageAt || (data.updatedAt ? toDate(data.updatedAt) : undefined),
                   unread,
                 } as ConversationSummary;
               }),
@@ -293,7 +298,10 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
                   />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }} numberOfLines={1}>
+                  <Text
+                    style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}
+                    numberOfLines={1}
+                  >
                     {g.name}
                   </Text>
                   {g.lastActivity && (
@@ -398,7 +406,10 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
                     {dm.participantName}
                   </Text>
                   {dm.lastMessage && (
-                    <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+                    <Text
+                      style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}
+                      numberOfLines={1}
+                    >
                       {dm.lastMessage}
                     </Text>
                   )}
@@ -438,9 +449,7 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
 
         {!auth.user && (
           <View style={{ paddingVertical: theme.space.lg, alignItems: 'center' }}>
-            <Text style={{ color: theme.colors.muted, fontSize: 14 }}>
-              請先登入以查看訊息。
-            </Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 14 }}>請先登入以查看訊息。</Text>
           </View>
         )}
       </ScrollView>

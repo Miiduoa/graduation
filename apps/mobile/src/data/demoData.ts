@@ -1299,9 +1299,7 @@ export function getDemoCourses(schoolId: string): Course[] {
           dayOfWeek: 5,
           startTime: '13:10',
           endTime: '15:00',
-          schedule: [
-            { dayOfWeek: 5, startTime: '13:10', endTime: '15:00', location: '體育館 ST' },
-          ],
+          schedule: [{ dayOfWeek: 5, startTime: '13:10', endTime: '15:00', location: '體育館 ST' }],
           capacity: 50,
           enrolled: 48,
         },
@@ -1313,7 +1311,6 @@ export function getDemoCourses(schoolId: string): Course[] {
   }
 }
 
-
 export function getDemoEvents(schoolId: string): ClubEvent[] {
   schoolId = normalizeDemoSchoolId(schoolId);
 
@@ -1323,7 +1320,8 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
         id: createId(schoolId, 'evt', 1),
         schoolId,
         title: '資訊學院 AI 實作工作坊',
-        description: '由資工系主辦，邀請業界講師實作 ChatGPT API 與 LangChain。自備筆電，提供免費午餐。地點：主顧樓 PH303 電腦教室。',
+        description:
+          '由資工系主辦，邀請業界講師實作 ChatGPT API 與 LangChain。自備筆電，提供免費午餐。地點：主顧樓 PH303 電腦教室。',
         startsAt: getDateOffset(5),
         endsAt: getDateOffset(5, { hours: 4 }),
         location: '主顧樓 PH303',
@@ -1338,7 +1336,8 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
         id: createId(schoolId, 'evt', 2),
         schoolId,
         title: '靜宜 65 週年校慶園遊會',
-        description: '各系攤位、美食市集、樂團表演、校友回娘家。主舞台在伯鐸廣場，園遊會攤位沿至善樓前草坪。當天憑學生證免費兌換紀念品。',
+        description:
+          '各系攤位、美食市集、樂團表演、校友回娘家。主舞台在伯鐸廣場，園遊會攤位沿至善樓前草坪。當天憑學生證免費兌換紀念品。',
         startsAt: getDateOffset(24),
         endsAt: getDateOffset(24, { hours: 8 }),
         location: '伯鐸廣場 & 至善樓前草坪',
@@ -1352,7 +1351,8 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
         id: createId(schoolId, 'evt', 3),
         schoolId,
         title: '企業徵才博覽會',
-        description: '超過 40 家企業進校徵才，含台積電、緯創、精誠資訊、永豐金等。攜帶履歷可現場面試。',
+        description:
+          '超過 40 家企業進校徵才，含台積電、緯創、精誠資訊、永豐金等。攜帶履歷可現場面試。',
         startsAt: getDateOffset(10),
         endsAt: getDateOffset(10, { hours: 6 }),
         location: '至善樓 1F 大廳',
@@ -1366,7 +1366,8 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
         id: createId(schoolId, 'evt', 4),
         schoolId,
         title: '社團聯合成果發表',
-        description: '熱音社、熱舞社、日研社、攝影社等 30+ 社團展演。開放自由入場，伯鐸廣場同步進行文創市集。',
+        description:
+          '熱音社、熱舞社、日研社、攝影社等 30+ 社團展演。開放自由入場，伯鐸廣場同步進行文創市集。',
         startsAt: getDateOffset(14),
         endsAt: getDateOffset(14, { hours: 5 }),
         location: '伯鐸廣場',
@@ -1394,7 +1395,8 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
         id: createId(schoolId, 'evt', 6),
         schoolId,
         title: '國際文化週 — 異國美食節',
-        description: '來自 15 國的交換生帶來家鄉料理！含日本、韓國、越南、印尼、法國等攤位。每道料理 $50-80。',
+        description:
+          '來自 15 國的交換生帶來家鄉料理！含日本、韓國、越南、印尼、法國等攤位。每道料理 $50-80。',
         startsAt: getDateOffset(20),
         endsAt: getDateOffset(23),
         location: '文興樓 WH 前庭',
@@ -1408,7 +1410,8 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
         id: createId(schoolId, 'evt', 7),
         schoolId,
         title: '蓋夏圖書館電影之夜',
-        description: '每月一次的電影放映活動。本月片單：《乘風破浪》。免費入場，座位 80 位先搶先贏。',
+        description:
+          '每月一次的電影放映活動。本月片單：《乘風破浪》。免費入場，座位 80 位先搶先贏。',
         startsAt: getDateOffset(12),
         endsAt: getDateOffset(12, { hours: 3 }),
         location: '蓋夏圖書館 LB B1 多媒體室',
@@ -1422,7 +1425,8 @@ export function getDemoEvents(schoolId: string): ClubEvent[] {
         id: createId(schoolId, 'evt', 8),
         schoolId,
         title: '校園路跑 — 靜宜綠色之旅',
-        description: '環校園 5K 路跑，途經靜宜後山生態步道。完賽者獲紀念衫乙件。報名費 $100（含保險）。',
+        description:
+          '環校園 5K 路跑，途經靜宜後山生態步道。完賽者獲紀念衫乙件。報名費 $100（含保險）。',
         startsAt: getDateOffset(30),
         endsAt: getDateOffset(30, { hours: 3 }),
         location: '校門口集合出發',
@@ -1585,7 +1589,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '資訊科學大樓',
           category: 'building',
-          lat: 24.1220,
+          lat: 24.122,
           lng: 120.6768,
           description: '資工系所在地，擁有現代化教室與實驗室。',
           building: '資訊科學大樓',
@@ -1633,7 +1637,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '農環大樓',
           category: 'building',
-          lat: 24.1250,
+          lat: 24.125,
           lng: 120.6735,
           description: '農資學院教學與研究中心。',
           building: '農環大樓',
@@ -1690,7 +1694,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '7-Eleven 中興門市',
           category: 'convenience',
           lat: 24.1218,
-          lng: 120.6740,
+          lng: 120.674,
           description: '24小時便利商店。',
           building: '7-Eleven',
           openingHours: {
@@ -1731,7 +1735,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '體育館',
           category: 'sports',
-          lat: 24.1200,
+          lat: 24.12,
           lng: 120.6772,
           description: '籃球場、羽毛球場、健身房等運動設施。',
           building: '體育館',
@@ -1752,8 +1756,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '校門口',
           category: 'other',
-          lat: 24.1210,
-          lng: 120.6730,
+          lat: 24.121,
+          lng: 120.673,
           description: '興大路/學府路校門，校園進出口。',
           building: '校門口',
           accessible: true,
@@ -1770,8 +1774,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '蓋夏圖書館',
           category: 'library',
-          lat: 24.22750,
-          lng: 120.56350,
+          lat: 24.2275,
+          lng: 120.5635,
           description: '校內主要圖書館，藏書豐富，設有自習區與多媒體視聽室。',
           building: '蓋夏圖書館',
           openingHours: {
@@ -1827,8 +1831,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '靜安樓 Jing An Hall (JA)',
           category: 'building',
-          lat: 24.22630,
-          lng: 120.56490,
+          lat: 24.2263,
+          lng: 120.5649,
           description: '教學大樓。',
           building: '靜安樓',
           accessible: true,
@@ -1839,8 +1843,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '格倫樓 Theodore Guerin Hall (TG)',
           category: 'building',
-          lat: 24.22680,
-          lng: 120.56570,
+          lat: 24.2268,
+          lng: 120.5657,
           description: '教學大樓。',
           building: '格倫樓',
           accessible: true,
@@ -1851,8 +1855,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '方濟樓 St. Francis Hall (SF)',
           category: 'building',
-          lat: 24.22740,
-          lng: 120.56600,
+          lat: 24.2274,
+          lng: 120.566,
           description: '教學大樓。',
           building: '方濟樓',
           accessible: true,
@@ -1863,8 +1867,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '思源樓 Si Yuan Hall (SY)',
           category: 'building',
-          lat: 24.22810,
-          lng: 120.56530,
+          lat: 24.2281,
+          lng: 120.5653,
           description: '教學大樓。',
           building: '思源樓',
           accessible: true,
@@ -1875,8 +1879,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '體育館 John Paul II Sports Hall',
           category: 'sports',
-          lat: 24.22580,
-          lng: 120.56350,
+          lat: 24.2258,
+          lng: 120.5635,
           description: '綜合體育設施，含籃球場、排球場、健身房。',
           building: '體育館',
           openingHours: {
@@ -1896,8 +1900,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '學生餐廳',
           category: 'cafeteria',
-          lat: 24.22620,
-          lng: 120.56450,
+          lat: 24.2262,
+          lng: 120.5645,
           description: '校內主要學生餐飲區，提供多種平價餐點。',
           building: '學生餐廳',
           openingHours: {
@@ -1918,8 +1922,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '行政中心',
           category: 'office',
-          lat: 24.22720,
-          lng: 120.56380,
+          lat: 24.2272,
+          lng: 120.5638,
           description: '校務行政中心：教務處、學務處、總務處。',
           building: '行政中心',
           openingHours: {
@@ -1938,8 +1942,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '主顧聖母堂',
           category: 'other',
-          lat: 24.22660,
-          lng: 120.56320,
+          lat: 24.2266,
+          lng: 120.5632,
           description: '校園聖殿，天主教靜宜大學精神象徵。',
           building: '主顧聖母堂',
           accessible: true,
@@ -1950,8 +1954,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '第一研究大樓',
           category: 'building',
-          lat: 24.22850,
-          lng: 120.56480,
+          lat: 24.2285,
+          lng: 120.5648,
           description: '研究生教學與研究中心。',
           building: '第一研究大樓',
           accessible: true,
@@ -1962,8 +1966,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '田徑場',
           category: 'sports',
-          lat: 24.22520,
-          lng: 120.56400,
+          lat: 24.2252,
+          lng: 120.564,
           description: '標準田徑跑道與草坪運動場。',
           building: '田徑場',
           accessible: true,
@@ -1974,8 +1978,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '校門口',
           category: 'other',
-          lat: 24.22600,
-          lng: 120.56280,
+          lat: 24.226,
+          lng: 120.5628,
           description: '靜宜大學正門，中棲路入口。',
           building: '校門口',
           accessible: true,
@@ -2069,8 +2073,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '電機二館',
           category: 'building',
-          lat: 25.0210,
-          lng: 121.5430,
+          lat: 25.021,
+          lng: 121.543,
           description: '電機資訊學院教學與研究中心。',
           building: '電機二館',
           accessible: true,
@@ -2093,8 +2097,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '法律學院',
           category: 'building',
-          lat: 25.0140,
-          lng: 121.5380,
+          lat: 25.014,
+          lng: 121.538,
           description: '台大法律學院，台灣頂尖法學教育機構。',
           building: '萬才館',
           accessible: true,
@@ -2126,7 +2130,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '小福樓',
           category: 'cafeteria',
-          lat: 25.0180,
+          lat: 25.018,
           lng: 121.5398,
           description: '學生美食區，提供多樣化餐點。',
           building: '小福樓',
@@ -2149,7 +2153,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '體育館',
           category: 'sports',
           lat: 25.0203,
-          lng: 121.5380,
+          lng: 121.538,
           description: '籃球場、游泳池、健身房等運動設施。',
           building: '體育館',
           openingHours: {
@@ -2170,7 +2174,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '椰林大道',
           category: 'other',
           lat: 25.0168,
-          lng: 121.5390,
+          lng: 121.539,
           description: '台大校園標誌性的林蔭道路。',
           building: '椰林大道',
           accessible: true,
@@ -2205,8 +2209,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '新生教學館',
           category: 'building',
-          lat: 25.0190,
-          lng: 121.5370,
+          lat: 25.019,
+          lng: 121.537,
           description: '新生通識教育教學中心。',
           building: '新生教學館',
           accessible: true,
@@ -2224,7 +2228,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '旺宏館',
           category: 'library',
           lat: 24.7952,
-          lng: 120.9960,
+          lng: 120.996,
           description: '清華大學總圖書館，學習資源中心。',
           building: '旺宏館',
           openingHours: {
@@ -2245,7 +2249,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '大禮堂',
           category: 'building',
           lat: 24.7945,
-          lng: 120.9950,
+          lng: 120.995,
           description: '清華大學標誌性建築，成功湖畔演講廳。',
           building: '大禮堂',
           accessible: true,
@@ -2268,8 +2272,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '資訊電機館',
           category: 'building',
-          lat: 24.7980,
-          lng: 120.9970,
+          lat: 24.798,
+          lng: 120.997,
           description: '資訊工程系與電機系教學中心。',
           building: '台達館',
           accessible: true,
@@ -2292,8 +2296,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '化工館',
           category: 'building',
-          lat: 24.7970,
-          lng: 120.9940,
+          lat: 24.797,
+          lng: 120.994,
           description: '化學工程系教學與研究中心。',
           building: '化工館',
           accessible: true,
@@ -2304,7 +2308,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '生科院',
           category: 'building',
-          lat: 24.7940,
+          lat: 24.794,
           lng: 120.9975,
           description: '生命科學院教學與研究中心。',
           building: '生科院',
@@ -2372,7 +2376,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '水木餐廳',
           category: 'cafeteria',
           lat: 24.7955,
-          lng: 120.9950,
+          lng: 120.995,
           description: '清華學生餐廳，主要用餐地點。',
           building: '水木餐廳',
           openingHours: {
@@ -2393,8 +2397,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '體育館',
           category: 'sports',
-          lat: 24.7930,
-          lng: 120.9940,
+          lat: 24.793,
+          lng: 120.994,
           description: '籃球場、羽毛球場、健身房等運動設施。',
           building: '體育館',
           openingHours: {
@@ -2427,7 +2431,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '校門口',
           category: 'other',
           lat: 24.7958,
-          lng: 120.9920,
+          lng: 120.992,
           description: '光復路校門，校園主要進出口。',
           building: '校門口',
           accessible: true,
@@ -2438,7 +2442,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '第二綜合大樓',
           category: 'building',
-          lat: 24.7950,
+          lat: 24.795,
           lng: 120.9965,
           description: '清華第二綜合教學樓。',
           building: '第二綜合大樓',
@@ -2456,7 +2460,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '總圖書館',
           category: 'library',
-          lat: 23.0000,
+          lat: 23.0,
           lng: 120.2175,
           description: '成功大學總圖書館，成功校區學習中心。',
           building: 'K館',
@@ -2477,7 +2481,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '資訊工程系館',
           category: 'building',
-          lat: 22.9990,
+          lat: 22.999,
           lng: 120.2195,
           description: '資訊工程系教學與研究中心，自強校區。',
           building: '資訊工程系館',
@@ -2490,7 +2494,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '電機系館',
           category: 'building',
           lat: 22.9985,
-          lng: 120.2190,
+          lng: 120.219,
           description: '電機工程系教學與研究中心。',
           building: '電機系館',
           accessible: true,
@@ -2502,7 +2506,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '工學院綜合大樓',
           category: 'building',
           lat: 22.9995,
-          lng: 120.2180,
+          lng: 120.218,
           description: '工學院主要教學樓。',
           building: '工學院綜合大樓',
           accessible: true,
@@ -2525,7 +2529,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '管理學院',
           category: 'building',
-          lat: 22.9980,
+          lat: 22.998,
           lng: 120.2165,
           description: '成功大學管理學院教學中心。',
           building: '管理學院',
@@ -2537,8 +2541,8 @@ export function getDemoPois(schoolId: string): Poi[] {
           schoolId,
           name: '社會科學院',
           category: 'building',
-          lat: 23.0010,
-          lng: 120.2160,
+          lat: 23.001,
+          lng: 120.216,
           description: '社會科學領域教學與研究中心。',
           building: '社會科學院',
           accessible: true,
@@ -2562,7 +2566,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '榕園',
           category: 'other',
           lat: 23.0005,
-          lng: 120.2160,
+          lng: 120.216,
           description: '成功大學美景區，校園綠化區。',
           building: '榕園',
           accessible: true,
@@ -2607,7 +2611,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '體育館',
           category: 'sports',
           lat: 22.9975,
-          lng: 120.2180,
+          lng: 120.218,
           description: '籃球場、羽毛球場、健身房等運動設施。',
           building: '體育館',
           openingHours: {
@@ -2640,7 +2644,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '小東門',
           category: 'other',
           lat: 22.9988,
-          lng: 120.2200,
+          lng: 120.22,
           description: '成功大學東側校門進出口。',
           building: '小東門',
           accessible: true,
@@ -2652,7 +2656,7 @@ export function getDemoPois(schoolId: string): Poi[] {
           name: '學生食堂',
           category: 'cafeteria',
           lat: 22.9995,
-          lng: 120.2170,
+          lng: 120.217,
           description: '成功大學學生餐廳，提供多樣餐點。',
           building: '學生食堂',
           openingHours: {
@@ -3950,10 +3954,34 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#FF6B6B',
         frequency: '約15分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 1)}-stop-1`, name: '台中火車站', lat: 24.1362, lng: 120.6847, order: 1 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-2`, name: '大慶車站', lat: 24.1190, lng: 120.6640, order: 2 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-3`, name: '興大郵局站', lat: 24.1225, lng: 120.6720, order: 3 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-4`, name: '中興大學站(國光路)', lat: 24.1215, lng: 120.6780, order: 4 },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-1`,
+            name: '台中火車站',
+            lat: 24.1362,
+            lng: 120.6847,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-2`,
+            name: '大慶車站',
+            lat: 24.119,
+            lng: 120.664,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-3`,
+            name: '興大郵局站',
+            lat: 24.1225,
+            lng: 120.672,
+            order: 3,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-4`,
+            name: '中興大學站(國光路)',
+            lat: 24.1215,
+            lng: 120.678,
+            order: 4,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 1)}-stop-1`, departureTime: '06:00' },
@@ -3969,9 +3997,27 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#4ECDC4',
         frequency: '約15-20分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 2)}-stop-1`, name: '台中火車站', lat: 24.1362, lng: 120.6847, order: 1 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-2`, name: '中興大學站', lat: 24.1215, lng: 120.6780, order: 2 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-3`, name: '國光忠明南路口站', lat: 24.1195, lng: 120.6758, order: 3 },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-1`,
+            name: '台中火車站',
+            lat: 24.1362,
+            lng: 120.6847,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-2`,
+            name: '中興大學站',
+            lat: 24.1215,
+            lng: 120.678,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-3`,
+            name: '國光忠明南路口站',
+            lat: 24.1195,
+            lng: 120.6758,
+            order: 3,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 2)}-stop-1`, departureTime: '07:00' },
@@ -3987,8 +4033,20 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#95E1D3',
         frequency: '約20分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 3)}-stop-1`, name: '統聯轉運站', lat: 24.1370, lng: 120.6850, order: 1 },
-          { id: `${createId(schoolId, 'bus', 3)}-stop-2`, name: '中興大學(國光路)', lat: 24.1215, lng: 120.6780, order: 2 },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-1`,
+            name: '統聯轉運站',
+            lat: 24.137,
+            lng: 120.685,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-2`,
+            name: '中興大學(國光路)',
+            lat: 24.1215,
+            lng: 120.678,
+            order: 2,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 3)}-stop-1`, departureTime: '08:00' },
@@ -3997,7 +4055,7 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         ],
       },
     ],
-    'ntu': [
+    ntu: [
       {
         id: createId(schoolId, 'bus', 1),
         schoolId,
@@ -4006,9 +4064,27 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#FF6B6B',
         frequency: '約10-15分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 1)}-stop-1`, name: '捷運公館站', lat: 25.0144, lng: 121.5343, order: 1 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-2`, name: '台大正門', lat: 25.0133, lng: 121.5344, order: 2 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-3`, name: '台大綜合體育館', lat: 25.0200, lng: 121.5380, order: 3 },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-1`,
+            name: '捷運公館站',
+            lat: 25.0144,
+            lng: 121.5343,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-2`,
+            name: '台大正門',
+            lat: 25.0133,
+            lng: 121.5344,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-3`,
+            name: '台大綜合體育館',
+            lat: 25.02,
+            lng: 121.538,
+            order: 3,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 1)}-stop-1`, departureTime: '06:30' },
@@ -4024,8 +4100,20 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#4ECDC4',
         frequency: '約12-18分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 2)}-stop-1`, name: '公館站', lat: 25.0144, lng: 121.5343, order: 1 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-2`, name: '台大', lat: 25.0160, lng: 121.5360, order: 2 },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-1`,
+            name: '公館站',
+            lat: 25.0144,
+            lng: 121.5343,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-2`,
+            name: '台大',
+            lat: 25.016,
+            lng: 121.536,
+            order: 2,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 2)}-stop-1`, departureTime: '07:15' },
@@ -4041,10 +4129,34 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#95E1D3',
         frequency: '約10分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 3)}-stop-1`, name: '校總區大門', lat: 25.0133, lng: 121.5344, order: 1 },
-          { id: `${createId(schoolId, 'bus', 3)}-stop-2`, name: '小福樓', lat: 25.0180, lng: 121.5398, order: 2 },
-          { id: `${createId(schoolId, 'bus', 3)}-stop-3`, name: '總圖書館', lat: 25.0175, lng: 121.5405, order: 3 },
-          { id: `${createId(schoolId, 'bus', 3)}-stop-4`, name: '水源校區', lat: 25.0120, lng: 121.5320, order: 4 },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-1`,
+            name: '校總區大門',
+            lat: 25.0133,
+            lng: 121.5344,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-2`,
+            name: '小福樓',
+            lat: 25.018,
+            lng: 121.5398,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-3`,
+            name: '總圖書館',
+            lat: 25.0175,
+            lng: 121.5405,
+            order: 3,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-4`,
+            name: '水源校區',
+            lat: 25.012,
+            lng: 121.532,
+            order: 4,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 3)}-stop-1`, departureTime: '08:00' },
@@ -4053,7 +4165,7 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         ],
       },
     ],
-    'nthu': [
+    nthu: [
       {
         id: createId(schoolId, 'bus', 1),
         schoolId,
@@ -4062,9 +4174,27 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#FF6B6B',
         frequency: '約15-20分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 1)}-stop-1`, name: '新竹火車站', lat: 24.8015, lng: 120.9715, order: 1 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-2`, name: '清大校門', lat: 24.7958, lng: 120.9920, order: 2 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-3`, name: '清大校內', lat: 24.7961, lng: 120.9967, order: 3 },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-1`,
+            name: '新竹火車站',
+            lat: 24.8015,
+            lng: 120.9715,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-2`,
+            name: '清大校門',
+            lat: 24.7958,
+            lng: 120.992,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-3`,
+            name: '清大校內',
+            lat: 24.7961,
+            lng: 120.9967,
+            order: 3,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 1)}-stop-1`, departureTime: '06:30' },
@@ -4080,10 +4210,34 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#4ECDC4',
         frequency: '約10分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 2)}-stop-1`, name: '校門口', lat: 24.7958, lng: 120.9920, order: 1 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-2`, name: '旺宏館', lat: 24.7952, lng: 120.9960, order: 2 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-3`, name: '台達館', lat: 24.7980, lng: 120.9970, order: 3 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-4`, name: '小吃部', lat: 24.7948, lng: 120.9945, order: 4 },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-1`,
+            name: '校門口',
+            lat: 24.7958,
+            lng: 120.992,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-2`,
+            name: '旺宏館',
+            lat: 24.7952,
+            lng: 120.996,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-3`,
+            name: '台達館',
+            lat: 24.798,
+            lng: 120.997,
+            order: 3,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-4`,
+            name: '小吃部',
+            lat: 24.7948,
+            lng: 120.9945,
+            order: 4,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 2)}-stop-1`, departureTime: '08:00' },
@@ -4092,7 +4246,7 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         ],
       },
     ],
-    'ncku': [
+    ncku: [
       {
         id: createId(schoolId, 'bus', 1),
         schoolId,
@@ -4101,9 +4255,27 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#FF6B6B',
         frequency: '約15-20分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 1)}-stop-1`, name: '台南火車站', lat: 22.9972, lng: 120.2122, order: 1 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-2`, name: '成大校門', lat: 23.0003, lng: 120.2155, order: 2 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-3`, name: '成大光復校區', lat: 23.0008, lng: 120.2165, order: 3 },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-1`,
+            name: '台南火車站',
+            lat: 22.9972,
+            lng: 120.2122,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-2`,
+            name: '成大校門',
+            lat: 23.0003,
+            lng: 120.2155,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-3`,
+            name: '成大光復校區',
+            lat: 23.0008,
+            lng: 120.2165,
+            order: 3,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 1)}-stop-1`, departureTime: '06:30' },
@@ -4119,9 +4291,27 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#4ECDC4',
         frequency: '約12分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 2)}-stop-1`, name: '光復校區', lat: 23.0003, lng: 120.2155, order: 1 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-2`, name: '自強校區', lat: 22.9990, lng: 120.2195, order: 2 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-3`, name: '勝利校區', lat: 22.9992, lng: 120.2155, order: 3 },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-1`,
+            name: '光復校區',
+            lat: 23.0003,
+            lng: 120.2155,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-2`,
+            name: '自強校區',
+            lat: 22.999,
+            lng: 120.2195,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-3`,
+            name: '勝利校區',
+            lat: 22.9992,
+            lng: 120.2155,
+            order: 3,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 2)}-stop-1`, departureTime: '08:00' },
@@ -4139,11 +4329,41 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#FF6B6B',
         frequency: '約5-10分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 1)}-stop-1`, name: '台中車站(台灣大道)', lat: 24.13700, lng: 120.68600, order: 1 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-2`, name: '秋紅谷', lat: 24.16280, lng: 120.64020, order: 2 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-3`, name: '東海大學', lat: 24.17900, lng: 120.60300, order: 3 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-4`, name: '弘光科技大學', lat: 24.20500, lng: 120.58200, order: 4 },
-          { id: `${createId(schoolId, 'bus', 1)}-stop-5`, name: '靜宜大學', lat: 24.22600, lng: 120.56300, order: 5 },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-1`,
+            name: '台中車站(台灣大道)',
+            lat: 24.137,
+            lng: 120.686,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-2`,
+            name: '秋紅谷',
+            lat: 24.1628,
+            lng: 120.6402,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-3`,
+            name: '東海大學',
+            lat: 24.179,
+            lng: 120.603,
+            order: 3,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-4`,
+            name: '弘光科技大學',
+            lat: 24.205,
+            lng: 120.582,
+            order: 4,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 1)}-stop-5`,
+            name: '靜宜大學',
+            lat: 24.226,
+            lng: 120.563,
+            order: 5,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 1)}-stop-1`, departureTime: '06:00' },
@@ -4159,9 +4379,27 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#4ECDC4',
         frequency: '約10-15分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 2)}-stop-1`, name: '新民高中', lat: 24.14800, lng: 120.68400, order: 1 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-2`, name: '台中車站(台灣大道)', lat: 24.13700, lng: 120.68600, order: 2 },
-          { id: `${createId(schoolId, 'bus', 2)}-stop-3`, name: '靜宜大學', lat: 24.22600, lng: 120.56300, order: 3 },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-1`,
+            name: '新民高中',
+            lat: 24.148,
+            lng: 120.684,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-2`,
+            name: '台中車站(台灣大道)',
+            lat: 24.137,
+            lng: 120.686,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 2)}-stop-3`,
+            name: '靜宜大學',
+            lat: 24.226,
+            lng: 120.563,
+            order: 3,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 2)}-stop-1`, departureTime: '06:30' },
@@ -4177,9 +4415,27 @@ export function getDemoBusRoutes(schoolId: string): BusRoute[] {
         color: '#95E1D3',
         frequency: '約20-30分鐘一班',
         stops: [
-          { id: `${createId(schoolId, 'bus', 3)}-stop-1`, name: '沙鹿火車站', lat: 24.23350, lng: 120.56650, order: 1 },
-          { id: `${createId(schoolId, 'bus', 3)}-stop-2`, name: '靜宜大學', lat: 24.22600, lng: 120.56300, order: 2 },
-          { id: `${createId(schoolId, 'bus', 3)}-stop-3`, name: '清水車站', lat: 24.26380, lng: 120.56100, order: 3 },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-1`,
+            name: '沙鹿火車站',
+            lat: 24.2335,
+            lng: 120.5665,
+            order: 1,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-2`,
+            name: '靜宜大學',
+            lat: 24.226,
+            lng: 120.563,
+            order: 2,
+          },
+          {
+            id: `${createId(schoolId, 'bus', 3)}-stop-3`,
+            name: '清水車站',
+            lat: 24.2638,
+            lng: 120.561,
+            order: 3,
+          },
         ],
         schedule: [
           { stopId: `${createId(schoolId, 'bus', 3)}-stop-1`, departureTime: '07:00' },
@@ -4835,7 +5091,9 @@ export function getDemoConversations(schoolId: string, userId: string): Conversa
     ...conv,
     id: conv.id.replace('tw-nchu', schoolId),
     schoolId,
-    memberIds: conv.memberIds.map((id) => (id.includes('tw-nchu') ? id.replace('tw-nchu', schoolId) : id)),
+    memberIds: conv.memberIds.map((id) =>
+      id.includes('tw-nchu') ? id.replace('tw-nchu', schoolId) : id,
+    ),
   }));
 }
 
@@ -5192,7 +5450,10 @@ export function getDemoComments(postId: string, schoolId: string = 'tw-nchu'): C
 
 // ===== getDemoSubmissions =====
 
-export function getDemoSubmissions(assignmentId: string, schoolId: string = 'tw-nchu'): Submission[] {
+export function getDemoSubmissions(
+  assignmentId: string,
+  schoolId: string = 'tw-nchu',
+): Submission[] {
   schoolId = normalizeDemoSchoolId(schoolId);
   const assignNumber = parseInt(assignmentId.split('-').pop() || '0');
   const submissions: Submission[] = [];
@@ -5398,7 +5659,10 @@ export function getDemoLibrarySeats(schoolId: string = 'tw-nchu'): LibrarySeat[]
 
 // ===== getDemoAchievements =====
 
-export function getDemoAchievements(userId: string, schoolId: string = 'tw-nchu'): UserAchievement[] {
+export function getDemoAchievements(
+  userId: string,
+  schoolId: string = 'tw-nchu',
+): UserAchievement[] {
   schoolId = normalizeDemoSchoolId(schoolId);
   const achievements: UserAchievement[] = [
     {
@@ -5540,7 +5804,6 @@ export function getDemoAchievements(userId: string, schoolId: string = 'tw-nchu'
   return achievements;
 }
 
-
 // ===== Course Modules =====
 
 export function getDemoCourseModules(schoolId: string, courseSpaceId?: string): CourseModule[] {
@@ -5672,7 +5935,9 @@ export function getDemoCourseModules(schoolId: string, courseSpaceId?: string): 
     ],
   };
 
-  const courseNum = courseSpaceId ? courseSpaceId.split('-')[courseSpaceId.split('-').length - 1] : null;
+  const courseNum = courseSpaceId
+    ? courseSpaceId.split('-')[courseSpaceId.split('-').length - 1]
+    : null;
   const modules = courseNum ? courseModulesByGroup[courseNum] : [];
 
   if (modules) {
@@ -5777,7 +6042,11 @@ export function getDemoCourseMaterials(courseSpaceId: string, moduleId?: string)
 
 // ===== Quizzes =====
 
-export function getDemoQuizzes(userId: string, courseSpaceId?: string, schoolId = 'tw-nchu'): Quiz[] {
+export function getDemoQuizzes(
+  userId: string,
+  courseSpaceId?: string,
+  schoolId = 'tw-nchu',
+): Quiz[] {
   schoolId = normalizeDemoSchoolId(schoolId);
   const quizzes: Quiz[] = [
     {
@@ -5835,7 +6104,7 @@ export function getDemoQuizzes(userId: string, courseSpaceId?: string, schoolId 
       questionCount: 5,
       durationMinutes: 20,
       points: 30,
-      weight: 0.10,
+      weight: 0.1,
       source: 'quiz',
       questions: [
         {
@@ -5865,7 +6134,7 @@ export function getDemoQuizzes(userId: string, courseSpaceId?: string, schoolId 
       questionCount: 25,
       durationMinutes: 90,
       points: 100,
-      weight: 0.30,
+      weight: 0.3,
       source: 'quiz',
       questions: [],
     },
@@ -5897,7 +6166,11 @@ export function getDemoQuizzes(userId: string, courseSpaceId?: string, schoolId 
 
 // ===== Attendance Sessions =====
 
-export function getDemoAttendanceSessions(userId: string, courseSpaceId?: string, schoolId = 'tw-nchu'): AttendanceSession[] {
+export function getDemoAttendanceSessions(
+  userId: string,
+  courseSpaceId?: string,
+  schoolId = 'tw-nchu',
+): AttendanceSession[] {
   schoolId = normalizeDemoSchoolId(schoolId);
   const sessions: AttendanceSession[] = [
     {
@@ -6111,7 +6384,11 @@ export function getDemoInboxTasks(userId: string, schoolId = 'tw-nchu'): InboxTa
 
 // ===== Enrollments =====
 
-export function getDemoEnrollments(userId: string, semester = '114-2', schoolId = 'tw-nchu'): Enrollment[] {
+export function getDemoEnrollments(
+  userId: string,
+  semester = '114-2',
+  schoolId = 'tw-nchu',
+): Enrollment[] {
   schoolId = normalizeDemoSchoolId(schoolId);
   const enrollments: Enrollment[] = [
     {
@@ -6259,7 +6536,10 @@ export function getDemoGrades(userId: string, semester = '113-1', schoolId = 'tw
 
 // ===== GPA =====
 
-export function getDemoGPA(userId: string, _schoolId = 'tw-pu'): { gpa: number; totalCredits: number; totalPoints: number } {
+export function getDemoGPA(
+  userId: string,
+  _schoolId = 'tw-pu',
+): { gpa: number; totalCredits: number; totalPoints: number } {
   return {
     gpa: 3.68,
     totalCredits: 72,
@@ -6618,7 +6898,10 @@ export function getDemoPrintJobs(userId: string, schoolId = 'tw-nchu'): PrintJob
 
 // ===== Health Center =====
 
-export function getDemoHealthAppointments(userId: string, schoolId = 'tw-nchu'): HealthAppointment[] {
+export function getDemoHealthAppointments(
+  userId: string,
+  schoolId = 'tw-nchu',
+): HealthAppointment[] {
   schoolId = normalizeDemoSchoolId(schoolId);
   const appointments: HealthAppointment[] = [
     {
@@ -6661,7 +6944,11 @@ export function getDemoHealthAppointments(userId: string, schoolId = 'tw-nchu'):
   return appointments;
 }
 
-export function getDemoHealthTimeSlots(department: string, date: string, schoolId = 'tw-nchu'): HealthTimeSlot[] {
+export function getDemoHealthTimeSlots(
+  department: string,
+  date: string,
+  schoolId = 'tw-nchu',
+): HealthTimeSlot[] {
   schoolId = normalizeDemoSchoolId(schoolId);
   const slots: HealthTimeSlot[] = [];
   const hours = [9, 10, 11, 12, 14, 15, 16];
@@ -6671,11 +6958,12 @@ export function getDemoHealthTimeSlots(department: string, date: string, schoolI
     minutes.forEach((minute) => {
       const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
       const slotNum = slots.length + 1;
-      
+
       slots.push({
         id: createId(schoolId, `slot-${department}`, slotNum),
         department: department as HealthDepartment,
-        doctorName: department === 'dental' ? '陳牙醫' : department === 'mental' ? '李心理師' : '王醫生',
+        doctorName:
+          department === 'dental' ? '陳牙醫' : department === 'mental' ? '李心理師' : '王醫生',
         date,
         time,
         available: Math.random() > 0.4,
@@ -6889,16 +7177,33 @@ export function getDemoCourseGradebook(schoolId = 'tw-nchu'): CourseGradebookDat
 
   const rows: CourseGradebookRow[] = students.map((student, idx) => {
     const grades = [
-      { assignmentId: assignments[0].id, grade: 85 + Math.random() * 15, isLate: false, submittedAt: new Date('2024-03-14'), feedback: '很好的實踐！' },
-      { assignmentId: assignments[1].id, grade: 75 + Math.random() * 25, isLate: idx === 2, submittedAt: new Date('2024-04-21'), feedback: idx === 2 ? '遲交已扣分' : null },
-      { assignmentId: assignments[2].id, grade: null, isLate: false, submittedAt: null, feedback: null },
+      {
+        assignmentId: assignments[0].id,
+        grade: 85 + Math.random() * 15,
+        isLate: false,
+        submittedAt: new Date('2024-03-14'),
+        feedback: '很好的實踐！',
+      },
+      {
+        assignmentId: assignments[1].id,
+        grade: 75 + Math.random() * 25,
+        isLate: idx === 2,
+        submittedAt: new Date('2024-04-21'),
+        feedback: idx === 2 ? '遲交已扣分' : null,
+      },
+      {
+        assignmentId: assignments[2].id,
+        grade: null,
+        isLate: false,
+        submittedAt: null,
+        feedback: null,
+      },
     ];
 
-    const gradedAssignments = grades.filter(g => g.grade !== null).length;
+    const gradedAssignments = grades.filter((g) => g.grade !== null).length;
     const totalAssignments = assignments.length;
-    const finalScore = gradedAssignments === 2
-      ? (grades[0].grade! * 0.3 + grades[1].grade! * 0.3) / 0.6
-      : null;
+    const finalScore =
+      gradedAssignments === 2 ? (grades[0].grade! * 0.3 + grades[1].grade! * 0.3) / 0.6 : null;
 
     return {
       uid: student.uid,

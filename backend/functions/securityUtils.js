@@ -1,6 +1,6 @@
 const DEFAULT_ALLOWED_ORIGINS = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
   /^https:\/\/.*\.web\.app$/,
   /^https:\/\/.*\.firebaseapp\.com$/,
 ];
@@ -8,48 +8,56 @@ const DEFAULT_ALLOWED_ORIGINS = [
 const rateLimitBuckets = new Map();
 
 function normalizeRuntimeEnv(value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "production" || normalized === "preview") {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'production' || normalized === 'preview') {
     return normalized;
   }
 
-  return "development";
+  return 'development';
 }
 
 function getAppRuntimeEnv() {
-  const explicitAppEnv = String(process.env.APP_ENV || "").trim();
+  const explicitAppEnv = String(process.env.APP_ENV || '').trim();
   if (explicitAppEnv) {
     return normalizeRuntimeEnv(explicitAppEnv);
   }
 
-  const explicitUniversalFlag = String(process.env.UNIVERSAL_DEV_ACCOUNTS_ENABLED || "").trim().toLowerCase();
-  if (explicitUniversalFlag === "true") {
-    return "preview";
+  const explicitUniversalFlag = String(process.env.UNIVERSAL_DEV_ACCOUNTS_ENABLED || '')
+    .trim()
+    .toLowerCase();
+  if (explicitUniversalFlag === 'true') {
+    return 'preview';
   }
 
-  const nodeEnv = String(process.env.NODE_ENV || "").trim().toLowerCase();
-  if (nodeEnv === "production") {
-    return "production";
+  const nodeEnv = String(process.env.NODE_ENV || '')
+    .trim()
+    .toLowerCase();
+  if (nodeEnv === 'production') {
+    return 'production';
   }
 
-  return "development";
+  return 'development';
 }
 
 function isProductionRuntime() {
-  return getAppRuntimeEnv() === "production";
+  return getAppRuntimeEnv() === 'production';
 }
 
 function isUniversalDevAccountsEnabled() {
-  const override = String(process.env.UNIVERSAL_DEV_ACCOUNTS_ENABLED || "").trim().toLowerCase();
-  if (override === "true") return true;
-  if (override === "false") return false;
+  const override = String(process.env.UNIVERSAL_DEV_ACCOUNTS_ENABLED || '')
+    .trim()
+    .toLowerCase();
+  if (override === 'true') return true;
+  if (override === 'false') return false;
 
-  return getAppRuntimeEnv() !== "production";
+  return getAppRuntimeEnv() !== 'production';
 }
 
 function getAllowedOrigins() {
-  const raw = String(process.env.ALLOWED_WEB_ORIGINS || "")
-    .split(",")
+  const raw = String(process.env.ALLOWED_WEB_ORIGINS || '')
+    .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
 
@@ -68,11 +76,11 @@ function isAllowedOrigin(origin) {
 }
 
 function assertTrustedOrigin(req) {
-  const origin = req.get?.("origin") || req.headers?.origin || "";
+  const origin = req.get?.('origin') || req.headers?.origin || '';
   if (!origin) return;
 
   if (!isAllowedOrigin(origin)) {
-    const error = new Error("Origin not allowed");
+    const error = new Error('Origin not allowed');
     error.statusCode = 403;
     throw error;
   }
@@ -83,25 +91,15 @@ function getCorsOrigins() {
 }
 
 function getClientIp(req) {
-  const forwarded = req.get?.("x-forwarded-for") || req.headers?.["x-forwarded-for"];
-  if (typeof forwarded === "string" && forwarded.trim()) {
-    return forwarded.split(",")[0].trim();
+  const forwarded = req.get?.('x-forwarded-for') || req.headers?.['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
   }
 
-  return (
-    req.ip ||
-    req.socket?.remoteAddress ||
-    req.rawRequest?.ip ||
-    "unknown"
-  );
+  return req.ip || req.socket?.remoteAddress || req.rawRequest?.ip || 'unknown';
 }
 
-function consumeRateLimit({
-  scope,
-  key,
-  limit,
-  windowMs,
-}) {
+function consumeRateLimit({ scope, key, limit, windowMs }) {
   const bucketKey = `${scope}:${key}`;
   const now = Date.now();
   const current = rateLimitBuckets.get(bucketKey);
@@ -139,35 +137,35 @@ function enforceRateLimit(options) {
   const result = consumeRateLimit(options);
   if (result.allowed) return result;
 
-  const error = new Error("Too many requests");
+  const error = new Error('Too many requests');
   error.statusCode = 429;
   error.retryAfterMs = Math.max(0, result.resetAt - Date.now());
   throw error;
 }
 
 function requirePostJson(req) {
-  if (req.method !== "POST") {
-    const error = new Error("Method not allowed");
+  if (req.method !== 'POST') {
+    const error = new Error('Method not allowed');
     error.statusCode = 405;
     throw error;
   }
 
-  const contentType = String(req.get?.("content-type") || req.headers?.["content-type"] || "");
-  if (!contentType.toLowerCase().includes("application/json")) {
-    const error = new Error("Content-Type must be application/json");
+  const contentType = String(req.get?.('content-type') || req.headers?.['content-type'] || '');
+  if (!contentType.toLowerCase().includes('application/json')) {
+    const error = new Error('Content-Type must be application/json');
     error.statusCode = 415;
     throw error;
   }
 }
 
-function writeHttpError(res, error, fallbackMessage = "Request failed") {
+function writeHttpError(res, error, fallbackMessage = 'Request failed') {
   const statusCode = Number(error?.statusCode) || 500;
   const body = {
     error: error?.message || fallbackMessage,
   };
 
-  if (typeof error?.retryAfterMs === "number") {
-    res.set("Retry-After", String(Math.ceil(error.retryAfterMs / 1000)));
+  if (typeof error?.retryAfterMs === 'number') {
+    res.set('Retry-After', String(Math.ceil(error.retryAfterMs / 1000)));
   }
 
   res.status(statusCode).json(body);

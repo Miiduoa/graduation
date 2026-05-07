@@ -28,36 +28,128 @@
 
 export type CampusEvent =
   // ─── 點名相關 ───
-  | { type: 'session:started'; payload: { sessionId: string; courseId: string; courseName: string; teacherId: string; mode: string } }
-  | { type: 'session:ended'; payload: { sessionId: string; courseId: string; presentCount: number; totalStudents: number; rate: number } }
-  | { type: 'attendance:checked_in'; payload: { sessionId: string; courseId: string; studentId: string; studentName: string; status: 'present' | 'late' } }
-  | { type: 'attendance:marked_absent'; payload: { sessionId: string; studentId: string; courseId: string } }
-  | { type: 'attendance:rate_warning'; payload: { studentId: string; courseId: string; courseName: string; rate: number } }
+  | {
+      type: 'session:started';
+      payload: {
+        sessionId: string;
+        courseId: string;
+        courseName: string;
+        teacherId: string;
+        mode: string;
+      };
+    }
+  | {
+      type: 'session:ended';
+      payload: {
+        sessionId: string;
+        courseId: string;
+        presentCount: number;
+        totalStudents: number;
+        rate: number;
+      };
+    }
+  | {
+      type: 'attendance:checked_in';
+      payload: {
+        sessionId: string;
+        courseId: string;
+        studentId: string;
+        studentName: string;
+        status: 'present' | 'late';
+      };
+    }
+  | {
+      type: 'attendance:marked_absent';
+      payload: { sessionId: string; studentId: string; courseId: string };
+    }
+  | {
+      type: 'attendance:rate_warning';
+      payload: { studentId: string; courseId: string; courseName: string; rate: number };
+    }
   // ─── 假單相關 ───
-  | { type: 'leave:submitted'; payload: { requestId: string; studentId: string; courseId: string; courseName: string } }
-  | { type: 'leave:reviewed'; payload: { requestId: string; studentId: string; approved: boolean; courseId: string } }
+  | {
+      type: 'leave:submitted';
+      payload: { requestId: string; studentId: string; courseId: string; courseName: string };
+    }
+  | {
+      type: 'leave:reviewed';
+      payload: { requestId: string; studentId: string; approved: boolean; courseId: string };
+    }
   // ─── 成績相關 ───
-  | { type: 'grade:updated'; payload: { studentId: string; courseId: string; courseName: string; score: number; itemName: string } }
-  | { type: 'gpa:changed'; payload: { studentId: string; oldGPA: number; newGPA: number; trend: 'up' | 'down' | 'stable' } }
+  | {
+      type: 'grade:updated';
+      payload: {
+        studentId: string;
+        courseId: string;
+        courseName: string;
+        score: number;
+        itemName: string;
+      };
+    }
+  | {
+      type: 'gpa:changed';
+      payload: {
+        studentId: string;
+        oldGPA: number;
+        newGPA: number;
+        trend: 'up' | 'down' | 'stable';
+      };
+    }
   // ─── 作業相關 ───
-  | { type: 'assignment:published'; payload: { courseId: string; courseName: string; title: string; deadline: number; teacherId: string } }
-  | { type: 'assignment:submitted'; payload: { studentId: string; courseId: string; activityId: string; title: string } }
-  | { type: 'assignment:graded'; payload: { studentId: string; courseId: string; title: string; score: number } }
+  | {
+      type: 'assignment:published';
+      payload: {
+        courseId: string;
+        courseName: string;
+        title: string;
+        deadline: number;
+        teacherId: string;
+      };
+    }
+  | {
+      type: 'assignment:submitted';
+      payload: { studentId: string; courseId: string; activityId: string; title: string };
+    }
+  | {
+      type: 'assignment:graded';
+      payload: { studentId: string; courseId: string; title: string; score: number };
+    }
   // ─── 課程相關 ───
-  | { type: 'course:enrolled'; payload: { studentId: string; courseId: string; courseName: string } }
+  | {
+      type: 'course:enrolled';
+      payload: { studentId: string; courseId: string; courseName: string };
+    }
   | { type: 'course:created'; payload: { courseId: string; courseName: string; teacherId: string } }
-  | { type: 'course:approved'; payload: { courseId: string; courseName: string; approvedBy: string } }
+  | {
+      type: 'course:approved';
+      payload: { courseId: string; courseName: string; approvedBy: string };
+    }
   // ─── 社交相關 ───
   | { type: 'group:joined'; payload: { userId: string; groupId: string; groupName: string } }
   | { type: 'buddy:matched'; payload: { studentA: string; studentB: string; courseId: string } }
   | { type: 'post:created'; payload: { userId: string; groupId: string; postId: string } }
   // ─── 校園生活 ───
   | { type: 'cafeteria:order_placed'; payload: { userId: string; vendorId: string; total: number } }
-  | { type: 'lostfound:posted'; payload: { userId: string; itemId: string; type: 'lost' | 'found' } }
+  | {
+      type: 'lostfound:posted';
+      payload: { userId: string; itemId: string; type: 'lost' | 'found' };
+    }
   | { type: 'crowd:reported'; payload: { userId: string; poiId: string; level: number } }
   // ─── 系統 / XP ───
-  | { type: 'xp:earned'; payload: { userId: string; action: string; amount: number; newTotal: number; newLevel: number } }
-  | { type: 'achievement:unlocked'; payload: { userId: string; achievementId: string; title: string } }
+  | {
+      type: 'xp:earned';
+      payload: {
+        userId: string;
+        action: string;
+        amount: number;
+        newTotal: number;
+        newLevel: number;
+      };
+    }
+  | {
+      type: 'achievement:unlocked';
+      payload: { userId: string; achievementId: string; title: string };
+    }
   | { type: 'streak:updated'; payload: { userId: string; days: number; isAtRisk: boolean } }
   | { type: 'nudge:triggered'; payload: { userId: string; nudgeType: string; message: string } }
   // ─── 通用 ───
@@ -72,7 +164,9 @@ export type PayloadOf<T extends CampusEventType> = Extract<CampusEvent, { type: 
 // EVENT BUS IMPLEMENTATION
 // ============================================================================
 
-type Listener<T extends CampusEventType = CampusEventType> = (payload: PayloadOf<T>) => void | Promise<void>;
+type Listener<T extends CampusEventType = CampusEventType> = (
+  payload: PayloadOf<T>,
+) => void | Promise<void>;
 
 class CampusEventBusImpl {
   private listeners = new Map<string, Set<Listener<any>>>();
@@ -154,7 +248,9 @@ class CampusEventBusImpl {
       if (lastEvent) listener(lastEvent);
     };
     this.listeners.get('*')!.add(wrappedListener);
-    return () => { this.listeners.get('*')?.delete(wrappedListener); };
+    return () => {
+      this.listeners.get('*')?.delete(wrappedListener);
+    };
   }
 
   /**
@@ -211,8 +307,7 @@ export const emitAssignmentPublished = (p: PayloadOf<'assignment:published'>) =>
 export const emitAssignmentSubmitted = (p: PayloadOf<'assignment:submitted'>) =>
   campusEventBus.emit('assignment:submitted', p);
 
-export const emitXPEarned = (p: PayloadOf<'xp:earned'>) =>
-  campusEventBus.emit('xp:earned', p);
+export const emitXPEarned = (p: PayloadOf<'xp:earned'>) => campusEventBus.emit('xp:earned', p);
 
 export const emitNudgeTriggered = (p: PayloadOf<'nudge:triggered'>) =>
   campusEventBus.emit('nudge:triggered', p);

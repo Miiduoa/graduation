@@ -1,19 +1,19 @@
-export type SSOProvider = "oidc" | "cas" | "saml";
+export type SSOProvider = 'oidc' | 'cas' | 'saml';
 
-export type AuthRole = "student" | "teacher" | "admin" | "staff" | "department_head";
+export type AuthRole = 'student' | 'teacher' | 'admin' | 'staff' | 'department_head';
 
-export type RoleGroup = "student" | "teacher" | "staff" | "department_head" | "admin";
+export type RoleGroup = 'student' | 'teacher' | 'staff' | 'department_head' | 'admin';
 
-export type SchoolMemberRole = "member" | "editor" | "admin";
+export type SchoolMemberRole = 'member' | 'editor' | 'admin';
 
-export type SSOSetupStatus = "draft" | "testing" | "live";
+export type SSOSetupStatus = 'draft' | 'testing' | 'live';
 
 export type SchoolSsoAvailabilityReason =
-  | "not-configured"
-  | "disabled"
-  | "not-live"
-  | "incomplete"
-  | "ready";
+  | 'not-configured'
+  | 'disabled'
+  | 'not-live'
+  | 'incomplete'
+  | 'ready';
 
 export type SchoolSSOProviderConfig = {
   provider: SSOProvider;
@@ -91,43 +91,43 @@ export type SSOCallbackResult = {
 };
 
 function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 function asStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  const items = value.filter(
+    (item): item is string => typeof item === 'string' && item.trim().length > 0,
+  );
   return items.length > 0 ? items : undefined;
 }
 
 function asStringRecord(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== "object") return undefined;
+  if (!value || typeof value !== 'object') return undefined;
 
   const entries = Object.entries(value).filter(
-    (entry): entry is [string, string] => typeof entry[0] === "string" && typeof entry[1] === "string"
+    (entry): entry is [string, string] =>
+      typeof entry[0] === 'string' && typeof entry[1] === 'string',
   );
 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-function normalizeSetupStatus(
-  value: unknown,
-  hasSsoConfig: boolean
-): SSOSetupStatus {
-  if (value === "draft" || value === "testing" || value === "live") {
+function normalizeSetupStatus(value: unknown, hasSsoConfig: boolean): SSOSetupStatus {
+  if (value === 'draft' || value === 'testing' || value === 'live') {
     return value;
   }
 
-  return hasSsoConfig ? "testing" : "draft";
+  return hasSsoConfig ? 'testing' : 'draft';
 }
 
 export function normalizeSchoolSSOConfig(
   value: unknown,
-  fallback: Partial<Pick<SchoolSSOConfig, "schoolId" | "schoolName" | "emailDomain">> = {}
+  fallback: Partial<Pick<SchoolSSOConfig, 'schoolId' | 'schoolName' | 'emailDomain'>> = {},
 ): SchoolSSOConfig {
-  const input = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const input = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
   const rawConfig =
-    input.ssoConfig && typeof input.ssoConfig === "object"
+    input.ssoConfig && typeof input.ssoConfig === 'object'
       ? (input.ssoConfig as Record<string, unknown>)
       : null;
 
@@ -139,7 +139,7 @@ export function normalizeSchoolSSOConfig(
     setupStatus: normalizeSetupStatus(input.setupStatus, Boolean(rawConfig)),
     ssoConfig: rawConfig
       ? {
-          provider: ((asString(rawConfig.provider) as SSOProvider | undefined) ?? "oidc"),
+          provider: (asString(rawConfig.provider) as SSOProvider | undefined) ?? 'oidc',
           name: asString(rawConfig.name),
           enabled: rawConfig.enabled !== false,
           clientId: asString(rawConfig.clientId),
@@ -171,57 +171,53 @@ export function normalizeSchoolSSOConfig(
 
 type RequiredSchoolSsoField = keyof Pick<
   SchoolSSOProviderConfig,
-  | "clientId"
-  | "clientSecret"
-  | "authorizationEndpoint"
-  | "tokenEndpoint"
-  | "casServerUrl"
-  | "samlEntryPoint"
-  | "spEntityId"
-  | "spPrivateKey"
-  | "spCertificate"
-  | "assertConsumerUrl"
-  | "idpCertificate"
+  | 'clientId'
+  | 'clientSecret'
+  | 'authorizationEndpoint'
+  | 'tokenEndpoint'
+  | 'casServerUrl'
+  | 'samlEntryPoint'
+  | 'spEntityId'
+  | 'spPrivateKey'
+  | 'spCertificate'
+  | 'assertConsumerUrl'
+  | 'idpCertificate'
 >;
 
 const REQUIRED_PROVIDER_FIELDS: Record<SSOProvider, RequiredSchoolSsoField[]> = {
-  oidc: ["clientId", "clientSecret", "authorizationEndpoint", "tokenEndpoint"],
-  cas: ["casServerUrl"],
+  oidc: ['clientId', 'clientSecret', 'authorizationEndpoint', 'tokenEndpoint'],
+  cas: ['casServerUrl'],
   saml: [
-    "samlEntryPoint",
-    "spEntityId",
-    "spPrivateKey",
-    "spCertificate",
-    "assertConsumerUrl",
-    "idpCertificate",
+    'samlEntryPoint',
+    'spEntityId',
+    'spPrivateKey',
+    'spCertificate',
+    'assertConsumerUrl',
+    'idpCertificate',
   ],
 };
 
 function hasConfigValue(value: unknown): boolean {
-  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   return Boolean(value);
 }
 
 export function getRequiredSchoolSsoFields(
-  provider?: SSOProvider | null
+  provider?: SSOProvider | null,
 ): RequiredSchoolSsoField[] {
   if (!provider) return [];
   return [...REQUIRED_PROVIDER_FIELDS[provider]];
 }
 
-export function getMissingSchoolSsoFields(
-  config?: SchoolSSOProviderConfig | null
-): string[] {
+export function getMissingSchoolSsoFields(config?: SchoolSSOProviderConfig | null): string[] {
   if (!config) return [];
 
   const requiredFields = getRequiredSchoolSsoFields(config.provider);
   return requiredFields.filter((field) => !hasConfigValue(config[field]));
 }
 
-export function getSchoolSsoAvailability(
-  config?: SchoolSSOConfig | null
-): SchoolSsoAvailability {
+export function getSchoolSsoAvailability(config?: SchoolSSOConfig | null): SchoolSsoAvailability {
   const ssoConfig = config?.ssoConfig ?? null;
   const provider = ssoConfig?.provider ?? null;
   const setupStatus = normalizeSetupStatus(config?.setupStatus, Boolean(ssoConfig));
@@ -229,15 +225,15 @@ export function getSchoolSsoAvailability(
   const isConfigured = Boolean(ssoConfig);
   const isEnabled = Boolean(ssoConfig?.enabled);
   const isComplete = isConfigured && missingFields.length === 0;
-  const isLoginReady = isComplete && isEnabled && setupStatus !== "draft";
-  const isProductionReady = isComplete && isEnabled && setupStatus === "live";
+  const isLoginReady = isComplete && isEnabled && setupStatus !== 'draft';
+  const isProductionReady = isComplete && isEnabled && setupStatus === 'live';
 
   if (!ssoConfig) {
     return {
       provider,
       setupStatus,
-      reason: "not-configured",
-      message: "此學校尚未設定學校登入",
+      reason: 'not-configured',
+      message: '此學校尚未設定學校登入',
       missingFields,
       isConfigured,
       isEnabled,
@@ -251,8 +247,8 @@ export function getSchoolSsoAvailability(
     return {
       provider,
       setupStatus,
-      reason: "disabled",
-      message: "此學校的學校登入已停用",
+      reason: 'disabled',
+      message: '此學校的學校登入已停用',
       missingFields,
       isConfigured,
       isEnabled,
@@ -266,8 +262,8 @@ export function getSchoolSsoAvailability(
     return {
       provider,
       setupStatus,
-      reason: "incomplete",
-      message: "此學校的學校登入設定尚未完成",
+      reason: 'incomplete',
+      message: '此學校的學校登入設定尚未完成',
       missingFields,
       isConfigured,
       isEnabled,
@@ -277,12 +273,12 @@ export function getSchoolSsoAvailability(
     };
   }
 
-  if (setupStatus === "draft") {
+  if (setupStatus === 'draft') {
     return {
       provider,
       setupStatus,
-      reason: "not-live",
-      message: "此學校的學校登入尚未正式開通",
+      reason: 'not-live',
+      message: '此學校的學校登入尚未正式開通',
       missingFields,
       isConfigured,
       isEnabled,
@@ -292,12 +288,12 @@ export function getSchoolSsoAvailability(
     };
   }
 
-  if (setupStatus === "testing") {
+  if (setupStatus === 'testing') {
     return {
       provider,
       setupStatus,
-      reason: "not-live",
-      message: "此學校的學校登入仍在測試中",
+      reason: 'not-live',
+      message: '此學校的學校登入仍在測試中',
       missingFields,
       isConfigured,
       isEnabled,
@@ -310,8 +306,8 @@ export function getSchoolSsoAvailability(
   return {
     provider,
     setupStatus,
-    reason: "ready",
-    message: "此學校已開通學校登入",
+    reason: 'ready',
+    message: '此學校已開通學校登入',
     missingFields,
     isConfigured,
     isEnabled,
@@ -321,27 +317,23 @@ export function getSchoolSsoAvailability(
   };
 }
 
-export function isSchoolSsoLoginReady(
-  config?: SchoolSSOConfig | null
-): boolean {
+export function isSchoolSsoLoginReady(config?: SchoolSSOConfig | null): boolean {
   return getSchoolSsoAvailability(config).isLoginReady;
 }
 
-export function isProductionSSOReady(
-  config?: SchoolSSOConfig | null
-): boolean {
+export function isProductionSSOReady(config?: SchoolSSOConfig | null): boolean {
   return getSchoolSsoAvailability(config).isProductionReady;
 }
 
 export function normalizeSSOUserInfo(value: unknown): SSOUserInfo | null {
-  const input = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const input = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
   if (!input) return null;
 
   const sub = asString(input.sub);
   if (!sub) return null;
 
   const normalizedRole = normalizeAuthRole(
-    asString(input.role) ?? asString(input.userType) ?? asString(input.affiliation)
+    asString(input.role) ?? asString(input.userType) ?? asString(input.affiliation),
   );
 
   return {
@@ -364,72 +356,77 @@ export function normalizeSSOUserInfo(value: unknown): SSOUserInfo | null {
 }
 
 export function normalizeAuthRole(value?: string | null): AuthRole {
-  const normalized = (value ?? "").trim().toLowerCase();
+  const normalized = (value ?? '').trim().toLowerCase();
 
-  if (normalized.includes("admin")) {
-    return "admin";
+  if (normalized.includes('admin')) {
+    return 'admin';
   }
   if (
-    normalized.includes("department_head") ||
-    normalized.includes("principal") ||
-    normalized.includes("chair") ||
-    normalized.includes("director") ||
-    normalized.includes("系主任") ||
-    normalized.includes("主管")
+    normalized.includes('department_head') ||
+    normalized.includes('principal') ||
+    normalized.includes('chair') ||
+    normalized.includes('director') ||
+    normalized.includes('系主任') ||
+    normalized.includes('主管')
   ) {
-    return "department_head";
+    return 'department_head';
   }
   if (
-    normalized.includes("teacher") ||
-    normalized.includes("faculty") ||
-    normalized.includes("professor")
+    normalized.includes('teacher') ||
+    normalized.includes('faculty') ||
+    normalized.includes('professor')
   ) {
-    return "teacher";
+    return 'teacher';
   }
-  if (normalized.includes("staff") || normalized.includes("employee")) {
-    return "staff";
+  if (normalized.includes('staff') || normalized.includes('employee')) {
+    return 'staff';
   }
 
-  return "student";
+  return 'student';
 }
 
 export function determineAuthRole(
-  userInfo: Pick<SSOUserInfo, "role" | "email" | "department" | "ou" | "affiliation" | "userType">
+  userInfo: Pick<SSOUserInfo, 'role' | 'email' | 'department' | 'ou' | 'affiliation' | 'userType'>,
 ): AuthRole {
   if (userInfo.role) {
     return normalizeAuthRole(userInfo.role);
   }
 
-  const email = (userInfo.email ?? "").toLowerCase();
-  const department = (userInfo.department ?? userInfo.ou ?? "").toLowerCase();
-  const type = (userInfo.userType ?? userInfo.affiliation ?? "").toLowerCase();
+  const email = (userInfo.email ?? '').toLowerCase();
+  const department = (userInfo.department ?? userInfo.ou ?? '').toLowerCase();
+  const type = (userInfo.userType ?? userInfo.affiliation ?? '').toLowerCase();
 
-  if (type.includes("faculty") || type.includes("teacher") || type.includes("staff") || type.includes("employee")) {
+  if (
+    type.includes('faculty') ||
+    type.includes('teacher') ||
+    type.includes('staff') ||
+    type.includes('employee')
+  ) {
     if (
-      department.includes("系主任") ||
-      department.includes("主管") ||
-      department.includes("chair") ||
-      department.includes("director")
+      department.includes('系主任') ||
+      department.includes('主管') ||
+      department.includes('chair') ||
+      department.includes('director')
     ) {
-      return "department_head";
+      return 'department_head';
     }
-    if (department.includes("admin") || department.includes("行政")) {
-      return "admin";
+    if (department.includes('admin') || department.includes('行政')) {
+      return 'admin';
     }
-    return type.includes("staff") || type.includes("employee") ? "staff" : "teacher";
+    return type.includes('staff') || type.includes('employee') ? 'staff' : 'teacher';
   }
 
-  if (email.includes("teacher") || email.includes("prof")) {
-    return "teacher";
+  if (email.includes('teacher') || email.includes('prof')) {
+    return 'teacher';
   }
 
-  return "student";
+  return 'student';
 }
 
 export function toSchoolMemberRole(role: AuthRole): SchoolMemberRole {
-  if (role === "admin") return "admin";
-  if (role === "teacher" || role === "staff" || role === "department_head") return "editor";
-  return "member";
+  if (role === 'admin') return 'admin';
+  if (role === 'teacher' || role === 'staff' || role === 'department_head') return 'editor';
+  return 'member';
 }
 
 export function getRoleGroupForAuthRole(role: AuthRole): RoleGroup {
@@ -437,6 +434,9 @@ export function getRoleGroupForAuthRole(role: AuthRole): RoleGroup {
 }
 
 export function getSSOProviderName(schoolConfig?: SchoolSSOConfig | null): string {
-  if (!schoolConfig?.ssoConfig) return "";
-  return schoolConfig.ssoConfig.name || `${schoolConfig.schoolName ?? schoolConfig.schoolId ?? "學校"} SSO`;
+  if (!schoolConfig?.ssoConfig) return '';
+  return (
+    schoolConfig.ssoConfig.name ||
+    `${schoolConfig.schoolName ?? schoolConfig.schoolId ?? '學校'} SSO`
+  );
 }

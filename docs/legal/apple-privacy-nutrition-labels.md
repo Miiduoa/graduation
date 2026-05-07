@@ -23,6 +23,7 @@ This document maps Campus Helper's data practices to Apple's App Privacy Details
 ### Overview
 
 Campus Helper uses IDFA (Identifier for Advertisers) and cookie identifiers for:
+
 - Analytics (understanding feature usage)
 - Fraud prevention
 - App performance monitoring
@@ -34,6 +35,7 @@ Campus Helper uses IDFA (Identifier for Advertisers) and cookie identifiers for:
 ### Detailed Tracking Data
 
 #### Device Advertising ID (IDFA)
+
 - **Used?** YES
 - **Purpose:** Firebase Analytics (anonymized)
 - **Linked to Identity?** NO - Anonymized after 90 days
@@ -41,6 +43,7 @@ Campus Helper uses IDFA (Identifier for Advertisers) and cookie identifiers for:
 - **User Control?** Yes - iOS Settings > Privacy > Tracking
 
 #### Cookies and Similar Technologies
+
 - **Used?** YES (session cookies only)
 - **Purpose:** Maintain login sessions, store preferences
 - **Linked to Identity?** Session-only; cleared on logout
@@ -48,16 +51,19 @@ Campus Helper uses IDFA (Identifier for Advertisers) and cookie identifiers for:
 - **User Control?** Yes - Can clear app cache in Settings
 
 #### Cross-App Tracking
+
 - **Used?** NO
 - **Purpose:** N/A
 - **Note:** Campus Helper does not track users across other apps
 
 #### Cross-Website Tracking
+
 - **Used?** NO
 - **Purpose:** N/A
 - **Note:** Campus Helper does not track web browsing
 
 #### Device Fingerprinting
+
 - **Used?** NO
 - **Purpose:** N/A
 - **Note:** Device ID used for analytics only (not fingerprinting)
@@ -70,21 +76,22 @@ Campus Helper uses IDFA (Identifier for Advertisers) and cookie identifiers for:
 
 Campus Helper collects the following data that is linked to user identity:
 
-| Category | Linked to You | Purpose |
-|----------|--------------|---------|
-| Contact Info | YES | Account creation, communication |
-| Financial Info | YES | Payment processing |
-| Location | YES | Navigation, service finding |
-| Sensitive Info | NO | Not collected |
-| Health & Fitness | NO | Not collected |
-| Search & Browse History | NO | Anonymized |
-| Usage Data | NO | Anonymized analytics |
+| Category                | Linked to You | Purpose                         |
+| ----------------------- | ------------- | ------------------------------- |
+| Contact Info            | YES           | Account creation, communication |
+| Financial Info          | YES           | Payment processing              |
+| Location                | YES           | Navigation, service finding     |
+| Sensitive Info          | NO            | Not collected                   |
+| Health & Fitness        | NO            | Not collected                   |
+| Search & Browse History | NO            | Anonymized                      |
+| Usage Data              | NO            | Anonymized analytics            |
 
 ### Detailed User-Identified Data
 
 #### Contact Information
 
 **Name**
+
 - **Linked to You?** YES
 - **Purpose:** Account profile, display in study groups
 - **Shared?** NO (except payment processor if payment made)
@@ -92,6 +99,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Can edit or delete in Settings > Profile
 
 **Email Address**
+
 - **Linked to You?** YES
 - **Purpose:** Account verification, communication, password recovery
 - **Shared?** NO
@@ -99,6 +107,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Can update in Settings > Account
 
 **Phone Number**
+
 - **Linked to You?** YES (if provided)
 - **Purpose:** Two-factor authentication (optional)
 - **Shared?** NO
@@ -106,6 +115,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Optional; can remove in Settings > Security
 
 **Postal Address**
+
 - **Linked to You?** YES (if payment made)
 - **Purpose:** Billing address for invoices
 - **Shared?** NO (except payment processor)
@@ -113,6 +123,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Required for billing; can use PO box
 
 **Email Address (from SSO)**
+
 - **Linked to You?** YES
 - **Purpose:** School identity verification
 - **Shared?** YES (to school SSO provider only)
@@ -122,6 +133,7 @@ Campus Helper collects the following data that is linked to user identity:
 #### Financial Information
 
 **Payment Information**
+
 - **Linked to You?** YES
 - **Purpose:** In-app purchases, service payments
 - **Shared?** YES (payment processors only: Stripe, TapPay, LINE Pay)
@@ -130,6 +142,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Can remove payment method anytime
 
 **Transaction History**
+
 - **Linked to You?** YES
 - **Purpose:** Billing records, refunds, disputes
 - **Shared?** NO (except payment processors)
@@ -137,6 +150,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Can export in Settings > Privacy
 
 **Billing Address**
+
 - **Linked to You?** YES
 - **Purpose:** Invoice generation
 - **Shared?** NO (except payment processors)
@@ -146,6 +160,7 @@ Campus Helper collects the following data that is linked to user identity:
 #### Location Data
 
 **GPS Coordinates**
+
 - **Linked to You?** YES
 - **Purpose:** Campus navigation, facility location
 - **Shared?** NO
@@ -153,6 +168,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Can disable completely in Settings > Privacy > Location
 
 **Approximate Location (IP-based)**
+
 - **Linked to You?** NO
 - **Purpose:** Region detection, compliance
 - **Shared?** NO
@@ -160,6 +176,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Cannot be disabled (used for legal compliance)
 
 **Location History**
+
 - **Linked to You?** YES
 - **Purpose:** Generate "on campus" status
 - **Shared?** NO
@@ -169,6 +186,7 @@ Campus Helper collects the following data that is linked to user identity:
 #### User IDs
 
 **Account ID**
+
 - **Linked to You?** YES
 - **Purpose:** Internal user identification
 - **Shared?** NO
@@ -176,6 +194,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** N/A (auto-generated)
 
 **Student ID / Employee ID**
+
 - **Linked to You?** YES
 - **Purpose:** School identity verification via SSO
 - **Shared?** YES (to school SSO only)
@@ -183,6 +202,7 @@ Campus Helper collects the following data that is linked to user identity:
 - **User Control:** Can unlink from SSO
 
 **Device ID**
+
 - **Linked to You?** NO (after 90 days)
 - **Purpose:** Identify unique devices
 - **Shared?** NO
@@ -197,21 +217,22 @@ Campus Helper collects the following data that is linked to user identity:
 
 Campus Helper collects and uses the following data that is anonymized or pseudonymized:
 
-| Data Type | Linked to Identity | Purpose | Retention |
-|-----------|-------------------|---------|-----------|
-| Search Queries (anonymized) | NO | Trending topics, recommendations | 90 days |
-| Page View History | NO | Feature usage analysis | 90 days |
-| App Performance Data | NO | Crash analysis, optimization | 30 days |
-| Device Info | NO | Compatibility, optimization | Session |
-| OS Version | NO | Compatibility testing | Session |
-| App Usage Patterns | NO | Feature prioritization | 90 days |
-| Aggregated Statistics | NO | Analytics, reports | Indefinite |
+| Data Type                   | Linked to Identity | Purpose                          | Retention  |
+| --------------------------- | ------------------ | -------------------------------- | ---------- |
+| Search Queries (anonymized) | NO                 | Trending topics, recommendations | 90 days    |
+| Page View History           | NO                 | Feature usage analysis           | 90 days    |
+| App Performance Data        | NO                 | Crash analysis, optimization     | 30 days    |
+| Device Info                 | NO                 | Compatibility, optimization      | Session    |
+| OS Version                  | NO                 | Compatibility testing            | Session    |
+| App Usage Patterns          | NO                 | Feature prioritization           | 90 days    |
+| Aggregated Statistics       | NO                 | Analytics, reports               | Indefinite |
 
 ### Detailed Anonymized Data
 
 #### Usage and Analytics Data
 
 **Feature Usage**
+
 - **Linked to You?** NO (anonymized after 90 days)
 - **Purpose:** Understand which features are valuable
 - **Data Collected?** YES (via Firebase Analytics)
@@ -220,6 +241,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 - **User Control:** Can disable in Settings > Privacy > Analytics
 
 **Page View Statistics**
+
 - **Linked to You?** NO
 - **Purpose:** Understand user journey
 - **Data Collected?** YES
@@ -228,6 +250,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 - **User Control:** Can disable analytics
 
 **App Performance Metrics**
+
 - **Linked to You?** NO
 - **Purpose:** Monitor app health
 - **Data Collected?** YES (Firebase Performance)
@@ -238,6 +261,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 #### Crash and Error Data
 
 **Crash Reports**
+
 - **Linked to You?** NO (anonymized)
 - **Purpose:** Fix crashes and bugs
 - **Data Collected?** YES (Firebase Crashlytics)
@@ -246,6 +270,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 - **User Control:** Can disable in Settings > Privacy > Crash Reporting
 
 **Error Logs**
+
 - **Linked to You?** NO
 - **Purpose:** Debug issues
 - **Data Collected?** YES
@@ -256,6 +281,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 #### Device and System Data
 
 **Device Model**
+
 - **Linked to You?** NO
 - **Purpose:** Optimize for different devices
 - **Data Collected?** YES
@@ -264,6 +290,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 - **User Control:** N/A (necessary for app function)
 
 **Operating System Version**
+
 - **Linked to You?** NO
 - **Purpose:** Feature compatibility
 - **Data Collected?** YES
@@ -272,6 +299,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 - **User Control:** N/A
 
 **Screen Resolution**
+
 - **Linked to You?** NO
 - **Purpose:** Optimize layout
 - **Data Collected?** YES
@@ -280,6 +308,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 - **User Control:** N/A
 
 **Memory and Storage Info**
+
 - **Linked to You?** NO
 - **Purpose:** App optimization
 - **Data Collected?** YES
@@ -290,6 +319,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 #### Network Data
 
 **Connection Type**
+
 - **Linked to You?** NO
 - **Purpose:** Optimize performance
 - **Data Collected?** YES
@@ -298,6 +328,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 - **User Control:** N/A
 
 **IP Address**
+
 - **Linked to You?** NO (after 30 days)
 - **Purpose:** Region detection, DDoS prevention
 - **Data Collected?** YES
@@ -312,6 +343,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.1 Contact Info Category
 
 **Data Collected:**
+
 - ✓ Name (linked to you)
 - ✓ Email Address (linked to you)
 - ✓ Phone Number (optional, linked to you)
@@ -326,6 +358,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.2 Health & Fitness Category
 
 **Data Collected:**
+
 - ✗ Health Records
 - ✗ Fitness Data
 - ✗ Health Conditions
@@ -340,6 +373,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.3 Financial Info Category
 
 **Data Collected:**
+
 - ✓ Payment Information (tokens only, not card numbers)
 - ✓ Purchase History (transaction records)
 - ✓ Billing Address (for invoices)
@@ -354,6 +388,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.4 Location Category
 
 **Data Collected:**
+
 - ✓ GPS Coordinates (precise location)
 - ✓ Approximate Location (via IP or cell tower)
 - ✓ Location History (optional, user-controlled)
@@ -366,6 +401,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.5 Sensitive Info Category
 
 **Data Collected:**
+
 - ✗ Race or Ethnicity
 - ✗ Religious or Philosophical Beliefs
 - ✗ Sexual Orientation or Gender Identity
@@ -384,6 +420,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.6 Search & Browse History Category
 
 **Data Collected:**
+
 - ✓ In-App Search Queries (anonymized)
 - ✓ In-App Browse History (anonymized)
 - ✗ Web Search History
@@ -396,6 +433,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.7 User ID Category
 
 **Data Collected:**
+
 - ✓ User ID (linked to account)
 - ✓ Device ID (anonymized after 90 days)
 - ✓ Student/Employee ID (from SSO)
@@ -409,6 +447,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.8 Purchase History Category
 
 **Data Collected:**
+
 - ✓ Purchase History
 - ✓ Transaction Records
 - ✗ In-App Purchase History
@@ -420,6 +459,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.9 Product Interaction Category
 
 **Data Collected:**
+
 - ✓ Feature Usage (anonymized)
 - ✓ Click History (anonymized)
 - ✓ Page View History (anonymized)
@@ -433,6 +473,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.10 App Activity Category
 
 **Data Collected:**
+
 - ✓ App Launches (anonymized)
 - ✓ App Crashes (anonymized)
 - ✓ App Performance (anonymized)
@@ -446,6 +487,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.11 Device ID Category
 
 **Data Collected:**
+
 - ✓ Device ID (IDFA/AAID, anonymized after 90 days)
 - ✓ Device Model
 - ✓ Operating System
@@ -459,27 +501,32 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 5.12 Other Data Categories
 
 **Coarse Location**
+
 - **Collected?** YES (IP-based region detection)
 - **Linked to You?** NO
 - **Purpose:** Compliance, language/region settings
 - **Retention:** Session only
 
 **Photos or Videos**
+
 - **Collected?** YES (user-uploaded only)
 - **Linked to You?** YES (visible in user's posts)
 - **Purpose:** User profile, campus activity sharing
 - **Sharing?** YES (visible to users per privacy settings)
 
 **Audio**
+
 - **Collected?** NO (not currently)
 - **Purpose:** N/A
 - **Note:** Future voice assistant feature may collect audio
 
 **Calendar and Contacts**
+
 - **Collected?** NO (app cannot access without explicit permission)
 - **Purpose:** N/A (if enabled, used locally only)
 
 **Calendar Data**
+
 - **Collected?** NO (app can write to calendar, not read)
 - **Linked to You?** N/A
 - **Purpose:** Allow syncing of course schedule to device calendar
@@ -491,18 +538,18 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 
 ### Quick Reference
 
-| Privacy Aspect | Status | Details |
-|---|---|---|
-| **Tracking** | Limited | IDFA used for analytics only (not cross-app tracking) |
-| **User Identity** | Linked | Name, email, contact info linked to account |
-| **Financial** | Linked | Payment info linked; stored securely with processors |
-| **Location** | Linked | GPS location linked to account; anonymized after 30 days |
-| **Health** | Not Collected | Campus Helper is not a health app |
-| **Sensitive Info** | Not Collected | Does not collect race, religion, orientation, etc. |
-| **Browsing** | Anonymized | In-app search/browse anonymized |
-| **Data Sold?** | NO | Data never sold to advertisers or brokers |
-| **Data Shared?** | Limited | Only with necessary service providers |
-| **User Control** | Comprehensive | Extensive privacy settings in app |
+| Privacy Aspect     | Status        | Details                                                  |
+| ------------------ | ------------- | -------------------------------------------------------- |
+| **Tracking**       | Limited       | IDFA used for analytics only (not cross-app tracking)    |
+| **User Identity**  | Linked        | Name, email, contact info linked to account              |
+| **Financial**      | Linked        | Payment info linked; stored securely with processors     |
+| **Location**       | Linked        | GPS location linked to account; anonymized after 30 days |
+| **Health**         | Not Collected | Campus Helper is not a health app                        |
+| **Sensitive Info** | Not Collected | Does not collect race, religion, orientation, etc.       |
+| **Browsing**       | Anonymized    | In-app search/browse anonymized                          |
+| **Data Sold?**     | NO            | Data never sold to advertisers or brokers                |
+| **Data Shared?**   | Limited       | Only with necessary service providers                    |
+| **User Control**   | Comprehensive | Extensive privacy settings in app                        |
 
 ---
 
@@ -511,11 +558,13 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 7.1 Data Security
 
 **Encryption Standards:**
+
 - TLS 1.3 for data in transit
 - AES-256 for sensitive data at rest
 - bcrypt for password hashing
 
 **Security Features:**
+
 - Firebase security infrastructure
 - Google Cloud encryption
 - DDoS protection
@@ -524,6 +573,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 7.2 User Privacy Controls
 
 **Available in Settings:**
+
 - Location toggle (On/Off)
 - Analytics opt-out
 - Crash reporting opt-out
@@ -536,6 +586,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 7.3 Compliance
 
 **Standards Adhered To:**
+
 - GDPR (EU/UK/Swiss users)
 - Taiwan Personal Data Protection Act
 - COPPA (for under-13 protections)
@@ -548,11 +599,13 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 8.1 Future Data Collection
 
 **Potential Future Features:**
+
 - Voice input for AI assistant (audio may be collected)
 - Fitness tracking integration (health data)
 - Enhanced analytics (user research features)
 
 **Notice:** Any new data collection will:
+
 - Require user explicit consent
 - Be documented in app privacy settings
 - Trigger App Store privacy label update
@@ -561,6 +614,7 @@ Campus Helper collects and uses the following data that is anonymized or pseudon
 ### 8.2 Privacy Label Updates
 
 This document reflects the current version of Campus Helper. As the app evolves:
+
 - Major feature additions will be documented
 - Users will be notified of changes
 - App privacy labels will be updated
@@ -579,6 +633,7 @@ This document reflects the current version of Campus Helper. As the app evolves:
 ### 9.2 Apple Privacy Contact
 
 **App Store Privacy Contact:**
+
 - Name: Campus Helper Privacy Team
 - Email: privacy@campushelper.app
 - Role: Responsible for data practices
@@ -603,6 +658,7 @@ Campus Helper Development Team
 ### App Privacy Details - Required Fields
 
 #### Data Linked to You
+
 - [x] Contact Information
 - [ ] Health & Fitness
 - [x] Financial Information
@@ -617,6 +673,7 @@ Campus Helper Development Team
 - [ ] Other Data
 
 **Details for Each:**
+
 - **Contact Information:** Name, Email, Phone (optional), Address (for billing)
 - **Financial Information:** Payment method (tokens), transaction history
 - **Location:** GPS coordinates, location history
@@ -628,6 +685,7 @@ Campus Helper Development Team
 - **Device ID:** IDFA, device model, OS version
 
 #### Data Not Linked to You
+
 - [x] Contact Information (emails invited to events)
 - [ ] Health & Fitness
 - [ ] Financial Information
@@ -642,17 +700,20 @@ Campus Helper Development Team
 - [ ] Other Data
 
 #### Data Used to Track You
+
 - [x] IDFA (anonymized)
 - [ ] Other Cross-App Tracking
 - [ ] Cross-Website Tracking
 - [ ] Fingerprinting
 
 **Details:**
+
 - IDFA: Used for Firebase Analytics (anonymized after 90 days)
 - No cross-app or cross-website tracking
 - No device fingerprinting
 
 #### Privacy Practices
+
 - [x] Data is encrypted in transit
 - [x] Users can request deletion
 - [x] Users can download their data
@@ -669,6 +730,7 @@ Campus Helper Development Team
 **Applicable:** iOS version of Campus Helper only
 
 For the most current information, users should refer to:
+
 - In-app Privacy Settings
 - Full Privacy Policy: docs/legal/privacy-policy.md
 - App Store Privacy Details (official source)

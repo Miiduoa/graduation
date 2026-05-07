@@ -1,20 +1,28 @@
 /* eslint-disable */
-import React, { useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, Text, View, ActivityIndicator, Platform } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
+import React, { useMemo, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 
-import { useAuth } from "../state/auth";
-import { useNotifications } from "../state/notifications";
-import { useSchool } from "../state/school";
-import { usePermissions } from "../hooks/usePermissions";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
-import { ContextStrip } from "../ui/campusOs";
-import { resolveRoleMode } from "../utils/campusOs";
-import { navigateToCourseHome } from "../utils/courseNavigation";
+import { useAuth } from '../state/auth';
+import { useNotifications } from '../state/notifications';
+import { useSchool } from '../state/school';
+import { usePermissions } from '../hooks/usePermissions';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { ContextStrip } from '../ui/campusOs';
+import { resolveRoleMode } from '../utils/campusOs';
+import { navigateToCourseHome } from '../utils/courseNavigation';
 
 interface ListRowProps {
   icon: string;
@@ -30,8 +38,8 @@ function ListRow({ icon, title, meta, tint, onPress, isLast }: ListRowProps) {
     <Pressable
       onPress={onPress}
       style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
         gap: 14,
         paddingVertical: 14,
         paddingHorizontal: 16,
@@ -41,16 +49,27 @@ function ListRow({ icon, title, meta, tint, onPress, isLast }: ListRowProps) {
       })}
     >
       <LinearGradient
-        colors={[`${tint || theme.colors.accent}20`, `${tint || theme.colors.accent}08`] as [string, string]}
-        style={{ width: 34, height: 34, borderRadius: 10, justifyContent: "center", alignItems: "center" }}
+        colors={
+          [`${tint || theme.colors.accent}20`, `${tint || theme.colors.accent}08`] as [
+            string,
+            string,
+          ]
+        }
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 10,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
       >
         <Ionicons name={icon as any} size={16} color={tint || theme.colors.accent} />
       </LinearGradient>
-      <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "600", flex: 1 }}>
+      <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '600', flex: 1 }}>
         {title}
       </Text>
       {meta && (
-        <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: "500" }}>
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: '500' }}>
           {meta}
         </Text>
       )}
@@ -62,12 +81,14 @@ function ListRow({ icon, title, meta, tint, onPress, isLast }: ListRowProps) {
 /** iOS-style grouped card container */
 function GroupedCard({ children }: { children: React.ReactNode }) {
   return (
-    <View style={{
-      marginHorizontal: theme.space.lg,
-      borderRadius: 16,
-      backgroundColor: theme.colors.surface,
-      overflow: "hidden",
-    }}>
+    <View
+      style={{
+        marginHorizontal: theme.space.lg,
+        borderRadius: 16,
+        backgroundColor: theme.colors.surface,
+        overflow: 'hidden',
+      }}
+    >
       {children}
     </View>
   );
@@ -83,8 +104,8 @@ function SectionHeader({ title }: SectionHeaderProps) {
       style={{
         color: theme.colors.textSecondary,
         fontSize: 13,
-        fontWeight: "600",
-        textTransform: "uppercase",
+        fontWeight: '600',
+        textTransform: 'uppercase',
         letterSpacing: 0.5,
         marginTop: 28,
         marginBottom: 10,
@@ -103,31 +124,46 @@ export function PersonalHubScreen(props: any) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const notifs = useNotifications();
   const { school } = useSchool();
-  const { displayName: roleDisplayName, badgeColor, can, isTeacher, isStaff, isDepartmentHead, isAdmin } = usePermissions();
+  const {
+    displayName: roleDisplayName,
+    badgeColor,
+    can,
+    isTeacher,
+    isStaff,
+    isDepartmentHead,
+    isAdmin,
+  } = usePermissions();
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
   const activeMerchantAssignments = useMemo(
     () =>
       (auth.profile?.merchantAssignments ?? []).filter(
-        (assignment) => assignment.status === "active"
+        (assignment) => assignment.status === 'active',
       ),
-    [auth.profile?.merchantAssignments]
+    [auth.profile?.merchantAssignments],
   );
 
   const identity = useMemo(() => {
-    if (!auth.user) return "校園訪客";
-    return auth.profile?.displayName ?? auth.user.email ?? "校園使用者";
+    if (!auth.user) return '校園訪客';
+    return auth.profile?.displayName ?? auth.user.email ?? '校園使用者';
   }, [auth.profile?.displayName, auth.user]);
 
   // auth 還在載入時不要顯示登入按鈕（避免閃現登入畫面）
   if (auth.loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: "center", alignItems: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme.colors.bg,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
         <ActivityIndicator size="large" color={theme.colors.accent} />
       </View>
     );
   }
 
-  const isDark = theme.mode === "dark";
+  const isDark = theme.mode === 'dark';
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -137,99 +173,125 @@ export function PersonalHubScreen(props: any) {
         }}
       >
         <LinearGradient
-          colors={isDark
-            ? ["#2E1065", "#1A0A3E", theme.colors.bg] as [string, string, string]
-            : ["#EDE9FE", "#F5F3FF", theme.colors.bg] as [string, string, string]
+          colors={
+            isDark
+              ? (['#2E1065', '#1A0A3E', theme.colors.bg] as [string, string, string])
+              : (['#EDE9FE', '#F5F3FF', theme.colors.bg] as [string, string, string])
           }
           style={{
             paddingTop: insets.top + theme.space.lg,
             paddingBottom: 24,
           }}
         >
-        {/* ⚙️ 右上角設定齒輪 */}
-        <View style={{ position: "absolute", top: insets.top + 12, right: theme.space.lg, zIndex: 10 }}>
-          <Pressable
-            onPress={() => nav?.navigate?.("Settings")}
-            hitSlop={12}
-            style={({ pressed }) => ({
-              width: 38,
-              height: 38,
-              borderRadius: 19,
-              backgroundColor: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)",
-              justifyContent: "center",
-              alignItems: "center",
-              opacity: pressed ? 0.6 : 1,
-            })}
-          >
-            <Ionicons name="settings-outline" size={20} color={isDark ? "rgba(255,255,255,0.7)" : theme.colors.textSecondary} />
-          </Pressable>
-        </View>
-
-        <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.xl }}>
-          {/* Avatar circle */}
-          <LinearGradient
-            colors={[theme.colors.accent, "#7C3AED"] as [string, string]}
+          {/* ⚙️ 右上角設定齒輪 */}
+          <View
             style={{
-              width: 72,
-              height: 72,
-              borderRadius: 36,
-              alignItems: "center",
-              justifyContent: "center",
-              marginBottom: theme.space.md,
+              position: 'absolute',
+              top: insets.top + 12,
+              right: theme.space.lg,
+              zIndex: 10,
             }}
           >
-            <Ionicons name="person" size={32} color="#FFFFFF" />
-          </LinearGradient>
-          <View style={{ gap: theme.space.sm }}>
-            <Text style={{ color: isDark ? "rgba(255,255,255,0.6)" : theme.colors.textSecondary, fontSize: 13 }}>我的</Text>
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: "800", letterSpacing: -0.5 }}>
-              {identity}
-            </Text>
+            <Pressable
+              onPress={() => nav?.navigate?.('Settings')}
+              hitSlop={12}
+              style={({ pressed }) => ({
+                width: 38,
+                height: 38,
+                borderRadius: 19,
+                backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)',
+                justifyContent: 'center',
+                alignItems: 'center',
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <Ionicons
+                name="settings-outline"
+                size={20}
+                color={isDark ? 'rgba(255,255,255,0.7)' : theme.colors.textSecondary}
+              />
+            </Pressable>
           </View>
-          {auth.user ? (
-            <View
+
+          <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.xl }}>
+            {/* Avatar circle */}
+            <LinearGradient
+              colors={[theme.colors.accent, '#7C3AED'] as [string, string]}
               style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: theme.space.md,
-                marginTop: theme.space.md,
+                width: 72,
+                height: 72,
+                borderRadius: 36,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: theme.space.md,
               }}
             >
-              <View
+              <Ionicons name="person" size={32} color="#FFFFFF" />
+            </LinearGradient>
+            <View style={{ gap: theme.space.sm }}>
+              <Text
                 style={{
-                  backgroundColor: badgeColor,
-                  paddingHorizontal: theme.space.md,
-                  paddingVertical: theme.space.xs,
-                  borderRadius: theme.radius.full,
+                  color: isDark ? 'rgba(255,255,255,0.6)' : theme.colors.textSecondary,
+                  fontSize: 13,
                 }}
               >
-                <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>
-                  {roleDisplayName}
-                </Text>
-              </View>
-              {auth.profile?.department ? (
-                <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
-                  {auth.profile.department}
-                </Text>
-              ) : null}
+                我的
+              </Text>
+              <Text
+                style={{
+                  color: theme.colors.text,
+                  fontSize: 28,
+                  fontWeight: '800',
+                  letterSpacing: -0.5,
+                }}
+              >
+                {identity}
+              </Text>
             </View>
-          ) : null}
-        </View>
+            {auth.user ? (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: theme.space.md,
+                  marginTop: theme.space.md,
+                }}
+              >
+                <View
+                  style={{
+                    backgroundColor: badgeColor,
+                    paddingHorizontal: theme.space.md,
+                    paddingVertical: theme.space.xs,
+                    borderRadius: theme.radius.full,
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
+                    {roleDisplayName}
+                  </Text>
+                </View>
+                {auth.profile?.department ? (
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
+                    {auth.profile.department}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
         </LinearGradient>
 
         {!auth.user ? (
           <Pressable
-            onPress={() => nav?.navigate?.("SSOLogin")}
+            onPress={() => nav?.navigate?.('SSOLogin')}
             style={({ pressed }) => ({
               marginHorizontal: theme.space.lg,
               marginBottom: theme.space.xl,
               borderRadius: theme.radius.lg,
-              overflow: "hidden",
+              overflow: 'hidden',
               opacity: pressed ? 0.85 : 1,
             })}
           >
             <LinearGradient
-              colors={[theme.colors.accent, "#7C3AED"] as [string, string]}
+              colors={[theme.colors.accent, '#7C3AED'] as [string, string]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={{
@@ -237,8 +299,10 @@ export function PersonalHubScreen(props: any) {
                 paddingHorizontal: theme.space.lg,
               }}
             >
-              <Text style={{ color: "#fff", fontSize: 15, fontWeight: "700" }}>登入帳號</Text>
-              <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, marginTop: theme.space.xs }}>
+              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>登入帳號</Text>
+              <Text
+                style={{ color: 'rgba(255,255,255,0.8)', fontSize: 13, marginTop: theme.space.xs }}
+              >
                 使用學校帳號密碼登入以解鎖完整功能
               </Text>
             </LinearGradient>
@@ -253,28 +317,28 @@ export function PersonalHubScreen(props: any) {
               title="商家接單"
               meta={`${activeMerchantAssignments.length} 間`}
               tint={theme.colors.accent}
-              onPress={() => nav?.navigate?.("MerchantHub")}
+              onPress={() => nav?.navigate?.('MerchantHub')}
             />
           ) : null}
           <ListRow
             icon="person-outline"
             title="個人資料"
-            meta={auth.user ? "已綁定" : "未登入"}
-            onPress={() => nav?.navigate?.(auth.user ? "ProfileEdit" : "SSOLogin")}
+            meta={auth.user ? '已綁定' : '未登入'}
+            onPress={() => nav?.navigate?.(auth.user ? 'ProfileEdit' : 'SSOLogin')}
           />
           <ListRow
             icon="notifications-outline"
             title="通知與提醒"
-            meta={notifs.unreadCount > 0 ? `${notifs.unreadCount} 則` : "已整理"}
+            meta={notifs.unreadCount > 0 ? `${notifs.unreadCount} 則` : '已整理'}
             tint={theme.colors.warning}
-            onPress={() => nav?.navigate?.("NotificationSettings")}
+            onPress={() => nav?.navigate?.('NotificationSettings')}
           />
           <ListRow
             icon="accessibility-outline"
             title="語言與無障礙"
             meta="偏好"
             tint={theme.colors.calm}
-            onPress={() => nav?.navigate?.("AccessibilitySettings")}
+            onPress={() => nav?.navigate?.('AccessibilitySettings')}
             isLast
           />
         </GroupedCard>
@@ -286,21 +350,21 @@ export function PersonalHubScreen(props: any) {
             title="學分與畢業規劃"
             meta="規劃"
             tint={theme.colors.roleTeacher}
-            onPress={() => nav?.navigate?.("CreditAuditStack")}
+            onPress={() => nav?.navigate?.('CreditAuditStack')}
           />
           <ListRow
             icon="trophy-outline"
             title="成就與積分"
             meta="成長"
             tint={theme.colors.achievement}
-            onPress={() => nav?.navigate?.("Achievements")}
+            onPress={() => nav?.navigate?.('Achievements')}
           />
           <ListRow
             icon="shield-checkmark-outline"
             title="帳號安全與資料"
             meta="安全"
             tint={theme.colors.urgent}
-            onPress={() => nav?.navigate?.("DataExport")}
+            onPress={() => nav?.navigate?.('DataExport')}
             isLast
           />
         </GroupedCard>
@@ -312,21 +376,21 @@ export function PersonalHubScreen(props: any) {
             title="AI 模型管理"
             meta="本地推理"
             tint="#8B5CF6"
-            onPress={() => nav?.navigate?.("AIModelManager")}
+            onPress={() => nav?.navigate?.('AIModelManager')}
           />
           <ListRow
             icon="search-outline"
             title="全域搜尋"
             meta="搜尋"
             tint={theme.colors.calm}
-            onPress={() => nav?.navigate?.("GlobalSearch")}
+            onPress={() => nav?.navigate?.('GlobalSearch')}
           />
           <ListRow
             icon="grid-outline"
             title="小工具"
             meta="Widget"
             tint={theme.colors.warning}
-            onPress={() => nav?.navigate?.("WidgetPreview")}
+            onPress={() => nav?.navigate?.('WidgetPreview')}
             isLast
           />
         </GroupedCard>
@@ -336,12 +400,12 @@ export function PersonalHubScreen(props: any) {
             <SectionHeader
               title={
                 isAdmin
-                  ? "管理入口"
+                  ? '管理入口'
                   : isStaff
-                    ? "服務管理"
+                    ? '服務管理'
                     : isDepartmentHead
-                      ? "主管工具"
-                      : "教學工具"
+                      ? '主管工具'
+                      : '教學工具'
               }
             />
             <GroupedCard>
@@ -360,7 +424,7 @@ export function PersonalHubScreen(props: any) {
                   title="設施與工單管理"
                   meta="服務"
                   tint={theme.colors.warning}
-                  onPress={() => nav?.navigate?.("PrintService")}
+                  onPress={() => nav?.navigate?.('PrintService')}
                 />
               ) : null}
               {isDepartmentHead ? (
@@ -369,7 +433,7 @@ export function PersonalHubScreen(props: any) {
                   title="系所數據與審核"
                   meta="審核"
                   tint={theme.colors.calm}
-                  onPress={() => nav?.navigate?.("AdminDashboard")}
+                  onPress={() => nav?.navigate?.('AdminDashboard')}
                 />
               ) : null}
               {isAdmin ? (
@@ -379,14 +443,14 @@ export function PersonalHubScreen(props: any) {
                     title="管理員控制台"
                     meta="Admin"
                     tint={theme.colors.roleAdmin}
-                    onPress={() => nav?.navigate?.("AdminDashboard")}
+                    onPress={() => nav?.navigate?.('AdminDashboard')}
                   />
                   <ListRow
                     icon="checkmark-done-outline"
                     title="課程驗證管理"
                     meta="審核"
                     tint={theme.colors.urgent}
-                    onPress={() => nav?.navigate?.("AdminCourseVerify")}
+                    onPress={() => nav?.navigate?.('AdminCourseVerify')}
                     isLast
                   />
                 </>
@@ -401,11 +465,11 @@ export function PersonalHubScreen(props: any) {
             <GroupedCard>
               <Pressable
                 onPress={() => {
-                  Alert.alert("確認登出", "登出後需要重新使用學校帳號登入，確定要登出嗎？", [
-                    { text: "取消", style: "cancel" },
+                  Alert.alert('確認登出', '登出後需要重新使用學校帳號登入，確定要登出嗎？', [
+                    { text: '取消', style: 'cancel' },
                     {
-                      text: "登出",
-                      style: "destructive",
+                      text: '登出',
+                      style: 'destructive',
                       onPress: async () => {
                         setIsLoggingOut(true);
                         try {
@@ -419,8 +483,8 @@ export function PersonalHubScreen(props: any) {
                 }}
                 disabled={isLoggingOut}
                 style={({ pressed }) => ({
-                  flexDirection: "row",
-                  alignItems: "center",
+                  flexDirection: 'row',
+                  alignItems: 'center',
                   gap: 14,
                   paddingVertical: 14,
                   paddingHorizontal: 16,
@@ -433,11 +497,11 @@ export function PersonalHubScreen(props: any) {
                   <Ionicons name="log-out-outline" size={18} color={theme.colors.danger} />
                 )}
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.danger, fontSize: 15, fontWeight: "600" }}>
+                  <Text style={{ color: theme.colors.danger, fontSize: 15, fontWeight: '600' }}>
                     登出帳號
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                    {auth.user.email ?? "已登入"}
+                    {auth.user.email ?? '已登入'}
                   </Text>
                 </View>
               </Pressable>

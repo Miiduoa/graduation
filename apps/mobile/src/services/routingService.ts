@@ -7,13 +7,13 @@
  * 智慧導航：AI 即時路線優化 + 塞車偵測 + 自動改道建議
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getBusStopsOfRoute,
   getBusEstimates,
   type TDXBusEstimate,
   type TDXBusStopOfRoute,
-} from "./tdxApi";
+} from './tdxApi';
 
 // ─── 座標類型 ────────────────────────────────────────────
 
@@ -30,10 +30,10 @@ export type LatLng = {
  */
 async function fetchWithTimeout(url: string, timeoutMs = 15000): Promise<any> {
   const timeoutPromise = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("timeout")), timeoutMs),
+    setTimeout(() => reject(new Error('timeout')), timeoutMs),
   );
   const fetchPromise = fetch(url, {
-    headers: { Accept: "application/json" },
+    headers: { Accept: 'application/json' },
   }).then(async (resp) => {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     return resp.json();
@@ -53,16 +53,13 @@ export type SearchResult = {
   importance: number;
 };
 
-const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
-const SEARCH_CACHE_PREFIX = "@geo_cache:";
+const NOMINATIM_BASE = 'https://nominatim.openstreetmap.org';
+const SEARCH_CACHE_PREFIX = '@geo_cache:';
 
 /**
  * 搜尋地點（支援中英文，台灣優先）
  */
-export async function searchPlaces(
-  query: string,
-  near?: LatLng,
-): Promise<SearchResult[]> {
+export async function searchPlaces(query: string, near?: LatLng): Promise<SearchResult[]> {
   if (!query.trim()) return [];
 
   const cacheKey = `${SEARCH_CACHE_PREFIX}${query.trim().toLowerCase()}`;
@@ -78,17 +75,20 @@ export async function searchPlaces(
 
   const params = new URLSearchParams({
     q: query.trim(),
-    format: "json",
-    addressdetails: "1",
-    limit: "10",
-    countrycodes: "tw",
-    "accept-language": "zh-TW,zh,en",
+    format: 'json',
+    addressdetails: '1',
+    limit: '10',
+    countrycodes: 'tw',
+    'accept-language': 'zh-TW,zh,en',
   });
 
   if (near) {
     const delta = 0.15;
-    params.set("viewbox", `${near.lng - delta},${near.lat - delta},${near.lng + delta},${near.lat + delta}`);
-    params.set("bounded", "0");
+    params.set(
+      'viewbox',
+      `${near.lng - delta},${near.lat - delta},${near.lng + delta},${near.lat + delta}`,
+    );
+    params.set('bounded', '0');
   }
 
   try {
@@ -100,11 +100,13 @@ export async function searchPlaces(
       shortName: extractShortName(item),
       lat: parseFloat(item.lat),
       lng: parseFloat(item.lon),
-      type: item.type || item.class || "",
+      type: item.type || item.class || '',
       importance: item.importance || 0,
     }));
 
-    AsyncStorage.setItem(cacheKey, JSON.stringify({ data: results, _ts: Date.now() })).catch(() => {});
+    AsyncStorage.setItem(cacheKey, JSON.stringify({ data: results, _ts: Date.now() })).catch(
+      () => {},
+    );
     return results;
   } catch {
     return [];
@@ -113,13 +115,13 @@ export async function searchPlaces(
 
 function extractShortName(item: any): string {
   const addr = item.address || {};
-  const name = item.name || addr.amenity || addr.building || addr.shop || addr.tourism || "";
+  const name = item.name || addr.amenity || addr.building || addr.shop || addr.tourism || '';
   if (name) return name;
-  const road = addr.road || "";
-  const district = addr.suburb || addr.city_district || addr.town || addr.city || "";
+  const road = addr.road || '';
+  const district = addr.suburb || addr.city_district || addr.town || addr.city || '';
   if (road && district) return `${road}, ${district}`;
   if (road) return road;
-  return item.display_name?.split(",")[0] || "";
+  return item.display_name?.split(',')[0] || '';
 }
 
 /**
@@ -131,7 +133,9 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string> 
       `${NOMINATIM_BASE}/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=zh-TW,zh&zoom=18`,
       8000,
     );
-    return data.display_name?.split(",").slice(0, 3).join(",") || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    return (
+      data.display_name?.split(',').slice(0, 3).join(',') || `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+    );
   } catch {
     return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
   }
@@ -150,11 +154,11 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string> 
  *   - 開車        → router.project-osrm.org 為主（速度快、穩定）
  */
 const OSRM_DE: Record<string, string> = {
-  foot: "https://routing.openstreetmap.de/routed-foot",
-  bike: "https://routing.openstreetmap.de/routed-bike",
-  car:  "https://routing.openstreetmap.de/routed-car",
+  foot: 'https://routing.openstreetmap.de/routed-foot',
+  bike: 'https://routing.openstreetmap.de/routed-bike',
+  car: 'https://routing.openstreetmap.de/routed-car',
 };
-const OSRM_PROJECT = "https://router.project-osrm.org";
+const OSRM_PROJECT = 'https://router.project-osrm.org';
 
 export type RouteStep = {
   instruction: string;
@@ -167,7 +171,7 @@ export type RouteStep = {
 
 export type RouteOption = {
   id: string;
-  mode: "walking" | "cycling" | "transit" | "driving";
+  mode: 'walking' | 'cycling' | 'transit' | 'driving';
   modeLabel: string;
   totalDistance: number;
   totalDuration: number;
@@ -182,7 +186,7 @@ export type RouteOption = {
 };
 
 export type TransitDetail = {
-  type: "walk" | "bus" | "train";
+  type: 'walk' | 'bus' | 'train';
   routeName?: string;
   routeId?: string;
   fromStop?: string;
@@ -201,15 +205,20 @@ export type TransitDetail = {
 async function osrmRoute(
   from: LatLng,
   to: LatLng,
-  profile: "foot" | "bike" | "car",
-): Promise<{ distance: number; duration: number; steps: RouteStep[]; geometry: [number, number][] } | null> {
+  profile: 'foot' | 'bike' | 'car',
+): Promise<{
+  distance: number;
+  duration: number;
+  steps: RouteStep[];
+  geometry: [number, number][];
+} | null> {
   const coords = `${from.lng},${from.lat};${to.lng},${to.lat}`;
-  const qs = "overview=full&geometries=geojson&steps=true";
+  const qs = 'overview=full&geometries=geojson&steps=true';
 
   // routing.openstreetmap.de 各伺服器只載入一種 profile，URL 一律用 /driving/
   // router.project-osrm.org 只載入 driving，URL 也用 /driving/
   const urls: string[] =
-    profile === "car"
+    profile === 'car'
       ? [
           // 開車：project-osrm 為主，routing.openstreetmap.de 為備
           `${OSRM_PROJECT}/route/v1/driving/${coords}?${qs}`,
@@ -227,7 +236,7 @@ async function osrmRoute(
       console.log(`[OSRM] ${profile}: ${url.substring(0, 90)}...`);
       const data = await fetchWithTimeout(url);
 
-      if (data.code !== "Ok" || !data.routes?.length) {
+      if (data.code !== 'Ok' || !data.routes?.length) {
         console.warn(`[OSRM] ${profile} code=${data.code}`);
         continue;
       }
@@ -242,8 +251,8 @@ async function osrmRoute(
             instruction: buildInstruction(step, profile),
             distance: step.distance ?? 0,
             duration: step.duration ?? 0,
-            maneuver: step.maneuver?.type ?? "",
-            name: step.name ?? "",
+            maneuver: step.maneuver?.type ?? '',
+            name: step.name ?? '',
             coordinates: step.geometry?.coordinates ?? [],
           });
         }
@@ -261,28 +270,40 @@ async function osrmRoute(
   return null;
 }
 
-function buildInstruction(step: any, profile: "foot" | "bike" | "car" = "car"): string {
-  const maneuver = step.maneuver?.type ?? "";
-  const modifier = step.maneuver?.modifier ?? "";
-  const name = step.name || "道路";
-  const verb = profile === "foot" ? "走" : profile === "bike" ? "騎" : "開";
+function buildInstruction(step: any, profile: 'foot' | 'bike' | 'car' = 'car'): string {
+  const maneuver = step.maneuver?.type ?? '';
+  const modifier = step.maneuver?.modifier ?? '';
+  const name = step.name || '道路';
+  const verb = profile === 'foot' ? '走' : profile === 'bike' ? '騎' : '開';
 
   const directionMap: Record<string, string> = {
-    left: "左轉", right: "右轉",
-    "slight left": "稍微左轉", "slight right": "稍微右轉",
-    "sharp left": "急轉左", "sharp right": "急轉右",
-    straight: "直走", uturn: "迴轉",
+    left: '左轉',
+    right: '右轉',
+    'slight left': '稍微左轉',
+    'slight right': '稍微右轉',
+    'sharp left': '急轉左',
+    'sharp right': '急轉右',
+    straight: '直走',
+    uturn: '迴轉',
   };
 
   switch (maneuver) {
-    case "depart": return `從 ${name} 出發`;
-    case "arrive": return `到達目的地`;
-    case "turn": case "end of road": case "fork":
+    case 'depart':
+      return `從 ${name} 出發`;
+    case 'arrive':
+      return `到達目的地`;
+    case 'turn':
+    case 'end of road':
+    case 'fork':
       return `${directionMap[modifier] || modifier} 進入 ${name}`;
-    case "new name": return `繼續${verb} ${name}`;
-    case "merge": return `匯入 ${name}`;
-    case "roundabout": return `進入圓環，${verb} ${name}`;
-    case "rotary": return `進入圓環`;
+    case 'new name':
+      return `繼續${verb} ${name}`;
+    case 'merge':
+      return `匯入 ${name}`;
+    case 'roundabout':
+      return `進入圓環，${verb} ${name}`;
+    case 'rotary':
+      return `進入圓環`;
     default:
       if (modifier && directionMap[modifier]) return `${directionMap[modifier]} ${name}`;
       return `沿 ${name} 繼續`;
@@ -294,37 +315,38 @@ function buildInstruction(step: any, profile: "foot" | "bike" | "car" = "car"): 
 /**
  * 規劃多種交通方式的路線（步行 / 騎車 / 開車 / 大眾運輸）
  */
-export async function planRoutes(
-  from: LatLng,
-  to: LatLng,
-): Promise<RouteOption[]> {
+export async function planRoutes(from: LatLng, to: LatLng): Promise<RouteOption[]> {
   const results: RouteOption[] = [];
   const now = Date.now();
 
-  console.log(`[Route] Planning from (${from.lat.toFixed(4)},${from.lng.toFixed(4)}) to (${to.lat.toFixed(4)},${to.lng.toFixed(4)})`);
+  console.log(
+    `[Route] Planning from (${from.lat.toFixed(4)},${from.lng.toFixed(4)}) to (${to.lat.toFixed(4)},${to.lng.toFixed(4)})`,
+  );
 
   // 同時查詢四種交通方式
   const [walkResult, bikeResult, driveResult, transitResult] = await Promise.allSettled([
-    osrmRoute(from, to, "foot"),
-    osrmRoute(from, to, "bike"),
-    osrmRoute(from, to, "car"),
+    osrmRoute(from, to, 'foot'),
+    osrmRoute(from, to, 'bike'),
+    osrmRoute(from, to, 'car'),
     planTransitRoute(from, to),
   ]);
 
-  console.log(`[Route] Results — walk:${walkResult.status === "fulfilled" && walkResult.value ? "OK" : "FAIL"} bike:${bikeResult.status === "fulfilled" && bikeResult.value ? "OK" : "FAIL"} drive:${driveResult.status === "fulfilled" && driveResult.value ? "OK" : "FAIL"} transit:${transitResult.status === "fulfilled" && transitResult.value ? "OK" : "FAIL"}`);
+  console.log(
+    `[Route] Results — walk:${walkResult.status === 'fulfilled' && walkResult.value ? 'OK' : 'FAIL'} bike:${bikeResult.status === 'fulfilled' && bikeResult.value ? 'OK' : 'FAIL'} drive:${driveResult.status === 'fulfilled' && driveResult.value ? 'OK' : 'FAIL'} transit:${transitResult.status === 'fulfilled' && transitResult.value ? 'OK' : 'FAIL'}`,
+  );
 
   // 開車方案
-  if (driveResult.status === "fulfilled" && driveResult.value) {
+  if (driveResult.status === 'fulfilled' && driveResult.value) {
     const r = driveResult.value;
     const congestion = estimateCongestion(r.duration, r.distance);
     const adjustedDuration = Math.round(r.duration * (1 + congestion * 0.5));
     results.push({
-      id: "drive",
-      mode: "driving",
-      modeLabel: "開車",
+      id: 'drive',
+      mode: 'driving',
+      modeLabel: '開車',
       totalDistance: r.distance,
       totalDuration: adjustedDuration,
-      summary: `開車 ${formatDistance(r.distance)}，約 ${formatDuration(adjustedDuration)}${congestion > 0.3 ? " ⚠️ 可能壅塞" : ""}`,
+      summary: `開車 ${formatDistance(r.distance)}，約 ${formatDuration(adjustedDuration)}${congestion > 0.3 ? ' ⚠️ 可能壅塞' : ''}`,
       steps: r.steps,
       routeGeometry: r.geometry,
       queriedAt: now,
@@ -333,12 +355,12 @@ export async function planRoutes(
   }
 
   // 騎車方案
-  if (bikeResult.status === "fulfilled" && bikeResult.value) {
+  if (bikeResult.status === 'fulfilled' && bikeResult.value) {
     const r = bikeResult.value;
     results.push({
-      id: "bike",
-      mode: "cycling",
-      modeLabel: "騎車",
+      id: 'bike',
+      mode: 'cycling',
+      modeLabel: '騎車',
       totalDistance: r.distance,
       totalDuration: r.duration,
       summary: `騎車 ${formatDistance(r.distance)}，約 ${formatDuration(r.duration)}`,
@@ -349,12 +371,12 @@ export async function planRoutes(
   }
 
   // 步行方案
-  if (walkResult.status === "fulfilled" && walkResult.value) {
+  if (walkResult.status === 'fulfilled' && walkResult.value) {
     const r = walkResult.value;
     results.push({
-      id: "walk",
-      mode: "walking",
-      modeLabel: "步行",
+      id: 'walk',
+      mode: 'walking',
+      modeLabel: '步行',
       totalDistance: r.distance,
       totalDuration: r.duration,
       summary: `步行 ${formatDistance(r.distance)}，約 ${formatDuration(r.duration)}`,
@@ -365,7 +387,7 @@ export async function planRoutes(
   }
 
   // 大眾運輸方案
-  if (transitResult.status === "fulfilled" && transitResult.value) {
+  if (transitResult.status === 'fulfilled' && transitResult.value) {
     results.push({ ...transitResult.value, queriedAt: now });
   }
 
@@ -393,7 +415,7 @@ function estimateCongestion(durationSec: number, distanceM: number): number {
   const dayOfWeek = now.getDay(); // 0=Sun
 
   // 平均速度 (km/h)
-  const avgSpeed = (distanceM / 1000) / (durationSec / 3600);
+  const avgSpeed = distanceM / 1000 / (durationSec / 3600);
 
   // 時段擁擠權重
   let timeFactor = 0;
@@ -401,7 +423,7 @@ function estimateCongestion(durationSec: number, distanceM: number): number {
     // 平日
     if ((hour >= 7 && hour <= 9) || (hour >= 17 && hour <= 19)) {
       timeFactor = 0.7; // 尖峰
-    } else if ((hour >= 11 && hour <= 13)) {
+    } else if (hour >= 11 && hour <= 13) {
       timeFactor = 0.3; // 午間
     } else if (hour >= 22 || hour < 6) {
       timeFactor = 0.0; // 深夜
@@ -444,7 +466,7 @@ export async function checkForBetterRoute(
     if (sameMode) {
       return {
         shouldReroute: true,
-        reason: "您已偏離路線，已自動重新規劃",
+        reason: '您已偏離路線，已自動重新規劃',
         newRoute: sameMode,
         timeSaved: 0,
       };
@@ -453,7 +475,7 @@ export async function checkForBetterRoute(
     if (newRoutes.length > 0) {
       return {
         shouldReroute: true,
-        reason: "您已偏離路線，已自動重新規劃",
+        reason: '您已偏離路線，已自動重新規劃',
         newRoute: newRoutes[0],
         timeSaved: 0,
       };
@@ -464,12 +486,12 @@ export async function checkForBetterRoute(
   const elapsed = Date.now() - (currentRoute.queriedAt ?? 0);
   if (elapsed < 45000) {
     // 距離上次查詢不到 45 秒，不重新查
-    return { shouldReroute: false, reason: "" };
+    return { shouldReroute: false, reason: '' };
   }
 
   try {
     const freshRoute = await osrmRoute(currentPos, destination, modeToProfile(currentRoute.mode));
-    if (!freshRoute) return { shouldReroute: false, reason: "" };
+    if (!freshRoute) return { shouldReroute: false, reason: '' };
 
     // 計算剩餘路程的預估時間
     const remainingDuration = estimateRemainingDuration(currentPos, currentRoute);
@@ -478,16 +500,17 @@ export async function checkForBetterRoute(
 
     if (timeSaved > 180 && percentSaved > 0.15) {
       // 新路線快 >3 分鐘 且 >15%
-      const congestion = currentRoute.mode === "driving"
-        ? estimateCongestion(freshRoute.duration, freshRoute.distance)
-        : 0;
+      const congestion =
+        currentRoute.mode === 'driving'
+          ? estimateCongestion(freshRoute.duration, freshRoute.distance)
+          : 0;
       const adjustedDuration = Math.round(freshRoute.duration * (1 + congestion * 0.5));
 
       return {
         shouldReroute: true,
         reason: `發現更快路線，可節省 ${formatDuration(timeSaved)}`,
         newRoute: {
-          id: currentRoute.id + "-reroute",
+          id: currentRoute.id + '-reroute',
           mode: currentRoute.mode,
           modeLabel: currentRoute.modeLabel,
           totalDistance: freshRoute.distance,
@@ -503,14 +526,17 @@ export async function checkForBetterRoute(
     }
   } catch {}
 
-  return { shouldReroute: false, reason: "" };
+  return { shouldReroute: false, reason: '' };
 }
 
-function modeToProfile(mode: RouteOption["mode"]): "foot" | "bike" | "car" {
+function modeToProfile(mode: RouteOption['mode']): 'foot' | 'bike' | 'car' {
   switch (mode) {
-    case "walking": return "foot";
-    case "cycling": return "bike";
-    default: return "car";
+    case 'walking':
+      return 'foot';
+    case 'cycling':
+      return 'bike';
+    default:
+      return 'car';
   }
 }
 
@@ -558,7 +584,7 @@ export function calculateLiveETA(
   destination: LatLng,
   route: RouteOption,
   currentSpeedMps: number | null,
-): { etaSeconds: number; etaText: string; congestionLevel: "smooth" | "moderate" | "heavy" } {
+): { etaSeconds: number; etaText: string; congestionLevel: 'smooth' | 'moderate' | 'heavy' } {
   const remaining = estimateRemainingDuration(currentPos, route);
   const congestion = route.congestionScore ?? 0;
 
@@ -574,8 +600,8 @@ export function calculateLiveETA(
   // 加上擁擠修正
   adjusted = Math.round(adjusted * (1 + congestion * 0.3));
 
-  const level: "smooth" | "moderate" | "heavy" =
-    congestion > 0.5 ? "heavy" : congestion > 0.2 ? "moderate" : "smooth";
+  const level: 'smooth' | 'moderate' | 'heavy' =
+    congestion > 0.5 ? 'heavy' : congestion > 0.2 ? 'moderate' : 'smooth';
 
   return {
     etaSeconds: adjusted,
@@ -586,12 +612,21 @@ export function calculateLiveETA(
 
 // ─── 大眾運輸路線規劃 ─────────────────────────────────────
 
-async function planTransitRoute(
-  from: LatLng,
-  to: LatLng,
-): Promise<RouteOption | null> {
+async function planTransitRoute(from: LatLng, to: LatLng): Promise<RouteOption | null> {
   try {
-    const commonRoutes = ["300", "301", "302", "303", "304", "305", "306", "307", "308", "309", "310"];
+    const commonRoutes = [
+      '300',
+      '301',
+      '302',
+      '303',
+      '304',
+      '305',
+      '306',
+      '307',
+      '308',
+      '309',
+      '310',
+    ];
     const routePromises = commonRoutes.map((id) => getBusStopsOfRoute(id).catch(() => []));
     const allRouteStops = await Promise.all(routePromises);
 
@@ -622,7 +657,10 @@ async function planTransitRoute(
           for (const alightStop of stops) {
             if (alightStop.StopSequence <= boardStop.StopSequence) continue;
             const dFromAlight = haversine(
-              { lat: alightStop.StopPosition.PositionLat, lng: alightStop.StopPosition.PositionLon },
+              {
+                lat: alightStop.StopPosition.PositionLat,
+                lng: alightStop.StopPosition.PositionLon,
+              },
               to,
             );
             if (dFromAlight > 1500) continue;
@@ -665,7 +703,8 @@ async function planTransitRoute(
     try {
       const estimates = await getBusEstimates(bestPlan.routeId);
       const boardEta = estimates.find(
-        (e) => e.StopName?.Zh_tw === bestPlan!.boardStop.name && e.Direction === bestPlan!.direction,
+        (e) =>
+          e.StopName?.Zh_tw === bestPlan!.boardStop.name && e.Direction === bestPlan!.direction,
       );
       if (boardEta?.EstimateTime !== undefined) {
         etaMinutes = Math.ceil(boardEta.EstimateTime / 60);
@@ -673,8 +712,8 @@ async function planTransitRoute(
     } catch {}
 
     const [walkToStop, walkFromStop] = await Promise.all([
-      osrmRoute(from, { lat: bestPlan.boardStop.lat, lng: bestPlan.boardStop.lng }, "foot"),
-      osrmRoute({ lat: bestPlan.alightStop.lat, lng: bestPlan.alightStop.lng }, to, "foot"),
+      osrmRoute(from, { lat: bestPlan.boardStop.lat, lng: bestPlan.boardStop.lng }, 'foot'),
+      osrmRoute({ lat: bestPlan.alightStop.lat, lng: bestPlan.alightStop.lng }, to, 'foot'),
     ]);
 
     const transitDetails: TransitDetail[] = [];
@@ -684,27 +723,67 @@ async function planTransitRoute(
     let totalDistance = 0;
 
     if (walkToStop) {
-      transitDetails.push({ type: "walk", walkDistance: walkToStop.distance, steps: walkToStop.steps, coordinates: walkToStop.geometry });
-      allSteps.push({ instruction: `步行 ${formatDistance(walkToStop.distance)} 到 ${bestPlan.boardStop.name} 站`, distance: walkToStop.distance, duration: walkToStop.duration, maneuver: "depart", name: "", coordinates: walkToStop.geometry });
+      transitDetails.push({
+        type: 'walk',
+        walkDistance: walkToStop.distance,
+        steps: walkToStop.steps,
+        coordinates: walkToStop.geometry,
+      });
+      allSteps.push({
+        instruction: `步行 ${formatDistance(walkToStop.distance)} 到 ${bestPlan.boardStop.name} 站`,
+        distance: walkToStop.distance,
+        duration: walkToStop.duration,
+        maneuver: 'depart',
+        name: '',
+        coordinates: walkToStop.geometry,
+      });
       totalGeometry = [...totalGeometry, ...walkToStop.geometry];
       totalDuration += walkToStop.duration;
       totalDistance += walkToStop.distance;
     }
 
     const rideTime = bestPlan.stopCount * 120;
-    transitDetails.push({ type: "bus", routeName: bestPlan.routeName, routeId: bestPlan.routeId, fromStop: bestPlan.boardStop.name, toStop: bestPlan.alightStop.name, estimateMinutes: etaMinutes });
-    allSteps.push({
-      instruction: `搭 ${bestPlan.routeName} 路公車（${bestPlan.boardStop.name} → ${bestPlan.alightStop.name}，${bestPlan.stopCount} 站）${etaMinutes !== undefined ? `，預估 ${etaMinutes} 分鐘到站` : ""}`,
-      distance: 0, duration: rideTime, maneuver: "notification", name: bestPlan.routeName,
-      coordinates: [[bestPlan.boardStop.lng, bestPlan.boardStop.lat], [bestPlan.alightStop.lng, bestPlan.alightStop.lat]],
+    transitDetails.push({
+      type: 'bus',
+      routeName: bestPlan.routeName,
+      routeId: bestPlan.routeId,
+      fromStop: bestPlan.boardStop.name,
+      toStop: bestPlan.alightStop.name,
+      estimateMinutes: etaMinutes,
     });
-    totalGeometry.push([bestPlan.boardStop.lng, bestPlan.boardStop.lat], [bestPlan.alightStop.lng, bestPlan.alightStop.lat]);
+    allSteps.push({
+      instruction: `搭 ${bestPlan.routeName} 路公車（${bestPlan.boardStop.name} → ${bestPlan.alightStop.name}，${bestPlan.stopCount} 站）${etaMinutes !== undefined ? `，預估 ${etaMinutes} 分鐘到站` : ''}`,
+      distance: 0,
+      duration: rideTime,
+      maneuver: 'notification',
+      name: bestPlan.routeName,
+      coordinates: [
+        [bestPlan.boardStop.lng, bestPlan.boardStop.lat],
+        [bestPlan.alightStop.lng, bestPlan.alightStop.lat],
+      ],
+    });
+    totalGeometry.push(
+      [bestPlan.boardStop.lng, bestPlan.boardStop.lat],
+      [bestPlan.alightStop.lng, bestPlan.alightStop.lat],
+    );
     totalDuration += rideTime + (etaMinutes ? etaMinutes * 60 : 300);
     totalDistance += bestPlan.stopCount * 800;
 
     if (walkFromStop) {
-      transitDetails.push({ type: "walk", walkDistance: walkFromStop.distance, steps: walkFromStop.steps, coordinates: walkFromStop.geometry });
-      allSteps.push({ instruction: `步行 ${formatDistance(walkFromStop.distance)} 到目的地`, distance: walkFromStop.distance, duration: walkFromStop.duration, maneuver: "arrive", name: "", coordinates: walkFromStop.geometry });
+      transitDetails.push({
+        type: 'walk',
+        walkDistance: walkFromStop.distance,
+        steps: walkFromStop.steps,
+        coordinates: walkFromStop.geometry,
+      });
+      allSteps.push({
+        instruction: `步行 ${formatDistance(walkFromStop.distance)} 到目的地`,
+        distance: walkFromStop.distance,
+        duration: walkFromStop.duration,
+        maneuver: 'arrive',
+        name: '',
+        coordinates: walkFromStop.geometry,
+      });
       totalGeometry = [...totalGeometry, ...walkFromStop.geometry];
       totalDuration += walkFromStop.duration;
       totalDistance += walkFromStop.distance;
@@ -712,16 +791,17 @@ async function planTransitRoute(
 
     return {
       id: `transit-${bestPlan.routeId}`,
-      mode: "transit",
-      modeLabel: "大眾運輸",
-      totalDistance, totalDuration,
+      mode: 'transit',
+      modeLabel: '大眾運輸',
+      totalDistance,
+      totalDuration,
       summary: `搭 ${bestPlan.routeName} 路，${bestPlan.stopCount} 站，約 ${formatDuration(totalDuration)}`,
       steps: allSteps,
       routeGeometry: totalGeometry,
       transitDetails,
     };
   } catch (err) {
-    console.warn("[Routing] Transit planning failed:", err);
+    console.warn('[Routing] Transit planning failed:', err);
     return null;
   }
 }
@@ -734,7 +814,9 @@ export function haversine(a: LatLng, b: LatLng): number {
   const dLng = ((b.lng - a.lng) * Math.PI) / 180;
   const sinLat = Math.sin(dLat / 2);
   const sinLng = Math.sin(dLng / 2);
-  const h = sinLat * sinLat + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * sinLng * sinLng;
+  const h =
+    sinLat * sinLat +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * sinLng * sinLng;
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
@@ -744,7 +826,7 @@ export function formatDistance(meters: number): string {
 }
 
 export function formatDuration(seconds: number): string {
-  if (seconds < 60) return "不到 1 分鐘";
+  if (seconds < 60) return '不到 1 分鐘';
   const mins = Math.round(seconds / 60);
   if (mins < 60) return `${mins} 分鐘`;
   const hrs = Math.floor(mins / 60);
@@ -753,4 +835,4 @@ export function formatDuration(seconds: number): string {
   return `${hrs} 小時 ${remainMins} 分`;
 }
 
-export const PU_LOCATION: LatLng = { lat: 24.2260, lng: 120.5630 };
+export const PU_LOCATION: LatLng = { lat: 24.226, lng: 120.563 };

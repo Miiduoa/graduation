@@ -210,11 +210,12 @@ function normalizeDormPackageRecord(row: Record<string, unknown>): DormPackage {
     carrier: String(row.carrier ?? row.courier ?? ''),
     arrivedAt: String(row.arrivedAt ?? row.createdAt ?? new Date().toISOString()),
     status: statusMap[String(row.status ?? 'pending')] ?? 'pending',
-    pickedAt: typeof row.pickedAt === 'string'
-      ? row.pickedAt
-      : typeof row.pickedUpAt === 'string'
-        ? row.pickedUpAt
-        : undefined,
+    pickedAt:
+      typeof row.pickedAt === 'string'
+        ? row.pickedAt
+        : typeof row.pickedUpAt === 'string'
+          ? row.pickedUpAt
+          : undefined,
   };
 }
 
@@ -238,16 +239,18 @@ function normalizeHealthAppointmentRecord(row: Record<string, unknown>): HealthA
   return {
     ...(row as HealthAppointment),
     timeSlot: String(row.timeSlot ?? row.time ?? ''),
-    reason: typeof row.reason === 'string'
-      ? row.reason
-      : typeof row.symptoms === 'string'
-        ? row.symptoms
-        : undefined,
-    notes: typeof row.notes === 'string'
-      ? row.notes
-      : typeof row.note === 'string'
-        ? row.note
-        : undefined,
+    reason:
+      typeof row.reason === 'string'
+        ? row.reason
+        : typeof row.symptoms === 'string'
+          ? row.symptoms
+          : undefined,
+    notes:
+      typeof row.notes === 'string'
+        ? row.notes
+        : typeof row.note === 'string'
+          ? row.note
+          : undefined,
   };
 }
 
@@ -255,11 +258,12 @@ function normalizeHealthRecordRecord(row: Record<string, unknown>): HealthRecord
   return {
     ...(row as HealthRecord),
     date: String(row.date ?? row.visitDate ?? ''),
-    notes: typeof row.notes === 'string'
-      ? row.notes
-      : typeof row.note === 'string'
-        ? row.note
-        : undefined,
+    notes:
+      typeof row.notes === 'string'
+        ? row.notes
+        : typeof row.note === 'string'
+          ? row.note
+          : undefined,
   };
 }
 
@@ -269,11 +273,9 @@ function normalizeCafeteriaRecord(row: Record<string, unknown>): Cafeteria {
     ...(row as Cafeteria),
     name: String(row.name ?? row.cafeteria ?? row.merchantName ?? '未命名餐廳'),
     merchantId: String(row.merchantId ?? row.id ?? ''),
-    pilotStatus:
-      pilotStatus === 'pilot' || pilotStatus === 'live' ? pilotStatus : 'inactive',
+    pilotStatus: pilotStatus === 'pilot' || pilotStatus === 'live' ? pilotStatus : 'inactive',
     orderingEnabled: row.orderingEnabled === true,
-    activeOperatorCount:
-      typeof row.activeOperatorCount === 'number' ? row.activeOperatorCount : 0,
+    activeOperatorCount: typeof row.activeOperatorCount === 'number' ? row.activeOperatorCount : 0,
   };
 }
 
@@ -281,11 +283,19 @@ function buildLegacyPoiCollectionPath(poiId: string, collectionName: string): st
   return ['pois', poiId, collectionName];
 }
 
-function buildLegacyPoiDocumentPath(poiId: string, collectionName: string, docId: string): string[] {
+function buildLegacyPoiDocumentPath(
+  poiId: string,
+  collectionName: string,
+  docId: string,
+): string[] {
   return ['pois', poiId, collectionName, docId];
 }
 
-function getPoiScopedPath(schoolId: string | undefined, poiId: string, collectionName: string): string[] {
+function getPoiScopedPath(
+  schoolId: string | undefined,
+  poiId: string,
+  collectionName: string,
+): string[] {
   return schoolId
     ? buildSchoolCollectionPath(schoolId, 'pois', poiId, collectionName)
     : buildLegacyPoiCollectionPath(poiId, collectionName);
@@ -975,26 +985,32 @@ export const firebaseSource: DataSource = {
 
   async submitPoiReview(data) {
     const db = getDb();
-    await setDoc(docFromSegments(db, [...getPoiScopedPath(data.schoolId, data.poiId, 'reviews'), data.uid]), {
-      uid: data.uid,
-      schoolId: data.schoolId ?? null,
-      displayName: data.displayName ?? null,
-      avatarUrl: data.avatarUrl ?? null,
-      rating: data.rating,
-      comment: data.comment.trim(),
-      tags: data.tags ?? [],
-      helpful: 0,
-      helpfulBy: [],
-      createdAt: serverTimestamp(),
-    });
+    await setDoc(
+      docFromSegments(db, [...getPoiScopedPath(data.schoolId, data.poiId, 'reviews'), data.uid]),
+      {
+        uid: data.uid,
+        schoolId: data.schoolId ?? null,
+        displayName: data.displayName ?? null,
+        avatarUrl: data.avatarUrl ?? null,
+        rating: data.rating,
+        comment: data.comment.trim(),
+        tags: data.tags ?? [],
+        helpful: 0,
+        helpfulBy: [],
+        createdAt: serverTimestamp(),
+      },
+    );
   },
 
   async submitPoiCrowdReport(data) {
-    await createDocumentAtPath<PoiCrowdReport>(getPoiScopedPath(data.schoolId, data.poiId, 'crowdReports'), {
-      uid: data.uid,
-      schoolId: data.schoolId,
-      level: data.level,
-    });
+    await createDocumentAtPath<PoiCrowdReport>(
+      getPoiScopedPath(data.schoolId, data.poiId, 'crowdReports'),
+      {
+        uid: data.uid,
+        schoolId: data.schoolId,
+        level: data.level,
+      },
+    );
   },
 
   async togglePoiReviewHelpful(data) {
@@ -1003,7 +1019,9 @@ export const firebaseSource: DataSource = {
       ? buildSchoolCollectionPath(data.schoolId, 'pois', data.poiId, 'reviews', data.reviewId)
       : null;
     const legacyPath = buildLegacyPoiDocumentPath(data.poiId, 'reviews', data.reviewId);
-    const canonicalDoc = canonicalPath ? await getDoc(docFromSegments(db, canonicalPath)).catch(() => null) : null;
+    const canonicalDoc = canonicalPath
+      ? await getDoc(docFromSegments(db, canonicalPath)).catch(() => null)
+      : null;
     const targetPath = canonicalDoc?.exists() ? canonicalPath! : legacyPath;
 
     await updateDoc(docFromSegments(db, targetPath), {
@@ -1914,7 +1932,7 @@ export const firebaseSource: DataSource = {
     const currentUid = getAuthInstance().currentUser?.uid ?? null;
     const resolvedSchoolId = currentUid
       ? await resolveUserSchoolId(currentUid, schoolId)
-      : schoolId ?? null;
+      : (schoolId ?? null);
     if (!resolvedSchoolId) {
       throw new Error('缺少 schoolId，無法建立對話');
     }
@@ -1942,8 +1960,12 @@ export const firebaseSource: DataSource = {
       if (!existing?.exists()) {
         await setDoc(ref, payload);
       }
-      const row = await fetchDocumentAtPath<Conversation>(buildConversationCollectionPath(conversationId));
-      return normalizeConversationRecord((row ?? { id: conversationId, ...payload }) as Record<string, unknown>);
+      const row = await fetchDocumentAtPath<Conversation>(
+        buildConversationCollectionPath(conversationId),
+      );
+      return normalizeConversationRecord(
+        (row ?? { id: conversationId, ...payload }) as Record<string, unknown>,
+      );
     }
 
     const row = await createDocument<Conversation>(
@@ -2164,10 +2186,10 @@ export const firebaseSource: DataSource = {
       throw new Error('缺少 schoolId，無法歸還書籍');
     }
 
-    const returnBook = httpsCallable<
-      { schoolId: string; loanId: string },
-      { success?: boolean }
-    >(getFunctionsInstance(), 'returnBook');
+    const returnBook = httpsCallable<{ schoolId: string; loanId: string }, { success?: boolean }>(
+      getFunctionsInstance(),
+      'returnBook',
+    );
     await returnBook({ schoolId: resolvedSchoolId, loanId });
   },
 
@@ -2865,7 +2887,11 @@ export const firebaseSource: DataSource = {
       }
     }
 
-    return fetchCollection<WashingMachine>('washingMachines', [bySchool(schoolId), ...constraints], schoolId);
+    return fetchCollection<WashingMachine>(
+      'washingMachines',
+      [bySchool(schoolId), ...constraints],
+      schoolId,
+    );
   },
 
   async listWashingReservations(userId, schoolId = undefined) {
@@ -2925,9 +2951,7 @@ export const firebaseSource: DataSource = {
         buildSchoolCollectionPath(resolvedSchoolId, 'washingReservations', reservationId),
       );
       if (reservation) {
-        return normalizeWashingReservationRecord(
-          reservation as unknown as Record<string, unknown>,
-        );
+        return normalizeWashingReservationRecord(reservation as unknown as Record<string, unknown>);
       }
     }
 
@@ -3022,7 +3046,10 @@ export const firebaseSource: DataSource = {
   },
 
   async createPrintJob(data) {
-    const resolvedSchoolId = await resolveUserSchoolId(data.userId, (data as Record<string, unknown>).schoolId as string | undefined);
+    const resolvedSchoolId = await resolveUserSchoolId(
+      data.userId,
+      (data as Record<string, unknown>).schoolId as string | undefined,
+    );
     if (!resolvedSchoolId) {
       throw new Error('缺少 schoolId，無法建立列印工作');
     }
@@ -3196,7 +3223,14 @@ export const firebaseSource: DataSource = {
     }
 
     const rescheduleHealthAppointment = httpsCallable<
-      { schoolId: string; appointmentId: string; date: string; timeSlot: string; doctorId?: string; doctorName?: string },
+      {
+        schoolId: string;
+        appointmentId: string;
+        date: string;
+        timeSlot: string;
+        doctorId?: string;
+        doctorName?: string;
+      },
       { success?: boolean }
     >(getFunctionsInstance(), 'rescheduleHealthAppointment');
     await rescheduleHealthAppointment({

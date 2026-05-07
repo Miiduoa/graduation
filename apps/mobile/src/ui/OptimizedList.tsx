@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import React, { memo, useCallback, useMemo, useRef } from "react";
+import React, { memo, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,10 @@ import {
   Dimensions,
   type ViewStyle,
   type ListRenderItemInfo,
-} from "react-native";
-import { getCurrentTheme, type Theme } from "./theme";
+} from 'react-native';
+import { getCurrentTheme, type Theme } from './theme';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export type OptimizedListProps<T> = {
   data: T[];
@@ -60,7 +60,7 @@ function OptimizedListInner<T>(props: OptimizedListProps<T>) {
   } = props;
 
   const theme = getCurrentTheme();
-  
+
   const calculatedInitialNumToRender = useMemo(() => {
     return initialNumToRender ?? Math.ceil(SCREEN_HEIGHT / estimatedItemSize) + 2;
   }, [initialNumToRender, estimatedItemSize]);
@@ -79,7 +79,7 @@ function OptimizedListInner<T>(props: OptimizedListProps<T>) {
       offset: estimatedItemSize * index,
       index,
     }),
-    [estimatedItemSize]
+    [estimatedItemSize],
   );
 
   const handleEndReached = useCallback(() => {
@@ -154,7 +154,7 @@ export type SkeletonListProps = {
 
 export function SkeletonList({ count = 5, itemHeight = 80, gap = 12, style }: SkeletonListProps) {
   const theme = getCurrentTheme();
-  
+
   return (
     <View style={[{ gap }, style]}>
       {Array.from({ length: count }).map((_, i) => (
@@ -164,7 +164,13 @@ export function SkeletonList({ count = 5, itemHeight = 80, gap = 12, style }: Sk
   );
 }
 
-const SkeletonItem = memo(function SkeletonItem({ height, theme }: { height: number; theme: Theme }) {
+const SkeletonItem = memo(function SkeletonItem({
+  height,
+  theme,
+}: {
+  height: number;
+  theme: Theme;
+}) {
   return (
     <View
       style={[
@@ -176,9 +182,9 @@ const SkeletonItem = memo(function SkeletonItem({ height, theme }: { height: num
         },
       ]}
     >
-      <View style={[styles.skeletonLine, { width: "70%", backgroundColor: theme.colors.border }]} />
-      <View style={[styles.skeletonLine, { width: "50%", backgroundColor: theme.colors.border }]} />
-      <View style={[styles.skeletonLine, { width: "90%", backgroundColor: theme.colors.border }]} />
+      <View style={[styles.skeletonLine, { width: '70%', backgroundColor: theme.colors.border }]} />
+      <View style={[styles.skeletonLine, { width: '50%', backgroundColor: theme.colors.border }]} />
+      <View style={[styles.skeletonLine, { width: '90%', backgroundColor: theme.colors.border }]} />
     </View>
   );
 });
@@ -201,9 +207,23 @@ export function LazyImage({ uri, width, height, borderRadius = 0, fallback }: La
   }
 
   return (
-    <View style={{ width, height, borderRadius, overflow: "hidden", backgroundColor: theme.colors.surface2 }}>
+    <View
+      style={{
+        width,
+        height,
+        borderRadius,
+        overflow: 'hidden',
+        backgroundColor: theme.colors.surface2,
+      }}
+    >
       {!loaded && !error && (
-        <View style={[StyleSheet.absoluteFill, styles.imagePlaceholder, { backgroundColor: theme.colors.surface2 }]}>
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            styles.imagePlaceholder,
+            { backgroundColor: theme.colors.surface2 },
+          ]}
+        >
           <ActivityIndicator size="small" color={theme.colors.muted} />
         </View>
       )}
@@ -220,39 +240,37 @@ export function useListOptimization<T>(
   options: {
     getItemId: (item: T) => string;
     compareItems?: (a: T, b: T) => boolean;
-  }
+  },
 ) {
   const { getItemId, compareItems } = options;
-  
+
   const prevDataRef = useRef<T[]>([]);
   const prevMapRef = useRef<Map<string, T>>(new Map());
 
   const optimizedData = useMemo(() => {
     const prevMap = prevMapRef.current;
     const newMap = new Map<string, T>();
-    
+
     const result = data.map((item) => {
       const id = getItemId(item);
       const prevItem = prevMap.get(id);
-      
+
       if (prevItem) {
-        const shouldReuse = compareItems 
-          ? !compareItems(prevItem, item)
-          : prevItem === item;
-        
+        const shouldReuse = compareItems ? !compareItems(prevItem, item) : prevItem === item;
+
         if (shouldReuse) {
           newMap.set(id, prevItem);
           return prevItem;
         }
       }
-      
+
       newMap.set(id, item);
       return item;
     });
-    
+
     prevMapRef.current = newMap;
     prevDataRef.current = result;
-    
+
     return result;
   }, [data, getItemId, compareItems]);
 
@@ -261,10 +279,7 @@ export function useListOptimization<T>(
   return { optimizedData, keyExtractor };
 }
 
-export function useDebouncedList<T>(
-  data: T[],
-  delay: number = 100
-): T[] {
+export function useDebouncedList<T>(data: T[], delay: number = 100): T[] {
   const [debouncedData, setDebouncedData] = React.useState(data);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -290,9 +305,9 @@ export function useDebouncedList<T>(
 const styles = StyleSheet.create({
   footer: {
     padding: 16,
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "center",
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
     gap: 8,
   },
   footerText: {
@@ -301,14 +316,14 @@ const styles = StyleSheet.create({
   skeletonItem: {
     padding: 16,
     gap: 8,
-    justifyContent: "center",
+    justifyContent: 'center',
   },
   skeletonLine: {
     height: 12,
     borderRadius: 6,
   },
   imagePlaceholder: {
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

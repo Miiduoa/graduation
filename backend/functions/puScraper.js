@@ -47,8 +47,20 @@ const PERIOD_TIME_MAP = {
 
 /** 中文星期 → dayOfWeek number */
 const DAY_MAP = {
-  '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 7,
-  'Mon': 1, 'Tue': 2, 'Wed': 3, 'Thu': 4, 'Fri': 5, 'Sat': 6, 'Sun': 7,
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  日: 7,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
 };
 
 // ---------------------------------------------------------------------------
@@ -68,14 +80,17 @@ function parseCookies(setCookieHeaders, jar) {
 }
 
 function cookieString(jar) {
-  return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join('; ');
+  return Object.entries(jar)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
 }
 
 function httpsRequest(hostname, path, method, cookies, body) {
   return new Promise((resolve, reject) => {
     const bodyBuf = body ? Buffer.from(body, 'utf8') : null;
     const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
     };
@@ -120,7 +135,11 @@ function post(hostname, path, cookies, body) {
 async function getFollowRedirect(hostname, path, cookies, maxRedirects = 3) {
   let res = await get(hostname, path, cookies);
   let redirects = 0;
-  while ((res.status === 301 || res.status === 302) && res.headers.location && redirects < maxRedirects) {
+  while (
+    (res.status === 301 || res.status === 302) &&
+    res.headers.location &&
+    redirects < maxRedirects
+  ) {
     const loc = res.headers.location;
     const url = new URL(loc, `https://${hostname}`);
     hostname = url.hostname;
@@ -293,7 +312,9 @@ function parseClassInfo(className) {
 
   // Match pattern: 系名 + 年級(one or two Chinese characters) + optional suffix
   // Examples: "資管三A", "會計四甲", "英文二"
-  const match = className.match(/^([^\d\w一二三四五六七八九\u4e00-\u9fff]*[\u4e00-\u9fff]+?)([一二三四五六七八九])(.*)$/);
+  const match = className.match(
+    /^([^\d\w一二三四五六七八九\u4e00-\u9fff]*[\u4e00-\u9fff]+?)([一二三四五六七八九])(.*)$/,
+  );
 
   if (match) {
     let department = match[1];
@@ -306,12 +327,12 @@ function parseClassInfo(className) {
 
     // Map grade character to year
     const gradeMap = {
-      '一': '一年級',
-      '二': '二年級',
-      '三': '三年級',
-      '四': '四年級',
-      '五': '五年級',
-      '六': '六年級',
+      一: '一年級',
+      二: '二年級',
+      三: '三年級',
+      四: '四年級',
+      五: '五年級',
+      六: '六年級',
     };
     const grade = gradeMap[gradeChar] || null;
 
@@ -360,7 +381,11 @@ async function puLogin(uid, upassword) {
     }
 
     const verify = await getFollowRedirect(ALCAT_HOST, COURSE_RESULT_PATH, cookies);
-    if (verify.status !== 200 || looksLikePuLoginPage(verify.data) || !hasPuStudentContext(verify.data)) {
+    if (
+      verify.status !== 200 ||
+      looksLikePuLoginPage(verify.data) ||
+      !hasPuStudentContext(verify.data)
+    ) {
       return {
         success: false,
         cookies: {},
@@ -552,9 +577,12 @@ async function puFetchGrades(cookies, semester) {
 
         // Summary rows (average, behavior, ranking)
         if (
-          courseName.includes('平均') || courseName.includes('average') ||
-          courseName.includes('操行') || courseName.includes('Behavior') ||
-          courseName.includes('排名') || courseName.includes('ranking')
+          courseName.includes('平均') ||
+          courseName.includes('average') ||
+          courseName.includes('操行') ||
+          courseName.includes('Behavior') ||
+          courseName.includes('排名') ||
+          courseName.includes('ranking')
         ) {
           if (courseName.includes('系排名') || courseName.includes('Department')) {
             summary[sem].departmentRanking = score;
@@ -582,9 +610,7 @@ async function puFetchGrades(cookies, semester) {
       }
     }
 
-    const filteredGrades = semester
-      ? grades.filter((g) => g.semester === semester)
-      : grades;
+    const filteredGrades = semester ? grades.filter((g) => g.semester === semester) : grades;
 
     return {
       success: true,
@@ -741,11 +767,7 @@ async function puFetchAbsence(cookies) {
     // Skip header row
     for (const cells of rows) {
       if (cells.length < 5) continue;
-      if (
-        cells[0].includes('date') ||
-        cells[0].includes('日期') ||
-        cells[0].includes('course')
-      ) {
+      if (cells[0].includes('date') || cells[0].includes('日期') || cells[0].includes('course')) {
         continue;
       }
 
@@ -787,7 +809,10 @@ async function puFetchCreditSummary(cookies) {
     // 從成績頁取得所有成績資料
     const gradeResult = await puFetchGrades(cookies);
     if (!gradeResult.success || !gradeResult.grades || gradeResult.grades.length === 0) {
-      return { success: true, creditSummary: { totalRequired: 128, totalEarned: 0, categories: [], semesters: [] } };
+      return {
+        success: true,
+        creditSummary: { totalRequired: 128, totalEarned: 0, categories: [], semesters: [] },
+      };
     }
 
     // 依修別（courseType）分類統計
@@ -798,10 +823,19 @@ async function puFetchCreditSummary(cookies) {
     for (const g of gradeResult.grades) {
       const ct = (g.courseType || '其他').trim();
       const score = typeof g.score === 'number' ? g.score : parseFloat(String(g.score));
-      const passed = isNaN(score) ? String(g.score).includes('Pass') || String(g.score).includes('通過') : score >= 60;
+      const passed = isNaN(score)
+        ? String(g.score).includes('Pass') || String(g.score).includes('通過')
+        : score >= 60;
 
       if (!categoryMap[ct]) {
-        categoryMap[ct] = { category: ct, earned: 0, courses: 0, passedCourses: 0, failedCourses: 0, credits: 0 };
+        categoryMap[ct] = {
+          category: ct,
+          earned: 0,
+          courses: 0,
+          passedCourses: 0,
+          failedCourses: 0,
+          credits: 0,
+        };
       }
       categoryMap[ct].courses += 1;
       categoryMap[ct].credits += g.credits;
@@ -822,7 +856,15 @@ async function puFetchCreditSummary(cookies) {
     const semesterMap = {};
     for (const g of gradeResult.grades) {
       const sem = g.semester || 'unknown';
-      if (!semesterMap[sem]) semesterMap[sem] = { semester: sem, courses: 0, credits: 0, totalScore: 0, weightedScore: 0, weightedCredits: 0 };
+      if (!semesterMap[sem])
+        semesterMap[sem] = {
+          semester: sem,
+          courses: 0,
+          credits: 0,
+          totalScore: 0,
+          weightedScore: 0,
+          weightedCredits: 0,
+        };
       semesterMap[sem].courses += 1;
       const score = typeof g.score === 'number' ? g.score : parseFloat(String(g.score));
       const passed = isNaN(score) ? String(g.score).includes('Pass') : score >= 60;
@@ -836,7 +878,8 @@ async function puFetchCreditSummary(cookies) {
     const semesters = Object.values(semesterMap)
       .map((s) => ({
         ...s,
-        average: s.weightedCredits > 0 ? Math.round((s.weightedScore / s.weightedCredits) * 100) / 100 : 0,
+        average:
+          s.weightedCredits > 0 ? Math.round((s.weightedScore / s.weightedCredits) * 100) / 100 : 0,
         ranking: gradeResult.summary?.[s.semester] || {},
       }))
       .sort((a, b) => String(b.semester).localeCompare(String(a.semester)));
@@ -855,7 +898,10 @@ async function puFetchCreditSummary(cookies) {
     };
   } catch (err) {
     console.error('[puFetchCreditSummary] Error:', err);
-    return { success: true, creditSummary: { totalRequired: 128, totalEarned: 0, categories: [], semesters: [] } };
+    return {
+      success: true,
+      creditSummary: { totalRequired: 128, totalEarned: 0, categories: [], semesters: [] },
+    };
   }
 }
 

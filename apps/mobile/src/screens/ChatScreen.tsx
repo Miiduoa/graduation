@@ -1,30 +1,23 @@
 /* eslint-disable */
-import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { ScrollView, Text, TextInput, View, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Screen, Card, Button, Pill, LoadingState, ErrorState } from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
-import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
-import { useDataSource } from "../hooks/useDataSource";
-import { getDb, isFirebaseMockMode } from "../firebase";
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  orderBy,
-  query,
-} from "firebase/firestore";
-import { useAsyncList } from "../hooks/useAsyncList";
-import { fetchSchoolDirectoryProfiles } from "../services/memberDirectory";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { ScrollView, Text, TextInput, View, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Screen, Card, Button, Pill, LoadingState, ErrorState } from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { useDataSource } from '../hooks/useDataSource';
+import { getDb, isFirebaseMockMode } from '../firebase';
+import { collection, doc, getDoc, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { useAsyncList } from '../hooks/useAsyncList';
+import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 
 type Msg = { id: string; senderId: string; text?: string; content?: string; createdAt?: any };
 
 type Conversation = {
   id: string;
-  type: "dm" | "group_chat";
+  type: 'dm' | 'group_chat';
   memberIds: string[];
   lastMessageText?: string;
   lastMessageAt?: any;
@@ -43,39 +36,44 @@ export function ChatScreen(props: any) {
   const ds = useDataSource();
   const db = getDb();
 
-  const [text, setText] = useState("");
+  const [text, setText] = useState('');
   // 快取用戶名稱：{ [uid]: displayName }
   const [userNames, setUserNames] = useState<Record<string, string>>({});
   // 追蹤已發送請求的 UID，避免重複 fetch 或無限迴圈
   const fetchedUids = useRef<Set<string>>(new Set());
 
-  const fetchUserName = useCallback(async (uid: string) => {
-    if (fetchedUids.current.has(uid)) return;
-    fetchedUids.current.add(uid);
-    try {
-      const [profile] = await fetchSchoolDirectoryProfiles(school.id, [uid], db);
-      const name = profile?.displayName ?? uid.slice(0, 8);
-      setUserNames((prev) => ({ ...prev, [uid]: name }));
-    } catch {
-      setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
-    }
-  }, [db, school.id]);
+  const fetchUserName = useCallback(
+    async (uid: string) => {
+      if (fetchedUids.current.has(uid)) return;
+      fetchedUids.current.add(uid);
+      try {
+        const [profile] = await fetchSchoolDirectoryProfiles(school.id, [uid], db);
+        const name = profile?.displayName ?? uid.slice(0, 8);
+        setUserNames((prev) => ({ ...prev, [uid]: name }));
+      } catch {
+        setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
+      }
+    },
+    [db, school.id],
+  );
 
   const convoKey = useMemo(() => {
     if (!auth.user || !peerId || !school.id) return null;
     return dmId(school.id, auth.user.uid, peerId);
   }, [auth.user?.uid, peerId, school.id]);
 
-  const { items: convoRows, loading: convoLoading, error: convoError, reload: reloadConvo } = useAsyncList<Conversation>(
-    async () => {
-      if (isFirebaseMockMode()) return [];
-      if (!convoKey) return [];
-      const snap = await getDoc(doc(db, "conversations", convoKey));
-      if (!snap.exists()) return [];
-      return [{ id: snap.id, ...(snap.data() as any) } as any];
-    },
-    [db, convoKey]
-  );
+  const {
+    items: convoRows,
+    loading: convoLoading,
+    error: convoError,
+    reload: reloadConvo,
+  } = useAsyncList<Conversation>(async () => {
+    if (isFirebaseMockMode()) return [];
+    if (!convoKey) return [];
+    const snap = await getDoc(doc(db, 'conversations', convoKey));
+    if (!snap.exists()) return [];
+    return [{ id: snap.id, ...(snap.data() as any) } as any];
+  }, [db, convoKey]);
 
   const convo = convoRows[0];
 
@@ -94,8 +92,8 @@ export function ChatScreen(props: any) {
     setMsgLoading(true);
     setMsgError(null);
 
-    const ref = collection(db, "conversations", convoKey, "messages");
-    const qy = query(ref, orderBy("createdAt", "asc"));
+    const ref = collection(db, 'conversations', convoKey, 'messages');
+    const qy = query(ref, orderBy('createdAt', 'asc'));
 
     const unsubscribe = onSnapshot(
       qy,
@@ -108,14 +106,16 @@ export function ChatScreen(props: any) {
         setMsgLoading(false);
         setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
         // 預先抓取所有發訊者的用戶名稱
-        const senderIds = [...new Set(rows.map((m) => m.senderId).filter((id) => id !== auth.user?.uid))];
+        const senderIds = [
+          ...new Set(rows.map((m) => m.senderId).filter((id) => id !== auth.user?.uid)),
+        ];
         senderIds.forEach(fetchUserName);
       },
       (error) => {
-        console.error("[ChatScreen] Messages subscription error:", error);
+        console.error('[ChatScreen] Messages subscription error:', error);
         setMsgError(error.message);
         setMsgLoading(false);
-      }
+      },
     );
 
     return () => unsubscribe();
@@ -140,18 +140,16 @@ export function ChatScreen(props: any) {
     await ensureConversation();
 
     // 若有引用貼文，附加於訊息內容末尾（Message 型別無 refPostId 欄位）
-    const messageContent = refPostId
-      ? `${text.trim()}\n\n📎 引用貼文：${refPostId}`
-      : text.trim();
+    const messageContent = refPostId ? `${text.trim()}\n\n📎 引用貼文：${refPostId}` : text.trim();
 
     await ds.sendMessage({
       conversationId: convoKey,
       senderId: auth.user.uid,
       content: messageContent,
-      type: "text",
+      type: 'text',
     });
 
-    setText("");
+    setText('');
     reloadConvo();
   };
 
@@ -163,7 +161,16 @@ export function ChatScreen(props: any) {
   }
 
   if (convoLoading) return <LoadingState title="對話" subtitle="載入中..." rows={2} />;
-  if (convoError) return <ErrorState title="對話" subtitle="讀取對話失敗" hint={convoError} actionText="重試" onAction={reloadConvo} />;
+  if (convoError)
+    return (
+      <ErrorState
+        title="對話"
+        subtitle="讀取對話失敗"
+        hint={convoError}
+        actionText="重試"
+        onAction={reloadConvo}
+      />
+    );
 
   return (
     <Screen>
@@ -175,8 +182,17 @@ export function ChatScreen(props: any) {
           contentContainerStyle={{ padding: 16, paddingBottom: 80, gap: 8 }}
         >
           {refPostId ? (
-            <View style={{ padding: 10, borderRadius: theme.radius.md, backgroundColor: theme.colors.accentSoft, marginBottom: 8 }}>
-              <Text style={{ color: theme.colors.accent, fontSize: 12 }}>引用貼文：{refPostId}</Text>
+            <View
+              style={{
+                padding: 10,
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.accentSoft,
+                marginBottom: 8,
+              }}
+            >
+              <Text style={{ color: theme.colors.accent, fontSize: 12 }}>
+                引用貼文：{refPostId}
+              </Text>
             </View>
           ) : null}
 
@@ -185,17 +201,24 @@ export function ChatScreen(props: any) {
 
           {messages.map((m) => {
             const mine = m.senderId === auth.user?.uid;
-            const senderName = mine ? "我" : (userNames[m.senderId] ?? m.senderId.slice(0, 8));
+            const senderName = mine ? '我' : (userNames[m.senderId] ?? m.senderId.slice(0, 8));
             return (
               <View
                 key={m.id}
                 style={{
-                  alignSelf: mine ? "flex-end" : "flex-start",
-                  maxWidth: "80%",
+                  alignSelf: mine ? 'flex-end' : 'flex-start',
+                  maxWidth: '80%',
                 }}
               >
                 {!mine && (
-                  <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 4, marginLeft: 4 }}>
+                  <Text
+                    style={{
+                      color: theme.colors.muted,
+                      fontSize: 11,
+                      marginBottom: 4,
+                      marginLeft: 4,
+                    }}
+                  >
                     {senderName}
                   </Text>
                 )}
@@ -210,13 +233,15 @@ export function ChatScreen(props: any) {
                     borderColor: theme.colors.border,
                   }}
                 >
-                  <Text style={{ color: mine ? "#fff" : theme.colors.text, lineHeight: 20 }}>{m.content ?? m.text}</Text>
+                  <Text style={{ color: mine ? '#fff' : theme.colors.text, lineHeight: 20 }}>
+                    {m.content ?? m.text}
+                  </Text>
                 </View>
               </View>
             );
           })}
           {messages.length === 0 && !msgLoading ? (
-            <View style={{ alignItems: "center", paddingVertical: 40, gap: 8 }}>
+            <View style={{ alignItems: 'center', paddingVertical: 40, gap: 8 }}>
               <Ionicons name="chatbubble-outline" size={36} color={theme.colors.muted} />
               <Text style={{ color: theme.colors.muted }}>尚無訊息，發送第一則訊息開始對話</Text>
             </View>
@@ -226,7 +251,7 @@ export function ChatScreen(props: any) {
         {/* 輸入列 */}
         <View
           style={{
-            position: "absolute",
+            position: 'absolute',
             bottom: 0,
             left: 0,
             right: 0,
@@ -235,8 +260,8 @@ export function ChatScreen(props: any) {
             backgroundColor: theme.colors.bg,
             borderTopWidth: 1,
             borderTopColor: theme.colors.border,
-            flexDirection: "row",
-            alignItems: "center",
+            flexDirection: 'row',
+            alignItems: 'center',
             gap: 10,
           }}
         >
@@ -268,12 +293,12 @@ export function ChatScreen(props: any) {
               height: 44,
               borderRadius: 22,
               backgroundColor: text.trim() ? theme.colors.accent : theme.colors.surface2,
-              alignItems: "center",
-              justifyContent: "center",
+              alignItems: 'center',
+              justifyContent: 'center',
               opacity: pressed ? 0.8 : 1,
             })}
           >
-            <Ionicons name="send" size={20} color={text.trim() ? "#fff" : theme.colors.muted} />
+            <Ionicons name="send" size={20} color={text.trim() ? '#fff' : theme.colors.muted} />
           </Pressable>
         </View>
       </View>

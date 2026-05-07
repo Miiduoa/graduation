@@ -2,7 +2,7 @@
 /**
  * Firebase Performance Monitoring Service
  * 效能監控服務
- * 
+ *
  * 功能：
  * - 自動追蹤網路請求效能
  * - 自訂追蹤（Screen render、Data fetch 等）
@@ -10,8 +10,8 @@
  * - 效能資料分析
  */
 
-import React from "react";
-import { Platform } from "react-native";
+import React from 'react';
+import { Platform } from 'react-native';
 
 // Performance trace interface
 interface PerformanceTrace {
@@ -47,7 +47,7 @@ class MockTrace implements PerformanceTrace {
     if (this.stopped) return;
     this.stopped = true;
     const duration = Date.now() - this.startTime;
-    
+
     if (__DEV__) {
       console.log(`[Perf] Trace stopped: ${this.name} (${duration}ms)`);
       if (this.attributes.size > 0) {
@@ -109,7 +109,7 @@ class MockHttpMetric implements HttpMetric {
   private responseCode: number = 0;
   private requestSize: number = 0;
   private responseSize: number = 0;
-  private contentType: string = "";
+  private contentType: string = '';
   private attributes: Map<string, string> = new Map();
 
   constructor(url: string, method: string) {
@@ -143,7 +143,7 @@ class MockHttpMetric implements HttpMetric {
 
   async stop(): Promise<void> {
     const duration = Date.now() - this.startTime;
-    
+
     if (__DEV__) {
       console.log(`[Perf] HTTP: ${this.method} ${this.url}`);
       console.log(`[Perf]   Status: ${this.responseCode}, Duration: ${duration}ms`);
@@ -214,23 +214,21 @@ class PerformanceDataStore {
   }
 
   getAverageTraceDuration(traceName: string): number {
-    const matching = this.traces.filter(t => t.name === traceName);
+    const matching = this.traces.filter((t) => t.name === traceName);
     if (matching.length === 0) return 0;
     return matching.reduce((sum, t) => sum + t.duration, 0) / matching.length;
   }
 
   getSlowestTraces(limit: number = 10): TraceData[] {
-    return [...this.traces]
-      .sort((a, b) => b.duration - a.duration)
-      .slice(0, limit);
+    return [...this.traces].sort((a, b) => b.duration - a.duration).slice(0, limit);
   }
 
   getSlowHttpRequests(thresholdMs: number = 1000): HttpMetricData[] {
-    return this.httpMetrics.filter(m => m.duration > thresholdMs);
+    return this.httpMetrics.filter((m) => m.duration > thresholdMs);
   }
 
   getErrorHttpRequests(): HttpMetricData[] {
-    return this.httpMetrics.filter(m => m.responseCode >= 400);
+    return this.httpMetrics.filter((m) => m.responseCode >= 400);
   }
 
   clear(): void {
@@ -240,14 +238,14 @@ class PerformanceDataStore {
 
   getReport(): PerformanceReport {
     const tracesByName = new Map<string, TraceData[]>();
-    this.traces.forEach(t => {
+    this.traces.forEach((t) => {
       const existing = tracesByName.get(t.name) ?? [];
       existing.push(t);
       tracesByName.set(t.name, existing);
     });
 
     const traceStats = Array.from(tracesByName.entries()).map(([name, traces]) => {
-      const durations = traces.map(t => t.duration);
+      const durations = traces.map((t) => t.duration);
       return {
         name,
         count: traces.length,
@@ -260,13 +258,15 @@ class PerformanceDataStore {
 
     const httpStats = {
       totalRequests: this.httpMetrics.length,
-      avgDuration: this.httpMetrics.length > 0
-        ? this.httpMetrics.reduce((sum, m) => sum + m.duration, 0) / this.httpMetrics.length
-        : 0,
-      errorRate: this.httpMetrics.length > 0
-        ? this.httpMetrics.filter(m => m.responseCode >= 400).length / this.httpMetrics.length
-        : 0,
-      slowRequests: this.httpMetrics.filter(m => m.duration > 1000).length,
+      avgDuration:
+        this.httpMetrics.length > 0
+          ? this.httpMetrics.reduce((sum, m) => sum + m.duration, 0) / this.httpMetrics.length
+          : 0,
+      errorRate:
+        this.httpMetrics.length > 0
+          ? this.httpMetrics.filter((m) => m.responseCode >= 400).length / this.httpMetrics.length
+          : 0,
+      slowRequests: this.httpMetrics.filter((m) => m.duration > 1000).length,
     };
 
     return {
@@ -351,10 +351,10 @@ class PerformanceService {
   async measureAsync<T>(
     traceName: string,
     fn: () => Promise<T>,
-    attributes?: Record<string, string>
+    attributes?: Record<string, string>,
   ): Promise<T> {
     const trace = this.startTrace(traceName);
-    
+
     if (attributes) {
       Object.entries(attributes).forEach(([key, value]) => {
         trace.putAttribute(key, value);
@@ -363,11 +363,11 @@ class PerformanceService {
 
     try {
       const result = await fn();
-      trace.putAttribute("success", "true");
+      trace.putAttribute('success', 'true');
       return result;
     } catch (error) {
-      trace.putAttribute("success", "false");
-      trace.putAttribute("error", String(error));
+      trace.putAttribute('success', 'false');
+      trace.putAttribute('error', String(error));
       throw error;
     } finally {
       trace.stop();
@@ -377,13 +377,9 @@ class PerformanceService {
   /**
    * Measure sync function execution time
    */
-  measure<T>(
-    traceName: string,
-    fn: () => T,
-    attributes?: Record<string, string>
-  ): T {
+  measure<T>(traceName: string, fn: () => T, attributes?: Record<string, string>): T {
     const trace = this.startTrace(traceName);
-    
+
     if (attributes) {
       Object.entries(attributes).forEach(([key, value]) => {
         trace.putAttribute(key, value);
@@ -392,11 +388,11 @@ class PerformanceService {
 
     try {
       const result = fn();
-      trace.putAttribute("success", "true");
+      trace.putAttribute('success', 'true');
       return result;
     } catch (error) {
-      trace.putAttribute("success", "false");
-      trace.putAttribute("error", String(error));
+      trace.putAttribute('success', 'false');
+      trace.putAttribute('error', String(error));
       throw error;
     } finally {
       trace.stop();
@@ -424,38 +420,38 @@ export const performance = new PerformanceService();
 // Predefined trace names
 export const TraceNames = {
   // Screen rendering
-  SCREEN_RENDER_ANNOUNCEMENTS: "screen_render_announcements",
-  SCREEN_RENDER_EVENTS: "screen_render_events",
-  SCREEN_RENDER_MAP: "screen_render_map",
-  SCREEN_RENDER_CAFETERIA: "screen_render_cafeteria",
-  SCREEN_RENDER_ME: "screen_render_me",
-  
+  SCREEN_RENDER_ANNOUNCEMENTS: 'screen_render_announcements',
+  SCREEN_RENDER_EVENTS: 'screen_render_events',
+  SCREEN_RENDER_MAP: 'screen_render_map',
+  SCREEN_RENDER_CAFETERIA: 'screen_render_cafeteria',
+  SCREEN_RENDER_ME: 'screen_render_me',
+
   // Data fetching
-  FETCH_ANNOUNCEMENTS: "fetch_announcements",
-  FETCH_EVENTS: "fetch_events",
-  FETCH_POIS: "fetch_pois",
-  FETCH_MENUS: "fetch_menus",
-  FETCH_USER_PROFILE: "fetch_user_profile",
-  FETCH_GROUPS: "fetch_groups",
-  FETCH_GRADES: "fetch_grades",
-  
+  FETCH_ANNOUNCEMENTS: 'fetch_announcements',
+  FETCH_EVENTS: 'fetch_events',
+  FETCH_POIS: 'fetch_pois',
+  FETCH_MENUS: 'fetch_menus',
+  FETCH_USER_PROFILE: 'fetch_user_profile',
+  FETCH_GROUPS: 'fetch_groups',
+  FETCH_GRADES: 'fetch_grades',
+
   // User actions
-  ACTION_LOGIN: "action_login",
-  ACTION_REGISTER: "action_register",
-  ACTION_LOGOUT: "action_logout",
-  ACTION_SEARCH: "action_search",
-  ACTION_FAVORITE: "action_favorite",
-  ACTION_REGISTER_EVENT: "action_register_event",
-  
+  ACTION_LOGIN: 'action_login',
+  ACTION_REGISTER: 'action_register',
+  ACTION_LOGOUT: 'action_logout',
+  ACTION_SEARCH: 'action_search',
+  ACTION_FAVORITE: 'action_favorite',
+  ACTION_REGISTER_EVENT: 'action_register_event',
+
   // Features
-  FEATURE_AI_CHAT: "feature_ai_chat",
-  FEATURE_QR_SCAN: "feature_qr_scan",
-  FEATURE_AR_NAVIGATION: "feature_ar_navigation",
-  
+  FEATURE_AI_CHAT: 'feature_ai_chat',
+  FEATURE_QR_SCAN: 'feature_qr_scan',
+  FEATURE_AR_NAVIGATION: 'feature_ar_navigation',
+
   // App lifecycle
-  APP_STARTUP: "app_startup",
-  APP_COLD_START: "app_cold_start",
-  APP_WARM_START: "app_warm_start",
+  APP_STARTUP: 'app_startup',
+  APP_COLD_START: 'app_cold_start',
+  APP_WARM_START: 'app_warm_start',
 } as const;
 
 // Performance hooks for React components
@@ -487,15 +483,15 @@ export function usePerformanceTrace(traceName: string, deps: any[] = []) {
 // Screen render performance HOC
 export function withScreenPerformance<P extends object>(
   WrappedComponent: React.ComponentType<P>,
-  screenName: string
+  screenName: string,
 ): React.ComponentType<P> {
   return function PerformanceTrackedComponent(props: P) {
     const trace = performance.startTrace(`screen_render_${screenName}`);
-    trace.putAttribute("platform", Platform.OS);
-    
+    trace.putAttribute('platform', Platform.OS);
+
     // Stop trace after render
     setTimeout(() => trace.stop(), 0);
-    
+
     return React.createElement(WrappedComponent, props);
   };
 }
@@ -503,26 +499,22 @@ export function withScreenPerformance<P extends object>(
 // Fetch wrapper with performance tracking
 export async function fetchWithPerformance(
   url: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<Response> {
-  const httpMetric = performance.newHttpMetric(url, options.method ?? "GET");
-  
+  const httpMetric = performance.newHttpMetric(url, options.method ?? 'GET');
+
   if (options.body) {
-    httpMetric.setRequestPayloadSize(
-      typeof options.body === "string" ? options.body.length : 0
-    );
+    httpMetric.setRequestPayloadSize(typeof options.body === 'string' ? options.body.length : 0);
   }
 
   await httpMetric.start();
 
   try {
     const response = await fetch(url, options);
-    
+
     httpMetric.setHttpResponseCode(response.status);
-    httpMetric.setResponseContentType(
-      response.headers.get("content-type") ?? "unknown"
-    );
-    
+    httpMetric.setResponseContentType(response.headers.get('content-type') ?? 'unknown');
+
     // Clone response to read size
     const clone = response.clone();
     const text = await clone.text();
@@ -532,7 +524,7 @@ export async function fetchWithPerformance(
     return response;
   } catch (error) {
     httpMetric.setHttpResponseCode(0);
-    httpMetric.putAttribute("error", String(error));
+    httpMetric.putAttribute('error', String(error));
     await httpMetric.stop();
     throw error;
   }

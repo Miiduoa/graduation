@@ -1,9 +1,9 @@
-import { getDataSource } from "../data/source";
-import { getCacheSize } from "../data/cachedSource";
+import { getDataSource } from '../data/source';
+import { getCacheSize } from '../data/cachedSource';
 
 export type CacheWarmingConfig = {
   schoolId: string;
-  priority?: "high" | "normal" | "low";
+  priority?: 'high' | 'normal' | 'low';
   maxConcurrent?: number;
   onProgress?: (completed: number, total: number) => void;
   onComplete?: () => void;
@@ -17,26 +17,16 @@ export type CacheWarmingResult = {
   duration: number;
 };
 
-const HIGH_PRIORITY_RESOURCES = [
-  "announcements",
-  "events",
-  "menu",
-];
+const HIGH_PRIORITY_RESOURCES = ['announcements', 'events', 'menu'];
 
-const NORMAL_PRIORITY_RESOURCES = [
-  "pois",
-  "courses",
-];
+const NORMAL_PRIORITY_RESOURCES = ['pois', 'courses'];
 
-const LOW_PRIORITY_RESOURCES = [
-  "clubs",
-  "library",
-];
+const LOW_PRIORITY_RESOURCES = ['clubs', 'library'];
 
 export async function warmCache(config: CacheWarmingConfig): Promise<CacheWarmingResult> {
   const {
     schoolId,
-    priority = "normal",
+    priority = 'normal',
     maxConcurrent = 3,
     onProgress,
     onComplete,
@@ -49,14 +39,18 @@ export async function warmCache(config: CacheWarmingConfig): Promise<CacheWarmin
 
   let resources: string[];
   switch (priority) {
-    case "high":
+    case 'high':
       resources = HIGH_PRIORITY_RESOURCES;
       break;
-    case "normal":
+    case 'normal':
       resources = [...HIGH_PRIORITY_RESOURCES, ...NORMAL_PRIORITY_RESOURCES];
       break;
-    case "low":
-      resources = [...HIGH_PRIORITY_RESOURCES, ...NORMAL_PRIORITY_RESOURCES, ...LOW_PRIORITY_RESOURCES];
+    case 'low':
+      resources = [
+        ...HIGH_PRIORITY_RESOURCES,
+        ...NORMAL_PRIORITY_RESOURCES,
+        ...LOW_PRIORITY_RESOURCES,
+      ];
       break;
   }
 
@@ -67,19 +61,19 @@ export async function warmCache(config: CacheWarmingConfig): Promise<CacheWarmin
   const fetchResource = async (resource: string): Promise<void> => {
     try {
       switch (resource) {
-        case "announcements":
+        case 'announcements':
           await ds.listAnnouncements(schoolId);
           break;
-        case "events":
+        case 'events':
           await ds.listEvents(schoolId);
           break;
-        case "menu":
+        case 'menu':
           await ds.listMenus(schoolId);
           break;
-        case "pois":
+        case 'pois':
           await ds.listPois(schoolId);
           break;
-        case "courses":
+        case 'courses':
           await ds.listCourses(schoolId);
           break;
         default:
@@ -127,7 +121,7 @@ export async function getCacheStatus(): Promise<{
   lastWarmedAt?: number;
 }> {
   const cacheInfo = await getCacheSize();
-  
+
   return {
     size: cacheInfo.approximateBytes,
     count: cacheInfo.count,
@@ -150,10 +144,10 @@ export async function warmCacheIfNeeded(schoolId: string): Promise<CacheWarmingR
   }
 
   isWarmingInProgress = true;
-  
+
   warmingPromise = warmCache({
     schoolId,
-    priority: "high",
+    priority: 'high',
     onComplete: () => {
       isWarmingInProgress = false;
       warmingPromise = null;

@@ -319,7 +319,17 @@ jobs:
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [security-gates, lint-and-typecheck, test-mobile, test-web, test-functions, test-rules, build-mobile, build-web]
+    needs:
+      [
+        security-gates,
+        lint-and-typecheck,
+        test-mobile,
+        test-web,
+        test-functions,
+        test-rules,
+        build-mobile,
+        build-web,
+      ]
     if: always()
     steps:
       - name: Check job results

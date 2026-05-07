@@ -1,7 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import React, { useState, useMemo } from "react";
-import { ScrollView, Text, View, TextInput, Pressable, Alert, KeyboardAvoidingView, Platform } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import React, { useState, useMemo } from 'react';
+import {
+  ScrollView,
+  Text,
+  View,
+  TextInput,
+  Pressable,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   Screen,
   AnimatedCard,
@@ -10,37 +19,44 @@ import {
   Pill,
   SectionTitle,
   SegmentedControl,
-} from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
-import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
-import { getDataSource, hasDataSource } from "../data";
+} from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { getDataSource, hasDataSource } from '../data';
 
-type ItemType = "lost" | "found";
-type ItemCategory = "electronics" | "cards" | "clothing" | "accessories" | "books" | "keys" | "other";
+type ItemType = 'lost' | 'found';
+type ItemCategory =
+  | 'electronics'
+  | 'cards'
+  | 'clothing'
+  | 'accessories'
+  | 'books'
+  | 'keys'
+  | 'other';
 
 const CATEGORY_INFO: Record<ItemCategory, { label: string; icon: string; color: string }> = {
-  electronics: { label: "電子產品", icon: "phone-portrait", color: "#3B82F6" },
-  cards: { label: "證件/卡片", icon: "card", color: "#8B5CF6" },
-  clothing: { label: "衣物", icon: "shirt", color: "#EC4899" },
-  accessories: { label: "配件", icon: "glasses", color: "#F59E0B" },
-  books: { label: "書籍", icon: "book", color: "#10B981" },
-  keys: { label: "鑰匙", icon: "key", color: "#6366F1" },
-  other: { label: "其他", icon: "help-circle", color: "#6B7280" },
+  electronics: { label: '電子產品', icon: 'phone-portrait', color: '#3B82F6' },
+  cards: { label: '證件/卡片', icon: 'card', color: '#8B5CF6' },
+  clothing: { label: '衣物', icon: 'shirt', color: '#EC4899' },
+  accessories: { label: '配件', icon: 'glasses', color: '#F59E0B' },
+  books: { label: '書籍', icon: 'book', color: '#10B981' },
+  keys: { label: '鑰匙', icon: 'key', color: '#6366F1' },
+  other: { label: '其他', icon: 'help-circle', color: '#6B7280' },
 };
 
 const COMMON_LOCATIONS = [
-  "圖書館",
-  "學生餐廳",
-  "體育館",
-  "工程館",
-  "文學院",
-  "理學院",
-  "行政大樓",
-  "宿舍區",
-  "停車場",
-  "公車站",
+  '圖書館',
+  '學生餐廳',
+  '體育館',
+  '工程館',
+  '文學院',
+  '理學院',
+  '行政大樓',
+  '宿舍區',
+  '停車場',
+  '公車站',
 ];
 
 function InputField({
@@ -64,8 +80,8 @@ function InputField({
 }) {
   return (
     <View style={{ marginBottom: 16 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 6 }}>
-        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>{label}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>{label}</Text>
         {required && <Text style={{ color: theme.colors.danger, marginLeft: 4 }}>*</Text>}
       </View>
       <TextInput
@@ -75,7 +91,7 @@ function InputField({
         placeholderTextColor={theme.colors.muted}
         multiline={multiline}
         maxLength={maxLength}
-        textAlignVertical={multiline ? "top" : "center"}
+        textAlignVertical={multiline ? 'top' : 'center'}
         style={{
           paddingVertical: multiline ? 12 : 14,
           paddingHorizontal: 14,
@@ -92,7 +108,7 @@ function InputField({
         <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>{hint}</Text>
       )}
       {maxLength && (
-        <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4, textAlign: "right" }}>
+        <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4, textAlign: 'right' }}>
           {value.length}/{maxLength}
         </Text>
       )}
@@ -104,25 +120,25 @@ export function LostFoundPostScreen(props: any) {
   const nav = props?.navigation;
   const route = props?.route;
   const editId = route?.params?.id;
-  const initialType = route?.params?.type ?? "lost";
+  const initialType = route?.params?.type ?? 'lost';
   const isEditing = !!editId;
 
   const auth = useAuth();
   const { school } = useSchool();
 
   const [type, setType] = useState<ItemType>(initialType);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [category, setCategory] = useState<ItemCategory | null>(null);
-  const [location, setLocation] = useState("");
-  const [customLocation, setCustomLocation] = useState("");
-  const [dateStr, setDateStr] = useState(new Date().toISOString().split("T")[0]);
-  const [contactInfo, setContactInfo] = useState("");
+  const [location, setLocation] = useState('');
+  const [customLocation, setCustomLocation] = useState('');
+  const [dateStr, setDateStr] = useState(new Date().toISOString().split('T')[0]);
+  const [contactInfo, setContactInfo] = useState('');
   const [characteristics, setCharacteristics] = useState<string[]>([]);
-  const [newCharacteristic, setNewCharacteristic] = useState("");
+  const [newCharacteristic, setNewCharacteristic] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const finalLocation = location === "custom" ? customLocation : location;
+  const finalLocation = location === 'custom' ? customLocation : location;
 
   const isValid = useMemo(() => {
     return (
@@ -137,11 +153,11 @@ export function LostFoundPostScreen(props: any) {
   const handleAddCharacteristic = () => {
     if (!newCharacteristic.trim()) return;
     if (characteristics.length >= 6) {
-      Alert.alert("上限", "最多只能新增 6 個特徵");
+      Alert.alert('上限', '最多只能新增 6 個特徵');
       return;
     }
     setCharacteristics([...characteristics, newCharacteristic.trim()]);
-    setNewCharacteristic("");
+    setNewCharacteristic('');
   };
 
   const handleRemoveCharacteristic = (idx: number) => {
@@ -150,12 +166,12 @@ export function LostFoundPostScreen(props: any) {
 
   const handleSubmit = async () => {
     if (!auth.user) {
-      Alert.alert("請先登入", "需要登入才能發布失物招領");
+      Alert.alert('請先登入', '需要登入才能發布失物招領');
       return;
     }
 
     if (!isValid) {
-      Alert.alert("資料不完整", "請填寫所有必填欄位");
+      Alert.alert('資料不完整', '請填寫所有必填欄位');
       return;
     }
 
@@ -186,19 +202,19 @@ export function LostFoundPostScreen(props: any) {
       // DataSource 未就緒時仍允許導覽回上頁（示範模式）
 
       Alert.alert(
-        isEditing ? "更新成功" : "發布成功",
-        type === "lost"
-          ? "您的遺失物品資訊已發布，希望能盡快找回！"
-          : "感謝您的熱心幫助，願物品早日回到主人身邊！",
+        isEditing ? '更新成功' : '發布成功',
+        type === 'lost'
+          ? '您的遺失物品資訊已發布，希望能盡快找回！'
+          : '感謝您的熱心幫助，願物品早日回到主人身邊！',
         [
           {
-            text: "確定",
+            text: '確定',
             onPress: () => nav?.goBack?.(),
           },
-        ]
+        ],
       );
     } catch (error: any) {
-      Alert.alert("發布失敗", error?.message ?? "請稍後再試");
+      Alert.alert('發布失敗', error?.message ?? '請稍後再試');
     } finally {
       setSubmitting(false);
     }
@@ -211,7 +227,7 @@ export function LostFoundPostScreen(props: any) {
           <Text style={{ color: theme.colors.muted, marginBottom: 16 }}>
             登入後才能發布失物招領資訊，以便他人聯繫您。
           </Text>
-          <Button text="前往登入" kind="primary" onPress={() => nav?.navigate?.("MeHome")} />
+          <Button text="前往登入" kind="primary" onPress={() => nav?.navigate?.('MeHome')} />
         </AnimatedCard>
       </Screen>
     );
@@ -221,7 +237,7 @@ export function LostFoundPostScreen(props: any) {
     <Screen>
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={100}
       >
         <ScrollView
@@ -230,14 +246,14 @@ export function LostFoundPostScreen(props: any) {
           showsVerticalScrollIndicator={false}
         >
           <AnimatedCard
-            title={isEditing ? "編輯失物招領" : "發布失物招領"}
-            subtitle={type === "lost" ? "告訴大家您遺失了什麼" : "告訴大家您拾獲了什麼"}
+            title={isEditing ? '編輯失物招領' : '發布失物招領'}
+            subtitle={type === 'lost' ? '告訴大家您遺失了什麼' : '告訴大家您拾獲了什麼'}
           >
             <View style={{ marginBottom: 20 }}>
               <SegmentedControl
                 options={[
-                  { key: "lost", label: "我遺失了" },
-                  { key: "found", label: "我拾獲了" },
+                  { key: 'lost', label: '我遺失了' },
+                  { key: 'found', label: '我拾獲了' },
                 ]}
                 selected={type}
                 onChange={(k) => setType(k as ItemType)}
@@ -248,22 +264,23 @@ export function LostFoundPostScreen(props: any) {
               style={{
                 padding: 14,
                 borderRadius: theme.radius.md,
-                backgroundColor: type === "lost" ? `${theme.colors.danger}15` : `${theme.colors.success}15`,
-                flexDirection: "row",
-                alignItems: "center",
+                backgroundColor:
+                  type === 'lost' ? `${theme.colors.danger}15` : `${theme.colors.success}15`,
+                flexDirection: 'row',
+                alignItems: 'center',
                 gap: 10,
                 marginBottom: 20,
               }}
             >
               <Ionicons
-                name={type === "lost" ? "search" : "gift"}
+                name={type === 'lost' ? 'search' : 'gift'}
                 size={22}
-                color={type === "lost" ? theme.colors.danger : theme.colors.success}
+                color={type === 'lost' ? theme.colors.danger : theme.colors.success}
               />
               <Text style={{ color: theme.colors.text, fontSize: 13, flex: 1 }}>
-                {type === "lost"
-                  ? "詳細描述您遺失的物品，有助於拾獲者辨認"
-                  : "詳細描述您拾獲的物品，但請保留部分特徵以便確認失主身份"}
+                {type === 'lost'
+                  ? '詳細描述您遺失的物品，有助於拾獲者辨認'
+                  : '詳細描述您拾獲的物品，但請保留部分特徵以便確認失主身份'}
               </Text>
             </View>
 
@@ -278,18 +295,20 @@ export function LostFoundPostScreen(props: any) {
             />
 
             <View style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>物品類別</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
+                  物品類別
+                </Text>
                 <Text style={{ color: theme.colors.danger, marginLeft: 4 }}>*</Text>
               </View>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                 {Object.entries(CATEGORY_INFO).map(([key, info]) => (
                   <Pressable
                     key={key}
                     onPress={() => setCategory(key as ItemCategory)}
                     style={{
-                      flexDirection: "row",
-                      alignItems: "center",
+                      flexDirection: 'row',
+                      alignItems: 'center',
                       paddingHorizontal: 14,
                       paddingVertical: 10,
                       borderRadius: theme.radius.md,
@@ -307,7 +326,7 @@ export function LostFoundPostScreen(props: any) {
                     <Text
                       style={{
                         color: category === key ? info.color : theme.colors.muted,
-                        fontWeight: "600",
+                        fontWeight: '600',
                       }}
                     >
                       {info.label}
@@ -322,9 +341,9 @@ export function LostFoundPostScreen(props: any) {
               value={description}
               onChange={setDescription}
               placeholder={
-                type === "lost"
-                  ? "描述物品的外觀、特徵、遺失情況等。越詳細越有助於找回。"
-                  : "描述物品的外觀（請保留部分特徵不公開，以便確認失主）"
+                type === 'lost'
+                  ? '描述物品的外觀、特徵、遺失情況等。越詳細越有助於找回。'
+                  : '描述物品的外觀（請保留部分特徵不公開，以便確認失主）'
               }
               multiline
               maxLength={500}
@@ -332,12 +351,16 @@ export function LostFoundPostScreen(props: any) {
             />
 
             <View style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>物品特徵</Text>
-                <Text style={{ color: theme.colors.muted, marginLeft: 8, fontSize: 12 }}>（選填，最多 6 個）</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
+                  物品特徵
+                </Text>
+                <Text style={{ color: theme.colors.muted, marginLeft: 8, fontSize: 12 }}>
+                  （選填，最多 6 個）
+                </Text>
               </View>
 
-              <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
                 <TextInput
                   value={newCharacteristic}
                   onChangeText={setNewCharacteristic}
@@ -362,8 +385,8 @@ export function LostFoundPostScreen(props: any) {
                     width: 48,
                     borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.accent,
-                    alignItems: "center",
-                    justifyContent: "center",
+                    alignItems: 'center',
+                    justifyContent: 'center',
                   }}
                 >
                   <Ionicons name="add" size={24} color="#fff" />
@@ -371,14 +394,14 @@ export function LostFoundPostScreen(props: any) {
               </View>
 
               {characteristics.length > 0 && (
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   {characteristics.map((char, idx) => (
                     <Pressable
                       key={idx}
                       onPress={() => handleRemoveCharacteristic(idx)}
                       style={{
-                        flexDirection: "row",
-                        alignItems: "center",
+                        flexDirection: 'row',
+                        alignItems: 'center',
                         paddingLeft: 12,
                         paddingRight: 8,
                         paddingVertical: 6,
@@ -396,15 +419,19 @@ export function LostFoundPostScreen(props: any) {
             </View>
 
             <View style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>
-                  {type === "lost" ? "遺失地點" : "拾獲地點"}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
+                  {type === 'lost' ? '遺失地點' : '拾獲地點'}
                 </Text>
                 <Text style={{ color: theme.colors.danger, marginLeft: 4 }}>*</Text>
               </View>
 
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-                <View style={{ flexDirection: "row", gap: 8 }}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ marginBottom: 10 }}
+              >
+                <View style={{ flexDirection: 'row', gap: 8 }}>
                   {COMMON_LOCATIONS.map((loc) => (
                     <Pressable
                       key={loc}
@@ -413,7 +440,8 @@ export function LostFoundPostScreen(props: any) {
                         paddingHorizontal: 14,
                         paddingVertical: 8,
                         borderRadius: 999,
-                        backgroundColor: location === loc ? theme.colors.accentSoft : theme.colors.surface2,
+                        backgroundColor:
+                          location === loc ? theme.colors.accentSoft : theme.colors.surface2,
                         borderWidth: 1,
                         borderColor: location === loc ? theme.colors.accent : theme.colors.border,
                       }}
@@ -421,7 +449,7 @@ export function LostFoundPostScreen(props: any) {
                       <Text
                         style={{
                           color: location === loc ? theme.colors.accent : theme.colors.muted,
-                          fontWeight: "600",
+                          fontWeight: '600',
                           fontSize: 13,
                         }}
                       >
@@ -430,20 +458,22 @@ export function LostFoundPostScreen(props: any) {
                     </Pressable>
                   ))}
                   <Pressable
-                    onPress={() => setLocation("custom")}
+                    onPress={() => setLocation('custom')}
                     style={{
                       paddingHorizontal: 14,
                       paddingVertical: 8,
                       borderRadius: 999,
-                      backgroundColor: location === "custom" ? theme.colors.accentSoft : theme.colors.surface2,
+                      backgroundColor:
+                        location === 'custom' ? theme.colors.accentSoft : theme.colors.surface2,
                       borderWidth: 1,
-                      borderColor: location === "custom" ? theme.colors.accent : theme.colors.border,
+                      borderColor:
+                        location === 'custom' ? theme.colors.accent : theme.colors.border,
                     }}
                   >
                     <Text
                       style={{
-                        color: location === "custom" ? theme.colors.accent : theme.colors.muted,
-                        fontWeight: "600",
+                        color: location === 'custom' ? theme.colors.accent : theme.colors.muted,
+                        fontWeight: '600',
                         fontSize: 13,
                       }}
                     >
@@ -453,7 +483,7 @@ export function LostFoundPostScreen(props: any) {
                 </View>
               </ScrollView>
 
-              {location === "custom" && (
+              {location === 'custom' && (
                 <TextInput
                   value={customLocation}
                   onChangeText={setCustomLocation}
@@ -474,9 +504,9 @@ export function LostFoundPostScreen(props: any) {
             </View>
 
             <View style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>
-                  {type === "lost" ? "遺失日期" : "拾獲日期"}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
+                  {type === 'lost' ? '遺失日期' : '拾獲日期'}
                 </Text>
                 <Text style={{ color: theme.colors.danger, marginLeft: 4 }}>*</Text>
               </View>
@@ -520,24 +550,32 @@ export function LostFoundPostScreen(props: any) {
                 borderColor: theme.colors.border,
               }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                <Pill text={type === "lost" ? "遺失" : "拾獲"} kind={type === "lost" ? "accent" : "default"} />
+              <View
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}
+              >
+                <Pill
+                  text={type === 'lost' ? '遺失' : '拾獲'}
+                  kind={type === 'lost' ? 'accent' : 'default'}
+                />
                 {category && <Pill text={CATEGORY_INFO[category].label} />}
               </View>
-              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
-                {title || "(尚未填寫標題)"}
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
+                {title || '(尚未填寫標題)'}
               </Text>
-              <Text style={{ color: theme.colors.muted, marginTop: 8, lineHeight: 20 }} numberOfLines={3}>
-                {description || "(尚未填寫描述)"}
+              <Text
+                style={{ color: theme.colors.muted, marginTop: 8, lineHeight: 20 }}
+                numberOfLines={3}
+              >
+                {description || '(尚未填寫描述)'}
               </Text>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 12 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Ionicons name="location-outline" size={14} color={theme.colors.muted} />
                   <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                    {finalLocation || "(未選擇)"}
+                    {finalLocation || '(未選擇)'}
                   </Text>
                 </View>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Ionicons name="calendar-outline" size={14} color={theme.colors.muted} />
                   <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{dateStr}</Text>
                 </View>
@@ -547,7 +585,7 @@ export function LostFoundPostScreen(props: any) {
 
           <View style={{ gap: 12, marginTop: 20 }}>
             <Button
-              text={submitting ? "發布中..." : isEditing ? "更新" : "發布"}
+              text={submitting ? '發布中...' : isEditing ? '更新' : '發布'}
               kind="primary"
               onPress={handleSubmit}
               disabled={!isValid || submitting}
@@ -555,13 +593,17 @@ export function LostFoundPostScreen(props: any) {
             <Button text="取消" onPress={() => nav?.goBack?.()} disabled={submitting} />
           </View>
 
-          <View style={{ marginTop: 20, padding: 14, borderRadius: theme.radius.md, backgroundColor: theme.colors.surface2 }}>
+          <View
+            style={{
+              marginTop: 20,
+              padding: 14,
+              borderRadius: theme.radius.md,
+              backgroundColor: theme.colors.surface2,
+            }}
+          >
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              發布說明：{"\n"}
-              • 請如實描述物品，勿發布虛假資訊{"\n"}
-              • 刊登資訊將在 30 天後自動下架{"\n"}
-              • 如物品已找回，請記得更新狀態{"\n"}
-              • 交接物品時請在公共場所進行
+              發布說明：{'\n'}• 請如實描述物品，勿發布虛假資訊{'\n'}• 刊登資訊將在 30 天後自動下架
+              {'\n'}• 如物品已找回，請記得更新狀態{'\n'}• 交接物品時請在公共場所進行
             </Text>
           </View>
         </ScrollView>

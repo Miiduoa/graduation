@@ -2,26 +2,30 @@
 export function formatDateTime(input: string | number | Date | any) {
   try {
     const v: any = input as any;
-    if (v == null) return "";
+    if (v == null) return '';
 
     // Firestore Timestamp (or Timestamp-like): { seconds, nanoseconds, toDate() }
-    if (typeof v === "object") {
-      if (typeof v.toMillis === "function") {
+    if (typeof v === 'object') {
+      if (typeof v.toMillis === 'function') {
         const d = new Date(v.toMillis());
         if (!Number.isNaN(d.getTime())) return d.toLocaleString();
       }
-      if (typeof v.toDate === "function") {
+      if (typeof v.toDate === 'function') {
         const raw = v.toDate();
         // Re-wrap to avoid Hermes cross-realm Date issues
         let d: Date;
-        try { d = new Date(raw.getTime()); } catch { d = new Date(Date.parse(String(raw))); }
+        try {
+          d = new Date(raw.getTime());
+        } catch {
+          d = new Date(Date.parse(String(raw)));
+        }
         if (!Number.isNaN(d.getTime())) return d.toLocaleString();
       }
-      if (typeof v.seconds === "number") {
+      if (typeof v.seconds === 'number') {
         const d = new Date(v.seconds * 1000);
         if (!Number.isNaN(d.getTime())) return d.toLocaleString();
       }
-      if (typeof v._seconds === "number") {
+      if (typeof v._seconds === 'number') {
         const d = new Date(v._seconds * 1000);
         if (!Number.isNaN(d.getTime())) return d.toLocaleString();
       }
@@ -37,7 +41,7 @@ export function formatDateTime(input: string | number | Date | any) {
 
 export function formatDate(input: string | number | Date | any): string {
   const date = toDate(input);
-  return date ? date.toLocaleDateString("zh-TW") : "";
+  return date ? date.toLocaleDateString('zh-TW') : '';
 }
 
 function isValidDate(d: unknown): d is Date {
@@ -45,10 +49,10 @@ function isValidDate(d: unknown): d is Date {
   if (!(d instanceof Date)) return false;
   // Some mocks/serializers might carry `getTime` but not behave like real Date.
   const getTime = (d as { getTime?: unknown }).getTime;
-  if (typeof getTime !== "function") return false;
+  if (typeof getTime !== 'function') return false;
   // getTime 依賴 this 指向 Date 物件，所以要用 call 綁定。
   const t = (getTime as (this: Date) => number).call(d);
-  return typeof t === "number" && !Number.isNaN(t);
+  return typeof t === 'number' && !Number.isNaN(t);
 }
 
 export function toDate(input: any): Date | null {
@@ -56,22 +60,26 @@ export function toDate(input: any): Date | null {
     if (input == null) return null;
 
     // Firestore Timestamp — prefer toMillis() (plain number, no cross-realm risk)
-    if (typeof input.toMillis === "function") {
+    if (typeof input.toMillis === 'function') {
       const ms = input.toMillis();
-      if (typeof ms === "number" && Number.isFinite(ms)) return new Date(ms);
+      if (typeof ms === 'number' && Number.isFinite(ms)) return new Date(ms);
     }
 
     // Firestore Timestamp.toDate() — re-wrap to avoid Hermes cross-realm Date issues
-    if (typeof input.toDate === "function") {
+    if (typeof input.toDate === 'function') {
       const d = input.toDate();
-      try { return new Date(d.getTime()); } catch { /* cross-realm */ }
+      try {
+        return new Date(d.getTime());
+      } catch {
+        /* cross-realm */
+      }
       const parsed = Date.parse(String(d));
       return Number.isFinite(parsed) ? new Date(parsed) : null;
     }
 
     // Serialised Firestore Timestamp
-    if (typeof input._seconds === "number") return new Date(input._seconds * 1000);
-    if (typeof input.seconds === "number") return new Date(input.seconds * 1000);
+    if (typeof input._seconds === 'number') return new Date(input._seconds * 1000);
+    if (typeof input.seconds === 'number') return new Date(input.seconds * 1000);
 
     // String, number, or current-realm Date
     const d = input instanceof Date ? input : new Date(input);
@@ -82,10 +90,10 @@ export function toDate(input: any): Date | null {
 }
 
 export function formatRelativeTime(date?: Date | null): string {
-  if (!isValidDate(date)) return "";
+  if (!isValidDate(date)) return '';
   const now = new Date();
   const getTime = (date as { getTime?: unknown }).getTime;
-  if (typeof getTime !== "function") return "";
+  if (typeof getTime !== 'function') return '';
   const diff = (getTime as () => number).call(date) - now.getTime();
   const absDiff = Math.abs(diff);
   const isPast = diff < 0;
@@ -94,22 +102,26 @@ export function formatRelativeTime(date?: Date | null): string {
   const hours = Math.floor(absDiff / (1000 * 60 * 60));
   const days = Math.floor(absDiff / (1000 * 60 * 60 * 24));
 
-  if (minutes < 1) return isPast ? "剛剛" : "即將";
+  if (minutes < 1) return isPast ? '剛剛' : '即將';
   if (minutes < 60) return isPast ? `${minutes} 分鐘前` : `${minutes} 分鐘後`;
   if (hours < 24) return isPast ? `${hours} 小時前` : `${hours} 小時後`;
   if (days < 7) return isPast ? `${days} 天前` : `${days} 天後`;
   return date.toLocaleDateString();
 }
 
-export function formatCountdown(
-  targetDate?: Date | null
-): { days: number; hours: number; minutes: number; seconds: number; isExpired: boolean } {
+export function formatCountdown(targetDate?: Date | null): {
+  days: number;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  isExpired: boolean;
+} {
   if (!isValidDate(targetDate)) {
     return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
   }
   const now = new Date();
   const getTime = (targetDate as { getTime?: unknown }).getTime;
-  if (typeof getTime !== "function") {
+  if (typeof getTime !== 'function') {
     return { days: 0, hours: 0, minutes: 0, seconds: 0, isExpired: true };
   }
   const diff = (getTime as () => number).call(targetDate) - now.getTime();
@@ -137,8 +149,8 @@ export function isOpenNow(openTime: string, closeTime: string): boolean {
   const now = new Date();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-  const [openH, openM] = openTime.split(":").map(Number);
-  const [closeH, closeM] = closeTime.split(":").map(Number);
+  const [openH, openM] = openTime.split(':').map(Number);
+  const [closeH, closeM] = closeTime.split(':').map(Number);
 
   const openMinutes = openH * 60 + openM;
   const closeMinutes = closeH * 60 + closeM;
@@ -151,7 +163,7 @@ export function isOpenNow(openTime: string, closeTime: string): boolean {
 
 export function getTimeUntilClose(closeTime: string): number {
   const now = new Date();
-  const [closeH, closeM] = closeTime.split(":").map(Number);
+  const [closeH, closeM] = closeTime.split(':').map(Number);
   const closeDate = new Date(now);
   closeDate.setHours(closeH, closeM, 0, 0);
 
@@ -171,21 +183,24 @@ export function debounce<T extends (...args: any[]) => any>(fn: T, delay: number
 }
 
 export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 B";
+  if (bytes === 0) return '0 B';
   const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
+  const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
-export function formatPrice(amount: number | null | undefined, currencySymbol: string = "$"): string {
-  const safeAmount = typeof amount === "number" && Number.isFinite(amount) ? amount : 0;
-  return `${currencySymbol}${safeAmount.toLocaleString("zh-TW")}`;
+export function formatPrice(
+  amount: number | null | undefined,
+  currencySymbol: string = '$',
+): string {
+  const safeAmount = typeof amount === 'number' && Number.isFinite(amount) ? amount : 0;
+  return `${currencySymbol}${safeAmount.toLocaleString('zh-TW')}`;
 }
 
 export function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength - 3) + "...";
+  return text.slice(0, maxLength - 3) + '...';
 }
 
 export function generateId(): string {

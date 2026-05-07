@@ -1,6 +1,16 @@
 /* eslint-disable */
 import React, { useMemo, useState, useEffect } from 'react';
-import { ScrollView, Text, View, Pressable, Share, Alert, TextInput, Image, Linking } from 'react-native';
+import {
+  ScrollView,
+  Text,
+  View,
+  Pressable,
+  Share,
+  Alert,
+  TextInput,
+  Image,
+  Linking,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   doc,
@@ -673,7 +683,9 @@ export function MenuDetailScreen(props: any) {
                   }}
                   style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
                 >
-                  <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>查看資料來源</Text>
+                  <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
+                    查看資料來源
+                  </Text>
                 </Pressable>
               ) : null}
             </View>

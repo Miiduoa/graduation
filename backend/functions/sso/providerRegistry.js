@@ -1,32 +1,32 @@
-const saml2 = require("saml2-js");
-const xml2js = require("xml2js");
-const nodeCrypto = require("crypto");
+const saml2 = require('saml2-js');
+const xml2js = require('xml2js');
+const nodeCrypto = require('crypto');
 
 const REQUIRED_PROVIDER_FIELDS = {
-  oidc: ["clientId", "clientSecret", "authorizationEndpoint", "tokenEndpoint"],
-  cas: ["casServerUrl"],
+  oidc: ['clientId', 'clientSecret', 'authorizationEndpoint', 'tokenEndpoint'],
+  cas: ['casServerUrl'],
   saml: [
-    "samlEntryPoint",
-    "spEntityId",
-    "spPrivateKey",
-    "spCertificate",
-    "assertConsumerUrl",
-    "idpCertificate",
+    'samlEntryPoint',
+    'spEntityId',
+    'spPrivateKey',
+    'spCertificate',
+    'assertConsumerUrl',
+    'idpCertificate',
   ],
 };
 
 function hasConfigValue(value) {
-  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   return Boolean(value);
 }
 
 function normalizeSetupStatus(value, hasSsoConfig) {
-  if (value === "draft" || value === "testing" || value === "live") {
+  if (value === 'draft' || value === 'testing' || value === 'live') {
     return value;
   }
 
-  return hasSsoConfig ? "testing" : "draft";
+  return hasSsoConfig ? 'testing' : 'draft';
 }
 
 function getMissingSsoConfigFields(ssoConfig) {
@@ -35,7 +35,7 @@ function getMissingSsoConfigFields(ssoConfig) {
   }
 
   return REQUIRED_PROVIDER_FIELDS[ssoConfig.provider].filter(
-    (field) => !hasConfigValue(ssoConfig[field])
+    (field) => !hasConfigValue(ssoConfig[field]),
   );
 }
 
@@ -46,15 +46,15 @@ function evaluateSsoConfiguration(config = {}) {
   const isConfigured = Boolean(ssoConfig);
   const isEnabled = Boolean(ssoConfig?.enabled);
   const isComplete = isConfigured && missingFields.length === 0;
-  const isLoginReady = isComplete && isEnabled && setupStatus !== "draft";
-  const isProductionReady = isComplete && isEnabled && setupStatus === "live";
+  const isLoginReady = isComplete && isEnabled && setupStatus !== 'draft';
+  const isProductionReady = isComplete && isEnabled && setupStatus === 'live';
 
   if (!ssoConfig) {
     return {
       provider: null,
       setupStatus,
-      reason: "not-configured",
-      message: "SSO not configured for this school",
+      reason: 'not-configured',
+      message: 'SSO not configured for this school',
       missingFields,
       isConfigured,
       isEnabled,
@@ -68,8 +68,8 @@ function evaluateSsoConfiguration(config = {}) {
     return {
       provider: ssoConfig.provider,
       setupStatus,
-      reason: "disabled",
-      message: "SSO is disabled for this school",
+      reason: 'disabled',
+      message: 'SSO is disabled for this school',
       missingFields,
       isConfigured,
       isEnabled,
@@ -83,8 +83,8 @@ function evaluateSsoConfiguration(config = {}) {
     return {
       provider: ssoConfig.provider,
       setupStatus,
-      reason: "incomplete",
-      message: "SSO configuration is incomplete for this school",
+      reason: 'incomplete',
+      message: 'SSO configuration is incomplete for this school',
       missingFields,
       isConfigured,
       isEnabled,
@@ -94,12 +94,12 @@ function evaluateSsoConfiguration(config = {}) {
     };
   }
 
-  if (setupStatus === "draft") {
+  if (setupStatus === 'draft') {
     return {
       provider: ssoConfig.provider,
       setupStatus,
-      reason: "not-live",
-      message: "SSO is not live for this school",
+      reason: 'not-live',
+      message: 'SSO is not live for this school',
       missingFields,
       isConfigured,
       isEnabled,
@@ -109,12 +109,12 @@ function evaluateSsoConfiguration(config = {}) {
     };
   }
 
-  if (setupStatus === "testing") {
+  if (setupStatus === 'testing') {
     return {
       provider: ssoConfig.provider,
       setupStatus,
-      reason: "not-live",
-      message: "SSO is still in testing for this school",
+      reason: 'not-live',
+      message: 'SSO is still in testing for this school',
       missingFields,
       isConfigured,
       isEnabled,
@@ -127,8 +127,8 @@ function evaluateSsoConfiguration(config = {}) {
   return {
     provider: ssoConfig.provider,
     setupStatus,
-    reason: "ready",
-    message: "SSO is ready",
+    reason: 'ready',
+    message: 'SSO is ready',
     missingFields,
     isConfigured,
     isEnabled,
@@ -139,34 +139,30 @@ function evaluateSsoConfiguration(config = {}) {
 }
 
 function decodeJWT(token) {
-  const parts = token.split(".");
+  const parts = token.split('.');
   if (parts.length !== 3) {
-    throw new Error("Invalid JWT format");
+    throw new Error('Invalid JWT format');
   }
 
-  const payload = Buffer.from(parts[1], "base64url").toString("utf8");
+  const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
   return JSON.parse(payload);
 }
 
 function toBase64Url(buffer) {
-  return buffer
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+  return buffer.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
 function verifyPkceChallenge(codeVerifier, expectedCodeChallenge) {
   if (!codeVerifier || !expectedCodeChallenge) {
-    throw new Error("Missing PKCE verifier");
+    throw new Error('Missing PKCE verifier');
   }
 
   const actualChallenge = toBase64Url(
-    nodeCrypto.createHash("sha256").update(codeVerifier, "utf8").digest()
+    nodeCrypto.createHash('sha256').update(codeVerifier, 'utf8').digest(),
   );
 
   if (actualChallenge !== expectedCodeChallenge) {
-    throw new Error("PKCE validation failed");
+    throw new Error('PKCE validation failed');
   }
 }
 
@@ -178,19 +174,19 @@ async function verifyOIDC({
   expectedCodeChallenge,
   expectedNonce,
 }) {
-  const fetch = (await import("node-fetch")).default;
+  const fetch = (await import('node-fetch')).default;
 
   if (expectedCodeChallenge) {
     verifyPkceChallenge(codeVerifier, expectedCodeChallenge);
   }
 
   const tokenResponse = await fetch(ssoConfig.tokenUrl, {
-    method: "POST",
+    method: 'POST',
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+      'Content-Type': 'application/x-www-form-urlencoded',
     },
     body: new URLSearchParams({
-      grant_type: "authorization_code",
+      grant_type: 'authorization_code',
       code,
       client_id: ssoConfig.clientId,
       client_secret: ssoConfig.clientSecret,
@@ -201,8 +197,8 @@ async function verifyOIDC({
 
   if (!tokenResponse.ok) {
     const errorText = await tokenResponse.text();
-    console.error("OIDC token error:", errorText);
-    throw new Error("Failed to exchange authorization code");
+    console.error('OIDC token error:', errorText);
+    throw new Error('Failed to exchange authorization code');
   }
 
   const tokens = await tokenResponse.json();
@@ -210,7 +206,7 @@ async function verifyOIDC({
   if (tokens.id_token) {
     const decoded = decodeJWT(tokens.id_token);
     if (expectedNonce && decoded.nonce && decoded.nonce !== expectedNonce) {
-      throw new Error("OIDC nonce validation failed");
+      throw new Error('OIDC nonce validation failed');
     }
     return {
       sub: decoded.sub,
@@ -230,7 +226,7 @@ async function verifyOIDC({
   });
 
   if (!userInfoResponse.ok) {
-    throw new Error("Failed to fetch user info");
+    throw new Error('Failed to fetch user info');
   }
 
   const userInfo = await userInfoResponse.json();
@@ -246,48 +242,38 @@ async function verifyOIDC({
 }
 
 async function verifyCAS({ ticket, redirectUri, ssoConfig }) {
-  const fetch = (await import("node-fetch")).default;
+  const fetch = (await import('node-fetch')).default;
   const validateUrl =
     `${ssoConfig.casServerUrl}/serviceValidate?ticket=${ticket}` +
     `&service=${encodeURIComponent(redirectUri)}`;
 
   const response = await fetch(validateUrl);
   if (!response.ok) {
-    throw new Error("CAS ticket validation failed");
+    throw new Error('CAS ticket validation failed');
   }
 
   const xmlText = await response.text();
   const parser = new xml2js.Parser({ explicitArray: false });
   const result = await parser.parseStringPromise(xmlText);
-  const serviceResponse = result["cas:serviceResponse"];
+  const serviceResponse = result['cas:serviceResponse'];
 
-  if (serviceResponse["cas:authenticationFailure"]) {
-    throw new Error(
-      serviceResponse["cas:authenticationFailure"]._ ||
-        "CAS authentication failed"
-    );
+  if (serviceResponse['cas:authenticationFailure']) {
+    throw new Error(serviceResponse['cas:authenticationFailure']._ || 'CAS authentication failed');
   }
 
-  const success = serviceResponse["cas:authenticationSuccess"];
+  const success = serviceResponse['cas:authenticationSuccess'];
   if (!success) {
-    throw new Error("Unexpected CAS response format");
+    throw new Error('Unexpected CAS response format');
   }
 
-  const attributes = success["cas:attributes"] || {};
+  const attributes = success['cas:attributes'] || {};
   return {
-    sub: success["cas:user"],
-    email: attributes["cas:email"] || attributes["cas:mail"],
-    name:
-      attributes["cas:displayName"] ||
-      attributes["cas:cn"] ||
-      success["cas:user"],
-    displayName:
-      attributes["cas:displayName"] || attributes["cas:cn"],
-    studentId:
-      attributes["cas:studentId"] ||
-      attributes["cas:employeeNumber"],
-    department:
-      attributes["cas:department"] || attributes["cas:ou"],
+    sub: success['cas:user'],
+    email: attributes['cas:email'] || attributes['cas:mail'],
+    name: attributes['cas:displayName'] || attributes['cas:cn'] || success['cas:user'],
+    displayName: attributes['cas:displayName'] || attributes['cas:cn'],
+    studentId: attributes['cas:studentId'] || attributes['cas:employeeNumber'],
+    department: attributes['cas:department'] || attributes['cas:ou'],
   };
 }
 
@@ -306,41 +292,29 @@ async function verifySAML({ SAMLResponse, ssoConfig }) {
   });
 
   return new Promise((resolve, reject) => {
-    sp.post_assert(
-      idp,
-      { request_body: { SAMLResponse } },
-      (error, samlResponse) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        const user = samlResponse.user;
-        resolve({
-          sub: user.name_id,
-          email: user.attributes?.email?.[0],
-          name:
-            user.attributes?.displayName?.[0] ||
-            user.attributes?.cn?.[0],
-          displayName: user.attributes?.displayName?.[0],
-          studentId:
-            user.attributes?.studentId?.[0] ||
-            user.attributes?.employeeNumber?.[0],
-          department:
-            user.attributes?.department?.[0] ||
-            user.attributes?.ou?.[0],
-        });
+    sp.post_assert(idp, { request_body: { SAMLResponse } }, (error, samlResponse) => {
+      if (error) {
+        reject(error);
+        return;
       }
-    );
+
+      const user = samlResponse.user;
+      resolve({
+        sub: user.name_id,
+        email: user.attributes?.email?.[0],
+        name: user.attributes?.displayName?.[0] || user.attributes?.cn?.[0],
+        displayName: user.attributes?.displayName?.[0],
+        studentId: user.attributes?.studentId?.[0] || user.attributes?.employeeNumber?.[0],
+        department: user.attributes?.department?.[0] || user.attributes?.ou?.[0],
+      });
+    });
   });
 }
 
 const PROVIDER_ADAPTERS = {
   oidc: {
     getMissingCallbackFields(input = {}) {
-      return ["code", "redirectUri"].filter(
-        (field) => !hasConfigValue(input[field])
-      );
+      return ['code', 'redirectUri'].filter((field) => !hasConfigValue(input[field]));
     },
     verify(input) {
       return verifyOIDC(input);
@@ -348,9 +322,7 @@ const PROVIDER_ADAPTERS = {
   },
   cas: {
     getMissingCallbackFields(input = {}) {
-      return ["ticket", "redirectUri"].filter(
-        (field) => !hasConfigValue(input[field])
-      );
+      return ['ticket', 'redirectUri'].filter((field) => !hasConfigValue(input[field]));
     },
     verify(input) {
       return verifyCAS(input);
@@ -358,9 +330,7 @@ const PROVIDER_ADAPTERS = {
   },
   saml: {
     getMissingCallbackFields(input = {}) {
-      return ["SAMLResponse"].filter(
-        (field) => !hasConfigValue(input[field])
-      );
+      return ['SAMLResponse'].filter((field) => !hasConfigValue(input[field]));
     },
     verify(input) {
       return verifySAML(input);

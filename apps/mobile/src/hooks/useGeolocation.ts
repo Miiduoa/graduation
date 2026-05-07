@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import * as Location from "expo-location";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import * as Location from 'expo-location';
 
 export type GeolocationState = {
   latitude: number | null;
@@ -78,15 +78,15 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
     try {
       const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
       setPermissionStatus(foregroundStatus);
-      
-      if (foregroundStatus !== "granted") {
-        setError("位置權限被拒絕");
+
+      if (foregroundStatus !== 'granted') {
+        setError('位置權限被拒絕');
         return false;
       }
-      
+
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "請求權限失敗");
+      setError(e instanceof Error ? e.message : '請求權限失敗');
       return false;
     }
   }, []);
@@ -103,9 +103,7 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
       }
 
       const location = await Location.getCurrentPositionAsync({
-        accuracy: enableHighAccuracy 
-          ? Location.Accuracy.High 
-          : Location.Accuracy.Balanced,
+        accuracy: enableHighAccuracy ? Location.Accuracy.High : Location.Accuracy.Balanced,
       });
 
       const newState: GeolocationState = {
@@ -122,7 +120,7 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
       setLoading(false);
       return newState;
     } catch (e) {
-      const message = e instanceof Error ? e.message : "獲取位置失敗";
+      const message = e instanceof Error ? e.message : '獲取位置失敗';
       setError(message);
       setLoading(false);
       return null;
@@ -140,18 +138,16 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
     try {
       subscriptionRef.current = await Location.watchPositionAsync(
         {
-          accuracy: enableHighAccuracy 
-            ? Location.Accuracy.High 
-            : Location.Accuracy.Balanced,
+          accuracy: enableHighAccuracy ? Location.Accuracy.High : Location.Accuracy.Balanced,
           distanceInterval,
           timeInterval,
         },
         (location) => {
           updatePosition(location);
-        }
+        },
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "開始追蹤失敗");
+      setError(e instanceof Error ? e.message : '開始追蹤失敗');
       setIsWatching(false);
     }
   }, [distanceInterval, enableHighAccuracy, requestPermission, timeInterval, updatePosition]);
@@ -172,14 +168,14 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
 
   useEffect(() => {
     let isCancelled = false;
-    
+
     if (autoStart) {
       // 使用 IIFE 處理 async，並在 subscription 建立前檢查是否已取消
       (async () => {
         if (isCancelled) return;
-        
+
         if (subscriptionRef.current) return;
-        
+
         const hasPermission = await requestPermission();
         if (!hasPermission || isCancelled) return;
 
@@ -188,9 +184,7 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
         try {
           const subscription = await Location.watchPositionAsync(
             {
-              accuracy: enableHighAccuracy 
-                ? Location.Accuracy.High 
-                : Location.Accuracy.Balanced,
+              accuracy: enableHighAccuracy ? Location.Accuracy.High : Location.Accuracy.Balanced,
               distanceInterval,
               timeInterval,
             },
@@ -198,9 +192,9 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
               if (!isCancelled) {
                 updatePosition(location);
               }
-            }
+            },
           );
-          
+
           // 再次檢查是否已取消，如果是則立即清除 subscription
           if (isCancelled) {
             subscription.remove();
@@ -209,7 +203,7 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
           }
         } catch (e) {
           if (!isCancelled) {
-            setError(e instanceof Error ? e.message : "開始追蹤失敗");
+            setError(e instanceof Error ? e.message : '開始追蹤失敗');
             setIsWatching(false);
           }
         }
@@ -224,7 +218,14 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
       }
       setIsWatching(false);
     };
-  }, [autoStart, enableHighAccuracy, distanceInterval, timeInterval, requestPermission, updatePosition]);
+  }, [
+    autoStart,
+    enableHighAccuracy,
+    distanceInterval,
+    timeInterval,
+    requestPermission,
+    updatePosition,
+  ]);
 
   return {
     ...state,
@@ -242,12 +243,7 @@ export function useGeolocation(options: GeolocationOptions = {}): GeolocationRes
 /**
  * 計算兩點之間的距離（公尺）
  */
-export function calculateDistance(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
+export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3;
   const φ1 = (lat1 * Math.PI) / 180;
   const φ2 = (lat2 * Math.PI) / 180;
@@ -265,12 +261,7 @@ export function calculateDistance(
 /**
  * 計算方位角
  */
-export function calculateBearing(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
+export function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const φ1 = (lat1 * Math.PI) / 180;
   const φ2 = (lat2 * Math.PI) / 180;
   const Δλ = ((lon2 - lon1) * Math.PI) / 180;

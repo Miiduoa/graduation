@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import { ReactNode } from "react";
-import { Button } from "./Button";
+import { ReactNode } from 'react';
+import { Button } from './Button';
 
 interface EmptyStateProps {
   icon?: ReactNode;
@@ -10,13 +10,13 @@ interface EmptyStateProps {
   action?: {
     label: string;
     onClick: () => void;
-    variant?: "default" | "primary";
+    variant?: 'default' | 'primary';
   };
   secondaryAction?: {
     label: string;
     onClick: () => void;
   };
-  size?: "sm" | "md" | "lg";
+  size?: 'sm' | 'md' | 'lg';
 }
 
 export function EmptyState({
@@ -25,12 +25,12 @@ export function EmptyState({
   description,
   action,
   secondaryAction,
-  size = "md",
+  size = 'md',
 }: EmptyStateProps) {
   const sizeStyles = {
-    sm: { iconSize: "40px", titleSize: "16px", descSize: "13px", padding: "24px" },
-    md: { iconSize: "56px", titleSize: "18px", descSize: "14px", padding: "40px" },
-    lg: { iconSize: "72px", titleSize: "22px", descSize: "15px", padding: "56px" },
+    sm: { iconSize: '40px', titleSize: '16px', descSize: '13px', padding: '24px' },
+    md: { iconSize: '56px', titleSize: '18px', descSize: '14px', padding: '40px' },
+    lg: { iconSize: '72px', titleSize: '22px', descSize: '15px', padding: '56px' },
   };
 
   const styles = sizeStyles[size];
@@ -38,11 +38,11 @@ export function EmptyState({
   return (
     <div
       style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        textAlign: "center",
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
         padding: styles.padding,
       }}
     >
@@ -51,14 +51,14 @@ export function EmptyState({
           style={{
             width: styles.iconSize,
             height: styles.iconSize,
-            borderRadius: "16px",
-            background: "var(--panel)",
-            border: "1px solid var(--border)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
+            borderRadius: '16px',
+            background: 'var(--panel)',
+            border: '1px solid var(--border)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             fontSize: `calc(${styles.iconSize} * 0.5)`,
-            marginBottom: "20px",
+            marginBottom: '20px',
           }}
         >
           {icon}
@@ -69,7 +69,7 @@ export function EmptyState({
           margin: 0,
           fontSize: styles.titleSize,
           fontWeight: 700,
-          color: "var(--text)",
+          color: 'var(--text)',
         }}
       >
         {title}
@@ -77,11 +77,11 @@ export function EmptyState({
       {description && (
         <p
           style={{
-            margin: "12px 0 0",
+            margin: '12px 0 0',
             fontSize: styles.descSize,
-            color: "var(--muted)",
+            color: 'var(--muted)',
             lineHeight: 1.6,
-            maxWidth: "320px",
+            maxWidth: '320px',
           }}
         >
           {description}
@@ -90,17 +90,14 @@ export function EmptyState({
       {(action || secondaryAction) && (
         <div
           style={{
-            marginTop: "24px",
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
+            marginTop: '24px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
           }}
         >
           {action && (
-            <Button
-              variant={action.variant ?? "primary"}
-              onClick={action.onClick}
-            >
+            <Button variant={action.variant ?? 'primary'} onClick={action.onClick}>
               {action.label}
             </Button>
           )}
@@ -123,17 +120,17 @@ interface ErrorStateProps {
 }
 
 export function ErrorState({
-  title = "發生錯誤",
-  message = "無法載入資料，請稍後再試",
+  title = '發生錯誤',
+  message = '無法載入資料，請稍後再試',
   onRetry,
-  retryLabel = "重試",
+  retryLabel = '重試',
 }: ErrorStateProps) {
   return (
     <EmptyState
       icon="❌"
       title={title}
       description={message}
-      action={onRetry ? { label: retryLabel, onClick: onRetry, variant: "primary" } : undefined}
+      action={onRetry ? { label: retryLabel, onClick: onRetry, variant: 'primary' } : undefined}
     />
   );
 }
@@ -148,8 +145,8 @@ interface NoDataStateProps {
 }
 
 export function NoDataState({
-  title = "沒有資料",
-  message = "目前沒有任何資料",
+  title = '沒有資料',
+  message = '目前沒有任何資料',
   action,
 }: NoDataStateProps) {
   return (
@@ -157,7 +154,7 @@ export function NoDataState({
       icon="📭"
       title={title}
       description={message}
-      action={action ? { ...action, variant: "primary" } : undefined}
+      action={action ? { ...action, variant: 'primary' } : undefined}
     />
   );
 }
@@ -173,7 +170,7 @@ export function NoSearchResults({ query, onClear }: NoSearchResultsProps) {
       icon="🔍"
       title="找不到結果"
       description={`沒有符合「${query}」的搜尋結果`}
-      action={onClear ? { label: "清除搜尋", onClick: onClear } : undefined}
+      action={onClear ? { label: '清除搜尋', onClick: onClear } : undefined}
     />
   );
 }

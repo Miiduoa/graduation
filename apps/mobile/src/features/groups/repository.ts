@@ -46,7 +46,7 @@ function toTimestampLike(value: unknown): { seconds: number; nanoseconds?: numbe
   ) {
     const date = (value as { toDate: () => Date }).toDate();
     const ms = (date as Date | null)?.getTime?.();
-    if (typeof ms !== "number" || Number.isNaN(ms)) return null;
+    if (typeof ms !== 'number' || Number.isNaN(ms)) return null;
     return { seconds: Math.floor(ms / 1000) };
   }
 
@@ -57,10 +57,17 @@ function getDueAtSeconds(value: PendingGroupAssignment['dueAt']): number {
   return value?.seconds ?? 0;
 }
 
-export async function listActiveUserGroups(uid: string, queryLimit = 10): Promise<ActiveUserGroup[]> {
+export async function listActiveUserGroups(
+  uid: string,
+  queryLimit = 10,
+): Promise<ActiveUserGroup[]> {
   const db = getDb();
   const snapshot = await getDocs(
-    query(collection(db, 'users', uid, 'groups'), where('status', '==', 'active'), limit(queryLimit))
+    query(
+      collection(db, 'users', uid, 'groups'),
+      where('status', '==', 'active'),
+      limit(queryLimit),
+    ),
   );
 
   return snapshot.docs.map((docSnap) => {
@@ -77,7 +84,7 @@ export async function listPendingAssignmentsForUserGroups(
   options: {
     maxGroups?: number;
     assignmentsPerGroup?: number;
-  } = {}
+  } = {},
 ): Promise<PendingGroupAssignment[]> {
   const db = getDb();
   const groups = await listActiveUserGroups(uid, options.maxGroups ?? 10);
@@ -92,16 +99,16 @@ export async function listPendingAssignmentsForUserGroups(
             collection(db, 'groups', group.id, 'assignments'),
             where('dueAt', '>', now),
             orderBy('dueAt', 'asc'),
-            limit(assignmentsPerGroup)
-          )
+            limit(assignmentsPerGroup),
+          ),
         ).catch(() => null),
         getDocs(
           query(
             collection(db, 'groups', group.id, 'assignments'),
             where('dueAt', '<=', now),
             orderBy('dueAt', 'desc'),
-            limit(Math.max(2, Math.ceil(assignmentsPerGroup / 2)))
-          )
+            limit(Math.max(2, Math.ceil(assignmentsPerGroup / 2))),
+          ),
         ).catch(() => null),
       ]);
 
@@ -109,21 +116,19 @@ export async function listPendingAssignmentsForUserGroups(
       upcomingSnapshot?.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
       lateSnapshot?.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
 
-      return (
-        Array.from(docsById.values()).map((docSnap) => {
-          const raw = toRecord(docSnap.data());
-          const dueAt = toTimestampLike(raw.dueAt);
-          return {
-            id: docSnap.id,
-            groupId: group.id,
-            groupName: group.name,
-            title: readString(raw.title, '未命名作業'),
-            dueAt,
-            isLate: raw.isLate === true || (dueAt?.seconds ?? Number.POSITIVE_INFINITY) <= nowSeconds,
-          };
-        })
-      );
-    })
+      return Array.from(docsById.values()).map((docSnap) => {
+        const raw = toRecord(docSnap.data());
+        const dueAt = toTimestampLike(raw.dueAt);
+        return {
+          id: docSnap.id,
+          groupId: group.id,
+          groupName: group.name,
+          title: readString(raw.title, '未命名作業'),
+          dueAt,
+          isLate: raw.isLate === true || (dueAt?.seconds ?? Number.POSITIVE_INFINITY) <= nowSeconds,
+        };
+      });
+    }),
   );
 
   return groupAssignments

@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import dynamic from "next/dynamic";
-import { SiteShell } from "@/components/SiteShell";
-import { resolveSchoolPageContext } from "@/lib/pageContext";
-import { PageLoadingCard } from "@/components/PageLoadingCard";
+import dynamic from 'next/dynamic';
+import { SiteShell } from '@/components/SiteShell';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { PageLoadingCard } from '@/components/PageLoadingCard';
 
 // 使用 dynamic import 並關閉 SSR（Leaflet 需要 browser API）
-const MapClient = dynamic(() => import("./MapClient"), {
+const MapClient = dynamic(() => import('./MapClient'), {
   ssr: false,
   loading: () => <PageLoadingCard message="地圖載入中..." />,
 });

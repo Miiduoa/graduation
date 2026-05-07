@@ -1,7 +1,7 @@
 /* eslint-disable */
-import { useState, useEffect, useCallback, useRef } from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useLatestValue } from "./useLatestValue";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useLatestValue } from './useLatestValue';
 
 type StorageOptions<T> = {
   defaultValue: T;
@@ -14,18 +14,14 @@ type StorageOptions<T> = {
  */
 export function useAsyncStorage<T>(
   key: string,
-  options: StorageOptions<T> | T
+  options: StorageOptions<T> | T,
 ): [T, (value: T | ((prev: T) => T)) => Promise<void>, boolean, () => Promise<void>] {
   const normalizedOptions =
-    options != null && typeof options === "object" && "defaultValue" in options
+    options != null && typeof options === 'object' && 'defaultValue' in options
       ? options
       : { defaultValue: options as T };
 
-  const { 
-    defaultValue, 
-    serialize = JSON.stringify, 
-    deserialize = JSON.parse 
-  } = normalizedOptions;
+  const { defaultValue, serialize = JSON.stringify, deserialize = JSON.parse } = normalizedOptions;
 
   const [value, setValue] = useState<T>(defaultValue);
   const [loading, setLoading] = useState(true);
@@ -56,7 +52,7 @@ export function useAsyncStorage<T>(
 
   // 使用 ref 來追蹤最新的 value，避免閉包陳舊問題
   const valueRef = useLatestValue(value);
-  
+
   const setStoredValue = useCallback(
     async (newValue: T | ((prev: T) => T)) => {
       // 使用 ref 取得最新值，確保連續快速調用時使用正確的 prev
@@ -70,7 +66,7 @@ export function useAsyncStorage<T>(
         console.error(`[useAsyncStorage] Failed to save ${keyRef.current}:`, e);
       }
     },
-    [serialize]
+    [serialize],
   );
 
   const removeValue = useCallback(async () => {
@@ -90,7 +86,7 @@ export function useAsyncStorage<T>(
  */
 export function useMultiStorage<T extends Record<string, unknown>>(
   keys: (keyof T)[],
-  defaults: T
+  defaults: T,
 ): {
   values: T;
   loading: boolean;
@@ -134,29 +130,32 @@ export function useMultiStorage<T extends Record<string, unknown>>(
     setValuesState((prev) => ({ ...prev, ...newValues }));
     try {
       const pairs = Object.entries(newValues).map(
-        ([key, value]) => [key, JSON.stringify(value)] as [string, string]
+        ([key, value]) => [key, JSON.stringify(value)] as [string, string],
       );
       await AsyncStorage.multiSet(pairs);
     } catch (e) {
-      console.error("[useMultiStorage] Failed to save multiple values:", e);
+      console.error('[useMultiStorage] Failed to save multiple values:', e);
     }
   }, []);
 
-  const removeValue = useCallback(async (key: keyof T) => {
-    setValuesState((prev) => ({ ...prev, [key]: defaults[key] }));
-    try {
-      await AsyncStorage.removeItem(key as string);
-    } catch (e) {
-      console.error(`[useMultiStorage] Failed to remove ${String(key)}:`, e);
-    }
-  }, [defaults]);
+  const removeValue = useCallback(
+    async (key: keyof T) => {
+      setValuesState((prev) => ({ ...prev, [key]: defaults[key] }));
+      try {
+        await AsyncStorage.removeItem(key as string);
+      } catch (e) {
+        console.error(`[useMultiStorage] Failed to remove ${String(key)}:`, e);
+      }
+    },
+    [defaults],
+  );
 
   const clear = useCallback(async () => {
     setValuesState(defaults);
     try {
       await AsyncStorage.multiRemove(keys as string[]);
     } catch (e) {
-      console.error("[useMultiStorage] Failed to clear values:", e);
+      console.error('[useMultiStorage] Failed to clear values:', e);
     }
   }, [defaults, keys]);
 
@@ -168,7 +167,7 @@ export function useMultiStorage<T extends Record<string, unknown>>(
  */
 export function useBooleanStorage(
   key: string,
-  defaultValue = false
+  defaultValue = false,
 ): [boolean, () => Promise<void>, () => Promise<void>, boolean] {
   const [value, setValue, loading] = useAsyncStorage<boolean>(key, { defaultValue });
 
@@ -188,7 +187,7 @@ export function useBooleanStorage(
  */
 export function useHistoryStorage<T>(
   key: string,
-  maxItems = 50
+  maxItems = 50,
 ): {
   history: T[];
   loading: boolean;
@@ -204,19 +203,19 @@ export function useHistoryStorage<T>(
     async (item: T) => {
       await setHistory((prev) => {
         const filtered = prev.filter(
-          (existing) => JSON.stringify(existing) !== JSON.stringify(item)
+          (existing) => JSON.stringify(existing) !== JSON.stringify(item),
         );
         return [item, ...filtered].slice(0, maxItems);
       });
     },
-    [maxItems, setHistory]
+    [maxItems, setHistory],
   );
 
   const remove = useCallback(
     async (index: number) => {
       await setHistory((prev) => prev.filter((_, i) => i !== index));
     },
-    [setHistory]
+    [setHistory],
   );
 
   return { history, loading, add, remove, clear: clearStorage };

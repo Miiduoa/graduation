@@ -1,12 +1,12 @@
-import type { SchoolApiAdapter, ApiConfig, AdapterCapabilities } from "./types";
-import { GenericRestAdapter, type GenericRestConfig } from "./GenericRestAdapter";
+import type { SchoolApiAdapter, ApiConfig, AdapterCapabilities } from './types';
+import { GenericRestAdapter, type GenericRestConfig } from './GenericRestAdapter';
 
 export type AdapterFactory = (schoolId: string, schoolName: string) => SchoolApiAdapter;
 
 export type SchoolApiConfig = {
   schoolId: string;
   schoolName: string;
-  adapterType: "generic" | "custom";
+  adapterType: 'generic' | 'custom';
   config: ApiConfig | GenericRestConfig;
   customFactory?: AdapterFactory;
 };
@@ -27,30 +27,30 @@ export async function getAdapter(schoolId: string): Promise<SchoolApiAdapter | n
   if (adapterRegistry.has(schoolId)) {
     return adapterRegistry.get(schoolId)!;
   }
-  
+
   const config = configRegistry.get(schoolId);
   if (!config) {
     console.warn(`[AdapterRegistry] No config found for school: ${schoolId}`);
     return null;
   }
-  
+
   const adapter = await createAdapter(config);
   if (adapter) {
     adapterRegistry.set(schoolId, adapter);
   }
-  
+
   return adapter;
 }
 
 async function createAdapter(config: SchoolApiConfig): Promise<SchoolApiAdapter | null> {
   let adapter: SchoolApiAdapter;
-  
+
   switch (config.adapterType) {
-    case "generic":
+    case 'generic':
       adapter = new GenericRestAdapter(config.schoolId, config.schoolName);
       break;
-      
-    case "custom":
+
+    case 'custom':
       if (config.customFactory) {
         adapter = config.customFactory(config.schoolId, config.schoolName);
       } else {
@@ -62,12 +62,12 @@ async function createAdapter(config: SchoolApiConfig): Promise<SchoolApiAdapter 
         adapter = factory(config.schoolId, config.schoolName);
       }
       break;
-      
+
     default:
       console.error(`[AdapterRegistry] Unknown adapter type: ${config.adapterType}`);
       return null;
   }
-  
+
   try {
     await adapter.initialize(config.config);
     return adapter;
@@ -98,10 +98,7 @@ export function clearAllAdapters(): void {
 }
 
 export function listRegisteredSchools(): string[] {
-  return Array.from(new Set([
-    ...adapterRegistry.keys(),
-    ...configRegistry.keys(),
-  ]));
+  return Array.from(new Set([...adapterRegistry.keys(), ...configRegistry.keys()]));
 }
 
 export async function checkAdapterHealth(schoolId: string): Promise<boolean> {
@@ -109,20 +106,20 @@ export async function checkAdapterHealth(schoolId: string): Promise<boolean> {
   if (!adapter) {
     return false;
   }
-  
+
   return adapter.isHealthy();
 }
 
 export async function checkAllAdaptersHealth(): Promise<Map<string, boolean>> {
   const results = new Map<string, boolean>();
   const schools = listRegisteredSchools();
-  
+
   await Promise.all(
     schools.map(async (schoolId) => {
       const healthy = await checkAdapterHealth(schoolId);
       results.set(schoolId, healthy);
-    })
+    }),
   );
-  
+
   return results;
 }

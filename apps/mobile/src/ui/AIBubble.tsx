@@ -9,49 +9,49 @@
  * - Autonomy（SDT）：用戶可輕鬆關閉，確保不干擾感
  */
 
-import React, { useRef, useEffect, useState } from "react";
-import { View, Text, Pressable, Animated, Easing } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { theme } from "./theme";
+import React, { useRef, useEffect, useState } from 'react';
+import { View, Text, Pressable, Animated, Easing } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { theme } from './theme';
 
 export type AIBubbleContext =
-  | "grades"           // 成績頁面 → 「想知道怎麼提高這科成績嗎？」
-  | "attendance"       // 出席頁面 → 「幫你計算需要出席幾次」
-  | "course"           // 課程頁面 → 「解釋這個單元的核心概念」
-  | "quiz"             // 測驗頁面 → 「生成練習題幫你複習」
-  | "deadline"         // 截止日期 → 「幫你安排完成時間表」
-  | "custom";          // 自定義
+  | 'grades' // 成績頁面 → 「想知道怎麼提高這科成績嗎？」
+  | 'attendance' // 出席頁面 → 「幫你計算需要出席幾次」
+  | 'course' // 課程頁面 → 「解釋這個單元的核心概念」
+  | 'quiz' // 測驗頁面 → 「生成練習題幫你複習」
+  | 'deadline' // 截止日期 → 「幫你安排完成時間表」
+  | 'custom'; // 自定義
 
 const CONTEXT_MESSAGES: Record<AIBubbleContext, { icon: string; message: string; cta: string }> = {
   grades: {
-    icon: "trending-up",
-    message: "想了解如何提高成績嗎？",
-    cta: "讓 AI 分析",
+    icon: 'trending-up',
+    message: '想了解如何提高成績嗎？',
+    cta: '讓 AI 分析',
   },
   attendance: {
-    icon: "calculator",
-    message: "幫你算出最少需要出席幾次",
-    cta: "立即計算",
+    icon: 'calculator',
+    message: '幫你算出最少需要出席幾次',
+    cta: '立即計算',
   },
   course: {
-    icon: "bulb",
-    message: "需要解釋這個單元的重點？",
-    cta: "問 AI",
+    icon: 'bulb',
+    message: '需要解釋這個單元的重點？',
+    cta: '問 AI',
   },
   quiz: {
-    icon: "help-circle",
-    message: "想要 AI 生成練習題幫你複習？",
-    cta: "開始練習",
+    icon: 'help-circle',
+    message: '想要 AI 生成練習題幫你複習？',
+    cta: '開始練習',
   },
   deadline: {
-    icon: "calendar",
-    message: "讓 AI 幫你規劃完成時間表",
-    cta: "規劃一下",
+    icon: 'calendar',
+    message: '讓 AI 幫你規劃完成時間表',
+    cta: '規劃一下',
   },
   custom: {
-    icon: "sparkles",
-    message: "需要 AI 助理嗎？",
-    cta: "開啟 AI",
+    icon: 'sparkles',
+    message: '需要 AI 助理嗎？',
+    cta: '開啟 AI',
   },
 };
 
@@ -61,12 +61,18 @@ type AIBubbleProps = {
   customCta?: string;
   onPress: () => void;
   onDismiss?: () => void;
-  delay?: number;       // 出現的延遲毫秒（讓用戶先瀏覽頁面）
+  delay?: number; // 出現的延遲毫秒（讓用戶先瀏覽頁面）
   style?: object;
 };
 
 export function AIBubble({
-  context, customMessage, customCta, onPress, onDismiss, delay = 1500, style,
+  context,
+  customMessage,
+  customCta,
+  onPress,
+  onDismiss,
+  delay = 1500,
+  style,
 }: AIBubbleProps) {
   const [visible, setVisible] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -83,7 +89,12 @@ export function AIBubble({
     const timer = setTimeout(() => {
       setVisible(true);
       Animated.parallel([
-        Animated.timing(slideAnim, { toValue: 0, duration: 380, useNativeDriver: true, easing: Easing.out(Easing.cubic) }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 380,
+          useNativeDriver: true,
+          easing: Easing.out(Easing.cubic),
+        }),
         Animated.timing(opacityAnim, { toValue: 1, duration: 350, useNativeDriver: true }),
         Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, friction: 8 }),
       ]).start();
@@ -113,36 +124,48 @@ export function AIBubble({
         style,
       ]}
     >
-      <View style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        padding: 14,
-        borderRadius: 18,
-        backgroundColor: theme.colors.accentSoft,
-        borderWidth: 1,
-        borderColor: `${theme.colors.accent}20`,
-        shadowColor: theme.colors.accent,
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 2 },
-        elevation: 2,
-      }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          padding: 14,
+          borderRadius: 18,
+          backgroundColor: theme.colors.accentSoft,
+          borderWidth: 1,
+          borderColor: `${theme.colors.accent}20`,
+          shadowColor: theme.colors.accent,
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 2 },
+          elevation: 2,
+        }}
+      >
         {/* AI 圖示 */}
-        <View style={{
-          width: 38, height: 38, borderRadius: 12,
-          backgroundColor: theme.colors.accent,
-          alignItems: "center", justifyContent: "center",
-          flexShrink: 0,
-        }}>
+        <View
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: 12,
+            backgroundColor: theme.colors.accent,
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
           <Ionicons name={info.icon as any} size={18} color="#fff" />
         </View>
 
         {/* 訊息文字 */}
-        <Text style={{
-          flex: 1, color: theme.colors.text, fontSize: 13,
-          fontWeight: "500", lineHeight: 18,
-        }}>
+        <Text
+          style={{
+            flex: 1,
+            color: theme.colors.text,
+            fontSize: 13,
+            fontWeight: '500',
+            lineHeight: 18,
+          }}
+        >
           {message}
         </Text>
 
@@ -150,13 +173,14 @@ export function AIBubble({
         <Pressable
           onPress={onPress}
           style={({ pressed }) => ({
-            paddingHorizontal: 12, paddingVertical: 7,
+            paddingHorizontal: 12,
+            paddingVertical: 7,
             borderRadius: 10,
             backgroundColor: theme.colors.accent,
             opacity: pressed ? 0.85 : 1,
           })}
         >
-          <Text style={{ color: "#fff", fontSize: 12, fontWeight: "700" }}>{cta}</Text>
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{cta}</Text>
         </Pressable>
 
         {/* 關閉按鈕 */}

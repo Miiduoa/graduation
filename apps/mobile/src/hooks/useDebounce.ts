@@ -1,6 +1,6 @@
 /* eslint-disable */
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useLatestValue } from "./useLatestValue";
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useLatestValue } from './useLatestValue';
 
 /**
  * 防抖 hook - 在指定延遲後更新值
@@ -26,8 +26,8 @@ export function useDebounce<T>(value: T, delay: number = 300): T {
  * 可以知道是否正在等待防抖完成
  */
 export function useDebounceWithPending<T>(
-  value: T, 
-  delay: number = 300
+  value: T,
+  delay: number = 300,
 ): { debouncedValue: T; isPending: boolean } {
   const debouncedValue = useDebounce(value, delay);
   const isPending = !Object.is(debouncedValue, value);
@@ -42,9 +42,9 @@ export function useDebounceWithPending<T>(
 export function useSearchDebounce(
   value: string,
   delay: number = 300,
-  minLength: number = 0
-): { 
-  debouncedValue: string; 
+  minLength: number = 0,
+): {
+  debouncedValue: string;
   isSearching: boolean;
   isEmpty: boolean;
   shouldSearch: boolean;
@@ -64,7 +64,7 @@ export function useSearchDebounce(
  */
 export function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
   callback: T,
-  delay: number = 300
+  delay: number = 300,
 ): T {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callbackRef = useLatestValue(callback);
@@ -74,13 +74,13 @@ export function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
-      
+
       timeoutRef.current = setTimeout(() => {
         callbackRef.current(...args);
         timeoutRef.current = null;
       }, delay);
     },
-    [delay]
+    [delay],
   ) as T;
 
   useEffect(() => {
@@ -99,7 +99,7 @@ export function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
  */
 export function useLeadingDebounce<T extends (...args: unknown[]) => unknown>(
   callback: T,
-  delay: number = 300
+  delay: number = 300,
 ): T {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const callbackRef = useLatestValue(callback);
@@ -110,14 +110,14 @@ export function useLeadingDebounce<T extends (...args: unknown[]) => unknown>(
       if (canCallRef.current) {
         callbackRef.current(...args);
         canCallRef.current = false;
-        
+
         timeoutRef.current = setTimeout(() => {
           canCallRef.current = true;
           timeoutRef.current = null;
         }, delay);
       }
     },
-    [delay]
+    [delay],
   ) as T;
 
   useEffect(() => {

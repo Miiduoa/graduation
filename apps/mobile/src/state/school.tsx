@@ -1,6 +1,10 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { PROVIDENCE_UNIVERSITY_SCHOOL_CODE, PROVIDENCE_UNIVERSITY_SCHOOL_ID, type School } from '@campus/shared/src';
+import {
+  PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
+  PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+  type School,
+} from '@campus/shared/src';
 import { findSchoolById, normalizeSchoolCode, resolveSchool } from '@campus/shared/src/schools';
 import { clearCacheExceptSchool } from '../data/cachedSource';
 import { setHybridSourceSchoolContext } from '../data/hybridSource';
@@ -29,7 +33,10 @@ const STORAGE_KEY = 'campus.schoolSelection.v1';
 function getProvidenceSchool(): School {
   return (
     findSchoolById(PROVIDENCE_UNIVERSITY_SCHOOL_ID) ??
-    resolveSchool({ schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID, school: PROVIDENCE_UNIVERSITY_SCHOOL_CODE })
+    resolveSchool({
+      schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+      school: PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
+    })
   );
 }
 

@@ -1,11 +1,11 @@
 /* eslint-disable */
-import React from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import { usePermissions } from "../hooks/usePermissions";
-import type { Permission } from "../services/permissions";
-import { theme } from "./theme";
+import React from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { usePermissions } from '../hooks/usePermissions';
+import type { Permission } from '../services/permissions';
+import { theme } from './theme';
 
 type RouteGuardProps = {
   /** Required permission(s). If array, user needs ANY of them. */
@@ -81,8 +81,8 @@ export function withPermission(requires: Permission | Permission[]) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 24,
     backgroundColor: theme.colors.bg,
   },
@@ -90,10 +90,10 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     borderRadius: 16,
     padding: 32,
-    alignItems: "center",
+    alignItems: 'center',
     maxWidth: 340,
-    width: "100%",
-    shadowColor: "#000",
+    width: '100%',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
@@ -104,35 +104,35 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     backgroundColor: theme.colors.bg,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 20,
   },
   title: {
     fontSize: 20,
-    fontWeight: "700",
+    fontWeight: '700',
     color: theme.colors.text,
     marginBottom: 8,
-    textAlign: "center",
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 15,
     color: theme.colors.textSecondary,
-    textAlign: "center",
+    textAlign: 'center',
     lineHeight: 22,
     marginBottom: 8,
   },
   hint: {
     fontSize: 13,
     color: theme.colors.textSecondary,
-    textAlign: "center",
+    textAlign: 'center',
     lineHeight: 19,
     marginBottom: 24,
     opacity: 0.7,
   },
   backButton: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     backgroundColor: theme.colors.accent,
     paddingHorizontal: 20,
@@ -140,8 +140,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   backButtonText: {
-    color: "#fff",
+    color: '#fff',
     fontSize: 15,
-    fontWeight: "600",
+    fontWeight: '600',
   },
 });

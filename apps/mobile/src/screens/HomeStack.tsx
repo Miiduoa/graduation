@@ -18,30 +18,39 @@
  * - GamificationScreen → XP/成就已顯示在 SmartDashboard 頂部
  * - ProactiveScreen → 智慧提醒已整合進 SmartDashboard 的建議卡片
  */
-import React from "react";
-import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { SmartDashboardScreen } from "./SmartDashboardScreen";
-import { AnnouncementsScreen } from "./AnnouncementsScreen";
-import { AnnouncementDetailScreen } from "./AnnouncementDetailScreen";
-import { EventsScreen } from "./EventsScreen";
-import { EventDetailScreen } from "./EventDetailScreen";
-import { AIChatScreen } from "./AIChatScreen";
-import { CampusSocialScreen } from "./CampusSocialScreen";
-import { SmartCalendarScreen } from "./SmartCalendarScreen";
-import { useThemeMode } from "../state/theme";
-import { createStackScreenOptions } from "../ui/navigationTheme";
-import type { CampusActorRole } from "../data";
+import React from 'react';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { SmartDashboardScreen } from './SmartDashboardScreen';
+import { AnnouncementsScreen } from './AnnouncementsScreen';
+import { AnnouncementDetailScreen } from './AnnouncementDetailScreen';
+import { EventsScreen } from './EventsScreen';
+import { EventDetailScreen } from './EventDetailScreen';
+import { AIChatScreen } from './AIChatScreen';
+import { CampusSocialScreen } from './CampusSocialScreen';
+import { SmartCalendarScreen } from './SmartCalendarScreen';
+import { useThemeMode } from '../state/theme';
+import { createStackScreenOptions } from '../ui/navigationTheme';
+import type { CampusActorRole } from '../data';
 
 const Stack = createNativeStackNavigator<any, undefined>();
 
 const HOME_ROUTE_ROLE_REQUIREMENTS: Record<string, CampusActorRole[]> = {
-  TodayHome: ["student", "teacher", "staff", "department", "admin", "school"],
-  AIChat: ["student", "teacher", "staff", "department", "admin", "school"],
-  CampusSocialScreen: ["student", "teacher", "staff", "department", "admin", "school"],
+  TodayHome: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
+  AIChat: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
+  CampusSocialScreen: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
 };
 
 export function getHomeRouteRoleRequirements(routeName: string): CampusActorRole[] {
-  return HOME_ROUTE_ROLE_REQUIREMENTS[routeName] ?? ["student", "teacher", "staff", "department", "admin", "school"];
+  return (
+    HOME_ROUTE_ROLE_REQUIREMENTS[routeName] ?? [
+      'student',
+      'teacher',
+      'staff',
+      'department',
+      'admin',
+      'school',
+    ]
+  );
 }
 
 export function HomeStack() {
@@ -53,14 +62,30 @@ export function HomeStack() {
       initialRouteName="TodayHome"
       screenOptions={createStackScreenOptions()}
     >
-      <Stack.Screen name="TodayHome" component={SmartDashboardScreen} options={{ title: "Today", headerShown: false }} />
-      <Stack.Screen name="公告總覽" component={AnnouncementsScreen} options={{ title: "公告" }} />
-      <Stack.Screen name="公告詳情" component={AnnouncementDetailScreen} options={{ title: "公告詳情" }} />
-      <Stack.Screen name="活動總覽" component={EventsScreen} options={{ title: "活動" }} />
-      <Stack.Screen name="活動詳情" component={EventDetailScreen} options={{ title: "活動詳情" }} />
-      <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: "AI 助理" }} />
-      <Stack.Screen name="CampusSocialScreen" component={CampusSocialScreen} options={{ title: "校園社群", headerShown: false }} />
-      <Stack.Screen name="SmartCalendarScreen" component={SmartCalendarScreen} options={{ title: "智慧行事曆", headerShown: false }} />
+      <Stack.Screen
+        name="TodayHome"
+        component={SmartDashboardScreen}
+        options={{ title: 'Today', headerShown: false }}
+      />
+      <Stack.Screen name="公告總覽" component={AnnouncementsScreen} options={{ title: '公告' }} />
+      <Stack.Screen
+        name="公告詳情"
+        component={AnnouncementDetailScreen}
+        options={{ title: '公告詳情' }}
+      />
+      <Stack.Screen name="活動總覽" component={EventsScreen} options={{ title: '活動' }} />
+      <Stack.Screen name="活動詳情" component={EventDetailScreen} options={{ title: '活動詳情' }} />
+      <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI 助理' }} />
+      <Stack.Screen
+        name="CampusSocialScreen"
+        component={CampusSocialScreen}
+        options={{ title: '校園社群', headerShown: false }}
+      />
+      <Stack.Screen
+        name="SmartCalendarScreen"
+        component={SmartCalendarScreen}
+        options={{ title: '智慧行事曆', headerShown: false }}
+      />
     </Stack.Navigator>
   );
 }

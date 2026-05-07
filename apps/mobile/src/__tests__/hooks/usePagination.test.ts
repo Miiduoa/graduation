@@ -40,7 +40,7 @@ describe('usePagination', () => {
       usePagination(mockFetchFn, {
         initialPage: 2,
         pageSize: 10,
-      })
+      }),
     );
 
     await waitFor(() => {
@@ -55,9 +55,7 @@ describe('usePagination', () => {
   it('should calculate pagination correctly', async () => {
     mockFetchFn.mockResolvedValue({ data: [], total: 95 });
 
-    const { result } = renderHook(() =>
-      usePagination(mockFetchFn, { pageSize: 20 })
-    );
+    const { result } = renderHook(() => usePagination(mockFetchFn, { pageSize: 20 }));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -128,9 +126,7 @@ describe('usePagination', () => {
   it('should navigate to previous page', async () => {
     mockFetchFn.mockResolvedValue({ data: [], total: 100 });
 
-    const { result } = renderHook(() =>
-      usePagination(mockFetchFn, { initialPage: 3 })
-    );
+    const { result } = renderHook(() => usePagination(mockFetchFn, { initialPage: 3 }));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -180,9 +176,7 @@ describe('usePagination', () => {
   it('should refresh and reset to page 1', async () => {
     mockFetchFn.mockResolvedValue({ data: [{ id: 1 }], total: 100 });
 
-    const { result } = renderHook(() =>
-      usePagination(mockFetchFn, { initialPage: 3 })
-    );
+    const { result } = renderHook(() => usePagination(mockFetchFn, { initialPage: 3 }));
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -218,12 +212,7 @@ describe('usePagination', () => {
     });
 
     expect(result.current.items).toHaveLength(4);
-    expect(result.current.items).toEqual([
-      { id: 1 },
-      { id: 2 },
-      { id: 3 },
-      { id: 4 },
-    ]);
+    expect(result.current.items).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }]);
   });
 
   it('should handle fetch error', async () => {
@@ -464,7 +453,7 @@ describe('useInfiniteScroll', () => {
 
     const { result, rerender } = renderHook(
       ({ filter }) => useInfiniteScroll(mockFetchFn, [filter]),
-      { initialProps: { filter: 'a' } }
+      { initialProps: { filter: 'a' } },
     );
 
     await waitFor(() => {

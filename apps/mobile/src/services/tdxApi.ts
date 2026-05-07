@@ -17,30 +17,31 @@
  *   若無金鑰則使用 guest 存取（有 rate limit）
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ─── 設定 ────────────────────────────────────────────────
 
-const TDX_BASE = "https://tdx.transportdata.tw/api/basic";
-const TDX_AUTH_URL = "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token";
+const TDX_BASE = 'https://tdx.transportdata.tw/api/basic';
+const TDX_AUTH_URL =
+  'https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token';
 
 // TDX 金鑰（可透過 .env 或直接設定，免費方案即可）
 // 若未設定則用 guest 模式（可能有 rate limit）
-const TDX_CLIENT_ID = "";
-const TDX_CLIENT_SECRET = "";
+const TDX_CLIENT_ID = '';
+const TDX_CLIENT_SECRET = '';
 
 // 快取金鑰
-const CACHE_PREFIX = "@tdx_cache:";
-const TOKEN_KEY = "@tdx_token";
+const CACHE_PREFIX = '@tdx_cache:';
+const TOKEN_KEY = '@tdx_token';
 
 // 快取時效（毫秒）
 const CACHE_TTL = {
-  busRoutes: 24 * 60 * 60 * 1000,     // 路線資料 24h
-  busStops: 24 * 60 * 60 * 1000,      // 站牌資料 24h
-  busEstimate: 30 * 1000,             // 到站預估 30s
-  trainSchedule: 6 * 60 * 60 * 1000,  // 火車時刻 6h
-  hsrSchedule: 6 * 60 * 60 * 1000,    // 高鐵時刻 6h
-  youbike: 60 * 1000,                 // YouBike 1min
+  busRoutes: 24 * 60 * 60 * 1000, // 路線資料 24h
+  busStops: 24 * 60 * 60 * 1000, // 站牌資料 24h
+  busEstimate: 30 * 1000, // 到站預估 30s
+  trainSchedule: 6 * 60 * 60 * 1000, // 火車時刻 6h
+  hsrSchedule: 6 * 60 * 60 * 1000, // 高鐵時刻 6h
+  youbike: 60 * 1000, // YouBike 1min
 };
 
 // ─── Token 管理 ──────────────────────────────────────────
@@ -70,8 +71,8 @@ async function getAccessToken(): Promise<string | null> {
   // 重新取得
   try {
     const resp = await fetch(TDX_AUTH_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `grant_type=client_credentials&client_id=${TDX_CLIENT_ID}&client_secret=${TDX_CLIENT_SECRET}`,
     });
     const data = await resp.json();
@@ -85,7 +86,7 @@ async function getAccessToken(): Promise<string | null> {
       return data.access_token;
     }
   } catch (err) {
-    console.warn("[TDX] Token fetch failed:", err);
+    console.warn('[TDX] Token fetch failed:', err);
   }
 
   return null;
@@ -109,11 +110,11 @@ async function tdxFetch<T>(path: string, cacheKey?: string, ttl?: number): Promi
 
   const token = await getAccessToken();
   const headers: Record<string, string> = {
-    "Accept": "application/json",
-    "Accept-Encoding": "gzip",
+    Accept: 'application/json',
+    'Accept-Encoding': 'gzip',
   };
   if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+    headers['Authorization'] = `Bearer ${token}`;
   }
 
   const controller = new AbortController();
@@ -121,11 +122,11 @@ async function tdxFetch<T>(path: string, cacheKey?: string, ttl?: number): Promi
 
   try {
     const url = `${TDX_BASE}${path}`;
-    console.log("[TDX] Fetching:", url);
+    console.log('[TDX] Fetching:', url);
     const resp = await fetch(url, { headers, signal: controller.signal });
 
     if (!resp.ok) {
-      console.warn("[TDX] HTTP", resp.status, "for", path);
+      console.warn('[TDX] HTTP', resp.status, 'for', path);
       return null;
     }
 
@@ -142,9 +143,9 @@ async function tdxFetch<T>(path: string, cacheKey?: string, ttl?: number): Promi
     return data as T;
   } catch (err) {
     if (controller.signal.aborted) {
-      console.warn("[TDX] Request timeout:", path);
+      console.warn('[TDX] Request timeout:', path);
     } else {
-      console.warn("[TDX] Fetch error:", err);
+      console.warn('[TDX] Fetch error:', err);
     }
     return null;
   } finally {
@@ -204,14 +205,14 @@ export type TDXBusEstimate = {
  * @param keyword - 路線號碼或名稱（如 "300"、"301"）
  */
 export async function searchBusRoutes(keyword?: string): Promise<TDXBusRoute[]> {
-  let filter = "";
+  let filter = '';
   if (keyword) {
     const k = keyword.trim();
     filter = `&$filter=contains(RouteName/Zh_tw,'${k}') or contains(RouteID,'${k}')`;
   }
   const data = await tdxFetch<TDXBusRoute[]>(
     `/v2/Bus/Route/City/Taichung?$top=50&$format=JSON${filter}`,
-    keyword ? undefined : "bus_routes_all",
+    keyword ? undefined : 'bus_routes_all',
     keyword ? undefined : CACHE_TTL.busRoutes,
   );
   return data ?? [];
@@ -258,17 +259,17 @@ export async function getNearbyBusEstimates(): Promise<TDXBusEstimate[]> {
 // ─── 靜宜周邊常用路線 ────────────────────────────────────
 
 export const PU_COMMON_BUS_ROUTES = [
-  { id: "300", name: "300", desc: "台中車站 - 靜宜大學 - 清水（台灣大道幹線）" },
-  { id: "301", name: "301", desc: "新民高中 - 靜宜大學（經台灣大道）" },
-  { id: "302", name: "302", desc: "台中公園 - 沙鹿（經台灣大道）" },
-  { id: "303", name: "303", desc: "港區藝術中心 - 新民高中（經清水）" },
-  { id: "304", name: "304", desc: "新民高中 - 港區藝術中心（經大甲）" },
-  { id: "305", name: "305", desc: "大甲 - 鹿寮（經沙鹿）" },
-  { id: "306", name: "306", desc: "清水 - 梧棲（經靜宜大學）" },
-  { id: "307", name: "307", desc: "台中車站 - 梧棲觀光漁港" },
-  { id: "308", name: "308", desc: "關連工業區 - 靜宜大學（經東海大學）" },
-  { id: "309", name: "309", desc: "台中車站 - 港區藝術中心（經龍井）" },
-  { id: "310", name: "310", desc: "台中車站 - 台中港旅客服務中心" },
+  { id: '300', name: '300', desc: '台中車站 - 靜宜大學 - 清水（台灣大道幹線）' },
+  { id: '301', name: '301', desc: '新民高中 - 靜宜大學（經台灣大道）' },
+  { id: '302', name: '302', desc: '台中公園 - 沙鹿（經台灣大道）' },
+  { id: '303', name: '303', desc: '港區藝術中心 - 新民高中（經清水）' },
+  { id: '304', name: '304', desc: '新民高中 - 港區藝術中心（經大甲）' },
+  { id: '305', name: '305', desc: '大甲 - 鹿寮（經沙鹿）' },
+  { id: '306', name: '306', desc: '清水 - 梧棲（經靜宜大學）' },
+  { id: '307', name: '307', desc: '台中車站 - 梧棲觀光漁港' },
+  { id: '308', name: '308', desc: '關連工業區 - 靜宜大學（經東海大學）' },
+  { id: '309', name: '309', desc: '台中車站 - 港區藝術中心（經龍井）' },
+  { id: '310', name: '310', desc: '台中車站 - 台中港旅客服務中心' },
 ];
 
 // ═══════════════════════════════════════════════════════
@@ -295,10 +296,10 @@ export type TDXTrainTimetable = {
 
 /** 靜宜附近的台鐵車站 */
 export const PU_NEARBY_TRAIN_STATIONS = [
-  { id: "3330", name: "沙鹿", distance: "2.5km" },
-  { id: "3340", name: "清水", distance: "5km" },
-  { id: "3320", name: "龍井", distance: "5km" },
-  { id: "3350", name: "大甲", distance: "12km" },
+  { id: '3330', name: '沙鹿', distance: '2.5km' },
+  { id: '3340', name: '清水', distance: '5km' },
+  { id: '3320', name: '龍井', distance: '5km' },
+  { id: '3350', name: '大甲', distance: '12km' },
 ];
 
 /**
@@ -308,7 +309,7 @@ export async function getTrainSchedule(
   stationId: string,
   date?: string, // YYYY-MM-DD
 ): Promise<TDXTrainTimetable[]> {
-  const today = date || new Date().toISOString().split("T")[0];
+  const today = date || new Date().toISOString().split('T')[0];
   const data = await tdxFetch<TDXTrainTimetable[]>(
     `/v3/Rail/TRA/DailyTrainTimetable/Station/${stationId}/${today}?$format=JSON`,
     `train_${stationId}_${today}`,
@@ -339,15 +340,13 @@ export type TDXHSRTimetable = {
 };
 
 /** 高鐵台中站 */
-export const HSR_TAICHUNG_STATION_ID = "1035";
+export const HSR_TAICHUNG_STATION_ID = '1035';
 
 /**
  * 查詢高鐵時刻表（台中站）
  */
-export async function getHSRSchedule(
-  date?: string,
-): Promise<TDXHSRTimetable[]> {
-  const today = date || new Date().toISOString().split("T")[0];
+export async function getHSRSchedule(date?: string): Promise<TDXHSRTimetable[]> {
+  const today = date || new Date().toISOString().split('T')[0];
   const data = await tdxFetch<TDXHSRTimetable[]>(
     `/v2/Rail/THSR/DailyTimetable/Station/${HSR_TAICHUNG_STATION_ID}/${today}?$format=JSON`,
     `hsr_taichung_${today}`,
@@ -391,7 +390,7 @@ export async function getNearbyBikeStations(): Promise<TDXBikeStation[]> {
   // 靜宜大學座標: 24.2260, 120.5630，搜尋 2km 內
   const data = await tdxFetch<TDXBikeStation[]>(
     `/v2/Bike/Station/City/Taichung?$spatialFilter=nearby(24.2260,120.5630,2000)&$format=JSON`,
-    "bike_stations_pu",
+    'bike_stations_pu',
     CACHE_TTL.youbike,
   );
   return data ?? [];
@@ -432,20 +431,22 @@ export async function getNearbyBikesWithAvailability(): Promise<BikeStationWithA
 
   const availMap = new Map(availability.map((a) => [a.StationUID, a]));
 
-  return stations.map((station): BikeStationWithAvailability => {
-    const avail = availMap.get(station.StationUID);
-    return {
-      ...station,
-      availableRent: avail?.AvailableRentBikes ?? 0,
-      availableReturn: avail?.AvailableReturnBikes ?? 0,
-      serviceStatus: avail?.ServiceStatus ?? 0,
-      hasElectric: (avail?.AvailableRentElectricBikes ?? 0) > 0,
-      electricBikes: avail?.AvailableRentElectricBikes ?? 0,
-    };
-  }).sort((a, b) => {
-    // 有車的排前面
-    if (a.availableRent > 0 && b.availableRent === 0) return -1;
-    if (a.availableRent === 0 && b.availableRent > 0) return 1;
-    return 0;
-  });
+  return stations
+    .map((station): BikeStationWithAvailability => {
+      const avail = availMap.get(station.StationUID);
+      return {
+        ...station,
+        availableRent: avail?.AvailableRentBikes ?? 0,
+        availableReturn: avail?.AvailableReturnBikes ?? 0,
+        serviceStatus: avail?.ServiceStatus ?? 0,
+        hasElectric: (avail?.AvailableRentElectricBikes ?? 0) > 0,
+        electricBikes: avail?.AvailableRentElectricBikes ?? 0,
+      };
+    })
+    .sort((a, b) => {
+      // 有車的排前面
+      if (a.availableRent > 0 && b.availableRent === 0) return -1;
+      if (a.availableRent === 0 && b.availableRent > 0) return 1;
+      return 0;
+    });
 }

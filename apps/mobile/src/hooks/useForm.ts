@@ -1,7 +1,7 @@
 /* eslint-disable */
-import { useState, useCallback, useRef, useMemo, useEffect } from "react";
-import type { TextInputProps } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import type { TextInputProps } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type ValidationRule<T> = {
   validate: (value: T, allValues: Record<string, unknown>) => boolean;
@@ -58,23 +58,20 @@ export type FormActions<T extends Record<string, unknown>> = {
  */
 export function useForm<T extends Record<string, unknown>>(
   config: FormConfig<T>,
-  options: UseFormOptions = {}
+  options: UseFormOptions = {},
 ): FormState<T> & FormActions<T> {
   const { persistKey, persistDebounceMs = 1000, validateOnChange = false } = options;
   // 使用 JSON 序列化進行深度比較，確保 config 變化時能正確重新計算初始值
   const configSnapshot = JSON.stringify(
-    Object.fromEntries(
-      Object.entries(config).map(([k, v]) => [k, v.initialValue])
-    )
+    Object.fromEntries(Object.entries(config).map(([k, v]) => [k, v.initialValue])),
   );
-  
+
   const initialValues = useMemo(() => {
     const values: Partial<T> = {};
     for (const key of Object.keys(config)) {
       values[key as keyof T] = config[key as keyof T].initialValue;
     }
     return values as T;
-     
   }, [configSnapshot]);
 
   const [values, setValuesState] = useState<T>(initialValues);
@@ -85,12 +82,12 @@ export function useForm<T extends Record<string, unknown>>(
 
   const configRef = useRef(config);
   configRef.current = config;
-  
+
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!persistKey) return;
-    
+
     (async () => {
       try {
         const saved = await AsyncStorage.getItem(`@form_draft_${persistKey}`);
@@ -99,7 +96,7 @@ export function useForm<T extends Record<string, unknown>>(
           setValuesState((prev) => ({ ...prev, ...parsed }));
         }
       } catch (e) {
-        console.warn("[useForm] Failed to load draft:", e);
+        console.warn('[useForm] Failed to load draft:', e);
       } finally {
         setDraftLoaded(true);
       }
@@ -108,19 +105,19 @@ export function useForm<T extends Record<string, unknown>>(
 
   useEffect(() => {
     if (!persistKey || !draftLoaded) return;
-    
+
     if (persistTimerRef.current) {
       clearTimeout(persistTimerRef.current);
     }
-    
+
     persistTimerRef.current = setTimeout(async () => {
       try {
         await AsyncStorage.setItem(`@form_draft_${persistKey}`, JSON.stringify(values));
       } catch (e) {
-        console.warn("[useForm] Failed to save draft:", e);
+        console.warn('[useForm] Failed to save draft:', e);
       }
     }, persistDebounceMs);
-    
+
     return () => {
       if (persistTimerRef.current) {
         clearTimeout(persistTimerRef.current);
@@ -133,29 +130,32 @@ export function useForm<T extends Record<string, unknown>>(
     try {
       await AsyncStorage.removeItem(`@form_draft_${persistKey}`);
     } catch (e) {
-      console.warn("[useForm] Failed to clear draft:", e);
+      console.warn('[useForm] Failed to clear draft:', e);
     }
   }, [persistKey]);
 
-  const validateField = useCallback(<K extends keyof T>(field: K): boolean => {
-    const fieldConfig = configRef.current[field];
-    const value = values[field];
-    const rules = fieldConfig?.rules ?? [];
+  const validateField = useCallback(
+    <K extends keyof T>(field: K): boolean => {
+      const fieldConfig = configRef.current[field];
+      const value = values[field];
+      const rules = fieldConfig?.rules ?? [];
 
-    for (const rule of rules) {
-      if (!rule.validate(value as T[K], values as Record<string, unknown>)) {
-        setErrors((prev) => ({ ...prev, [field]: rule.message }));
-        return false;
+      for (const rule of rules) {
+        if (!rule.validate(value as T[K], values as Record<string, unknown>)) {
+          setErrors((prev) => ({ ...prev, [field]: rule.message }));
+          return false;
+        }
       }
-    }
 
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-    return true;
-  }, [values]);
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+      return true;
+    },
+    [values],
+  );
 
   const validateForm = useCallback((): boolean => {
     let isValid = true;
@@ -206,13 +206,16 @@ export function useForm<T extends Record<string, unknown>>(
     setTouchedState((prev) => ({ ...prev, [field]: isTouched }));
   }, []);
 
-  const reset = useCallback(async (newValues?: Partial<T>) => {
-    setValuesState(newValues ? { ...initialValues, ...newValues } : initialValues);
-    setErrors({});
-    setTouchedState({});
-    setIsSubmitting(false);
-    await clearDraft();
-  }, [initialValues, clearDraft]);
+  const reset = useCallback(
+    async (newValues?: Partial<T>) => {
+      setValuesState(newValues ? { ...initialValues, ...newValues } : initialValues);
+      setErrors({});
+      setTouchedState({});
+      setIsSubmitting(false);
+      await clearDraft();
+    },
+    [initialValues, clearDraft],
+  );
 
   const handleSubmit = useCallback(
     (onSubmit: (values: T) => Promise<void> | void) => {
@@ -235,7 +238,7 @@ export function useForm<T extends Record<string, unknown>>(
         }
       };
     },
-    [validateForm, values]
+    [validateForm, values],
   );
 
   const getFieldProps = useCallback(
@@ -245,20 +248,20 @@ export function useForm<T extends Record<string, unknown>>(
         // 根據欄位的初始值類型自動轉換輸入值
         const fieldConfig = configRef.current[field];
         const initialValue = fieldConfig?.initialValue;
-        
+
         let typedValue: T[K];
-        if (typeof initialValue === "number") {
+        if (typeof initialValue === 'number') {
           // 數字欄位：嘗試轉換為數字
           const num = parseFloat(String(value));
           typedValue = (isNaN(num) ? 0 : num) as T[K];
-        } else if (typeof initialValue === "boolean") {
+        } else if (typeof initialValue === 'boolean') {
           // 布林欄位：轉換為布林值
           typedValue = Boolean(value) as T[K];
         } else {
           // 字串或其他類型：保持原樣
           typedValue = value as T[K];
         }
-        
+
         setValue(field, typedValue);
         if (validateOnChange || touched[field]) {
           setTimeout(() => validateField(field), 0);
@@ -270,7 +273,7 @@ export function useForm<T extends Record<string, unknown>>(
       },
       error: touched[field] ? errors[field] : undefined,
     }),
-    [errors, setTouched, setValue, touched, validateField, values, validateOnChange]
+    [errors, setTouched, setValue, touched, validateField, values, validateOnChange],
   );
 
   // 改用更高效的 isDirty 判斷方式，避免大型表單的效能問題
@@ -279,9 +282,9 @@ export function useForm<T extends Record<string, unknown>>(
     for (const key of keys) {
       const currentValue = values[key as keyof T];
       const initialValue = initialValues[key as keyof T];
-      
+
       // 對於物件和陣列，使用 JSON 比較（僅在需要時）
-      if (typeof currentValue === "object" && currentValue !== null) {
+      if (typeof currentValue === 'object' && currentValue !== null) {
         if (JSON.stringify(currentValue) !== JSON.stringify(initialValue)) {
           return true;
         }
@@ -317,9 +320,9 @@ export function useForm<T extends Record<string, unknown>>(
 // ===== 預設驗證規則 =====
 
 export const validators = {
-  required: (message = "此欄位為必填"): ValidationRule<unknown> => ({
+  required: (message = '此欄位為必填'): ValidationRule<unknown> => ({
     validate: (value) => {
-      if (typeof value === "string") return value.trim().length > 0;
+      if (typeof value === 'string') return value.trim().length > 0;
       if (Array.isArray(value)) return value.length > 0;
       return value !== null && value !== undefined;
     },
@@ -336,18 +339,19 @@ export const validators = {
     message: message ?? `最多只能 ${max} 個字元`,
   }),
 
-  email: (message = "請輸入有效的電子郵件"): ValidationRule<string> => ({
+  email: (message = '請輸入有效的電子郵件'): ValidationRule<string> => ({
     // 使用更完整的 email 驗證正則表達式
     validate: (value) => {
       if (!value || value.trim().length === 0) return true; // 空值由 required 規則處理
       // RFC 5322 簡化版本
-      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+      const emailRegex =
+        /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
       return emailRegex.test(value.trim());
     },
     message,
   }),
 
-  phone: (message = "請輸入有效的電話號碼"): ValidationRule<string> => ({
+  phone: (message = '請輸入有效的電話號碼'): ValidationRule<string> => ({
     validate: (value) => /^[\d\-+() ]{8,}$/.test(value),
     message,
   }),
@@ -374,21 +378,27 @@ export const validators = {
 
   custom: <T>(
     validateFn: (value: T, allValues: Record<string, unknown>) => boolean,
-    message: string
+    message: string,
   ): ValidationRule<T> => ({
     validate: validateFn,
     message,
   }),
 
-  password: (options?: { minLength?: number; requireUppercase?: boolean; requireLowercase?: boolean; requireNumber?: boolean; requireSpecial?: boolean }): ValidationRule<string> => {
-    const { 
-      minLength = 8, 
-      requireUppercase = true, 
-      requireLowercase = true, 
-      requireNumber = true, 
-      requireSpecial = false 
+  password: (options?: {
+    minLength?: number;
+    requireUppercase?: boolean;
+    requireLowercase?: boolean;
+    requireNumber?: boolean;
+    requireSpecial?: boolean;
+  }): ValidationRule<string> => {
+    const {
+      minLength = 8,
+      requireUppercase = true,
+      requireLowercase = true,
+      requireNumber = true,
+      requireSpecial = false,
     } = options ?? {};
-    
+
     return {
       validate: (value) => {
         if (value.length < minLength) return false;
@@ -398,44 +408,48 @@ export const validators = {
         if (requireSpecial && !/[!@#$%^&*(),.?":{}|<>]/.test(value)) return false;
         return true;
       },
-      message: `密碼需至少 ${minLength} 字元${requireUppercase ? "、含大寫字母" : ""}${requireLowercase ? "、含小寫字母" : ""}${requireNumber ? "、含數字" : ""}${requireSpecial ? "、含特殊符號" : ""}`,
+      message: `密碼需至少 ${minLength} 字元${requireUppercase ? '、含大寫字母' : ''}${requireLowercase ? '、含小寫字母' : ''}${requireNumber ? '、含數字' : ''}${requireSpecial ? '、含特殊符號' : ''}`,
     };
   },
 };
 
-export type PasswordStrength = "weak" | "medium" | "strong" | "very_strong";
+export type PasswordStrength = 'weak' | 'medium' | 'strong' | 'very_strong';
 
-export function getPasswordStrength(password: string): { strength: PasswordStrength; score: number; suggestions: string[] } {
+export function getPasswordStrength(password: string): {
+  strength: PasswordStrength;
+  score: number;
+  suggestions: string[];
+} {
   let score = 0;
   const suggestions: string[] = [];
-  
+
   if (password.length >= 8) score += 1;
-  else suggestions.push("密碼需至少 8 個字元");
-  
+  else suggestions.push('密碼需至少 8 個字元');
+
   if (password.length >= 12) score += 1;
-  
+
   if (/[a-z]/.test(password)) score += 1;
-  else suggestions.push("加入小寫字母");
-  
+  else suggestions.push('加入小寫字母');
+
   if (/[A-Z]/.test(password)) score += 1;
-  else suggestions.push("加入大寫字母");
-  
+  else suggestions.push('加入大寫字母');
+
   if (/\d/.test(password)) score += 1;
-  else suggestions.push("加入數字");
-  
+  else suggestions.push('加入數字');
+
   if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) score += 1;
-  else suggestions.push("加入特殊符號可提高安全性");
-  
+  else suggestions.push('加入特殊符號可提高安全性');
+
   if (/(.)\1{2,}/.test(password)) {
     score -= 1;
-    suggestions.push("避免連續重複字元");
+    suggestions.push('避免連續重複字元');
   }
-  
+
   let strength: PasswordStrength;
-  if (score <= 2) strength = "weak";
-  else if (score <= 4) strength = "medium";
-  else if (score <= 5) strength = "strong";
-  else strength = "very_strong";
-  
+  if (score <= 2) strength = 'weak';
+  else if (score <= 4) strength = 'medium';
+  else if (score <= 5) strength = 'strong';
+  else strength = 'very_strong';
+
   return { strength, score: Math.max(0, Math.min(100, score * 16)), suggestions };
 }

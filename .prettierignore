@@ -8,3 +8,37 @@ build
 web-build
 backend/.firebase
 backend/functions/lib
+
+# Package manager / generated lockfiles
+package-lock.json
+pnpm-lock.yaml
+**/package-lock.json
+**/Podfile.lock
+
+# Native dependency output
+apps/mobile/ios/Pods
+apps/mobile/ios/build
+
+# Local runtime output
+*.log
+firebase-debug.log*
+firestore-debug.log*
+tmp
+outputs
+
+# Local tool state
+.claude
+.cursor
+.playwright-cli
+
+# Python runtime output
+__pycache__
+*.pyc
+*.pyo
+backend/ai-server/.venv
+backend/ai-server/data
+
+# TypeScript / framework generated files
+*.tsbuildinfo
+next-env.d.ts
+expo-env.d.ts

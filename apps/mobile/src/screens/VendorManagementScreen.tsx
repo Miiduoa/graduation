@@ -8,7 +8,7 @@
  * 角色：店家老闆（Vendor Owner）
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -19,13 +19,13 @@ import {
   TextInput,
   View,
   Switch,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
-import { Card, Screen, SectionTitle, Pill } from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
-import { useAuth } from "../state/auth";
+import { Card, Screen, SectionTitle, Pill } from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { useAuth } from '../state/auth';
 import {
   getVendors,
   getVendor,
@@ -54,7 +54,7 @@ import {
   type OrderStatus,
   type Review,
   type FlashDeal,
-} from "../services/cafeteriaData";
+} from '../services/cafeteriaData';
 
 // ══════════════════════════════════════════════════
 // 主畫面
@@ -68,17 +68,19 @@ export function VendorManagementScreen(props: any) {
   const myVendor = useMemo(() => {
     const uid = auth.profile?.uid ?? auth.user?.uid;
     if (uid) {
-      const owned = VENDORS.find(v => v.ownerUid === uid);
+      const owned = VENDORS.find((v) => v.ownerUid === uid);
       if (owned) return owned;
     }
     return VENDORS[0]; // demo fallback
   }, [auth.profile?.uid, auth.user?.uid]);
 
-  const [activeTab, setActiveTab] = useState<"dashboard" | "orders" | "menu" | "reviews" | "stats">("dashboard");
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'menu' | 'reviews' | 'stats'>(
+    'dashboard',
+  );
   const [isOpen, setIsOpen] = useState(myVendor?.isOpen ?? true);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const [cancelReason, setCancelReason] = useState("");
+  const [cancelReason, setCancelReason] = useState('');
   const [vendorOrders, setVendorOrders] = useState<Order[]>([]);
   const [vendorReviews, setVendorReviews] = useState<Review[]>([]);
 
@@ -87,7 +89,9 @@ export function VendorManagementScreen(props: any) {
     try {
       const orders = await getOrders(undefined, myVendor.id);
       setVendorOrders(orders);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [myVendor.id]);
 
   // 載入本店評價
@@ -95,7 +99,9 @@ export function VendorManagementScreen(props: any) {
     try {
       const reviews = await getReviews(myVendor.id);
       setVendorReviews(reviews);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [myVendor.id]);
 
   useEffect(() => {
@@ -106,14 +112,17 @@ export function VendorManagementScreen(props: any) {
   // 訂單統計
   const orderStats = useMemo(() => {
     return {
-      pending: vendorOrders.filter(o => o.status === "pending").length,
-      confirmed: vendorOrders.filter(o => o.status === "confirmed").length,
-      preparing: vendorOrders.filter(o => o.status === "preparing").length,
-      ready: vendorOrders.filter(o => o.status === "ready").length,
-      completed: vendorOrders.filter(o => o.status === "completed").length,
+      pending: vendorOrders.filter((o) => o.status === 'pending').length,
+      confirmed: vendorOrders.filter((o) => o.status === 'confirmed').length,
+      preparing: vendorOrders.filter((o) => o.status === 'preparing').length,
+      ready: vendorOrders.filter((o) => o.status === 'ready').length,
+      completed: vendorOrders.filter((o) => o.status === 'completed').length,
       total: vendorOrders.length,
       revenue: vendorOrders.reduce((sum, o) => sum + o.totalPrice, 0),
-      avgOrder: vendorOrders.length > 0 ? Math.round(vendorOrders.reduce((sum, o) => sum + o.totalPrice, 0) / vendorOrders.length) : 0,
+      avgOrder:
+        vendorOrders.length > 0
+          ? Math.round(vendorOrders.reduce((sum, o) => sum + o.totalPrice, 0) / vendorOrders.length)
+          : 0,
     };
   }, [vendorOrders]);
 
@@ -124,43 +133,63 @@ export function VendorManagementScreen(props: any) {
     try {
       const items = await getMenuItemsAsync(myVendor.id);
       setMenuItems(items);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [myVendor.id]);
 
   useEffect(() => {
     loadMenu();
   }, [loadMenu]);
 
-  const avgRating = vendorReviews.length > 0
-    ? (vendorReviews.reduce((sum, r) => sum + r.rating, 0) / vendorReviews.length).toFixed(1)
-    : "未評";
+  const avgRating =
+    vendorReviews.length > 0
+      ? (vendorReviews.reduce((sum, r) => sum + r.rating, 0) / vendorReviews.length).toFixed(1)
+      : '未評';
 
   // 處理訂單狀態更新（更新後重新載入訂單列表）
-  const handleUpdateOrderStatus = useCallback(async (orderId: string, newStatus: OrderStatus) => {
-    try {
-      await updateOrderStatus(orderId, newStatus);
-      Alert.alert("成功", `訂單已更新為 ${ORDER_STATUS_LABELS[newStatus]}`);
-      await loadOrders(); // 重新載入訂單
-    } catch (e) {
-      Alert.alert("錯誤", "更新訂單狀態失敗");
-    }
-  }, [loadOrders]);
+  const handleUpdateOrderStatus = useCallback(
+    async (orderId: string, newStatus: OrderStatus) => {
+      try {
+        await updateOrderStatus(orderId, newStatus);
+        Alert.alert('成功', `訂單已更新為 ${ORDER_STATUS_LABELS[newStatus]}`);
+        await loadOrders(); // 重新載入訂單
+      } catch (e) {
+        Alert.alert('錯誤', '更新訂單狀態失敗');
+      }
+    },
+    [loadOrders],
+  );
 
   const handleToggleOpen = useCallback(() => {
     setIsOpen(!isOpen);
     Alert.alert(
-      "營業狀態已更改",
-      !isOpen ? "您的店家現在接受新訂單" : "您的店家現在暫停接受新訂單"
+      '營業狀態已更改',
+      !isOpen ? '您的店家現在接受新訂單' : '您的店家現在暫停接受新訂單',
     );
   }, [isOpen]);
 
   return (
     <Screen noPadding>
       {/* 標題欄 */}
-      <View style={{ padding: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+      <View
+        style={{
+          padding: 16,
+          paddingBottom: 12,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.colors.border,
+        }}
+      >
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 12,
+          }}
+        >
           <View>
-            <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 22 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 22 }}>
               {myVendor.name}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -176,8 +205,8 @@ export function VendorManagementScreen(props: any) {
               backgroundColor: theme.colors.surface,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              alignItems: "center",
-              justifyContent: "center",
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             <Ionicons name="close" size={20} color={theme.colors.text} />
@@ -187,9 +216,9 @@ export function VendorManagementScreen(props: any) {
         {/* 營業狀態切換 */}
         <View
           style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
             padding: 10,
             borderRadius: 10,
             backgroundColor: isOpen ? `${theme.colors.success}10` : `${theme.colors.danger}10`,
@@ -197,19 +226,17 @@ export function VendorManagementScreen(props: any) {
             borderColor: isOpen ? `${theme.colors.success}30` : `${theme.colors.danger}30`,
           }}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Ionicons
-              name={isOpen ? "checkmark-circle" : "close-circle"}
+              name={isOpen ? 'checkmark-circle' : 'close-circle'}
               size={18}
               color={isOpen ? theme.colors.success : theme.colors.danger}
             />
             <View>
-              <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 13 }}>
-                {isOpen ? "營業中" : "暫停營業"}
+              <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 13 }}>
+                {isOpen ? '營業中' : '暫停營業'}
               </Text>
-              <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-                點擊切換營業狀態
-              </Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 11 }}>點擊切換營業狀態</Text>
             </View>
           </View>
           <Switch value={isOpen} onValueChange={handleToggleOpen} />
@@ -217,21 +244,27 @@ export function VendorManagementScreen(props: any) {
       </View>
 
       {/* 分頁標籤 */}
-      <View style={{ flexDirection: "row", borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
-        {(["dashboard", "orders", "menu", "reviews", "stats"] as const).map((tab) => {
+      <View
+        style={{
+          flexDirection: 'row',
+          borderBottomWidth: 1,
+          borderBottomColor: theme.colors.border,
+        }}
+      >
+        {(['dashboard', 'orders', 'menu', 'reviews', 'stats'] as const).map((tab) => {
           const labels: Record<typeof tab, string> = {
-            dashboard: "儀表板",
-            orders: "訂單",
-            menu: "菜單",
-            reviews: "評價",
-            stats: "統計",
+            dashboard: '儀表板',
+            orders: '訂單',
+            menu: '菜單',
+            reviews: '評價',
+            stats: '統計',
           };
           const icons: Record<typeof tab, keyof typeof Ionicons.glyphMap> = {
-            dashboard: "home-outline",
-            orders: "receipt-outline",
-            menu: "document-outline",
-            reviews: "star-outline",
-            stats: "bar-chart-outline",
+            dashboard: 'home-outline',
+            orders: 'receipt-outline',
+            menu: 'document-outline',
+            reviews: 'star-outline',
+            stats: 'bar-chart-outline',
           };
           const isActive = activeTab === tab;
           return (
@@ -241,12 +274,12 @@ export function VendorManagementScreen(props: any) {
               style={{
                 flex: 1,
                 paddingVertical: 12,
-                alignItems: "center",
+                alignItems: 'center',
                 borderBottomWidth: isActive ? 3 : 0,
-                borderBottomColor: isActive ? theme.colors.accent : "transparent",
+                borderBottomColor: isActive ? theme.colors.accent : 'transparent',
               }}
             >
-              <View style={{ alignItems: "center", gap: 4 }}>
+              <View style={{ alignItems: 'center', gap: 4 }}>
                 <Ionicons
                   name={icons[tab]}
                   size={18}
@@ -255,7 +288,7 @@ export function VendorManagementScreen(props: any) {
                 <Text
                   style={{
                     fontSize: 11,
-                    fontWeight: isActive ? "600" : "400",
+                    fontWeight: isActive ? '600' : '400',
                     color: isActive ? theme.colors.accent : theme.colors.muted,
                   }}
                 >
@@ -268,11 +301,19 @@ export function VendorManagementScreen(props: any) {
       </View>
 
       {/* 內容區域 */}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
-        {activeTab === "dashboard" && (
-          <DashboardTab vendor={myVendor} orderStats={orderStats} reviews={vendorReviews} avgRating={avgRating} />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+      >
+        {activeTab === 'dashboard' && (
+          <DashboardTab
+            vendor={myVendor}
+            orderStats={orderStats}
+            reviews={vendorReviews}
+            avgRating={avgRating}
+          />
         )}
-        {activeTab === "orders" && (
+        {activeTab === 'orders' && (
           <OrdersTab
             orders={vendorOrders}
             onSelectOrder={setSelectedOrder}
@@ -280,9 +321,11 @@ export function VendorManagementScreen(props: any) {
             onShowCancel={setShowCancelModal}
           />
         )}
-        {activeTab === "menu" && <MenuTab vendorId={myVendor.id} menuItems={menuItems} onRefresh={loadMenu} />}
-        {activeTab === "reviews" && <ReviewsTab reviews={vendorReviews} avgRating={avgRating} />}
-        {activeTab === "stats" && (
+        {activeTab === 'menu' && (
+          <MenuTab vendorId={myVendor.id} menuItems={menuItems} onRefresh={loadMenu} />
+        )}
+        {activeTab === 'reviews' && <ReviewsTab reviews={vendorReviews} avgRating={avgRating} />}
+        {activeTab === 'stats' && (
           <StatsTab vendor={myVendor} orders={vendorOrders} reviews={vendorReviews} />
         )}
       </ScrollView>
@@ -298,8 +341,8 @@ export function VendorManagementScreen(props: any) {
           <View
             style={{
               flex: 1,
-              backgroundColor: "#00000060",
-              justifyContent: "flex-end",
+              backgroundColor: '#00000060',
+              justifyContent: 'flex-end',
             }}
           >
             <View
@@ -311,7 +354,14 @@ export function VendorManagementScreen(props: any) {
                 paddingBottom: 30,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16, marginBottom: 12 }}>
+              <Text
+                style={{
+                  color: theme.colors.text,
+                  fontWeight: '700',
+                  fontSize: 16,
+                  marginBottom: 12,
+                }}
+              >
                 取消訂單 #{selectedOrder.id}
               </Text>
               <TextInput
@@ -327,11 +377,11 @@ export function VendorManagementScreen(props: any) {
                   color: theme.colors.text,
                   marginBottom: 16,
                   minHeight: 80,
-                  textAlignVertical: "top",
+                  textAlignVertical: 'top',
                 }}
                 multiline
               />
-              <View style={{ flexDirection: "row", gap: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Pressable
                   onPress={() => setShowCancelModal(false)}
                   style={{
@@ -339,16 +389,16 @@ export function VendorManagementScreen(props: any) {
                     paddingVertical: 12,
                     borderRadius: 10,
                     backgroundColor: theme.colors.surface,
-                    alignItems: "center",
+                    alignItems: 'center',
                   }}
                 >
-                  <Text style={{ color: theme.colors.text, fontWeight: "600" }}>返回</Text>
+                  <Text style={{ color: theme.colors.text, fontWeight: '600' }}>返回</Text>
                 </Pressable>
                 <Pressable
                   onPress={() => {
-                    handleUpdateOrderStatus(selectedOrder.id, "cancelled");
+                    handleUpdateOrderStatus(selectedOrder.id, 'cancelled');
                     setShowCancelModal(false);
-                    setCancelReason("");
+                    setCancelReason('');
                     setSelectedOrder(null);
                   }}
                   style={{
@@ -356,10 +406,10 @@ export function VendorManagementScreen(props: any) {
                     paddingVertical: 12,
                     borderRadius: 10,
                     backgroundColor: theme.colors.danger,
-                    alignItems: "center",
+                    alignItems: 'center',
                   }}
                 >
-                  <Text style={{ color: "#fff", fontWeight: "600" }}>確認取消</Text>
+                  <Text style={{ color: '#fff', fontWeight: '600' }}>確認取消</Text>
                 </Pressable>
               </View>
             </View>
@@ -386,7 +436,7 @@ function DashboardTab(props: {
     <View style={{ padding: 16, gap: 16 }}>
       {/* 概況卡片 */}
       <View style={{ gap: 10 }}>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
           <View
             style={{
               flex: 1,
@@ -397,8 +447,10 @@ function DashboardTab(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>今日訂單</Text>
-            <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 20 }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
+              今日訂單
+            </Text>
+            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 20 }}>
               {orderStats.total}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -415,8 +467,10 @@ function DashboardTab(props: {
               borderColor: `${theme.colors.success}30`,
             }}
           >
-            <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>今日營收</Text>
-            <Text style={{ color: theme.colors.success, fontWeight: "800", fontSize: 20 }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
+              今日營收
+            </Text>
+            <Text style={{ color: theme.colors.success, fontWeight: '800', fontSize: 20 }}>
               NT${orderStats.revenue}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -424,7 +478,7 @@ function DashboardTab(props: {
             </Text>
           </View>
         </View>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
           <View
             style={{
               flex: 1,
@@ -435,8 +489,10 @@ function DashboardTab(props: {
               borderColor: `${theme.colors.accent}30`,
             }}
           >
-            <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>平均評分</Text>
-            <Text style={{ color: theme.colors.accent, fontWeight: "800", fontSize: 20 }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
+              平均評分
+            </Text>
+            <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 20 }}>
               {avgRating}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -448,13 +504,13 @@ function DashboardTab(props: {
               flex: 1,
               padding: 14,
               borderRadius: 14,
-              backgroundColor: `${"#F59E0B"}10`,
+              backgroundColor: `${'#F59E0B'}10`,
               borderWidth: 1,
-              borderColor: `${"#F59E0B"}30`,
+              borderColor: `${'#F59E0B'}30`,
             }}
           >
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>待處理</Text>
-            <Text style={{ color: "#F59E0B", fontWeight: "800", fontSize: 20 }}>
+            <Text style={{ color: '#F59E0B', fontWeight: '800', fontSize: 20 }}>
               {orderStats.pending + orderStats.confirmed}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -468,7 +524,7 @@ function DashboardTab(props: {
       <View style={{ gap: 8 }}>
         <SectionTitle text="訂單狀態分佈" />
         <View style={{ gap: 8 }}>
-          {(["pending", "confirmed", "preparing", "ready"] as const).map((status) => (
+          {(['pending', 'confirmed', 'preparing', 'ready'] as const).map((status) => (
             <View
               key={status}
               style={{
@@ -477,27 +533,27 @@ function DashboardTab(props: {
                 backgroundColor: theme.colors.surface2,
                 borderLeftWidth: 4,
                 borderLeftColor: ORDER_STATUS_COLORS[status],
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
               }}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: "500", fontSize: 13 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: '500', fontSize: 13 }}>
                 {ORDER_STATUS_LABELS[status]}
               </Text>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <View
                   style={{
                     paddingHorizontal: 10,
                     paddingVertical: 4,
                     borderRadius: 6,
-                    backgroundColor: ORDER_STATUS_COLORS[status] + "20",
+                    backgroundColor: ORDER_STATUS_COLORS[status] + '20',
                   }}
                 >
                   <Text
                     style={{
                       color: ORDER_STATUS_COLORS[status],
-                      fontWeight: "700",
+                      fontWeight: '700',
                       fontSize: 14,
                     }}
                   >
@@ -518,8 +574,8 @@ function DashboardTab(props: {
             padding: 12,
             borderRadius: 10,
             backgroundColor: theme.colors.surface2,
-            flexDirection: "row",
-            alignItems: "center",
+            flexDirection: 'row',
+            alignItems: 'center',
             gap: 10,
           }}
         >
@@ -529,14 +585,14 @@ function DashboardTab(props: {
               height: 36,
               borderRadius: 8,
               backgroundColor: `${theme.colors.accent}10`,
-              alignItems: "center",
-              justifyContent: "center",
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             <Ionicons name="document-outline" size={18} color={theme.colors.accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 13 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 13 }}>
               查看菜單
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>管理菜單可用性</Text>
@@ -562,11 +618,11 @@ function OrdersTab(props: {
 
   const groupedOrders = useMemo(() => {
     return {
-      pending: orders.filter(o => o.status === "pending"),
-      confirmed: orders.filter(o => o.status === "confirmed"),
-      preparing: orders.filter(o => o.status === "preparing"),
-      ready: orders.filter(o => o.status === "ready"),
-      completed: orders.filter(o => o.status === "completed"),
+      pending: orders.filter((o) => o.status === 'pending'),
+      confirmed: orders.filter((o) => o.status === 'confirmed'),
+      preparing: orders.filter((o) => o.status === 'preparing'),
+      ready: orders.filter((o) => o.status === 'ready'),
+      completed: orders.filter((o) => o.status === 'completed'),
     };
   }, [orders]);
 
@@ -583,7 +639,7 @@ function OrdersTab(props: {
               <OrderCard
                 key={order.id}
                 order={order}
-                onAccept={() => onUpdateStatus(order.id, "confirmed")}
+                onAccept={() => onUpdateStatus(order.id, 'confirmed')}
                 onCancel={() => {
                   onSelectOrder(order);
                   onShowCancel(true);
@@ -605,7 +661,7 @@ function OrdersTab(props: {
               <OrderCard
                 key={order.id}
                 order={order}
-                onAccept={() => onUpdateStatus(order.id, "preparing")}
+                onAccept={() => onUpdateStatus(order.id, 'preparing')}
                 actionLabel="開始製作"
               />
             ))}
@@ -624,7 +680,7 @@ function OrdersTab(props: {
               <OrderCard
                 key={order.id}
                 order={order}
-                onAccept={() => onUpdateStatus(order.id, "ready")}
+                onAccept={() => onUpdateStatus(order.id, 'ready')}
                 actionLabel="準備完成"
               />
             ))}
@@ -643,7 +699,7 @@ function OrdersTab(props: {
               <OrderCard
                 key={order.id}
                 order={order}
-                onAccept={() => onUpdateStatus(order.id, "completed")}
+                onAccept={() => onUpdateStatus(order.id, 'completed')}
                 actionLabel="已取餐"
               />
             ))}
@@ -666,7 +722,7 @@ function OrdersTab(props: {
       )}
 
       {orders.length === 0 && (
-        <View style={{ padding: 40, alignItems: "center" }}>
+        <View style={{ padding: 40, alignItems: 'center' }}>
           <Ionicons name="happy-outline" size={48} color={theme.colors.muted} />
           <Text style={{ color: theme.colors.muted, fontSize: 14, marginTop: 12 }}>
             目前沒有訂單
@@ -688,7 +744,7 @@ function OrderCard(props: {
   actionLabel?: string;
   isCompleted?: boolean;
 }) {
-  const { order, onAccept, onCancel, actionLabel = "確認訂單", isCompleted } = props;
+  const { order, onAccept, onCancel, actionLabel = '確認訂單', isCompleted } = props;
 
   const createdTime = new Date(order.createdAt);
   const timeAgo = Math.round((Date.now() - createdTime.getTime()) / 60000);
@@ -706,9 +762,16 @@ function OrderCard(props: {
       }}
     >
       {/* 標題行 */}
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
+      <View
+        style={{
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>
             訂單 #{order.id.slice(-4).toUpperCase()}
           </Text>
           {order.queueNumber && (
@@ -720,20 +783,26 @@ function OrderCard(props: {
                 backgroundColor: `${ORDER_STATUS_COLORS[order.status]}20`,
               }}
             >
-              <Text style={{ color: ORDER_STATUS_COLORS[order.status], fontSize: 11, fontWeight: "600" }}>
+              <Text
+                style={{
+                  color: ORDER_STATUS_COLORS[order.status],
+                  fontSize: 11,
+                  fontWeight: '600',
+                }}
+              >
                 號碼 {order.queueNumber}
               </Text>
             </View>
           )}
         </View>
         <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-          {timeAgo < 1 ? "剛才" : `${timeAgo} 分鐘前`}
+          {timeAgo < 1 ? '剛才' : `${timeAgo} 分鐘前`}
         </Text>
       </View>
 
       {/* 狀態和金額 */}
-      <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <View
             style={{
               width: 8,
@@ -742,25 +811,34 @@ function OrderCard(props: {
               backgroundColor: ORDER_STATUS_COLORS[order.status],
             }}
           />
-          <Text style={{ color: ORDER_STATUS_COLORS[order.status], fontWeight: "600", fontSize: 12 }}>
+          <Text
+            style={{ color: ORDER_STATUS_COLORS[order.status], fontWeight: '600', fontSize: 12 }}
+          >
             {ORDER_STATUS_LABELS[order.status]}
           </Text>
         </View>
-        <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>
           NT$ {order.totalPrice}
         </Text>
       </View>
 
       {/* 品項 */}
-      <View style={{ backgroundColor: theme.colors.surface, borderRadius: 8, padding: 8, marginBottom: 8 }}>
+      <View
+        style={{
+          backgroundColor: theme.colors.surface,
+          borderRadius: 8,
+          padding: 8,
+          marginBottom: 8,
+        }}
+      >
         {order.items.map((item, idx) => (
           <View key={idx} style={{ marginBottom: idx === order.items.length - 1 ? 0 : 6 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: "500" }}>
+            <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '500' }}>
               {item.menuItemName} × {item.quantity}
             </Text>
             {item.selectedOptions.length > 0 && (
               <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
-                {item.selectedOptions.map(opt => `${opt.optionName}: ${opt.choice}`).join(" / ")}
+                {item.selectedOptions.map((opt) => `${opt.optionName}: ${opt.choice}`).join(' / ')}
               </Text>
             )}
           </View>
@@ -769,16 +847,21 @@ function OrderCard(props: {
 
       {/* 備註 */}
       {order.note && (
-        <View style={{ marginBottom: 8, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
-          <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-            備註：{order.note}
-          </Text>
+        <View
+          style={{
+            marginBottom: 8,
+            paddingBottom: 8,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.colors.border,
+          }}
+        >
+          <Text style={{ color: theme.colors.muted, fontSize: 11 }}>備註：{order.note}</Text>
         </View>
       )}
 
       {/* 操作按鈕 */}
       {!isCompleted && (
-        <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
           {onAccept && (
             <Pressable
               onPress={onAccept}
@@ -787,12 +870,10 @@ function OrderCard(props: {
                 paddingVertical: 8,
                 borderRadius: 8,
                 backgroundColor: theme.colors.accent,
-                alignItems: "center",
+                alignItems: 'center',
               }}
             >
-              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 12 }}>
-                {actionLabel}
-              </Text>
+              <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>{actionLabel}</Text>
             </Pressable>
           )}
           {onCancel && (
@@ -805,10 +886,10 @@ function OrderCard(props: {
                 backgroundColor: theme.colors.surface,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
-                alignItems: "center",
+                alignItems: 'center',
               }}
             >
-              <Text style={{ color: theme.colors.danger, fontWeight: "600", fontSize: 12 }}>
+              <Text style={{ color: theme.colors.danger, fontWeight: '600', fontSize: 12 }}>
                 取消訂單
               </Text>
             </Pressable>
@@ -838,31 +919,31 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
   // ── 編輯 / 新增 Modal 狀態 ──
   const [showEditor, setShowEditor] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null); // null = 新增模式
-  const [formName, setFormName] = useState("");
-  const [formDesc, setFormDesc] = useState("");
-  const [formPrice, setFormPrice] = useState("");
-  const [formCategory, setFormCategory] = useState("");
-  const [formCalories, setFormCalories] = useState("");
-  const [formAllergens, setFormAllergens] = useState("");
+  const [formName, setFormName] = useState('');
+  const [formDesc, setFormDesc] = useState('');
+  const [formPrice, setFormPrice] = useState('');
+  const [formCategory, setFormCategory] = useState('');
+  const [formCalories, setFormCalories] = useState('');
+  const [formAllergens, setFormAllergens] = useState('');
   const [formIsPopular, setFormIsPopular] = useState(false);
   const [formIsAvailable, setFormIsAvailable] = useState(true);
 
   // 快閃折扣
   const [showFlashDeal, setShowFlashDeal] = useState(false);
   const [flashItem, setFlashItem] = useState<MenuItem | null>(null);
-  const [flashPrice, setFlashPrice] = useState("");
-  const [flashQty, setFlashQty] = useState("5");
-  const [flashReason, setFlashReason] = useState("即將打烊");
-  const [flashHours, setFlashHours] = useState("2");
+  const [flashPrice, setFlashPrice] = useState('');
+  const [flashQty, setFlashQty] = useState('5');
+  const [flashReason, setFlashReason] = useState('即將打烊');
+  const [flashHours, setFlashHours] = useState('2');
 
   const openNewItem = useCallback(() => {
     setEditingItem(null);
-    setFormName("");
-    setFormDesc("");
-    setFormPrice("");
-    setFormCategory("");
-    setFormCalories("");
-    setFormAllergens("");
+    setFormName('');
+    setFormDesc('');
+    setFormPrice('');
+    setFormCategory('');
+    setFormCalories('');
+    setFormAllergens('');
     setFormIsPopular(false);
     setFormIsAvailable(true);
     setShowEditor(true);
@@ -874,8 +955,8 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
     setFormDesc(item.description);
     setFormPrice(item.price.toString());
     setFormCategory(item.category);
-    setFormCalories(item.calories?.toString() ?? "");
-    setFormAllergens(item.allergens.join("、"));
+    setFormCalories(item.calories?.toString() ?? '');
+    setFormAllergens(item.allergens.join('、'));
     setFormIsPopular(item.isPopular);
     setFormIsAvailable(item.isAvailable);
     setShowEditor(true);
@@ -883,12 +964,12 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
 
   const handleSave = useCallback(async () => {
     if (!formName.trim() || !formPrice.trim()) {
-      Alert.alert("錯誤", "品項名稱和價格為必填");
+      Alert.alert('錯誤', '品項名稱和價格為必填');
       return;
     }
     const price = parseInt(formPrice, 10);
     if (isNaN(price) || price < 0) {
-      Alert.alert("錯誤", "請輸入正確的價格");
+      Alert.alert('錯誤', '請輸入正確的價格');
       return;
     }
     const allergens = formAllergens.trim() ? formAllergens.split(/[、,，\s]+/).filter(Boolean) : [];
@@ -900,19 +981,19 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
           name: formName.trim(),
           description: formDesc.trim(),
           price,
-          category: formCategory.trim() || "其他",
+          category: formCategory.trim() || '其他',
           calories: calories && !isNaN(calories) ? calories : null,
           allergens,
           isPopular: formIsPopular,
           isAvailable: formIsAvailable,
         });
-        Alert.alert("成功", "品項已更新");
+        Alert.alert('成功', '品項已更新');
       } else {
         await addMenuItem(vendorId, {
           name: formName.trim(),
           description: formDesc.trim(),
           price,
-          category: formCategory.trim() || "其他",
+          category: formCategory.trim() || '其他',
           imageUrl: null,
           isAvailable: formIsAvailable,
           isPopular: formIsPopular,
@@ -920,41 +1001,59 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
           calories: calories && !isNaN(calories) ? calories : null,
           options: [],
         });
-        Alert.alert("成功", "新品項已新增");
+        Alert.alert('成功', '新品項已新增');
       }
       setShowEditor(false);
       onRefresh();
     } catch {
-      Alert.alert("錯誤", "儲存失敗");
+      Alert.alert('錯誤', '儲存失敗');
     }
-  }, [vendorId, editingItem, formName, formDesc, formPrice, formCategory, formCalories, formAllergens, formIsPopular, formIsAvailable, onRefresh]);
+  }, [
+    vendorId,
+    editingItem,
+    formName,
+    formDesc,
+    formPrice,
+    formCategory,
+    formCalories,
+    formAllergens,
+    formIsPopular,
+    formIsAvailable,
+    onRefresh,
+  ]);
 
-  const handleDelete = useCallback((item: MenuItem) => {
-    Alert.alert("確認刪除", `確定要刪除「${item.name}」嗎？`, [
-      { text: "取消", style: "cancel" },
-      {
-        text: "刪除",
-        style: "destructive",
-        onPress: async () => {
-          await deleteMenuItemData(vendorId, item.id);
-          onRefresh();
+  const handleDelete = useCallback(
+    (item: MenuItem) => {
+      Alert.alert('確認刪除', `確定要刪除「${item.name}」嗎？`, [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '刪除',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteMenuItemData(vendorId, item.id);
+            onRefresh();
+          },
         },
-      },
-    ]);
-  }, [vendorId, onRefresh]);
+      ]);
+    },
+    [vendorId, onRefresh],
+  );
 
-  const handleToggleAvailability = useCallback(async (item: MenuItem) => {
-    await updateMenuItemData(vendorId, item.id, { isAvailable: !item.isAvailable });
-    onRefresh();
-  }, [vendorId, onRefresh]);
+  const handleToggleAvailability = useCallback(
+    async (item: MenuItem) => {
+      await updateMenuItemData(vendorId, item.id, { isAvailable: !item.isAvailable });
+      onRefresh();
+    },
+    [vendorId, onRefresh],
+  );
 
   // 快閃折扣
   const openFlashDeal = useCallback((item: MenuItem) => {
     setFlashItem(item);
     setFlashPrice(Math.round(item.price * 0.7).toString());
-    setFlashQty("5");
-    setFlashReason("即將打烊");
-    setFlashHours("2");
+    setFlashQty('5');
+    setFlashReason('即將打烊');
+    setFlashHours('2');
     setShowFlashDeal(true);
   }, []);
 
@@ -964,7 +1063,7 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
     const qty = parseInt(flashQty, 10);
     const hrs = parseInt(flashHours, 10);
     if (isNaN(dp) || isNaN(qty) || isNaN(hrs)) {
-      Alert.alert("錯誤", "請輸入正確的數字");
+      Alert.alert('錯誤', '請輸入正確的數字');
       return;
     }
     const expires = new Date();
@@ -979,14 +1078,14 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
       reason: flashReason,
       expiresAt: expires.toISOString(),
     });
-    Alert.alert("成功", `「${flashItem.name}」快閃折扣已發布！`);
+    Alert.alert('成功', `「${flashItem.name}」快閃折扣已發布！`);
     setShowFlashDeal(false);
   }, [vendorId, flashItem, flashPrice, flashQty, flashReason, flashHours]);
 
   return (
     <View style={{ paddingVertical: 16 }}>
       {/* 操作列 */}
-      <View style={{ paddingHorizontal: 16, marginBottom: 16, flexDirection: "row", gap: 10 }}>
+      <View style={{ paddingHorizontal: 16, marginBottom: 16, flexDirection: 'row', gap: 10 }}>
         <Pressable
           onPress={openNewItem}
           style={{
@@ -994,14 +1093,14 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
             paddingVertical: 12,
             borderRadius: 10,
             backgroundColor: theme.colors.accent,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
             gap: 6,
           }}
         >
           <Ionicons name="add-circle-outline" size={18} color="#fff" />
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>新增品項</Text>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>新增品項</Text>
         </Pressable>
         <View
           style={{
@@ -1011,11 +1110,11 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
             backgroundColor: theme.colors.surface2,
             borderWidth: 1,
             borderColor: theme.colors.border,
-            alignItems: "center",
-            justifyContent: "center",
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
-          <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "600" }}>
+          <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '600' }}>
             共 {menuItems.length} 項
           </Text>
         </View>
@@ -1040,20 +1139,53 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
                   opacity: item.isAvailable ? 1 : 0.7,
                 }}
               >
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                  }}
+                >
                   <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                      <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 13 }}>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        marginBottom: 4,
+                      }}
+                    >
+                      <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 13 }}>
                         {item.name}
                       </Text>
                       {item.isPopular && (
-                        <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: "#F59E0B20" }}>
-                          <Text style={{ color: "#F59E0B", fontSize: 9, fontWeight: "600" }}>熱門</Text>
+                        <View
+                          style={{
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 4,
+                            backgroundColor: '#F59E0B20',
+                          }}
+                        >
+                          <Text style={{ color: '#F59E0B', fontSize: 9, fontWeight: '600' }}>
+                            熱門
+                          </Text>
                         </View>
                       )}
                       {!item.isAvailable && (
-                        <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: `${theme.colors.danger}20` }}>
-                          <Text style={{ color: theme.colors.danger, fontSize: 9, fontWeight: "600" }}>已下架</Text>
+                        <View
+                          style={{
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            borderRadius: 4,
+                            backgroundColor: `${theme.colors.danger}20`,
+                          }}
+                        >
+                          <Text
+                            style={{ color: theme.colors.danger, fontSize: 9, fontWeight: '600' }}
+                          >
+                            已下架
+                          </Text>
                         </View>
                       )}
                     </View>
@@ -1061,12 +1193,12 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
                       {item.description}
                     </Text>
                     {item.allergens.length > 0 && (
-                      <Text style={{ color: "#F59E0B", fontSize: 10, marginBottom: 4 }}>
-                        過敏原：{item.allergens.join("、")}
+                      <Text style={{ color: '#F59E0B', fontSize: 10, marginBottom: 4 }}>
+                        過敏原：{item.allergens.join('、')}
                       </Text>
                     )}
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: 14 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 14 }}>
                         NT${item.price}
                       </Text>
                       {item.calories != null && (
@@ -1083,24 +1215,63 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
                   />
                 </View>
                 {/* 操作按鈕列 */}
-                <View style={{ flexDirection: "row", gap: 8, marginTop: 10, borderTopWidth: 1, borderTopColor: theme.colors.border, paddingTop: 10 }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    gap: 8,
+                    marginTop: 10,
+                    borderTopWidth: 1,
+                    borderTopColor: theme.colors.border,
+                    paddingTop: 10,
+                  }}
+                >
                   <Pressable
                     onPress={() => openEditItem(item)}
-                    style={{ flex: 1, paddingVertical: 7, borderRadius: 8, backgroundColor: `${theme.colors.accent}10`, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 4 }}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 7,
+                      borderRadius: 8,
+                      backgroundColor: `${theme.colors.accent}10`,
+                      alignItems: 'center',
+                      flexDirection: 'row',
+                      justifyContent: 'center',
+                      gap: 4,
+                    }}
                   >
                     <Ionicons name="create-outline" size={14} color={theme.colors.accent} />
-                    <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "600" }}>編輯</Text>
+                    <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: '600' }}>
+                      編輯
+                    </Text>
                   </Pressable>
                   <Pressable
                     onPress={() => openFlashDeal(item)}
-                    style={{ flex: 1, paddingVertical: 7, borderRadius: 8, backgroundColor: "#F59E0B10", alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 4 }}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 7,
+                      borderRadius: 8,
+                      backgroundColor: '#F59E0B10',
+                      alignItems: 'center',
+                      flexDirection: 'row',
+                      justifyContent: 'center',
+                      gap: 4,
+                    }}
                   >
                     <Ionicons name="flash-outline" size={14} color="#F59E0B" />
-                    <Text style={{ color: "#F59E0B", fontSize: 11, fontWeight: "600" }}>快閃折扣</Text>
+                    <Text style={{ color: '#F59E0B', fontSize: 11, fontWeight: '600' }}>
+                      快閃折扣
+                    </Text>
                   </Pressable>
                   <Pressable
                     onPress={() => handleDelete(item)}
-                    style={{ paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8, backgroundColor: `${theme.colors.danger}10`, alignItems: "center", flexDirection: "row", gap: 4 }}
+                    style={{
+                      paddingVertical: 7,
+                      paddingHorizontal: 12,
+                      borderRadius: 8,
+                      backgroundColor: `${theme.colors.danger}10`,
+                      alignItems: 'center',
+                      flexDirection: 'row',
+                      gap: 4,
+                    }}
                   >
                     <Ionicons name="trash-outline" size={14} color={theme.colors.danger} />
                   </Pressable>
@@ -1112,72 +1283,173 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
       ))}
 
       {menuItems.length === 0 && (
-        <View style={{ padding: 40, alignItems: "center" }}>
+        <View style={{ padding: 40, alignItems: 'center' }}>
           <Ionicons name="document-outline" size={48} color={theme.colors.muted} />
-          <Text style={{ color: theme.colors.muted, fontSize: 14, marginTop: 12 }}>目前沒有菜單項目</Text>
-          <Pressable onPress={openNewItem} style={{ marginTop: 12, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8, backgroundColor: theme.colors.accent }}>
-            <Text style={{ color: "#fff", fontWeight: "600" }}>新增第一個品項</Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 14, marginTop: 12 }}>
+            目前沒有菜單項目
+          </Text>
+          <Pressable
+            onPress={openNewItem}
+            style={{
+              marginTop: 12,
+              paddingHorizontal: 20,
+              paddingVertical: 10,
+              borderRadius: 8,
+              backgroundColor: theme.colors.accent,
+            }}
+          >
+            <Text style={{ color: '#fff', fontWeight: '600' }}>新增第一個品項</Text>
           </Pressable>
         </View>
       )}
 
       {/* ═══ 新增 / 編輯 Modal ═══ */}
-      <Modal visible={showEditor} transparent animationType="slide" onRequestClose={() => setShowEditor(false)}>
-        <View style={{ flex: 1, backgroundColor: "#00000060", justifyContent: "flex-end" }}>
+      <Modal
+        visible={showEditor}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowEditor(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: '#00000060', justifyContent: 'flex-end' }}>
           <ScrollView
-            style={{ maxHeight: "85%", backgroundColor: theme.colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20 }}
+            style={{
+              maxHeight: '85%',
+              backgroundColor: theme.colors.background,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+            }}
             contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
             keyboardShouldPersistTaps="handled"
           >
-            <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 18, marginBottom: 16 }}>
-              {editingItem ? "編輯品項" : "新增品項"}
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontWeight: '700',
+                fontSize: 18,
+                marginBottom: 16,
+              }}
+            >
+              {editingItem ? '編輯品項' : '新增品項'}
             </Text>
 
-            <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>品項名稱 *</Text>
-            <TextInput value={formName} onChangeText={setFormName} placeholder="例如：雞腿飯" placeholderTextColor={theme.colors.muted} style={editorInputStyle} />
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+              品項名稱 *
+            </Text>
+            <TextInput
+              value={formName}
+              onChangeText={setFormName}
+              placeholder="例如：雞腿飯"
+              placeholderTextColor={theme.colors.muted}
+              style={editorInputStyle}
+            />
 
-            <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4, marginTop: 12 }}>描述</Text>
-            <TextInput value={formDesc} onChangeText={setFormDesc} placeholder="例如：滷雞腿附三配菜" placeholderTextColor={theme.colors.muted} style={editorInputStyle} multiline />
+            <Text
+              style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4, marginTop: 12 }}
+            >
+              描述
+            </Text>
+            <TextInput
+              value={formDesc}
+              onChangeText={setFormDesc}
+              placeholder="例如：滷雞腿附三配菜"
+              placeholderTextColor={theme.colors.muted}
+              style={editorInputStyle}
+              multiline
+            />
 
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>價格 (NT$) *</Text>
-                <TextInput value={formPrice} onChangeText={setFormPrice} placeholder="65" placeholderTextColor={theme.colors.muted} style={editorInputStyle} keyboardType="number-pad" />
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+                  價格 (NT$) *
+                </Text>
+                <TextInput
+                  value={formPrice}
+                  onChangeText={setFormPrice}
+                  placeholder="65"
+                  placeholderTextColor={theme.colors.muted}
+                  style={editorInputStyle}
+                  keyboardType="number-pad"
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>分類</Text>
-                <TextInput value={formCategory} onChangeText={setFormCategory} placeholder="主食" placeholderTextColor={theme.colors.muted} style={editorInputStyle} />
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+                  分類
+                </Text>
+                <TextInput
+                  value={formCategory}
+                  onChangeText={setFormCategory}
+                  placeholder="主食"
+                  placeholderTextColor={theme.colors.muted}
+                  style={editorInputStyle}
+                />
               </View>
             </View>
 
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>熱量 (kcal)</Text>
-                <TextInput value={formCalories} onChangeText={setFormCalories} placeholder="選填" placeholderTextColor={theme.colors.muted} style={editorInputStyle} keyboardType="number-pad" />
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+                  熱量 (kcal)
+                </Text>
+                <TextInput
+                  value={formCalories}
+                  onChangeText={setFormCalories}
+                  placeholder="選填"
+                  placeholderTextColor={theme.colors.muted}
+                  style={editorInputStyle}
+                  keyboardType="number-pad"
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>過敏原</Text>
-                <TextInput value={formAllergens} onChangeText={setFormAllergens} placeholder="蛋、奶、麩質" placeholderTextColor={theme.colors.muted} style={editorInputStyle} />
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+                  過敏原
+                </Text>
+                <TextInput
+                  value={formAllergens}
+                  onChangeText={setFormAllergens}
+                  placeholder="蛋、奶、麩質"
+                  placeholderTextColor={theme.colors.muted}
+                  style={editorInputStyle}
+                />
               </View>
             </View>
 
-            <View style={{ flexDirection: "row", gap: 20, marginTop: 16 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 20, marginTop: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Switch value={formIsPopular} onValueChange={setFormIsPopular} />
                 <Text style={{ color: theme.colors.text, fontSize: 13 }}>標記熱門</Text>
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Switch value={formIsAvailable} onValueChange={setFormIsAvailable} />
                 <Text style={{ color: theme.colors.text, fontSize: 13 }}>上架中</Text>
               </View>
             </View>
 
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 20 }}>
-              <Pressable onPress={() => setShowEditor(false)} style={{ flex: 1, paddingVertical: 13, borderRadius: 10, backgroundColor: theme.colors.surface, alignItems: "center" }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "600" }}>取消</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+              <Pressable
+                onPress={() => setShowEditor(false)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 13,
+                  borderRadius: 10,
+                  backgroundColor: theme.colors.surface,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>取消</Text>
               </Pressable>
-              <Pressable onPress={handleSave} style={{ flex: 1, paddingVertical: 13, borderRadius: 10, backgroundColor: theme.colors.accent, alignItems: "center" }}>
-                <Text style={{ color: "#fff", fontWeight: "700" }}>{editingItem ? "儲存修改" : "新增品項"}</Text>
+              <Pressable
+                onPress={handleSave}
+                style={{
+                  flex: 1,
+                  paddingVertical: 13,
+                  borderRadius: 10,
+                  backgroundColor: theme.colors.accent,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700' }}>
+                  {editingItem ? '儲存修改' : '新增品項'}
+                </Text>
               </Pressable>
             </View>
           </ScrollView>
@@ -1185,58 +1457,135 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
       </Modal>
 
       {/* ═══ 快閃折扣 Modal ═══ */}
-      <Modal visible={showFlashDeal} transparent animationType="slide" onRequestClose={() => setShowFlashDeal(false)}>
-        <View style={{ flex: 1, backgroundColor: "#00000060", justifyContent: "flex-end" }}>
-          <View style={{ backgroundColor: theme.colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 40 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 }}>
+      <Modal
+        visible={showFlashDeal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowFlashDeal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: '#00000060', justifyContent: 'flex-end' }}>
+          <View
+            style={{
+              backgroundColor: theme.colors.background,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              padding: 20,
+              paddingBottom: 40,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
               <Ionicons name="flash" size={22} color="#F59E0B" />
-              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 18 }}>發布惜食快閃折扣</Text>
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
+                發布惜食快閃折扣
+              </Text>
             </View>
 
             {flashItem && (
-              <View style={{ padding: 12, borderRadius: 10, backgroundColor: theme.colors.surface2, marginBottom: 16 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>{flashItem.name}</Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>原價 NT${flashItem.price}</Text>
+              <View
+                style={{
+                  padding: 12,
+                  borderRadius: 10,
+                  backgroundColor: theme.colors.surface2,
+                  marginBottom: 16,
+                }}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
+                  {flashItem.name}
+                </Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                  原價 NT${flashItem.price}
+                </Text>
               </View>
             )}
 
-            <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>折扣價 (NT$)</Text>
-                <TextInput value={flashPrice} onChangeText={setFlashPrice} style={editorInputStyle} keyboardType="number-pad" />
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+                  折扣價 (NT$)
+                </Text>
+                <TextInput
+                  value={flashPrice}
+                  onChangeText={setFlashPrice}
+                  style={editorInputStyle}
+                  keyboardType="number-pad"
+                />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>限量份數</Text>
-                <TextInput value={flashQty} onChangeText={setFlashQty} style={editorInputStyle} keyboardType="number-pad" />
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+                  限量份數
+                </Text>
+                <TextInput
+                  value={flashQty}
+                  onChangeText={setFlashQty}
+                  style={editorInputStyle}
+                  keyboardType="number-pad"
+                />
               </View>
             </View>
 
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>原因</Text>
-            <View style={{ flexDirection: "row", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-              {["即將打烊", "剩餘食材", "限時優惠", "新品試賣"].map(r => (
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+              {['即將打烊', '剩餘食材', '限時優惠', '新品試賣'].map((r) => (
                 <Pressable
                   key={r}
                   onPress={() => setFlashReason(r)}
                   style={{
-                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8,
-                    backgroundColor: flashReason === r ? theme.colors.accent : theme.colors.surface2,
-                    borderWidth: 1, borderColor: flashReason === r ? theme.colors.accent : theme.colors.border,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 8,
+                    backgroundColor:
+                      flashReason === r ? theme.colors.accent : theme.colors.surface2,
+                    borderWidth: 1,
+                    borderColor: flashReason === r ? theme.colors.accent : theme.colors.border,
                   }}
                 >
-                  <Text style={{ color: flashReason === r ? "#fff" : theme.colors.text, fontSize: 12, fontWeight: "500" }}>{r}</Text>
+                  <Text
+                    style={{
+                      color: flashReason === r ? '#fff' : theme.colors.text,
+                      fontSize: 12,
+                      fontWeight: '500',
+                    }}
+                  >
+                    {r}
+                  </Text>
                 </Pressable>
               ))}
             </View>
 
-            <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>有效時間（小時）</Text>
-            <TextInput value={flashHours} onChangeText={setFlashHours} style={editorInputStyle} keyboardType="number-pad" />
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 4 }}>
+              有效時間（小時）
+            </Text>
+            <TextInput
+              value={flashHours}
+              onChangeText={setFlashHours}
+              style={editorInputStyle}
+              keyboardType="number-pad"
+            />
 
-            <View style={{ flexDirection: "row", gap: 10, marginTop: 20 }}>
-              <Pressable onPress={() => setShowFlashDeal(false)} style={{ flex: 1, paddingVertical: 13, borderRadius: 10, backgroundColor: theme.colors.surface, alignItems: "center" }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "600" }}>取消</Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+              <Pressable
+                onPress={() => setShowFlashDeal(false)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 13,
+                  borderRadius: 10,
+                  backgroundColor: theme.colors.surface,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>取消</Text>
               </Pressable>
-              <Pressable onPress={handleCreateFlashDeal} style={{ flex: 1, paddingVertical: 13, borderRadius: 10, backgroundColor: "#F59E0B", alignItems: "center" }}>
-                <Text style={{ color: "#fff", fontWeight: "700" }}>發布折扣</Text>
+              <Pressable
+                onPress={handleCreateFlashDeal}
+                style={{
+                  flex: 1,
+                  paddingVertical: 13,
+                  borderRadius: 10,
+                  backgroundColor: '#F59E0B',
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700' }}>發布折扣</Text>
               </Pressable>
             </View>
           </View>
@@ -1282,12 +1631,12 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
             backgroundColor: theme.colors.surface2,
             borderWidth: 1,
             borderColor: theme.colors.border,
-            alignItems: "center",
+            alignItems: 'center',
           }}
         >
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
             <Ionicons name="star" size={24} color="#F59E0B" />
-            <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 28 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 28 }}>
               {avgRating}
             </Text>
           </View>
@@ -1296,13 +1645,14 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
           </Text>
 
           {/* 評分分佈 */}
-          <View style={{ marginTop: 12, width: "100%" }}>
+          <View style={{ marginTop: 12, width: '100%' }}>
             {[5, 4, 3, 2, 1].map((rating) => (
-              <View key={rating} style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <View
+                key={rating}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}
+              >
                 <View style={{ width: 50 }}>
-                  <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-                    {rating} 星
-                  </Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{rating} 星</Text>
                 </View>
                 <View
                   style={{
@@ -1310,18 +1660,20 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
                     height: 8,
                     borderRadius: 4,
                     backgroundColor: theme.colors.surface,
-                    overflow: "hidden",
+                    overflow: 'hidden',
                   }}
                 >
                   <View
                     style={{
-                      height: "100%",
+                      height: '100%',
                       width: `${(ratingBreakdown[rating] / reviews.length) * 100}%`,
-                      backgroundColor: "#F59E0B",
+                      backgroundColor: '#F59E0B',
                     }}
                   />
                 </View>
-                <Text style={{ color: theme.colors.muted, fontSize: 11, width: 30, textAlign: "right" }}>
+                <Text
+                  style={{ color: theme.colors.muted, fontSize: 11, width: 30, textAlign: 'right' }}
+                >
                   {ratingBreakdown[rating]}
                 </Text>
               </View>
@@ -1345,11 +1697,13 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
                 borderColor: theme.colors.border,
               }}
             >
-              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 12 }}>
+              <View
+                style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
                   {review.studentName}
                 </Text>
-                <View style={{ flexDirection: "row", gap: 2 }}>
+                <View style={{ flexDirection: 'row', gap: 2 }}>
                   {Array(5)
                     .fill(0)
                     .map((_, i) => (
@@ -1357,16 +1711,18 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
                         key={i}
                         name="star"
                         size={14}
-                        color={i < review.rating ? "#F59E0B" : theme.colors.border}
+                        color={i < review.rating ? '#F59E0B' : theme.colors.border}
                       />
                     ))}
                 </View>
               </View>
-              <Text style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18, marginBottom: 8 }}>
+              <Text
+                style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18, marginBottom: 8 }}
+              >
                 {review.comment}
               </Text>
               {review.tags.length > 0 && (
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
                   {review.tags.map((tag) => (
                     <View
                       key={tag}
@@ -1377,7 +1733,7 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
                         backgroundColor: `${theme.colors.accent}10`,
                       }}
                     >
-                      <Text style={{ color: theme.colors.accent, fontSize: 10, fontWeight: "500" }}>
+                      <Text style={{ color: theme.colors.accent, fontSize: 10, fontWeight: '500' }}>
                         {tag}
                       </Text>
                     </View>
@@ -1385,7 +1741,7 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
                 </View>
               )}
               <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
-                {new Date(review.createdAt).toLocaleDateString("zh-TW")}
+                {new Date(review.createdAt).toLocaleDateString('zh-TW')}
               </Text>
             </View>
           ))}
@@ -1393,7 +1749,7 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
       </View>
 
       {reviews.length === 0 && (
-        <View style={{ padding: 40, alignItems: "center" }}>
+        <View style={{ padding: 40, alignItems: 'center' }}>
           <Ionicons name="star-outline" size={48} color={theme.colors.muted} />
           <Text style={{ color: theme.colors.muted, fontSize: 14, marginTop: 12 }}>
             目前沒有評價
@@ -1418,10 +1774,9 @@ function StatsTab(props: { vendor: Vendor; orders: Order[]; reviews: Review[] })
     const avgRating =
       reviews.length > 0
         ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)
-        : "未評";
-    const completedOrders = orders.filter((o) => o.status === "completed").length;
-    const peakHour =
-      orders.length > 0 ? new Date(orders[0].createdAt).getHours() : "未知";
+        : '未評';
+    const completedOrders = orders.filter((o) => o.status === 'completed').length;
+    const peakHour = orders.length > 0 ? new Date(orders[0].createdAt).getHours() : '未知';
 
     return {
       totalOrders,
@@ -1438,16 +1793,24 @@ function StatsTab(props: { vendor: Vendor; orders: Order[]; reviews: Review[] })
     <View style={{ padding: 16, gap: 16 }}>
       {/* 統計卡片網格 */}
       <View style={{ gap: 10 }}>
-        <View style={{ flexDirection: "row", gap: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
           <StatCard label="總訂單數" value={stats.totalOrders.toString()} icon="receipt-outline" />
           <StatCard label="總營收" value={`NT$${stats.totalRevenue}`} icon="cash-outline" />
         </View>
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <StatCard label="平均訂單額" value={`NT$${stats.avgOrderValue}`} icon="trending-up-outline" />
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <StatCard
+            label="平均訂單額"
+            value={`NT$${stats.avgOrderValue}`}
+            icon="trending-up-outline"
+          />
           <StatCard label="平均評分" value={stats.avgRating} icon="star-outline" />
         </View>
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <StatCard label="已完成訂單" value={stats.completedOrders.toString()} icon="checkmark-circle-outline" />
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <StatCard
+            label="已完成訂單"
+            value={stats.completedOrders.toString()}
+            icon="checkmark-circle-outline"
+          />
           <StatCard label="評價數" value={stats.reviewCount.toString()} icon="chatbox-outline" />
         </View>
       </View>
@@ -1465,27 +1828,27 @@ function StatsTab(props: { vendor: Vendor; orders: Order[]; reviews: Review[] })
             gap: 10,
           }}
         >
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>店家名稱</Text>
-            <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 12 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
               {vendor.name}
             </Text>
           </View>
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>分類</Text>
-            <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 12 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
               {CATEGORY_LABELS[vendor.category]}
             </Text>
           </View>
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>營業時間</Text>
-            <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 12 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
               {vendor.openTime}~{vendor.closeTime}
             </Text>
           </View>
-          <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>攤位號碼</Text>
-            <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 12 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 12 }}>
               {vendor.floor} {vendor.stallNumber}
             </Text>
           </View>
@@ -1499,11 +1862,7 @@ function StatsTab(props: { vendor: Vendor; orders: Order[]; reviews: Review[] })
 // 統計卡片
 // ══════════════════════════════════════════════════
 
-function StatCard(props: {
-  label: string;
-  value: string;
-  icon: keyof typeof Ionicons.glyphMap;
-}) {
+function StatCard(props: { label: string; value: string; icon: keyof typeof Ionicons.glyphMap }) {
   const { label, value, icon } = props;
 
   return (
@@ -1515,13 +1874,13 @@ function StatCard(props: {
         backgroundColor: theme.colors.surface2,
         borderWidth: 1,
         borderColor: theme.colors.border,
-        alignItems: "center",
-        justifyContent: "center",
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
     >
       <Ionicons name={icon} size={20} color={theme.colors.accent} style={{ marginBottom: 6 }} />
       <Text style={{ color: theme.colors.muted, fontSize: 10, marginBottom: 4 }}>{label}</Text>
-      <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>{value}</Text>
+      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>{value}</Text>
     </View>
   );
 }
