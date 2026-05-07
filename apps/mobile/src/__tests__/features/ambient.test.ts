@@ -1,7 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { AmbientCue, CourseSpace } from '../../data/types';
-import { dismissAmbientCue, listAmbientCues, applyAmbientCueVisibilityRules } from '../../features/engagement/ambient';
+import {
+  dismissAmbientCue,
+  listAmbientCues,
+  applyAmbientCueVisibilityRules,
+} from '../../features/engagement/ambient';
 import { getDataSource } from '../../data/source';
 
 jest.mock('../../data/source', () => ({

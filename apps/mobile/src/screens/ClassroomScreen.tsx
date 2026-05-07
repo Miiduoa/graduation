@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   ScrollView,
   Text,
@@ -9,15 +9,23 @@ import {
   Alert,
   RefreshControl,
   Modal,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { CameraView, useCameraPermissions } from "expo-camera";
-import { Screen, Card, Button, Pill, LoadingState, ErrorState, AnimatedCard } from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, softShadowStyle } from "../ui/theme";
-import { useAuth } from "../state/auth";
-import { getDb, isFirebaseMockMode } from "../firebase";
-import { getFunctions, httpsCallable } from "firebase/functions";
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import {
+  Screen,
+  Card,
+  Button,
+  Pill,
+  LoadingState,
+  ErrorState,
+  AnimatedCard,
+} from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme, softShadowStyle } from '../ui/theme';
+import { useAuth } from '../state/auth';
+import { getDb, isFirebaseMockMode } from '../firebase';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   doc,
   collection,
@@ -29,7 +37,7 @@ import {
   query,
   orderBy,
   limit,
-} from "firebase/firestore";
+} from 'firebase/firestore';
 
 let QRCodeSvg: React.ComponentType<{
   value: string;
@@ -39,7 +47,7 @@ let QRCodeSvg: React.ComponentType<{
 }> | null = null;
 
 try {
-  QRCodeSvg = require("react-native-qrcode-svg").default;
+  QRCodeSvg = require('react-native-qrcode-svg').default;
 } catch {
   QRCodeSvg = null;
 }
@@ -74,21 +82,38 @@ type Poll = {
 
 // Demo student names for random selection
 const DEMO_STUDENTS = [
-  "李明軒", "王思齊", "陳怡安", "黃郁涵", "張子萌",
-  "劉昱辰", "林佳柔", "吳凱琪", "鄭亞寧", "楊承恩",
-  "何宇哲", "賴昱臻", "邱意涵", "曾聖傑", "蔣予晴",
+  '李明軒',
+  '王思齊',
+  '陳怡安',
+  '黃郁涵',
+  '張子萌',
+  '劉昱辰',
+  '林佳柔',
+  '吳凱琪',
+  '鄭亞寧',
+  '楊承恩',
+  '何宇哲',
+  '賴昱臻',
+  '邱意涵',
+  '曾聖傑',
+  '蔣予晴',
 ];
 
 const REACTION_CONFIG = {
-  understood: { icon: "checkmark-circle" as const, color: "#10B981", label: "懂了" },
-  partial: { icon: "help-circle" as const, color: "#F59E0B", label: "有點懂" },
-  confused: { icon: "close-circle" as const, color: "#EF4444", label: "不懂" },
+  understood: { icon: 'checkmark-circle' as const, color: '#10B981', label: '懂了' },
+  partial: { icon: 'help-circle' as const, color: '#F59E0B', label: '有點懂' },
+  confused: { icon: 'close-circle' as const, color: '#EF4444', label: '不懂' },
 } as const;
 
 type ReactionKey = keyof typeof REACTION_CONFIG;
 
-function ReactionBar({ reactions, totalCount, userReaction, onReact }: {
-  reactions: LiveSession["reactions"];
+function ReactionBar({
+  reactions,
+  totalCount,
+  userReaction,
+  onReact,
+}: {
+  reactions: LiveSession['reactions'];
   totalCount: number;
   userReaction: ReactionKey | null;
   onReact: (r: ReactionKey) => void;
@@ -97,8 +122,8 @@ function ReactionBar({ reactions, totalCount, userReaction, onReact }: {
 
   return (
     <View>
-      <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
-        {(["understood", "partial", "confused"] as ReactionKey[]).map((key) => {
+      <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+        {(['understood', 'partial', 'confused'] as ReactionKey[]).map((key) => {
           const cfg = REACTION_CONFIG[key];
           const active = userReaction === key;
           return (
@@ -107,7 +132,7 @@ function ReactionBar({ reactions, totalCount, userReaction, onReact }: {
               onPress={() => onReact(key)}
               style={({ pressed }) => ({
                 flex: 1,
-                alignItems: "center",
+                alignItems: 'center',
                 padding: 14,
                 borderRadius: theme.radius.lg,
                 backgroundColor: active ? `${cfg.color}20` : theme.colors.surface2,
@@ -118,7 +143,13 @@ function ReactionBar({ reactions, totalCount, userReaction, onReact }: {
               })}
             >
               <Ionicons name={cfg.icon} size={28} color={active ? cfg.color : theme.colors.muted} />
-              <Text style={{ color: active ? cfg.color : theme.colors.muted, fontWeight: "700", fontSize: 13 }}>
+              <Text
+                style={{
+                  color: active ? cfg.color : theme.colors.muted,
+                  fontWeight: '700',
+                  fontSize: 13,
+                }}
+              >
                 {cfg.label}
               </Text>
               <Text style={{ color: active ? cfg.color : theme.colors.muted, fontSize: 11 }}>
@@ -135,23 +166,30 @@ function ReactionBar({ reactions, totalCount, userReaction, onReact }: {
           <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
             共 {totalCount} 人回應
           </Text>
-          <View style={{ height: 10, borderRadius: 5, overflow: "hidden", flexDirection: "row" }}>
-            {(["understood", "partial", "confused"] as ReactionKey[]).map((key) => {
+          <View style={{ height: 10, borderRadius: 5, overflow: 'hidden', flexDirection: 'row' }}>
+            {(['understood', 'partial', 'confused'] as ReactionKey[]).map((key) => {
               const pct = (reactions[key] / total) * 100;
               if (pct === 0) return null;
               return (
                 <View
                   key={key}
-                  style={{ width: `${pct}%`, height: "100%", backgroundColor: REACTION_CONFIG[key].color }}
+                  style={{
+                    width: `${pct}%`,
+                    height: '100%',
+                    backgroundColor: REACTION_CONFIG[key].color,
+                  }}
                 />
               );
             })}
           </View>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-            {(["understood", "partial", "confused"] as ReactionKey[]).map((key) => {
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+            {(['understood', 'partial', 'confused'] as ReactionKey[]).map((key) => {
               const pct = Math.round((reactions[key] / total) * 100);
               return (
-                <Text key={key} style={{ color: REACTION_CONFIG[key].color, fontSize: 11, fontWeight: "700" }}>
+                <Text
+                  key={key}
+                  style={{ color: REACTION_CONFIG[key].color, fontSize: 11, fontWeight: '700' }}
+                >
                   {REACTION_CONFIG[key].label} {pct}%
                 </Text>
               );
@@ -163,14 +201,18 @@ function ReactionBar({ reactions, totalCount, userReaction, onReact }: {
   );
 }
 
-function PollCard({ poll, myAnswer, onAnswer }: {
+function PollCard({
+  poll,
+  myAnswer,
+  onAnswer,
+}: {
   poll: Poll;
   myAnswer: number | null;
   onAnswer: (idx: number) => void;
 }) {
   const totalVotes = Object.values(poll.responses).length;
-  const optionVotes = poll.options.map((_, i) =>
-    Object.values(poll.responses).filter((v) => v === i).length
+  const optionVotes = poll.options.map(
+    (_, i) => Object.values(poll.responses).filter((v) => v === i).length,
   );
 
   return (
@@ -184,12 +226,14 @@ function PollCard({ poll, myAnswer, onAnswer }: {
         ...softShadowStyle(theme.shadows.soft),
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <Ionicons name="bar-chart" size={18} color={theme.colors.accent} />
-        <Text style={{ color: theme.colors.accent, fontWeight: "800", fontSize: 13, flex: 1 }}>即時投票</Text>
+        <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 13, flex: 1 }}>
+          即時投票
+        </Text>
         <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{totalVotes} 票</Text>
       </View>
-      <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16, marginBottom: 12 }}>
+      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16, marginBottom: 12 }}>
         {poll.question}
       </Text>
       <View style={{ gap: 8 }}>
@@ -205,26 +249,42 @@ function PollCard({ poll, myAnswer, onAnswer }: {
                 borderWidth: 2,
                 borderColor: isSelected ? theme.colors.accent : theme.colors.border,
                 backgroundColor: isSelected ? theme.colors.accentSoft : theme.colors.surface2,
-                overflow: "hidden",
+                overflow: 'hidden',
                 opacity: pressed ? 0.8 : 1,
               })}
             >
               {myAnswer !== null && (
                 <View
                   style={{
-                    position: "absolute",
-                    left: 0, top: 0, bottom: 0,
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
                     width: `${pct}%`,
-                    backgroundColor: isSelected ? `${theme.colors.accent}30` : `${theme.colors.muted}15`,
+                    backgroundColor: isSelected
+                      ? `${theme.colors.accent}30`
+                      : `${theme.colors.muted}15`,
                   }}
                 />
               )}
-              <View style={{ flexDirection: "row", alignItems: "center", padding: 12, gap: 10 }}>
-                <Text style={{ color: isSelected ? theme.colors.accent : theme.colors.text, fontWeight: "700", flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', padding: 12, gap: 10 }}>
+                <Text
+                  style={{
+                    color: isSelected ? theme.colors.accent : theme.colors.text,
+                    fontWeight: '700',
+                    flex: 1,
+                  }}
+                >
                   {opt}
                 </Text>
                 {myAnswer !== null && (
-                  <Text style={{ color: isSelected ? theme.colors.accent : theme.colors.muted, fontWeight: "700", fontSize: 13 }}>
+                  <Text
+                    style={{
+                      color: isSelected ? theme.colors.accent : theme.colors.muted,
+                      fontWeight: '700',
+                      fontSize: 13,
+                    }}
+                  >
                     {pct}%
                   </Text>
                 )}
@@ -251,7 +311,7 @@ export function ClassroomScreen(props: any) {
   const [questions, setQuestions] = useState<AnonQuestion[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
   const [loading, setLoading] = useState(true);
-  const [newQuestion, setNewQuestion] = useState("");
+  const [newQuestion, setNewQuestion] = useState('');
   const [submittingQ, setSubmittingQ] = useState(false);
   const [userReaction, setUserReaction] = useState<ReactionKey | null>(null);
   const [myPollAnswers, setMyPollAnswers] = useState<Record<string, number>>({});
@@ -262,8 +322,8 @@ export function ClassroomScreen(props: any) {
   const scanLockRef = useRef(false);
 
   // 教師：新增投票
-  const [newPollQuestion, setNewPollQuestion] = useState("");
-  const [newPollOptions, setNewPollOptions] = useState(["", ""]);
+  const [newPollQuestion, setNewPollQuestion] = useState('');
+  const [newPollOptions, setNewPollOptions] = useState(['', '']);
 
   // 隨機選人
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
@@ -279,8 +339,8 @@ export function ClassroomScreen(props: any) {
 
   // 即時小測
   const [quizActive, setQuizActive] = useState(false);
-  const [quizQuestion, setQuizQuestion] = useState("");
-  const [quizOptions, setQuizOptions] = useState(["", "", ""]);
+  const [quizQuestion, setQuizQuestion] = useState('');
+  const [quizOptions, setQuizOptions] = useState(['', '', '']);
   const [quizTimerSeconds, setQuizTimerSeconds] = useState(30);
   const [quizResponses, setQuizResponses] = useState<Record<string, number>>({});
   const [, setQuizStartTime] = useState<number | null>(null);
@@ -293,7 +353,7 @@ export function ClassroomScreen(props: any) {
       return;
     }
     if (!groupId || !sessionId) return;
-    const ref = doc(db, "groups", groupId, "liveSessions", sessionId);
+    const ref = doc(db, 'groups', groupId, 'liveSessions', sessionId);
     const unsub = onSnapshot(ref, (snap) => {
       if (snap.exists()) {
         setSession({ sessionId, ...(snap.data() as any) });
@@ -307,8 +367,8 @@ export function ClassroomScreen(props: any) {
   useEffect(() => {
     if (isFirebaseMockMode()) return;
     if (!groupId || !sessionId) return;
-    const ref = collection(db, "groups", groupId, "liveSessions", sessionId, "questions");
-    const q = query(ref, orderBy("upvotes", "desc"), limit(30));
+    const ref = collection(db, 'groups', groupId, 'liveSessions', sessionId, 'questions');
+    const q = query(ref, orderBy('upvotes', 'desc'), limit(30));
     const unsub = onSnapshot(q, (snap) => {
       setQuestions(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as AnonQuestion[]);
     });
@@ -319,8 +379,8 @@ export function ClassroomScreen(props: any) {
   useEffect(() => {
     if (isFirebaseMockMode()) return;
     if (!groupId || !sessionId) return;
-    const ref = collection(db, "groups", groupId, "liveSessions", sessionId, "polls");
-    const unsub = onSnapshot(query(ref, orderBy("createdAt", "desc")), (snap) => {
+    const ref = collection(db, 'groups', groupId, 'liveSessions', sessionId, 'polls');
+    const unsub = onSnapshot(query(ref, orderBy('createdAt', 'desc')), (snap) => {
       setPolls(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Poll[]);
     });
     return () => unsub();
@@ -339,11 +399,11 @@ export function ClassroomScreen(props: any) {
   const handleJoin = useCallback(async () => {
     if (!groupId || !sessionId || !auth.user) return;
     try {
-      const joinSession = httpsCallable(functions, "joinLiveSession");
+      const joinSession = httpsCallable(functions, 'joinLiveSession');
       await joinSession({ groupId, sessionId });
       setJoined(true);
     } catch (e: any) {
-      Alert.alert("加入失敗", e.message ?? "無法加入課堂");
+      Alert.alert('加入失敗', e.message ?? '無法加入課堂');
     }
   }, [groupId, sessionId, auth.user]);
 
@@ -352,7 +412,7 @@ export function ClassroomScreen(props: any) {
     if (!cameraPermission?.granted) {
       const result = await requestCameraPermission();
       if (!result.granted) {
-        Alert.alert("需要相機權限", "請在設定中允許相機存取，才能掃描 QR Code 簽到");
+        Alert.alert('需要相機權限', '請在設定中允許相機存取，才能掃描 QR Code 簽到');
         return;
       }
     }
@@ -361,129 +421,144 @@ export function ClassroomScreen(props: any) {
   }, [cameraPermission, requestCameraPermission]);
 
   // 掃描到 QR Code 後驗證並簽到
-  const handleQRScanned = useCallback(async ({ data }: { data: string }) => {
-    if (scanLockRef.current) return;
-    scanLockRef.current = true;
-    setShowQRScanner(false);
+  const handleQRScanned = useCallback(
+    async ({ data }: { data: string }) => {
+      if (scanLockRef.current) return;
+      scanLockRef.current = true;
+      setShowQRScanner(false);
 
-    try {
-      const url = new URL(data);
-      const token = url.searchParams.get("token");
-      const scannedGroupId = url.searchParams.get("groupId");
-      const scannedSessionId = url.searchParams.get("sessionId");
+      try {
+        const url = new URL(data);
+        const token = url.searchParams.get('token');
+        const scannedGroupId = url.searchParams.get('groupId');
+        const scannedSessionId = url.searchParams.get('sessionId');
 
-      if (!token || scannedGroupId !== groupId || scannedSessionId !== sessionId) {
-        Alert.alert("QR Code 無效", "請掃描老師目前課堂的 QR Code");
-        return;
+        if (!token || scannedGroupId !== groupId || scannedSessionId !== sessionId) {
+          Alert.alert('QR Code 無效', '請掃描老師目前課堂的 QR Code');
+          return;
+        }
+
+        const joinSession = httpsCallable(functions, 'joinLiveSession');
+        await joinSession({ groupId, sessionId, qrToken: token });
+        setJoined(true);
+        Alert.alert('簽到成功', '出席已記錄！');
+      } catch (e: any) {
+        Alert.alert('簽到失敗', e.message ?? '無法完成簽到，請稍後再試');
       }
-
-      const joinSession = httpsCallable(functions, "joinLiveSession");
-      await joinSession({ groupId, sessionId, qrToken: token });
-      setJoined(true);
-      Alert.alert("簽到成功", "出席已記錄！");
-    } catch (e: any) {
-      Alert.alert("簽到失敗", e.message ?? "無法完成簽到，請稍後再試");
-    }
-  }, [groupId, sessionId, functions]);
+    },
+    [groupId, sessionId, functions],
+  );
 
   // 提交匿名問題
   const handleSubmitQuestion = useCallback(async () => {
     if (!newQuestion.trim() || !groupId || !sessionId || !auth.user) return;
     setSubmittingQ(true);
     try {
-      await addDoc(collection(db, "groups", groupId, "liveSessions", sessionId, "questions"), {
+      await addDoc(collection(db, 'groups', groupId, 'liveSessions', sessionId, 'questions'), {
         text: newQuestion.trim(),
         upvotes: 0,
         answered: false,
         createdAt: serverTimestamp(),
         upvotedBy: [],
       });
-      setNewQuestion("");
+      setNewQuestion('');
     } catch {
-      Alert.alert("發送失敗", "請稍後再試");
+      Alert.alert('發送失敗', '請稍後再試');
     } finally {
       setSubmittingQ(false);
     }
   }, [newQuestion, groupId, sessionId, auth.user]);
 
   // 問題 Upvote
-  const handleUpvote = useCallback(async (question: AnonQuestion) => {
-    if (!groupId || !sessionId || !auth.user) return;
-    const uid = auth.user.uid;
-    const alreadyVoted = question.upvotedBy?.includes(uid);
-    const ref = doc(db, "groups", groupId, "liveSessions", sessionId, "questions", question.id);
-    await updateDoc(ref, {
-      upvotes: increment(alreadyVoted ? -1 : 1),
-      upvotedBy: alreadyVoted
-        ? (question.upvotedBy ?? []).filter((id: string) => id !== uid)
-        : [...(question.upvotedBy ?? []), uid],
-    });
-  }, [groupId, sessionId, auth.user]);
+  const handleUpvote = useCallback(
+    async (question: AnonQuestion) => {
+      if (!groupId || !sessionId || !auth.user) return;
+      const uid = auth.user.uid;
+      const alreadyVoted = question.upvotedBy?.includes(uid);
+      const ref = doc(db, 'groups', groupId, 'liveSessions', sessionId, 'questions', question.id);
+      await updateDoc(ref, {
+        upvotes: increment(alreadyVoted ? -1 : 1),
+        upvotedBy: alreadyVoted
+          ? (question.upvotedBy ?? []).filter((id: string) => id !== uid)
+          : [...(question.upvotedBy ?? []), uid],
+      });
+    },
+    [groupId, sessionId, auth.user],
+  );
 
   // 標記問題已回答
-  const handleMarkAnswered = useCallback(async (questionId: string) => {
-    if (!groupId || !sessionId) return;
-    const ref = doc(db, "groups", groupId, "liveSessions", sessionId, "questions", questionId);
-    await updateDoc(ref, { answered: true });
-  }, [groupId, sessionId]);
+  const handleMarkAnswered = useCallback(
+    async (questionId: string) => {
+      if (!groupId || !sessionId) return;
+      const ref = doc(db, 'groups', groupId, 'liveSessions', sessionId, 'questions', questionId);
+      await updateDoc(ref, { answered: true });
+    },
+    [groupId, sessionId],
+  );
 
   // 提交理解度反饋
-  const handleReact = useCallback(async (reaction: ReactionKey) => {
-    if (!groupId || !sessionId || !auth.user) return;
-    try {
-      const submitReaction = httpsCallable(functions, "submitReaction");
-      await submitReaction({ groupId, sessionId, reaction });
-      setUserReaction(reaction);
-    } catch {
-      Alert.alert("回報失敗", "請稍後再試");
-    }
-  }, [groupId, sessionId, auth.user]);
+  const handleReact = useCallback(
+    async (reaction: ReactionKey) => {
+      if (!groupId || !sessionId || !auth.user) return;
+      try {
+        const submitReaction = httpsCallable(functions, 'submitReaction');
+        await submitReaction({ groupId, sessionId, reaction });
+        setUserReaction(reaction);
+      } catch {
+        Alert.alert('回報失敗', '請稍後再試');
+      }
+    },
+    [groupId, sessionId, auth.user],
+  );
 
   // 回答投票
-  const handlePollAnswer = useCallback(async (pollId: string, optionIdx: number) => {
-    if (!groupId || !sessionId || !auth.user) return;
-    try {
-      const submitPoll = httpsCallable(functions, "submitPollResponse");
-      await submitPoll({ groupId, sessionId, pollId, optionIdx });
-      setMyPollAnswers((prev) => ({ ...prev, [pollId]: optionIdx }));
-    } catch {
-      Alert.alert("投票失敗", "請稍後再試");
-    }
-  }, [groupId, sessionId, auth.user]);
+  const handlePollAnswer = useCallback(
+    async (pollId: string, optionIdx: number) => {
+      if (!groupId || !sessionId || !auth.user) return;
+      try {
+        const submitPoll = httpsCallable(functions, 'submitPollResponse');
+        await submitPoll({ groupId, sessionId, pollId, optionIdx });
+        setMyPollAnswers((prev) => ({ ...prev, [pollId]: optionIdx }));
+      } catch {
+        Alert.alert('投票失敗', '請稍後再試');
+      }
+    },
+    [groupId, sessionId, auth.user],
+  );
 
   // 教師：新增投票
   const handleCreatePoll = useCallback(async () => {
     if (!newPollQuestion.trim() || newPollOptions.filter((o) => o.trim()).length < 2) return;
     if (!groupId || !sessionId) return;
     try {
-      await addDoc(collection(db, "groups", groupId, "liveSessions", sessionId, "polls"), {
+      await addDoc(collection(db, 'groups', groupId, 'liveSessions', sessionId, 'polls'), {
         question: newPollQuestion.trim(),
         options: newPollOptions.map((o) => o.trim()).filter(Boolean),
         responses: {},
         active: true,
         createdAt: serverTimestamp(),
       });
-      setNewPollQuestion("");
-      setNewPollOptions(["", ""]);
+      setNewPollQuestion('');
+      setNewPollOptions(['', '']);
     } catch {
-      Alert.alert("建立失敗", "請稍後再試");
+      Alert.alert('建立失敗', '請稍後再試');
     }
   }, [newPollQuestion, newPollOptions, groupId, sessionId]);
 
   // 結束課堂（教師）
   const handleEndSession = useCallback(async () => {
-    Alert.alert("結束課堂", "確定要結束今天的課堂互動？", [
-      { text: "取消", style: "cancel" },
+    Alert.alert('結束課堂', '確定要結束今天的課堂互動？', [
+      { text: '取消', style: 'cancel' },
       {
-        text: "結束",
-        style: "destructive",
+        text: '結束',
+        style: 'destructive',
         onPress: async () => {
           try {
-            const endSession = httpsCallable(functions, "endLiveSession");
+            const endSession = httpsCallable(functions, 'endLiveSession');
             await endSession({ groupId, sessionId });
             nav?.goBack?.();
           } catch {
-            Alert.alert("操作失敗", "請稍後再試");
+            Alert.alert('操作失敗', '請稍後再試');
           }
         },
       },
@@ -529,14 +604,14 @@ export function ClassroomScreen(props: any) {
     if (!quickAnswerStartTime || !auth.user) return;
     const responseTime = Math.round((Date.now() - quickAnswerStartTime) / 1000);
     try {
-      const submitAnswer = httpsCallable(functions, "submitQuickAnswer");
+      const submitAnswer = httpsCallable(functions, 'submitQuickAnswer');
       await submitAnswer({ groupId, sessionId, responseTime });
       setQuickAnswerResponses((prev) => ({
         ...prev,
         [auth.user!.uid]: responseTime,
       }));
     } catch {
-      Alert.alert("提交失敗", "請稍後再試");
+      Alert.alert('提交失敗', '請稍後再試');
     }
   }, [quickAnswerStartTime, auth.user, groupId, sessionId]);
 
@@ -549,7 +624,7 @@ export function ClassroomScreen(props: any) {
   // ===== 即時小測 (Pop Quiz) =====
   const handleCreatePopQuiz = useCallback(() => {
     if (!quizQuestion.trim() || quizOptions.filter((o) => o.trim()).length < 2) {
-      Alert.alert("建立失敗", "請輸入問題並至少設定 2 個選項");
+      Alert.alert('建立失敗', '請輸入問題並至少設定 2 個選項');
       return;
     }
     setQuizActive(true);
@@ -569,40 +644,52 @@ export function ClassroomScreen(props: any) {
     }, 1000);
   }, [quizQuestion, quizOptions]);
 
-  const handleSubmitPopQuizAnswer = useCallback(async (optionIdx: number) => {
-    if (!auth.user || !quizActive) return;
-    try {
-      const submitQuiz = httpsCallable(functions, "submitPopQuizAnswer");
-      await submitQuiz({ groupId, sessionId, optionIdx });
-      setQuizResponses((prev) => ({
-        ...prev,
-        [auth.user!.uid]: optionIdx,
-      }));
-    } catch {
-      Alert.alert("提交失敗", "請稍後再試");
-    }
-  }, [auth.user, quizActive, groupId, sessionId]);
+  const handleSubmitPopQuizAnswer = useCallback(
+    async (optionIdx: number) => {
+      if (!auth.user || !quizActive) return;
+      try {
+        const submitQuiz = httpsCallable(functions, 'submitPopQuizAnswer');
+        await submitQuiz({ groupId, sessionId, optionIdx });
+        setQuizResponses((prev) => ({
+          ...prev,
+          [auth.user!.uid]: optionIdx,
+        }));
+      } catch {
+        Alert.alert('提交失敗', '請稍後再試');
+      }
+    },
+    [auth.user, quizActive, groupId, sessionId],
+  );
 
-  if (!auth.user) return <ErrorState title="課堂" subtitle="尚未登入" hint="請先登入才能加入課堂" />;
-  if (!groupId || !sessionId) return <ErrorState title="課堂" subtitle="缺少課堂資訊" hint="請從群組頁面進入課堂" />;
+  if (!auth.user)
+    return <ErrorState title="課堂" subtitle="尚未登入" hint="請先登入才能加入課堂" />;
+  if (!groupId || !sessionId)
+    return <ErrorState title="課堂" subtitle="缺少課堂資訊" hint="請從群組頁面進入課堂" />;
   if (loading) return <LoadingState title="課堂" subtitle="連線中..." rows={3} />;
-  if (!session) return <ErrorState title="課堂" subtitle="找不到課堂" hint="課堂可能已結束或不存在" />;
+  if (!session)
+    return <ErrorState title="課堂" subtitle="找不到課堂" hint="課堂可能已結束或不存在" />;
 
   return (
     <Screen>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => setRefreshing(false)} tintColor={theme.colors.accent} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => setRefreshing(false)}
+            tintColor={theme.colors.accent}
+          />
+        }
       >
         {/* 課堂狀態標頭 */}
         <View
           style={{
-            flexDirection: "row",
-            alignItems: "center",
+            flexDirection: 'row',
+            alignItems: 'center',
             padding: 16,
             gap: 12,
-            backgroundColor: session.active ? "#10B98110" : theme.colors.surface2,
+            backgroundColor: session.active ? '#10B98110' : theme.colors.surface2,
             borderBottomWidth: 1,
             borderBottomColor: theme.colors.border,
           }}
@@ -612,17 +699,21 @@ export function ClassroomScreen(props: any) {
               width: 10,
               height: 10,
               borderRadius: 5,
-              backgroundColor: session.active ? "#10B981" : "#EF4444",
+              backgroundColor: session.active ? '#10B981' : '#EF4444',
             }}
           />
-          <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 16, flex: 1 }}>
-            {session.active ? "課堂進行中" : "課堂已結束"}
+          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16, flex: 1 }}>
+            {session.active ? '課堂進行中' : '課堂已結束'}
           </Text>
           <Pill text={`${session.attendeeCount} 人在線`} kind="accent" />
           {isTeacher && session.active && (
             <Pressable
               onPress={handleEndSession}
-              style={{ padding: 8, borderRadius: theme.radius.md, backgroundColor: theme.colors.dangerSoft }}
+              style={{
+                padding: 8,
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.dangerSoft,
+              }}
             >
               <Ionicons name="stop-circle" size={20} color={theme.colors.danger} />
             </Pressable>
@@ -650,7 +741,7 @@ export function ClassroomScreen(props: any) {
           {/* 教師：QR Code 出席打卡 */}
           {isTeacher && session.qrToken && session.active && (
             <AnimatedCard title="出席打卡 QR Code" subtitle="學生掃碼即可記錄出席">
-              <View style={{ alignItems: "center", padding: 16, gap: 12 }}>
+              <View style={{ alignItems: 'center', padding: 16, gap: 12 }}>
                 {QRCodeSvg ? (
                   <QRCodeSvg
                     value={`campusone://classroom/join?groupId=${groupId}&sessionId=${sessionId}&token=${session.qrToken}`}
@@ -667,22 +758,31 @@ export function ClassroomScreen(props: any) {
                       borderWidth: 1,
                       borderColor: theme.colors.border,
                       backgroundColor: theme.colors.surface2,
-                      alignItems: "center",
-                      justifyContent: "center",
+                      alignItems: 'center',
+                      justifyContent: 'center',
                       padding: 18,
                       gap: 8,
                     }}
                   >
                     <Ionicons name="qr-code-outline" size={36} color={theme.colors.accent} />
-                    <Text style={{ color: theme.colors.text, fontWeight: "700", textAlign: "center" }}>
+                    <Text
+                      style={{ color: theme.colors.text, fontWeight: '700', textAlign: 'center' }}
+                    >
                       QR 套件尚未安裝
                     </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "center", lineHeight: 18 }}>
+                    <Text
+                      style={{
+                        color: theme.colors.muted,
+                        fontSize: 12,
+                        textAlign: 'center',
+                        lineHeight: 18,
+                      }}
+                    >
                       目前先保留課堂流程，安裝 `react-native-qrcode-svg` 後即可顯示正式 QR Code。
                     </Text>
                   </View>
                 )}
-                <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "center" }}>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'center' }}>
                   此 QR Code 每 5 分鐘更新一次以防代掃
                 </Text>
               </View>
@@ -716,28 +816,28 @@ export function ClassroomScreen(props: any) {
           {/* 隨機選人 (Random Student Selection) - 教師 */}
           {isTeacher && session.active && (
             <Card title="隨機選人" subtitle="選中幸運學生進行提問或互動">
-              <View style={{ alignItems: "center", gap: 16 }}>
+              <View style={{ alignItems: 'center', gap: 16 }}>
                 {selectedStudent && (
                   <View
                     style={{
-                      width: "100%",
+                      width: '100%',
                       paddingVertical: 24,
                       paddingHorizontal: 16,
                       borderRadius: theme.radius.lg,
                       backgroundColor: theme.colors.accentSoft,
-                      alignItems: "center",
+                      alignItems: 'center',
                       borderWidth: 2,
                       borderColor: theme.colors.accent,
                     }}
                   >
                     <Text style={{ color: theme.colors.muted, fontSize: 13, marginBottom: 8 }}>
-                      {isSpinning ? "轉動中..." : "選中學生"}
+                      {isSpinning ? '轉動中...' : '選中學生'}
                     </Text>
                     <Text
                       style={{
                         color: theme.colors.accent,
                         fontSize: 36,
-                        fontWeight: "800",
+                        fontWeight: '800',
                         opacity: isSpinning ? 0.7 : 1,
                       }}
                     >
@@ -745,7 +845,7 @@ export function ClassroomScreen(props: any) {
                     </Text>
                   </View>
                 )}
-                <View style={{ flexDirection: "row", gap: 10, width: "100%" }}>
+                <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
                   <Pressable
                     onPress={handleStartRandomSelection}
                     disabled={isSpinning}
@@ -755,12 +855,12 @@ export function ClassroomScreen(props: any) {
                       paddingHorizontal: 16,
                       borderRadius: theme.radius.md,
                       backgroundColor: theme.colors.accent,
-                      alignItems: "center",
+                      alignItems: 'center',
                       opacity: pressed ? 0.8 : isSpinning ? 0.6 : 1,
                     })}
                   >
-                    <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>
-                      {isSpinning ? "轉動中..." : "選人"}
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
+                      {isSpinning ? '轉動中...' : '選人'}
                     </Text>
                   </Pressable>
                   {selectedStudent && !isSpinning && (
@@ -774,11 +874,11 @@ export function ClassroomScreen(props: any) {
                         backgroundColor: theme.colors.surface2,
                         borderWidth: 1,
                         borderColor: theme.colors.border,
-                        alignItems: "center",
+                        alignItems: 'center',
                         opacity: pressed ? 0.8 : 1,
                       })}
                     >
-                      <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
+                      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
                         再選一位
                       </Text>
                     </Pressable>
@@ -791,52 +891,100 @@ export function ClassroomScreen(props: any) {
           {/* 搶答 (Quick Answer Race) */}
           {quickAnswerActive && (
             <Card title="搶答" subtitle="快速回答老師的問題">
-              <View style={{ alignItems: "center", gap: 16 }}>
+              <View style={{ alignItems: 'center', gap: 16 }}>
                 {quickAnswerStartTime === null ? (
-                  <View style={{ width: "100%", alignItems: "center", paddingVertical: 20 }}>
-                    <Text style={{ color: theme.colors.accent, fontSize: 48, fontWeight: "800", marginBottom: 12 }}>
-                      {quickAnswerCountdown > 0 ? quickAnswerCountdown : "GO!"}
+                  <View style={{ width: '100%', alignItems: 'center', paddingVertical: 20 }}>
+                    <Text
+                      style={{
+                        color: theme.colors.accent,
+                        fontSize: 48,
+                        fontWeight: '800',
+                        marginBottom: 12,
+                      }}
+                    >
+                      {quickAnswerCountdown > 0 ? quickAnswerCountdown : 'GO!'}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 14 }}>
-                      {quickAnswerCountdown > 0 ? "準備好了嗎？" : "開始搶答！"}
+                      {quickAnswerCountdown > 0 ? '準備好了嗎？' : '開始搶答！'}
                     </Text>
                   </View>
                 ) : (
-                  <View style={{ width: "100%", gap: 12 }}>
-                    <View style={{ backgroundColor: theme.colors.surface2, borderRadius: theme.radius.md, padding: 16, alignItems: "center" }}>
-                      <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 6 }}>回應者</Text>
-                      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: "800" }}>
+                  <View style={{ width: '100%', gap: 12 }}>
+                    <View
+                      style={{
+                        backgroundColor: theme.colors.surface2,
+                        borderRadius: theme.radius.md,
+                        padding: 16,
+                        alignItems: 'center',
+                      }}
+                    >
+                      <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 6 }}>
+                        回應者
+                      </Text>
+                      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
                         {Object.keys(quickAnswerResponses).length} 人
                       </Text>
                     </View>
                     {Object.keys(quickAnswerResponses).length > 0 && (
                       <View>
-                        <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 13, marginBottom: 8 }}>
+                        <Text
+                          style={{
+                            color: theme.colors.text,
+                            fontWeight: '700',
+                            fontSize: 13,
+                            marginBottom: 8,
+                          }}
+                        >
                           回應時間排行
                         </Text>
                         {Object.entries(quickAnswerResponses)
                           .sort(([, a], [, b]) => a - b)
                           .slice(0, 5)
                           .map(([uid, time], idx) => (
-                            <View key={uid} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, paddingHorizontal: 8, borderRadius: theme.radius.sm }}>
+                            <View
+                              key={uid}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 8,
+                                paddingVertical: 6,
+                                paddingHorizontal: 8,
+                                borderRadius: theme.radius.sm,
+                              }}
+                            >
                               <View
                                 style={{
                                   width: 24,
                                   height: 24,
                                   borderRadius: 12,
-                                  backgroundColor: idx === 0 ? "#FFD700" : idx === 1 ? "#C0C0C0" : idx === 2 ? "#CD7F32" : theme.colors.surface2,
-                                  alignItems: "center",
-                                  justifyContent: "center",
+                                  backgroundColor:
+                                    idx === 0
+                                      ? '#FFD700'
+                                      : idx === 1
+                                        ? '#C0C0C0'
+                                        : idx === 2
+                                          ? '#CD7F32'
+                                          : theme.colors.surface2,
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
                                 }}
                               >
-                                <Text style={{ fontWeight: "800", fontSize: 12, color: idx < 3 ? "#fff" : theme.colors.muted }}>
+                                <Text
+                                  style={{
+                                    fontWeight: '800',
+                                    fontSize: 12,
+                                    color: idx < 3 ? '#fff' : theme.colors.muted,
+                                  }}
+                                >
                                   {idx + 1}
                                 </Text>
                               </View>
-                              <Text style={{ color: theme.colors.text, flex: 1, fontWeight: "700" }}>
+                              <Text
+                                style={{ color: theme.colors.text, flex: 1, fontWeight: '700' }}
+                              >
                                 學生 {uid.slice(0, 4)}
                               </Text>
-                              <Text style={{ color: theme.colors.accent, fontWeight: "700" }}>
+                              <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
                                 {time}s
                               </Text>
                             </View>
@@ -845,36 +993,38 @@ export function ClassroomScreen(props: any) {
                     )}
                   </View>
                 )}
-                {!isTeacher && quickAnswerStartTime !== null && !quickAnswerResponses[auth.user?.uid ?? ""] && (
-                  <Pressable
-                    onPress={handleSubmitQuickAnswer}
-                    style={({ pressed }) => ({
-                      width: "100%",
-                      paddingVertical: 16,
-                      borderRadius: theme.radius.md,
-                      backgroundColor: theme.colors.accent,
-                      alignItems: "center",
-                      opacity: pressed ? 0.8 : 1,
-                    })}
-                  >
-                    <Text style={{ color: "#fff", fontWeight: "800", fontSize: 18 }}>搶答</Text>
-                  </Pressable>
-                )}
+                {!isTeacher &&
+                  quickAnswerStartTime !== null &&
+                  !quickAnswerResponses[auth.user?.uid ?? ''] && (
+                    <Pressable
+                      onPress={handleSubmitQuickAnswer}
+                      style={({ pressed }) => ({
+                        width: '100%',
+                        paddingVertical: 16,
+                        borderRadius: theme.radius.md,
+                        backgroundColor: theme.colors.accent,
+                        alignItems: 'center',
+                        opacity: pressed ? 0.8 : 1,
+                      })}
+                    >
+                      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 18 }}>搶答</Text>
+                    </Pressable>
+                  )}
                 {isTeacher && quickAnswerStartTime !== null && (
                   <Pressable
                     onPress={handleStopQuickAnswer}
                     style={({ pressed }) => ({
-                      width: "100%",
+                      width: '100%',
                       paddingVertical: 12,
                       borderRadius: theme.radius.md,
                       backgroundColor: theme.colors.dangerSoft,
                       borderWidth: 1,
                       borderColor: theme.colors.danger,
-                      alignItems: "center",
+                      alignItems: 'center',
                       opacity: pressed ? 0.8 : 1,
                     })}
                   >
-                    <Text style={{ color: theme.colors.danger, fontWeight: "700" }}>結束搶答</Text>
+                    <Text style={{ color: theme.colors.danger, fontWeight: '700' }}>結束搶答</Text>
                   </Pressable>
                 )}
               </View>
@@ -890,26 +1040,30 @@ export function ClassroomScreen(props: any) {
                 paddingHorizontal: 16,
                 borderRadius: theme.radius.md,
                 backgroundColor: theme.colors.accent,
-                alignItems: "center",
+                alignItems: 'center',
                 opacity: pressed ? 0.8 : 1,
               })}
             >
-              <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>啟動搶答</Text>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>啟動搶答</Text>
             </Pressable>
           )}
 
           {/* 投票 */}
           {polls.filter((p) => p.active).length > 0 && (
             <View style={{ gap: 12 }}>
-              <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 18 }}>即時投票</Text>
-              {polls.filter((p) => p.active).map((poll) => (
-                <PollCard
-                  key={poll.id}
-                  poll={poll}
-                  myAnswer={myPollAnswers[poll.id] ?? null}
-                  onAnswer={(idx) => handlePollAnswer(poll.id, idx)}
-                />
-              ))}
+              <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+                即時投票
+              </Text>
+              {polls
+                .filter((p) => p.active)
+                .map((poll) => (
+                  <PollCard
+                    key={poll.id}
+                    poll={poll}
+                    myAnswer={myPollAnswers[poll.id] ?? null}
+                    onAnswer={(idx) => handlePollAnswer(poll.id, idx)}
+                  />
+                ))}
             </View>
           )}
 
@@ -917,60 +1071,82 @@ export function ClassroomScreen(props: any) {
           {quizActive && (
             <Card title="即時小測" subtitle={`剩餘時間: ${quizTimerSeconds} 秒`}>
               <View style={{ gap: 12 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 16 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
                   {quizQuestion}
                 </Text>
                 <View style={{ gap: 8 }}>
-                  {quizOptions.filter((o) => o.trim()).map((opt, i) => {
-                    const totalResponses = Object.keys(quizResponses).length;
-                    const thisOptionCount = Object.values(quizResponses).filter((v) => v === i).length;
-                    const pct = totalResponses > 0 ? Math.round((thisOptionCount / totalResponses) * 100) : 0;
-                    const userAnswered = quizResponses[auth.user?.uid ?? ""] === i;
+                  {quizOptions
+                    .filter((o) => o.trim())
+                    .map((opt, i) => {
+                      const totalResponses = Object.keys(quizResponses).length;
+                      const thisOptionCount = Object.values(quizResponses).filter(
+                        (v) => v === i,
+                      ).length;
+                      const pct =
+                        totalResponses > 0
+                          ? Math.round((thisOptionCount / totalResponses) * 100)
+                          : 0;
+                      const userAnswered = quizResponses[auth.user?.uid ?? ''] === i;
 
-                    return (
-                      <View key={i}>
-                        <Pressable
-                          onPress={() => handleSubmitPopQuizAnswer(i)}
-                          disabled={!quizActive || !!quizResponses[auth.user?.uid ?? ""]}
-                          style={({ pressed }) => ({
-                            paddingVertical: 12,
-                            paddingHorizontal: 16,
-                            borderRadius: theme.radius.md,
-                            borderWidth: 2,
-                            borderColor: userAnswered ? theme.colors.accent : theme.colors.border,
-                            backgroundColor: userAnswered ? theme.colors.accentSoft : theme.colors.surface2,
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 10,
-                            opacity: pressed ? 0.8 : 1,
-                          })}
-                        >
-                          <View
-                            style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 14,
-                              backgroundColor: userAnswered ? theme.colors.accent : theme.colors.border,
-                              alignItems: "center",
-                              justifyContent: "center",
-                            }}
+                      return (
+                        <View key={i}>
+                          <Pressable
+                            onPress={() => handleSubmitPopQuizAnswer(i)}
+                            disabled={!quizActive || !!quizResponses[auth.user?.uid ?? '']}
+                            style={({ pressed }) => ({
+                              paddingVertical: 12,
+                              paddingHorizontal: 16,
+                              borderRadius: theme.radius.md,
+                              borderWidth: 2,
+                              borderColor: userAnswered ? theme.colors.accent : theme.colors.border,
+                              backgroundColor: userAnswered
+                                ? theme.colors.accentSoft
+                                : theme.colors.surface2,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 10,
+                              opacity: pressed ? 0.8 : 1,
+                            })}
                           >
-                            <Text style={{ color: userAnswered ? "#fff" : theme.colors.muted, fontWeight: "700" }}>
-                              {String.fromCharCode(65 + i)}
+                            <View
+                              style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 14,
+                                backgroundColor: userAnswered
+                                  ? theme.colors.accent
+                                  : theme.colors.border,
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: userAnswered ? '#fff' : theme.colors.muted,
+                                  fontWeight: '700',
+                                }}
+                              >
+                                {String.fromCharCode(65 + i)}
+                              </Text>
+                            </View>
+                            <Text style={{ color: theme.colors.text, fontWeight: '600', flex: 1 }}>
+                              {opt}
                             </Text>
-                          </View>
-                          <Text style={{ color: theme.colors.text, fontWeight: "600", flex: 1 }}>
-                            {opt}
-                          </Text>
-                          {totalResponses > 0 && (
-                            <Text style={{ color: theme.colors.muted, fontWeight: "700", fontSize: 12 }}>
-                              {pct}% ({thisOptionCount})
-                            </Text>
-                          )}
-                        </Pressable>
-                      </View>
-                    );
-                  })}
+                            {totalResponses > 0 && (
+                              <Text
+                                style={{
+                                  color: theme.colors.muted,
+                                  fontWeight: '700',
+                                  fontSize: 12,
+                                }}
+                              >
+                                {pct}% ({thisOptionCount})
+                              </Text>
+                            )}
+                          </Pressable>
+                        </View>
+                      );
+                    })}
                 </View>
               </View>
             </Card>
@@ -995,7 +1171,7 @@ export function ClassroomScreen(props: any) {
                 }}
               />
               {newPollOptions.map((opt, i) => (
-                <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+                <View key={i} style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                   <TextInput
                     value={opt}
                     onChangeText={(v) => {
@@ -1017,7 +1193,9 @@ export function ClassroomScreen(props: any) {
                   />
                   {newPollOptions.length > 2 && (
                     <Pressable
-                      onPress={() => setNewPollOptions(newPollOptions.filter((_, idx) => idx !== i))}
+                      onPress={() =>
+                        setNewPollOptions(newPollOptions.filter((_, idx) => idx !== i))
+                      }
                       style={{ padding: 10 }}
                     >
                       <Ionicons name="close-circle" size={20} color={theme.colors.danger} />
@@ -1025,18 +1203,31 @@ export function ClassroomScreen(props: any) {
                   )}
                 </View>
               ))}
-              <View style={{ flexDirection: "row", gap: 10, marginTop: 4 }}>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
                 <Pressable
-                  onPress={() => setNewPollOptions([...newPollOptions, ""])}
-                  style={{ flex: 1, padding: 10, borderRadius: theme.radius.md, borderWidth: 1, borderColor: theme.colors.border, alignItems: "center" }}
+                  onPress={() => setNewPollOptions([...newPollOptions, ''])}
+                  style={{
+                    flex: 1,
+                    padding: 10,
+                    borderRadius: theme.radius.md,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    alignItems: 'center',
+                  }}
                 >
                   <Text style={{ color: theme.colors.muted }}>+ 新增選項</Text>
                 </Pressable>
                 <Pressable
                   onPress={handleCreatePoll}
-                  style={{ flex: 1, padding: 10, borderRadius: theme.radius.md, backgroundColor: theme.colors.accent, alignItems: "center" }}
+                  style={{
+                    flex: 1,
+                    padding: 10,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: theme.colors.accent,
+                    alignItems: 'center',
+                  }}
                 >
-                  <Text style={{ color: "#fff", fontWeight: "700" }}>發送投票</Text>
+                  <Text style={{ color: '#fff', fontWeight: '700' }}>發送投票</Text>
                 </Pressable>
               </View>
             </Card>
@@ -1059,13 +1250,13 @@ export function ClassroomScreen(props: any) {
                   backgroundColor: theme.colors.surface2,
                   marginBottom: 12,
                   minHeight: 60,
-                  textAlignVertical: "top",
+                  textAlignVertical: 'top',
                 }}
                 multiline
               />
 
               {quizOptions.map((opt, i) => (
-                <View key={i} style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+                <View key={i} style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                   <TextInput
                     value={opt}
                     onChangeText={(v) => {
@@ -1096,11 +1287,11 @@ export function ClassroomScreen(props: any) {
                 </View>
               ))}
 
-              <View style={{ flexDirection: "row", gap: 10, marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
                 <Pressable
                   onPress={() => {
                     if (quizOptions.length < 4) {
-                      setQuizOptions([...quizOptions, ""]);
+                      setQuizOptions([...quizOptions, '']);
                     }
                   }}
                   disabled={quizOptions.length >= 4}
@@ -1110,21 +1301,32 @@ export function ClassroomScreen(props: any) {
                     borderRadius: theme.radius.md,
                     borderWidth: 1,
                     borderColor: quizOptions.length < 4 ? theme.colors.border : theme.colors.muted,
-                    alignItems: "center",
+                    alignItems: 'center',
                     opacity: quizOptions.length < 4 ? 1 : 0.5,
                   }}
                 >
-                  <Text style={{ color: quizOptions.length < 4 ? theme.colors.text : theme.colors.muted }}>
+                  <Text
+                    style={{
+                      color: quizOptions.length < 4 ? theme.colors.text : theme.colors.muted,
+                    }}
+                  >
                     + 新增選項
                   </Text>
                 </Pressable>
               </View>
 
-              <View style={{ backgroundColor: theme.colors.surface2, borderRadius: theme.radius.md, padding: 12, marginBottom: 12 }}>
+              <View
+                style={{
+                  backgroundColor: theme.colors.surface2,
+                  borderRadius: theme.radius.md,
+                  padding: 12,
+                  marginBottom: 12,
+                }}
+              >
                 <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 8 }}>
                   回答時間
                 </Text>
-                <View style={{ flexDirection: "row", gap: 8 }}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
                   {[30, 60, 90].map((secs) => (
                     <Pressable
                       key={secs}
@@ -1133,16 +1335,17 @@ export function ClassroomScreen(props: any) {
                         flex: 1,
                         paddingVertical: 8,
                         borderRadius: theme.radius.sm,
-                        backgroundColor: quizTimerSeconds === secs ? theme.colors.accent : theme.colors.surface,
-                        alignItems: "center",
+                        backgroundColor:
+                          quizTimerSeconds === secs ? theme.colors.accent : theme.colors.surface,
+                        alignItems: 'center',
                         borderWidth: quizTimerSeconds === secs ? 0 : 1,
                         borderColor: theme.colors.border,
                       }}
                     >
                       <Text
                         style={{
-                          color: quizTimerSeconds === secs ? "#fff" : theme.colors.text,
-                          fontWeight: "700",
+                          color: quizTimerSeconds === secs ? '#fff' : theme.colors.text,
+                          fontWeight: '700',
                           fontSize: 12,
                         }}
                       >
@@ -1159,11 +1362,11 @@ export function ClassroomScreen(props: any) {
                   paddingVertical: 12,
                   borderRadius: theme.radius.md,
                   backgroundColor: theme.colors.accent,
-                  alignItems: "center",
+                  alignItems: 'center',
                   opacity: pressed ? 0.8 : 1,
                 })}
               >
-                <Text style={{ color: "#fff", fontWeight: "700", fontSize: 16 }}>發送小測</Text>
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>發送小測</Text>
               </Pressable>
             </Card>
           )}
@@ -1172,7 +1375,7 @@ export function ClassroomScreen(props: any) {
           <Card title={`匿名問答 (${questions.length})`} subtitle="問題越多 upvote 越優先顯示">
             {/* 提問輸入 */}
             {session.active && (
-              <View style={{ flexDirection: "row", gap: 10, marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
                 <TextInput
                   value={newQuestion}
                   onChangeText={setNewQuestion}
@@ -1196,35 +1399,43 @@ export function ClassroomScreen(props: any) {
                     width: 44,
                     height: 44,
                     borderRadius: 22,
-                    backgroundColor: newQuestion.trim() ? theme.colors.accent : theme.colors.surface2,
-                    alignItems: "center",
-                    justifyContent: "center",
+                    backgroundColor: newQuestion.trim()
+                      ? theme.colors.accent
+                      : theme.colors.surface2,
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     opacity: pressed ? 0.8 : 1,
                   })}
                 >
-                  <Ionicons name="send" size={18} color={newQuestion.trim() ? "#fff" : theme.colors.muted} />
+                  <Ionicons
+                    name="send"
+                    size={18}
+                    color={newQuestion.trim() ? '#fff' : theme.colors.muted}
+                  />
                 </Pressable>
               </View>
             )}
 
             {questions.length === 0 ? (
-              <Text style={{ color: theme.colors.muted, textAlign: "center", paddingVertical: 16 }}>
+              <Text style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 16 }}>
                 尚無問題，鼓起勇氣提問！
               </Text>
             ) : (
               <View style={{ gap: 10 }}>
                 {questions.map((q) => {
-                  const voted = q.upvotedBy?.includes(auth.user?.uid ?? "");
+                  const voted = q.upvotedBy?.includes(auth.user?.uid ?? '');
                   return (
                     <View
                       key={q.id}
                       style={{
-                        flexDirection: "row",
-                        alignItems: "flex-start",
+                        flexDirection: 'row',
+                        alignItems: 'flex-start',
                         gap: 10,
                         padding: 12,
                         borderRadius: theme.radius.md,
-                        backgroundColor: q.answered ? theme.colors.successSoft : theme.colors.surface2,
+                        backgroundColor: q.answered
+                          ? theme.colors.successSoft
+                          : theme.colors.surface2,
                         borderWidth: 1,
                         borderColor: q.answered ? theme.colors.success : theme.colors.border,
                       }}
@@ -1232,27 +1443,40 @@ export function ClassroomScreen(props: any) {
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: theme.colors.text, lineHeight: 20 }}>{q.text}</Text>
                         {q.answered && (
-                          <Text style={{ color: theme.colors.success, fontSize: 11, fontWeight: "700", marginTop: 4 }}>
+                          <Text
+                            style={{
+                              color: theme.colors.success,
+                              fontSize: 11,
+                              fontWeight: '700',
+                              marginTop: 4,
+                            }}
+                          >
                             ✓ 已回答
                           </Text>
                         )}
                       </View>
-                      <View style={{ alignItems: "center", gap: 6 }}>
+                      <View style={{ alignItems: 'center', gap: 6 }}>
                         <Pressable
                           onPress={() => handleUpvote(q)}
                           style={{
-                            alignItems: "center",
+                            alignItems: 'center',
                             padding: 8,
                             borderRadius: theme.radius.md,
-                            backgroundColor: voted ? theme.colors.accentSoft : "transparent",
+                            backgroundColor: voted ? theme.colors.accentSoft : 'transparent',
                           }}
                         >
                           <Ionicons
-                            name={voted ? "thumbs-up" : "thumbs-up-outline"}
+                            name={voted ? 'thumbs-up' : 'thumbs-up-outline'}
                             size={20}
                             color={voted ? theme.colors.accent : theme.colors.muted}
                           />
-                          <Text style={{ color: voted ? theme.colors.accent : theme.colors.muted, fontSize: 12, fontWeight: "700" }}>
+                          <Text
+                            style={{
+                              color: voted ? theme.colors.accent : theme.colors.muted,
+                              fontSize: 12,
+                              fontWeight: '700',
+                            }}
+                          >
                             {q.upvotes}
                           </Text>
                         </Pressable>
@@ -1261,7 +1485,11 @@ export function ClassroomScreen(props: any) {
                             onPress={() => handleMarkAnswered(q.id)}
                             style={{ padding: 6 }}
                           >
-                            <Ionicons name="checkmark-circle-outline" size={20} color={theme.colors.success} />
+                            <Ionicons
+                              name="checkmark-circle-outline"
+                              size={20}
+                              color={theme.colors.success}
+                            />
                           </Pressable>
                         )}
                       </View>
@@ -1275,23 +1503,27 @@ export function ClassroomScreen(props: any) {
       </ScrollView>
 
       {/* QR Code 掃描器 Modal */}
-      <Modal visible={showQRScanner} animationType="slide" onRequestClose={() => setShowQRScanner(false)}>
-        <View style={{ flex: 1, backgroundColor: "#000" }}>
+      <Modal
+        visible={showQRScanner}
+        animationType="slide"
+        onRequestClose={() => setShowQRScanner(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: '#000' }}>
           <CameraView
             style={{ flex: 1 }}
             facing="back"
-            barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
             onBarcodeScanned={handleQRScanned}
           />
           <View
             style={{
-              position: "absolute",
+              position: 'absolute',
               top: 0,
               left: 0,
               right: 0,
               bottom: 0,
-              justifyContent: "center",
-              alignItems: "center",
+              justifyContent: 'center',
+              alignItems: 'center',
             }}
           >
             <View
@@ -1300,21 +1532,21 @@ export function ClassroomScreen(props: any) {
                 height: 220,
                 borderRadius: 16,
                 borderWidth: 3,
-                borderColor: "#fff",
-                backgroundColor: "transparent",
+                borderColor: '#fff',
+                backgroundColor: 'transparent',
               }}
             />
-            <Text style={{ color: "#fff", marginTop: 20, fontSize: 15, textAlign: "center" }}>
+            <Text style={{ color: '#fff', marginTop: 20, fontSize: 15, textAlign: 'center' }}>
               將 QR Code 對準框內掃描簽到
             </Text>
           </View>
           <Pressable
             onPress={() => setShowQRScanner(false)}
             style={{
-              position: "absolute",
+              position: 'absolute',
               top: 56,
               right: 20,
-              backgroundColor: "rgba(0,0,0,0.5)",
+              backgroundColor: 'rgba(0,0,0,0.5)',
               borderRadius: 20,
               padding: 8,
             }}

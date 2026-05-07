@@ -17,7 +17,7 @@
  *   - 差分隱私友善設計（只存匯總數據）
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -26,39 +26,39 @@ export type CrowdLevel = 1 | 2 | 3 | 4 | 5; // 1=空, 5=爆滿
 export type PulseLocation = {
   id: string;
   name: string;
-  category: "library" | "dining" | "parking" | "gym" | "study" | "other";
+  category: 'library' | 'dining' | 'parking' | 'gym' | 'study' | 'other';
   icon: string;
   currentLevel: CrowdLevel;
-  confidence: number;       // 0-1, based on report freshness/quantity
-  lastReportAt: number;      // epoch ms
+  confidence: number; // 0-1, based on report freshness/quantity
+  lastReportAt: number; // epoch ms
   reportCount24h: number;
-  trend: "rising" | "falling" | "stable";
-  peakHours: string[];       // e.g. ["12:00-13:00", "17:30-18:30"]
-  bestTimeToVisit: string;   // e.g. "14:00-15:00"
+  trend: 'rising' | 'falling' | 'stable';
+  peakHours: string[]; // e.g. ["12:00-13:00", "17:30-18:30"]
+  bestTimeToVisit: string; // e.g. "14:00-15:00"
 };
 
 export type PulseReport = {
   locationId: string;
   level: CrowdLevel;
   timestamp: number;
-  dayOfWeek: number;        // 0=Sun, 6=Sat
-  hourOfDay: number;        // 0-23
+  dayOfWeek: number; // 0=Sun, 6=Sat
+  hourOfDay: number; // 0-23
 };
 
 export type CampusEvent = {
   id: string;
-  type: "rush_hour" | "exam_period" | "event" | "weather" | "maintenance" | "custom";
+  type: 'rush_hour' | 'exam_period' | 'event' | 'weather' | 'maintenance' | 'custom';
   title: string;
   description: string;
   icon: string;
-  severity: "info" | "warning" | "alert";
+  severity: 'info' | 'warning' | 'alert';
   startTime: number;
   endTime?: number;
   affectedLocations: string[];
 };
 
 export type PulseInsight = {
-  type: "suggestion" | "alert" | "trend" | "fun_fact";
+  type: 'suggestion' | 'alert' | 'trend' | 'fun_fact';
   title: string;
   description: string;
   icon: string;
@@ -70,39 +70,123 @@ export type CampusPulseSnapshot = {
   locations: PulseLocation[];
   events: CampusEvent[];
   insights: PulseInsight[];
-  overallBusyness: number;  // 0-100
+  overallBusyness: number; // 0-100
   timestamp: number;
 };
 
 // ─── Constants ──────────────────────────────────────────
 
-const CACHE_KEY = "@campus_pulse:reports";
-const CACHE_KEY_PATTERNS = "@campus_pulse:patterns";
+const CACHE_KEY = '@campus_pulse:reports';
+const CACHE_KEY_PATTERNS = '@campus_pulse:patterns';
 const REPORT_DECAY_MS = 30 * 60 * 1000; // 30 minutes half-life
 
 /** 靜宜大學主要地點 */
-const CAMPUS_LOCATIONS: Omit<PulseLocation, "currentLevel" | "confidence" | "lastReportAt" | "reportCount24h" | "trend" | "peakHours" | "bestTimeToVisit">[] = [
-  { id: "lib_main", name: "蓋夏圖書館", category: "library", icon: "library-outline" },
-  { id: "lib_study", name: "圖書館自習室", category: "study", icon: "book-outline" },
-  { id: "cafe_main", name: "學生餐廳", category: "dining", icon: "restaurant-outline" },
-  { id: "cafe_sub", name: "第二餐廳", category: "dining", icon: "fast-food-outline" },
-  { id: "cafe_711", name: "7-11 便利商店", category: "dining", icon: "cart-outline" },
-  { id: "parking_main", name: "主停車場", category: "parking", icon: "car-outline" },
-  { id: "parking_back", name: "後門停車場", category: "parking", icon: "car-sport-outline" },
-  { id: "gym", name: "體育館", category: "gym", icon: "fitness-outline" },
-  { id: "study_room", name: "討論室", category: "study", icon: "people-outline" },
-  { id: "computer_lab", name: "電腦教室", category: "study", icon: "desktop-outline" },
+const CAMPUS_LOCATIONS: Omit<
+  PulseLocation,
+  | 'currentLevel'
+  | 'confidence'
+  | 'lastReportAt'
+  | 'reportCount24h'
+  | 'trend'
+  | 'peakHours'
+  | 'bestTimeToVisit'
+>[] = [
+  { id: 'lib_main', name: '蓋夏圖書館', category: 'library', icon: 'library-outline' },
+  { id: 'lib_study', name: '圖書館自習室', category: 'study', icon: 'book-outline' },
+  { id: 'cafe_main', name: '學生餐廳', category: 'dining', icon: 'restaurant-outline' },
+  { id: 'cafe_sub', name: '第二餐廳', category: 'dining', icon: 'fast-food-outline' },
+  { id: 'cafe_711', name: '7-11 便利商店', category: 'dining', icon: 'cart-outline' },
+  { id: 'parking_main', name: '主停車場', category: 'parking', icon: 'car-outline' },
+  { id: 'parking_back', name: '後門停車場', category: 'parking', icon: 'car-sport-outline' },
+  { id: 'gym', name: '體育館', category: 'gym', icon: 'fitness-outline' },
+  { id: 'study_room', name: '討論室', category: 'study', icon: 'people-outline' },
+  { id: 'computer_lab', name: '電腦教室', category: 'study', icon: 'desktop-outline' },
 ];
 
 /** 基於經驗的歷史模式（初始種子資料） */
 const DEFAULT_PATTERNS: Record<string, Record<number, Record<number, number>>> = {
   // locationId → dayOfWeek → hourOfDay → avgLevel
   lib_main: {
-    1: { 8: 2, 9: 2, 10: 3, 11: 3, 12: 2, 13: 3, 14: 4, 15: 4, 16: 4, 17: 3, 18: 3, 19: 4, 20: 4, 21: 3 },
-    2: { 8: 2, 9: 2, 10: 3, 11: 3, 12: 2, 13: 3, 14: 4, 15: 4, 16: 4, 17: 3, 18: 3, 19: 4, 20: 4, 21: 3 },
-    3: { 8: 2, 9: 3, 10: 3, 11: 3, 12: 2, 13: 3, 14: 3, 15: 4, 16: 4, 17: 3, 18: 3, 19: 4, 20: 4, 21: 3 },
-    4: { 8: 2, 9: 2, 10: 3, 11: 3, 12: 2, 13: 3, 14: 4, 15: 4, 16: 4, 17: 3, 18: 3, 19: 4, 20: 4, 21: 3 },
-    5: { 8: 2, 9: 2, 10: 3, 11: 3, 12: 2, 13: 3, 14: 3, 15: 3, 16: 3, 17: 2, 18: 2, 19: 2, 20: 2, 21: 1 },
+    1: {
+      8: 2,
+      9: 2,
+      10: 3,
+      11: 3,
+      12: 2,
+      13: 3,
+      14: 4,
+      15: 4,
+      16: 4,
+      17: 3,
+      18: 3,
+      19: 4,
+      20: 4,
+      21: 3,
+    },
+    2: {
+      8: 2,
+      9: 2,
+      10: 3,
+      11: 3,
+      12: 2,
+      13: 3,
+      14: 4,
+      15: 4,
+      16: 4,
+      17: 3,
+      18: 3,
+      19: 4,
+      20: 4,
+      21: 3,
+    },
+    3: {
+      8: 2,
+      9: 3,
+      10: 3,
+      11: 3,
+      12: 2,
+      13: 3,
+      14: 3,
+      15: 4,
+      16: 4,
+      17: 3,
+      18: 3,
+      19: 4,
+      20: 4,
+      21: 3,
+    },
+    4: {
+      8: 2,
+      9: 2,
+      10: 3,
+      11: 3,
+      12: 2,
+      13: 3,
+      14: 4,
+      15: 4,
+      16: 4,
+      17: 3,
+      18: 3,
+      19: 4,
+      20: 4,
+      21: 3,
+    },
+    5: {
+      8: 2,
+      9: 2,
+      10: 3,
+      11: 3,
+      12: 2,
+      13: 3,
+      14: 3,
+      15: 3,
+      16: 3,
+      17: 2,
+      18: 2,
+      19: 2,
+      20: 2,
+      21: 1,
+    },
     6: { 9: 1, 10: 2, 11: 2, 12: 2, 13: 2, 14: 3, 15: 3, 16: 3, 17: 2, 18: 1 },
     0: { 10: 1, 11: 1, 12: 1, 13: 2, 14: 2, 15: 2, 16: 2, 17: 1 },
   },
@@ -148,7 +232,7 @@ async function saveReports(reports: PulseReport[]): Promise<void> {
     const filtered = reports.filter((r) => r.timestamp > cutoff);
     await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(filtered));
   } catch (err) {
-    console.warn("[CampusPulse] saveReports error:", err);
+    console.warn('[CampusPulse] saveReports error:', err);
   }
 }
 
@@ -168,7 +252,7 @@ async function savePatterns(
   try {
     await AsyncStorage.setItem(CACHE_KEY_PATTERNS, JSON.stringify(patterns));
   } catch (err) {
-    console.warn("[CampusPulse] savePatterns error:", err);
+    console.warn('[CampusPulse] savePatterns error:', err);
   }
 }
 
@@ -178,10 +262,7 @@ async function savePatterns(
  * 提交人潮回報
  * 使用指數衰減，越新的回報權重越高
  */
-export async function submitCrowdReport(
-  locationId: string,
-  level: CrowdLevel,
-): Promise<void> {
+export async function submitCrowdReport(locationId: string, level: CrowdLevel): Promise<void> {
   const now = new Date();
   const report: PulseReport = {
     locationId,
@@ -219,7 +300,7 @@ function computeCurrentLevel(
   locationId: string,
   reports: PulseReport[],
   patterns: Record<string, Record<number, Record<number, number>>>,
-): { level: CrowdLevel; confidence: number; trend: "rising" | "falling" | "stable" } {
+): { level: CrowdLevel; confidence: number; trend: 'rising' | 'falling' | 'stable' } {
   const now = Date.now();
   const locationReports = reports.filter((r) => r.locationId === locationId);
 
@@ -263,15 +344,15 @@ function computeCurrentLevel(
   const clampedLevel = Math.max(1, Math.min(5, Math.round(level))) as CrowdLevel;
 
   // 4. Trend detection
-  let trend: "rising" | "falling" | "stable" = "stable";
+  let trend: 'rising' | 'falling' | 'stable' = 'stable';
   if (recentReports.length >= 3) {
     const sorted = recentReports.sort((a, b) => b.age - a.age); // oldest first
     const firstHalf = sorted.slice(0, Math.floor(sorted.length / 2));
     const secondHalf = sorted.slice(Math.floor(sorted.length / 2));
     const avgFirst = firstHalf.reduce((s, r) => s + r.level, 0) / firstHalf.length;
     const avgSecond = secondHalf.reduce((s, r) => s + r.level, 0) / secondHalf.length;
-    if (avgSecond - avgFirst > 0.5) trend = "rising";
-    else if (avgFirst - avgSecond > 0.5) trend = "falling";
+    if (avgSecond - avgFirst > 0.5) trend = 'rising';
+    else if (avgFirst - avgSecond > 0.5) trend = 'falling';
   }
 
   return { level: clampedLevel, confidence, trend };
@@ -296,7 +377,7 @@ function findPeakHours(
   return entries
     .filter((e) => e.level >= 4)
     .slice(0, 2)
-    .map((e) => `${String(e.hour).padStart(2, "0")}:00-${String(e.hour + 1).padStart(2, "0")}:00`);
+    .map((e) => `${String(e.hour).padStart(2, '0')}:00-${String(e.hour + 1).padStart(2, '0')}:00`);
 }
 
 /**
@@ -309,7 +390,7 @@ function findBestTime(
   const currentDay = new Date().getDay();
   const currentHour = new Date().getHours();
   const dayPattern = patterns[locationId]?.[currentDay];
-  if (!dayPattern) return "隨時都可以";
+  if (!dayPattern) return '隨時都可以';
 
   // Find the lowest crowd hour that's still in the future
   const futureEntries = Object.entries(dayPattern)
@@ -317,10 +398,10 @@ function findBestTime(
     .filter((e) => e.hour > currentHour)
     .sort((a, b) => a.level - b.level);
 
-  if (futureEntries.length === 0) return "明天再來";
+  if (futureEntries.length === 0) return '明天再來';
 
   const best = futureEntries[0];
-  return `${String(best.hour).padStart(2, "0")}:00-${String(best.hour + 1).padStart(2, "0")}:00`;
+  return `${String(best.hour).padStart(2, '0')}:00-${String(best.hour + 1).padStart(2, '0')}:00`;
 }
 
 // ─── Event Detection ────────────────────────────────────
@@ -332,49 +413,55 @@ function detectCampusEvents(): CampusEvent[] {
   const dayOfWeek = now.getDay();
 
   // Rush hour detection
-  if ((hour >= 11 && hour <= 13) && dayOfWeek >= 1 && dayOfWeek <= 5) {
+  if (hour >= 11 && hour <= 13 && dayOfWeek >= 1 && dayOfWeek <= 5) {
     events.push({
-      id: "rush_lunch",
-      type: "rush_hour",
-      title: "午餐尖峰時段",
-      description: "餐廳和便利商店人潮較多，建議提早或延後用餐",
-      icon: "time-outline",
-      severity: "info",
+      id: 'rush_lunch',
+      type: 'rush_hour',
+      title: '午餐尖峰時段',
+      description: '餐廳和便利商店人潮較多，建議提早或延後用餐',
+      icon: 'time-outline',
+      severity: 'info',
       startTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 11, 30).getTime(),
       endTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 13, 30).getTime(),
-      affectedLocations: ["cafe_main", "cafe_sub", "cafe_711"],
+      affectedLocations: ['cafe_main', 'cafe_sub', 'cafe_711'],
     });
   }
 
   // Class change rush
   const classChangeTimes = [9, 10, 11, 12, 13, 14, 15, 16, 17];
   const minute = now.getMinutes();
-  if (classChangeTimes.includes(hour) && minute >= 0 && minute <= 15 && dayOfWeek >= 1 && dayOfWeek <= 5) {
+  if (
+    classChangeTimes.includes(hour) &&
+    minute >= 0 &&
+    minute <= 15 &&
+    dayOfWeek >= 1 &&
+    dayOfWeek <= 5
+  ) {
     events.push({
       id: `class_change_${hour}`,
-      type: "rush_hour",
-      title: "下課人潮",
-      description: "剛下課，走廊和餐廳會比較擁擠",
-      icon: "walk-outline",
-      severity: "info",
+      type: 'rush_hour',
+      title: '下課人潮',
+      description: '剛下課，走廊和餐廳會比較擁擠',
+      icon: 'walk-outline',
+      severity: 'info',
       startTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, 0).getTime(),
       endTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, 15).getTime(),
-      affectedLocations: ["cafe_main", "parking_main"],
+      affectedLocations: ['cafe_main', 'parking_main'],
     });
   }
 
   // Evening study surge (exam period heuristic: weekday evenings)
   if (hour >= 18 && hour <= 21 && dayOfWeek >= 1 && dayOfWeek <= 5) {
     events.push({
-      id: "evening_study",
-      type: "event",
-      title: "晚間自習時段",
-      description: "圖書館和自習室通常較為擁擠",
-      icon: "moon-outline",
-      severity: "info",
+      id: 'evening_study',
+      type: 'event',
+      title: '晚間自習時段',
+      description: '圖書館和自習室通常較為擁擠',
+      icon: 'moon-outline',
+      severity: 'info',
       startTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 18, 0).getTime(),
       endTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 22, 0).getTime(),
-      affectedLocations: ["lib_main", "lib_study", "study_room"],
+      affectedLocations: ['lib_main', 'lib_study', 'study_room'],
     });
   }
 
@@ -383,51 +470,50 @@ function detectCampusEvents(): CampusEvent[] {
 
 // ─── Insight Generation ─────────────────────────────────
 
-function generatePulseInsights(
-  locations: PulseLocation[],
-  events: CampusEvent[],
-): PulseInsight[] {
+function generatePulseInsights(locations: PulseLocation[], events: CampusEvent[]): PulseInsight[] {
   const insights: PulseInsight[] = [];
   const now = new Date();
   const hour = now.getHours();
 
   // Find least crowded dining option
-  const diningLocations = locations.filter((l) => l.category === "dining");
+  const diningLocations = locations.filter((l) => l.category === 'dining');
   const leastCrowded = diningLocations.sort((a, b) => a.currentLevel - b.currentLevel)[0];
   if (leastCrowded && diningLocations.length > 1) {
     insights.push({
-      type: "suggestion",
-      title: "推薦用餐地點",
-      description: `「${leastCrowded.name}」目前人最少（${"🟢🟡🟠🔴🔴"[leastCrowded.currentLevel - 1]} 等級 ${leastCrowded.currentLevel}）`,
-      icon: "restaurant-outline",
-      actionLabel: "導航前往",
+      type: 'suggestion',
+      title: '推薦用餐地點',
+      description: `「${leastCrowded.name}」目前人最少（${'🟢🟡🟠🔴🔴'[leastCrowded.currentLevel - 1]} 等級 ${leastCrowded.currentLevel}）`,
+      icon: 'restaurant-outline',
+      actionLabel: '導航前往',
       actionTarget: `dining_${leastCrowded.id}`,
     });
   }
 
   // Study space recommendation
-  const studyLocations = locations.filter((l) => l.category === "study" || l.category === "library");
+  const studyLocations = locations.filter(
+    (l) => l.category === 'study' || l.category === 'library',
+  );
   const bestStudy = studyLocations.sort((a, b) => a.currentLevel - b.currentLevel)[0];
   if (bestStudy) {
     insights.push({
-      type: "suggestion",
-      title: "最佳自習地點",
+      type: 'suggestion',
+      title: '最佳自習地點',
       description: `「${bestStudy.name}」目前最空，適合自習（等級 ${bestStudy.currentLevel}/5）`,
-      icon: "book-outline",
-      actionLabel: "前往",
+      icon: 'book-outline',
+      actionLabel: '前往',
       actionTarget: `study_${bestStudy.id}`,
     });
   }
 
   // Parking status
-  const parkingLocations = locations.filter((l) => l.category === "parking");
+  const parkingLocations = locations.filter((l) => l.category === 'parking');
   const fullParking = parkingLocations.filter((l) => l.currentLevel >= 4);
   if (fullParking.length > 0 && hour >= 7 && hour <= 10) {
     insights.push({
-      type: "alert",
-      title: "停車位緊張",
-      description: `${fullParking.map((p) => p.name).join("、")}已接近滿位，建議提早出發或搭乘大眾運輸`,
-      icon: "car-outline",
+      type: 'alert',
+      title: '停車位緊張',
+      description: `${fullParking.map((p) => p.name).join('、')}已接近滿位，建議提早出發或搭乘大眾運輸`,
+      icon: 'car-outline',
     });
   }
 
@@ -435,17 +521,17 @@ function generatePulseInsights(
   const overallBusy = locations.reduce((sum, l) => sum + l.currentLevel, 0) / locations.length;
   if (overallBusy <= 2) {
     insights.push({
-      type: "fun_fact",
-      title: "校園很悠閒",
-      description: "現在是校園的安靜時刻，適合散步或獨自思考 🌿",
-      icon: "leaf-outline",
+      type: 'fun_fact',
+      title: '校園很悠閒',
+      description: '現在是校園的安靜時刻，適合散步或獨自思考 🌿',
+      icon: 'leaf-outline',
     });
   } else if (overallBusy >= 4) {
     insights.push({
-      type: "fun_fact",
-      title: "校園超熱鬧",
-      description: "現在整個校園都很熱鬧！大家都在享受校園生活 🎉",
-      icon: "people-outline",
+      type: 'fun_fact',
+      title: '校園超熱鬧',
+      description: '現在整個校園都很熱鬧！大家都在享受校園生活 🎉',
+      icon: 'people-outline',
     });
   }
 
@@ -458,7 +544,7 @@ function generatePulseInsights(
  * 取得完整的校園脈動快照
  */
 export async function getCampusPulseSnapshot(): Promise<CampusPulseSnapshot> {
-  console.log("[CampusPulse] Getting campus pulse snapshot…");
+  console.log('[CampusPulse] Getting campus pulse snapshot…');
 
   const [reports, patterns] = await Promise.all([loadReports(), loadPatterns()]);
 
@@ -560,5 +646,7 @@ export async function addClassroomActivity(courseId: string, sessionId: string):
   reports.push(report);
   await saveReports(reports);
 
-  console.log(`[CampusPulse] Classroom activity added for course=${courseId}, session=${sessionId}`);
+  console.log(
+    `[CampusPulse] Classroom activity added for course=${courseId}, session=${sessionId}`,
+  );
 }

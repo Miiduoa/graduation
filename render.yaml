@@ -13,8 +13,8 @@ services:
       - key: OPENAI_COMPAT_MODEL
         value: qwen/qwen3-32b
       - key: PORT
-        value: "8100"
+        value: '8100'
       - key: ENABLE_RAG
-        value: "false"
+        value: 'false'
       - key: ENABLE_SELF_TRAIN_LOOP
-        value: "false"
+        value: 'false'

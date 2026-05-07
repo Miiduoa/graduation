@@ -175,17 +175,17 @@ flowchart TD
 
 ## 6. 建議的資料分層
 
-| 資料類型 | 來源 | 讀取方式 | 是否需要 embedding |
-|---|---|---|---|
-| 課表 | user / schedule | 結構化查詢 | 否 |
-| 待繳作業 | groups assignments | 結構化查詢 | 否 |
-| 成績 / GPA | grades / enrollments | 結構化查詢 | 否 |
-| 公告標題與日期 | announcements | 結構化查詢 | 否 |
-| 公告全文 | announcements body | 檢索 | 是 |
-| 群組 Q&A / 貼文 | groups posts/comments | 檢索 | 是 |
-| 教材 / 講義摘要 | course materials | 檢索 | 是 |
-| 餐廳、地點、活動 | school public data | 結構化查詢 | 通常否 |
-| 週報 / 學習摘要 | users weeklyReports | 結構化查詢 | 否 |
+| 資料類型         | 來源                  | 讀取方式   | 是否需要 embedding |
+| ---------------- | --------------------- | ---------- | ------------------ |
+| 課表             | user / schedule       | 結構化查詢 | 否                 |
+| 待繳作業         | groups assignments    | 結構化查詢 | 否                 |
+| 成績 / GPA       | grades / enrollments  | 結構化查詢 | 否                 |
+| 公告標題與日期   | announcements         | 結構化查詢 | 否                 |
+| 公告全文         | announcements body    | 檢索       | 是                 |
+| 群組 Q&A / 貼文  | groups posts/comments | 檢索       | 是                 |
+| 教材 / 講義摘要  | course materials      | 檢索       | 是                 |
+| 餐廳、地點、活動 | school public data    | 結構化查詢 | 通常否             |
+| 週報 / 學習摘要  | users weeklyReports   | 結構化查詢 | 否                 |
 
 ## 7. 建議新增的 Firestore 結構
 

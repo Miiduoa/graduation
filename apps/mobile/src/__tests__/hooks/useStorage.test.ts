@@ -8,7 +8,7 @@ import {
 } from '../../hooks/useStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest/async-storage-mock')
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
 describe('useAsyncStorage', () => {
@@ -18,7 +18,7 @@ describe('useAsyncStorage', () => {
 
   it('should return default value initially', () => {
     const { result, unmount } = renderHook(() =>
-      useAsyncStorage('testKey', { defaultValue: 'default' })
+      useAsyncStorage('testKey', { defaultValue: 'default' }),
     );
 
     const [value, , loading] = result.current;
@@ -31,25 +31,29 @@ describe('useAsyncStorage', () => {
     await AsyncStorage.setItem('testKey', JSON.stringify('stored'));
 
     const { result, unmount } = renderHook(() =>
-      useAsyncStorage('testKey', { defaultValue: 'default' })
+      useAsyncStorage('testKey', { defaultValue: 'default' }),
     );
 
-    await waitFor(() => {
-      expect(result.current[2]).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current[2]).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     expect(result.current[0]).toBe('stored');
     unmount();
   });
 
   it('should save value to storage', async () => {
-    const { result, unmount } = renderHook(() =>
-      useAsyncStorage('testKey', { defaultValue: '' })
-    );
+    const { result, unmount } = renderHook(() => useAsyncStorage('testKey', { defaultValue: '' }));
 
-    await waitFor(() => {
-      expect(result.current[2]).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current[2]).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     await act(async () => {
       await result.current[1]('newValue');
@@ -65,12 +69,15 @@ describe('useAsyncStorage', () => {
     await AsyncStorage.setItem('counterKey', JSON.stringify(5));
 
     const { result, unmount } = renderHook(() =>
-      useAsyncStorage<number>('counterKey', { defaultValue: 0 })
+      useAsyncStorage<number>('counterKey', { defaultValue: 0 }),
     );
 
-    await waitFor(() => {
-      expect(result.current[2]).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current[2]).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     await act(async () => {
       await result.current[1]((prev) => prev + 1);
@@ -84,12 +91,15 @@ describe('useAsyncStorage', () => {
     await AsyncStorage.setItem('testKey', JSON.stringify('toRemove'));
 
     const { result, unmount } = renderHook(() =>
-      useAsyncStorage('testKey', { defaultValue: 'default' })
+      useAsyncStorage('testKey', { defaultValue: 'default' }),
     );
 
-    await waitFor(() => {
-      expect(result.current[0]).toBe('toRemove');
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current[0]).toBe('toRemove');
+      },
+      { timeout: 5000 },
+    );
 
     await act(async () => {
       await result.current[3]();
@@ -105,12 +115,15 @@ describe('useAsyncStorage', () => {
     await AsyncStorage.setItem('corruptedKey', 'not-valid-json');
 
     const { result, unmount } = renderHook(() =>
-      useAsyncStorage('corruptedKey', { defaultValue: 'fallback' })
+      useAsyncStorage('corruptedKey', { defaultValue: 'fallback' }),
     );
 
-    await waitFor(() => {
-      expect(result.current[2]).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current[2]).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     expect(result.current[0]).toBe('fallback');
     unmount();
@@ -131,9 +144,7 @@ describe('useMultiStorage', () => {
   const defaults: TestValues = { name: '', email: '', age: 0 };
 
   it('should return default values initially', () => {
-    const { result, unmount } = renderHook(() =>
-      useMultiStorage<TestValues>([...keys], defaults)
-    );
+    const { result, unmount } = renderHook(() => useMultiStorage<TestValues>([...keys], defaults));
 
     expect(result.current.values).toEqual(defaults);
     expect(result.current.loading).toBe(true);
@@ -144,13 +155,14 @@ describe('useMultiStorage', () => {
     await AsyncStorage.setItem('name', JSON.stringify('John'));
     await AsyncStorage.setItem('email', JSON.stringify('john@example.com'));
 
-    const { result, unmount } = renderHook(() =>
-      useMultiStorage<TestValues>([...keys], defaults)
-    );
+    const { result, unmount } = renderHook(() => useMultiStorage<TestValues>([...keys], defaults));
 
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     expect(result.current.values.name).toBe('John');
     expect(result.current.values.email).toBe('john@example.com');
@@ -159,13 +171,14 @@ describe('useMultiStorage', () => {
   });
 
   it('should set single value', async () => {
-    const { result, unmount } = renderHook(() =>
-      useMultiStorage<TestValues>([...keys], defaults)
-    );
+    const { result, unmount } = renderHook(() => useMultiStorage<TestValues>([...keys], defaults));
 
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     await act(async () => {
       await result.current.setValue('name', 'Jane');
@@ -178,13 +191,14 @@ describe('useMultiStorage', () => {
   });
 
   it('should set multiple values', async () => {
-    const { result, unmount } = renderHook(() =>
-      useMultiStorage<TestValues>([...keys], defaults)
-    );
+    const { result, unmount } = renderHook(() => useMultiStorage<TestValues>([...keys], defaults));
 
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     await act(async () => {
       await result.current.setValues({
@@ -223,9 +237,12 @@ describe('useBooleanStorage', () => {
   it('should toggle value', async () => {
     const { result, unmount } = renderHook(() => useBooleanStorage('boolKey', false));
 
-    await waitFor(() => {
-      expect(result.current[3]).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current[3]).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     await act(async () => {
       await result.current[1]();
@@ -244,9 +261,12 @@ describe('useBooleanStorage', () => {
   it('should set true', async () => {
     const { result, unmount } = renderHook(() => useBooleanStorage('boolKey', false));
 
-    await waitFor(() => {
-      expect(result.current[3]).toBe(false);
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        expect(result.current[3]).toBe(false);
+      },
+      { timeout: 5000 },
+    );
 
     await act(async () => {
       await result.current[2]();
@@ -276,9 +296,12 @@ describe('useHistoryStorage', () => {
 
     const { result, unmount } = renderHook(() => useHistoryStorage<string>('history'));
 
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    }, { timeout: 3000 });
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+      },
+      { timeout: 3000 },
+    );
 
     expect(result.current.history).toContain('existing');
     unmount();

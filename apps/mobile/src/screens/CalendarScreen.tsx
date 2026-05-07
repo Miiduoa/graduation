@@ -1,15 +1,24 @@
 /* eslint-disable */
-import React, { useMemo, useState } from "react";
-import { ScrollView, Text, View, Pressable, Alert, Share, Linking, Clipboard } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Screen, Card, Pill, Button, LoadingState, ErrorState, SectionTitle, Divider } from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, softShadowStyle } from "../ui/theme";
-import { useSchool } from "../state/school";
-import { useAuth } from "../state/auth";
-import { useDataSource } from "../hooks/useDataSource";
-import { useAsyncList } from "../hooks/useAsyncList";
-import { formatDateTime } from "../utils/format";
+import React, { useMemo, useState } from 'react';
+import { ScrollView, Text, View, Pressable, Alert, Share, Linking, Clipboard } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  Screen,
+  Card,
+  Pill,
+  Button,
+  LoadingState,
+  ErrorState,
+  SectionTitle,
+  Divider,
+} from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme, softShadowStyle } from '../ui/theme';
+import { useSchool } from '../state/school';
+import { useAuth } from '../state/auth';
+import { useDataSource } from '../hooks/useDataSource';
+import { useAsyncList } from '../hooks/useAsyncList';
+import { formatDateTime } from '../utils/format';
 import {
   pickAndParseICalFile,
   exportAndShareICalFile,
@@ -17,11 +26,11 @@ import {
   convertAssignmentsToICalEvents,
   type ICalEvent,
   type ParsedCalendar,
-} from "../services/ical";
+} from '../services/ical';
 
 type CalendarEvent = {
   id: string;
-  type: "event" | "assignment";
+  type: 'event' | 'assignment';
   title: string;
   date: Date;
   endDate?: Date;
@@ -63,17 +72,27 @@ function isSameDay(d1: Date, d2: Date): boolean {
 
 function formatMonthYear(date: Date): string {
   const months = [
-    "一月", "二月", "三月", "四月", "五月", "六月",
-    "七月", "八月", "九月", "十月", "十一月", "十二月",
+    '一月',
+    '二月',
+    '三月',
+    '四月',
+    '五月',
+    '六月',
+    '七月',
+    '八月',
+    '九月',
+    '十月',
+    '十一月',
+    '十二月',
   ];
   return `${date.getFullYear()} 年 ${months[date.getMonth()]}`;
 }
 
-const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
 const CALENDAR_API_BASE_URL =
   process.env.EXPO_PUBLIC_FIREBASE_FUNCTIONS_URL ??
-  `https://asia-east1-${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? "YOUR_PROJECT_ID"}.cloudfunctions.net`;
+  `https://asia-east1-${process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? 'YOUR_PROJECT_ID'}.cloudfunctions.net`;
 
 type SubscribeButtonProps = {
   icon: string;
@@ -83,7 +102,7 @@ type SubscribeButtonProps = {
 };
 
 function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeButtonProps) {
-  const webcalUrl = subscribeUrl.replace(/^https?:\/\//, "webcal://");
+  const webcalUrl = subscribeUrl.replace(/^https?:\/\//, 'webcal://');
 
   const handleSubscribe = async () => {
     try {
@@ -91,29 +110,25 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
       if (canOpen) {
         await Linking.openURL(webcalUrl);
       } else {
-        Alert.alert(
-          "無法開啟日曆",
-          "請複製連結後手動新增訂閱",
-          [
-            { text: "取消", style: "cancel" },
-            {
-              text: "複製連結",
-              onPress: () => {
-                Clipboard.setString(subscribeUrl);
-                Alert.alert("已複製", "訂閱連結已複製到剪貼簿");
-              }
+        Alert.alert('無法開啟日曆', '請複製連結後手動新增訂閱', [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '複製連結',
+            onPress: () => {
+              Clipboard.setString(subscribeUrl);
+              Alert.alert('已複製', '訂閱連結已複製到剪貼簿');
             },
-          ]
-        );
+          },
+        ]);
       }
     } catch (error) {
-      Alert.alert("錯誤", "無法開啟訂閱連結");
+      Alert.alert('錯誤', '無法開啟訂閱連結');
     }
   };
 
   const handleCopy = () => {
     Clipboard.setString(subscribeUrl);
-    Alert.alert("已複製", "訂閱連結已複製到剪貼簿");
+    Alert.alert('已複製', '訂閱連結已複製到剪貼簿');
   };
 
   const handleShare = async () => {
@@ -123,7 +138,7 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
         url: subscribeUrl,
       });
     } catch (error) {
-      console.error("Share error:", error);
+      console.error('Share error:', error);
     }
   };
 
@@ -138,25 +153,27 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
         ...softShadowStyle(theme.shadows.soft),
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <View
           style={{
             width: 42,
             height: 42,
             borderRadius: theme.radius.md,
             backgroundColor: theme.colors.accentSoft,
-            alignItems: "center",
-            justifyContent: "center",
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
           <Ionicons name={icon as any} size={20} color={theme.colors.accent} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>{label}</Text>
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>{description}</Text>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>{label}</Text>
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+            {description}
+          </Text>
         </View>
       </View>
-      <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
         <Pressable
           onPress={handleSubscribe}
           style={({ pressed }) => ({
@@ -165,15 +182,15 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
             paddingHorizontal: 14,
             borderRadius: theme.radius.md,
             backgroundColor: pressed ? theme.colors.accentHover : theme.colors.accent,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
             gap: 6,
             transform: [{ scale: pressed ? 0.985 : 1 }],
           })}
         >
           <Ionicons name="add-circle" size={16} color="#fff" />
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>訂閱</Text>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>訂閱</Text>
         </Pressable>
         <Pressable
           onPress={handleCopy}
@@ -215,7 +232,9 @@ export function CalendarScreen(props: any) {
   const ds = useDataSource();
 
   const today = new Date();
-  const [currentMonth, setCurrentMonth] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [currentMonth, setCurrentMonth] = useState(
+    new Date(today.getFullYear(), today.getMonth(), 1),
+  );
   const [selectedDate, setSelectedDate] = useState<Date | null>(today);
   const [importedEvents, setImportedEvents] = useState<ICalEvent[]>([]);
   const [importedCalendarName, setImportedCalendarName] = useState<string | null>(null);
@@ -223,33 +242,30 @@ export function CalendarScreen(props: any) {
 
   const { items: events, loading: eventsLoading } = useAsyncList<any>(
     () => ds.listEvents(school.id),
-    [ds, school.id]
+    [ds, school.id],
   );
 
-  const { items: assignments, loading: assignmentsLoading } = useAsyncList<any>(
-    async () => {
-      if (!auth.user) return [];
-      const groups = await ds.listGroups(auth.user.uid, {
-        pageSize: 10,
-        filters: [{ field: "schoolId", operator: "==", value: school.id }],
-      });
-      if (groups.length === 0) return [];
+  const { items: assignments, loading: assignmentsLoading } = useAsyncList<any>(async () => {
+    if (!auth.user) return [];
+    const groups = await ds.listGroups(auth.user.uid, {
+      pageSize: 10,
+      filters: [{ field: 'schoolId', operator: '==', value: school.id }],
+    });
+    if (groups.length === 0) return [];
 
-      const assignmentGroups = await Promise.all(
-        groups.slice(0, 10).map(async (group) => {
-          const rows = await ds.listAssignments(group.id, { pageSize: 50 });
-          return rows.map((assignment) => ({
-            ...assignment,
-            groupId: assignment.groupId ?? group.id,
-            groupName: group.name ?? group.id,
-          }));
-        }),
-      );
+    const assignmentGroups = await Promise.all(
+      groups.slice(0, 10).map(async (group) => {
+        const rows = await ds.listAssignments(group.id, { pageSize: 50 });
+        return rows.map((assignment) => ({
+          ...assignment,
+          groupId: assignment.groupId ?? group.id,
+          groupName: group.name ?? group.id,
+        }));
+      }),
+    );
 
-      return assignmentGroups.flat();
-    },
-    [auth.user?.uid, ds, school.id]
-  );
+    return assignmentGroups.flat();
+  }, [auth.user?.uid, ds, school.id]);
 
   const calendarEvents = useMemo(() => {
     const items: CalendarEvent[] = [];
@@ -257,9 +273,9 @@ export function CalendarScreen(props: any) {
     const safeTime = (d: unknown): number => {
       if (!(d instanceof Date)) return 0;
       const gt = (d as { getTime?: unknown }).getTime;
-      if (typeof gt !== "function") return 0;
+      if (typeof gt !== 'function') return 0;
       const ms = (gt as (this: Date) => number).call(d);
-      return typeof ms === "number" && !Number.isNaN(ms) ? ms : 0;
+      return typeof ms === 'number' && !Number.isNaN(ms) ? ms : 0;
     };
 
     for (const e of events) {
@@ -267,7 +283,7 @@ export function CalendarScreen(props: any) {
       if (startDate && !isNaN(startDate.getTime())) {
         items.push({
           id: `event-${e.id}`,
-          type: "event",
+          type: 'event',
           title: e.title,
           date: startDate,
           endDate: e.endsAt?.toDate?.() ?? (e.endsAt ? new Date(e.endsAt) : undefined),
@@ -281,7 +297,7 @@ export function CalendarScreen(props: any) {
       if (dueDate && !isNaN(dueDate.getTime())) {
         items.push({
           id: `assignment-${a.id}`,
-          type: "assignment",
+          type: 'assignment',
           title: a.title,
           date: dueDate,
           groupId: a.groupId,
@@ -293,7 +309,7 @@ export function CalendarScreen(props: any) {
     for (const ie of importedEvents) {
       items.push({
         id: ie.id,
-        type: "event",
+        type: 'event',
         title: `[匯入] ${ie.title}`,
         date: ie.startDate,
         endDate: ie.endDate,
@@ -311,30 +327,34 @@ export function CalendarScreen(props: any) {
         setImportedEvents(result.events);
         setImportedCalendarName(result.name ?? null);
         Alert.alert(
-          "匯入成功",
-          `已匯入 ${result.events.length} 個事件${result.name ? `（${result.name}）` : ""}`
+          '匯入成功',
+          `已匯入 ${result.events.length} 個事件${result.name ? `（${result.name}）` : ''}`,
         );
       }
     } catch (error: any) {
-      Alert.alert("匯入失敗", error?.message ?? "無法解析 iCal 檔案");
+      Alert.alert('匯入失敗', error?.message ?? '無法解析 iCal 檔案');
     }
   };
 
   const handleExportIcal = async () => {
     setExporting(true);
     try {
-      const eventItems = convertAppEventsToICalEvents(events, "event");
+      const eventItems = convertAppEventsToICalEvents(events, 'event');
       const assignmentItems = convertAssignmentsToICalEvents(assignments);
       const allItems = [...eventItems, ...assignmentItems];
 
       if (allItems.length === 0) {
-        Alert.alert("沒有事件", "目前沒有可匯出的事件");
+        Alert.alert('沒有事件', '目前沒有可匯出的事件');
         return;
       }
 
-      await exportAndShareICalFile(allItems, `${school.code}-calendar.ics`, `${school.name} 行事曆`);
+      await exportAndShareICalFile(
+        allItems,
+        `${school.code}-calendar.ics`,
+        `${school.name} 行事曆`,
+      );
     } catch (error: any) {
-      Alert.alert("匯出失敗", error?.message ?? "無法匯出行事曆");
+      Alert.alert('匯出失敗', error?.message ?? '無法匯出行事曆');
     } finally {
       setExporting(false);
     }
@@ -345,20 +365,20 @@ export function CalendarScreen(props: any) {
     setImportedCalendarName(null);
   };
 
-  const getSubscribeUrl = (type: "events" | "assignments" | "all") => {
+  const getSubscribeUrl = (type: 'events' | 'assignments' | 'all') => {
     const params = new URLSearchParams({
       schoolId: school.id,
       type,
     });
-    if (auth.user && (type === "assignments" || type === "all")) {
-      params.append("userId", auth.user.uid);
+    if (auth.user && (type === 'assignments' || type === 'all')) {
+      params.append('userId', auth.user.uid);
     }
     return `${CALENDAR_API_BASE_URL}/calendarSubscribe?${params.toString()}`;
   };
 
   const monthDays = useMemo(
     () => getMonthDays(currentMonth.getFullYear(), currentMonth.getMonth()),
-    [currentMonth]
+    [currentMonth],
   );
 
   const eventsOnSelectedDate = useMemo(() => {
@@ -373,8 +393,8 @@ export function CalendarScreen(props: any) {
   const getEventTypesOnDay = (date: Date): { hasEvent: boolean; hasAssignment: boolean } => {
     const dayEvents = calendarEvents.filter((e) => isSameDay(e.date, date));
     return {
-      hasEvent: dayEvents.some((e) => e.type === "event"),
-      hasAssignment: dayEvents.some((e) => e.type === "assignment"),
+      hasEvent: dayEvents.some((e) => e.type === 'event'),
+      hasAssignment: dayEvents.some((e) => e.type === 'assignment'),
     };
   };
 
@@ -395,15 +415,25 @@ export function CalendarScreen(props: any) {
 
   return (
     <Screen>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 14, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ gap: 14, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+      >
         <Card title="行事曆" subtitle={formatMonthYear(currentMonth)}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 14,
+            }}
+          >
             <Pressable
               onPress={goToPrevMonth}
               style={({ pressed }) => ({
                 padding: 8,
                 borderRadius: theme.radius.sm,
-                backgroundColor: pressed ? theme.colors.accentSoft : "transparent",
+                backgroundColor: pressed ? theme.colors.accentSoft : 'transparent',
                 transform: [{ scale: pressed ? 0.985 : 1 }],
               })}
             >
@@ -415,18 +445,20 @@ export function CalendarScreen(props: any) {
                 paddingHorizontal: 16,
                 paddingVertical: 6,
                 borderRadius: theme.radius.full,
-                backgroundColor: pressed ? theme.colors.accentSoft : "transparent",
+                backgroundColor: pressed ? theme.colors.accentSoft : 'transparent',
                 transform: [{ scale: pressed ? 0.985 : 1 }],
               })}
             >
-              <Text style={{ color: theme.colors.accent, fontWeight: "700", fontSize: 14 }}>今天</Text>
+              <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 14 }}>
+                今天
+              </Text>
             </Pressable>
             <Pressable
               onPress={goToNextMonth}
               style={({ pressed }) => ({
                 padding: 8,
                 borderRadius: theme.radius.sm,
-                backgroundColor: pressed ? theme.colors.accentSoft : "transparent",
+                backgroundColor: pressed ? theme.colors.accentSoft : 'transparent',
                 transform: [{ scale: pressed ? 0.985 : 1 }],
               })}
             >
@@ -434,15 +466,19 @@ export function CalendarScreen(props: any) {
             </Pressable>
           </View>
 
-          <View style={{ flexDirection: "row", marginBottom: 8 }}>
+          <View style={{ flexDirection: 'row', marginBottom: 8 }}>
             {WEEKDAYS.map((day) => (
-              <View key={day} style={{ flex: 1, alignItems: "center" }}>
-                <Text style={{ color: theme.colors.textSecondary, fontWeight: "700", fontSize: 12 }}>{day}</Text>
+              <View key={day} style={{ flex: 1, alignItems: 'center' }}>
+                <Text
+                  style={{ color: theme.colors.textSecondary, fontWeight: '700', fontSize: 12 }}
+                >
+                  {day}
+                </Text>
               </View>
             ))}
           </View>
 
-          <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
             {monthDays.map((date, idx) => {
               const isCurrentMonth = date.getMonth() === currentMonth.getMonth();
               const isToday = isSameDay(date, today);
@@ -454,10 +490,10 @@ export function CalendarScreen(props: any) {
                   key={idx}
                   onPress={() => setSelectedDate(date)}
                   style={{
-                    width: "14.28%",
+                    width: '14.28%',
                     aspectRatio: 1,
-                    alignItems: "center",
-                    justifyContent: "center",
+                    alignItems: 'center',
+                    justifyContent: 'center',
                   }}
                 >
                   <View
@@ -465,37 +501,39 @@ export function CalendarScreen(props: any) {
                       width: 38,
                       height: 38,
                       borderRadius: theme.radius.full,
-                      alignItems: "center",
-                      justifyContent: "center",
+                      alignItems: 'center',
+                      justifyContent: 'center',
                       backgroundColor: isSelected
                         ? theme.colors.accent
                         : isToday
-                        ? theme.colors.accentSoft
-                        : "transparent",
+                          ? theme.colors.accentSoft
+                          : 'transparent',
                     }}
                   >
                     <Text
                       style={{
                         color: isSelected
-                          ? "#fff"
+                          ? '#fff'
                           : isCurrentMonth
-                          ? theme.colors.text
-                          : theme.colors.muted,
-                        fontWeight: isToday || isSelected ? "700" : "400",
+                            ? theme.colors.text
+                            : theme.colors.muted,
+                        fontWeight: isToday || isSelected ? '700' : '400',
                         fontSize: 14,
                       }}
                     >
                       {date.getDate()}
                     </Text>
-                    {(hasCampusEvent || hasAssignment) ? (
-                      <View style={{ position: "absolute", bottom: 3, flexDirection: "row", gap: 2 }}>
+                    {hasCampusEvent || hasAssignment ? (
+                      <View
+                        style={{ position: 'absolute', bottom: 3, flexDirection: 'row', gap: 2 }}
+                      >
                         {hasCampusEvent && (
                           <View
                             style={{
                               width: 5,
                               height: 5,
                               borderRadius: theme.radius.full,
-                              backgroundColor: isSelected ? "#fff" : theme.colors.accent,
+                              backgroundColor: isSelected ? '#fff' : theme.colors.accent,
                             }}
                           />
                         )}
@@ -505,7 +543,7 @@ export function CalendarScreen(props: any) {
                               width: 5,
                               height: 5,
                               borderRadius: theme.radius.full,
-                              backgroundColor: isSelected ? "#fff" : theme.colors.warning,
+                              backgroundColor: isSelected ? '#fff' : theme.colors.warning,
                             }}
                           />
                         )}
@@ -517,13 +555,27 @@ export function CalendarScreen(props: any) {
             })}
           </View>
 
-          <View style={{ flexDirection: "row", gap: 16, marginTop: 14 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <View style={{ width: 10, height: 10, borderRadius: theme.radius.full, backgroundColor: theme.colors.accent }} />
+          <View style={{ flexDirection: 'row', gap: 16, marginTop: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: theme.radius.full,
+                  backgroundColor: theme.colors.accent,
+                }}
+              />
               <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>活動</Text>
             </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <View style={{ width: 10, height: 10, borderRadius: theme.radius.full, backgroundColor: theme.colors.warning }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: theme.radius.full,
+                  backgroundColor: theme.colors.warning,
+                }}
+              />
               <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>作業截止</Text>
             </View>
           </View>
@@ -533,11 +585,15 @@ export function CalendarScreen(props: any) {
           <LoadingState title="事件" subtitle="載入中..." rows={2} />
         ) : (
           <Card
-            title={selectedDate ? `${selectedDate.getMonth() + 1}/${selectedDate.getDate()} 的事件` : "選擇日期"}
+            title={
+              selectedDate
+                ? `${selectedDate.getMonth() + 1}/${selectedDate.getDate()} 的事件`
+                : '選擇日期'
+            }
             subtitle={`共 ${eventsOnSelectedDate.length} 個事件`}
           >
             {eventsOnSelectedDate.length === 0 ? (
-              <View style={{ alignItems: "center", paddingVertical: 20 }}>
+              <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                 <Ionicons name="calendar-outline" size={32} color={theme.colors.muted} />
                 <Text style={{ color: theme.colors.textSecondary, marginTop: 8, fontSize: 14 }}>
                   這天沒有事件。
@@ -549,13 +605,13 @@ export function CalendarScreen(props: any) {
                   <Pressable
                     key={e.id}
                     onPress={() => {
-                      if (e.type === "event") {
-                        const eventId = e.id.replace("event-", "");
-                        nav?.navigate?.("Today", { screen: "活動詳情", params: { id: eventId } });
-                      } else if (e.type === "assignment" && e.groupId) {
-                        const assignmentId = e.id.replace("assignment-", "");
-                        nav?.navigate?.("收件匣", {
-                          screen: "AssignmentDetail",
+                      if (e.type === 'event') {
+                        const eventId = e.id.replace('event-', '');
+                        nav?.navigate?.('Today', { screen: '活動詳情', params: { id: eventId } });
+                      } else if (e.type === 'assignment' && e.groupId) {
+                        const assignmentId = e.id.replace('assignment-', '');
+                        nav?.navigate?.('收件匣', {
+                          screen: 'AssignmentDetail',
                           params: { groupId: e.groupId, assignmentId },
                         });
                       }
@@ -570,32 +626,41 @@ export function CalendarScreen(props: any) {
                       transform: [{ scale: pressed ? 0.985 : 1 }],
                     })}
                   >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                       <View
                         style={{
                           width: 36,
                           height: 36,
                           borderRadius: theme.radius.sm,
-                          backgroundColor: e.type === "event" ? theme.colors.accentSoft : theme.colors.warningSoft,
-                          alignItems: "center",
-                          justifyContent: "center",
+                          backgroundColor:
+                            e.type === 'event' ? theme.colors.accentSoft : theme.colors.warningSoft,
+                          alignItems: 'center',
+                          justifyContent: 'center',
                         }}
                       >
                         <Ionicons
-                          name={e.type === "event" ? "calendar" : "document-text"}
+                          name={e.type === 'event' ? 'calendar' : 'document-text'}
                           size={18}
-                          color={e.type === "event" ? theme.colors.accent : theme.colors.warning}
+                          color={e.type === 'event' ? theme.colors.accent : theme.colors.warning}
                         />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ color: theme.colors.text, fontWeight: "600", fontSize: 14 }}>{e.title}</Text>
-                        <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 3 }}>
+                        <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
+                          {e.title}
+                        </Text>
+                        <Text
+                          style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 3 }}
+                        >
                           {formatDateTime(e.date)}
-                          {e.location ? ` · ${e.location}` : ""}
-                          {e.groupName ? ` · ${e.groupName}` : ""}
+                          {e.location ? ` · ${e.location}` : ''}
+                          {e.groupName ? ` · ${e.groupName}` : ''}
                         </Text>
                       </View>
-                      <Pill text={e.type === "event" ? "活動" : "作業"} kind={e.type === "event" ? "accent" : "warning"} size="sm" />
+                      <Pill
+                        text={e.type === 'event' ? '活動' : '作業'}
+                        kind={e.type === 'event' ? 'accent' : 'warning'}
+                        size="sm"
+                      />
                     </View>
                   </Pressable>
                 ))}
@@ -607,13 +672,13 @@ export function CalendarScreen(props: any) {
         <Card title="即將到來" subtitle="未來 7 天的事件">
           {(() => {
             const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
-            const upcoming = calendarEvents.filter(
-              (e) => e.date >= today && e.date <= nextWeek
-            );
+            const upcoming = calendarEvents.filter((e) => e.date >= today && e.date <= nextWeek);
             if (upcoming.length === 0) {
               return (
-                <View style={{ alignItems: "center", paddingVertical: 16 }}>
-                  <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>未來 7 天沒有事件。</Text>
+                <View style={{ alignItems: 'center', paddingVertical: 16 }}>
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>
+                    未來 7 天沒有事件。
+                  </Text>
                 </View>
               );
             }
@@ -623,8 +688,8 @@ export function CalendarScreen(props: any) {
                   <View
                     key={e.id}
                     style={{
-                      flexDirection: "row",
-                      alignItems: "center",
+                      flexDirection: 'row',
+                      alignItems: 'center',
                       gap: 12,
                       paddingVertical: 8,
                       paddingHorizontal: 10,
@@ -637,10 +702,14 @@ export function CalendarScreen(props: any) {
                         width: 8,
                         height: 8,
                         borderRadius: theme.radius.full,
-                        backgroundColor: e.type === "event" ? theme.colors.accent : theme.colors.warning,
+                        backgroundColor:
+                          e.type === 'event' ? theme.colors.accent : theme.colors.warning,
                       }}
                     />
-                    <Text style={{ color: theme.colors.text, flex: 1, fontSize: 14 }} numberOfLines={1}>
+                    <Text
+                      style={{ color: theme.colors.text, flex: 1, fontSize: 14 }}
+                      numberOfLines={1}
+                    >
                       {e.title}
                     </Text>
                     <Pill
@@ -651,7 +720,14 @@ export function CalendarScreen(props: any) {
                   </View>
                 ))}
                 {upcoming.length > 5 ? (
-                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12, textAlign: "center", marginTop: 4 }}>
+                  <Text
+                    style={{
+                      color: theme.colors.textSecondary,
+                      fontSize: 12,
+                      textAlign: 'center',
+                      marginTop: 4,
+                    }}
+                  >
                     還有 {upcoming.length - 5} 個事件...
                   </Text>
                 ) : null}
@@ -664,19 +740,41 @@ export function CalendarScreen(props: any) {
           <View style={{ gap: 14 }}>
             <View>
               <SectionTitle text="匯入外部行事曆" />
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 10, marginTop: 4, lineHeight: 18 }}>
+              <Text
+                style={{
+                  color: theme.colors.textSecondary,
+                  fontSize: 12,
+                  marginBottom: 10,
+                  marginTop: 4,
+                  lineHeight: 18,
+                }}
+              >
                 支援 .ics 格式（學校行事曆、Google 日曆等）
               </Text>
-              <Button text="選擇 iCal 檔案" kind="primary" icon="document-attach-outline" onPress={handleImportIcal} />
+              <Button
+                text="選擇 iCal 檔案"
+                kind="primary"
+                icon="document-attach-outline"
+                onPress={handleImportIcal}
+              />
               {importedEvents.length > 0 ? (
                 <View style={{ marginTop: 12 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <View
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}
+                  >
                     <Pill text={`已匯入 ${importedEvents.length} 個事件`} kind="accent" size="sm" />
                     {importedCalendarName ? (
-                      <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>{importedCalendarName}</Text>
+                      <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                        {importedCalendarName}
+                      </Text>
                     ) : null}
                   </View>
-                  <Button text="清除匯入的事件" kind="ghost" icon="close-circle-outline" onPress={handleClearImported} />
+                  <Button
+                    text="清除匯入的事件"
+                    kind="ghost"
+                    icon="close-circle-outline"
+                    onPress={handleClearImported}
+                  />
                 </View>
               ) : null}
             </View>
@@ -685,11 +783,19 @@ export function CalendarScreen(props: any) {
 
             <View>
               <SectionTitle text="匯出我的行事曆" />
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 10, marginTop: 4, lineHeight: 18 }}>
+              <Text
+                style={{
+                  color: theme.colors.textSecondary,
+                  fontSize: 12,
+                  marginBottom: 10,
+                  marginTop: 4,
+                  lineHeight: 18,
+                }}
+              >
                 匯出活動與作業截止日期為 .ics 檔案
               </Text>
               <Button
-                text={exporting ? "匯出中..." : "匯出行事曆"}
+                text={exporting ? '匯出中...' : '匯出行事曆'}
                 kind="primary"
                 icon="download-outline"
                 onPress={handleExportIcal}
@@ -702,7 +808,15 @@ export function CalendarScreen(props: any) {
 
             <View>
               <SectionTitle text="訂閱行事曆" />
-              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4, marginBottom: 14 }}>
+              <Text
+                style={{
+                  color: theme.colors.textSecondary,
+                  fontSize: 12,
+                  lineHeight: 18,
+                  marginTop: 4,
+                  marginBottom: 14,
+                }}
+              >
                 訂閱後，校園行事曆會自動同步到你的 iOS/Android/Google 日曆。
               </Text>
 
@@ -711,7 +825,7 @@ export function CalendarScreen(props: any) {
                   icon="calendar"
                   label="訂閱所有活動"
                   description="包含所有校園活動"
-                  subscribeUrl={getSubscribeUrl("events")}
+                  subscribeUrl={getSubscribeUrl('events')}
                 />
 
                 {auth.user && (
@@ -719,7 +833,7 @@ export function CalendarScreen(props: any) {
                     icon="document-text"
                     label="訂閱我的作業"
                     description="包含課程作業截止日"
-                    subscribeUrl={getSubscribeUrl("assignments")}
+                    subscribeUrl={getSubscribeUrl('assignments')}
                   />
                 )}
 
@@ -728,19 +842,21 @@ export function CalendarScreen(props: any) {
                     icon="apps"
                     label="訂閱全部"
                     description="活動 + 作業 + 已報名活動"
-                    subscribeUrl={getSubscribeUrl("all")}
+                    subscribeUrl={getSubscribeUrl('all')}
                   />
                 )}
               </View>
 
-              <View style={{
-                marginTop: 14,
-                padding: 14,
-                backgroundColor: theme.colors.accentSoft,
-                borderRadius: theme.radius.md,
-              }}>
+              <View
+                style={{
+                  marginTop: 14,
+                  padding: 14,
+                  backgroundColor: theme.colors.accentSoft,
+                  borderRadius: theme.radius.md,
+                }}
+              >
                 <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
-                  💡 提示：點擊「訂閱」會開啟系統日曆 App。{"\n"}
+                  💡 提示：點擊「訂閱」會開啟系統日曆 App。{'\n'}
                   如果無法自動開啟，可以複製連結後手動新增訂閱。
                 </Text>
               </View>

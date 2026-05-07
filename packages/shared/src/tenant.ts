@@ -6,15 +6,15 @@ export type TenantContext = {
   scope?: string | null;
 };
 
-const SCOPED_STORAGE_PREFIX = "campus.scope";
+const SCOPED_STORAGE_PREFIX = 'campus.scope';
 
 function sanitizeStoragePart(value: string): string {
-  const normalized = value.trim().replace(/[^A-Za-z0-9_-]+/g, "-");
-  return normalized || "default";
+  const normalized = value.trim().replace(/[^A-Za-z0-9_-]+/g, '-');
+  return normalized || 'default';
 }
 
 function requireSegment(name: string, value: string | null | undefined): string {
-  const normalized = String(value ?? "").trim();
+  const normalized = String(value ?? '').trim();
   if (!normalized) {
     throw new Error(`Missing required tenant segment: ${name}`);
   }
@@ -22,9 +22,7 @@ function requireSegment(name: string, value: string | null | undefined): string 
 }
 
 function normalizeOptionalSegments(segments: Array<string | null | undefined>): string[] {
-  return segments
-    .map((segment) => String(segment ?? "").trim())
-    .filter(Boolean);
+  return segments.map((segment) => String(segment ?? '').trim()).filter(Boolean);
 }
 
 export function makeScopedStorageKey(feature: string, context: TenantContext = {}): string {
@@ -34,10 +32,10 @@ export function makeScopedStorageKey(feature: string, context: TenantContext = {
     parts.push(sanitizeStoragePart(context.scope));
   }
 
-  parts.push(`u:${sanitizeStoragePart(context.uid ?? "anonymous")}`);
-  parts.push(`s:${sanitizeStoragePart(context.schoolId ?? "default")}`);
+  parts.push(`u:${sanitizeStoragePart(context.uid ?? 'anonymous')}`);
+  parts.push(`s:${sanitizeStoragePart(context.schoolId ?? 'default')}`);
 
-  return parts.join(".");
+  return parts.join('.');
 }
 
 export function makeScopedStoragePrefix(feature?: string): string {
@@ -51,7 +49,7 @@ export function buildUserCollectionPath(
   uid: string,
   ...segments: Array<string | null | undefined>
 ): string[] {
-  return ["users", requireSegment("uid", uid), ...normalizeOptionalSegments(segments)];
+  return ['users', requireSegment('uid', uid), ...normalizeOptionalSegments(segments)];
 }
 
 export function buildUserSchoolCollectionPath(
@@ -60,10 +58,10 @@ export function buildUserSchoolCollectionPath(
   ...segments: Array<string | null | undefined>
 ): string[] {
   return [
-    "users",
-    requireSegment("uid", uid),
-    "schools",
-    requireSegment("schoolId", schoolId),
+    'users',
+    requireSegment('uid', uid),
+    'schools',
+    requireSegment('schoolId', schoolId),
     ...normalizeOptionalSegments(segments),
   ];
 }
@@ -72,14 +70,14 @@ export function buildSchoolCollectionPath(
   schoolId: string,
   ...segments: Array<string | null | undefined>
 ): string[] {
-  return ["schools", requireSegment("schoolId", schoolId), ...normalizeOptionalSegments(segments)];
+  return ['schools', requireSegment('schoolId', schoolId), ...normalizeOptionalSegments(segments)];
 }
 
 export function buildGroupCollectionPath(
   groupId: string,
   ...segments: Array<string | null | undefined>
 ): string[] {
-  return ["groups", requireSegment("groupId", groupId), ...normalizeOptionalSegments(segments)];
+  return ['groups', requireSegment('groupId', groupId), ...normalizeOptionalSegments(segments)];
 }
 
 export function buildConversationCollectionPath(
@@ -87,8 +85,8 @@ export function buildConversationCollectionPath(
   ...segments: Array<string | null | undefined>
 ): string[] {
   return [
-    "conversations",
-    requireSegment("conversationId", conversationId),
+    'conversations',
+    requireSegment('conversationId', conversationId),
     ...normalizeOptionalSegments(segments),
   ];
 }
@@ -97,5 +95,5 @@ export function buildRootCollectionPath(
   collectionName: string,
   ...segments: Array<string | null | undefined>
 ): string[] {
-  return [requireSegment("collectionName", collectionName), ...normalizeOptionalSegments(segments)];
+  return [requireSegment('collectionName', collectionName), ...normalizeOptionalSegments(segments)];
 }

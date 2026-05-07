@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef } from 'react';
 import {
   Animated,
   Dimensions,
@@ -12,12 +12,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "./navigationTheme";
-import { theme, softShadowStyle } from "./theme";
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
+import { theme, softShadowStyle } from './theme';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type ModalProps = {
   visible: boolean;
@@ -26,8 +26,8 @@ type ModalProps = {
   children: React.ReactNode;
   showCloseButton?: boolean;
   closeOnBackdrop?: boolean;
-  animationType?: "fade" | "slide" | "none";
-  size?: "small" | "medium" | "large" | "fullscreen";
+  animationType?: 'fade' | 'slide' | 'none';
+  size?: 'small' | 'medium' | 'large' | 'fullscreen';
   footer?: React.ReactNode;
 };
 
@@ -38,8 +38,8 @@ export function Modal({
   children,
   showCloseButton = true,
   closeOnBackdrop = true,
-  animationType = "fade",
-  size = "medium",
+  animationType = 'fade',
+  size = 'medium',
   footer,
 }: ModalProps) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -58,18 +58,40 @@ export function Modal({
 
   const getSizeStyle = (): any => {
     switch (size) {
-      case "small": return { width: "82%", maxHeight: SCREEN_HEIGHT * 0.4 };
-      case "large": return { width: "94%", maxHeight: SCREEN_HEIGHT * 0.85 };
-      case "fullscreen": return { width: "100%", height: "100%", borderRadius: 0 };
-      default: return { width: "90%", maxHeight: SCREEN_HEIGHT * 0.7 };
+      case 'small':
+        return { width: '82%', maxHeight: SCREEN_HEIGHT * 0.4 };
+      case 'large':
+        return { width: '94%', maxHeight: SCREEN_HEIGHT * 0.85 };
+      case 'fullscreen':
+        return { width: '100%', height: '100%', borderRadius: 0 };
+      default:
+        return { width: '90%', maxHeight: SCREEN_HEIGHT * 0.7 };
     }
   };
 
   return (
-    <RNModal visible={visible} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent accessibilityViewIsModal>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <TouchableWithoutFeedback onPress={closeOnBackdrop ? onClose : undefined} accessible={false}>
-          <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.colors.overlay, opacity: fadeAnim }]} />
+    <RNModal
+      visible={visible}
+      transparent
+      animationType="none"
+      onRequestClose={onClose}
+      statusBarTranslucent
+      accessibilityViewIsModal
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+      >
+        <TouchableWithoutFeedback
+          onPress={closeOnBackdrop ? onClose : undefined}
+          accessible={false}
+        >
+          <Animated.View
+            style={[
+              StyleSheet.absoluteFillObject,
+              { backgroundColor: theme.colors.overlay, opacity: fadeAnim },
+            ]}
+          />
         </TouchableWithoutFeedback>
 
         <Animated.View
@@ -79,7 +101,7 @@ export function Modal({
               borderRadius: theme.radius.xl,
               borderWidth: 1,
               borderColor: theme.colors.border,
-              overflow: "hidden",
+              overflow: 'hidden',
               ...softShadowStyle(theme.shadows.soft),
             },
             getSizeStyle(),
@@ -87,13 +109,32 @@ export function Modal({
           ]}
           accessible
           accessibilityRole="alert"
-          accessibilityLabel={title || "對話框"}
+          accessibilityLabel={title || '對話框'}
           accessibilityViewIsModal
         >
           {(title || showCloseButton) && (
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 22, paddingVertical: 18, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingHorizontal: 22,
+                paddingVertical: 18,
+                borderBottomWidth: 1,
+                borderBottomColor: theme.colors.border,
+              }}
+            >
               {title && (
-                <Text style={{ fontSize: 18, fontWeight: "700", color: theme.colors.text, flex: 1, letterSpacing: -0.2 }} accessibilityRole="header">
+                <Text
+                  style={{
+                    fontSize: 18,
+                    fontWeight: '700',
+                    color: theme.colors.text,
+                    flex: 1,
+                    letterSpacing: -0.2,
+                  }}
+                  accessibilityRole="header"
+                >
                   {title}
                 </Text>
               )}
@@ -106,9 +147,9 @@ export function Modal({
                     width: 32,
                     height: 32,
                     borderRadius: 16,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: pressed ? theme.colors.surface2 : "transparent",
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
                     marginLeft: 12,
                   })}
                   hitSlop={8}
@@ -119,12 +160,26 @@ export function Modal({
             </View>
           )}
 
-          <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ padding: 22, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            style={{ flexGrow: 0 }}
+            contentContainerStyle={{ padding: 22, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+            showsVerticalScrollIndicator={false}
+          >
             {children}
           </ScrollView>
 
           {footer && (
-            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12, paddingHorizontal: 22, paddingVertical: 18, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'flex-end',
+                gap: 12,
+                paddingHorizontal: 22,
+                paddingVertical: 18,
+                borderTopWidth: 1,
+                borderTopColor: theme.colors.border,
+              }}
+            >
               {footer}
             </View>
           )}
@@ -137,7 +192,7 @@ export function Modal({
 type AlertAction = {
   text: string;
   onPress?: () => void;
-  style?: "default" | "cancel" | "destructive";
+  style?: 'default' | 'cancel' | 'destructive';
 };
 
 type AlertDialogProps = {
@@ -153,42 +208,78 @@ export function AlertDialog({
   onClose,
   title,
   message,
-  actions = [{ text: "確定", onPress: onClose }],
+  actions = [{ text: '確定', onPress: onClose }],
 }: AlertDialogProps) {
   return (
-    <Modal visible={visible} onClose={onClose} size="small" showCloseButton={false} closeOnBackdrop={false}>
-      <View style={{ alignItems: "center", paddingTop: 4 }}>
-        <Text style={{ fontSize: 18, fontWeight: "700", color: theme.colors.text, textAlign: "center", marginBottom: 8, letterSpacing: -0.2 }}>
+    <Modal
+      visible={visible}
+      onClose={onClose}
+      size="small"
+      showCloseButton={false}
+      closeOnBackdrop={false}
+    >
+      <View style={{ alignItems: 'center', paddingTop: 4 }}>
+        <Text
+          style={{
+            fontSize: 18,
+            fontWeight: '700',
+            color: theme.colors.text,
+            textAlign: 'center',
+            marginBottom: 8,
+            letterSpacing: -0.2,
+          }}
+        >
           {title}
         </Text>
         {message && (
-          <Text style={{ fontSize: 14, color: theme.colors.muted, textAlign: "center", lineHeight: 21, marginBottom: 22 }}>
+          <Text
+            style={{
+              fontSize: 14,
+              color: theme.colors.muted,
+              textAlign: 'center',
+              lineHeight: 21,
+              marginBottom: 22,
+            }}
+          >
             {message}
           </Text>
         )}
-        <View style={{ flexDirection: "row", marginTop: 8, marginHorizontal: -22, marginBottom: -22, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            marginTop: 8,
+            marginHorizontal: -22,
+            marginBottom: -22,
+            borderTopWidth: 1,
+            borderTopColor: theme.colors.border,
+          }}
+        >
           {actions.map((action, index) => (
             <Pressable
               key={index}
-              onPress={() => { action.onPress?.(); onClose(); }}
+              onPress={() => {
+                action.onPress?.();
+                onClose();
+              }}
               style={({ pressed }) => ({
                 flex: 1,
                 paddingVertical: 15,
-                alignItems: "center",
+                alignItems: 'center',
                 borderLeftWidth: index > 0 ? 1 : 0,
                 borderLeftColor: theme.colors.border,
-                backgroundColor: pressed ? theme.colors.surface2 : "transparent",
+                backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
               })}
             >
               <Text
                 style={{
                   fontSize: 16,
-                  fontWeight: action.style === "cancel" ? "400" : "600",
-                  color: action.style === "destructive"
-                    ? theme.colors.danger
-                    : action.style === "cancel"
-                      ? theme.colors.muted
-                      : theme.colors.accent,
+                  fontWeight: action.style === 'cancel' ? '400' : '600',
+                  color:
+                    action.style === 'destructive'
+                      ? theme.colors.danger
+                      : action.style === 'cancel'
+                        ? theme.colors.muted
+                        : theme.colors.accent,
                 }}
               >
                 {action.text}
@@ -213,8 +304,14 @@ type ConfirmDialogProps = {
 };
 
 export function ConfirmDialog({
-  visible, onClose, onConfirm, title, message,
-  confirmText = "確定", cancelText = "取消", destructive = false,
+  visible,
+  onClose,
+  onConfirm,
+  title,
+  message,
+  confirmText = '確定',
+  cancelText = '取消',
+  destructive = false,
 }: ConfirmDialogProps) {
   return (
     <AlertDialog
@@ -223,8 +320,8 @@ export function ConfirmDialog({
       title={title}
       message={message}
       actions={[
-        { text: cancelText, style: "cancel" },
-        { text: confirmText, style: destructive ? "destructive" : "default", onPress: onConfirm },
+        { text: cancelText, style: 'cancel' },
+        { text: confirmText, style: destructive ? 'destructive' : 'default', onPress: onConfirm },
       ]}
     />
   );
@@ -232,30 +329,37 @@ export function ConfirmDialog({
 
 type LoadingModalProps = { visible: boolean; message?: string };
 
-export function LoadingModal({ visible, message = "載入中..." }: LoadingModalProps) {
+export function LoadingModal({ visible, message = '載入中...' }: LoadingModalProps) {
   const spinAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (visible) {
       const animation = Animated.loop(
-        Animated.timing(spinAnim, { toValue: 1, duration: 800, useNativeDriver: true })
+        Animated.timing(spinAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
       );
       animation.start();
       return () => animation.stop();
     }
   }, [visible]);
 
-  const spin = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  const spin = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   return (
     <RNModal visible={visible} transparent statusBarTranslucent>
-      <View style={{ flex: 1, backgroundColor: theme.colors.overlay, justifyContent: "center", alignItems: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme.colors.overlay,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
         <View
           style={{
             backgroundColor: theme.colors.surface,
             borderRadius: theme.radius.xl,
             padding: 28,
-            alignItems: "center",
+            alignItems: 'center',
             minWidth: 130,
             borderWidth: 1,
             borderColor: theme.colors.border,
@@ -274,7 +378,9 @@ export function LoadingModal({ visible, message = "載入中..." }: LoadingModal
               marginBottom: 14,
             }}
           />
-          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "500" }}>{message}</Text>
+          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '500' }}>
+            {message}
+          </Text>
         </View>
       </View>
     </RNModal>

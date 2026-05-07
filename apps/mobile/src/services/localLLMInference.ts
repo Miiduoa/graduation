@@ -18,13 +18,13 @@
  *  6. 結構化輸出解析（JSON / Tool Call）
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as FileSystem from "expo-file-system/legacy";
-import { NativeModules, Platform, TurboModuleRegistry } from "react-native";
-import type { LlamaContext, TokenData } from "llama.rn";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
+import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
+import type { LlamaContext, TokenData } from 'llama.rn';
 
 // Expo FileSystem compat
-const getDocDir = () => FileSystem.documentDirectory ?? "file:///data/user/0/app/";
+const getDocDir = () => FileSystem.documentDirectory ?? 'file:///data/user/0/app/';
 
 // ═══════════════════════════════════════════════════
 // Types & Configuration
@@ -46,7 +46,7 @@ export interface LLMConfig {
 }
 
 export interface LLMMessage {
-  role: "system" | "user" | "assistant" | "tool";
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   name?: string; // tool name for tool messages
 }
@@ -66,7 +66,7 @@ export interface LLMGenerateResult {
   content: string;
   tokensGenerated: number;
   tokensPerSecond: number;
-  finishReason: "stop" | "length" | "error";
+  finishReason: 'stop' | 'length' | 'error';
   totalTimeMs: number;
 }
 
@@ -77,12 +77,12 @@ export interface ModelDownloadProgress {
 }
 
 export type LLMStatus =
-  | "uninitialized"
-  | "downloading"
-  | "loading"
-  | "ready"
-  | "generating"
-  | "error";
+  | 'uninitialized'
+  | 'downloading'
+  | 'loading'
+  | 'ready'
+  | 'generating'
+  | 'error';
 
 export interface LLMState {
   status: LLMStatus;
@@ -102,11 +102,11 @@ export interface LLMRuntimeAvailability {
 // ═══════════════════════════════════════════════════
 
 export const MODEL_REGISTRY: Record<string, LLMConfig> = {
-  "qwen2.5-3b": {
-    modelId: "qwen2.5-3b",
+  'qwen2.5-3b': {
+    modelId: 'qwen2.5-3b',
     modelUrl:
-      "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
-    modelFileName: "qwen2.5-3b-instruct-q4_k_m.gguf",
+      'https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
+    modelFileName: 'qwen2.5-3b-instruct-q4_k_m.gguf',
     modelSize: 2_100_000_000, // ~2.1GB
     contextLength: 4096,
     maxTokens: 2048,
@@ -117,11 +117,11 @@ export const MODEL_REGISTRY: Record<string, LLMConfig> = {
     threads: 4,
     gpuLayers: 99, // offload all to Metal on iOS
   },
-  "phi-3.5-mini": {
-    modelId: "phi-3.5-mini",
+  'phi-3.5-mini': {
+    modelId: 'phi-3.5-mini',
     modelUrl:
-      "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
-    modelFileName: "Phi-3.5-mini-instruct-Q4_K_M.gguf",
+      'https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf',
+    modelFileName: 'Phi-3.5-mini-instruct-Q4_K_M.gguf',
     modelSize: 2_400_000_000, // ~2.4GB
     contextLength: 4096,
     maxTokens: 2048,
@@ -132,11 +132,11 @@ export const MODEL_REGISTRY: Record<string, LLMConfig> = {
     threads: 4,
     gpuLayers: 99,
   },
-  "smollm2-1.7b": {
-    modelId: "smollm2-1.7b",
+  'smollm2-1.7b': {
+    modelId: 'smollm2-1.7b',
     modelUrl:
-      "https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF/resolve/main/smollm2-1.7b-instruct-q4_k_m.gguf",
-    modelFileName: "smollm2-1.7b-instruct-q4_k_m.gguf",
+      'https://huggingface.co/HuggingFaceTB/SmolLM2-1.7B-Instruct-GGUF/resolve/main/smollm2-1.7b-instruct-q4_k_m.gguf',
+    modelFileName: 'smollm2-1.7b-instruct-q4_k_m.gguf',
     modelSize: 1_100_000_000, // ~1.1GB
     contextLength: 2048,
     maxTokens: 1024,
@@ -150,29 +150,29 @@ export const MODEL_REGISTRY: Record<string, LLMConfig> = {
 };
 
 // 預設模型
-const DEFAULT_MODEL_ID = "qwen2.5-3b";
+const DEFAULT_MODEL_ID = 'qwen2.5-3b';
 
 // Storage keys
 const STORAGE_KEYS = {
-  activeModel: "@local_llm:active_model",
-  modelReady: "@local_llm:model_ready",
-  inferenceStats: "@local_llm:stats",
+  activeModel: '@local_llm:active_model',
+  modelReady: '@local_llm:model_ready',
+  inferenceStats: '@local_llm:stats',
 };
 
 // ═══════════════════════════════════════════════════
 // LLM Runtime — llama.rn 封裝層
 // ═══════════════════════════════════════════════════
 
-type LlamaRNExports = typeof import("llama.rn");
+type LlamaRNExports = typeof import('llama.rn');
 
 const RUNTIME_UNAVAILABLE_MESSAGE =
-  "本地 AI 原生模組尚未載入。請重新安裝或重建包含 llama.rn 的開發版 App 後再啟用模型。";
+  '本地 AI 原生模組尚未載入。請重新安裝或重建包含 llama.rn 的開發版 App 後再啟用模型。';
 
 let cachedLlamaModule: Partial<LlamaRNExports> | null | undefined;
 
 function getNativeRNLlamaModule(): unknown {
   try {
-    const turboModule = (TurboModuleRegistry as any)?.get?.("RNLlama");
+    const turboModule = (TurboModuleRegistry as any)?.get?.('RNLlama');
     return turboModule ?? NativeModules.RNLlama ?? null;
   } catch {
     return NativeModules.RNLlama ?? null;
@@ -183,9 +183,9 @@ function loadLlamaModule(): Partial<LlamaRNExports> | null {
   if (cachedLlamaModule !== undefined) return cachedLlamaModule;
 
   try {
-    cachedLlamaModule = require("llama.rn") as Partial<LlamaRNExports>;
+    cachedLlamaModule = require('llama.rn') as Partial<LlamaRNExports>;
   } catch (e) {
-    console.warn("[LocalLLM] Failed to load llama.rn JS module:", e);
+    console.warn('[LocalLLM] Failed to load llama.rn JS module:', e);
     cachedLlamaModule = null;
   }
 
@@ -193,10 +193,10 @@ function loadLlamaModule(): Partial<LlamaRNExports> | null {
 }
 
 function getRuntimeAvailability(): LLMRuntimeAvailability {
-  if (Platform.OS !== "ios" && Platform.OS !== "android") {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
     return {
       available: false,
-      reason: "本地 AI 只支援 iOS / Android 原生 App。",
+      reason: '本地 AI 只支援 iOS / Android 原生 App。',
     };
   }
 
@@ -208,10 +208,10 @@ function getRuntimeAvailability(): LLMRuntimeAvailability {
   }
 
   const llamaModule = loadLlamaModule();
-  if (typeof llamaModule?.initLlama !== "function") {
+  if (typeof llamaModule?.initLlama !== 'function') {
     return {
       available: false,
-      reason: "本地 AI JavaScript 模組尚未正確載入，請重新啟動 App 後再試。",
+      reason: '本地 AI JavaScript 模組尚未正確載入，請重新啟動 App 後再試。',
     };
   }
 
@@ -219,12 +219,8 @@ function getRuntimeAvailability(): LLMRuntimeAvailability {
 }
 
 function normalizeLoadModelError(error: any): string {
-  const message = String(error?.message ?? error ?? "未知錯誤");
-  if (
-    /initLlama|initContext|RNLlama|NativeModule|TurboModule|native module/i.test(
-      message,
-    )
-  ) {
+  const message = String(error?.message ?? error ?? '未知錯誤');
+  if (/initLlama|initContext|RNLlama|NativeModule|TurboModule|native module/i.test(message)) {
     return RUNTIME_UNAVAILABLE_MESSAGE;
   }
   return `模型載入失敗：${message}`;
@@ -237,7 +233,7 @@ function normalizeLoadModelError(error: any): string {
 class LocalLLMEngine {
   private context: LlamaContext | null = null;
   private config: LLMConfig | null = null;
-  private state: LLMState = { status: "uninitialized" };
+  private state: LLMState = { status: 'uninitialized' };
   private listeners: Set<(state: LLMState) => void> = new Set();
   private conversationHistory: LLMMessage[] = [];
   private abortController: AbortController | null = null;
@@ -299,7 +295,7 @@ class LocalLLMEngine {
   ): Promise<boolean> {
     const cfg = MODEL_REGISTRY[modelId ?? DEFAULT_MODEL_ID];
     if (!cfg) {
-      this.setState({ status: "error", error: `Unknown model: ${modelId}` });
+      this.setState({ status: 'error', error: `Unknown model: ${modelId}` });
       return false;
     }
 
@@ -310,7 +306,7 @@ class LocalLLMEngine {
     }
 
     const modelPath = this.getModelPath(cfg);
-    this.setState({ status: "downloading", modelId: cfg.modelId });
+    this.setState({ status: 'downloading', modelId: cfg.modelId });
 
     try {
       // HuggingFace URL 需要 redirect 追蹤 + User-Agent
@@ -319,7 +315,7 @@ class LocalLLMEngine {
         modelPath,
         {
           headers: {
-            "User-Agent": "CampusAI-App/1.0",
+            'User-Agent': 'CampusAI-App/1.0',
           },
         },
         (downloadProgress) => {
@@ -345,7 +341,7 @@ class LocalLLMEngine {
 
       const result = await downloadResumable.downloadAsync();
       if (!result) {
-        throw new Error("下載回傳 null — 可能是網路連線中斷或 URL 無效");
+        throw new Error('下載回傳 null — 可能是網路連線中斷或 URL 無效');
       }
 
       console.log(`[LocalLLM] Download complete: status=${result.status}, uri=${result.uri}`);
@@ -355,17 +351,17 @@ class LocalLLMEngine {
         JSON.stringify({ modelId: cfg.modelId, downloadedAt: Date.now() }),
       );
 
-      this.setState({ status: "uninitialized", downloadProgress: undefined });
+      this.setState({ status: 'uninitialized', downloadProgress: undefined });
       return true;
     } catch (e: any) {
       console.error(`[LocalLLM] Download error:`, e);
-      const userMsg = e.message?.includes("Network")
-        ? "網路連線失敗，請確認 Wi-Fi 已連線後重試"
-        : e.message?.includes("space")
-          ? "儲存空間不足，請清理裝置空間後重試"
-          : `下載失敗：${e.message ?? "未知錯誤"}`;
+      const userMsg = e.message?.includes('Network')
+        ? '網路連線失敗，請確認 Wi-Fi 已連線後重試'
+        : e.message?.includes('space')
+          ? '儲存空間不足，請清理裝置空間後重試'
+          : `下載失敗：${e.message ?? '未知錯誤'}`;
       this.setState({
-        status: "error",
+        status: 'error',
         error: userMsg,
         downloadProgress: undefined,
       });
@@ -379,7 +375,7 @@ class LocalLLMEngine {
   async loadModel(modelId?: string): Promise<boolean> {
     const cfg = MODEL_REGISTRY[modelId ?? DEFAULT_MODEL_ID];
     if (!cfg) {
-      this.setState({ status: "error", error: `Unknown model: ${modelId}` });
+      this.setState({ status: 'error', error: `Unknown model: ${modelId}` });
       return false;
     }
 
@@ -388,13 +384,13 @@ class LocalLLMEngine {
     const fileInfo = await FileSystem.getInfoAsync(modelPath);
     if (!fileInfo.exists) {
       this.setState({
-        status: "error",
-        error: "Model not downloaded. Call downloadModel() first.",
+        status: 'error',
+        error: 'Model not downloaded. Call downloadModel() first.',
       });
       return false;
     }
 
-    this.setState({ status: "loading", modelId: cfg.modelId });
+    this.setState({ status: 'loading', modelId: cfg.modelId });
 
     try {
       const runtimeAvailability = getRuntimeAvailability();
@@ -403,7 +399,7 @@ class LocalLLMEngine {
       }
 
       const initLlama = loadLlamaModule()?.initLlama;
-      if (typeof initLlama !== "function") {
+      if (typeof initLlama !== 'function') {
         throw new Error(RUNTIME_UNAVAILABLE_MESSAGE);
       }
 
@@ -425,13 +421,13 @@ class LocalLLMEngine {
       });
 
       this.config = cfg;
-      this.setState({ status: "ready" });
+      this.setState({ status: 'ready' });
 
       await AsyncStorage.setItem(STORAGE_KEYS.activeModel, cfg.modelId);
       return true;
     } catch (e: any) {
       this.setState({
-        status: "error",
+        status: 'error',
         error: normalizeLoadModelError(e),
       });
       return false;
@@ -447,7 +443,7 @@ class LocalLLMEngine {
   ): Promise<boolean> {
     const mid = modelId ?? DEFAULT_MODEL_ID;
 
-    if (this.state.status === "ready" && this.config?.modelId === mid) {
+    if (this.state.status === 'ready' && this.config?.modelId === mid) {
       return true;
     }
 
@@ -467,27 +463,27 @@ class LocalLLMEngine {
    * 使用 ChatML 格式 (Qwen2.5 / Phi-3.5 / SmolLM2 均支援)
    */
   private formatPrompt(messages: LLMMessage[]): string {
-    let prompt = "";
+    let prompt = '';
 
     for (const msg of messages) {
       switch (msg.role) {
-        case "system":
+        case 'system':
           prompt += `<|im_start|>system\n${msg.content}<|im_end|>\n`;
           break;
-        case "user":
+        case 'user':
           prompt += `<|im_start|>user\n${msg.content}<|im_end|>\n`;
           break;
-        case "assistant":
+        case 'assistant':
           prompt += `<|im_start|>assistant\n${msg.content}<|im_end|>\n`;
           break;
-        case "tool":
-          prompt += `<|im_start|>tool\nName: ${msg.name ?? "unknown"}\nResult: ${msg.content}<|im_end|>\n`;
+        case 'tool':
+          prompt += `<|im_start|>tool\nName: ${msg.name ?? 'unknown'}\nResult: ${msg.content}<|im_end|>\n`;
           break;
       }
     }
 
     // 開始 assistant 回答
-    prompt += "<|im_start|>assistant\n";
+    prompt += '<|im_start|>assistant\n';
     return prompt;
   }
 
@@ -496,14 +492,14 @@ class LocalLLMEngine {
    */
   async generate(options: LLMGenerateOptions): Promise<LLMGenerateResult> {
     if (!this.context || !this.config) {
-      throw new Error("Model not loaded. Call loadModel() or ensureReady() first.");
+      throw new Error('Model not loaded. Call loadModel() or ensureReady() first.');
     }
 
-    if (this.state.status === "generating") {
-      throw new Error("Already generating. Abort the current generation first.");
+    if (this.state.status === 'generating') {
+      throw new Error('Already generating. Abort the current generation first.');
     }
 
-    this.setState({ status: "generating" });
+    this.setState({ status: 'generating' });
     this.abortController = new AbortController();
 
     const {
@@ -511,21 +507,21 @@ class LocalLLMEngine {
       maxTokens = this.config.maxTokens,
       temperature = this.config.temperature,
       topP = this.config.topP,
-      stopSequences = ["<|im_end|>", "<|im_start|>"],
+      stopSequences = ['<|im_end|>', '<|im_start|>'],
       onToken,
       signal,
     } = options;
 
     // 連接外部 signal
     if (signal) {
-      signal.addEventListener("abort", () => this.abortController?.abort());
+      signal.addEventListener('abort', () => this.abortController?.abort());
     }
 
     const prompt = this.formatPrompt(messages);
 
     try {
       const startTime = Date.now();
-      let generated = "";
+      let generated = '';
 
       const result = await this.context.completion(
         {
@@ -547,7 +543,7 @@ class LocalLLMEngine {
       const totalTimeMs = Date.now() - startTime;
       const tps = result.timings?.predicted_per_second ?? 0;
 
-      this.setState({ status: "ready", tokensPerSecond: tps });
+      this.setState({ status: 'ready', tokensPerSecond: tps });
 
       // 儲存統計
       this.saveStats(tps, result.tokens_predicted, totalTimeMs);
@@ -556,22 +552,21 @@ class LocalLLMEngine {
         content: result.text.trim(),
         tokensGenerated: result.tokens_predicted,
         tokensPerSecond: tps,
-        finishReason:
-          result.tokens_predicted >= maxTokens ? "length" : "stop",
+        finishReason: result.tokens_predicted >= maxTokens ? 'length' : 'stop',
         totalTimeMs,
       };
     } catch (e: any) {
-      if (e.name === "AbortError" || this.abortController?.signal.aborted) {
-        this.setState({ status: "ready" });
+      if (e.name === 'AbortError' || this.abortController?.signal.aborted) {
+        this.setState({ status: 'ready' });
         return {
-          content: "",
+          content: '',
           tokensGenerated: 0,
           tokensPerSecond: 0,
-          finishReason: "error",
+          finishReason: 'error',
           totalTimeMs: 0,
         };
       }
-      this.setState({ status: "error", error: e.message });
+      this.setState({ status: 'error', error: e.message });
       throw e;
     } finally {
       this.abortController = null;
@@ -599,13 +594,13 @@ class LocalLLMEngine {
     // 添加系統提示（如果是新對話或系統提示變更）
     if (systemPrompt && this.conversationHistory.length === 0) {
       this.conversationHistory.push({
-        role: "system",
+        role: 'system',
         content: systemPrompt,
       });
     }
 
     // 添加使用者訊息
-    this.conversationHistory.push({ role: "user", content: userMessage });
+    this.conversationHistory.push({ role: 'user', content: userMessage });
 
     // Context window 管理：如果歷史太長，壓縮
     this.compressHistoryIfNeeded();
@@ -619,7 +614,7 @@ class LocalLLMEngine {
     // 保存助理回覆
     if (result.content) {
       this.conversationHistory.push({
-        role: "assistant",
+        role: 'assistant',
         content: result.content,
       });
     }
@@ -632,12 +627,8 @@ class LocalLLMEngine {
    */
   private compressHistoryIfNeeded() {
     const maxTurns = 10; // 保留最近 10 輪
-    const systemMsgs = this.conversationHistory.filter(
-      (m) => m.role === "system",
-    );
-    const nonSystemMsgs = this.conversationHistory.filter(
-      (m) => m.role !== "system",
-    );
+    const systemMsgs = this.conversationHistory.filter((m) => m.role === 'system');
+    const nonSystemMsgs = this.conversationHistory.filter((m) => m.role !== 'system');
 
     if (nonSystemMsgs.length > maxTurns * 2) {
       // 保留最近的對話
@@ -649,7 +640,7 @@ class LocalLLMEngine {
 
       this.conversationHistory = [
         ...systemMsgs,
-        { role: "system", content: `[對話摘要] ${summary}` },
+        { role: 'system', content: `[對話摘要] ${summary}` },
         ...recent,
       ];
     }
@@ -659,10 +650,8 @@ class LocalLLMEngine {
    * 簡單摘要（提取關鍵資訊）
    */
   private summarizeMessages(messages: LLMMessage[]): string {
-    const userMsgs = messages
-      .filter((m) => m.role === "user")
-      .map((m) => m.content.slice(0, 50));
-    const topics = userMsgs.join("；");
+    const userMsgs = messages.filter((m) => m.role === 'user').map((m) => m.content.slice(0, 50));
+    const topics = userMsgs.join('；');
     return `使用者先前詢問了：${topics}`;
   }
 
@@ -702,14 +691,17 @@ class LocalLLMEngine {
     // 注入 JSON 指示
     let lastUserIdx = -1;
     for (let i = jsonMessages.length - 1; i >= 0; i--) {
-      if (jsonMessages[i].role === "user") { lastUserIdx = i; break; }
+      if (jsonMessages[i].role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
     }
     if (lastUserIdx >= 0) {
       jsonMessages[lastUserIdx] = {
         ...jsonMessages[lastUserIdx],
         content:
           jsonMessages[lastUserIdx].content +
-          `\n\n請以 JSON 格式回覆${schema ? `，格式如下：${schema}` : ""}。只輸出 JSON，不要其他文字。`,
+          `\n\n請以 JSON 格式回覆${schema ? `，格式如下：${schema}` : ''}。只輸出 JSON，不要其他文字。`,
       };
     }
 
@@ -740,7 +732,7 @@ class LocalLLMEngine {
       this.context = null;
     }
     this.config = null;
-    this.setState({ status: "uninitialized" });
+    this.setState({ status: 'uninitialized' });
   }
 
   /**
@@ -776,25 +768,16 @@ class LocalLLMEngine {
 
   // ── Stats ──
 
-  private async saveStats(
-    tps: number,
-    tokensGenerated: number,
-    timeMs: number,
-  ) {
+  private async saveStats(tps: number, tokensGenerated: number, timeMs: number) {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEYS.inferenceStats);
       const stats = raw ? JSON.parse(raw) : { totalInferences: 0, avgTps: 0, totalTokens: 0 };
       stats.totalInferences++;
       stats.totalTokens += tokensGenerated;
-      stats.avgTps =
-        (stats.avgTps * (stats.totalInferences - 1) + tps) /
-        stats.totalInferences;
+      stats.avgTps = (stats.avgTps * (stats.totalInferences - 1) + tps) / stats.totalInferences;
       stats.lastInference = Date.now();
       stats.lastTimeMs = timeMs;
-      await AsyncStorage.setItem(
-        STORAGE_KEYS.inferenceStats,
-        JSON.stringify(stats),
-      );
+      await AsyncStorage.setItem(STORAGE_KEYS.inferenceStats, JSON.stringify(stats));
     } catch {}
   }
 
@@ -806,9 +789,7 @@ class LocalLLMEngine {
   }> {
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEYS.inferenceStats);
-      return raw
-        ? JSON.parse(raw)
-        : { totalInferences: 0, avgTps: 0, totalTokens: 0 };
+      return raw ? JSON.parse(raw) : { totalInferences: 0, avgTps: 0, totalTokens: 0 };
     } catch {
       return { totalInferences: 0, avgTps: 0, totalTokens: 0 };
     }
@@ -825,12 +806,12 @@ class LocalLLMEngine {
 function extractJSON(text: string): string {
   // 嘗試直接解析
   const trimmed = text.trim();
-  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     // 找到最外層的 {}  或 []
     let depth = 0;
     let start = -1;
     const opener = trimmed[0];
-    const closer = opener === "{" ? "}" : "]";
+    const closer = opener === '{' ? '}' : ']';
 
     for (let i = 0; i < trimmed.length; i++) {
       if (trimmed[i] === opener) {

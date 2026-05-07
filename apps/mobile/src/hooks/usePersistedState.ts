@@ -1,10 +1,7 @@
 /* eslint-disable */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  loadPersistedValue,
-  savePersistedValue,
-} from "../services/persistedStorage";
-import { useLatestValue } from "./useLatestValue";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { loadPersistedValue, savePersistedValue } from '../services/persistedStorage';
+import { useLatestValue } from './useLatestValue';
 
 type Deserialize<T> = (raw: string) => T;
 type Serialize<T> = (value: T) => string;
@@ -31,7 +28,7 @@ export function usePersistedState<T>({
   const serializeRef = useLatestValue(serialize);
   const legacyKeysRef = useLatestValue(legacyKeys);
 
-  const legacyKeySignature = useMemo(() => legacyKeys.join("|"), [legacyKeys]);
+  const legacyKeySignature = useMemo(() => legacyKeys.join('|'), [legacyKeys]);
 
   useEffect(() => {
     let cancelled = false;

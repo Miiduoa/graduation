@@ -46,12 +46,14 @@ export function initCrossModuleConnections(): void {
 
       // 記錄教室活躍人數（供校園脈動使用）
       try {
-        const campusPulse = await import('./campusPulseEngine') as any;
+        const campusPulse = (await import('./campusPulseEngine')) as any;
         if (typeof campusPulse.addClassroomActivity === 'function') {
           campusPulse.addClassroomActivity(payload.courseId, payload.sessionId);
         }
-      } catch (_) { /* optional module */ }
-    })
+      } catch (_) {
+        /* optional module */
+      }
+    }),
   );
 
   // ─── 點名場次啟動 → 行事曆 + 推播 ───
@@ -71,16 +73,20 @@ export function initCrossModuleConnections(): void {
             metadata: { sessionId: payload.sessionId, mode: payload.mode },
           });
         }
-      } catch (_) { /* optional */ }
+      } catch (_) {
+        /* optional */
+      }
 
       // 觸發推播引擎通知修課學生
       try {
-        const proactiveEngine = await import('./proactiveIntelligenceEngine') as any;
+        const proactiveEngine = (await import('./proactiveIntelligenceEngine')) as any;
         if (typeof proactiveEngine.triggerAttendanceNudge === 'function') {
           proactiveEngine.triggerAttendanceNudge(payload.courseId, payload.courseName);
         }
-      } catch (_) { /* optional */ }
-    })
+      } catch (_) {
+        /* optional */
+      }
+    }),
   );
 
   // ─── 點名場次結束 → 計算出席率 → 風險檢測 ───
@@ -95,8 +101,8 @@ export function initCrossModuleConnections(): void {
         try {
           const session = await getSessionById(payload.sessionId);
           if (session) {
-            const absentStudents = session.records.filter(r => r.status === 'absent');
-            absentStudents.forEach(student => {
+            const absentStudents = session.records.filter((r) => r.status === 'absent');
+            absentStudents.forEach((student) => {
               campusEventBus.emit('attendance:rate_warning', {
                 studentId: student.studentId,
                 courseId,
@@ -107,7 +113,7 @@ export function initCrossModuleConnections(): void {
           }
         } catch (_) {}
       }
-    })
+    }),
   );
 
   // ─── 假單審核 → 更新出席紀錄 ───
@@ -117,7 +123,9 @@ export function initCrossModuleConnections(): void {
         // 找到該學生在該課程最近的 session，將 absent 改為 excused
         try {
           const sessions = await getAllSessions(payload.courseId);
-          const activeSessions = sessions.filter(s => s.status === 'active' || s.status === 'completed');
+          const activeSessions = sessions.filter(
+            (s) => s.status === 'active' || s.status === 'completed',
+          );
           const latestSession = activeSessions[activeSessions.length - 1];
           if (latestSession) {
             await updateStudentStatus(latestSession.id, payload.studentId, 'excused', '假單已核准');
@@ -126,7 +134,7 @@ export function initCrossModuleConnections(): void {
           console.warn('[Connector] Leave approval update failed:', e);
         }
       }
-    })
+    }),
   );
 
   // ─── 成績更新 → 學業預測刷新 + 推播 ───
@@ -147,8 +155,10 @@ export function initCrossModuleConnections(): void {
             });
           }
         }
-      } catch (_) { /* optional */ }
-    })
+      } catch (_) {
+        /* optional */
+      }
+    }),
   );
 
   // ─── GPA 下降 → 推播預警 ───
@@ -161,7 +171,7 @@ export function initCrossModuleConnections(): void {
           message: `你的 GPA 從 ${payload.oldGPA.toFixed(2)} 降至 ${payload.newGPA.toFixed(2)}，建議檢視近期學習狀況`,
         });
       }
-    })
+    }),
   );
 
   // ─── 作業發佈 → 行事曆新增截止日 ───
@@ -180,8 +190,10 @@ export function initCrossModuleConnections(): void {
             metadata: { teacherId: payload.teacherId },
           });
         }
-      } catch (_) { /* optional */ }
-    })
+      } catch (_) {
+        /* optional */
+      }
+    }),
   );
 
   // ─── 作業繳交 → XP ───
@@ -190,7 +202,7 @@ export function initCrossModuleConnections(): void {
       try {
         await earnXP('submit_assignment');
       } catch (_) {}
-    })
+    }),
   );
 
   // ─── 每日登入 → Streak + XP + 成就 ───
@@ -198,13 +210,14 @@ export function initCrossModuleConnections(): void {
     campusEventBus.on('user:daily_login', async (payload) => {
       try {
         await earnXP('daily_login');
-        const gamification = await import('./gamificationEngine') as any;
+        const gamification = (await import('./gamificationEngine')) as any;
         if (typeof gamification.updateStreak === 'function') await gamification.updateStreak();
-        if (typeof gamification.checkAndAwardAchievements === 'function') await gamification.checkAndAwardAchievements();
+        if (typeof gamification.checkAndAwardAchievements === 'function')
+          await gamification.checkAndAwardAchievements();
       } catch (e) {
         console.warn('[Connector] Daily login processing failed:', e);
       }
-    })
+    }),
   );
 
   // ─── 群眾回報 → 校園脈動 ───
@@ -213,7 +226,7 @@ export function initCrossModuleConnections(): void {
       try {
         await earnXP('report_crowd');
       } catch (_) {}
-    })
+    }),
   );
 
   // ─── 出席率風險 → 推播引擎 ───
@@ -224,7 +237,7 @@ export function initCrossModuleConnections(): void {
         nudgeType: 'attendance_risk',
         message: `「${payload.courseName}」出席率偏低，請注意出缺席狀況`,
       });
-    })
+    }),
   );
 
   console.log('[CrossModule] All connections initialized ✓');

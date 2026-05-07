@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
 // Legacy simple categories (kept for backward compat)
 // ---------------------------------------------------------------------------
-export type CreditCategory = "required" | "elective" | "general" | "english" | "other";
+export type CreditCategory = 'required' | 'elective' | 'general' | 'english' | 'other';
 
 export type Department = {
   id: string;
   schoolId: string;
   name: string;
-  college?: string;           // 所屬學院
-  programType: "university" | "junior_college"; // 大學 / 五專
+  college?: string; // 所屬學院
+  programType: 'university' | 'junior_college'; // 大學 / 五專
 };
 
 export type GradRuleTemplate = {
@@ -54,7 +54,7 @@ export type Enrollment = {
   uid: string;
   courseId: string;
   term?: string; // e.g. 2025-1
-  status: "planned" | "enrolled" | "completed";
+  status: 'planned' | 'enrolled' | 'completed';
   passed?: boolean;
   grade?: number; // 0-100
 };
@@ -75,9 +75,9 @@ export type CourseRequirement = {
   code?: string;
   name: string;
   credits: number;
-  required: boolean;            // true = 必修, false = 選修
-  suggestedYear?: number;       // 建議修課年級 1-4
-  suggestedSemester?: 1 | 2;    // 建議修課學期
+  required: boolean; // true = 必修, false = 選修
+  suggestedYear?: number; // 建議修課年級 1-4
+  suggestedSemester?: 1 | 2; // 建議修課學期
   notes?: string;
 };
 
@@ -86,18 +86,18 @@ export type CreditSubCategory = {
   key: string;
   label: string;
   minCredits: number;
-  maxCredits?: number;          // cap (e.g. 外系 max 20)
+  maxCredits?: number; // cap (e.g. 外系 max 20)
   courses?: CourseRequirement[];
   notes?: string;
 };
 
 /** Top-level category in the graduation structure */
 export type DetailedCreditCategory = {
-  key: string;                  // e.g. "university_core", "college_required"
-  label: string;                // e.g. "校訂課程", "院共同必修"
-  minCredits: number;           // minimum total for this category
+  key: string; // e.g. "university_core", "college_required"
+  label: string; // e.g. "校訂課程", "院共同必修"
+  minCredits: number; // minimum total for this category
   maxCredits?: number;
-  color?: string;               // for UI display
+  color?: string; // for UI display
   subCategories?: CreditSubCategory[];
   courses?: CourseRequirement[];
   notes?: string;
@@ -107,9 +107,9 @@ export type DetailedCreditCategory = {
 export type NonCreditRequirement = {
   key: string;
   label: string;
-  type: "certification" | "course_substitute" | "service" | "other";
+  type: 'certification' | 'course_substitute' | 'service' | 'other';
   description: string;
-  alternatives?: string[];      // 替代方案
+  alternatives?: string[]; // 替代方案
 };
 
 /** Complete detailed graduation template for a department+year */
@@ -119,15 +119,15 @@ export type DetailedGradTemplate = {
   schoolName: string;
   departmentId: string;
   departmentName: string;
-  college?: string;             // 學院
-  academicYear: string;         // 入學學年度 e.g. "115"
-  programType: "university" | "junior_college";
-  division?: string;            // 組別 (不分組 / A組 / B組)
-  studentType?: string;         // 一般生 / 轉學生
+  college?: string; // 學院
+  academicYear: string; // 入學學年度 e.g. "115"
+  programType: 'university' | 'junior_college';
+  division?: string; // 組別 (不分組 / A組 / B組)
+  studentType?: string; // 一般生 / 轉學生
   totalCreditsRequired: number;
   categories: DetailedCreditCategory[];
   nonCreditRequirements: NonCreditRequirement[];
-  otherRules?: string[];        // 其他附註 (e.g. 外系學分上限)
+  otherRules?: string[]; // 其他附註 (e.g. 外系學分上限)
 };
 
 /** Result of a detailed credit audit */
@@ -165,8 +165,10 @@ export function calculateCredits(input: {
 }): CreditAuditResult {
   const passingGrade = input.passingGrade ?? 60;
 
-  const rawTotal = input.rule?.override?.totalCreditsRequired ?? input.template.requirements.totalCreditsRequired;
-  const requiredTotal = Number.isFinite(Number(rawTotal)) && Number(rawTotal) >= 0 ? Number(rawTotal) : 0;
+  const rawTotal =
+    input.rule?.override?.totalCreditsRequired ?? input.template.requirements.totalCreditsRequired;
+  const requiredTotal =
+    Number.isFinite(Number(rawTotal)) && Number(rawTotal) >= 0 ? Number(rawTotal) : 0;
 
   const requiredByCategory: Partial<Record<CreditCategory, number>> = {};
   const mergeSource = [
@@ -190,10 +192,10 @@ export function calculateCredits(input: {
 
   const missingCourseIds: string[] = [];
 
-  const validCategories: CreditCategory[] = ["required", "elective", "general", "english", "other"];
+  const validCategories: CreditCategory[] = ['required', 'elective', 'general', 'english', 'other'];
 
   for (const e of input.enrollments) {
-    if (e.status !== "completed") continue;
+    if (e.status !== 'completed') continue;
 
     const course = input.coursesById[e.courseId];
     if (!course) {
@@ -201,23 +203,45 @@ export function calculateCredits(input: {
       continue;
     }
 
-    const passed = e.passed ?? (typeof e.grade === "number" ? e.grade >= passingGrade : true);
+    const passed = e.passed ?? (typeof e.grade === 'number' ? e.grade >= passingGrade : true);
     if (!passed) continue;
 
     const cred = Number(course.credits);
     const creditsToAdd = Number.isFinite(cred) && cred >= 0 ? cred : 0;
-    const category = validCategories.includes(course.category as CreditCategory) ? (course.category as CreditCategory) : "other";
+    const category = validCategories.includes(course.category as CreditCategory)
+      ? (course.category as CreditCategory)
+      : 'other';
     earnedByCategory[category] += creditsToAdd;
   }
 
   const totalEarned = Object.values(earnedByCategory).reduce((a, b) => a + b, 0);
 
-  const byCategory: CreditAuditResult["byCategory"] = {
-    required: { earned: earnedByCategory.required, required: requiredByCategory.required ?? 0, remaining: 0 },
-    elective: { earned: earnedByCategory.elective, required: requiredByCategory.elective ?? 0, remaining: 0 },
-    general: { earned: earnedByCategory.general, required: requiredByCategory.general ?? 0, remaining: 0 },
-    english: { earned: earnedByCategory.english, required: requiredByCategory.english ?? 0, remaining: 0 },
-    other: { earned: earnedByCategory.other, required: requiredByCategory.other ?? 0, remaining: 0 },
+  const byCategory: CreditAuditResult['byCategory'] = {
+    required: {
+      earned: earnedByCategory.required,
+      required: requiredByCategory.required ?? 0,
+      remaining: 0,
+    },
+    elective: {
+      earned: earnedByCategory.elective,
+      required: requiredByCategory.elective ?? 0,
+      remaining: 0,
+    },
+    general: {
+      earned: earnedByCategory.general,
+      required: requiredByCategory.general ?? 0,
+      remaining: 0,
+    },
+    english: {
+      earned: earnedByCategory.english,
+      required: requiredByCategory.english ?? 0,
+      remaining: 0,
+    },
+    other: {
+      earned: earnedByCategory.other,
+      required: requiredByCategory.other ?? 0,
+      remaining: 0,
+    },
   };
 
   (Object.keys(byCategory) as CreditCategory[]).forEach((k) => {
@@ -249,7 +273,7 @@ export function calculateDetailedCredits(input: {
   courses: Array<{
     name: string;
     credits: number;
-    categoryKey: string;     // matches DetailedCreditCategory.key
+    categoryKey: string; // matches DetailedCreditCategory.key
     subCategoryKey?: string; // matches CreditSubCategory.key
     passed: boolean;
   }>;
@@ -281,7 +305,7 @@ export function calculateDetailedCredits(input: {
     if (cat.maxCredits != null && (earnedMap[cat.key] ?? 0) > cat.maxCredits) {
       const excess = (earnedMap[cat.key] ?? 0) - cat.maxCredits;
       warnings.push(
-        `「${cat.label}」已修 ${earnedMap[cat.key]} 學分，超過上限 ${cat.maxCredits} 學分，超出 ${excess} 學分不計入畢業學分`
+        `「${cat.label}」已修 ${earnedMap[cat.key]} 學分，超過上限 ${cat.maxCredits} 學分，超出 ${excess} 學分不計入畢業學分`,
       );
       earnedMap[cat.key] = cat.maxCredits;
     }
@@ -296,7 +320,7 @@ export function calculateDetailedCredits(input: {
   }
 
   // Build per-category results
-  const byCategory: DetailedCreditAuditResult["byCategory"] = template.categories.map((cat) => {
+  const byCategory: DetailedCreditAuditResult['byCategory'] = template.categories.map((cat) => {
     const earned = earnedMap[cat.key] ?? 0;
     const required = cat.minCredits;
     return {
@@ -334,8 +358,7 @@ export function calculateDetailedCredits(input: {
     totalEarned >= totalRequired &&
     byCategory.every((cat) => cat.earned >= cat.required) &&
     byCategory.every(
-      (cat) =>
-        !cat.subCategories || cat.subCategories.every((sub) => sub.earned >= sub.required)
+      (cat) => !cat.subCategories || cat.subCategories.every((sub) => sub.earned >= sub.required),
     );
   const allNonCreditSatisfied = nonCreditStatus.every((n) => n.satisfied);
   const satisfied = creditsSatisfied && allNonCreditSatisfied;

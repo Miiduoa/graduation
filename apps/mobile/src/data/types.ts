@@ -641,7 +641,13 @@ export type LearningSignal = {
   id: string;
   userId: string;
   schoolId?: string;
-  type: 'late_assignment' | 'missing_submission' | 'low_grade' | 'attendance_drop' | 'workload_spike' | 'positive_momentum';
+  type:
+    | 'late_assignment'
+    | 'missing_submission'
+    | 'low_grade'
+    | 'attendance_drop'
+    | 'workload_spike'
+    | 'positive_momentum';
   severity: number;
   title: string;
   description: string;

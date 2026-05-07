@@ -185,7 +185,8 @@ export function SettingsScreen(props: any) {
             }}
           >
             <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
-              目前產品已鎖定為 {school.name}（{PROVIDENCE_UNIVERSITY_SCHOOL_CODE}），此版本不再提供校碼切換與多校模式。
+              目前產品已鎖定為 {school.name}（{PROVIDENCE_UNIVERSITY_SCHOOL_CODE}
+              ），此版本不再提供校碼切換與多校模式。
             </Text>
           </View>
         </AnimatedCard>

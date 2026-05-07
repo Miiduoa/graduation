@@ -1,9 +1,5 @@
 import { renderHook, act } from '@testing-library/react-native';
-import {
-  useThrottle,
-  useThrottledCallback,
-  usePreventDoubleClick,
-} from '../../hooks/useThrottle';
+import { useThrottle, useThrottledCallback, usePreventDoubleClick } from '../../hooks/useThrottle';
 
 describe('useThrottle', () => {
   beforeEach(() => {
@@ -20,15 +16,14 @@ describe('useThrottle', () => {
   });
 
   it('should update value after interval', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useThrottle(value, 300),
-      { initialProps: { value: 'initial' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useThrottle(value, 300), {
+      initialProps: { value: 'initial' },
+    });
 
     expect(result.current).toBe('initial');
 
     rerender({ value: 'updated' });
-    
+
     // 值不會立即更新（因為在節流間隔內）
     expect(result.current).toBe('initial');
 
@@ -42,10 +37,9 @@ describe('useThrottle', () => {
   });
 
   it('should throttle rapid value changes', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useThrottle(value, 300),
-      { initialProps: { value: 'a' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useThrottle(value, 300), {
+      initialProps: { value: 'a' },
+    });
 
     expect(result.current).toBe('a');
 
@@ -63,10 +57,9 @@ describe('useThrottle', () => {
   });
 
   it('should use custom interval', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useThrottle(value, 500),
-      { initialProps: { value: 'initial' } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useThrottle(value, 500), {
+      initialProps: { value: 'initial' },
+    });
 
     rerender({ value: 'updated' });
 
@@ -82,10 +75,9 @@ describe('useThrottle', () => {
   });
 
   it('should work with number values', () => {
-    const { result, rerender } = renderHook(
-      ({ value }) => useThrottle(value, 300),
-      { initialProps: { value: 0 } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useThrottle(value, 300), {
+      initialProps: { value: 0 },
+    });
 
     expect(result.current).toBe(0);
 
@@ -101,10 +93,9 @@ describe('useThrottle', () => {
     const obj1 = { name: 'test' };
     const obj2 = { name: 'updated' };
 
-    const { result, rerender } = renderHook(
-      ({ value }) => useThrottle(value, 300),
-      { initialProps: { value: obj1 } }
-    );
+    const { result, rerender } = renderHook(({ value }) => useThrottle(value, 300), {
+      initialProps: { value: obj1 },
+    });
 
     expect(result.current).toBe(obj1);
 

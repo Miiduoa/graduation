@@ -91,10 +91,7 @@ describe('useForm', () => {
     const configWithRules = {
       email: {
         initialValue: '',
-        rules: [
-          validators.required('Email is required'),
-          validators.email('Invalid email format'),
-        ],
+        rules: [validators.required('Email is required'), validators.email('Invalid email format')],
       },
       password: {
         initialValue: '',
@@ -296,15 +293,13 @@ describe('useForm', () => {
     });
 
     it('should set isSubmitting during submission', async () => {
-      const onSubmit = jest.fn(
-        () => new Promise((resolve) => setTimeout(resolve, 50))
-      );
+      const onSubmit = jest.fn(() => new Promise((resolve) => setTimeout(resolve, 50)));
       const { result } = renderHook(() => useForm(basicConfig));
 
       expect(result.current.isSubmitting).toBe(false);
 
       const submitPromise = result.current.handleSubmit(onSubmit)();
-      
+
       await act(async () => {
         await submitPromise;
       });
@@ -528,7 +523,7 @@ describe('validators', () => {
   describe('custom', () => {
     const rule = validators.custom<string>(
       (value) => value.startsWith('https://'),
-      'URL must start with https://'
+      'URL must start with https://',
     );
 
     it('should pass for valid value', () => {

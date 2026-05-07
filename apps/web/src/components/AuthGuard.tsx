@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import { useEffect, useState, ReactNode, createContext, useContext, useCallback } from "react";
-import { onAuthStateChanged, User, signOut } from "firebase/auth";
-import { getAuth } from "@/features/auth/client";
-import Link from "next/link";
+import { useEffect, useState, ReactNode, createContext, useContext, useCallback } from 'react';
+import { onAuthStateChanged, User, signOut } from 'firebase/auth';
+import { getAuth } from '@/features/auth/client';
+import Link from 'next/link';
 
 interface AuthState {
   user: User | null;
@@ -21,7 +21,7 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
+    throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
 }
@@ -51,9 +51,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setState({ user, loading: false, error: null });
       },
       (error) => {
-        console.error("Auth state change error:", error);
+        console.error('Auth state change error:', error);
         setState({ user: null, loading: false, error });
-      }
+      },
     );
 
     return () => unsubscribe();
@@ -62,12 +62,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signOutUser = useCallback(async () => {
     const auth = getAuth();
     if (!auth) return;
-    
+
     try {
       await signOut(auth);
       setState({ user: null, loading: false, error: null });
     } catch (error) {
-      console.error("Sign out error:", error);
+      console.error('Sign out error:', error);
       throw error;
     }
   }, []);
@@ -75,7 +75,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const refreshUser = useCallback(async () => {
     const auth = getAuth();
     if (!auth?.currentUser) return;
-    
+
     try {
       await auth.currentUser.reload();
       setState((prev) => ({
@@ -83,7 +83,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         user: auth.currentUser,
       }));
     } catch (error) {
-      console.error("Refresh user error:", error);
+      console.error('Refresh user error:', error);
     }
   }, []);
 
@@ -104,7 +104,7 @@ interface AuthGuardProps {
 export function AuthGuard({
   children,
   fallback,
-  redirectTo = "/login",
+  redirectTo = '/login',
   requireAuth = true,
 }: AuthGuardProps) {
   const { user, loading } = useAuth();
@@ -132,30 +132,30 @@ interface AuthLoadingScreenProps {
   message?: string;
 }
 
-function AuthLoadingScreen({ message = "驗證身份中..." }: AuthLoadingScreenProps) {
+function AuthLoadingScreen({ message = '驗證身份中...' }: AuthLoadingScreenProps) {
   return (
     <div
       style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "60vh",
-        gap: "16px",
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '60vh',
+        gap: '16px',
       }}
     >
       <div
         style={{
-          width: "48px",
-          height: "48px",
-          border: "4px solid var(--border)",
-          borderTopColor: "var(--brand)",
-          borderRadius: "50%",
-          animation: "spin 1s linear infinite",
+          width: '48px',
+          height: '48px',
+          border: '4px solid var(--border)',
+          borderTopColor: 'var(--brand)',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite',
         }}
       />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <p style={{ color: "var(--muted)", fontSize: "14px" }}>{message}</p>
+      <p style={{ color: 'var(--muted)', fontSize: '14px' }}>{message}</p>
     </div>
   );
 }
@@ -172,12 +172,12 @@ export function ProtectedContent({ children, fallback }: ProtectedContentProps) 
     return (
       <div
         style={{
-          padding: "20px",
-          textAlign: "center",
-          color: "var(--muted)",
+          padding: '20px',
+          textAlign: 'center',
+          color: 'var(--muted)',
         }}
       >
-        <div className="skeleton" style={{ height: "100px", borderRadius: "12px" }} />
+        <div className="skeleton" style={{ height: '100px', borderRadius: '12px' }} />
       </div>
     );
   }
@@ -187,29 +187,29 @@ export function ProtectedContent({ children, fallback }: ProtectedContentProps) 
       fallback ?? (
         <div
           style={{
-            padding: "40px 20px",
-            textAlign: "center",
-            background: "var(--panel)",
-            borderRadius: "var(--radius-lg)",
-            border: "1px solid var(--border)",
+            padding: '40px 20px',
+            textAlign: 'center',
+            background: 'var(--panel)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border)',
           }}
         >
-          <div style={{ fontSize: "48px", marginBottom: "16px" }}>🔒</div>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔒</div>
           <h3
             style={{
-              margin: "0 0 8px",
-              fontSize: "18px",
+              margin: '0 0 8px',
+              fontSize: '18px',
               fontWeight: 700,
-              color: "var(--text)",
+              color: 'var(--text)',
             }}
           >
             需要登入
           </h3>
           <p
             style={{
-              margin: "0 0 20px",
-              fontSize: "14px",
-              color: "var(--muted)",
+              margin: '0 0 20px',
+              fontSize: '14px',
+              color: 'var(--muted)',
             }}
           >
             請先登入以查看此內容
@@ -218,13 +218,13 @@ export function ProtectedContent({ children, fallback }: ProtectedContentProps) 
             href="/login"
             className="btn primary"
             style={{
-              display: "inline-block",
-              padding: "12px 24px",
-              borderRadius: "12px",
-              background: "var(--brand)",
-              color: "#fff",
+              display: 'inline-block',
+              padding: '12px 24px',
+              borderRadius: '12px',
+              background: 'var(--brand)',
+              color: '#fff',
               fontWeight: 600,
-              textDecoration: "none",
+              textDecoration: 'none',
             }}
           >
             前往登入
@@ -242,13 +242,13 @@ interface GuestOnlyProps {
   redirectTo?: string;
 }
 
-export function GuestOnly({ children, redirectTo = "/" }: GuestOnlyProps) {
+export function GuestOnly({ children, redirectTo = '/' }: GuestOnlyProps) {
   const { user, loading } = useAuth();
 
   useEffect(() => {
     if (!loading && user) {
       const searchParams = new URLSearchParams(window.location.search);
-      const returnUrl = searchParams.get("returnUrl") || redirectTo;
+      const returnUrl = searchParams.get('returnUrl') || redirectTo;
       window.location.href = returnUrl;
     }
   }, [user, loading, redirectTo]);
@@ -284,10 +284,10 @@ export function RoleGuard({ children, allowedRoles, fallback }: RoleGuardProps) 
 
       try {
         const tokenResult = await user.getIdTokenResult();
-        setUserRole((tokenResult.claims.role as string) || "user");
+        setUserRole((tokenResult.claims.role as string) || 'user');
       } catch (error) {
-        console.error("Failed to get user role:", error);
-        setUserRole("user");
+        console.error('Failed to get user role:', error);
+        setUserRole('user');
       } finally {
         setRoleLoading(false);
       }
@@ -305,29 +305,29 @@ export function RoleGuard({ children, allowedRoles, fallback }: RoleGuardProps) 
       fallback ?? (
         <div
           style={{
-            padding: "40px 20px",
-            textAlign: "center",
-            background: "var(--panel)",
-            borderRadius: "var(--radius-lg)",
-            border: "1px solid var(--border)",
+            padding: '40px 20px',
+            textAlign: 'center',
+            background: 'var(--panel)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border)',
           }}
         >
-          <div style={{ fontSize: "48px", marginBottom: "16px" }}>⛔</div>
+          <div style={{ fontSize: '48px', marginBottom: '16px' }}>⛔</div>
           <h3
             style={{
-              margin: "0 0 8px",
-              fontSize: "18px",
+              margin: '0 0 8px',
+              fontSize: '18px',
               fontWeight: 700,
-              color: "var(--text)",
+              color: 'var(--text)',
             }}
           >
             權限不足
           </h3>
           <p
             style={{
-              margin: "0 0 20px",
-              fontSize: "14px",
-              color: "var(--muted)",
+              margin: '0 0 20px',
+              fontSize: '14px',
+              color: 'var(--muted)',
             }}
           >
             您沒有權限存取此頁面
@@ -336,14 +336,14 @@ export function RoleGuard({ children, allowedRoles, fallback }: RoleGuardProps) 
             href="/"
             className="btn"
             style={{
-              display: "inline-block",
-              padding: "12px 24px",
-              borderRadius: "12px",
-              background: "var(--panel2)",
-              color: "var(--text)",
+              display: 'inline-block',
+              padding: '12px 24px',
+              borderRadius: '12px',
+              background: 'var(--panel2)',
+              color: 'var(--text)',
               fontWeight: 600,
-              textDecoration: "none",
-              border: "1px solid var(--border)",
+              textDecoration: 'none',
+              border: '1px solid var(--border)',
             }}
           >
             返回首頁

@@ -20,12 +20,12 @@ export const defaultNotificationPreferences: NotificationPreferences = {
   grades: true,
   messages: true,
   quietHoursEnabled: false,
-  quietHoursStart: "22:00",
-  quietHoursEnd: "08:00",
+  quietHoursStart: '22:00',
+  quietHoursEnd: '08:00',
 };
 
 export function normalizeNotificationPreferences(
-  value?: Partial<NotificationPreferences> | null
+  value?: Partial<NotificationPreferences> | null,
 ): NotificationPreferences {
   return {
     ...defaultNotificationPreferences,

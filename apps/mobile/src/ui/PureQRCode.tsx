@@ -1,14 +1,14 @@
 /* eslint-disable */
 /**
  * PureQRCode — 純 JavaScript QR 碼生成器
- * 
+ *
  * 不需要任何原生套件，使用 React Native View 渲染真實可掃描的 QR 碼。
  * 實作 QR Code Model 2, Version 1-6 (支援最多 134 bytes 的資料)
- * 
+ *
  * 參考：ISO/IEC 18004:2015
  */
-import React, { useMemo } from "react";
-import { View } from "react-native";
+import React, { useMemo } from 'react';
+import { View } from 'react-native';
 
 // ─── QR Code Core Algorithm ─────────────────────────────
 
@@ -23,28 +23,26 @@ const MODE_BYTE = 4;
 
 // Version info: [version, dataCodewords, ecCodewordsPerBlock, numBlocks]
 const VERSION_INFO: [number, number, number, number][] = [
-  [1, 19, 7, 1],    // V1 M
-  [2, 34, 10, 1],   // V2 M
-  [3, 55, 15, 1],   // V3 M
-  [4, 80, 20, 1],   // V4 M
-  [5, 108, 26, 1],  // V5 M
-  [6, 136, 18, 2],  // V6 M
+  [1, 19, 7, 1], // V1 M
+  [2, 34, 10, 1], // V2 M
+  [3, 55, 15, 1], // V3 M
+  [4, 80, 20, 1], // V4 M
+  [5, 108, 26, 1], // V5 M
+  [6, 136, 18, 2], // V6 M
 ];
 
 // Alignment pattern positions per version
 const ALIGNMENT_POSITIONS: number[][] = [
-  [],           // V1
-  [6, 18],      // V2
-  [6, 22],      // V3
-  [6, 26],      // V4
-  [6, 30],      // V5
-  [6, 34],      // V6
+  [], // V1
+  [6, 18], // V2
+  [6, 22], // V3
+  [6, 26], // V4
+  [6, 30], // V5
+  [6, 34], // V6
 ];
 
 // Format info for EC level Medium + mask patterns 0-7
-const FORMAT_INFO = [
-  0x5412, 0x5125, 0x5E7C, 0x5B4B, 0x45F9, 0x40CE, 0x4F97, 0x4AA0,
-];
+const FORMAT_INFO = [0x5412, 0x5125, 0x5e7c, 0x5b4b, 0x45f9, 0x40ce, 0x4f97, 0x4aa0];
 
 // GF(256) log/exp tables for Reed-Solomon
 const GF_EXP = new Uint8Array(512);
@@ -97,19 +95,24 @@ function rsEncode(data: number[], ecLen: number): number[] {
 }
 
 // Encode text to byte mode QR data
-function encodeData(text: string, version: number, ecPerBlock: number, numBlocks: number): number[] {
+function encodeData(
+  text: string,
+  version: number,
+  ecPerBlock: number,
+  numBlocks: number,
+): number[] {
   const bytes: number[] = [];
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
     if (code < 0x80) {
       bytes.push(code);
     } else if (code < 0x800) {
-      bytes.push(0xC0 | (code >> 6));
-      bytes.push(0x80 | (code & 0x3F));
+      bytes.push(0xc0 | (code >> 6));
+      bytes.push(0x80 | (code & 0x3f));
     } else {
-      bytes.push(0xE0 | (code >> 12));
-      bytes.push(0x80 | ((code >> 6) & 0x3F));
-      bytes.push(0x80 | (code & 0x3F));
+      bytes.push(0xe0 | (code >> 12));
+      bytes.push(0x80 | ((code >> 6) & 0x3f));
+      bytes.push(0x80 | (code & 0x3f));
     }
   }
 
@@ -141,7 +144,7 @@ function encodeData(text: string, version: number, ecPerBlock: number, numBlocks
   while (dataBits.length % 8 !== 0) dataBits.push(0);
 
   // Pad codewords
-  const padBytes = [0xEC, 0x11];
+  const padBytes = [0xec, 0x11];
   let padIdx = 0;
   while (dataBits.length < maxBits) {
     const pb = padBytes[padIdx % 2];
@@ -200,13 +203,13 @@ function createReserved(version: number): boolean[][] {
 // Place finder patterns
 function placeFinderPattern(matrix: boolean[][], reserved: boolean[][], row: number, col: number) {
   const pattern = [
-    [1,1,1,1,1,1,1],
-    [1,0,0,0,0,0,1],
-    [1,0,1,1,1,0,1],
-    [1,0,1,1,1,0,1],
-    [1,0,1,1,1,0,1],
-    [1,0,0,0,0,0,1],
-    [1,1,1,1,1,1,1],
+    [1, 1, 1, 1, 1, 1, 1],
+    [1, 0, 0, 0, 0, 0, 1],
+    [1, 0, 1, 1, 1, 0, 1],
+    [1, 0, 1, 1, 1, 0, 1],
+    [1, 0, 1, 1, 1, 0, 1],
+    [1, 0, 0, 0, 0, 0, 1],
+    [1, 1, 1, 1, 1, 1, 1],
   ];
   for (let r = 0; r < 7; r++) {
     for (let c = 0; c < 7; c++) {
@@ -224,13 +227,30 @@ function placeFinderPattern(matrix: boolean[][], reserved: boolean[][], row: num
 function placeSeparators(matrix: boolean[][], reserved: boolean[][], size: number) {
   for (let i = 0; i < 8; i++) {
     // Top-left
-    if (i < size) { matrix[7][i] = false; reserved[7][i] = true; matrix[i][7] = false; reserved[i][7] = true; }
+    if (i < size) {
+      matrix[7][i] = false;
+      reserved[7][i] = true;
+      matrix[i][7] = false;
+      reserved[i][7] = true;
+    }
     // Top-right
-    if (size - 8 + i < size) { matrix[7][size - 8 + i] = false; reserved[7][size - 8 + i] = true; }
-    if (i < 8) { matrix[i][size - 8] = false; reserved[i][size - 8] = true; }
+    if (size - 8 + i < size) {
+      matrix[7][size - 8 + i] = false;
+      reserved[7][size - 8 + i] = true;
+    }
+    if (i < 8) {
+      matrix[i][size - 8] = false;
+      reserved[i][size - 8] = true;
+    }
     // Bottom-left
-    if (size - 8 + i < size) { matrix[size - 8 + i][7] = false; reserved[size - 8 + i][7] = true; }
-    if (i < 8) { matrix[size - 8][i] = false; reserved[size - 8][i] = true; }
+    if (size - 8 + i < size) {
+      matrix[size - 8 + i][7] = false;
+      reserved[size - 8 + i][7] = true;
+    }
+    if (i < 8) {
+      matrix[size - 8][i] = false;
+      reserved[size - 8][i] = true;
+    }
   }
 }
 
@@ -320,14 +340,14 @@ const MASK_FUNCTIONS = [
   (r: number, c: number) => c % 3 === 0,
   (r: number, c: number) => (r + c) % 3 === 0,
   (r: number, c: number) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0,
-  (r: number, c: number) => ((r * c) % 2 + (r * c) % 3) === 0,
-  (r: number, c: number) => ((r * c) % 2 + (r * c) % 3) % 2 === 0,
-  (r: number, c: number) => ((r + c) % 2 + (r * c) % 3) % 2 === 0,
+  (r: number, c: number) => ((r * c) % 2) + ((r * c) % 3) === 0,
+  (r: number, c: number) => (((r * c) % 2) + ((r * c) % 3)) % 2 === 0,
+  (r: number, c: number) => (((r + c) % 2) + ((r * c) % 3)) % 2 === 0,
 ];
 
 function applyMask(matrix: boolean[][], reserved: boolean[][], maskIdx: number): boolean[][] {
   const size = matrix.length;
-  const result = matrix.map(row => [...row]);
+  const result = matrix.map((row) => [...row]);
   const maskFn = MASK_FUNCTIONS[maskIdx];
 
   for (let r = 0; r < size; r++) {
@@ -349,16 +369,24 @@ function calculatePenalty(matrix: boolean[][]): number {
   for (let r = 0; r < size; r++) {
     let count = 1;
     for (let c = 1; c < size; c++) {
-      if (matrix[r][c] === matrix[r][c - 1]) { count++; }
-      else { if (count >= 5) penalty += count - 2; count = 1; }
+      if (matrix[r][c] === matrix[r][c - 1]) {
+        count++;
+      } else {
+        if (count >= 5) penalty += count - 2;
+        count = 1;
+      }
     }
     if (count >= 5) penalty += count - 2;
   }
   for (let c = 0; c < size; c++) {
     let count = 1;
     for (let r = 1; r < size; r++) {
-      if (matrix[r][c] === matrix[r - 1][c]) { count++; }
-      else { if (count >= 5) penalty += count - 2; count = 1; }
+      if (matrix[r][c] === matrix[r - 1][c]) {
+        count++;
+      } else {
+        if (count >= 5) penalty += count - 2;
+        count = 1;
+      }
     }
     if (count >= 5) penalty += count - 2;
   }
@@ -382,16 +410,39 @@ function placeFormatInfo(matrix: boolean[][], size: number, maskIdx: number) {
 
   // Around top-left finder
   const positions1 = [
-    [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5],
-    [8, 7], [8, 8], [7, 8],
-    [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8],
+    [8, 0],
+    [8, 1],
+    [8, 2],
+    [8, 3],
+    [8, 4],
+    [8, 5],
+    [8, 7],
+    [8, 8],
+    [7, 8],
+    [5, 8],
+    [4, 8],
+    [3, 8],
+    [2, 8],
+    [1, 8],
+    [0, 8],
   ];
   // Around top-right and bottom-left
   const positions2 = [
-    [8, size - 1], [8, size - 2], [8, size - 3], [8, size - 4],
-    [8, size - 5], [8, size - 6], [8, size - 7], [8, size - 8],
-    [size - 7, 8], [size - 6, 8], [size - 5, 8], [size - 4, 8],
-    [size - 3, 8], [size - 2, 8], [size - 1, 8],
+    [8, size - 1],
+    [8, size - 2],
+    [8, size - 3],
+    [8, size - 4],
+    [8, size - 5],
+    [8, size - 6],
+    [8, size - 7],
+    [8, size - 8],
+    [size - 7, 8],
+    [size - 6, 8],
+    [size - 5, 8],
+    [size - 4, 8],
+    [size - 3, 8],
+    [size - 2, 8],
+    [size - 1, 8],
   ];
 
   for (let i = 0; i < 15; i++) {
@@ -414,8 +465,11 @@ function generateQRMatrix(text: string): boolean[][] {
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
     if (code < 0x80) textBytes.push(code);
-    else if (code < 0x800) { textBytes.push(0, 0); }
-    else { textBytes.push(0, 0, 0); }
+    else if (code < 0x800) {
+      textBytes.push(0, 0);
+    } else {
+      textBytes.push(0, 0, 0);
+    }
   }
   const dataLen = textBytes.length;
 
@@ -483,8 +537,8 @@ interface PureQRCodeProps {
 export function PureQRCode({
   value,
   size = 200,
-  color = "#000000",
-  backgroundColor = "#FFFFFF",
+  color = '#000000',
+  backgroundColor = '#FFFFFF',
   logo,
   logoSize = 40,
 }: PureQRCodeProps) {
@@ -502,16 +556,19 @@ export function PureQRCode({
   const quietZone = moduleSize;
 
   return (
-    <View style={{
-      width: size, height: size,
-      backgroundColor,
-      borderRadius: 8,
-      overflow: "hidden",
-      padding: quietZone,
-    }}>
+    <View
+      style={{
+        width: size,
+        height: size,
+        backgroundColor,
+        borderRadius: 8,
+        overflow: 'hidden',
+        padding: quietZone,
+      }}
+    >
       <View style={{ flex: 1 }}>
         {matrix.map((row, r) => (
-          <View key={r} style={{ flexDirection: "row", height: moduleSize }}>
+          <View key={r} style={{ flexDirection: 'row', height: moduleSize }}>
             {row.map((cell, c) => (
               <View
                 key={c}
@@ -526,18 +583,20 @@ export function PureQRCode({
         ))}
       </View>
       {logo && (
-        <View style={{
-          position: "absolute",
-          top: (size - logoSize) / 2,
-          left: (size - logoSize) / 2,
-          width: logoSize,
-          height: logoSize,
-          backgroundColor: "#FFFFFF",
-          borderRadius: 6,
-          justifyContent: "center",
-          alignItems: "center",
-          padding: 2,
-        }}>
+        <View
+          style={{
+            position: 'absolute',
+            top: (size - logoSize) / 2,
+            left: (size - logoSize) / 2,
+            width: logoSize,
+            height: logoSize,
+            backgroundColor: '#FFFFFF',
+            borderRadius: 6,
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 2,
+          }}
+        >
           {logo}
         </View>
       )}

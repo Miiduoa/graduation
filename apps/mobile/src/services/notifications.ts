@@ -1,18 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import * as Notifications from "expo-notifications";
-import * as Device from "expo-device";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import Constants from "expo-constants";
-import { Platform, Linking, Alert } from "react-native";
-import { doc, setDoc, deleteDoc, serverTimestamp, getDoc } from "firebase/firestore";
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import { Platform, Linking, Alert } from 'react-native';
+import { doc, setDoc, deleteDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import {
   defaultNotificationPreferences,
   normalizeNotificationPreferences,
   type NotificationPreferences,
-} from "@campus/shared/src/notifications";
-import { getDb } from "../firebase";
-import { withRetry } from "../utils/retry";
-import { trackEvent } from "./analytics";
+} from '@campus/shared/src/notifications';
+import { getDb } from '../firebase';
+import { withRetry } from '../utils/retry';
+import { trackEvent } from './analytics';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -26,8 +26,8 @@ Notifications.setNotificationHandler({
 
 export type PushTokenInfo = {
   token: string;
-  type: "expo" | "fcm" | "apns";
-  platform: "ios" | "android" | "web";
+  type: 'expo' | 'fcm' | 'apns';
+  platform: 'ios' | 'android' | 'web';
   deviceName?: string;
   createdAt: any;
 };
@@ -38,8 +38,8 @@ export type PermissionResult = {
   status: Notifications.PermissionStatus;
 };
 
-const PUSH_TOKEN_STORAGE_KEY = "@notifications.pushToken";
-const NOTIFICATION_PREFS_STORAGE_PREFIX = "@notifications.preferences";
+const PUSH_TOKEN_STORAGE_KEY = '@notifications.pushToken';
+const NOTIFICATION_PREFS_STORAGE_PREFIX = '@notifications.preferences';
 
 function getExpoProjectId(): string | undefined {
   const expoConfig = (Constants.expoConfig as any) ?? {};
@@ -47,11 +47,9 @@ function getExpoProjectId(): string | undefined {
   const easConfig = (Constants as any)?.easConfig ?? {};
 
   const projectId =
-    easConfig.projectId ??
-    expoConfig?.extra?.eas?.projectId ??
-    manifest?.extra?.eas?.projectId;
+    easConfig.projectId ?? expoConfig?.extra?.eas?.projectId ?? manifest?.extra?.eas?.projectId;
 
-  return typeof projectId === "string" && projectId.trim().length > 0
+  return typeof projectId === 'string' && projectId.trim().length > 0
     ? projectId.trim()
     : undefined;
 }
@@ -60,7 +58,7 @@ async function cachePushToken(token: string): Promise<void> {
   try {
     await AsyncStorage.setItem(PUSH_TOKEN_STORAGE_KEY, token);
   } catch (error) {
-    console.warn("[Notifications] Failed to cache push token:", error);
+    console.warn('[Notifications] Failed to cache push token:', error);
   }
 }
 
@@ -68,7 +66,7 @@ export async function getCachedPushToken(): Promise<string | null> {
   try {
     return await AsyncStorage.getItem(PUSH_TOKEN_STORAGE_KEY);
   } catch (error) {
-    console.warn("[Notifications] Failed to read cached push token:", error);
+    console.warn('[Notifications] Failed to read cached push token:', error);
     return null;
   }
 }
@@ -77,7 +75,7 @@ export async function clearCachedPushToken(): Promise<void> {
   try {
     await AsyncStorage.removeItem(PUSH_TOKEN_STORAGE_KEY);
   } catch (error) {
-    console.warn("[Notifications] Failed to clear cached push token:", error);
+    console.warn('[Notifications] Failed to clear cached push token:', error);
   }
 }
 
@@ -87,7 +85,7 @@ export async function clearCachedPushToken(): Promise<void> {
 export async function checkPushPermission(): Promise<PermissionResult> {
   const { status, canAskAgain } = await Notifications.getPermissionsAsync();
   return {
-    granted: status === "granted",
+    granted: status === 'granted',
     canAskAgain,
     status,
   };
@@ -97,8 +95,8 @@ export async function checkPushPermission(): Promise<PermissionResult> {
  * 引導用戶到設定開啟推播權限
  */
 export function openNotificationSettings(): void {
-  if (Platform.OS === "ios") {
-    Linking.openURL("app-settings:");
+  if (Platform.OS === 'ios') {
+    Linking.openURL('app-settings:');
   } else {
     Linking.openSettings();
   }
@@ -108,19 +106,15 @@ export function openNotificationSettings(): void {
  * 顯示權限被拒絕時的提示
  */
 export function showPermissionDeniedAlert(): void {
-  Alert.alert(
-    "推播通知已關閉",
-    "您已關閉推播通知權限。如需接收重要通知，請前往設定開啟。",
-    [
-      { text: "稍後再說", style: "cancel" },
-      { text: "前往設定", onPress: openNotificationSettings },
-    ]
-  );
+  Alert.alert('推播通知已關閉', '您已關閉推播通知權限。如需接收重要通知，請前往設定開啟。', [
+    { text: '稍後再說', style: 'cancel' },
+    { text: '前往設定', onPress: openNotificationSettings },
+  ]);
 }
 
 export async function registerForPushNotificationsAsync(): Promise<string | null> {
   if (!Device.isDevice) {
-    console.log("Push notifications require a physical device");
+    console.log('Push notifications require a physical device');
     return null;
   }
 
@@ -134,52 +128,52 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     } else {
       // 用戶已拒絕且無法再次請求
       showPermissionDeniedAlert();
-      trackEvent("push_permission_denied_permanent", {});
+      trackEvent('push_permission_denied_permanent', {});
       return null;
     }
   }
 
-  if (finalStatus !== "granted") {
-    console.log("Push notification permission not granted");
-    trackEvent("push_permission_denied", {});
+  if (finalStatus !== 'granted') {
+    console.log('Push notification permission not granted');
+    trackEvent('push_permission_denied', {});
     return null;
   }
 
   // 追蹤權限授予
-  trackEvent("push_permission_granted", {});
+  trackEvent('push_permission_granted', {});
 
-  if (Platform.OS === "android") {
+  if (Platform.OS === 'android') {
     // 使用 Promise.all 並行建立頻道，加速初始化
     await Promise.all([
-      Notifications.setNotificationChannelAsync("default", {
-        name: "預設",
+      Notifications.setNotificationChannelAsync('default', {
+        name: '預設',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#7C5CFF",
+        lightColor: '#7C5CFF',
       }),
-      Notifications.setNotificationChannelAsync("announcements", {
-        name: "公告通知",
-        description: "學校公告、系所公告",
+      Notifications.setNotificationChannelAsync('announcements', {
+        name: '公告通知',
+        description: '學校公告、系所公告',
         importance: Notifications.AndroidImportance.HIGH,
       }),
-      Notifications.setNotificationChannelAsync("events", {
-        name: "活動通知",
-        description: "活動提醒、報名通知",
+      Notifications.setNotificationChannelAsync('events', {
+        name: '活動通知',
+        description: '活動提醒、報名通知',
         importance: Notifications.AndroidImportance.DEFAULT,
       }),
-      Notifications.setNotificationChannelAsync("groups", {
-        name: "群組通知",
-        description: "群組貼文、作業、成績",
+      Notifications.setNotificationChannelAsync('groups', {
+        name: '群組通知',
+        description: '群組貼文、作業、成績',
         importance: Notifications.AndroidImportance.HIGH,
       }),
-      Notifications.setNotificationChannelAsync("messages", {
-        name: "訊息通知",
-        description: "私人訊息",
+      Notifications.setNotificationChannelAsync('messages', {
+        name: '訊息通知',
+        description: '私人訊息',
         importance: Notifications.AndroidImportance.MAX,
       }),
-      Notifications.setNotificationChannelAsync("ai-agent", {
-        name: "AI 主動回報",
-        description: "課表、作業與重要校園事件的 AI 主動提醒",
+      Notifications.setNotificationChannelAsync('ai-agent', {
+        name: 'AI 主動回報',
+        description: '課表、作業與重要校園事件的 AI 主動提醒',
         importance: Notifications.AndroidImportance.HIGH,
       }),
     ]);
@@ -188,17 +182,19 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   try {
     const projectId = getExpoProjectId();
     if (!projectId) {
-      console.warn("[Notifications] Expo projectId is missing; push token retrieval may fail in production builds.");
+      console.warn(
+        '[Notifications] Expo projectId is missing; push token retrieval may fail in production builds.',
+      );
     }
 
     const tokenData = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined
+      projectId ? { projectId } : undefined,
     );
     await cachePushToken(tokenData.data);
     return tokenData.data;
   } catch (error) {
-    console.error("Failed to get push token:", error);
-    trackEvent("push_token_error", { error: String(error) });
+    console.error('Failed to get push token:', error);
+    trackEvent('push_token_error', { error: String(error) });
     return null;
   }
 }
@@ -206,54 +202,42 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 /**
  * 儲存推播 Token 到 Firestore（帶重試機制）
  */
-export async function savePushTokenToFirestore(
-  uid: string,
-  token: string
-): Promise<void> {
+export async function savePushTokenToFirestore(uid: string, token: string): Promise<void> {
   const db = getDb();
-  const tokenId = token.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 100);
+  const tokenId = token.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 100);
 
   const tokenDoc: PushTokenInfo = {
     token,
-    type: token.startsWith("ExponentPushToken") ? "expo" : "fcm",
-    platform: Platform.OS as "ios" | "android" | "web",
+    type: token.startsWith('ExponentPushToken') ? 'expo' : 'fcm',
+    platform: Platform.OS as 'ios' | 'android' | 'web',
     deviceName: Device.deviceName ?? undefined,
     createdAt: serverTimestamp(),
   };
 
-  await withRetry(
-    () => setDoc(doc(db, "users", uid, "pushTokens", tokenId), tokenDoc),
-    {
-      maxRetries: 3,
-      baseDelayMs: 1000,
-      onRetry: (error, attempt) => {
-        console.warn(`[Notifications] Retrying token save (attempt ${attempt}):`, error.message);
-      },
-    }
-  );
+  await withRetry(() => setDoc(doc(db, 'users', uid, 'pushTokens', tokenId), tokenDoc), {
+    maxRetries: 3,
+    baseDelayMs: 1000,
+    onRetry: (error, attempt) => {
+      console.warn(`[Notifications] Retrying token save (attempt ${attempt}):`, error.message);
+    },
+  });
 
   await cachePushToken(token);
-  
-  trackEvent("push_token_saved", { platform: Platform.OS });
+
+  trackEvent('push_token_saved', { platform: Platform.OS });
 }
 
 /**
  * 從 Firestore 移除推播 Token（帶重試機制）
  */
-export async function removePushTokenFromFirestore(
-  uid: string,
-  token: string
-): Promise<void> {
+export async function removePushTokenFromFirestore(uid: string, token: string): Promise<void> {
   const db = getDb();
-  const tokenId = token.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 100);
-  
-  await withRetry(
-    () => deleteDoc(doc(db, "users", uid, "pushTokens", tokenId)),
-    {
-      maxRetries: 2,
-      baseDelayMs: 500,
-    }
-  );
+  const tokenId = token.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 100);
+
+  await withRetry(() => deleteDoc(doc(db, 'users', uid, 'pushTokens', tokenId)), {
+    maxRetries: 2,
+    baseDelayMs: 500,
+  });
 
   const cachedToken = await getCachedPushToken();
   if (cachedToken === token) {
@@ -270,11 +254,11 @@ export async function refreshPushTokenIfNeeded(uid: string): Promise<void> {
     if (!currentToken) return;
 
     const db = getDb();
-    const tokenId = currentToken.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 100);
-    const tokenRef = doc(db, "users", uid, "pushTokens", tokenId);
-    
+    const tokenId = currentToken.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 100);
+    const tokenRef = doc(db, 'users', uid, 'pushTokens', tokenId);
+
     const existing = await getDoc(tokenRef);
-    
+
     if (!existing.exists()) {
       // Token 不存在，儲存新的
       await savePushTokenToFirestore(uid, currentToken);
@@ -283,7 +267,7 @@ export async function refreshPushTokenIfNeeded(uid: string): Promise<void> {
       await setDoc(tokenRef, { lastActiveAt: serverTimestamp() }, { merge: true });
     }
   } catch (error) {
-    console.error("[Notifications] Failed to refresh token:", error);
+    console.error('[Notifications] Failed to refresh token:', error);
   }
 }
 
@@ -294,26 +278,30 @@ function getNotificationPreferencesStorageKey(uid: string): string {
 }
 
 function isOfflineFirestoreError(error: unknown): boolean {
-  const code = typeof (error as { code?: unknown })?.code === "string"
-    ? String((error as { code: string }).code).toLowerCase()
-    : "";
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  const code =
+    typeof (error as { code?: unknown })?.code === 'string'
+      ? String((error as { code: string }).code).toLowerCase()
+      : '';
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
 
   return (
-    code === "unavailable" ||
-    code === "failed-precondition" && message.includes("offline") ||
-    message.includes("client is offline") ||
-    message.includes("offline")
+    code === 'unavailable' ||
+    (code === 'failed-precondition' && message.includes('offline')) ||
+    message.includes('client is offline') ||
+    message.includes('offline')
   );
 }
 
-async function readCachedNotificationPreferences(uid: string): Promise<NotificationPreferences | null> {
+async function readCachedNotificationPreferences(
+  uid: string,
+): Promise<NotificationPreferences | null> {
   try {
     const raw = await AsyncStorage.getItem(getNotificationPreferencesStorageKey(uid));
     if (!raw) return null;
     return normalizeNotificationPreferences(JSON.parse(raw) as Partial<NotificationPreferences>);
   } catch (error) {
-    console.warn("[Notifications] Failed to read cached preferences:", error);
+    console.warn('[Notifications] Failed to read cached preferences:', error);
     return null;
   }
 }
@@ -328,7 +316,7 @@ async function cacheNotificationPreferences(
       JSON.stringify(normalizeNotificationPreferences(prefs)),
     );
   } catch (error) {
-    console.warn("[Notifications] Failed to cache preferences:", error);
+    console.warn('[Notifications] Failed to cache preferences:', error);
   }
 }
 
@@ -345,7 +333,7 @@ export async function loadNotificationPreferences(uid: string): Promise<Notifica
   const cached = await readCachedNotificationPreferences(uid);
 
   try {
-    const snap = await getDoc(doc(db, "users", uid, "settings", "notifications"));
+    const snap = await getDoc(doc(db, 'users', uid, 'settings', 'notifications'));
     if (!snap.exists()) {
       return cached ?? defaultNotificationPreferences;
     }
@@ -355,11 +343,16 @@ export async function loadNotificationPreferences(uid: string): Promise<Notifica
     return prefs;
   } catch (error) {
     if (isOfflineFirestoreError(error)) {
-      console.warn("[Notifications] Firestore offline; using cached/default notification preferences.");
+      console.warn(
+        '[Notifications] Firestore offline; using cached/default notification preferences.',
+      );
       return cached ?? defaultNotificationPreferences;
     }
     if (cached) {
-      console.warn("[Notifications] Failed to load remote preferences; using cached preferences:", error);
+      console.warn(
+        '[Notifications] Failed to load remote preferences; using cached preferences:',
+        error,
+      );
       return cached;
     }
     throw error;
@@ -371,36 +364,37 @@ export async function loadNotificationPreferences(uid: string): Promise<Notifica
  */
 export async function saveNotificationPreferences(
   uid: string,
-  prefs: NotificationPreferences
+  prefs: NotificationPreferences,
 ): Promise<void> {
   const db = getDb();
   const normalizedPrefs = normalizeNotificationPreferences(prefs);
   await cacheNotificationPreferences(uid, normalizedPrefs);
-  
+
   try {
     await withRetry(
-      () => setDoc(
-        doc(db, "users", uid, "settings", "notifications"),
-        {
-          ...normalizedPrefs,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      ),
+      () =>
+        setDoc(
+          doc(db, 'users', uid, 'settings', 'notifications'),
+          {
+            ...normalizedPrefs,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        ),
       {
         maxRetries: 2,
         baseDelayMs: 500,
-      }
+      },
     );
   } catch (error) {
     if (isOfflineFirestoreError(error)) {
-      console.warn("[Notifications] Firestore offline; saved notification preferences locally.");
+      console.warn('[Notifications] Firestore offline; saved notification preferences locally.');
       return;
     }
     throw error;
   }
-  
-  trackEvent("notification_preferences_updated", {
+
+  trackEvent('notification_preferences_updated', {
     enabled: normalizedPrefs.enabled,
     announcements: normalizedPrefs.announcements,
     events: normalizedPrefs.events,
@@ -411,13 +405,13 @@ export async function saveNotificationPreferences(
  * 監聽接收到的通知（前景）
  */
 export function addNotificationReceivedListener(
-  callback: (notification: Notifications.Notification) => void
+  callback: (notification: Notifications.Notification) => void,
 ): Notifications.EventSubscription {
   return Notifications.addNotificationReceivedListener((notification) => {
     // 追蹤通知接收
-    trackEvent("notification_received", {
-      title: notification.request.content.title ?? "",
-      channelId: String((notification.request.content.data as any)?.channelId ?? "default"),
+    trackEvent('notification_received', {
+      title: notification.request.content.title ?? '',
+      channelId: String((notification.request.content.data as any)?.channelId ?? 'default'),
     });
     callback(notification);
   });
@@ -427,12 +421,12 @@ export function addNotificationReceivedListener(
  * 監聽用戶點擊通知的回應
  */
 export function addNotificationResponseReceivedListener(
-  callback: (response: Notifications.NotificationResponse) => void
+  callback: (response: Notifications.NotificationResponse) => void,
 ): Notifications.EventSubscription {
   return Notifications.addNotificationResponseReceivedListener((response) => {
     // 追蹤通知點擊
-    trackEvent("notification_clicked", {
-      title: response.notification.request.content.title ?? "",
+    trackEvent('notification_clicked', {
+      title: response.notification.request.content.title ?? '',
       actionIdentifier: response.actionIdentifier,
       data: JSON.stringify(response.notification.request.content.data || {}),
     });
@@ -461,7 +455,7 @@ export async function scheduleLocalNotification(
   body: string,
   data?: Record<string, any>,
   trigger?: Notifications.NotificationTriggerInput,
-  channelId?: string
+  channelId?: string,
 ): Promise<string> {
   const content: any = {
     title,
@@ -469,8 +463,8 @@ export async function scheduleLocalNotification(
     data,
     sound: true,
   };
-  if (Platform.OS === "android") {
-    content.channelId = channelId ?? "default";
+  if (Platform.OS === 'android') {
+    content.channelId = channelId ?? 'default';
   }
 
   return Notifications.scheduleNotificationAsync({
@@ -519,12 +513,12 @@ export type ScheduledNotificationConfig = {
  * 排程推播通知（支援週期性推播）
  */
 export async function schedulePushNotification(
-  config: ScheduledNotificationConfig
+  config: ScheduledNotificationConfig,
 ): Promise<string> {
   const { title, body, data, trigger, channelId } = config;
-  
+
   let triggerInput: Notifications.NotificationTriggerInput;
-  
+
   if (trigger.weekday !== undefined) {
     triggerInput = {
       weekday: trigger.weekday,
@@ -544,29 +538,29 @@ export async function schedulePushNotification(
       repeats: trigger.repeats ?? false,
     } as any;
   }
-  
+
   const content: any = {
     title,
     body,
     data,
     sound: true,
   };
-  if (Platform.OS === "android") {
-    content.channelId = channelId ?? "default";
+  if (Platform.OS === 'android') {
+    content.channelId = channelId ?? 'default';
   }
 
   const notificationId = await Notifications.scheduleNotificationAsync({
     content,
     trigger: triggerInput,
   });
-  
-  trackEvent("notification_scheduled", {
+
+  trackEvent('notification_scheduled', {
     title,
     repeats: trigger.repeats ?? false,
     weekday: trigger.weekday ?? -1,
     hour: trigger.hour,
   });
-  
+
   return notificationId;
 }
 
@@ -577,7 +571,7 @@ export async function sendImmediateNotification(
   title: string,
   body: string,
   data?: Record<string, any>,
-  channelId?: string
+  channelId?: string,
 ): Promise<string> {
   const content: any = {
     title,
@@ -585,8 +579,8 @@ export async function sendImmediateNotification(
     data,
     sound: true,
   };
-  if (Platform.OS === "android") {
-    content.channelId = channelId ?? "default";
+  if (Platform.OS === 'android') {
+    content.channelId = channelId ?? 'default';
   }
 
   return Notifications.scheduleNotificationAsync({
@@ -598,17 +592,19 @@ export async function sendImmediateNotification(
 /**
  * 顯示即將到來的通知（用於測試和調試）
  */
-export async function getUpcomingNotifications(): Promise<{
-  id: string;
-  title: string;
-  body: string;
-  trigger: any;
-}[]> {
+export async function getUpcomingNotifications(): Promise<
+  {
+    id: string;
+    title: string;
+    body: string;
+    trigger: any;
+  }[]
+> {
   const scheduled = await getAllScheduledNotifications();
-  return scheduled.map(n => ({
+  return scheduled.map((n) => ({
     id: n.identifier,
-    title: n.content.title ?? "",
-    body: n.content.body ?? "",
+    title: n.content.title ?? '',
+    body: n.content.body ?? '',
     trigger: n.trigger,
   }));
 }

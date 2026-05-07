@@ -32,7 +32,6 @@ import {
   setTCSavedCredentials,
   clearTCSavedCredentials,
   clearTCSession,
-
 } from './tronClassClient';
 import {
   syncAllData,
@@ -52,11 +51,7 @@ import type { UserRole } from '../state/auth';
 
 // ─── Progress Callback ──────────────────────────────────
 
-export type LoginProgress =
-  | 'authenticating'
-  | 'syncingCampus'
-  | 'syncingTronClass'
-  | 'linking';
+export type LoginProgress = 'authenticating' | 'syncingCampus' | 'syncingTronClass' | 'linking';
 
 export type OnLoginProgress = (step: LoginProgress, detail?: string) => void;
 
@@ -121,8 +116,8 @@ async function tryBackendUnifiedLogin(
   error?: string;
 }> {
   try {
-    const url = getCloudFunctionUrl("signInPuStudentId");
-    console.log("[studentIdAuth] Trying backend unified login…");
+    const url = getCloudFunctionUrl('signInPuStudentId');
+    console.log('[studentIdAuth] Trying backend unified login…');
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000); // 2 秒逾時（Cloud Functions 未部署時快速失敗）
@@ -130,8 +125,8 @@ async function tryBackendUnifiedLogin(
     let response: Response;
     try {
       response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
           studentId,
@@ -153,18 +148,18 @@ async function tryBackendUnifiedLogin(
 
     if (!response.ok || !data?.success) {
       const errorMsg = (data?.error as string) || `HTTP ${response.status}`;
-      console.warn("[studentIdAuth] Backend unified login failed:", errorMsg);
+      console.warn('[studentIdAuth] Backend unified login failed:', errorMsg);
       return { success: false, error: errorMsg };
     }
 
-    console.log("[studentIdAuth] Backend unified login succeeded!");
+    console.log('[studentIdAuth] Backend unified login succeeded!');
     return {
       success: true,
       data: {
         uid: data.uid as string,
         studentId: (data.studentId as string) || studentId,
         displayName: (data.displayName as string) || `${studentId} 同學`,
-        department: (data.department as string) || "",
+        department: (data.department as string) || '',
         puSessionId: data.puSessionId as string,
         tronClassSessionId: (data.tronClassSessionId as string) || null,
         tronClassUserId: (data.tronClassUserId as number) ?? null,
@@ -175,10 +170,10 @@ async function tryBackendUnifiedLogin(
       },
     };
   } catch (err) {
-    console.warn("[studentIdAuth] Backend unified login error:", err);
+    console.warn('[studentIdAuth] Backend unified login error:', err);
     return {
       success: false,
-      error: err instanceof Error ? err.message : "後端連線失敗",
+      error: err instanceof Error ? err.message : '後端連線失敗',
     };
   }
 }
@@ -222,7 +217,7 @@ export async function signInWithStudentId(params: {
   }
 
   // ── 策略 B: 降級為手機直連 E校園 + 後端代理 TronClass ──
-  console.log("[studentIdAuth] Falling back to hybrid login…");
+  console.log('[studentIdAuth] Falling back to hybrid login…');
   return await handleHybridLogin(studentId, params, progress);
 }
 
@@ -230,18 +225,12 @@ export async function signInWithStudentId(params: {
  * 策略 A 成功：後端統一登入回來的資料處理
  */
 async function handleBackendLoginSuccess(
-  data: NonNullable<Awaited<ReturnType<typeof tryBackendUnifiedLogin>>["data"]>,
+  data: NonNullable<Awaited<ReturnType<typeof tryBackendUnifiedLogin>>['data']>,
   params: { studentId: string; password: string; schoolId: string; schoolName?: string },
   progress: OnLoginProgress,
 ): Promise<StudentIdLoginResult> {
-  const {
-    studentId,
-    displayName,
-    department,
-    puSessionId,
-    tronClassSessionId,
-    tronClassUserId,
-  } = data;
+  const { studentId, displayName, department, puSessionId, tronClassSessionId, tronClassUserId } =
+    data;
 
   progress('syncingCampus', '同步 E 校園資料');
 
@@ -259,21 +248,43 @@ async function handleBackendLoginSuccess(
     if (adapter && adapter instanceof PUAdapter) {
       adapter.setBackendSession(puSessionId, studentId, displayName);
     }
-  } catch { /* Adapter 尚未註冊 */ }
+  } catch {
+    /* Adapter 尚未註冊 */
+  }
 
   // 快取後端回傳的資料（如果有的話）
   let seededCount = 0;
   if (data.courses) {
-    try { await seedCachedCourses(data.courses); seededCount++; } catch (e) { console.warn("[studentIdAuth] seed courses error:", e); }
+    try {
+      await seedCachedCourses(data.courses);
+      seededCount++;
+    } catch (e) {
+      console.warn('[studentIdAuth] seed courses error:', e);
+    }
   }
   if (data.grades) {
-    try { await seedCachedGrades(data.grades); seededCount++; } catch (e) { console.warn("[studentIdAuth] seed grades error:", e); }
+    try {
+      await seedCachedGrades(data.grades);
+      seededCount++;
+    } catch (e) {
+      console.warn('[studentIdAuth] seed grades error:', e);
+    }
   }
   if (data.studentInfo) {
-    try { await seedCachedStudentInfo(data.studentInfo); seededCount++; } catch (e) { console.warn("[studentIdAuth] seed studentInfo error:", e); }
+    try {
+      await seedCachedStudentInfo(data.studentInfo);
+      seededCount++;
+    } catch (e) {
+      console.warn('[studentIdAuth] seed studentInfo error:', e);
+    }
   }
   if (data.announcements) {
-    try { await seedCachedAnnouncements(data.announcements); seededCount++; } catch (e) { console.warn("[studentIdAuth] seed announcements error:", e); }
+    try {
+      await seedCachedAnnouncements(data.announcements);
+      seededCount++;
+    } catch (e) {
+      console.warn('[studentIdAuth] seed announcements error:', e);
+    }
   }
   console.log(`[studentIdAuth] Seeded ${seededCount}/4 data types from backend`);
 
@@ -314,7 +325,7 @@ async function handleBackendLoginSuccess(
     // 儲存 TronClass 後端 session（可能為 null）
     if (tronClassSessionId) {
       await setTCBackendSession(tronClassSessionId, tronClassUserId);
-      console.log("[studentIdAuth] TronClass session stored, userId:", tronClassUserId);
+      console.log('[studentIdAuth] TronClass session stored, userId:', tronClassUserId);
     }
 
     // 如果後端統一登入時 TronClass 沒成功，用 tcLogin 重試
@@ -422,7 +433,9 @@ async function handleHybridLogin(
       if (adapter && adapter instanceof PUAdapter) {
         adapter.setDirectSession(session, userAccount);
       }
-    } catch { /* Adapter 尚未註冊 */ }
+    } catch {
+      /* Adapter 尚未註冊 */
+    }
   } else {
     // E校園 失敗但 TronClass 成功 → 建立一個最小 session
     console.log('[studentIdAuth] Hybrid: E-campus failed, using TronClass-only mode');
@@ -458,7 +471,9 @@ async function handleHybridLogin(
           if (infoResult.data.studentId) realStudentId = infoResult.data.studentId;
           if (infoResult.data.className) department = infoResult.data.className;
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     // 重新注入 PUAdapter（用 realStudentId）
@@ -467,7 +482,9 @@ async function handleHybridLogin(
       if (adapter && adapter instanceof PUAdapter) {
         adapter.setDirectSession(session!, realStudentId);
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   } else {
     progress('syncingCampus', 'E校園暫時無法連線，使用 TronClass 資料');
     // TronClass-only mode: 從 TronClass 取得基本使用者資訊

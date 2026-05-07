@@ -1,24 +1,42 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
-import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
-import { ScrollView, Text, View, Pressable, Platform, RefreshControl, FlatList, Alert, AccessibilityInfo } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAsyncList } from "../hooks/useAsyncList";
-import { useDataSource } from "../hooks/useDataSource";
-import { useSearchDebounce } from "../hooks/useDebounce";
-import { useNetworkStatus } from "../hooks/useNetworkStatus";
-import { usePermissions } from "../hooks/usePermissions";
-import { Card, Pill, LoadingState, EmptyState, ErrorState, SearchBar, Button } from "../ui/components";
-import { OfflineDataNotice } from "../ui/OfflineBanner";
-import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
-import { useDemo } from "../state/demo";
-import { useSearchHistory, POPULAR_SEARCHES } from "../state/searchHistory";
-import { useToast } from "../ui/Toast";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme, softShadowStyle } from "../ui/theme";
-import { formatDateTime } from "../utils/format";
+import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
+import {
+  ScrollView,
+  Text,
+  View,
+  Pressable,
+  Platform,
+  RefreshControl,
+  FlatList,
+  Alert,
+  AccessibilityInfo,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAsyncList } from '../hooks/useAsyncList';
+import { useDataSource } from '../hooks/useDataSource';
+import { useSearchDebounce } from '../hooks/useDebounce';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
+import { usePermissions } from '../hooks/usePermissions';
+import {
+  Card,
+  Pill,
+  LoadingState,
+  EmptyState,
+  ErrorState,
+  SearchBar,
+  Button,
+} from '../ui/components';
+import { OfflineDataNotice } from '../ui/OfflineBanner';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { useDemo } from '../state/demo';
+import { useSearchHistory, POPULAR_SEARCHES } from '../state/searchHistory';
+import { useToast } from '../ui/Toast';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme, softShadowStyle } from '../ui/theme';
+import { formatDateTime } from '../utils/format';
 
 type Announcement = {
   id: string;
@@ -28,16 +46,18 @@ type Announcement = {
   publishedAt: unknown;
 };
 
-type AnnouncementView = "all" | "important" | "today";
+type AnnouncementView = 'all' | 'important' | 'today';
 
 function isImportantAnnouncement(a: Announcement): boolean {
   const hay = `${a.title} ${a.body}`.toLowerCase();
-  return hay.includes("重要") || hay.includes("緊急") || hay.includes("停課") || hay.includes("異動");
+  return (
+    hay.includes('重要') || hay.includes('緊急') || hay.includes('停課') || hay.includes('異動')
+  );
 }
 
 const ICON_MAP: Record<string, { name: string; bg: string; color: string }> = {
-  important: { name: "alert-circle", bg: "rgba(239,68,68,0.15)", color: "#EF4444" },
-  general: { name: "megaphone", bg: "rgba(99,102,241,0.15)", color: "#6366F1" },
+  important: { name: 'alert-circle', bg: 'rgba(239,68,68,0.15)', color: '#EF4444' },
+  general: { name: 'megaphone', bg: 'rgba(99,102,241,0.15)', color: '#6366F1' },
 };
 
 function getAnnouncementIcon(a: Announcement) {
@@ -57,16 +77,16 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
   toastRef.current = toast;
   const { isOffline, isOnline } = useNetworkStatus();
   const { can } = usePermissions();
-  const canPublish = can("announcements.create");
+  const canPublish = can('announcements.create');
 
   const demo = useDemo();
   const searchHistory = useSearchHistory();
 
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState<number | undefined>(undefined);
-  const [activeView, setActiveView] = useState<AnnouncementView>("all");
-  
+  const [activeView, setActiveView] = useState<AnnouncementView>('all');
+
   const { debouncedValue: debouncedQuery, isSearching } = useSearchDebounce(q, 300);
 
   const ds = useDataSource();
@@ -74,48 +94,45 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
   const handleRefreshError = useCallback((error: string) => {
     toastRef.current.show({
       message: `更新失敗：${error}`,
-      type: "error",
+      type: 'error',
       duration: 3000,
       action: {
-        text: "重試",
+        text: '重試',
         onPress: () => refresh(),
       },
     });
   }, []);
 
-  const { 
-    items: raw, 
-    error: loadError, 
-    loading: loadLoading, 
+  const {
+    items: raw,
+    error: loadError,
+    loading: loadLoading,
     refreshing,
     reload,
-    refresh 
+    refresh,
   } = useAsyncList<Announcement>(
     () => ds.listAnnouncements(school.id),
     [auth.user?.uid, ds, school.id],
-    { keepPreviousData: true, onRefreshError: handleRefreshError }
+    { keepPreviousData: true, onRefreshError: handleRefreshError },
   );
-  
+
   useEffect(() => {
     if (!loadLoading && raw.length > 0) {
       setLastFetchTime(Date.now());
     }
   }, [loadLoading, raw.length]);
 
-  const isLoading = demo.mode === "loading" || (demo.mode === "normal" && loadLoading && raw.length === 0);
+  const isLoading =
+    demo.mode === 'loading' || (demo.mode === 'normal' && loadLoading && raw.length === 0);
   const error =
-    demo.mode === "error"
-      ? "(demo) 網路錯誤或權限不足"
-      : demo.mode === "normal"
-        ? loadError
-        : null;
+    demo.mode === 'error' ? '(demo) 網路錯誤或權限不足' : demo.mode === 'normal' ? loadError : null;
 
   const handleRefresh = useCallback(async () => {
-    if (demo.mode !== "normal") return;
+    if (demo.mode !== 'normal') return;
     if (isOffline) {
       toastRef.current.show({
-        message: "目前處於離線模式，無法更新",
-        type: "warning",
+        message: '目前處於離線模式，無法更新',
+        type: 'warning',
         duration: 2000,
       });
       return;
@@ -124,10 +141,10 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
   }, [demo.mode, refresh, isOffline]);
 
   const items = useMemo(() => {
-    const baseItems = demo.mode === "empty" ? [] : raw;
+    const baseItems = demo.mode === 'empty' ? [] : raw;
     const filteredByView = baseItems.filter((a) => {
-      if (activeView === "important") return isImportantAnnouncement(a);
-      if (activeView === "today") {
+      if (activeView === 'important') return isImportantAnnouncement(a);
+      if (activeView === 'today') {
         const published = new Date(String(a.publishedAt));
         if (Number.isNaN(published.getTime())) return false;
         const now = new Date();
@@ -143,13 +160,13 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
     if (!debouncedQuery.trim()) return filteredByView;
     const needle = debouncedQuery.trim().toLowerCase();
     return filteredByView.filter((a) => {
-      const hay = `${a.title}\n${a.body}\n${a.source ?? ""}`.toLowerCase();
+      const hay = `${a.title}\n${a.body}\n${a.source ?? ''}`.toLowerCase();
       return hay.includes(needle);
     });
   }, [demo.mode, debouncedQuery, raw, activeView]);
 
   const stats = useMemo(() => {
-    const baseItems = demo.mode === "empty" ? [] : raw;
+    const baseItems = demo.mode === 'empty' ? [] : raw;
     const today = new Date();
     const todayCount = baseItems.filter((a) => {
       const published = new Date(String(a.publishedAt));
@@ -172,17 +189,17 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
     setQ(query);
     setShowSuggestions(false);
     if (query.trim()) {
-      searchHistory.addSearch(query, "announcement");
+      searchHistory.addSearch(query, 'announcement');
     }
   };
 
-  const recentSearches = searchHistory.recentSearches("announcement", 5);
+  const recentSearches = searchHistory.recentSearches('announcement', 5);
   const popularSearches = POPULAR_SEARCHES.announcement;
 
   const viewFilters: { key: AnnouncementView; label: string; icon: string }[] = [
-    { key: "all", label: "全部公告", icon: "list" },
-    { key: "important", label: "重要優先", icon: "alert-circle" },
-    { key: "today", label: "今天發布", icon: "today" },
+    { key: 'all', label: '全部公告', icon: 'list' },
+    { key: 'important', label: '重要優先', icon: 'alert-circle' },
+    { key: 'today', label: '今天發布', icon: 'today' },
   ];
 
   return (
@@ -199,7 +216,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
             hint={error}
             actionText="重試"
             onAction={() => {
-              demo.setMode("normal");
+              demo.setMode('normal');
               reload();
             }}
           />
@@ -214,11 +231,18 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
               backgroundColor: theme.colors.bg,
             }}
           >
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 16,
+              }}
+            >
               <Text
                 style={{
                   fontSize: 34,
-                  fontWeight: "800",
+                  fontWeight: '800',
                   color: theme.colors.text,
                   letterSpacing: -1,
                 }}
@@ -229,11 +253,11 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
               {canPublish && (
                 <Pressable
                   onPress={() =>
-                    Alert.alert("發佈公告", "請至管理後台或課程中樞發佈公告。", [{ text: "確定" }])
+                    Alert.alert('發佈公告', '請至管理後台或課程中樞發佈公告。', [{ text: '確定' }])
                   }
                   style={({ pressed }) => ({
-                    flexDirection: "row",
-                    alignItems: "center",
+                    flexDirection: 'row',
+                    alignItems: 'center',
                     gap: 6,
                     backgroundColor: theme.colors.accent,
                     paddingHorizontal: 14,
@@ -244,25 +268,27 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                   accessibilityLabel="發佈新公告"
                 >
                   <Ionicons name="add" size={16} color="#fff" />
-                  <Text style={{ color: "#fff", fontSize: 13, fontWeight: "700" }}>發佈</Text>
+                  <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>發佈</Text>
                 </Pressable>
               )}
             </View>
 
-            <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
               <View
                 style={{
                   paddingHorizontal: 14,
                   paddingVertical: 10,
                   borderRadius: theme.radius.md,
                   backgroundColor: theme.colors.surface,
-                  alignItems: "center",
+                  alignItems: 'center',
                   minWidth: 64,
                   borderWidth: 1,
                   borderColor: theme.colors.border,
                 }}
               >
-                <Text style={{ color: theme.colors.accent, fontSize: 20, fontWeight: "800" }}>{stats.total}</Text>
+                <Text style={{ color: theme.colors.accent, fontSize: 20, fontWeight: '800' }}>
+                  {stats.total}
+                </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>全部</Text>
               </View>
               <View
@@ -271,13 +297,15 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                   paddingVertical: 10,
                   borderRadius: theme.radius.md,
                   backgroundColor: theme.colors.surface,
-                  alignItems: "center",
+                  alignItems: 'center',
                   minWidth: 64,
                   borderWidth: 1,
                   borderColor: theme.colors.border,
                 }}
               >
-                <Text style={{ color: theme.colors.danger, fontSize: 20, fontWeight: "800" }}>{stats.important}</Text>
+                <Text style={{ color: theme.colors.danger, fontSize: 20, fontWeight: '800' }}>
+                  {stats.important}
+                </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>重要</Text>
               </View>
               <View
@@ -286,13 +314,15 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                   paddingVertical: 10,
                   borderRadius: theme.radius.md,
                   backgroundColor: theme.colors.surface,
-                  alignItems: "center",
+                  alignItems: 'center',
                   minWidth: 64,
                   borderWidth: 1,
                   borderColor: theme.colors.border,
                 }}
               >
-                <Text style={{ color: theme.colors.success, fontSize: 20, fontWeight: "800" }}>{stats.today}</Text>
+                <Text style={{ color: theme.colors.success, fontSize: 20, fontWeight: '800' }}>
+                  {stats.today}
+                </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>今日</Text>
               </View>
               {isOffline && (
@@ -302,23 +332,23 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                     paddingVertical: 10,
                     borderRadius: theme.radius.md,
                     backgroundColor: theme.colors.warningSoft,
-                    alignItems: "center",
-                    justifyContent: "center",
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     borderWidth: 1,
-                    borderColor: "transparent",
+                    borderColor: 'transparent',
                   }}
                 >
                   <Ionicons name="cloud-offline" size={18} color={theme.colors.warning} />
-                  <Text style={{ color: theme.colors.warning, fontSize: 11, marginTop: 2 }}>離線</Text>
+                  <Text style={{ color: theme.colors.warning, fontSize: 11, marginTop: 2 }}>
+                    離線
+                  </Text>
                 </View>
               )}
             </View>
           </View>
 
           <View style={{ flex: 1, paddingHorizontal: 16, gap: 12 }}>
-            {isOffline && lastFetchTime && (
-              <OfflineDataNotice cachedAt={lastFetchTime} />
-            )}
+            {isOffline && lastFetchTime && <OfflineDataNotice cachedAt={lastFetchTime} />}
 
             <View style={{ marginTop: 4 }}>
               <SearchBar
@@ -345,8 +375,8 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                     key={f.key}
                     onPress={() => setActiveView(f.key)}
                     style={({ pressed }) => ({
-                      flexDirection: "row",
-                      alignItems: "center",
+                      flexDirection: 'row',
+                      alignItems: 'center',
                       gap: 6,
                       paddingHorizontal: 14,
                       paddingVertical: 8,
@@ -361,13 +391,13 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                       // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       name={f.icon as any}
                       size={14}
-                      color={isActive ? "#fff" : theme.colors.muted}
+                      color={isActive ? '#fff' : theme.colors.muted}
                     />
                     <Text
                       style={{
                         fontSize: 13,
-                        fontWeight: "600",
-                        color: isActive ? "#fff" : theme.colors.textSecondary,
+                        fontWeight: '600',
+                        color: isActive ? '#fff' : theme.colors.textSecondary,
                       }}
                     >
                       {f.label}
@@ -393,34 +423,57 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
               >
                 {recentSearches.length > 0 ? (
                   <View style={{ marginBottom: 4 }}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: 10,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Ionicons name="time" size={15} color={theme.colors.accent} />
-                        <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: theme.typography.label.fontSize }}>
+                        <Text
+                          style={{
+                            color: theme.colors.text,
+                            fontWeight: '700',
+                            fontSize: theme.typography.label.fontSize,
+                          }}
+                        >
                           最近搜尋
                         </Text>
                       </View>
-                      <Pressable onPress={() => {
-                        Alert.alert(
-                          "清除搜尋紀錄",
-                          "確定要清除所有搜尋紀錄嗎？",
-                          [
-                            { text: "取消", style: "cancel" },
-                            { text: "清除", style: "destructive", onPress: () => searchHistory.clearHistory() },
-                          ]
-                        );
-                      }}>
-                        <Text style={{ color: theme.colors.accent, fontSize: theme.typography.bodySmall.fontSize, fontWeight: "600" }}>清除</Text>
+                      <Pressable
+                        onPress={() => {
+                          Alert.alert('清除搜尋紀錄', '確定要清除所有搜尋紀錄嗎？', [
+                            { text: '取消', style: 'cancel' },
+                            {
+                              text: '清除',
+                              style: 'destructive',
+                              onPress: () => searchHistory.clearHistory(),
+                            },
+                          ]);
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: theme.colors.accent,
+                            fontSize: theme.typography.bodySmall.fontSize,
+                            fontWeight: '600',
+                          }}
+                        >
+                          清除
+                        </Text>
                       </Pressable>
                     </View>
-                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                       {recentSearches.map((item) => (
                         <Pressable
                           key={item.timestamp}
                           onPress={() => handleSearch(item.query)}
                           style={({ pressed }) => ({
-                            flexDirection: "row",
-                            alignItems: "center",
+                            flexDirection: 'row',
+                            alignItems: 'center',
                             gap: 6,
                             paddingHorizontal: 12,
                             paddingVertical: 6,
@@ -432,7 +485,14 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                           })}
                         >
                           <Ionicons name="time-outline" size={14} color={theme.colors.muted} />
-                          <Text style={{ color: theme.colors.text, fontSize: theme.typography.bodySmall.fontSize }}>{item.query}</Text>
+                          <Text
+                            style={{
+                              color: theme.colors.text,
+                              fontSize: theme.typography.bodySmall.fontSize,
+                            }}
+                          >
+                            {item.query}
+                          </Text>
                           <Pressable
                             onPress={(e) => {
                               e.stopPropagation?.();
@@ -449,20 +509,28 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                 ) : null}
 
                 <View>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                  <View
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 }}
+                  >
                     <Ionicons name="trending-up" size={15} color={theme.colors.success} />
-                    <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: theme.typography.label.fontSize }}>
+                    <Text
+                      style={{
+                        color: theme.colors.text,
+                        fontWeight: '700',
+                        fontSize: theme.typography.label.fontSize,
+                      }}
+                    >
                       熱門搜尋
                     </Text>
                   </View>
-                  <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {popularSearches.map((term) => (
                       <Pressable
                         key={term}
                         onPress={() => handleSearch(term)}
                         style={({ pressed }) => ({
-                          flexDirection: "row",
-                          alignItems: "center",
+                          flexDirection: 'row',
+                          alignItems: 'center',
                           gap: 6,
                           paddingHorizontal: 12,
                           paddingVertical: 6,
@@ -474,7 +542,15 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                         })}
                       >
                         <Ionicons name="trending-up" size={14} color={theme.colors.accent} />
-                        <Text style={{ color: theme.colors.accent, fontSize: theme.typography.bodySmall.fontSize, fontWeight: "600" }}>{term}</Text>
+                        <Text
+                          style={{
+                            color: theme.colors.accent,
+                            fontSize: theme.typography.bodySmall.fontSize,
+                            fontWeight: '600',
+                          }}
+                        >
+                          {term}
+                        </Text>
                       </Pressable>
                     ))}
                   </View>
@@ -488,7 +564,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                 subtitle="請換個關鍵字或清除搜尋"
                 hint="你也可以試試熱門搜尋關鍵字"
                 actionText="清除搜尋"
-                onAction={() => setQ("")}
+                onAction={() => setQ('')}
                 icon="search-outline"
                 variant="search"
               />
@@ -503,13 +579,30 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
               />
             ) : (
               <>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                  <Text style={{ color: theme.colors.muted, fontSize: theme.typography.bodySmall.fontSize }}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.colors.muted,
+                      fontSize: theme.typography.bodySmall.fontSize,
+                    }}
+                  >
                     {`結果：${items.length}`}
                   </Text>
                   {(refreshing || isSearching) && (
-                    <Text style={{ color: theme.colors.accent, fontSize: theme.typography.bodySmall.fontSize, fontWeight: "600" }}>
-                      {isSearching ? "搜尋中..." : "更新中..."}
+                    <Text
+                      style={{
+                        color: theme.colors.accent,
+                        fontSize: theme.typography.bodySmall.fontSize,
+                        fontWeight: '600',
+                      }}
+                    >
+                      {isSearching ? '搜尋中...' : '更新中...'}
                     </Text>
                   )}
                 </View>
@@ -532,19 +625,19 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
 
                     const goDetail = () => {
                       try {
-                        if (nav && typeof nav.navigate === "function") {
-                          nav.navigate("公告詳情", { id: a.id });
+                        if (nav && typeof nav.navigate === 'function') {
+                          nav.navigate('公告詳情', { id: a.id });
                         } else {
                           toastRef.current.show({
-                            message: "導航暫時無法使用，請稍後再試",
-                            type: "warning",
+                            message: '導航暫時無法使用，請稍後再試',
+                            type: 'warning',
                             duration: 2000,
                           });
                         }
                       } catch (error) {
                         toastRef.current.show({
-                          message: "開啟詳情失敗",
-                          type: "error",
+                          message: '開啟詳情失敗',
+                          type: 'error',
                           duration: 2000,
                         });
                       }
@@ -563,7 +656,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                       >
                         <View
                           style={{
-                            flexDirection: "row",
+                            flexDirection: 'row',
                             padding: theme.space.lg,
                             borderRadius: theme.radius.lg,
                             backgroundColor: theme.colors.surface,
@@ -581,20 +674,23 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                               height: 40,
                               borderRadius: 12,
                               backgroundColor: iconInfo.bg,
-                              alignItems: "center",
-                              justifyContent: "center",
+                              alignItems: 'center',
+                              justifyContent: 'center',
                               marginTop: 2,
                             }}
                           >
                             <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                              name={iconInfo.name as any} size={20} color={iconInfo.color} />
+                              name={iconInfo.name as any}
+                              size={20}
+                              color={iconInfo.color}
+                            />
                           </View>
 
                           <View style={{ flex: 1, gap: 6 }}>
                             <Text
                               style={{
                                 fontSize: 16,
-                                fontWeight: "700",
+                                fontWeight: '700',
                                 lineHeight: 22,
                                 color: theme.colors.text,
                               }}
@@ -609,9 +705,9 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                                 lineHeight: 16,
                               }}
                             >
-                              {formatDateTime(a.publishedAt) + (a.source ? ` · ${a.source}` : "")}
+                              {formatDateTime(a.publishedAt) + (a.source ? ` · ${a.source}` : '')}
                             </Text>
-                            <View pointerEvents={Platform.OS === "web" ? "none" : "auto"}>
+                            <View pointerEvents={Platform.OS === 'web' ? 'none' : 'auto'}>
                               <Text
                                 style={{
                                   color: theme.colors.textSecondary,
@@ -626,7 +722,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                             </View>
                           </View>
 
-                          <View style={{ justifyContent: "center" }}>
+                          <View style={{ justifyContent: 'center' }}>
                             <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
                           </View>
                         </View>

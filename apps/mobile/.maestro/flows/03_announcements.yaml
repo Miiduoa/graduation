@@ -9,13 +9,12 @@ tags:
   - announcements
 
 ---
-
 # 啟動 App
 - launchApp
 
 # 等待主畫面載入（公告頁面是預設頁面）
 - assertVisible:
-    text: "公告"
+    text: '公告'
     timeout: 10000
 
 # 截圖 - 公告列表
@@ -23,23 +22,23 @@ tags:
 
 # 驗證公告列表存在
 - assertVisible:
-    text: "搜尋公告"
+    text: '搜尋公告'
     optional: true
 
 # 測試搜尋功能
 - tapOn:
-    text: "搜尋公告"
+    text: '搜尋公告'
     optional: true
 
 # 輸入搜尋關鍵字
-- inputText: "選課"
+- inputText: '選課'
 
 # 等待搜尋結果
 - extendedWaitUntil:
     visible:
       anyOf:
-        - text: "選課"
-        - text: "找不到結果"
+        - text: '選課'
+        - text: '找不到結果'
     timeout: 5000
 
 # 截圖 - 搜尋結果
@@ -47,21 +46,21 @@ tags:
 
 # 清除搜尋
 - tapOn:
-    id: "clear-search"
+    id: 'clear-search'
     optional: true
 
 # 點擊第一個公告
 - tapOn:
     index: 0
     below:
-      text: "公告"
+      text: '公告'
 
 # 等待公告詳情頁面
 - extendedWaitUntil:
     visible:
       anyOf:
-        - text: "收藏"
-        - text: "分享"
+        - text: '收藏'
+        - text: '分享'
     timeout: 5000
 
 # 截圖 - 公告詳情
@@ -69,20 +68,20 @@ tags:
 
 # 測試收藏功能
 - tapOn:
-    text: "收藏"
+    text: '收藏'
     optional: true
 
 # 測試 AI 摘要功能
 - tapOn:
-    text: "AI 摘要"
+    text: 'AI 摘要'
     optional: true
 
 # 等待 AI 摘要結果
 - extendedWaitUntil:
     visible:
       anyOf:
-        - text: "摘要"
-        - text: "生成中"
+        - text: '摘要'
+        - text: '生成中'
     timeout: 10000
     optional: true
 

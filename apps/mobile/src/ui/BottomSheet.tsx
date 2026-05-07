@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useEffect, useRef, useCallback } from "react";
+import React, { useEffect, useRef, useCallback } from 'react';
 import {
   Animated,
   Dimensions,
@@ -10,18 +10,18 @@ import {
   View,
   TouchableWithoutFeedback,
   ScrollView,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "./navigationTheme";
-import { theme, softShadowStyle } from "./theme";
-import { SafeAreaInsetsContext } from "react-native-safe-area-context";
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
+import { theme, softShadowStyle } from './theme';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
 function useSafeInsets() {
   const context = React.useContext(SafeAreaInsetsContext);
   return context ?? { top: 0, bottom: 0, left: 0, right: 0 };
 }
 
-const { height: SCREEN_HEIGHT } = Dimensions.get("window");
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type BottomSheetProps = {
   visible: boolean;
@@ -60,10 +60,14 @@ export function BottomSheet({
     (toValue: number, duration = 300) => {
       Animated.parallel([
         Animated.spring(translateY, { toValue, friction: 10, tension: 80, useNativeDriver: true }),
-        Animated.timing(backdropOpacity, { toValue: toValue >= SCREEN_HEIGHT ? 0 : 1, duration: duration / 2, useNativeDriver: true }),
+        Animated.timing(backdropOpacity, {
+          toValue: toValue >= SCREEN_HEIGHT ? 0 : 1,
+          duration: duration / 2,
+          useNativeDriver: true,
+        }),
       ]).start();
     },
-    [backdropOpacity, translateY]
+    [backdropOpacity, translateY],
   );
 
   const close = useCallback(() => {
@@ -81,7 +85,10 @@ export function BottomSheet({
       },
       onPanResponderRelease: (_, gs) => {
         const currentY = heights[currentSnapIndex.current] + gs.dy;
-        if (gs.vy > 0.5 || currentY > SCREEN_HEIGHT * 0.75) { close(); return; }
+        if (gs.vy > 0.5 || currentY > SCREEN_HEIGHT * 0.75) {
+          close();
+          return;
+        }
         if (gs.vy < -0.5 && currentSnapIndex.current < snapPoints.length - 1) {
           currentSnapIndex.current++;
           animateToPosition(heights[currentSnapIndex.current]);
@@ -91,12 +98,15 @@ export function BottomSheet({
         let closestDistance = Math.abs(currentY - heights[0]);
         for (let i = 1; i < heights.length; i++) {
           const distance = Math.abs(currentY - heights[i]);
-          if (distance < closestDistance) { closestDistance = distance; closestIndex = i; }
+          if (distance < closestDistance) {
+            closestDistance = distance;
+            closestIndex = i;
+          }
         }
         currentSnapIndex.current = closestIndex;
         animateToPosition(heights[closestIndex]);
       },
-    })
+    }),
   ).current;
 
   useEffect(() => {
@@ -110,15 +120,31 @@ export function BottomSheet({
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={close} statusBarTranslucent>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="none"
+      onRequestClose={close}
+      statusBarTranslucent
+    >
       <View style={{ flex: 1 }}>
         <TouchableWithoutFeedback onPress={closeOnBackdrop ? close : undefined}>
-          <Animated.View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: theme.colors.overlay, opacity: backdropOpacity }} />
+          <Animated.View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: theme.colors.overlay,
+              opacity: backdropOpacity,
+            }}
+          />
         </TouchableWithoutFeedback>
 
         <Animated.View
           style={{
-            position: "absolute",
+            position: 'absolute',
             left: 0,
             right: 0,
             bottom: 0,
@@ -136,14 +162,44 @@ export function BottomSheet({
           {...panResponder.panHandlers}
         >
           {showHandle && (
-            <View style={{ alignItems: "center", paddingVertical: 12 }}>
-              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: theme.colors.muted, opacity: 0.3 }} />
+            <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+              <View
+                style={{
+                  width: 36,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: theme.colors.muted,
+                  opacity: 0.3,
+                }}
+              />
             </View>
           )}
 
           {(title || showCloseButton) && (
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 22, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
-              {title && <Text style={{ fontSize: 18, fontWeight: "700", color: theme.colors.text, flex: 1, letterSpacing: -0.2 }}>{title}</Text>}
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingHorizontal: 22,
+                paddingBottom: 16,
+                borderBottomWidth: 1,
+                borderBottomColor: theme.colors.border,
+              }}
+            >
+              {title && (
+                <Text
+                  style={{
+                    fontSize: 18,
+                    fontWeight: '700',
+                    color: theme.colors.text,
+                    flex: 1,
+                    letterSpacing: -0.2,
+                  }}
+                >
+                  {title}
+                </Text>
+              )}
               {showCloseButton && (
                 <Pressable
                   onPress={close}
@@ -151,9 +207,9 @@ export function BottomSheet({
                     width: 32,
                     height: 32,
                     borderRadius: 16,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: pressed ? theme.colors.surface2 : "transparent",
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
                     marginLeft: 12,
                   })}
                   hitSlop={8}
@@ -164,12 +220,27 @@ export function BottomSheet({
             </View>
           )}
 
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 22, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }} showsVerticalScrollIndicator={false} bounces={false}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 22, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
             {children}
           </ScrollView>
 
           {footer && (
-            <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12, paddingHorizontal: 22, paddingVertical: 18, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'flex-end',
+                gap: 12,
+                paddingHorizontal: 22,
+                paddingVertical: 18,
+                borderTopWidth: 1,
+                borderTopColor: theme.colors.border,
+              }}
+            >
               {footer}
             </View>
           )}
@@ -196,14 +267,52 @@ type ActionSheetProps = {
   cancelText?: string;
 };
 
-export function ActionSheet({ visible, onClose, title, message, actions, cancelText = "取消" }: ActionSheetProps) {
+export function ActionSheet({
+  visible,
+  onClose,
+  title,
+  message,
+  actions,
+  cancelText = '取消',
+}: ActionSheetProps) {
   return (
     <BottomSheet visible={visible} onClose={onClose} snapPoints={[0.35]} enableDrag showHandle>
       <View>
         {(title || message) && (
-          <View style={{ alignItems: "center", paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: theme.colors.border, marginBottom: 8 }}>
-            {title && <Text style={{ fontSize: 16, fontWeight: "700", color: theme.colors.text, textAlign: "center" }}>{title}</Text>}
-            {message && <Text style={{ fontSize: 13, color: theme.colors.muted, textAlign: "center", marginTop: 4, lineHeight: 19 }}>{message}</Text>}
+          <View
+            style={{
+              alignItems: 'center',
+              paddingBottom: 16,
+              borderBottomWidth: 1,
+              borderBottomColor: theme.colors.border,
+              marginBottom: 8,
+            }}
+          >
+            {title && (
+              <Text
+                style={{
+                  fontSize: 16,
+                  fontWeight: '700',
+                  color: theme.colors.text,
+                  textAlign: 'center',
+                }}
+              >
+                {title}
+              </Text>
+            )}
+            {message && (
+              <Text
+                style={{
+                  fontSize: 13,
+                  color: theme.colors.muted,
+                  textAlign: 'center',
+                  marginTop: 4,
+                  lineHeight: 19,
+                }}
+              >
+                {message}
+              </Text>
+            )}
           </View>
         )}
 
@@ -211,15 +320,18 @@ export function ActionSheet({ visible, onClose, title, message, actions, cancelT
           {actions.map((action, index) => (
             <Pressable
               key={index}
-              onPress={() => { action.onPress?.(); onClose(); }}
+              onPress={() => {
+                action.onPress?.();
+                onClose();
+              }}
               disabled={action.disabled}
               style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
+                flexDirection: 'row',
+                alignItems: 'center',
                 paddingVertical: 15,
                 paddingHorizontal: 16,
                 borderRadius: theme.radius.md,
-                backgroundColor: pressed ? theme.colors.surface2 : "transparent",
+                backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
                 opacity: action.disabled ? 0.4 : 1,
               })}
             >
@@ -236,7 +348,7 @@ export function ActionSheet({ visible, onClose, title, message, actions, cancelT
                   fontSize: 16,
                   color: action.destructive ? theme.colors.danger : theme.colors.text,
                   flex: 1,
-                  fontWeight: "500",
+                  fontWeight: '500',
                 }}
               >
                 {action.text}
@@ -248,14 +360,16 @@ export function ActionSheet({ visible, onClose, title, message, actions, cancelT
         <Pressable
           onPress={onClose}
           style={({ pressed }) => ({
-            alignItems: "center",
+            alignItems: 'center',
             paddingVertical: 15,
             marginTop: 8,
             borderRadius: theme.radius.md,
             backgroundColor: pressed ? theme.colors.surface2 : theme.colors.bg,
           })}
         >
-          <Text style={{ fontSize: 16, fontWeight: "600", color: theme.colors.accent }}>{cancelText}</Text>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: theme.colors.accent }}>
+            {cancelText}
+          </Text>
         </Pressable>
       </View>
     </BottomSheet>
@@ -281,21 +395,37 @@ type BottomPickerProps<T> = {
 };
 
 export function BottomPicker<T>({
-  visible, onClose, title, options, value, onSelect, multiple = false, selectedValues = [],
+  visible,
+  onClose,
+  title,
+  options,
+  value,
+  onSelect,
+  multiple = false,
+  selectedValues = [],
 }: BottomPickerProps<T>) {
-  const handleSelect = (v: T) => { onSelect(v); if (!multiple) onClose(); };
-  const isSelected = (v: T) => multiple ? selectedValues.some((sv) => sv === v) : value === v;
+  const handleSelect = (v: T) => {
+    onSelect(v);
+    if (!multiple) onClose();
+  };
+  const isSelected = (v: T) => (multiple ? selectedValues.some((sv) => sv === v) : value === v);
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={title} snapPoints={[0.5]} showCloseButton>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={title}
+      snapPoints={[0.5]}
+      showCloseButton
+    >
       <View>
         {options.map((option, index) => (
           <Pressable
             key={index}
             onPress={() => handleSelect(option.value)}
             style={({ pressed }) => ({
-              flexDirection: "row",
-              alignItems: "center",
+              flexDirection: 'row',
+              alignItems: 'center',
               paddingVertical: 14,
               paddingHorizontal: 16,
               borderRadius: theme.radius.md,
@@ -304,7 +434,7 @@ export function BottomPicker<T>({
                 ? theme.colors.accentSoft
                 : pressed
                   ? theme.colors.surface2
-                  : "transparent",
+                  : 'transparent',
             })}
           >
             {option.icon && (
@@ -321,16 +451,20 @@ export function BottomPicker<T>({
                 style={{
                   fontSize: 16,
                   color: isSelected(option.value) ? theme.colors.accent : theme.colors.text,
-                  fontWeight: isSelected(option.value) ? "600" : "400",
+                  fontWeight: isSelected(option.value) ? '600' : '400',
                 }}
               >
                 {option.label}
               </Text>
               {option.description && (
-                <Text style={{ fontSize: 13, color: theme.colors.muted, marginTop: 2 }}>{option.description}</Text>
+                <Text style={{ fontSize: 13, color: theme.colors.muted, marginTop: 2 }}>
+                  {option.description}
+                </Text>
               )}
             </View>
-            {isSelected(option.value) && <Ionicons name="checkmark" size={22} color={theme.colors.accent} />}
+            {isSelected(option.value) && (
+              <Ionicons name="checkmark" size={22} color={theme.colors.accent} />
+            )}
           </Pressable>
         ))}
       </View>

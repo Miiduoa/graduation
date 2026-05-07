@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo } from "react";
-import { Animated, Easing, Text, View } from "react-native";
-import { useAnimatedValue } from "../../hooks/useAnimatedValue";
-import { softShadowStyle, theme } from "../theme";
+import React, { useEffect, useMemo } from 'react';
+import { Animated, Easing, Text, View } from 'react-native';
+import { useAnimatedValue } from '../../hooks/useAnimatedValue';
+import { softShadowStyle, theme } from '../theme';
 
 export function LoadingOverlay(props: { visible: boolean; message?: string }) {
   const spinAnim = useAnimatedValue(0);
@@ -19,7 +19,7 @@ export function LoadingOverlay(props: { visible: boolean; message?: string }) {
         duration: 800,
         easing: Easing.linear,
         useNativeDriver: true,
-      })
+      }),
     );
     animation.start();
 
@@ -33,9 +33,9 @@ export function LoadingOverlay(props: { visible: boolean; message?: string }) {
     () =>
       spinAnim.interpolate({
         inputRange: [0, 1],
-        outputRange: ["0deg", "360deg"],
+        outputRange: ['0deg', '360deg'],
       }),
-    [spinAnim]
+    [spinAnim],
   );
 
   if (!props.visible) return null;
@@ -43,25 +43,25 @@ export function LoadingOverlay(props: { visible: boolean; message?: string }) {
   return (
     <View
       style={{
-        position: "absolute",
+        position: 'absolute',
         top: 0,
         left: 0,
         right: 0,
         bottom: 0,
         backgroundColor: theme.colors.overlay,
-        justifyContent: "center",
-        alignItems: "center",
+        justifyContent: 'center',
+        alignItems: 'center',
         zIndex: 1000,
       }}
       accessibilityRole="alert"
-      accessibilityLabel={props.message ?? "載入中"}
+      accessibilityLabel={props.message ?? '載入中'}
     >
       <View
         style={{
           padding: 28,
           borderRadius: theme.radius.xl,
           backgroundColor: theme.colors.surfaceElevated,
-          alignItems: "center",
+          alignItems: 'center',
           gap: 14,
           minWidth: 120,
           borderWidth: 1,
@@ -76,12 +76,12 @@ export function LoadingOverlay(props: { visible: boolean; message?: string }) {
             borderRadius: 18,
             borderWidth: 3,
             borderColor: theme.colors.accent,
-            borderTopColor: "transparent",
+            borderTopColor: 'transparent',
             transform: [{ rotate: spin }],
           }}
         />
         {props.message ? (
-          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: "500" }}>
+          <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '500' }}>
             {props.message}
           </Text>
         ) : null}

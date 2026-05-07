@@ -18,14 +18,10 @@
  *   - 學生自願公開可配對狀態
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  getAnyCachedCourses,
-  getAnyCachedGrades,
-  getAnyCachedTCCourses,
-} from "./puDataCache";
-import type { PUCourse, PUCourseResult, PUGradeResult } from "./puDirectScraper";
-import type { TCCourse } from "./tronClassClient";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAnyCachedCourses, getAnyCachedGrades, getAnyCachedTCCourses } from './puDataCache';
+import type { PUCourse, PUCourseResult, PUGradeResult } from './puDirectScraper';
+import type { TCCourse } from './tronClassClient';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -33,26 +29,26 @@ export type StudyProfile = {
   userId: string;
   displayName: string;
   department: string;
-  courses: string[];           // course names
-  strengths: string[];         // subjects they're good at
-  weaknesses: string[];        // subjects they need help with
-  availableSlots: TimeSlot[];  // free time slots
+  courses: string[]; // course names
+  strengths: string[]; // subjects they're good at
+  weaknesses: string[]; // subjects they need help with
+  availableSlots: TimeSlot[]; // free time slots
   studyStyle: StudyStyle;
-  isPublic: boolean;           // opted into matching
+  isPublic: boolean; // opted into matching
   lastActive: number;
 };
 
 export type StudyStyle = {
-  preferGroup: boolean;        // prefers group study
-  preferQuiet: boolean;        // prefers quiet environments
-  preferOnline: boolean;       // open to online study
-  preferTeaching: boolean;     // likes teaching others
-  preferLearning: boolean;     // wants to learn from others
+  preferGroup: boolean; // prefers group study
+  preferQuiet: boolean; // prefers quiet environments
+  preferOnline: boolean; // open to online study
+  preferTeaching: boolean; // likes teaching others
+  preferLearning: boolean; // wants to learn from others
 };
 
 export type TimeSlot = {
-  dayOfWeek: number;           // 1-7 (Mon-Sun)
-  startHour: number;           // 0-23
+  dayOfWeek: number; // 1-7 (Mon-Sun)
+  startHour: number; // 0-23
   endHour: number;
 };
 
@@ -60,7 +56,7 @@ export type BuddyMatch = {
   userId: string;
   displayName: string;
   department: string;
-  matchScore: number;          // 0-100
+  matchScore: number; // 0-100
   matchReasons: MatchReason[];
   reasons: string[];
   sharedCourses: string[];
@@ -68,19 +64,19 @@ export type BuddyMatch = {
   complementaryPairs: ComplementaryPair[];
   commonFreeSlots: TimeSlot[];
   commonTimeSlots: { day: string; time: string }[];
-  compatibility: "excellent" | "good" | "fair";
+  compatibility: 'excellent' | 'good' | 'fair';
 };
 
 export type MatchReason = {
-  type: "shared_course" | "complementary" | "schedule" | "style" | "department";
+  type: 'shared_course' | 'complementary' | 'schedule' | 'style' | 'department';
   description: string;
   weight: number;
 };
 
 export type ComplementaryPair = {
   subject: string;
-  yourLevel: "strong" | "average" | "weak";
-  theirLevel: "strong" | "average" | "weak";
+  yourLevel: 'strong' | 'average' | 'weak';
+  theirLevel: 'strong' | 'average' | 'weak';
   benefit: string;
 };
 
@@ -93,7 +89,7 @@ export type StudyGroup = {
   maxMembers: number;
   meetingSchedule: TimeSlot[];
   location: string;
-  style: "collaborative" | "tutorial" | "discussion" | "practice";
+  style: 'collaborative' | 'tutorial' | 'discussion' | 'practice';
   createdAt: number;
   isActive: boolean;
 };
@@ -101,7 +97,7 @@ export type StudyGroup = {
 export type StudyGroupMember = {
   userId: string;
   displayName: string;
-  role: "organizer" | "member";
+  role: 'organizer' | 'member';
   joinedAt: number;
 };
 
@@ -109,16 +105,16 @@ export type CourseReview = {
   id: string;
   courseCode: string;
   courseName: string;
-  rating: number;              // 1-5
-  difficulty: number;          // 1-5
-  workload: number;            // 1-5
-  usefulness: number;          // 1-5
+  rating: number; // 1-5
+  difficulty: number; // 1-5
+  workload: number; // 1-5
+  usefulness: number; // 1-5
   comment: string;
-  sentiment: "positive" | "neutral" | "negative";
-  sentimentScore: number;      // -1 to 1
+  sentiment: 'positive' | 'neutral' | 'negative';
+  sentimentScore: number; // -1 to 1
   tags: string[];
   createdAt: number;
-  helpful: number;             // upvote count
+  helpful: number; // upvote count
 };
 
 export type CourseReviewSummary = {
@@ -138,22 +134,22 @@ export type CourseReviewSummary = {
   recentReviews: CourseReview[];
 };
 
-const DAY_LABELS = ["", "週一", "週二", "週三", "週四", "週五", "週六", "週日"];
+const DAY_LABELS = ['', '週一', '週二', '週三', '週四', '週五', '週六', '週日'];
 
 function formatTimeSlot(slot: TimeSlot): { day: string; time: string } {
   return {
     day: DAY_LABELS[slot.dayOfWeek] ?? `週${slot.dayOfWeek}`,
-    time: `${String(slot.startHour).padStart(2, "0")}:00-${String(slot.endHour).padStart(2, "0")}:00`,
+    time: `${String(slot.startHour).padStart(2, '0')}:00-${String(slot.endHour).padStart(2, '0')}:00`,
   };
 }
 
 // ─── Storage Keys ───────────────────────────────────────
 
 const KEYS = {
-  myProfile: "@study_buddy:my_profile",
-  reviews: "@study_buddy:reviews",
-  groups: "@study_buddy:groups",
-  mockProfiles: "@study_buddy:mock_profiles",
+  myProfile: '@study_buddy:my_profile',
+  reviews: '@study_buddy:reviews',
+  groups: '@study_buddy:groups',
+  mockProfiles: '@study_buddy:mock_profiles',
 } as const;
 
 // ─── Similarity Algorithms ──────────────────────────────
@@ -191,21 +187,39 @@ function styleCompatibility(a: StudyStyle, b: StudyStyle): number {
   let total = 0;
 
   // Teaching + Learning is a great match
-  if (a.preferTeaching && b.preferLearning) { score += 2; total += 2; }
-  else if (a.preferLearning && b.preferTeaching) { score += 2; total += 2; }
-  else { total += 2; }
+  if (a.preferTeaching && b.preferLearning) {
+    score += 2;
+    total += 2;
+  } else if (a.preferLearning && b.preferTeaching) {
+    score += 2;
+    total += 2;
+  } else {
+    total += 2;
+  }
 
   // Same environment preference
-  if (a.preferQuiet === b.preferQuiet) { score += 1; total += 1; }
-  else { total += 1; }
+  if (a.preferQuiet === b.preferQuiet) {
+    score += 1;
+    total += 1;
+  } else {
+    total += 1;
+  }
 
   // Both open to group study
-  if (a.preferGroup && b.preferGroup) { score += 1; total += 1; }
-  else { total += 1; }
+  if (a.preferGroup && b.preferGroup) {
+    score += 1;
+    total += 1;
+  } else {
+    total += 1;
+  }
 
   // Online compatibility
-  if (a.preferOnline === b.preferOnline) { score += 0.5; total += 0.5; }
-  else { total += 0.5; }
+  if (a.preferOnline === b.preferOnline) {
+    score += 0.5;
+    total += 0.5;
+  } else {
+    total += 0.5;
+  }
 
   return total > 0 ? score / total : 0.5;
 }
@@ -213,16 +227,57 @@ function styleCompatibility(a: StudyStyle, b: StudyStyle): number {
 // ─── Sentiment Analysis ────────────────────────────────
 
 /** 簡易中文情感分析 (Lexicon-based) */
-function analyzeSentiment(text: string): { sentiment: "positive" | "neutral" | "negative"; score: number } {
+function analyzeSentiment(text: string): {
+  sentiment: 'positive' | 'neutral' | 'negative';
+  score: number;
+} {
   const positiveWords = [
-    "好", "棒", "讚", "推薦", "有趣", "實用", "認真", "清楚",
-    "用心", "喜歡", "收穫", "豐富", "精彩", "優秀", "滿意",
-    "學到", "受益", "熱情", "幽默", "專業", "值得", "很好",
+    '好',
+    '棒',
+    '讚',
+    '推薦',
+    '有趣',
+    '實用',
+    '認真',
+    '清楚',
+    '用心',
+    '喜歡',
+    '收穫',
+    '豐富',
+    '精彩',
+    '優秀',
+    '滿意',
+    '學到',
+    '受益',
+    '熱情',
+    '幽默',
+    '專業',
+    '值得',
+    '很好',
   ];
   const negativeWords = [
-    "爛", "差", "無聊", "難", "混", "廢", "雷", "不好",
-    "浪費", "不推", "失望", "糟", "扯", "不認真", "敷衍",
-    "沒用", "太難", "不及格", "當人", "嚴格", "煩", "困難",
+    '爛',
+    '差',
+    '無聊',
+    '難',
+    '混',
+    '廢',
+    '雷',
+    '不好',
+    '浪費',
+    '不推',
+    '失望',
+    '糟',
+    '扯',
+    '不認真',
+    '敷衍',
+    '沒用',
+    '太難',
+    '不及格',
+    '當人',
+    '嚴格',
+    '煩',
+    '困難',
   ];
 
   let posCount = 0;
@@ -236,14 +291,14 @@ function analyzeSentiment(text: string): { sentiment: "positive" | "neutral" | "
   }
 
   const total = posCount + negCount;
-  if (total === 0) return { sentiment: "neutral", score: 0 };
+  if (total === 0) return { sentiment: 'neutral', score: 0 };
 
   const score = (posCount - negCount) / total; // -1 to 1
 
-  let sentiment: "positive" | "neutral" | "negative";
-  if (score > 0.2) sentiment = "positive";
-  else if (score < -0.2) sentiment = "negative";
-  else sentiment = "neutral";
+  let sentiment: 'positive' | 'neutral' | 'negative';
+  if (score > 0.2) sentiment = 'positive';
+  else if (score < -0.2) sentiment = 'negative';
+  else sentiment = 'neutral';
 
   return { sentiment, score: Math.round(score * 100) / 100 };
 }
@@ -254,9 +309,9 @@ function analyzeSentiment(text: string): { sentiment: "positive" | "neutral" | "
  * 從已有資料自動建立學習檔案
  */
 export async function buildMyStudyProfile(
-  userId = "guest",
-  displayName = "同學",
-  department = "未設定系所",
+  userId = 'guest',
+  displayName = '同學',
+  department = '未設定系所',
 ): Promise<StudyProfile> {
   const [coursesResult, gradeResult] = await Promise.all([
     getAnyCachedCourses(),
@@ -272,7 +327,7 @@ export async function buildMyStudyProfile(
   if (gradeResult) {
     const categoryScores = new Map<string, number[]>();
     for (const grade of gradeResult.grades) {
-      const score = typeof grade.score === "number" ? grade.score : parseFloat(String(grade.score));
+      const score = typeof grade.score === 'number' ? grade.score : parseFloat(String(grade.score));
       if (isNaN(score)) continue;
       const category = categorizeCourseSimple(grade.courseName);
       const existing = categoryScores.get(category) ?? [];
@@ -314,12 +369,12 @@ export async function buildMyStudyProfile(
 }
 
 function categorizeCourseSimple(name: string): string {
-  if (/數學|統計|微積分/.test(name)) return "數理";
-  if (/程式|資料|演算法|系統|網路/.test(name)) return "資訊";
-  if (/英文|英語|語言/.test(name)) return "語言";
-  if (/管理|經濟|行銷/.test(name)) return "商管";
-  if (/通識|人文|藝術/.test(name)) return "通識";
-  return "其他";
+  if (/數學|統計|微積分/.test(name)) return '數理';
+  if (/程式|資料|演算法|系統|網路/.test(name)) return '資訊';
+  if (/英文|英語|語言/.test(name)) return '語言';
+  if (/管理|經濟|行銷/.test(name)) return '商管';
+  if (/通識|人文|藝術/.test(name)) return '通識';
+  return '其他';
 }
 
 function calculateFreeSlots(courses: PUCourse[]): TimeSlot[] {
@@ -379,8 +434,8 @@ function computeMatchScore(me: StudyProfile, other: StudyProfile): BuddyMatch {
     if (other.strengths.includes(weakness)) {
       complementaryPairs.push({
         subject: weakness,
-        yourLevel: "weak",
-        theirLevel: "strong",
+        yourLevel: 'weak',
+        theirLevel: 'strong',
         benefit: `${other.displayName} 擅長${weakness}，可以幫助你`,
       });
     }
@@ -389,8 +444,8 @@ function computeMatchScore(me: StudyProfile, other: StudyProfile): BuddyMatch {
     if (other.weaknesses.includes(strength)) {
       complementaryPairs.push({
         subject: strength,
-        yourLevel: "strong",
-        theirLevel: "weak",
+        yourLevel: 'strong',
+        theirLevel: 'weak',
         benefit: `你擅長${strength}，可以互相教學`,
       });
     }
@@ -421,37 +476,37 @@ function computeMatchScore(me: StudyProfile, other: StudyProfile): BuddyMatch {
   const matchReasons: MatchReason[] = [];
   if (sharedCourses.length > 0) {
     matchReasons.push({
-      type: "shared_course",
+      type: 'shared_course',
       description: `共同修習 ${sharedCourses.length} 門課`,
       weight: courseSimilarity,
     });
   }
   if (complementaryPairs.length > 0) {
     matchReasons.push({
-      type: "complementary",
+      type: 'complementary',
       description: `${complementaryPairs.length} 個互補科目`,
       weight: complementaryScore,
     });
   }
   if (commonSlots.length > 0) {
     matchReasons.push({
-      type: "schedule",
+      type: 'schedule',
       description: `${commonSlots.length} 個共同空檔時段`,
       weight: scheduleScore,
     });
   }
   if (deptBonus > 0) {
     matchReasons.push({
-      type: "department",
-      description: "同系所",
+      type: 'department',
+      description: '同系所',
       weight: 1,
     });
   }
 
-  let compatibility: BuddyMatch["compatibility"];
-  if (matchScore >= 70) compatibility = "excellent";
-  else if (matchScore >= 40) compatibility = "good";
-  else compatibility = "fair";
+  let compatibility: BuddyMatch['compatibility'];
+  if (matchScore >= 70) compatibility = 'excellent';
+  else if (matchScore >= 40) compatibility = 'good';
+  else compatibility = 'fair';
 
   return {
     userId: other.userId,
@@ -472,17 +527,43 @@ function computeMatchScore(me: StudyProfile, other: StudyProfile): BuddyMatch {
 // ─── Mock Data for Demo ─────────────────────────────────
 
 function generateMockProfiles(myProfile: StudyProfile): StudyProfile[] {
-  const departments = ["資管系", "資工系", "會計系", "企管系", "應數系", "外文系"];
+  const departments = ['資管系', '資工系', '會計系', '企管系', '應數系', '外文系'];
   const coursePool = [
-    "程式設計", "資料結構", "演算法", "資料庫管理", "軟體工程",
-    "統計學", "微積分", "線性代數", "英文", "日文",
-    "管理學", "經濟學", "會計學", "通識-藝術欣賞", "體育",
-    "作業系統", "網路概論", "人工智慧", "機器學習", "資訊安全",
+    '程式設計',
+    '資料結構',
+    '演算法',
+    '資料庫管理',
+    '軟體工程',
+    '統計學',
+    '微積分',
+    '線性代數',
+    '英文',
+    '日文',
+    '管理學',
+    '經濟學',
+    '會計學',
+    '通識-藝術欣賞',
+    '體育',
+    '作業系統',
+    '網路概論',
+    '人工智慧',
+    '機器學習',
+    '資訊安全',
   ];
 
   const names = [
-    "小明", "小華", "阿德", "小美", "阿文", "小琳",
-    "志豪", "雅婷", "建宏", "怡君", "家豪", "佳蓉",
+    '小明',
+    '小華',
+    '阿德',
+    '小美',
+    '阿文',
+    '小琳',
+    '志豪',
+    '雅婷',
+    '建宏',
+    '怡君',
+    '家豪',
+    '佳蓉',
   ];
 
   const profiles: StudyProfile[] = [];
@@ -580,7 +661,9 @@ async function loadReviews(): Promise<CourseReview[]> {
   }
 }
 
-export async function getCourseReviewSummary(courseName: string): Promise<CourseReviewSummary | null> {
+export async function getCourseReviewSummary(
+  courseName: string,
+): Promise<CourseReviewSummary | null> {
   const reviews = await loadReviews();
   const courseReviews = reviews.filter((r) => r.courseName === courseName);
 
@@ -608,7 +691,7 @@ export async function getCourseReviewSummary(courseName: string): Promise<Course
 
   return {
     courseName,
-    courseCode: courseReviews[0]?.courseCode ?? "",
+    courseCode: courseReviews[0]?.courseCode ?? '',
     averageRating: Math.round(avgRating * 10) / 10,
     averageDifficulty: Math.round(avgDifficulty * 10) / 10,
     averageWorkload: Math.round(avgWorkload * 10) / 10,
@@ -626,11 +709,11 @@ export async function getCourseReviewSummary(courseName: string): Promise<Course
  * 取得學習夥伴推薦
  */
 export async function getStudyBuddyMatches(
-  userId = "guest",
-  displayName = "同學",
-  department = "未設定系所",
+  userId = 'guest',
+  displayName = '同學',
+  department = '未設定系所',
 ): Promise<BuddyMatch[]> {
-  console.log("[StudyBuddy] Computing matches…");
+  console.log('[StudyBuddy] Computing matches…');
 
   // Build or load my profile
   const myProfile = await buildMyStudyProfile(userId, displayName, department);
@@ -640,14 +723,14 @@ export async function getStudyBuddyMatches(
   try {
     otherProfiles = await getRealClassmateProfiles(myProfile);
   } catch (e) {
-    console.log("[StudyBuddy] Real roster fetch failed, using mock:", e);
+    console.log('[StudyBuddy] Real roster fetch failed, using mock:', e);
   }
 
   // Fallback to mock if no real data
   if (otherProfiles.length < 3) {
     const mockProfiles = generateMockProfiles(myProfile);
     // Merge: real profiles first, then fill with mock
-    const existingIds = new Set(otherProfiles.map(p => p.userId));
+    const existingIds = new Set(otherProfiles.map((p) => p.userId));
     for (const mp of mockProfiles) {
       if (!existingIds.has(mp.userId)) otherProfiles.push(mp);
     }
@@ -676,7 +759,8 @@ async function getRealClassmateProfiles(myProfile: StudyProfile): Promise<StudyP
   // Collect all classmates across my courses
   const classmateMap = new Map<string, { name: string; courses: string[] }>();
 
-  for (const course of tcCourses.slice(0, 6)) { // limit to 6 courses for speed
+  for (const course of tcCourses.slice(0, 6)) {
+    // limit to 6 courses for speed
     try {
       const students = await getCourseStudents(course.id);
       for (const student of students) {
@@ -688,7 +772,9 @@ async function getRealClassmateProfiles(myProfile: StudyProfile): Promise<StudyP
           classmateMap.set(student.id, { name: student.name, courses: [course.name] });
         }
       }
-    } catch (_) { /* skip failed course */ }
+    } catch (_) {
+      /* skip failed course */
+    }
   }
 
   // Build profiles from real classmates
@@ -699,7 +785,7 @@ async function getRealClassmateProfiles(myProfile: StudyProfile): Promise<StudyP
 
     const strengths = data.courses
       .slice(0, 2)
-      .map(c => categorizeCourseSimple(c))
+      .map((c) => categorizeCourseSimple(c))
       .filter((v, i, a) => a.indexOf(v) === i);
 
     profiles.push({
@@ -751,8 +837,8 @@ async function generateDefaultStudyGroupsFromRealCourses(): Promise<StudyGroup[]
   }
 
   const now = Date.now();
-  const styles: Array<StudyGroup["style"]> = ["collaborative", "tutorial", "practice"];
-  const locations = ["圖書館討論室", "任垣樓自習區", "電腦教室"];
+  const styles: Array<StudyGroup['style']> = ['collaborative', 'tutorial', 'practice'];
+  const locations = ['圖書館討論室', '任垣樓自習區', '電腦教室'];
   const daySchedules = [
     { dayOfWeek: 3, startHour: 14, endHour: 16 },
     { dayOfWeek: 2, startHour: 18, endHour: 20 },
@@ -763,7 +849,7 @@ async function generateDefaultStudyGroupsFromRealCourses(): Promise<StudyGroup[]
   const courses = cached.courses.slice(0, 3);
 
   return courses.map((course, i) => {
-    const courseName = course.name || "未知課程";
+    const courseName = course.name || '未知課程';
     const courseCode = course.code || `C${i + 1}`;
     const idx = i % styles.length;
 
@@ -773,7 +859,12 @@ async function generateDefaultStudyGroupsFromRealCourses(): Promise<StudyGroup[]
       courseName,
       courseCode,
       members: [
-        { userId: `placeholder_${i}`, displayName: "等待加入", role: "organizer" as const, joinedAt: now - 7 * 86400000 },
+        {
+          userId: `placeholder_${i}`,
+          displayName: '等待加入',
+          role: 'organizer' as const,
+          joinedAt: now - 7 * 86400000,
+        },
       ],
       maxMembers: 6,
       meetingSchedule: [daySchedules[idx]],
@@ -796,14 +887,14 @@ export async function createStudyGroup(
   displayName: string,
   schedule: TimeSlot[],
   location: string,
-  style: StudyGroup["style"],
+  style: StudyGroup['style'],
 ): Promise<StudyGroup> {
   const group: StudyGroup = {
     id: `sg_${Date.now()}`,
     name,
     courseName,
     courseCode,
-    members: [{ userId, displayName, role: "organizer", joinedAt: Date.now() }],
+    members: [{ userId, displayName, role: 'organizer', joinedAt: Date.now() }],
     maxMembers: 6,
     meetingSchedule: schedule,
     location,

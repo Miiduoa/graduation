@@ -4,9 +4,9 @@
  * 監聽 App 前後台切換狀態
  */
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { AppState, AppStateStatus } from "react-native";
-import { useLatestValue } from "./useLatestValue";
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
+import { useLatestValue } from './useLatestValue';
 
 export interface AppStateOptions {
   onForeground?: () => void;
@@ -36,7 +36,7 @@ export function useAppState(options?: AppStateOptions): AppStateResult {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       const prevState = appState;
 
-      if (nextAppState === "active" && prevState !== "active") {
+      if (nextAppState === 'active' && prevState !== 'active') {
         if (backgroundStartRef.current) {
           const duration = Date.now() - backgroundStartRef.current.getTime();
           setBackgroundDuration(duration);
@@ -47,19 +47,19 @@ export function useAppState(options?: AppStateOptions): AppStateResult {
         optionsRef.current?.onActive?.();
       }
 
-      if (nextAppState === "background" && prevState !== "background") {
+      if (nextAppState === 'background' && prevState !== 'background') {
         backgroundStartRef.current = new Date();
         optionsRef.current?.onBackground?.();
       }
 
-      if (nextAppState === "inactive" && prevState !== "inactive") {
+      if (nextAppState === 'inactive' && prevState !== 'inactive') {
         optionsRef.current?.onInactive?.();
       }
 
       setAppState(nextAppState);
     };
 
-    const subscription = AppState.addEventListener("change", handleAppStateChange);
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
 
     return () => {
       subscription.remove();
@@ -68,9 +68,9 @@ export function useAppState(options?: AppStateOptions): AppStateResult {
 
   return {
     appState,
-    isActive: appState === "active",
-    isBackground: appState === "background",
-    isInactive: appState === "inactive",
+    isActive: appState === 'active',
+    isBackground: appState === 'background',
+    isInactive: appState === 'inactive',
     lastActiveAt,
     backgroundDuration,
   };
@@ -78,7 +78,7 @@ export function useAppState(options?: AppStateOptions): AppStateResult {
 
 export function useAppStateCallback(
   callback: (state: AppStateStatus) => void,
-  deps: React.DependencyList = []
+  deps: React.DependencyList = [],
 ): void {
   const callbackRef = useLatestValue(callback);
 
@@ -87,15 +87,14 @@ export function useAppStateCallback(
       callbackRef.current(state);
     };
 
-    const subscription = AppState.addEventListener("change", handleChange);
+    const subscription = AppState.addEventListener('change', handleChange);
     return () => subscription.remove();
-     
   }, deps);
 }
 
 export function useForegroundEffect(
   effect: () => void | (() => void),
-  deps: React.DependencyList = []
+  deps: React.DependencyList = [],
 ): void {
   const effectRef = useLatestValue(effect);
   const cleanupRef = useRef<void | (() => void)>(undefined);
@@ -105,9 +104,9 @@ export function useForegroundEffect(
     cleanupRef.current = effectRef.current();
 
     const handleChange = (state: AppStateStatus) => {
-      if (state === "background") {
+      if (state === 'background') {
         wasBackgroundRef.current = true;
-      } else if (state === "active" && wasBackgroundRef.current) {
+      } else if (state === 'active' && wasBackgroundRef.current) {
         wasBackgroundRef.current = false;
         if (cleanupRef.current) {
           cleanupRef.current();
@@ -116,7 +115,7 @@ export function useForegroundEffect(
       }
     };
 
-    const subscription = AppState.addEventListener("change", handleChange);
+    const subscription = AppState.addEventListener('change', handleChange);
 
     return () => {
       subscription.remove();
@@ -124,7 +123,6 @@ export function useForegroundEffect(
         cleanupRef.current();
       }
     };
-     
   }, deps);
 }
 
@@ -133,7 +131,7 @@ export function useAppRefresh(
   options: {
     minBackgroundDuration?: number;
     refreshOnMount?: boolean;
-  } = {}
+  } = {},
 ): { refresh: () => void; isRefreshing: boolean } {
   const { minBackgroundDuration = 30000, refreshOnMount = false } = options;
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -155,9 +153,9 @@ export function useAppRefresh(
     }
 
     const handleChange = (state: AppStateStatus) => {
-      if (state === "background") {
+      if (state === 'background') {
         backgroundStartRef.current = new Date();
-      } else if (state === "active" && backgroundStartRef.current) {
+      } else if (state === 'active' && backgroundStartRef.current) {
         const duration = Date.now() - backgroundStartRef.current.getTime();
         backgroundStartRef.current = null;
 
@@ -167,7 +165,7 @@ export function useAppRefresh(
       }
     };
 
-    const subscription = AppState.addEventListener("change", handleChange);
+    const subscription = AppState.addEventListener('change', handleChange);
     return () => subscription.remove();
   }, [minBackgroundDuration, refreshOnMount, doRefresh]);
 
@@ -181,7 +179,7 @@ export function useKeepAwake(shouldKeepAwake: boolean = true): void {
     let keepAwakeInterval: ReturnType<typeof setInterval> | null = null;
 
     try {
-      const ExpoKeepAwake = require("expo-keep-awake");
+      const ExpoKeepAwake = require('expo-keep-awake');
       if (shouldKeepAwake) {
         ExpoKeepAwake.activateKeepAwake();
       }

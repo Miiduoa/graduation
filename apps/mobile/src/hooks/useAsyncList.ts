@@ -1,4 +1,4 @@
-import React from "react";
+import React from 'react';
 
 export type UseAsyncListOptions = {
   keepPreviousData?: boolean;
@@ -29,36 +29,39 @@ async function fetchWithRetry<T>(
   load: () => Promise<T>,
   retryCount: number,
   retryDelay: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<T> {
   let lastError: unknown;
-  
+
   for (let attempt = 0; attempt <= retryCount; attempt++) {
     if (signal?.aborted) {
-      throw new Error("Aborted");
+      throw new Error('Aborted');
     }
-    
+
     try {
       return await load();
     } catch (e) {
       lastError = e;
-      
+
       if (attempt < retryCount) {
         await new Promise((resolve) => setTimeout(resolve, retryDelay * (attempt + 1)));
       }
     }
   }
-  
+
   throw lastError;
 }
 
 export function useAsyncList<T>(
-  load: () => Promise<T[]>, 
+  load: () => Promise<T[]>,
   deps: React.DependencyList,
-  options: UseAsyncListOptions = {}
+  options: UseAsyncListOptions = {},
 ): UseAsyncListResult<T> {
-  const { keepPreviousData, retryCount, retryDelay, onRefreshError, onLoadError } = { ...DEFAULT_OPTIONS, ...options };
-  
+  const { keepPreviousData, retryCount, retryDelay, onRefreshError, onLoadError } = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+  };
+
   const [items, setItems] = React.useState<T[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
@@ -66,16 +69,16 @@ export function useAsyncList<T>(
   const [lastRefreshError, setLastRefreshError] = React.useState<string | null>(null);
 
   const [reloadTick, setReloadTick] = React.useState(0);
-  
+
   const loadRef = React.useRef(load);
   loadRef.current = load;
-  
+
   const onRefreshErrorRef = React.useRef(onRefreshError);
   onRefreshErrorRef.current = onRefreshError;
-  
+
   const onLoadErrorRef = React.useRef(onLoadError);
   onLoadErrorRef.current = onLoadError;
-  
+
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
   const reload = React.useCallback(() => {
@@ -88,13 +91,13 @@ export function useAsyncList<T>(
     // 同時取消主要載入和刷新請求，避免 race condition
     abortControllerRef.current?.abort();
     refreshAbortRef.current?.abort();
-    
+
     const controller = new AbortController();
     refreshAbortRef.current = controller;
-    
+
     setRefreshing(true);
     setLastRefreshError(null);
-    
+
     try {
       const rows = await loadRef.current();
       if (!controller.signal.aborted) {
@@ -103,7 +106,7 @@ export function useAsyncList<T>(
       }
     } catch (e) {
       if (controller.signal.aborted) return;
-      if (e instanceof Error && e.message === "Aborted") return;
+      if (e instanceof Error && e.message === 'Aborted') return;
       const errorMsg = e instanceof Error ? e.message : String(e);
       setLastRefreshError(errorMsg);
       onRefreshErrorRef.current?.(errorMsg);
@@ -119,22 +122,17 @@ export function useAsyncList<T>(
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    
+
     let cancelled = false;
-    
+
     setLoading(true);
     setError(null);
-    
+
     if (!keepPreviousData) {
       setItems([]);
     }
 
-    fetchWithRetry(
-      () => loadRef.current(),
-      retryCount ?? 0,
-      retryDelay ?? 1000,
-      controller.signal
-    )
+    fetchWithRetry(() => loadRef.current(), retryCount ?? 0, retryDelay ?? 1000, controller.signal)
       .then((rows) => {
         if (!cancelled && !controller.signal.aborted) {
           setItems(rows);
@@ -142,15 +140,15 @@ export function useAsyncList<T>(
       })
       .catch((e) => {
         if (cancelled || controller.signal.aborted) return;
-        if (e instanceof Error && e.message === "Aborted") return;
-        
+        if (e instanceof Error && e.message === 'Aborted') return;
+
         if (!keepPreviousData) {
           setItems([]);
         }
         let errorMsg = e instanceof Error ? e.message : String(e);
         // Firebase offline → friendlier message
-        if (errorMsg.includes("offline") || errorMsg.includes("client is offline")) {
-          errorMsg = "無法連線到伺服器。請檢查網路連線，或確認 Firebase 設定是否正確。";
+        if (errorMsg.includes('offline') || errorMsg.includes('client is offline')) {
+          errorMsg = '無法連線到伺服器。請檢查網路連線，或確認 Firebase 設定是否正確。';
         }
         setError(errorMsg);
         onLoadErrorRef.current?.(errorMsg);

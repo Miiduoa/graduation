@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   subscribeToNetworkStatus,
   getNetworkStatus,
   type NetworkStatus,
-} from "../services/offline";
+} from '../services/offline';
 
 /**
  * 判斷是否真正在線
@@ -15,7 +15,7 @@ function isEffectivelyOnline(status: NetworkStatus): boolean {
   // isInternetReachable: 是否能真正訪問互聯網
   // 當 isInternetReachable 為 null 時，表示狀態未知，我們採用保守策略
   if (!status.isConnected) return false;
-  
+
   // 如果 isInternetReachable 為 null（未知），我們假設網路可用
   // 但會在實際請求時處理失敗情況
   // 這樣可以避免在網路恢復時過度延遲
@@ -33,7 +33,7 @@ export function useNetworkStatus() {
   const [status, setStatus] = useState<NetworkStatus>(getNetworkStatus());
   const [wasOffline, setWasOffline] = useState(false);
   const [showReconnectedBanner, setShowReconnectedBanner] = useState(false);
-  
+
   const previousStatusRef = useRef<NetworkStatus>(status);
   const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasOfflineTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -41,10 +41,10 @@ export function useNetworkStatus() {
 
   useEffect(() => {
     isMountedRef.current = true;
-    
+
     const unsubscribe = subscribeToNetworkStatus((newStatus) => {
       if (!isMountedRef.current) return;
-      
+
       const previousStatus = previousStatusRef.current;
       const previouslyOffline = isDefinitelyOffline(previousStatus);
       const nowOnline = isEffectivelyOnline(newStatus);
@@ -73,7 +73,7 @@ export function useNetworkStatus() {
         }
         setWasOffline(true);
       }
-      
+
       // 當網路恢復且穩定時，重置 wasOffline
       if (nowOnline && previouslyOffline && newStatus.isInternetReachable === true) {
         // 清除之前的計時器
@@ -129,16 +129,16 @@ export function useNetworkStatus() {
     isConnected: status.isConnected,
     isInternetReachable: status.isInternetReachable,
     connectionType: status.type,
-    
+
     // 派生狀態（建議使用這些而非原始狀態）
     isOnline: effectivelyOnline,
     isOffline: definitelyOffline,
     isUnknown,
-    
+
     // 歷史狀態
     wasOffline,
     resetWasOffline,
-    
+
     // Banner 控制
     showReconnectedBanner,
     dismissReconnectedBanner,

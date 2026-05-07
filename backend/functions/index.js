@@ -43,10 +43,7 @@ const {
   requirePostJson,
   writeHttpError,
 } = require('./securityUtils');
-const {
-  normalizeCafeteriaPilotStatus,
-  resolveCafeteriaOrderingMetadata,
-} = require('./cafeterias');
+const { normalizeCafeteriaPilotStatus, resolveCafeteriaOrderingMetadata } = require('./cafeterias');
 const {
   answerWithServerWebSearch,
   buildAgentSystemPrompt,
@@ -375,7 +372,9 @@ const UNIVERSAL_DEV_ACCOUNTS = [
 ];
 
 function normalizeDevAccountEmail(email) {
-  return String(email || '').trim().toLowerCase();
+  return String(email || '')
+    .trim()
+    .toLowerCase();
 }
 
 function authenticateUniversalDevAccount(email, password) {
@@ -385,14 +384,15 @@ function authenticateUniversalDevAccount(email, password) {
   return (
     UNIVERSAL_DEV_ACCOUNTS.find(
       (account) =>
-        account.email === normalizedEmail &&
-        normalizedPassword === UNIVERSAL_DEV_ACCOUNT_PASSWORD,
+        account.email === normalizedEmail && normalizedPassword === UNIVERSAL_DEV_ACCOUNT_PASSWORD,
     ) || null
   );
 }
 
 function normalizePuStudentId(studentId) {
-  return String(studentId || '').trim().toUpperCase();
+  return String(studentId || '')
+    .trim()
+    .toUpperCase();
 }
 
 function buildPuStudentUid(studentId) {
@@ -403,51 +403,45 @@ function buildPuStudentEmail(studentId) {
   return `${studentId.toLowerCase()}@pu.edu.tw`;
 }
 
-async function createPuTronClassSession({
-  studentId,
-  cookies,
-  session,
-}) {
+async function createPuTronClassSession({ studentId, cookies, session }) {
   const sessionId = nodeCrypto.randomBytes(16).toString('hex');
-  await db.collection('_puTronClassSessions').doc(sessionId).set(
-    {
-      studentId,
-      cookies,
-      userId: session?.userId ?? null,
-      userName: session?.userName ?? null,
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
-    },
-    { merge: true },
-  );
+  await db
+    .collection('_puTronClassSessions')
+    .doc(sessionId)
+    .set(
+      {
+        studentId,
+        cookies,
+        userId: session?.userId ?? null,
+        userName: session?.userName ?? null,
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+      },
+      { merge: true },
+    );
 
   return sessionId;
 }
 
-async function createPuCampusSession({
-  studentId,
-  cookies,
-}) {
+async function createPuCampusSession({ studentId, cookies }) {
   const sessionId = nodeCrypto.randomBytes(16).toString('hex');
-  await db.collection('_puSessions').doc(sessionId).set(
-    {
-      studentId,
-      cookies,
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
-    },
-    { merge: true },
-  );
+  await db
+    .collection('_puSessions')
+    .doc(sessionId)
+    .set(
+      {
+        studentId,
+        cookies,
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+      },
+      { merge: true },
+    );
 
   return sessionId;
 }
 
-async function ensurePuStudentAuthUser({
-  auth,
-  uid,
-  displayName,
-  email,
-}) {
+async function ensurePuStudentAuthUser({ auth, uid, displayName, email }) {
   let authUser = null;
   let isNewUser = false;
 
@@ -984,17 +978,13 @@ function chunkItems(items, size = 400) {
   return chunks;
 }
 
-const {
-  trimString,
-  optionalTrimmedString,
-  parsePositiveInteger,
-  parseTimestampInput,
-} = createValidationHelpers({
-  HttpsError,
-  FieldValue,
-  Timestamp,
-  toJsDate: (value) => toJsDate(value),
-});
+const { trimString, optionalTrimmedString, parsePositiveInteger, parseTimestampInput } =
+  createValidationHelpers({
+    HttpsError,
+    FieldValue,
+    Timestamp,
+    toJsDate: (value) => toJsDate(value),
+  });
 
 function normalizeSchoolAnnouncementInput(input = {}) {
   const title = trimString(input.title, 160);
@@ -1230,10 +1220,38 @@ const ASSISTANT_ROLE_ACTION_ALLOWLIST = {
     'queue_action',
     'open_url',
   ]),
-  staff: new Set(['navigate', 'start_navigation', 'draft_message', 'submit_draft', 'queue_action', 'open_url']),
-  department: new Set(['navigate', 'start_navigation', 'draft_message', 'submit_draft', 'queue_action', 'open_url']),
-  admin: new Set(['navigate', 'start_navigation', 'draft_message', 'submit_draft', 'queue_action', 'open_url']),
-  school: new Set(['navigate', 'start_navigation', 'draft_message', 'submit_draft', 'queue_action', 'open_url']),
+  staff: new Set([
+    'navigate',
+    'start_navigation',
+    'draft_message',
+    'submit_draft',
+    'queue_action',
+    'open_url',
+  ]),
+  department: new Set([
+    'navigate',
+    'start_navigation',
+    'draft_message',
+    'submit_draft',
+    'queue_action',
+    'open_url',
+  ]),
+  admin: new Set([
+    'navigate',
+    'start_navigation',
+    'draft_message',
+    'submit_draft',
+    'queue_action',
+    'open_url',
+  ]),
+  school: new Set([
+    'navigate',
+    'start_navigation',
+    'draft_message',
+    'submit_draft',
+    'queue_action',
+    'open_url',
+  ]),
 };
 
 function resolveAssistantActorRole(rawRole) {
@@ -1252,8 +1270,11 @@ function resolvePermissionScope(intent, hasAuth) {
 
 function filterAssistantActionsByRole(actions, role, permissionScope = 'school_public') {
   if (!Array.isArray(actions) || actions.length === 0) return [];
-  const allowlist = ASSISTANT_ROLE_ACTION_ALLOWLIST[role] || ASSISTANT_ROLE_ACTION_ALLOWLIST.student;
-  return normalizeAssistantActions(actions, permissionScope).filter((item) => item && allowlist.has(item.action));
+  const allowlist =
+    ASSISTANT_ROLE_ACTION_ALLOWLIST[role] || ASSISTANT_ROLE_ACTION_ALLOWLIST.student;
+  return normalizeAssistantActions(actions, permissionScope).filter(
+    (item) => item && allowlist.has(item.action),
+  );
 }
 
 function mapDocData(docSnap) {
@@ -1536,7 +1557,11 @@ async function fetchAssistantKnowledgeChunks({ uid, schoolId, groupId, queryText
       const visibility = chunk.visibility || 'school';
       return visibility === 'public' || visibility === 'school';
     })
-    .map((chunk) => ({ ...chunk, scope: 'school', source: `schools/${schoolId}/aiKnowledge/${chunk.id}` }));
+    .map((chunk) => ({
+      ...chunk,
+      scope: 'school',
+      source: `schools/${schoolId}/aiKnowledge/${chunk.id}`,
+    }));
 
   let groupChunks = [];
   if (groupId && uid && (await isAssistantGroupMember(uid, groupId))) {
@@ -1650,10 +1675,7 @@ async function buildModelBackedAssistantResponse({
   }
 
   const modelResult = await callAssistantModel({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      ...history,
-    ],
+    messages: [{ role: 'system', content: systemPrompt }, ...history],
   });
 
   if (!modelResult?.content) {
@@ -1683,12 +1705,11 @@ async function buildModelBackedAssistantResponse({
   };
 }
 
-async function queueAssistantActionDrafts(uid, actions, {
-  schoolId,
-  actorRole,
-  permissionScope,
-  requestId,
-}) {
+async function queueAssistantActionDrafts(
+  uid,
+  actions,
+  { schoolId, actorRole, permissionScope, requestId },
+) {
   if (!uid || !Array.isArray(actions) || actions.length === 0) return actions;
 
   await Promise.all(
@@ -1737,20 +1758,23 @@ async function writeAssistantAuditLog({
   errorCode,
   requestId,
 }) {
-  await db.collection('aiLogs').doc(requestId).set({
-    uidHash: hashUserId(uid, schoolId),
-    schoolId: schoolId || null,
-    intent,
-    provider: provider || 'structured',
-    model: model || null,
-    latencyMs,
-    tokenUsage: tokenUsage || null,
-    sources: sources || [],
-    actionCount: actionCount || 0,
-    errorCode: errorCode || null,
-    requestId,
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  await db
+    .collection('aiLogs')
+    .doc(requestId)
+    .set({
+      uidHash: hashUserId(uid, schoolId),
+      schoolId: schoolId || null,
+      intent,
+      provider: provider || 'structured',
+      model: model || null,
+      latencyMs,
+      tokenUsage: tokenUsage || null,
+      sources: sources || [],
+      actionCount: actionCount || 0,
+      errorCode: errorCode || null,
+      requestId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
 }
 
 // =====================================================
@@ -2209,7 +2233,16 @@ exports.askCampusAssistant = onCall(
       return {
         content: '目前無法判斷你所屬的學校。請先選擇學校，或登入後再試一次。',
         suggestions: ['今日公告', '近期活動', '推薦餐點'],
-        debug: { intent, route: 'structured_v1', sourcesUsed: 0, source, freshness, permissionScope, actorRole, requestId },
+        debug: {
+          intent,
+          route: 'structured_v1',
+          sourcesUsed: 0,
+          source,
+          freshness,
+          permissionScope,
+          actorRole,
+          requestId,
+        },
       };
     }
 
@@ -2222,7 +2255,17 @@ exports.askCampusAssistant = onCall(
       suggestions: [],
       actions: [],
       citations: [],
-      debug: { intent, route: 'structured_v1', sourcesUsed: 0, hasAuth: Boolean(uid), source, freshness, permissionScope, actorRole, requestId },
+      debug: {
+        intent,
+        route: 'structured_v1',
+        sourcesUsed: 0,
+        hasAuth: Boolean(uid),
+        source,
+        freshness,
+        permissionScope,
+        actorRole,
+        requestId,
+      },
     };
     const finalizeResponse = async () => {
       response.actions = filterAssistantActionsByRole(response.actions, actorRole, permissionScope);
@@ -2251,7 +2294,9 @@ exports.askCampusAssistant = onCall(
         model: modelTrace.model,
         latencyMs: Date.now() - startedAt,
         tokenUsage: modelTrace.usage,
-        sources: response.citations.map((citation) => citation.source || `${citation.type}:${citation.id}`).slice(0, 12),
+        sources: response.citations
+          .map((citation) => citation.source || `${citation.type}:${citation.id}`)
+          .slice(0, 12),
         actionCount: response.actions.length,
         errorCode: response.error ? 'response_error' : null,
         requestId,
@@ -2322,13 +2367,19 @@ exports.askCampusAssistant = onCall(
       };
       if (modelBacked.response) {
         response.content = modelBacked.response.content;
-        response.suggestions = modelBacked.response.suggestions.length > 0
-          ? modelBacked.response.suggestions
-          : ['查看詳情', '今日摘要', '推薦餐點'];
+        response.suggestions =
+          modelBacked.response.suggestions.length > 0
+            ? modelBacked.response.suggestions
+            : ['查看詳情', '今日摘要', '推薦餐點'];
         response.actions = modelBacked.response.actions;
         response.citations = modelBacked.response.citations;
         response.debug.route = 'agent_model_rag';
-        response.debug.sourcesUsed = knowledgeChunks.length + announcements.length + events.length + menus.length + pois.length;
+        response.debug.sourcesUsed =
+          knowledgeChunks.length +
+          announcements.length +
+          events.length +
+          menus.length +
+          pois.length;
         return await finalizeResponse();
       }
     }
@@ -2346,7 +2397,7 @@ exports.askCampusAssistant = onCall(
         '草稿內容：',
         '您好，我因身體不適／個人事由，想申請相關課程請假。請協助確認是否需要補交證明文件，謝謝。',
         '',
-        '送出前請確認日期、課程、假別與證明文件。'
+        '送出前請確認日期、課程、假別與證明文件。',
       ].join('\n');
       response.suggestions = ['補上日期', '改成病假', '查請假規則'];
       response.actions = [
@@ -2359,7 +2410,9 @@ exports.askCampusAssistant = onCall(
           evidenceRefs: [{ type: 'system', id: 'leave-request-draft', label: '請假草稿' }],
         }),
       ];
-      response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];
+      response.citations = [
+        { type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' },
+      ];
       return await finalizeResponse();
     }
 
@@ -2375,7 +2428,8 @@ exports.askCampusAssistant = onCall(
       const target = pendingAssignments[0];
 
       if (!target) {
-        response.content = '目前沒有抓到快截止的作業。你可以指定一份作業名稱，我會幫你拆成可執行步驟。';
+        response.content =
+          '目前沒有抓到快截止的作業。你可以指定一份作業名稱，我會幫你拆成可執行步驟。';
         response.suggestions = ['今日摘要', '查作業', '查公告'];
         return await finalizeResponse();
       }
@@ -2388,7 +2442,7 @@ exports.askCampusAssistant = onCall(
         '3. 用 45 分鐘完成第一版內容。',
         '4. 截止前預留 20 分鐘檢查格式與附件。',
         '',
-        `截止時間：${formatAssistantDate(target.dueAt, true) || '未設定'}`
+        `截止時間：${formatAssistantDate(target.dueAt, true) || '未設定'}`,
       ].join('\n');
       response.suggestions = ['設定提醒', '更細拆步驟', '查看作業'];
       response.actions = [
@@ -2469,7 +2523,9 @@ exports.askCampusAssistant = onCall(
             },
             requiresConfirmation: true,
             sensitivity: 'medium',
-            evidenceRefs: [{ type: 'assignment', id: earliest.id, label: earliest.title ?? '作業' }],
+            evidenceRefs: [
+              { type: 'assignment', id: earliest.id, label: earliest.title ?? '作業' },
+            ],
           }),
         ];
         response.citations = pendingAssignments.slice(0, 3).map((assignment) => ({
@@ -2516,7 +2572,13 @@ exports.askCampusAssistant = onCall(
             },
             requiresConfirmation: true,
             sensitivity: 'medium',
-            evidenceRefs: [{ type: 'assignment', id: pendingAssignments[0].id, label: pendingAssignments[0].title ?? '作業' }],
+            evidenceRefs: [
+              {
+                type: 'assignment',
+                id: pendingAssignments[0].id,
+                label: pendingAssignments[0].title ?? '作業',
+              },
+            ],
           }),
         ];
       }
@@ -2546,12 +2608,16 @@ exports.askCampusAssistant = onCall(
           .join('\n'),
       ].join('\n');
       response.suggestions = ['查看詳情', '近期活動', '推薦餐點'];
-      response.actions = announcements.slice(0, 2).map((announcement) => assistantAction({
-        label: `查看「${String(announcement.title ?? '公告').slice(0, 10)}」`,
-        action: 'navigate',
-        params: { screen: 'Today', nested: '公告詳情', id: announcement.id },
-        evidenceRefs: [{ type: 'announcement', id: announcement.id, label: announcement.title ?? '公告' }],
-      }));
+      response.actions = announcements.slice(0, 2).map((announcement) =>
+        assistantAction({
+          label: `查看「${String(announcement.title ?? '公告').slice(0, 10)}」`,
+          action: 'navigate',
+          params: { screen: 'Today', nested: '公告詳情', id: announcement.id },
+          evidenceRefs: [
+            { type: 'announcement', id: announcement.id, label: announcement.title ?? '公告' },
+          ],
+        }),
+      );
       response.citations = announcements.slice(0, 3).map((announcement) => ({
         type: 'announcement',
         id: announcement.id,
@@ -2588,12 +2654,14 @@ exports.askCampusAssistant = onCall(
           .join('\n'),
       ].join('\n');
       response.suggestions = ['查看詳情', '今日公告', '找地點'];
-      response.actions = events.slice(0, 2).map((event) => assistantAction({
-        label: `查看「${String(event.title ?? '活動').slice(0, 10)}」`,
-        action: 'navigate',
-        params: { screen: 'Today', nested: '活動詳情', id: event.id },
-        evidenceRefs: [{ type: 'event', id: event.id, label: event.title ?? '活動' }],
-      }));
+      response.actions = events.slice(0, 2).map((event) =>
+        assistantAction({
+          label: `查看「${String(event.title ?? '活動').slice(0, 10)}」`,
+          action: 'navigate',
+          params: { screen: 'Today', nested: '活動詳情', id: event.id },
+          evidenceRefs: [{ type: 'event', id: event.id, label: event.title ?? '活動' }],
+        }),
+      );
       response.citations = events.slice(0, 3).map((event) => ({
         type: 'event',
         id: event.id,
@@ -2624,12 +2692,14 @@ exports.askCampusAssistant = onCall(
           .join('\n'),
       ].join('\n');
       response.suggestions = ['其他選擇', '找地點', '近期活動'];
-      response.actions = menus.slice(0, 2).map((menu) => assistantAction({
-        label: `查看「${String(menu.name ?? menu.title ?? '餐點').slice(0, 10)}」`,
-        action: 'navigate',
-        params: { screen: '校園', nested: 'MenuDetail', id: menu.id },
-        evidenceRefs: [{ type: 'menu', id: menu.id, label: menu.name ?? menu.title ?? '餐點' }],
-      }));
+      response.actions = menus.slice(0, 2).map((menu) =>
+        assistantAction({
+          label: `查看「${String(menu.name ?? menu.title ?? '餐點').slice(0, 10)}」`,
+          action: 'navigate',
+          params: { screen: '校園', nested: 'MenuDetail', id: menu.id },
+          evidenceRefs: [{ type: 'menu', id: menu.id, label: menu.name ?? menu.title ?? '餐點' }],
+        }),
+      );
       response.citations = menus.slice(0, 3).map((menu) => ({
         type: 'menu',
         id: menu.id,
@@ -2732,7 +2802,16 @@ function clampPulseLevel(value) {
 }
 
 function normalizePulseCategory(value) {
-  const allowed = new Set(['library', 'dining', 'parking', 'gym', 'study', 'classroom', 'service', 'other']);
+  const allowed = new Set([
+    'library',
+    'dining',
+    'parking',
+    'gym',
+    'study',
+    'classroom',
+    'service',
+    'other',
+  ]);
   return allowed.has(value) ? value : 'other';
 }
 
@@ -2773,7 +2852,11 @@ exports.submitPulseReport = onCall(
     const locationName = String(request.data?.locationName || locationId).slice(0, 80);
     const category = normalizePulseCategory(request.data?.category);
     const now = FieldValue.serverTimestamp();
-    const aggregateRef = db.collection('schools').doc(schoolId).collection('pulseAggregates').doc(locationId);
+    const aggregateRef = db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('pulseAggregates')
+      .doc(locationId);
     const reportRef = db.collection('schools').doc(schoolId).collection('pulseReports').doc();
 
     await db.runTransaction(async (transaction) => {
@@ -2786,7 +2869,11 @@ exports.submitPulseReport = onCall(
       const roundedLevel = clampPulseLevel(currentLevel);
       const previousRounded = clampPulseLevel(previousLevel);
       const trend =
-        roundedLevel > previousRounded ? 'rising' : roundedLevel < previousRounded ? 'falling' : 'stable';
+        roundedLevel > previousRounded
+          ? 'rising'
+          : roundedLevel < previousRounded
+            ? 'falling'
+            : 'stable';
       const reportCount24h = Number(previous.reportCount24h || 0) + 1;
 
       transaction.set(reportRef, {
@@ -2811,7 +2898,8 @@ exports.submitPulseReport = onCall(
           sampleSize,
           reportCount24h,
           trend,
-          bestTimeToVisit: previous.bestTimeToVisit || (roundedLevel >= 4 ? '尖峰後 30 分鐘' : '現在可前往'),
+          bestTimeToVisit:
+            previous.bestTimeToVisit || (roundedLevel >= 4 ? '尖峰後 30 分鐘' : '現在可前往'),
           updatedAt: now,
         },
         { merge: true },
@@ -2867,10 +2955,19 @@ exports.getStudentRiskSnapshots = onCall(
     }
 
     const baseRef = schoolId
-      ? db.collection('users').doc(uid).collection('schools').doc(schoolId).collection('riskSnapshots')
+      ? db
+          .collection('users')
+          .doc(uid)
+          .collection('schools')
+          .doc(schoolId)
+          .collection('riskSnapshots')
       : db.collection('users').doc(uid).collection('riskSnapshots');
 
-    const existing = await baseRef.orderBy('generatedAt', 'desc').limit(5).get().catch(() => null);
+    const existing = await baseRef
+      .orderBy('generatedAt', 'desc')
+      .limit(5)
+      .get()
+      .catch(() => null);
     if (existing && !existing.empty) {
       return {
         snapshots: existing.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })),
@@ -2883,7 +2980,8 @@ exports.getStudentRiskSnapshots = onCall(
       return due && due - Date.now() <= 72 * 60 * 60 * 1000;
     });
     const score = Math.min(95, pendingAssignments.length * 10 + highPressure.length * 15);
-    const level = score >= 70 ? 'critical' : score >= 45 ? 'warning' : score >= 20 ? 'watch' : 'safe';
+    const level =
+      score >= 70 ? 'critical' : score >= 45 ? 'warning' : score >= 20 ? 'watch' : 'safe';
     const snapshotRef = baseRef.doc();
     const generatedAt = Timestamp.now();
     const snapshot = {
@@ -2905,7 +3003,9 @@ exports.getStudentRiskSnapshots = onCall(
         title: assignment.title || '作業',
         description: `截止：${formatAssistantDate(assignment.dueAt, true) || '未設定'}`,
         groupId: assignment.groupId,
-        evidenceRefs: [{ type: 'assignment', id: assignment.id, label: assignment.title || '作業' }],
+        evidenceRefs: [
+          { type: 'assignment', id: assignment.id, label: assignment.title || '作業' },
+        ],
         createdAt: generatedAt,
       })),
       recommendedActions: pendingAssignments.slice(0, 3).map((assignment, index) => ({
@@ -2922,7 +3022,9 @@ exports.getStudentRiskSnapshots = onCall(
           screen: 'AssignmentDetail',
           params: { groupId: assignment.groupId, assignmentId: assignment.id },
         },
-        evidenceRefs: [{ type: 'assignment', id: assignment.id, label: assignment.title || '作業' }],
+        evidenceRefs: [
+          { type: 'assignment', id: assignment.id, label: assignment.title || '作業' },
+        ],
         requiresConfirmation: false,
         source: 'risk',
         dueAt: assignment.dueAt || null,
@@ -3001,7 +3103,8 @@ exports.enqueueAssistantAction = onCall(
       schoolId: userProfile?.schoolId || request.data?.schoolId || null,
       label,
       action,
-      params: request.data?.params && typeof request.data.params === 'object' ? request.data.params : {},
+      params:
+        request.data?.params && typeof request.data.params === 'object' ? request.data.params : {},
       requiresConfirmation,
       sensitivity: request.data?.sensitivity || (requiresConfirmation ? 'medium' : 'low'),
       status: 'pending_confirmation',
@@ -3486,7 +3589,11 @@ exports.signInPuStudentId = onRequest(
       });
 
       const loginResult = await puLogin(rawStudentId, password);
-      if (!loginResult.success || !loginResult.cookies || Object.keys(loginResult.cookies).length === 0) {
+      if (
+        !loginResult.success ||
+        !loginResult.cookies ||
+        Object.keys(loginResult.cookies).length === 0
+      ) {
         res.status(401).json({
           error: loginResult.error || '學號或密碼錯誤',
         });
@@ -3511,7 +3618,10 @@ exports.signInPuStudentId = onRequest(
           });
           console.log('[signInPuStudentId] TronClass login OK, sessionId:', tronClassSessionId);
         } else {
-          console.warn('[signInPuStudentId] TronClass login failed (soft):', tronClassLoginResult.error || 'unknown');
+          console.warn(
+            '[signInPuStudentId] TronClass login failed (soft):',
+            tronClassLoginResult.error || 'unknown',
+          );
         }
       } catch (tcErr) {
         console.warn('[signInPuStudentId] TronClass login threw (soft):', tcErr?.message || tcErr);
@@ -3530,7 +3640,9 @@ exports.signInPuStudentId = onRequest(
       ]);
       const profile = profileResult.success ? profileResult.studentInfo || {} : {};
       const studentId = normalizePuStudentId(profile.studentId || rawStudentId);
-      const displayName = String(profile.name || loginResult.studentName || `${studentId} 同學`).trim();
+      const displayName = String(
+        profile.name || loginResult.studentName || `${studentId} 同學`,
+      ).trim();
       const department = String(profile.class || '').trim();
 
       if (skipFirebase) {
@@ -3568,7 +3680,9 @@ exports.signInPuStudentId = onRequest(
                 summary: gradesResult.summary || {},
               }
             : null,
-          announcements: announcementsResult.success ? announcementsResult.announcements || [] : null,
+          announcements: announcementsResult.success
+            ? announcementsResult.announcements || []
+            : null,
         });
         return;
       }
@@ -4348,7 +4462,12 @@ exports.deleteSchoolAnnouncement = onCall(
 
     await assertSchoolAdminOrEditor(schoolId, uid);
     const actorEmail = trimString(request.auth?.token?.email, 320);
-    await db.collection('schools').doc(schoolId).collection('announcements').doc(announcementId).delete();
+    await db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('announcements')
+      .doc(announcementId)
+      .delete();
 
     await logAdminAction({
       schoolId,
@@ -4484,8 +4603,7 @@ exports.upsertSchoolEvent = onCall(
         startsAt:
           normalized.startsAt instanceof Timestamp ? normalized.startsAt : FieldValue.delete(),
         endsAt: normalized.endsAt,
-        capacity:
-          normalized.capacity == null ? FieldValue.delete() : normalized.capacity,
+        capacity: normalized.capacity == null ? FieldValue.delete() : normalized.capacity,
       };
 
       await targetRef.set(payload, { merge: true });
@@ -4860,7 +4978,10 @@ exports.clearSchoolAdminTestData = onCall(
       db.collection('schools').doc(schoolId).collection('clubEvents').get(),
     ]);
 
-    const refs = [...announcementsSnap.docs.map((docSnap) => docSnap.ref), ...eventsSnap.docs.map((docSnap) => docSnap.ref)];
+    const refs = [
+      ...announcementsSnap.docs.map((docSnap) => docSnap.ref),
+      ...eventsSnap.docs.map((docSnap) => docSnap.ref),
+    ];
     for (const chunk of chunkItems(refs)) {
       const batch = db.batch();
       for (const ref of chunk) {
@@ -5254,7 +5375,11 @@ exports.returnBook = onCall(
 
     const batch = db.batch();
     const scopedLoanRef = getUserSchoolDoc(uid, schoolId, 'libraryLoans', loanId);
-    const bookRef = db.collection('schools').doc(schoolId).collection('libraryBooks').doc(loanData.bookId);
+    const bookRef = db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('libraryBooks')
+      .doc(loanData.bookId);
     const bookDocForReturn = await bookRef.get();
 
     batch.update(loanRef, {
@@ -5395,8 +5520,17 @@ exports.reserveSeat = onCall(
       throw new HttpsError('failed-precondition', 'Maximum daily reservations reached');
     }
 
-    const reservationRef = db.collection('schools').doc(schoolId).collection('seatReservations').doc();
-    const scopedReservationRef = getUserSchoolDoc(uid, schoolId, 'seatReservations', reservationRef.id);
+    const reservationRef = db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('seatReservations')
+      .doc();
+    const scopedReservationRef = getUserSchoolDoc(
+      uid,
+      schoolId,
+      'seatReservations',
+      reservationRef.id,
+    );
     const reservationPayload = {
       userId: uid,
       schoolId,
@@ -5719,7 +5853,11 @@ exports.exportUserData = onCall(
           .get();
         const conversations = [];
         for (const conversationDoc of conversationsSnap.docs) {
-          if (schoolId && conversationDoc.data()?.schoolId && conversationDoc.data().schoolId !== schoolId) {
+          if (
+            schoolId &&
+            conversationDoc.data()?.schoolId &&
+            conversationDoc.data().schoolId !== schoolId
+          ) {
             continue;
           }
           const messagesSnap = await conversationDoc.ref
@@ -5850,70 +5988,56 @@ exports.deleteUserAccount = onCall(
         await db.collectionGroup('registrations').where('userId', '==', uid).limit(200).get(),
       );
       await deleteSnapshotDocs(
-        (
-          await db
-            .collectionGroup('members')
-            .where(FieldPath.documentId(), '==', uid)
-            .get()
-            .catch(() => null)
-        ) || { docs: [] },
+        (await db
+          .collectionGroup('members')
+          .where(FieldPath.documentId(), '==', uid)
+          .get()
+          .catch(() => null)) || { docs: [] },
       );
       await deleteSnapshotDocs(
-        (
-          await db
-            .collectionGroup('directory')
-            .where(FieldPath.documentId(), '==', uid)
-            .get()
-            .catch(() => null)
-        ) || { docs: [] },
+        (await db
+          .collectionGroup('directory')
+          .where(FieldPath.documentId(), '==', uid)
+          .get()
+          .catch(() => null)) || { docs: [] },
       );
       await deleteSnapshotDocs(
-        (
-          await db
-            .collectionGroup('serviceRoles')
-            .where(FieldPath.documentId(), '==', uid)
-            .get()
-            .catch(() => null)
-        ) || { docs: [] },
+        (await db
+          .collectionGroup('serviceRoles')
+          .where(FieldPath.documentId(), '==', uid)
+          .get()
+          .catch(() => null)) || { docs: [] },
       );
       await deleteSnapshotDocs(
-        (
-          await db
-            .collectionGroup('operators')
-            .where(FieldPath.documentId(), '==', uid)
-            .get()
-            .catch(() => null)
-        ) || { docs: [] },
+        (await db
+          .collectionGroup('operators')
+          .where(FieldPath.documentId(), '==', uid)
+          .get()
+          .catch(() => null)) || { docs: [] },
       );
       await deleteSnapshotDocs(
-        (
-          await db
-            .collectionGroup('submissions')
-            .where('userId', '==', uid)
-            .limit(200)
-            .get()
-            .catch(() => null)
-        ) || { docs: [] },
+        (await db
+          .collectionGroup('submissions')
+          .where('userId', '==', uid)
+          .limit(200)
+          .get()
+          .catch(() => null)) || { docs: [] },
       );
       await deleteSnapshotDocs(
-        (
-          await db
-            .collectionGroup('peerReviews')
-            .where('reviewerId', '==', uid)
-            .limit(200)
-            .get()
-            .catch(() => null)
-        ) || { docs: [] },
+        (await db
+          .collectionGroup('peerReviews')
+          .where('reviewerId', '==', uid)
+          .limit(200)
+          .get()
+          .catch(() => null)) || { docs: [] },
       );
       await deleteSnapshotDocs(
-        (
-          await db
-            .collectionGroup('peerReviews')
-            .where('submissionOwnerId', '==', uid)
-            .limit(200)
-            .get()
-            .catch(() => null)
-        ) || { docs: [] },
+        (await db
+          .collectionGroup('peerReviews')
+          .where('submissionOwnerId', '==', uid)
+          .limit(200)
+          .get()
+          .catch(() => null)) || { docs: [] },
       );
 
       await userRef.set(
@@ -6065,7 +6189,10 @@ exports.updateOrderStatus = onCall(
     if (!hasSchoolOverride) {
       const cafeteriaId = trimString(order?.cafeteriaId, 160);
       if (!cafeteriaId) {
-        throw new HttpsError('permission-denied', 'Legacy orders without cafeteriaId are read-only');
+        throw new HttpsError(
+          'permission-denied',
+          'Legacy orders without cafeteriaId are read-only',
+        );
       }
       await assertCafeteriaOperator(schoolId, cafeteriaId, uid);
     }
@@ -6379,7 +6506,11 @@ exports.reserveWashingMachine = onCall(
 
     await assertActiveSchoolMember(schoolId, uid);
 
-    const machineRef = db.collection('schools').doc(schoolId).collection('washingMachines').doc(machineId);
+    const machineRef = db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('washingMachines')
+      .doc(machineId);
     const machineDoc = await machineRef.get();
     if (!machineDoc.exists) {
       throw new HttpsError('not-found', 'Washing machine not found');
@@ -6402,7 +6533,11 @@ exports.reserveWashingMachine = onCall(
       throw new HttpsError('already-exists', 'This time slot is already reserved');
     }
 
-    const reservationRef = db.collection('schools').doc(schoolId).collection('washingReservations').doc();
+    const reservationRef = db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('washingReservations')
+      .doc();
     const reservedUntil = new Date(Date.now() + 10 * 60 * 1000);
 
     await db.runTransaction(async (transaction) => {
@@ -6448,7 +6583,11 @@ exports.cancelWashingReservation = onCall(
       throw new HttpsError('invalid-argument', 'Missing required fields');
     }
 
-    const reservationRef = db.collection('schools').doc(schoolId).collection('washingReservations').doc(reservationId);
+    const reservationRef = db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('washingReservations')
+      .doc(reservationId);
     const reservationDoc = await reservationRef.get();
     if (!reservationDoc.exists) {
       throw new HttpsError('not-found', 'Reservation not found');
@@ -6463,7 +6602,11 @@ exports.cancelWashingReservation = onCall(
       throw new HttpsError('failed-precondition', 'Reservation cannot be cancelled');
     }
 
-    const machineRef = db.collection('schools').doc(schoolId).collection('washingMachines').doc(reservation.machineId);
+    const machineRef = db
+      .collection('schools')
+      .doc(schoolId)
+      .collection('washingMachines')
+      .doc(reservation.machineId);
 
     await db.runTransaction(async (transaction) => {
       transaction.update(reservationRef, {
@@ -6655,7 +6798,11 @@ exports.cancelPrintJob = onCall(
 
       if (jobDoc.data().printerId) {
         transaction.set(
-          db.collection('schools').doc(schoolId).collection('printers').doc(jobDoc.data().printerId),
+          db
+            .collection('schools')
+            .doc(schoolId)
+            .collection('printers')
+            .doc(jobDoc.data().printerId),
           {
             queueLength: FieldValue.increment(-1),
             updatedAt: FieldValue.serverTimestamp(),
@@ -8295,7 +8442,14 @@ exports.puFetchCampusData = onRequest(
       const sessionId = String(req.body?.sessionId || '').trim();
       const dataType = String(req.body?.dataType || '').trim();
       const semester = String(req.body?.semester || '').trim();
-      const allowedTypes = ['courses', 'grades', 'announcements', 'studentInfo', 'absence', 'creditSummary'];
+      const allowedTypes = [
+        'courses',
+        'grades',
+        'announcements',
+        'studentInfo',
+        'absence',
+        'creditSummary',
+      ];
 
       if (!sessionId || !dataType) {
         res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
@@ -8323,7 +8477,12 @@ exports.puFetchCampusData = onRequest(
 
       const sessionData = sessionDoc.data();
       const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
-      if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0 || !expiresAt || expiresAt < new Date()) {
+      if (
+        !sessionData?.cookies ||
+        Object.keys(sessionData.cookies).length === 0 ||
+        !expiresAt ||
+        expiresAt < new Date()
+      ) {
         await sessionRef.delete().catch(() => null);
         res.status(401).json({ error: 'Invalid or expired PU session' });
         return;
@@ -8447,7 +8606,22 @@ exports.puFetchTronClassData = onRequest(
 
       const sessionId = String(req.body?.sessionId || '').trim();
       const dataType = String(req.body?.dataType || '').trim();
-      const allowedTypes = ['profile', 'courses', 'activities', 'modules', 'attendance', 'todos', 'courseDetail', 'exams', 'scoreItems', 'selfScore', 'homeworkStatus', 'homeworkScores', 'examStatus', 'announcements'];
+      const allowedTypes = [
+        'profile',
+        'courses',
+        'activities',
+        'modules',
+        'attendance',
+        'todos',
+        'courseDetail',
+        'exams',
+        'scoreItems',
+        'selfScore',
+        'homeworkStatus',
+        'homeworkScores',
+        'examStatus',
+        'announcements',
+      ];
 
       if (!sessionId || !dataType) {
         res.status(400).json({ error: 'Missing required fields: sessionId, dataType' });
@@ -8599,7 +8773,12 @@ exports.puFetchTronClassData = onRequest(
         case 'activityDetail': {
           const courseId = Number(req.body?.courseId);
           const activityId = Number(req.body?.activityId);
-          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(activityId) || activityId <= 0) {
+          if (
+            !Number.isFinite(courseId) ||
+            courseId <= 0 ||
+            !Number.isFinite(activityId) ||
+            activityId <= 0
+          ) {
             res.status(400).json({ error: 'Missing or invalid courseId/activityId' });
             return;
           }
@@ -8609,7 +8788,12 @@ exports.puFetchTronClassData = onRequest(
         case 'homeworkDetail': {
           const courseId = Number(req.body?.courseId);
           const homeworkId = Number(req.body?.homeworkId);
-          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(homeworkId) || homeworkId <= 0) {
+          if (
+            !Number.isFinite(courseId) ||
+            courseId <= 0 ||
+            !Number.isFinite(homeworkId) ||
+            homeworkId <= 0
+          ) {
             res.status(400).json({ error: 'Missing or invalid courseId/homeworkId' });
             return;
           }
@@ -8619,7 +8803,12 @@ exports.puFetchTronClassData = onRequest(
         case 'homeworkSubmissions': {
           const courseId = Number(req.body?.courseId);
           const homeworkId = Number(req.body?.homeworkId);
-          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(homeworkId) || homeworkId <= 0) {
+          if (
+            !Number.isFinite(courseId) ||
+            courseId <= 0 ||
+            !Number.isFinite(homeworkId) ||
+            homeworkId <= 0
+          ) {
             res.status(400).json({ error: 'Missing or invalid courseId/homeworkId' });
             return;
           }
@@ -8629,7 +8818,12 @@ exports.puFetchTronClassData = onRequest(
         case 'examDetail': {
           const courseId = Number(req.body?.courseId);
           const examId = Number(req.body?.examId);
-          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(examId) || examId <= 0) {
+          if (
+            !Number.isFinite(courseId) ||
+            courseId <= 0 ||
+            !Number.isFinite(examId) ||
+            examId <= 0
+          ) {
             res.status(400).json({ error: 'Missing or invalid courseId/examId' });
             return;
           }
@@ -8639,7 +8833,12 @@ exports.puFetchTronClassData = onRequest(
         case 'examAttempts': {
           const courseId = Number(req.body?.courseId);
           const examId = Number(req.body?.examId);
-          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(examId) || examId <= 0) {
+          if (
+            !Number.isFinite(courseId) ||
+            courseId <= 0 ||
+            !Number.isFinite(examId) ||
+            examId <= 0
+          ) {
             res.status(400).json({ error: 'Missing or invalid courseId/examId' });
             return;
           }
@@ -8658,7 +8857,12 @@ exports.puFetchTronClassData = onRequest(
         case 'discussionPosts': {
           const courseId = Number(req.body?.courseId);
           const discussionId = Number(req.body?.discussionId);
-          if (!Number.isFinite(courseId) || courseId <= 0 || !Number.isFinite(discussionId) || discussionId <= 0) {
+          if (
+            !Number.isFinite(courseId) ||
+            courseId <= 0 ||
+            !Number.isFinite(discussionId) ||
+            discussionId <= 0
+          ) {
             res.status(400).json({ error: 'Missing or invalid courseId/discussionId' });
             return;
           }

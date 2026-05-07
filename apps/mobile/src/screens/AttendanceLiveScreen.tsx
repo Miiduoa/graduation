@@ -95,7 +95,16 @@ function RotatingQRDisplay({ sessionId, secret }: { sessionId: string; secret: s
           <Ionicons name={'shield-checkmark' as any} size={14} color="#FFFFFF" />
           <Text style={s.qrBadgeText}>動態防截圖</Text>
         </View>
-        <View style={[s.qrBadge, { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }]}>
+        <View
+          style={[
+            s.qrBadge,
+            {
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            },
+          ]}
+        >
           <Ionicons name={'time-outline' as any} size={14} color={theme.colors.accent} />
           <Text style={[s.qrBadgeText, { color: theme.colors.text }]}>{countdown}s</Text>
         </View>
@@ -153,7 +162,10 @@ function StudentRecordItem({
           <Text style={[s.recordStatus, { color: statusColor }]}>{statusLabel}</Text>
           {record.checkInTime && (
             <Text style={s.recordTime}>
-              {new Date(record.checkInTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}
+              {new Date(record.checkInTime).toLocaleTimeString('zh-TW', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
             </Text>
           )}
         </View>
@@ -204,7 +216,9 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
     }
   }, [sessionId, isTeacher, auth.user?.uid]);
 
-  useEffect(() => { loadSession(); }, [loadSession]);
+  useEffect(() => {
+    loadSession();
+  }, [loadSession]);
 
   // Auto-refresh (every 5 sec for teacher)
   useEffect(() => {
@@ -266,7 +280,9 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
 
   const handleEndSession = useCallback(() => {
     if (!session) return;
-    const checkedCount = session.records.filter((r) => r.status === 'present' || r.status === 'late').length;
+    const checkedCount = session.records.filter(
+      (r) => r.status === 'present' || r.status === 'late',
+    ).length;
     Alert.alert(
       '結束點名',
       `確認結束「${session.courseName}」的點名？\n已簽到: ${checkedCount} / ${session.totalStudents}`,
@@ -284,10 +300,13 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
     );
   }, [session, sessionId, navigation]);
 
-  const handleStatusChange = useCallback(async (studentId: string, status: AttendanceStatus) => {
-    await updateStudentStatus(sessionId, studentId, status);
-    await loadSession();
-  }, [sessionId, loadSession]);
+  const handleStatusChange = useCallback(
+    async (studentId: string, status: AttendanceStatus) => {
+      await updateStudentStatus(sessionId, studentId, status);
+      await loadSession();
+    },
+    [sessionId, loadSession],
+  );
 
   // ─── Computed ─────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -336,7 +355,9 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
           <Ionicons name={'chevron-back' as any} size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <View style={s.headerCenter}>
-          <Text style={s.headerTitle} numberOfLines={1}>{session.courseName}</Text>
+          <Text style={s.headerTitle} numberOfLines={1}>
+            {session.courseName}
+          </Text>
           <View style={s.headerMeta}>
             <View style={[s.liveIndicator, session.status === 'active' && s.liveActive]} />
             <Text style={s.headerSubtitle}>
@@ -354,7 +375,9 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
       <ScrollView
         style={s.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={{ paddingBottom: insets.bottom + TAB_BAR_CONTENT_BOTTOM_PADDING + 40 }}
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + TAB_BAR_CONTENT_BOTTOM_PADDING + 40,
+        }}
       >
         {/* ══════════════════════════════════════════════════════
            TEACHER VIEW
@@ -389,7 +412,11 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                 <NumberCodeDisplay code={session.numberCode} />
               ) : (
                 <View style={s.manualModeHint}>
-                  <Ionicons name={'clipboard-outline' as any} size={40} color={theme.colors.accent} />
+                  <Ionicons
+                    name={'clipboard-outline' as any}
+                    size={40}
+                    color={theme.colors.accent}
+                  />
                   <Text style={s.manualModeText}>手動點名模式</Text>
                   <Text style={s.manualModeSubtext}>長按學生名稱更改出席狀態</Text>
                 </View>
@@ -415,7 +442,13 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                     onPress={() => setStudentFilter(f)}
                   >
                     <Text style={[s.filterTabText, studentFilter === f && s.filterTabTextActive]}>
-                      {f === 'all' ? '全部' : f === 'present' ? '出席' : f === 'late' ? '遲到' : '缺席'}
+                      {f === 'all'
+                        ? '全部'
+                        : f === 'present'
+                          ? '出席'
+                          : f === 'late'
+                            ? '遲到'
+                            : '缺席'}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -447,7 +480,11 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
               /* ── Check-in success ── */
               <View style={s.successCard}>
                 <View style={s.successIcon}>
-                  <Ionicons name={'checkmark-circle' as any} size={72} color={theme.colors.success} />
+                  <Ionicons
+                    name={'checkmark-circle' as any}
+                    size={72}
+                    color={theme.colors.success}
+                  />
                 </View>
                 <Text style={s.successTitle}>簽到成功</Text>
                 <Text style={s.successMessage}>{checkInMessage}</Text>
@@ -461,7 +498,11 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                   </View>
                   {session.location ? (
                     <View style={s.sessionInfoRow}>
-                      <Ionicons name={'location-outline' as any} size={16} color={theme.colors.muted} />
+                      <Ionicons
+                        name={'location-outline' as any}
+                        size={16}
+                        color={theme.colors.muted}
+                      />
                       <Text style={s.sessionInfoText}>{session.location}</Text>
                     </View>
                   ) : null}
@@ -493,7 +534,10 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                     <Text style={s.studentInputLabel}>輸入 6 位簽到密碼</Text>
                     <View style={s.studentDigitsRow}>
                       {Array.from({ length: 6 }).map((_, i) => (
-                        <View key={i} style={[s.studentDigitBox, numberInput[i] ? s.studentDigitFilled : null]}>
+                        <View
+                          key={i}
+                          style={[s.studentDigitBox, numberInput[i] ? s.studentDigitFilled : null]}
+                        >
                           <Text style={s.studentDigitText}>{numberInput[i] || ''}</Text>
                         </View>
                       ))}
@@ -501,7 +545,9 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                     <TextInput
                       style={s.hiddenInput}
                       value={numberInput}
-                      onChangeText={(text) => setNumberInput(text.replace(/[^0-9]/g, '').slice(0, 6))}
+                      onChangeText={(text) =>
+                        setNumberInput(text.replace(/[^0-9]/g, '').slice(0, 6))
+                      }
                       keyboardType="number-pad"
                       maxLength={6}
                       autoFocus
@@ -519,7 +565,11 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                   /* QR mode — in real app would open camera scanner */
                   <View style={s.studentQRSection}>
                     <View style={s.scanPlaceholder}>
-                      <Ionicons name={'scan-outline' as any} size={56} color={theme.colors.accent} />
+                      <Ionicons
+                        name={'scan-outline' as any}
+                        size={56}
+                        color={theme.colors.accent}
+                      />
                       <Text style={s.scanHint}>掃描教師端的 QR 碼</Text>
                     </View>
                     <TouchableOpacity style={s.checkInBtn} onPress={handleCheckIn}>
@@ -531,21 +581,35 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                     <Text style={s.fallbackLabel}>手動輸入密碼</Text>
                     <View style={s.studentDigitsRow}>
                       {Array.from({ length: 6 }).map((_, i) => (
-                        <View key={i} style={[s.studentDigitBox, s.studentDigitSmall, numberInput[i] ? s.studentDigitFilled : null]}>
-                          <Text style={[s.studentDigitText, { fontSize: 18 }]}>{numberInput[i] || ''}</Text>
+                        <View
+                          key={i}
+                          style={[
+                            s.studentDigitBox,
+                            s.studentDigitSmall,
+                            numberInput[i] ? s.studentDigitFilled : null,
+                          ]}
+                        >
+                          <Text style={[s.studentDigitText, { fontSize: 18 }]}>
+                            {numberInput[i] || ''}
+                          </Text>
                         </View>
                       ))}
                     </View>
                     <TextInput
                       style={s.hiddenInput}
                       value={numberInput}
-                      onChangeText={(text) => setNumberInput(text.replace(/[^0-9]/g, '').slice(0, 6))}
+                      onChangeText={(text) =>
+                        setNumberInput(text.replace(/[^0-9]/g, '').slice(0, 6))
+                      }
                       keyboardType="number-pad"
                       maxLength={6}
                     />
                     {numberInput.length === 6 && (
                       <TouchableOpacity
-                        style={[s.checkInBtn, { marginTop: 12, backgroundColor: theme.colors.success }]}
+                        style={[
+                          s.checkInBtn,
+                          { marginTop: 12, backgroundColor: theme.colors.success },
+                        ]}
                         onPress={handleNumberSubmit}
                       >
                         <Text style={s.checkInBtnText}>密碼簽到</Text>
@@ -587,7 +651,13 @@ const s = StyleSheet.create({
   headerCenter: { flex: 1, marginLeft: 8 },
   headerTitle: { fontSize: 17, fontWeight: '700', color: theme.colors.text },
   headerMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
-  liveIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: theme.colors.muted, marginRight: 6 },
+  liveIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.muted,
+    marginRight: 6,
+  },
   liveActive: { backgroundColor: '#34C759' },
   headerSubtitle: { fontSize: 12, color: theme.colors.muted },
   endBtn: {
@@ -640,7 +710,12 @@ const s = StyleSheet.create({
 
   // Number Code
   codeSection: { alignItems: 'center', paddingVertical: 32 },
-  codeSectionLabel: { fontSize: 13, color: theme.colors.muted, fontWeight: '600', letterSpacing: 1 },
+  codeSectionLabel: {
+    fontSize: 13,
+    color: theme.colors.muted,
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
   codeDigitsRow: { flexDirection: 'row', marginTop: 16, gap: 8 },
   codeDigitBox: {
     width: 48,

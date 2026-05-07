@@ -1,6 +1,6 @@
-import type { UserRole } from "../data/types";
+import type { UserRole } from '../data/types';
 
-export type CourseNavigationRole = UserRole | "guest" | "department" | null | undefined;
+export type CourseNavigationRole = UserRole | 'guest' | 'department' | null | undefined;
 
 export type NavigationLike = {
   navigate?: (name: string, params?: unknown) => void;
@@ -13,20 +13,20 @@ export type NavigationTarget = {
 };
 
 function isCourseTabName(name: string | null | undefined): boolean {
-  return name === "課程" || name === "教學";
+  return name === '課程' || name === '教學';
 }
 
-export function getCourseRootTab(role: CourseNavigationRole): "課程" | "教學" | null {
-  if (role === "teacher" || role === "professor") return "教學";
-  if (!role || role === "guest" || role === "student" || role === "alumni") return "課程";
+export function getCourseRootTab(role: CourseNavigationRole): '課程' | '教學' | null {
+  if (role === 'teacher' || role === 'professor') return '教學';
+  if (!role || role === 'guest' || role === 'student' || role === 'alumni') return '課程';
   return null;
 }
 
 export function getRoleFallbackTab(role: CourseNavigationRole): string {
-  if (role === "admin") return "管理";
-  if (role === "principal" || role === "department") return "審核";
-  if (role === "staff") return "服務";
-  return "Today";
+  if (role === 'admin') return '管理';
+  if (role === 'principal' || role === 'department') return '審核';
+  if (role === 'staff') return '服務';
+  return 'Today';
 }
 
 export function normalizeCourseScreen(
@@ -37,11 +37,11 @@ export function normalizeCourseScreen(
   if (!rootTab) return undefined;
 
   if (!screen) {
-    return rootTab === "教學" ? "TeachingHub" : "CoursesHome";
+    return rootTab === '教學' ? 'TeachingHub' : 'CoursesHome';
   }
 
-  if (rootTab === "教學" && screen === "CoursesHome") return "TeachingHub";
-  if (rootTab === "課程" && screen === "TeachingHub") return "CoursesHome";
+  if (rootTab === '教學' && screen === 'CoursesHome') return 'TeachingHub';
+  if (rootTab === '課程' && screen === 'TeachingHub') return 'CoursesHome';
   return screen;
 }
 
@@ -55,7 +55,7 @@ export function buildCourseNavigationTarget(
     return { tab: getRoleFallbackTab(role) };
   }
 
-  const targetScreen = screen === "CourseHub" && !params?.groupId ? undefined : screen;
+  const targetScreen = screen === 'CourseHub' && !params?.groupId ? undefined : screen;
 
   return {
     tab: rootTab,
@@ -81,15 +81,16 @@ export function buildNavigationTarget(
   };
 }
 
-export function navigateToTarget(navigation: NavigationLike | null | undefined, target: NavigationTarget): void {
+export function navigateToTarget(
+  navigation: NavigationLike | null | undefined,
+  target: NavigationTarget,
+): void {
   if (!navigation?.navigate) return;
 
   if (target.screen) {
     navigation.navigate(
       target.tab,
-      target.params
-        ? { screen: target.screen, params: target.params }
-        : { screen: target.screen },
+      target.params ? { screen: target.screen, params: target.params } : { screen: target.screen },
     );
     return;
   }
@@ -119,10 +120,5 @@ export function navigateToCourseWorkspace(
   role: CourseNavigationRole,
   params?: Record<string, unknown>,
 ): void {
-  navigateToCourseScreen(
-    navigation,
-    role,
-    params?.groupId ? "CourseHub" : undefined,
-    params,
-  );
+  navigateToCourseScreen(navigation, role, params?.groupId ? 'CourseHub' : undefined, params);
 }
