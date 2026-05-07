@@ -1,9 +1,6 @@
-import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from "@campus/shared/src";
-import { BaseApiAdapter } from "./BaseAdapter";
-import type {
-  AdapterCapabilities,
-  AuthCredentials,
-} from "./types";
+import { PROVIDENCE_UNIVERSITY_SCHOOL_ID } from '@campus/shared/src';
+import { BaseApiAdapter } from './BaseAdapter';
+import type { AdapterCapabilities, AuthCredentials } from './types';
 import type {
   Announcement,
   ClubEvent,
@@ -18,12 +15,9 @@ import type {
   Quiz,
   AttendanceSession,
   AttendanceSummary,
-} from "../types";
-import { CAMPUS_POIS, type CampusPoiCategory } from "../puCampusData";
-import {
-  puLogin,
-  type PUSession,
-} from "../../services/puDirectScraper";
+} from '../types';
+import { CAMPUS_POIS, type CampusPoiCategory } from '../puCampusData';
+import { puLogin, type PUSession } from '../../services/puDirectScraper';
 import {
   getCachedCourses,
   getCachedGrades,
@@ -49,14 +43,9 @@ import {
   refreshTCModulesForCourses,
   refreshTCAttendance,
   refreshTCTodos,
-} from "../../services/puDataCache";
-import type {
-  TCCourse,
-  TCActivity,
-  TCModule,
-  TCAttendance,
-} from "../../services/tronClassClient";
-import { getCloudFunctionUrl } from "../../services/cloudFunctions";
+} from '../../services/puDataCache';
+import type { TCCourse, TCActivity, TCModule, TCAttendance } from '../../services/tronClassClient';
+import { getCloudFunctionUrl } from '../../services/cloudFunctions';
 
 function toValidDate(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -74,9 +63,9 @@ function toValidDate(value: string | null | undefined): Date | null {
  * Verified against live pages on 2026-03-24.
  */
 export class PUAdapter extends BaseApiAdapter {
-  readonly schoolId = "tw-pu";
-  readonly schoolName = "靜宜大學";
-  readonly apiVersion = "1.0";
+  readonly schoolId = 'tw-pu';
+  readonly schoolName = '靜宜大學';
+  readonly apiVersion = '1.0';
 
   private sessionId: string | null = null;
   private studentId: string | null = null;
@@ -100,7 +89,7 @@ export class PUAdapter extends BaseApiAdapter {
     if (this.useDirectMode) {
       const result = await puLogin(username, password);
       if (!result.success || !result.session) {
-        throw new Error(result.error ?? "靜宜大學登入失敗");
+        throw new Error(result.error ?? '靜宜大學登入失敗');
       }
 
       this.directSession = result.session;
@@ -117,9 +106,9 @@ export class PUAdapter extends BaseApiAdapter {
 
     // ── Cloud Functions mode ──
     try {
-      const response = await fetch(getCloudFunctionUrl("puAuthenticate"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch(getCloudFunctionUrl('puAuthenticate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           data: { uid: username, upassword: password },
         }),
@@ -141,7 +130,7 @@ export class PUAdapter extends BaseApiAdapter {
       const data = result.result;
 
       if (!data.success) {
-        throw new Error(data.error || "登入失敗");
+        throw new Error(data.error || '登入失敗');
       }
 
       this.sessionId = data.sessionId || null;
@@ -156,9 +145,7 @@ export class PUAdapter extends BaseApiAdapter {
 
       return this.credentials;
     } catch (error) {
-      throw new Error(
-        error instanceof Error ? error.message : "靜宜大學登入失敗"
-      );
+      throw new Error(error instanceof Error ? error.message : '靜宜大學登入失敗');
     }
   }
 
@@ -210,15 +197,15 @@ export class PUAdapter extends BaseApiAdapter {
   /**
    * E校園課程 → TCCourse 格式轉換（TronClass 不可用時的 fallback）
    */
-  private convertPUCoursesToTC(puCourses: import("../../services/puDirectScraper").PUCourse[]): TCCourse[] {
+  private convertPUCoursesToTC(
+    puCourses: import('../../services/puDirectScraper').PUCourse[],
+  ): TCCourse[] {
     return puCourses.map((c, index) => ({
       id: -(index + 1), // 負數 ID 表示來自 E校園
       name: c.name || c.nameEn || c.code,
       course_code: c.code,
       department: null,
-      instructors: c.teacherName
-        ? [{ id: 0, name: c.teacherName }]
-        : [],
+      instructors: c.teacherName ? [{ id: 0, name: c.teacherName }] : [],
       credit: c.credits,
       semester: null,
       klass: null,
@@ -226,8 +213,8 @@ export class PUAdapter extends BaseApiAdapter {
       course_outline: null,
       start_date: null,
       end_date: null,
-      status: "ongoing",
-      role: "student",
+      status: 'ongoing',
+      role: 'student',
       student_count: 0,
       classroom_schedule: c.timePlaceRaw || null,
     }));
@@ -242,18 +229,24 @@ export class PUAdapter extends BaseApiAdapter {
       return (await refreshTCCourses()) ?? stale ?? [];
     } catch (error) {
       if (stale) {
-        console.warn("[PUAdapter] Falling back to stale TronClass courses:", error);
+        console.warn('[PUAdapter] Falling back to stale TronClass courses:', error);
         return stale;
       }
       // TronClass 完全不可用 → 嘗試用 E校園 課表資料
-      console.warn("[PUAdapter] TronClass unavailable, trying E-campus courses fallback:", error);
+      console.warn('[PUAdapter] TronClass unavailable, trying E-campus courses fallback:', error);
       try {
-        const puData = await getCachedCourses() ?? await getAnyCachedCourses();
+        const puData = (await getCachedCourses()) ?? (await getAnyCachedCourses());
         if (puData?.courses?.length) {
-          console.log("[PUAdapter] Using E-campus courses as fallback:", puData.courses.length, "courses");
+          console.log(
+            '[PUAdapter] Using E-campus courses as fallback:',
+            puData.courses.length,
+            'courses',
+          );
           return this.convertPUCoursesToTC(puData.courses);
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
       return []; // 不 throw，讓畫面顯示空狀態而非錯誤
     }
   }
@@ -267,7 +260,7 @@ export class PUAdapter extends BaseApiAdapter {
       return await refreshTCActivitiesForCourses(courseIds);
     } catch (error) {
       if (stale) {
-        console.warn("[PUAdapter] Falling back to stale TronClass activities:", error);
+        console.warn('[PUAdapter] Falling back to stale TronClass activities:', error);
         return stale;
       }
       throw error;
@@ -283,7 +276,7 @@ export class PUAdapter extends BaseApiAdapter {
       return await refreshTCModulesForCourses(courseIds);
     } catch (error) {
       if (stale) {
-        console.warn("[PUAdapter] Falling back to stale TronClass modules:", error);
+        console.warn('[PUAdapter] Falling back to stale TronClass modules:', error);
         return stale;
       }
       throw error;
@@ -299,7 +292,7 @@ export class PUAdapter extends BaseApiAdapter {
       return (await refreshTCTodos()) ?? stale ?? [];
     } catch (error) {
       if (stale) {
-        console.warn("[PUAdapter] Falling back to stale TronClass todos:", error);
+        console.warn('[PUAdapter] Falling back to stale TronClass todos:', error);
         return stale;
       }
       throw error;
@@ -315,7 +308,7 @@ export class PUAdapter extends BaseApiAdapter {
       return (await refreshTCAttendance()) ?? stale ?? [];
     } catch (error) {
       if (stale) {
-        console.warn("[PUAdapter] Falling back to stale TronClass attendance:", error);
+        console.warn('[PUAdapter] Falling back to stale TronClass attendance:', error);
         return stale;
       }
       throw error;
@@ -326,16 +319,19 @@ export class PUAdapter extends BaseApiAdapter {
   // Data fetching helper (Cloud Functions mode only)
   // ---------------------------------------------------------------------------
 
-  private async fetchData<T>(dataType: string, extra: Record<string, unknown> = {}): Promise<T | null> {
+  private async fetchData<T>(
+    dataType: string,
+    extra: Record<string, unknown> = {},
+  ): Promise<T | null> {
     if (!this.sessionId) {
       console.warn(`[PUAdapter] No session for ${dataType}`);
       return null;
     }
 
     try {
-      const response = await fetch(getCloudFunctionUrl("puFetchCampusData"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch(getCloudFunctionUrl('puFetchCampusData'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: this.sessionId,
           dataType,
@@ -360,14 +356,18 @@ export class PUAdapter extends BaseApiAdapter {
   // Announcements
   // ---------------------------------------------------------------------------
 
-  private mapAnnouncements(items: Array<{ title: string; url: string; date: string }>): Announcement[] {
-    return items.map((item, i): Announcement => ({
-      id: `pu-ann-${i}-${item.title.slice(0, 10)}`,
-      title: item.title,
-      body: item.url,
-      publishedAt: new Date(item.date).toISOString(),
-      source: "靜宜大學 e校園",
-    }));
+  private mapAnnouncements(
+    items: Array<{ title: string; url: string; date: string }>,
+  ): Announcement[] {
+    return items.map(
+      (item, i): Announcement => ({
+        id: `pu-ann-${i}-${item.title.slice(0, 10)}`,
+        title: item.title,
+        body: item.url,
+        publishedAt: new Date(item.date).toISOString(),
+        source: '靜宜大學 e校園',
+      }),
+    );
   }
 
   async listAnnouncements(): Promise<Announcement[]> {
@@ -396,16 +396,18 @@ export class PUAdapter extends BaseApiAdapter {
       announcements: Array<{ title: string; url: string; date: string }>;
     };
 
-    const data = await this.fetchData<AnnouncementResponse>("announcements");
+    const data = await this.fetchData<AnnouncementResponse>('announcements');
     if (!data?.success) return [];
 
-    return data.announcements.map((item, i): Announcement => ({
-      id: `pu-ann-${i}-${Date.now()}`,
-      title: item.title,
-      body: item.url,
-      publishedAt: new Date(item.date).toISOString(),
-      source: "靜宜大學 e校園",
-    }));
+    return data.announcements.map(
+      (item, i): Announcement => ({
+        id: `pu-ann-${i}-${Date.now()}`,
+        title: item.title,
+        body: item.url,
+        publishedAt: new Date(item.date).toISOString(),
+        source: '靜宜大學 e校園',
+      }),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -420,33 +422,38 @@ export class PUAdapter extends BaseApiAdapter {
   // Courses
   // ---------------------------------------------------------------------------
 
-  private mapCourses(data: import("../../services/puDirectScraper").PUCourseResult, semester?: string): Course[] {
+  private mapCourses(
+    data: import('../../services/puDirectScraper').PUCourseResult,
+    semester?: string,
+  ): Course[] {
     if (data.studentInfo?.studentId) this.studentId = data.studentInfo.studentId;
     if (data.studentInfo?.name) this.studentName = data.studentInfo.name;
 
     return data.courses
       .filter((c) => c.dayOfWeek !== null)
-      .map((course): Course => ({
-        id: `pu-crs-${course.code}-${course.dayOfWeek}`,
-        code: course.code,
-        name: course.name,
-        instructor: course.teacherEmail.split("@")[0] || "未知教師",
-        teacher: course.teacherEmail.split("@")[0] || "未知教師",
-        credits: course.credits,
-        semester: data.semester ?? semester ?? "未指定",
-        schedule: [
-          {
-            dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-            startTime: course.startTime || "08:10",
-            endTime: course.endTime || "09:00",
-            location: course.location,
-          },
-        ],
-        dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-        startTime: course.startTime || "08:10",
-        endTime: course.endTime || "09:00",
-        location: course.location,
-      }));
+      .map(
+        (course): Course => ({
+          id: `pu-crs-${course.code}-${course.dayOfWeek}`,
+          code: course.code,
+          name: course.name,
+          instructor: course.teacherEmail.split('@')[0] || '未知教師',
+          teacher: course.teacherEmail.split('@')[0] || '未知教師',
+          credits: course.credits,
+          semester: data.semester ?? semester ?? '未指定',
+          schedule: [
+            {
+              dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+              startTime: course.startTime || '08:10',
+              endTime: course.endTime || '09:00',
+              location: course.location,
+            },
+          ],
+          dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+          startTime: course.startTime || '08:10',
+          endTime: course.endTime || '09:00',
+          location: course.location,
+        }),
+      );
   }
 
   async listCourses(_studentId?: string, semester?: string): Promise<Course[]> {
@@ -496,47 +503,50 @@ export class PUAdapter extends BaseApiAdapter {
       totalCredits: number;
     };
 
-    const data = await this.fetchData<CourseResponse>("courses", { semester });
+    const data = await this.fetchData<CourseResponse>('courses', { semester });
     if (!data?.success || !data.courses) return [];
 
     if (data.studentInfo?.studentId) this.studentId = data.studentInfo.studentId;
     if (data.studentInfo?.name) this.studentName = data.studentInfo.name;
 
-    const detectedSemester = data.semester || semester || "未指定";
+    const detectedSemester = data.semester || semester || '未指定';
 
     return data.courses
       .filter((c) => c.dayOfWeek !== null)
-      .map((course): Course => ({
-        id: `pu-crs-${course.code}-${course.dayOfWeek}`,
-        code: course.code,
-        name: course.name,
-        instructor: course.teacherEmail.split("@")[0] || "未知教師",
-        teacher: course.teacherEmail.split("@")[0] || "未知教師",
-        credits: course.credits,
-        semester: detectedSemester,
-        schedule: [
-          {
-            dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-            startTime: course.startTime || "08:10",
-            endTime: course.endTime || "09:00",
-            location: course.location,
-          },
-        ],
-        dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
-        startTime: course.startTime || "08:10",
-        endTime: course.endTime || "09:00",
-        location: course.location,
-      }));
+      .map(
+        (course): Course => ({
+          id: `pu-crs-${course.code}-${course.dayOfWeek}`,
+          code: course.code,
+          name: course.name,
+          instructor: course.teacherEmail.split('@')[0] || '未知教師',
+          teacher: course.teacherEmail.split('@')[0] || '未知教師',
+          credits: course.credits,
+          semester: detectedSemester,
+          schedule: [
+            {
+              dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+              startTime: course.startTime || '08:10',
+              endTime: course.endTime || '09:00',
+              location: course.location,
+            },
+          ],
+          dayOfWeek: (course.dayOfWeek || 1) as 1 | 2 | 3 | 4 | 5 | 6 | 7,
+          startTime: course.startTime || '08:10',
+          endTime: course.endTime || '09:00',
+          location: course.location,
+        }),
+      );
   }
 
   async getCourse(id: string): Promise<Course | null> {
     const courses = await this.listCourses();
     return (
-      courses.find((course) =>
-        course.id === id ||
-        course.code === id ||
-        id.includes(course.code) ||
-        id.includes(course.id)
+      courses.find(
+        (course) =>
+          course.id === id ||
+          course.code === id ||
+          id.includes(course.code) ||
+          id.includes(course.id),
       ) ?? null
     );
   }
@@ -545,10 +555,15 @@ export class PUAdapter extends BaseApiAdapter {
   // Grades
   // ---------------------------------------------------------------------------
 
-  private mapGrades(data: import("../../services/puDirectScraper").PUGradeResult, studentId: string, semester?: string): Grade[] {
+  private mapGrades(
+    data: import('../../services/puDirectScraper').PUGradeResult,
+    studentId: string,
+    semester?: string,
+  ): Grade[] {
     const grades = semester ? data.grades.filter((g) => g.semester === semester) : data.grades;
     return grades.map((item, i): Grade => {
-      const score = typeof item.score === "number" ? item.score : parseFloat(String(item.score)) || 0;
+      const score =
+        typeof item.score === 'number' ? item.score : parseFloat(String(item.score)) || 0;
       return {
         id: `pu-grade-${item.semester}-${i}`,
         courseId: `pu-crs-${item.semester}-${i}`,
@@ -558,7 +573,7 @@ export class PUAdapter extends BaseApiAdapter {
         gradePoint: this.scoreToGradePoint(score),
         score,
         semester: item.semester,
-        userId: studentId || this.studentId || "",
+        userId: studentId || this.studentId || '',
         courseType: item.courseType || undefined,
         courseClass: item.className || undefined,
         courseNameEn: item.courseNameEn || undefined,
@@ -610,23 +625,25 @@ export class PUAdapter extends BaseApiAdapter {
       >;
     };
 
-    const data = await this.fetchData<GradeResponse>("grades", { semester });
+    const data = await this.fetchData<GradeResponse>('grades', { semester });
     if (!data?.success || !data.grades) return [];
 
-    return data.grades.map((item, i): Grade => ({
-      id: `pu-grade-${item.semester}-${i}`,
-      courseId: `pu-crs-${item.semester}-${i}`,
-      courseName: item.courseName,
-      courseNameEn: item.courseNameEn || undefined,
-      courseCode: undefined,
-      credits: item.credits,
-      grade: typeof item.score === "number" ? item.score : parseFloat(String(item.score)) || 0,
-      gradePoint: 0,
-      semester: item.semester,
-      userId: studentId || this.studentId || "",
-      courseType: item.courseType || undefined,
-      courseClass: item.class || undefined,
-    }));
+    return data.grades.map(
+      (item, i): Grade => ({
+        id: `pu-grade-${item.semester}-${i}`,
+        courseId: `pu-crs-${item.semester}-${i}`,
+        courseName: item.courseName,
+        courseNameEn: item.courseNameEn || undefined,
+        courseCode: undefined,
+        credits: item.credits,
+        grade: typeof item.score === 'number' ? item.score : parseFloat(String(item.score)) || 0,
+        gradePoint: 0,
+        semester: item.semester,
+        userId: studentId || this.studentId || '',
+        courseType: item.courseType || undefined,
+        courseClass: item.class || undefined,
+      }),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -642,34 +659,36 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   async listPois(): Promise<Poi[]> {
-    const categoryMap: Record<CampusPoiCategory, Poi["category"]> = {
-      academic: "building",
-      admin: "office",
-      library: "library",
-      cafeteria: "cafeteria",
-      dormitory: "dormitory",
-      sports: "sports",
-      parking: "parking",
-      convenience: "convenience",
-      medical: "medical",
-      religious: "other",
-      gate: "other",
-      research: "building",
-      other: "other",
+    const categoryMap: Record<CampusPoiCategory, Poi['category']> = {
+      academic: 'building',
+      admin: 'office',
+      library: 'library',
+      cafeteria: 'cafeteria',
+      dormitory: 'dormitory',
+      sports: 'sports',
+      parking: 'parking',
+      convenience: 'convenience',
+      medical: 'medical',
+      religious: 'other',
+      gate: 'other',
+      research: 'building',
+      other: 'other',
     };
 
-    return CAMPUS_POIS.map((p): Poi => ({
-      id: p.id,
-      name: `${p.name} ${p.nameEn}`,
-      category: categoryMap[p.category] ?? "other",
-      lat: p.lat,
-      lng: p.lng,
-      description: p.description,
-      building: p.code,
-      facilities: p.facilities,
-      accessible: p.accessible,
-      imageUrl: p.imageUrl ?? undefined,
-    }));
+    return CAMPUS_POIS.map(
+      (p): Poi => ({
+        id: p.id,
+        name: `${p.name} ${p.nameEn}`,
+        category: categoryMap[p.category] ?? 'other',
+        lat: p.lat,
+        lng: p.lng,
+        description: p.description,
+        building: p.code,
+        facilities: p.facilities,
+        accessible: p.accessible,
+        imageUrl: p.imageUrl ?? undefined,
+      }),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -678,7 +697,7 @@ export class PUAdapter extends BaseApiAdapter {
 
   private mapTCCourseToCourseSpace(tc: TCCourse, activities?: TCActivity[]): CourseSpace {
     const homeworkActivities = (activities ?? []).filter(
-      (a) => a.type === "homework" || a.type === "exam" || a.type === "quiz"
+      (a) => a.type === 'homework' || a.type === 'exam' || a.type === 'quiz',
     );
     const now = Date.now();
     const dueSoon = homeworkActivities.filter((a) => {
@@ -686,9 +705,7 @@ export class PUAdapter extends BaseApiAdapter {
       if (!due) return false;
       return due > now && due - now < 7 * 24 * 60 * 60 * 1000; // 7 天內
     });
-    const quizzes = (activities ?? []).filter(
-      (a) => a.type === "quiz" || a.type === "exam"
-    );
+    const quizzes = (activities ?? []).filter((a) => a.type === 'quiz' || a.type === 'exam');
 
     return {
       id: `tc-${tc.id}`,
@@ -696,19 +713,23 @@ export class PUAdapter extends BaseApiAdapter {
       courseId: `tc-${tc.id}`,
       name: tc.name,
       description: tc.course_code || undefined,
-      role: tc.role === "teacher" ? "instructor" : "student",
+      role: tc.role === 'teacher' ? 'instructor' : 'student',
       unreadCount: 0,
       assignmentCount: homeworkActivities.length,
       dueSoonCount: dueSoon.length,
       quizCount: quizzes.length,
       moduleCount: 0,
       activeSessionId: null,
-      latestDueAt: dueSoon.length > 0
-        ? new Date(dueSoon.sort((a, b) =>
-            (toValidDate(a.end_time)?.getTime() ?? Number.MAX_SAFE_INTEGER) -
-            (toValidDate(b.end_time)?.getTime() ?? Number.MAX_SAFE_INTEGER)
-          )[0].end_time!)
-        : null,
+      latestDueAt:
+        dueSoon.length > 0
+          ? new Date(
+              dueSoon.sort(
+                (a, b) =>
+                  (toValidDate(a.end_time)?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+                  (toValidDate(b.end_time)?.getTime() ?? Number.MAX_SAFE_INTEGER),
+              )[0].end_time!,
+            )
+          : null,
       memberCount: tc.student_count,
       schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
     };
@@ -722,12 +743,10 @@ export class PUAdapter extends BaseApiAdapter {
     try {
       activitiesMap = await this.ensureTCActivitiesMap(courses.map((course) => course.id));
     } catch (error) {
-      console.warn("[PUAdapter] Failed to load activities, continuing with courses only:", error);
+      console.warn('[PUAdapter] Failed to load activities, continuing with courses only:', error);
     }
 
-    return courses.map((tc) =>
-      this.mapTCCourseToCourseSpace(tc, activitiesMap[tc.id] ?? [])
-    );
+    return courses.map((tc) => this.mapTCCourseToCourseSpace(tc, activitiesMap[tc.id] ?? []));
   }
 
   async getCourseSpace(courseSpaceId: string, _userId?: string): Promise<CourseSpace | null> {
@@ -743,12 +762,12 @@ export class PUAdapter extends BaseApiAdapter {
     const tcCourses = await this.ensureTCCourses();
     const courseMap = new Map(tcCourses.map((course) => [course.id, course.name]));
     const courseIds = courseSpaceId
-      ? [parseInt(courseSpaceId.replace("tc-", ""), 10)].filter((id) => !isNaN(id))
+      ? [parseInt(courseSpaceId.replace('tc-', ''), 10)].filter((id) => !isNaN(id))
       : tcCourses.map((course) => course.id);
     const modulesMap =
       courseIds.length > 0
         ? await this.ensureTCModulesMap(courseIds)
-        : await getCachedTCModules() ?? {};
+        : ((await getCachedTCModules()) ?? {});
     const results: CourseModule[] = [];
 
     const processModules = (courseId: number, modules: TCModule[]) => {
@@ -756,13 +775,15 @@ export class PUAdapter extends BaseApiAdapter {
       const courseName = courseMap.get(courseId) ?? `Course ${courseId}`;
 
       for (const mod of modules) {
-        const materials: CourseMaterial[] = (mod.syllabuses ?? []).map((syllabus): CourseMaterial => ({
-          id: `tc-mat-${syllabus.id}`,
-          moduleId: `tc-mod-${mod.id}`,
-          groupId,
-          type: "document",
-          label: syllabus.name?.trim() || `教材 ${syllabus.id}`,
-        }));
+        const materials: CourseMaterial[] = (mod.syllabuses ?? []).map(
+          (syllabus): CourseMaterial => ({
+            id: `tc-mat-${syllabus.id}`,
+            moduleId: `tc-mod-${mod.id}`,
+            groupId,
+            type: 'document',
+            label: syllabus.name?.trim() || `教材 ${syllabus.id}`,
+          }),
+        );
 
         results.push({
           id: `tc-mod-${mod.id}`,
@@ -779,7 +800,7 @@ export class PUAdapter extends BaseApiAdapter {
     };
 
     if (courseSpaceId) {
-      const courseId = parseInt(courseSpaceId.replace("tc-", ""), 10);
+      const courseId = parseInt(courseSpaceId.replace('tc-', ''), 10);
       if (!isNaN(courseId) && modulesMap[courseId]) {
         processModules(courseId, modulesMap[courseId]);
       }
@@ -797,16 +818,18 @@ export class PUAdapter extends BaseApiAdapter {
   // ---------------------------------------------------------------------------
 
   private mapTCActivityToInboxTask(activity: TCActivity, courseName: string): InboxTask {
-    const isQuiz = activity.type === "quiz" || activity.type === "exam";
-    const kind: InboxTask["kind"] = isQuiz ? "quiz" : "assignment";
+    const isQuiz = activity.type === 'quiz' || activity.type === 'exam';
+    const kind: InboxTask['kind'] = isQuiz ? 'quiz' : 'assignment';
     const dueAt = toValidDate(activity.end_time);
 
     let priority = 50;
     if (dueAt) {
       const hoursUntilDue = (dueAt.getTime() - Date.now()) / (1000 * 60 * 60);
-      if (hoursUntilDue < 0) priority = 10;        // 已過期
-      else if (hoursUntilDue < 24) priority = 90;   // 24 小時內
-      else if (hoursUntilDue < 72) priority = 70;   // 3 天內
+      if (hoursUntilDue < 0)
+        priority = 10; // 已過期
+      else if (hoursUntilDue < 24)
+        priority = 90; // 24 小時內
+      else if (hoursUntilDue < 72) priority = 70; // 3 天內
     }
 
     return {
@@ -815,14 +838,12 @@ export class PUAdapter extends BaseApiAdapter {
       groupId: `tc-${activity.course_id}`,
       groupName: courseName,
       title: activity.title,
-      subtitle: dueAt
-        ? `截止：${dueAt.toLocaleDateString("zh-TW")}`
-        : activity.type,
+      subtitle: dueAt ? `截止：${dueAt.toLocaleDateString('zh-TW')}` : activity.type,
       assignmentId: `tc-activity-${activity.id}`,
       priority,
       dueAt,
-      preferredIntent: isQuiz ? "submit" : "submit",
-      actionLabel: isQuiz ? "開始測驗" : "繳交作業",
+      preferredIntent: isQuiz ? 'submit' : 'submit',
+      actionLabel: isQuiz ? '開始測驗' : '繳交作業',
     };
   }
 
@@ -832,8 +853,8 @@ export class PUAdapter extends BaseApiAdapter {
     const courseMap = new Map(courses.map((c) => [c.id, c.name]));
 
     return todos
-      .filter((t) => t.status !== "graded" && t.status !== "submitted")
-      .map((t) => this.mapTCActivityToInboxTask(t, courseMap.get(t.course_id) ?? "未知課程"))
+      .filter((t) => t.status !== 'graded' && t.status !== 'submitted')
+      .map((t) => this.mapTCActivityToInboxTask(t, courseMap.get(t.course_id) ?? '未知課程'))
       .sort((a, b) => b.priority - a.priority);
   }
 
@@ -844,39 +865,37 @@ export class PUAdapter extends BaseApiAdapter {
   async listQuizzes(_userId?: string, courseSpaceId?: string): Promise<Quiz[]> {
     const courses = await this.ensureTCCourses();
     const courseIds = courseSpaceId
-      ? [parseInt(courseSpaceId.replace("tc-", ""), 10)].filter((id) => !isNaN(id))
+      ? [parseInt(courseSpaceId.replace('tc-', ''), 10)].filter((id) => !isNaN(id))
       : courses.map((course) => course.id);
     const activitiesMap =
       courseIds.length > 0
         ? await this.ensureTCActivitiesMap(courseIds)
-        : await getCachedTCActivities() ?? await getAnyCachedTCActivities() ?? {};
+        : ((await getCachedTCActivities()) ?? (await getAnyCachedTCActivities()) ?? {});
     const courseMap = new Map(courses.map((c) => [c.id, c.name]));
     const results: Quiz[] = [];
 
     const processActivities = (courseId: number, activities: TCActivity[]) => {
-      const quizActivities = activities.filter(
-        (a) => a.type === "quiz" || a.type === "exam"
-      );
+      const quizActivities = activities.filter((a) => a.type === 'quiz' || a.type === 'exam');
       for (const a of quizActivities) {
         results.push({
           id: `tc-quiz-${a.id}`,
           assignmentId: `tc-activity-${a.id}`,
           groupId: `tc-${courseId}`,
-          groupName: courseMap.get(courseId) ?? "未知課程",
+          groupName: courseMap.get(courseId) ?? '未知課程',
           title: a.title,
           description: a.description ?? undefined,
           dueAt: toValidDate(a.end_time),
-          type: a.type === "exam" ? "exam" : "quiz",
-          gradesPublished: a.status === "graded",
+          type: a.type === 'exam' ? 'exam' : 'quiz',
+          gradesPublished: a.status === 'graded',
           points: a.total_score ?? undefined,
           weight: a.weight ?? undefined,
-          source: "quiz",
+          source: 'quiz',
         });
       }
     };
 
     if (courseSpaceId) {
-      const courseId = parseInt(courseSpaceId.replace("tc-", ""), 10);
+      const courseId = parseInt(courseSpaceId.replace('tc-', ''), 10);
       if (!isNaN(courseId) && activitiesMap[courseId]) {
         processActivities(courseId, activitiesMap[courseId]);
       }
@@ -893,28 +912,33 @@ export class PUAdapter extends BaseApiAdapter {
   // TronClass → Attendance mapping
   // ---------------------------------------------------------------------------
 
-  async listAttendanceSessions(_userId?: string, courseSpaceId?: string): Promise<AttendanceSession[]> {
+  async listAttendanceSessions(
+    _userId?: string,
+    courseSpaceId?: string,
+  ): Promise<AttendanceSession[]> {
     const attendance = await this.ensureTCAttendance();
 
     const filtered = courseSpaceId
       ? attendance.filter((a) => `tc-${a.course_id}` === courseSpaceId)
       : attendance;
 
-    return filtered.map((a): AttendanceSession => ({
-      id: `tc-att-${a.course_id}`,
-      groupId: `tc-${a.course_id}`,
-      groupName: a.course_name,
-      active: false,
-      attendeeCount: a.attended,
-      startedAt: null,
-      endedAt: null,
-      source: "attendance",
-    }));
+    return filtered.map(
+      (a): AttendanceSession => ({
+        id: `tc-att-${a.course_id}`,
+        groupId: `tc-${a.course_id}`,
+        groupName: a.course_name,
+        active: false,
+        attendeeCount: a.attended,
+        startedAt: null,
+        endedAt: null,
+        source: 'attendance',
+      }),
+    );
   }
 
   async getAttendanceSummary(courseSpaceId: string): Promise<AttendanceSummary> {
     const attendance = await this.ensureTCAttendance();
-    const courseId = parseInt(courseSpaceId.replace("tc-", ""), 10);
+    const courseId = parseInt(courseSpaceId.replace('tc-', ''), 10);
     const match = attendance.find((a) => a.course_id === courseId);
 
     return {
@@ -944,8 +968,10 @@ export class PUAdapter extends BaseApiAdapter {
     return 0.0;
   }
 
-  async getGPA(_userId?: string): Promise<{ gpa: number; totalCredits: number; totalPoints: number }> {
-    const cached = await getCachedGrades() ?? await getAnyCachedGrades();
+  async getGPA(
+    _userId?: string,
+  ): Promise<{ gpa: number; totalCredits: number; totalPoints: number }> {
+    const cached = (await getCachedGrades()) ?? (await getAnyCachedGrades());
     if (!cached || cached.grades.length === 0) {
       return { gpa: 0, totalCredits: 0, totalPoints: 0 };
     }
@@ -954,9 +980,7 @@ export class PUAdapter extends BaseApiAdapter {
     let totalPoints = 0;
 
     for (const grade of cached.grades) {
-      const score = typeof grade.score === "number"
-        ? grade.score
-        : parseFloat(String(grade.score));
+      const score = typeof grade.score === 'number' ? grade.score : parseFloat(String(grade.score));
 
       if (isNaN(score) || grade.credits <= 0) continue;
 
@@ -977,14 +1001,14 @@ export class PUAdapter extends BaseApiAdapter {
     if (this.useDirectMode) {
       // Direct mode: test connection to alcat.pu.edu.tw
       try {
-        const r = await fetch("https://alcat.pu.edu.tw", { method: "HEAD" });
+        const r = await fetch('https://alcat.pu.edu.tw', { method: 'HEAD' });
         return r.ok || r.status === 302;
       } catch {
         return false;
       }
     }
     try {
-      const response = await fetch(getCloudFunctionUrl("puHealthCheck"), { method: "GET" });
+      const response = await fetch(getCloudFunctionUrl('puHealthCheck'), { method: 'GET' });
       return response.ok;
     } catch {
       return false;

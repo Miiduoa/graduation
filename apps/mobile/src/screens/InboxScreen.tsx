@@ -1,25 +1,25 @@
 /* eslint-disable */
-import React, { useMemo } from "react";
-import { RefreshControl, ScrollView, Text, View, Pressable } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import React, { useMemo } from 'react';
+import { RefreshControl, ScrollView, Text, View, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { CourseSpace, InboxTask } from "../data";
-import { useAsyncList } from "../hooks/useAsyncList";
-import { useDataSource } from "../hooks/useDataSource";
-import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
-import { useAmbientCues } from "../features/engagement";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
+import type { CourseSpace, InboxTask } from '../data';
+import { useAsyncList } from '../hooks/useAsyncList';
+import { useDataSource } from '../hooks/useDataSource';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { useAmbientCues } from '../features/engagement';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
 import {
   ActionableInboxRow,
   AmbientCueCard,
   CompletionState,
   ContextStrip,
   TimelineCard,
-} from "../ui/campusOs";
-import { formatDueWindow, isTeachingRole, resolveRoleMode, toInboxItem } from "../utils/campusOs";
-import { navigateToCourseHome, navigateToCourseScreen } from "../utils/courseNavigation";
+} from '../ui/campusOs';
+import { formatDueWindow, isTeachingRole, resolveRoleMode, toInboxItem } from '../utils/campusOs';
+import { navigateToCourseHome, navigateToCourseScreen } from '../utils/courseNavigation';
 
 export function InboxScreen(props: any) {
   const nav = props?.navigation;
@@ -29,53 +29,56 @@ export function InboxScreen(props: any) {
   const ds = useDataSource();
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
   const teachingMode = isTeachingRole(auth.profile?.role);
-  const ambientRole = roleMode === "guest" ? "guest" : roleMode;
+  const ambientRole = roleMode === 'guest' ? 'guest' : roleMode;
 
   const {
     items: courseSpaces,
     loading: membershipsLoading,
     refresh: refreshMemberships,
     refreshing: membershipsRefreshing,
-  } = useAsyncList<CourseSpace>(
-    async () => {
-      if (!auth.user) return [];
-      return ds.listCourseSpaces(auth.user.uid, school.id);
-    },
-    [auth.user?.uid, ds, school.id]
-  );
+  } = useAsyncList<CourseSpace>(async () => {
+    if (!auth.user) return [];
+    return ds.listCourseSpaces(auth.user.uid, school.id);
+  }, [auth.user?.uid, ds, school.id]);
 
   const {
     items: inboxTasks,
     loading: inboxLoading,
     refresh: refreshInbox,
     refreshing: inboxRefreshing,
-  } = useAsyncList<InboxTask>(
-    async () => {
-      if (!auth.user) return [];
-      return ds.listInboxTasks(auth.user.uid, school.id);
-    },
-    [auth.user?.uid, ds, school.id]
-  );
+  } = useAsyncList<InboxTask>(async () => {
+    if (!auth.user) return [];
+    return ds.listInboxTasks(auth.user.uid, school.id);
+  }, [auth.user?.uid, ds, school.id]);
 
   const inboxItems = useMemo(
     () => inboxTasks.map(toInboxItem).sort((a, b) => a.priority - b.priority),
-    [inboxTasks]
+    [inboxTasks],
   );
-  const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
+  const {
+    cue: ambientCue,
+    dismissCue: dismissAmbientCue,
+    openCue: openAmbientCue,
+  } = useAmbientCues({
     schoolId: school.id,
     uid: auth.user?.uid ?? null,
     role: ambientRole,
-    surface: "inbox",
+    surface: 'inbox',
     limit: 1,
   });
 
-  const liveCount = inboxItems.filter((item) => item.kind === "live").length;
-  const dueCount = inboxItems.filter((item) => item.kind === "assignment" || item.kind === "quiz").length;
-  const unreadCount = courseSpaces.reduce((sum, membership) => sum + (membership.unreadCount ?? 0), 0);
+  const liveCount = inboxItems.filter((item) => item.kind === 'live').length;
+  const dueCount = inboxItems.filter(
+    (item) => item.kind === 'assignment' || item.kind === 'quiz',
+  ).length;
+  const unreadCount = courseSpaces.reduce(
+    (sum, membership) => sum + (membership.unreadCount ?? 0),
+    0,
+  );
 
   const openItem = (item: (typeof inboxItems)[number]) => {
-    if (item.kind === "live" && item.sessionId) {
-      navigateToCourseScreen(nav, auth.profile?.role, "Classroom", {
+    if (item.kind === 'live' && item.sessionId) {
+      navigateToCourseScreen(nav, auth.profile?.role, 'Classroom', {
         groupId: item.groupId,
         sessionId: item.sessionId,
         isTeacher: teachingMode,
@@ -83,15 +86,15 @@ export function InboxScreen(props: any) {
       return;
     }
 
-    if ((item.kind === "assignment" || item.kind === "quiz") && item.assignmentId) {
-      nav?.navigate?.("收件匣", {
-        screen: "AssignmentDetail",
+    if ((item.kind === 'assignment' || item.kind === 'quiz') && item.assignmentId) {
+      nav?.navigate?.('收件匣', {
+        screen: 'AssignmentDetail',
         params: { groupId: item.groupId, assignmentId: item.assignmentId },
       });
       return;
     }
 
-    nav?.navigate?.("收件匣", { screen: "GroupDetail", params: { groupId: item.groupId } });
+    nav?.navigate?.('收件匣', { screen: 'GroupDetail', params: { groupId: item.groupId } });
   };
 
   return (
@@ -143,7 +146,7 @@ export function InboxScreen(props: any) {
             title="登入後才會出現可執行的收件匣"
             description="收件匣會把課程更新、作業、評量、課堂與訊息整合成單一工作台。"
             actionLabel="前往登入"
-            onPress={() => nav?.navigate?.("我的", { screen: "SSOLogin" })}
+            onPress={() => nav?.navigate?.('我的', { screen: 'SSOLogin' })}
           />
         ) : null}
 
@@ -177,18 +180,18 @@ export function InboxScreen(props: any) {
                 <ActionableInboxRow
                   key={item.id}
                   icon={
-                    item.kind === "live"
-                      ? "pulse-outline"
-                      : item.kind === "assignment"
-                        ? "document-text-outline"
-                        : item.kind === "quiz"
-                          ? "help-circle-outline"
-                          : "mail-outline"
+                    item.kind === 'live'
+                      ? 'pulse-outline'
+                      : item.kind === 'assignment'
+                        ? 'document-text-outline'
+                        : item.kind === 'quiz'
+                          ? 'help-circle-outline'
+                          : 'mail-outline'
                   }
                   title={`${item.title} · ${item.groupName}`}
-                  reason={item.reason ?? "這個項目需要你確認下一步"}
-                  consequence={item.consequence ?? "後續可能變成更高壓的處理"}
-                  nextStep={item.nextStep ?? "先打開內容"}
+                  reason={item.reason ?? '這個項目需要你確認下一步'}
+                  consequence={item.consequence ?? '後續可能變成更高壓的處理'}
+                  nextStep={item.nextStep ?? '先打開內容'}
                   urgency={item.urgency}
                   actionLabel={item.actionLabel}
                   onPress={() => openItem(item)}
@@ -229,7 +232,7 @@ export function InboxScreen(props: any) {
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => nav?.navigate?.("Dms")}
+                onPress={() => nav?.navigate?.('Dms')}
                 style={({ pressed }) => ({
                   paddingHorizontal: theme.space.md,
                   paddingVertical: theme.space.md,

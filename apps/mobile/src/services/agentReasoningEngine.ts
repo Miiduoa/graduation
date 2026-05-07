@@ -18,8 +18,8 @@
  *  - task_execute: 執行特定任務（訂餐、請假、查天氣等）
  */
 
-import { localLLM, type LLMMessage, type LLMGenerateResult } from "./localLLMInference";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { localLLM, type LLMMessage, type LLMGenerateResult } from './localLLMInference';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ═══════════════════════════════════════════════════
 // Types
@@ -49,7 +49,7 @@ export interface ToolResult {
 /** 推理步驟 */
 export interface ReasoningStep {
   id: string;
-  type: "plan" | "tool_call" | "verify" | "synthesize" | "thought";
+  type: 'plan' | 'tool_call' | 'verify' | 'synthesize' | 'thought';
   content: string;
   toolName?: string;
   toolParams?: Record<string, any>;
@@ -64,7 +64,7 @@ export interface ReasoningPlan {
   steps: PlannedStep[];
   confidence: number;
   requiresTools: boolean;
-  complexity: "simple" | "moderate" | "complex";
+  complexity: 'simple' | 'moderate' | 'complex';
 }
 
 export interface PlannedStep {
@@ -195,8 +195,8 @@ export async function agentReason(
   // ── Step 1: Planning ──
   const planStep: ReasoningStep = {
     id: `step_${Date.now()}_plan`,
-    type: "plan",
-    content: "分析問題，制定計畫...",
+    type: 'plan',
+    content: '分析問題，制定計畫...',
     timestamp: Date.now(),
   };
   onStep?.(planStep);
@@ -207,18 +207,13 @@ export async function agentReason(
   reasoning.push(planStep);
 
   // ── Step 2: Simple path (no tools needed) ──
-  if (!plan.requiresTools || plan.complexity === "simple") {
-    const directResult = await generateDirectAnswer(
-      userMessage,
-      cfg,
-      onToken,
-      signal,
-    );
+  if (!plan.requiresTools || plan.complexity === 'simple') {
+    const directResult = await generateDirectAnswer(userMessage, cfg, onToken, signal);
     totalTokens += directResult.tokensGenerated;
 
     const synthStep: ReasoningStep = {
       id: `step_${Date.now()}_synth`,
-      type: "synthesize",
+      type: 'synthesize',
       content: directResult.content,
       timestamp: Date.now(),
     };
@@ -245,9 +240,7 @@ export async function agentReason(
 
     // Check dependencies
     if (plannedStep.dependsOn?.length) {
-      const allDepsReady = plannedStep.dependsOn.every((dep) =>
-        stepResults.has(dep),
-      );
+      const allDepsReady = plannedStep.dependsOn.every((dep) => stepResults.has(dep));
       if (!allDepsReady && plannedStep.optional) continue;
     }
 
@@ -256,7 +249,7 @@ export async function agentReason(
       const tool = toolRegistry.get(plannedStep.tool)!;
       const execStep: ReasoningStep = {
         id: plannedStep.id,
-        type: "tool_call",
+        type: 'tool_call',
         content: `執行工具: ${tool.name}`,
         toolName: tool.name,
         toolParams: plannedStep.params,
@@ -265,11 +258,7 @@ export async function agentReason(
       onStep?.(execStep);
 
       try {
-        const result = await executeToolWithRetry(
-          tool,
-          plannedStep.params ?? {},
-          cfg.maxRetries,
-        );
+        const result = await executeToolWithRetry(tool, plannedStep.params ?? {}, cfg.maxRetries);
         execStep.toolResult = result;
         execStep.durationMs = Date.now() - execStep.timestamp;
         stepResults.set(plannedStep.id, result.data);
@@ -292,7 +281,7 @@ export async function agentReason(
       // Thought step (no tool)
       const thoughtStep: ReasoningStep = {
         id: plannedStep.id,
-        type: "thought",
+        type: 'thought',
         content: plannedStep.action,
         timestamp: Date.now(),
       };
@@ -304,28 +293,22 @@ export async function agentReason(
   // ── Step 4: Verify ──
   const verifyStep: ReasoningStep = {
     id: `step_${Date.now()}_verify`,
-    type: "verify",
-    content: "驗證結果...",
+    type: 'verify',
+    content: '驗證結果...',
     timestamp: Date.now(),
   };
   onStep?.(verifyStep);
 
-  const verification = await verifyResults(
-    userMessage,
-    reasoning,
-    stepResults,
-    cfg,
-    signal,
-  );
-  verifyStep.content = `驗證結果：${verification.passed ? "通過" : "需改善"} (信心度: ${verification.confidence})`;
+  const verification = await verifyResults(userMessage, reasoning, stepResults, cfg, signal);
+  verifyStep.content = `驗證結果：${verification.passed ? '通過' : '需改善'} (信心度: ${verification.confidence})`;
   verifyStep.durationMs = Date.now() - verifyStep.timestamp;
   reasoning.push(verifyStep);
 
   // ── Step 5: Synthesize final answer ──
   const synthStep: ReasoningStep = {
     id: `step_${Date.now()}_final`,
-    type: "synthesize",
-    content: "整合結果...",
+    type: 'synthesize',
+    content: '整合結果...',
     timestamp: Date.now(),
   };
   onStep?.(synthStep);
@@ -366,11 +349,11 @@ async function generatePlan(
 ): Promise<ReasoningPlan> {
   const toolDescriptions = Array.from(toolRegistry.values())
     .map((t) => `- ${t.name}: ${t.description}`)
-    .join("\n");
+    .join('\n');
 
   const planPrompt: LLMMessage[] = [
     {
-      role: "system",
+      role: 'system',
       content: `你是一個任務規劃器。分析使用者的問題，決定是否需要使用工具，並制定執行計畫。
 
 可用工具：
@@ -387,7 +370,7 @@ ${toolDescriptions}
   ]
 }`,
     },
-    { role: "user", content: userMessage },
+    { role: 'user', content: userMessage },
   ];
 
   try {
@@ -398,7 +381,7 @@ ${toolDescriptions}
         goal: result.data.goal ?? userMessage,
         steps: (result.data.steps ?? []).map((s, i) => ({
           id: s.id ?? `s${i + 1}`,
-          action: s.action ?? "",
+          action: s.action ?? '',
           tool: s.tool,
           params: s.params,
           dependsOn: s.dependsOn,
@@ -406,11 +389,11 @@ ${toolDescriptions}
         })),
         confidence: Math.min(1, Math.max(0, result.data.confidence ?? 0.5)),
         requiresTools: result.data.requiresTools ?? false,
-        complexity: result.data.complexity ?? "simple",
+        complexity: result.data.complexity ?? 'simple',
       };
     }
   } catch (e) {
-    console.warn("[AgentReasoning] Plan generation failed:", e);
+    console.warn('[AgentReasoning] Plan generation failed:', e);
   }
 
   // Fallback: 用規則判斷
@@ -424,15 +407,15 @@ function generateFallbackPlan(userMessage: string): ReasoningPlan {
   const msg = userMessage.toLowerCase();
   const steps: PlannedStep[] = [];
   let requiresTools = false;
-  let complexity: "simple" | "moderate" | "complex" = "simple";
+  let complexity: 'simple' | 'moderate' | 'complex' = 'simple';
 
   // 課表相關
   if (/課表|課程|上課|老師|教授/.test(msg)) {
     steps.push({
-      id: "s1",
-      action: "查詢課表資料",
-      tool: "campus_query",
-      params: { type: "courses" },
+      id: 's1',
+      action: '查詢課表資料',
+      tool: 'campus_query',
+      params: { type: 'courses' },
     });
     requiresTools = true;
   }
@@ -440,10 +423,10 @@ function generateFallbackPlan(userMessage: string): ReasoningPlan {
   // 成績相關
   if (/成績|分數|及格|學期/.test(msg)) {
     steps.push({
-      id: "s2",
-      action: "查詢成績資料",
-      tool: "campus_query",
-      params: { type: "grades" },
+      id: 's2',
+      action: '查詢成績資料',
+      tool: 'campus_query',
+      params: { type: 'grades' },
     });
     requiresTools = true;
   }
@@ -451,10 +434,10 @@ function generateFallbackPlan(userMessage: string): ReasoningPlan {
   // 出席相關
   if (/出席|點名|缺課|翹課/.test(msg)) {
     steps.push({
-      id: "s3",
-      action: "查詢出席記錄",
-      tool: "campus_query",
-      params: { type: "attendance" },
+      id: 's3',
+      action: '查詢出席記錄',
+      tool: 'campus_query',
+      params: { type: 'attendance' },
     });
     requiresTools = true;
   }
@@ -462,21 +445,21 @@ function generateFallbackPlan(userMessage: string): ReasoningPlan {
   // 天氣 / 新聞 / 搜尋
   if (/天氣|新聞|搜尋|查一下|幫我找/.test(msg)) {
     steps.push({
-      id: "s4",
-      action: "搜尋網路資訊",
-      tool: "web_search",
+      id: 's4',
+      action: '搜尋網路資訊',
+      tool: 'web_search',
       params: { query: userMessage },
     });
     requiresTools = true;
-    complexity = "moderate";
+    complexity = 'moderate';
   }
 
   // 計算
   if (/計算|算|多少|加|減|乘|除|平均|GPA/.test(msg)) {
     steps.push({
-      id: "s5",
-      action: "進行計算",
-      tool: "calculate",
+      id: 's5',
+      action: '進行計算',
+      tool: 'calculate',
       params: { expression: userMessage },
     });
     requiresTools = true;
@@ -485,10 +468,10 @@ function generateFallbackPlan(userMessage: string): ReasoningPlan {
   // 行事曆
   if (/行事曆|提醒|什麼時候|截止|deadline/.test(msg)) {
     steps.push({
-      id: "s6",
-      action: "查詢行事曆",
-      tool: "schedule_manage",
-      params: { action: "query", query: userMessage },
+      id: 's6',
+      action: '查詢行事曆',
+      tool: 'schedule_manage',
+      params: { action: 'query', query: userMessage },
     });
     requiresTools = true;
   }
@@ -496,22 +479,19 @@ function generateFallbackPlan(userMessage: string): ReasoningPlan {
   // 校園知識
   if (/在哪|怎麼走|規定|辦法|電話|位置|開放/.test(msg)) {
     steps.push({
-      id: "s7",
-      action: "查詢校園知識庫",
-      tool: "knowledge_base",
+      id: 's7',
+      action: '查詢校園知識庫',
+      tool: 'knowledge_base',
       params: { query: userMessage },
     });
     requiresTools = true;
   }
 
-  if (steps.length > 2) complexity = "complex";
+  if (steps.length > 2) complexity = 'complex';
 
   return {
     goal: userMessage.slice(0, 100),
-    steps:
-      steps.length > 0
-        ? steps
-        : [{ id: "s1", action: "直接回答使用者問題" }],
+    steps: steps.length > 0 ? steps : [{ id: 's1', action: '直接回答使用者問題' }],
     confidence: steps.length > 0 ? 0.7 : 0.5,
     requiresTools,
     complexity,
@@ -544,7 +524,7 @@ async function executeToolWithRetry(
     }
   }
 
-  return { success: false, data: null, error: lastError ?? "Unknown error" };
+  return { success: false, data: null, error: lastError ?? 'Unknown error' };
 }
 
 // ═══════════════════════════════════════════════════
@@ -567,7 +547,7 @@ async function verifyResults(
 ): Promise<VerificationResult> {
   // 收集工具結果
   const toolResults = reasoning
-    .filter((s) => s.type === "tool_call" && s.toolResult)
+    .filter((s) => s.type === 'tool_call' && s.toolResult)
     .map((s) => ({
       tool: s.toolName,
       success: s.toolResult?.success,
@@ -584,27 +564,27 @@ async function verifyResults(
   if (failedTools.length > 0) {
     score -= 0.2 * failedTools.length;
     issues.push(`${failedTools.length} 個工具執行失敗`);
-    suggestions.push("可能需要使用替代方式取得資訊");
+    suggestions.push('可能需要使用替代方式取得資訊');
   }
 
   // 檢查是否有實質資料
   const hasData = toolResults.some((t) => t.hasData);
   if (toolResults.length > 0 && !hasData) {
     score -= 0.3;
-    issues.push("工具未回傳有效資料");
-    suggestions.push("嘗試用不同參數重新查詢");
+    issues.push('工具未回傳有效資料');
+    suggestions.push('嘗試用不同參數重新查詢');
   }
 
   // 如果 LLM 可用，用它進行語意驗證
-  if (localLLM.getState().status === "ready" && score > 0.3) {
+  if (localLLM.getState().status === 'ready' && score > 0.3) {
     try {
       const verifyMessages: LLMMessage[] = [
         {
-          role: "system",
+          role: 'system',
           content: `驗證以下回答是否正確回應了使用者的問題。回覆 JSON: {"score": 0.0-1.0, "issues": []}`,
         },
         {
-          role: "user",
+          role: 'user',
           content: `問題：${originalQuestion}\n\n收集到的資料：${JSON.stringify(Array.from(results.entries()).slice(0, 3))}`,
         },
       ];
@@ -650,26 +630,26 @@ async function synthesizeAnswer(
 ): Promise<LLMGenerateResult> {
   // 收集所有工具結果
   const toolData = reasoning
-    .filter((s) => s.type === "tool_call" && s.toolResult?.success)
+    .filter((s) => s.type === 'tool_call' && s.toolResult?.success)
     .map((s) => `[${s.toolName}] ${JSON.stringify(s.toolResult?.data).slice(0, 500)}`)
-    .join("\n");
+    .join('\n');
 
   const messages: LLMMessage[] = [
-    { role: "system", content: config.systemPrompt },
+    { role: 'system', content: config.systemPrompt },
     {
-      role: "user",
+      role: 'user',
       content: userMessage,
     },
   ];
 
   if (toolData) {
     messages.push({
-      role: "tool",
-      name: "aggregated_results",
+      role: 'tool',
+      name: 'aggregated_results',
       content: toolData,
     });
     messages.push({
-      role: "system",
+      role: 'system',
       content: `上面是你收集到的資料。現在請根據這些資料，用親切的語氣回答使用者的問題。如果資料不足，誠實告知。`,
     });
   }
@@ -690,8 +670,8 @@ async function generateDirectAnswer(
 ): Promise<LLMGenerateResult> {
   return localLLM.generate({
     messages: [
-      { role: "system", content: config.systemPrompt },
-      { role: "user", content: userMessage },
+      { role: 'system', content: config.systemPrompt },
+      { role: 'user', content: userMessage },
     ],
     onToken,
     signal,
@@ -702,7 +682,7 @@ async function generateDirectAnswer(
 // Conversation Memory — 長期記憶
 // ═══════════════════════════════════════════════════
 
-const MEMORY_KEY = "@agent:conversation_memory";
+const MEMORY_KEY = '@agent:conversation_memory';
 const MAX_MEMORY_ITEMS = 50;
 
 interface MemoryItem {
@@ -745,10 +725,7 @@ export async function getMemory(): Promise<MemoryItem[]> {
 /**
  * 從記憶中找相關的歷史問答（用於上下文增強）
  */
-export async function findRelevantMemory(
-  query: string,
-  limit = 3,
-): Promise<MemoryItem[]> {
+export async function findRelevantMemory(query: string, limit = 3): Promise<MemoryItem[]> {
   const memory = await getMemory();
   if (memory.length === 0) return [];
 

@@ -2,17 +2,19 @@ import '@testing-library/jest-native/extend-expect';
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () =>
-  require('@react-native-async-storage/async-storage/jest/async-storage-mock')
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
 // Mock NetInfo
 jest.mock('@react-native-community/netinfo', () => ({
   addEventListener: jest.fn(() => jest.fn()),
-  fetch: jest.fn(() => Promise.resolve({
-    isConnected: true,
-    isInternetReachable: true,
-    type: 'wifi',
-  })),
+  fetch: jest.fn(() =>
+    Promise.resolve({
+      isConnected: true,
+      isInternetReachable: true,
+      type: 'wifi',
+    }),
+  ),
 }));
 
 // Mock expo-notifications
@@ -123,10 +125,7 @@ console.warn = (...args) => {
 // Silence console errors for act warnings in tests
 const originalError = console.error;
 console.error = (...args) => {
-  if (
-    typeof args[0] === 'string' &&
-    args[0].includes('not wrapped in act')
-  ) {
+  if (typeof args[0] === 'string' && args[0].includes('not wrapped in act')) {
     return;
   }
   originalError.apply(console, args);

@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   ScrollView,
@@ -14,13 +14,13 @@ import {
   Platform,
   FlatList,
   Pressable,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { useDataSource } from "../hooks/useDataSource";
-import { useSchool } from "../state/school";
-import { theme } from "../ui/theme";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useDataSource } from '../hooks/useDataSource';
+import { useSchool } from '../state/school';
+import { theme } from '../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import {
   getCampusPulseSnapshot,
   submitCrowdReport,
@@ -31,17 +31,14 @@ import {
   type CampusEvent,
   type PulseInsight,
   type CrowdLevel,
-} from "../services/campusPulseEngine";
-import { earnXP } from "../services/gamificationEngine";
+} from '../services/campusPulseEngine';
+import { earnXP } from '../services/gamificationEngine';
 
-if (
-  UIManager.setLayoutAnimationEnabledExperimental &&
-  Platform.OS === "android"
-) {
+if (UIManager.setLayoutAnimationEnabledExperimental && Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const LOCATION_CARD_WIDTH = (SCREEN_WIDTH - theme.space.lg * 2 - theme.space.md) / 2;
 
 interface ExpandedLocation {
@@ -61,11 +58,11 @@ interface CrowdOption {
 }
 
 const CROWD_OPTIONS: CrowdOption[] = [
-  { level: 1, emoji: "😌", label: "空曠" },
-  { level: 2, emoji: "🙂", label: "舒適" },
-  { level: 3, emoji: "😐", label: "一般" },
-  { level: 4, emoji: "😰", label: "擁擠" },
-  { level: 5, emoji: "🤯", label: "爆滿" },
+  { level: 1, emoji: '😌', label: '空曠' },
+  { level: 2, emoji: '🙂', label: '舒適' },
+  { level: 3, emoji: '😐', label: '一般' },
+  { level: 4, emoji: '😰', label: '擁擠' },
+  { level: 5, emoji: '🤯', label: '爆滿' },
 ];
 
 const getCrowdColor = (level: CrowdLevel): string => {
@@ -73,11 +70,11 @@ const getCrowdColor = (level: CrowdLevel): string => {
     case 1:
       return theme.colors.success;
     case 2:
-      return "#84cc16";
+      return '#84cc16';
     case 3:
       return theme.colors.warning;
     case 4:
-      return "#f97316";
+      return '#f97316';
     case 5:
       return theme.colors.danger;
     default:
@@ -85,26 +82,26 @@ const getCrowdColor = (level: CrowdLevel): string => {
   }
 };
 
-const getTrendIcon = (trend: PulseLocation["trend"]): string => {
+const getTrendIcon = (trend: PulseLocation['trend']): string => {
   switch (trend) {
-    case "rising":
-      return "trending-up";
-    case "falling":
-      return "trending-down";
-    case "stable":
-      return "remove-outline";
+    case 'rising':
+      return 'trending-up';
+    case 'falling':
+      return 'trending-down';
+    case 'stable':
+      return 'remove-outline';
     default:
-      return "help-outline";
+      return 'help-outline';
   }
 };
 
-const getTrendColor = (trend: PulseLocation["trend"]): string => {
+const getTrendColor = (trend: PulseLocation['trend']): string => {
   switch (trend) {
-    case "rising":
+    case 'rising':
       return theme.colors.warning;
-    case "falling":
+    case 'falling':
       return theme.colors.success;
-    case "stable":
+    case 'stable':
       return theme.colors.textSecondary;
     default:
       return theme.colors.border;
@@ -120,29 +117,29 @@ const BusyMeter: React.FC<BusyMeterProps> = ({ level }) => {
   const rotation = (percentage / 100) * 180 - 90;
 
   return (
-    <View style={{ alignItems: "center", marginVertical: theme.space.lg }}>
-      <View style={{ width: 140, height: 140, position: "relative" }}>
+    <View style={{ alignItems: 'center', marginVertical: theme.space.lg }}>
+      <View style={{ width: 140, height: 140, position: 'relative' }}>
         {/* Meter background */}
         <View
           style={{
-            width: "100%",
-            height: "100%",
+            width: '100%',
+            height: '100%',
             borderRadius: 70,
             borderWidth: 3,
             borderColor: theme.colors.border,
             backgroundColor: theme.colors.surface,
-            justifyContent: "flex-end",
-            alignItems: "center",
-            overflow: "hidden",
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            overflow: 'hidden',
           }}
         >
           {/* Meter fill */}
           <View
             style={{
-              width: "100%",
+              width: '100%',
               height: `${percentage}%`,
               backgroundColor: getCrowdColor(
-                percentage > 80 ? 5 : percentage > 60 ? 4 : percentage > 40 ? 3 : 2
+                percentage > 80 ? 5 : percentage > 60 ? 4 : percentage > 40 ? 3 : 2,
               ),
             }}
           />
@@ -151,12 +148,12 @@ const BusyMeter: React.FC<BusyMeterProps> = ({ level }) => {
         {/* Center needle */}
         <View
           style={{
-            position: "absolute",
+            position: 'absolute',
             width: 4,
             height: 70,
             backgroundColor: theme.colors.text,
-            bottom: "50%",
-            left: "50%",
+            bottom: '50%',
+            left: '50%',
             marginLeft: -2,
             borderRadius: 2,
             transform: [{ rotate: `${rotation}deg` }],
@@ -166,13 +163,13 @@ const BusyMeter: React.FC<BusyMeterProps> = ({ level }) => {
         {/* Center dot */}
         <View
           style={{
-            position: "absolute",
+            position: 'absolute',
             width: 12,
             height: 12,
             borderRadius: 6,
             backgroundColor: theme.colors.text,
-            bottom: "50%",
-            left: "50%",
+            bottom: '50%',
+            left: '50%',
             marginLeft: -6,
             marginBottom: -6,
           }}
@@ -182,7 +179,7 @@ const BusyMeter: React.FC<BusyMeterProps> = ({ level }) => {
       <Text
         style={{
           fontSize: 28,
-          fontWeight: "700",
+          fontWeight: '700',
           color: theme.colors.text,
           marginTop: theme.space.md,
         }}
@@ -227,14 +224,14 @@ const EventCard: React.FC<EventCardProps> = ({ event }) => {
         borderColor: theme.colors.border,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
         <Ionicons
           name={
-            event.severity === "alert"
-              ? "alert-circle-outline"
-              : event.severity === "warning"
-              ? "warning-outline"
-              : "information-circle-outline"
+            event.severity === 'alert'
+              ? 'alert-circle-outline'
+              : event.severity === 'warning'
+                ? 'warning-outline'
+                : 'information-circle-outline'
           }
           size={20}
           color={severityColor}
@@ -244,7 +241,7 @@ const EventCard: React.FC<EventCardProps> = ({ event }) => {
           style={{
             flex: 1,
             fontSize: 13,
-            fontWeight: "600",
+            fontWeight: '600',
             color: theme.colors.text,
           }}
         >
@@ -264,12 +261,12 @@ const EventCard: React.FC<EventCardProps> = ({ event }) => {
       </Text>
 
       {event.affectedLocations && event.affectedLocations.length > 0 && (
-        <View style={{ marginTop: theme.space.sm, flexDirection: "row", flexWrap: "wrap" }}>
+        <View style={{ marginTop: theme.space.sm, flexDirection: 'row', flexWrap: 'wrap' }}>
           {event.affectedLocations.slice(0, 3).map((loc, idx) => (
             <View
               key={idx}
               style={{
-                backgroundColor: severityColor + "20",
+                backgroundColor: severityColor + '20',
                 paddingHorizontal: theme.space.sm,
                 paddingVertical: 2,
                 borderRadius: theme.radius.sm,
@@ -281,7 +278,7 @@ const EventCard: React.FC<EventCardProps> = ({ event }) => {
                 style={{
                   fontSize: 10,
                   color: severityColor,
-                  fontWeight: "500",
+                  fontWeight: '500',
                 }}
               >
                 {loc}
@@ -300,10 +297,10 @@ interface InsightCardProps {
 
 const InsightCard: React.FC<InsightCardProps> = ({ insight }) => {
   const typeConfig = {
-    suggestion: { icon: "lightbulb-outline", color: theme.colors.info },
-    alert: { icon: "alert-circle-outline", color: theme.colors.danger },
-    trend: { icon: "trending-up", color: theme.colors.warning },
-    fun_fact: { icon: "sparkles", color: theme.colors.accent },
+    suggestion: { icon: 'lightbulb-outline', color: theme.colors.info },
+    alert: { icon: 'alert-circle-outline', color: theme.colors.danger },
+    trend: { icon: 'trending-up', color: theme.colors.warning },
+    fun_fact: { icon: 'sparkles', color: theme.colors.accent },
   };
 
   const config = typeConfig[insight.type] || typeConfig.suggestion;
@@ -319,15 +316,15 @@ const InsightCard: React.FC<InsightCardProps> = ({ insight }) => {
         borderColor: theme.colors.border,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
         <View
           style={{
             width: 36,
             height: 36,
             borderRadius: theme.radius.md,
-            backgroundColor: config.color + "20",
-            justifyContent: "center",
-            alignItems: "center",
+            backgroundColor: config.color + '20',
+            justifyContent: 'center',
+            alignItems: 'center',
             marginRight: theme.space.md,
           }}
         >
@@ -338,7 +335,7 @@ const InsightCard: React.FC<InsightCardProps> = ({ insight }) => {
           <Text
             style={{
               fontSize: 14,
-              fontWeight: "600",
+              fontWeight: '600',
               color: theme.colors.text,
               marginBottom: theme.space.sm,
             }}
@@ -387,7 +384,9 @@ const LocationCard: React.FC<LocationCardProps> = ({
         },
       ]}
     >
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <View
+        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}
+      >
         <Ionicons
           name={location.icon as any}
           size={24}
@@ -395,7 +394,7 @@ const LocationCard: React.FC<LocationCardProps> = ({
         />
         <View
           style={{
-            backgroundColor: getCrowdColor(location.currentLevel) + "30",
+            backgroundColor: getCrowdColor(location.currentLevel) + '30',
             paddingHorizontal: theme.space.sm,
             paddingVertical: 2,
             borderRadius: theme.radius.sm,
@@ -404,7 +403,7 @@ const LocationCard: React.FC<LocationCardProps> = ({
           <Text
             style={{
               fontSize: 10,
-              fontWeight: "600",
+              fontWeight: '600',
               color: getCrowdColor(location.currentLevel),
             }}
           >
@@ -416,7 +415,7 @@ const LocationCard: React.FC<LocationCardProps> = ({
       <Text
         style={{
           fontSize: 14,
-          fontWeight: "600",
+          fontWeight: '600',
           color: theme.colors.text,
           marginTop: theme.space.sm,
         }}
@@ -425,7 +424,7 @@ const LocationCard: React.FC<LocationCardProps> = ({
       </Text>
 
       {/* Crowd level dots */}
-      <View style={{ flexDirection: "row", marginTop: theme.space.md, gap: theme.space.sm }}>
+      <View style={{ flexDirection: 'row', marginTop: theme.space.md, gap: theme.space.sm }}>
         {[1, 2, 3, 4, 5].map((level) => (
           <View
             key={level}
@@ -442,8 +441,10 @@ const LocationCard: React.FC<LocationCardProps> = ({
 
       {/* Trend and timing info */}
       <View style={{ marginTop: theme.space.md }}>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <View
+          style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Ionicons
               name={getTrendIcon(location.trend) as any}
               size={16}
@@ -454,18 +455,18 @@ const LocationCard: React.FC<LocationCardProps> = ({
               style={{
                 fontSize: 12,
                 color: getTrendColor(location.trend),
-                fontWeight: "500",
+                fontWeight: '500',
               }}
             >
-              {location.trend === "rising"
-                ? "上升中"
-                : location.trend === "falling"
-                ? "下降中"
-                : "穩定"}
+              {location.trend === 'rising'
+                ? '上升中'
+                : location.trend === 'falling'
+                  ? '下降中'
+                  : '穩定'}
             </Text>
           </View>
           <Ionicons
-            name={isExpanded ? "chevron-up" : "chevron-down"}
+            name={isExpanded ? 'chevron-up' : 'chevron-down'}
             size={16}
             color={theme.colors.textSecondary}
           />
@@ -478,7 +479,7 @@ const LocationCard: React.FC<LocationCardProps> = ({
             marginTop: theme.space.sm,
           }}
         >
-          尖峰: {location.peakHours.length > 0 ? location.peakHours.join("、") : "尚無明顯尖峰"}
+          尖峰: {location.peakHours.length > 0 ? location.peakHours.join('、') : '尚無明顯尖峰'}
         </Text>
         <Text
           style={{
@@ -497,7 +498,7 @@ const LocationCard: React.FC<LocationCardProps> = ({
           <Text
             style={{
               fontSize: 12,
-              fontWeight: "600",
+              fontWeight: '600',
               color: theme.colors.text,
               marginBottom: theme.space.md,
             }}
@@ -506,8 +507,8 @@ const LocationCard: React.FC<LocationCardProps> = ({
           </Text>
           <View
             style={{
-              flexDirection: "row",
-              alignItems: "flex-end",
+              flexDirection: 'row',
+              alignItems: 'flex-end',
               height: 80,
               gap: 3,
             }}
@@ -522,17 +523,17 @@ const LocationCard: React.FC<LocationCardProps> = ({
                   key={idx}
                   style={{
                     flex: 1,
-                    alignItems: "center",
+                    alignItems: 'center',
                   }}
                 >
                   <View
                     style={{
-                      width: "100%",
+                      width: '100%',
                       height: barHeight,
                       backgroundColor: getCrowdColor(data.level),
                       borderRadius: theme.radius.sm,
                       borderWidth: isCurrentHour ? 2 : 0,
-                      borderColor: isCurrentHour ? theme.colors.accent : "transparent",
+                      borderColor: isCurrentHour ? theme.colors.accent : 'transparent',
                     }}
                   />
                   <Text
@@ -561,12 +562,7 @@ interface ReportModalProps {
   onSubmit: (locationId: string, level: CrowdLevel) => void;
 }
 
-const ReportModal: React.FC<ReportModalProps> = ({
-  visible,
-  onClose,
-  locations,
-  onSubmit,
-}) => {
+const ReportModal: React.FC<ReportModalProps> = ({ visible, onClose, locations, onSubmit }) => {
   const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
   const [selectedLevel, setSelectedLevel] = useState<CrowdLevel | null>(null);
 
@@ -579,17 +575,12 @@ const ReportModal: React.FC<ReportModalProps> = ({
   }, [selectedLocation, selectedLevel, onSubmit]);
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View
         style={{
           flex: 1,
-          backgroundColor: "rgba(0,0,0,0.4)",
-          justifyContent: "flex-end",
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          justifyContent: 'flex-end',
         }}
       >
         <View
@@ -598,32 +589,28 @@ const ReportModal: React.FC<ReportModalProps> = ({
             borderTopLeftRadius: theme.radius.lg,
             borderTopRightRadius: theme.radius.lg,
             padding: theme.space.lg,
-            maxHeight: "80%",
+            maxHeight: '80%',
           }}
         >
           <View
             style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
               marginBottom: theme.space.lg,
             }}
           >
             <Text
               style={{
                 fontSize: 18,
-                fontWeight: "700",
+                fontWeight: '700',
                 color: theme.colors.text,
               }}
             >
               回報人潮狀況
             </Text>
             <TouchableOpacity onPress={onClose}>
-              <Ionicons
-                name="close-outline"
-                size={24}
-                color={theme.colors.textSecondary}
-              />
+              <Ionicons name="close-outline" size={24} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           </View>
 
@@ -631,7 +618,7 @@ const ReportModal: React.FC<ReportModalProps> = ({
           <Text
             style={{
               fontSize: 13,
-              fontWeight: "600",
+              fontWeight: '600',
               color: theme.colors.text,
               marginBottom: theme.space.md,
             }}
@@ -652,25 +639,18 @@ const ReportModal: React.FC<ReportModalProps> = ({
                   paddingVertical: theme.space.sm,
                   borderRadius: theme.radius.md,
                   backgroundColor:
-                    selectedLocation === loc.id
-                      ? theme.colors.accent
-                      : theme.colors.surface,
+                    selectedLocation === loc.id ? theme.colors.accent : theme.colors.surface,
                   marginRight: theme.space.sm,
                   borderWidth: 1,
                   borderColor:
-                    selectedLocation === loc.id
-                      ? theme.colors.accent
-                      : theme.colors.border,
+                    selectedLocation === loc.id ? theme.colors.accent : theme.colors.border,
                 }}
               >
                 <Text
                   style={{
                     fontSize: 12,
-                    fontWeight: "500",
-                    color:
-                      selectedLocation === loc.id
-                        ? theme.colors.bg
-                        : theme.colors.text,
+                    fontWeight: '500',
+                    color: selectedLocation === loc.id ? theme.colors.bg : theme.colors.text,
                   }}
                 >
                   {loc.name}
@@ -683,7 +663,7 @@ const ReportModal: React.FC<ReportModalProps> = ({
           <Text
             style={{
               fontSize: 13,
-              fontWeight: "600",
+              fontWeight: '600',
               color: theme.colors.text,
               marginBottom: theme.space.md,
             }}
@@ -696,14 +676,14 @@ const ReportModal: React.FC<ReportModalProps> = ({
                 key={option.level}
                 onPress={() => setSelectedLevel(option.level)}
                 style={{
-                  flexDirection: "row",
-                  alignItems: "center",
+                  flexDirection: 'row',
+                  alignItems: 'center',
                   paddingHorizontal: theme.space.md,
                   paddingVertical: theme.space.md,
                   borderRadius: theme.radius.md,
                   backgroundColor:
                     selectedLevel === option.level
-                      ? getCrowdColor(option.level) + "20"
+                      ? getCrowdColor(option.level) + '20'
                       : theme.colors.surface,
                   borderWidth: 2,
                   borderColor:
@@ -712,25 +692,19 @@ const ReportModal: React.FC<ReportModalProps> = ({
                       : theme.colors.border,
                 }}
               >
-                <Text style={{ fontSize: 24, marginRight: theme.space.md }}>
-                  {option.emoji}
-                </Text>
+                <Text style={{ fontSize: 24, marginRight: theme.space.md }}>{option.emoji}</Text>
                 <Text
                   style={{
                     flex: 1,
                     fontSize: 14,
-                    fontWeight: "500",
+                    fontWeight: '500',
                     color: theme.colors.text,
                   }}
                 >
                   {option.label}
                 </Text>
                 {selectedLevel === option.level && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={20}
-                    color={getCrowdColor(option.level)}
-                  />
+                  <Ionicons name="checkmark-circle" size={20} color={getCrowdColor(option.level)} />
                 )}
               </TouchableOpacity>
             ))}
@@ -742,19 +716,18 @@ const ReportModal: React.FC<ReportModalProps> = ({
             disabled={!selectedLocation || !selectedLevel}
             style={{
               backgroundColor:
-                selectedLocation && selectedLevel
-                  ? theme.colors.accent
-                  : theme.colors.border,
+                selectedLocation && selectedLevel ? theme.colors.accent : theme.colors.border,
               paddingVertical: theme.space.md,
               borderRadius: theme.radius.md,
-              alignItems: "center",
+              alignItems: 'center',
             }}
           >
             <Text
               style={{
                 fontSize: 14,
-                fontWeight: "600",
-                color: selectedLocation && selectedLevel ? theme.colors.bg : theme.colors.textSecondary,
+                fontWeight: '600',
+                color:
+                  selectedLocation && selectedLevel ? theme.colors.bg : theme.colors.textSecondary,
               }}
             >
               提交回報
@@ -771,10 +744,7 @@ interface FeedbackAnimationProps {
   onAnimationEnd: () => void;
 }
 
-const FeedbackAnimation: React.FC<FeedbackAnimationProps> = ({
-  feedback,
-  onAnimationEnd,
-}) => {
+const FeedbackAnimation: React.FC<FeedbackAnimationProps> = ({ feedback, onAnimationEnd }) => {
   const animValue = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -804,9 +774,9 @@ const FeedbackAnimation: React.FC<FeedbackAnimationProps> = ({
   return (
     <Animated.View
       style={{
-        position: "absolute",
-        top: "50%",
-        left: "50%",
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
         marginLeft: -80,
         marginTop: -40,
         opacity,
@@ -820,15 +790,15 @@ const FeedbackAnimation: React.FC<FeedbackAnimationProps> = ({
           paddingHorizontal: theme.space.lg,
           paddingVertical: theme.space.md,
           borderRadius: theme.radius.lg,
-          alignItems: "center",
+          alignItems: 'center',
         }}
       >
         <Text
           style={{
             fontSize: 14,
-            fontWeight: "600",
+            fontWeight: '600',
             color: theme.colors.bg,
-            textAlign: "center",
+            textAlign: 'center',
           }}
         >
           感謝回報！
@@ -836,7 +806,7 @@ const FeedbackAnimation: React.FC<FeedbackAnimationProps> = ({
         <Text
           style={{
             fontSize: 16,
-            fontWeight: "700",
+            fontWeight: '700',
             color: theme.colors.bg,
             marginTop: theme.space.sm,
           }}
@@ -865,7 +835,7 @@ export function CampusPulseScreen() {
       const data = await getCampusPulseSnapshot();
       setSnapshot(data);
     } catch (error) {
-      console.error("Failed to load campus pulse snapshot:", error);
+      console.error('Failed to load campus pulse snapshot:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -889,19 +859,17 @@ export function CampusPulseScreen() {
       }
 
       try {
-        LayoutAnimation.configureNext(
-          LayoutAnimation.Presets.easeInEaseOut
-        );
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         const hourlyData = (await getHourlyPattern(locationId)).map((item) => ({
           hour: item.hour,
           level: Math.max(1, Math.min(5, Math.round(item.level))) as CrowdLevel,
         }));
         setExpandedLocation({ id: locationId, hourlyData });
       } catch (error) {
-        console.error("Failed to load hourly pattern:", error);
+        console.error('Failed to load hourly pattern:', error);
       }
     },
-    [expandedLocation]
+    [expandedLocation],
   );
 
   const handleReportSubmit = useCallback(
@@ -912,10 +880,10 @@ export function CampusPulseScreen() {
           schoolId: school.id,
           locationId,
           locationName: location?.name,
-          category: location?.category === "dining" ? "dining" : location?.category,
+          category: location?.category === 'dining' ? 'dining' : location?.category,
           level,
         });
-        const xpResult = await earnXP("report_crowd");
+        const xpResult = await earnXP('report_crowd');
 
         setFeedback({ show: true, xp: xpResult.xpGained || 5 });
         setReportModalVisible(false);
@@ -925,10 +893,10 @@ export function CampusPulseScreen() {
           loadSnapshot();
         }, 500);
       } catch (error) {
-        console.error("Failed to submit crowd report:", error);
+        console.error('Failed to submit crowd report:', error);
       }
     },
-    [ds, loadSnapshot, school.id, snapshot?.locations]
+    [ds, loadSnapshot, school.id, snapshot?.locations],
   );
 
   if (loading || !snapshot) {
@@ -937,15 +905,11 @@ export function CampusPulseScreen() {
         style={{
           flex: 1,
           backgroundColor: theme.colors.bg,
-          justifyContent: "center",
-          alignItems: "center",
+          justifyContent: 'center',
+          alignItems: 'center',
         }}
       >
-        <Ionicons
-          name="radio-button-off-outline"
-          size={40}
-          color={theme.colors.textSecondary}
-        />
+        <Ionicons name="radio-button-off-outline" size={40} color={theme.colors.textSecondary} />
         <Text
           style={{
             fontSize: 14,
@@ -986,25 +950,21 @@ export function CampusPulseScreen() {
         >
           <View
             style={{
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
             }}
           >
             <Text
               style={{
                 fontSize: 24,
-                fontWeight: "700",
+                fontWeight: '700',
                 color: theme.colors.text,
               }}
             >
               校園脈動
             </Text>
-            <Ionicons
-              name="radio-button-on"
-              size={20}
-              color={theme.colors.success}
-            />
+            <Ionicons name="radio-button-on" size={20} color={theme.colors.success} />
           </View>
         </View>
 
@@ -1022,18 +982,14 @@ export function CampusPulseScreen() {
             <Text
               style={{
                 fontSize: 14,
-                fontWeight: "600",
+                fontWeight: '600',
                 color: theme.colors.text,
                 marginBottom: theme.space.md,
               }}
             >
               校園事件
             </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              scrollEventThrottle={16}
-            >
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} scrollEventThrottle={16}>
               {snapshot.events.map((event, idx) => (
                 <EventCard key={idx} event={event} />
               ))}
@@ -1052,7 +1008,7 @@ export function CampusPulseScreen() {
             <Text
               style={{
                 fontSize: 14,
-                fontWeight: "600",
+                fontWeight: '600',
                 color: theme.colors.text,
                 marginBottom: theme.space.md,
               }}
@@ -1075,7 +1031,7 @@ export function CampusPulseScreen() {
           <Text
             style={{
               fontSize: 14,
-              fontWeight: "600",
+              fontWeight: '600',
               color: theme.colors.text,
               marginBottom: theme.space.md,
             }}
@@ -1085,8 +1041,8 @@ export function CampusPulseScreen() {
 
           <View
             style={{
-              flexDirection: "row",
-              flexWrap: "wrap",
+              flexDirection: 'row',
+              flexWrap: 'wrap',
               gap: theme.space.md,
             }}
           >
@@ -1102,9 +1058,7 @@ export function CampusPulseScreen() {
                   isExpanded={expandedLocation?.id === location.id}
                   onPress={() => handleLocationPress(location.id)}
                   hourlyData={
-                    expandedLocation?.id === location.id
-                      ? expandedLocation.hourlyData
-                      : undefined
+                    expandedLocation?.id === location.id ? expandedLocation.hourlyData : undefined
                   }
                 />
               </View>
@@ -1131,15 +1085,15 @@ export function CampusPulseScreen() {
       <TouchableOpacity
         onPress={() => setReportModalVisible(true)}
         style={{
-          position: "absolute",
+          position: 'absolute',
           bottom: TAB_BAR_CONTENT_BOTTOM_PADDING + theme.space.lg,
           right: theme.space.lg,
           width: 56,
           height: 56,
           borderRadius: 28,
           backgroundColor: theme.colors.accent,
-          justifyContent: "center",
-          alignItems: "center",
+          justifyContent: 'center',
+          alignItems: 'center',
           shadowColor: theme.colors.accent,
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.3,
@@ -1147,11 +1101,7 @@ export function CampusPulseScreen() {
           elevation: 8,
         }}
       >
-        <Ionicons
-          name="megaphone-outline"
-          size={24}
-          color={theme.colors.bg}
-        />
+        <Ionicons name="megaphone-outline" size={24} color={theme.colors.bg} />
       </TouchableOpacity>
     </View>
   );

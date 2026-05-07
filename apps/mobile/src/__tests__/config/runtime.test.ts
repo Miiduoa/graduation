@@ -1,10 +1,10 @@
-jest.mock("../../data", () => ({
+jest.mock('../../data', () => ({
   createCachedSource: jest.fn((source) => source),
   configureHybridSource: jest.fn(),
-  firebaseSource: { kind: "firebase" },
-  hybridSource: { kind: "hybrid" },
+  firebaseSource: { kind: 'firebase' },
+  hybridSource: { kind: 'hybrid' },
   initializeSchoolApis: jest.fn(),
-  mockSource: { kind: "mock" },
+  mockSource: { kind: 'mock' },
   setApiEnvironment: jest.fn(),
   setDataSource: jest.fn(),
   setDataSourceEvidence: jest.fn(),
@@ -16,34 +16,34 @@ import {
   getRuntimeDataSourcePolicy,
   parseApiEnvironment,
   parseDataSourceMode,
-} from "../../config/runtime";
+} from '../../config/runtime';
 
-describe("runtime data source policy", () => {
-  it("keeps hybrid as the long-term design target", () => {
-    expect(DATA_SOURCE_DESIGN_TARGET_MODE).toBe("hybrid");
+describe('runtime data source policy', () => {
+  it('keeps hybrid as the long-term design target', () => {
+    expect(DATA_SOURCE_DESIGN_TARGET_MODE).toBe('hybrid');
   });
 
-  it("uses the runtime default when the mode env is absent or invalid", () => {
+  it('uses the runtime default when the mode env is absent or invalid', () => {
     expect(parseDataSourceMode(undefined)).toBe(DEFAULT_RUNTIME_DATA_SOURCE_MODE);
-    expect(parseDataSourceMode("invalid-mode")).toBe(DEFAULT_RUNTIME_DATA_SOURCE_MODE);
+    expect(parseDataSourceMode('invalid-mode')).toBe(DEFAULT_RUNTIME_DATA_SOURCE_MODE);
   });
 
-  it("parses supported data source and api environment values", () => {
-    expect(parseDataSourceMode("mock")).toBe("mock");
-    expect(parseDataSourceMode("firebase")).toBe("firebase");
-    expect(parseDataSourceMode("hybrid")).toBe("hybrid");
-    expect(parseApiEnvironment("development")).toBe("development");
-    expect(parseApiEnvironment("staging")).toBe("staging");
-    expect(parseApiEnvironment("production")).toBe("production");
+  it('parses supported data source and api environment values', () => {
+    expect(parseDataSourceMode('mock')).toBe('mock');
+    expect(parseDataSourceMode('firebase')).toBe('firebase');
+    expect(parseDataSourceMode('hybrid')).toBe('hybrid');
+    expect(parseApiEnvironment('development')).toBe('development');
+    expect(parseApiEnvironment('staging')).toBe('staging');
+    expect(parseApiEnvironment('production')).toBe('production');
   });
 
-  it("publishes a policy snapshot for diagnostics", () => {
+  it('publishes a policy snapshot for diagnostics', () => {
     const policy = getRuntimeDataSourcePolicy();
 
-    expect(policy.designTargetMode).toBe("hybrid");
+    expect(policy.designTargetMode).toBe('hybrid');
     expect(policy.defaultRuntimeMode).toBe(DEFAULT_RUNTIME_DATA_SOURCE_MODE);
-    expect(["mock", "firebase", "hybrid"]).toContain(policy.requestedMode);
-    expect(["mock", "firebase", "hybrid"]).toContain(policy.resolvedMode);
-    expect(["development", "staging", "production"]).toContain(policy.apiEnvironment);
+    expect(['mock', 'firebase', 'hybrid']).toContain(policy.requestedMode);
+    expect(['mock', 'firebase', 'hybrid']).toContain(policy.resolvedMode);
+    expect(['development', 'staging', 'production']).toContain(policy.apiEnvironment);
   });
 });

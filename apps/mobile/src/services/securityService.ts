@@ -52,9 +52,10 @@ export async function runSecurityAudit(): Promise<SecurityReport> {
   if (Platform.OS === 'android') {
     // Heuristic: check for common root indicators
     // Real production app should use SafetyNet / Play Integrity API
-    warnings.push(
+    warnings
+      .push
       // Advisory only — real check requires native module
-    );
+      ();
   }
 
   return {

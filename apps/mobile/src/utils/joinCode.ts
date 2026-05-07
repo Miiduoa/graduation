@@ -4,9 +4,9 @@
  */
 export function normalizeJoinCode(x: string): string {
   return x
-    .replace(/[\s-]/g, "")
+    .replace(/[\s-]/g, '')
     .replace(/[IO01]/gi, (char) => {
-      const replacements: Record<string, string> = { I: "", O: "", 0: "", 1: "" };
+      const replacements: Record<string, string> = { I: '', O: '', 0: '', 1: '' };
       return replacements[char.toUpperCase()] ?? char;
     })
     .toUpperCase()
@@ -30,10 +30,10 @@ export function isValidJoinCode(code: string): boolean {
   return normalized.length === 8 && /^[A-Z2-9]+$/.test(normalized);
 }
 
-const ALPHANUM = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // avoid confusing chars (I/1/O/0)
+const ALPHANUM = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // avoid confusing chars (I/1/O/0)
 
 export function generateJoinCode(len = 8): string {
-  let out = "";
+  let out = '';
   for (let i = 0; i < len; i++) {
     out += ALPHANUM[Math.floor(Math.random() * ALPHANUM.length)];
   }

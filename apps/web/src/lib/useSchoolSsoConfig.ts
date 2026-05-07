@@ -1,12 +1,12 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { getSchoolSsoAvailability, type SchoolSsoAvailability } from "@campus/shared/src/auth";
-import { fetchSchoolSSOConfig, type SchoolSSOConfig } from "./firebase";
+import { useEffect, useState } from 'react';
+import { getSchoolSsoAvailability, type SchoolSsoAvailability } from '@campus/shared/src/auth';
+import { fetchSchoolSSOConfig, type SchoolSSOConfig } from './firebase';
 
 export type SchoolSsoState = {
   config: SchoolSSOConfig | null;
-  ssoConfig: SchoolSSOConfig["ssoConfig"];
+  ssoConfig: SchoolSSOConfig['ssoConfig'];
   allowEmailLogin: boolean;
   availability: SchoolSsoAvailability;
   ssoReady: boolean;
@@ -15,7 +15,7 @@ export type SchoolSsoState = {
 
 export function getSchoolSsoFallbackConfig(
   schoolId: string,
-  fallbackToNull: boolean = false
+  fallbackToNull: boolean = false,
 ): SchoolSSOConfig | null {
   if (fallbackToNull) {
     return null;
@@ -28,10 +28,7 @@ export function getSchoolSsoFallbackConfig(
   };
 }
 
-export function toSchoolSsoState(
-  config: SchoolSSOConfig | null,
-  loading: boolean
-): SchoolSsoState {
+export function toSchoolSsoState(config: SchoolSSOConfig | null, loading: boolean): SchoolSsoState {
   const availability = getSchoolSsoAvailability(config);
 
   return {
@@ -59,7 +56,7 @@ export function useSchoolSsoConfig(schoolId: string, fallbackToNull: boolean = f
           setConfig(next);
         }
       } catch (error) {
-        console.error("Failed to load school SSO config:", error);
+        console.error('Failed to load school SSO config:', error);
         if (active) {
           setConfig(getSchoolSsoFallbackConfig(schoolId, fallbackToNull));
         }

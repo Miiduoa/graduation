@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -10,20 +10,20 @@ import {
   Text,
   TextInput,
   View,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { CourseSpace } from "../data";
-import { useAsyncList } from "../hooks/useAsyncList";
-import { useDataSource } from "../hooks/useDataSource";
-import { useAuth } from "../state/auth";
-import { useSchool } from "../state/school";
-import { useSchedule } from "../state/schedule";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
-import { SegmentedControl, Spinner } from "../ui/components";
-import { isTeachingRole } from "../utils/campusOs";
+import type { CourseSpace } from '../data';
+import { useAsyncList } from '../hooks/useAsyncList';
+import { useDataSource } from '../hooks/useDataSource';
+import { useAuth } from '../state/auth';
+import { useSchool } from '../state/school';
+import { useSchedule } from '../state/schedule';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { SegmentedControl, Spinner } from '../ui/components';
+import { isTeachingRole } from '../utils/campusOs';
 import {
   getCachedTCCourses,
   getCachedTCActivities,
@@ -33,7 +33,7 @@ import {
   refreshTCActivitiesForCourses,
   refreshTCAttendance,
   refreshTCTodos,
-} from "../services/puDataCache";
+} from '../services/puDataCache';
 import {
   tcFetchGrades,
   tcLogin,
@@ -50,37 +50,46 @@ import {
   type TCExamInfo,
   type TCExamSubmission,
   type TCScoreItem,
-} from "../services/tronClassClient";
+} from '../services/tronClassClient';
 
 // ─── Types ──────────────────────────────────────────────
 
-type TabKey = "schedule" | "courses" | "homework" | "grades";
+type TabKey = 'schedule' | 'courses' | 'homework' | 'grades';
 
 const TAB_OPTIONS = [
-  { key: "schedule", label: "課表" },
-  { key: "courses", label: "課程" },
-  { key: "homework", label: "作業" },
-  { key: "grades", label: "成績" },
+  { key: 'schedule', label: '課表' },
+  { key: 'courses', label: '課程' },
+  { key: 'homework', label: '作業' },
+  { key: 'grades', label: '成績' },
 ];
 
 // ─── Schedule helpers (inlined from CourseScheduleScreen) ─
-const WEEKDAYS_SHORT = ["日", "一", "二", "三", "四", "五", "六"];
+const WEEKDAYS_SHORT = ['日', '一', '二', '三', '四', '五', '六'];
 const PERIODS = [
-  { period: 1, time: "08:10-09:00" },
-  { period: 2, time: "09:10-10:00" },
-  { period: 3, time: "10:10-11:00" },
-  { period: 4, time: "11:10-12:00" },
-  { period: 5, time: "12:10-13:00" },
-  { period: 6, time: "13:10-14:00" },
-  { period: 7, time: "14:10-15:00" },
-  { period: 8, time: "15:10-16:00" },
-  { period: 9, time: "16:10-17:00" },
-  { period: 10, time: "17:10-18:00" },
-  { period: 11, time: "18:30-19:20" },
-  { period: 12, time: "19:25-20:15" },
-  { period: 13, time: "20:20-21:10" },
+  { period: 1, time: '08:10-09:00' },
+  { period: 2, time: '09:10-10:00' },
+  { period: 3, time: '10:10-11:00' },
+  { period: 4, time: '11:10-12:00' },
+  { period: 5, time: '12:10-13:00' },
+  { period: 6, time: '13:10-14:00' },
+  { period: 7, time: '14:10-15:00' },
+  { period: 8, time: '15:10-16:00' },
+  { period: 9, time: '16:10-17:00' },
+  { period: 10, time: '17:10-18:00' },
+  { period: 11, time: '18:30-19:20' },
+  { period: 12, time: '19:25-20:15' },
+  { period: 13, time: '20:20-21:10' },
 ];
-const COURSE_COLORS = ["#8B5CF6", "#EC4899", "#F59E0B", "#10B981", "#3B82F6", "#EF4444", "#6366F1", "#14B8A6"];
+const COURSE_COLORS = [
+  '#8B5CF6',
+  '#EC4899',
+  '#F59E0B',
+  '#10B981',
+  '#3B82F6',
+  '#EF4444',
+  '#6366F1',
+  '#14B8A6',
+];
 
 type CourseSlot = {
   id: string;
@@ -95,11 +104,11 @@ type CourseSlot = {
 };
 
 function timeToperiod(t: string): number {
-  const [h, m] = t.split(":").map(Number);
+  const [h, m] = t.split(':').map(Number);
   const total = h * 60 + m;
   for (let i = 0; i < PERIODS.length; i++) {
-    const [s] = PERIODS[i].time.split("-");
-    const [sh, sm] = s.split(":").map(Number);
+    const [s] = PERIODS[i].time.split('-');
+    const [sh, sm] = s.split(':').map(Number);
     if (Math.abs(total - (sh * 60 + sm)) < 30) return i + 1;
   }
   if (total < 490) return 1;
@@ -111,8 +120,8 @@ function getCurrentPeriod(): number {
   const now = new Date();
   const time = now.getHours() * 60 + now.getMinutes();
   for (let i = 0; i < PERIODS.length; i++) {
-    const [s] = PERIODS[i].time.split("-");
-    const [sh, sm] = s.split(":").map(Number);
+    const [s] = PERIODS[i].time.split('-');
+    const [sh, sm] = s.split(':').map(Number);
     const start = sh * 60 + sm;
     if (time >= start && time < start + 60) return i + 1;
   }
@@ -123,14 +132,14 @@ function getCurrentPeriod(): number {
 
 function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
   const [show, setShow] = useState(false);
-  const [account, setAccount] = useState((props.profile as any)?.loginAccount || "");
-  const [password, setPassword] = useState("");
+  const [account, setAccount] = useState((props.profile as any)?.loginAccount || '');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = useCallback(async () => {
     if (!account.trim() || !password) {
-      Alert.alert("提示", "請輸入帳號和密碼");
+      Alert.alert('提示', '請輸入帳號和密碼');
       return;
     }
     setLoading(true);
@@ -150,15 +159,15 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
       if (success) {
         await setTCSavedCredentials(account.trim(), password);
         setShow(false);
-        setAccount("");
-        setPassword("");
+        setAccount('');
+        setPassword('');
         setError(null);
         props.onSuccess();
       } else {
-        setError("登入失敗，請檢查帳號密碼");
+        setError('登入失敗，請檢查帳號密碼');
       }
     } catch {
-      setError("連線失敗，請檢查網路");
+      setError('連線失敗，請檢查網路');
     } finally {
       setLoading(false);
     }
@@ -166,10 +175,19 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
 
   if (!show) {
     return (
-      <View style={{ alignItems: "center", paddingVertical: 30, gap: 14 }}>
-        <Ionicons name="school-outline" size={44} color={theme.colors.accent} style={{ opacity: 0.5 }} />
-        <Text style={{ fontSize: 16, fontWeight: "700", color: theme.colors.text }}>尚未連線 TronClass</Text>
-        <Text style={{ color: theme.colors.muted, textAlign: "center", lineHeight: 20, fontSize: 13 }}>
+      <View style={{ alignItems: 'center', paddingVertical: 30, gap: 14 }}>
+        <Ionicons
+          name="school-outline"
+          size={44}
+          color={theme.colors.accent}
+          style={{ opacity: 0.5 }}
+        />
+        <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text }}>
+          尚未連線 TronClass
+        </Text>
+        <Text
+          style={{ color: theme.colors.muted, textAlign: 'center', lineHeight: 20, fontSize: 13 }}
+        >
           連線後即可查看課程、作業、成績等資料
         </Text>
         <Pressable
@@ -182,7 +200,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
             opacity: pressed ? 0.8 : 1,
           })}
         >
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>連線 TronClass</Text>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>連線 TronClass</Text>
         </Pressable>
       </View>
     );
@@ -199,7 +217,9 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
         gap: 12,
       }}
     >
-      <Text style={{ fontWeight: "700", fontSize: 15, color: theme.colors.text }}>連線 TronClass</Text>
+      <Text style={{ fontWeight: '700', fontSize: 15, color: theme.colors.text }}>
+        連線 TronClass
+      </Text>
       <Text style={{ color: theme.colors.muted, fontSize: 12 }}>請輸入 E校園 帳號密碼</Text>
       <TextInput
         placeholder="E校園帳號"
@@ -230,7 +250,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
         autoCapitalize="none"
         style={{
           borderWidth: 1,
-          borderColor: error ? "#DC2626" : theme.colors.border,
+          borderColor: error ? '#DC2626' : theme.colors.border,
           borderRadius: 10,
           paddingHorizontal: 14,
           paddingVertical: 12,
@@ -239,9 +259,14 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
           backgroundColor: theme.colors.bg,
         }}
       />
-      {error ? <Text style={{ color: "#DC2626", fontSize: 13 }}>{error}</Text> : null}
-      <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 12, marginTop: 4 }}>
-        <Pressable onPress={() => { setShow(false); setError(null); }}>
+      {error ? <Text style={{ color: '#DC2626', fontSize: 13 }}>{error}</Text> : null}
+      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 4 }}>
+        <Pressable
+          onPress={() => {
+            setShow(false);
+            setError(null);
+          }}
+        >
           <Text style={{ color: theme.colors.muted, fontSize: 15, paddingVertical: 8 }}>取消</Text>
         </Pressable>
         <Pressable
@@ -258,7 +283,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
           {loading ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>連線</Text>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>連線</Text>
           )}
         </Pressable>
       </View>
@@ -268,7 +293,10 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
 
 // ─── Mini Schedule View ──────────────────────────────────
 
-function MiniScheduleView(props: { courses: CourseSlot[]; onCoursePress: (c: CourseSlot) => void }) {
+function MiniScheduleView(props: {
+  courses: CourseSlot[];
+  onCoursePress: (c: CourseSlot) => void;
+}) {
   const today = new Date().getDay();
   const currentPeriod = getCurrentPeriod();
   const displayDays = [1, 2, 3, 4, 5];
@@ -287,8 +315,8 @@ function MiniScheduleView(props: { courses: CourseSlot[]; onCoursePress: (c: Cou
           <Pressable
             onPress={() => props.onCoursePress(next)}
             style={{
-              flexDirection: "row",
-              alignItems: "center",
+              flexDirection: 'row',
+              alignItems: 'center',
               padding: 14,
               borderRadius: 14,
               backgroundColor: `${next.color}12`,
@@ -297,13 +325,27 @@ function MiniScheduleView(props: { courses: CourseSlot[]; onCoursePress: (c: Cou
               gap: 12,
             }}
           >
-            <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: next.color, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#fff", fontWeight: "900", fontSize: 16 }}>{next.startPeriod}</Text>
+            <View
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 21,
+                backgroundColor: next.color,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }}>
+                {next.startPeriod}
+              </Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 15 }}>下一堂：{next.name}</Text>
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
+                下一堂：{next.name}
+              </Text>
               <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                {next.location} · {next.teacher} · {PERIODS[next.startPeriod - 1]?.time.split("-")[0]}
+                {next.location} · {next.teacher} ·{' '}
+                {PERIODS[next.startPeriod - 1]?.time.split('-')[0]}
               </Text>
             </View>
           </Pressable>
@@ -311,14 +353,37 @@ function MiniScheduleView(props: { courses: CourseSlot[]; onCoursePress: (c: Cou
       })()}
 
       {/* 統計 */}
-      <View style={{ flexDirection: "row", gap: 10 }}>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
         {[
-          { label: "課程數", value: new Set(props.courses.map((c) => c.name)).size, color: theme.colors.accent },
-          { label: "總學分", value: props.courses.reduce((s, c) => s + (c.credits ?? 0), 0), color: theme.colors.success },
-          { label: "今日", value: props.courses.filter((c) => c.dayOfWeek === today).length, color: "#F59E0B" },
+          {
+            label: '課程數',
+            value: new Set(props.courses.map((c) => c.name)).size,
+            color: theme.colors.accent,
+          },
+          {
+            label: '總學分',
+            value: props.courses.reduce((s, c) => s + (c.credits ?? 0), 0),
+            color: theme.colors.success,
+          },
+          {
+            label: '今日',
+            value: props.courses.filter((c) => c.dayOfWeek === today).length,
+            color: '#F59E0B',
+          },
         ].map((s) => (
-          <View key={s.label} style={{ flex: 1, alignItems: "center", paddingVertical: 12, borderRadius: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}>
-            <Text style={{ color: s.color, fontWeight: "900", fontSize: 22 }}>{s.value}</Text>
+          <View
+            key={s.label}
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              paddingVertical: 12,
+              borderRadius: 12,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <Text style={{ color: s.color, fontWeight: '900', fontSize: 22 }}>{s.value}</Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{s.label}</Text>
           </View>
         ))}
@@ -327,8 +392,8 @@ function MiniScheduleView(props: { courses: CourseSlot[]; onCoursePress: (c: Cou
       {/* 週課表 grid */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View>
-          <View style={{ flexDirection: "row" }}>
-            <View style={{ width: 44, height: 36, justifyContent: "center", alignItems: "center" }}>
+          <View style={{ flexDirection: 'row' }}>
+            <View style={{ width: 44, height: 36, justifyContent: 'center', alignItems: 'center' }}>
               <Text style={{ color: theme.colors.muted, fontSize: 10 }}>節次</Text>
             </View>
             {displayDays.map((day) => (
@@ -337,25 +402,51 @@ function MiniScheduleView(props: { courses: CourseSlot[]; onCoursePress: (c: Cou
                 style={{
                   width: 60,
                   height: 36,
-                  justifyContent: "center",
-                  alignItems: "center",
-                  backgroundColor: day === today ? theme.colors.accentSoft : "transparent",
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  backgroundColor: day === today ? theme.colors.accentSoft : 'transparent',
                   borderRadius: 8,
                 }}
               >
-                <Text style={{ color: day === today ? theme.colors.accent : theme.colors.text, fontWeight: day === today ? "700" : "500", fontSize: 13 }}>
+                <Text
+                  style={{
+                    color: day === today ? theme.colors.accent : theme.colors.text,
+                    fontWeight: day === today ? '700' : '500',
+                    fontSize: 13,
+                  }}
+                >
                   {WEEKDAYS_SHORT[day]}
                 </Text>
               </View>
             ))}
           </View>
           {displayPeriods.map((p) => (
-            <View key={p.period} style={{ flexDirection: "row", height: 46 }}>
-              <View style={{ width: 44, justifyContent: "center", alignItems: "center", backgroundColor: p.period === currentPeriod ? `${theme.colors.accent}20` : "transparent", borderRadius: 6 }}>
-                <Text style={{ color: p.period === currentPeriod ? theme.colors.accent : theme.colors.muted, fontSize: 11, fontWeight: p.period === currentPeriod ? "700" : "500" }}>{p.period}</Text>
+            <View key={p.period} style={{ flexDirection: 'row', height: 46 }}>
+              <View
+                style={{
+                  width: 44,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  backgroundColor:
+                    p.period === currentPeriod ? `${theme.colors.accent}20` : 'transparent',
+                  borderRadius: 6,
+                }}
+              >
+                <Text
+                  style={{
+                    color: p.period === currentPeriod ? theme.colors.accent : theme.colors.muted,
+                    fontSize: 11,
+                    fontWeight: p.period === currentPeriod ? '700' : '500',
+                  }}
+                >
+                  {p.period}
+                </Text>
               </View>
               {displayDays.map((day) => {
-                const course = props.courses.find((c) => c.dayOfWeek === day && p.period >= c.startPeriod && p.period <= c.endPeriod);
+                const course = props.courses.find(
+                  (c) =>
+                    c.dayOfWeek === day && p.period >= c.startPeriod && p.period <= c.endPeriod,
+                );
                 const isStart = course?.startPeriod === p.period;
                 if (course && isStart) {
                   const height = (course.endPeriod - course.startPeriod + 1) * 46 - 4;
@@ -363,17 +454,48 @@ function MiniScheduleView(props: { courses: CourseSlot[]; onCoursePress: (c: Cou
                     <Pressable
                       key={`${day}-${p.period}`}
                       onPress={() => props.onCoursePress(course)}
-                      style={{ width: 58, height, marginHorizontal: 1, padding: 3, borderRadius: 6, backgroundColor: course.color, overflow: "hidden" }}
+                      style={{
+                        width: 58,
+                        height,
+                        marginHorizontal: 1,
+                        padding: 3,
+                        borderRadius: 6,
+                        backgroundColor: course.color,
+                        overflow: 'hidden',
+                      }}
                     >
-                      <Text style={{ color: "#fff", fontWeight: "700", fontSize: 9 }} numberOfLines={2}>{course.name}</Text>
-                      <Text style={{ color: "rgba(255,255,255,0.8)", fontSize: 8, marginTop: 1 }} numberOfLines={1}>{course.location}</Text>
+                      <Text
+                        style={{ color: '#fff', fontWeight: '700', fontSize: 9 }}
+                        numberOfLines={2}
+                      >
+                        {course.name}
+                      </Text>
+                      <Text
+                        style={{ color: 'rgba(255,255,255,0.8)', fontSize: 8, marginTop: 1 }}
+                        numberOfLines={1}
+                      >
+                        {course.location}
+                      </Text>
                     </Pressable>
                   );
                 } else if (course) {
                   return <View key={`${day}-${p.period}`} style={{ width: 60 }} />;
                 }
                 return (
-                  <View key={`${day}-${p.period}`} style={{ width: 58, height: 42, marginHorizontal: 1, marginVertical: 2, borderRadius: 6, backgroundColor: theme.colors.surface2, borderWidth: 1, borderColor: theme.colors.border, borderStyle: "dashed" }} />
+                  <View
+                    key={`${day}-${p.period}`}
+                    style={{
+                      width: 58,
+                      height: 42,
+                      marginHorizontal: 1,
+                      marginVertical: 2,
+                      borderRadius: 6,
+                      backgroundColor: theme.colors.surface2,
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      borderStyle: 'dashed',
+                    }}
+                  />
                 );
               })}
             </View>
@@ -389,11 +511,26 @@ function MiniScheduleView(props: { courses: CourseSlot[]; onCoursePress: (c: Cou
 function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () => void }) {
   if (props.courses.length === 0) {
     return (
-      <View style={{ alignItems: "center", paddingVertical: 30, gap: 8 }}>
-        <Ionicons name="book-outline" size={40} color={theme.colors.muted} style={{ opacity: 0.5 }} />
+      <View style={{ alignItems: 'center', paddingVertical: 30, gap: 8 }}>
+        <Ionicons
+          name="book-outline"
+          size={40}
+          color={theme.colors.muted}
+          style={{ opacity: 0.5 }}
+        />
         <Text style={{ color: theme.colors.muted, fontSize: 14 }}>尚無課程資料</Text>
-        <Pressable onPress={props.onRefresh} style={({ pressed }) => ({ paddingHorizontal: 20, paddingVertical: 8, borderRadius: 16, backgroundColor: theme.colors.accent, opacity: pressed ? 0.8 : 1, marginTop: 6 })}>
-          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>重新載入</Text>
+        <Pressable
+          onPress={props.onRefresh}
+          style={({ pressed }) => ({
+            paddingHorizontal: 20,
+            paddingVertical: 8,
+            borderRadius: 16,
+            backgroundColor: theme.colors.accent,
+            opacity: pressed ? 0.8 : 1,
+            marginTop: 6,
+          })}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>重新載入</Text>
         </Pressable>
       </View>
     );
@@ -402,13 +539,16 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
   return (
     <View style={{ gap: 10 }}>
       {props.courses.map((course, idx) => {
-        const instructor = course.instructors?.[0]?.name ?? "未知";
-        const semester = course.semester?.name ?? "";
+        const instructor = course.instructors?.[0]?.name ?? '未知';
+        const semester = course.semester?.name ?? '';
         return (
           <Pressable
             key={course.id}
             onPress={() =>
-              props.nav?.navigate?.("CourseHub", { groupId: String(course.id), groupName: course.name })
+              props.nav?.navigate?.('CourseHub', {
+                groupId: String(course.id),
+                groupName: course.name,
+              })
             }
             style={({ pressed }) => ({
               padding: 14,
@@ -422,48 +562,95 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
               gap: 6,
             })}
           >
-            <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 15 }} numberOfLines={2}>
+            <Text
+              style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}
+              numberOfLines={2}
+            >
               {course.name}
             </Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                 <Ionicons name="person-outline" size={12} color={theme.colors.muted} />
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{instructor}</Text>
               </View>
               {course.credit != null && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Ionicons name="school-outline" size={12} color={theme.colors.muted} />
-                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{course.credit} 學分</Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                    {course.credit} 學分
+                  </Text>
                 </View>
               )}
               {semester ? (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Ionicons name="calendar-outline" size={12} color={theme.colors.muted} />
                   <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{semester}</Text>
                 </View>
               ) : null}
             </View>
-            <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+            <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
               <Pressable
-                onPress={() => props.nav?.navigate?.("CourseModules", { groupId: String(course.id), groupName: course.name })}
-                style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: "#2563EB14", borderWidth: 1, borderColor: "#2563EB22" }}
+                onPress={() =>
+                  props.nav?.navigate?.('CourseModules', {
+                    groupId: String(course.id),
+                    groupName: course.name,
+                  })
+                }
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: '#2563EB14',
+                  borderWidth: 1,
+                  borderColor: '#2563EB22',
+                }}
               >
                 <Ionicons name="albums-outline" size={12} color="#2563EB" />
-                <Text style={{ color: "#2563EB", fontSize: 11, fontWeight: "700" }}>教材</Text>
+                <Text style={{ color: '#2563EB', fontSize: 11, fontWeight: '700' }}>教材</Text>
               </Pressable>
               <Pressable
-                onPress={() => props.nav?.navigate?.("QuizCenter", { groupId: String(course.id), groupName: course.name })}
-                style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: `${theme.colors.info}14`, borderWidth: 1, borderColor: `${theme.colors.info}22` }}
+                onPress={() =>
+                  props.nav?.navigate?.('QuizCenter', {
+                    groupId: String(course.id),
+                    groupName: course.name,
+                  })
+                }
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: `${theme.colors.info}14`,
+                  borderWidth: 1,
+                  borderColor: `${theme.colors.info}22`,
+                }}
               >
                 <Ionicons name="help-circle-outline" size={12} color={theme.colors.info} />
-                <Text style={{ color: theme.colors.info, fontSize: 11, fontWeight: "700" }}>測驗</Text>
+                <Text style={{ color: theme.colors.info, fontSize: 11, fontWeight: '700' }}>
+                  測驗
+                </Text>
               </Pressable>
               <Pressable
-                onPress={() => props.nav?.navigate?.("Grades")}
-                style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: "#0EA5E914", borderWidth: 1, borderColor: "#0EA5E922" }}
+                onPress={() => props.nav?.navigate?.('Grades')}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: '#0EA5E914',
+                  borderWidth: 1,
+                  borderColor: '#0EA5E922',
+                }}
               >
                 <Ionicons name="stats-chart-outline" size={12} color="#0EA5E9" />
-                <Text style={{ color: "#0EA5E9", fontSize: 11, fontWeight: "700" }}>成績</Text>
+                <Text style={{ color: '#0EA5E9', fontSize: 11, fontWeight: '700' }}>成績</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -489,7 +676,7 @@ function HomeworkView(props: {
     for (const course of props.courses) {
       const acts = props.activities[course.id] ?? [];
       for (const a of acts) {
-        if (a.type === "homework" || a.type === "assignment" || a.type === "offline_homework") {
+        if (a.type === 'homework' || a.type === 'assignment' || a.type === 'offline_homework') {
           items.push({ ...a, courseName: course.name });
         }
       }
@@ -499,7 +686,7 @@ function HomeworkView(props: {
     for (const todo of props.todos) {
       if (!items.some((i) => i.id === todo.id)) {
         const course = props.courses.find((c) => c.id === todo.course_id);
-        items.push({ ...todo, courseName: course?.name ?? "未知課程" });
+        items.push({ ...todo, courseName: course?.name ?? '未知課程' });
       }
     }
 
@@ -516,8 +703,13 @@ function HomeworkView(props: {
 
   if (allHomework.length === 0) {
     return (
-      <View style={{ alignItems: "center", paddingVertical: 30, gap: 8 }}>
-        <Ionicons name="document-text-outline" size={40} color={theme.colors.muted} style={{ opacity: 0.5 }} />
+      <View style={{ alignItems: 'center', paddingVertical: 30, gap: 8 }}>
+        <Ionicons
+          name="document-text-outline"
+          size={40}
+          color={theme.colors.muted}
+          style={{ opacity: 0.5 }}
+        />
         <Text style={{ color: theme.colors.muted, fontSize: 14 }}>目前沒有作業</Text>
       </View>
     );
@@ -537,36 +729,36 @@ function HomeworkView(props: {
 
   const renderItem = (item: (typeof allHomework)[number]) => {
     const isOverdue = item.end_time && new Date(item.end_time) < now;
-    const isSubmitted = item.status === "submitted" || item.status === "graded";
-    const isGraded = item.status === "graded";
+    const isSubmitted = item.status === 'submitted' || item.status === 'graded';
+    const isGraded = item.status === 'graded';
     const dueDate = item.end_time ? new Date(item.end_time) : null;
 
     let statusColor = theme.colors.muted;
-    let statusText = "待處理";
-    let statusIcon: keyof typeof Ionicons.glyphMap = "time-outline";
+    let statusText = '待處理';
+    let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
     if (isGraded) {
       statusColor = theme.colors.success;
-      statusText = item.score != null ? `${item.score}/${item.total_score ?? 100}` : "已批改";
-      statusIcon = "checkmark-circle";
+      statusText = item.score != null ? `${item.score}/${item.total_score ?? 100}` : '已批改';
+      statusIcon = 'checkmark-circle';
     } else if (isSubmitted) {
-      statusColor = "#2563EB";
-      statusText = "已繳交";
-      statusIcon = "checkmark-done-outline";
+      statusColor = '#2563EB';
+      statusText = '已繳交';
+      statusIcon = 'checkmark-done-outline';
     } else if (isOverdue) {
-      statusColor = "#DC2626";
-      statusText = "已逾期";
-      statusIcon = "alert-circle";
+      statusColor = '#DC2626';
+      statusText = '已逾期';
+      statusIcon = 'alert-circle';
     } else if (dueDate) {
       const diffHours = (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60);
       if (diffHours < 24) {
-        statusColor = "#F59E0B";
+        statusColor = '#F59E0B';
         statusText = `${Math.max(0, Math.floor(diffHours))} 小時後截止`;
-        statusIcon = "warning-outline";
+        statusIcon = 'warning-outline';
       } else if (diffHours < 72) {
-        statusColor = "#F59E0B";
+        statusColor = '#F59E0B';
         statusText = `${Math.floor(diffHours / 24)} 天後截止`;
-        statusIcon = "time-outline";
+        statusIcon = 'time-outline';
       } else {
         statusText = `${Math.floor(diffHours / 24)} 天後截止`;
       }
@@ -576,7 +768,7 @@ function HomeworkView(props: {
       <Pressable
         key={`${item.course_id}-${item.id}`}
         onPress={() =>
-          props.nav?.navigate?.("CourseModules", {
+          props.nav?.navigate?.('CourseModules', {
             groupId: String(item.course_id),
             groupName: item.courseName,
           })
@@ -586,28 +778,45 @@ function HomeworkView(props: {
           borderRadius: 14,
           backgroundColor: theme.colors.surface,
           borderWidth: 1,
-          borderColor: isOverdue && !isSubmitted ? "#DC262630" : theme.colors.border,
+          borderColor: isOverdue && !isSubmitted ? '#DC262630' : theme.colors.border,
           opacity: pressed ? 0.8 : 1,
           gap: 8,
         })}
       >
-        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
-          <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: `${statusColor}14`, alignItems: "center", justifyContent: "center", marginTop: 2 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+          <View
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              backgroundColor: `${statusColor}14`,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginTop: 2,
+            }}
+          >
             <Ionicons name={statusIcon} size={18} color={statusColor} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }} numberOfLines={2}>
+            <Text
+              style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}
+              numberOfLines={2}
+            >
               {item.title}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
               {item.courseName}
             </Text>
           </View>
-          <View style={{ alignItems: "flex-end" }}>
-            <Text style={{ color: statusColor, fontWeight: "700", fontSize: 12 }}>{statusText}</Text>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={{ color: statusColor, fontWeight: '700', fontSize: 12 }}>
+              {statusText}
+            </Text>
             {dueDate && (
               <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
-                {dueDate.getMonth() + 1}/{dueDate.getDate()} {String(dueDate.getHours()).padStart(2, "0")}:{String(dueDate.getMinutes()).padStart(2, "0")}
+                {dueDate.getMonth() + 1}/{dueDate.getDate()}{' '}
+                {String(dueDate.getHours()).padStart(2, '0')}:
+                {String(dueDate.getMinutes()).padStart(2, '0')}
               </Text>
             )}
           </View>
@@ -625,7 +834,7 @@ function HomeworkView(props: {
     <View style={{ gap: 14 }}>
       {pending.length > 0 && (
         <View style={{ gap: 8 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
             待完成 ({pending.length})
           </Text>
           {pending.map(renderItem)}
@@ -633,12 +842,12 @@ function HomeworkView(props: {
       )}
       {past.length > 0 && (
         <View style={{ gap: 8, marginTop: 6 }}>
-          <Text style={{ color: theme.colors.muted, fontWeight: "700", fontSize: 14 }}>
+          <Text style={{ color: theme.colors.muted, fontWeight: '700', fontSize: 14 }}>
             已過期 ({past.length})
           </Text>
           {past.slice(0, 10).map(renderItem)}
           {past.length > 10 && (
-            <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: "center" }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 12, textAlign: 'center' }}>
               還有 {past.length - 10} 項...
             </Text>
           )}
@@ -650,10 +859,25 @@ function HomeworkView(props: {
 
 // ─── Grades Tab ──────────────────────────────────────────
 
-type ExamScoreRow = TCExamInfo & { submission?: TCExamSubmission | null; courseName: string; courseId: number; percentage: number };
-type CourseScoreSummary = { courseId: number; courseName: string; scoreItems: TCScoreItem[]; examRows: ExamScoreRow[]; estimatedFinal: number | null };
+type ExamScoreRow = TCExamInfo & {
+  submission?: TCExamSubmission | null;
+  courseName: string;
+  courseId: number;
+  percentage: number;
+};
+type CourseScoreSummary = {
+  courseId: number;
+  courseName: string;
+  scoreItems: TCScoreItem[];
+  examRows: ExamScoreRow[];
+  estimatedFinal: number | null;
+};
 
-function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; courses: TCCourse[] }) {
+function GradesView(props: {
+  grades: TCGradeItem[];
+  attendance: TCAttendance[];
+  courses: TCCourse[];
+}) {
   const [examScores, setExamScores] = useState<ExamScoreRow[]>([]);
   const [courseSummaries, setCourseSummaries] = useState<CourseScoreSummary[]>([]);
   const [loadingExams, setLoadingExams] = useState(false);
@@ -680,10 +904,18 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
               try {
                 const sub = await tcFetchExamSubmissions(exam.id);
                 // 找到對應 score-item 的 percentage
-                const si = scoreItems.find((s) => s.name === exam.title || (s as any).referrer_id === exam.id);
+                const si = scoreItems.find(
+                  (s) => s.name === exam.title || (s as any).referrer_id === exam.id,
+                );
                 const pct = si?.percentage ?? 0;
-                const row: ExamScoreRow = { ...exam, submission: sub, courseName: course.name, courseId: course.id, percentage: pct };
-                if (sub && typeof sub.exam_score === "number") {
+                const row: ExamScoreRow = {
+                  ...exam,
+                  submission: sub,
+                  courseName: course.name,
+                  courseId: course.id,
+                  percentage: pct,
+                };
+                if (sub && typeof sub.exam_score === 'number') {
                   courseExamRows.push(row);
                   allRows.push(row);
                 }
@@ -692,7 +924,9 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
 
             // 計算最終成績估算
             let estimatedFinal: number | null = null;
-            const allScored = courseExamRows.filter((e) => typeof e.submission?.exam_score === "number");
+            const allScored = courseExamRows.filter(
+              (e) => typeof e.submission?.exam_score === 'number',
+            );
             if (allScored.length > 0) {
               // 檢查是否有設定百分比權重
               const hasWeights = allScored.some((e) => e.percentage > 0);
@@ -700,17 +934,30 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
                 // 加權計算：按百分比權重
                 const weighted = allScored.filter((e) => e.percentage > 0);
                 const totalPct = weighted.reduce((s, e) => s + e.percentage, 0);
-                const weightedSum = weighted.reduce((s, e) => s + (e.submission?.exam_score ?? 0) * e.percentage, 0);
-                estimatedFinal = totalPct > 0 ? Math.round((weightedSum / totalPct) * 10) / 10 : null;
+                const weightedSum = weighted.reduce(
+                  (s, e) => s + (e.submission?.exam_score ?? 0) * e.percentage,
+                  0,
+                );
+                estimatedFinal =
+                  totalPct > 0 ? Math.round((weightedSum / totalPct) * 10) / 10 : null;
               } else {
                 // 無權重：計算簡單平均
-                const totalScore = allScored.reduce((s, e) => s + (e.submission?.exam_score ?? 0), 0);
+                const totalScore = allScored.reduce(
+                  (s, e) => s + (e.submission?.exam_score ?? 0),
+                  0,
+                );
                 estimatedFinal = Math.round((totalScore / allScored.length) * 10) / 10;
               }
             }
 
             if (courseExamRows.length > 0) {
-              summaries.push({ courseId: course.id, courseName: course.name, scoreItems, examRows: courseExamRows, estimatedFinal });
+              summaries.push({
+                courseId: course.id,
+                courseName: course.name,
+                scoreItems,
+                examRows: courseExamRows,
+                estimatedFinal,
+              });
             }
           } catch {}
         }
@@ -722,13 +969,17 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
         if (!cancelled) setLoadingExams(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [props.courses]);
 
   const totalCredits = props.grades.reduce((s, g) => s + (g.credits ?? 0), 0);
-  const gpa = props.grades.length > 0
-    ? props.grades.reduce((s, g) => s + (g.grade_point ?? 0) * (g.credits ?? 0), 0) / Math.max(totalCredits, 1)
-    : null;
+  const gpa =
+    props.grades.length > 0
+      ? props.grades.reduce((s, g) => s + (g.grade_point ?? 0) * (g.credits ?? 0), 0) /
+        Math.max(totalCredits, 1)
+      : null;
 
   // 按課程分組考試分數（必須在所有 early return 之前呼叫 useMemo）
   const examsByCourse = useMemo(() => {
@@ -740,10 +991,20 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
     return map;
   }, [examScores]);
 
-  if (props.grades.length === 0 && props.attendance.length === 0 && examScores.length === 0 && !loadingExams) {
+  if (
+    props.grades.length === 0 &&
+    props.attendance.length === 0 &&
+    examScores.length === 0 &&
+    !loadingExams
+  ) {
     return (
-      <View style={{ alignItems: "center", paddingVertical: 30, gap: 8 }}>
-        <Ionicons name="stats-chart-outline" size={40} color={theme.colors.muted} style={{ opacity: 0.5 }} />
+      <View style={{ alignItems: 'center', paddingVertical: 30, gap: 8 }}>
+        <Ionicons
+          name="stats-chart-outline"
+          size={40}
+          color={theme.colors.muted}
+          style={{ opacity: 0.5 }}
+        />
         <Text style={{ color: theme.colors.muted, fontSize: 14 }}>尚無成績資料</Text>
       </View>
     );
@@ -753,17 +1014,53 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
     <View style={{ gap: 14 }}>
       {/* GPA summary */}
       {gpa != null && (
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <View style={{ flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}>
-            <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 24 }}>{gpa.toFixed(2)}</Text>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <View
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              paddingVertical: 14,
+              borderRadius: 14,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+              {gpa.toFixed(2)}
+            </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>GPA</Text>
           </View>
-          <View style={{ flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}>
-            <Text style={{ color: theme.colors.success, fontWeight: "900", fontSize: 24 }}>{totalCredits}</Text>
+          <View
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              paddingVertical: 14,
+              borderRadius: 14,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+              {totalCredits}
+            </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已修學分</Text>
           </View>
-          <View style={{ flex: 1, alignItems: "center", paddingVertical: 14, borderRadius: 14, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border }}>
-            <Text style={{ color: "#F59E0B", fontWeight: "900", fontSize: 24 }}>{props.grades.length}</Text>
+          <View
+            style={{
+              flex: 1,
+              alignItems: 'center',
+              paddingVertical: 14,
+              borderRadius: 14,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+              {props.grades.length}
+            </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>科目數</Text>
           </View>
         </View>
@@ -772,19 +1069,26 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
       {/* TronClass 小考/測驗分數 + 加權成績 */}
       {(courseSummaries.length > 0 || loadingExams) && (
         <View style={{ gap: 8 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
             小考 / 測驗成績
           </Text>
           {loadingExams && courseSummaries.length === 0 && (
-            <View style={{ alignItems: "center", paddingVertical: 20 }}>
+            <View style={{ alignItems: 'center', paddingVertical: 20 }}>
               <ActivityIndicator size="small" color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>載入測驗成績中...</Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                載入測驗成績中...
+              </Text>
             </View>
           )}
           {courseSummaries.map((cs) => {
-            const finalColor = cs.estimatedFinal != null
-              ? (cs.estimatedFinal >= 80 ? theme.colors.success : cs.estimatedFinal >= 60 ? "#F59E0B" : "#DC2626")
-              : theme.colors.muted;
+            const finalColor =
+              cs.estimatedFinal != null
+                ? cs.estimatedFinal >= 80
+                  ? theme.colors.success
+                  : cs.estimatedFinal >= 60
+                    ? '#F59E0B'
+                    : '#DC2626'
+                : theme.colors.muted;
             return (
               <View
                 key={`course-exams-${cs.courseId}`}
@@ -798,8 +1102,17 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
                 }}
               >
                 {/* 課程標題 + 預估成績 */}
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14, flex: 1 }} numberOfLines={1}>
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <Text
+                    style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14, flex: 1 }}
+                    numberOfLines={1}
+                  >
                     {cs.courseName}
                   </Text>
                   <Pressable
@@ -812,20 +1125,28 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
 
                 {/* 預估成績 */}
                 {cs.estimatedFinal != null && (
-                  <View style={{
-                    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-                    paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10,
-                    backgroundColor: `${finalColor}10`, borderWidth: 1, borderColor: `${finalColor}30`,
-                  }}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingVertical: 8,
+                      paddingHorizontal: 12,
+                      borderRadius: 10,
+                      backgroundColor: `${finalColor}10`,
+                      borderWidth: 1,
+                      borderColor: `${finalColor}30`,
+                    }}
+                  >
                     <View>
-                      <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: "600" }}>
-                        {cs.examRows.some(e => e.percentage > 0) ? "加權預估成績" : "平均分數"}
+                      <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
+                        {cs.examRows.some((e) => e.percentage > 0) ? '加權預估成績' : '平均分數'}
                       </Text>
                       <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
                         {cs.examRows.length} 項測驗
                       </Text>
                     </View>
-                    <Text style={{ color: finalColor, fontWeight: "900", fontSize: 22 }}>
+                    <Text style={{ color: finalColor, fontWeight: '900', fontSize: 22 }}>
                       {cs.estimatedFinal}
                     </Text>
                   </View>
@@ -834,20 +1155,30 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
                 {/* 各項分數 */}
                 {cs.examRows.map((exam) => {
                   const score = exam.submission?.exam_score ?? 0;
-                  const scoreColor = score >= 80 ? theme.colors.success : score >= 60 ? "#F59E0B" : "#DC2626";
+                  const scoreColor =
+                    score >= 80 ? theme.colors.success : score >= 60 ? '#F59E0B' : '#DC2626';
                   return (
                     <View
                       key={exam.id}
-                      style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 4 }}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingVertical: 4,
+                      }}
                     >
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                         <Ionicons name="checkbox-outline" size={14} color={theme.colors.muted} />
-                        <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={1}>{exam.title}</Text>
+                        <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={1}>
+                          {exam.title}
+                        </Text>
                         {exam.percentage > 0 && (
-                          <Text style={{ color: theme.colors.muted, fontSize: 11 }}>({exam.percentage}%)</Text>
+                          <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
+                            ({exam.percentage}%)
+                          </Text>
                         )}
                       </View>
-                      <Text style={{ color: scoreColor, fontWeight: "700", fontSize: 16 }}>
+                      <Text style={{ color: scoreColor, fontWeight: '700', fontSize: 16 }}>
                         {score}
                       </Text>
                     </View>
@@ -862,11 +1193,16 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
       {/* Grade list */}
       {props.grades.length > 0 && (
         <View style={{ gap: 8 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>成績列表</Text>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+            成績列表
+          </Text>
           {props.grades.map((g, idx) => {
             const scoreColor =
-              (g.final_score ?? 0) >= 80 ? theme.colors.success :
-              (g.final_score ?? 0) >= 60 ? "#F59E0B" : "#DC2626";
+              (g.final_score ?? 0) >= 80
+                ? theme.colors.success
+                : (g.final_score ?? 0) >= 60
+                  ? '#F59E0B'
+                  : '#DC2626';
             return (
               <View
                 key={`${g.course_id}-${idx}`}
@@ -876,22 +1212,27 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
                   backgroundColor: theme.colors.surface,
                   borderWidth: 1,
                   borderColor: theme.colors.border,
-                  flexDirection: "row",
-                  alignItems: "center",
+                  flexDirection: 'row',
+                  alignItems: 'center',
                   gap: 12,
                 }}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }} numberOfLines={1}>
+                  <Text
+                    style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}
+                    numberOfLines={1}
+                  >
                     {g.course_name}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
                     {g.semester} · {g.credits} 學分
                   </Text>
                 </View>
-                <View style={{ alignItems: "flex-end" }}>
+                <View style={{ alignItems: 'flex-end' }}>
                   {g.final_score != null && (
-                    <Text style={{ color: scoreColor, fontWeight: "900", fontSize: 20 }}>{g.final_score}</Text>
+                    <Text style={{ color: scoreColor, fontWeight: '900', fontSize: 20 }}>
+                      {g.final_score}
+                    </Text>
                   )}
                   {g.final_grade && (
                     <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{g.final_grade}</Text>
@@ -906,7 +1247,9 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
       {/* Attendance */}
       {props.attendance.length > 0 && (
         <View style={{ gap: 8, marginTop: 6 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }}>出勤記錄</Text>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+            出勤記錄
+          </Text>
           {props.attendance.map((a, idx) => (
             <View
               key={`att-${idx}`}
@@ -919,20 +1262,41 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
                 gap: 6,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: "700", fontSize: 14 }} numberOfLines={1}>
+              <Text
+                style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}
+                numberOfLines={1}
+              >
                 {a.course_name}
               </Text>
-              <View style={{ flexDirection: "row", gap: 12 }}>
+              <View style={{ flexDirection: 'row', gap: 12 }}>
                 <Text style={{ color: theme.colors.success, fontSize: 12 }}>出席 {a.attended}</Text>
-                <Text style={{ color: "#DC2626", fontSize: 12 }}>缺席 {a.absent}</Text>
-                <Text style={{ color: "#F59E0B", fontSize: 12 }}>遲到 {a.late}</Text>
+                <Text style={{ color: '#DC2626', fontSize: 12 }}>缺席 {a.absent}</Text>
+                <Text style={{ color: '#F59E0B', fontSize: 12 }}>遲到 {a.late}</Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>請假 {a.leave}</Text>
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: theme.colors.surface2, overflow: "hidden" }}>
-                  <View style={{ width: `${a.rate}%`, height: "100%", borderRadius: 2, backgroundColor: a.rate >= 80 ? theme.colors.success : a.rate >= 60 ? "#F59E0B" : "#DC2626" }} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View
+                  style={{
+                    flex: 1,
+                    height: 4,
+                    borderRadius: 2,
+                    backgroundColor: theme.colors.surface2,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <View
+                    style={{
+                      width: `${a.rate}%`,
+                      height: '100%',
+                      borderRadius: 2,
+                      backgroundColor:
+                        a.rate >= 80 ? theme.colors.success : a.rate >= 60 ? '#F59E0B' : '#DC2626',
+                    }}
+                  />
                 </View>
-                <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600" }}>{a.rate}%</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600' }}>
+                  {a.rate}%
+                </Text>
               </View>
             </View>
           ))}
@@ -946,7 +1310,7 @@ function GradesView(props: { grades: TCGradeItem[]; attendance: TCAttendance[]; 
 
 export function CoursesHomeScreen(props: any) {
   const nav = props?.navigation;
-  const initialTab = (props?.route?.params?.initialTab as TabKey) ?? "schedule";
+  const initialTab = (props?.route?.params?.initialTab as TabKey) ?? 'schedule';
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const { school } = useSchool();
@@ -1028,26 +1392,23 @@ export function CoursesHomeScreen(props: any) {
         id: `${course.id}_${si}`,
         name: course.name,
         teacher: course.instructor,
-        location: sched.location || "待定",
+        location: sched.location || '待定',
         dayOfWeek: sched.dayOfWeek,
         startPeriod: timeToperiod(sched.startTime),
         endPeriod: timeToperiod(sched.endTime),
         color: COURSE_COLORS[ci % COURSE_COLORS.length],
         credits: course.credits,
-      }))
+      })),
     );
   }, [schedule.courses]);
 
-  const handleCoursePress = useCallback(
-    (course: CourseSlot) => {
-      Alert.alert(
-        course.name,
-        `教師：${course.teacher}\n地點：${course.location}\n時間：${WEEKDAYS_SHORT[course.dayOfWeek]} 第 ${course.startPeriod}-${course.endPeriod} 節\n學分：${course.credits ?? "-"}`,
-        [{ text: "關閉" }]
-      );
-    },
-    []
-  );
+  const handleCoursePress = useCallback((course: CourseSlot) => {
+    Alert.alert(
+      course.name,
+      `教師：${course.teacher}\n地點：${course.location}\n時間：${WEEKDAYS_SHORT[course.dayOfWeek]} 第 ${course.startPeriod}-${course.endPeriod} 節\n學分：${course.credits ?? '-'}`,
+      [{ text: '關閉' }],
+    );
+  }, []);
 
   const handleLoginSuccess = useCallback(() => {
     loadAllData();
@@ -1074,18 +1435,28 @@ export function CoursesHomeScreen(props: any) {
         }}
       >
         {/* Header */}
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <View
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+        >
           <View style={{ gap: 2 }}>
-            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "700", letterSpacing: 1.5, textTransform: "uppercase" }}>
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: 11,
+                fontWeight: '700',
+                letterSpacing: 1.5,
+                textTransform: 'uppercase',
+              }}
+            >
               課程
             </Text>
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: "800" }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
               我的課程
             </Text>
           </View>
-          <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
             <Pressable
-              onPress={() => nav?.navigate?.("AIChat")}
+              onPress={() => nav?.navigate?.('AIChat')}
               style={({ pressed }) => ({
                 width: 38,
                 height: 38,
@@ -1093,15 +1464,15 @@ export function CoursesHomeScreen(props: any) {
                 backgroundColor: theme.colors.surface,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
-                alignItems: "center",
-                justifyContent: "center",
+                alignItems: 'center',
+                justifyContent: 'center',
                 opacity: pressed ? 0.7 : 1,
               })}
             >
               <Ionicons name="sparkles" size={18} color="#FF6B9A" />
             </Pressable>
             <Pressable
-              onPress={() => nav?.navigate?.("CreditAuditStack")}
+              onPress={() => nav?.navigate?.('CreditAuditStack')}
               style={({ pressed }) => ({
                 width: 38,
                 height: 38,
@@ -1109,8 +1480,8 @@ export function CoursesHomeScreen(props: any) {
                 backgroundColor: theme.colors.surface,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
-                alignItems: "center",
-                justifyContent: "center",
+                alignItems: 'center',
+                justifyContent: 'center',
                 opacity: pressed ? 0.7 : 1,
               })}
             >
@@ -1127,30 +1498,41 @@ export function CoursesHomeScreen(props: any) {
         />
 
         {/* Loading state */}
-        {dataLoading && tab !== "schedule" && (
-          <View style={{ alignItems: "center", paddingVertical: 30 }}>
+        {dataLoading && tab !== 'schedule' && (
+          <View style={{ alignItems: 'center', paddingVertical: 30 }}>
             <ActivityIndicator size="large" color={theme.colors.accent} />
-            <Text style={{ color: theme.colors.muted, marginTop: 10, fontSize: 13 }}>載入資料中...</Text>
+            <Text style={{ color: theme.colors.muted, marginTop: 10, fontSize: 13 }}>
+              載入資料中...
+            </Text>
           </View>
         )}
 
         {/* Schedule tab */}
-        {tab === "schedule" && (
-          schedule.loading ? (
-            <View style={{ alignItems: "center", paddingVertical: 30 }}>
+        {tab === 'schedule' &&
+          (schedule.loading ? (
+            <View style={{ alignItems: 'center', paddingVertical: 30 }}>
               <ActivityIndicator size="large" color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.muted, marginTop: 10, fontSize: 13 }}>載入課表中...</Text>
+              <Text style={{ color: theme.colors.muted, marginTop: 10, fontSize: 13 }}>
+                載入課表中...
+              </Text>
             </View>
           ) : courseSlots.length > 0 ? (
             <MiniScheduleView courses={courseSlots} onCoursePress={handleCoursePress} />
           ) : (
-            <View style={{ alignItems: "center", paddingVertical: 30, gap: 8 }}>
-              <Ionicons name="calendar-outline" size={40} color={theme.colors.muted} style={{ opacity: 0.5 }} />
+            <View style={{ alignItems: 'center', paddingVertical: 30, gap: 8 }}>
+              <Ionicons
+                name="calendar-outline"
+                size={40}
+                color={theme.colors.muted}
+                style={{ opacity: 0.5 }}
+              />
               <Text style={{ color: theme.colors.muted, fontSize: 14 }}>尚無課表資料</Text>
-              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>請先連線 TronClass 或手動新增課程</Text>
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                請先連線 TronClass 或手動新增課程
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                 <Pressable
-                  onPress={() => nav?.navigate?.("CourseSchedule")}
+                  onPress={() => nav?.navigate?.('CourseSchedule')}
                   style={({ pressed }) => ({
                     paddingHorizontal: 18,
                     paddingVertical: 8,
@@ -1159,70 +1541,71 @@ export function CoursesHomeScreen(props: any) {
                     opacity: pressed ? 0.8 : 1,
                   })}
                 >
-                  <Text style={{ color: "#fff", fontWeight: "700", fontSize: 13 }}>完整課表</Text>
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>完整課表</Text>
                 </Pressable>
               </View>
             </View>
-          )
-        )}
+          ))}
 
         {/* Courses tab */}
-        {tab === "courses" && !dataLoading && (
-          hasTCData ? (
+        {tab === 'courses' &&
+          !dataLoading &&
+          (hasTCData ? (
             <CourseListView courses={tcCourses} nav={nav} onRefresh={handleRefresh} />
           ) : (
             <TCLoginSection onSuccess={handleLoginSuccess} profile={auth.profile} />
-          )
-        )}
+          ))}
 
         {/* Homework tab */}
-        {tab === "homework" && !dataLoading && (
-          hasTCData ? (
-            <HomeworkView
-              activities={tcActivities}
-              courses={tcCourses}
-              todos={tcTodos}
-              nav={nav}
-            />
+        {tab === 'homework' &&
+          !dataLoading &&
+          (hasTCData ? (
+            <HomeworkView activities={tcActivities} courses={tcCourses} todos={tcTodos} nav={nav} />
           ) : (
             <TCLoginSection onSuccess={handleLoginSuccess} profile={auth.profile} />
-          )
-        )}
+          ))}
 
         {/* Grades tab */}
-        {tab === "grades" && !dataLoading && (
-          hasTCData || tcGrades.length > 0 || tcAttendance.length > 0 ? (
+        {tab === 'grades' &&
+          !dataLoading &&
+          (hasTCData || tcGrades.length > 0 || tcAttendance.length > 0 ? (
             <GradesView grades={tcGrades} attendance={tcAttendance} courses={tcCourses} />
           ) : (
             <TCLoginSection onSuccess={handleLoginSuccess} profile={auth.profile} />
-          )
-        )}
+          ))}
 
         {/* Smart Attendance Entry — 智慧點名入口 */}
         <Pressable
-          onPress={() => nav?.navigate?.("Attendance")}
+          onPress={() => nav?.navigate?.('Attendance')}
           style={({ pressed }) => ({
-            flexDirection: "row",
-            alignItems: "center",
+            flexDirection: 'row',
+            alignItems: 'center',
             gap: 12,
             padding: 16,
             marginTop: 6,
             borderRadius: 16,
             backgroundColor: theme.colors.surface,
             borderWidth: 1,
-            borderColor: theme.colors.accent + "40",
+            borderColor: theme.colors.accent + '40',
             opacity: pressed ? 0.85 : 1,
           })}
         >
-          <View style={{
-            width: 44, height: 44, borderRadius: 12,
-            backgroundColor: theme.colors.accentSoft,
-            alignItems: "center", justifyContent: "center",
-          }}>
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: theme.colors.accentSoft,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
             <Ionicons name="qr-code-outline" size={24} color={theme.colors.accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: "700" }}>智慧點名</Text>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
+              智慧點名
+            </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
               7 種點名模式 · 動態 QR · 反作弊驗證 · AI 分析
             </Text>
@@ -1232,13 +1615,13 @@ export function CoursesHomeScreen(props: any) {
 
         {/* Quick links at bottom */}
         <View style={{ gap: 8, marginTop: 6 }}>
-          <View style={{ flexDirection: "row", gap: 8 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
             <Pressable
-              onPress={() => nav?.navigate?.("CourseSchedule")}
+              onPress={() => nav?.navigate?.('CourseSchedule')}
               style={({ pressed }) => ({
                 flex: 1,
-                flexDirection: "row",
-                alignItems: "center",
+                flexDirection: 'row',
+                alignItems: 'center',
                 gap: 8,
                 paddingHorizontal: 14,
                 paddingVertical: 12,
@@ -1250,14 +1633,16 @@ export function CoursesHomeScreen(props: any) {
               })}
             >
               <Ionicons name="calendar-outline" size={16} color={theme.colors.accent} />
-              <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: "600" }}>完整課表</Text>
+              <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
+                完整課表
+              </Text>
             </Pressable>
             <Pressable
-              onPress={() => nav?.navigate?.("AICourseAdvisor")}
+              onPress={() => nav?.navigate?.('AICourseAdvisor')}
               style={({ pressed }) => ({
                 flex: 1,
-                flexDirection: "row",
-                alignItems: "center",
+                flexDirection: 'row',
+                alignItems: 'center',
                 gap: 8,
                 paddingHorizontal: 14,
                 paddingVertical: 12,
@@ -1269,7 +1654,9 @@ export function CoursesHomeScreen(props: any) {
               })}
             >
               <Ionicons name="school-outline" size={16} color="#8B5CF6" />
-              <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: "600" }}>選課助理</Text>
+              <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
+                選課助理
+              </Text>
             </Pressable>
           </View>
         </View>

@@ -4,7 +4,7 @@
  * 讓使用者選擇、下載、管理本地 LLM 模型。
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,20 +15,20 @@ import {
   ActivityIndicator,
   Animated,
   Platform,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import NetInfo from "@react-native-community/netinfo";
-import * as FileSystem from "expo-file-system/legacy";
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import NetInfo from '@react-native-community/netinfo';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   localLLM,
   MODEL_REGISTRY,
   type ModelDownloadProgress,
   type LLMState,
   type LLMRuntimeAvailability,
-} from "../services/localLLMInference";
-import { localAssistant } from "../services/localAssistant";
-import { theme } from "../ui/theme";
+} from '../services/localLLMInference';
+import { localAssistant } from '../services/localAssistant';
+import { theme } from '../ui/theme';
 
 const COLORS = theme.colors;
 
@@ -42,9 +42,9 @@ interface ModelInfo {
   description: string;
   sizeLabel: string;
   sizeBytes: number;
-  quality: "輕量" | "標準" | "完整";
+  quality: '輕量' | '標準' | '完整';
   qualityStars: number; // 1-5
-  speedStars: number;   // 1-5
+  speedStars: number; // 1-5
   recommended: boolean;
   features: string[];
   badge?: string;
@@ -52,43 +52,43 @@ interface ModelInfo {
 
 const MODEL_INFO: ModelInfo[] = [
   {
-    id: "smollm2-1.7b",
-    name: "SmolLM2 輕量版",
-    description: "速度最快，適合基本問答和簡單對話",
-    sizeLabel: "1.1 GB",
+    id: 'smollm2-1.7b',
+    name: 'SmolLM2 輕量版',
+    description: '速度最快，適合基本問答和簡單對話',
+    sizeLabel: '1.1 GB',
     sizeBytes: 1_100_000_000,
-    quality: "輕量",
+    quality: '輕量',
     qualityStars: 3,
     speedStars: 5,
     recommended: false,
-    features: ["基本問答", "校園資訊", "快速回覆"],
-    badge: "最省空間",
+    features: ['基本問答', '校園資訊', '快速回覆'],
+    badge: '最省空間',
   },
   {
-    id: "qwen2.5-3b",
-    name: "Qwen2.5 標準版",
-    description: "中英文表現優秀，推理能力強，最佳性價比",
-    sizeLabel: "2.1 GB",
+    id: 'qwen2.5-3b',
+    name: 'Qwen2.5 標準版',
+    description: '中英文表現優秀，推理能力強，最佳性價比',
+    sizeLabel: '2.1 GB',
     sizeBytes: 2_100_000_000,
-    quality: "標準",
+    quality: '標準',
     qualityStars: 4,
     speedStars: 4,
     recommended: true,
-    features: ["深度推理", "中英文雙語", "工具使用", "多輪對話"],
-    badge: "推薦",
+    features: ['深度推理', '中英文雙語', '工具使用', '多輪對話'],
+    badge: '推薦',
   },
   {
-    id: "phi-3.5-mini",
-    name: "Phi-3.5 完整版",
-    description: "推理能力最強，適合複雜問題分析",
-    sizeLabel: "2.4 GB",
+    id: 'phi-3.5-mini',
+    name: 'Phi-3.5 完整版',
+    description: '推理能力最強，適合複雜問題分析',
+    sizeLabel: '2.4 GB',
     sizeBytes: 2_400_000_000,
-    quality: "完整",
+    quality: '完整',
     qualityStars: 5,
     speedStars: 3,
     recommended: false,
-    features: ["最強推理", "數學計算", "邏輯分析", "長文理解"],
-    badge: "最強大",
+    features: ['最強推理', '數學計算', '邏輯分析', '長文理解'],
+    badge: '最強大',
   },
 ];
 
@@ -98,7 +98,9 @@ const MODEL_INFO: ModelInfo[] = [
 
 export default function AIModelManagerScreen({ navigation }: any) {
   const [llmState, setLlmState] = useState<LLMState>(localLLM.getState());
-  const [downloadProgress, setDownloadProgress] = useState<Record<string, ModelDownloadProgress>>({});
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, ModelDownloadProgress>>(
+    {},
+  );
   const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [isWifi, setIsWifi] = useState(true);
@@ -136,18 +138,18 @@ export default function AIModelManagerScreen({ navigation }: any) {
 
       const status = await localAssistant.getStatus();
       // 只有在模型真正 ready 時才標記為使用中
-      if (status.llmState.modelId && status.llmState.status === "ready") {
+      if (status.llmState.modelId && status.llmState.status === 'ready') {
         setActiveModel(status.llmState.modelId);
       }
     } catch (e) {
-      console.warn("[AIModelManager] loadState error:", e);
+      console.warn('[AIModelManager] loadState error:', e);
     }
     setLoading(false);
   }, []);
 
   const checkNetwork = useCallback(async () => {
     const state = await NetInfo.fetch();
-    setIsWifi(state.type === "wifi");
+    setIsWifi(state.type === 'wifi');
   }, []);
 
   const checkDiskSpace = useCallback(async () => {
@@ -168,13 +170,13 @@ export default function AIModelManagerScreen({ navigation }: any) {
 
       // Wi-Fi check
       const netState = await NetInfo.fetch();
-      if (netState.type !== "wifi") {
+      if (netState.type !== 'wifi') {
         Alert.alert(
-          "建議使用 Wi-Fi",
+          '建議使用 Wi-Fi',
           `${info.name} 大約 ${info.sizeLabel}，使用行動數據下載可能會產生大量費用。確定要繼續嗎？`,
           [
-            { text: "取消", style: "cancel" },
-            { text: "繼續下載", onPress: () => startDownload(modelId) },
+            { text: '取消', style: 'cancel' },
+            { text: '繼續下載', onPress: () => startDownload(modelId) },
           ],
         );
         return;
@@ -183,9 +185,9 @@ export default function AIModelManagerScreen({ navigation }: any) {
       // Disk space check
       if (diskSpace !== null && diskSpace < info.sizeBytes * 1.2) {
         Alert.alert(
-          "儲存空間不足",
+          '儲存空間不足',
           `下載 ${info.name} 需要約 ${info.sizeLabel} 的空間，但你的裝置只剩 ${formatBytes(diskSpace)}。請先清理一些空間。`,
-          [{ text: "了解" }],
+          [{ text: '了解' }],
         );
         return;
       }
@@ -208,13 +210,13 @@ export default function AIModelManagerScreen({ navigation }: any) {
           delete next[modelId];
           return next;
         });
-        Alert.alert("下載完成", "模型已下載成功！現在要啟用嗎？", [
-          { text: "稍後", style: "cancel" },
-          { text: "立即啟用", onPress: () => handleActivate(modelId) },
+        Alert.alert('下載完成', '模型已下載成功！現在要啟用嗎？', [
+          { text: '稍後', style: 'cancel' },
+          { text: '立即啟用', onPress: () => handleActivate(modelId) },
         ]);
       } else {
-        const errMsg = localLLM.getState().error ?? "下載失敗，請檢查網路連線後重試。";
-        Alert.alert("下載失敗", errMsg);
+        const errMsg = localLLM.getState().error ?? '下載失敗，請檢查網路連線後重試。';
+        Alert.alert('下載失敗', errMsg);
         setDownloadProgress((prev) => {
           const next = { ...prev };
           delete next[modelId];
@@ -222,7 +224,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
         });
       }
     } catch (e: any) {
-      Alert.alert("下載錯誤", e?.message ?? "未知錯誤，請稍後重試。");
+      Alert.alert('下載錯誤', e?.message ?? '未知錯誤，請稍後重試。');
       setDownloadProgress((prev) => {
         const next = { ...prev };
         delete next[modelId];
@@ -236,7 +238,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
       const runtime = localLLM.getRuntimeAvailability();
       setRuntimeAvailability(runtime);
       if (!runtime.available) {
-        Alert.alert("啟用失敗", runtime.reason ?? "本地 AI 推理引擎尚未就緒。");
+        Alert.alert('啟用失敗', runtime.reason ?? '本地 AI 推理引擎尚未就緒。');
         return;
       }
 
@@ -244,18 +246,18 @@ export default function AIModelManagerScreen({ navigation }: any) {
       if (ok) {
         setActiveModel(modelId);
         await localAssistant.setConfig({ modelId });
-        Alert.alert("啟用成功", "AI 模型已載入，可以開始對話了！");
+        Alert.alert('啟用成功', 'AI 模型已載入，可以開始對話了！');
       } else {
         setActiveModel(null);
         const state = localLLM.getState();
-        const errMsg = state.error?.includes("原生模組")
-          ? "AI 推理引擎尚未就緒，請確認 App 已完整安裝後重試。如果問題持續，請嘗試重新安裝 App。"
-          : state.error ?? "模型載入失敗，請重試。";
-        Alert.alert("啟用失敗", errMsg);
+        const errMsg = state.error?.includes('原生模組')
+          ? 'AI 推理引擎尚未就緒，請確認 App 已完整安裝後重試。如果問題持續，請嘗試重新安裝 App。'
+          : (state.error ?? '模型載入失敗，請重試。');
+        Alert.alert('啟用失敗', errMsg);
       }
     } catch (e: any) {
       setActiveModel(null);
-      Alert.alert("啟用失敗", "模型載入時發生錯誤，請稍後重試。");
+      Alert.alert('啟用失敗', '模型載入時發生錯誤，請稍後重試。');
     }
   }, []);
 
@@ -263,13 +265,13 @@ export default function AIModelManagerScreen({ navigation }: any) {
     (modelId: string) => {
       const info = MODEL_INFO.find((m) => m.id === modelId);
       Alert.alert(
-        "刪除模型",
-        `確定要刪除 ${info?.name ?? modelId}？這將釋放 ${info?.sizeLabel ?? "未知"} 的空間。`,
+        '刪除模型',
+        `確定要刪除 ${info?.name ?? modelId}？這將釋放 ${info?.sizeLabel ?? '未知'} 的空間。`,
         [
-          { text: "取消", style: "cancel" },
+          { text: '取消', style: 'cancel' },
           {
-            text: "刪除",
-            style: "destructive",
+            text: '刪除',
+            style: 'destructive',
             onPress: async () => {
               await localLLM.deleteModel(modelId);
               setDownloadedModels((prev) => prev.filter((id) => id !== modelId));
@@ -294,7 +296,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
@@ -311,11 +313,11 @@ export default function AIModelManagerScreen({ navigation }: any) {
         <View style={styles.statusBar}>
           <View style={styles.statusItem}>
             <Ionicons
-              name={isWifi ? "wifi" : "cellular"}
+              name={isWifi ? 'wifi' : 'cellular'}
               size={16}
-              color={isWifi ? "#34C759" : "#FF9500"}
+              color={isWifi ? '#34C759' : '#FF9500'}
             />
-            <Text style={styles.statusText}>{isWifi ? "Wi-Fi 已連線" : "行動數據"}</Text>
+            <Text style={styles.statusText}>{isWifi ? 'Wi-Fi 已連線' : '行動數據'}</Text>
           </View>
           {diskSpace !== null && (
             <View style={styles.statusItem}>
@@ -326,18 +328,18 @@ export default function AIModelManagerScreen({ navigation }: any) {
           {activeModel && (
             <View style={styles.statusItem}>
               <Ionicons name="checkmark-circle" size={16} color="#34C759" />
-              <Text style={[styles.statusText, { color: "#34C759" }]}>
+              <Text style={[styles.statusText, { color: '#34C759' }]}>
                 已啟用：{MODEL_INFO.find((m) => m.id === activeModel)?.name ?? activeModel}
               </Text>
-          </View>
-        )}
-      </View>
+            </View>
+          )}
+        </View>
 
         {!runtimeAvailability.available && (
           <View style={styles.runtimeNotice}>
             <Ionicons name="construct-outline" size={18} color="#FF9500" />
             <Text style={styles.runtimeNoticeText}>
-              {runtimeAvailability.reason ?? "本地 AI 推理引擎尚未就緒。"}
+              {runtimeAvailability.reason ?? '本地 AI 推理引擎尚未就緒。'}
             </Text>
           </View>
         )}
@@ -347,7 +349,9 @@ export default function AIModelManagerScreen({ navigation }: any) {
           const isDownloaded = downloadedModels.includes(model.id);
           const isActive = activeModel === model.id;
           const progress = downloadProgress[model.id];
-          const isDownloading = (llmState.status === "downloading" && llmState.modelId === model.id) || !!downloadProgress[model.id];
+          const isDownloading =
+            (llmState.status === 'downloading' && llmState.modelId === model.id) ||
+            !!downloadProgress[model.id];
           const canActivate = runtimeAvailability.available;
 
           return (
@@ -387,9 +391,9 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     {Array.from({ length: 5 }).map((_, i) => (
                       <Ionicons
                         key={`q${i}`}
-                        name={i < model.qualityStars ? "star" : "star-outline"}
+                        name={i < model.qualityStars ? 'star' : 'star-outline'}
                         size={14}
-                        color={i < model.qualityStars ? "#FFD700" : "#D1D5DB"}
+                        color={i < model.qualityStars ? '#FFD700' : '#D1D5DB'}
                       />
                     ))}
                   </View>
@@ -400,9 +404,9 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     {Array.from({ length: 5 }).map((_, i) => (
                       <Ionicons
                         key={`s${i}`}
-                        name={i < model.speedStars ? "flash" : "flash-outline"}
+                        name={i < model.speedStars ? 'flash' : 'flash-outline'}
                         size={14}
-                        color={i < model.speedStars ? "#FF9500" : "#D1D5DB"}
+                        color={i < model.speedStars ? '#FF9500' : '#D1D5DB'}
                       />
                     ))}
                   </View>
@@ -419,17 +423,32 @@ export default function AIModelManagerScreen({ navigation }: any) {
               </View>
 
               {/* Error State */}
-              {llmState.status === "error" && llmState.modelId === model.id && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10, padding: 10, backgroundColor: "#FF3B3010", borderRadius: 8 }}>
+              {llmState.status === 'error' && llmState.modelId === model.id && (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginBottom: 10,
+                    padding: 10,
+                    backgroundColor: '#FF3B3010',
+                    borderRadius: 8,
+                  }}
+                >
                   <Ionicons name="alert-circle" size={16} color="#FF3B30" />
-                  <Text style={{ color: "#FF3B30", fontSize: 12, flex: 1 }} numberOfLines={3}>
-                    {llmState.error ?? "發生錯誤，請稍後重試"}
+                  <Text style={{ color: '#FF3B30', fontSize: 12, flex: 1 }} numberOfLines={3}>
+                    {llmState.error ?? '發生錯誤，請稍後重試'}
                   </Text>
                   <TouchableOpacity
                     onPress={() => handleActivate(model.id)}
-                    style={{ paddingHorizontal: 10, paddingVertical: 4, backgroundColor: COLORS.accent, borderRadius: 6 }}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      backgroundColor: COLORS.accent,
+                      borderRadius: 6,
+                    }}
                   >
-                    <Text style={{ color: "#fff", fontSize: 11, fontWeight: "600" }}>重試</Text>
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '600' }}>重試</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -438,12 +457,11 @@ export default function AIModelManagerScreen({ navigation }: any) {
               {isDownloading && progress && (
                 <View style={styles.progressContainer}>
                   <View style={styles.progressBarBg}>
-                    <View
-                      style={[styles.progressBarFill, { width: `${progress.percent}%` }]}
-                    />
+                    <View style={[styles.progressBarFill, { width: `${progress.percent}%` }]} />
                   </View>
                   <Text style={styles.progressText}>
-                    {formatBytes(progress.bytesDownloaded)} / {formatBytes(progress.totalBytes)} ({progress.percent}%)
+                    {formatBytes(progress.bytesDownloaded)} / {formatBytes(progress.totalBytes)} (
+                    {progress.percent}%)
                   </Text>
                 </View>
               )}
@@ -474,15 +492,12 @@ export default function AIModelManagerScreen({ navigation }: any) {
                       <Ionicons
                         name="power-outline"
                         size={18}
-                        color={canActivate ? "#fff" : COLORS.textSecondary}
+                        color={canActivate ? '#fff' : COLORS.textSecondary}
                       />
                       <Text
-                        style={[
-                          styles.actionBtnText,
-                          !canActivate && styles.actionBtnTextDisabled,
-                        ]}
+                        style={[styles.actionBtnText, !canActivate && styles.actionBtnTextDisabled]}
                       >
-                        {canActivate ? "啟用" : "需重建 App"}
+                        {canActivate ? '啟用' : '需重建 App'}
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
@@ -507,7 +522,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     onPress={() => localLLM.abort()}
                   >
                     <Ionicons name="close-circle-outline" size={18} color="#FF3B30" />
-                    <Text style={[styles.actionBtnText, { color: "#FF3B30" }]}>取消</Text>
+                    <Text style={[styles.actionBtnText, { color: '#FF3B30' }]}>取消</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -520,27 +535,19 @@ export default function AIModelManagerScreen({ navigation }: any) {
           <Text style={styles.infoTitle}>關於本地 AI</Text>
           <View style={styles.infoItem}>
             <Ionicons name="lock-closed-outline" size={18} color={COLORS.textSecondary} />
-            <Text style={styles.infoText}>
-              所有對話完全在你的手機上處理，不會上傳到任何伺服器
-            </Text>
+            <Text style={styles.infoText}>所有對話完全在你的手機上處理，不會上傳到任何伺服器</Text>
           </View>
           <View style={styles.infoItem}>
             <Ionicons name="cloud-offline-outline" size={18} color={COLORS.textSecondary} />
-            <Text style={styles.infoText}>
-              下載模型後可離線使用 AI 助理（網路搜尋功能除外）
-            </Text>
+            <Text style={styles.infoText}>下載模型後可離線使用 AI 助理（網路搜尋功能除外）</Text>
           </View>
           <View style={styles.infoItem}>
             <Ionicons name="battery-half-outline" size={18} color={COLORS.textSecondary} />
-            <Text style={styles.infoText}>
-              使用本地 AI 時手機可能會稍微發熱，這是正常現象
-            </Text>
+            <Text style={styles.infoText}>使用本地 AI 時手機可能會稍微發熱，這是正常現象</Text>
           </View>
           <View style={styles.infoItem}>
             <Ionicons name="trash-bin-outline" size={18} color={COLORS.textSecondary} />
-            <Text style={styles.infoText}>
-              隨時可以刪除模型釋放空間，不影響其他功能
-            </Text>
+            <Text style={styles.infoText}>隨時可以刪除模型釋放空間，不影響其他功能</Text>
           </View>
         </View>
 
@@ -548,7 +555,8 @@ export default function AIModelManagerScreen({ navigation }: any) {
         <View style={styles.fallbackNotice}>
           <Ionicons name="information-circle-outline" size={20} color={COLORS.accent} />
           <Text style={styles.fallbackText}>
-            即使不下載模型，AI 助理仍可使用基本問答功能（校園資訊、課表查詢等），只是無法進行深度推理和自然對話。
+            即使不下載模型，AI
+            助理仍可使用基本問答功能（校園資訊、課表查詢等），只是無法進行深度推理和自然對話。
           </Text>
         </View>
 
@@ -584,7 +592,7 @@ const styles = StyleSheet.create({
 
   // Header
   header: {
-    alignItems: "center",
+    alignItems: 'center',
     marginBottom: 20,
     paddingVertical: 12,
   },
@@ -593,35 +601,35 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 28,
     backgroundColor: COLORS.accent,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
   headerTitle: {
     fontSize: 22,
-    fontWeight: "700",
+    fontWeight: '700',
     color: COLORS.text,
     marginBottom: 8,
   },
   headerSub: {
     fontSize: 14,
     color: COLORS.textSecondary,
-    textAlign: "center",
+    textAlign: 'center',
     lineHeight: 20,
     paddingHorizontal: 20,
   },
 
   // Status
   statusBar: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
     marginBottom: 20,
     paddingHorizontal: 4,
   },
   statusItem: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
   },
   statusText: {
@@ -629,13 +637,13 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
   },
   runtimeNotice: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 8,
-    backgroundColor: "#FF950015",
+    backgroundColor: '#FF950015',
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
-    alignItems: "flex-start",
+    alignItems: 'flex-start',
   },
   runtimeNoticeText: {
     fontSize: 12,
@@ -652,15 +660,15 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
-    position: "relative",
-    overflow: "hidden",
+    position: 'relative',
+    overflow: 'hidden',
   },
   modelCardActive: {
-    borderColor: "#34C759",
+    borderColor: '#34C759',
     borderWidth: 2,
   },
   badge: {
-    position: "absolute",
+    position: 'absolute',
     top: 12,
     right: 12,
     paddingHorizontal: 8,
@@ -671,29 +679,29 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accent,
   },
   badgeNormal: {
-    backgroundColor: COLORS.textSecondary + "30",
+    backgroundColor: COLORS.textSecondary + '30',
   },
   badgeText: {
     fontSize: 11,
-    fontWeight: "600",
-    color: "#fff",
+    fontWeight: '600',
+    color: '#fff',
   },
   modelHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 6,
     paddingRight: 70,
   },
   modelName: {
     fontSize: 17,
-    fontWeight: "700",
+    fontWeight: '700',
     color: COLORS.text,
   },
   modelSize: {
     fontSize: 13,
     color: COLORS.textSecondary,
-    fontWeight: "500",
+    fontWeight: '500',
   },
   modelDesc: {
     fontSize: 13,
@@ -704,34 +712,34 @@ const styles = StyleSheet.create({
 
   // Stats
   statsRow: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 24,
     marginBottom: 12,
   },
   statItem: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
   },
   statLabel: {
     fontSize: 12,
     color: COLORS.textSecondary,
-    fontWeight: "500",
+    fontWeight: '500',
   },
   starRow: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 2,
   },
 
   // Features
   featuresRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 6,
     marginBottom: 14,
   },
   featureChip: {
-    backgroundColor: COLORS.accent + "15",
+    backgroundColor: COLORS.accent + '15',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
@@ -739,7 +747,7 @@ const styles = StyleSheet.create({
   featureText: {
     fontSize: 11,
     color: COLORS.accent,
-    fontWeight: "500",
+    fontWeight: '500',
   },
 
   // Progress
@@ -750,29 +758,29 @@ const styles = StyleSheet.create({
     height: 6,
     backgroundColor: COLORS.border,
     borderRadius: 3,
-    overflow: "hidden",
+    overflow: 'hidden',
     marginBottom: 4,
   },
   progressBarFill: {
-    height: "100%",
+    height: '100%',
     backgroundColor: COLORS.accent,
     borderRadius: 3,
   },
   progressText: {
     fontSize: 11,
     color: COLORS.textSecondary,
-    textAlign: "center",
+    textAlign: 'center',
   },
 
   // Actions
   actionRow: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 8,
-    alignItems: "center",
+    alignItems: 'center',
   },
   actionBtn: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -781,43 +789,43 @@ const styles = StyleSheet.create({
   downloadBtn: {
     backgroundColor: COLORS.accent,
     flex: 1,
-    justifyContent: "center",
+    justifyContent: 'center',
   },
   activateBtn: {
-    backgroundColor: "#34C759",
+    backgroundColor: '#34C759',
     flex: 1,
-    justifyContent: "center",
+    justifyContent: 'center',
   },
   deleteBtn: {
-    backgroundColor: "#FF3B3015",
+    backgroundColor: '#FF3B3015',
     paddingHorizontal: 12,
   },
   cancelBtn: {
-    backgroundColor: "#FF3B3015",
+    backgroundColor: '#FF3B3015',
     flex: 1,
-    justifyContent: "center",
+    justifyContent: 'center',
   },
   actionBtnDisabled: {
     backgroundColor: COLORS.border,
   },
   actionBtnText: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#fff",
+    fontWeight: '600',
+    color: '#fff',
   },
   actionBtnTextDisabled: {
     color: COLORS.textSecondary,
   },
   activeIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
     paddingVertical: 10,
   },
   activeText: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#34C759",
+    fontWeight: '600',
+    color: '#34C759',
   },
 
   // Info
@@ -830,15 +838,15 @@ const styles = StyleSheet.create({
   },
   infoTitle: {
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: '700',
     color: COLORS.text,
     marginBottom: 12,
   },
   infoItem: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 10,
     marginBottom: 10,
-    alignItems: "flex-start",
+    alignItems: 'flex-start',
   },
   infoText: {
     fontSize: 13,
@@ -849,12 +857,12 @@ const styles = StyleSheet.create({
 
   // Fallback Notice
   fallbackNotice: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 8,
-    backgroundColor: COLORS.accent + "10",
+    backgroundColor: COLORS.accent + '10',
     borderRadius: 12,
     padding: 14,
-    alignItems: "flex-start",
+    alignItems: 'flex-start',
   },
   fallbackText: {
     fontSize: 12,

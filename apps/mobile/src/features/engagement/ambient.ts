@@ -55,19 +55,29 @@ function toMs(val: unknown): number | null {
   return null;
 }
 
-type NavigationLike = {
-  navigate?: (...args: unknown[]) => void;
-} | null | undefined;
+type NavigationLike =
+  | {
+      navigate?: (...args: unknown[]) => void;
+    }
+  | null
+  | undefined;
 
 function getTodayIsoDate(): string {
   return new Date().toISOString().split('T')[0] ?? '';
 }
 
 function getAmbientDismissStorageKey(dismissKey: string, uid: string, schoolId: string): string {
-  return getScopedStorageKey(`ambientCueDismiss.${dismissKey}.${getTodayIsoDate()}`, { uid, schoolId });
+  return getScopedStorageKey(`ambientCueDismiss.${dismissKey}.${getTodayIsoDate()}`, {
+    uid,
+    schoolId,
+  });
 }
 
-async function isAmbientCueDismissed(dismissKey: string, uid: string, schoolId: string): Promise<boolean> {
+async function isAmbientCueDismissed(
+  dismissKey: string,
+  uid: string,
+  schoolId: string,
+): Promise<boolean> {
   return loadPersistedValue<boolean>({
     storageKey: getAmbientDismissStorageKey(dismissKey, uid, schoolId),
     fallback: false,
@@ -80,7 +90,11 @@ export async function dismissAmbientCue(params: {
   uid: string;
   schoolId: string;
 }): Promise<void> {
-  await savePersistedValue(getAmbientDismissStorageKey(params.dismissKey, params.uid, params.schoolId), '1', (value) => value);
+  await savePersistedValue(
+    getAmbientDismissStorageKey(params.dismissKey, params.uid, params.schoolId),
+    '1',
+    (value) => value,
+  );
 }
 
 export function isAmbientCueFresh(cue: AmbientCue, now = Date.now()): boolean {
@@ -113,7 +127,7 @@ function getAmbientCuePriority(cue: AmbientCue): number {
 
 export function applyAmbientCueVisibilityRules(
   cues: AmbientCue[],
-  now = Date.now()
+  now = Date.now(),
 ): { visible: AmbientCue[]; hiddenLowSample: AmbientCue[] } {
   const hiddenLowSample: AmbientCue[] = [];
   const visible = cues
@@ -178,9 +192,13 @@ function createCourseCue(params: {
   };
 }
 
-function buildStudentLearningCues(surface: AmbientCueSurface, courseSpaces: CourseSpace[]): AmbientCue[] {
+function buildStudentLearningCues(
+  surface: AmbientCueSurface,
+  courseSpaces: CourseSpace[],
+): AmbientCue[] {
   const liveSpace = courseSpaces.find(
-    (space) => !!space.activeSessionId && (space.activeLearnerCount ?? 0) >= AMBIENT_CUE_MIN_DISTINCT_USERS,
+    (space) =>
+      !!space.activeSessionId && (space.activeLearnerCount ?? 0) >= AMBIENT_CUE_MIN_DISTINCT_USERS,
   );
   const completionSpace = courseSpaces.find(
     (space) => (space.completedAssignmentCount ?? 0) >= AMBIENT_CUE_MIN_DISTINCT_USERS,
@@ -200,7 +218,11 @@ function buildStudentLearningCues(surface: AmbientCueSurface, courseSpaces: Cour
         target: {
           tab: '課程',
           screen: 'Classroom',
-          params: { groupId: liveSpace.groupId, sessionId: liveSpace.activeSessionId, isTeacher: false },
+          params: {
+            groupId: liveSpace.groupId,
+            sessionId: liveSpace.activeSessionId,
+            isTeacher: false,
+          },
         },
       }),
     );
@@ -227,9 +249,13 @@ function buildStudentLearningCues(surface: AmbientCueSurface, courseSpaces: Cour
   return cues;
 }
 
-function buildTeacherLearningCues(surface: AmbientCueSurface, courseSpaces: CourseSpace[]): AmbientCue[] {
+function buildTeacherLearningCues(
+  surface: AmbientCueSurface,
+  courseSpaces: CourseSpace[],
+): AmbientCue[] {
   const liveSpace = courseSpaces.find(
-    (space) => !!space.activeSessionId && (space.activeLearnerCount ?? 0) >= AMBIENT_CUE_MIN_DISTINCT_USERS,
+    (space) =>
+      !!space.activeSessionId && (space.activeLearnerCount ?? 0) >= AMBIENT_CUE_MIN_DISTINCT_USERS,
   );
   const completionSpace = courseSpaces.find(
     (space) => (space.completedAssignmentCount ?? 0) >= AMBIENT_CUE_MIN_DISTINCT_USERS,
@@ -249,7 +275,11 @@ function buildTeacherLearningCues(surface: AmbientCueSurface, courseSpaces: Cour
         target: {
           tab: '教學',
           screen: 'Classroom',
-          params: { groupId: liveSpace.groupId, sessionId: liveSpace.activeSessionId, isTeacher: true },
+          params: {
+            groupId: liveSpace.groupId,
+            sessionId: liveSpace.activeSessionId,
+            isTeacher: true,
+          },
         },
       }),
     );
@@ -290,7 +320,8 @@ function buildAchievementCue(params: {
     return [];
   }
 
-  const distinctUserCount = completionSpace?.completedAssignmentCount ?? Math.max(params.leaderboardSize, 3);
+  const distinctUserCount =
+    completionSpace?.completedAssignmentCount ?? Math.max(params.leaderboardSize, 3);
   const updatedAt = completionSpace?.socialProofUpdatedAt ?? new Date();
 
   return [
@@ -353,15 +384,21 @@ async function buildAdminCue(schoolId: string): Promise<AmbientCue[]> {
   const { getDb } = await import('../../firebase');
   const db = getDb();
   const [announcementsSnap, eventsSnap] = await Promise.all([
-    getDocs(query(collection(db, 'schools', schoolId, 'announcements'), orderBy('publishedAt', 'desc'), limit(5))).catch(
-      () => null,
-    ),
-    getDocs(query(collection(db, 'schools', schoolId, 'events'), orderBy('startsAt', 'desc'), limit(5))).catch(
-      () => null,
-    ),
+    getDocs(
+      query(
+        collection(db, 'schools', schoolId, 'announcements'),
+        orderBy('publishedAt', 'desc'),
+        limit(5),
+      ),
+    ).catch(() => null),
+    getDocs(
+      query(collection(db, 'schools', schoolId, 'events'), orderBy('startsAt', 'desc'), limit(5)),
+    ).catch(() => null),
   ]);
   const distinctUserCount = (announcementsSnap?.size ?? 0) + (eventsSnap?.size ?? 0);
-  const latestAnnouncement = announcementsSnap?.docs[0]?.data() as Record<string, unknown> | undefined;
+  const latestAnnouncement = announcementsSnap?.docs[0]?.data() as
+    | Record<string, unknown>
+    | undefined;
   const latestEvent = eventsSnap?.docs[0]?.data() as Record<string, unknown> | undefined;
   const updatedAt = new Date();
   const headline =
@@ -395,7 +432,9 @@ async function buildAdminCue(schoolId: string): Promise<AmbientCue[]> {
 async function buildDepartmentCue(schoolId: string): Promise<AmbientCue[]> {
   const { getDb } = await import('../../firebase');
   const db = getDb();
-  const approvalsSnap = await getDocs(collection(db, 'schools', schoolId, 'approvals')).catch(() => null);
+  const approvalsSnap = await getDocs(collection(db, 'schools', schoolId, 'approvals')).catch(
+    () => null,
+  );
   const pendingCount = approvalsSnap?.size ?? 0;
 
   return [
@@ -452,7 +491,9 @@ async function buildCampusCue(schoolId: string): Promise<AmbientCue[]> {
     ];
   }
 
-  const popularMenu = menus.find((menu) => menu.popular && (menu.ratingCount ?? 0) >= AMBIENT_CUE_MIN_DISTINCT_USERS);
+  const popularMenu = menus.find(
+    (menu) => menu.popular && (menu.ratingCount ?? 0) >= AMBIENT_CUE_MIN_DISTINCT_USERS,
+  );
   if (popularMenu) {
     return [
       {
@@ -520,7 +561,9 @@ export async function listAmbientCues(params: {
     cues = await buildCampusCue(params.schoolId);
   } else {
     const ds = getDataSource();
-    const courseSpaces = await ds.listCourseSpaces(params.uid, params.schoolId).catch(() => [] as CourseSpace[]);
+    const courseSpaces = await ds
+      .listCourseSpaces(params.uid, params.schoolId)
+      .catch(() => [] as CourseSpace[]);
 
     if (params.surface === 'achievements') {
       const leaderboardRows = await getDataSource()
@@ -614,9 +657,7 @@ export function useAmbientCues(params: {
 
   const cues = React.useMemo(
     () =>
-      items
-        .filter((cue) => !dismissedKeys.includes(cue.dismissKey))
-        .slice(0, params.limit ?? 2),
+      items.filter((cue) => !dismissedKeys.includes(cue.dismissKey)).slice(0, params.limit ?? 2),
     [dismissedKeys, items, params.limit],
   );
 
@@ -651,13 +692,16 @@ export function useAmbientCues(params: {
     [params.schoolId, params.uid],
   );
 
-  const openCue = React.useCallback((cue: AmbientCue, navigation: NavigationLike) => {
-    analytics.logEvent('ambient_cue_open', {
-      surface: cue.surface,
-      distinct_count: cue.distinctUserCount,
-    });
-    openAmbientCueTarget(navigation, cue, params.role ?? null);
-  }, [params.role]);
+  const openCue = React.useCallback(
+    (cue: AmbientCue, navigation: NavigationLike) => {
+      analytics.logEvent('ambient_cue_open', {
+        surface: cue.surface,
+        distinct_count: cue.distinctUserCount,
+      });
+      openAmbientCueTarget(navigation, cue, params.role ?? null);
+    },
+    [params.role],
+  );
 
   return {
     cues,

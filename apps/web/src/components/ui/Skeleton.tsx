@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import { CSSProperties } from "react";
+import { CSSProperties } from 'react';
 
 interface SkeletonProps {
   width?: string | number;
@@ -11,15 +11,15 @@ interface SkeletonProps {
 }
 
 export function Skeleton({
-  width = "100%",
-  height = "20px",
-  borderRadius = "8px",
+  width = '100%',
+  height = '20px',
+  borderRadius = '8px',
   style,
   className,
 }: SkeletonProps) {
   return (
     <div
-      className={`skeleton ${className ?? ""}`}
+      className={`skeleton ${className ?? ''}`}
       style={{
         width,
         height,
@@ -32,9 +32,9 @@ export function Skeleton({
 
 export function SkeletonText({
   lines = 3,
-  width = "100%",
-  lastLineWidth = "60%",
-  gap = "12px",
+  width = '100%',
+  lastLineWidth = '60%',
+  gap = '12px',
 }: {
   lines?: number;
   width?: string | number;
@@ -42,13 +42,9 @@ export function SkeletonText({
   gap?: string | number;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap }}>
       {Array.from({ length: lines }).map((_, i) => (
-        <Skeleton
-          key={i}
-          width={i === lines - 1 ? lastLineWidth : width}
-          height="14px"
-        />
+        <Skeleton key={i} width={i === lines - 1 ? lastLineWidth : width} height="14px" />
       ))}
     </div>
   );
@@ -58,16 +54,16 @@ export function SkeletonCard() {
   return (
     <div
       style={{
-        border: "1px solid var(--border)",
-        background: "var(--panel)",
-        borderRadius: "var(--radius-lg)",
-        padding: "20px",
+        border: '1px solid var(--border)',
+        background: 'var(--panel)',
+        borderRadius: 'var(--radius-lg)',
+        padding: '20px',
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "16px" }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
         <Skeleton width="48px" height="48px" borderRadius="12px" />
         <div style={{ flex: 1 }}>
-          <Skeleton width="60%" height="16px" style={{ marginBottom: "8px" }} />
+          <Skeleton width="60%" height="16px" style={{ marginBottom: '8px' }} />
           <Skeleton width="40%" height="12px" />
         </div>
       </div>
@@ -78,7 +74,7 @@ export function SkeletonCard() {
 
 export function SkeletonList({ count = 3 }: { count?: number }) {
   return (
-    <div style={{ display: "grid", gap: "16px" }}>
+    <div style={{ display: 'grid', gap: '16px' }}>
       {Array.from({ length: count }).map((_, i) => (
         <SkeletonCard key={i} />
       ))}
@@ -90,21 +86,21 @@ export function SkeletonAvatar({ size = 40 }: { size?: number }) {
   return <Skeleton width={size} height={size} borderRadius="50%" />;
 }
 
-export function SkeletonButton({ width = "100px" }: { width?: string | number }) {
+export function SkeletonButton({ width = '100px' }: { width?: string | number }) {
   return <Skeleton width={width} height="44px" borderRadius="12px" />;
 }
 
 export function SkeletonTable({ rows = 5, columns = 4 }: { rows?: number; columns?: number }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div
         style={{
-          display: "grid",
+          display: 'grid',
           gridTemplateColumns: `repeat(${columns}, 1fr)`,
-          gap: "12px",
-          padding: "12px",
-          background: "var(--panel2)",
-          borderRadius: "8px",
+          gap: '12px',
+          padding: '12px',
+          background: 'var(--panel2)',
+          borderRadius: '8px',
         }}
       >
         {Array.from({ length: columns }).map((_, i) => (
@@ -115,15 +111,15 @@ export function SkeletonTable({ rows = 5, columns = 4 }: { rows?: number; column
         <div
           key={rowIndex}
           style={{
-            display: "grid",
+            display: 'grid',
             gridTemplateColumns: `repeat(${columns}, 1fr)`,
-            gap: "12px",
-            padding: "12px",
-            borderBottom: "1px solid var(--border)",
+            gap: '12px',
+            padding: '12px',
+            borderBottom: '1px solid var(--border)',
           }}
         >
           {Array.from({ length: columns }).map((_, colIndex) => (
-            <Skeleton key={colIndex} width={colIndex === 0 ? "90%" : "70%"} height="14px" />
+            <Skeleton key={colIndex} width={colIndex === 0 ? '90%' : '70%'} height="14px" />
           ))}
         </div>
       ))}

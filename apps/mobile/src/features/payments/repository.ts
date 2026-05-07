@@ -66,7 +66,10 @@ export async function loadPaymentDashboardData(params: {
     const [transactions, user, walletResponse] = await Promise.all([
       params.dataSource.listTransactions(params.userId, undefined, params.schoolId),
       params.dataSource.getUser(params.userId),
-      httpsCallable(getFunctionsInstance(), 'getWalletBalance')({ schoolId: params.schoolId }).catch(() => null),
+      httpsCallable(
+        getFunctionsInstance(),
+        'getWalletBalance',
+      )({ schoolId: params.schoolId }).catch(() => null),
     ]);
 
     const mappedTransactions =
@@ -117,7 +120,9 @@ export async function loadTransferTargets(params: {
 
   try {
     const db = getDb();
-    const membersSnapshot = await getDocs(query(collection(db, 'schools', params.schoolId, 'members'), limit(20)));
+    const membersSnapshot = await getDocs(
+      query(collection(db, 'schools', params.schoolId, 'members'), limit(20)),
+    );
     const targets = (
       await Promise.all(
         membersSnapshot.docs.map(async (memberSnapshot) => {
@@ -135,7 +140,7 @@ export async function loadTransferTargets(params: {
             name: displayName ?? email ?? `使用者-${memberSnapshot.id.slice(0, 6)}`,
             account: email?.split('@')[0] ?? memberSnapshot.id.slice(0, 8),
           };
-        })
+        }),
       )
     ).filter((target): target is TransferTarget => target != null);
 

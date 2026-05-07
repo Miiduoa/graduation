@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef } from "react";
-import { AppState, type AppStateStatus } from "react-native";
-import Constants from "expo-constants";
+import { useCallback, useEffect, useRef } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
+import Constants from 'expo-constants';
 
-import { getAIStatus } from "../services/ai";
-import { syncWebLearningKnowledgeBase } from "../services/webLearning";
+import { getAIStatus } from '../services/ai';
+import { syncWebLearningKnowledgeBase } from '../services/webLearning';
 
 const MIN_RUN_INTERVAL_MS = 30 * 60 * 1000;
 const ACTIVE_INTERVAL_MS = 45 * 60 * 1000;
@@ -12,7 +12,7 @@ function isWebLearningEnabled(): boolean {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
   const raw = extra.aiWebLearningEnabled ?? process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED;
   if (raw == null) return true;
-  return raw === true || String(raw).toLowerCase() === "true";
+  return raw === true || String(raw).toLowerCase() === 'true';
 }
 
 export function useWebLearningSync() {
@@ -46,20 +46,20 @@ export function useWebLearningSync() {
 
   useEffect(() => {
     const startup = setTimeout(() => {
-      void runSync("startup", false);
+      void runSync('startup', false);
     }, 5000);
 
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (appStateRef.current.match(/inactive|background/) && nextAppState === "active") {
-        void runSync("foreground", false);
+      if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
+        void runSync('foreground', false);
       }
       appStateRef.current = nextAppState;
     };
 
-    const appStateSubscription = AppState.addEventListener("change", handleAppStateChange);
+    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
     const interval = setInterval(() => {
-      if (AppState.currentState === "active") {
-        void runSync("active-interval", false);
+      if (AppState.currentState === 'active') {
+        void runSync('active-interval', false);
       }
     }, ACTIVE_INTERVAL_MS);
 

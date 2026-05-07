@@ -41,15 +41,21 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
-export async function loadEventRegistrations(eventId: string, schoolId: string): Promise<EventRegistration[]> {
+export async function loadEventRegistrations(
+  eventId: string,
+  schoolId: string,
+): Promise<EventRegistration[]> {
   const db = getDb();
 
   try {
     const canonicalSnapshot = await getDocs(
       query(
-        collectionFromSegments(db, buildSchoolCollectionPath(schoolId, 'events', eventId, 'registrations')),
-        orderBy('registeredAt', 'asc')
-      )
+        collectionFromSegments(
+          db,
+          buildSchoolCollectionPath(schoolId, 'events', eventId, 'registrations'),
+        ),
+        orderBy('registeredAt', 'asc'),
+      ),
     );
 
     if (!canonicalSnapshot.empty) {
@@ -63,7 +69,10 @@ export async function loadEventRegistrations(eventId: string, schoolId: string):
   }
 
   const legacySnapshot = await getDocs(
-    query(collectionFromSegments(db, ['events', eventId, 'registrations']), orderBy('registeredAt', 'asc'))
+    query(
+      collectionFromSegments(db, ['events', eventId, 'registrations']),
+      orderBy('registeredAt', 'asc'),
+    ),
   );
 
   return legacySnapshot.docs.map((docSnap) => ({
@@ -78,9 +87,12 @@ export async function loadEventReviews(eventId: string, schoolId: string): Promi
   try {
     const canonicalSnapshot = await getDocs(
       query(
-        collectionFromSegments(db, buildSchoolCollectionPath(schoolId, 'events', eventId, 'reviews')),
-        orderBy('createdAt', 'desc')
-      )
+        collectionFromSegments(
+          db,
+          buildSchoolCollectionPath(schoolId, 'events', eventId, 'reviews'),
+        ),
+        orderBy('createdAt', 'desc'),
+      ),
     );
 
     if (!canonicalSnapshot.empty) {
@@ -94,7 +106,7 @@ export async function loadEventReviews(eventId: string, schoolId: string): Promi
   }
 
   const legacySnapshot = await getDocs(
-    query(collectionFromSegments(db, ['events', eventId, 'reviews']), orderBy('createdAt', 'desc'))
+    query(collectionFromSegments(db, ['events', eventId, 'reviews']), orderBy('createdAt', 'desc')),
   );
 
   return legacySnapshot.docs.map((docSnap) => ({
@@ -117,7 +129,7 @@ export async function loadEventUserProfiles(uids: string[]): Promise<EventUserPr
         email: readString(raw.email) ?? undefined,
         avatarUrl: readString(raw.avatarUrl) ?? undefined,
       };
-    })
+    }),
   );
 
   return profiles.filter((profile) => profile != null) as EventUserProfile[];
@@ -134,7 +146,10 @@ export async function submitEventReview(params: {
 }): Promise<void> {
   const db = getDb();
   await setDoc(
-    docFromSegments(db, buildSchoolCollectionPath(params.schoolId, 'events', params.eventId, 'reviews', params.uid)),
+    docFromSegments(
+      db,
+      buildSchoolCollectionPath(params.schoolId, 'events', params.eventId, 'reviews', params.uid),
+    ),
     {
       uid: params.uid,
       email: params.email ?? null,
@@ -143,6 +158,6 @@ export async function submitEventReview(params: {
       comment: params.comment.trim(),
       schoolId: params.schoolId,
       createdAt: serverTimestamp(),
-    }
+    },
   );
 }

@@ -2,46 +2,42 @@
 /**
  * Payment Service
  * 支付系統服務
- * 
+ *
  * 支援的支付方式：
  * - 校園卡（學生證）
  * - Apple Pay / Google Pay
  * - 信用卡/金融卡
  * - Line Pay
  * - 街口支付
- * 
+ *
  * 整合方式：
  * - Stripe (國際卡片支付)
  * - TapPay (台灣在地支付)
  * - 各校校園卡 API
  */
 
-import { Platform } from "react-native";
+import { Platform } from 'react-native';
 
 // Payment types
-export type PaymentMethod = 
-  | "campus_card"
-  | "apple_pay"
-  | "google_pay"
-  | "credit_card"
-  | "debit_card"
-  | "line_pay"
-  | "jko_pay"
-  | "taiwan_pay";
+export type PaymentMethod =
+  | 'campus_card'
+  | 'apple_pay'
+  | 'google_pay'
+  | 'credit_card'
+  | 'debit_card'
+  | 'line_pay'
+  | 'jko_pay'
+  | 'taiwan_pay';
 
-export type PaymentStatus = 
-  | "pending"
-  | "processing"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "refunded";
+export type PaymentStatus =
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'refunded';
 
-export type TransactionType = 
-  | "payment"
-  | "topup"
-  | "refund"
-  | "transfer";
+export type TransactionType = 'payment' | 'topup' | 'refund' | 'transfer';
 
 export interface PaymentMethodInfo {
   id: string;
@@ -99,7 +95,7 @@ interface StripeConfig {
 interface TapPayConfig {
   appId: string;
   appKey: string;
-  serverType: "sandbox" | "production";
+  serverType: 'sandbox' | 'production';
 }
 
 // Payment Service Class
@@ -111,25 +107,22 @@ class PaymentService {
   /**
    * Initialize payment service with provider configs
    */
-  async initialize(options: {
-    stripe?: StripeConfig;
-    tapPay?: TapPayConfig;
-  }): Promise<void> {
+  async initialize(options: { stripe?: StripeConfig; tapPay?: TapPayConfig }): Promise<void> {
     this.stripeConfig = options.stripe;
     this.tapPayConfig = options.tapPay;
-    
+
     // Initialize Stripe
     if (this.stripeConfig) {
       // Note: In real implementation, use @stripe/stripe-react-native
-      console.log("[Payment] Stripe initialized");
+      console.log('[Payment] Stripe initialized');
     }
-    
+
     // Initialize TapPay
     if (this.tapPayConfig) {
       // Note: In real implementation, use tappay-react-native
-      console.log("[Payment] TapPay initialized");
+      console.log('[Payment] TapPay initialized');
     }
-    
+
     this.initialized = true;
   }
 
@@ -138,61 +131,61 @@ class PaymentService {
    */
   async getPaymentMethods(_userId: string): Promise<PaymentMethodInfo[]> {
     const methods: PaymentMethodInfo[] = [];
-    
+
     // Campus Card (always available)
     methods.push({
-      id: "campus_card_default",
-      type: "campus_card",
-      displayName: "學生證",
-      icon: "card",
+      id: 'campus_card_default',
+      type: 'campus_card',
+      displayName: '學生證',
+      icon: 'card',
       isDefault: true,
       isAvailable: true,
     });
-    
+
     // Apple Pay (iOS only)
-    if (Platform.OS === "ios") {
+    if (Platform.OS === 'ios') {
       methods.push({
-        id: "apple_pay",
-        type: "apple_pay",
-        displayName: "Apple Pay",
-        icon: "logo-apple",
+        id: 'apple_pay',
+        type: 'apple_pay',
+        displayName: 'Apple Pay',
+        icon: 'logo-apple',
         isDefault: false,
         isAvailable: await this.isApplePayAvailable(),
       });
     }
-    
+
     // Google Pay (Android only)
-    if (Platform.OS === "android") {
+    if (Platform.OS === 'android') {
       methods.push({
-        id: "google_pay",
-        type: "google_pay",
-        displayName: "Google Pay",
-        icon: "logo-google",
+        id: 'google_pay',
+        type: 'google_pay',
+        displayName: 'Google Pay',
+        icon: 'logo-google',
         isDefault: false,
         isAvailable: await this.isGooglePayAvailable(),
       });
     }
-    
+
     // Line Pay
     methods.push({
-      id: "line_pay",
-      type: "line_pay",
-      displayName: "LINE Pay",
-      icon: "chatbubble",
+      id: 'line_pay',
+      type: 'line_pay',
+      displayName: 'LINE Pay',
+      icon: 'chatbubble',
       isDefault: false,
       isAvailable: true,
     });
-    
+
     // JKO Pay (街口支付)
     methods.push({
-      id: "jko_pay",
-      type: "jko_pay",
-      displayName: "街口支付",
-      icon: "wallet",
+      id: 'jko_pay',
+      type: 'jko_pay',
+      displayName: '街口支付',
+      icon: 'wallet',
       isDefault: false,
       isAvailable: true,
     });
-    
+
     return methods;
   }
 
@@ -200,7 +193,7 @@ class PaymentService {
    * Check if Apple Pay is available
    */
   async isApplePayAvailable(): Promise<boolean> {
-    if (Platform.OS !== "ios") return false;
+    if (Platform.OS !== 'ios') return false;
     // In real implementation, use Stripe.isApplePaySupported()
     return true;
   }
@@ -209,7 +202,7 @@ class PaymentService {
    * Check if Google Pay is available
    */
   async isGooglePayAvailable(): Promise<boolean> {
-    if (Platform.OS !== "android") return false;
+    if (Platform.OS !== 'android') return false;
     // In real implementation, use Stripe.isGooglePaySupported()
     return true;
   }
@@ -219,62 +212,67 @@ class PaymentService {
    */
   async getWalletBalance(userId: string): Promise<WalletBalance> {
     try {
-      const { getFirestore, doc, getDoc } = await import("firebase/firestore");
-      const { getApp } = await import("firebase/app");
-      
+      const { getFirestore, doc, getDoc } = await import('firebase/firestore');
+      const { getApp } = await import('firebase/app');
+
       const db = getFirestore(getApp());
-      const walletDoc = await getDoc(doc(db, "users", userId, "wallet", "balance"));
-      
+      const walletDoc = await getDoc(doc(db, 'users', userId, 'wallet', 'balance'));
+
       if (walletDoc.exists()) {
         const data = walletDoc.data();
         return {
           available: data.available ?? 0,
           pending: data.pending ?? 0,
-          currency: data.currency ?? "TWD",
+          currency: data.currency ?? 'TWD',
           lastUpdated: data.lastUpdated?.toDate?.()?.toISOString?.() ?? new Date().toISOString(),
         };
       }
     } catch (error) {
-      console.warn("[Payment] Failed to fetch wallet balance:", error);
+      console.warn('[Payment] Failed to fetch wallet balance:', error);
     }
-    
+
     return {
       available: 0,
       pending: 0,
-      currency: "TWD",
+      currency: 'TWD',
       lastUpdated: new Date().toISOString(),
     };
   }
-  
+
   /**
    * Update wallet balance
    */
   private async updateWalletBalance(userId: string, delta: number): Promise<void> {
     try {
-      const { getFirestore, doc, runTransaction, serverTimestamp } = await import("firebase/firestore");
-      const { getApp } = await import("firebase/app");
-      
+      const { getFirestore, doc, runTransaction, serverTimestamp } =
+        await import('firebase/firestore');
+      const { getApp } = await import('firebase/app');
+
       const db = getFirestore(getApp());
-      const walletRef = doc(db, "users", userId, "wallet", "balance");
-      
+      const walletRef = doc(db, 'users', userId, 'wallet', 'balance');
+
       await runTransaction(db, async (transaction) => {
         const walletDoc = await transaction.get(walletRef);
         const currentBalance = walletDoc.exists() ? (walletDoc.data().available ?? 0) : 0;
         const newBalance = currentBalance + delta;
-        
+
         if (newBalance < 0) {
-          throw new Error("INSUFFICIENT_BALANCE");
+          throw new Error('INSUFFICIENT_BALANCE');
         }
-        
-        transaction.set(walletRef, {
-          available: newBalance,
-          pending: 0,
-          currency: "TWD",
-          lastUpdated: serverTimestamp(),
-        }, { merge: true });
+
+        transaction.set(
+          walletRef,
+          {
+            available: newBalance,
+            pending: 0,
+            currency: 'TWD',
+            lastUpdated: serverTimestamp(),
+          },
+          { merge: true },
+        );
       });
     } catch (error) {
-      console.error("[Payment] Failed to update wallet balance:", error);
+      console.error('[Payment] Failed to update wallet balance:', error);
       throw error;
     }
   }
@@ -292,15 +290,15 @@ class PaymentService {
     description: string;
     metadata?: Record<string, unknown>;
   }): Promise<PaymentResult> {
-    const { 
-      userId, 
-      amount, 
-      currency = "TWD", 
-      paymentMethodId, 
-      merchantId, 
-      merchantName, 
+    const {
+      userId,
+      amount,
+      currency = 'TWD',
+      paymentMethodId,
+      merchantId,
+      merchantName,
       description,
-      metadata 
+      metadata,
     } = options;
 
     try {
@@ -308,51 +306,51 @@ class PaymentService {
       if (amount <= 0) {
         return {
           success: false,
-          status: "failed",
-          errorCode: "INVALID_AMOUNT",
-          errorMessage: "金額必須大於 0",
+          status: 'failed',
+          errorCode: 'INVALID_AMOUNT',
+          errorMessage: '金額必須大於 0',
         };
       }
 
       // Get payment method
       const methods = await this.getPaymentMethods(userId);
-      const method = methods.find(m => m.id === paymentMethodId);
-      
+      const method = methods.find((m) => m.id === paymentMethodId);
+
       if (!method) {
         return {
           success: false,
-          status: "failed",
-          errorCode: "INVALID_PAYMENT_METHOD",
-          errorMessage: "無效的支付方式",
+          status: 'failed',
+          errorCode: 'INVALID_PAYMENT_METHOD',
+          errorMessage: '無效的支付方式',
         };
       }
 
       if (!method.isAvailable) {
         return {
           success: false,
-          status: "failed",
-          errorCode: "PAYMENT_METHOD_UNAVAILABLE",
-          errorMessage: "此支付方式目前無法使用",
+          status: 'failed',
+          errorCode: 'PAYMENT_METHOD_UNAVAILABLE',
+          errorMessage: '此支付方式目前無法使用',
         };
       }
 
       // Process based on payment method
       let result: PaymentResult;
-      
+
       switch (method.type) {
-        case "campus_card":
+        case 'campus_card':
           result = await this.processCampusCardPayment(userId, amount);
           break;
-        case "apple_pay":
+        case 'apple_pay':
           result = await this.processApplePayPayment(amount, merchantName);
           break;
-        case "google_pay":
+        case 'google_pay':
           result = await this.processGooglePayPayment(amount, merchantName);
           break;
-        case "line_pay":
+        case 'line_pay':
           result = await this.processLinePayPayment(userId, amount, description);
           break;
-        case "jko_pay":
+        case 'jko_pay':
           result = await this.processJKOPayPayment(userId, amount, description);
           break;
         default:
@@ -363,7 +361,7 @@ class PaymentService {
       if (result.success) {
         await this.createTransaction({
           userId,
-          type: "payment",
+          type: 'payment',
           amount,
           currency,
           status: result.status,
@@ -378,11 +376,11 @@ class PaymentService {
 
       return result;
     } catch (error) {
-      console.error("[Payment] Error processing payment:", error);
+      console.error('[Payment] Error processing payment:', error);
       return {
         success: false,
-        status: "failed",
-        errorCode: "UNKNOWN_ERROR",
+        status: 'failed',
+        errorCode: 'UNKNOWN_ERROR',
         errorMessage: String(error),
       };
     }
@@ -391,29 +389,26 @@ class PaymentService {
   /**
    * Process campus card payment
    */
-  private async processCampusCardPayment(
-    userId: string,
-    amount: number
-  ): Promise<PaymentResult> {
+  private async processCampusCardPayment(userId: string, amount: number): Promise<PaymentResult> {
     // In real implementation, connect to campus card API
     const balance = await this.getWalletBalance(userId);
-    
+
     if (balance.available < amount) {
       return {
         success: false,
-        status: "failed",
-        errorCode: "INSUFFICIENT_BALANCE",
-        errorMessage: "餘額不足",
+        status: 'failed',
+        errorCode: 'INSUFFICIENT_BALANCE',
+        errorMessage: '餘額不足',
       };
     }
 
     // Simulate processing
     await this.delay(1000);
-    
+
     return {
       success: true,
       transactionId: this.generateTransactionId(),
-      status: "completed",
+      status: 'completed',
     };
   }
 
@@ -422,18 +417,18 @@ class PaymentService {
    */
   private async processApplePayPayment(
     amount: number,
-    merchantName: string
+    merchantName: string,
   ): Promise<PaymentResult> {
     // In real implementation, use Stripe Apple Pay or TapPay
     // This would show the Apple Pay sheet
-    
+
     // Simulate processing
     await this.delay(1500);
-    
+
     return {
       success: true,
       transactionId: this.generateTransactionId(),
-      status: "completed",
+      status: 'completed',
     };
   }
 
@@ -442,17 +437,17 @@ class PaymentService {
    */
   private async processGooglePayPayment(
     amount: number,
-    merchantName: string
+    merchantName: string,
   ): Promise<PaymentResult> {
     // In real implementation, use Stripe Google Pay or TapPay
-    
+
     // Simulate processing
     await this.delay(1500);
-    
+
     return {
       success: true,
       transactionId: this.generateTransactionId(),
-      status: "completed",
+      status: 'completed',
     };
   }
 
@@ -462,20 +457,20 @@ class PaymentService {
   private async processLinePayPayment(
     userId: string,
     amount: number,
-    description: string
+    description: string,
   ): Promise<PaymentResult> {
     // In real implementation:
     // 1. Call LINE Pay Reserve API
     // 2. Open LINE Pay app via deep link
     // 3. Handle callback
-    
+
     // Simulate processing
     await this.delay(2000);
-    
+
     return {
       success: true,
       transactionId: this.generateTransactionId(),
-      status: "completed",
+      status: 'completed',
     };
   }
 
@@ -485,20 +480,20 @@ class PaymentService {
   private async processJKOPayPayment(
     userId: string,
     amount: number,
-    description: string
+    description: string,
   ): Promise<PaymentResult> {
     // In real implementation:
     // 1. Call JKO Pay API
     // 2. Show JKO QR code or deep link
     // 3. Handle callback
-    
+
     // Simulate processing
     await this.delay(2000);
-    
+
     return {
       success: true,
       transactionId: this.generateTransactionId(),
-      status: "completed",
+      status: 'completed',
     };
   }
 
@@ -508,17 +503,17 @@ class PaymentService {
   private async processCardPayment(
     userId: string,
     amount: number,
-    paymentMethodId: string
+    paymentMethodId: string,
   ): Promise<PaymentResult> {
     // In real implementation, use Stripe PaymentIntent
-    
+
     // Simulate processing
     await this.delay(2000);
-    
+
     return {
       success: true,
       transactionId: this.generateTransactionId(),
-      status: "completed",
+      status: 'completed',
     };
   }
 
@@ -535,33 +530,33 @@ class PaymentService {
     if (amount < 100) {
       return {
         success: false,
-        status: "failed",
-        errorCode: "MIN_TOPUP_AMOUNT",
-        errorMessage: "最低儲值金額為 NT$100",
+        status: 'failed',
+        errorCode: 'MIN_TOPUP_AMOUNT',
+        errorMessage: '最低儲值金額為 NT$100',
       };
     }
 
     if (amount > 10000) {
       return {
         success: false,
-        status: "failed",
-        errorCode: "MAX_TOPUP_AMOUNT",
-        errorMessage: "單次儲值上限為 NT$10,000",
+        status: 'failed',
+        errorCode: 'MAX_TOPUP_AMOUNT',
+        errorMessage: '單次儲值上限為 NT$10,000',
       };
     }
 
     // Process top-up payment
     const result = await this.processCardPayment(userId, amount, paymentMethodId);
-    
+
     if (result.success) {
       await this.createTransaction({
         userId,
-        type: "topup",
+        type: 'topup',
         amount,
-        currency: "TWD",
-        status: "completed",
+        currency: 'TWD',
+        status: 'completed',
         paymentMethodId,
-        description: "餘額儲值",
+        description: '餘額儲值',
       });
     }
 
@@ -590,7 +585,7 @@ class PaymentService {
     return {
       success: true,
       transactionId: this.generateTransactionId(),
-      status: "refunded",
+      status: 'refunded',
     };
   }
 
@@ -605,40 +600,46 @@ class PaymentService {
       type?: TransactionType;
       startDate?: string;
       endDate?: string;
-    }
+    },
   ): Promise<Transaction[]> {
     const { limit = 20, offset = 0, type, startDate, endDate } = options ?? {};
-    
+
     try {
-      const { getFirestore, collection, query, where, orderBy, limit: firestoreLimit, startAfter, getDocs } = await import("firebase/firestore");
-      const { getApp } = await import("firebase/app");
-      
+      const {
+        getFirestore,
+        collection,
+        query,
+        where,
+        orderBy,
+        limit: firestoreLimit,
+        startAfter,
+        getDocs,
+      } = await import('firebase/firestore');
+      const { getApp } = await import('firebase/app');
+
       const db = getFirestore(getApp());
-      const constraints: any[] = [
-        where("userId", "==", userId),
-        orderBy("createdAt", "desc"),
-      ];
-      
+      const constraints: any[] = [where('userId', '==', userId), orderBy('createdAt', 'desc')];
+
       if (type) {
-        constraints.push(where("type", "==", type));
+        constraints.push(where('type', '==', type));
       }
-      
+
       if (startDate) {
-        constraints.push(where("createdAt", ">=", startDate));
+        constraints.push(where('createdAt', '>=', startDate));
       }
-      
+
       if (endDate) {
-        constraints.push(where("createdAt", "<=", endDate));
+        constraints.push(where('createdAt', '<=', endDate));
       }
-      
+
       constraints.push(firestoreLimit(limit + offset));
-      
-      const q = query(collection(db, "transactions"), ...constraints);
+
+      const q = query(collection(db, 'transactions'), ...constraints);
       const snapshot = await getDocs(q);
-      
+
       const transactions: Transaction[] = [];
       let idx = 0;
-      
+
       snapshot.forEach((doc) => {
         if (idx >= offset && transactions.length < limit) {
           const data = doc.data();
@@ -647,7 +648,7 @@ class PaymentService {
             userId: data.userId,
             type: data.type,
             amount: data.amount,
-            currency: data.currency ?? "TWD",
+            currency: data.currency ?? 'TWD',
             status: data.status,
             paymentMethodId: data.paymentMethodId,
             paymentMethod: data.paymentMethod,
@@ -664,47 +665,47 @@ class PaymentService {
         }
         idx++;
       });
-      
+
       return transactions;
     } catch (error) {
-      console.warn("[Payment] Failed to fetch from Firebase, using mock data:", error);
-      
+      console.warn('[Payment] Failed to fetch from Firebase, using mock data:', error);
+
       const mockTransactions: Transaction[] = [
         {
-          id: "txn_1",
+          id: 'txn_1',
           userId,
-          type: "payment",
+          type: 'payment',
           amount: 85,
-          currency: "TWD",
-          status: "completed",
-          paymentMethod: "campus_card",
-          merchantName: "第一學生餐廳",
-          description: "雞腿便當",
+          currency: 'TWD',
+          status: 'completed',
+          paymentMethod: 'campus_card',
+          merchantName: '第一學生餐廳',
+          description: '雞腿便當',
           createdAt: new Date(Date.now() - 3600000).toISOString(),
           completedAt: new Date(Date.now() - 3600000).toISOString(),
         },
         {
-          id: "txn_2",
+          id: 'txn_2',
           userId,
-          type: "payment",
+          type: 'payment',
           amount: 45,
-          currency: "TWD",
-          status: "completed",
-          paymentMethod: "campus_card",
-          merchantName: "7-11 校園店",
-          description: "飲料",
+          currency: 'TWD',
+          status: 'completed',
+          paymentMethod: 'campus_card',
+          merchantName: '7-11 校園店',
+          description: '飲料',
           createdAt: new Date(Date.now() - 86400000).toISOString(),
           completedAt: new Date(Date.now() - 86400000).toISOString(),
         },
         {
-          id: "txn_3",
+          id: 'txn_3',
           userId,
-          type: "topup",
+          type: 'topup',
           amount: 500,
-          currency: "TWD",
-          status: "completed",
-          paymentMethod: "credit_card",
-          description: "餘額儲值",
+          currency: 'TWD',
+          status: 'completed',
+          paymentMethod: 'credit_card',
+          description: '餘額儲值',
           createdAt: new Date(Date.now() - 172800000).toISOString(),
           completedAt: new Date(Date.now() - 172800000).toISOString(),
         },
@@ -712,9 +713,9 @@ class PaymentService {
 
       let filtered = mockTransactions;
       if (type) {
-        filtered = filtered.filter(t => t.type === type);
+        filtered = filtered.filter((t) => t.type === type);
       }
-      
+
       return filtered.slice(offset, offset + limit);
     }
   }
@@ -722,21 +723,22 @@ class PaymentService {
   /**
    * Create transaction record
    */
-  private async createTransaction(data: Omit<Transaction, "id" | "createdAt">): Promise<string> {
+  private async createTransaction(data: Omit<Transaction, 'id' | 'createdAt'>): Promise<string> {
     try {
-      const { getFirestore, collection, addDoc, serverTimestamp } = await import("firebase/firestore");
-      const { getApp } = await import("firebase/app");
-      
+      const { getFirestore, collection, addDoc, serverTimestamp } =
+        await import('firebase/firestore');
+      const { getApp } = await import('firebase/app');
+
       const db = getFirestore(getApp());
-      const docRef = await addDoc(collection(db, "transactions"), {
+      const docRef = await addDoc(collection(db, 'transactions'), {
         ...data,
         createdAt: serverTimestamp(),
       });
-      
-      console.log("[Payment] Transaction created:", docRef.id);
+
+      console.log('[Payment] Transaction created:', docRef.id);
       return docRef.id;
     } catch (error) {
-      console.warn("[Payment] Failed to save transaction to Firebase:", error);
+      console.warn('[Payment] Failed to save transaction to Firebase:', error);
       return this.generateTransactionId();
     }
   }
@@ -754,7 +756,7 @@ class PaymentService {
    * Utility delay function
    */
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 
@@ -762,9 +764,9 @@ class PaymentService {
 export const paymentService = new PaymentService();
 
 // Payment utilities
-export function formatCurrency(amount: number, currency: string = "TWD"): string {
-  const formatter = new Intl.NumberFormat("zh-TW", {
-    style: "currency",
+export function formatCurrency(amount: number, currency: string = 'TWD'): string {
+  const formatter = new Intl.NumberFormat('zh-TW', {
+    style: 'currency',
     currency,
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
@@ -774,52 +776,52 @@ export function formatCurrency(amount: number, currency: string = "TWD"): string
 
 export function getPaymentMethodIcon(type: PaymentMethod): string {
   const icons: Record<PaymentMethod, string> = {
-    campus_card: "card",
-    apple_pay: "logo-apple",
-    google_pay: "logo-google",
-    credit_card: "card-outline",
-    debit_card: "card-outline",
-    line_pay: "chatbubble",
-    jko_pay: "wallet",
-    taiwan_pay: "scan",
+    campus_card: 'card',
+    apple_pay: 'logo-apple',
+    google_pay: 'logo-google',
+    credit_card: 'card-outline',
+    debit_card: 'card-outline',
+    line_pay: 'chatbubble',
+    jko_pay: 'wallet',
+    taiwan_pay: 'scan',
   };
-  return icons[type] ?? "card";
+  return icons[type] ?? 'card';
 }
 
 export function getPaymentMethodDisplayName(type: PaymentMethod): string {
   const names: Record<PaymentMethod, string> = {
-    campus_card: "學生證",
-    apple_pay: "Apple Pay",
-    google_pay: "Google Pay",
-    credit_card: "信用卡",
-    debit_card: "金融卡",
-    line_pay: "LINE Pay",
-    jko_pay: "街口支付",
-    taiwan_pay: "台灣 Pay",
+    campus_card: '學生證',
+    apple_pay: 'Apple Pay',
+    google_pay: 'Google Pay',
+    credit_card: '信用卡',
+    debit_card: '金融卡',
+    line_pay: 'LINE Pay',
+    jko_pay: '街口支付',
+    taiwan_pay: '台灣 Pay',
   };
-  return names[type] ?? "其他";
+  return names[type] ?? '其他';
 }
 
 export function getTransactionStatusText(status: PaymentStatus): string {
   const texts: Record<PaymentStatus, string> = {
-    pending: "處理中",
-    processing: "付款中",
-    completed: "已完成",
-    failed: "失敗",
-    cancelled: "已取消",
-    refunded: "已退款",
+    pending: '處理中',
+    processing: '付款中',
+    completed: '已完成',
+    failed: '失敗',
+    cancelled: '已取消',
+    refunded: '已退款',
   };
-  return texts[status] ?? "未知";
+  return texts[status] ?? '未知';
 }
 
 export function getTransactionStatusColor(status: PaymentStatus): string {
   const colors: Record<PaymentStatus, string> = {
-    pending: "#F59E0B",
-    processing: "#3B82F6",
-    completed: "#22C55E",
-    failed: "#EF4444",
-    cancelled: "#6B7280",
-    refunded: "#8B5CF6",
+    pending: '#F59E0B',
+    processing: '#3B82F6',
+    completed: '#22C55E',
+    failed: '#EF4444',
+    cancelled: '#6B7280',
+    refunded: '#8B5CF6',
   };
-  return colors[status] ?? "#6B7280";
+  return colors[status] ?? '#6B7280';
 }

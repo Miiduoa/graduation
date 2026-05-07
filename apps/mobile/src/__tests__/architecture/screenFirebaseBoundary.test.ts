@@ -1,11 +1,10 @@
-import fs from "node:fs";
-import path from "node:path";
+import fs from 'node:fs';
+import path from 'node:path';
 
-const {
-  allowedScreenDirectFirebaseImports,
-} = require("../../../firebase-screen-boundaries.js") as {
-  allowedScreenDirectFirebaseImports: string[];
-};
+const { allowedScreenDirectFirebaseImports } =
+  require('../../../firebase-screen-boundaries.js') as {
+    allowedScreenDirectFirebaseImports: string[];
+  };
 
 function listScreenFiles(dir: string): string[] {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -18,7 +17,7 @@ function listScreenFiles(dir: string): string[] {
       continue;
     }
 
-    if (entry.isFile() && entry.name.endsWith(".tsx")) {
+    if (entry.isFile() && entry.name.endsWith('.tsx')) {
       files.push(entryPath);
     }
   }
@@ -27,13 +26,13 @@ function listScreenFiles(dir: string): string[] {
 }
 
 function toRepoPath(filePath: string): string {
-  const relative = path.relative(process.cwd(), filePath).split(path.sep).join("/");
+  const relative = path.relative(process.cwd(), filePath).split(path.sep).join('/');
   return `apps/mobile/${relative}`;
 }
 
-describe("screen Firebase boundaries", () => {
-  it("only allows direct Firebase imports in the explicit allowlist", () => {
-    const screenDir = path.join(process.cwd(), "src", "screens");
+describe('screen Firebase boundaries', () => {
+  it('only allows direct Firebase imports in the explicit allowlist', () => {
+    const screenDir = path.join(process.cwd(), 'src', 'screens');
     const screenFiles = listScreenFiles(screenDir);
     const restrictedImportPatterns = [
       /from ["']firebase\/firestore["']/,
@@ -42,18 +41,22 @@ describe("screen Firebase boundaries", () => {
 
     const offenders = screenFiles
       .map((filePath) => {
-        const source = fs.readFileSync(filePath, "utf8");
+        const source = fs.readFileSync(filePath, 'utf8');
         const repoPath = toRepoPath(filePath);
-        const hasRestrictedImport = restrictedImportPatterns.some((pattern) => pattern.test(source));
-        return hasRestrictedImport && !allowedScreenDirectFirebaseImports.includes(repoPath) ? repoPath : null;
+        const hasRestrictedImport = restrictedImportPatterns.some((pattern) =>
+          pattern.test(source),
+        );
+        return hasRestrictedImport && !allowedScreenDirectFirebaseImports.includes(repoPath)
+          ? repoPath
+          : null;
       })
       .filter((value): value is string => value !== null);
 
     const staleAllowlistEntries = allowedScreenDirectFirebaseImports.filter((repoPath) => {
-      const localPath = repoPath.replace(/^apps\/mobile\//, "");
+      const localPath = repoPath.replace(/^apps\/mobile\//, '');
       const fullPath = path.join(process.cwd(), localPath);
       if (!fs.existsSync(fullPath)) return true;
-      const source = fs.readFileSync(fullPath, "utf8");
+      const source = fs.readFileSync(fullPath, 'utf8');
       return !restrictedImportPatterns.some((pattern) => pattern.test(source));
     });
 

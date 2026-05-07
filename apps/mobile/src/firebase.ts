@@ -1,19 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
-import Constants from "expo-constants";
-import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
-import { getFirestore, initializeFirestore, memoryLocalCache } from "firebase/firestore";
-import { getFunctions, type Functions } from "firebase/functions";
-import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { 
-  getAuth, 
-  initializeAuth, 
-  onIdTokenChanged,
-  type Auth,
-  type User,
-} from "firebase/auth";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from 'expo-constants';
+import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
+import { getFirestore, initializeFirestore, memoryLocalCache } from 'firebase/firestore';
+import { getFunctions, type Functions } from 'firebase/functions';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getAuth, initializeAuth, onIdTokenChanged, type Auth, type User } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const { getReactNativePersistence } = require("@firebase/auth/dist/rn/index.js") as {
+const { getReactNativePersistence } = require('@firebase/auth/dist/rn/index.js') as {
   getReactNativePersistence: (storage: typeof AsyncStorage) => unknown;
 };
 
@@ -32,9 +26,9 @@ function getFirebaseConfig(): FirebaseWebConfig {
 }
 
 function isMockRuntimeMode(): boolean {
-  const mode = String(process.env.EXPO_PUBLIC_DATA_SOURCE_MODE ?? "").toLowerCase();
-  const useMockData = String(process.env.EXPO_PUBLIC_USE_MOCK_DATA ?? "").toLowerCase() === "true";
-  return mode === "mock" || useMockData;
+  const mode = String(process.env.EXPO_PUBLIC_DATA_SOURCE_MODE ?? '').toLowerCase();
+  const useMockData = String(process.env.EXPO_PUBLIC_USE_MOCK_DATA ?? '').toLowerCase() === 'true';
+  return mode === 'mock' || useMockData;
 }
 
 function hasRealFirebaseValue(value?: string): boolean {
@@ -43,12 +37,12 @@ function hasRealFirebaseValue(value?: string): boolean {
   if (!normalized) return false;
 
   const placeholders = new Set([
-    "your_firebase_api_key",
-    "your-project.firebaseapp.com",
-    "your-project-id",
-    "your-project.appspot.com",
-    "123456789012",
-    "1:123456789012:web:abcdef123456",
+    'your_firebase_api_key',
+    'your-project.firebaseapp.com',
+    'your-project-id',
+    'your-project.appspot.com',
+    '123456789012',
+    '1:123456789012:web:abcdef123456',
   ]);
 
   return !placeholders.has(normalized);
@@ -69,16 +63,16 @@ export function getFirebaseApp() {
 
   if (!hasUsableFirebaseConfig()) {
     console.warn(
-      "[firebase] Missing Firebase env config. Using local fallback Firebase config for app bootstrap."
+      '[firebase] Missing Firebase env config. Using local fallback Firebase config for app bootstrap.',
     );
 
     return initializeApp({
-      apiKey: "mock-api-key",
-      authDomain: "mock-project.firebaseapp.com",
-      projectId: "mock-project",
-      storageBucket: "mock-project.appspot.com",
-      messagingSenderId: "000000000000",
-      appId: "1:000000000000:web:mock",
+      apiKey: 'mock-api-key',
+      authDomain: 'mock-project.firebaseapp.com',
+      projectId: 'mock-project',
+      storageBucket: 'mock-project.appspot.com',
+      messagingSenderId: '000000000000',
+      appId: '1:000000000000:web:mock',
     });
   }
 
@@ -115,7 +109,9 @@ export function getDb() {
 
 export function getCloudFunctionRegion(): string {
   const extra = (Constants.expoConfig as any)?.extra ?? (Constants as any)?.manifest?.extra ?? {};
-  return String(extra.cloudFunctionRegion ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? "asia-east1");
+  return String(
+    extra.cloudFunctionRegion ?? process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1',
+  );
 }
 
 export function getFunctionsInstance(): Functions {
@@ -132,14 +128,14 @@ export async function uploadAvatar(userId: string, uri: string): Promise<string>
   const storageRef = ref(storage, `avatars/${userId}.${fileExtension}`);
 
   const mimeTypes: Record<string, string> = {
-    jpg: "image/jpeg",
-    jpeg: "image/jpeg",
-    png: "image/png",
-    gif: "image/gif",
-    webp: "image/webp",
-    heic: "image/heic",
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    heic: 'image/heic',
   };
-  const contentType = mimeTypes[fileExtension] ?? "image/jpeg";
+  const contentType = mimeTypes[fileExtension] ?? 'image/jpeg';
 
   const response = await fetch(uri);
   const blob = await response.blob();
@@ -172,7 +168,7 @@ let isRefreshing = false;
 async function refreshTokenWithRetry(user: User): Promise<boolean> {
   // 防止並發刷新
   if (isRefreshing) {
-    console.log("[firebase] Token refresh already in progress, skipping");
+    console.log('[firebase] Token refresh already in progress, skipping');
     return false;
   }
 
@@ -180,7 +176,7 @@ async function refreshTokenWithRetry(user: User): Promise<boolean> {
   if (lastExhaustedTime > 0) {
     const timeSinceExhausted = Date.now() - lastExhaustedTime;
     if (timeSinceExhausted < TOKEN_REFRESH_CONFIG.cooldownAfterExhausted) {
-      console.log("[firebase] In cooldown period, skipping refresh");
+      console.log('[firebase] In cooldown period, skipping refresh');
       return false;
     } else {
       // 冷卻期結束，重置狀態
@@ -196,44 +192,40 @@ async function refreshTokenWithRetry(user: User): Promise<boolean> {
       try {
         await user.getIdToken(true);
         tokenRefreshRetryCount = 0;
-        console.log("[firebase] Token refreshed successfully");
+        console.log('[firebase] Token refreshed successfully');
         return true;
       } catch (e) {
         const isLastAttempt = attempt === TOKEN_REFRESH_CONFIG.maxRetries;
         const delay = TOKEN_REFRESH_CONFIG.retryDelayMs * Math.pow(2, attempt);
-        
+
         console.warn(`[firebase] Token refresh attempt ${attempt + 1} failed:`, e);
-        
+
         // 檢查是否是不可恢復的錯誤
         const errorCode = (e as any)?.code;
         const isUnrecoverable = [
-          "auth/user-disabled",
-          "auth/user-not-found",
-          "auth/invalid-user-token",
-          "auth/user-token-expired",
+          'auth/user-disabled',
+          'auth/user-not-found',
+          'auth/invalid-user-token',
+          'auth/user-token-expired',
         ].includes(errorCode);
 
         if (isUnrecoverable) {
-          console.error("[firebase] Unrecoverable auth error:", errorCode);
-          tokenRefreshListeners.forEach((cb) => 
-            cb(user, new Error("TOKEN_REFRESH_EXHAUSTED"))
-          );
+          console.error('[firebase] Unrecoverable auth error:', errorCode);
+          tokenRefreshListeners.forEach((cb) => cb(user, new Error('TOKEN_REFRESH_EXHAUSTED')));
           lastExhaustedTime = Date.now();
           return false;
         }
-        
+
         if (!isLastAttempt) {
           await new Promise((resolve) => setTimeout(resolve, delay));
         } else {
           tokenRefreshRetryCount++;
           const error = e instanceof Error ? e : new Error(String(e));
           tokenRefreshListeners.forEach((cb) => cb(user, error));
-          
+
           if (tokenRefreshRetryCount >= 3) {
-            console.error("[firebase] Token refresh failed repeatedly, user may need to re-login");
-            tokenRefreshListeners.forEach((cb) => 
-              cb(user, new Error("TOKEN_REFRESH_EXHAUSTED"))
-            );
+            console.error('[firebase] Token refresh failed repeatedly, user may need to re-login');
+            tokenRefreshListeners.forEach((cb) => cb(user, new Error('TOKEN_REFRESH_EXHAUSTED')));
             lastExhaustedTime = Date.now();
           }
           return false;
@@ -248,36 +240,36 @@ async function refreshTokenWithRetry(user: User): Promise<boolean> {
 
 async function checkAndRefreshToken(user: User | null): Promise<void> {
   if (!user) return;
-  
+
   try {
     const tokenResult = await user.getIdTokenResult();
     const expirationTime = new Date(tokenResult.expirationTime).getTime();
     const now = Date.now();
-    
+
     if (expirationTime - now < TOKEN_REFRESH_CONFIG.refreshThresholdMs) {
       await refreshTokenWithRetry(user);
     }
   } catch (e) {
-    console.error("[firebase] Token check failed:", e);
+    console.error('[firebase] Token check failed:', e);
   }
 }
 
 export function getAuthInstance(): Auth {
   if (_auth) return _auth;
   const app = getFirebaseApp();
-  
+
   try {
     _auth = initializeAuth(app, {
       persistence: getReactNativePersistence(AsyncStorage) as any,
     });
   } catch (e: any) {
-    if (e.code === "auth/already-initialized") {
+    if (e.code === 'auth/already-initialized') {
       _auth = getAuth(app);
     } else {
       throw e;
     }
   }
-  
+
   if (!_tokenRefreshUnsubscribe) {
     _tokenRefreshUnsubscribe = onIdTokenChanged(
       _auth,
@@ -288,12 +280,12 @@ export function getAuthInstance(): Auth {
         tokenRefreshListeners.forEach((cb) => cb(user));
       },
       (error) => {
-        console.error("[firebase] Token change error:", error);
+        console.error('[firebase] Token change error:', error);
         tokenRefreshListeners.forEach((cb) => cb(null, error));
-      }
+      },
     );
   }
-  
+
   if (!_tokenRefreshInterval) {
     _tokenRefreshInterval = setInterval(() => {
       const currentUser = _auth?.currentUser;
@@ -302,7 +294,7 @@ export function getAuthInstance(): Auth {
       }
     }, TOKEN_REFRESH_CONFIG.checkIntervalMs);
   }
-  
+
   return _auth;
 }
 
@@ -338,11 +330,11 @@ export async function forceRefreshToken(): Promise<string | null> {
   const auth = getAuthInstance();
   const user = auth.currentUser;
   if (!user) return null;
-  
+
   try {
     return await user.getIdToken(true);
   } catch (e) {
-    console.error("[firebase] Force refresh token failed:", e);
+    console.error('[firebase] Force refresh token failed:', e);
     throw e;
   }
 }

@@ -9,7 +9,6 @@ tags:
   - journey
 
 ---
-
 # 清除 App 狀態
 - clearState
 
@@ -18,7 +17,7 @@ tags:
 
 # === 1. 完成 Onboarding ===
 - assertVisible:
-    text: "歡迎"
+    text: '歡迎'
     timeout: 10000
     optional: true
 
@@ -31,12 +30,12 @@ tags:
           duration: 200
 
 - tapOn:
-    text: "開始使用"
+    text: '開始使用'
     optional: true
 
 # 等待主畫面
 - assertVisible:
-    text: "公告"
+    text: '公告'
     timeout: 10000
 
 # === 2. 瀏覽公告 ===
@@ -47,7 +46,7 @@ tags:
 - tapOn:
     index: 0
     below:
-      text: "公告"
+      text: '公告'
     optional: true
 
 # 截圖
@@ -58,7 +57,7 @@ tags:
 
 # === 3. 查看活動 ===
 - tapOn:
-    text: "活動"
+    text: '活動'
 
 - takeScreenshot: journey_03_events
 
@@ -66,7 +65,7 @@ tags:
 - tapOn:
     index: 0
     below:
-      text: "活動"
+      text: '活動'
     optional: true
 
 - takeScreenshot: journey_04_event_detail
@@ -75,13 +74,13 @@ tags:
 
 # === 4. 探索地圖 ===
 - tapOn:
-    text: "地圖"
+    text: '地圖'
 
 - takeScreenshot: journey_05_map
 
 # 選擇餐廳分類
 - tapOn:
-    text: "餐廳"
+    text: '餐廳'
     optional: true
 
 - takeScreenshot: journey_06_map_cafeteria
@@ -90,7 +89,7 @@ tags:
 
 # === 5. 查看餐廳菜單 ===
 - tapOn:
-    text: "餐廳"
+    text: '餐廳'
 
 - takeScreenshot: journey_07_cafeteria
 
@@ -98,7 +97,7 @@ tags:
 - tapOn:
     index: 0
     below:
-      text: "餐廳"
+      text: '餐廳'
     optional: true
 
 - takeScreenshot: journey_08_menu_detail
@@ -107,26 +106,26 @@ tags:
 
 # === 6. 前往「我的」頁面 ===
 - tapOn:
-    text: "我的"
+    text: '我的'
 
 - takeScreenshot: journey_09_me
 
 # === 7. 使用 AI 助理 ===
 - tapOn:
-    text: "AI 助理"
+    text: 'AI 助理'
     optional: true
 
 - takeScreenshot: journey_10_ai_chat
 
 # 發送訊息
 - tapOn:
-    text: "今日公告"
+    text: '今日公告'
     optional: true
 
 # 等待回覆
 - extendedWaitUntil:
     notVisible:
-      text: "思考中"
+      text: '思考中'
     timeout: 15000
     optional: true
 
@@ -136,7 +135,7 @@ tags:
 
 # === 8. 查看課表 ===
 - tapOn:
-    text: "課表"
+    text: '課表'
     optional: true
 
 - takeScreenshot: journey_12_schedule
@@ -146,11 +145,11 @@ tags:
 # === 9. 查看成績 ===
 - scrollUntilVisible:
     element:
-      text: "成績"
+      text: '成績'
     direction: DOWN
 
 - tapOn:
-    text: "成績"
+    text: '成績'
     optional: true
 
 - takeScreenshot: journey_13_grades
@@ -159,11 +158,11 @@ tags:
 
 # === 10. 進入設定 ===
 - tapOn:
-    id: "settings-button"
+    id: 'settings-button'
     optional: true
 
 - tapOn:
-    text: "設定"
+    text: '設定'
     optional: true
 
 - takeScreenshot: journey_14_settings

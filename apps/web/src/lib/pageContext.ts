@@ -1,9 +1,9 @@
 import {
   PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
   PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-} from "@campus/shared/src";
-import { findSchoolById, resolveSchool } from "@campus/shared/src/schools";
-import { buildSchoolSearch, type SchoolContext } from "./navigation";
+} from '@campus/shared/src';
+import { findSchoolById, resolveSchool } from '@campus/shared/src/schools';
+import { buildSchoolSearch, type SchoolContext } from './navigation';
 
 export type SchoolSearchParams = {
   school?: string;

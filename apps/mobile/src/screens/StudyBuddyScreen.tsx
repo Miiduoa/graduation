@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,11 +15,11 @@ import {
   Platform,
   Animated,
   FlatList,
-} from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import { theme } from "../ui/theme";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { theme } from '../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import {
   getStudyBuddyMatches,
   getStudyGroups,
@@ -32,16 +32,16 @@ import {
   type StudyProfile,
   type TimeSlot,
   type CourseReviewSummary,
-} from "../services/studyBuddyEngine";
-import { earnXP } from "../services/gamificationEngine";
+} from '../services/studyBuddyEngine';
+import { earnXP } from '../services/gamificationEngine';
 
-if (Platform.OS === "android") {
+if (Platform.OS === 'android') {
   if (UIManager.setLayoutAnimationEnabledExperimental) {
     UIManager.setLayoutAnimationEnabledExperimental(true);
   }
 }
 
-type TabType = "buddy" | "group" | "review";
+type TabType = 'buddy' | 'group' | 'review';
 
 const scoreColor = (score: number): string => {
   if (score >= 85) return theme.colors.success;
@@ -49,21 +49,21 @@ const scoreColor = (score: number): string => {
   return theme.colors.warning;
 };
 
-const DAY_LABELS = ["", "週一", "週二", "週三", "週四", "週五", "週六", "週日"];
+const DAY_LABELS = ['', '週一', '週二', '週三', '週四', '週五', '週六', '週日'];
 
 function formatTimeSlot(slot: TimeSlot): string {
-  return `${DAY_LABELS[slot.dayOfWeek] ?? `週${slot.dayOfWeek}`} ${String(slot.startHour).padStart(2, "0")}:00-${String(slot.endHour).padStart(2, "0")}:00`;
+  return `${DAY_LABELS[slot.dayOfWeek] ?? `週${slot.dayOfWeek}`} ${String(slot.startHour).padStart(2, '0')}:00-${String(slot.endHour).padStart(2, '0')}:00`;
 }
 
-function formatStudyStyle(style: StudyProfile["studyStyle"]): string {
+function formatStudyStyle(style: StudyProfile['studyStyle']): string {
   const parts = [
-    style.preferGroup ? "小組" : "個人",
-    style.preferQuiet ? "安靜" : "互動",
-    style.preferOnline ? "線上" : "實體",
+    style.preferGroup ? '小組' : '個人',
+    style.preferQuiet ? '安靜' : '互動',
+    style.preferOnline ? '線上' : '實體',
   ];
-  if (style.preferTeaching) parts.push("可教學");
-  if (style.preferLearning) parts.push("想補強");
-  return parts.join(" / ");
+  if (style.preferTeaching) parts.push('可教學');
+  if (style.preferLearning) parts.push('想補強');
+  return parts.join(' / ');
 }
 
 // ============================================================================
@@ -108,14 +108,9 @@ const BuddyMatchCard: React.FC<BuddyMatchCardProps> = ({ match }) => {
         <View style={styles.matchCardHeader}>
           <View style={styles.scoreCircle}>
             <View
-              style={[
-                styles.scoreInner,
-                { backgroundColor: matchColor, borderColor: matchColor },
-              ]}
+              style={[styles.scoreInner, { backgroundColor: matchColor, borderColor: matchColor }]}
             >
-              <Text style={[styles.scoreText, { color: "#fff" }]}>
-                {match.matchScore}
-              </Text>
+              <Text style={[styles.scoreText, { color: '#fff' }]}>{match.matchScore}</Text>
             </View>
           </View>
 
@@ -133,22 +128,12 @@ const BuddyMatchCard: React.FC<BuddyMatchCardProps> = ({ match }) => {
         {match.sharedCourses && match.sharedCourses.length > 0 && (
           <View style={styles.tagsContainer}>
             {match.sharedCourses.slice(0, 3).map((course, idx) => (
-              <View
-                key={idx}
-                style={[
-                  styles.tag,
-                  { backgroundColor: `${theme.colors.accent}20` },
-                ]}
-              >
-                <Text style={[styles.tagText, { color: theme.colors.accent }]}>
-                  {course}
-                </Text>
+              <View key={idx} style={[styles.tag, { backgroundColor: `${theme.colors.accent}20` }]}>
+                <Text style={[styles.tagText, { color: theme.colors.accent }]}>{course}</Text>
               </View>
             ))}
             {match.sharedCourses.length > 3 && (
-              <Text
-                style={[styles.moreText, { color: theme.colors.textSecondary }]}
-              >
+              <Text style={[styles.moreText, { color: theme.colors.textSecondary }]}>
                 +{match.sharedCourses.length - 3}
               </Text>
             )}
@@ -158,22 +143,13 @@ const BuddyMatchCard: React.FC<BuddyMatchCardProps> = ({ match }) => {
         {/* Complementary Subjects */}
         {match.complementaryPairs && match.complementaryPairs.length > 0 && (
           <View style={styles.complementarySection}>
-            <Text
-              style={[
-                styles.sectionLabel,
-                { color: theme.colors.textSecondary },
-              ]}
-            >
+            <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>
               互補科目
             </Text>
             <View style={styles.complementaryRow}>
               {match.complementaryPairs.slice(0, 2).map((pair, idx) => (
                 <View key={idx} style={styles.complementaryPair}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={14}
-                    color={theme.colors.success}
-                  />
+                  <Ionicons name="checkmark-circle" size={14} color={theme.colors.success} />
                   <Text style={[styles.complementaryText, { color: theme.colors.text }]}>
                     {pair.subject}
                   </Text>
@@ -188,14 +164,8 @@ const BuddyMatchCard: React.FC<BuddyMatchCardProps> = ({ match }) => {
           <View style={styles.reasonsSection}>
             {match.reasons.slice(0, 2).map((reason, idx) => (
               <View key={idx} style={styles.reasonItem}>
-                <Ionicons
-                  name="star-outline"
-                  size={12}
-                  color={theme.colors.accent}
-                />
-                <Text style={[styles.reasonText, { color: theme.colors.text }]}>
-                  {reason}
-                </Text>
+                <Ionicons name="star-outline" size={12} color={theme.colors.accent} />
+                <Text style={[styles.reasonText, { color: theme.colors.text }]}>{reason}</Text>
               </View>
             ))}
           </View>
@@ -204,22 +174,14 @@ const BuddyMatchCard: React.FC<BuddyMatchCardProps> = ({ match }) => {
         {/* Common Time Slots */}
         {match.commonTimeSlots && match.commonTimeSlots.length > 0 && (
           <View style={styles.timeSlotSection}>
-            <Text
-              style={[
-                styles.sectionLabel,
-                { color: theme.colors.textSecondary },
-              ]}
-            >
+            <Text style={[styles.sectionLabel, { color: theme.colors.textSecondary }]}>
               共同空閒時段
             </Text>
             <View style={styles.timeSlotRow}>
               {match.commonTimeSlots.slice(0, 2).map((slot, idx) => (
                 <View
                   key={idx}
-                  style={[
-                    styles.timeSlot,
-                    { backgroundColor: `${theme.colors.social}15` },
-                  ]}
+                  style={[styles.timeSlot, { backgroundColor: `${theme.colors.social}15` }]}
                 >
                   <Text style={[styles.timeSlotText, { color: theme.colors.social }]}>
                     {slot.day} {slot.time}
@@ -230,12 +192,7 @@ const BuddyMatchCard: React.FC<BuddyMatchCardProps> = ({ match }) => {
           </View>
         )}
 
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            { backgroundColor: theme.colors.accent },
-          ]}
-        >
+        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.accent }]}>
           <Text style={styles.actionButtonText}>開始聊天</Text>
         </TouchableOpacity>
       </TouchableOpacity>
@@ -255,13 +212,13 @@ const StudyGroupCard: React.FC<StudyGroupCardProps> = ({ group }) => {
   const memberPercentage = (memberCount / group.maxMembers) * 100;
   const styleBadgeColor = (style: string) => {
     switch (style) {
-      case "collaborative":
+      case 'collaborative':
         return theme.colors.social;
-      case "tutorial":
+      case 'tutorial':
         return theme.colors.accent;
-      case "discussion":
+      case 'discussion':
         return theme.colors.success;
-      case "practice":
+      case 'practice':
         return theme.colors.warning;
       default:
         return theme.colors.textSecondary;
@@ -269,10 +226,10 @@ const StudyGroupCard: React.FC<StudyGroupCardProps> = ({ group }) => {
   };
 
   const styleLabel: Record<string, string> = {
-    collaborative: "協作式",
-    tutorial: "教學式",
-    discussion: "討論式",
-    practice: "練習式",
+    collaborative: '協作式',
+    tutorial: '教學式',
+    discussion: '討論式',
+    practice: '練習式',
   };
 
   return (
@@ -287,25 +244,13 @@ const StudyGroupCard: React.FC<StudyGroupCardProps> = ({ group }) => {
     >
       <View style={styles.groupHeader}>
         <View style={styles.groupTitleSection}>
-          <Text style={[styles.groupName, { color: theme.colors.text }]}>
-            {group.name}
-          </Text>
+          <Text style={[styles.groupName, { color: theme.colors.text }]}>{group.name}</Text>
           <Text style={[styles.groupCourse, { color: theme.colors.textSecondary }]}>
             {group.courseName}
           </Text>
         </View>
-        <View
-          style={[
-            styles.styleBadge,
-            { backgroundColor: `${styleBadgeColor(group.style)}20` },
-          ]}
-        >
-          <Text
-            style={[
-              styles.styleBadgeText,
-              { color: styleBadgeColor(group.style) },
-            ]}
-          >
+        <View style={[styles.styleBadge, { backgroundColor: `${styleBadgeColor(group.style)}20` }]}>
+          <Text style={[styles.styleBadgeText, { color: styleBadgeColor(group.style) }]}>
             {styleLabel[group.style]}
           </Text>
         </View>
@@ -332,23 +277,14 @@ const StudyGroupCard: React.FC<StudyGroupCardProps> = ({ group }) => {
       {/* Meeting Schedule */}
       {group.meetingSchedule && (
         <View style={styles.scheduleSection}>
-          <Ionicons
-            name="calendar-outline"
-            size={14}
-            color={theme.colors.textSecondary}
-          />
+          <Ionicons name="calendar-outline" size={14} color={theme.colors.textSecondary} />
           <Text style={[styles.scheduleText, { color: theme.colors.textSecondary }]}>
-            {group.meetingSchedule.map(formatTimeSlot).join("、")}
+            {group.meetingSchedule.map(formatTimeSlot).join('、')}
           </Text>
         </View>
       )}
 
-      <TouchableOpacity
-        style={[
-          styles.actionButton,
-          { backgroundColor: theme.colors.success },
-        ]}
-      >
+      <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.success }]}>
         <Text style={styles.actionButtonText}>加入讀書會</Text>
       </TouchableOpacity>
     </View>
@@ -361,21 +297,20 @@ const StudyGroupCard: React.FC<StudyGroupCardProps> = ({ group }) => {
 export function StudyBuddyScreen() {
   const insets = useSafeAreaInsets();
 
-  const [activeTab, setActiveTab] = useState<TabType>("buddy");
+  const [activeTab, setActiveTab] = useState<TabType>('buddy');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [myProfile, setMyProfile] = useState<StudyProfile | null>(null);
   const [buddyMatches, setBuddyMatches] = useState<BuddyMatch[]>([]);
   const [studyGroups, setStudyGroups] = useState<StudyGroup[]>([]);
-  const [courseReviewSummary, setCourseReviewSummary] =
-    useState<CourseReviewSummary | null>(null);
+  const [courseReviewSummary, setCourseReviewSummary] = useState<CourseReviewSummary | null>(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewDifficulty, setReviewDifficulty] = useState(0);
   const [reviewWorkload, setReviewWorkload] = useState(0);
   const [reviewUtility, setReviewUtility] = useState(0);
-  const [reviewComment, setReviewComment] = useState("");
-  const [selectedCourse, setSelectedCourse] = useState("");
+  const [reviewComment, setReviewComment] = useState('');
+  const [selectedCourse, setSelectedCourse] = useState('');
 
   // Load data
   useEffect(() => {
@@ -389,14 +324,14 @@ export function StudyBuddyScreen() {
         buildMyStudyProfile(),
         getStudyBuddyMatches(),
         getStudyGroups(),
-        getCourseReviewSummary(""),
+        getCourseReviewSummary(''),
       ]);
       setMyProfile(profile);
       setBuddyMatches(matches);
       setStudyGroups(groups);
       setCourseReviewSummary(reviews);
     } catch (error) {
-      console.error("Failed to load study buddy data:", error);
+      console.error('Failed to load study buddy data:', error);
     } finally {
       setLoading(false);
     }
@@ -427,20 +362,20 @@ export function StudyBuddyScreen() {
         reviewComment,
         [],
       );
-      await earnXP("write_review");
+      await earnXP('write_review');
 
       // Reset form
       setReviewRating(0);
       setReviewDifficulty(0);
       setReviewWorkload(0);
       setReviewUtility(0);
-      setReviewComment("");
-      setSelectedCourse("");
+      setReviewComment('');
+      setSelectedCourse('');
       setShowReviewModal(false);
 
       await loadData();
     } catch (error) {
-      console.error("Failed to submit review:", error);
+      console.error('Failed to submit review:', error);
     }
   };
 
@@ -449,7 +384,7 @@ export function StudyBuddyScreen() {
       {[1, 2, 3, 4, 5].map((star) => (
         <TouchableOpacity key={star} onPress={() => onRate(star)}>
           <Ionicons
-            name={star <= rating ? "star" : "star-outline"}
+            name={star <= rating ? 'star' : 'star-outline'}
             size={size}
             color={star <= rating ? theme.colors.warning : theme.colors.border}
           />
@@ -481,18 +416,14 @@ export function StudyBuddyScreen() {
     >
       <ScrollView
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={{
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + theme.space.lg,
         }}
       >
         {/* ===== HEADER ===== */}
         <View style={styles.header}>
-          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>
-            學習夥伴
-          </Text>
+          <Text style={[styles.headerTitle, { color: theme.colors.text }]}>學習夥伴</Text>
           <Text style={[styles.headerSubtitle, { color: theme.colors.textSecondary }]}>
             AI 智慧配對，找到最適合的學伴
           </Text>
@@ -509,17 +440,10 @@ export function StudyBuddyScreen() {
               },
             ]}
           >
-            <Text style={[styles.profileTitle, { color: theme.colors.text }]}>
-              我的學習檔案
-            </Text>
+            <Text style={[styles.profileTitle, { color: theme.colors.text }]}>我的學習檔案</Text>
             <View style={styles.profileGrid}>
               <View style={styles.profileItem}>
-                <Text
-                  style={[
-                    styles.profileLabel,
-                    { color: theme.colors.textSecondary },
-                  ]}
-                >
+                <Text style={[styles.profileLabel, { color: theme.colors.textSecondary }]}>
                   系所
                 </Text>
                 <Text style={[styles.profileValue, { color: theme.colors.text }]}>
@@ -527,12 +451,7 @@ export function StudyBuddyScreen() {
                 </Text>
               </View>
               <View style={styles.profileItem}>
-                <Text
-                  style={[
-                    styles.profileLabel,
-                    { color: theme.colors.textSecondary },
-                  ]}
-                >
+                <Text style={[styles.profileLabel, { color: theme.colors.textSecondary }]}>
                   學習風格
                 </Text>
                 <Text style={[styles.profileValue, { color: theme.colors.text }]}>
@@ -555,17 +474,9 @@ export function StudyBuddyScreen() {
                   {myProfile.strengths.map((strength, idx) => (
                     <View
                       key={idx}
-                      style={[
-                        styles.tag,
-                        { backgroundColor: `${theme.colors.success}20` },
-                      ]}
+                      style={[styles.tag, { backgroundColor: `${theme.colors.success}20` }]}
                     >
-                      <Text
-                        style={[
-                          styles.tagText,
-                          { color: theme.colors.success },
-                        ]}
-                      >
+                      <Text style={[styles.tagText, { color: theme.colors.success }]}>
                         {strength}
                       </Text>
                     </View>
@@ -585,11 +496,7 @@ export function StudyBuddyScreen() {
             ]}
             onPress={loadData}
           >
-            <Ionicons
-              name="person-add-outline"
-              size={32}
-              color={theme.colors.accent}
-            />
+            <Ionicons name="person-add-outline" size={32} color={theme.colors.accent} />
             <Text style={[styles.emptyProfileText, { color: theme.colors.accent }]}>
               建立個人檔案
             </Text>
@@ -597,25 +504,20 @@ export function StudyBuddyScreen() {
         )}
 
         {/* ===== TAB SWITCHER ===== */}
-        <View
-          style={[
-            styles.tabSwitcher,
-            { borderBottomColor: theme.colors.border },
-          ]}
-        >
+        <View style={[styles.tabSwitcher, { borderBottomColor: theme.colors.border }]}>
           <TouchableOpacity
             style={[
               styles.tab,
-              activeTab === "buddy" && {
+              activeTab === 'buddy' && {
                 borderBottomColor: theme.colors.accent,
               },
             ]}
-            onPress={() => handleTabChange("buddy")}
+            onPress={() => handleTabChange('buddy')}
           >
             <Text
               style={[
                 styles.tabText,
-                activeTab === "buddy"
+                activeTab === 'buddy'
                   ? { color: theme.colors.accent }
                   : { color: theme.colors.textSecondary },
               ]}
@@ -627,16 +529,16 @@ export function StudyBuddyScreen() {
           <TouchableOpacity
             style={[
               styles.tab,
-              activeTab === "group" && {
+              activeTab === 'group' && {
                 borderBottomColor: theme.colors.accent,
               },
             ]}
-            onPress={() => handleTabChange("group")}
+            onPress={() => handleTabChange('group')}
           >
             <Text
               style={[
                 styles.tabText,
-                activeTab === "group"
+                activeTab === 'group'
                   ? { color: theme.colors.accent }
                   : { color: theme.colors.textSecondary },
               ]}
@@ -648,16 +550,16 @@ export function StudyBuddyScreen() {
           <TouchableOpacity
             style={[
               styles.tab,
-              activeTab === "review" && {
+              activeTab === 'review' && {
                 borderBottomColor: theme.colors.accent,
               },
             ]}
-            onPress={() => handleTabChange("review")}
+            onPress={() => handleTabChange('review')}
           >
             <Text
               style={[
                 styles.tabText,
-                activeTab === "review"
+                activeTab === 'review'
                   ? { color: theme.colors.accent }
                   : { color: theme.colors.textSecondary },
               ]}
@@ -675,25 +577,14 @@ export function StudyBuddyScreen() {
         ) : (
           <>
             {/* BUDDY MATCHES */}
-            {activeTab === "buddy" && (
+            {activeTab === 'buddy' && (
               <View style={styles.tabContent}>
                 {buddyMatches && buddyMatches.length > 0 ? (
-                  buddyMatches.map((match, idx) => (
-                    <BuddyMatchCard key={idx} match={match} />
-                  ))
+                  buddyMatches.map((match, idx) => <BuddyMatchCard key={idx} match={match} />)
                 ) : (
                   <View style={styles.emptyState}>
-                    <Ionicons
-                      name="person-outline"
-                      size={48}
-                      color={theme.colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.emptyStateText,
-                        { color: theme.colors.textSecondary },
-                      ]}
-                    >
+                    <Ionicons name="person-outline" size={48} color={theme.colors.textSecondary} />
+                    <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
                       暫無配對結果
                     </Text>
                   </View>
@@ -702,35 +593,21 @@ export function StudyBuddyScreen() {
             )}
 
             {/* STUDY GROUPS */}
-            {activeTab === "group" && (
+            {activeTab === 'group' && (
               <View style={styles.tabContent}>
                 {studyGroups && studyGroups.length > 0 ? (
-                  studyGroups.map((group, idx) => (
-                    <StudyGroupCard key={idx} group={group} />
-                  ))
+                  studyGroups.map((group, idx) => <StudyGroupCard key={idx} group={group} />)
                 ) : (
                   <View style={styles.emptyState}>
-                    <Ionicons
-                      name="people-outline"
-                      size={48}
-                      color={theme.colors.textSecondary}
-                    />
-                    <Text
-                      style={[
-                        styles.emptyStateText,
-                        { color: theme.colors.textSecondary },
-                      ]}
-                    >
+                    <Ionicons name="people-outline" size={48} color={theme.colors.textSecondary} />
+                    <Text style={[styles.emptyStateText, { color: theme.colors.textSecondary }]}>
                       暫無讀書會
                     </Text>
                   </View>
                 )}
 
                 <TouchableOpacity
-                  style={[
-                    styles.fab,
-                    { backgroundColor: theme.colors.success },
-                  ]}
+                  style={[styles.fab, { backgroundColor: theme.colors.success }]}
                   onPress={() => setShowReviewModal(false)}
                 >
                   <Ionicons name="add" size={28} color="#fff" />
@@ -739,7 +616,7 @@ export function StudyBuddyScreen() {
             )}
 
             {/* COURSE REVIEWS */}
-            {activeTab === "review" && (
+            {activeTab === 'review' && (
               <View style={styles.tabContent}>
                 {courseReviewSummary && (
                   <>
@@ -758,17 +635,16 @@ export function StudyBuddyScreen() {
                       </Text>
                       <View style={styles.averageRatingDisplay}>
                         <Text style={[styles.averageRating, { color: theme.colors.accent }]}>
-                          {courseReviewSummary.averageRating?.toFixed(1) || "N/A"}
+                          {courseReviewSummary.averageRating?.toFixed(1) || 'N/A'}
                         </Text>
                         <View style={styles.starsSmall}>
                           {[1, 2, 3, 4, 5].map((star) => (
                             <Ionicons
                               key={star}
                               name={
-                                star <=
-                                Math.round(courseReviewSummary.averageRating || 0)
-                                  ? "star"
-                                  : "star-outline"
+                                star <= Math.round(courseReviewSummary.averageRating || 0)
+                                  ? 'star'
+                                  : 'star-outline'
                               }
                               size={16}
                               color={theme.colors.warning}
@@ -778,12 +654,7 @@ export function StudyBuddyScreen() {
                       </View>
 
                       {/* Sentiment Bar */}
-                      <Text
-                        style={[
-                          styles.sentimentLabel,
-                          { color: theme.colors.textSecondary },
-                        ]}
-                      >
+                      <Text style={[styles.sentimentLabel, { color: theme.colors.textSecondary }]}>
                         評論情緒分佈
                       </Text>
                       <View style={styles.sentimentBar}>
@@ -819,17 +690,9 @@ export function StudyBuddyScreen() {
                       <View style={styles.sentimentLegend}>
                         <View style={styles.legendItem}>
                           <View
-                            style={[
-                              styles.legendDot,
-                              { backgroundColor: theme.colors.success },
-                            ]}
+                            style={[styles.legendDot, { backgroundColor: theme.colors.success }]}
                           />
-                          <Text
-                            style={[
-                              styles.legendText,
-                              { color: theme.colors.textSecondary },
-                            ]}
-                          >
+                          <Text style={[styles.legendText, { color: theme.colors.textSecondary }]}>
                             正面
                           </Text>
                         </View>
@@ -840,28 +703,15 @@ export function StudyBuddyScreen() {
                               { backgroundColor: theme.colors.textSecondary },
                             ]}
                           />
-                          <Text
-                            style={[
-                              styles.legendText,
-                              { color: theme.colors.textSecondary },
-                            ]}
-                          >
+                          <Text style={[styles.legendText, { color: theme.colors.textSecondary }]}>
                             中立
                           </Text>
                         </View>
                         <View style={styles.legendItem}>
                           <View
-                            style={[
-                              styles.legendDot,
-                              { backgroundColor: theme.colors.warning },
-                            ]}
+                            style={[styles.legendDot, { backgroundColor: theme.colors.warning }]}
                           />
-                          <Text
-                            style={[
-                              styles.legendText,
-                              { color: theme.colors.textSecondary },
-                            ]}
-                          >
+                          <Text style={[styles.legendText, { color: theme.colors.textSecondary }]}>
                             負面
                           </Text>
                         </View>
@@ -872,12 +722,7 @@ export function StudyBuddyScreen() {
                     {courseReviewSummary.recentReviews &&
                       courseReviewSummary.recentReviews.length > 0 && (
                         <View>
-                          <Text
-                            style={[
-                              styles.reviewsListTitle,
-                              { color: theme.colors.text },
-                            ]}
-                          >
+                          <Text style={[styles.reviewsListTitle, { color: theme.colors.text }]}>
                             評價列表
                           </Text>
                           {courseReviewSummary.recentReviews.slice(0, 3).map((review, idx) => (
@@ -896,11 +741,7 @@ export function StudyBuddyScreen() {
                                   {[1, 2, 3, 4, 5].map((star) => (
                                     <Ionicons
                                       key={star}
-                                      name={
-                                        star <= (review.rating || 0)
-                                          ? "star"
-                                          : "star-outline"
-                                      }
+                                      name={star <= (review.rating || 0) ? 'star' : 'star-outline'}
                                       size={12}
                                       color={theme.colors.warning}
                                     />
@@ -911,9 +752,9 @@ export function StudyBuddyScreen() {
                                     styles.sentimentBadge,
                                     {
                                       backgroundColor: `${
-                                        review.sentiment === "positive"
+                                        review.sentiment === 'positive'
                                           ? theme.colors.success
-                                          : review.sentiment === "negative"
+                                          : review.sentiment === 'negative'
                                             ? theme.colors.warning
                                             : theme.colors.textSecondary
                                       }20`,
@@ -925,28 +766,23 @@ export function StudyBuddyScreen() {
                                       styles.sentimentBadgeText,
                                       {
                                         color:
-                                          review.sentiment === "positive"
+                                          review.sentiment === 'positive'
                                             ? theme.colors.success
-                                            : review.sentiment === "negative"
+                                            : review.sentiment === 'negative'
                                               ? theme.colors.warning
                                               : theme.colors.textSecondary,
                                       },
                                     ]}
                                   >
-                                    {review.sentiment === "positive"
-                                      ? "正面"
-                                      : review.sentiment === "negative"
-                                        ? "負面"
-                                        : "中立"}
+                                    {review.sentiment === 'positive'
+                                      ? '正面'
+                                      : review.sentiment === 'negative'
+                                        ? '負面'
+                                        : '中立'}
                                   </Text>
                                 </View>
                               </View>
-                              <Text
-                                style={[
-                                  styles.reviewComment,
-                                  { color: theme.colors.text },
-                                ]}
-                              >
+                              <Text style={[styles.reviewComment, { color: theme.colors.text }]}>
                                 {review.comment}
                               </Text>
                             </View>
@@ -957,10 +793,7 @@ export function StudyBuddyScreen() {
                 )}
 
                 <TouchableOpacity
-                  style={[
-                    styles.fab,
-                    { backgroundColor: theme.colors.accent },
-                  ]}
+                  style={[styles.fab, { backgroundColor: theme.colors.accent }]}
                   onPress={() => setShowReviewModal(true)}
                 >
                   <Ionicons name="pencil" size={24} color="#fff" />
@@ -978,12 +811,7 @@ export function StudyBuddyScreen() {
         transparent
         onRequestClose={() => setShowReviewModal(false)}
       >
-        <View
-          style={[
-            styles.modalContainer,
-            { backgroundColor: `${theme.colors.bg}E5` },
-          ]}
-        >
+        <View style={[styles.modalContainer, { backgroundColor: `${theme.colors.bg}E5` }]}>
           <View
             style={[
               styles.modalContent,
@@ -994,23 +822,15 @@ export function StudyBuddyScreen() {
             ]}
           >
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
-                寫課程評價
-              </Text>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>寫課程評價</Text>
               <TouchableOpacity onPress={() => setShowReviewModal(false)}>
-                <Ionicons
-                  name="close"
-                  size={24}
-                  color={theme.colors.textSecondary}
-                />
+                <Ionicons name="close" size={24} color={theme.colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={styles.modalScroll}>
               {/* Course Selection */}
-              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-                選擇課程
-              </Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>選擇課程</Text>
               <TextInput
                 style={[
                   styles.input,
@@ -1027,33 +847,23 @@ export function StudyBuddyScreen() {
               />
 
               {/* Overall Rating */}
-              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-                整體評分
-              </Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>整體評分</Text>
               {renderStars(reviewRating, setReviewRating)}
 
               {/* Difficulty */}
-              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-                難度
-              </Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>難度</Text>
               {renderStars(reviewDifficulty, setReviewDifficulty, 20)}
 
               {/* Workload */}
-              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-                工作量
-              </Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>工作量</Text>
               {renderStars(reviewWorkload, setReviewWorkload, 20)}
 
               {/* Utility */}
-              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-                實用性
-              </Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>實用性</Text>
               {renderStars(reviewUtility, setReviewUtility, 20)}
 
               {/* Comment */}
-              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>
-                評論
-              </Text>
+              <Text style={[styles.inputLabel, { color: theme.colors.text }]}>評論</Text>
               <TextInput
                 style={[
                   styles.inputMultiline,
@@ -1073,10 +883,7 @@ export function StudyBuddyScreen() {
 
               {/* Submit Button */}
               <TouchableOpacity
-                style={[
-                  styles.submitButton,
-                  { backgroundColor: theme.colors.accent },
-                ]}
+                style={[styles.submitButton, { backgroundColor: theme.colors.accent }]}
                 onPress={handleSubmitReview}
               >
                 <Text style={styles.submitButtonText}>提交評價</Text>
@@ -1102,7 +909,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 28,
-    fontWeight: "700",
+    fontWeight: '700',
     marginBottom: theme.space.sm,
   },
   headerSubtitle: {
@@ -1117,12 +924,12 @@ const styles = StyleSheet.create({
   },
   profileTitle: {
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.md,
   },
   profileGrid: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     marginBottom: theme.space.md,
   },
   profileItem: {
@@ -1130,46 +937,46 @@ const styles = StyleSheet.create({
   },
   profileLabel: {
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: '500',
     marginBottom: theme.space.xs,
   },
   profileValue: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   strengthsTags: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: theme.space.sm,
   },
   emptyProfileButton: {
     marginHorizontal: theme.space.lg,
     marginBottom: theme.space.lg,
     paddingVertical: theme.space.xl,
-    alignItems: "center",
+    alignItems: 'center',
     borderRadius: theme.radius.lg,
     borderWidth: 2,
   },
   emptyProfileText: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
     marginTop: theme.space.md,
   },
   tabSwitcher: {
-    flexDirection: "row",
+    flexDirection: 'row',
     borderBottomWidth: 1,
     marginHorizontal: theme.space.lg,
   },
   tab: {
     flex: 1,
     paddingVertical: theme.space.md,
-    alignItems: "center",
+    alignItems: 'center',
     borderBottomWidth: 3,
-    borderBottomColor: "transparent",
+    borderBottomColor: 'transparent',
   },
   tabText: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   tabContent: {
     paddingHorizontal: theme.space.lg,
@@ -1177,7 +984,7 @@ const styles = StyleSheet.create({
   },
   loadingContainer: {
     paddingVertical: theme.space.xl * 2,
-    alignItems: "center",
+    alignItems: 'center',
   },
   matchCard: {
     marginBottom: theme.space.md,
@@ -1186,16 +993,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   matchCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: theme.space.md,
   },
   scoreCircle: {
     width: 60,
     height: 60,
     borderRadius: 30,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: theme.space.md,
   },
   scoreInner: {
@@ -1203,27 +1010,27 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 25,
     borderWidth: 2,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scoreText: {
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: '700',
   },
   matchCardInfo: {
     flex: 1,
   },
   matchName: {
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.xs,
   },
   matchDept: {
     fontSize: 12,
   },
   tagsContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: theme.space.sm,
     marginBottom: theme.space.md,
   },
@@ -1234,28 +1041,28 @@ const styles = StyleSheet.create({
   },
   tagText: {
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: '500',
   },
   moreText: {
     fontSize: 12,
-    fontWeight: "500",
-    alignSelf: "center",
+    fontWeight: '500',
+    alignSelf: 'center',
   },
   complementarySection: {
     marginBottom: theme.space.md,
   },
   sectionLabel: {
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.sm,
   },
   complementaryRow: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: theme.space.sm,
   },
   complementaryPair: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: theme.space.xs,
   },
   complementaryText: {
@@ -1266,8 +1073,8 @@ const styles = StyleSheet.create({
     gap: theme.space.sm,
   },
   reasonItem: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: theme.space.sm,
   },
   reasonText: {
@@ -1278,7 +1085,7 @@ const styles = StyleSheet.create({
     marginBottom: theme.space.md,
   },
   timeSlotRow: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: theme.space.sm,
   },
   timeSlot: {
@@ -1288,18 +1095,18 @@ const styles = StyleSheet.create({
   },
   timeSlotText: {
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: '500',
   },
   actionButton: {
     paddingVertical: theme.space.md,
     borderRadius: theme.radius.md,
-    alignItems: "center",
+    alignItems: 'center',
     marginTop: theme.space.md,
   },
   actionButtonText: {
-    color: "#fff",
+    color: '#fff',
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   groupCard: {
     marginBottom: theme.space.md,
@@ -1308,9 +1115,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   groupHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: theme.space.md,
   },
   groupTitleSection: {
@@ -1318,7 +1125,7 @@ const styles = StyleSheet.create({
   },
   groupName: {
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.xs,
   },
   groupCourse: {
@@ -1331,7 +1138,7 @@ const styles = StyleSheet.create({
   },
   styleBadgeText: {
     fontSize: 11,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   memberSection: {
     marginBottom: theme.space.md,
@@ -1339,18 +1146,18 @@ const styles = StyleSheet.create({
   memberBar: {
     height: 6,
     borderRadius: 3,
-    overflow: "hidden",
+    overflow: 'hidden',
     marginBottom: theme.space.sm,
   },
   memberProgress: {
-    height: "100%",
+    height: '100%',
   },
   memberText: {
     fontSize: 12,
   },
   scheduleSection: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: theme.space.sm,
     marginBottom: theme.space.md,
   },
@@ -1358,14 +1165,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   fab: {
-    position: "absolute",
+    position: 'absolute',
     bottom: theme.space.lg + TAB_BAR_CONTENT_BOTTOM_PADDING,
     right: theme.space.lg,
     width: 56,
     height: 56,
     borderRadius: 28,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   reviewSummaryCard: {
     marginBottom: theme.space.lg,
@@ -1375,44 +1182,44 @@ const styles = StyleSheet.create({
   },
   reviewSummaryTitle: {
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.md,
   },
   averageRatingDisplay: {
-    alignItems: "center",
+    alignItems: 'center',
     marginBottom: theme.space.lg,
   },
   averageRating: {
     fontSize: 36,
-    fontWeight: "700",
+    fontWeight: '700',
     marginBottom: theme.space.sm,
   },
   starsSmall: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: theme.space.xs,
   },
   sentimentLabel: {
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.sm,
   },
   sentimentBar: {
     height: 8,
     borderRadius: 4,
-    flexDirection: "row",
-    overflow: "hidden",
+    flexDirection: 'row',
+    overflow: 'hidden',
     marginBottom: theme.space.md,
   },
   sentimentSegment: {
-    height: "100%",
+    height: '100%',
   },
   sentimentLegend: {
-    flexDirection: "row",
-    justifyContent: "space-around",
+    flexDirection: 'row',
+    justifyContent: 'space-around',
   },
   legendItem: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: theme.space.xs,
   },
   legendDot: {
@@ -1425,7 +1232,7 @@ const styles = StyleSheet.create({
   },
   reviewsListTitle: {
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.md,
     marginTop: theme.space.lg,
   },
@@ -1436,13 +1243,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   reviewHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: theme.space.md,
   },
   reviewRatingSmall: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 2,
   },
   sentimentBadge: {
@@ -1452,19 +1259,19 @@ const styles = StyleSheet.create({
   },
   sentimentBadgeText: {
     fontSize: 10,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   reviewComment: {
     fontSize: 12,
     lineHeight: 18,
   },
   starsContainer: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: theme.space.md,
     marginBottom: theme.space.lg,
   },
   emptyState: {
-    alignItems: "center",
+    alignItems: 'center',
     paddingVertical: theme.space.xl * 2,
   },
   emptyStateText: {
@@ -1473,32 +1280,32 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     flex: 1,
-    justifyContent: "flex-end",
+    justifyContent: 'flex-end',
   },
   modalContent: {
     borderTopLeftRadius: theme.radius.lg,
     borderTopRightRadius: theme.radius.lg,
-    maxHeight: "90%",
+    maxHeight: '90%',
     borderTopWidth: 1,
   },
   modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: theme.space.lg,
     paddingVertical: theme.space.md,
     borderBottomWidth: 1,
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: '700',
   },
   modalScroll: {
     padding: theme.space.lg,
   },
   inputLabel: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.sm,
   },
   input: {
@@ -1516,17 +1323,17 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space.md,
     marginBottom: theme.space.lg,
     fontSize: 14,
-    textAlignVertical: "top",
+    textAlignVertical: 'top',
   },
   submitButton: {
     paddingVertical: theme.space.md,
     borderRadius: theme.radius.md,
-    alignItems: "center",
+    alignItems: 'center',
     marginVertical: theme.space.lg,
   },
   submitButtonText: {
-    color: "#fff",
+    color: '#fff',
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: '700',
   },
 });

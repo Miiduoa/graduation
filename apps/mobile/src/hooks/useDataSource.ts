@@ -1,7 +1,7 @@
-import React from "react";
+import React from 'react';
 
-import { getDataSource, type DataSource } from "../data";
-import { useAuth } from "../state/auth";
+import { getDataSource, type DataSource } from '../data';
+import { useAuth } from '../state/auth';
 
 /**
  * Hook to get the current DataSource instance.
@@ -10,7 +10,7 @@ import { useAuth } from "../state/auth";
  */
 export function useDataSource() {
   const auth = useAuth();
-  const authKey = auth.user?.uid ?? "__guest__";
+  const authKey = auth.user?.uid ?? '__guest__';
 
   return React.useMemo(() => {
     void authKey;
@@ -18,7 +18,7 @@ export function useDataSource() {
     return new Proxy(source, {
       get(target, prop, receiver) {
         const value = Reflect.get(target, prop, receiver) as unknown;
-        return typeof value === "function" ? value.bind(target) : value;
+        return typeof value === 'function' ? value.bind(target) : value;
       },
     }) as DataSource;
   }, [authKey]);

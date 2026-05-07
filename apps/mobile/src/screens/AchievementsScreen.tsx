@@ -1,15 +1,15 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
-import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { ScrollView, Text, View, Pressable, Animated, RefreshControl, Share } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Screen, Pill, AnimatedCard, ProgressRing } from "../ui/components";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
-import { theme } from "../ui/theme";
-import { useAuth } from "../state/auth";
-import { useFavorites } from "../state/favorites";
-import { useSchool } from "../state/school";
-import { getRuntimeDataSourcePolicy } from "../config/runtime";
-import { getReleaseConfig } from "../services/release";
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { ScrollView, Text, View, Pressable, Animated, RefreshControl, Share } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Screen, Pill, AnimatedCard, ProgressRing } from '../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../ui/theme';
+import { useAuth } from '../state/auth';
+import { useFavorites } from '../state/favorites';
+import { useSchool } from '../state/school';
+import { getRuntimeDataSourcePolicy } from '../config/runtime';
+import { getReleaseConfig } from '../services/release';
 import {
   getStreakStorageKey,
   loadLeaderboardSnapshot,
@@ -20,21 +20,21 @@ import {
   type StreakData,
   useAmbientCues,
   updateUserStreak,
-} from "../features/engagement";
-import { AmbientCueCard, CompletionState } from "../ui/campusOs";
+} from '../features/engagement';
+import { AmbientCueCard, CompletionState } from '../ui/campusOs';
 
 type Achievement = {
   id: string;
   title: string;
   description: string;
   icon: string;
-  category: "explorer" | "social" | "academic" | "engagement" | "special";
+  category: 'explorer' | 'social' | 'academic' | 'engagement' | 'special';
   points: number;
   requirement: number;
   progress: number;
   unlocked: boolean;
   unlockedAt?: Date;
-  rarity: "common" | "rare" | "epic" | "legendary";
+  rarity: 'common' | 'rare' | 'epic' | 'legendary';
 };
 
 type LeaderboardEntry = {
@@ -46,36 +46,225 @@ type LeaderboardEntry = {
   isCurrentUser: boolean;
 };
 
-const ACHIEVEMENT_DEFINITIONS: Omit<Achievement, "progress" | "unlocked" | "unlockedAt">[] = [
-  { id: "first_login", title: "新生報到", description: "首次登入 APP", icon: "rocket", category: "engagement", points: 10, requirement: 1, rarity: "common" },
-  { id: "profile_complete", title: "自我介紹", description: "完成個人資料填寫", icon: "person-circle", category: "engagement", points: 20, requirement: 1, rarity: "common" },
-  { id: "first_favorite", title: "收藏家入門", description: "收藏第一個項目", icon: "heart", category: "engagement", points: 10, requirement: 1, rarity: "common" },
-  { id: "collector_10", title: "收藏達人", description: "累積收藏 10 個項目", icon: "heart-circle", category: "engagement", points: 50, requirement: 10, rarity: "rare" },
-  { id: "collector_50", title: "收藏大師", description: "累積收藏 50 個項目", icon: "trophy", category: "engagement", points: 150, requirement: 50, rarity: "epic" },
-  { id: "explore_5", title: "校園探索者", description: "瀏覽 5 個不同地點", icon: "compass", category: "explorer", points: 30, requirement: 5, rarity: "common" },
-  { id: "explore_20", title: "校園達人", description: "瀏覽 20 個不同地點", icon: "map", category: "explorer", points: 100, requirement: 20, rarity: "rare" },
-  { id: "navigate_first", title: "方向感", description: "首次使用導航功能", icon: "navigate", category: "explorer", points: 15, requirement: 1, rarity: "common" },
-  { id: "event_first", title: "活動參與者", description: "報名第一個活動", icon: "calendar", category: "social", points: 25, requirement: 1, rarity: "common" },
-  { id: "event_5", title: "社交達人", description: "報名 5 個活動", icon: "people", category: "social", points: 75, requirement: 5, rarity: "rare" },
-  { id: "group_join", title: "群組新手", description: "加入第一個群組", icon: "chatbubbles", category: "social", points: 20, requirement: 1, rarity: "common" },
-  { id: "post_first", title: "發言人", description: "在群組發表第一篇貼文", icon: "create", category: "social", points: 30, requirement: 1, rarity: "common" },
-  { id: "post_10", title: "話題王", description: "累積發表 10 篇貼文", icon: "megaphone", category: "social", points: 100, requirement: 10, rarity: "rare" },
-  { id: "credit_check", title: "學分規劃師", description: "首次使用學分試算", icon: "school", category: "academic", points: 20, requirement: 1, rarity: "common" },
-  { id: "course_10", title: "修課達人", description: "登錄 10 門課程", icon: "book", category: "academic", points: 80, requirement: 10, rarity: "rare" },
-  { id: "ai_chat", title: "AI 先鋒", description: "首次使用 AI 助理", icon: "sparkles", category: "special", points: 25, requirement: 1, rarity: "common" },
-  { id: "ai_master", title: "AI 達人", description: "與 AI 助理對話 50 次", icon: "hardware-chip", category: "special", points: 150, requirement: 50, rarity: "epic" },
-  { id: "early_bird", title: "早起的鳥兒", description: "在早上 6-7 點使用 APP", icon: "sunny", category: "special", points: 40, requirement: 1, rarity: "rare" },
-  { id: "night_owl", title: "夜貓子", description: "在凌晨 1-3 點使用 APP", icon: "moon", category: "special", points: 40, requirement: 1, rarity: "rare" },
-  { id: "streak_7", title: "持之以恆", description: "連續 7 天登入", icon: "flame", category: "engagement", points: 100, requirement: 7, rarity: "rare" },
-  { id: "streak_30", title: "鐵粉認證", description: "連續 30 天登入", icon: "medal", category: "engagement", points: 300, requirement: 30, rarity: "legendary" },
+const ACHIEVEMENT_DEFINITIONS: Omit<Achievement, 'progress' | 'unlocked' | 'unlockedAt'>[] = [
+  {
+    id: 'first_login',
+    title: '新生報到',
+    description: '首次登入 APP',
+    icon: 'rocket',
+    category: 'engagement',
+    points: 10,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'profile_complete',
+    title: '自我介紹',
+    description: '完成個人資料填寫',
+    icon: 'person-circle',
+    category: 'engagement',
+    points: 20,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'first_favorite',
+    title: '收藏家入門',
+    description: '收藏第一個項目',
+    icon: 'heart',
+    category: 'engagement',
+    points: 10,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'collector_10',
+    title: '收藏達人',
+    description: '累積收藏 10 個項目',
+    icon: 'heart-circle',
+    category: 'engagement',
+    points: 50,
+    requirement: 10,
+    rarity: 'rare',
+  },
+  {
+    id: 'collector_50',
+    title: '收藏大師',
+    description: '累積收藏 50 個項目',
+    icon: 'trophy',
+    category: 'engagement',
+    points: 150,
+    requirement: 50,
+    rarity: 'epic',
+  },
+  {
+    id: 'explore_5',
+    title: '校園探索者',
+    description: '瀏覽 5 個不同地點',
+    icon: 'compass',
+    category: 'explorer',
+    points: 30,
+    requirement: 5,
+    rarity: 'common',
+  },
+  {
+    id: 'explore_20',
+    title: '校園達人',
+    description: '瀏覽 20 個不同地點',
+    icon: 'map',
+    category: 'explorer',
+    points: 100,
+    requirement: 20,
+    rarity: 'rare',
+  },
+  {
+    id: 'navigate_first',
+    title: '方向感',
+    description: '首次使用導航功能',
+    icon: 'navigate',
+    category: 'explorer',
+    points: 15,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'event_first',
+    title: '活動參與者',
+    description: '報名第一個活動',
+    icon: 'calendar',
+    category: 'social',
+    points: 25,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'event_5',
+    title: '社交達人',
+    description: '報名 5 個活動',
+    icon: 'people',
+    category: 'social',
+    points: 75,
+    requirement: 5,
+    rarity: 'rare',
+  },
+  {
+    id: 'group_join',
+    title: '群組新手',
+    description: '加入第一個群組',
+    icon: 'chatbubbles',
+    category: 'social',
+    points: 20,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'post_first',
+    title: '發言人',
+    description: '在群組發表第一篇貼文',
+    icon: 'create',
+    category: 'social',
+    points: 30,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'post_10',
+    title: '話題王',
+    description: '累積發表 10 篇貼文',
+    icon: 'megaphone',
+    category: 'social',
+    points: 100,
+    requirement: 10,
+    rarity: 'rare',
+  },
+  {
+    id: 'credit_check',
+    title: '學分規劃師',
+    description: '首次使用學分試算',
+    icon: 'school',
+    category: 'academic',
+    points: 20,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'course_10',
+    title: '修課達人',
+    description: '登錄 10 門課程',
+    icon: 'book',
+    category: 'academic',
+    points: 80,
+    requirement: 10,
+    rarity: 'rare',
+  },
+  {
+    id: 'ai_chat',
+    title: 'AI 先鋒',
+    description: '首次使用 AI 助理',
+    icon: 'sparkles',
+    category: 'special',
+    points: 25,
+    requirement: 1,
+    rarity: 'common',
+  },
+  {
+    id: 'ai_master',
+    title: 'AI 達人',
+    description: '與 AI 助理對話 50 次',
+    icon: 'hardware-chip',
+    category: 'special',
+    points: 150,
+    requirement: 50,
+    rarity: 'epic',
+  },
+  {
+    id: 'early_bird',
+    title: '早起的鳥兒',
+    description: '在早上 6-7 點使用 APP',
+    icon: 'sunny',
+    category: 'special',
+    points: 40,
+    requirement: 1,
+    rarity: 'rare',
+  },
+  {
+    id: 'night_owl',
+    title: '夜貓子',
+    description: '在凌晨 1-3 點使用 APP',
+    icon: 'moon',
+    category: 'special',
+    points: 40,
+    requirement: 1,
+    rarity: 'rare',
+  },
+  {
+    id: 'streak_7',
+    title: '持之以恆',
+    description: '連續 7 天登入',
+    icon: 'flame',
+    category: 'engagement',
+    points: 100,
+    requirement: 7,
+    rarity: 'rare',
+  },
+  {
+    id: 'streak_30',
+    title: '鐵粉認證',
+    description: '連續 30 天登入',
+    icon: 'medal',
+    category: 'engagement',
+    points: 300,
+    requirement: 30,
+    rarity: 'legendary',
+  },
 ];
 
 const CATEGORY_INFO = {
-  explorer: { label: "探索", color: "#3B82F6", icon: "compass" },
-  social: { label: "社交", color: "#10B981", icon: "people" },
-  academic: { label: "學業", color: "#F59E0B", icon: "school" },
-  engagement: { label: "互動", color: "#8B5CF6", icon: "heart" },
-  special: { label: "特殊", color: "#EF4444", icon: "star" },
+  explorer: { label: '探索', color: '#3B82F6', icon: 'compass' },
+  social: { label: '社交', color: '#10B981', icon: 'people' },
+  academic: { label: '學業', color: '#F59E0B', icon: 'school' },
+  engagement: { label: '互動', color: '#8B5CF6', icon: 'heart' },
+  special: { label: '特殊', color: '#EF4444', icon: 'star' },
 };
 
 /**
@@ -97,50 +286,72 @@ function StreakCard({ streak, onShare }: { streak: StreakData; onShare: () => vo
       Animated.sequence([
         Animated.timing(flameAnim, { toValue: 1.12, duration: 800, useNativeDriver: true }),
         Animated.timing(flameAnim, { toValue: 0.95, duration: 800, useNativeDriver: true }),
-      ])
+      ]),
     ).start();
   }, []);
 
-  const streakColor = streak.currentStreak >= 30
-    ? theme.colors.achievement
-    : streak.currentStreak >= 7
-      ? theme.colors.streak
-      : theme.colors.accent;
+  const streakColor =
+    streak.currentStreak >= 30
+      ? theme.colors.achievement
+      : streak.currentStreak >= 7
+        ? theme.colors.streak
+        : theme.colors.accent;
 
   const streakMilestones = [1, 3, 7, 14, 30, 60, 100];
   const nextMilestone = streakMilestones.find((m) => m > streak.currentStreak) ?? 100;
   const prevMilestone = streakMilestones.filter((m) => m <= streak.currentStreak).pop() ?? 0;
-  const milestoneProgress = (streak.currentStreak - prevMilestone) / (nextMilestone - prevMilestone);
+  const milestoneProgress =
+    (streak.currentStreak - prevMilestone) / (nextMilestone - prevMilestone);
 
   return (
-    <Animated.View style={{ opacity: opacityAnim, transform: [{ scale: scaleAnim }], marginBottom: 12 }}>
-      <View style={{
-        padding: 20, borderRadius: 24,
-        backgroundColor: `${streakColor}10`,
-        borderWidth: 1.5, borderColor: `${streakColor}25`,
-      }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 16 }}>
+    <Animated.View
+      style={{ opacity: opacityAnim, transform: [{ scale: scaleAnim }], marginBottom: 12 }}
+    >
+      <View
+        style={{
+          padding: 20,
+          borderRadius: 24,
+          backgroundColor: `${streakColor}10`,
+          borderWidth: 1.5,
+          borderColor: `${streakColor}25`,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
           {/* 火焰動畫 */}
-          <Animated.View style={{
-            width: 72, height: 72, borderRadius: 22,
-            backgroundColor: `${streakColor}20`,
-            alignItems: "center", justifyContent: "center",
-            transform: [{ scale: flameAnim }],
-          }}>
+          <Animated.View
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 22,
+              backgroundColor: `${streakColor}20`,
+              alignItems: 'center',
+              justifyContent: 'center',
+              transform: [{ scale: flameAnim }],
+            }}
+          >
             <Text style={{ fontSize: 36 }}>
-              {streak.currentStreak >= 30 ? "🔥" : streak.currentStreak >= 7 ? "⚡" : "✨"}
+              {streak.currentStreak >= 30 ? '🔥' : streak.currentStreak >= 7 ? '⚡' : '✨'}
             </Text>
           </Animated.View>
 
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: "700", letterSpacing: 0.3 }}>
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: 12,
+                fontWeight: '700',
+                letterSpacing: 0.3,
+              }}
+            >
               連續使用天數
             </Text>
-            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 4, marginTop: 2 }}>
-              <Text style={{ color: streakColor, fontWeight: "900", fontSize: 40, letterSpacing: -1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4, marginTop: 2 }}>
+              <Text
+                style={{ color: streakColor, fontWeight: '900', fontSize: 40, letterSpacing: -1 }}
+              >
                 {streak.currentStreak}
               </Text>
-              <Text style={{ color: streakColor, fontWeight: "700", fontSize: 16 }}>天</Text>
+              <Text style={{ color: streakColor, fontWeight: '700', fontSize: 16 }}>天</Text>
             </View>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
               最長紀錄 {streak.longestStreak} 天 · 共 {streak.totalDays} 天
@@ -150,7 +361,8 @@ function StreakCard({ streak, onShare }: { streak: StreakData; onShare: () => vo
           <Pressable
             onPress={onShare}
             style={({ pressed }) => ({
-              padding: 10, borderRadius: 12,
+              padding: 10,
+              borderRadius: 12,
               backgroundColor: `${streakColor}18`,
               opacity: pressed ? 0.7 : 1,
             })}
@@ -161,21 +373,30 @@ function StreakCard({ streak, onShare }: { streak: StreakData; onShare: () => vo
 
         {/* 到下一個里程碑的進度 */}
         <View style={{ marginTop: 16 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
-            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: "600" }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600' }}>
               距離 {nextMilestone} 天里程碑
             </Text>
-            <Text style={{ color: streakColor, fontSize: 11, fontWeight: "700" }}>
+            <Text style={{ color: streakColor, fontSize: 11, fontWeight: '700' }}>
               還差 {nextMilestone - streak.currentStreak} 天
             </Text>
           </View>
-          <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.border, overflow: "hidden" }}>
-            <View style={{
-              height: "100%",
-              width: `${milestoneProgress * 100}%`,
-              backgroundColor: streakColor,
+          <View
+            style={{
+              height: 6,
               borderRadius: 3,
-            }} />
+              backgroundColor: theme.colors.border,
+              overflow: 'hidden',
+            }}
+          >
+            <View
+              style={{
+                height: '100%',
+                width: `${milestoneProgress * 100}%`,
+                backgroundColor: streakColor,
+                borderRadius: 3,
+              }}
+            />
           </View>
         </View>
       </View>
@@ -184,10 +405,10 @@ function StreakCard({ streak, onShare }: { streak: StreakData; onShare: () => vo
 }
 
 const RARITY_INFO = {
-  common: { label: "普通", color: "#94A3B8", bgColor: "rgba(148,163,184,0.15)" },
-  rare: { label: "稀有", color: "#3B82F6", bgColor: "rgba(59,130,246,0.15)" },
-  epic: { label: "史詩", color: "#8B5CF6", bgColor: "rgba(139,92,246,0.15)" },
-  legendary: { label: "傳說", color: "#F59E0B", bgColor: "rgba(245,158,11,0.15)" },
+  common: { label: '普通', color: '#94A3B8', bgColor: 'rgba(148,163,184,0.15)' },
+  rare: { label: '稀有', color: '#3B82F6', bgColor: 'rgba(59,130,246,0.15)' },
+  epic: { label: '史詩', color: '#8B5CF6', bgColor: 'rgba(139,92,246,0.15)' },
+  legendary: { label: '傳說', color: '#F59E0B', bgColor: 'rgba(245,158,11,0.15)' },
 };
 
 function calculateLevel(points: number): { level: number; currentXP: number; nextLevelXP: number } {
@@ -208,7 +429,11 @@ function calculateLevel(points: number): { level: number; currentXP: number; nex
   };
 }
 
-function AchievementCard(props: { achievement: Achievement; onPress?: () => void; onShare?: () => void }) {
+function AchievementCard(props: {
+  achievement: Achievement;
+  onPress?: () => void;
+  onShare?: () => void;
+}) {
   const { achievement } = props;
   const rarityInfo = RARITY_INFO[achievement.rarity];
   const categoryInfo = CATEGORY_INFO[achievement.category];
@@ -249,16 +474,23 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
           opacity: achievement.unlocked ? 1 : 0.65,
         }}
       >
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
           <Animated.View style={{ transform: [{ scale: unlockAnim }] }}>
-            <View style={{
-              width: 56, height: 56, borderRadius: 28,
-              backgroundColor: achievement.unlocked ? `${categoryInfo.color}25` : theme.colors.surface2,
-              alignItems: "center", justifyContent: "center",
-              borderWidth: 2,
-              borderColor: achievement.unlocked ? categoryInfo.color : theme.colors.border,
-            }}>
-            <Ionicons
+            <View
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: 28,
+                backgroundColor: achievement.unlocked
+                  ? `${categoryInfo.color}25`
+                  : theme.colors.surface2,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 2,
+                borderColor: achievement.unlocked ? categoryInfo.color : theme.colors.border,
+              }}
+            >
+              <Ionicons
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 name={achievement.icon as any}
                 size={28}
@@ -268,8 +500,8 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
           </Animated.View>
 
           <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16 }}>
                 {achievement.title}
               </Text>
               {achievement.unlocked && (
@@ -282,32 +514,52 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
 
             {!achievement.unlocked && (
               <View style={{ marginTop: 8 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                <View
+                  style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}
+                >
                   {/* 正向框架：「已達成 X/Y」而非「未完成 Y-X」 */}
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
                     已達成 {achievement.progress}/{achievement.requirement}
                   </Text>
-                  <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "600" }}>
+                  <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: '600' }}>
                     再努力 {achievement.requirement - achievement.progress} 步！
                   </Text>
                 </View>
-                <View style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.border, overflow: "hidden" }}>
-                  <View style={{
-                    height: "100%",
-                    width: `${progress * 100}%`,
-                    backgroundColor: categoryInfo.color,
+                <View
+                  style={{
+                    height: 6,
                     borderRadius: 3,
-                  }} />
+                    backgroundColor: theme.colors.border,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <View
+                    style={{
+                      height: '100%',
+                      width: `${progress * 100}%`,
+                      backgroundColor: categoryInfo.color,
+                      borderRadius: 3,
+                    }}
+                  />
                 </View>
               </View>
             )}
           </View>
 
-          <View style={{ alignItems: "flex-end", gap: 6 }}>
-            <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: rarityInfo.bgColor }}>
-              <Text style={{ color: rarityInfo.color, fontSize: 10, fontWeight: "700" }}>{rarityInfo.label}</Text>
+          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+            <View
+              style={{
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 999,
+                backgroundColor: rarityInfo.bgColor,
+              }}
+            >
+              <Text style={{ color: rarityInfo.color, fontSize: 10, fontWeight: '700' }}>
+                {rarityInfo.label}
+              </Text>
             </View>
-            <Text style={{ color: theme.colors.achievement, fontWeight: "800", fontSize: 13 }}>
+            <Text style={{ color: theme.colors.achievement, fontWeight: '800', fontSize: 13 }}>
               +{achievement.points}
             </Text>
             {achievement.unlocked && props.onShare && (
@@ -324,8 +576,13 @@ function AchievementCard(props: { achievement: Achievement; onPress?: () => void
 
 // 這些成就直接從本地狀態計算（不需要 Firestore 追蹤）
 const LOCAL_COMPUTED_IDS = new Set([
-  "first_login", "profile_complete", "first_favorite",
-  "collector_10", "collector_50", "early_bird", "night_owl",
+  'first_login',
+  'profile_complete',
+  'first_favorite',
+  'collector_10',
+  'collector_50',
+  'early_bird',
+  'night_owl',
 ]);
 
 export function AchievementsScreen(props: Record<string, unknown>) {
@@ -334,17 +591,24 @@ export function AchievementsScreen(props: Record<string, unknown>) {
   const { school } = useSchool();
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [firestoreProgress, setFirestoreProgress] = useState<Record<string, AchievementProgress>>({});
+  const [firestoreProgress, setFirestoreProgress] = useState<Record<string, AchievementProgress>>(
+    {},
+  );
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [streakData, setStreakData] = useState<StreakData>({ currentStreak: 0, longestStreak: 0, lastLoginDate: "", totalDays: 0 });
+  const [streakData, setStreakData] = useState<StreakData>({
+    currentStreak: 0,
+    longestStreak: 0,
+    lastLoginDate: '',
+    totalDays: 0,
+  });
   const streakStorageKey = useMemo(
     () => getStreakStorageKey(auth.user?.uid ?? null, school.id),
-    [auth.user?.uid, school.id]
+    [auth.user?.uid, school.id],
   );
   const allowDemoLeaderboard = useMemo(() => {
     const runtimePolicy = getRuntimeDataSourcePolicy();
-    return runtimePolicy.requestedMode === "mock" || getReleaseConfig().appEnv !== "production";
+    return runtimePolicy.requestedMode === 'mock' || getReleaseConfig().appEnv !== 'production';
   }, []);
 
   useEffect(() => {
@@ -374,10 +638,12 @@ export function AchievementsScreen(props: Record<string, unknown>) {
   }, [school?.id, auth.user?.uid]);
 
   const totalFavorites = useMemo(() => {
-    return fav.favorites.announcement.length +
+    return (
+      fav.favorites.announcement.length +
       fav.favorites.event.length +
       fav.favorites.poi.length +
-      fav.favorites.menu.length;
+      fav.favorites.menu.length
+    );
   }, [fav.favorites]);
 
   // 訂閱 Firestore 成就資料
@@ -407,7 +673,7 @@ export function AchievementsScreen(props: Record<string, unknown>) {
             points: row.points,
             level: calculateLevel(row.points).level,
             isCurrentUser: row.userId === auth.user?.uid,
-          }))
+          })),
         );
       },
     });
@@ -424,21 +690,21 @@ export function AchievementsScreen(props: Record<string, unknown>) {
       if (LOCAL_COMPUTED_IDS.has(def.id)) {
         // 本地計算
         switch (def.id) {
-          case "first_login":
+          case 'first_login':
             progress = auth.user ? 1 : 0;
             break;
-          case "profile_complete":
+          case 'profile_complete':
             progress = auth.profile?.displayName ? 1 : 0;
             break;
-          case "first_favorite":
-          case "collector_10":
-          case "collector_50":
+          case 'first_favorite':
+          case 'collector_10':
+          case 'collector_50':
             progress = totalFavorites;
             break;
-          case "early_bird":
+          case 'early_bird':
             progress = hour >= 6 && hour < 7 ? 1 : 0;
             break;
-          case "night_owl":
+          case 'night_owl':
             progress = hour >= 1 && hour < 3 ? 1 : 0;
             break;
         }
@@ -458,7 +724,7 @@ export function AchievementsScreen(props: Record<string, unknown>) {
         // 從 Firestore 讀取（若無資料則為 0）
         const fsData = firestoreProgress[def.id];
         progress = fsData?.progress ?? 0;
-        unlocked = fsData?.unlocked ?? (progress >= def.requirement);
+        unlocked = fsData?.unlocked ?? progress >= def.requirement;
         unlockedAt = fsData?.unlockedAt;
       }
 
@@ -474,11 +740,15 @@ export function AchievementsScreen(props: Record<string, unknown>) {
   const totalPoints = useMemo(() => {
     return achievements.filter((a) => a.unlocked).reduce((sum, a) => sum + a.points, 0);
   }, [achievements]);
-  const { cue: ambientCue, dismissCue: dismissAmbientCue, openCue: openAmbientCue } = useAmbientCues({
+  const {
+    cue: ambientCue,
+    dismissCue: dismissAmbientCue,
+    openCue: openAmbientCue,
+  } = useAmbientCues({
     schoolId: school.id,
     uid: auth.user?.uid ?? null,
-    role: "student",
-    surface: "achievements",
+    role: 'student',
+    surface: 'achievements',
     totalPoints,
     limit: 1,
   });
@@ -499,21 +769,28 @@ export function AchievementsScreen(props: Record<string, unknown>) {
     if (!allowDemoLeaderboard) return [];
     // fallback with real current user
     const fallback: LeaderboardEntry[] = [
-      { rank: 1, userId: "u1", userName: "學霸小明", points: 1250, level: 8, isCurrentUser: false },
-      { rank: 2, userId: "u2", userName: "活動王", points: 980, level: 7, isCurrentUser: false },
-      { rank: 3, userId: "u3", userName: "探索家", points: 850, level: 6, isCurrentUser: false },
+      { rank: 1, userId: 'u1', userName: '學霸小明', points: 1250, level: 8, isCurrentUser: false },
+      { rank: 2, userId: 'u2', userName: '活動王', points: 980, level: 7, isCurrentUser: false },
+      { rank: 3, userId: 'u3', userName: '探索家', points: 850, level: 6, isCurrentUser: false },
     ];
     if (auth.user) {
       fallback.push({
         rank: 4,
         userId: auth.user.uid,
-        userName: auth.profile?.displayName ?? "我",
+        userName: auth.profile?.displayName ?? '我',
         points: totalPoints,
         level: levelInfo.level,
         isCurrentUser: true,
       });
     }
-    fallback.push({ rank: 5, userId: "u5", userName: "新同學", points: 320, level: 3, isCurrentUser: false });
+    fallback.push({
+      rank: 5,
+      userId: 'u5',
+      userName: '新同學',
+      points: 320,
+      level: 3,
+      isCurrentUser: false,
+    });
     return fallback.sort((a, b) => b.points - a.points).map((e, i) => ({ ...e, rank: i + 1 }));
   }, [allowDemoLeaderboard, leaderboard, auth.user, auth.profile, totalPoints, levelInfo.level]);
 
@@ -521,7 +798,7 @@ export function AchievementsScreen(props: Record<string, unknown>) {
     try {
       await Share.share({
         message: `我已連續使用校園助手 ${streakData.currentStreak} 天！🔥\n最高紀錄 ${streakData.longestStreak} 天，一起來挑戰吧！`,
-        title: "我的學習 Streak",
+        title: '我的學習 Streak',
       });
     } catch {
       // ignore
@@ -532,7 +809,7 @@ export function AchievementsScreen(props: Record<string, unknown>) {
     try {
       await Share.share({
         message: `我在校園助手解鎖了「${achievement.title}」成就！🏆\n${achievement.description}\n+${achievement.points} 積分`,
-        title: "成就解鎖",
+        title: '成就解鎖',
       });
     } catch {
       // ignore
@@ -544,14 +821,20 @@ export function AchievementsScreen(props: Record<string, unknown>) {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.accent} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={theme.colors.accent}
+          />
+        }
       >
         {/* ─── Streak 連續使用卡片 ─── */}
         <StreakCard streak={streakData} onShare={handleShareStreak} />
 
         <AnimatedCard title="" subtitle="">
-          <View style={{ alignItems: "center", padding: 8 }}>
-            <View style={{ position: "relative", width: 100, height: 100 }}>
+          <View style={{ alignItems: 'center', padding: 8 }}>
+            <View style={{ position: 'relative', width: 100, height: 100 }}>
               <ProgressRing
                 progress={levelInfo.currentXP / levelInfo.nextLevelXP}
                 size={100}
@@ -561,48 +844,67 @@ export function AchievementsScreen(props: Record<string, unknown>) {
               />
               <View
                 style={{
-                  position: "absolute",
+                  position: 'absolute',
                   top: 0,
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  alignItems: "center",
-                  justifyContent: "center",
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   gap: 2,
                 }}
               >
-                <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 30, lineHeight: 34 }}>
+                <Text
+                  style={{
+                    color: theme.colors.accent,
+                    fontWeight: '900',
+                    fontSize: 30,
+                    lineHeight: 34,
+                  }}
+                >
                   {levelInfo.level}
                 </Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 14 }}>等級</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 14 }}>
+                  等級
+                </Text>
               </View>
             </View>
 
-            <Text style={{ color: theme.colors.text, fontWeight: "800", fontSize: 20, marginTop: 16 }}>
-              {auth.profile?.displayName ?? "校園探索者"}
+            <Text
+              style={{ color: theme.colors.text, fontWeight: '800', fontSize: 20, marginTop: 16 }}
+            >
+              {auth.profile?.displayName ?? '校園探索者'}
             </Text>
 
-            <View style={{ flexDirection: "row", gap: 20, marginTop: 16 }}>
-              <View style={{ alignItems: "center" }}>
-                <Text style={{ color: theme.colors.accent, fontWeight: "900", fontSize: 24 }}>{totalPoints}</Text>
+            <View style={{ flexDirection: 'row', gap: 20, marginTop: 16 }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+                  {totalPoints}
+                </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>總積分</Text>
               </View>
-              <View style={{ alignItems: "center" }}>
-                <Text style={{ color: theme.colors.success, fontWeight: "900", fontSize: 24 }}>{unlockedCount}</Text>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+                  {unlockedCount}
+                </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>已解鎖</Text>
               </View>
-              <View style={{ alignItems: "center" }}>
-                <Text style={{ color: theme.colors.muted, fontWeight: "900", fontSize: 24 }}>{totalCount}</Text>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: theme.colors.muted, fontWeight: '900', fontSize: 24 }}>
+                  {totalCount}
+                </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>總成就</Text>
               </View>
             </View>
 
-            <View style={{ marginTop: 16, width: "100%" }}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+            <View style={{ marginTop: 16, width: '100%' }}>
+              <View
+                style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}
+              >
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
                   距離下一級：{levelInfo.nextLevelXP - levelInfo.currentXP} XP
                 </Text>
-                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "700" }}>
+                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>
                   Lv.{levelInfo.level + 1}
                 </Text>
               </View>
@@ -611,12 +913,12 @@ export function AchievementsScreen(props: Record<string, unknown>) {
                   height: 8,
                   borderRadius: 4,
                   backgroundColor: theme.colors.border,
-                  overflow: "hidden",
+                  overflow: 'hidden',
                 }}
               >
                 <View
                   style={{
-                    height: "100%",
+                    height: '100%',
                     width: `${(levelInfo.currentXP / levelInfo.nextLevelXP) * 100}%`,
                     backgroundColor: theme.colors.accent,
                     borderRadius: 4,
@@ -653,11 +955,13 @@ export function AchievementsScreen(props: Record<string, unknown>) {
                 <View
                   key={entry.userId}
                   style={{
-                    flexDirection: "row",
-                    alignItems: "center",
+                    flexDirection: 'row',
+                    alignItems: 'center',
                     padding: 12,
                     borderRadius: theme.radius.md,
-                    backgroundColor: entry.isCurrentUser ? theme.colors.accentSoft : theme.colors.surface2,
+                    backgroundColor: entry.isCurrentUser
+                      ? theme.colors.accentSoft
+                      : theme.colors.surface2,
                     borderWidth: entry.isCurrentUser ? 1 : 0,
                     borderColor: theme.colors.accent,
                   }}
@@ -668,26 +972,38 @@ export function AchievementsScreen(props: Record<string, unknown>) {
                       height: 32,
                       borderRadius: 16,
                       backgroundColor:
-                        entry.rank === 1 ? "#F59E0B" : entry.rank === 2 ? "#94A3B8" : entry.rank === 3 ? "#CD7F32" : theme.colors.surface2,
-                      alignItems: "center",
-                      justifyContent: "center",
+                        entry.rank === 1
+                          ? '#F59E0B'
+                          : entry.rank === 2
+                            ? '#94A3B8'
+                            : entry.rank === 3
+                              ? '#CD7F32'
+                              : theme.colors.surface2,
+                      alignItems: 'center',
+                      justifyContent: 'center',
                       marginRight: 12,
                     }}
                   >
                     {entry.rank <= 3 ? (
                       <Ionicons name="trophy" size={16} color="#fff" />
                     ) : (
-                      <Text style={{ color: theme.colors.muted, fontWeight: "700" }}>{entry.rank}</Text>
+                      <Text style={{ color: theme.colors.muted, fontWeight: '700' }}>
+                        {entry.rank}
+                      </Text>
                     )}
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: theme.colors.text, fontWeight: "700" }}>
+                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
                       {entry.userName}
-                      {entry.isCurrentUser && " (你)"}
+                      {entry.isCurrentUser && ' (你)'}
                     </Text>
-                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>Lv.{entry.level}</Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                      Lv.{entry.level}
+                    </Text>
                   </View>
-                  <Text style={{ color: theme.colors.accent, fontWeight: "700" }}>{entry.points} 分</Text>
+                  <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
+                    {entry.points} 分
+                  </Text>
                 </View>
               ))}
             </View>
@@ -696,19 +1012,26 @@ export function AchievementsScreen(props: Record<string, unknown>) {
 
         <AnimatedCard title="成就分類" subtitle="" delay={200}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
               <Pressable
                 onPress={() => setSelectedCategory(null)}
                 style={{
                   paddingHorizontal: 16,
                   paddingVertical: 10,
                   borderRadius: 999,
-                  backgroundColor: !selectedCategory ? theme.colors.accentSoft : theme.colors.surface2,
+                  backgroundColor: !selectedCategory
+                    ? theme.colors.accentSoft
+                    : theme.colors.surface2,
                   borderWidth: 1,
                   borderColor: !selectedCategory ? theme.colors.accent : theme.colors.border,
                 }}
               >
-                <Text style={{ color: !selectedCategory ? theme.colors.accent : theme.colors.muted, fontWeight: "700" }}>
+                <Text
+                  style={{
+                    color: !selectedCategory ? theme.colors.accent : theme.colors.muted,
+                    fontWeight: '700',
+                  }}
+                >
                   全部
                 </Text>
               </Pressable>
@@ -720,20 +1043,29 @@ export function AchievementsScreen(props: Record<string, unknown>) {
                     key={key}
                     onPress={() => setSelectedCategory(key)}
                     style={{
-                      flexDirection: "row",
-                      alignItems: "center",
+                      flexDirection: 'row',
+                      alignItems: 'center',
                       gap: 6,
                       paddingHorizontal: 16,
                       paddingVertical: 10,
                       borderRadius: 999,
-                      backgroundColor: selectedCategory === key ? `${info.color}20` : theme.colors.surface2,
+                      backgroundColor:
+                        selectedCategory === key ? `${info.color}20` : theme.colors.surface2,
                       borderWidth: 1,
                       borderColor: selectedCategory === key ? info.color : theme.colors.border,
                     }}
                   >
                     <Ionicons // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      name={info.icon as any} size={16} color={selectedCategory === key ? info.color : theme.colors.muted} />
-                    <Text style={{ color: selectedCategory === key ? info.color : theme.colors.muted, fontWeight: "700" }}>
+                      name={info.icon as any}
+                      size={16}
+                      color={selectedCategory === key ? info.color : theme.colors.muted}
+                    />
+                    <Text
+                      style={{
+                        color: selectedCategory === key ? info.color : theme.colors.muted,
+                        fontWeight: '700',
+                      }}
+                    >
                       {info.label} ({count}/{total})
                     </Text>
                   </Pressable>

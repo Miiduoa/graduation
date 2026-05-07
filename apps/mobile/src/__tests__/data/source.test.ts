@@ -132,17 +132,15 @@ describe('DataSource', () => {
     it('should set and get data source', () => {
       const mockDs = createMockDataSource();
       setDataSource(mockDs);
-      
+
       const ds = getDataSource();
       expect(ds).toBe(mockDs);
     });
 
     it('should throw error when getting unset data source', () => {
       setDataSource(null as unknown as DataSource);
-      
-      expect(() => getDataSource()).toThrow(
-        'DataSource not set. Call setDataSource() in App.tsx.'
-      );
+
+      expect(() => getDataSource()).toThrow('DataSource not set. Call setDataSource() in App.tsx.');
     });
   });
 
@@ -150,13 +148,13 @@ describe('DataSource', () => {
     it('should return true when data source is set', () => {
       const mockDs = createMockDataSource();
       setDataSource(mockDs);
-      
+
       expect(hasDataSource()).toBe(true);
     });
 
     it('should return false when data source is not set', () => {
       setDataSource(null as unknown as DataSource);
-      
+
       expect(hasDataSource()).toBe(false);
     });
   });
@@ -191,17 +189,13 @@ describe('DataSource', () => {
       const mockDs = getDataSource();
       (mockDs.listAnnouncements as jest.Mock).mockRejectedValue(new Error('Network error'));
 
-      await expect(withDataSource((ds) => ds.listAnnouncements())).rejects.toThrow(
-        'Network error'
-      );
+      await expect(withDataSource((ds) => ds.listAnnouncements())).rejects.toThrow('Network error');
     });
 
     it('should throw error when data source is not set and no fallback', async () => {
       setDataSource(null as unknown as DataSource);
 
-      await expect(
-        withDataSource((ds) => ds.listAnnouncements())
-      ).rejects.toThrow();
+      await expect(withDataSource((ds) => ds.listAnnouncements())).rejects.toThrow();
     });
 
     it('should return fallback when data source is not set', async () => {

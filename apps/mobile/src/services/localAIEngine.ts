@@ -30,9 +30,9 @@ export interface WordVector {
 
 /** 詞嵌入模型 */
 export interface EmbeddingModel {
-  vocab: Map<string, Float32Array>;       // 詞 → 向量
-  wordFreq: Map<string, number>;          // 詞頻
-  coMatrix: Map<string, Map<string, number>>;  // 共現矩陣（用於動態訓練）
+  vocab: Map<string, Float32Array>; // 詞 → 向量
+  wordFreq: Map<string, number>; // 詞頻
+  coMatrix: Map<string, Map<string, number>>; // 共現矩陣（用於動態訓練）
   dim: number;
   trainCount: number;
 }
@@ -107,7 +107,11 @@ export function sentenceEmbedding(model: EmbeddingModel, tokens: string[]): Floa
 }
 
 /** 語意相似度（基於詞向量） */
-export function semanticSimilarity(model: EmbeddingModel, tokensA: string[], tokensB: string[]): number {
+export function semanticSimilarity(
+  model: EmbeddingModel,
+  tokensA: string[],
+  tokensB: string[],
+): number {
   const va = sentenceEmbedding(model, tokensA);
   const vb = sentenceEmbedding(model, tokensB);
   return vecCosine(va, vb);
@@ -116,17 +120,17 @@ export function semanticSimilarity(model: EmbeddingModel, tokensA: string[], tok
 // ── Skip-gram 風格的線上訓練 ──
 
 /** 從一個句子更新共現矩陣 + 微調向量（SGD） */
-export function trainEmbeddingOnSentence(
-  model: EmbeddingModel,
-  tokens: string[],
-  lr = 0.01,
-): void {
+export function trainEmbeddingOnSentence(model: EmbeddingModel, tokens: string[], lr = 0.01): void {
   const windowSize = 3;
   for (let i = 0; i < tokens.length; i++) {
     const center = tokens[i];
     model.wordFreq.set(center, (model.wordFreq.get(center) ?? 0) + 1);
 
-    for (let j = Math.max(0, i - windowSize); j <= Math.min(tokens.length - 1, i + windowSize); j++) {
+    for (
+      let j = Math.max(0, i - windowSize);
+      j <= Math.min(tokens.length - 1, i + windowSize);
+      j++
+    ) {
       if (i === j) continue;
       const context = tokens[j];
 
@@ -146,8 +150,8 @@ export function trainEmbeddingOnSentence(
         const normC = vecNorm(vc);
         const normCtx = vecNorm(vctx);
         for (let d = 0; d < model.dim; d++) {
-          const gradC = error * lr * (vctx[d] / normCtx - sim * vc[d] / normC) / normC;
-          const gradCtx = error * lr * (vc[d] / normC - sim * vctx[d] / normCtx) / normCtx;
+          const gradC = (error * lr * (vctx[d] / normCtx - (sim * vc[d]) / normC)) / normC;
+          const gradCtx = (error * lr * (vc[d] / normC - (sim * vctx[d]) / normCtx)) / normCtx;
           vc[d] += gradC;
           vctx[d] += gradCtx;
         }
@@ -160,32 +164,32 @@ export function trainEmbeddingOnSentence(
 // ── 預訓練校園領域詞向量 ──
 
 const CAMPUS_SEED_SENTENCES: string[][] = [
-  ["課程", "上課", "老師", "教授", "學分", "必修", "選修", "通識"],
-  ["作業", "繳交", "截止", "報告", "期中考", "期末考", "成績", "分數"],
-  ["午餐", "晚餐", "早餐", "餐廳", "食堂", "便當", "素食", "美食"],
-  ["圖書館", "借書", "還書", "座位", "自習", "討論室", "預約"],
-  ["宿舍", "寢室", "報修", "洗衣", "包裹", "門禁", "室友"],
-  ["公車", "校車", "交通", "停車場", "腳踏車", "通勤"],
-  ["社團", "活動", "報名", "講座", "比賽", "志工", "服務學習"],
-  ["請假", "缺曠", "出席", "翹課", "病假", "事假"],
-  ["選課", "退選", "加簽", "課表", "衝堂", "排課"],
-  ["被當", "當掉", "不及格", "二一", "退學", "延畢", "重修"],
-  ["獎學金", "助學", "工讀", "實習", "打工"],
-  ["保健室", "健康", "看醫生", "診所", "頭痛", "感冒", "不舒服"],
-  ["心情", "壓力", "焦慮", "諮商", "輔導", "開心", "難過"],
-  ["天氣", "下雨", "溫度", "颱風", "停班", "停課"],
-  ["列印", "影印", "印表機", "掃描", "紙張", "墨水"],
-  ["遺失", "失物", "撿到", "認領", "協尋", "掉了"],
-  ["推薦", "建議", "吃什麼", "好吃", "便宜", "CP值"],
-  ["公告", "通知", "消息", "重要", "截止日"],
-  ["地圖", "導航", "怎麼走", "位置", "在哪裡"],
-  ["畢業", "學位", "論文", "答辯", "畢業門檻"],
+  ['課程', '上課', '老師', '教授', '學分', '必修', '選修', '通識'],
+  ['作業', '繳交', '截止', '報告', '期中考', '期末考', '成績', '分數'],
+  ['午餐', '晚餐', '早餐', '餐廳', '食堂', '便當', '素食', '美食'],
+  ['圖書館', '借書', '還書', '座位', '自習', '討論室', '預約'],
+  ['宿舍', '寢室', '報修', '洗衣', '包裹', '門禁', '室友'],
+  ['公車', '校車', '交通', '停車場', '腳踏車', '通勤'],
+  ['社團', '活動', '報名', '講座', '比賽', '志工', '服務學習'],
+  ['請假', '缺曠', '出席', '翹課', '病假', '事假'],
+  ['選課', '退選', '加簽', '課表', '衝堂', '排課'],
+  ['被當', '當掉', '不及格', '二一', '退學', '延畢', '重修'],
+  ['獎學金', '助學', '工讀', '實習', '打工'],
+  ['保健室', '健康', '看醫生', '診所', '頭痛', '感冒', '不舒服'],
+  ['心情', '壓力', '焦慮', '諮商', '輔導', '開心', '難過'],
+  ['天氣', '下雨', '溫度', '颱風', '停班', '停課'],
+  ['列印', '影印', '印表機', '掃描', '紙張', '墨水'],
+  ['遺失', '失物', '撿到', '認領', '協尋', '掉了'],
+  ['推薦', '建議', '吃什麼', '好吃', '便宜', 'CP值'],
+  ['公告', '通知', '消息', '重要', '截止日'],
+  ['地圖', '導航', '怎麼走', '位置', '在哪裡'],
+  ['畢業', '學位', '論文', '答辯', '畢業門檻'],
   // 關聯句：建立跨領域語意連結
-  ["作業", "截止", "趕快", "繳交", "遲交", "扣分"],
-  ["考試", "複習", "準備", "範圍", "重點", "及格"],
-  ["訂餐", "點餐", "外送", "價格", "菜單", "等候"],
-  ["生病", "不舒服", "請假", "看醫生", "保健室", "休息"],
-  ["壓力", "考試", "作業", "睡不著", "累", "崩潰", "諮商"],
+  ['作業', '截止', '趕快', '繳交', '遲交', '扣分'],
+  ['考試', '複習', '準備', '範圍', '重點', '及格'],
+  ['訂餐', '點餐', '外送', '價格', '菜單', '等候'],
+  ['生病', '不舒服', '請假', '看醫生', '保健室', '休息'],
+  ['壓力', '考試', '作業', '睡不著', '累', '崩潰', '諮商'],
 ];
 
 export function createEmbeddingModel(): EmbeddingModel {
@@ -212,14 +216,33 @@ export function createEmbeddingModel(): EmbeddingModel {
 // ═══════════════════════════════════════════════════
 
 const INTENT_LABELS = [
-  "greeting", "academic", "assignment", "grades", "dining",
-  "navigation", "announcement", "event", "library", "dormitory",
-  "health", "emotion", "transport", "weather", "printing",
-  "scholarship", "attendance", "graduation", "lost_found",
-  "recommendation", "complaint", "thanks", "farewell", "general",
+  'greeting',
+  'academic',
+  'assignment',
+  'grades',
+  'dining',
+  'navigation',
+  'announcement',
+  'event',
+  'library',
+  'dormitory',
+  'health',
+  'emotion',
+  'transport',
+  'weather',
+  'printing',
+  'scholarship',
+  'attendance',
+  'graduation',
+  'lost_found',
+  'recommendation',
+  'complaint',
+  'thanks',
+  'farewell',
+  'general',
 ] as const;
 
-export type IntentLabel = typeof INTENT_LABELS[number];
+export type IntentLabel = (typeof INTENT_LABELS)[number];
 
 /** 意圖分類結果 */
 export interface IntentResult {
@@ -254,29 +277,57 @@ export function createClassifierWeights(): ClassifierWeights {
   // 初始化關鍵詞增強映射
   const keywordBoosts = new Map<string, Map<string, number>>();
   const boostMap: Record<string, string[]> = {
-    greeting: ["你好", "嗨", "哈囉", "早安", "午安", "晚安", "安安"],
-    academic: ["課", "修", "學分", "老師", "上課", "教授", "課表", "選課"],
-    assignment: ["作業", "繳交", "截止", "報告", "考試", "期中", "期末"],
-    grades: ["成績", "分數", "及格", "被當", "GPA", "二一", "排名"],
-    dining: ["吃", "餐", "飯", "午餐", "晚餐", "素食", "便當", "餐廳", "美食", "外送", "便宜", "平價", "其他選擇", "還有其他"],
-    navigation: ["哪裡", "怎麼走", "位置", "導航", "地圖", "在哪"],
-    announcement: ["公告", "通知", "消息", "新聞"],
-    event: ["活動", "報名", "講座", "比賽", "社團"],
-    library: ["圖書", "借書", "還書", "座位", "自習"],
-    dormitory: ["宿舍", "寢室", "報修", "洗衣", "包裹", "門禁"],
-    health: ["頭痛", "感冒", "不舒服", "看醫生", "保健室", "發燒", "診所"],
-    emotion: ["壓力", "焦慮", "難過", "累", "煩", "開心", "心情", "沮喪"],
-    transport: ["公車", "校車", "停車", "腳踏車", "交通", "怎麼去", "車站", "火車站", "高鐵", "客運", "台中車站", "臺中車站"],
-    weather: ["天氣", "下雨", "溫度", "颱風"],
-    printing: ["列印", "影印", "印表"],
-    scholarship: ["獎學金", "助學", "補助"],
-    attendance: ["請假", "缺曠", "翹課", "出席"],
-    graduation: ["畢業", "學位", "論文", "延畢"],
-    lost_found: ["遺失", "掉了", "撿到", "失物"],
-    recommendation: ["推薦", "建議", "哪個好", "選哪個"],
-    complaint: ["爛", "差", "不好", "很糟", "太慢", "很爛"],
-    thanks: ["謝謝", "感謝", "太好了", "幫大忙"],
-    farewell: ["掰掰", "再見", "下次見", "拜"],
+    greeting: ['你好', '嗨', '哈囉', '早安', '午安', '晚安', '安安'],
+    academic: ['課', '修', '學分', '老師', '上課', '教授', '課表', '選課'],
+    assignment: ['作業', '繳交', '截止', '報告', '考試', '期中', '期末'],
+    grades: ['成績', '分數', '及格', '被當', 'GPA', '二一', '排名'],
+    dining: [
+      '吃',
+      '餐',
+      '飯',
+      '午餐',
+      '晚餐',
+      '素食',
+      '便當',
+      '餐廳',
+      '美食',
+      '外送',
+      '便宜',
+      '平價',
+      '其他選擇',
+      '還有其他',
+    ],
+    navigation: ['哪裡', '怎麼走', '位置', '導航', '地圖', '在哪'],
+    announcement: ['公告', '通知', '消息', '新聞'],
+    event: ['活動', '報名', '講座', '比賽', '社團'],
+    library: ['圖書', '借書', '還書', '座位', '自習'],
+    dormitory: ['宿舍', '寢室', '報修', '洗衣', '包裹', '門禁'],
+    health: ['頭痛', '感冒', '不舒服', '看醫生', '保健室', '發燒', '診所'],
+    emotion: ['壓力', '焦慮', '難過', '累', '煩', '開心', '心情', '沮喪'],
+    transport: [
+      '公車',
+      '校車',
+      '停車',
+      '腳踏車',
+      '交通',
+      '怎麼去',
+      '車站',
+      '火車站',
+      '高鐵',
+      '客運',
+      '台中車站',
+      '臺中車站',
+    ],
+    weather: ['天氣', '下雨', '溫度', '颱風'],
+    printing: ['列印', '影印', '印表'],
+    scholarship: ['獎學金', '助學', '補助'],
+    attendance: ['請假', '缺曠', '翹課', '出席'],
+    graduation: ['畢業', '學位', '論文', '延畢'],
+    lost_found: ['遺失', '掉了', '撿到', '失物'],
+    recommendation: ['推薦', '建議', '哪個好', '選哪個'],
+    complaint: ['爛', '差', '不好', '很糟', '太慢', '很爛'],
+    thanks: ['謝謝', '感謝', '太好了', '幫大忙'],
+    farewell: ['掰掰', '再見', '下次見', '拜'],
   };
 
   for (const [intent, keywords] of Object.entries(boostMap)) {
@@ -291,9 +342,9 @@ export function createClassifierWeights(): ClassifierWeights {
 /** Softmax 函數 */
 function softmax(logits: number[]): number[] {
   const maxLogit = Math.max(...logits);
-  const exps = logits.map(l => Math.exp(l - maxLogit));
+  const exps = logits.map((l) => Math.exp(l - maxLogit));
   const sum = exps.reduce((a, b) => a + b, 0) || 1;
-  return exps.map(e => e / sum);
+  return exps.map((e) => e / sum);
 }
 
 /** 分類器推理 */
@@ -303,7 +354,7 @@ export function classifyIntent(
   weights: ClassifierWeights,
 ): IntentResult {
   const sentVec = sentenceEmbedding(embedding, tokens);
-  const rawText = tokens.join("");
+  const rawText = tokens.join('');
 
   // 計算每個意圖的 logit = cosine(sentence, centroid) + bias + keyword_boost
   const logits: number[] = [];
@@ -392,7 +443,7 @@ export function trainClassifier(
 // ═══════════════════════════════════════════════════
 
 export interface ConversationTurn {
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: string;
   tokens: string[];
   intent?: IntentLabel;
@@ -404,16 +455,16 @@ export interface ConversationTurn {
 
 /** 對話槽位（Slot）— 追蹤用戶在多輪中逐步提供的資訊 */
 export interface DialogSlot {
-  name: string;        // 例如 "target_day", "food_preference", "course_name"
+  name: string; // 例如 "target_day", "food_preference", "course_name"
   value: string;
-  source: "user" | "inferred"; // 用戶明確說的 vs AI 推理的
-  turnIndex: number;   // 在哪一輪設定的
+  source: 'user' | 'inferred'; // 用戶明確說的 vs AI 推理的
+  turnIndex: number; // 在哪一輪設定的
   confidence: number;
 }
 
 /** 上下文記憶片段 — 記住前文的關鍵資訊 */
 export interface ContextMemoryItem {
-  key: string;         // 例如 "last_recommended_meal", "asked_about_course"
+  key: string; // 例如 "last_recommended_meal", "asked_about_course"
   value: string;
   intent: IntentLabel;
   turnIndex: number;
@@ -438,10 +489,10 @@ export interface DialogContext {
   lastAssistantSummary: string;
   /** 用戶的對話風格偏好（從互動中學習） */
   userStyle: {
-    prefersShort: boolean;     // 偏好簡短
-    prefersDetail: boolean;    // 偏好詳細
-    usesEmoji: boolean;        // 用戶常用 emoji
-    formality: number;         // 0=casual 1=formal
+    prefersShort: boolean; // 偏好簡短
+    prefersDetail: boolean; // 偏好詳細
+    usesEmoji: boolean; // 用戶常用 emoji
+    formality: number; // 0=casual 1=formal
   };
   /** 省略還原歷史 — 記住用戶省略的主詞/受詞 */
   ellipsisHistory: Array<{ original: string; resolved: string; turnIndex: number }>;
@@ -457,69 +508,83 @@ export function createDialogContext(): DialogContext {
     topicContinuity: 0,
     slots: [],
     shortTermMemory: [],
-    lastAssistantSummary: "",
+    lastAssistantSummary: '',
     userStyle: { prefersShort: false, prefersDetail: false, usesEmoji: false, formality: 0.5 },
     ellipsisHistory: [],
   };
 }
 
 /** 從回答內容中提取關鍵資訊存入短期記憶 */
-function extractMemoryFromResponse(content: string, intent: IntentLabel, turnIndex: number): ContextMemoryItem[] {
+function extractMemoryFromResponse(
+  content: string,
+  intent: IntentLabel,
+  turnIndex: number,
+): ContextMemoryItem[] {
   const items: ContextMemoryItem[] = [];
 
   // 餐點推薦 → 記住推薦了什麼
-  if (intent === "dining") {
+  if (intent === 'dining') {
     const menuItems = content.match(/\d+\.\s*([^\n（(]+)/g);
     if (menuItems && menuItems.length > 0) {
       items.push({
-        key: "last_recommended_meals",
-        value: menuItems.slice(0, 5).join(", "),
-        intent, turnIndex, expiresAfterTurns: 10,
+        key: 'last_recommended_meals',
+        value: menuItems.slice(0, 5).join(', '),
+        intent,
+        turnIndex,
+        expiresAfterTurns: 10,
       });
     }
     // 記住提到的餐廳
     const cafeterias = content.match(/（([^）]+)）/g);
     if (cafeterias) {
       items.push({
-        key: "mentioned_cafeterias",
-        value: cafeterias.map(c => c.replace(/[（）]/g, "")).join(", "),
-        intent, turnIndex, expiresAfterTurns: 10,
+        key: 'mentioned_cafeterias',
+        value: cafeterias.map((c) => c.replace(/[（）]/g, '')).join(', '),
+        intent,
+        turnIndex,
+        expiresAfterTurns: 10,
       });
     }
   }
 
   // 課程 → 記住提到的課
-  if (intent === "academic") {
+  if (intent === 'academic') {
     const courseItems = content.match(/\d+\.\s*([^\n（(]+)/g);
     if (courseItems) {
       items.push({
-        key: "last_mentioned_courses",
-        value: courseItems.slice(0, 8).join(", "),
-        intent, turnIndex, expiresAfterTurns: 15,
+        key: 'last_mentioned_courses',
+        value: courseItems.slice(0, 8).join(', '),
+        intent,
+        turnIndex,
+        expiresAfterTurns: 15,
       });
     }
   }
 
   // 作業 → 記住提到的作業
-  if (intent === "assignment") {
+  if (intent === 'assignment') {
     const assignItems = content.match(/\d+\.\s*([^\n（(]+)/g);
     if (assignItems) {
       items.push({
-        key: "last_mentioned_assignments",
-        value: assignItems.slice(0, 8).join(", "),
-        intent, turnIndex, expiresAfterTurns: 15,
+        key: 'last_mentioned_assignments',
+        value: assignItems.slice(0, 8).join(', '),
+        intent,
+        turnIndex,
+        expiresAfterTurns: 15,
       });
     }
   }
 
   // 通用：記住 AI 回答的主要結論
   if (content.length > 20) {
-    const firstSentence = content.split(/[。！？\n]/)[0]?.trim() ?? "";
+    const firstSentence = content.split(/[。！？\n]/)[0]?.trim() ?? '';
     if (firstSentence.length >= 5) {
       items.push({
-        key: "last_answer_gist",
+        key: 'last_answer_gist',
         value: firstSentence.slice(0, 80),
-        intent, turnIndex, expiresAfterTurns: 5,
+        intent,
+        turnIndex,
+        expiresAfterTurns: 5,
       });
     }
   }
@@ -532,53 +597,112 @@ function extractSlots(text: string, intent: IntentLabel, turnIndex: number): Dia
   const slots: DialogSlot[] = [];
 
   // 時間槽
-  const dayMatch = text.match(/今天|明天|後天|星期([一二三四五六日天])|週([一二三四五六日天])|下週|這週/);
+  const dayMatch = text.match(
+    /今天|明天|後天|星期([一二三四五六日天])|週([一二三四五六日天])|下週|這週/,
+  );
   if (dayMatch) {
-    slots.push({ name: "target_day", value: dayMatch[0], source: "user", turnIndex, confidence: 0.95 });
+    slots.push({
+      name: 'target_day',
+      value: dayMatch[0],
+      source: 'user',
+      turnIndex,
+      confidence: 0.95,
+    });
   }
 
   const timeMatch = text.match(/([上下]午)|早上|中午|晚上|(\d{1,2})[點時]/);
   if (timeMatch) {
-    slots.push({ name: "target_time", value: timeMatch[0], source: "user", turnIndex, confidence: 0.9 });
+    slots.push({
+      name: 'target_time',
+      value: timeMatch[0],
+      source: 'user',
+      turnIndex,
+      confidence: 0.9,
+    });
   }
 
   // 餐飲偏好槽
-  if (intent === "dining" || /吃|餐|飯|餓/.test(text)) {
+  if (intent === 'dining' || /吃|餐|飯|餓/.test(text)) {
     const priceMatch = text.match(/(\d+)\s*[元塊]以[下內]|便宜|平價/);
-    if (priceMatch) slots.push({ name: "budget", value: priceMatch[0], source: "user", turnIndex, confidence: 0.9 });
+    if (priceMatch)
+      slots.push({
+        name: 'budget',
+        value: priceMatch[0],
+        source: 'user',
+        turnIndex,
+        confidence: 0.9,
+      });
 
     const prefMatch = text.match(/素食|不吃[肉辣]|清淡|重口味|健康|有肉|辣|不辣|海鮮|甜的|鹹的/);
-    if (prefMatch) slots.push({ name: "food_preference", value: prefMatch[0], source: "user", turnIndex, confidence: 0.95 });
+    if (prefMatch)
+      slots.push({
+        name: 'food_preference',
+        value: prefMatch[0],
+        source: 'user',
+        turnIndex,
+        confidence: 0.95,
+      });
 
     const cafeteriaMatch = text.match(/學生餐廳|教職員餐廳|便利商店|飲料店|濟時樓/);
-    if (cafeteriaMatch) slots.push({ name: "cafeteria", value: cafeteriaMatch[0], source: "user", turnIndex, confidence: 0.95 });
+    if (cafeteriaMatch)
+      slots.push({
+        name: 'cafeteria',
+        value: cafeteriaMatch[0],
+        source: 'user',
+        turnIndex,
+        confidence: 0.95,
+      });
   }
 
   // 課程槽
-  if (intent === "academic" || intent === "assignment" || intent === "grades") {
+  if (intent === 'academic' || intent === 'assignment' || intent === 'grades') {
     const teacherMatch = text.match(/([^\s]{2,4})(老師|教授|教的)/);
-    if (teacherMatch) slots.push({ name: "teacher_name", value: teacherMatch[1], source: "user", turnIndex, confidence: 0.8 });
+    if (teacherMatch)
+      slots.push({
+        name: 'teacher_name',
+        value: teacherMatch[1],
+        source: 'user',
+        turnIndex,
+        confidence: 0.8,
+      });
   }
 
   // 地點槽
   const locationMatch = text.match(/在([^\s,，。]{2,8})|到([^\s,，。]{2,8})|去([^\s,，。]{2,8})/);
-  if (locationMatch && intent === "navigation") {
-    slots.push({ name: "destination", value: (locationMatch[1] || locationMatch[2] || locationMatch[3]), source: "user", turnIndex, confidence: 0.7 });
+  if (locationMatch && intent === 'navigation') {
+    slots.push({
+      name: 'destination',
+      value: locationMatch[1] || locationMatch[2] || locationMatch[3],
+      source: 'user',
+      turnIndex,
+      confidence: 0.7,
+    });
   }
 
   // 數量槽
   const quantityMatch = text.match(/(\d+)\s*(份|杯|碗|個|瓶)/);
   if (quantityMatch) {
-    slots.push({ name: "quantity", value: quantityMatch[0], source: "user", turnIndex, confidence: 0.9 });
+    slots.push({
+      name: 'quantity',
+      value: quantityMatch[0],
+      source: 'user',
+      turnIndex,
+      confidence: 0.9,
+    });
   }
 
   return slots;
 }
 
 /** 分析用戶對話風格 */
-function analyzeUserStyle(content: string, prevStyle: DialogContext["userStyle"]): DialogContext["userStyle"] {
+function analyzeUserStyle(
+  content: string,
+  prevStyle: DialogContext['userStyle'],
+): DialogContext['userStyle'] {
   const len = content.length;
-  const hasEmoji = /[\u{1F300}-\u{1FAFF}]|😀|😂|🤔|👍|❤️|🎉|💪|😊|🙏|😭|😅|🥺|✨|🔥|💯/u.test(content);
+  const hasEmoji = /[\u{1F300}-\u{1FAFF}]|😀|😂|🤔|👍|❤️|🎉|💪|😊|🙏|😭|😅|🥺|✨|🔥|💯/u.test(
+    content,
+  );
   const isFormal = /請問|麻煩|您|不好意思|打擾/.test(content);
   const isCasual = /ㄟ|ㄏㄏ|哈哈|欸|啊|喔|耶|讚|帥|酷|XD|lol/i.test(content);
 
@@ -586,14 +710,18 @@ function analyzeUserStyle(content: string, prevStyle: DialogContext["userStyle"]
     prefersShort: len < 10 ? true : len > 50 ? false : prevStyle.prefersShort,
     prefersDetail: /詳細|完整|所有|全部|列出來|一一/.test(content) ? true : prevStyle.prefersDetail,
     usesEmoji: hasEmoji ? true : prevStyle.usesEmoji,
-    formality: isFormal ? Math.min(1, prevStyle.formality + 0.15) : isCasual ? Math.max(0, prevStyle.formality - 0.15) : prevStyle.formality,
+    formality: isFormal
+      ? Math.min(1, prevStyle.formality + 0.15)
+      : isCasual
+        ? Math.max(0, prevStyle.formality - 0.15)
+        : prevStyle.formality,
   };
 }
 
 /** 更新對話上下文（大幅強化版） */
 export function updateDialogContext(
   ctx: DialogContext,
-  role: "user" | "assistant",
+  role: 'user' | 'assistant',
   content: string,
   tokens: string[],
   intent?: IntentLabel,
@@ -602,8 +730,11 @@ export function updateDialogContext(
 ): DialogContext {
   const turnIndex = ctx.turns.length;
   const turn: ConversationTurn = {
-    role, content, tokens,
-    intent, entities,
+    role,
+    content,
+    tokens,
+    intent,
+    entities,
     timestamp: Date.now(),
     dataKeysUsed,
   };
@@ -613,10 +744,10 @@ export function updateDialogContext(
   let topicContinuity = ctx.topicContinuity;
   const topicHistory = [...ctx.topicHistory];
 
-  if (role === "user" && intent) {
+  if (role === 'user' && intent) {
     if (intent === currentTopic) {
       topicContinuity++;
-    } else if (intent !== "general" && intent !== "greeting") {
+    } else if (intent !== 'general' && intent !== 'greeting') {
       currentTopic = intent;
       topicContinuity = 1;
       topicHistory.push(intent);
@@ -627,7 +758,7 @@ export function updateDialogContext(
   const mentionedEntities = [...ctx.mentionedEntities];
   if (entities) {
     for (const e of entities) {
-      const existing = mentionedEntities.findIndex(m => m.text === e.text && m.type === e.type);
+      const existing = mentionedEntities.findIndex((m) => m.text === e.text && m.type === e.type);
       if (existing >= 0) mentionedEntities[existing] = e;
       else mentionedEntities.push(e);
     }
@@ -636,7 +767,7 @@ export function updateDialogContext(
 
   // 情緒追蹤（更細緻）
   let userMood = ctx.userMood;
-  if (role === "user") {
+  if (role === 'user') {
     const strongPositive = /太好了|太棒了|完美|太強了|厲害|愛你/;
     const mildPositive = /謝謝|感謝|不錯|好的|了解|懂了|有幫助|ok/i;
     const strongNegative = /完全不對|胡說|亂講|爛|垃圾|廢物|白痴/;
@@ -651,10 +782,10 @@ export function updateDialogContext(
 
   // 更新槽位
   let slots = [...ctx.slots];
-  if (role === "user" && intent) {
+  if (role === 'user' && intent) {
     const newSlots = extractSlots(content, intent, turnIndex);
     for (const ns of newSlots) {
-      const existIdx = slots.findIndex(s => s.name === ns.name);
+      const existIdx = slots.findIndex((s) => s.name === ns.name);
       if (existIdx >= 0) {
         // 用戶重新指定 → 覆蓋
         slots[existIdx] = ns;
@@ -663,31 +794,33 @@ export function updateDialogContext(
       }
     }
     // 清除太舊的槽位（超過 15 輪）
-    slots = slots.filter(s => turnIndex - s.turnIndex < 15);
+    slots = slots.filter((s) => turnIndex - s.turnIndex < 15);
   }
 
   // 更新短期記憶
   let shortTermMemory = [...ctx.shortTermMemory];
-  if (role === "assistant" && intent) {
+  if (role === 'assistant' && intent) {
     const newMemItems = extractMemoryFromResponse(content, intent, turnIndex);
     for (const nm of newMemItems) {
-      const existIdx = shortTermMemory.findIndex(m => m.key === nm.key);
+      const existIdx = shortTermMemory.findIndex((m) => m.key === nm.key);
       if (existIdx >= 0) shortTermMemory[existIdx] = nm;
       else shortTermMemory.push(nm);
     }
   }
   // 清除過期記憶
-  shortTermMemory = shortTermMemory.filter(m => m.expiresAfterTurns === 0 || turnIndex - m.turnIndex < m.expiresAfterTurns);
+  shortTermMemory = shortTermMemory.filter(
+    (m) => m.expiresAfterTurns === 0 || turnIndex - m.turnIndex < m.expiresAfterTurns,
+  );
 
   // AI 回答摘要
   let lastAssistantSummary = ctx.lastAssistantSummary;
-  if (role === "assistant") {
-    const firstLine = content.split(/[。！？\n]/)[0]?.trim() ?? "";
+  if (role === 'assistant') {
+    const firstLine = content.split(/[。！？\n]/)[0]?.trim() ?? '';
     lastAssistantSummary = firstLine.slice(0, 100);
   }
 
   // 用戶風格分析
-  const userStyle = role === "user" ? analyzeUserStyle(content, ctx.userStyle) : ctx.userStyle;
+  const userStyle = role === 'user' ? analyzeUserStyle(content, ctx.userStyle) : ctx.userStyle;
 
   return {
     turns,
@@ -707,57 +840,61 @@ export function updateDialogContext(
 /** 指代消解 + 省略還原（大幅強化版）
  *  處理：代詞（那個/它/他）、省略主詞、省略受詞、零指代
  */
-export function resolveReferences(
-  text: string,
-  ctx: DialogContext,
-): string {
+export function resolveReferences(text: string, ctx: DialogContext): string {
   let resolved = text;
   const recent = ctx.mentionedEntities.slice(-5).reverse();
 
   // ── 1. 代詞替換 ──
   resolved = resolved.replace(/那門課|那堂課|那個課/, () => {
-    const course = recent.find(e => e.type === "course");
-    return course ? course.text : "那門課";
+    const course = recent.find((e) => e.type === 'course');
+    return course ? course.text : '那門課';
   });
 
   resolved = resolved.replace(/那邊|那裡|那個地方/, () => {
-    const place = recent.find(e => e.type === "location");
-    return place ? place.text : "那裡";
+    const place = recent.find((e) => e.type === 'location');
+    return place ? place.text : '那裡';
   });
 
   resolved = resolved.replace(/那道|那個菜|那個餐/, () => {
-    const food = recent.find(e => e.type === "food");
-    return food ? food.text : "那道菜";
+    const food = recent.find((e) => e.type === 'food');
+    return food ? food.text : '那道菜';
   });
 
   resolved = resolved.replace(/那份|那個作業/, () => {
-    const assignment = recent.find(e => e.type === "assignment");
-    return assignment ? assignment.text : "那份作業";
+    const assignment = recent.find((e) => e.type === 'assignment');
+    return assignment ? assignment.text : '那份作業';
   });
 
   // 「那個」— 根據上下文 topic 選擇最相關的實體
   resolved = resolved.replace(/那個|這個|它/, () => {
-    if (ctx.currentTopic === "dining") return recent.find(e => e.type === "food")?.text ?? recent[0]?.text ?? "那個";
-    if (ctx.currentTopic === "academic") return recent.find(e => e.type === "course")?.text ?? recent[0]?.text ?? "那個";
-    if (ctx.currentTopic === "navigation") return recent.find(e => e.type === "location")?.text ?? recent[0]?.text ?? "那個";
-    return recent[0]?.text ?? "那個";
+    if (ctx.currentTopic === 'dining')
+      return recent.find((e) => e.type === 'food')?.text ?? recent[0]?.text ?? '那個';
+    if (ctx.currentTopic === 'academic')
+      return recent.find((e) => e.type === 'course')?.text ?? recent[0]?.text ?? '那個';
+    if (ctx.currentTopic === 'navigation')
+      return recent.find((e) => e.type === 'location')?.text ?? recent[0]?.text ?? '那個';
+    return recent[0]?.text ?? '那個';
   });
 
   // ── 2. 省略還原：極短訊息根據上下文補全 ──
   if (resolved.length <= 8 && ctx.turns.length > 0) {
-    const lastUserTurn = [...ctx.turns].reverse().find(t => t.role === "user");
-    const lastAsstTurn = [...ctx.turns].reverse().find(t => t.role === "assistant");
+    const lastUserTurn = [...ctx.turns].reverse().find((t) => t.role === 'user');
+    const lastAsstTurn = [...ctx.turns].reverse().find((t) => t.role === 'assistant');
 
     // 「呢？」「也是」→ 對前一個回答的追問
     if (/^(呢|也是|也要|也想|一樣|同上)\s*[？?]?\s*$/.test(resolved)) {
       if (lastUserTurn?.content) {
-        const lastTopic = lastUserTurn.content.replace(/[？?！!。，]$/g, "");
+        const lastTopic = lastUserTurn.content.replace(/[？?！!。，]$/g, '');
         resolved = `${lastTopic}也是`;
       }
     }
 
     // 「多少錢」「在哪」「幾點」→ 補上前文的主語
-    if (/^(多少錢|多少|在哪|幾點|怎麼去|好吃嗎|推薦嗎|要多久|遠嗎|貴嗎|辣嗎)\s*[？?]?\s*$/.test(resolved)) {
+    if (
+      /^(多少錢|多少|在哪|幾點|怎麼去|好吃嗎|推薦嗎|要多久|遠嗎|貴嗎|辣嗎)\s*[？?]?\s*$/.test(
+        resolved,
+      )
+    ) {
       const subject = recent[0]?.text;
       if (subject) {
         resolved = `${subject}${resolved}`;
@@ -767,25 +904,47 @@ export function resolveReferences(
     // 「第一個」「第二個」「最後一個」→ 從短期記憶中找列表
     const ordinalMatch = resolved.match(/^第([一二三四五六七八1-8])個/);
     if (ordinalMatch) {
-      const ordinalMap: Record<string, number> = { "一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "七": 6, "八": 7, "1": 0, "2": 1, "3": 2, "4": 3, "5": 4, "6": 5, "7": 6, "8": 7 };
+      const ordinalMap: Record<string, number> = {
+        一: 0,
+        二: 1,
+        三: 2,
+        四: 3,
+        五: 4,
+        六: 5,
+        七: 6,
+        八: 7,
+        '1': 0,
+        '2': 1,
+        '3': 2,
+        '4': 3,
+        '5': 4,
+        '6': 5,
+        '7': 6,
+        '8': 7,
+      };
       const idx = ordinalMap[ordinalMatch[1]] ?? 0;
       // 從短期記憶中找列表
-      const listMem = ctx.shortTermMemory.find(m => m.key === "last_recommended_meals" || m.key === "last_mentioned_courses" || m.key === "last_mentioned_assignments");
+      const listMem = ctx.shortTermMemory.find(
+        (m) =>
+          m.key === 'last_recommended_meals' ||
+          m.key === 'last_mentioned_courses' ||
+          m.key === 'last_mentioned_assignments',
+      );
       if (listMem) {
-        const items = listMem.value.split(", ");
+        const items = listMem.value.split(', ');
         if (items[idx]) {
-          const cleanItem = items[idx].replace(/^\d+\.\s*/, "").trim();
+          const cleanItem = items[idx].replace(/^\d+\.\s*/, '').trim();
           resolved = resolved.replace(ordinalMatch[0], cleanItem);
         }
       }
     }
 
     if (/^最後一個/.test(resolved)) {
-      const listMem = ctx.shortTermMemory.find(m => m.key.startsWith("last_"));
+      const listMem = ctx.shortTermMemory.find((m) => m.key.startsWith('last_'));
       if (listMem) {
-        const items = listMem.value.split(", ");
-        const last = items[items.length - 1]?.replace(/^\d+\.\s*/, "").trim();
-        if (last) resolved = resolved.replace("最後一個", last);
+        const items = listMem.value.split(', ');
+        const last = items[items.length - 1]?.replace(/^\d+\.\s*/, '').trim();
+        if (last) resolved = resolved.replace('最後一個', last);
       }
     }
   }
@@ -810,7 +969,8 @@ export function isFollowUp(text: string, ctx: DialogContext): boolean {
   if (ctx.turns.length === 0) return false;
 
   // 1. 明確的追問詞
-  if (/那個|那邊|然後呢|接下來|還有呢|更多|再多說|詳細|繼續|還有嗎|其他的|別的呢/.test(text)) return true;
+  if (/那個|那邊|然後呢|接下來|還有呢|更多|再多說|詳細|繼續|還有嗎|其他的|別的呢/.test(text))
+    return true;
 
   // 2. 極短問句且有先前主題
   if (text.length <= 8 && ctx.currentTopic !== null) return true;
@@ -829,7 +989,8 @@ export function isFollowUp(text: string, ctx: DialogContext): boolean {
   }
 
   // 6. 比較型追問
-  if (/比較|哪個好|哪個便宜|哪個近|差別|差異|不同/.test(text) && ctx.currentTopic !== null) return true;
+  if (/比較|哪個好|哪個便宜|哪個近|差別|差異|不同/.test(text) && ctx.currentTopic !== null)
+    return true;
 
   // 7. 否定型追問（不喜歡前面推薦的）
   if (/不想要|換一個|換別的|其他選擇|不喜歡|太[貴遠辣鹹甜]/.test(text)) return true;
@@ -848,43 +1009,49 @@ export function getContextSummary(ctx: DialogContext): string {
 
   // 活躍槽位
   if (ctx.slots.length > 0) {
-    const slotStr = ctx.slots.map(s => `${s.name}=${s.value}`).join(", ");
+    const slotStr = ctx.slots.map((s) => `${s.name}=${s.value}`).join(', ');
     parts.push(`[使用者已提供: ${slotStr}]`);
   }
 
   // 短期記憶
   if (ctx.shortTermMemory.length > 0) {
-    const memStr = ctx.shortTermMemory.slice(-3).map(m => `${m.key}: ${m.value.slice(0, 40)}`).join("; ");
+    const memStr = ctx.shortTermMemory
+      .slice(-3)
+      .map((m) => `${m.key}: ${m.value.slice(0, 40)}`)
+      .join('; ');
     parts.push(`[前文提及: ${memStr}]`);
   }
 
   // 最近的實體
   if (ctx.mentionedEntities.length > 0) {
-    const entityStr = ctx.mentionedEntities.slice(-5).map(e => `${e.text}(${e.type})`).join(", ");
+    const entityStr = ctx.mentionedEntities
+      .slice(-5)
+      .map((e) => `${e.text}(${e.type})`)
+      .join(', ');
     parts.push(`[提到的實體: ${entityStr}]`);
   }
 
   // 情緒
   if (Math.abs(ctx.userMood) > 0.2) {
-    parts.push(`[使用者情緒: ${ctx.userMood > 0 ? "正面" : "負面"}(${ctx.userMood.toFixed(1)})]`);
+    parts.push(`[使用者情緒: ${ctx.userMood > 0 ? '正面' : '負面'}(${ctx.userMood.toFixed(1)})]`);
   }
 
   // 用戶風格
-  if (ctx.userStyle.prefersShort) parts.push("[偏好: 簡短回答]");
-  if (ctx.userStyle.prefersDetail) parts.push("[偏好: 詳細回答]");
+  if (ctx.userStyle.prefersShort) parts.push('[偏好: 簡短回答]');
+  if (ctx.userStyle.prefersDetail) parts.push('[偏好: 詳細回答]');
 
-  return parts.join(" ");
+  return parts.join(' ');
 }
 
 /** 取得槽位值（從對話槽位中查找） */
 export function getSlotValue(ctx: DialogContext, slotName: string): string | null {
-  const slot = ctx.slots.find(s => s.name === slotName);
+  const slot = ctx.slots.find((s) => s.name === slotName);
   return slot?.value ?? null;
 }
 
 /** 取得短期記憶值 */
 export function getMemoryValue(ctx: DialogContext, key: string): string | null {
-  const mem = ctx.shortTermMemory.find(m => m.key === key);
+  const mem = ctx.shortTermMemory.find((m) => m.key === key);
   return mem?.value ?? null;
 }
 
@@ -892,7 +1059,15 @@ export function getMemoryValue(ctx: DialogContext, key: string): string | null {
 // 4. Named Entity Recognition — 校園實體辨識
 // ═══════════════════════════════════════════════════
 
-export type EntityType = "course" | "person" | "location" | "time" | "food" | "event" | "number" | "assignment";
+export type EntityType =
+  | 'course'
+  | 'person'
+  | 'location'
+  | 'time'
+  | 'food'
+  | 'event'
+  | 'number'
+  | 'assignment';
 
 export interface NamedEntity {
   text: string;
@@ -904,28 +1079,28 @@ export interface NamedEntity {
 
 /** 時間表達式模式 */
 const TIME_PATTERNS: Array<[RegExp, string]> = [
-  [/今天/, "today"],
-  [/明天/, "tomorrow"],
-  [/後天/, "day_after_tomorrow"],
-  [/昨天/, "yesterday"],
-  [/這週|這個禮拜|本週/, "this_week"],
-  [/下週|下個禮拜|下星期/, "next_week"],
-  [/星期([一二三四五六日天])/, "weekday"],
-  [/週([一二三四五六日天])/, "weekday"],
-  [/([上下]午)/, "period"],
-  [/(\d{1,2})[點時]/, "hour"],
-  [/(\d{1,2})月(\d{1,2})[日號]/, "date"],
-  [/第(\d+)節/, "period_num"],
-  [/期中|期末/, "exam_period"],
-  [/早上|中午|傍晚|晚上|凌晨/, "time_of_day"],
+  [/今天/, 'today'],
+  [/明天/, 'tomorrow'],
+  [/後天/, 'day_after_tomorrow'],
+  [/昨天/, 'yesterday'],
+  [/這週|這個禮拜|本週/, 'this_week'],
+  [/下週|下個禮拜|下星期/, 'next_week'],
+  [/星期([一二三四五六日天])/, 'weekday'],
+  [/週([一二三四五六日天])/, 'weekday'],
+  [/([上下]午)/, 'period'],
+  [/(\d{1,2})[點時]/, 'hour'],
+  [/(\d{1,2})月(\d{1,2})[日號]/, 'date'],
+  [/第(\d+)節/, 'period_num'],
+  [/期中|期末/, 'exam_period'],
+  [/早上|中午|傍晚|晚上|凌晨/, 'time_of_day'],
 ];
 
 /** 數量表達式模式 */
 const NUMBER_PATTERNS: Array<[RegExp, EntityType]> = [
-  [/(\d+)\s*學分/, "number"],
-  [/(\d+)\s*[元塊]/, "number"],
-  [/(\d+)\s*份/, "number"],
-  [/(\d+)\s*[人位個]/, "number"],
+  [/(\d+)\s*學分/, 'number'],
+  [/(\d+)\s*[元塊]/, 'number'],
+  [/(\d+)\s*份/, 'number'],
+  [/(\d+)\s*[人位個]/, 'number'],
 ];
 
 /** 從文本中提取所有實體 */
@@ -944,7 +1119,7 @@ export function extractEntities(
     if (match) {
       entities.push({
         text: match[0],
-        type: "time",
+        type: 'time',
         start: text.indexOf(match[0]),
         end: text.indexOf(match[0]) + match[0].length,
         normalized,
@@ -970,7 +1145,7 @@ export function extractEntities(
     if (course.length >= 2 && text.includes(course)) {
       entities.push({
         text: course,
-        type: "course",
+        type: 'course',
         start: text.indexOf(course),
         end: text.indexOf(course) + course.length,
       });
@@ -982,7 +1157,7 @@ export function extractEntities(
     if (loc.length >= 2 && text.includes(loc)) {
       entities.push({
         text: loc,
-        type: "location",
+        type: 'location',
         start: text.indexOf(loc),
         end: text.indexOf(loc) + loc.length,
       });
@@ -994,7 +1169,7 @@ export function extractEntities(
     if (person.length >= 2 && text.includes(person)) {
       entities.push({
         text: person,
-        type: "person",
+        type: 'person',
         start: text.indexOf(person),
         end: text.indexOf(person) + person.length,
       });
@@ -1006,7 +1181,7 @@ export function extractEntities(
     if (food.length >= 2 && text.includes(food)) {
       entities.push({
         text: food,
-        type: "food",
+        type: 'food',
         start: text.indexOf(food),
         end: text.indexOf(food) + food.length,
       });
@@ -1014,8 +1189,8 @@ export function extractEntities(
   }
 
   // 去重
-  return entities.filter((e, i, arr) =>
-    arr.findIndex(x => x.text === e.text && x.type === e.type) === i
+  return entities.filter(
+    (e, i, arr) => arr.findIndex((x) => x.text === e.text && x.type === e.type) === i,
   );
 }
 
@@ -1044,33 +1219,45 @@ export function createNgramModel(): NgramModel {
     intentStarters: new Map(),
     intentEnders: new Map(),
     connectors: [
-      "另外", "此外", "而且", "不過", "但是", "所以",
-      "接下來", "最後", "首先", "然後", "總結來說",
-      "建議你", "你可以", "如果你", "記得",
+      '另外',
+      '此外',
+      '而且',
+      '不過',
+      '但是',
+      '所以',
+      '接下來',
+      '最後',
+      '首先',
+      '然後',
+      '總結來說',
+      '建議你',
+      '你可以',
+      '如果你',
+      '記得',
     ],
     totalTokens: 0,
   };
 
   // 預設每個意圖的開頭句和結尾句
   const defaultStarters: Record<string, string[]> = {
-    greeting: ["你好！", "嗨！", "哈囉！"],
-    academic: ["關於你的課程，", "讓我查看你的課表，", "根據你的課程資料，"],
-    assignment: ["關於作業的部分，", "讓我幫你看看待繳作業，", "目前你的作業狀況："],
-    grades: ["關於成績方面，", "根據你目前的學習狀況，"],
-    dining: ["今天的餐點推薦：", "讓我看看有什麼好吃的，", "根據菜單資料，"],
-    navigation: ["關於你要去的地方，", "讓我幫你找路線，"],
-    event: ["近期有以下活動：", "校園活動資訊："],
-    library: ["圖書館相關資訊：", "關於圖書館服務，"],
-    health: ["關於你的健康問題，", "聽起來你身體不太舒服，"],
-    emotion: ["聽起來你最近", "我理解你的感受，"],
+    greeting: ['你好！', '嗨！', '哈囉！'],
+    academic: ['關於你的課程，', '讓我查看你的課表，', '根據你的課程資料，'],
+    assignment: ['關於作業的部分，', '讓我幫你看看待繳作業，', '目前你的作業狀況：'],
+    grades: ['關於成績方面，', '根據你目前的學習狀況，'],
+    dining: ['今天的餐點推薦：', '讓我看看有什麼好吃的，', '根據菜單資料，'],
+    navigation: ['關於你要去的地方，', '讓我幫你找路線，'],
+    event: ['近期有以下活動：', '校園活動資訊：'],
+    library: ['圖書館相關資訊：', '關於圖書館服務，'],
+    health: ['關於你的健康問題，', '聽起來你身體不太舒服，'],
+    emotion: ['聽起來你最近', '我理解你的感受，'],
   };
 
   const defaultEnders: Record<string, string[]> = {
-    general: ["還有什麼需要幫忙的嗎？", "有其他問題隨時問我。", "希望這有幫助！"],
-    academic: ["如果需要更詳細的資訊，可以再問我。", "加油！"],
-    dining: ["祝用餐愉快！", "要看其他餐廳的選擇嗎？"],
-    health: ["祝你早日康復！", "記得多休息。", "如果症狀持續，建議去看醫生。"],
-    emotion: ["你不是一個人面對。", "有需要的話學校諮商中心可以幫助你。", "希望你快點好起來。"],
+    general: ['還有什麼需要幫忙的嗎？', '有其他問題隨時問我。', '希望這有幫助！'],
+    academic: ['如果需要更詳細的資訊，可以再問我。', '加油！'],
+    dining: ['祝用餐愉快！', '要看其他餐廳的選擇嗎？'],
+    health: ['祝你早日康復！', '記得多休息。', '如果症狀持續，建議去看醫生。'],
+    emotion: ['你不是一個人面對。', '有需要的話學校諮商中心可以幫助你。', '希望你快點好起來。'],
   };
 
   for (const [intent, starters] of Object.entries(defaultStarters)) {
@@ -1084,13 +1271,9 @@ export function createNgramModel(): NgramModel {
 }
 
 /** 訓練 N-gram model（從一個好回答學習） */
-export function trainNgramOnResponse(
-  model: NgramModel,
-  response: string,
-  intent: string,
-): void {
+export function trainNgramOnResponse(model: NgramModel, response: string, intent: string): void {
   // 斷句
-  const sentences = response.split(/[。！？\n]/).filter(s => s.trim().length > 0);
+  const sentences = response.split(/[。！？\n]/).filter((s) => s.trim().length > 0);
 
   // 學習開頭句和結尾句
   if (sentences.length > 0) {
@@ -1103,7 +1286,7 @@ export function trainNgramOnResponse(
       model.intentStarters.set(intent, starters);
     }
 
-    const enders = model.intentEnders.get(intent) ?? model.intentEnders.get("general") ?? [];
+    const enders = model.intentEnders.get(intent) ?? model.intentEnders.get('general') ?? [];
     const lastSent = sentences[sentences.length - 1].trim();
     if (lastSent.length <= 30 && !enders.includes(lastSent)) {
       enders.push(lastSent);
@@ -1113,7 +1296,7 @@ export function trainNgramOnResponse(
   }
 
   // 訓練 character-level bigram/trigram（中文沒有空格，用字元做）
-  const chars = response.replace(/\s+/g, "").split("");
+  const chars = response.replace(/\s+/g, '').split('');
   for (let i = 0; i < chars.length - 1; i++) {
     const a = chars[i];
     const b = chars[i + 1];
@@ -1141,10 +1324,10 @@ export function generateWithNgram(
   maxLen = 60,
   temperature = 0.7,
 ): string {
-  if (model.totalTokens < 100) return ""; // 訓練不足
+  if (model.totalTokens < 100) return ''; // 訓練不足
 
   const result = prefix;
-  const chars = result.split("");
+  const chars = result.split('');
 
   for (let step = 0; step < maxLen; step++) {
     const len = chars.length;
@@ -1174,7 +1357,7 @@ export function generateWithNgram(
     if (/[。！？]/.test(nextChar)) break;
   }
 
-  return chars.join("");
+  return chars.join('');
 }
 
 /** 從分佈中採樣（帶溫度控制） */
@@ -1216,24 +1399,30 @@ export interface RewardModel {
 
 /** 回答策略 */
 export type ResponseStrategy =
-  | "direct_answer"      // 直接回答
-  | "list_format"        // 列表格式
-  | "suggestion_with_data" // 帶數據的建議
-  | "empathy_first"      // 先表達共感
-  | "step_by_step"       // 分步驟說明
-  | "comparison"         // 比較分析
-  | "brief"              // 簡短回答
-  | "detailed";          // 詳細說明
+  | 'direct_answer' // 直接回答
+  | 'list_format' // 列表格式
+  | 'suggestion_with_data' // 帶數據的建議
+  | 'empathy_first' // 先表達共感
+  | 'step_by_step' // 分步驟說明
+  | 'comparison' // 比較分析
+  | 'brief' // 簡短回答
+  | 'detailed'; // 詳細說明
 
 const ALL_STRATEGIES: ResponseStrategy[] = [
-  "direct_answer", "list_format", "suggestion_with_data",
-  "empathy_first", "step_by_step", "comparison", "brief", "detailed",
+  'direct_answer',
+  'list_format',
+  'suggestion_with_data',
+  'empathy_first',
+  'step_by_step',
+  'comparison',
+  'brief',
+  'detailed',
 ];
 
 export function createRewardModel(): RewardModel {
   return {
     qTable: new Map(),
-    epsilon: 0.3,   // 初始 30% 探索
+    epsilon: 0.3, // 初始 30% 探索
     alpha: 0.15,
     gamma: 0.9,
     steps: 0,
@@ -1243,8 +1432,8 @@ export function createRewardModel(): RewardModel {
 
 /** 狀態 hash：意圖 + 情緒 + 主題延續性 */
 function stateHash(intent: IntentLabel, mood: number, continuity: number): string {
-  const moodBucket = mood < -0.3 ? "neg" : mood > 0.3 ? "pos" : "neu";
-  const contBucket = continuity <= 1 ? "new" : "cont";
+  const moodBucket = mood < -0.3 ? 'neg' : mood > 0.3 ? 'pos' : 'neu';
+  const contBucket = continuity <= 1 ? 'new' : 'cont';
   return `${intent}|${moodBucket}|${contBucket}`;
 }
 
@@ -1331,7 +1520,7 @@ export function updateReward(
 export interface ResponseCandidate {
   text: string;
   score: number;
-  source: "template" | "local_handler" | "ngram" | "similar_qa";
+  source: 'template' | 'local_handler' | 'ngram' | 'similar_qa';
   strategy: ResponseStrategy;
 }
 
@@ -1343,15 +1532,16 @@ export function composeResponse(
   ngramModel: NgramModel,
   dialogCtx: DialogContext,
 ): string {
-  if (candidates.length === 0) return "";
+  if (candidates.length === 0) return '';
 
   // 根據策略過濾和排序候選
   const strategyFiltered = candidates
-    .filter(c => c.strategy === strategy || c.strategy === "direct_answer")
+    .filter((c) => c.strategy === strategy || c.strategy === 'direct_answer')
     .sort((a, b) => b.score - a.score);
 
   // 如果沒有匹配策略的候選，用所有候選
-  const pool = strategyFiltered.length > 0 ? strategyFiltered : candidates.sort((a, b) => b.score - a.score);
+  const pool =
+    strategyFiltered.length > 0 ? strategyFiltered : candidates.sort((a, b) => b.score - a.score);
 
   // 選最佳主要候選
   const primary = pool[0];
@@ -1359,46 +1549,43 @@ export function composeResponse(
 
   // 根據策略修飾回答
   switch (strategy) {
-    case "empathy_first": {
+    case 'empathy_first': {
       if (dialogCtx.userMood < -0.2 && !/聽起來|理解|辛苦/.test(response)) {
-        const empathyPrefixes = [
-          "我理解你的感受。",
-          "這確實不容易。",
-          "聽起來你最近辛苦了。",
-        ];
+        const empathyPrefixes = ['我理解你的感受。', '這確實不容易。', '聽起來你最近辛苦了。'];
         const prefix = empathyPrefixes[Math.floor(Math.random() * empathyPrefixes.length)];
         response = `${prefix}\n\n${response}`;
       }
       break;
     }
 
-    case "brief": {
+    case 'brief': {
       // 壓縮到 2-3 句
-      const sentences = response.split(/[。！？\n]/).filter(s => s.trim().length > 0);
+      const sentences = response.split(/[。！？\n]/).filter((s) => s.trim().length > 0);
       if (sentences.length > 3) {
-        response = sentences.slice(0, 3).join("。") + "。";
+        response = sentences.slice(0, 3).join('。') + '。';
       }
       break;
     }
 
-    case "detailed": {
+    case 'detailed': {
       // 如果太短，嘗試從次要候選擴充
       if (response.length < 80 && pool.length > 1) {
         const supplement = pool[1].text;
         if (!response.includes(supplement.slice(0, 20))) {
-          const connector = ngramModel.connectors[Math.floor(Math.random() * ngramModel.connectors.length)];
+          const connector =
+            ngramModel.connectors[Math.floor(Math.random() * ngramModel.connectors.length)];
           response = `${response}\n\n${connector}，${supplement}`;
         }
       }
       break;
     }
 
-    case "step_by_step": {
+    case 'step_by_step': {
       // 如果不是列表形式，重新排版
       if (!/\d+[\.\、]/.test(response) && response.length > 40) {
-        const sentences = response.split(/[。\n]/).filter(s => s.trim().length > 3);
+        const sentences = response.split(/[。\n]/).filter((s) => s.trim().length > 3);
         if (sentences.length >= 2) {
-          response = sentences.map((s, i) => `${i + 1}. ${s.trim()}`).join("\n");
+          response = sentences.map((s, i) => `${i + 1}. ${s.trim()}`).join('\n');
         }
       }
       break;
@@ -1408,23 +1595,28 @@ export function composeResponse(
   // 根據用戶風格調整
   if (dialogCtx.userStyle.prefersShort && response.length > 150) {
     // 用戶喜歡簡短 → 壓縮
-    const sentences = response.split(/[。！？\n]/).filter(s => s.trim().length > 0);
+    const sentences = response.split(/[。！？\n]/).filter((s) => s.trim().length > 0);
     if (sentences.length > 4) {
-      response = sentences.slice(0, 3).join("。") + "。";
+      response = sentences.slice(0, 3).join('。') + '。';
     }
   }
 
   // 根據情緒選擇結尾
   if (dialogCtx.userMood < -0.3) {
     // 負面情緒 → 溫暖結尾
-    const warmEnders = ["如果需要幫忙隨時說。", "我在這��，有什麼都可��問。", "別擔心，我們一起解決。"];
+    const warmEnders = [
+      '如果需要幫忙隨時說。',
+      '我在這��，有什麼都可��問。',
+      '別擔心，我們一起解決。',
+    ];
     const ender = warmEnders[Math.floor(Math.random() * warmEnders.length)];
     if (response.length < 300 && !response.includes(ender.slice(0, 4))) {
       response = `${response}\n\n${ender}`;
     }
   } else if (dialogCtx.topicContinuity <= 1) {
     // 新話題的第一輪 → 加引導結尾
-    const enders = ngramModel.intentEnders.get(intent) ?? ngramModel.intentEnders.get("general") ?? [];
+    const enders =
+      ngramModel.intentEnders.get(intent) ?? ngramModel.intentEnders.get('general') ?? [];
     if (enders.length > 0 && response.length < 300) {
       const ender = enders[Math.floor(Math.random() * enders.length)];
       if (!response.includes(ender.slice(0, 8))) {
@@ -1436,8 +1628,8 @@ export function composeResponse(
 
   // 如果用戶喜歡用 emoji，加一些溫度
   if (dialogCtx.userStyle.usesEmoji && response.length < 200) {
-    if (!response.includes("！")) {
-      response = response.replace(/。$/, "！");
+    if (!response.includes('！')) {
+      response = response.replace(/。$/, '！');
     }
   }
 
@@ -1487,13 +1679,19 @@ export function indexDocument(
 }
 
 /** 計算 TF-IDF 向量的餘弦相似度 */
-function tfidfSimilarity(queryTokens: string[], docTokens: string[], idf: Map<string, number>): number {
+function tfidfSimilarity(
+  queryTokens: string[],
+  docTokens: string[],
+  idf: Map<string, number>,
+): number {
   const qTF = new Map<string, number>();
   for (const t of queryTokens) qTF.set(t, (qTF.get(t) ?? 0) + 1);
   const dTF = new Map<string, number>();
   for (const t of docTokens) dTF.set(t, (dTF.get(t) ?? 0) + 1);
 
-  let dot = 0, normQ = 0, normD = 0;
+  let dot = 0,
+    normQ = 0,
+    normD = 0;
   const allTerms = new Set([...queryTokens, ...docTokens]);
 
   for (const t of allTerms) {
@@ -1543,29 +1741,23 @@ export function hybridRetrieve(
 ): RetrievalResult[] {
   if (idx.docs.length === 0) return [];
 
-  const candidates = intentFilter
-    ? idx.docs.filter(d => d.intent === intentFilter)
-    : idx.docs;
+  const candidates = intentFilter ? idx.docs.filter((d) => d.intent === intentFilter) : idx.docs;
 
   if (candidates.length === 0) return [];
 
   // TF-IDF 分數
-  const tfidfScores = candidates.map(d => tfidfSimilarity(queryTokens, d.tokens, idx.idf));
+  const tfidfScores = candidates.map((d) => tfidfSimilarity(queryTokens, d.tokens, idx.idf));
 
   // 語意分數（詞向量）
   const queryEmbed = sentenceEmbedding(embedding, queryTokens);
-  const semScores = candidates.map(d => {
+  const semScores = candidates.map((d) => {
     const docEmbed = sentenceEmbedding(embedding, d.tokens);
     return vecCosine(queryEmbed, docEmbed);
   });
 
   // 各自排名
-  const tfidfRank = tfidfScores
-    .map((_, i) => i)
-    .sort((a, b) => tfidfScores[b] - tfidfScores[a]);
-  const semRank = semScores
-    .map((_, i) => i)
-    .sort((a, b) => semScores[b] - semScores[a]);
+  const tfidfRank = tfidfScores.map((_, i) => i).sort((a, b) => tfidfScores[b] - tfidfScores[a]);
+  const semRank = semScores.map((_, i) => i).sort((a, b) => semScores[b] - semScores[a]);
 
   // RRF 融合
   const fusedScores = rrfFuse([tfidfRank, semRank]);
@@ -1592,7 +1784,8 @@ export function hybridRetrieve(
 
 /** Levenshtein 編輯距離（支援中文） */
 export function editDistance(a: string, b: string): number {
-  const la = a.length, lb = b.length;
+  const la = a.length,
+    lb = b.length;
   if (la === 0) return lb;
   if (lb === 0) return la;
 
@@ -1607,9 +1800,9 @@ export function editDistance(a: string, b: string): number {
     for (let j = 1; j <= lb; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
       curr[j] = Math.min(
-        prev[j] + 1,      // 刪除
-        curr[j - 1] + 1,  // 插入
-        prev[j - 1] + cost // 替換
+        prev[j] + 1, // 刪除
+        curr[j - 1] + 1, // 插入
+        prev[j - 1] + cost, // 替換
       );
     }
     [prev, curr] = [curr, prev];
@@ -1619,30 +1812,30 @@ export function editDistance(a: string, b: string): number {
 
 /** 注音/形近字映射表（常見易混淆） */
 const SIMILAR_CHARS: Record<string, string[]> = {
-  "的": ["得", "地"],
-  "得": ["的", "地"],
-  "地": ["的", "得"],
-  "在": ["再"],
-  "再": ["在"],
-  "做": ["作"],
-  "作": ["做"],
-  "那": ["哪"],
-  "哪": ["那"],
-  "他": ["她", "它"],
-  "她": ["他", "它"],
-  "及": ["級", "極", "集"],
-  "級": ["及", "極"],
-  "須": ["需"],
-  "需": ["須"],
-  "園": ["院", "原"],
-  "院": ["園", "源"],
-  "坐": ["座"],
-  "座": ["坐"],
-  "練": ["煉"],
-  "像": ["象", "想"],
-  "帳": ["賬", "帳"],
-  "份": ["分"],
-  "分": ["份"],
+  的: ['得', '地'],
+  得: ['的', '地'],
+  地: ['的', '得'],
+  在: ['再'],
+  再: ['在'],
+  做: ['作'],
+  作: ['做'],
+  那: ['哪'],
+  哪: ['那'],
+  他: ['她', '它'],
+  她: ['他', '它'],
+  及: ['級', '極', '集'],
+  級: ['及', '極'],
+  須: ['需'],
+  需: ['須'],
+  園: ['院', '原'],
+  院: ['園', '源'],
+  坐: ['座'],
+  座: ['坐'],
+  練: ['煉'],
+  像: ['象', '想'],
+  帳: ['賬', '帳'],
+  份: ['分'],
+  分: ['份'],
 };
 
 /** 形近字規範化 */
@@ -1696,7 +1889,7 @@ export function fuzzyMatch(
   }
 
   return results
-    .filter((r, i, arr) => arr.findIndex(x => x.text === r.text) === i)
+    .filter((r, i, arr) => arr.findIndex((x) => x.text === r.text) === i)
     .sort((a, b) => a.distance - b.distance || b.similarity - a.similarity);
 }
 
@@ -1708,7 +1901,7 @@ export function fuzzyIntentCorrection(
 ): IntentResult {
   if (result.confidence > 0.6) return result; // 信心足夠，不修正
 
-  const rawText = tokens.join("");
+  const rawText = tokens.join('');
   let bestIntent = result.intent;
   let bestBoost = 0;
 
@@ -1745,12 +1938,12 @@ export function fuzzyIntentCorrection(
 /** 結構化對話摘要 */
 export interface ConversationSummary {
   topicsCovered: IntentLabel[];
-  keyFacts: string[];           // 關鍵事實（用戶提到的具體事物）
-  userPreferences: string[];    // 使用者偏好
-  unresolved: string[];         // 尚未解答的問題
+  keyFacts: string[]; // 關鍵事實（用戶提到的具體事物）
+  userPreferences: string[]; // 使用者偏好
+  unresolved: string[]; // 尚未解答的問題
   overallMood: number;
   turnCount: number;
-  compressedAt: number;         // 壓縮時的 turn index
+  compressedAt: number; // 壓縮時的 turn index
 }
 
 /** 將長對話壓縮成結構化摘要 */
@@ -1763,7 +1956,7 @@ export function summarizeConversation(ctx: DialogContext): ConversationSummary {
 
   // 從槽位提取用戶偏好
   for (const slot of ctx.slots) {
-    if (slot.source === "user") {
+    if (slot.source === 'user') {
       userPreferences.push(`${slot.name}: ${slot.value}`);
     }
   }
@@ -1776,7 +1969,7 @@ export function summarizeConversation(ctx: DialogContext): ConversationSummary {
     entityGroups.set(e.type, group);
   }
   for (const [type, items] of entityGroups) {
-    keyFacts.push(`提到的${type}: ${items.slice(-5).join("、")}`);
+    keyFacts.push(`提到的${type}: ${items.slice(-5).join('、')}`);
   }
 
   // 從短期記憶提取
@@ -1785,14 +1978,12 @@ export function summarizeConversation(ctx: DialogContext): ConversationSummary {
   }
 
   // 找出可能未解答的問題（用戶的最後幾個問句）
-  const recentUserTurns = ctx.turns
-    .filter(t => t.role === "user")
-    .slice(-3);
+  const recentUserTurns = ctx.turns.filter((t) => t.role === 'user').slice(-3);
   for (const turn of recentUserTurns) {
     if (/[？?]$/.test(turn.content.trim()) || /嗎|呢|怎麼|如何|什麼/.test(turn.content)) {
       // 檢查後面是否有助理回答
       const turnIdx = ctx.turns.indexOf(turn);
-      const nextAsst = ctx.turns.slice(turnIdx + 1).find(t => t.role === "assistant");
+      const nextAsst = ctx.turns.slice(turnIdx + 1).find((t) => t.role === 'assistant');
       if (!nextAsst || nextAsst.content.length < 10) {
         unresolved.push(turn.content.slice(0, 60));
       }
@@ -1815,26 +2006,31 @@ export function summaryToText(summary: ConversationSummary): string {
   const parts: string[] = [];
 
   if (summary.topicsCovered.length > 0) {
-    parts.push(`[對話歷程: 已聊過 ${summary.topicsCovered.join("→")} 等主題, 共 ${summary.turnCount} 輪]`);
+    parts.push(
+      `[對話歷程: 已聊過 ${summary.topicsCovered.join('→')} 等主題, 共 ${summary.turnCount} 輪]`,
+    );
   }
 
   if (summary.keyFacts.length > 0) {
-    parts.push(`[關鍵事實: ${summary.keyFacts.slice(-5).join("; ")}]`);
+    parts.push(`[關鍵事實: ${summary.keyFacts.slice(-5).join('; ')}]`);
   }
 
   if (summary.userPreferences.length > 0) {
-    parts.push(`[使用者偏好: ${summary.userPreferences.join(", ")}]`);
+    parts.push(`[使用者偏好: ${summary.userPreferences.join(', ')}]`);
   }
 
   if (summary.unresolved.length > 0) {
-    parts.push(`[未解答: ${summary.unresolved.join("; ")}]`);
+    parts.push(`[未解答: ${summary.unresolved.join('; ')}]`);
   }
 
-  return parts.join(" ");
+  return parts.join(' ');
 }
 
 /** 當對話過長時自動壓縮（保留最近 N 輪 + 摘要） */
-export function compressDialogIfNeeded(ctx: DialogContext, maxTurns = 20): {
+export function compressDialogIfNeeded(
+  ctx: DialogContext,
+  maxTurns = 20,
+): {
   ctx: DialogContext;
   summary: ConversationSummary | null;
 } {
@@ -1848,9 +2044,9 @@ export function compressDialogIfNeeded(ctx: DialogContext, maxTurns = 20): {
 
   // 將摘要存入短期記憶
   const summaryMem: ContextMemoryItem = {
-    key: "conversation_summary",
+    key: 'conversation_summary',
     value: summaryToText(summary),
-    intent: ctx.currentTopic ?? "general",
+    intent: ctx.currentTopic ?? 'general',
     turnIndex: ctx.turns.length,
     expiresAfterTurns: 0, // 不過期
   };
@@ -1935,13 +2131,13 @@ export function heuristicHelpful(
 /** 上下文信號源（模擬 Transformer 的多頭注意力） */
 export interface ContextSignal {
   name: string;
-  vector: Float32Array;  // 投影到 EMBED_DIM
-  weight: number;        // 學習到的重要性權重
+  vector: Float32Array; // 投影到 EMBED_DIM
+  weight: number; // 學習到的重要性權重
 }
 
 /** 多頭注意力融合器 */
 export interface AttentionFuser {
-  headWeights: Map<string, number>;  // 每個信號源的注意力權重
+  headWeights: Map<string, number>; // 每個信號源的注意力權重
   numHeads: number;
   dim: number;
 }
@@ -1949,11 +2145,11 @@ export interface AttentionFuser {
 export function createAttentionFuser(): AttentionFuser {
   return {
     headWeights: new Map([
-      ["entity", 1.0],
-      ["slot", 1.2],
-      ["memory", 0.8],
-      ["mood", 0.6],
-      ["topic", 1.5],
+      ['entity', 1.0],
+      ['slot', 1.2],
+      ['memory', 0.8],
+      ['mood', 0.6],
+      ['topic', 1.5],
     ]),
     numHeads: 4,
     dim: EMBED_DIM,
@@ -1969,7 +2165,7 @@ function signalToVector(
   const vec = new Float32Array(EMBED_DIM);
 
   switch (signalName) {
-    case "entity": {
+    case 'entity': {
       // 最近實體的平均嵌入
       const recentEntities = ctx.mentionedEntities.slice(-5);
       for (const e of recentEntities) {
@@ -1978,7 +2174,7 @@ function signalToVector(
       }
       break;
     }
-    case "slot": {
+    case 'slot': {
       // 活躍槽位值的嵌入
       for (const slot of ctx.slots) {
         const sVec = sentenceEmbedding(embedding, advancedTokenize(slot.value));
@@ -1986,7 +2182,7 @@ function signalToVector(
       }
       break;
     }
-    case "memory": {
+    case 'memory': {
       // 短期記憶的嵌入
       const recentMem = ctx.shortTermMemory.slice(-3);
       for (const m of recentMem) {
@@ -1995,14 +2191,15 @@ function signalToVector(
       }
       break;
     }
-    case "mood": {
+    case 'mood': {
       // 情緒向量（用簡單的正負方向）
-      const moodSeed = ctx.userMood > 0.2 ? "開心滿意" : ctx.userMood < -0.2 ? "不滿煩躁" : "平靜中性";
+      const moodSeed =
+        ctx.userMood > 0.2 ? '開心滿意' : ctx.userMood < -0.2 ? '不滿煩躁' : '平靜中性';
       const mVec = sentenceEmbedding(embedding, advancedTokenize(moodSeed));
       vecAdd(vec, mVec, Math.abs(ctx.userMood));
       break;
     }
-    case "topic": {
+    case 'topic': {
       // 當前主題向量
       if (ctx.currentTopic) {
         const tVec = sentenceEmbedding(embedding, advancedTokenize(ctx.currentTopic));
@@ -2025,7 +2222,7 @@ export function fuseContextWithAttention(
   const result = new Float32Array(EMBED_DIM);
   vecAdd(result, queryVec, 1.0); // 起始 = 查詢本身
 
-  const signalNames = ["entity", "slot", "memory", "mood", "topic"];
+  const signalNames = ['entity', 'slot', 'memory', 'mood', 'topic'];
   const signals: Array<{ name: string; vec: Float32Array }> = [];
 
   for (const name of signalNames) {
@@ -2042,9 +2239,9 @@ export function fuseContextWithAttention(
 
   // Softmax 歸一化
   const maxScore = Math.max(...scores);
-  const exps = scores.map(s => Math.exp(s - maxScore));
+  const exps = scores.map((s) => Math.exp(s - maxScore));
   const sumExp = exps.reduce((a, b) => a + b, 0) || 1;
-  const attnWeights = exps.map(e => e / sumExp);
+  const attnWeights = exps.map((e) => e / sumExp);
 
   // 加權融合: result += sum(attn_i * V_i)
   for (let i = 0; i < signals.length; i++) {
@@ -2079,7 +2276,7 @@ export function attentionAdjustedClassify(
   const fusedVec = fuseContextWithAttention(rawVec, ctx, embedding, fuser);
 
   // 用融合向量重新計算各意圖分數
-  const rawText = tokens.join("");
+  const rawText = tokens.join('');
   const logits: number[] = [];
   const labels: IntentLabel[] = [];
 
@@ -2110,7 +2307,9 @@ export function attentionAdjustedClassify(
   const finalTopK = labels
     .map((l, i) => ({
       intent: l,
-      score: baseWeight * (baseResult.topK.find(k => k.intent === l)?.score ?? 0) + attnWeight * probs[i],
+      score:
+        baseWeight * (baseResult.topK.find((k) => k.intent === l)?.score ?? 0) +
+        attnWeight * probs[i],
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
@@ -2131,47 +2330,173 @@ export function attentionAdjustedClassify(
 /** 更豐富的領域字典 */
 const DOMAIN_DICTIONARY: string[] = [
   // 學術
-  "被當", "當掉", "不及格", "二一", "退學", "延畢", "重修", "學分",
-  "必修", "選修", "通識", "學程", "輔系", "雙主修", "轉學",
-  "作業", "報告", "論文", "簡報", "小組", "分組", "期中考", "期末考",
-  "小考", "點名", "出席率", "教學評量",
+  '被當',
+  '當掉',
+  '不及格',
+  '二一',
+  '退學',
+  '延畢',
+  '重修',
+  '學分',
+  '必修',
+  '選修',
+  '通識',
+  '學程',
+  '輔系',
+  '雙主修',
+  '轉學',
+  '作業',
+  '報告',
+  '論文',
+  '簡報',
+  '小組',
+  '分組',
+  '期中考',
+  '期末考',
+  '小考',
+  '點名',
+  '出席率',
+  '教學評量',
   // 生活
-  "圖書館", "圖書", "借書", "還書", "座位", "自習室", "討論室",
-  "宿舍", "寢室", "報修", "洗衣機", "烘衣機", "包裹", "門禁", "室友",
-  "餐廳", "食堂", "午餐", "晚餐", "早餐", "素食", "便當", "外送",
-  "美食", "菜單", "飲料", "點心",
-  "公車", "校車", "停車場", "腳踏車", "YouBike", "火車站", "捷運",
-  "列印", "影印", "印表機", "掃描",
+  '圖書館',
+  '圖書',
+  '借書',
+  '還書',
+  '座位',
+  '自習室',
+  '討論室',
+  '宿舍',
+  '寢室',
+  '報修',
+  '洗衣機',
+  '烘衣機',
+  '包裹',
+  '門禁',
+  '室友',
+  '餐廳',
+  '食堂',
+  '午餐',
+  '晚餐',
+  '早餐',
+  '素食',
+  '便當',
+  '外送',
+  '美食',
+  '菜單',
+  '飲料',
+  '點心',
+  '公車',
+  '校車',
+  '停車場',
+  '腳踏車',
+  'YouBike',
+  '火車站',
+  '捷運',
+  '列印',
+  '影印',
+  '印表機',
+  '掃描',
   // 場所
-  "靜宜大學", "主顧樓", "文興樓", "伯鐸樓", "至善樓",
-  "體育館", "操場", "游泳池", "福利社", "書店",
-  "保健室", "諮商中心", "學務處", "教務處", "總務處",
+  '靜宜大學',
+  '主顧樓',
+  '文興樓',
+  '伯鐸樓',
+  '至善樓',
+  '體育館',
+  '操場',
+  '游泳池',
+  '福利社',
+  '書店',
+  '保健室',
+  '諮商中心',
+  '學務處',
+  '教務處',
+  '總務處',
   // 行政
-  "選課", "退選", "加簽", "課表", "排課", "衝堂",
-  "請假", "病假", "事假", "公假", "喪假",
-  "缺曠", "翹課", "遲到",
-  "獎學金", "助學金", "工讀", "實習",
-  "社團", "活動", "報名", "講座", "比賽", "志工",
+  '選課',
+  '退選',
+  '加簽',
+  '課表',
+  '排課',
+  '衝堂',
+  '請假',
+  '病假',
+  '事假',
+  '公假',
+  '喪假',
+  '缺曠',
+  '翹課',
+  '遲到',
+  '獎學金',
+  '助學金',
+  '工讀',
+  '實習',
+  '社團',
+  '活動',
+  '報名',
+  '講座',
+  '比賽',
+  '志工',
   // 情緒
-  "壓力", "焦慮", "難過", "憂鬱", "崩潰", "諮商",
+  '壓力',
+  '焦慮',
+  '難過',
+  '憂鬱',
+  '崩潰',
+  '諮商',
   // 感知
-  "頭痛", "肚子痛", "發燒", "感冒", "咳嗽", "流鼻水",
-  "過敏", "拉肚子", "不舒服", "受傷",
+  '頭痛',
+  '肚子痛',
+  '發燒',
+  '感冒',
+  '咳嗽',
+  '流鼻水',
+  '過敏',
+  '拉肚子',
+  '不舒服',
+  '受傷',
   // 天氣
-  "天氣", "下雨", "颱風", "地震", "溫度",
+  '天氣',
+  '下雨',
+  '颱風',
+  '地震',
+  '溫度',
   // 遺失
-  "遺失", "失物", "撿到", "認領",
+  '遺失',
+  '失物',
+  '撿到',
+  '認領',
   // 動作
-  "訂餐", "點餐", "預約", "掛號", "借閱", "查詢", "推薦",
-  "導航", "繳交", "提醒", "設定", "修改", "刪除",
+  '訂餐',
+  '點餐',
+  '預約',
+  '掛號',
+  '借閱',
+  '查詢',
+  '推薦',
+  '導航',
+  '繳交',
+  '提醒',
+  '設定',
+  '修改',
+  '刪除',
   // 校園特有
-  "畢業門檻", "必修學分", "服務學習", "體育課", "英文門檻",
-  "學生證", "悠遊卡", "校園WiFi",
+  '畢業門檻',
+  '必修學分',
+  '服務學習',
+  '體育課',
+  '英文門檻',
+  '學生證',
+  '悠遊卡',
+  '校園WiFi',
 ];
 
 /** 強化版中文斷詞 — 字典最長匹配 + bigram */
 export function advancedTokenize(text: string): string[] {
-  const normalized = text.toLowerCase().replace(/[？?！!。，、：；\s""''「」（）()\[\]~～…—·・]/g, " ").trim();
+  const normalized = text
+    .toLowerCase()
+    .replace(/[？?！!。，、：；\s""''「」（）()\[\]~～…—·・]/g, ' ')
+    .trim();
   const tokens: string[] = [];
 
   // 字典按長度排序（長詞優先）
@@ -2183,7 +2508,7 @@ export function advancedTokenize(text: string): string[] {
   for (const term of sortedDict) {
     while (remaining.includes(term)) {
       tokens.push(term);
-      remaining = remaining.replace(term, " ");
+      remaining = remaining.replace(term, ' ');
     }
   }
 
@@ -2192,21 +2517,72 @@ export function advancedTokenize(text: string): string[] {
   if (engNum) {
     for (const en of engNum) {
       if (en.length >= 1) tokens.push(en);
-      remaining = remaining.replace(en, " ");
+      remaining = remaining.replace(en, ' ');
     }
   }
 
   // 第三輪：剩餘中文做 bigram + unigram
   const STOP = new Set([
-    "的", "了", "在", "是", "我", "有", "和", "就", "不", "人",
-    "都", "一", "上", "也", "很", "到", "說", "要", "去",
-    "你", "會", "著", "看", "好", "這", "他", "她", "它",
-    "嗎", "呢", "吧", "啊", "喔", "欸", "那", "什", "麼",
-    "怎", "可", "以", "請", "幫", "想", "能", "把", "被",
-    "讓", "給", "跟", "對", "從", "向", "為", "與",
+    '的',
+    '了',
+    '在',
+    '是',
+    '我',
+    '有',
+    '和',
+    '就',
+    '不',
+    '人',
+    '都',
+    '一',
+    '上',
+    '也',
+    '很',
+    '到',
+    '說',
+    '要',
+    '去',
+    '你',
+    '會',
+    '著',
+    '看',
+    '好',
+    '這',
+    '他',
+    '她',
+    '它',
+    '嗎',
+    '呢',
+    '吧',
+    '啊',
+    '喔',
+    '欸',
+    '那',
+    '什',
+    '麼',
+    '怎',
+    '可',
+    '以',
+    '請',
+    '幫',
+    '想',
+    '能',
+    '把',
+    '被',
+    '讓',
+    '給',
+    '跟',
+    '對',
+    '從',
+    '向',
+    '為',
+    '與',
   ]);
 
-  const chars = remaining.replace(/\s+/g, "").split("").filter(c => c.trim().length > 0);
+  const chars = remaining
+    .replace(/\s+/g, '')
+    .split('')
+    .filter((c) => c.trim().length > 0);
   for (let i = 0; i < chars.length; i++) {
     // bigram
     if (i < chars.length - 1) {
@@ -2221,7 +2597,7 @@ export function advancedTokenize(text: string): string[] {
     }
   }
 
-  return tokens.filter(t => t.length > 0);
+  return tokens.filter((t) => t.length > 0);
 }
 
 // ═══════════════════════════════════════════════════
@@ -2230,7 +2606,7 @@ export function advancedTokenize(text: string): string[] {
 
 /** 推理步驟 */
 export interface ReasoningStep {
-  type: "decompose" | "retrieve" | "infer" | "verify" | "synthesize";
+  type: 'decompose' | 'retrieve' | 'infer' | 'verify' | 'synthesize';
   description: string;
   input: string;
   output: string;
@@ -2243,14 +2619,14 @@ export interface ReasoningChain {
   steps: ReasoningStep[];
   finalAnswer: string;
   totalConfidence: number;
-  strategy: "simple" | "multi_step" | "comparative" | "conditional" | "temporal";
+  strategy: 'simple' | 'multi_step' | 'comparative' | 'conditional' | 'temporal';
 }
 
 /** 推論規則（知識圖譜） */
 export interface InferenceRule {
   id: string;
-  condition: string[];    // 前提條件（關鍵字模式）
-  conclusion: string;     // 推論結論
+  condition: string[]; // 前提條件（關鍵字模式）
+  conclusion: string; // 推論結論
   domain: IntentLabel;
   confidence: number;
 }
@@ -2258,40 +2634,164 @@ export interface InferenceRule {
 /** 校園知識推論規則庫 */
 const INFERENCE_RULES: InferenceRule[] = [
   // 學業推論
-  { id: "r1", condition: ["被當", "必修"], conclusion: "必修被當需要重修，否則無法畢業", domain: "academic", confidence: 0.95 },
-  { id: "r2", condition: ["二一"], conclusion: "一學期超過 2/3 學分不及格會被退學預警（二一）", domain: "academic", confidence: 0.95 },
-  { id: "r3", condition: ["延畢"], conclusion: "超過修業年限未完成學分或畢業門檻會延畢，需向教務處申請", domain: "graduation", confidence: 0.9 },
-  { id: "r4", condition: ["衝堂"], conclusion: "兩門課時間重疊無法同時選，需擇一或找其他時段", domain: "academic", confidence: 0.95 },
-  { id: "r5", condition: ["加簽"], conclusion: "選課額滿需到第一堂課找老師加簽，需準備加簽單", domain: "academic", confidence: 0.9 },
-  { id: "r6", condition: ["缺曠", "扣考"], conclusion: "缺曠達一定次數會被扣考或扣分，注意各科規定", domain: "attendance", confidence: 0.85 },
-  { id: "r7", condition: ["翹課", "點名"], conclusion: "點名未到算缺曠，累積過多會影響成績", domain: "attendance", confidence: 0.9 },
-  { id: "r8", condition: ["遲交", "作業"], conclusion: "遲交作業通常會扣分，建議先聯繫老師", domain: "assignment", confidence: 0.85 },
+  {
+    id: 'r1',
+    condition: ['被當', '必修'],
+    conclusion: '必修被當需要重修，否則無法畢業',
+    domain: 'academic',
+    confidence: 0.95,
+  },
+  {
+    id: 'r2',
+    condition: ['二一'],
+    conclusion: '一學期超過 2/3 學分不及格會被退學預警（二一）',
+    domain: 'academic',
+    confidence: 0.95,
+  },
+  {
+    id: 'r3',
+    condition: ['延畢'],
+    conclusion: '超過修業年限未完成學分或畢業門檻會延畢，需向教務處申請',
+    domain: 'graduation',
+    confidence: 0.9,
+  },
+  {
+    id: 'r4',
+    condition: ['衝堂'],
+    conclusion: '兩門課時間重疊無法同時選，需擇一或找其他時段',
+    domain: 'academic',
+    confidence: 0.95,
+  },
+  {
+    id: 'r5',
+    condition: ['加簽'],
+    conclusion: '選課額滿需到第一堂課找老師加簽，需準備加簽單',
+    domain: 'academic',
+    confidence: 0.9,
+  },
+  {
+    id: 'r6',
+    condition: ['缺曠', '扣考'],
+    conclusion: '缺曠達一定次數會被扣考或扣分，注意各科規定',
+    domain: 'attendance',
+    confidence: 0.85,
+  },
+  {
+    id: 'r7',
+    condition: ['翹課', '點名'],
+    conclusion: '點名未到算缺曠，累積過多會影響成績',
+    domain: 'attendance',
+    confidence: 0.9,
+  },
+  {
+    id: 'r8',
+    condition: ['遲交', '作業'],
+    conclusion: '遲交作業通常會扣分，建議先聯繫老師',
+    domain: 'assignment',
+    confidence: 0.85,
+  },
 
   // 生活推論
-  { id: "r10", condition: ["下雨", "沒帶傘"], conclusion: "可以到圖書館或便利商店暫避，或借傘", domain: "weather", confidence: 0.8 },
-  { id: "r11", condition: ["頭痛", "發燒"], conclusion: "可能是感冒或發燒，建議先去保健室量體溫", domain: "health", confidence: 0.85 },
-  { id: "r12", condition: ["肚子痛", "吃壞"], conclusion: "可能食物中毒或腸胃炎，建議去保健室或就近診所", domain: "health", confidence: 0.85 },
-  { id: "r13", condition: ["壓力", "失眠"], conclusion: "建議到諮商中心預約心理諮���，有專業心理師協助", domain: "emotion", confidence: 0.9 },
-  { id: "r14", condition: ["包裹", "到了"], conclusion: "可以到宿舍收發室或指定地點領取，記得帶學生證", domain: "dormitory", confidence: 0.85 },
-  { id: "r15", condition: ["洗��", "壞了"], conclusion: "可以在 APP 上報修，或聯繫宿舍管理員", domain: "dormitory", confidence: 0.85 },
+  {
+    id: 'r10',
+    condition: ['下雨', '沒帶傘'],
+    conclusion: '可以到圖書館或便利商店暫避，或借傘',
+    domain: 'weather',
+    confidence: 0.8,
+  },
+  {
+    id: 'r11',
+    condition: ['頭痛', '發燒'],
+    conclusion: '可能是感冒或發燒，建議先去保健室量體溫',
+    domain: 'health',
+    confidence: 0.85,
+  },
+  {
+    id: 'r12',
+    condition: ['肚子痛', '吃壞'],
+    conclusion: '可能食物中毒或腸胃炎，建議去保健室或就近診所',
+    domain: 'health',
+    confidence: 0.85,
+  },
+  {
+    id: 'r13',
+    condition: ['壓力', '失眠'],
+    conclusion: '建議到諮商中心預約心理諮���，有專業心理師協助',
+    domain: 'emotion',
+    confidence: 0.9,
+  },
+  {
+    id: 'r14',
+    condition: ['包裹', '到了'],
+    conclusion: '可以到宿舍收發室或指定地點領取，記得帶學生證',
+    domain: 'dormitory',
+    confidence: 0.85,
+  },
+  {
+    id: 'r15',
+    condition: ['洗��', '壞了'],
+    conclusion: '可以在 APP 上報修，或聯繫宿舍管理員',
+    domain: 'dormitory',
+    confidence: 0.85,
+  },
 
   // 時間推論
-  { id: "r20", condition: ["期中考", "準備"], conclusion: "距離期中考時間建議提前 2 週開始複習，整理筆記和考古題", domain: "academic", confidence: 0.8 },
-  { id: "r21", condition: ["選課", "什麼時候"], conclusion: "選課時間依教務處公告，通常在學期末或開學前，可查教務系統", domain: "academic", confidence: 0.85 },
-  { id: "r22", condition: ["畢業", "門檻"], conclusion: "畢業門檻包括必修學分、英文門檻、服務學習等，可在教務系統查看", domain: "graduation", confidence: 0.9 },
+  {
+    id: 'r20',
+    condition: ['期中考', '準備'],
+    conclusion: '距離期中考時間建議提前 2 週開始複習，整理筆記和考古題',
+    domain: 'academic',
+    confidence: 0.8,
+  },
+  {
+    id: 'r21',
+    condition: ['選課', '什麼時候'],
+    conclusion: '選課時間依教務處公告，通常在學期末或開學前，可查教務系統',
+    domain: 'academic',
+    confidence: 0.85,
+  },
+  {
+    id: 'r22',
+    condition: ['畢業', '門檻'],
+    conclusion: '畢業門檻包括必修學分、英文門檻、服務學習等，可在教務系統查看',
+    domain: 'graduation',
+    confidence: 0.9,
+  },
 
   // 條件推論
-  { id: "r30", condition: ["餓", "沒錢"], conclusion: "學生餐廳有平價選���，或可申請急難救助金", domain: "dining", confidence: 0.7 },
-  { id: "r31", condition: ["生病", "請假"], conclusion: "需要填寫請假單並附上醫療證明，透過學務系統申請", domain: "attendance", confidence: 0.9 },
-  { id: "r32", condition: ["遺失", "學生證"], conclusion: "到學務處申請補發，需準備照片和工本費", domain: "lost_found", confidence: 0.9 },
+  {
+    id: 'r30',
+    condition: ['餓', '沒錢'],
+    conclusion: '學生餐廳有平價選���，或可申請急難救助金',
+    domain: 'dining',
+    confidence: 0.7,
+  },
+  {
+    id: 'r31',
+    condition: ['生病', '請假'],
+    conclusion: '需要填寫請假單並附上醫療證明，透過學務系統申請',
+    domain: 'attendance',
+    confidence: 0.9,
+  },
+  {
+    id: 'r32',
+    condition: ['遺失', '學生證'],
+    conclusion: '到學務處申請補發，需準備照片和工本費',
+    domain: 'lost_found',
+    confidence: 0.9,
+  },
 ];
 
 /** 問題複雜度分析 */
-function analyzeComplexity(text: string, tokens: string[], entities: NamedEntity[]): {
-  complexity: "simple" | "moderate" | "complex";
+function analyzeComplexity(
+  text: string,
+  tokens: string[],
+  entities: NamedEntity[],
+): {
+  complexity: 'simple' | 'moderate' | 'complex';
   requiresReasoning: boolean;
   subQuestions: string[];
-  strategy: ReasoningChain["strategy"];
+  strategy: ReasoningChain['strategy'];
 } {
   const hasComparison = /比較|哪個好|差別|差異|還是|或者|vs/i.test(text);
   const hasCondition = /如果|假如|萬一|要是|除非|的話/.test(text);
@@ -2301,36 +2801,36 @@ function analyzeComplexity(text: string, tokens: string[], entities: NamedEntity
   const isHow = /怎麼辦|怎麼做|如何|步驟|方法/.test(text);
 
   const subQuestions: string[] = [];
-  let strategy: ReasoningChain["strategy"] = "simple";
+  let strategy: ReasoningChain['strategy'] = 'simple';
 
   if (hasComparison) {
-    strategy = "comparative";
+    strategy = 'comparative';
     // 拆解比較的對象
-    const parts = text.split(/比較|還是|或者|vs/i).filter(s => s.trim().length > 0);
+    const parts = text.split(/比較|還是|或者|vs/i).filter((s) => s.trim().length > 0);
     if (parts.length >= 2) {
       subQuestions.push(`${parts[0].trim()}的特點是什麼？`);
       subQuestions.push(`${parts[1].trim()}的特點是什麼？`);
-      subQuestions.push("兩者的差異在哪裡？");
+      subQuestions.push('兩者的差異在哪裡？');
     }
   } else if (hasCondition) {
-    strategy = "conditional";
-    const ifParts = text.split(/如果|假如|的話/).filter(s => s.trim().length > 0);
+    strategy = 'conditional';
+    const ifParts = text.split(/如果|假如|的話/).filter((s) => s.trim().length > 0);
     if (ifParts.length >= 2) {
       subQuestions.push(`${ifParts[0].trim()}的情況下會怎樣？`);
       subQuestions.push(`具體該怎麼做？`);
     }
   } else if (hasTemporal) {
-    strategy = "temporal";
+    strategy = 'temporal';
   } else if (hasMultiPart) {
-    strategy = "multi_step";
+    strategy = 'multi_step';
     // 拆解多部分問題
-    const parts = text.split(/而且|另外|還有|同時|順便|以及/).filter(s => s.trim().length > 2);
+    const parts = text.split(/而且|另外|還有|同時|順便|以及/).filter((s) => s.trim().length > 2);
     for (const p of parts) subQuestions.push(p.trim());
   } else if (isHow) {
-    strategy = "multi_step";
-    subQuestions.push("需要什麼前置準備？");
-    subQuestions.push("具體步驟是什麼？");
-    subQuestions.push("需要注意什麼？");
+    strategy = 'multi_step';
+    subQuestions.push('需要什麼前置準備？');
+    subQuestions.push('具體步驟是什麼？');
+    subQuestions.push('需要注意什麼？');
   }
 
   const score =
@@ -2344,7 +2844,7 @@ function analyzeComplexity(text: string, tokens: string[], entities: NamedEntity
     (text.length > 40 ? 1 : 0);
 
   return {
-    complexity: score >= 4 ? "complex" : score >= 2 ? "moderate" : "simple",
+    complexity: score >= 4 ? 'complex' : score >= 2 ? 'moderate' : 'simple',
     requiresReasoning: score >= 2,
     subQuestions,
     strategy,
@@ -2357,10 +2857,11 @@ export function inferFromRules(text: string, intent: IntentLabel): InferenceRule
 
   for (const rule of INFERENCE_RULES) {
     // 所有前提條件都出現在文本中才觸發
-    const allMatch = rule.condition.every(cond => text.includes(cond));
+    const allMatch = rule.condition.every((cond) => text.includes(cond));
     // 或者 domain 匹配且至少一半條件出現
-    const halfMatch = rule.domain === intent &&
-      rule.condition.filter(c => text.includes(c)).length >= Math.ceil(rule.condition.length / 2);
+    const halfMatch =
+      rule.domain === intent &&
+      rule.condition.filter((c) => text.includes(c)).length >= Math.ceil(rule.condition.length / 2);
 
     if (allMatch || halfMatch) {
       triggered.push(rule);
@@ -2384,20 +2885,21 @@ export function chainOfThought(
 
   // Step 1: 問題分解
   steps.push({
-    type: "decompose",
+    type: 'decompose',
     description: `分析問題複雜度: ${complexity.complexity}, 策略: ${complexity.strategy}`,
     input: text,
-    output: complexity.subQuestions.length > 0
-      ? `子問題: ${complexity.subQuestions.join(" / ")}`
-      : "單一問題，直接處理",
+    output:
+      complexity.subQuestions.length > 0
+        ? `子問題: ${complexity.subQuestions.join(' / ')}`
+        : '單一問題，直接處理',
     confidence: 0.9,
   });
 
   // Step 2: 知識檢索
   if (retrievalHits.length > 0) {
     steps.push({
-      type: "retrieve",
-      description: "從知識庫檢索相關資訊",
+      type: 'retrieve',
+      description: '從知識庫檢索相關資訊',
       input: `查詢: ${text}`,
       output: `找到 ${retrievalHits.length} 筆相關資料，最佳匹配分數: ${retrievalHits[0].fusedScore.toFixed(3)}`,
       confidence: Math.min(retrievalHits[0].fusedScore * 2, 0.95),
@@ -2408,21 +2910,21 @@ export function chainOfThought(
   const inferences = inferFromRules(text, intent.intent);
   if (inferences.length > 0) {
     steps.push({
-      type: "infer",
-      description: "觸發知識推論規則",
-      input: `規則匹配: ${inferences.map(r => r.id).join(", ")}`,
-      output: inferences.map(r => r.conclusion).join("；"),
+      type: 'infer',
+      description: '觸發知識推論規則',
+      input: `規則匹配: ${inferences.map((r) => r.id).join(', ')}`,
+      output: inferences.map((r) => r.conclusion).join('；'),
       confidence: inferences[0].confidence,
     });
   }
 
   // Step 4: 上下文推論
   if (ctx.currentTopic && ctx.topicContinuity > 1) {
-    const slotInfo = ctx.slots.map(s => `${s.name}=${s.value}`).join(", ");
+    const slotInfo = ctx.slots.map((s) => `${s.name}=${s.value}`).join(', ');
     steps.push({
-      type: "infer",
-      description: "結合對話上下文推論",
-      input: `主題: ${ctx.currentTopic}, 持續 ${ctx.topicContinuity} 輪, 槽位: ${slotInfo || "無"}`,
+      type: 'infer',
+      description: '結合對話上下文推論',
+      input: `主題: ${ctx.currentTopic}, 持續 ${ctx.topicContinuity} 輪, 槽位: ${slotInfo || '無'}`,
       output: `延續 ${ctx.currentTopic} 主題，考慮使用者已提供的資訊`,
       confidence: 0.8,
     });
@@ -2431,28 +2933,31 @@ export function chainOfThought(
   // Step 5: 自我驗證
   const totalConf = steps.reduce((s, st) => s + st.confidence, 0) / Math.max(steps.length, 1);
   steps.push({
-    type: "verify",
-    description: "自我驗證推理品質",
+    type: 'verify',
+    description: '自我驗證推理品質',
     input: `推理步驟數: ${steps.length}, 平均信心: ${totalConf.toFixed(2)}`,
-    output: totalConf > 0.6 ? "推理品質合格" : "信心不足，建議請求澄清或使用 Gemini",
+    output: totalConf > 0.6 ? '推理品質合格' : '信心不足，建議請求澄清或使用 Gemini',
     confidence: totalConf,
   });
 
   // Step 6: 合成最終答案方向
-  const inferenceConclusions = inferences.map(r => r.conclusion).join("。");
-  const retrievalContext = retrievalHits.slice(0, 2).map(h => h.raw.slice(0, 60)).join("; ");
+  const inferenceConclusions = inferences.map((r) => r.conclusion).join('。');
+  const retrievalContext = retrievalHits
+    .slice(0, 2)
+    .map((h) => h.raw.slice(0, 60))
+    .join('; ');
   steps.push({
-    type: "synthesize",
-    description: "合成回答方向",
-    input: `推論: ${inferenceConclusions || "無"}; 檢索: ${retrievalContext || "無"}`,
-    output: inferenceConclusions || retrievalContext || "需要依據本地知識庫生成回答",
+    type: 'synthesize',
+    description: '合成回答方向',
+    input: `推論: ${inferenceConclusions || '無'}; 檢索: ${retrievalContext || '無'}`,
+    output: inferenceConclusions || retrievalContext || '需要依據本地知識庫生成回答',
     confidence: Math.max(totalConf, 0.5),
   });
 
   return {
     question: text,
     steps,
-    finalAnswer: inferenceConclusions || "",
+    finalAnswer: inferenceConclusions || '',
     totalConfidence: totalConf,
     strategy: complexity.strategy,
   };
@@ -2510,7 +3015,13 @@ export function distillFromGeminiResponse(
 
   // 5. 加入檢索索引（最重要：讓未來相似問題可以直接本地回答）
   const qaId = `distill_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  indexDocument(brain.retrievalIndex, qaId, `${question}\n${geminiAnswer}`, [...qTokens, ...aTokens], intent);
+  indexDocument(
+    brain.retrievalIndex,
+    qaId,
+    `${question}\n${geminiAnswer}`,
+    [...qTokens, ...aTokens],
+    intent,
+  );
 
   // 6. 提取回答模板（從 Gemini 回答中學習回答結構）
   extractAndStoreTemplate(brain, geminiAnswer, intent);
@@ -2518,7 +3029,7 @@ export function distillFromGeminiResponse(
 
 /** 從回答中提取可重用的模板 */
 function extractAndStoreTemplate(brain: LocalAIBrain, answer: string, intent: IntentLabel): void {
-  const sentences = answer.split(/[。！？\n]/).filter(s => s.trim().length > 3);
+  const sentences = answer.split(/[。！？\n]/).filter((s) => s.trim().length > 3);
   if (sentences.length === 0) return;
 
   // 學習開頭句式
@@ -2566,48 +3077,56 @@ export function needsClarification(
 
   // 1. 意圖不明確
   if (intent.confidence < 0.35) {
-    reasons.push("意圖不明確");
+    reasons.push('意圖不明確');
     const top2 = intent.topK.slice(0, 2);
     if (top2.length >= 2 && top2[1].score > top2[0].score * 0.7) {
       const intentNames: Record<string, string> = {
-        dining: "餐飲", academic: "課程", assignment: "作業", navigation: "導航",
-        health: "健康", event: "活動", library: "圖書館", dormitory: "宿舍",
-        emotion: "心理諮詢", grades: "成績", transport: "交通",
+        dining: '餐飲',
+        academic: '課程',
+        assignment: '作業',
+        navigation: '導航',
+        health: '健康',
+        event: '活動',
+        library: '圖書館',
+        dormitory: '宿舍',
+        emotion: '心理諮詢',
+        grades: '成績',
+        transport: '交通',
       };
       suggestedQuestions.push(
-        `你是想問${intentNames[top2[0].intent] ?? top2[0].intent}還是${intentNames[top2[1].intent] ?? top2[1].intent}的問題呢？`
+        `你是想問${intentNames[top2[0].intent] ?? top2[0].intent}還是${intentNames[top2[1].intent] ?? top2[1].intent}的問題呢？`,
       );
     } else {
-      suggestedQuestions.push("可以再說得更具體一點嗎？我想確保能幫到你。");
+      suggestedQuestions.push('可以再說得更具體一點嗎？我想確保能幫到你。');
     }
   }
 
   // 2. 模糊指代無法解析
   if (/那個|這個|它/.test(text) && entities.length === 0 && ctx.mentionedEntities.length === 0) {
-    reasons.push("指代模糊");
-    suggestedQuestions.push("你說的「那個」是指什麼呢？");
+    reasons.push('指代模糊');
+    suggestedQuestions.push('你說的「那個」是指什麼呢？');
   }
 
   // 3. 關鍵資訊缺失（特定意圖需要特定槽位）
   const requiredSlots: Record<string, string[]> = {
-    dining: ["food_preference"],
-    navigation: ["destination"],
+    dining: ['food_preference'],
+    navigation: ['destination'],
     academic: [],
     assignment: [],
   };
 
   const needed = requiredSlots[intent.intent] ?? [];
   for (const slotName of needed) {
-    if (!ctx.slots.find(s => s.name === slotName)) {
+    if (!ctx.slots.find((s) => s.name === slotName)) {
       missingSlots.push(slotName);
     }
   }
 
   if (missingSlots.length > 0 && intent.confidence > 0.5) {
     const slotPrompts: Record<string, string> = {
-      food_preference: "你想吃什麼類型的？（例如：素食、便宜的、不辣的）",
-      destination: "你想去哪裡？",
-      target_day: "是問今天還是哪一天的？",
+      food_preference: '你想吃什麼類型的？（例如：素食、便宜的、不辣的）',
+      destination: '你想去哪裡？',
+      target_day: '是問今天還是哪一天的？',
     };
     for (const slot of missingSlots) {
       if (slotPrompts[slot]) suggestedQuestions.push(slotPrompts[slot]);
@@ -2616,16 +3135,17 @@ export function needsClarification(
 
   // 4. 推理信心過低
   if (reasoning.totalConfidence < 0.3 && text.length > 15) {
-    reasons.push("推理信心不足");
-    suggestedQuestions.push("這個問題有點複雜，可以告訴我更多細節嗎？");
+    reasons.push('推理信心不足');
+    suggestedQuestions.push('這個問題有點複雜，可以告訴我更多細節嗎？');
   }
 
   // 只在信心真的很低時才澄清，避免每次都問
-  const shouldClarify = reasons.length > 0 && intent.confidence < 0.35 && !ctx.slots.some(s => s.confidence > 0.8);
+  const shouldClarify =
+    reasons.length > 0 && intent.confidence < 0.35 && !ctx.slots.some((s) => s.confidence > 0.8);
 
   return {
     needed: shouldClarify,
-    reason: reasons.join(", "),
+    reason: reasons.join(', '),
     suggestedQuestions: suggestedQuestions.slice(0, 2),
     missingSlots,
   };
@@ -2633,10 +3153,10 @@ export function needsClarification(
 
 /** 回答品質自評 */
 export interface QualityScore {
-  relevance: number;    // 與問題的相關性 0~1
+  relevance: number; // 與問題的相關性 0~1
   completeness: number; // 回答完整性 0~1
-  naturalness: number;  // 自然度 0~1
-  overall: number;      // 綜合分數 0~1
+  naturalness: number; // 自然度 0~1
+  overall: number; // 綜合分數 0~1
   shouldUseGemini: boolean; // 建議是否回退到 Gemini
 }
 
@@ -2664,7 +3184,7 @@ export function evaluateResponseQuality(
   if (/^抱歉|^我不|^無法/.test(answer)) naturalness -= 0.3;
   if (answer.length < 5) naturalness -= 0.3;
   if (answer.length > 10 && !/[，。！？]/.test(answer)) naturalness -= 0.2; // 沒有標點不自然
-  const uniqueChars = new Set(answer.split("")).size;
+  const uniqueChars = new Set(answer.split('')).size;
   if (uniqueChars / answer.length > 0.5) naturalness += 0.1; // 字元多樣性
   naturalness = Math.max(0, Math.min(1, naturalness));
 
@@ -2698,10 +3218,10 @@ export function evaluateResponseQuality(
 
 /** 情境因素 */
 export interface ContextualFactors {
-  timeOfDay: "morning" | "noon" | "afternoon" | "evening" | "night";
+  timeOfDay: 'morning' | 'noon' | 'afternoon' | 'evening' | 'night';
   dayOfWeek: number; // 0=Sun
   isWeekend: boolean;
-  semesterPhase: "early" | "midterm" | "late" | "exam" | "break";
+  semesterPhase: 'early' | 'midterm' | 'late' | 'exam' | 'break';
   weatherHint?: string;
   recentMood: number;
   conversationDepth: number; // 對話已進行幾輪
@@ -2714,23 +3234,23 @@ export function inferContextualFactors(ctx: DialogContext): ContextualFactors {
   const dayOfWeek = now.getDay();
   const month = now.getMonth() + 1;
 
-  let timeOfDay: ContextualFactors["timeOfDay"];
-  if (hour < 9) timeOfDay = "morning";
-  else if (hour < 13) timeOfDay = "noon";
-  else if (hour < 17) timeOfDay = "afternoon";
-  else if (hour < 21) timeOfDay = "evening";
-  else timeOfDay = "night";
+  let timeOfDay: ContextualFactors['timeOfDay'];
+  if (hour < 9) timeOfDay = 'morning';
+  else if (hour < 13) timeOfDay = 'noon';
+  else if (hour < 17) timeOfDay = 'afternoon';
+  else if (hour < 21) timeOfDay = 'evening';
+  else timeOfDay = 'night';
 
   // 學期階段推斷
-  let semesterPhase: ContextualFactors["semesterPhase"];
-  if (month >= 2 && month <= 3) semesterPhase = "early";
-  else if (month === 4) semesterPhase = "midterm";
-  else if (month === 5) semesterPhase = "late";
-  else if (month === 6 || month === 1) semesterPhase = "exam";
-  else if (month >= 7 && month <= 8) semesterPhase = "break";
-  else if (month >= 9 && month <= 10) semesterPhase = "early";
-  else if (month === 11) semesterPhase = "midterm";
-  else semesterPhase = "late";
+  let semesterPhase: ContextualFactors['semesterPhase'];
+  if (month >= 2 && month <= 3) semesterPhase = 'early';
+  else if (month === 4) semesterPhase = 'midterm';
+  else if (month === 5) semesterPhase = 'late';
+  else if (month === 6 || month === 1) semesterPhase = 'exam';
+  else if (month >= 7 && month <= 8) semesterPhase = 'break';
+  else if (month >= 9 && month <= 10) semesterPhase = 'early';
+  else if (month === 11) semesterPhase = 'midterm';
+  else semesterPhase = 'late';
 
   return {
     timeOfDay,
@@ -2752,28 +3272,28 @@ export function contextualEnhance(
   let enhanced = answer;
 
   // 時間感知的增強
-  if (intent === "dining") {
-    if (factors.timeOfDay === "morning" && !/早餐/.test(enhanced)) {
-      enhanced = enhanced.replace(/^/, "早上好！");
-    } else if (factors.timeOfDay === "night" && !/宵夜/.test(enhanced)) {
-      enhanced += "\n\n（提醒：現在比較晚了，注意別吃太多��夜喔）";
+  if (intent === 'dining') {
+    if (factors.timeOfDay === 'morning' && !/早餐/.test(enhanced)) {
+      enhanced = enhanced.replace(/^/, '早上好！');
+    } else if (factors.timeOfDay === 'night' && !/宵夜/.test(enhanced)) {
+      enhanced += '\n\n（提醒：現在比較晚了，注意別吃太多��夜喔）';
     }
   }
 
   // 考試季增強
-  if (factors.semesterPhase === "exam" || factors.semesterPhase === "midterm") {
-    if (intent === "emotion" && factors.recentMood < -0.2) {
-      enhanced += "\n\n考試季壓力大是正常的，記得適當休息。學校諮商中心可以幫忙。";
+  if (factors.semesterPhase === 'exam' || factors.semesterPhase === 'midterm') {
+    if (intent === 'emotion' && factors.recentMood < -0.2) {
+      enhanced += '\n\n考試季壓力大是正常的，記得適當休息。學校諮商中心可以幫忙。';
     }
-    if (intent === "academic" && !/複習|準備|考試/.test(enhanced)) {
-      enhanced += "\n\n（現在是考試季，記得安排複習時間喔！）";
+    if (intent === 'academic' && !/複習|準備|考試/.test(enhanced)) {
+      enhanced += '\n\n（現在是考試季，記得安排複習時間喔！）';
     }
   }
 
   // 週末增強
   if (factors.isWeekend) {
-    if (intent === "library" && !/週末|假日/.test(enhanced)) {
-      enhanced += "\n\n（提醒：週末圖書館開放時間可能不同，建議先確認）";
+    if (intent === 'library' && !/週末|假日/.test(enhanced)) {
+      enhanced += '\n\n（提醒：週末圖書館開放時間可能不同，建議先確認）';
     }
   }
 
@@ -2781,14 +3301,14 @@ export function contextualEnhance(
   if (factors.conversationDepth > 8 && !ctx.userStyle.prefersShort) {
     // 不加太多，避免囉嗦
     if (factors.conversationDepth === 9 || factors.conversationDepth === 15) {
-      enhanced += "\n\n（你今天問了不少問題，有需要我整理一下今天聊的重點嗎？）";
+      enhanced += '\n\n（你今天問了不少問題，有需要我整理一下今天聊的重點嗎？）';
     }
   }
 
   // 夜晚情緒關懷
-  if (factors.timeOfDay === "night" && intent === "emotion") {
+  if (factors.timeOfDay === 'night' && intent === 'emotion') {
     if (!/晚安|休息/.test(enhanced)) {
-      enhanced += "\n\n夜深了，記得早點休息。明天又是新的一天。";
+      enhanced += '\n\n夜深了，記得早點休息。明天又是新的一天。';
     }
   }
 
@@ -2806,12 +3326,8 @@ export function composeStructuredResponse(
   const parts: string[] = [];
 
   // 1. 共感層（負面情緒 or 壓力相關）
-  if (ctx.userMood < -0.3 || intent === "emotion" || intent === "health") {
-    const empathyLines = [
-      "我理解你的感受。",
-      "聽起來不太容易，",
-      "別太擔心，我來幫你。",
-    ];
+  if (ctx.userMood < -0.3 || intent === 'emotion' || intent === 'health') {
+    const empathyLines = ['我理解你的感受。', '聽起來不太容易，', '別太擔心，我來幫你。'];
     if (!/理解|擔心|感受/.test(mainContent)) {
       parts.push(empathyLines[Math.floor(Math.random() * empathyLines.length)]);
     }
@@ -2821,7 +3337,7 @@ export function composeStructuredResponse(
   parts.push(mainContent);
 
   // 3. 推論補充（如果有觸發推論規則）
-  const inferences = reasoning.steps.filter(s => s.type === "infer" && s.output.length > 5);
+  const inferences = reasoning.steps.filter((s) => s.type === 'infer' && s.output.length > 5);
   if (inferences.length > 0 && !mainContent.includes(inferences[0].output.slice(0, 15))) {
     const inferNote = inferences[0].output;
     if (inferNote.length < 80) {
@@ -2831,13 +3347,13 @@ export function composeStructuredResponse(
 
   // 4. 行動建議（可執行的下一步）
   const actionSuggestions: Record<string, string[]> = {
-    health: ["需要幫你查附近診所嗎？", "要幫你預約保健室嗎？"],
-    assignment: ["需要幫你設定提醒嗎？", "要幫你查看其他作業截止日嗎？"],
-    dining: ["要看其他餐廳的選擇嗎？", "想換成便宜或素食選項嗎？"],
-    event: ["需要幫你報名嗎？", "要幫你加到行事曆嗎？"],
-    navigation: ["需要幫你導航嗎？", "要查公車時刻表嗎？"],
-    academic: ["需要看更詳細的課程資訊嗎？", "要幫你查教學大綱嗎？"],
-    emotion: ["需要幫你預約諮商嗎？", "要聊聊嗎���我在這裡。"],
+    health: ['需要幫你查附近診所嗎？', '要幫你預約保健室嗎？'],
+    assignment: ['需要幫你設定提醒嗎？', '要幫你查看其他作業截止日嗎？'],
+    dining: ['要看其他餐廳的選擇嗎？', '想換成便宜或素食選項嗎？'],
+    event: ['需要幫你報名嗎？', '要幫你加到行事曆嗎？'],
+    navigation: ['需要幫你導航嗎？', '要查公車時刻表嗎？'],
+    academic: ['需要看更詳細的課程資訊嗎？', '要幫你查教學大綱嗎？'],
+    emotion: ['需要幫你預約諮商嗎？', '要聊聊嗎���我在這裡。'],
   };
 
   const actions = actionSuggestions[intent];
@@ -2848,7 +3364,7 @@ export function composeStructuredResponse(
     }
   }
 
-  return parts.join("\n");
+  return parts.join('\n');
 }
 
 // ═══════════════════════════════════════════════════
@@ -2921,11 +3437,21 @@ export function understandQuery(
   const tokens = advancedTokenize(resolvedText);
 
   // 3. 實體辨識
-  const entities = extractEntities(resolvedText, knownCourses, knownLocations, knownPeople, knownFoods);
+  const entities = extractEntities(
+    resolvedText,
+    knownCourses,
+    knownLocations,
+    knownPeople,
+    knownFoods,
+  );
 
   // 4. 意圖分類（多頭注意力增強版）
   let intent = attentionAdjustedClassify(
-    tokens, brain.embedding, brain.classifier, brain.dialogCtx, brain.attentionFuser,
+    tokens,
+    brain.embedding,
+    brain.classifier,
+    brain.dialogCtx,
+    brain.attentionFuser,
   );
 
   // 4b. 模糊匹配修正（錯字容忍）
@@ -2954,14 +3480,32 @@ export function understandQuery(
 
   // 8. 混合檢索（TF-IDF + 語意）
   const retrievalHits = hybridRetrieve(
-    resolvedText, tokens, brain.retrievalIndex, brain.embedding, 3, finalIntent.intent,
+    resolvedText,
+    tokens,
+    brain.retrievalIndex,
+    brain.embedding,
+    3,
+    finalIntent.intent,
   );
 
   // 9. Chain-of-Thought 推理
-  const reasoning = chainOfThought(resolvedText, tokens, finalIntent, entities, brain.dialogCtx, retrievalHits);
+  const reasoning = chainOfThought(
+    resolvedText,
+    tokens,
+    finalIntent,
+    entities,
+    brain.dialogCtx,
+    retrievalHits,
+  );
 
   // 10. 主動澄清判斷
-  const clarification = needsClarification(resolvedText, finalIntent, entities, brain.dialogCtx, reasoning);
+  const clarification = needsClarification(
+    resolvedText,
+    finalIntent,
+    entities,
+    brain.dialogCtx,
+    reasoning,
+  );
 
   // 11. 情境推理
   const contextualFactors = inferContextualFactors(brain.dialogCtx);
@@ -3023,7 +3567,13 @@ export function trainFromFeedback(
   // 6. 正面回饋 → 將 Q&A 加入檢索索引（越多好回答，檢索越精準）
   if (reward > 0) {
     const qaId = `qa_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    indexDocument(brain.retrievalIndex, qaId, `${question}\n${answer}`, [...tokens, ...answerTokens], intent);
+    indexDocument(
+      brain.retrievalIndex,
+      qaId,
+      `${question}\n${answer}`,
+      [...tokens, ...answerTokens],
+      intent,
+    );
   }
 
   return {
@@ -3035,15 +3585,15 @@ export function trainFromFeedback(
 /** 更新對話上下文（每輪呼叫）+ 自動學習 */
 export function updateBrainContext(
   brain: LocalAIBrain,
-  role: "user" | "assistant",
+  role: 'user' | 'assistant',
   content: string,
   tokens: string[],
   intent?: IntentLabel,
   entities?: NamedEntity[],
 ): LocalAIBrain {
   // 自動從對話學習（self-supervised）
-  if (role === "assistant" && brain.dialogCtx.turns.length > 0) {
-    const lastUserTurn = [...brain.dialogCtx.turns].reverse().find(t => t.role === "user");
+  if (role === 'assistant' && brain.dialogCtx.turns.length > 0) {
+    const lastUserTurn = [...brain.dialogCtx.turns].reverse().find((t) => t.role === 'user');
     if (lastUserTurn && intent) {
       const helpful = heuristicHelpful(lastUserTurn.content, content);
       autoLearnFromTurn(brain, lastUserTurn.content, content, intent, helpful);
@@ -3074,18 +3624,19 @@ export function serializeBrain(brain: LocalAIBrain): string {
     centroids: Array.from(brain.classifier.centroids.entries()).map(([k, v]) => [k, Array.from(v)]),
     counts: Array.from(brain.classifier.counts.entries()),
     biases: Array.from(brain.classifier.biases.entries()),
-    keywordBoosts: Array.from(brain.classifier.keywordBoosts.entries()).map(
-      ([k, v]) => [k, Array.from(v.entries())]
-    ),
+    keywordBoosts: Array.from(brain.classifier.keywordBoosts.entries()).map(([k, v]) => [
+      k,
+      Array.from(v.entries()),
+    ]),
   };
 
   const serializableNgram = {
-    bigrams: Array.from(brain.ngramModel.bigrams.entries()).slice(0, 2000).map(
-      ([k, v]) => [k, Array.from(v.entries()).slice(0, 20)]
-    ),
-    trigrams: Array.from(brain.ngramModel.trigrams.entries()).slice(0, 3000).map(
-      ([k, v]) => [k, Array.from(v.entries()).slice(0, 10)]
-    ),
+    bigrams: Array.from(brain.ngramModel.bigrams.entries())
+      .slice(0, 2000)
+      .map(([k, v]) => [k, Array.from(v.entries()).slice(0, 20)]),
+    trigrams: Array.from(brain.ngramModel.trigrams.entries())
+      .slice(0, 3000)
+      .map(([k, v]) => [k, Array.from(v.entries()).slice(0, 10)]),
     intentStarters: Array.from(brain.ngramModel.intentStarters.entries()),
     intentEnders: Array.from(brain.ngramModel.intentEnders.entries()),
     totalTokens: brain.ngramModel.totalTokens,
@@ -3102,8 +3653,11 @@ export function serializeBrain(brain: LocalAIBrain): string {
 
   // 序列化 TF-IDF 索引（只保留最新 200 筆文檔）
   const serializableRetrieval = {
-    docs: brain.retrievalIndex.docs.slice(-200).map(d => ({
-      id: d.id, tokens: d.tokens.slice(0, 30), raw: d.raw.slice(0, 200), intent: d.intent,
+    docs: brain.retrievalIndex.docs.slice(-200).map((d) => ({
+      id: d.id,
+      tokens: d.tokens.slice(0, 30),
+      raw: d.raw.slice(0, 200),
+      intent: d.intent,
     })),
     totalDocs: Math.min(brain.retrievalIndex.totalDocs, 200),
   };
@@ -3252,4 +3806,4 @@ export function deserializeBrain(json: string): LocalAIBrain | null {
   }
 }
 
-export const AI_BRAIN_STORAGE_KEY = "pu_ai_brain_v2";
+export const AI_BRAIN_STORAGE_KEY = 'pu_ai_brain_v2';

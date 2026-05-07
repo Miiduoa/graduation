@@ -9,4 +9,4 @@ export {
   signInWithCustomAuthToken,
   signUp,
   startWebSSOCallback,
-} from "@/lib/firebase";
+} from '@/lib/firebase';

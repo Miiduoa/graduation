@@ -1,7 +1,7 @@
 /* eslint-disable */
-import { useEffect, useState, useCallback, useRef } from "react";
-import { subscribeToCacheUpdates } from "../data/cachedSource";
-import { useLatestValue } from "./useLatestValue";
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { subscribeToCacheUpdates } from '../data/cachedSource';
+import { useLatestValue } from './useLatestValue';
 
 type CacheSubscriptionOptions<T> = {
   cacheKey: string;
@@ -35,10 +35,10 @@ export function useCacheSubscription<T>({
 
     const unsubscribe = subscribeToCacheUpdates((key, newData) => {
       if (key === cacheKey || key.startsWith(`${cacheKey}_`)) {
-        const transformedData = transformRef.current 
-          ? transformRef.current(newData) 
+        const transformedData = transformRef.current
+          ? transformRef.current(newData)
           : (newData as T);
-        
+
         setData(transformedData);
         setLastUpdate(new Date());
         setUpdateCount((c) => c + 1);
@@ -77,22 +77,22 @@ export function useMultiCacheSubscription({
   cacheKeys,
   enabled = true,
 }: MultiCacheSubscriptionOptions): MultiCacheSubscriptionResult {
-  const [updates, setUpdates] = useState<Map<string, { data: unknown; timestamp: Date }>>(new Map());
+  const [updates, setUpdates] = useState<Map<string, { data: unknown; timestamp: Date }>>(
+    new Map(),
+  );
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [totalUpdateCount, setTotalUpdateCount] = useState(0);
 
   // 使用穩定的字串來避免陣列順序變化導致的重新訂閱
-  const cacheKeysString = [...cacheKeys].sort().join(",");
+  const cacheKeysString = [...cacheKeys].sort().join(',');
 
   useEffect(() => {
     if (!enabled) return;
 
     const unsubscribe = subscribeToCacheUpdates((key, data) => {
-      const keyList = cacheKeysString.split(",");
-      const matchingKey = keyList.find(
-        (ck) => key === ck || key.startsWith(`${ck}_`)
-      );
-      
+      const keyList = cacheKeysString.split(',');
+      const matchingKey = keyList.find((ck) => key === ck || key.startsWith(`${ck}_`));
+
       if (matchingKey) {
         const now = new Date();
         setUpdates((prev) => {
@@ -146,22 +146,20 @@ export function useCachedData<T>({
   const [isFetching, setIsFetching] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState<Date | null>(null);
   const fetchFnRef = useLatestValue(fetchFn);
-  
+
   // 追蹤請求序號避免 race condition
   const requestIdRef = useRef(0);
-  
-  const isStale = lastFetchTime 
-    ? Date.now() - lastFetchTime.getTime() > staleTime 
-    : true;
+
+  const isStale = lastFetchTime ? Date.now() - lastFetchTime.getTime() > staleTime : true;
 
   const fetchData = useCallback(async () => {
     if (!enabled) return;
-    
+
     const currentRequestId = ++requestIdRef.current;
-    
+
     setIsFetching(true);
     setError(null);
-    
+
     try {
       const result = await fetchFnRef.current();
       // 只處理最新的請求結果
@@ -171,7 +169,7 @@ export function useCachedData<T>({
       }
     } catch (e) {
       if (currentRequestId === requestIdRef.current) {
-        setError(e instanceof Error ? e.message : "載入失敗");
+        setError(e instanceof Error ? e.message : '載入失敗');
       }
     } finally {
       if (currentRequestId === requestIdRef.current) {
@@ -184,7 +182,6 @@ export function useCachedData<T>({
   // 初始載入
   useEffect(() => {
     fetchData();
-     
   }, [...dependencies, enabled]);
 
   // 監聽快取更新

@@ -31,6 +31,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.1 Personal Information
 
 #### Name
+
 - **Collected?** YES
 - **Shared?** NO (except with payment providers if user makes purchase)
 - **Purpose:**
@@ -42,6 +43,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Encrypted in transit and at rest
 
 #### Email Address
+
 - **Collected?** YES
 - **Shared?** NO
 - **Purpose:**
@@ -53,6 +55,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Encrypted in transit and at rest
 
 #### User ID / Student ID / Employee ID
+
 - **Collected?** YES (for university students/staff only)
 - **Shared?** NO (except school SSO provider for verification only)
 - **Purpose:**
@@ -65,6 +68,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Encrypted, verified via HTTPS with school SSO
 
 #### Phone Number
+
 - **Collected?** NO (optional)
 - **Shared?** NO
 - **Purpose:** Two-factor authentication (if enabled)
@@ -73,6 +77,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Encrypted
 
 #### Date of Birth
+
 - **Collected?** NO (not collected directly; school provides age for verification)
 - **Shared?** NO
 - **Purpose:** Age verification only (no age-based content)
@@ -81,6 +86,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Hashed, not stored in plaintext
 
 #### Profile Photo
+
 - **Collected?** YES (optional, user-provided)
 - **Shared?** YES (visible to other campus users within privacy settings)
 - **Purpose:**
@@ -93,6 +99,7 @@ Users can request deletion of their account and associated data through Settings
 - **User Control:** Can delete anytime in Settings > Profile
 
 #### Gender/Department Information
+
 - **Collected?** NO (not collected by app; only from school directory if user authorizes)
 - **Shared?** NO
 - **Purpose:** Study group matching (optional feature)
@@ -105,6 +112,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.2 Financial Information
 
 #### Payment Method
+
 - **Collected?** YES (for in-app purchases only)
 - **Shared?** NO (shared only with payment processor)
 - **Purpose:**
@@ -120,6 +128,7 @@ Users can request deletion of their account and associated data through Settings
   - PCI-DSS Level 1 compliant
 
 #### Billing Address
+
 - **Collected?** YES (for invoice purposes)
 - **Shared?** NO
 - **Purpose:**
@@ -131,6 +140,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Encrypted at rest and in transit
 
 #### Transaction History
+
 - **Collected?** YES (order ID, amount, date, time)
 - **Shared?** NO (except to payment processor for processing)
 - **Purpose:**
@@ -147,6 +157,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.3 Location Data
 
 #### Precise Location (GPS)
+
 - **Collected?** YES (only when user enables location)
 - **Shared?** NO
 - **Purpose:**
@@ -164,6 +175,7 @@ Users can request deletion of their account and associated data through Settings
 - **User Control:** Can disable completely; permission toggle in Settings
 
 #### Approximate Location
+
 - **Collected?** YES (from IP address if location disabled)
 - **Shared?** NO
 - **Purpose:**
@@ -175,6 +187,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** IP-based, not location-based
 
 #### Location History
+
 - **Collected?** YES (if location enabled)
 - **Shared?** NO
 - **Purpose:**
@@ -191,6 +204,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.4 Contacts
 
 #### Contact List
+
 - **Collected?** NO (not auto-collected)
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -200,6 +214,7 @@ Users can request deletion of their account and associated data through Settings
 - **Note:** Campus Helper has a campus directory (not user's device contacts)
 
 #### Invited Contacts
+
 - **Collected?** YES (only explicit invitations)
 - **Shared?** YES (only to recipient, for event/group invitation)
 - **Purpose:**
@@ -215,6 +230,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.5 Photos and Videos
 
 #### User-Uploaded Photos
+
 - **Collected?** YES (optional, user-initiated)
 - **Shared?** YES (visible within privacy scope: study group, campus, public)
 - **Purpose:**
@@ -235,6 +251,7 @@ Users can request deletion of their account and associated data through Settings
   - Can make private or delete from archive
 
 #### Camera Roll Access
+
 - **Collected?** NO (app cannot access camera roll without permission)
 - **Shared?** NO
 - **Purpose:** Allow user to select photos from device for upload
@@ -243,6 +260,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Only selected photos processed
 
 #### Camera Usage
+
 - **Collected?** NO (not stored; only processed)
 - **Shared?** NO
 - **Purpose:**
@@ -258,6 +276,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.6 Audio and Messages
 
 #### Audio Recordings
+
 - **Collected?** NO (not currently implemented)
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -267,6 +286,7 @@ Users can request deletion of their account and associated data through Settings
 - **Note:** Future voice assistant may use recordings (feature not yet released)
 
 #### Text Messages / Chat History
+
 - **Collected?** YES (in-app messages in study groups)
 - **Shared?** YES (visible to group members according to group settings)
 - **Purpose:**
@@ -283,6 +303,7 @@ Users can request deletion of their account and associated data through Settings
   - Can block users
 
 #### Call Data
+
 - **Collected?** NO (not applicable; no calling features)
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -295,6 +316,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.7 Emails and Communications
 
 #### Email Communications
+
 - **Collected?** YES (sent from app)
 - **Shared?** NO (user's email only)
 - **Purpose:**
@@ -308,6 +330,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Sent via secure email provider (SendGrid, AWS SES)
 
 #### Email Attachments
+
 - **Collected?** NO (attachments not supported in-app)
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -320,6 +343,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.8 Search History and Browsing Data
 
 #### In-App Search Queries
+
 - **Collected?** YES (anonymized)
 - **Shared?** NO
 - **Purpose:**
@@ -332,6 +356,7 @@ Users can request deletion of their account and associated data through Settings
 - **User Control:** Can clear search history in Settings > Privacy
 
 #### Website Browsing
+
 - **Collected?** NO (app doesn't track external browsing)
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -340,6 +365,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Not applicable
 
 #### In-App Browsing (Pages Viewed)
+
 - **Collected?** YES (anonymized)
 - **Shared?** NO
 - **Purpose:**
@@ -358,6 +384,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.9 App Activity
 
 #### App Usage and Interaction
+
 - **Collected?** YES
 - **Shared?** NO (except with Firebase Analytics)
 - **Purpose:**
@@ -371,6 +398,7 @@ Users can request deletion of their account and associated data through Settings
 - **User Control:** Can disable analytics in Settings > Privacy > Analytics
 
 #### App Features Used
+
 - **Collected?** YES (feature interaction logs)
 - **Shared?** NO
 - **Purpose:**
@@ -383,6 +411,7 @@ Users can request deletion of their account and associated data through Settings
 - **User Control:** Can opt-out in Settings
 
 #### App Crashes and Errors
+
 - **Collected?** YES (crash logs)
 - **Shared?** NO (except error context with Firebase)
 - **Purpose:**
@@ -402,6 +431,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.10 Device Information
 
 #### Device Model and OS
+
 - **Collected?** YES
 - **Shared?** NO
 - **Purpose:**
@@ -413,6 +443,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Firebase Analytics; anonymized
 
 #### Device Identifiers (UDID, IDFA, AAID)
+
 - **Collected?** YES
 - **Shared?** NO
 - **Purpose:**
@@ -425,6 +456,7 @@ Users can request deletion of their account and associated data through Settings
 - **User Control:** Can reset IDFA (iOS) or AAID (Android) in device settings
 
 #### Storage and RAM Information
+
 - **Collected?** YES (app's own usage only)
 - **Shared?** NO
 - **Purpose:**
@@ -435,6 +467,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Local device only; not sent to servers
 
 #### Device Settings
+
 - **Collected?** PARTIAL
 - **Shared?** NO
 - **Purpose:**
@@ -445,6 +478,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Local device only
 
 #### Battery and Connection State
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -457,6 +491,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.11 Advertising and Analytics IDs
 
 #### Advertising ID (IDFA / AAID)
+
 - **Collected?** YES (from device)
 - **Shared?** NO (NOT shared with advertisers)
 - **Purpose:**
@@ -470,6 +505,7 @@ Users can request deletion of their account and associated data through Settings
   - Android: Settings > Google > Manage Google Account > Data & Privacy
 
 #### Analytics Events
+
 - **Collected?** YES (feature usage)
 - **Shared?** NO (retained by Firebase, which is Google)
 - **Purpose:**
@@ -486,6 +522,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.12 AI and Machine Learning Data
 
 #### AI Query History
+
 - **Collected?** YES
 - **Shared?** NO for advertising or data resale; AI processing is routed through the backend proxy and then to configured AI providers (free-first: Groq, then Google Gemini)
 - **Purpose:**
@@ -511,6 +548,7 @@ Users can request deletion of their account and associated data through Settings
   - Can request data export
 
 #### AI Training Data
+
 - **Collected?** NO (not used directly)
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -523,6 +561,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.13 Health and Fitness Data
 
 #### Health Information
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -532,6 +571,7 @@ Users can request deletion of their account and associated data through Settings
 - **Note:** Campus Helper is not a health app; does not access HealthKit or Health app data
 
 #### Fitness Data
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -544,6 +584,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.14 Biometric Data
 
 #### Fingerprint
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -553,6 +594,7 @@ Users can request deletion of their account and associated data through Settings
 - **Note:** Optional: users can set up biometric unlock in device settings for local authentication (handled by OS, not Campus Helper)
 
 #### Face Recognition
+
 - **Collected?** NO (stored on device only)
 - **Shared?** NO
 - **Purpose:** Optional account verification (can be skipped)
@@ -569,6 +611,7 @@ Users can request deletion of their account and associated data through Settings
   - Can clear face data in Settings > Security
 
 #### Other Biometric Data
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -581,6 +624,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.15 Calendar and Event Data
 
 #### Calendar Entries
+
 - **Collected?** NO (app can add, not read without permission)
 - **Shared?** NO
 - **Purpose:**
@@ -599,6 +643,7 @@ Users can request deletion of their account and associated data through Settings
 ### 2.16 Sensitive Personal Information
 
 #### Race or Ethnicity
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -607,6 +652,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Not applicable
 
 #### Sexual Orientation or Gender Identity
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -615,6 +661,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Not applicable
 
 #### Religious or Philosophical Beliefs
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -623,6 +670,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Not applicable
 
 #### Trade Union Membership
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -631,6 +679,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Not applicable
 
 #### Genetic Information
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -639,6 +688,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Not applicable
 
 #### Biometric Data (for ID)
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -647,6 +697,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Not applicable
 
 #### Legal Status
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -655,6 +706,7 @@ Users can request deletion of their account and associated data through Settings
 - **Processing:** Not applicable
 
 #### Government ID
+
 - **Collected?** NO
 - **Shared?** NO
 - **Purpose:** Not applicable
@@ -671,6 +723,7 @@ Users can request deletion of their account and associated data through Settings
 **Total Third Parties:** 8-10 (varies by features used)
 
 **Data Sharing Principle:**
+
 - Data shared ONLY when necessary for service functionality
 - Data shared ONLY with established, secure providers
 - Data NEVER sold to advertisers or data brokers
@@ -679,6 +732,7 @@ Users can request deletion of their account and associated data through Settings
 ### 3.1 Firebase (Google)
 
 **Services Used:**
+
 - Authentication
 - Cloud Firestore (database)
 - Cloud Functions (backend)
@@ -686,6 +740,7 @@ Users can request deletion of their account and associated data through Settings
 - Cloud Messaging (push notifications)
 
 **Data Shared:**
+
 - Anonymized user activity
 - Crash and error logs
 - Device info (anonymized)
@@ -693,6 +748,7 @@ Users can request deletion of their account and associated data through Settings
 - Push notification tokens
 
 **Purpose:**
+
 - Host app infrastructure
 - Track app usage and errors
 - Deliver push notifications
@@ -704,15 +760,18 @@ Users can request deletion of their account and associated data through Settings
 ### 3.2 Google Cloud Platform
 
 **Services Used:**
+
 - Cloud Storage (for user photos, documents)
 - Cloud Datastore (backup)
 
 **Data Shared:**
+
 - User-uploaded photos
 - Backup data (encrypted)
 - Database backups
 
 **Purpose:**
+
 - Store app data
 - Maintain backups
 - Provide infrastructure
@@ -723,13 +782,16 @@ Users can request deletion of their account and associated data through Settings
 ### 3.3 Backend AI Providers
 
 **Services Used:**
+
 - AI assistant responses
 
 **Data Shared:**
+
 - Minimized user AI query context (sent for processing)
 - AI evaluation feedback (anonymized)
 
 **Purpose:**
+
 - Generate AI responses
 - Improve AI quality
 
@@ -739,14 +801,17 @@ Users can request deletion of their account and associated data through Settings
 ### 3.4 Stripe
 
 **Services Used:**
+
 - Credit card payment processing
 
 **Data Shared:**
+
 - Payment tokens (not full card numbers)
 - Transaction amounts and dates
 - Billing address
 
 **Purpose:**
+
 - Process payments securely
 - Prevent fraud
 - Handle refunds
@@ -758,14 +823,17 @@ Users can request deletion of their account and associated data through Settings
 ### 3.5 TapPay
 
 **Services Used:**
+
 - Taiwan local payment processing
 
 **Data Shared:**
+
 - Payment tokens
 - Transaction data
 - Billing address
 
 **Purpose:**
+
 - Process Taiwan-local payments
 - Fraud prevention
 - Reconciliation
@@ -776,14 +844,17 @@ Users can request deletion of their account and associated data through Settings
 ### 3.6 LINE Pay
 
 **Services Used:**
+
 - Mobile payment processing
 
 **Data Shared:**
+
 - Payment tokens
 - Transaction ID
 - Order details
 
 **Purpose:**
+
 - Process LINE Pay payments
 - Handle disputes
 
@@ -793,15 +864,18 @@ Users can request deletion of their account and associated data through Settings
 ### 3.7 School SSO Provider
 
 **Services Used:**
+
 - Student/staff identity verification
 
 **Data Shared:**
+
 - Student ID / Employee ID
 - Name
 - Email address
 - Authentication result (success/failure only)
 
 **Purpose:**
+
 - Verify user is legitimate student/staff
 - Link to school records
 - Enable school-specific features
@@ -812,14 +886,17 @@ Users can request deletion of their account and associated data through Settings
 ### 3.8 Sentry (Optional Error Tracking)
 
 **Services Used:**
+
 - Application error monitoring
 
 **Data Shared:**
+
 - Crash stack traces
 - Error context
 - User session ID (anonymized)
 
 **Purpose:**
+
 - Monitor app stability
 - Debug crashes
 - Identify bugs
@@ -831,42 +908,50 @@ Users can request deletion of their account and associated data through Settings
 ### 3.9 App Store / Play Store
 
 **Services Used:**
+
 - Application distribution
 - In-app purchases
 - App review
 
 **Data Shared:**
+
 - Basic app analytics
 - Installation stats
 - Crash reports (optional)
 
 **Purpose:**
+
 - Host app distribution
 - Manage updates
 - Process purchases
 
 **Data Agreement:** Yes (per app store terms)
 **Link:**
+
 - Apple: https://www.apple.com/privacy/
 - Google: https://policies.google.com/privacy
 
 ### 3.10 Email Service Provider (SendGrid / AWS SES)
 
 **Services Used:**
+
 - Send verification emails
 - Notifications
 - Password resets
 
 **Data Shared:**
+
 - User email address
 - Email content
 
 **Purpose:**
+
 - Deliver email communications
 - Ensure reliable email delivery
 
 **Data Agreement:** Yes
 **Link:**
+
 - SendGrid: https://sendgrid.com/legal/service-level-agreement/
 - AWS: https://aws.amazon.com/privacy/
 
@@ -877,16 +962,19 @@ Users can request deletion of their account and associated data through Settings
 ### 4.1 Encryption Standards
 
 **In Transit:**
+
 - TLS 1.3 for all network communications
 - Encrypted push notifications
 - Secure WebSocket (WSS) for real-time features
 
 **At Rest:**
+
 - AES-256 encryption for sensitive data (passwords, tokens)
 - Database-level encryption for user data
 - File-level encryption for backups
 
 **Password Storage:**
+
 - bcrypt hashing with salt
 - Plain-text passwords NEVER stored
 - Passwords NEVER logged or backed up
@@ -929,6 +1017,7 @@ Users can request deletion of their account and associated data through Settings
 - **Location Share with Others:** On/Off (show "on campus" status)
 
 **Effect of Disabling:**
+
 - Map shows user's location but doesn't store history
 - Location-based notifications disabled
 - Campus service locations still show (static, not user-relative)
@@ -943,6 +1032,7 @@ Users can request deletion of their account and associated data through Settings
 - **Microphone:** On/Off (if applicable)
 
 **Effect of Disabling:**
+
 - QR code scanning unavailable (manual input alternative provided)
 - Profile photo must be selected or skipped
 - Photo uploads disabled (text-only posts still available)
@@ -959,6 +1049,7 @@ Users can request deletion of their account and associated data through Settings
 - **Sound:** On/Off per category
 
 **Mandatory Notifications (cannot disable):**
+
 - Security alerts
 - Payment confirmations
 - Critical campus alerts
@@ -972,6 +1063,7 @@ Users can request deletion of their account and associated data through Settings
 - **Feature Usage Tracking:** On/Off
 
 **Effect of Disabling:**
+
 - No usage data sent to Firebase
 - Crash reports not sent
 - App still fully functional
@@ -989,18 +1081,21 @@ Users can request deletion of their account and associated data through Settings
 ### 5.6 Data Requests
 
 **Access and Export:**
+
 - Settings > Privacy > Export My Data
 - Generates ZIP with all personal data
 - Format: JSON or CSV
 - Available within 5 minutes of request
 
 **Account Deletion:**
+
 - Settings > Privacy > Delete Account
 - 30-day cooling-off period
 - Can cancel within 30 days
 - Permanent deletion after 30 days
 
 **Support Data Requests:**
+
 - Can request specific data types
 - Can request data deletion for specific features
 - Email: privacy@campushelper.app
@@ -1010,21 +1105,21 @@ Users can request deletion of their account and associated data through Settings
 
 ## 6. Data Retention Schedule
 
-| Data Type | Retention Period | Auto-Delete | User Control |
-|-----------|------------------|-------------|--------------|
-| Account Info | Until deletion | After 30-day cooling-off | Yes - Settings |
-| Location History | 30 days | Auto | Yes - Manual clear |
-| Location History (backup) | 7 days | Auto | Auto only |
-| Usage Analytics | 90 days | Auto (then aggregated) | Yes - Disable |
-| Crash Reports | 30 days | Auto | Yes - Disable |
-| Push Notification Logs | 90 days | Auto | N/A |
-| Chat/Message History | Until deletion | User-initiated | Yes - Delete |
-| AI Query History | 180 days (non-sensitive), 90 days (sensitive) | Auto | Yes - Delete |
-| Support Tickets | 1 year | Auto | Yes - Request deletion |
-| Payment Records | 7 years | Legal requirement | Export only |
-| Backups | 30 days old versions | Auto | Auto only |
-| IP Logs | 30 days | Auto | Auto only |
-| Device IDs | Anonymized after 90 days | Auto | Reset in Settings |
+| Data Type                 | Retention Period                              | Auto-Delete              | User Control           |
+| ------------------------- | --------------------------------------------- | ------------------------ | ---------------------- |
+| Account Info              | Until deletion                                | After 30-day cooling-off | Yes - Settings         |
+| Location History          | 30 days                                       | Auto                     | Yes - Manual clear     |
+| Location History (backup) | 7 days                                        | Auto                     | Auto only              |
+| Usage Analytics           | 90 days                                       | Auto (then aggregated)   | Yes - Disable          |
+| Crash Reports             | 30 days                                       | Auto                     | Yes - Disable          |
+| Push Notification Logs    | 90 days                                       | Auto                     | N/A                    |
+| Chat/Message History      | Until deletion                                | User-initiated           | Yes - Delete           |
+| AI Query History          | 180 days (non-sensitive), 90 days (sensitive) | Auto                     | Yes - Delete           |
+| Support Tickets           | 1 year                                        | Auto                     | Yes - Request deletion |
+| Payment Records           | 7 years                                       | Legal requirement        | Export only            |
+| Backups                   | 30 days old versions                          | Auto                     | Auto only              |
+| IP Logs                   | 30 days                                       | Auto                     | Auto only              |
+| Device IDs                | Anonymized after 90 days                      | Auto                     | Reset in Settings      |
 
 ---
 
@@ -1033,6 +1128,7 @@ Users can request deletion of their account and associated data through Settings
 ### 7.1 Legal Compliance
 
 **GDPR (General Data Protection Regulation)**
+
 - Applies to EU/UK/Swiss residents
 - Data Processing Agreement in place
 - Right to access, correct, delete data
@@ -1040,6 +1136,7 @@ Users can request deletion of their account and associated data through Settings
 - DPO contact: dpo@campushelper.app
 
 **Taiwan Personal Data Protection Act (個人資料保護法)**
+
 - Primary regulation for Campus Helper
 - Full compliance
 - User's explicit consent for collection
@@ -1047,12 +1144,14 @@ Users can request deletion of their account and associated data through Settings
 - Data export and deletion rights
 
 **COPPA (Children's Online Privacy Protection Act)**
+
 - Under-13 users cannot create accounts
 - If discovered: immediate account deletion
 - No data collection from under-13 users
 - Parental control available for 13-17 year-olds
 
 **CCPA/CPRA (California Consumer Privacy Act)**
+
 - Applies to California residents
 - Right to know, delete, opt-out
 - No sale of personal data
@@ -1067,12 +1166,14 @@ Users can request deletion of their account and associated data through Settings
 ### 7.3 Data Processing Agreements
 
 In place with:
+
 - Google / Firebase
 - Stripe, TapPay, LINE Pay
 - Email service providers
 - School SSO providers
 
 All agreements include:
+
 - Data controller/processor roles
 - Sub-processor disclosures
 - Data security commitments
@@ -1132,6 +1233,7 @@ A breach is any unauthorized access, loss, or disclosure of personal data that c
 ### 9.2 COPPA Compliance
 
 **What We Do:**
+
 - No account creation under 13
 - Parental consent collection for 13-17
 - No behavioral advertising
@@ -1139,6 +1241,7 @@ A breach is any unauthorized access, loss, or disclosure of personal data that c
 - No unnecessary data collection
 
 **What We Don't Do:**
+
 - Don't track under-13 users
 - Don't profile children
 - Don't target advertising to children
@@ -1147,6 +1250,7 @@ A breach is any unauthorized access, loss, or disclosure of personal data that c
 ### 9.3 Parental Controls (for 13-17)
 
 If under-18 accounts are enabled:
+
 - Parent can set privacy level to maximum
 - Parent can monitor group memberships
 - Parent can see aggregate usage stats
@@ -1159,11 +1263,13 @@ If under-18 accounts are enabled:
 ### 10.1 Locations
 
 **Primary Data Locations:**
+
 - Google Cloud Platform (US, Asia-Pacific regions)
 - Firestore (multi-region default)
 - App Storage (region-specific, user choice)
 
 **User Choice:**
+
 - Can select region: Taiwan, Singapore, or US
 - Affects where data is primarily stored
 - Backups maintained in multiple regions
@@ -1171,11 +1277,13 @@ If under-18 accounts are enabled:
 ### 10.2 Transfer Mechanisms
 
 **For GDPR Compliance:**
+
 - Standard Contractual Clauses (SCCs)
 - Adequacy Decisions
 - Binding Corporate Rules (where applicable)
 
 **For Taiwan PDPA:**
+
 - Explicit user consent (prior to transfer)
 - Contractual safeguards with data processors
 - Regular compliance reviews
@@ -1193,21 +1301,25 @@ If under-18 accounts are enabled:
 Campus Helper is built with privacy-first principles:
 
 ### 11.1 Data Minimization
+
 - Collect only necessary data
 - Delete automatically when not needed
 - Give users control over collection
 
 ### 11.2 Purpose Limitation
+
 - Data used only for stated purposes
 - Clear explanation of each use
 - No repurposing without consent
 
 ### 11.3 Storage Limitation
+
 - Auto-delete old data
 - Give users easy deletion options
 - Anonymize or pseudonymize when possible
 
 ### 11.4 User Control
+
 - Granular privacy settings
 - Easy data export
 - Easy account deletion
@@ -1223,6 +1335,7 @@ Campus Helper is built with privacy-first principles:
 **Response Time:** 7-14 business days
 
 **In-App Support:**
+
 - Settings > Help > Privacy Concerns
 - Select issue category
 - Submit to privacy team

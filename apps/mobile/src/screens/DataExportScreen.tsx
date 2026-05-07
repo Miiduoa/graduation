@@ -5,13 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { isAvailableAsync, shareAsync } from 'expo-sharing';
 import { Paths, File } from 'expo-file-system';
 
-import {
-  Screen,
-  Card,
-  Button,
-  Pill,
-  AnimatedCard,
-} from '../ui/components';
+import { Screen, Card, Button, Pill, AnimatedCard } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useSchool } from '../state/school';

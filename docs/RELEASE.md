@@ -23,6 +23,7 @@
 在開始任何發佈流程之前，請確保完成以下檢查項目：
 
 ### 代碼和測試檢查
+
 - [ ] 所有代碼已合併到 `main` 分支
 - [ ] 所有變更已進行代碼審查且已批准
 - [ ] 單位測試通過：`pnpm --filter mobile test`
@@ -31,6 +32,7 @@
 - [ ] TypeScript 檢查通過：`pnpm typecheck`
 
 ### 功能驗證
+
 - [ ] 所有新功能已在開發環境中測試
 - [ ] UI 在不同屏幕尺寸上驗證
 - [ ] iOS 設備上的功能測試（iPhone, iPad）
@@ -38,17 +40,20 @@
 - [ ] 網絡連接狀態下的功能測試（在線、離線、慢速網絡）
 
 ### 安全和隱私檢查
+
 - [ ] API 密鑰和敏感信息已妥善管理（通過環境變量）
 - [ ] 隱私政策已更新（如適用）
 - [ ] 用戶數據收集已遵循隱私法規
 - [ ] 依賴項沒有已知的安全漏洞
 
 ### 文檔檢查
+
 - [ ] 發佈說明已準備好
 - [ ] 已更新的變更日誌（CHANGELOG.md）
 - [ ] 已更新的功能文檔
 
 ### 配置檢查
+
 - [ ] 環境配置正確設置
 - [ ] Firebase 配置已驗證
 - [ ] API 端點指向正確的環境
@@ -68,26 +73,33 @@
 ### 自動版本凸起
 
 #### 修補版本凸起（Patch Bump）
+
 ```bash
 pnpm version:patch
 ```
+
 示例：`1.0.0` → `1.0.1`
 
 #### 次要版本凸起（Minor Bump）
+
 ```bash
 pnpm version:minor
 ```
+
 示例：`1.0.0` → `1.1.0`
 
 #### 主要版本凸起（Major Bump）
+
 ```bash
 pnpm version:major
 ```
+
 示例：`1.0.0` → `2.0.0`
 
 ### 版本号更新的文件
 
 版本凸起腳本會自動更新以下文件：
+
 - `apps/mobile/app.json` - Expo 配置
 - `apps/mobile/package.json` - Mobile 應用 package.json
 - `package.json` - 根目錄 package.json
@@ -115,17 +127,20 @@ pnpm version:major
 ### 設置
 
 1. 安裝依賴項：
+
 ```bash
 pnpm install
 ```
 
 2. 配置 EAS：
+
 ```bash
 cd apps/mobile
 npx eas-cli configure
 ```
 
 3. 登錄到 Expo：
+
 ```bash
 npx expo login
 ```
@@ -135,11 +150,13 @@ npx expo login
 Preview 構建用於本地測試和開發：
 
 #### iOS Preview 構建
+
 ```bash
 pnpm --filter mobile exec eas build --platform ios --profile preview --local
 ```
 
 #### Android Preview 構建
+
 ```bash
 pnpm --filter mobile exec eas build --platform android --profile preview --local
 ```
@@ -149,11 +166,13 @@ pnpm --filter mobile exec eas build --platform android --profile preview --local
 生產構建用於應用商店提交：
 
 #### iOS Production 構建
+
 ```bash
 pnpm --filter mobile exec eas build --platform ios --profile production --local
 ```
 
 #### Android Production 構建
+
 ```bash
 pnpm --filter mobile exec eas build --platform android --profile production --local
 ```
@@ -184,12 +203,12 @@ Release 工作流可通過 GitHub Actions 手動觸發，用於自動化構建�
 
 在運行工作流前，設置以下選項：
 
-| 選項 | 值 | 說明 |
-|------|------|--------|
-| **platform** | `all`, `ios`, `android` | 指定目標平台 |
-| **profile** | `production`, `preview` | 指定構建配置文件 |
-| **submit** | `true`, `false` | 構建後是否提交到應用商店 |
-| **release_notes** | 自由文本 | 可選的發佈說明 |
+| 選項              | 值                      | 說明                     |
+| ----------------- | ----------------------- | ------------------------ |
+| **platform**      | `all`, `ios`, `android` | 指定目標平台             |
+| **profile**       | `production`, `preview` | 指定構建配置文件         |
+| **submit**        | `true`, `false`         | 構建後是否提交到應用商店 |
+| **release_notes** | 自由文本                | 可選的發佈說明           |
 
 #### 工作流步驟
 
@@ -202,6 +221,7 @@ Release 工作流可通過 GitHub Actions 手動觸發，用於自動化構建�
 #### 示例工作流執行
 
 **場景 1：為 iOS 構建 Preview 版本（不提交）**
+
 ```
 Platform: ios
 Profile: preview
@@ -210,6 +230,7 @@ Release notes: (空)
 ```
 
 **場景 2：為兩個平台構建 Production 版本並提交**
+
 ```
 Platform: all
 Profile: production
@@ -367,12 +388,14 @@ pnpm --filter mobile exec eas submit --platform android --latest --non-interacti
 ### 邀請測試員
 
 #### 內部測試員
+
 1. 轉到 **App Store Connect** > **Users and Access**
 2. 添加團隊成員
 3. 分配適當的角色
 4. 用戶將自動添加到內部 TestFlight 組
 
 #### 外部測試員
+
 1. 轉到應用 > **TestFlight** > **External Testing**
 2. 創建新的測試員組
 3. 添加電子郵件地址
@@ -435,13 +458,13 @@ pnpm --filter mobile exec eas submit --platform android --latest --non-interacti
 
 ### 監控指標
 
-| 指標 | 目標 | 說明 |
-|------|------|--------|
-| 崩潰率 | < 0.1% | 異常終止的會話百分比 |
-| ANR 率 | < 0.05% | 應用無響應事件 |
-| 保留率（D1） | > 40% | 安裝後 1 天內仍在使用的用戶 |
-| 保留率（D7） | > 20% | 安裝後 7 天內仍在使用的用戶 |
-| 評分 | > 4.0/5.0 | 平均用戶評分 |
+| 指標         | 目標      | 說明                        |
+| ------------ | --------- | --------------------------- |
+| 崩潰率       | < 0.1%    | 異常終止的會話百分比        |
+| ANR 率       | < 0.05%   | 應用無響應事件              |
+| 保留率（D1） | > 40%     | 安裝後 1 天內仍在使用的用戶 |
+| 保留率（D7） | > 20%     | 安裝後 7 天內仍在使用的用戶 |
+| 評分         | > 4.0/5.0 | 平均用戶評分                |
 
 ---
 
@@ -497,13 +520,13 @@ pnpm --filter mobile exec eas submit --platform android --latest --non-interacti
 
 ### 熱修復 vs 常規更新
 
-| 方面 | 熱修復 | 常規更新 |
-|------|--------|---------|
-| 用途 | 關鍵 bug | 功能、增強功能 |
-| 發佈模式 | 緊急 | 計劃 |
-| 版本凸起 | 修補版 | 次要版或主要版 |
-| 測試時間 | 最小 | 完整 |
-| 發佈時間 | 數小時 | 計劃 |
+| 方面     | 熱修復   | 常規更新       |
+| -------- | -------- | -------------- |
+| 用途     | 關鍵 bug | 功能、增強功能 |
+| 發佈模式 | 緊急     | 計劃           |
+| 版本凸起 | 修補版   | 次要版或主要版 |
+| 測試時間 | 最小     | 完整           |
+| 發佈時間 | 數小時   | 計劃           |
 
 ### 熱修復流程
 
@@ -618,6 +641,7 @@ pnpm --filter mobile exec eas submit --platform android --latest --non-interacti
 
 **問題**：EAS 構建失敗
 **解決方案**：
+
 1. 檢查構建日誌中的特定錯誤
 2. 驗證所有環境變量設置正確
 3. 確保依賴項正確安裝
@@ -627,6 +651,7 @@ pnpm --filter mobile exec eas submit --platform android --latest --non-interacti
 
 **問題**：提交到 App Store 或 Google Play 失敗
 **解決方案**：
+
 1. 驗證 API 密鑰和證書
 2. 檢查應用 ID 和包名
 3. 確保應用版本號遞增
@@ -636,6 +661,7 @@ pnpm --filter mobile exec eas submit --platform android --latest --non-interacti
 
 **問題**：應用被應用商店拒絕
 **解決方案**：
+
 1. 閱讀拒絕原因詳情
 2. 解決所有指出的問題
 3. 凸起修補版本

@@ -1,25 +1,33 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { makeScopedStorageKey, makeScopedStoragePrefix, type TenantContext } from "@campus/shared/src";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  makeScopedStorageKey,
+  makeScopedStoragePrefix,
+  type TenantContext,
+} from '@campus/shared/src';
 
-export { makeScopedStorageKey, makeScopedStoragePrefix, type TenantContext } from "@campus/shared/src";
+export {
+  makeScopedStorageKey,
+  makeScopedStoragePrefix,
+  type TenantContext,
+} from '@campus/shared/src';
 
 export const LEGACY_GLOBAL_STORAGE_KEYS = new Set([
-  "@schedule_courses",
-  "@schedule_events",
-  "@schedule_semester",
-  "@schedule_view",
-  "@schedule_filter",
-  "ai_chat_history",
-  "@ai_course_advisor_preferences",
-  "@ai_course_advisor_chat_history",
-  "campus.streak.v1",
+  '@schedule_courses',
+  '@schedule_events',
+  '@schedule_semester',
+  '@schedule_view',
+  '@schedule_filter',
+  'ai_chat_history',
+  '@ai_course_advisor_preferences',
+  '@ai_course_advisor_chat_history',
+  'campus.streak.v1',
 ]);
 
 const LEGACY_SCOPED_PREFIXES = [
-  "campus.favorites.",
-  "@search_history.",
-  "@menu_subscriptions_",
-  "@menu_subscription_settings_",
+  'campus.favorites.',
+  '@search_history.',
+  '@menu_subscriptions_',
+  '@menu_subscription_settings_',
 ];
 
 function includesTenantMarker(key: string, marker: string): boolean {
@@ -27,10 +35,12 @@ function includesTenantMarker(key: string, marker: string): boolean {
 }
 
 function matchesLegacyScopedKey(key: string, context: TenantContext): boolean {
-  const uid = context.uid ? String(context.uid).trim() : "";
-  const schoolId = context.schoolId ? String(context.schoolId).trim() : "";
+  const uid = context.uid ? String(context.uid).trim() : '';
+  const schoolId = context.schoolId ? String(context.schoolId).trim() : '';
 
-  if (LEGACY_SCOPED_PREFIXES.some((prefix) => key.startsWith(prefix) && (!uid || key.includes(uid)))) {
+  if (
+    LEGACY_SCOPED_PREFIXES.some((prefix) => key.startsWith(prefix) && (!uid || key.includes(uid)))
+  ) {
     return true;
   }
 

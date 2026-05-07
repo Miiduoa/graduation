@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,12 @@ import {
   Dimensions,
   TouchableOpacity,
   Modal,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { theme } from "../ui/theme";
-import { useThemeMode } from "../state/theme";
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from "../ui/navigationTheme";
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { theme } from '../ui/theme';
+import { useThemeMode } from '../state/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import {
   getGamificationState,
   dailyCheckIn,
@@ -26,35 +26,36 @@ import {
   type AchievementCategory,
   type LeaderboardEntry,
   type WeeklyChallenge,
-} from "../services/gamificationEngine";
+} from '../services/gamificationEngine';
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
+const SCREEN_WIDTH = Dimensions.get('window').width;
 const ACHIEVEMENT_COLUMNS = 3;
-const ACHIEVEMENT_SIZE = (SCREEN_WIDTH - theme.space.lg * 2 - theme.space.sm * 2) / ACHIEVEMENT_COLUMNS;
+const ACHIEVEMENT_SIZE =
+  (SCREEN_WIDTH - theme.space.lg * 2 - theme.space.sm * 2) / ACHIEVEMENT_COLUMNS;
 
 const ACHIEVEMENT_CATEGORIES: AchievementCategory[] = [
-  "academic",
-  "social",
-  "exploration",
-  "consistency",
-  "mastery",
-  "special",
+  'academic',
+  'social',
+  'exploration',
+  'consistency',
+  'mastery',
+  'special',
 ];
 
 const CATEGORY_LABELS: Record<AchievementCategory, string> = {
-  academic: "學術",
-  social: "社交",
-  exploration: "探索",
-  consistency: "堅持",
-  mastery: "精通",
-  special: "特殊",
+  academic: '學術',
+  social: '社交',
+  exploration: '探索',
+  consistency: '堅持',
+  mastery: '精通',
+  special: '特殊',
 };
 
 const RARITY_COLORS: Record<string, { border: string; glow: string }> = {
-  common: { border: theme.colors.border, glow: "transparent" },
-  rare: { border: "#60A5FA", glow: "rgba(96, 165, 250, 0.3)" },
-  epic: { border: "#C4B5FD", glow: "rgba(196, 181, 253, 0.3)" },
-  legendary: { border: "#FBBF24", glow: "rgba(251, 191, 36, 0.4)" },
+  common: { border: theme.colors.border, glow: 'transparent' },
+  rare: { border: '#60A5FA', glow: 'rgba(96, 165, 250, 0.3)' },
+  epic: { border: '#C4B5FD', glow: 'rgba(196, 181, 253, 0.3)' },
+  legendary: { border: '#FBBF24', glow: 'rgba(251, 191, 36, 0.4)' },
 };
 
 export function GamificationScreen() {
@@ -62,7 +63,7 @@ export function GamificationScreen() {
   const themeMode = useThemeMode();
   const [gamState, setGamState] = useState<GamificationState | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<AchievementCategory>("academic");
+  const [selectedCategory, setSelectedCategory] = useState<AchievementCategory>('academic');
   const [selectedAchievement, setSelectedAchievement] = useState<Achievement | null>(null);
   const [showAchievementModal, setShowAchievementModal] = useState(false);
   const xpProgressAnim = useRef(new Animated.Value(0)).current;
@@ -85,10 +86,10 @@ export function GamificationScreen() {
 
   const loadGamificationState = async () => {
     try {
-      const state = await getGamificationState("你", "資訊系");
+      const state = await getGamificationState('你', '資訊系');
       setGamState(state);
     } catch (err) {
-      console.warn("[GamificationScreen] Load error:", err);
+      console.warn('[GamificationScreen] Load error:', err);
     }
   };
 
@@ -104,22 +105,22 @@ export function GamificationScreen() {
       await loadGamificationState();
       // TODO: Show toast with result
     } catch (err) {
-      console.warn("[GamificationScreen] Check-in error:", err);
+      console.warn('[GamificationScreen] Check-in error:', err);
     }
   };
 
   const handleEarnXP = async () => {
     try {
-      const result = await earnXP("daily_login");
+      const result = await earnXP('daily_login');
       await loadGamificationState();
     } catch (err) {
-      console.warn("[GamificationScreen] Earn XP error:", err);
+      console.warn('[GamificationScreen] Earn XP error:', err);
     }
   };
 
   const filteredAchievements = useMemo(
     () => gamState?.achievements.filter((a) => a.category === selectedCategory) ?? [],
-    [gamState?.achievements, selectedCategory]
+    [gamState?.achievements, selectedCategory],
   );
 
   if (!gamState) {
@@ -132,7 +133,7 @@ export function GamificationScreen() {
 
   const xpProgressWidth = xpProgressAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ["0%", "100%"],
+    outputRange: ['0%', '100%'],
   });
 
   const getRarityColor = (rarity: string) => RARITY_COLORS[rarity] || RARITY_COLORS.common;
@@ -156,7 +157,7 @@ export function GamificationScreen() {
             height: ACHIEVEMENT_SIZE,
             backgroundColor: isLocked ? theme.colors.surface : theme.colors.surface,
             borderColor: isLocked ? theme.colors.border : rarityColor.border,
-            shadowColor: isLocked ? "transparent" : rarityColor.glow,
+            shadowColor: isLocked ? 'transparent' : rarityColor.glow,
           },
         ]}
       >
@@ -170,11 +171,7 @@ export function GamificationScreen() {
             </>
           ) : (
             <>
-              <Ionicons
-                name={achievement.icon as any}
-                size={40}
-                color={theme.colors.achievement}
-              />
+              <Ionicons name={achievement.icon as any} size={40} color={theme.colors.achievement} />
               <Text style={[styles.achievementTitle, { color: theme.colors.text }]}>
                 {achievement.title}
               </Text>
@@ -192,17 +189,17 @@ export function GamificationScreen() {
 
   const renderLeaderboardEntry = (entry: LeaderboardEntry) => {
     let medalColor = theme.colors.text;
-    let medalIcon: string = "ios-ellipse-outline";
+    let medalIcon: string = 'ios-ellipse-outline';
 
     if (entry.rank === 1) {
-      medalIcon = "medal";
-      medalColor = "#FBBF24";
+      medalIcon = 'medal';
+      medalColor = '#FBBF24';
     } else if (entry.rank === 2) {
-      medalIcon = "medal";
-      medalColor = "#A1A1AA";
+      medalIcon = 'medal';
+      medalColor = '#A1A1AA';
     } else if (entry.rank === 3) {
-      medalIcon = "medal";
-      medalColor = "#FCA5A5";
+      medalIcon = 'medal';
+      medalColor = '#FCA5A5';
     }
 
     return (
@@ -211,7 +208,7 @@ export function GamificationScreen() {
         style={[
           styles.leaderboardRow,
           {
-            backgroundColor: entry.isCurrentUser ? theme.colors.accentSoft : "transparent",
+            backgroundColor: entry.isCurrentUser ? theme.colors.accentSoft : 'transparent',
             borderBottomColor: theme.colors.border,
           },
         ]}
@@ -227,13 +224,8 @@ export function GamificationScreen() {
               {entry.displayName}
             </Text>
             {entry.isCurrentUser && (
-              <View
-                style={[
-                  styles.youBadge,
-                  { backgroundColor: theme.colors.accent },
-                ]}
-              >
-                <Text style={[styles.youBadgeText, { color: "#FFFFFF" }]}>你</Text>
+              <View style={[styles.youBadge, { backgroundColor: theme.colors.accent }]}>
+                <Text style={[styles.youBadgeText, { color: '#FFFFFF' }]}>你</Text>
               </View>
             )}
           </View>
@@ -244,9 +236,7 @@ export function GamificationScreen() {
 
         <View style={styles.leaderboardStats}>
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.colors.accent }]}>
-              Lv.{entry.level}
-            </Text>
+            <Text style={[styles.statValue, { color: theme.colors.accent }]}>Lv.{entry.level}</Text>
             <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>等級</Text>
           </View>
           <View style={styles.statItem}>
@@ -256,9 +246,7 @@ export function GamificationScreen() {
             <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>連勝</Text>
           </View>
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: theme.colors.text }]}>
-              {entry.xp}
-            </Text>
+            <Text style={[styles.statValue, { color: theme.colors.text }]}>{entry.xp}</Text>
             <Text style={[styles.statLabel, { color: theme.colors.textSecondary }]}>XP</Text>
           </View>
         </View>
@@ -333,7 +321,7 @@ export function GamificationScreen() {
 
   const renderRecentXPGain = (item: { action: string; xp: number; timestamp: number }) => {
     const date = new Date(item.timestamp);
-    const timeStr = date.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
+    const timeStr = date.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
 
     return (
       <View
@@ -347,16 +335,10 @@ export function GamificationScreen() {
         ]}
       >
         <View style={styles.xpGainLeft}>
-          <Text style={[styles.xpGainAction, { color: theme.colors.text }]}>
-            {item.action}
-          </Text>
-          <Text style={[styles.xpGainTime, { color: theme.colors.textSecondary }]}>
-            {timeStr}
-          </Text>
+          <Text style={[styles.xpGainAction, { color: theme.colors.text }]}>{item.action}</Text>
+          <Text style={[styles.xpGainTime, { color: theme.colors.textSecondary }]}>{timeStr}</Text>
         </View>
-        <Text style={[styles.xpGainAmount, { color: theme.colors.growth }]}>
-          +{item.xp} XP
-        </Text>
+        <Text style={[styles.xpGainAmount, { color: theme.colors.growth }]}>+{item.xp} XP</Text>
       </View>
     );
   };
@@ -433,9 +415,7 @@ export function GamificationScreen() {
             style={[styles.testButton, { backgroundColor: theme.colors.accentSoft }]}
             onPress={handleEarnXP}
           >
-            <Text style={[styles.testButtonText, { color: theme.colors.accent }]}>
-              測試獲得 XP
-            </Text>
+            <Text style={[styles.testButtonText, { color: theme.colors.accent }]}>測試獲得 XP</Text>
           </TouchableOpacity>
         </View>
 
@@ -469,9 +449,7 @@ export function GamificationScreen() {
                 <Text style={[styles.streakLabel, { color: theme.colors.textSecondary }]}>
                   天連勝
                 </Text>
-                {gamState.streak.current > 0 && (
-                  <Text style={styles.fireEmoji}>🔥</Text>
-                )}
+                {gamState.streak.current > 0 && <Text style={styles.fireEmoji}>🔥</Text>}
               </View>
 
               <View style={styles.streakDivider} />
@@ -492,7 +470,7 @@ export function GamificationScreen() {
                   const dayIndex = 6 - i;
                   const today = new Date();
                   const date = new Date(today.getTime() - dayIndex * 24 * 60 * 60 * 1000);
-                  const dateStr = date.toISOString().split("T")[0];
+                  const dateStr = date.toISOString().split('T')[0];
                   const isCheckedIn = gamState.streak.history.includes(dateStr);
 
                   return (
@@ -511,13 +489,11 @@ export function GamificationScreen() {
                         style={[
                           styles.calendarDayLabel,
                           {
-                            color: isCheckedIn
-                              ? theme.colors.streak
-                              : theme.colors.textSecondary,
+                            color: isCheckedIn ? theme.colors.streak : theme.colors.textSecondary,
                           },
                         ]}
                       >
-                        {["日", "一", "二", "三", "四", "五", "六"][date.getDay()]}
+                        {['日', '一', '二', '三', '四', '五', '六'][date.getDay()]}
                       </Text>
                     </View>
                   );
@@ -544,9 +520,7 @@ export function GamificationScreen() {
         <View style={[styles.section, { marginTop: theme.space.lg }]}>
           <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>本週挑戰</Text>
 
-          {gamState.weeklyChallenges.map((challenge) =>
-            renderWeeklyChallenge(challenge)
-          )}
+          {gamState.weeklyChallenges.map((challenge) => renderWeeklyChallenge(challenge))}
         </View>
 
         {/* ───── Achievement Tabs & Grid ───── */}
@@ -567,9 +541,7 @@ export function GamificationScreen() {
                   styles.categoryTab,
                   {
                     borderBottomColor:
-                      selectedCategory === cat
-                        ? theme.colors.accent
-                        : "transparent",
+                      selectedCategory === cat ? theme.colors.accent : 'transparent',
                     borderBottomWidth: selectedCategory === cat ? 2 : 0,
                   },
                 ]}
@@ -579,9 +551,7 @@ export function GamificationScreen() {
                     styles.categoryTabText,
                     {
                       color:
-                        selectedCategory === cat
-                          ? theme.colors.accent
-                          : theme.colors.textSecondary,
+                        selectedCategory === cat ? theme.colors.accent : theme.colors.textSecondary,
                     },
                   ]}
                 >
@@ -624,18 +594,14 @@ export function GamificationScreen() {
         <View style={[styles.section, { marginTop: theme.space.lg }]}>
           <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>排行榜 TOP 10</Text>
 
-          {gamState.leaderboard.slice(0, 10).map((entry) =>
-            renderLeaderboardEntry(entry)
-          )}
+          {gamState.leaderboard.slice(0, 10).map((entry) => renderLeaderboardEntry(entry))}
         </View>
 
         {/* ───── Recent XP Gains ───── */}
         <View style={[styles.section, { marginTop: theme.space.lg }]}>
           <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>最近獲得</Text>
 
-          {gamState.recentXPGains.map((gain) =>
-            renderRecentXPGain(gain)
-          )}
+          {gamState.recentXPGains.map((gain) => renderRecentXPGain(gain))}
         </View>
       </ScrollView>
 
@@ -692,7 +658,7 @@ export function GamificationScreen() {
                     styles.modalBadge,
                     {
                       backgroundColor:
-                        selectedAchievement.rarity === "legendary"
+                        selectedAchievement.rarity === 'legendary'
                           ? theme.colors.achievementSoft
                           : theme.colors.accentSoft,
                     },
@@ -703,7 +669,7 @@ export function GamificationScreen() {
                       styles.modalBadgeText,
                       {
                         color:
-                          selectedAchievement.rarity === "legendary"
+                          selectedAchievement.rarity === 'legendary'
                             ? theme.colors.achievement
                             : theme.colors.accent,
                       },
@@ -756,8 +722,7 @@ export function GamificationScreen() {
 
               {selectedAchievement.unlockedAt && (
                 <Text style={[styles.modalUnlockedDate, { marginTop: theme.space.lg }]}>
-                  解鎖於{" "}
-                  {new Date(selectedAchievement.unlockedAt).toLocaleDateString("zh-TW")}
+                  解鎖於 {new Date(selectedAchievement.unlockedAt).toLocaleDateString('zh-TW')}
                 </Text>
               )}
 
@@ -790,14 +755,14 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     marginTop: 32,
-    textAlign: "center",
+    textAlign: 'center',
   },
 
   // Hero Section
   heroSection: {
     borderRadius: theme.radius.lg,
     padding: theme.space.lg,
-    alignItems: "center",
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
@@ -809,36 +774,36 @@ const styles = StyleSheet.create({
   },
   levelNumber: {
     fontSize: 32,
-    fontWeight: "700",
+    fontWeight: '700',
     marginBottom: theme.space.xs,
   },
   levelTitle: {
     fontSize: 18,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.lg,
   },
   xpProgressContainer: {
-    width: "100%",
+    width: '100%',
     height: 12,
     borderRadius: theme.radius.full,
-    overflow: "hidden",
+    overflow: 'hidden',
     marginBottom: theme.space.md,
   },
   xpProgressBar: {
-    height: "100%",
+    height: '100%',
   },
   xpProgressText: {
     fontSize: 12,
     marginBottom: theme.space.lg,
   },
   totalXPContainer: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: theme.space.md,
   },
   totalXPText: {
     marginLeft: theme.space.xs,
-    fontWeight: "600",
+    fontWeight: '600',
     fontSize: 14,
   },
   testButton: {
@@ -847,7 +812,7 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
   },
   testButtonText: {
-    fontWeight: "600",
+    fontWeight: '600',
     fontSize: 12,
   },
 
@@ -855,7 +820,7 @@ const styles = StyleSheet.create({
   section: {},
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: '700',
     marginBottom: theme.space.md,
   },
 
@@ -867,17 +832,17 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
   },
   streakNumbers: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   streakItem: {
-    alignItems: "center",
+    alignItems: 'center',
     flex: 1,
   },
   streakValue: {
     fontSize: 36,
-    fontWeight: "800",
+    fontWeight: '800',
   },
   streakLabel: {
     fontSize: 12,
@@ -895,11 +860,11 @@ const styles = StyleSheet.create({
   },
   calendar: {},
   calendarDays: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
   calendarDayWrapper: {
-    alignItems: "center",
+    alignItems: 'center',
   },
   calendarDay: {
     width: 32,
@@ -909,19 +874,19 @@ const styles = StyleSheet.create({
   },
   calendarDayLabel: {
     fontSize: 10,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   checkInButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: theme.space.md,
     borderRadius: theme.radius.md,
     marginTop: theme.space.lg,
   },
   checkInButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
+    color: '#FFFFFF',
+    fontWeight: '700',
     fontSize: 14,
     marginLeft: theme.space.sm,
   },
@@ -935,23 +900,23 @@ const styles = StyleSheet.create({
     marginBottom: theme.space.md,
   },
   challengeHeader: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   challengeIconContainer: {
     width: 48,
     height: 48,
     borderRadius: theme.radius.md,
     backgroundColor: theme.colors.surface2,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: theme.space.md,
   },
   challengeTexts: {
     flex: 1,
   },
   challengeTitle: {
-    fontWeight: "600",
+    fontWeight: '600',
     fontSize: 14,
   },
   challengeDesc: {
@@ -960,32 +925,32 @@ const styles = StyleSheet.create({
   },
   challengeProgress: {
     marginTop: theme.space.md,
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   progressBarBg: {
     flex: 1,
     height: 8,
     borderRadius: theme.radius.full,
-    overflow: "hidden",
+    overflow: 'hidden',
     marginRight: theme.space.sm,
   },
   progressBarFill: {
-    height: "100%",
+    height: '100%',
   },
   progressText: {
     fontSize: 11,
     minWidth: 50,
-    textAlign: "right",
+    textAlign: 'right',
   },
   challengeReward: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: theme.space.md,
   },
   rewardText: {
     fontSize: 12,
-    fontWeight: "600",
+    fontWeight: '600',
     marginLeft: theme.space.xs,
   },
 
@@ -1000,12 +965,12 @@ const styles = StyleSheet.create({
   },
   categoryTabText: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   achievementGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-start",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
   },
   achievementCard: {
     borderRadius: theme.radius.md,
@@ -1013,47 +978,47 @@ const styles = StyleSheet.create({
     padding: theme.space.sm,
     marginRight: theme.space.sm,
     marginBottom: theme.space.md,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
     shadowOpacity: 0.4,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
     elevation: 4,
   },
   achievementInner: {
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    height: "100%",
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
   },
   achievementTitle: {
     fontSize: 10,
-    fontWeight: "600",
+    fontWeight: '600',
     marginTop: theme.space.xs,
-    textAlign: "center",
+    textAlign: 'center',
   },
   achievementCounter: {
-    alignItems: "center",
+    alignItems: 'center',
   },
   achievementCounterText: {
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.sm,
   },
   achievementCounterBar: {
-    width: "100%",
+    width: '100%',
     height: 8,
     borderRadius: theme.radius.full,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   achievementCounterFill: {
-    height: "100%",
+    height: '100%',
   },
 
   // Leaderboard
   leaderboardRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: theme.space.md,
     paddingHorizontal: theme.space.md,
     marginBottom: theme.space.sm,
@@ -1061,23 +1026,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   leaderboardRank: {
-    alignItems: "center",
+    alignItems: 'center',
     marginRight: theme.space.lg,
   },
   rankNumber: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: '700',
     marginTop: theme.space.xs,
   },
   leaderboardInfo: {
     flex: 1,
   },
   nameRow: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   leaderboardName: {
-    fontWeight: "600",
+    fontWeight: '600',
     fontSize: 14,
     marginRight: theme.space.sm,
   },
@@ -1088,24 +1053,24 @@ const styles = StyleSheet.create({
   },
   youBadgeText: {
     fontSize: 10,
-    fontWeight: "700",
+    fontWeight: '700',
   },
   leaderboardDept: {
     fontSize: 11,
     marginTop: theme.space.xs,
   },
   leaderboardStats: {
-    flexDirection: "row",
-    alignItems: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
     marginLeft: theme.space.md,
   },
   statItem: {
-    alignItems: "center",
+    alignItems: 'center',
     marginLeft: theme.space.lg,
   },
   statValue: {
     fontSize: 13,
-    fontWeight: "700",
+    fontWeight: '700',
   },
   statLabel: {
     fontSize: 10,
@@ -1114,9 +1079,9 @@ const styles = StyleSheet.create({
 
   // XP Gains
   xpGainItem: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: theme.space.md,
     paddingVertical: theme.space.sm,
     borderRadius: theme.radius.md,
@@ -1127,7 +1092,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   xpGainAction: {
-    fontWeight: "600",
+    fontWeight: '600',
     fontSize: 13,
   },
   xpGainTime: {
@@ -1135,42 +1100,42 @@ const styles = StyleSheet.create({
     marginTop: theme.space.xs,
   },
   xpGainAmount: {
-    fontWeight: "700",
+    fontWeight: '700',
     fontSize: 14,
   },
 
   // Modal
   modalOverlay: {
     flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalContent: {
     borderRadius: theme.radius.lg,
     padding: theme.space.lg,
-    width: "85%",
+    width: '85%',
     maxWidth: 320,
-    alignItems: "center",
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
   modalClose: {
-    position: "absolute",
+    position: 'absolute',
     top: theme.space.md,
     right: theme.space.md,
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: '700',
     marginBottom: theme.space.sm,
-    textAlign: "center",
+    textAlign: 'center',
   },
   modalDesc: {
     fontSize: 13,
-    textAlign: "center",
+    textAlign: 'center',
   },
   modalBadges: {
-    flexDirection: "row",
+    flexDirection: 'row',
   },
   modalBadge: {
     paddingHorizontal: theme.space.md,
@@ -1179,38 +1144,38 @@ const styles = StyleSheet.create({
     marginHorizontal: theme.space.sm,
   },
   modalBadgeText: {
-    fontWeight: "700",
+    fontWeight: '700',
     fontSize: 11,
   },
   modalCondition: {
-    width: "100%",
+    width: '100%',
   },
   modalConditionLabel: {
     fontSize: 11,
-    fontWeight: "600",
+    fontWeight: '600',
     marginBottom: theme.space.xs,
   },
   modalConditionText: {
     fontSize: 13,
   },
   modalProgress: {
-    width: "100%",
+    width: '100%',
   },
   modalUnlockedDate: {
     fontSize: 12,
     color: theme.colors.success,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   modalButton: {
-    width: "100%",
+    width: '100%',
     paddingVertical: theme.space.md,
     borderRadius: theme.radius.md,
-    alignItems: "center",
+    alignItems: 'center',
     marginTop: theme.space.lg,
   },
   modalButtonText: {
-    color: "#FFFFFF",
-    fontWeight: "700",
+    color: '#FFFFFF',
+    fontWeight: '700',
     fontSize: 14,
   },
 });

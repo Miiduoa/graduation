@@ -18,7 +18,7 @@
  *   - 貝葉斯推論的成績區間估計
  */
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getAnyCachedGrades,
   getAnyCachedCourses,
@@ -27,11 +27,11 @@ import {
   getAnyCachedTCAttendance,
   getAnyCachedTCTodos,
   getAnyCachedStudentInfo,
-} from "./puDataCache";
+} from './puDataCache';
 
-const INSIGHTS_CACHE_KEY = "@academic_insights:full";
-import type { PUGrade, PUGradeResult, PUCourseResult, PUStudentInfo } from "./puDirectScraper";
-import type { TCCourse, TCActivity, TCAttendance } from "./tronClassClient";
+const INSIGHTS_CACHE_KEY = '@academic_insights:full';
+import type { PUGrade, PUGradeResult, PUCourseResult, PUStudentInfo } from './puDirectScraper';
+import type { TCCourse, TCActivity, TCAttendance } from './tronClassClient';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -48,8 +48,8 @@ export type GpaPrediction = {
   predictedNextGpa: number;
   predictedNext: number;
   confidence: number; // 0-1
-  trend: "improving" | "declining" | "stable";
-  direction: "improving" | "declining" | "stable";
+  trend: 'improving' | 'declining' | 'stable';
+  direction: 'improving' | 'declining' | 'stable';
   trendStrength: number; // 0-1, how strong the trend is
   projectedGraduation: number | null; // projected graduation GPA
   historicalTrends: GpaTrend[];
@@ -61,19 +61,19 @@ export type CourseDifficulty = {
   courseName: string;
   courseCode: string;
   category: string;
-  difficulty: "easy" | "moderate" | "hard" | "very_hard";
+  difficulty: 'easy' | 'moderate' | 'hard' | 'very_hard';
   difficultyScore: number; // 0-100
   difficultyRating: number;
   averageScore: number;
   score: number;
   expectedScore: number;
   deviation: number;
-  performance: "above" | "below" | "at";
+  performance: 'above' | 'below' | 'at';
   passRate: number;
   factors: string[];
 };
 
-export type RiskLevel = "safe" | "watch" | "warning" | "critical";
+export type RiskLevel = 'safe' | 'watch' | 'warning' | 'critical';
 
 export type AcademicRisk = {
   level: RiskLevel;
@@ -88,7 +88,7 @@ export type AcademicRisk = {
 export type RiskAssessment = AcademicRisk;
 
 export type RiskFactor = {
-  category: "grades" | "attendance" | "assignments" | "trend" | "workload";
+  category: 'grades' | 'attendance' | 'assignments' | 'trend' | 'workload';
   description: string;
   severity: number; // 0-1
   icon: string; // Ionicons name
@@ -100,7 +100,7 @@ export type RiskFactor = {
 };
 
 export type StudyRecommendation = {
-  type: "priority" | "strategy" | "balance" | "opportunity" | "warning";
+  type: 'priority' | 'strategy' | 'balance' | 'opportunity' | 'warning';
   title: string;
   description: string;
   actionable: string;
@@ -161,7 +161,11 @@ function linearRegression(points: { x: number; y: number }[]): {
   const n = points.length;
   if (n < 2) return { slope: 0, intercept: points[0]?.y ?? 0, r2: 0 };
 
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+  let sumX = 0,
+    sumY = 0,
+    sumXY = 0,
+    sumX2 = 0,
+    sumY2 = 0;
   for (const p of points) {
     sumX += p.x;
     sumY += p.y;
@@ -178,7 +182,8 @@ function linearRegression(points: { x: number; y: number }[]): {
 
   // R² (coefficient of determination)
   const yMean = sumY / n;
-  let ssTot = 0, ssRes = 0;
+  let ssTot = 0,
+    ssRes = 0;
   for (const p of points) {
     ssTot += (p.y - yMean) ** 2;
     ssRes += (p.y - (slope * p.x + intercept)) ** 2;
@@ -227,7 +232,7 @@ function clamp(value: number, min: number, max: number): number {
 // ─── Data Processing ────────────────────────────────────
 
 function gradeToGpa(score: number | string): number {
-  const num = typeof score === "string" ? parseFloat(score) : score;
+  const num = typeof score === 'string' ? parseFloat(score) : score;
   if (isNaN(num)) return 0;
   if (num >= 90) return 4.0;
   if (num >= 85) return 3.7;
@@ -242,8 +247,8 @@ function gradeToGpa(score: number | string): number {
 }
 
 function extractNumericScore(score: number | string): number | null {
-  if (typeof score === "number") return score;
-  if (score === "Pass" || score === "通過") return 70; // pass threshold
+  if (typeof score === 'number') return score;
+  if (score === 'Pass' || score === '通過') return 70; // pass threshold
   const num = parseFloat(score);
   return isNaN(num) ? null : num;
 }
@@ -271,16 +276,16 @@ function sortSemesters(semesters: string[]): string[] {
 
 function categorizeCourse(courseName: string, courseType: string): string {
   const name = courseName.toLowerCase();
-  if (/數學|統計|微積分|線性代數|離散/.test(name)) return "數理";
-  if (/程式|資料結構|演算法|資料庫|系統|網路|軟體|資安/.test(name)) return "資訊專業";
-  if (/英文|英語|日語|日文|語言|文學/.test(name)) return "語言";
-  if (/體育|運動|健康/.test(name)) return "體育";
-  if (/通識|博雅|人文|藝術|哲學|歷史|社會/.test(name)) return "通識人文";
-  if (/管理|經濟|會計|行銷|財務|商業/.test(name)) return "商管";
-  if (/物理|化學|生物|自然/.test(name)) return "自然科學";
-  if (courseType === "必修" || courseType === "Required") return "必修";
-  if (courseType === "選修" || courseType === "Elective") return "選修";
-  return "其他";
+  if (/數學|統計|微積分|線性代數|離散/.test(name)) return '數理';
+  if (/程式|資料結構|演算法|資料庫|系統|網路|軟體|資安/.test(name)) return '資訊專業';
+  if (/英文|英語|日語|日文|語言|文學/.test(name)) return '語言';
+  if (/體育|運動|健康/.test(name)) return '體育';
+  if (/通識|博雅|人文|藝術|哲學|歷史|社會/.test(name)) return '通識人文';
+  if (/管理|經濟|會計|行銷|財務|商業/.test(name)) return '商管';
+  if (/物理|化學|生物|自然/.test(name)) return '自然科學';
+  if (courseType === '必修' || courseType === 'Required') return '必修';
+  if (courseType === '選修' || courseType === 'Elective') return '選修';
+  return '其他';
 }
 
 // ─── Core Analysis Functions ────────────────────────────
@@ -325,13 +330,13 @@ export function analyzeGpaTrend(gradeResult: PUGradeResult): GpaPrediction {
       predictedNextGpa: 0,
       predictedNext: 0,
       confidence: 0,
-      trend: "stable",
-      direction: "stable",
+      trend: 'stable',
+      direction: 'stable',
       trendStrength: 0,
       projectedGraduation: null,
       historicalTrends: [],
       trends: [],
-      analysis: "目前沒有足夠成績資料可分析趨勢。",
+      analysis: '目前沒有足夠成績資料可分析趨勢。',
     };
   }
 
@@ -364,10 +369,10 @@ export function analyzeGpaTrend(gradeResult: PUGradeResult): GpaPrediction {
 
   // Determine trend direction
   const slopeThreshold = 0.05;
-  let trend: "improving" | "declining" | "stable";
-  if (regression.slope > slopeThreshold) trend = "improving";
-  else if (regression.slope < -slopeThreshold) trend = "declining";
-  else trend = "stable";
+  let trend: 'improving' | 'declining' | 'stable';
+  if (regression.slope > slopeThreshold) trend = 'improving';
+  else if (regression.slope < -slopeThreshold) trend = 'declining';
+  else trend = 'stable';
 
   const trendStrength = clamp(Math.abs(regression.slope) / 0.3, 0, 1);
 
@@ -376,7 +381,10 @@ export function analyzeGpaTrend(gradeResult: PUGradeResult): GpaPrediction {
   const projectedGraduation =
     remainingSemesters > 0
       ? clamp(
-          Math.round((regression.slope * (trends.length + remainingSemesters / 2) + regression.intercept) * 100) / 100,
+          Math.round(
+            (regression.slope * (trends.length + remainingSemesters / 2) + regression.intercept) *
+              100,
+          ) / 100,
           0,
           4.0,
         )
@@ -394,14 +402,14 @@ export function analyzeGpaTrend(gradeResult: PUGradeResult): GpaPrediction {
     historicalTrends: trends,
     trends: [
       ...trends,
-      { semester: "預測", gpa: predictedNextGpa, credits: 0, courseCount: 0, predicted: true },
+      { semester: '預測', gpa: predictedNextGpa, credits: 0, courseCount: 0, predicted: true },
     ],
     analysis:
-      trend === "improving"
+      trend === 'improving'
         ? `GPA 呈上升趨勢，預測下學期約 ${predictedNextGpa.toFixed(2)}。`
-        : trend === "declining"
-        ? `GPA 有下滑跡象，預測下學期約 ${predictedNextGpa.toFixed(2)}，建議提早安排複習。`
-        : `GPA 目前相對穩定，預測下學期約 ${predictedNextGpa.toFixed(2)}。`,
+        : trend === 'declining'
+          ? `GPA 有下滑跡象，預測下學期約 ${predictedNextGpa.toFixed(2)}，建議提早安排複習。`
+          : `GPA 目前相對穩定，預測下學期約 ${predictedNextGpa.toFixed(2)}。`,
   };
 }
 
@@ -420,7 +428,7 @@ export function analyzeCourseDifficulty(gradeResult: PUGradeResult): CourseDiffi
     if (score === null) continue;
 
     const key = grade.courseName;
-    const existing = courseScores.get(key) ?? { scores: [], code: "", type: grade.courseType };
+    const existing = courseScores.get(key) ?? { scores: [], code: '', type: grade.courseType };
     existing.scores.push(score);
     if (!existing.code && grade.courseName) existing.code = grade.courseName;
     courseScores.set(key, existing);
@@ -433,16 +441,16 @@ export function analyzeCourseDifficulty(gradeResult: PUGradeResult): CourseDiffi
     // Bayesian prior based on course category
     const category = categorizeCourse(name, data.type);
     const categoryPrior: Record<string, number> = {
-      "數理": 65,
-      "資訊專業": 60,
-      "語言": 55,
-      "體育": 40,
-      "通識人文": 45,
-      "商管": 55,
-      "自然科學": 60,
-      "必修": 55,
-      "選修": 50,
-      "其他": 50,
+      數理: 65,
+      資訊專業: 60,
+      語言: 55,
+      體育: 40,
+      通識人文: 45,
+      商管: 55,
+      自然科學: 60,
+      必修: 55,
+      選修: 50,
+      其他: 50,
     };
     const prior = categoryPrior[category] ?? 50;
 
@@ -452,18 +460,18 @@ export function analyzeCourseDifficulty(gradeResult: PUGradeResult): CourseDiffi
     const weight = Math.min(n / 3, 1); // trust observation more with more data
     const difficultyScore = Math.round(weight * observedDifficulty + (1 - weight) * prior);
 
-    let difficulty: CourseDifficulty["difficulty"];
-    if (difficultyScore >= 50) difficulty = "very_hard";
-    else if (difficultyScore >= 35) difficulty = "hard";
-    else if (difficultyScore >= 20) difficulty = "moderate";
-    else difficulty = "easy";
+    let difficulty: CourseDifficulty['difficulty'];
+    if (difficultyScore >= 50) difficulty = 'very_hard';
+    else if (difficultyScore >= 35) difficulty = 'hard';
+    else if (difficultyScore >= 20) difficulty = 'moderate';
+    else difficulty = 'easy';
 
     const factors: string[] = [];
-    if (avg < 70) factors.push("平均分偏低");
-    if (avg >= 85) factors.push("平均分優秀");
-    if (passRate < 0.8) factors.push("及格率偏低");
-    if (category === "數理" || category === "資訊專業") factors.push("理工專業課程");
-    if (stdDev(data.scores) > 10) factors.push("成績離散度高");
+    if (avg < 70) factors.push('平均分偏低');
+    if (avg >= 85) factors.push('平均分優秀');
+    if (passRate < 0.8) factors.push('及格率偏低');
+    if (category === '數理' || category === '資訊專業') factors.push('理工專業課程');
+    if (stdDev(data.scores) > 10) factors.push('成績離散度高');
 
     const expectedScore = Math.round((100 - difficultyScore) * 10) / 10;
     const averageScore = Math.round(avg * 10) / 10;
@@ -480,7 +488,7 @@ export function analyzeCourseDifficulty(gradeResult: PUGradeResult): CourseDiffi
       score: averageScore,
       expectedScore,
       deviation,
-      performance: deviation > 3 ? "above" : deviation < -3 ? "below" : "at",
+      performance: deviation > 3 ? 'above' : deviation < -3 ? 'below' : 'at',
       passRate: Math.round(passRate * 100) / 100,
       factors,
     });
@@ -504,21 +512,21 @@ export function assessAcademicRisk(
   let totalRiskScore = 0;
 
   // Factor 1: GPA Trend (weight: 30%)
-  if (gpaPrediction.trend === "declining") {
+  if (gpaPrediction.trend === 'declining') {
     const severity = clamp(gpaPrediction.trendStrength, 0.3, 1);
     factors.push({
-      category: "trend",
+      category: 'trend',
       description: `GPA 呈下降趨勢 (斜率: ${(gpaPrediction.predictedNextGpa - gpaPrediction.currentGpa).toFixed(2)})`,
       severity,
-      icon: "trending-down",
+      icon: 'trending-down',
     });
     totalRiskScore += severity * 30;
   } else if (gpaPrediction.currentGpa < 2.0) {
     factors.push({
-      category: "grades",
+      category: 'grades',
       description: `目前 GPA ${gpaPrediction.currentGpa.toFixed(2)} 低於畢業門檻 (2.0)`,
       severity: 0.9,
-      icon: "alert-circle",
+      icon: 'alert-circle',
     });
     totalRiskScore += 27;
   }
@@ -527,10 +535,10 @@ export function assessAcademicRisk(
   if (gpaPrediction.currentGpa < 2.5 && gpaPrediction.currentGpa > 0) {
     const severity = clamp((2.5 - gpaPrediction.currentGpa) / 1.5, 0.2, 1);
     factors.push({
-      category: "grades",
+      category: 'grades',
       description: `GPA ${gpaPrediction.currentGpa.toFixed(2)} 需要提升`,
       severity,
-      icon: "school-outline",
+      icon: 'school-outline',
     });
     totalRiskScore += severity * 25;
   }
@@ -544,10 +552,10 @@ export function assessAcademicRisk(
     if (totalRecords > 0 && absenceRate > 0.15) {
       const severity = clamp(absenceRate / 0.3, 0.3, 1);
       factors.push({
-        category: "attendance",
+        category: 'attendance',
         description: `缺席率 ${(absenceRate * 100).toFixed(0)}%（${absences}/${totalRecords}）`,
         severity,
-        icon: "calendar-outline",
+        icon: 'calendar-outline',
       });
       totalRiskScore += severity * 20;
     }
@@ -557,16 +565,16 @@ export function assessAcademicRisk(
   if (tcTodos && tcTodos.length > 0) {
     const overdue = tcTodos.filter((t) => {
       const due = t.end_time ? new Date(t.end_time) : null;
-      return due && due < new Date() && t.status !== "finished";
+      return due && due < new Date() && t.status !== 'finished';
     }).length;
 
     if (overdue > 0) {
       const severity = clamp(overdue / 5, 0.3, 1);
       factors.push({
-        category: "assignments",
+        category: 'assignments',
         description: `${overdue} 份作業逾期未交`,
         severity,
-        icon: "document-text-outline",
+        icon: 'document-text-outline',
       });
       totalRiskScore += severity * 15;
     }
@@ -576,10 +584,10 @@ export function assessAcademicRisk(
   if (currentCourses && currentCourses.totalCredits > 25) {
     const severity = clamp((currentCourses.totalCredits - 25) / 10, 0.2, 0.8);
     factors.push({
-      category: "workload",
+      category: 'workload',
       description: `本學期修 ${currentCourses.totalCredits} 學分，負擔較重`,
       severity,
-      icon: "barbell-outline",
+      icon: 'barbell-outline',
     });
     totalRiskScore += severity * 10;
   }
@@ -587,14 +595,14 @@ export function assessAcademicRisk(
   totalRiskScore = clamp(Math.round(totalRiskScore), 0, 100);
 
   let level: RiskLevel;
-  if (totalRiskScore >= 70) level = "critical";
-  else if (totalRiskScore >= 45) level = "warning";
-  else if (totalRiskScore >= 20) level = "watch";
-  else level = "safe";
+  if (totalRiskScore >= 70) level = 'critical';
+  else if (totalRiskScore >= 45) level = 'warning';
+  else if (totalRiskScore >= 20) level = 'watch';
+  else level = 'safe';
   const enrichedFactors = factors.map((factor) => ({
     ...factor,
     name: factor.category,
-    status: factor.severity > 0.7 ? "danger" : factor.severity > 0.35 ? "warning" : "good",
+    status: factor.severity > 0.7 ? 'danger' : factor.severity > 0.35 ? 'warning' : 'good',
     score: Math.round(factor.severity * 100),
     weight: factor.severity,
     detail: factor.description,
@@ -614,34 +622,31 @@ export function assessAcademicRisk(
   };
 }
 
-function generateRecommendations(
-  factors: RiskFactor[],
-  gpaPrediction: GpaPrediction,
-): string[] {
+function generateRecommendations(factors: RiskFactor[], gpaPrediction: GpaPrediction): string[] {
   const recs: string[] = [];
 
   for (const factor of factors) {
     switch (factor.category) {
-      case "grades":
-        recs.push("建議預約學校的課業輔導資源，或找同學組讀書會");
+      case 'grades':
+        recs.push('建議預約學校的課業輔導資源，或找同學組讀書會');
         break;
-      case "trend":
-        recs.push("成績有下滑趨勢，建議每週固定複習時間並提前準備考試");
+      case 'trend':
+        recs.push('成績有下滑趨勢，建議每週固定複習時間並提前準備考試');
         break;
-      case "attendance":
-        recs.push("出席率偏低，許多課程的平時成績與出席直接相關");
+      case 'attendance':
+        recs.push('出席率偏低，許多課程的平時成績與出席直接相關');
         break;
-      case "assignments":
-        recs.push("有逾期未交的作業，建議優先處理以免影響學期成績");
+      case 'assignments':
+        recs.push('有逾期未交的作業，建議優先處理以免影響學期成績');
         break;
-      case "workload":
-        recs.push("學分負擔較重，注意平衡課業和休息時間");
+      case 'workload':
+        recs.push('學分負擔較重，注意平衡課業和休息時間');
         break;
     }
   }
 
-  if (gpaPrediction.trend === "improving") {
-    recs.push("GPA 持續進步中，保持目前的學習節奏！");
+  if (gpaPrediction.trend === 'improving') {
+    recs.push('GPA 持續進步中，保持目前的學習節奏！');
   }
 
   return [...new Set(recs)]; // deduplicate
@@ -663,15 +668,15 @@ export function generateStudyRecommendations(
   if (tcTodos) {
     const overdue = tcTodos.filter((t) => {
       const due = t.end_time ? new Date(t.end_time) : null;
-      return due && due < new Date() && t.status !== "finished";
+      return due && due < new Date() && t.status !== 'finished';
     });
     if (overdue.length > 0) {
       recs.push({
-        type: "warning",
-        title: "逾期作業提醒",
+        type: 'warning',
+        title: '逾期作業提醒',
         description: `你有 ${overdue.length} 份作業已逾期，盡快完成以免扣分。`,
-        actionable: "前往待辦事項查看逾期作業",
-        icon: "alert-circle",
+        actionable: '前往待辦事項查看逾期作業',
+        icon: 'alert-circle',
         urgency: 1.0,
       });
     }
@@ -681,30 +686,32 @@ export function generateStudyRecommendations(
       const due = t.end_time ? new Date(t.end_time) : null;
       const now = new Date();
       const threeDays = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-      return due && due > now && due < threeDays && t.status !== "finished";
+      return due && due > now && due < threeDays && t.status !== 'finished';
     });
     if (upcoming.length > 0) {
       recs.push({
-        type: "priority",
-        title: "三天內截止",
+        type: 'priority',
+        title: '三天內截止',
         description: `有 ${upcoming.length} 份作業即將到期，建議盡早開始。`,
-        actionable: "安排今天的學習計畫",
-        icon: "time-outline",
+        actionable: '安排今天的學習計畫',
+        icon: 'time-outline',
         urgency: 0.8,
       });
     }
   }
 
   // Strategy: focus on hard courses
-  const hardCourses = difficulties.filter((d) => d.difficulty === "hard" || d.difficulty === "very_hard");
+  const hardCourses = difficulties.filter(
+    (d) => d.difficulty === 'hard' || d.difficulty === 'very_hard',
+  );
   if (hardCourses.length > 0) {
     const hardName = hardCourses[0].courseName;
     recs.push({
-      type: "strategy",
-      title: "重點突破難課",
+      type: 'strategy',
+      title: '重點突破難課',
       description: `「${hardName}」是你的高難度課程（平均 ${hardCourses[0].averageScore} 分），建議投入更多時間。`,
-      actionable: "每週多安排 2-3 小時複習此科目",
-      icon: "bulb-outline",
+      actionable: '每週多安排 2-3 小時複習此科目',
+      icon: 'bulb-outline',
       urgency: 0.6,
       relatedCourse: hardName,
     });
@@ -713,36 +720,36 @@ export function generateStudyRecommendations(
   // Balance: study-life balance
   if (currentCourses && currentCourses.totalCredits > 22) {
     recs.push({
-      type: "balance",
-      title: "注意學業負擔",
+      type: 'balance',
+      title: '注意學業負擔',
       description: `本學期修了 ${currentCourses.totalCredits} 學分（${currentCourses.courses.length} 門課），記得安排休息時間。`,
-      actionable: "嘗試番茄鐘學習法：25 分鐘專注 + 5 分鐘休息",
-      icon: "fitness-outline",
+      actionable: '嘗試番茄鐘學習法：25 分鐘專注 + 5 分鐘休息',
+      icon: 'fitness-outline',
       urgency: 0.4,
     });
   }
 
   // Opportunity: improving trend
-  if (gpaPrediction.trend === "improving") {
+  if (gpaPrediction.trend === 'improving') {
     recs.push({
-      type: "opportunity",
-      title: "保持上升動力",
+      type: 'opportunity',
+      title: '保持上升動力',
       description: `你的 GPA 正在穩定提升（目前 ${gpaPrediction.currentGpa.toFixed(2)}），預測下學期可達 ${gpaPrediction.predictedNextGpa.toFixed(2)}！`,
-      actionable: "持續目前的學習策略，你做得很好！",
-      icon: "rocket-outline",
+      actionable: '持續目前的學習策略，你做得很好！',
+      icon: 'rocket-outline',
       urgency: 0.2,
     });
   }
 
   // Easy wins
-  const easyCourses = difficulties.filter((d) => d.difficulty === "easy" && d.averageScore < 90);
+  const easyCourses = difficulties.filter((d) => d.difficulty === 'easy' && d.averageScore < 90);
   if (easyCourses.length > 0) {
     recs.push({
-      type: "opportunity",
-      title: "輕鬆拉高 GPA",
+      type: 'opportunity',
+      title: '輕鬆拉高 GPA',
       description: `「${easyCourses[0].courseName}」對你來說不難（平均 ${easyCourses[0].averageScore} 分），稍加努力就能拿高分。`,
-      actionable: "投入少量額外時間即可提升總 GPA",
-      icon: "star-outline",
+      actionable: '投入少量額外時間即可提升總 GPA',
+      icon: 'star-outline',
       urgency: 0.3,
       relatedCourse: easyCourses[0].courseName,
     });
@@ -754,9 +761,7 @@ export function generateStudyRecommendations(
 /**
  * 建立學期表現摘要
  */
-export function buildSemesterSummaries(
-  gradeResult: PUGradeResult,
-): SemesterSummary[] {
+export function buildSemesterSummaries(gradeResult: PUGradeResult): SemesterSummary[] {
   const semesterMap = groupGradesBySemester(gradeResult.grades);
   const semesters = sortSemesters([...semesterMap.keys()]);
   const summaries: SemesterSummary[] = [];
@@ -859,7 +864,8 @@ export function buildAcademicProfile(gradeResult: PUGradeResult): AcademicProfil
   const allScores = gradeResult.grades
     .map((g) => extractNumericScore(g.score))
     .filter((s): s is number => s !== null);
-  const avgScore = allScores.length > 0 ? allScores.reduce((a, b) => a + b, 0) / allScores.length : 0;
+  const avgScore =
+    allScores.length > 0 ? allScores.reduce((a, b) => a + b, 0) / allScores.length : 0;
 
   const semesterMap = groupGradesBySemester(gradeResult.grades);
   const semesterCredits = [...semesterMap.values()].map((grades) =>
@@ -872,12 +878,13 @@ export function buildAcademicProfile(gradeResult: PUGradeResult): AcademicProfil
       : 0;
 
   const passedCount = allScores.filter((s) => s >= 60).length;
-  const completionRate = allScores.length > 0 ? Math.round((passedCount / allScores.length) * 100) : 100;
+  const completionRate =
+    allScores.length > 0 ? Math.round((passedCount / allScores.length) * 100) : 100;
 
   let preferredDifficulty: string;
-  if (avgScore >= 85) preferredDifficulty = "可挑戰高難度課程";
-  else if (avgScore >= 75) preferredDifficulty = "適合中等難度課程";
-  else preferredDifficulty = "建議以基礎課程為主";
+  if (avgScore >= 85) preferredDifficulty = '可挑戰高難度課程';
+  else if (avgScore >= 75) preferredDifficulty = '適合中等難度課程';
+  else preferredDifficulty = '建議以基礎課程為主';
 
   // Find specific strong/weak subjects
   const strongSubjects = gradeResult.grades
@@ -920,7 +927,7 @@ export function buildAcademicProfile(gradeResult: PUGradeResult): AcademicProfil
  */
 export async function getFullAcademicInsights(): Promise<FullAcademicInsights | null> {
   try {
-    console.log("[AcademicInsights] Computing full insights…");
+    console.log('[AcademicInsights] Computing full insights…');
 
     const [gradeResult, coursesResult, tcAttendance, tcActivities, tcTodos, studentInfo] =
       await Promise.all([
@@ -933,7 +940,7 @@ export async function getFullAcademicInsights(): Promise<FullAcademicInsights | 
       ]);
 
     if (!gradeResult || gradeResult.grades.length === 0) {
-      console.log("[AcademicInsights] No grade data available");
+      console.log('[AcademicInsights] No grade data available');
       return null;
     }
 
@@ -992,12 +999,12 @@ export async function getFullAcademicInsights(): Promise<FullAcademicInsights | 
 
     return insights;
   } catch (error) {
-    console.error("[AcademicInsights] Error:", error);
+    console.error('[AcademicInsights] Error:', error);
     // 嘗試讀取上次快取的結果
     try {
       const cached = await AsyncStorage.getItem(INSIGHTS_CACHE_KEY);
       if (cached) {
-        console.log("[AcademicInsights] Returning cached insights");
+        console.log('[AcademicInsights] Returning cached insights');
         return JSON.parse(cached);
       }
     } catch {}
@@ -1019,23 +1026,26 @@ export async function getCachedAcademicInsights(): Promise<FullAcademicInsights 
  * 當成績更新時自動觸發，回傳 GPA 變化趨勢
  */
 export async function refreshPrediction(studentId?: string): Promise<{
-  oldGPA: number; newGPA: number; trend: 'up' | 'down' | 'stable';
+  oldGPA: number;
+  newGPA: number;
+  trend: 'up' | 'down' | 'stable';
 } | null> {
   try {
     const insights = await getFullAcademicInsights();
-	    if (!insights) return null;
-	    const { gpaPrediction } = insights;
-	    const trend = gpaPrediction.direction === 'improving'
-	      ? 'up'
-	      : gpaPrediction.direction === 'declining'
-	      ? 'down'
-	      : 'stable';
-	    const delta = gpaPrediction.predictedNextGpa - gpaPrediction.currentGpa;
-	    return {
-	      oldGPA: gpaPrediction.currentGpa - delta,
-	      newGPA: gpaPrediction.currentGpa,
-	      trend,
-	    };
+    if (!insights) return null;
+    const { gpaPrediction } = insights;
+    const trend =
+      gpaPrediction.direction === 'improving'
+        ? 'up'
+        : gpaPrediction.direction === 'declining'
+          ? 'down'
+          : 'stable';
+    const delta = gpaPrediction.predictedNextGpa - gpaPrediction.currentGpa;
+    return {
+      oldGPA: gpaPrediction.currentGpa - delta,
+      newGPA: gpaPrediction.currentGpa,
+      trend,
+    };
   } catch (_) {
     return null;
   }

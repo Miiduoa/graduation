@@ -53,18 +53,18 @@ maestro test --device "iPhone 15 Pro" .maestro/flows/
 
 ## 測試流程
 
-| 檔案 | 說明 | 標籤 |
-|------|------|------|
-| `01_onboarding.yaml` | 首次使用引導流程 | smoke, onboarding |
-| `02_authentication.yaml` | 登入註冊流程 | smoke, auth |
-| `03_announcements.yaml` | 公告列表與詳情 | smoke, announcements |
-| `04_events.yaml` | 活動列表與報名 | smoke, events |
-| `05_map.yaml` | 地圖與 POI | smoke, map |
-| `06_cafeteria.yaml` | 餐廳菜單 | smoke, cafeteria |
-| `07_me_features.yaml` | 我的頁面功能 | smoke, me |
-| `08_settings.yaml` | 設定功能 | smoke, settings |
-| `09_messages.yaml` | 訊息與群組 | smoke, messages, groups |
-| `10_full_user_journey.yaml` | 完整使用者流程 | regression, journey |
+| 檔案                        | 說明             | 標籤                    |
+| --------------------------- | ---------------- | ----------------------- |
+| `01_onboarding.yaml`        | 首次使用引導流程 | smoke, onboarding       |
+| `02_authentication.yaml`    | 登入註冊流程     | smoke, auth             |
+| `03_announcements.yaml`     | 公告列表與詳情   | smoke, announcements    |
+| `04_events.yaml`            | 活動列表與報名   | smoke, events           |
+| `05_map.yaml`               | 地圖與 POI       | smoke, map              |
+| `06_cafeteria.yaml`         | 餐廳菜單         | smoke, cafeteria        |
+| `07_me_features.yaml`       | 我的頁面功能     | smoke, me               |
+| `08_settings.yaml`          | 設定功能         | smoke, settings         |
+| `09_messages.yaml`          | 訊息與群組       | smoke, messages, groups |
+| `10_full_user_journey.yaml` | 完整使用者流程   | regression, journey     |
 
 ## 測試環境變數
 
@@ -108,6 +108,7 @@ maestro studio
 ```
 
 這會開啟互動式介面，可以：
+
 - 即時預覽畫面元素
 - 測試單一指令
 - 產生測試腳本

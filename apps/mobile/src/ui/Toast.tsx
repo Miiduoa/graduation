@@ -1,11 +1,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
-import React, { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { Animated, Pressable, StyleSheet, Text, View, Dimensions } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { theme, softShadowStyle } from "./theme";
-import { SafeAreaInsetsContext } from "react-native-safe-area-context";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useMemo,
+} from 'react';
+import { Animated, Pressable, StyleSheet, Text, View, Dimensions } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { theme, softShadowStyle } from './theme';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
-type ToastType = "success" | "error" | "warning" | "info";
+type ToastType = 'success' | 'error' | 'warning' | 'info';
 
 type ToastConfig = {
   message: string;
@@ -32,15 +40,15 @@ const ToastContext = createContext<ToastContextType | null>(null);
 
 export function useToast(): ToastContextType {
   const context = useContext(ToastContext);
-  if (!context) throw new Error("useToast must be used within a ToastProvider");
+  if (!context) throw new Error('useToast must be used within a ToastProvider');
   return context;
 }
 
 const TYPE_CONFIG: Record<ToastType, { color: string; icon: string }> = {
-  success: { color: theme.colors.success, icon: "checkmark-circle" },
-  error: { color: theme.colors.danger, icon: "close-circle" },
-  warning: { color: theme.colors.warning, icon: "warning" },
-  info: { color: theme.colors.accent, icon: "information-circle" },
+  success: { color: theme.colors.success, icon: 'checkmark-circle' },
+  error: { color: theme.colors.danger, icon: 'close-circle' },
+  warning: { color: theme.colors.warning, icon: 'warning' },
+  info: { color: theme.colors.accent, icon: 'information-circle' },
 };
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
@@ -49,7 +57,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
   const scale = useRef(new Animated.Value(0.9)).current;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const config = TYPE_CONFIG[toast.type ?? "info"];
+  const config = TYPE_CONFIG[toast.type ?? 'info'];
   const color = config.color;
   const displayIcon = toast.icon || config.icon;
 
@@ -73,7 +81,9 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
     show();
     const duration = toast.duration ?? 3500;
     if (duration > 0) timerRef.current = setTimeout(hide, duration);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, []);
 
   return (
@@ -90,41 +100,47 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
         opacity,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", padding: 14, gap: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 }}>
         <View
           style={{
             width: 34,
             height: 34,
             borderRadius: 10,
             backgroundColor: `${color}12`,
-            alignItems: "center",
-            justifyContent: "center",
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
           <Ionicons name={displayIcon as any} size={18} color={color} />
         </View>
 
         <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 14, color: theme.colors.text, fontWeight: "500", lineHeight: 20 }} numberOfLines={2}>
+          <Text
+            style={{ fontSize: 14, color: theme.colors.text, fontWeight: '500', lineHeight: 20 }}
+            numberOfLines={2}
+          >
             {toast.message}
           </Text>
           {toast.action && (
             <Pressable onPress={toast.action.onPress} style={{ marginTop: 4 }}>
-              <Text style={{ fontSize: 13, fontWeight: "600", color }}>{toast.action.text}</Text>
+              <Text style={{ fontSize: 13, fontWeight: '600', color }}>{toast.action.text}</Text>
             </Pressable>
           )}
         </View>
 
         {toast.dismissible !== false && (
           <Pressable
-            onPress={() => { if (timerRef.current) clearTimeout(timerRef.current); hide(); }}
+            onPress={() => {
+              if (timerRef.current) clearTimeout(timerRef.current);
+              hide();
+            }}
             style={({ pressed }) => ({
               width: 28,
               height: 28,
               borderRadius: 14,
-              alignItems: "center",
-              justifyContent: "center",
-              backgroundColor: pressed ? theme.colors.surface2 : "transparent",
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: pressed ? theme.colors.surface2 : 'transparent',
             })}
             hitSlop={8}
           >
@@ -141,36 +157,72 @@ function useSafeInsets() {
   return context ?? { top: 0, bottom: 0, left: 0, right: 0 };
 }
 
-export function ToastProvider({ children, maxToasts = 3 }: { children: React.ReactNode; maxToasts?: number }) {
+export function ToastProvider({
+  children,
+  maxToasts = 3,
+}: {
+  children: React.ReactNode;
+  maxToasts?: number;
+}) {
   const insets = useSafeInsets();
   const [toasts, setToasts] = useState<Toast[]>([]);
   const idCounter = useRef(0);
 
-  const show = useCallback((config: ToastConfig): string => {
-    const id = `toast-${++idCounter.current}`;
-    setToasts((prev) => {
-      const updated = [...prev, { ...config, id }];
-      return updated.length > maxToasts ? updated.slice(-maxToasts) : updated;
-    });
-    return id;
-  }, [maxToasts]);
+  const show = useCallback(
+    (config: ToastConfig): string => {
+      const id = `toast-${++idCounter.current}`;
+      setToasts((prev) => {
+        const updated = [...prev, { ...config, id }];
+        return updated.length > maxToasts ? updated.slice(-maxToasts) : updated;
+      });
+      return id;
+    },
+    [maxToasts],
+  );
 
-  const success = useCallback((message: string, config?: Partial<ToastConfig>) => show({ ...config, message, type: "success" }), [show]);
-  const error = useCallback((message: string, config?: Partial<ToastConfig>) => show({ ...config, message, type: "error" }), [show]);
-  const warning = useCallback((message: string, config?: Partial<ToastConfig>) => show({ ...config, message, type: "warning" }), [show]);
-  const info = useCallback((message: string, config?: Partial<ToastConfig>) => show({ ...config, message, type: "info" }), [show]);
-  const dismiss = useCallback((id: string) => setToasts((prev) => prev.filter((t) => t.id !== id)), []);
+  const success = useCallback(
+    (message: string, config?: Partial<ToastConfig>) =>
+      show({ ...config, message, type: 'success' }),
+    [show],
+  );
+  const error = useCallback(
+    (message: string, config?: Partial<ToastConfig>) => show({ ...config, message, type: 'error' }),
+    [show],
+  );
+  const warning = useCallback(
+    (message: string, config?: Partial<ToastConfig>) =>
+      show({ ...config, message, type: 'warning' }),
+    [show],
+  );
+  const info = useCallback(
+    (message: string, config?: Partial<ToastConfig>) => show({ ...config, message, type: 'info' }),
+    [show],
+  );
+  const dismiss = useCallback(
+    (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id)),
+    [],
+  );
   const dismissAll = useCallback(() => setToasts([]), []);
 
   const contextValue = useMemo(
     () => ({ show, success, error, warning, info, dismiss, dismissAll }),
-    [show, success, error, warning, info, dismiss, dismissAll]
+    [show, success, error, warning, info, dismiss, dismissAll],
   );
 
   return (
     <ToastContext.Provider value={contextValue}>
       {children}
-      <View style={{ position: "absolute", top: insets.top + 8, left: 16, right: 16, zIndex: 9999, gap: 8 }} pointerEvents="box-none">
+      <View
+        style={{
+          position: 'absolute',
+          top: insets.top + 8,
+          left: 16,
+          right: 16,
+          zIndex: 9999,
+          gap: 8,
+        }}
+        pointerEvents="box-none"
+      >
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
         ))}
@@ -190,7 +242,7 @@ const SnackbarContext = createContext<SnackbarContextType | null>(null);
 
 export function useSnackbar(): SnackbarContextType {
   const context = useContext(SnackbarContext);
-  if (!context) throw new Error("useSnackbar must be used within a SnackbarProvider");
+  if (!context) throw new Error('useSnackbar must be used within a SnackbarProvider');
   return context;
 }
 
@@ -203,18 +255,30 @@ export function SnackbarProvider({ children }: { children: React.ReactNode }) {
 
   const dismiss = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
-    Animated.timing(translateY, { toValue: 100, duration: 200, useNativeDriver: true })
-      .start(() => { setVisible(false); setConfig(null); });
+    Animated.timing(translateY, { toValue: 100, duration: 200, useNativeDriver: true }).start(
+      () => {
+        setVisible(false);
+        setConfig(null);
+      },
+    );
   }, [translateY]);
 
-  const show = useCallback((newConfig: SnackbarConfig) => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    setConfig(newConfig);
-    setVisible(true);
-    Animated.spring(translateY, { toValue: 0, friction: 9, tension: 80, useNativeDriver: true }).start();
-    const duration = newConfig.duration ?? 4000;
-    if (duration > 0) timerRef.current = setTimeout(dismiss, duration);
-  }, [translateY, dismiss]);
+  const show = useCallback(
+    (newConfig: SnackbarConfig) => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setConfig(newConfig);
+      setVisible(true);
+      Animated.spring(translateY, {
+        toValue: 0,
+        friction: 9,
+        tension: 80,
+        useNativeDriver: true,
+      }).start();
+      const duration = newConfig.duration ?? 4000;
+      if (duration > 0) timerRef.current = setTimeout(dismiss, duration);
+    },
+    [translateY, dismiss],
+  );
 
   return (
     <SnackbarContext.Provider value={{ show, dismiss }}>
@@ -222,12 +286,12 @@ export function SnackbarProvider({ children }: { children: React.ReactNode }) {
       {visible && config && (
         <Animated.View
           style={{
-            position: "absolute",
+            position: 'absolute',
             left: 16,
             right: 16,
             bottom: insets.bottom + 90,
-            flexDirection: "row",
-            alignItems: "center",
+            flexDirection: 'row',
+            alignItems: 'center',
             backgroundColor: theme.colors.text,
             borderRadius: theme.radius.md,
             paddingVertical: 14,
@@ -237,12 +301,23 @@ export function SnackbarProvider({ children }: { children: React.ReactNode }) {
             transform: [{ translateY }],
           }}
         >
-          <Text style={{ flex: 1, fontSize: 14, color: theme.colors.bg, fontWeight: "500" }} numberOfLines={2}>
+          <Text
+            style={{ flex: 1, fontSize: 14, color: theme.colors.bg, fontWeight: '500' }}
+            numberOfLines={2}
+          >
             {config.message}
           </Text>
           {config.action && (
-            <Pressable onPress={() => { config.action?.onPress(); dismiss(); }} style={{ marginLeft: 14 }}>
-              <Text style={{ fontSize: 14, fontWeight: "700", color: theme.colors.accent }}>{config.action.text}</Text>
+            <Pressable
+              onPress={() => {
+                config.action?.onPress();
+                dismiss();
+              }}
+              style={{ marginLeft: 14 }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.accent }}>
+                {config.action.text}
+              </Text>
             </Pressable>
           )}
         </Animated.View>

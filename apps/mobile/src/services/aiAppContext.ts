@@ -1,10 +1,5 @@
-import type {
-  AgentMemory,
-  LocalTrainingDB,
-} from "../data/puAIAgentData";
-import {
-  exportTrainingInsights,
-} from "../data/puAIAgentData";
+import type { AgentMemory, LocalTrainingDB } from '../data/puAIAgentData';
+import { exportTrainingInsights } from '../data/puAIAgentData';
 import type {
   Announcement,
   Cafeteria,
@@ -26,10 +21,10 @@ import type {
   SeatReservation,
   StudentRiskSnapshot,
   WashingReservation,
-} from "../data/types";
-import type { DataSource } from "../data/source";
-import type { AIContext } from "./ai";
-import type { ProactiveAIReport } from "./proactiveAI";
+} from '../data/types';
+import type { DataSource } from '../data/source';
+import type { AIContext } from './ai';
+import type { ProactiveAIReport } from './proactiveAI';
 
 type AnyAssignment = {
   id: string;
@@ -60,7 +55,16 @@ export type AIAppContextInput = {
   schoolId: string;
   userId?: string | null;
   userName?: string | null;
-  role?: RoleGroup | "teacher" | "faculty" | "staff" | "student" | "admin" | "vendor" | "guest" | null;
+  role?:
+    | RoleGroup
+    | 'teacher'
+    | 'faculty'
+    | 'staff'
+    | 'student'
+    | 'admin'
+    | 'vendor'
+    | 'guest'
+    | null;
   isOnline?: boolean;
   courses?: Course[];
   pendingAssignments?: AnyAssignment[];
@@ -73,7 +77,13 @@ export type AIAppContextInput = {
     };
   } | null;
   announcements?: Announcement[];
-  events?: Array<{ id: string; title: string; location?: string; startsAt?: string; source?: string }>;
+  events?: Array<{
+    id: string;
+    title: string;
+    location?: string;
+    startsAt?: string;
+    source?: string;
+  }>;
   cafeterias?: Cafeteria[];
   menus?: MenuItem[];
   pois?: Poi[];
@@ -106,24 +116,24 @@ export function emptyAIAppRuntimeData(): AIAppRuntimeData {
 }
 
 function compact(value: unknown): string {
-  return String(value ?? "").trim();
+  return String(value ?? '').trim();
 }
 
 function toDate(value: unknown): Date | null {
   if (!value) return null;
   if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
-  if (typeof value === "string" || typeof value === "number") {
+  if (typeof value === 'string' || typeof value === 'number') {
     const parsed = new Date(value);
     return Number.isFinite(parsed.getTime()) ? parsed : null;
   }
-  if (typeof value === "object") {
+  if (typeof value === 'object') {
     const record = value as { seconds?: unknown; _seconds?: unknown; toDate?: unknown };
-    if (typeof record.toDate === "function") {
+    if (typeof record.toDate === 'function') {
       const parsed = (record.toDate as () => Date)();
       return Number.isFinite(parsed.getTime()) ? parsed : null;
     }
-    const seconds = typeof record.seconds === "number" ? record.seconds : record._seconds;
-    if (typeof seconds === "number") return new Date(seconds * 1000);
+    const seconds = typeof record.seconds === 'number' ? record.seconds : record._seconds;
+    if (typeof seconds === 'number') return new Date(seconds * 1000);
   }
   return null;
 }
@@ -131,11 +141,11 @@ function toDate(value: unknown): Date | null {
 function formatDate(value: unknown): string | undefined {
   const date = toDate(value);
   if (!date) return undefined;
-  return date.toLocaleString("zh-TW", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  return date.toLocaleString('zh-TW', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   });
 }
 
@@ -146,11 +156,18 @@ function isWithinHours(value: unknown, now: Date, hours: number): boolean {
   return diffHours >= 0 && diffHours <= hours;
 }
 
-function normalizeRole(role: AIAppContextInput["role"]): AIContext["role"] {
-  if (role === "faculty") return "teacher";
-  if (role === "vendor") return "staff";
-  if (role === "guest" || !role) return undefined;
-  if (role === "student" || role === "teacher" || role === "staff" || role === "department_head" || role === "admin") return role;
+function normalizeRole(role: AIAppContextInput['role']): AIContext['role'] {
+  if (role === 'faculty') return 'teacher';
+  if (role === 'vendor') return 'staff';
+  if (role === 'guest' || !role) return undefined;
+  if (
+    role === 'student' ||
+    role === 'teacher' ||
+    role === 'staff' ||
+    role === 'department_head' ||
+    role === 'admin'
+  )
+    return role;
   return undefined;
 }
 
@@ -158,32 +175,35 @@ function runtime(input?: Partial<AIAppRuntimeData>): AIAppRuntimeData {
   return { ...emptyAIAppRuntimeData(), ...(input ?? {}) };
 }
 
-function buildCoverage(input: AIAppContextInput, data: AIAppRuntimeData): NonNullable<AIContext["appDataCoverage"]> {
+function buildCoverage(
+  input: AIAppContextInput,
+  data: AIAppRuntimeData,
+): NonNullable<AIContext['appDataCoverage']> {
   const rows = [
-    ["courses", "課程", input.courses?.length ?? 0],
-    ["assignments", "作業", input.pendingAssignments?.length ?? 0],
-    ["announcements", "公告", input.announcements?.length ?? 0],
-    ["events", "活動", input.events?.length ?? 0],
-    ["menus", "餐點", input.menus?.length ?? 0],
-    ["pois", "地點", input.pois?.length ?? 0],
-    ["pulse", "校園脈動", data.pulseAggregates.length],
-    ["risk", "學習風險", data.riskSnapshots.length],
-    ["next_actions", "下一步建議", data.nextBestActions.length],
-    ["calendar", "行事曆", data.calendarEvents.length],
-    ["notifications", "通知", data.notifications.length],
-    ["orders", "訂單", data.orders.length],
-    ["repairs", "報修", data.repairRequests.length],
-    ["health", "健康預約", data.healthAppointments.length],
-    ["library", "圖書借閱", data.libraryLoans.length],
-    ["dorm", "宿舍包裹", data.dormPackages.length],
+    ['courses', '課程', input.courses?.length ?? 0],
+    ['assignments', '作業', input.pendingAssignments?.length ?? 0],
+    ['announcements', '公告', input.announcements?.length ?? 0],
+    ['events', '活動', input.events?.length ?? 0],
+    ['menus', '餐點', input.menus?.length ?? 0],
+    ['pois', '地點', input.pois?.length ?? 0],
+    ['pulse', '校園脈動', data.pulseAggregates.length],
+    ['risk', '學習風險', data.riskSnapshots.length],
+    ['next_actions', '下一步建議', data.nextBestActions.length],
+    ['calendar', '行事曆', data.calendarEvents.length],
+    ['notifications', '通知', data.notifications.length],
+    ['orders', '訂單', data.orders.length],
+    ['repairs', '報修', data.repairRequests.length],
+    ['health', '健康預約', data.healthAppointments.length],
+    ['library', '圖書借閱', data.libraryLoans.length],
+    ['dorm', '宿舍包裹', data.dormPackages.length],
   ] as const;
 
   return rows.map(([key, label, count]) => ({
     key,
     label,
     count,
-    state: count > 0 ? "live" as const : "empty" as const,
-    detail: count > 0 ? `${count} 筆` : "目前無資料",
+    state: count > 0 ? ('live' as const) : ('empty' as const),
+    detail: count > 0 ? `${count} 筆` : '目前無資料',
   }));
 }
 
@@ -192,18 +212,28 @@ function buildLongTermMemoryLines(memory?: AgentMemory | null): string[] {
   const lines: string[] = [];
   const prefs = memory.preferences;
   const prefParts = [
-    prefs.foodPreferences.length > 0 ? `飲食偏好：${prefs.foodPreferences.slice(0, 4).join("、")}` : "",
-    prefs.allergens.length > 0 ? `過敏：${prefs.allergens.slice(0, 4).join("、")}` : "",
-    prefs.frequentLocations.length > 0 ? `常去地點：${prefs.frequentLocations.slice(0, 4).join("、")}` : "",
-    prefs.communicationStyle ? `溝通風格：${prefs.communicationStyle}` : "",
+    prefs.foodPreferences.length > 0
+      ? `飲食偏好：${prefs.foodPreferences.slice(0, 4).join('、')}`
+      : '',
+    prefs.allergens.length > 0 ? `過敏：${prefs.allergens.slice(0, 4).join('、')}` : '',
+    prefs.frequentLocations.length > 0
+      ? `常去地點：${prefs.frequentLocations.slice(0, 4).join('、')}`
+      : '',
+    prefs.communicationStyle ? `溝通風格：${prefs.communicationStyle}` : '',
   ].filter(Boolean);
-  if (prefParts.length > 0) lines.push(`長期偏好：${prefParts.join("；")}`);
+  if (prefParts.length > 0) lines.push(`長期偏好：${prefParts.join('；')}`);
 
-  const learnedFacts = (memory.learnedFacts ?? []).slice(-5).map((fact) => fact.fact).filter(Boolean);
-  if (learnedFacts.length > 0) lines.push(`已學到的使用者事實：${learnedFacts.join("；")}`);
+  const learnedFacts = (memory.learnedFacts ?? [])
+    .slice(-5)
+    .map((fact) => fact.fact)
+    .filter(Boolean);
+  if (learnedFacts.length > 0) lines.push(`已學到的使用者事實：${learnedFacts.join('；')}`);
 
-  const recentActions = (memory.recentActions ?? []).slice(-5).map((action) => action.toolId).filter(Boolean);
-  if (recentActions.length > 0) lines.push(`近期互動/操作：${recentActions.join("、")}`);
+  const recentActions = (memory.recentActions ?? [])
+    .slice(-5)
+    .map((action) => action.toolId)
+    .filter(Boolean);
+  if (recentActions.length > 0) lines.push(`近期互動/操作：${recentActions.join('、')}`);
 
   return lines;
 }
@@ -213,13 +243,25 @@ export function buildAIAppPulseSummary(input: AIAppContextInput): string {
   const now = input.now ?? new Date();
   const lines: string[] = [];
 
-  const lateAssignments = (input.pendingAssignments ?? []).filter((assignment) => assignment.isLate);
-  const dueSoonAssignments = (input.pendingAssignments ?? []).filter((assignment) => !assignment.isLate && isWithinHours(assignment.dueAt, now, 72));
+  const lateAssignments = (input.pendingAssignments ?? []).filter(
+    (assignment) => assignment.isLate,
+  );
+  const dueSoonAssignments = (input.pendingAssignments ?? []).filter(
+    (assignment) => !assignment.isLate && isWithinHours(assignment.dueAt, now, 72),
+  );
   const nextClass = (input.courses ?? [])
     .flatMap((course) => {
-      const schedules = Array.isArray(course.schedule) && course.schedule.length > 0
-        ? course.schedule
-        : [{ dayOfWeek: course.dayOfWeek, startTime: course.startTime, endTime: course.endTime, location: course.location }];
+      const schedules =
+        Array.isArray(course.schedule) && course.schedule.length > 0
+          ? course.schedule
+          : [
+              {
+                dayOfWeek: course.dayOfWeek,
+                startTime: course.startTime,
+                endTime: course.endTime,
+                location: course.location,
+              },
+            ];
       return schedules
         .filter((schedule) => schedule.dayOfWeek === now.getDay())
         .map((schedule) => ({
@@ -233,64 +275,123 @@ export function buildAIAppPulseSummary(input: AIAppContextInput): string {
     .sort((left, right) => compact(left.startTime).localeCompare(compact(right.startTime)))[0];
 
   const topRisk = [...data.riskSnapshots].sort((a, b) => b.score - a.score)[0];
-  const topActions = [...data.nextBestActions]
-    .sort((a, b) => a.priority - b.priority)
-    .slice(0, 4);
+  const topActions = [...data.nextBestActions].sort((a, b) => a.priority - b.priority).slice(0, 4);
   const crowdedLocations = data.pulseAggregates
     .filter((pulse) => pulse.currentLevel >= 4)
     .sort((a, b) => b.currentLevel - a.currentLevel || b.confidence - a.confidence)
     .slice(0, 4);
-  const activeOrders = data.orders.filter((order) => !/completed|cancelled|refunded/i.test(compact(order.status)));
-  const activeRepairs = data.repairRequests.filter((repair) => !/completed|cancelled/i.test(compact(repair.status)));
+  const activeOrders = data.orders.filter(
+    (order) => !/completed|cancelled|refunded/i.test(compact(order.status)),
+  );
+  const activeRepairs = data.repairRequests.filter(
+    (repair) => !/completed|cancelled/i.test(compact(repair.status)),
+  );
   const upcomingHealth = data.healthAppointments.slice(0, 3);
   const activeReservations = data.seatReservations.slice(0, 3);
-  const unreadNotifications = data.notifications.filter((notification) => !(notification as any).read && !(notification as any).readAt);
+  const unreadNotifications = data.notifications.filter(
+    (notification) => !(notification as any).read && !(notification as any).readAt,
+  );
   const proactive = (input.proactiveReports ?? [])
     .filter((report) => !report.dismissedAt)
     .slice(0, 4);
 
-  lines.push(`資料時間：${now.toLocaleString("zh-TW")}；網路狀態：${input.isOnline === false ? "離線" : "線上或未知"}。`);
+  lines.push(
+    `資料時間：${now.toLocaleString('zh-TW')}；網路狀態：${input.isOnline === false ? '離線' : '線上或未知'}。`,
+  );
 
   if (topRisk) {
     lines.push(`學習/生活風險：${topRisk.level}，分數 ${topRisk.score}。${topRisk.summary}`);
   }
   if (lateAssignments.length > 0) {
-    lines.push(`逾期作業：${lateAssignments.slice(0, 4).map((assignment) => `${assignment.title}${assignment.groupName ? `（${assignment.groupName}）` : ""}`).join("、")}。`);
+    lines.push(
+      `逾期作業：${lateAssignments
+        .slice(0, 4)
+        .map(
+          (assignment) =>
+            `${assignment.title}${assignment.groupName ? `（${assignment.groupName}）` : ''}`,
+        )
+        .join('、')}。`,
+    );
   }
   if (dueSoonAssignments.length > 0) {
-    lines.push(`72 小時內截止：${dueSoonAssignments.slice(0, 4).map((assignment) => `${assignment.title}${formatDate(assignment.dueAt) ? ` ${formatDate(assignment.dueAt)}` : ""}`).join("、")}。`);
+    lines.push(
+      `72 小時內截止：${dueSoonAssignments
+        .slice(0, 4)
+        .map(
+          (assignment) =>
+            `${assignment.title}${formatDate(assignment.dueAt) ? ` ${formatDate(assignment.dueAt)}` : ''}`,
+        )
+        .join('、')}。`,
+    );
   }
   if (nextClass) {
-    lines.push(`今日下一堂課候選：${nextClass.course.name} ${nextClass.startTime ?? ""}${nextClass.location ? `，${nextClass.location}` : ""}。`);
+    lines.push(
+      `今日下一堂課候選：${nextClass.course.name} ${nextClass.startTime ?? ''}${nextClass.location ? `，${nextClass.location}` : ''}。`,
+    );
   }
   if (topActions.length > 0) {
-    lines.push(`Next Best Actions：${topActions.map((action) => `${action.title}（${action.urgency}，下一步：${action.nextStep || action.actionLabel}）`).join("；")}。`);
+    lines.push(
+      `Next Best Actions：${topActions.map((action) => `${action.title}（${action.urgency}，下一步：${action.nextStep || action.actionLabel}）`).join('；')}。`,
+    );
   }
   if (crowdedLocations.length > 0) {
-    lines.push(`校園即時脈動：${crowdedLocations.map((pulse) => `${pulse.locationName} ${pulse.currentLevel}/5 ${pulse.trend}，建議時段 ${pulse.bestTimeToVisit ?? "未提供"}`).join("；")}。`);
+    lines.push(
+      `校園即時脈動：${crowdedLocations.map((pulse) => `${pulse.locationName} ${pulse.currentLevel}/5 ${pulse.trend}，建議時段 ${pulse.bestTimeToVisit ?? '未提供'}`).join('；')}。`,
+    );
   } else if (data.pulseAggregates.length > 0) {
-    lines.push(`校園即時脈動：目前沒有 4/5 以上擁擠點，已有 ${data.pulseAggregates.length} 個地點回報。`);
+    lines.push(
+      `校園即時脈動：目前沒有 4/5 以上擁擠點，已有 ${data.pulseAggregates.length} 個地點回報。`,
+    );
   }
-  if (activeOrders.length > 0) lines.push(`進行中訂單：${activeOrders.slice(0, 3).map((order) => `${order.id} ${order.status}`).join("、")}。`);
-  if (activeRepairs.length > 0) lines.push(`進行中報修：${activeRepairs.slice(0, 3).map((repair) => `${repair.type} ${repair.status}`).join("、")}。`);
-  if (upcomingHealth.length > 0) lines.push(`健康預約：${upcomingHealth.map((appt) => `${appt.department} ${appt.date ?? ""} ${appt.timeSlot ?? ""}`).join("、")}。`);
-  if (activeReservations.length > 0) lines.push(`座位預約：${activeReservations.map((reservation) => `${reservation.seatId ?? reservation.id} ${reservation.date ?? ""}`).join("、")}。`);
-  if (unreadNotifications.length > 0) lines.push(`未讀通知：${unreadNotifications.slice(0, 4).map((notification) => notification.title).join("、")}。`);
-  if (proactive.length > 0) lines.push(`近期主動回報：${proactive.map((report) => `${report.title}（${report.priority}）`).join("；")}。`);
+  if (activeOrders.length > 0)
+    lines.push(
+      `進行中訂單：${activeOrders
+        .slice(0, 3)
+        .map((order) => `${order.id} ${order.status}`)
+        .join('、')}。`,
+    );
+  if (activeRepairs.length > 0)
+    lines.push(
+      `進行中報修：${activeRepairs
+        .slice(0, 3)
+        .map((repair) => `${repair.type} ${repair.status}`)
+        .join('、')}。`,
+    );
+  if (upcomingHealth.length > 0)
+    lines.push(
+      `健康預約：${upcomingHealth.map((appt) => `${appt.department} ${appt.date ?? ''} ${appt.timeSlot ?? ''}`).join('、')}。`,
+    );
+  if (activeReservations.length > 0)
+    lines.push(
+      `座位預約：${activeReservations.map((reservation) => `${reservation.seatId ?? reservation.id} ${reservation.date ?? ''}`).join('、')}。`,
+    );
+  if (unreadNotifications.length > 0)
+    lines.push(
+      `未讀通知：${unreadNotifications
+        .slice(0, 4)
+        .map((notification) => notification.title)
+        .join('、')}。`,
+    );
+  if (proactive.length > 0)
+    lines.push(
+      `近期主動回報：${proactive.map((report) => `${report.title}（${report.priority}）`).join('；')}。`,
+    );
 
   lines.push(...buildLongTermMemoryLines(input.agentMemory));
 
   if (lines.length <= 1) {
-    lines.push("目前沒有高優先待辦或風險訊號；回答時仍要檢查 App 資料覆蓋，不要捏造即時狀態。");
+    lines.push('目前沒有高優先待辦或風險訊號；回答時仍要檢查 App 資料覆蓋，不要捏造即時狀態。');
   }
 
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 export function buildAIAppContext(input: AIAppContextInput): AIContext {
   const data = runtime(input.runtimeData);
   const appPulseSummary = buildAIAppPulseSummary(input);
-  const dialogSummary = [input.dialogContextSummary, input.conversationSummary].filter(Boolean).join(" ");
+  const dialogSummary = [input.dialogContextSummary, input.conversationSummary]
+    .filter(Boolean)
+    .join(' ');
 
   return {
     schoolId: input.schoolId,
@@ -342,17 +443,26 @@ export function buildAIAppContext(input: AIAppContextInput): AIContext {
     pendingAssignments: (input.pendingAssignments ?? []).map((assignment) => ({
       id: assignment.id,
       title: assignment.title,
-      groupName: assignment.groupName ?? "",
+      groupName: assignment.groupName ?? '',
       dueAt: formatDate(assignment.dueAt),
       isLate: assignment.isLate,
     })),
     weeklyReport: input.weeklyReport
       ? {
-          summary: typeof input.weeklyReport.summary === "string" ? input.weeklyReport.summary : "",
+          summary: typeof input.weeklyReport.summary === 'string' ? input.weeklyReport.summary : '',
           stats: {
-            onTimeRate: typeof input.weeklyReport.stats?.onTimeRate === "number" ? input.weeklyReport.stats.onTimeRate : 100,
-            totalSubmissions: typeof input.weeklyReport.stats?.totalSubmissions === "number" ? input.weeklyReport.stats.totalSubmissions : 0,
-            newAchievements: typeof input.weeklyReport.stats?.newAchievements === "number" ? input.weeklyReport.stats.newAchievements : 0,
+            onTimeRate:
+              typeof input.weeklyReport.stats?.onTimeRate === 'number'
+                ? input.weeklyReport.stats.onTimeRate
+                : 100,
+            totalSubmissions:
+              typeof input.weeklyReport.stats?.totalSubmissions === 'number'
+                ? input.weeklyReport.stats.totalSubmissions
+                : 0,
+            newAchievements:
+              typeof input.weeklyReport.stats?.newAchievements === 'number'
+                ? input.weeklyReport.stats.newAchievements
+                : 0,
           },
         }
       : undefined,
@@ -401,46 +511,108 @@ export async function loadAIAppRuntimeData(params: {
     washingReservations,
   ] = await Promise.all([
     dataSource.listPulseAggregates
-      ? safeLoad("pulseAggregates", () => dataSource.listPulseAggregates!(schoolId ?? undefined), base.pulseAggregates)
+      ? safeLoad(
+          'pulseAggregates',
+          () => dataSource.listPulseAggregates!(schoolId ?? undefined),
+          base.pulseAggregates,
+        )
       : Promise.resolve(base.pulseAggregates),
     userId && dataSource.listNextBestActions
-      ? safeLoad("nextBestActions", () => dataSource.listNextBestActions!(userId, schoolId ?? undefined), base.nextBestActions)
+      ? safeLoad(
+          'nextBestActions',
+          () => dataSource.listNextBestActions!(userId, schoolId ?? undefined),
+          base.nextBestActions,
+        )
       : Promise.resolve(base.nextBestActions),
     userId && dataSource.listRiskSnapshots
-      ? safeLoad("riskSnapshots", () => dataSource.listRiskSnapshots!(userId, schoolId ?? undefined), base.riskSnapshots)
+      ? safeLoad(
+          'riskSnapshots',
+          () => dataSource.listRiskSnapshots!(userId, schoolId ?? undefined),
+          base.riskSnapshots,
+        )
       : Promise.resolve(base.riskSnapshots),
     userId
-      ? safeLoad("calendarEvents", () => dataSource.listCalendarEvents(userId, start.toISOString(), end.toISOString(), schoolId ?? undefined), base.calendarEvents)
+      ? safeLoad(
+          'calendarEvents',
+          () =>
+            dataSource.listCalendarEvents(
+              userId,
+              start.toISOString(),
+              end.toISOString(),
+              schoolId ?? undefined,
+            ),
+          base.calendarEvents,
+        )
       : Promise.resolve(base.calendarEvents),
     userId
-      ? safeLoad("notifications", () => dataSource.listNotifications(userId, { limit: 20 }), base.notifications)
+      ? safeLoad(
+          'notifications',
+          () => dataSource.listNotifications(userId, { limit: 20 }),
+          base.notifications,
+        )
       : Promise.resolve(base.notifications),
     userId
-      ? safeLoad("orders", () => dataSource.listOrders(userId, { limit: 10 }, schoolId ?? undefined), base.orders)
+      ? safeLoad(
+          'orders',
+          () => dataSource.listOrders(userId, { limit: 10 }, schoolId ?? undefined),
+          base.orders,
+        )
       : Promise.resolve(base.orders),
     userId
-      ? safeLoad("repairRequests", () => dataSource.listRepairRequests(userId, { limit: 10 }, schoolId ?? undefined), base.repairRequests)
+      ? safeLoad(
+          'repairRequests',
+          () => dataSource.listRepairRequests(userId, { limit: 10 }, schoolId ?? undefined),
+          base.repairRequests,
+        )
       : Promise.resolve(base.repairRequests),
     userId
-      ? safeLoad("healthAppointments", () => dataSource.listHealthAppointments(userId, { limit: 10 }, schoolId ?? undefined), base.healthAppointments)
+      ? safeLoad(
+          'healthAppointments',
+          () => dataSource.listHealthAppointments(userId, { limit: 10 }, schoolId ?? undefined),
+          base.healthAppointments,
+        )
       : Promise.resolve(base.healthAppointments),
     userId
-      ? safeLoad("seatReservations", () => dataSource.listSeatReservations(userId, schoolId ?? undefined), base.seatReservations)
+      ? safeLoad(
+          'seatReservations',
+          () => dataSource.listSeatReservations(userId, schoolId ?? undefined),
+          base.seatReservations,
+        )
       : Promise.resolve(base.seatReservations),
     userId
-      ? safeLoad("printJobs", () => dataSource.listPrintJobs(userId, { limit: 10 }, schoolId ?? undefined), base.printJobs)
+      ? safeLoad(
+          'printJobs',
+          () => dataSource.listPrintJobs(userId, { limit: 10 }, schoolId ?? undefined),
+          base.printJobs,
+        )
       : Promise.resolve(base.printJobs),
     userId
-      ? safeLoad("dormPackages", () => dataSource.listDormPackages(userId, { limit: 10 }, schoolId ?? undefined), base.dormPackages)
+      ? safeLoad(
+          'dormPackages',
+          () => dataSource.listDormPackages(userId, { limit: 10 }, schoolId ?? undefined),
+          base.dormPackages,
+        )
       : Promise.resolve(base.dormPackages),
     userId
-      ? safeLoad("conversations", () => dataSource.listConversations(userId, { limit: 10 }, schoolId ?? undefined), base.conversations)
+      ? safeLoad(
+          'conversations',
+          () => dataSource.listConversations(userId, { limit: 10 }, schoolId ?? undefined),
+          base.conversations,
+        )
       : Promise.resolve(base.conversations),
     userId
-      ? safeLoad("libraryLoans", () => dataSource.listLoans(userId, schoolId ?? undefined), base.libraryLoans)
+      ? safeLoad(
+          'libraryLoans',
+          () => dataSource.listLoans(userId, schoolId ?? undefined),
+          base.libraryLoans,
+        )
       : Promise.resolve(base.libraryLoans),
     userId
-      ? safeLoad("washingReservations", () => dataSource.listWashingReservations(userId, schoolId ?? undefined), base.washingReservations)
+      ? safeLoad(
+          'washingReservations',
+          () => dataSource.listWashingReservations(userId, schoolId ?? undefined),
+          base.washingReservations,
+        )
       : Promise.resolve(base.washingReservations),
   ]);
 

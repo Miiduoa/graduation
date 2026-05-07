@@ -1,11 +1,6 @@
-const nodeCrypto = require("crypto");
+const nodeCrypto = require('crypto');
 
-const SENSITIVE_SSO_FIELDS = [
-  "clientSecret",
-  "spPrivateKey",
-  "spCertificate",
-  "idpCertificate",
-];
+const SENSITIVE_SSO_FIELDS = ['clientSecret', 'spPrivateKey', 'spCertificate', 'idpCertificate'];
 
 function cloneConfig(value) {
   return value ? JSON.parse(JSON.stringify(value)) : {};
@@ -13,11 +8,11 @@ function cloneConfig(value) {
 
 function normalizeConfigShape(value) {
   const config = cloneConfig(value);
-  if (!config || typeof config !== "object") {
+  if (!config || typeof config !== 'object') {
     return { ssoConfig: null };
   }
 
-  if (!config.ssoConfig || typeof config.ssoConfig !== "object") {
+  if (!config.ssoConfig || typeof config.ssoConfig !== 'object') {
     return {
       ...config,
       ssoConfig: config.ssoConfig ?? null,
@@ -32,7 +27,7 @@ function splitSsoConfig(config) {
   const publicConfig = cloneConfig(normalized);
   const secretConfig = { ssoConfig: {} };
 
-  if (!publicConfig.ssoConfig || typeof publicConfig.ssoConfig !== "object") {
+  if (!publicConfig.ssoConfig || typeof publicConfig.ssoConfig !== 'object') {
     return {
       publicConfig,
       secretConfig: {},
@@ -62,9 +57,10 @@ function splitSsoConfig(config) {
 function mergeSsoConfig(publicConfig = {}, secretConfig = {}) {
   const normalizedPublic = normalizeConfigShape(publicConfig);
   const merged = cloneConfig(normalizedPublic);
-  const publicSsoConfig = merged.ssoConfig && typeof merged.ssoConfig === "object" ? merged.ssoConfig : null;
+  const publicSsoConfig =
+    merged.ssoConfig && typeof merged.ssoConfig === 'object' ? merged.ssoConfig : null;
   const secretSsoConfig =
-    secretConfig?.ssoConfig && typeof secretConfig.ssoConfig === "object"
+    secretConfig?.ssoConfig && typeof secretConfig.ssoConfig === 'object'
       ? secretConfig.ssoConfig
       : null;
 
@@ -82,24 +78,23 @@ function mergeSsoConfig(publicConfig = {}, secretConfig = {}) {
 
 function getKeyBuffer(secret) {
   if (!secret) {
-    throw new Error("Missing SSO encryption key");
+    throw new Error('Missing SSO encryption key');
   }
 
   if (/^[0-9a-f]{64}$/i.test(secret)) {
-    return Buffer.from(secret, "hex");
+    return Buffer.from(secret, 'hex');
   }
 
-  const base64Buffer = Buffer.from(secret, "base64");
+  const base64Buffer = Buffer.from(secret, 'base64');
   if (base64Buffer.length === 32) {
     return base64Buffer;
   }
 
-  return nodeCrypto.createHash("sha256").update(secret).digest();
+  return nodeCrypto.createHash('sha256').update(secret).digest();
 }
 
 function encryptSecretConfig(secretConfig, encryptionKey) {
-  const normalizedSecret =
-    secretConfig && typeof secretConfig === "object" ? secretConfig : {};
+  const normalizedSecret = secretConfig && typeof secretConfig === 'object' ? secretConfig : {};
 
   if (Object.keys(normalizedSecret).length === 0) {
     return null;
@@ -107,22 +102,22 @@ function encryptSecretConfig(secretConfig, encryptionKey) {
 
   const iv = nodeCrypto.randomBytes(12);
   const key = getKeyBuffer(encryptionKey);
-  const cipher = nodeCrypto.createCipheriv("aes-256-gcm", key, iv);
-  const plaintext = Buffer.from(JSON.stringify(normalizedSecret), "utf8");
+  const cipher = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
+  const plaintext = Buffer.from(JSON.stringify(normalizedSecret), 'utf8');
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
 
   return {
     version: 1,
-    algorithm: "aes-256-gcm",
-    iv: iv.toString("base64"),
-    tag: tag.toString("base64"),
-    ciphertext: ciphertext.toString("base64"),
+    algorithm: 'aes-256-gcm',
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    ciphertext: ciphertext.toString('base64'),
   };
 }
 
 function decryptSecretConfig(payload, encryptionKey) {
-  if (!payload || typeof payload !== "object") {
+  if (!payload || typeof payload !== 'object') {
     return {};
   }
 
@@ -136,17 +131,13 @@ function decryptSecretConfig(payload, encryptionKey) {
   }
 
   const key = getKeyBuffer(encryptionKey);
-  const decipher = nodeCrypto.createDecipheriv(
-    "aes-256-gcm",
-    key,
-    Buffer.from(iv, "base64")
-  );
-  decipher.setAuthTag(Buffer.from(tag, "base64"));
+  const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(tag, 'base64'));
 
   const plaintext = Buffer.concat([
-    decipher.update(Buffer.from(ciphertext, "base64")),
+    decipher.update(Buffer.from(ciphertext, 'base64')),
     decipher.final(),
-  ]).toString("utf8");
+  ]).toString('utf8');
 
   return JSON.parse(plaintext);
 }

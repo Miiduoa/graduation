@@ -1,10 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef } from 'react';
 import {
   addNotificationResponseReceivedListener,
   clearLastNotificationResponseAsync,
   getLastNotificationResponseAsync,
   syncPushTokenForUser,
-} from "../services/notifications";
+} from '../services/notifications';
 
 type NavigationLike = {
   current: {
@@ -26,60 +26,58 @@ function getNotificationResponseKey(response: {
   actionIdentifier?: string;
 }) {
   const identifier = response.notification?.request?.identifier;
-  const actionIdentifier = response.actionIdentifier ?? "default";
+  const actionIdentifier = response.actionIdentifier ?? 'default';
   const data = response.notification?.request?.content?.data;
-  return `${identifier ?? "unknown"}:${actionIdentifier}:${JSON.stringify(data ?? {})}`;
+  return `${identifier ?? 'unknown'}:${actionIdentifier}:${JSON.stringify(data ?? {})}`;
 }
 
 function navigateFromNotificationData(
   nav: { navigate: (route: string, params?: unknown) => void },
-  rawData: unknown
+  rawData: unknown,
 ) {
-  const data =
-    rawData && typeof rawData === "object"
-      ? (rawData as Record<string, unknown>)
-      : {};
+  const data = rawData && typeof rawData === 'object' ? (rawData as Record<string, unknown>) : {};
 
   switch (data.type) {
-    case "ai_proactive":
-      nav.navigate("Today", {
-        screen: "AIChat",
-        params: typeof data.reportId === "string" ? { proactiveReportId: data.reportId } : undefined,
+    case 'ai_proactive':
+      nav.navigate('Today', {
+        screen: 'AIChat',
+        params:
+          typeof data.reportId === 'string' ? { proactiveReportId: data.reportId } : undefined,
       });
       break;
-    case "announcement":
+    case 'announcement':
       if (data.announcementId) {
-        nav.navigate("Today", { screen: "公告詳情", params: { id: data.announcementId } });
+        nav.navigate('Today', { screen: '公告詳情', params: { id: data.announcementId } });
       }
       break;
-    case "event":
+    case 'event':
       if (data.eventId) {
-        nav.navigate("Today", { screen: "活動詳情", params: { id: data.eventId } });
+        nav.navigate('Today', { screen: '活動詳情', params: { id: data.eventId } });
       }
       break;
-    case "group_post":
+    case 'group_post':
       if (data.groupId && data.postId) {
-        nav.navigate("收件匣", {
-          screen: "GroupPost",
+        nav.navigate('收件匣', {
+          screen: 'GroupPost',
           params: { groupId: data.groupId, postId: data.postId },
         });
       }
       break;
-    case "assignment":
+    case 'assignment':
       if (data.groupId && data.assignmentId) {
-        nav.navigate("收件匣", {
-          screen: "AssignmentDetail",
+        nav.navigate('收件匣', {
+          screen: 'AssignmentDetail',
           params: { groupId: data.groupId, assignmentId: data.assignmentId },
         });
       }
       break;
-    case "message":
+    case 'message':
       if (data.peerId) {
-        nav.navigate("收件匣", { screen: "Chat", params: { kind: "dm", peerId: data.peerId } });
+        nav.navigate('收件匣', { screen: 'Chat', params: { kind: 'dm', peerId: data.peerId } });
       }
       break;
     default:
-      nav.navigate("我的", { screen: "Notifications" });
+      nav.navigate('我的', { screen: 'Notifications' });
       break;
   }
 }
@@ -96,11 +94,11 @@ export function usePushNotifications(navigationRef: NavigationLike, uid: string 
       try {
         const token = await syncPushTokenForUser(uid);
         if (!cancelled && token) {
-          console.log("[Notifications] Push token synced");
+          console.log('[Notifications] Push token synced');
         }
       } catch (error) {
         if (!cancelled) {
-          console.warn("[Notifications] Failed to register push notifications:", error);
+          console.warn('[Notifications] Failed to register push notifications:', error);
         }
       }
     })();
@@ -115,7 +113,7 @@ export function usePushNotifications(navigationRef: NavigationLike, uid: string 
 
     const handleResponse = async (
       response: NotificationResponseLike,
-      options?: { clearLastResponse?: boolean }
+      options?: { clearLastResponse?: boolean },
     ) => {
       const responseKey = getNotificationResponseKey(response);
       if (lastHandledResponseKeyRef.current === responseKey) {
@@ -133,7 +131,7 @@ export function usePushNotifications(navigationRef: NavigationLike, uid: string 
 
       if (options?.clearLastResponse) {
         await clearLastNotificationResponseAsync().catch((error) => {
-          console.warn("[Notifications] Failed to clear last notification response:", error);
+          console.warn('[Notifications] Failed to clear last notification response:', error);
         });
       }
     };
@@ -155,7 +153,7 @@ export function usePushNotifications(navigationRef: NavigationLike, uid: string 
         await handleResponse(response, { clearLastResponse: true });
       } catch (error) {
         if (!cancelled) {
-          console.warn("[Notifications] Failed to restore initial notification response:", error);
+          console.warn('[Notifications] Failed to restore initial notification response:', error);
         }
       }
     };
@@ -164,7 +162,7 @@ export function usePushNotifications(navigationRef: NavigationLike, uid: string 
 
     responseListener.current = addNotificationResponseReceivedListener((response) => {
       void handleResponse(response).catch((error) => {
-        console.warn("[Notifications] Failed to handle notification response:", error);
+        console.warn('[Notifications] Failed to handle notification response:', error);
       });
     });
 

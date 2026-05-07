@@ -77,7 +77,7 @@ function readString(value: unknown): string | null {
 }
 
 function mapAchievementProgress(
-  docs: Array<{ id: string; data: () => Record<string, unknown> }>
+  docs: Array<{ id: string; data: () => Record<string, unknown> }>,
 ): Record<string, AchievementProgress> {
   const progressMap: Record<string, AchievementProgress> = {};
 
@@ -160,26 +160,33 @@ export async function loadDailyBriefContent(params: {
 }): Promise<string | null> {
   const db = getDb();
   const canonicalDoc = await getDoc(
-    docFromSegments(db, buildUserSchoolCollectionPath(params.uid, params.schoolId, 'dailyBriefs', params.date))
+    docFromSegments(
+      db,
+      buildUserSchoolCollectionPath(params.uid, params.schoolId, 'dailyBriefs', params.date),
+    ),
   ).catch(() => null);
   const canonicalContent = readString(canonicalDoc?.data()?.content);
   if (canonicalContent) {
     return canonicalContent;
   }
 
-  const legacyDoc = await getDoc(docFromSegments(db, ['users', params.uid, 'dailyBriefs', params.date])).catch(
-    () => null
-  );
+  const legacyDoc = await getDoc(
+    docFromSegments(db, ['users', params.uid, 'dailyBriefs', params.date]),
+  ).catch(() => null);
   return readString(legacyDoc?.data()?.content);
 }
 
 export async function loadLeaderboardSnapshot(
   schoolId: string,
-  queryLimit = 10
+  queryLimit = 10,
 ): Promise<LeaderboardSnapshotRow[]> {
   const db = getDb();
   const snapshot = await getDocs(
-    query(collectionFromSegments(db, ['schools', schoolId, 'leaderboard']), orderBy('points', 'desc'), limit(queryLimit))
+    query(
+      collectionFromSegments(db, ['schools', schoolId, 'leaderboard']),
+      orderBy('points', 'desc'),
+      limit(queryLimit),
+    ),
   );
 
   return snapshot.docs.map((docSnap) => {
@@ -203,7 +210,7 @@ export function subscribeLeaderboard(params: {
     query(
       collectionFromSegments(db, ['schools', params.schoolId, 'leaderboard']),
       orderBy('points', 'desc'),
-      limit(params.queryLimit ?? 10)
+      limit(params.queryLimit ?? 10),
     ),
     (snapshot) => {
       params.onChange(
@@ -214,9 +221,9 @@ export function subscribeLeaderboard(params: {
             userName: readString(raw.displayName) ?? '同學',
             points: typeof raw.points === 'number' ? raw.points : 0,
           };
-        })
+        }),
       );
-    }
+    },
   );
 }
 
@@ -228,26 +235,34 @@ export function subscribeAchievementProgress(params: {
   const db = getDb();
   const achievementsRef = collectionFromSegments(
     db,
-    buildUserSchoolCollectionPath(params.uid, params.schoolId, 'achievements')
+    buildUserSchoolCollectionPath(params.uid, params.schoolId, 'achievements'),
   );
 
   return onSnapshot(achievementsRef, async (snapshot) => {
     if (!snapshot.empty) {
       params.onChange(
-        mapAchievementProgress(snapshot.docs.map((docSnap) => ({ id: docSnap.id, data: () => toRecord(docSnap.data()) })))
+        mapAchievementProgress(
+          snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            data: () => toRecord(docSnap.data()),
+          })),
+        ),
       );
       return;
     }
 
-    const legacySnapshot = await getDocs(collectionFromSegments(db, ['users', params.uid, 'achievements'])).catch(
-      () => null
-    );
+    const legacySnapshot = await getDocs(
+      collectionFromSegments(db, ['users', params.uid, 'achievements']),
+    ).catch(() => null);
     params.onChange(
       legacySnapshot
         ? mapAchievementProgress(
-            legacySnapshot.docs.map((docSnap) => ({ id: docSnap.id, data: () => toRecord(docSnap.data()) }))
+            legacySnapshot.docs.map((docSnap) => ({
+              id: docSnap.id,
+              data: () => toRecord(docSnap.data()),
+            })),
           )
-        : {}
+        : {},
     );
   });
 }
@@ -262,7 +277,12 @@ export async function syncAchievementProgress(params: {
   const db = getDb();
   const achievementRef = docFromSegments(
     db,
-    buildUserSchoolCollectionPath(params.uid, params.schoolId, 'achievements', params.achievementId)
+    buildUserSchoolCollectionPath(
+      params.uid,
+      params.schoolId,
+      'achievements',
+      params.achievementId,
+    ),
   );
   const snapshot = await getDoc(achievementRef);
   const unlocked = params.progress >= params.requirement;
@@ -278,7 +298,7 @@ export async function syncAchievementProgress(params: {
         updatedAt: serverTimestamp(),
         ...(unlocked && !existing?.unlockedAt ? { unlockedAt: serverTimestamp() } : {}),
       },
-      { merge: true }
+      { merge: true },
     );
   }
 }

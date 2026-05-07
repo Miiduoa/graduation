@@ -3,8 +3,8 @@
  * 處理 Deep Link 和 Universal Link 導航
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { Linking, Platform } from "react-native";
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Linking, Platform } from 'react-native';
 
 export interface DeepLinkRoute {
   path: string;
@@ -26,33 +26,33 @@ export interface DeepLinkResult {
   canOpenUrl: (url: string) => Promise<boolean>;
 }
 
-const DEFAULT_SCHEME = "campus";
+const DEFAULT_SCHEME = 'campus';
 const DEFAULT_PREFIXES = [
-  "campus://",
-  "https://campus-app.example.com",
-  "https://*.campus-app.example.com",
+  'campus://',
+  'https://campus-app.example.com',
+  'https://*.campus-app.example.com',
 ];
 
 function parseUrl(
   url: string,
   scheme: string = DEFAULT_SCHEME,
-  prefixes: string[] = DEFAULT_PREFIXES
+  prefixes: string[] = DEFAULT_PREFIXES,
 ): DeepLinkRoute | null {
   if (!url) return null;
 
-  let path = "";
-  let queryString = "";
+  let path = '';
+  let queryString = '';
 
   const schemePrefix = `${scheme}://`;
   if (url.startsWith(schemePrefix)) {
     const withoutScheme = url.slice(schemePrefix.length);
-    const [pathPart, query] = withoutScheme.split("?");
+    const [pathPart, query] = withoutScheme.split('?');
     path = pathPart;
-    queryString = query || "";
+    queryString = query || '';
   } else {
     for (const prefix of prefixes) {
-      if (prefix.includes("*")) {
-        const regex = new RegExp(prefix.replace(/\*/g, "[^/]+"));
+      if (prefix.includes('*')) {
+        const regex = new RegExp(prefix.replace(/\*/g, '[^/]+'));
         if (regex.test(url)) {
           try {
             const parsed = new URL(url);
@@ -69,8 +69,8 @@ function parseUrl(
           path = parsed.pathname.slice(1);
           queryString = parsed.search.slice(1);
         } catch {
-          path = url.slice(prefix.length).replace(/^\//, "");
-          const queryIndex = path.indexOf("?");
+          path = url.slice(prefix.length).replace(/^\//, '');
+          const queryIndex = path.indexOf('?');
           if (queryIndex !== -1) {
             queryString = path.slice(queryIndex + 1);
             path = path.slice(0, queryIndex);
@@ -99,7 +99,7 @@ function parseUrl(
     });
   }
 
-  const pathParts = path.split("/").filter(Boolean);
+  const pathParts = path.split('/').filter(Boolean);
   for (let i = 0; i < pathParts.length; i += 2) {
     if (pathParts[i + 1] && !params[pathParts[i]]) {
       params[pathParts[i]] = pathParts[i + 1];
@@ -134,7 +134,7 @@ export function useDeepLink(options: DeepLinkOptions = {}): DeepLinkResult {
         onLinkRef.current(parsedRoute);
       }
     },
-    [scheme, prefixes]
+    [scheme, prefixes],
   );
 
   useEffect(() => {
@@ -144,7 +144,7 @@ export function useDeepLink(options: DeepLinkOptions = {}): DeepLinkResult {
         setInitialUrl(url);
         handleUrl(url);
       } catch (error) {
-        console.error("[DeepLink] Failed to get initial URL:", error);
+        console.error('[DeepLink] Failed to get initial URL:', error);
       } finally {
         setIsLoading(false);
       }
@@ -152,7 +152,7 @@ export function useDeepLink(options: DeepLinkOptions = {}): DeepLinkResult {
 
     getInitialUrl();
 
-    const subscription = Linking.addEventListener("url", (event) => {
+    const subscription = Linking.addEventListener('url', (event) => {
       handleUrl(event.url);
     });
 
@@ -170,7 +170,7 @@ export function useDeepLink(options: DeepLinkOptions = {}): DeepLinkResult {
       }
       return false;
     } catch (error) {
-      console.error("[DeepLink] Failed to open URL:", error);
+      console.error('[DeepLink] Failed to open URL:', error);
       return false;
     }
   }, []);
@@ -195,18 +195,18 @@ export function useDeepLink(options: DeepLinkOptions = {}): DeepLinkResult {
 
 export function useDeepLinkNavigation<T extends Record<string, string>>(
   routes: Record<string, (params: T) => void>,
-  options: DeepLinkOptions = {}
+  options: DeepLinkOptions = {},
 ): DeepLinkResult {
   const handleLink = useCallback(
     (route: DeepLinkRoute) => {
-      const pathParts = route.path.split("/");
+      const pathParts = route.path.split('/');
       const routeName = pathParts[0];
 
       if (routeName && routes[routeName]) {
         routes[routeName](route.params as T);
       }
     },
-    [routes]
+    [routes],
   );
 
   return useDeepLink({
@@ -218,7 +218,7 @@ export function useDeepLinkNavigation<T extends Record<string, string>>(
 export function buildDeepLink(
   path: string,
   params?: Record<string, string>,
-  scheme: string = DEFAULT_SCHEME
+  scheme: string = DEFAULT_SCHEME,
 ): string {
   let url = `${scheme}://${path}`;
 
@@ -244,27 +244,27 @@ export function useUniversalLink(domain: string): {
         return false;
       }
     },
-    [domain]
+    [domain],
   );
 
   const shareLink = useCallback(
     async (path: string, title?: string): Promise<void> => {
       const url = `https://${domain}/${path}`;
       try {
-        const Share = require("react-native-share").default;
+        const Share = require('react-native-share').default;
         await Share.open({
-          title: title || "分享連結",
+          title: title || '分享連結',
           url,
-          message: title || "",
+          message: title || '',
         });
       } catch {
-        const { Share: RNShare } = require("react-native");
+        const { Share: RNShare } = require('react-native');
         await RNShare.share({
           message: title ? `${title}\n${url}` : url,
         });
       }
     },
-    [domain]
+    [domain],
   );
 
   return { openInApp, shareLink };
@@ -279,10 +279,10 @@ export function useExternalApps(): {
 } {
   const openMaps = useCallback(
     async (lat: number, lng: number, label?: string): Promise<boolean> => {
-      const encodedLabel = label ? encodeURIComponent(label) : "";
+      const encodedLabel = label ? encodeURIComponent(label) : '';
       const url = Platform.select({
-        ios: `maps:0,0?q=${lat},${lng}${encodedLabel ? `(${encodedLabel})` : ""}`,
-        android: `geo:${lat},${lng}?q=${lat},${lng}${encodedLabel ? `(${encodedLabel})` : ""}`,
+        ios: `maps:0,0?q=${lat},${lng}${encodedLabel ? `(${encodedLabel})` : ''}`,
+        android: `geo:${lat},${lng}?q=${lat},${lng}${encodedLabel ? `(${encodedLabel})` : ''}`,
         default: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
       });
 
@@ -292,19 +292,17 @@ export function useExternalApps(): {
           await Linking.openURL(url);
           return true;
         }
-        await Linking.openURL(
-          `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
-        );
+        await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
         return true;
       } catch {
         return false;
       }
     },
-    []
+    [],
   );
 
   const openPhone = useCallback(async (phoneNumber: string): Promise<boolean> => {
-    const url = `tel:${phoneNumber.replace(/\s/g, "")}`;
+    const url = `tel:${phoneNumber.replace(/\s/g, '')}`;
     try {
       await Linking.openURL(url);
       return true;
@@ -322,7 +320,7 @@ export function useExternalApps(): {
       if (body) params.push(`body=${encodeURIComponent(body)}`);
 
       if (params.length > 0) {
-        url += `?${params.join("&")}`;
+        url += `?${params.join('&')}`;
       }
 
       try {
@@ -332,7 +330,7 @@ export function useExternalApps(): {
         return false;
       }
     },
-    []
+    [],
   );
 
   const openAppStore = useCallback(async (appId: string): Promise<boolean> => {
@@ -348,7 +346,7 @@ export function useExternalApps(): {
         await Linking.openURL(url);
         return true;
       }
-      if (Platform.OS === "android") {
+      if (Platform.OS === 'android') {
         await Linking.openURL(`https://play.google.com/store/apps/details?id=${appId}`);
         return true;
       }
@@ -360,8 +358,8 @@ export function useExternalApps(): {
 
   const openSettings = useCallback(async (): Promise<boolean> => {
     try {
-      if (Platform.OS === "ios") {
-        await Linking.openURL("app-settings:");
+      if (Platform.OS === 'ios') {
+        await Linking.openURL('app-settings:');
       } else {
         await Linking.openSettings();
       }

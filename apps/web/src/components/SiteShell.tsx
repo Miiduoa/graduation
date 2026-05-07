@@ -1,24 +1,24 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
-import { PWAInstallBanner } from "./PWAInstallBanner";
-import { OfflineBanner } from "./OfflineBanner";
-import { UpdateBanner } from "./UpdateBanner";
+import Link from 'next/link';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
+import { PWAInstallBanner } from './PWAInstallBanner';
+import { OfflineBanner } from './OfflineBanner';
+import { UpdateBanner } from './UpdateBanner';
 
 const NAV_ICONS: Record<string, string> = {
-  "/": "☀️",
-  "/groups": "🎓",
-  "/map": "🗺️",
-  "/announcements": "📥",
-  "/profile": "👤",
-  "/timetable": "📅",
-  "/cafeteria": "🍱",
-  "/bus": "🚌",
-  "/library": "📚",
-  "/search": "🔍",
-  "/settings": "⚙",
+  '/': '☀️',
+  '/groups': '🎓',
+  '/map': '🗺️',
+  '/announcements': '📥',
+  '/profile': '👤',
+  '/timetable': '📅',
+  '/cafeteria': '🍱',
+  '/bus': '🚌',
+  '/library': '📚',
+  '/search': '🔍',
+  '/settings': '⚙',
 };
 
 function SiteShellInner(props: {
@@ -31,39 +31,38 @@ function SiteShellInner(props: {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const school = searchParams.get("school") || "";
-  const schoolId = searchParams.get("schoolId") || "";
-  const q =
-    school
-      ? `?school=${encodeURIComponent(school)}&schoolId=${encodeURIComponent(schoolId)}`
-      : "";
+  const school = searchParams.get('school') || '';
+  const schoolId = searchParams.get('schoolId') || '';
+  const q = school
+    ? `?school=${encodeURIComponent(school)}&schoolId=${encodeURIComponent(schoolId)}`
+    : '';
 
   const navItems = [
-    { href: "/", label: "Today", group: "primary" as const },
-    { href: "/groups", label: "課程", group: "primary" as const },
-    { href: "/map", label: "校園", group: "primary" as const },
-    { href: "/announcements", label: "收件匣", group: "primary" as const },
-    { href: "/profile", label: "我的", group: "primary" as const },
-    { href: "/timetable", label: "課表", group: "secondary" as const },
-    { href: "/cafeteria", label: "餐廳", group: "secondary" as const },
-    { href: "/bus", label: "公車", group: "secondary" as const },
-    { href: "/library", label: "圖書館", group: "secondary" as const },
-    { href: "/settings", label: "設定", group: "secondary" as const },
+    { href: '/', label: 'Today', group: 'primary' as const },
+    { href: '/groups', label: '課程', group: 'primary' as const },
+    { href: '/map', label: '校園', group: 'primary' as const },
+    { href: '/announcements', label: '收件匣', group: 'primary' as const },
+    { href: '/profile', label: '我的', group: 'primary' as const },
+    { href: '/timetable', label: '課表', group: 'secondary' as const },
+    { href: '/cafeteria', label: '餐廳', group: 'secondary' as const },
+    { href: '/bus', label: '公車', group: 'secondary' as const },
+    { href: '/library', label: '圖書館', group: 'secondary' as const },
+    { href: '/settings', label: '設定', group: 'secondary' as const },
   ];
 
-  const primaryNav = navItems.filter((item) => item.group === "primary");
-  const secondaryNav = navItems.filter((item) => item.group === "secondary");
+  const primaryNav = navItems.filter((item) => item.group === 'primary');
+  const secondaryNav = navItems.filter((item) => item.group === 'secondary');
 
   const mobileNav = [
-    { href: "/", label: "Today", icon: "☀️" },
-    { href: "/groups", label: "課程", icon: "🎓" },
-    { href: "/map", label: "校園", icon: "🗺️" },
-    { href: "/announcements", label: "收件匣", icon: "📥" },
-    { href: "/profile", label: "我的", icon: "👤" },
+    { href: '/', label: 'Today', icon: '☀️' },
+    { href: '/groups', label: '課程', icon: '🎓' },
+    { href: '/map', label: '校園', icon: '🗺️' },
+    { href: '/announcements', label: '收件匣', icon: '📥' },
+    { href: '/profile', label: '我的', icon: '👤' },
   ];
 
   const isActive = (href: string) => {
-    if (href === "/") return pathname === "/";
+    if (href === '/') return pathname === '/';
     return pathname.startsWith(href);
   };
 
@@ -117,7 +116,7 @@ function SiteShellInner(props: {
                   <Link
                     key={item.href}
                     href={`${item.href}${q}`}
-                    className={`navLink${isActive(item.href) ? " active" : ""}`}
+                    className={`navLink${isActive(item.href) ? ' active' : ''}`}
                   >
                     <span style={{ marginRight: 4 }}>{NAV_ICONS[item.href]}</span>
                     {item.label}
@@ -131,7 +130,7 @@ function SiteShellInner(props: {
                     <Link
                       key={item.href}
                       href={`${item.href}${q}`}
-                      className={`navLink secondary${isActive(item.href) ? " active" : ""}`}
+                      className={`navLink secondary${isActive(item.href) ? ' active' : ''}`}
                     >
                       {item.label}
                     </Link>
@@ -154,8 +153,8 @@ function SiteShellInner(props: {
                 {props.subtitle ? <p className="sub">{props.subtitle}</p> : null}
               </div>
               <div className="pageHeadMeta">
-                <span className="pill">{props.schoolName ?? "靜宜大學"}</span>
-                <span className="pill subtle">{props.schoolCode ?? "Campus Soft"}</span>
+                <span className="pill">{props.schoolName ?? '靜宜大學'}</span>
+                <span className="pill subtle">{props.schoolCode ?? 'Campus Soft'}</span>
               </div>
             </div>
           ) : null}
@@ -166,9 +165,15 @@ function SiteShellInner(props: {
         <footer className="footer">
           <div className="shellActions">
             <span>© 2026 Campus One</span>
-            <a href="#" className="footerLink">關於我們</a>
-            <a href="#" className="footerLink">隱私政策</a>
-            <a href="#" className="footerLink">聯絡我們</a>
+            <a href="#" className="footerLink">
+              關於我們
+            </a>
+            <a href="#" className="footerLink">
+              隱私政策
+            </a>
+            <a href="#" className="footerLink">
+              聯絡我們
+            </a>
           </div>
         </footer>
 
@@ -178,10 +183,10 @@ function SiteShellInner(props: {
             <Link
               key={item.href}
               href={`${item.href}${q}`}
-              className={`mobileDockLink${isActive(item.href) ? " active" : ""}`}
+              className={`mobileDockLink${isActive(item.href) ? ' active' : ''}`}
             >
-              <span style={{ fontSize: 20, display: "block", lineHeight: 1 }}>{item.icon}</span>
-              <span style={{ display: "block", fontSize: 10, marginTop: 2 }}>{item.label}</span>
+              <span style={{ fontSize: 20, display: 'block', lineHeight: 1 }}>{item.icon}</span>
+              <span style={{ display: 'block', fontSize: 10, marginTop: 2 }}>{item.label}</span>
             </Link>
           ))}
         </nav>
@@ -225,7 +230,7 @@ export function SiteShell(props: {
           <main className="main">
             <div
               className="card"
-              style={{ textAlign: "center", padding: 40, color: "var(--muted)" }}
+              style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}
             >
               載入中…
             </div>

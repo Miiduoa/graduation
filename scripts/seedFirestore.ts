@@ -184,7 +184,7 @@ function generatePois(schoolId: string) {
       name: '工程館',
       description: '資訊工程系主要教學大樓',
       category: 'building',
-      location: { lat: 24.1234, lng: 120.7890 },
+      location: { lat: 24.1234, lng: 120.789 },
       address: '校區中心',
       openingHours: { weekday: '08:00-22:00', weekend: '09:00-18:00' },
     },
@@ -194,7 +194,7 @@ function generatePois(schoolId: string) {
       name: '圖書館',
       description: '校園中央圖書館',
       category: 'library',
-      location: { lat: 24.1240, lng: 120.7885 },
+      location: { lat: 24.124, lng: 120.7885 },
       address: '校區中心',
       openingHours: { weekday: '08:00-23:00', weekend: '09:00-21:00' },
     },
@@ -204,7 +204,7 @@ function generatePois(schoolId: string) {
       name: '學生餐廳',
       description: '提供平價餐飲服務',
       category: 'cafeteria',
-      location: { lat: 24.1220, lng: 120.7900 },
+      location: { lat: 24.122, lng: 120.79 },
       address: '學生活動中心1樓',
       openingHours: { weekday: '11:00-14:00,17:00-19:00', weekend: '11:30-13:30' },
     },
@@ -218,7 +218,7 @@ function generateCafeterias(schoolId: string) {
       schoolId,
       name: '學生餐廳A',
       description: '主食滷肉飯、便當為主',
-      location: { lat: 24.1220, lng: 120.7900 },
+      location: { lat: 24.122, lng: 120.79 },
       openingHours: { weekday: '11:00-14:00,17:00-19:00', weekend: '11:30-13:30' },
       pilotStatus: 'live',
       orderingEnabled: true,
@@ -371,7 +371,7 @@ function generateGroupPosts(schoolId: string) {
       createdAt: getDateOffset(-2),
       likeCount: 12,
       commentCount: 5,
-    }
+    },
   );
 
   return posts;
@@ -567,7 +567,7 @@ function generateConversations(schoolId: string, userId: string) {
 
 async function writeBatchDocuments(
   docs: Array<{ path: string[]; data: any }>,
-  schoolId: string
+  schoolId: string,
 ): Promise<number> {
   let written = 0;
   let batch = db.batch();

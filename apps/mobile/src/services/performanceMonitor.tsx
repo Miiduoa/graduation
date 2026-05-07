@@ -4,20 +4,12 @@
  * 用於在開發模式下顯示效能監控資訊
  */
 
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  Modal,
-  StyleSheet,
-  Dimensions,
-} from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { performance, PerformanceReport } from "./performance";
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, Pressable, ScrollView, Modal, StyleSheet, Dimensions } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { performance, PerformanceReport } from './performance';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface PerformanceMonitorProps {
   enabled?: boolean;
@@ -40,13 +32,13 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
     const measureFps = () => {
       frameCount++;
       const currentTime = Date.now();
-      
+
       if (currentTime - lastTime >= 1000) {
         setFps(frameCount);
         frameCount = 0;
         lastTime = currentTime;
       }
-      
+
       animationId = requestAnimationFrame(measureFps);
     };
 
@@ -70,16 +62,16 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
   if (!enabled) return null;
 
   const getFpsColor = () => {
-    if (fps >= 55) return "#22C55E";
-    if (fps >= 30) return "#F59E0B";
-    return "#EF4444";
+    if (fps >= 55) return '#22C55E';
+    if (fps >= 30) return '#F59E0B';
+    return '#EF4444';
   };
 
   return (
     <>
       {/* Floating Button */}
       <Pressable
-        style={[styles.floatingButton, { display: isVisible ? "flex" : "none" }]}
+        style={[styles.floatingButton, { display: isVisible ? 'flex' : 'none' }]}
         onPress={() => setIsExpanded(true)}
         onLongPress={() => setIsVisible(false)}
       >
@@ -91,10 +83,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
 
       {/* Toggle Button (always visible in dev) */}
       {!isVisible && (
-        <Pressable
-          style={styles.toggleButton}
-          onPress={() => setIsVisible(true)}
-        >
+        <Pressable style={styles.toggleButton} onPress={() => setIsVisible(true)}>
           <Ionicons name="speedometer-outline" size={20} color="#fff" />
         </Pressable>
       )}
@@ -120,9 +109,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Frame Rate</Text>
                 <View style={styles.fpsLarge}>
-                  <Text style={[styles.fpsLargeText, { color: getFpsColor() }]}>
-                    {fps}
-                  </Text>
+                  <Text style={[styles.fpsLargeText, { color: getFpsColor() }]}>{fps}</Text>
                   <Text style={styles.fpsLargeLabel}>FPS</Text>
                 </View>
               </View>
@@ -134,9 +121,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                     <Text style={styles.sectionTitle}>HTTP Requests</Text>
                     <View style={styles.statRow}>
                       <Text style={styles.statLabel}>Total Requests</Text>
-                      <Text style={styles.statValue}>
-                        {report.httpStats.totalRequests}
-                      </Text>
+                      <Text style={styles.statValue}>{report.httpStats.totalRequests}</Text>
                     </View>
                     <View style={styles.statRow}>
                       <Text style={styles.statLabel}>Avg Duration</Text>
@@ -150,10 +135,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                         style={[
                           styles.statValue,
                           {
-                            color:
-                              report.httpStats.errorRate > 0.1
-                                ? "#EF4444"
-                                : "#22C55E",
+                            color: report.httpStats.errorRate > 0.1 ? '#EF4444' : '#22C55E',
                           },
                         ]}
                       >
@@ -161,15 +143,12 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                       </Text>
                     </View>
                     <View style={styles.statRow}>
-                      <Text style={styles.statLabel}>Slow Requests ({">"}1s)</Text>
+                      <Text style={styles.statLabel}>Slow Requests ({'>'}1s)</Text>
                       <Text
                         style={[
                           styles.statValue,
                           {
-                            color:
-                              report.httpStats.slowRequests > 0
-                                ? "#F59E0B"
-                                : "#22C55E",
+                            color: report.httpStats.slowRequests > 0 ? '#F59E0B' : '#22C55E',
                           },
                         ]}
                       >
@@ -193,9 +172,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                               <Text style={styles.traceName} numberOfLines={1}>
                                 {stat.name}
                               </Text>
-                              <Text style={styles.traceCount}>
-                                {stat.count}x
-                              </Text>
+                              <Text style={styles.traceCount}>{stat.count}x</Text>
                             </View>
                             <View style={styles.traceDurations}>
                               <Text style={styles.traceAvg}>
@@ -226,7 +203,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                 </Pressable>
 
                 <Pressable
-                  style={[styles.actionButton, { backgroundColor: "#3B82F6" }]}
+                  style={[styles.actionButton, { backgroundColor: '#3B82F6' }]}
                   onPress={refreshReport}
                 >
                   <Ionicons name="refresh-outline" size={18} color="#fff" />
@@ -243,68 +220,68 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
 
 const styles = StyleSheet.create({
   floatingButton: {
-    position: "absolute",
+    position: 'absolute',
     top: 50,
     right: 10,
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: "rgba(0, 0, 0, 0.8)",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
     zIndex: 9999,
     elevation: 10,
-    shadowColor: "#000",
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
   },
   toggleButton: {
-    position: "absolute",
+    position: 'absolute',
     top: 50,
     right: 10,
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
     zIndex: 9999,
   },
   fpsContainer: {
-    alignItems: "center",
+    alignItems: 'center',
   },
   fpsText: {
     fontSize: 16,
-    fontWeight: "bold",
+    fontWeight: 'bold',
   },
   fpsLabel: {
     fontSize: 8,
-    color: "#9CA3AF",
+    color: '#9CA3AF',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "flex-end",
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: "#fff",
+    backgroundColor: '#fff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: SCREEN_HEIGHT * 0.8,
   },
   modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#E5E7EB",
+    borderBottomColor: '#E5E7EB',
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#1F2937",
+    fontWeight: 'bold',
+    color: '#1F2937',
   },
   scrollContent: {
     padding: 16,
@@ -314,94 +291,94 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#6B7280",
+    fontWeight: '600',
+    color: '#6B7280',
     marginBottom: 10,
-    textTransform: "uppercase",
+    textTransform: 'uppercase',
   },
   fpsLarge: {
-    flexDirection: "row",
-    alignItems: "baseline",
+    flexDirection: 'row',
+    alignItems: 'baseline',
     gap: 8,
   },
   fpsLargeText: {
     fontSize: 48,
-    fontWeight: "bold",
+    fontWeight: 'bold',
   },
   fpsLargeLabel: {
     fontSize: 18,
-    color: "#9CA3AF",
+    color: '#9CA3AF',
   },
   statRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
+    borderBottomColor: '#F3F4F6',
   },
   statLabel: {
     fontSize: 14,
-    color: "#6B7280",
+    color: '#6B7280',
   },
   statValue: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#1F2937",
+    fontWeight: '600',
+    color: '#1F2937',
   },
   emptyText: {
     fontSize: 14,
-    color: "#9CA3AF",
-    textAlign: "center",
+    color: '#9CA3AF',
+    textAlign: 'center',
     paddingVertical: 20,
   },
   traceRow: {
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#F3F4F6",
+    borderBottomColor: '#F3F4F6',
   },
   traceInfo: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 4,
   },
   traceName: {
     fontSize: 13,
-    fontWeight: "500",
-    color: "#1F2937",
+    fontWeight: '500',
+    color: '#1F2937',
     flex: 1,
     marginRight: 8,
   },
   traceCount: {
     fontSize: 12,
-    color: "#9CA3AF",
+    color: '#9CA3AF',
   },
   traceDurations: {
-    flexDirection: "row",
+    flexDirection: 'row',
     gap: 16,
   },
   traceAvg: {
     fontSize: 12,
-    color: "#6B7280",
+    color: '#6B7280',
   },
   traceP95: {
     fontSize: 12,
-    color: "#F59E0B",
+    color: '#F59E0B',
   },
   actionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    backgroundColor: "#EF4444",
+    backgroundColor: '#EF4444',
     paddingVertical: 12,
     borderRadius: 8,
     marginBottom: 10,
   },
   actionButtonText: {
-    color: "#fff",
+    color: '#fff',
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: '600',
   },
 });
 
