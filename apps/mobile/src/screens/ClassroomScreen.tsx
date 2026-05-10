@@ -456,6 +456,7 @@ export function ClassroomScreen(props: any) {
     try {
       await addDoc(collection(db, 'groups', groupId, 'liveSessions', sessionId, 'questions'), {
         text: newQuestion.trim(),
+        authorId: auth.user.uid,
         upvotes: 0,
         answered: false,
         createdAt: serverTimestamp(),

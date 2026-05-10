@@ -16,7 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { Screen } from '../ui/components';
-import type { AssistantActionProposal } from '../data';
+import type { AssistantActionProposal, AssistantChoiceMenu } from '../data';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useSchool } from '../state/school';
@@ -27,18 +27,21 @@ import { useSchedule } from '../state/schedule';
 import {
   chatWithCampusAssistant,
   chatWithLocalLLMStreaming,
+  chatWithOnDeviceAssistantStreaming,
   getAIStatus,
+  hasSavedOnDeviceAssistant,
   submitFeedback,
   type AIMessage,
   type AIContext,
   type StreamingCallback,
 } from '../services/ai';
+import { autonomousQuery, autonomousQueryWithReflexion, exploreAndLearn, buildToolSelectionPrompt, parseToolSelection, resolveConversationReference, type AgentQueryResult, type ConversationTurn } from '../services/aiLocalAgent';
+import { executeTool } from '../services/aiAgentTools';
 import { toDate } from '../utils/format';
 import {
   clearAIChatHistory,
   getAIChatHistoryStorageKey,
   loadAIChatHistory,
-  loadAiPersonalContext,
   saveAIChatHistory,
   type AiPersonalContext,
 } from '../features/ai';
@@ -54,9 +57,15 @@ import { executeAgentToolAction, type AIActionExecutionResult } from '../service
 import {
   buildAIAppContext,
   emptyAIAppRuntimeData,
-  loadAIAppRuntimeData,
   type AIAppRuntimeData,
 } from '../services/aiAppContext';
+import {
+  getAIAmbientAwarenessSnapshot,
+  refreshAIAmbientAwareness,
+  subscribeAIAmbientAwareness,
+  type AIAmbientAwarenessSnapshot,
+} from '../services/aiAmbientAwareness';
+import { formatAIToolLayerForPrompt, runAIToolLayer } from '../services/aiToolLayer';
 import { shouldUseWebSearch } from '../services/webSearch';
 import { buildNavigationTarget, navigateToTarget } from '../utils/courseNavigation';
 import {
@@ -66,7 +75,7 @@ import {
   hasPuOfficialMenuSignal,
   isProvidenceDiningSchoolId,
 } from '../data/puDiningCatalog';
-import type { Cafeteria, MenuItem } from '../data/types';
+import type { Cafeteria, Course, MenuItem } from '../data/types';
 import {
   createAIBrain,
   understandQuery,
@@ -118,6 +127,9 @@ import {
   getMemoryStorageKey,
   extractLearnableFacts,
   mergeLearnedFacts,
+  mergeLearnedSkill,
+  extractLearnedSkillFromUserMessage,
+  collectLearnedSkillsFromToolRound,
   addRecentAction,
   buildThinkingChain,
   type AgentTool,
@@ -191,6 +203,8 @@ type Message = {
   content: string;
   timestamp: Date;
   suggestions?: string[];
+  /** 可點選選項（例如訂餐多選一），點擊後當成使用者訊息送出 */
+  choiceMenu?: AssistantChoiceMenu;
   actions?: AssistantActionProposal[];
   agentType?: AgentMessageType;
   toolExecution?: ToolExecution;
@@ -979,6 +993,55 @@ function RecentExecutionsBar(props: { executions: ToolExecution[] }) {
   );
 }
 
+function ChoiceMenuCard(props: {
+  menu: AssistantChoiceMenu;
+  onSelect: (sendAsUser: string) => void;
+}) {
+  const { menu, onSelect } = props;
+  return (
+    <View
+      style={{
+        marginTop: 10,
+        padding: 12,
+        borderRadius: 14,
+        backgroundColor: theme.colors.surface2,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        maxWidth: '100%',
+      }}
+    >
+      {menu.title ? (
+        <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.text, marginBottom: 4 }}>
+          {menu.title}
+        </Text>
+      ) : null}
+      {menu.prompt ? (
+        <Text style={{ fontSize: 12, color: theme.colors.muted, marginBottom: 10 }}>{menu.prompt}</Text>
+      ) : null}
+      {menu.options.map((opt) => (
+        <Pressable
+          key={opt.id}
+          onPress={() => onSelect(opt.sendAsUser?.trim() || opt.label)}
+          style={({ pressed }) => ({
+            paddingVertical: 12,
+            paddingHorizontal: 12,
+            marginBottom: 8,
+            borderRadius: 12,
+            backgroundColor: pressed ? theme.colors.accentSoft : theme.colors.surface,
+            borderWidth: 1,
+            borderColor: `${theme.colors.accent}35`,
+          })}
+        >
+          <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>{opt.label}</Text>
+          {opt.subtitle ? (
+            <Text style={{ fontSize: 12, color: theme.colors.muted, marginTop: 4 }}>{opt.subtitle}</Text>
+          ) : null}
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 // ── Message Bubble (Enhanced) ──
 function MessageBubble(props: {
   message: Message;
@@ -1053,6 +1116,18 @@ function MessageBubble(props: {
           <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '600' }}>
             AI Agent
           </Text>
+          {message.choiceMenu && message.choiceMenu.options.length > 0 && (
+            <View
+              style={{
+                paddingHorizontal: 6,
+                paddingVertical: 1,
+                borderRadius: 4,
+                backgroundColor: '#0EA5E918',
+              }}
+            >
+              <Text style={{ color: '#0EA5E9', fontSize: 9, fontWeight: '600' }}>選項</Text>
+            </View>
+          )}
           {message.agentType && message.agentType !== 'text' && (
             <View
               style={{
@@ -1146,6 +1221,10 @@ function MessageBubble(props: {
           param={message.paramCollect.nextParam}
           onSelect={(v) => onParamSelect?.(v)}
         />
+      )}
+
+      {!isUser && message.choiceMenu && message.choiceMenu.options.length > 0 && (
+        <ChoiceMenuCard menu={message.choiceMenu} onSelect={(t) => onSuggestion?.(t)} />
       )}
 
       {/* Suggestions */}
@@ -1261,14 +1340,23 @@ export function AIChatScreen(props: any) {
   const auth = useAuth();
   const ds = useDataSource();
   const scrollRef = useRef<ScrollView>(null);
-  const { courses } = useSchedule();
+  const scheduleState = useSchedule();
+  const { courses } = scheduleState;
 
   // ── State ──
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [aiStatus] = useState(() => getAIStatus());
+  const [aiStatusTick, setAiStatusTick] = useState(0);
+  const aiStatus = useMemo(() => getAIStatus(), [aiStatusTick]);
   const isOfflineAI = aiStatus.provider === 'offline' || aiStatus.provider === 'mock';
+
+  // 定期檢查本地模型是否就緒（使用者可能從 AI 模型管理頁面啟用模型後回到聊天）
+  useEffect(() => {
+    const timer = setInterval(() => setAiStatusTick((t) => t + 1), 5000);
+    return () => clearInterval(timer);
+  }, []);
+
   const [pendingAssignments, setPendingAssignments] = useState<
     AiPersonalContext['pendingAssignments']
   >([]);
@@ -1276,6 +1364,8 @@ export function AIChatScreen(props: any) {
   const [appRuntimeData, setAppRuntimeData] = useState<AIAppRuntimeData>(() =>
     emptyAIAppRuntimeData(),
   );
+  const appRuntimeDataRef = useRef<AIAppRuntimeData>(appRuntimeData);
+  const mountedRef = useRef(true);
   const [latestProactiveReports, setLatestProactiveReports] = useState<ProactiveAIReport[]>([]);
   const [showCapabilities, setShowCapabilities] = useState(true);
   const [recentExecutions, setRecentExecutions] = useState<ToolExecution[]>(() =>
@@ -1302,6 +1392,45 @@ export function AIChatScreen(props: any) {
     () => resolveAgentRoleFromProfile(auth.profile),
     [auth.profile?.role, auth.profile?.serviceRoles, auth.profile?.merchantAssignments],
   );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    appRuntimeDataRef.current = appRuntimeData;
+  }, [appRuntimeData]);
+
+  const applyAwarenessSnapshot = useCallback((snapshot: AIAmbientAwarenessSnapshot) => {
+    appRuntimeDataRef.current = snapshot.runtimeData;
+    if (!mountedRef.current) return;
+    setAppRuntimeData(snapshot.runtimeData);
+    if (snapshot.personalContext) {
+      setPendingAssignments(snapshot.personalContext.pendingAssignments);
+      setWeeklyReport(snapshot.personalContext.weeklyReport);
+    }
+  }, []);
+
+  const refreshAIAppAwareness = useCallback(
+    async (
+      reason: 'mount' | 'foreground-timer' | 'app-active' | 'app-background' | 'manual' = 'manual',
+      options?: { force?: boolean },
+    ): Promise<AIAppRuntimeData> => {
+      const snapshot = await refreshAIAmbientAwareness({
+        dataSource: ds,
+        userId: auth.user?.uid ?? null,
+        schoolId: school.id,
+        reason,
+        force: options?.force,
+      });
+      applyAwarenessSnapshot(snapshot);
+      return snapshot.runtimeData;
+    },
+    [applyAwarenessSnapshot, auth.user?.uid, ds, school.id],
+  );
   const aiModeMeta = useMemo(() => {
     if (isOfflineAI) {
       return {
@@ -1317,10 +1446,12 @@ export function AIChatScreen(props: any) {
     }
     if (aiStatus.provider === 'local-llm') {
       return {
-        label: '本機模型',
-        detail: '連線到你設定的本機 LLM server',
+        label: aiStatus.localModelReady ? '本機 AI 推理' : '本機模型',
+        detail: aiStatus.localModelReady
+          ? '使用已下載的 AI 模型在裝置上推理'
+          : '連線到你設定的本機 LLM server',
         icon: 'hardware-chip-outline' as const,
-        color: '#3B82F6',
+        color: aiStatus.localModelReady ? '#8B5CF6' : '#3B82F6',
       };
     }
     return {
@@ -1329,7 +1460,7 @@ export function AIChatScreen(props: any) {
       icon: 'cloud-outline' as const,
       color: '#F59E0B',
     };
-  }, [aiStatus.provider, aiStatus.webSearchEnabled, isOfflineAI]);
+  }, [aiStatus.provider, aiStatus.webSearchEnabled, aiStatus.localModelReady, isOfflineAI]);
 
   const buildGreetingContent = useCallback(
     (name: string) => {
@@ -1634,41 +1765,11 @@ export function AIChatScreen(props: any) {
   }, [messages, chatHistoryKey]);
 
   useEffect(() => {
-    if (!auth.user) return;
-    async function load() {
-      try {
-        const pc = await loadAiPersonalContext({ uid: auth.user!.uid, schoolId: school.id });
-        setPendingAssignments(pc.pendingAssignments);
-        setWeeklyReport(pc.weeklyReport);
-      } catch (e) {
-        console.warn('[AIChat] personal data fail:', e);
-      }
-    }
-    load();
-  }, [auth.user?.uid, school.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadRuntimeData() {
-      try {
-        const snapshot = await loadAIAppRuntimeData({
-          dataSource: ds,
-          userId: auth.user?.uid ?? null,
-          schoolId: school.id,
-        });
-        if (!cancelled) setAppRuntimeData(snapshot);
-      } catch (error) {
-        console.warn('[AIChat] app runtime context load fail:', error);
-        if (!cancelled) setAppRuntimeData(emptyAIAppRuntimeData());
-      }
-    }
-    loadRuntimeData();
-    const timer = setInterval(loadRuntimeData, 60_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [auth.user?.uid, ds, school.id]);
+    applyAwarenessSnapshot(getAIAmbientAwarenessSnapshot());
+    const unsubscribe = subscribeAIAmbientAwareness(applyAwarenessSnapshot);
+    refreshAIAppAwareness('mount', { force: true });
+    return unsubscribe;
+  }, [applyAwarenessSnapshot, refreshAIAppAwareness]);
 
   const routeProactiveReportId =
     typeof props?.route?.params?.proactiveReportId === 'string'
@@ -1720,15 +1821,19 @@ export function AIChatScreen(props: any) {
   }, [auth.user?.uid, school.id, routeProactiveReportId]);
 
   // ── AI Context ──
-  const aiContext = useMemo<AIContext>(
-    () =>
+  const buildLiveAIContext = useCallback(
+    (
+      runtimeDataOverride?: AIAppRuntimeData,
+      coursesOverride?: Course[],
+      opts?: { lastUserMessage?: string },
+    ): AIContext =>
       buildAIAppContext({
         schoolId: school.id,
         userId: auth.user?.uid ?? null,
         userName: auth.profile?.displayName ?? null,
         role: userRole,
         isOnline: isEffectivelyOnline(),
-        courses: courses ?? [],
+        courses: coursesOverride ?? courses ?? [],
         pendingAssignments: pendingAssignments ?? [],
         weeklyReport,
         announcements: (announcements ?? []) as any[],
@@ -1737,9 +1842,10 @@ export function AIChatScreen(props: any) {
         menus: diningMenus,
         pois: (pois ?? []) as any[],
         proactiveReports: latestProactiveReports,
-        runtimeData: appRuntimeData,
+        runtimeData: runtimeDataOverride ?? appRuntimeDataRef.current,
         agentMemory,
         trainingDB,
+        lastUserMessage: opts?.lastUserMessage ?? null,
         dialogContextSummary: getContextSummary(aiBrain.dialogCtx),
         conversationSummary: aiBrain.conversationSummary
           ? summaryToText(aiBrain.conversationSummary)
@@ -1759,13 +1865,16 @@ export function AIChatScreen(props: any) {
       pendingAssignments,
       weeklyReport,
       latestProactiveReports,
-      appRuntimeData,
       agentMemory,
       trainingDB,
       aiBrain.dialogCtx,
       aiBrain.conversationSummary,
     ],
   );
+  const aiContext = useMemo<AIContext>(() => buildLiveAIContext(appRuntimeData), [
+    buildLiveAIContext,
+    appRuntimeData,
+  ]);
 
   // ── Greeting ──
   useEffect(() => {
@@ -2356,6 +2465,27 @@ export function AIChatScreen(props: any) {
     return { ...message, thinkingSteps: [...steps, ...existing].slice(0, 7) };
   }
 
+  function isAgentOperationMessage(message: Message | null): message is Message {
+    if (!message) return false;
+    if (
+      message.agentType === 'tool_confirm' ||
+      message.agentType === 'param_collect' ||
+      message.agentType === 'tool_executing' ||
+      message.agentType === 'tool_result' ||
+      message.agentType === 'chain_progress'
+    ) {
+      return true;
+    }
+    return (
+      message.actions?.some(
+        (action) =>
+          action.requiresConfirmation ||
+          action.status === 'pending_confirmation' ||
+          (action.action !== 'navigate' && action.sensitivity !== 'low'),
+      ) ?? false
+    );
+  }
+
   // ── Agent Logic: Intent Detection + Tool Matching ──
   const detectIntentAndExecute = useCallback(
     async (userMessage: string): Promise<Message | null> => {
@@ -2661,14 +2791,27 @@ export function AIChatScreen(props: any) {
 
   const COURSE_DAY_NAMES = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
 
+  function normalizeCourseDayForChat(day: unknown): number | null {
+    if (typeof day !== 'number' || !Number.isFinite(day)) return null;
+    if (day === 7) return 0;
+    if (day >= 0 && day <= 6) return day;
+    return null;
+  }
+
   function getCourseMeetingsForChat(course: any): any[] {
     if (Array.isArray(course?.schedule) && course.schedule.length > 0) {
-      return course.schedule.filter((meeting: any) => typeof meeting?.dayOfWeek === 'number');
+      return course.schedule
+        .map((meeting: any) => {
+          const dayOfWeek = normalizeCourseDayForChat(meeting?.dayOfWeek);
+          return dayOfWeek == null ? null : { ...meeting, dayOfWeek };
+        })
+        .filter(Boolean);
     }
-    if (typeof course?.dayOfWeek === 'number') {
+    const dayOfWeek = normalizeCourseDayForChat(course?.dayOfWeek);
+    if (dayOfWeek != null) {
       return [
         {
-          dayOfWeek: course.dayOfWeek,
+          dayOfWeek,
           startPeriod: course.startPeriod,
           endPeriod: course.endPeriod,
           startTime: course.startTime,
@@ -2745,6 +2888,7 @@ export function AIChatScreen(props: any) {
     const day = new Date().getDay();
     return { day, label: '今天' };
   }
+
 
   // ═══════════════════════════════════════════════════
   // Smart Response Engine v2 — Knowledge-Driven
@@ -3148,11 +3292,16 @@ export function AIChatScreen(props: any) {
       }
 
       // ── 餐飲推薦（用 domain guard 確保只在 dining context）──
+      // 明確「點／訂／下單」且像是要執行訂餐時，不要用推薦語塞掉；交給工具層或本機代理 + create_order
+      const deferOrderToAgentTools =
+        /(?:幫我|請|替我)?(?:點|訂)(?!.*怎麼|.*如何)|我要(?:點|訂)|下單|來(?:一[個份碗]?|份|碗)|買(?:一[個份]?|份)|^(?:點|訂)\s*\S/.test(
+          lowerMsg,
+        ) && /吃|餐|飯|麵|便當|飲料|咖啡|奶茶|蛋餅|吐司|碗|杯|午餐|晚餐|早餐/.test(lowerMsg);
       const isDiningQuery =
         /推薦|吃什麼|有什麼好吃|想吃|蔬菜|素食|便宜|平價|划算|省錢|健康|有哪些|其他|還有|別的|換|午餐|晚餐|早餐|覓食|好餓|肚子餓/.test(
           lowerMsg,
         );
-      if (domain === 'dining' && isDiningQuery) {
+      if (domain === 'dining' && isDiningQuery && !deferOrderToAgentTools) {
         const menuItems = _menus;
         if (menuItems.length === 0) {
           const now = new Date();
@@ -5172,15 +5321,399 @@ export function AIChatScreen(props: any) {
       if (newFacts.length > 0) {
         setAgentMemory((prev) => mergeLearnedFacts(prev, newFacts));
       }
+      const newSkill = extractLearnedSkillFromUserMessage(userMsg.content);
+      const trainingDbForThisTurn = newSkill ? mergeLearnedSkill(trainingDB, newSkill) : trainingDB;
+      if (newSkill) {
+        setTrainingDB(trainingDbForThisTurn);
+      }
+      const syncedRuntimeDataForTools = await refreshAIAppAwareness('manual', { force: true });
+      let refreshedCoursesForTools: Course[] | undefined;
+      if (/課表|上課|有課|什麼課|幾點|請假|作業|成績|課程|學分/.test(userMsg.content)) {
+        const refreshedCourses = await scheduleState.refreshSchedule().catch((error) => {
+          console.warn('[AIChat] schedule refresh for AI tool layer failed:', error);
+          return [] as Course[];
+        });
+        if (refreshedCourses.length > 0) refreshedCoursesForTools = refreshedCourses;
+      }
+      const liveAIContextForTools = buildLiveAIContext(
+        syncedRuntimeDataForTools,
+        refreshedCoursesForTools,
+        { lastUserMessage: userMsg.content },
+      );
+      const toolLayerResult = runAIToolLayer({
+        message: userMsg.content,
+        context: liveAIContextForTools,
+      });
+      const modelAIContextForTools: AIContext = {
+        ...liveAIContextForTools,
+        appDataRecords: [
+          {
+            key: 'ai_tool_layer_result',
+            label: 'AI 工具層意圖/演算/跨角色影響',
+            text: formatAIToolLayerForPrompt(toolLayerResult),
+            priority: 999,
+          },
+          ...(liveAIContextForTools.appDataRecords ?? []),
+        ],
+      };
+
       // Track action
       setAgentMemory((prev) =>
         addRecentAction(prev, {
           toolId: 'user_message',
-          params: { content: userMsg.content },
+          params: {
+            content: userMsg.content,
+            intent: toolLayerResult.intent,
+            toolName: toolLayerResult.toolName,
+            crossRoleEffects: toolLayerResult.crossRoleEffects.map((effect) => effect.action),
+          },
           timestamp: new Date().toISOString(),
           wasSuccessful: true,
         }),
       );
+
+      const toolLayerThinkingSteps: ThinkingStepUI[] = toolLayerResult.steps.map((step) => ({
+        step: step.step,
+        detail: step.detail,
+        status: step.status,
+      }));
+
+      // ── 智慧代理快速路徑：所有「做事」意圖 + 自適應推理 都使用 v2 Agent ──
+      // 建構對話歷史（用於指代解析）
+      const recentHistory: ConversationTurn[] = (messages ?? [])
+        .slice(-10)
+        .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      // 檢查是否為指代訊息（「第一個」「那個」「就剛剛那個」）
+      const isReferenceMessage = /第[一二三四五六七八九十\d]+個|就?(?:剛剛?|上面|前面)?那[一個]?個?|就[是]?[那這它]|^(?:對|好[的啊]?|可以|沒問題|ok|OK|嗯|恩|是[的啊]?)\s*$/.test(userMsg.content.trim());
+      const isWriteIntent = toolLayerResult.intent === 'order_action'
+        || /幫我|我要|請.*假|報修|維修|預約|借.*書|續借|還書|取消|退選|發.*訊|繳交|報名|下單|加.*行程|新增|刪除|修改|幫.*做|幫.*處理|幫.*安排|幫.*設定|開始.*點名|訂.*[碗份個杯]|點.*[碗份個杯]|買.*[碗份個杯]|簽到|打卡|掛號|看診|評分|列印|投票|領.*包裹|洗衣|失物|遺失|撿到/.test(userMsg.content);
+      // 額外的 catch-all：指代訊息、寫入意圖、或 old tool layer 沒有明確結果
+      const shouldTryAgent = isWriteIntent || isReferenceMessage || !toolLayerResult.handled;
+      if (shouldTryAgent) {
+        try {
+          // 模型推理回調：當 regex + 語意推理都失敗時，讓本地模型思考後選工具
+          const modelInferenceCallback = async (prompt: string): Promise<string> => {
+            try {
+              const result = await chatWithOnDeviceAssistantStreaming(
+                [{ role: 'user', content: prompt }],
+                { appDataRecords: [], userName: '', schoolId: school.id } as any,
+                () => {},
+              );
+              return result.content || '';
+            } catch {
+              return '';
+            }
+          };
+          // 使用 Reflexion 版本：失敗後自動反思重試 + 探索式學習
+          const agentCtx = { userId: auth.user?.uid, schoolId: school.id, role: userRole as any };
+          let agentResult: AgentQueryResult = await autonomousQueryWithReflexion(
+            userMsg.content, agentCtx, modelInferenceCallback, recentHistory,
+          );
+
+          // 如果 Reflexion 也無法處理 → 嘗試探索式技能習得
+          const noResult = agentResult.executedActions.length === 0 && !agentResult.contextText && agentResult.intents.length === 0;
+          if (noResult && isWriteIntent) {
+            console.log('[AI Agent] Reflexion 無結果，啟動探索式技能習得...');
+            const exploration = await exploreAndLearn(userMsg.content, agentCtx, modelInferenceCallback);
+            if (exploration.success) {
+              agentResult = {
+                ...agentResult,
+                executedActions: [{ tool: 'exploration', result: { success: true, summary: exploration.result }, reason: '(自主學習) 探索完成' }],
+              };
+            }
+          }
+          // 有成功執行的寫入動作 → 直接回報結果
+          if (agentResult.executedActions.length > 0) {
+            const successActions = agentResult.executedActions.filter(a => a.result.success);
+            const failedActions = agentResult.executedActions.filter(a => !a.result.success);
+            let content = '';
+            if (successActions.length > 0) {
+              content = successActions.map(a => a.result.summary || `${a.reason}完成`).join('\n');
+            }
+            if (failedActions.length > 0) {
+              content += (content ? '\n\n' : '') + failedActions.map(a => a.result.summary || a.result.error || `${a.reason}失敗`).join('\n');
+            }
+            if (agentResult.failedActions.length > 0) {
+              content += (content ? '\n\n' : '') + agentResult.failedActions.map(a => `${a.reason}：${a.missingInfo}`).join('\n');
+            }
+            // 根據操作類型動態生成建議
+            const intentType = agentResult.intents[0]?.tool ?? 'unknown';
+            const dynamicSuggestions = intentType === 'create_order'
+              ? ['查看訂單狀態', '再點一份', '查看菜單']
+              : intentType === 'request_leave'
+                ? ['查看請假紀錄', '查看課表', '查看出席']
+                : intentType.includes('repair')
+                  ? ['查看報修狀態', '報修其他問題']
+                  : ['還需要什麼幫忙？', '查看我的狀態', '查通知'];
+            const stepLabel = agentResult.intents[0]?.reason ?? '執行操作';
+            // 加入 Reflexion 反思痕跡到思考步驟
+            const reflexionSteps: ThinkingStepUI[] = ('reflexionTraces' in agentResult)
+              ? ((agentResult as any).reflexionTraces ?? []).map((t: any) => ({
+                  step: `反思 R${t.round}`,
+                  detail: t.success ? `重試成功` : `${t.reflection?.slice(0, 40) ?? '思考中'}`,
+                  status: t.success ? 'done' as const : 'warning' as const,
+                }))
+              : [];
+            const orderMsg: Message = {
+              id: genMsgId(),
+              role: 'assistant',
+              content: content || '已處理你的請求。',
+              timestamp: new Date(),
+              agentType: 'tool_result',
+              thinkingSteps: [
+                ...toolLayerThinkingSteps,
+                ...reflexionSteps,
+                { step: stepLabel, detail: `已自動完成`, status: 'done' as const },
+              ],
+              choiceMenu: agentResult.choiceMenu,
+              suggestions: dynamicSuggestions,
+            };
+            setIsTyping(false);
+            setMessages((prev) => [...prev, orderMsg]);
+            setTrainingDB((prev) => {
+              let next = prev;
+              const drafts = collectLearnedSkillsFromToolRound(
+                successActions.map((a) => ({ result: a.result })),
+              );
+              for (const s of drafts) next = mergeLearnedSkill(next, s);
+              const updated = addTrainingPair(next, userMsg.content, orderMsg.content, 'local');
+              lastQAPairIdRef.current = updated.pairs[updated.pairs.length - 1]?.id ?? null;
+              return updated;
+            });
+            setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+            return;
+          }
+          // 有讀取結果但沒有寫入 → 顯示查詢結果讓使用者選擇
+          if (agentResult.contextText) {
+            const orderMsg: Message = {
+              id: genMsgId(),
+              role: 'assistant',
+              content: agentResult.contextText,
+              timestamp: new Date(),
+              agentType: 'text',
+              thinkingSteps: toolLayerThinkingSteps,
+              choiceMenu: agentResult.choiceMenu,
+              suggestions: ['幫我選第一個', '還有其他選項嗎？', '不用了謝謝'],
+            };
+            setIsTyping(false);
+            setMessages((prev) => [...prev, orderMsg]);
+            setTrainingDB((prev) => {
+              const updated = addTrainingPair(prev, userMsg.content, orderMsg.content, 'local');
+              lastQAPairIdRef.current = updated.pairs[updated.pairs.length - 1]?.id ?? null;
+              return updated;
+            });
+            setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+            return;
+          }
+        } catch (err) {
+          console.warn('[AIChat] autonomousQuery order_action failed, falling through:', err);
+        }
+      }
+
+      if (toolLayerResult.handled && toolLayerResult.answer) {
+        const toolLayerMsg: Message = {
+          id: genMsgId(),
+          role: 'assistant',
+          content: toolLayerResult.answer,
+          timestamp: new Date(),
+          agentType: 'text',
+          thinkingSteps: toolLayerThinkingSteps,
+          actions: toolLayerResult.actions,
+          suggestions:
+            toolLayerResult.intent === 'schedule_lookup'
+              ? ['設定上課提醒', '查作業截止', '查明天行程']
+              : toolLayerResult.intent === 'order_action' || toolLayerResult.intent === 'dining_lookup'
+                ? ['幫我點第一個', '換便宜一點', '開啟點餐']
+                : ['查我的資料總覽', '查通知', '還有什麼待辦'],
+        };
+        setIsTyping(false);
+        setMessages((prev) => [...prev, toolLayerMsg]);
+        setTrainingDB((prev) => {
+          const updated = addTrainingPair(prev, userMsg.content, toolLayerMsg.content, 'local');
+          lastQAPairIdRef.current = updated.pairs[updated.pairs.length - 1]?.id ?? null;
+          return updated;
+        });
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+        return;
+      }
+
+      if (await hasSavedOnDeviceAssistant()) {
+        const agentOperation = await detectIntentAndExecute(userMsg.content);
+        if (isAgentOperationMessage(agentOperation)) {
+          const operationWithToolSteps = {
+            ...agentOperation,
+            thinkingSteps: [
+              ...toolLayerThinkingSteps,
+              ...(agentOperation.thinkingSteps ?? []),
+            ].slice(0, 8),
+          };
+          setIsTyping(false);
+          setMessages((prev) => [...prev, operationWithToolSteps]);
+          setTrainingDB((prev) => {
+            const updated = addTrainingPair(
+              prev,
+              userMsg.content,
+              operationWithToolSteps.content ||
+                operationWithToolSteps.toolExecution?.result ||
+                '代理操作流程已啟動',
+              'local',
+            );
+            lastQAPairIdRef.current = updated.pairs[updated.pairs.length - 1]?.id ?? null;
+            return updated;
+          });
+          setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+          return;
+        }
+
+        const responseId = genMsgId();
+        const aiMessages: AIMessage[] = (messages ?? [])
+          .filter((m) => m.role !== 'system')
+          .map((m) => ({ role: m.role, content: m.content }));
+        aiMessages.push({ role: 'user', content: userMsg.content });
+        let liveAIContext = modelAIContextForTools;
+
+        const placeholder: Message = {
+          id: responseId,
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+          agentType: 'thinking',
+          thinkingSteps: [
+            {
+              step: '同步狀態',
+              detail: '正在更新使用者資料與 App 全域資料',
+              status: 'checking',
+            },
+          ],
+        };
+        setMessages((prev) => [...prev, placeholder]);
+        setIsTyping(false);
+        setAiStatusTick((t) => t + 1);
+
+        const updateThinkingSteps = (steps: ThinkingStepUI[]) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === responseId
+                ? { ...m, thinkingSteps: steps.slice(0, 8), agentType: 'thinking' }
+                : m,
+            ),
+          );
+        };
+
+        liveAIContext = modelAIContextForTools;
+        const dataRecordCount = liveAIContext.appDataRecords?.length ?? 0;
+        const blockedCount = liveAIContext.appDataCoverage?.filter((row) => row.state === 'blocked').length ?? 0;
+        const toolLayerSummaryStep: ThinkingStepUI = {
+          step: '工具層演算',
+          detail: `${toolLayerResult.toolName}；${toolLayerResult.insights.length} 個狀態洞察；${toolLayerResult.crossRoleEffects.length} 個跨角色影響`,
+          status: toolLayerResult.crossRoleEffects.length > 0 ? 'warning' : 'done',
+        };
+
+        updateThinkingSteps([
+          {
+            step: '同步狀態',
+            detail: `已掌握 ${dataRecordCount} 筆可檢索 App/使用者資料${blockedCount ? `，${blockedCount} 類資料缺權限` : ''}`,
+            status: blockedCount ? 'warning' : 'done',
+          },
+          {
+            step: '建立檢索',
+            detail: '正在依照你的問題挑選最相關資料',
+            status: 'checking',
+          },
+        ]);
+
+        updateThinkingSteps([
+          {
+            step: '同步狀態',
+            detail: `已掌握 ${dataRecordCount} 筆可檢索 App/使用者資料${blockedCount ? `，${blockedCount} 類資料缺權限` : ''}`,
+            status: blockedCount ? 'warning' : 'done',
+          },
+          {
+            step: '建立檢索',
+            detail: '已從全量資料索引取出本題相關內容',
+            status: 'done',
+          },
+          toolLayerSummaryStep,
+          {
+            step: '喚醒模型',
+            detail: '正在載入或復用已下載的本機模型',
+            status: 'checking',
+          },
+          {
+            step: '生成回覆',
+            detail: '模型開始依 App context 生成回答',
+            status: 'checking',
+          },
+        ]);
+
+        const onToken: StreamingCallback = (partial) => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === responseId ? { ...m, content: partial } : m)),
+          );
+          scrollRef.current?.scrollToEnd({ animated: false });
+        };
+
+        const aiResponse = await chatWithOnDeviceAssistantStreaming(
+          aiMessages,
+          liveAIContext,
+          onToken,
+          signal,
+        );
+        const finalContent = aiResponse.error
+          ? `抱歉，發生錯誤：${aiResponse.error}`
+          : aiResponse.content;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === responseId
+              ? {
+                  ...m,
+                  content: finalContent,
+                  agentType: 'text',
+                  suggestions: aiResponse.suggestions,
+                  actions: aiResponse.actions,
+                  choiceMenu: aiResponse.choiceMenu,
+                  thinkingSteps: [
+                    {
+                      step: '同步狀態',
+                      detail: `已掌握 ${dataRecordCount} 筆可檢索 App/使用者資料${blockedCount ? `，${blockedCount} 類資料缺權限` : ''}`,
+                      status: blockedCount ? 'warning' : 'done',
+                    },
+                    {
+                      step: '建立檢索',
+                      detail: '已從全量資料索引取出本題相關內容',
+                      status: 'done',
+                    },
+                    toolLayerSummaryStep,
+                    {
+                      step: '喚醒模型',
+                      detail: aiResponse.error ? '本機模型載入或推理失敗' : '已使用已下載模型',
+                      status: aiResponse.error ? 'warning' : 'done',
+                    },
+                    {
+                      step: '生成回覆',
+                      detail: aiResponse.error ? '回覆生成失敗' : '已依 App context 完成回答',
+                      status: aiResponse.error ? 'warning' : 'done',
+                    },
+                  ],
+                }
+              : m,
+          ),
+        );
+
+        if (!aiResponse.error && finalContent.length > 0) {
+          setTrainingDB((prev) => {
+            let next = prev;
+            if (aiResponse.learnedSkills?.length) {
+              for (const s of aiResponse.learnedSkills) next = mergeLearnedSkill(next, s);
+            }
+            const updated = addTrainingPair(next, userMsg.content, finalContent, 'local');
+            lastQAPairIdRef.current = updated.pairs[updated.pairs.length - 1]?.id ?? null;
+            return updated;
+          });
+        }
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+        return;
+      }
 
       // ── 智慧路由：雲端模式可把複雜查詢送外部模型；離線模式會先做能力邊界檢查 ──
       const deliberationSteps = buildAgentDeliberation(userMsg.content);
@@ -5237,8 +5770,14 @@ export function AIChatScreen(props: any) {
         );
         if (thinkingChain.steps.length > 0) {
           agentResult.thinkingSteps = [
+            ...toolLayerThinkingSteps,
             ...(agentResult.thinkingSteps ?? []),
             ...(thinkingChain.steps as ThinkingStepUI[]),
+          ].slice(0, 8);
+        } else if (toolLayerThinkingSteps.length > 0) {
+          agentResult.thinkingSteps = [
+            ...toolLayerThinkingSteps,
+            ...(agentResult.thinkingSteps ?? []),
           ].slice(0, 8);
         }
         setIsTyping(false);
@@ -5598,9 +6137,11 @@ export function AIChatScreen(props: any) {
                   content: finalContent,
                   suggestions: aiResponse.suggestions,
                   actions: aiResponse.actions,
-                  thinkingSteps:
-                    ((aiResponse as any).thinking as ThinkingStepUI[] | undefined) ??
-                    deliberationSteps,
+                  choiceMenu: aiResponse.choiceMenu,
+                  thinkingSteps: [
+                    ...deliberationSteps,
+                    ...(((aiResponse as any).thinking as ThinkingStepUI[] | undefined) ?? []),
+                  ].slice(0, 14),
                 }
               : m,
           ),
@@ -5610,7 +6151,11 @@ export function AIChatScreen(props: any) {
         if (!aiResponse.error && finalContent.length > 0) {
           const trainingSource = isOfflineAI ? 'local' : 'gemini';
           setTrainingDB((prev) => {
-            const updated = addTrainingPair(prev, userMsg.content, finalContent, trainingSource, {
+            let next = prev;
+            if (aiResponse.learnedSkills?.length) {
+              for (const s of aiResponse.learnedSkills) next = mergeLearnedSkill(next, s);
+            }
+            const updated = addTrainingPair(next, userMsg.content, finalContent, trainingSource, {
               courseNames: liveData.courses.map((c) => c.name),
               assignmentTitles: liveData.assignments.map((a) => a.title),
               menuNames: liveData.menus.map((m) => m.name),
@@ -5702,10 +6247,18 @@ export function AIChatScreen(props: any) {
                       content: fallback.content,
                       suggestions: fallback.suggestions,
                       actions: fallback.actions,
+                      choiceMenu: fallback.choiceMenu,
                     }
                   : m,
               ),
             );
+            if (fallback.learnedSkills?.length) {
+              setTrainingDB((prev) => {
+                let next = prev;
+                for (const s of fallback.learnedSkills!) next = mergeLearnedSkill(next, s);
+                return next;
+              });
+            }
           }
         }
       }

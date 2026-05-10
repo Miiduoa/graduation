@@ -21,7 +21,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -34,10 +34,16 @@ from config import (
     ENABLE_SELF_TRAIN_LOOP,
     ENABLE_RAG,
     ENABLE_WEB_SEARCH,
+    ENABLE_REFLEXION,
     FEEDBACK_DIR,
+    FIREBASE_CRED_PATH,
+    REQUIRE_FIREBASE_AUTH,
+    AI_ADMIN_TOKEN,
+    AI_ALLOWED_ORIGINS,
     PORT,
 )
 import llm_client
+from reflexion import maybe_retry_with_reflexion, needs_quality_reflexion
 from prompts.system import build_system_prompt
 from prompts.campus_knowledge import get_full_knowledge_text
 from web_search import search_public_web, format_web_context, should_use_web_search
@@ -101,10 +107,64 @@ app = FastAPI(title="Campus AI Server", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=AI_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _extract_bearer_token(authorization: str | None) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+    return token.strip()
+
+
+def _ensure_firebase_app():
+    import firebase_admin
+    from firebase_admin import credentials
+
+    if firebase_admin._apps:
+        return
+
+    if FIREBASE_CRED_PATH:
+        firebase_admin.initialize_app(credentials.Certificate(FIREBASE_CRED_PATH))
+    else:
+        firebase_admin.initialize_app()
+
+
+async def require_firebase_user(authorization: str | None = Header(default=None)) -> dict:
+    if not REQUIRE_FIREBASE_AUTH:
+        return {"uid": "local-dev"}
+
+    token = _extract_bearer_token(authorization)
+    try:
+        _ensure_firebase_app()
+        from firebase_admin import auth
+
+        return await asyncio.to_thread(auth.verify_id_token, token)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Firebase token verification failed: %s", exc)
+        raise HTTPException(status_code=401, detail="Invalid Firebase token") from exc
+
+
+async def require_admin_token(authorization: str | None = Header(default=None)) -> None:
+    if not AI_ADMIN_TOKEN:
+        raise HTTPException(status_code=503, detail="AI admin token is not configured")
+
+    token = _extract_bearer_token(authorization)
+    if not node_safe_compare(token, AI_ADMIN_TOKEN):
+        raise HTTPException(status_code=403, detail="Invalid admin token")
+
+
+def node_safe_compare(left: str, right: str) -> bool:
+    import hmac
+
+    return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
 
 
 # ─── Request / Response Models ───────────────────────────────────────
@@ -172,8 +232,7 @@ async def _stream_response(messages: list[dict]):
     yield f"data: {json.dumps({'done': True})}\n\n"
 
 
-@app.post("/api/chat")
-async def chat(req: ChatRequest):
+async def _chat_response(req: ChatRequest):
     messages = await _build_messages(req)
 
     if req.stream:
@@ -188,6 +247,13 @@ async def chat(req: ChatRequest):
 
     try:
         content = await llm_client.chat(messages)
+        if ENABLE_REFLEXION and needs_quality_reflexion(content):
+            content = await maybe_retry_with_reflexion(
+                llm_client.chat,
+                messages,
+                req.message,
+                content,
+            )
     except Exception as e:
         logger.error("LLM chat failed: %s", e)
         content = "抱歉，AI 暫時忙碌中，請稍後再試。"
@@ -201,14 +267,19 @@ async def chat(req: ChatRequest):
     }
 
 
+@app.post("/api/chat")
+async def chat(req: ChatRequest, _user: dict = Depends(require_firebase_user)):
+    return await _chat_response(req)
+
+
 @app.post("/api/chat/sync")
-async def chat_sync(req: ChatRequest):
+async def chat_sync(req: ChatRequest, _user: dict = Depends(require_firebase_user)):
     req.stream = False
-    return await chat(req)
+    return await _chat_response(req)
 
 
 @app.post("/api/tools/web-search")
-async def web_search(req: WebSearchRequest):
+async def web_search(req: WebSearchRequest, _user: dict = Depends(require_firebase_user)):
     if not ENABLE_WEB_SEARCH:
         return {"enabled": False, "content": "", "sources": []}
     content, sources = await search_public_web(req.query)
@@ -231,7 +302,7 @@ def _extract_suggestions(text: str) -> list[str]:
 # ─── Feedback Endpoint ───────────────────────────────────────────────
 
 @app.post("/api/feedback")
-async def submit_feedback_endpoint(req: FeedbackRequest):
+async def submit_feedback_endpoint(req: FeedbackRequest, _user: dict = Depends(require_firebase_user)):
     await asyncio.to_thread(
         save_feedback,
         message_id=req.message_id,
@@ -246,19 +317,21 @@ async def submit_feedback_endpoint(req: FeedbackRequest):
 # ─── Admin Endpoints ─────────────────────────────────────────────────
 
 @app.post("/api/admin/reindex")
-async def reindex():
+async def reindex(_admin: None = Depends(require_admin_token)):
+    if not ENABLE_RAG:
+        raise HTTPException(status_code=400, detail="RAG is disabled")
     count = await asyncio.to_thread(index_all_app_knowledge)
     return {"status": "ok", "chunks_indexed": count}
 
 
 @app.post("/api/admin/grow")
-async def trigger_growth():
+async def trigger_growth(_admin: None = Depends(require_admin_token)):
     result = await asyncio.to_thread(run_growth_cycle, True)
     return {"status": "ok", "result": result}
 
 
 @app.get("/api/admin/feedback")
-async def download_feedback():
+async def download_feedback(_admin: None = Depends(require_admin_token)):
     """Return all feedback as JSON array – used by offline sync."""
     feedback_file = FEEDBACK_DIR / "feedback_log.jsonl"
     if not feedback_file.exists():
@@ -269,20 +342,18 @@ async def download_feedback():
 
 
 @app.get("/api/growth")
-async def growth_stats():
+async def growth_stats(_admin: None = Depends(require_admin_token)):
     stats = await asyncio.to_thread(get_growth_stats)
     return stats
 
 
 @app.get("/api/status")
 async def status():
-    health = await llm_client.health_check()
-    growth = await asyncio.to_thread(get_growth_stats)
-
     return {
         "status": "running",
-        "llm": health,
-        "growth": growth,
+        "authRequired": REQUIRE_FIREBASE_AUTH,
+        "ragEnabled": ENABLE_RAG,
+        "webSearchEnabled": ENABLE_WEB_SEARCH,
     }
 
 

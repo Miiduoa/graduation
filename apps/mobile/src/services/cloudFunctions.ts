@@ -1,6 +1,8 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+import { getAuthInstance, hasUsableFirebaseConfig } from '../firebase';
+
 const DEFAULT_DEV_PROJECT_ID = 'campus-demo-3a869';
 
 type CloudFunctionConfig = {
@@ -75,6 +77,22 @@ export function getCloudFunctionBaseUrl(): string {
 
 export function getCloudFunctionUrl(functionName: string): string {
   return `${getCloudFunctionBaseUrl()}/${functionName}`;
+}
+
+export async function getFirebaseAuthHeaders(): Promise<Record<string, string>> {
+  if (!hasUsableFirebaseConfig()) {
+    return {};
+  }
+
+  const currentUser = getAuthInstance().currentUser;
+  if (!currentUser) {
+    return {};
+  }
+
+  const token = await currentUser.getIdToken();
+  return {
+    Authorization: `Bearer ${token}`,
+  };
 }
 
 export function getAIServerBaseUrl(): string {

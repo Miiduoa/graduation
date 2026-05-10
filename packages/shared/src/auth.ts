@@ -27,6 +27,8 @@ export type SchoolSSOProviderConfig = {
   tokenUrl?: string;
   userInfoEndpoint?: string;
   userInfoUrl?: string;
+  issuer?: string;
+  jwksUri?: string;
   casServerUrl?: string;
   samlEntryPoint?: string;
   samlIssuer?: string;
@@ -151,6 +153,8 @@ export function normalizeSchoolSSOConfig(
           tokenUrl: asString(rawConfig.tokenUrl) ?? asString(rawConfig.tokenEndpoint),
           userInfoEndpoint: asString(rawConfig.userInfoEndpoint) ?? asString(rawConfig.userInfoUrl),
           userInfoUrl: asString(rawConfig.userInfoUrl) ?? asString(rawConfig.userInfoEndpoint),
+          issuer: asString(rawConfig.issuer),
+          jwksUri: asString(rawConfig.jwksUri),
           casServerUrl: asString(rawConfig.casServerUrl),
           samlEntryPoint: asString(rawConfig.samlEntryPoint) ?? asString(rawConfig.idpSsoUrl),
           samlIssuer: asString(rawConfig.samlIssuer),

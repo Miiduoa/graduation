@@ -2482,6 +2482,21 @@ export interface TfIdfVector {
   norm: number;
 }
 
+/** 使用者／對話累積的程序性「技能」（如何做），與 learnedFacts 的事實記憶分流 */
+export interface LearnedSkill {
+  id: string;
+  title: string;
+  procedure: string;
+  /** 用來與使用者問題做匹配的關鍵片段（自動衍生 + 可手動補） */
+  triggers: string[];
+  source: 'user_explicit' | 'distilled' | 'reflection';
+  learnedAt: string;
+  lastUsedAt?: string;
+  useCount: number;
+}
+
+const MAX_LEARNED_SKILLS = 40;
+
 /** 本地 AI 大腦 — 完整的訓練資料庫 */
 export interface LocalTrainingDB {
   pairs: QAPair[];
@@ -2492,6 +2507,8 @@ export interface LocalTrainingDB {
   antiPatterns: Array<{ pattern: string; correction: string }>;
   /** 高品質範例（注入 system prompt 的精華） */
   goodExamples: Array<{ q: string; a: string; tags: string[] }>;
+  /** 自主學習的技能備忘（程序步驟），依使用者當前問題挑相關項注入 */
+  learnedSkills: LearnedSkill[];
   stats: {
     totalInteractions: number;
     localAnswers: number; // 本地引擎成功回答次數
@@ -2509,6 +2526,7 @@ export function getDefaultTrainingDB(): LocalTrainingDB {
     idfTable: {},
     antiPatterns: profileSeeds.antiPatterns,
     goodExamples: profileSeeds.goodExamples,
+    learnedSkills: [],
     stats: {
       totalInteractions: 0,
       localAnswers: 0,
@@ -2530,6 +2548,11 @@ export function normalizeLocalTrainingDB(input?: Partial<LocalTrainingDB> | null
       input?.idfTable && typeof input.idfTable === 'object' ? input.idfTable : fallback.idfTable,
     antiPatterns: Array.isArray(input?.antiPatterns) ? input!.antiPatterns : fallback.antiPatterns,
     goodExamples: Array.isArray(input?.goodExamples) ? input!.goodExamples : fallback.goodExamples,
+    learnedSkills: Array.isArray(input?.learnedSkills)
+      ? (input!.learnedSkills as LearnedSkill[])
+          .filter((s) => s && typeof (s as LearnedSkill).title === 'string')
+          .slice(0, MAX_LEARNED_SKILLS)
+      : fallback.learnedSkills,
     stats: {
       totalInteractions:
         typeof stats.totalInteractions === 'number'
@@ -2546,6 +2569,261 @@ export function normalizeLocalTrainingDB(input?: Partial<LocalTrainingDB> | null
           : fallback.stats.lastTrainedAt,
     },
   };
+}
+
+function normalizeSkillMatchText(s: string): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .replace(/[\s\d，。！？、；：「」『』《》【】\n\r\t]/g, '');
+}
+
+function deriveTriggersFromTitleProcedure(title: string, procedure: string): string[] {
+  const raw = `${title} ${procedure.slice(0, 400)}`;
+  const chunks = raw
+    .split(/[,，。.!?？；;\n]/)
+    .map((x) => x.trim())
+    .filter((x) => x.length >= 2 && x.length <= 40);
+  const uniq: string[] = [];
+  const seen = new Set<string>();
+  for (const c of [title, ...chunks]) {
+    const k = c.slice(0, 24);
+    if (!seen.has(k)) {
+      seen.add(k);
+      uniq.push(k);
+    }
+    if (uniq.length >= 12) break;
+  }
+  return uniq;
+}
+
+function scoreSkillRelevance(query: string, skill: LearnedSkill): number {
+  const q = normalizeSkillMatchText(query);
+  if (q.length < 2) return 0;
+  const hay = normalizeSkillMatchText(
+    [skill.title, ...skill.triggers, skill.procedure.slice(0, 320)].join(''),
+  );
+  let score = 0;
+  for (let i = 0; i < q.length - 1; i++) {
+    const bi = q.slice(i, i + 2);
+    if (hay.includes(bi)) score += 2;
+  }
+  for (const tr of skill.triggers) {
+    const nt = normalizeSkillMatchText(tr);
+    if (nt.length >= 2 && q.includes(nt)) score += 12;
+  }
+  const ntit = normalizeSkillMatchText(skill.title);
+  if (ntit.length >= 2 && q.includes(ntit)) score += 15;
+  return score;
+}
+
+/** 依使用者當句挑選最相關的自訂技能（供注入 prompt） */
+export function selectRelevantLearnedSkills(
+  query: string,
+  skills: LearnedSkill[],
+  max = 5,
+): LearnedSkill[] {
+  const ranked = [...skills]
+    .map((s) => ({ s, sc: scoreSkillRelevance(query, s) }))
+    .filter((x) => x.sc > 0)
+    .sort((a, b) => b.sc - a.sc);
+  return ranked.slice(0, max).map((x) => x.s);
+}
+
+export function formatLearnedSkillsBlock(skills: LearnedSkill[]): string {
+  const lines: string[] = ['【使用者與助理累積的自訂技能（遇到類似問題請優先沿用作法）】'];
+  skills.forEach((sk, i) => {
+    const src =
+      sk.source === 'distilled'
+        ? '成功任務蒸餾'
+        : sk.source === 'reflection'
+          ? '反思補強'
+          : '使用者明示';
+    lines.push(`${i + 1}. ${sk.title}（來源：${src}）`);
+    if (sk.triggers?.length) {
+      lines.push(`   關鍵詞：${sk.triggers.slice(0, 6).join('、')}`);
+    }
+    const proc = sk.procedure.trim().split('\n').slice(0, 12).join('\n');
+    lines.push(`   作法：${proc}`);
+  });
+  lines.push(
+    '（以上來自使用者明示教學或對話蒸餾；若與 App 即時資料衝突，以資料與工具結果為準。）',
+  );
+  return lines.join('\n');
+}
+
+export function mergeLearnedSkill(db: LocalTrainingDB, skill: LearnedSkill): LocalTrainingDB {
+  db = normalizeLocalTrainingDB(db);
+  const key = skill.title.trim().toLowerCase();
+  const idx = db.learnedSkills.findIndex((s) => s.title.trim().toLowerCase() === key);
+  let nextSkills: LearnedSkill[];
+  if (idx >= 0) {
+    const prev = db.learnedSkills[idx];
+    const merged: LearnedSkill = {
+      ...prev,
+      procedure: `${prev.procedure}\n---\n${skill.procedure}`.trim().slice(0, 4000),
+      triggers: Array.from(new Set([...prev.triggers, ...skill.triggers])).slice(0, 16),
+      useCount: prev.useCount + 1,
+      lastUsedAt: new Date().toISOString(),
+    };
+    nextSkills = [...db.learnedSkills];
+    nextSkills[idx] = merged;
+  } else {
+    nextSkills = [...db.learnedSkills, { ...skill, useCount: skill.useCount || 1 }].slice(
+      -MAX_LEARNED_SKILLS,
+    );
+  }
+  return { ...db, learnedSkills: nextSkills };
+}
+
+/** 從使用者一句話抽出「程序技能」（請記住／以後若…） */
+export function extractLearnedSkillFromUserMessage(text: string): LearnedSkill | null {
+  const t = text.trim();
+  if (t.length < 6 || t.length > 5000) return null;
+
+  const head = /^(請記住|記住|技能[:：]|助理請記|備忘[:：]|我教妳|我教你)\s*/;
+  if (head.test(t)) {
+    const body = t.replace(head, '').replace(/^[:：]\s*/, '').trim();
+    const lines = body.split(/\n/).map((l) => l.trim()).filter(Boolean);
+    const title = (lines[0] ?? '自訂作法').slice(0, 120);
+    const procedure = lines.length > 1 ? lines.slice(1).join('\n') : body;
+    if (!procedure || procedure.length < 4) return null;
+    const triggers = deriveTriggersFromTitleProcedure(title, procedure);
+    return {
+      id: `ls-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      title,
+      procedure: procedure.slice(0, 4000),
+      triggers,
+      source: 'user_explicit',
+      learnedAt: new Date().toISOString(),
+      useCount: 0,
+    };
+  }
+
+  const fut = /^以後(?:若|如果|當)(.+?)[，,。.]\s*(.+)$/s.exec(t);
+  if (fut?.[1] && fut?.[2]) {
+    const title = `當${fut[1].trim().slice(0, 80)}`;
+    const procedure = fut[2].trim();
+    const triggers = deriveTriggersFromTitleProcedure(title, procedure);
+    return {
+      id: `ls-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      title,
+      procedure: procedure.slice(0, 4000),
+      triggers,
+      source: 'user_explicit',
+      learnedAt: new Date().toISOString(),
+      useCount: 0,
+    };
+  }
+
+  return null;
+}
+
+/** 避免把「工具選擇器」內部 prompt 當成使用者原句蒸餾進技能庫 */
+export function isInternalToolSelectionPrompt(text: string): boolean {
+  const t = String(text ?? '');
+  return (
+    t.includes('工具選擇器') ||
+    t.includes('## 可用工具') ||
+    (t.includes('你是校園 AI 助理') && t.includes('[TOOL:'))
+  );
+}
+
+const TOOL_SUCCESS_SKILL_LABELS: Record<string, string> = {
+  create_order: '校園訂餐／代下單',
+  cancel_order: '取消訂單',
+  send_message: '發送站內訊息',
+  create_calendar_event: '建立行事曆事件',
+  register_event: '活動報名',
+  unregister_event: '取消活動報名',
+  reserve_library_seat: '預約圖書館座位',
+  cancel_seat_reservation: '取消座位預約',
+  borrow_book: '圖書借閱',
+  renew_book: '圖書續借',
+  return_book: '圖書歸還',
+  mark_notifications_read: '標示通知已讀',
+  create_repair_request: '宿舍／設施報修',
+  start_attendance: '課堂點名（教師）',
+  create_assignment: '建立作業（教師）',
+  grade_submission: '批改作業（教師）',
+  submit_assignment: '繳交作業',
+  enroll_course: '選課',
+  drop_course: '退選',
+  request_leave: '請假申請',
+  check_in_attendance: '課堂簽到',
+  create_health_appointment: '預約健檢／掛號',
+  create_print_job: '提交列印',
+  rate_menu_item: '餐點評分',
+  reserve_washing_machine: '預約洗衣',
+  confirm_package_pickup: '確認取件',
+  delete_calendar_event: '刪除行事曆事件',
+  update_calendar_event: '更新行事曆事件',
+};
+
+function sanitizeArgsForSkillLearning(args: Record<string, string>): string {
+  const skipKey = /password|token|secret|credential|apikey|ssid|auth|jwt/i;
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(args)) {
+    if (skipKey.test(k)) continue;
+    const sv = String(v ?? '').trim().slice(0, 160);
+    if (sv) parts.push(`${k}=${sv}`);
+  }
+  return parts.slice(0, 10).join('；');
+}
+
+/**
+ * 寫入工具成功後蒸餾成可重用技能（供之後類似問題注入 prompt；非新增程式能力，是記住「上次怎麼做成」）。
+ */
+export function distillLearnedSkillFromToolSuccess(
+  userMessage: string,
+  toolName: string,
+  args: Record<string, string>,
+  summary: string,
+): LearnedSkill | null {
+  const raw = userMessage.trim();
+  if (raw.length < 2 || raw.length > 4000) return null;
+  if (isInternalToolSelectionPrompt(raw)) return null;
+
+  const label =
+    TOOL_SUCCESS_SKILL_LABELS[toolName] ?? `完成任務（工具：${toolName}）`;
+  const argLine = sanitizeArgsForSkillLearning(args);
+  const userSnippet = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+  const procedure = [
+    `使用者意圖（原句摘要）：「${userSnippet}」`,
+    `成功路徑：呼叫工具 ${toolName}。`,
+    argLine ? `參數要點：${argLine}` : '',
+    `結果摘要：${String(summary).trim().slice(0, 500)}`,
+    '下次遇到類似說法，優先嘗試同一工具並補齊必要參數；若 App 資料不足再向使用者澄清。',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const triggers = deriveTriggersFromTitleProcedure(label, `${raw} ${toolName} ${argLine}`);
+  return {
+    id: `ls-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    title: label,
+    procedure: procedure.slice(0, 4000),
+    triggers,
+    source: 'distilled',
+    learnedAt: new Date().toISOString(),
+    useCount: 0,
+  };
+}
+
+/** 從一輪工具結果收集蒸餾技能（同一標題只保留一筆） */
+export function collectLearnedSkillsFromToolRound(
+  entries: Array<{ result: { learnedSkill?: LearnedSkill } }>,
+): LearnedSkill[] {
+  const out: LearnedSkill[] = [];
+  const seen = new Set<string>();
+  for (const e of entries) {
+    const s = e.result.learnedSkill;
+    if (!s) continue;
+    const k = s.title.trim().toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+  }
+  return out;
 }
 
 // ──────────────── 中文 NLP 工具 ────────────────
@@ -4230,8 +4508,8 @@ export function getLocalConfidence(question: string, tags: string[], db: LocalTr
   return Math.min(confidence, 1);
 }
 
-/** 匯出訓練洞察 — 注入 system prompt */
-export function exportTrainingInsights(db: LocalTrainingDB): string {
+/** 匯出訓練洞察 — 注入 system prompt（可傳入當句使用者問題以挑選相關自訂技能） */
+export function exportTrainingInsights(db: LocalTrainingDB, userQuery?: string | null): string {
   db = normalizeLocalTrainingDB(db);
   const lines: string[] = [];
 
@@ -4271,6 +4549,15 @@ export function exportTrainingInsights(db: LocalTrainingDB): string {
     const localRate = Math.round((db.stats.localAnswers / db.stats.totalInteractions) * 100);
     lines.push('');
     lines.push(`【學習進度】共 ${db.stats.totalInteractions} 次對話，本地回答率 ${localRate}%`);
+  }
+
+  const q = typeof userQuery === 'string' ? userQuery.trim() : '';
+  if (q && db.learnedSkills.length > 0) {
+    const picked = selectRelevantLearnedSkills(q, db.learnedSkills, 5);
+    if (picked.length > 0) {
+      lines.push('');
+      lines.push(formatLearnedSkillsBlock(picked));
+    }
   }
 
   return lines.join('\n');

@@ -18,3 +18,9 @@ services:
         value: 'false'
       - key: ENABLE_SELF_TRAIN_LOOP
         value: 'false'
+      - key: REQUIRE_FIREBASE_AUTH
+        value: 'true'
+      - key: AI_ALLOWED_ORIGINS
+        value: https://your-app.web.app,https://your-app.firebaseapp.com
+      - key: AI_ADMIN_TOKEN
+        sync: false

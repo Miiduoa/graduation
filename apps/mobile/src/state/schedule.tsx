@@ -16,6 +16,14 @@ import { getDataSource, hasDataSource } from '../data';
 import { getRuntimeDataSourcePolicy } from '../config/runtime';
 import { useSchool } from './school';
 import { getFirstStorageValue, getScopedStorageKey } from '../services/scopedStorage';
+import {
+  getCachedCourses,
+  getAnyCachedCourses,
+  getCachedTCCourses,
+  getAnyCachedTCCourses,
+} from '../services/puDataCache';
+import type { PUCourse } from '../services/puDirectScraper';
+import type { TCCourse } from '../services/tronClassClient';
 
 // ===== Types =====
 
@@ -74,7 +82,7 @@ type ScheduleContextType = {
   getWeekSchedule: () => WeekSchedule;
   hasConflict: (event: ScheduleEvent) => boolean;
 
-  refreshSchedule: () => Promise<void>;
+  refreshSchedule: () => Promise<Course[]>;
   exportToCalendar: () => Promise<CalendarEvent[]>;
 };
 
@@ -110,6 +118,13 @@ function isDemoCourse(course: Course): boolean {
     /^(tw-(pu|nchu)|pu)-crs-\d+$/i.test(id) ||
     (/^(tw-(pu|nchu)|pu)$/i.test(schoolId) && /-crs-\d+$/i.test(id))
   );
+}
+
+function normalizeScheduleDay(day: number | null | undefined): number | null {
+  if (typeof day !== 'number' || !Number.isFinite(day)) return null;
+  if (day === 7) return 0;
+  if (day >= 0 && day <= 6) return day;
+  return null;
 }
 
 function parseStoredCourses(raw: string | null): Course[] {
@@ -155,19 +170,25 @@ function getCurrentSemester(): string {
 }
 
 function courseToScheduleEvents(course: Course): ScheduleEvent[] {
-  return course.schedule.map((schedule, index) => ({
-    id: `${course.id}_${index}`,
-    courseId: course.id,
-    title: course.name,
-    location: schedule.location,
-    dayOfWeek: schedule.dayOfWeek,
-    startTime: schedule.startTime,
-    endTime: schedule.endTime,
-    color: getRandomColor(course.id),
-    type: 'class' as const,
-    instructor: course.instructor,
-    courseCode: course.code,
-  }));
+  return course.schedule.flatMap((schedule, index) => {
+    const dayOfWeek = normalizeScheduleDay(schedule.dayOfWeek);
+    if (dayOfWeek == null) return [];
+    return [
+      {
+        id: `${course.id}_${index}`,
+        courseId: course.id,
+        title: course.name,
+        location: schedule.location,
+        dayOfWeek,
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+        color: getRandomColor(course.id),
+        type: 'class' as const,
+        instructor: course.instructor,
+        courseCode: course.code,
+      },
+    ];
+  });
 }
 
 function getRandomColor(seed: string): string {
@@ -202,6 +223,116 @@ function isTimeOverlap(start1: string, end1: string, start2: string, end2: strin
   const e2 = timeToMinutes(end2);
 
   return s1 < e2 && s2 < e1;
+}
+
+// ===== PU / TronClass → Course 轉換 =====
+
+/** 靜宜大學節次 → 時間對照表 */
+const PERIOD_TIMES: Record<number, { start: string; end: string }> = {
+  1: { start: '08:10', end: '09:00' },
+  2: { start: '09:10', end: '10:00' },
+  3: { start: '10:10', end: '11:00' },
+  4: { start: '11:10', end: '12:00' },
+  5: { start: '12:40', end: '13:30' },
+  6: { start: '13:40', end: '14:30' },
+  7: { start: '14:40', end: '15:30' },
+  8: { start: '15:40', end: '16:30' },
+  9: { start: '16:40', end: '17:30' },
+  10: { start: '17:35', end: '18:25' },
+  11: { start: '18:30', end: '19:20' },
+  12: { start: '19:25', end: '20:15' },
+  13: { start: '20:20', end: '21:10' },
+};
+
+function puCourseToCourse(pu: PUCourse, index: number): Course {
+  const scheduleEntries: CourseSchedule[] = [];
+  const normalizedDay = normalizeScheduleDay(pu.dayOfWeek);
+
+  if (normalizedDay != null) {
+    const periods = pu.periods?.length ? pu.periods : [];
+    const startPeriod = periods.length > 0 ? Math.min(...periods) : undefined;
+    const endPeriod = periods.length > 0 ? Math.max(...periods) : undefined;
+    const startTime =
+      pu.startTime ?? (startPeriod ? PERIOD_TIMES[startPeriod]?.start : undefined) ?? '08:10';
+    const endTime =
+      pu.endTime ?? (endPeriod ? PERIOD_TIMES[endPeriod]?.end : undefined) ?? '09:00';
+
+    scheduleEntries.push({
+      dayOfWeek: normalizedDay,
+      startTime,
+      endTime,
+      location: pu.location ?? '',
+      startPeriod,
+      endPeriod,
+    });
+  }
+
+  return {
+    id: `pu_${pu.code}_${index}`,
+    code: pu.code,
+    name: pu.name,
+    instructor: pu.teacherName ?? pu.teacherEmail ?? '',
+    credits: pu.credits,
+    semester: '',
+    schedule: scheduleEntries,
+    location: pu.location ?? undefined,
+    dayOfWeek: normalizedDay ?? undefined,
+    startTime: scheduleEntries[0]?.startTime,
+    endTime: scheduleEntries[0]?.endTime,
+  };
+}
+
+function tcCourseToCourse(tc: TCCourse): Course {
+  // TronClass courses don't carry per-timeslot schedule info in the list API,
+  // but classroom_schedule might hold it. For now, create a placeholder.
+  return {
+    id: `tc_${tc.id}`,
+    code: tc.course_code ?? '',
+    name: tc.name,
+    instructor: tc.instructors?.map((i) => i.name).join(', ') ?? '',
+    credits: tc.credit ?? 0,
+    semester: tc.semester?.name ?? '',
+    schedule: [],
+  };
+}
+
+/** 嘗試從 puDataCache 載入課程（E校園 + TronClass） */
+export async function loadCoursesFromCache(): Promise<Course[]> {
+  const results: Course[] = [];
+
+  try {
+    // 1. E校園課表快取
+    const puResult = (await getCachedCourses()) ?? (await getAnyCachedCourses());
+    if (puResult?.courses?.length) {
+      for (let i = 0; i < puResult.courses.length; i++) {
+        results.push(puCourseToCourse(puResult.courses[i], i));
+      }
+      console.log(`[Schedule] Loaded ${puResult.courses.length} PU courses from cache`);
+    }
+  } catch (e) {
+    console.warn('[Schedule] Failed to load PU courses from cache:', e);
+  }
+
+  try {
+    // 2. TronClass 課程快取
+    const tcCourses = (await getCachedTCCourses()) ?? (await getAnyCachedTCCourses());
+    if (tcCourses?.length) {
+      // 避免與 PU 課程重複（用課程代碼比對）
+      const existingCodes = new Set(results.map((c) => c.code.toLowerCase()));
+      for (const tc of tcCourses) {
+        const code = (tc.course_code ?? '').toLowerCase();
+        if (!code || !existingCodes.has(code)) {
+          results.push(tcCourseToCourse(tc));
+          if (code) existingCodes.add(code);
+        }
+      }
+      console.log(`[Schedule] Loaded ${tcCourses.length} TronClass courses from cache`);
+    }
+  } catch (e) {
+    console.warn('[Schedule] Failed to load TronClass courses from cache:', e);
+  }
+
+  return results;
 }
 
 // ===== Provider =====
@@ -323,7 +454,7 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
   const hasFetchedRef = useRef(false);
   const previousContextRef = useRef<string | null>(null);
   const fetchAbortRef = useRef<AbortController | null>(null);
-  const refreshScheduleRef = useRef<() => Promise<void>>(async () => {});
+  const refreshScheduleRef = useRef<() => Promise<Course[]>>(async () => []);
 
   useEffect(() => {
     const currentContextKey = `${currentUserId ?? 'anonymous'}:${schoolId ?? 'default'}`;
@@ -501,12 +632,20 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
     [schedule],
   );
 
-  const refreshSchedule = useCallback(async () => {
-    if (!user?.uid) return;
+  const refreshSchedule = useCallback(async (): Promise<Course[]> => {
+    if (!user?.uid) return courses;
 
     if (SHOULD_SKIP_REMOTE_SCHEDULE_SYNC) {
-      setCourses((prev) => prev.filter((course) => !isDemoCourse(course)));
-      return;
+      // 跳過遠端同步，但仍嘗試從本地快取載入
+      const cachedCourses = await loadCoursesFromCache();
+      if (isMountedRef.current && cachedCourses.length > 0) {
+        setCourses(cachedCourses);
+        return cachedCourses;
+      } else {
+        const filtered = courses.filter((course) => !isDemoCourse(course));
+        setCourses(filtered);
+        return filtered;
+      }
     }
 
     setLoading(true);
@@ -514,8 +653,13 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
 
     try {
       if (!hasDataSource()) {
-        console.warn('[Schedule] DataSource not set, skipping server fetch');
-        return;
+        console.warn('[Schedule] DataSource not set, trying puDataCache...');
+        const cachedCourses = await loadCoursesFromCache();
+        if (isMountedRef.current && cachedCourses.length > 0) {
+          setCourses(cachedCourses);
+          return cachedCourses;
+        }
+        return courses;
       }
 
       const ds = getDataSource();
@@ -541,17 +685,40 @@ export function ScheduleProvider({ children }: ScheduleProviderProps) {
 
       if (enrolledCourses.length > 0) {
         setCourses(enrolledCourses);
+        return enrolledCourses;
+      } else {
+        // DataSource 沒有 enrollments → 嘗試從 puDataCache 載入
+        console.log('[Schedule] No enrollments from DataSource, trying puDataCache...');
+        const cachedCourses = await loadCoursesFromCache();
+        if (!isMountedRef.current) return cachedCourses;
+        if (cachedCourses.length > 0) {
+          console.log(`[Schedule] Loaded ${cachedCourses.length} courses from puDataCache`);
+          setCourses(cachedCourses);
+          return cachedCourses;
+        }
+        return [];
       }
     } catch (e) {
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current) return courses;
       console.error('[Schedule] Failed to fetch courses:', e);
+      // 即使遠端失敗，也嘗試從快取載入
+      try {
+        const cachedCourses = await loadCoursesFromCache();
+        if (isMountedRef.current && cachedCourses.length > 0) {
+          console.log(`[Schedule] Fallback: loaded ${cachedCourses.length} courses from cache`);
+          setCourses(cachedCourses);
+          setError(null); // 快取成功就清除錯誤
+          return cachedCourses;
+        }
+      } catch (_) { /* ignore */ }
       setError(e instanceof Error ? e.message : '刷新失敗');
+      return courses;
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
       }
     }
-  }, [user?.uid, currentSemester, schoolId]);
+  }, [user?.uid, currentSemester, schoolId, courses]);
 
   useEffect(() => {
     refreshScheduleRef.current = refreshSchedule;

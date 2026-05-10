@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 
@@ -121,6 +122,15 @@ export function PersonalHubScreen(props: any) {
   const nav = props?.navigation;
   const insets = useSafeAreaInsets();
   const auth = useAuth();
+
+  // 當畫面獲得焦點時重新讀取 auth 狀態（修復從登入頁返回後狀態未更新的問題）
+  // native-stack 的 screen freeze 可能導致 context 變更未即時反映
+  useFocusEffect(
+    useCallback(() => {
+      auth.refreshProfile();
+    }, [auth.refreshProfile]),
+  );
+
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const notifs = useNotifications();
   const { school } = useSchool();

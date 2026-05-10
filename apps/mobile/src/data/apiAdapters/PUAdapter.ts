@@ -45,7 +45,7 @@ import {
   refreshTCTodos,
 } from '../../services/puDataCache';
 import type { TCCourse, TCActivity, TCModule, TCAttendance } from '../../services/tronClassClient';
-import { getCloudFunctionUrl } from '../../services/cloudFunctions';
+import { getCloudFunctionUrl, getFirebaseAuthHeaders } from '../../services/cloudFunctions';
 
 function toValidDate(value: string | null | undefined): Date | null {
   if (!value) return null;
@@ -331,7 +331,7 @@ export class PUAdapter extends BaseApiAdapter {
     try {
       const response = await fetch(getCloudFunctionUrl('puFetchCampusData'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await getFirebaseAuthHeaders()) },
         body: JSON.stringify({
           sessionId: this.sessionId,
           dataType,

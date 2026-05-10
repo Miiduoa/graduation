@@ -86,6 +86,8 @@ export default ({ config }: any) => {
     process.env.EXPO_PUBLIC_ENABLE_UNIVERSAL_DEV_ACCOUNTS,
     appEnv !== 'production',
   );
+  const allowLocalMockAuth =
+    appEnv === 'development' && process.env.EXPO_PUBLIC_ALLOW_LOCAL_MOCK_AUTH === 'true';
 
   const firebase = {
     apiKey: requireReleaseValue(
@@ -321,6 +323,7 @@ export default ({ config }: any) => {
       aiWebLearningEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, true),
       enableMockSSO: !isReleaseLike && process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === 'true',
       enableUniversalDevAccounts,
+      allowLocalMockAuth,
       eas: {
         projectId: easProjectId,
       },

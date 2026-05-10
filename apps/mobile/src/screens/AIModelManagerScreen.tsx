@@ -51,6 +51,7 @@ interface ModelInfo {
 }
 
 const MODEL_INFO: ModelInfo[] = [
+  // ── 輕量級 ──
   {
     id: 'smollm2-1.7b',
     name: 'SmolLM2 輕量版',
@@ -58,37 +59,63 @@ const MODEL_INFO: ModelInfo[] = [
     sizeLabel: '1.1 GB',
     sizeBytes: 1_100_000_000,
     quality: '輕量',
-    qualityStars: 3,
+    qualityStars: 2,
     speedStars: 5,
     recommended: false,
     features: ['基本問答', '校園資訊', '快速回覆'],
     badge: '最省空間',
   },
+  // ── 標準級 ──
   {
     id: 'qwen2.5-3b',
     name: 'Qwen2.5 標準版',
-    description: '中英文表現優秀，推理能力強，最佳性價比',
+    description: '中英文表現優秀，空間與品質最佳平衡',
     sizeLabel: '2.1 GB',
     sizeBytes: 2_100_000_000,
     quality: '標準',
-    qualityStars: 4,
+    qualityStars: 3,
     speedStars: 4,
-    recommended: true,
-    features: ['深度推理', '中英文雙語', '工具使用', '多輪對話'],
-    badge: '推薦',
+    recommended: false,
+    features: ['中英文雙語', '工具使用', '多輪對話'],
   },
   {
     id: 'phi-3.5-mini',
-    name: 'Phi-3.5 完整版',
-    description: '推理能力最強，適合複雜問題分析',
+    name: 'Phi-3.5 標準版',
+    description: '推理能力突出，適合邏輯分析',
     sizeLabel: '2.4 GB',
     sizeBytes: 2_400_000_000,
-    quality: '完整',
-    qualityStars: 5,
+    quality: '標準',
+    qualityStars: 3,
     speedStars: 3,
     recommended: false,
-    features: ['最強推理', '數學計算', '邏輯分析', '長文理解'],
-    badge: '最強大',
+    features: ['推理分析', '數學計算', '邏輯思考'],
+  },
+  // ── 進階級 (7B) ──
+  {
+    id: 'qwen2.5-7b',
+    name: 'Qwen2.5 進階版',
+    description: '7B 參數，中英文理解與生成能力大幅提升，Agent 代理執行更準確',
+    sizeLabel: '4.7 GB',
+    sizeBytes: 4_680_000_000,
+    quality: '完整',
+    qualityStars: 5,
+    speedStars: 2,
+    recommended: true,
+    features: ['頂級中文', '深度推理', 'Agent 代理', '長文理解', '工具使用'],
+    badge: '推薦升級',
+  },
+  {
+    id: 'mistral-7b-v0.3',
+    name: 'Mistral 7B 進階版',
+    description: '7B 參數，歐洲頂尖開源模型，英文推理與分析能力極強',
+    sizeLabel: '4.4 GB',
+    sizeBytes: 4_370_000_000,
+    quality: '完整',
+    qualityStars: 5,
+    speedStars: 2,
+    recommended: false,
+    features: ['頂級推理', '程式分析', '邏輯思考', '英文最強'],
+    badge: '進階',
   },
 ];
 
@@ -168,6 +195,17 @@ export default function AIModelManagerScreen({ navigation }: any) {
       const info = MODEL_INFO.find((m) => m.id === modelId);
       if (!info) return;
 
+      const runtime = localLLM.getRuntimeAvailability();
+      setRuntimeAvailability(runtime);
+      if (!runtime.available) {
+        Alert.alert(
+          '需要開發版 App',
+          runtime.reason ??
+            '本地 AI 模型需要原生推理模組。請改用已安裝 llama.rn 的開發版 App，不要使用 Expo Go。',
+        );
+        return;
+      }
+
       // Wi-Fi check
       const netState = await NetInfo.fetch();
       if (netState.type !== 'wifi') {
@@ -197,6 +235,45 @@ export default function AIModelManagerScreen({ navigation }: any) {
     [diskSpace],
   );
 
+  const activateModel = useCallback(
+    async (
+      modelId: string,
+      messages: {
+        successTitle: string;
+        successBody: string;
+        failureTitle: string;
+        failureFallback: string;
+      },
+    ): Promise<boolean> => {
+      const runtime = localLLM.getRuntimeAvailability();
+      setRuntimeAvailability(runtime);
+      if (!runtime.available) {
+        setActiveModel(null);
+        Alert.alert(messages.failureTitle, runtime.reason ?? '本地 AI 推理引擎尚未就緒。');
+        return false;
+      }
+
+      await localLLM.setActiveModel(modelId);
+      await localAssistant.setConfig({ modelId });
+
+      const ok = await localLLM.loadModel(modelId);
+      if (ok) {
+        setActiveModel(modelId);
+        Alert.alert(messages.successTitle, messages.successBody);
+        return true;
+      }
+
+      setActiveModel(null);
+      const state = localLLM.getState();
+      const errMsg = state.error?.includes('原生模組')
+        ? 'AI 推理引擎尚未就緒，請確認 App 已完整安裝後重試。如果問題持續，請嘗試重新安裝 App。'
+        : (state.error ?? messages.failureFallback);
+      Alert.alert(messages.failureTitle, errMsg);
+      return false;
+    },
+    [],
+  );
+
   const startDownload = useCallback(async (modelId: string) => {
     try {
       const ok = await localLLM.downloadModel(modelId, (progress) => {
@@ -210,10 +287,12 @@ export default function AIModelManagerScreen({ navigation }: any) {
           delete next[modelId];
           return next;
         });
-        Alert.alert('下載完成', '模型已下載成功！現在要啟用嗎？', [
-          { text: '稍後', style: 'cancel' },
-          { text: '立即啟用', onPress: () => handleActivate(modelId) },
-        ]);
+        await activateModel(modelId, {
+          successTitle: '下載並啟用成功',
+          successBody: 'AI 模型已載入，可以開始對話了！',
+          failureTitle: '下載成功但啟用失敗',
+          failureFallback: '模型已下載，但載入到本機 AI 推理引擎時失敗。請稍後重試啟用。',
+        });
       } else {
         const errMsg = localLLM.getState().error ?? '下載失敗，請檢查網路連線後重試。';
         Alert.alert('下載失敗', errMsg);
@@ -231,35 +310,21 @@ export default function AIModelManagerScreen({ navigation }: any) {
         return next;
       });
     }
-  }, []);
+  }, [activateModel]);
 
   const handleActivate = useCallback(async (modelId: string) => {
     try {
-      const runtime = localLLM.getRuntimeAvailability();
-      setRuntimeAvailability(runtime);
-      if (!runtime.available) {
-        Alert.alert('啟用失敗', runtime.reason ?? '本地 AI 推理引擎尚未就緒。');
-        return;
-      }
-
-      const ok = await localLLM.loadModel(modelId);
-      if (ok) {
-        setActiveModel(modelId);
-        await localAssistant.setConfig({ modelId });
-        Alert.alert('啟用成功', 'AI 模型已載入，可以開始對話了！');
-      } else {
-        setActiveModel(null);
-        const state = localLLM.getState();
-        const errMsg = state.error?.includes('原生模組')
-          ? 'AI 推理引擎尚未就緒，請確認 App 已完整安裝後重試。如果問題持續，請嘗試重新安裝 App。'
-          : (state.error ?? '模型載入失敗，請重試。');
-        Alert.alert('啟用失敗', errMsg);
-      }
+      await activateModel(modelId, {
+        successTitle: '啟用成功',
+        successBody: 'AI 模型已載入，可以開始對話了！',
+        failureTitle: '啟用失敗',
+        failureFallback: '模型載入失敗，請重試。',
+      });
     } catch (e: any) {
       setActiveModel(null);
       Alert.alert('啟用失敗', '模型載入時發生錯誤，請稍後重試。');
     }
-  }, []);
+  }, [activateModel]);
 
   const handleDelete = useCallback(
     (modelId: string) => {
@@ -353,6 +418,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
             (llmState.status === 'downloading' && llmState.modelId === model.id) ||
             !!downloadProgress[model.id];
           const canActivate = runtimeAvailability.available;
+          const canDownload = runtimeAvailability.available;
 
           return (
             <Animated.View
@@ -440,7 +506,9 @@ export default function AIModelManagerScreen({ navigation }: any) {
                     {llmState.error ?? '發生錯誤，請稍後重試'}
                   </Text>
                   <TouchableOpacity
-                    onPress={() => handleActivate(model.id)}
+                    onPress={() =>
+                      isDownloaded ? handleActivate(model.id) : handleDownload(model.id)
+                    }
                     style={{
                       paddingHorizontal: 10,
                       paddingVertical: 4,
@@ -470,11 +538,24 @@ export default function AIModelManagerScreen({ navigation }: any) {
               <View style={styles.actionRow}>
                 {!isDownloaded && !isDownloading && (
                   <TouchableOpacity
-                    style={[styles.actionBtn, styles.downloadBtn]}
+                    style={[
+                      styles.actionBtn,
+                      styles.downloadBtn,
+                      !canDownload && styles.actionBtnDisabled,
+                    ]}
                     onPress={() => handleDownload(model.id)}
+                    disabled={!canDownload}
                   >
-                    <Ionicons name="cloud-download-outline" size={18} color="#fff" />
-                    <Text style={styles.actionBtnText}>下載模型</Text>
+                    <Ionicons
+                      name={canDownload ? 'cloud-download-outline' : 'construct-outline'}
+                      size={18}
+                      color={canDownload ? '#fff' : COLORS.textSecondary}
+                    />
+                    <Text
+                      style={[styles.actionBtnText, !canDownload && styles.actionBtnTextDisabled]}
+                    >
+                      {canDownload ? '下載模型' : '需開發版 App'}
+                    </Text>
                   </TouchableOpacity>
                 )}
 
@@ -543,7 +624,7 @@ export default function AIModelManagerScreen({ navigation }: any) {
           </View>
           <View style={styles.infoItem}>
             <Ionicons name="battery-half-outline" size={18} color={COLORS.textSecondary} />
-            <Text style={styles.infoText}>使用本地 AI 時手機可能會稍微發熱，這是正常現象</Text>
+            <Text style={styles.infoText}>使用本地 AI 時手機可能會稍微發熱，這是正常現象。7B 進階模型需要 6GB 以上 RAM 的裝置</Text>
           </View>
           <View style={styles.infoItem}>
             <Ionicons name="trash-bin-outline" size={18} color={COLORS.textSecondary} />

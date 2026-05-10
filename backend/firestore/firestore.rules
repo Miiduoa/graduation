@@ -426,12 +426,14 @@ service cloud.firestore {
       match /posts/{postId} {
         allow read: if isActiveGroupMember(groupId);
         allow create: if isActiveGroupMember(groupId)
+          && request.resource.data.authorId == request.auth.uid
           && (request.resource.data.kind != 'announcement' || canManageGroup(groupId));
         allow update, delete: if canManageGroup(groupId) || (isSignedIn() && resource.data.authorId == request.auth.uid);
 
         match /comments/{commentId} {
           allow read: if isActiveGroupMember(groupId);
-          allow create: if isActiveGroupMember(groupId);
+          allow create: if isActiveGroupMember(groupId)
+            && request.resource.data.authorId == request.auth.uid;
           allow update, delete: if canManageGroup(groupId) || (isSignedIn() && resource.data.authorId == request.auth.uid);
         }
       }
@@ -507,7 +509,8 @@ service cloud.firestore {
 
         match /questions/{questionId} {
           allow read: if isActiveGroupMember(groupId);
-          allow create: if isActiveGroupMember(groupId);
+          allow create: if isActiveGroupMember(groupId)
+            && request.resource.data.authorId == request.auth.uid;
           allow update: if canManageGroup(groupId)
             || (
               isActiveGroupMember(groupId)
@@ -530,7 +533,7 @@ service cloud.firestore {
 
         match /attendanceRecords/{recordId} {
           allow read: if isActiveGroupMember(groupId);
-          allow create, update: if canManageGroup(groupId) || (isSignedIn() && recordId == request.auth.uid);
+          allow create, update: if canManageGroup(groupId);
           allow delete: if false;
         }
       }

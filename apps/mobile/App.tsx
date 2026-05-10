@@ -60,6 +60,7 @@ import { DepartmentStack } from './src/screens/DepartmentStack';
 import { AdminStack } from './src/screens/AdminStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
 import { usePushNotifications } from './src/app/usePushNotifications';
+import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useProactiveAIReporter } from './src/app/useProactiveAIReporter';
 import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
@@ -724,6 +725,7 @@ function RoleAwareTabNavigator() {
 function AppNavigation({ navigationRef }: { navigationRef: AppNavigationRef }) {
   const auth = useAuth();
   usePushNotifications(navigationRef, auth.user?.uid);
+  useAIAmbientAwareness();
   useProactiveAIReporter();
   useWebLearningSync();
 
@@ -787,6 +789,11 @@ function AppInner() {
 
   useEffect(() => {
     const networkCleanup = initNetworkMonitoring();
+    import('./src/services/localAssistant')
+      .then(({ localAssistant }) => localAssistant.initialize())
+      .catch((error) => {
+        console.warn('[App] Local assistant initialization failed:', error);
+      });
 
     let offlineModeCleanup: (() => void) | null = null;
     initOfflineModeSync().then((cleanup) => {

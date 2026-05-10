@@ -7,6 +7,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _parse_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+    return value.strip().lower() == "true"
+
+
+def _parse_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 CHROMA_DIR = DATA_DIR / "chroma_db"
@@ -67,9 +78,20 @@ SELF_TRAIN_MIN_FEEDBACK = 50
 SELF_TRAIN_BATCH_SIZE = 200
 ENABLE_SELF_TRAIN_LOOP: bool = os.getenv("ENABLE_SELF_TRAIN_LOOP", "false").lower() == "true"
 
+# Reflexion：同步 /api/chat 時若首輪回答過短或典型失敗话术，反思後再問 LLM 一次（串流模式不套用）
+ENABLE_REFLEXION: bool = _parse_bool("ENABLE_REFLEXION", default=False)
+
 # ─── Firebase (optional – only for Firestore sync) ──────────────────
 
 FIREBASE_CRED_PATH: str | None = os.getenv("FIREBASE_CRED_PATH")
+REQUIRE_FIREBASE_AUTH: bool = _parse_bool(
+    "REQUIRE_FIREBASE_AUTH",
+    default=LLM_PROVIDER != "ollama",
+)
+AI_ADMIN_TOKEN: str = os.getenv("AI_ADMIN_TOKEN", "")
+AI_ALLOWED_ORIGINS: list[str] = _parse_csv(
+    os.getenv("AI_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"),
+)
 
 FIRESTORE_SYNC_INTERVAL_MINUTES = 15
 FIRESTORE_COLLECTIONS = [

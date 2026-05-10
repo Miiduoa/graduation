@@ -40,7 +40,7 @@ import {
   User,
 } from 'firebase/auth';
 import {
-  authenticateUniversalDevAccount,
+  findUniversalDevAccountByEmail,
   buildGroupCollectionPath,
   buildSchoolCollectionPath,
   buildUserSchoolCollectionPath,
@@ -197,7 +197,7 @@ export async function signIn(
   schoolId?: string,
 ): Promise<User | null> {
   const universalAccount = areUniversalDevAccountsEnabled()
-    ? authenticateUniversalDevAccount(email, password)
+    ? findUniversalDevAccountByEmail(email)
     : null;
   if (universalAccount) {
     if (!isFirebaseConfigured()) {

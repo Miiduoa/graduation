@@ -118,6 +118,30 @@ const CRITICAL_NO_MOCK_FALLBACK_METHODS = new Set([
   'listQuizzes',
 ]);
 
+function getErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const record = error as { code?: unknown; originalError?: unknown };
+  if (typeof record.code === 'string') return record.code;
+  return getErrorCode(record.originalError);
+}
+
+function isPermissionDenied(error: unknown): boolean {
+  if (getErrorCode(error) === 'permission-denied') return true;
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /Missing or insufficient permissions|permission-denied/i.test(message);
+}
+
+function logFallbackToMock(method: string, error: unknown): void {
+  const logger = isPermissionDenied(error) ? console.debug : console.warn;
+  logger(`[HybridSource] Falling back to mock ${method}:`, error);
+}
+
+function throwPermissionDeniedForPrivateData(method: string, error: unknown): void {
+  if (!isPermissionDenied(error)) return;
+  console.debug(`[HybridSource] ${method} permission denied; not using mock private data:`, error);
+  throw error;
+}
+
 export function configureHybridSource(newConfig: Partial<HybridSourceConfig>): void {
   config = { ...config, ...newConfig };
 }
@@ -460,6 +484,7 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
+      throwPermissionDeniedForPrivateData('listEnrollments', error);
       console.warn('[HybridSource] Falling back to mock enrollments:', error);
       return mockSource.listEnrollments(userId, semester, schoolId);
     }
@@ -518,6 +543,7 @@ export const hybridSource: DataSource = {
     try {
       return await firebaseSource.getGPA(userId, schoolId ?? currentSchoolContextId ?? undefined);
     } catch (error) {
+      throwPermissionDeniedForPrivateData('getGPA', error);
       console.warn('[HybridSource] Falling back to mock getGPA:', error);
       return mockSource.getGPA(userId, schoolId);
     }
@@ -599,7 +625,8 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listLoans:', error);
+      throwPermissionDeniedForPrivateData('listLoans', error);
+      logFallbackToMock('listLoans', error);
       return mockSource.listLoans(userId, schoolId);
     }
   },
@@ -655,7 +682,8 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listSeatReservations:', error);
+      throwPermissionDeniedForPrivateData('listSeatReservations', error);
+      logFallbackToMock('listSeatReservations', error);
       return mockSource.listSeatReservations(userId, schoolId);
     }
   },
@@ -735,7 +763,8 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listOrders:', error);
+      throwPermissionDeniedForPrivateData('listOrders', error);
+      logFallbackToMock('listOrders', error);
       return mockSource.listOrders(userId, options, schoolId);
     }
   },
@@ -800,6 +829,7 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
+      throwPermissionDeniedForPrivateData('listTransactions', error);
       console.warn('[HybridSource] Falling back to mock listTransactions:', error);
       return mockSource.listTransactions(userId, options, schoolId);
     }
@@ -841,6 +871,7 @@ export const hybridSource: DataSource = {
     try {
       return await firebaseSource.getDormitoryInfo(userId);
     } catch (error) {
+      throwPermissionDeniedForPrivateData('getDormitoryInfo', error);
       console.warn('[HybridSource] Falling back to mock getDormitoryInfo:', error);
       return mockSource.getDormitoryInfo(userId);
     }
@@ -853,7 +884,8 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listRepairRequests:', error);
+      throwPermissionDeniedForPrivateData('listRepairRequests', error);
+      logFallbackToMock('listRepairRequests', error);
       return mockSource.listRepairRequests(userId, options, schoolId);
     }
   },
@@ -889,7 +921,8 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listDormPackages:', error);
+      throwPermissionDeniedForPrivateData('listDormPackages', error);
+      logFallbackToMock('listDormPackages', error);
       return mockSource.listDormPackages(userId, options, schoolId);
     }
   },
@@ -922,7 +955,8 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listWashingReservations:', error);
+      throwPermissionDeniedForPrivateData('listWashingReservations', error);
+      logFallbackToMock('listWashingReservations', error);
       return mockSource.listWashingReservations(userId, schoolId);
     }
   },
@@ -988,7 +1022,8 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listPrintJobs:', error);
+      throwPermissionDeniedForPrivateData('listPrintJobs', error);
+      logFallbackToMock('listPrintJobs', error);
       return mockSource.listPrintJobs(userId, options, schoolId);
     }
   },
@@ -1020,7 +1055,8 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listHealthAppointments:', error);
+      throwPermissionDeniedForPrivateData('listHealthAppointments', error);
+      logFallbackToMock('listHealthAppointments', error);
       return mockSource.listHealthAppointments(userId, options, schoolId);
     }
   },
@@ -1063,6 +1099,7 @@ export const hybridSource: DataSource = {
         schoolId ?? currentSchoolContextId ?? undefined,
       );
     } catch (error) {
+      throwPermissionDeniedForPrivateData('listHealthRecords', error);
       console.warn('[HybridSource] Falling back to mock listHealthRecords:', error);
       return mockSource.listHealthRecords(userId, options, schoolId);
     }

@@ -90,6 +90,7 @@ target 'mobile' do
       next unless target.name.start_with?('RNFB')
 
       target.build_configurations.each do |configuration|
+        configuration.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
         configuration.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
       end
     end

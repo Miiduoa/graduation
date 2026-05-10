@@ -192,14 +192,33 @@ class LocalAssistant {
   private config: AssistantConfig = DEFAULT_ASSISTANT_CONFIG;
   private history: AssistantMessage[] = [];
   private statusListeners: Set<OnStatusCallback> = new Set();
+  private initialized = false;
+  private initPromise: Promise<void> | null = null;
 
   // ── Initialization ──
 
   async initialize(): Promise<void> {
+    if (this.initialized) return;
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = this.loadPersistedState();
+    return this.initPromise;
+  }
+
+  private async loadPersistedState(): Promise<void> {
     // 載入配置
     try {
       const raw = await AsyncStorage.getItem(CONFIG_KEY);
       if (raw) this.config = { ...DEFAULT_ASSISTANT_CONFIG, ...JSON.parse(raw) };
+    } catch {}
+
+    // 如果 LLM 引擎已有啟用模型紀錄，以 LLM 的選用模型為準。
+    try {
+      const savedModelId = await localLLM.getSavedModelId();
+      if (savedModelId) {
+        this.config = { ...this.config, modelId: savedModelId };
+        await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(this.config));
+      }
     } catch {}
 
     // 載入歷史
@@ -207,6 +226,9 @@ class LocalAssistant {
       const raw = await AsyncStorage.getItem(HISTORY_KEY);
       if (raw) this.history = JSON.parse(raw);
     } catch {}
+
+    this.initialized = true;
+    this.initPromise = null;
   }
 
   // ── Configuration ──
@@ -216,6 +238,7 @@ class LocalAssistant {
   }
 
   async setConfig(patch: Partial<AssistantConfig>): Promise<void> {
+    await this.initialize();
     this.config = { ...this.config, ...patch };
     await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(this.config));
   }
@@ -223,6 +246,7 @@ class LocalAssistant {
   // ── Status ──
 
   async getStatus(): Promise<AssistantStatus> {
+    await this.initialize();
     const llmState = localLLM.getState();
     const downloaded = await localLLM.isModelDownloaded(this.config.modelId);
     const stats = await localLLM.getStats();
@@ -244,19 +268,48 @@ class LocalAssistant {
   // ── Model Management ──
 
   async downloadModel(onProgress?: (p: ModelDownloadProgress) => void): Promise<boolean> {
+    await this.initialize();
     return localLLM.downloadModel(this.config.modelId, onProgress);
   }
 
   async loadModel(): Promise<boolean> {
+    await this.initialize();
     return localLLM.loadModel(this.config.modelId);
   }
 
   async ensureModelReady(onProgress?: (p: ModelDownloadProgress) => void): Promise<boolean> {
+    await this.initialize();
     return localLLM.ensureReady(this.config.modelId, onProgress);
   }
 
   isModelReady(): boolean {
     return localLLM.getState().status === 'ready';
+  }
+
+  async restoreDownloadedModel(): Promise<boolean> {
+    await this.initialize();
+
+    if (localLLM.getState().status === 'ready') {
+      return true;
+    }
+
+    const savedModelId = await localLLM.getSavedModelId();
+    const downloadedModels = await localLLM.getDownloadedModels();
+    const candidates = Array.from(
+      new Set([savedModelId, this.config.modelId, ...downloadedModels].filter(Boolean) as string[]),
+    );
+
+    for (const modelId of candidates) {
+      const downloaded = await localLLM.isModelDownloaded(modelId);
+      if (!downloaded) continue;
+
+      this.config = { ...this.config, modelId };
+      await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(this.config));
+      const loaded = await localLLM.loadModel(modelId);
+      if (loaded) return true;
+    }
+
+    return false;
   }
 
   // ── Chat (Main Entry Point) ──
@@ -273,6 +326,8 @@ class LocalAssistant {
       forceMode?: RoutingDecision;
     },
   ): Promise<AssistantMessage> {
+    await this.initialize();
+
     const { onToken, onStep, signal, forceMode } = options ?? {};
     const startTime = Date.now();
     const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -288,7 +343,9 @@ class LocalAssistant {
 
     // 決定路由
     const route = forceMode ?? routeQuery(message);
-    const llmReady = localLLM.getState().status === 'ready';
+    const llmReady =
+      localLLM.getState().status === 'ready' ||
+      (route !== 'local-nlp' ? await this.restoreDownloadedModel() : false);
 
     try {
       let response: AssistantMessage;

@@ -5,6 +5,8 @@
  * 完全不依賴任何外部 API，所有推理在本地完成。
  *
  * 支援模型：
+ *  - Qwen2.5-7B-Instruct (Q4_K_M) — 進階模型，中英文最強 (~4.7GB)
+ *  - Mistral-7B-Instruct-v0.3 (Q4_K_M) — 進階備選，推理能力頂尖 (~4.4GB)
  *  - Qwen2.5-3B-Instruct (Q4_K_M) — 主力模型，中英文優秀
  *  - Phi-3.5-mini-instruct (Q4_K_M) — 備用，推理能力強
  *  - SmolLM2-1.7B-Instruct (Q4_K_M) — 輕量備用
@@ -102,6 +104,38 @@ export interface LLMRuntimeAvailability {
 // ═══════════════════════════════════════════════════
 
 export const MODEL_REGISTRY: Record<string, LLMConfig> = {
+  // ── 進階模型 (~4-5GB) — 7B 參數級 ──
+  'qwen2.5-7b': {
+    modelId: 'qwen2.5-7b',
+    modelUrl:
+      'https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf',
+    modelFileName: 'Qwen2.5-7B-Instruct-Q4_K_M.gguf',
+    modelSize: 4_680_000_000, // ~4.68GB
+    contextLength: 4096,
+    maxTokens: 2048,
+    temperature: 0.7,
+    topP: 0.9,
+    topK: 40,
+    repeatPenalty: 1.1,
+    threads: 4,
+    gpuLayers: 99,
+  },
+  'mistral-7b-v0.3': {
+    modelId: 'mistral-7b-v0.3',
+    modelUrl:
+      'https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf',
+    modelFileName: 'Mistral-7B-Instruct-v0.3-Q4_K_M.gguf',
+    modelSize: 4_370_000_000, // ~4.37GB
+    contextLength: 4096,
+    maxTokens: 2048,
+    temperature: 0.7,
+    topP: 0.9,
+    topK: 40,
+    repeatPenalty: 1.1,
+    threads: 4,
+    gpuLayers: 99,
+  },
+  // ── 標準模型 (~1-2.5GB) — 3B 參數級 ──
   'qwen2.5-3b': {
     modelId: 'qwen2.5-3b',
     modelUrl:
@@ -167,6 +201,12 @@ type LlamaRNExports = typeof import('llama.rn');
 
 const RUNTIME_UNAVAILABLE_MESSAGE =
   '本地 AI 原生模組尚未載入。請重新安裝或重建包含 llama.rn 的開發版 App 後再啟用模型。';
+const DOWNLOAD_UNAVAILABLE_MESSAGE =
+  '目前環境無法使用本地 AI 模型下載。請改用已安裝 llama.rn 的開發版 App，不要使用 Expo Go。';
+const HF_DOWNLOAD_HEADERS = {
+  Accept: 'application/octet-stream',
+  'User-Agent': 'CampusAI-App/1.0',
+};
 
 let cachedLlamaModule: Partial<LlamaRNExports> | null | undefined;
 
@@ -226,6 +266,34 @@ function normalizeLoadModelError(error: any): string {
   return `模型載入失敗：${message}`;
 }
 
+function normalizeDownloadModelError(error: any): string {
+  const message = String(error?.message ?? error ?? '未知錯誤');
+  if (
+    /NSURLErrorDomain|Unable to download file|Network request failed|timed out|not connected/i.test(
+      message,
+    )
+  ) {
+    return '模型下載失敗：無法連線到 Hugging Face 下載伺服器。請確認 Wi-Fi 穩定，或稍後再重試。';
+  }
+  if (/space|storage|No space/i.test(message)) {
+    return '模型下載失敗：儲存空間不足，請清理裝置空間後重試。';
+  }
+  return `模型下載失敗：${message}`;
+}
+
+async function resolveDownloadUrl(cfg: LLMConfig): Promise<string> {
+  const response = await fetch(cfg.modelUrl, {
+    method: 'HEAD',
+    headers: HF_DOWNLOAD_HEADERS,
+  });
+
+  if (!response.ok) {
+    throw new Error(`下載伺服器回應 HTTP ${response.status}`);
+  }
+
+  return response.url || cfg.modelUrl;
+}
+
 // ═══════════════════════════════════════════════════
 // Core Engine Class
 // ═══════════════════════════════════════════════════
@@ -265,6 +333,43 @@ class LocalLLMEngine {
   // ── Model Management ──
 
   /**
+   * 取得使用者最後啟用或下載成功的模型。
+   */
+  async getSavedModelId(): Promise<string | null> {
+    try {
+      const activeModelId = await AsyncStorage.getItem(STORAGE_KEYS.activeModel);
+      if (activeModelId && MODEL_REGISTRY[activeModelId]) {
+        return activeModelId;
+      }
+
+      const readyRaw = await AsyncStorage.getItem(STORAGE_KEYS.modelReady);
+      if (readyRaw) {
+        const ready = JSON.parse(readyRaw);
+        if (ready?.modelId && MODEL_REGISTRY[ready.modelId]) {
+          return ready.modelId;
+        }
+      }
+    } catch {}
+
+    return null;
+  }
+
+  /**
+   * 記錄使用者選用的模型，不強制立即載入到記憶體。
+   */
+  async setActiveModel(modelId: string): Promise<boolean> {
+    const cfg = MODEL_REGISTRY[modelId];
+    if (!cfg) {
+      this.setState({ status: 'error', error: `Unknown model: ${modelId}` });
+      return false;
+    }
+
+    await AsyncStorage.setItem(STORAGE_KEYS.activeModel, cfg.modelId);
+    this.setState({ modelId: cfg.modelId, error: undefined });
+    return true;
+  }
+
+  /**
    * 取得模型檔案在裝置上的路徑
    */
   private getModelPath(config: LLMConfig): string {
@@ -299,6 +404,17 @@ class LocalLLMEngine {
       return false;
     }
 
+    const runtimeAvailability = getRuntimeAvailability();
+    if (!runtimeAvailability.available) {
+      this.setState({
+        status: 'error',
+        modelId: cfg.modelId,
+        error: runtimeAvailability.reason ?? DOWNLOAD_UNAVAILABLE_MESSAGE,
+        downloadProgress: undefined,
+      });
+      return false;
+    }
+
     const modelDir = `${getDocDir()}models/`;
     const dirInfo = await FileSystem.getInfoAsync(modelDir);
     if (!dirInfo.exists) {
@@ -309,14 +425,27 @@ class LocalLLMEngine {
     this.setState({ status: 'downloading', modelId: cfg.modelId });
 
     try {
-      // HuggingFace URL 需要 redirect 追蹤 + User-Agent
+      const existingInfo = await FileSystem.getInfoAsync(modelPath);
+      if (existingInfo.exists) {
+        if ((existingInfo as any).size > cfg.modelSize * 0.9) {
+          await AsyncStorage.setItem(
+            STORAGE_KEYS.modelReady,
+            JSON.stringify({ modelId: cfg.modelId, downloadedAt: Date.now() }),
+          );
+          this.setState({ status: 'uninitialized', downloadProgress: undefined });
+          return true;
+        }
+        await FileSystem.deleteAsync(modelPath, { idempotent: true });
+      }
+
+      // 先 resolve Hugging Face/Xet 的 signed URL，避免 iOS FileSystem 在大檔 redirect 時回傳 NSURLErrorDomain -1。
+      const downloadUrl = await resolveDownloadUrl(cfg);
+
       const downloadResumable = FileSystem.createDownloadResumable(
-        cfg.modelUrl,
+        downloadUrl,
         modelPath,
         {
-          headers: {
-            'User-Agent': 'CampusAI-App/1.0',
-          },
+          headers: HF_DOWNLOAD_HEADERS,
         },
         (downloadProgress) => {
           const progress: ModelDownloadProgress = {
@@ -354,14 +483,11 @@ class LocalLLMEngine {
       this.setState({ status: 'uninitialized', downloadProgress: undefined });
       return true;
     } catch (e: any) {
-      console.error(`[LocalLLM] Download error:`, e);
-      const userMsg = e.message?.includes('Network')
-        ? '網路連線失敗，請確認 Wi-Fi 已連線後重試'
-        : e.message?.includes('space')
-          ? '儲存空間不足，請清理裝置空間後重試'
-          : `下載失敗：${e.message ?? '未知錯誤'}`;
+      console.warn(`[LocalLLM] Download failed (${cfg.modelId}):`, e?.message ?? e);
+      const userMsg = normalizeDownloadModelError(e);
       this.setState({
         status: 'error',
+        modelId: cfg.modelId,
         error: userMsg,
         downloadProgress: undefined,
       });
@@ -385,7 +511,16 @@ class LocalLLMEngine {
     if (!fileInfo.exists) {
       this.setState({
         status: 'error',
-        error: 'Model not downloaded. Call downloadModel() first.',
+        modelId: cfg.modelId,
+        error: '找不到模型檔案。請到「本地 AI 模型」重新下載模型。',
+      });
+      return false;
+    }
+    if ((fileInfo as any).size && (fileInfo as any).size < cfg.modelSize * 0.9) {
+      this.setState({
+        status: 'error',
+        modelId: cfg.modelId,
+        error: '模型檔案不完整。請刪除後重新下載模型。',
       });
       return false;
     }
@@ -421,13 +556,14 @@ class LocalLLMEngine {
       });
 
       this.config = cfg;
-      this.setState({ status: 'ready' });
+      this.setState({ status: 'ready', modelId: cfg.modelId });
 
       await AsyncStorage.setItem(STORAGE_KEYS.activeModel, cfg.modelId);
       return true;
     } catch (e: any) {
       this.setState({
         status: 'error',
+        modelId: cfg.modelId,
         error: normalizeLoadModelError(e),
       });
       return false;
@@ -441,7 +577,7 @@ class LocalLLMEngine {
     modelId?: string,
     onProgress?: (progress: ModelDownloadProgress) => void,
   ): Promise<boolean> {
-    const mid = modelId ?? DEFAULT_MODEL_ID;
+    const mid = modelId ?? (await this.getSavedModelId()) ?? DEFAULT_MODEL_ID;
 
     if (this.state.status === 'ready' && this.config?.modelId === mid) {
       return true;
@@ -732,7 +868,7 @@ class LocalLLMEngine {
       this.context = null;
     }
     this.config = null;
-    this.setState({ status: 'uninitialized' });
+    this.setState({ status: 'uninitialized', modelId: undefined });
   }
 
   /**
@@ -751,7 +887,19 @@ class LocalLLMEngine {
       await FileSystem.deleteAsync(path, { idempotent: true });
     } catch {}
 
-    await AsyncStorage.removeItem(STORAGE_KEYS.modelReady);
+    try {
+      const [activeModelId, readyRaw] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.activeModel),
+        AsyncStorage.getItem(STORAGE_KEYS.modelReady),
+      ]);
+      if (activeModelId === cfg.modelId) {
+        await AsyncStorage.removeItem(STORAGE_KEYS.activeModel);
+      }
+      const ready = readyRaw ? JSON.parse(readyRaw) : null;
+      if (ready?.modelId === cfg.modelId) {
+        await AsyncStorage.removeItem(STORAGE_KEYS.modelReady);
+      }
+    } catch {}
   }
 
   /**

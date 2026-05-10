@@ -17,12 +17,18 @@ import Constants from 'expo-constants';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import type {
   AssistantActionProposal,
+  AssistantChoiceMenu,
   CampusActorRole,
   EvidenceRef,
   RoleActionPolicy,
 } from '../data';
 import { getFirebaseApp, hasUsableFirebaseConfig } from '../firebase';
-import { buildThinkingChain, type ThinkingStep } from '../data/puAIAgentData';
+import {
+  buildThinkingChain,
+  collectLearnedSkillsFromToolRound,
+  type LearnedSkill,
+  type ThinkingStep,
+} from '../data/puAIAgentData';
 import { answerWithOnlineSearch, shouldUseWebSearch } from './webSearch';
 import {
   buildAnswerFromLearnedWebItem,
@@ -31,10 +37,81 @@ import {
 } from './webLearning';
 import {
   buildAssistantCapabilityPrompt,
+  buildNoToolSurrogatePromptSection,
   getAssistantIdentityAnswer,
 } from '../data/aiAssistantProfile';
+import {
+  computeRealtimeInsights,
+  insightsToPromptText,
+  type RealtimeInsights,
+} from './aiRealtimeAnalytics';
+import {
+  computeCrossModuleInsights,
+  crossInsightsToPromptText,
+  generateDailyBriefing,
+  dailyBriefingToPromptText,
+} from './aiCrossModuleInference';
+import {
+  detectAndExecuteSmartAction,
+  type SmartActionResult,
+} from './aiSmartActions';
+import {
+  toGeminiToolsPayload,
+  parseGeminiFunctionCalls,
+  executeTool,
+  formatToolResponseForGemini,
+  type ToolCallResult,
+} from './aiAgentTools';
+import {
+  autonomousQuery,
+  buildLocalAgentContextAppendix,
+  parseExecuteCommands,
+  executeAgentActions,
+  type AgentQueryResult,
+} from './aiLocalAgent';
+import {
+  buildReflectorUserPayloadForTools,
+  composeQuickLocalReflection,
+  evaluateLocalAgentForReflexion,
+  evaluateToolRoundForReflexion,
+  formatReflexionHintsForSystemPrompt,
+  generateReflectionViaGemini,
+  MAX_REFLEXIONS_PER_GEMINI_TRIAL,
+  rememberReflexion,
+} from './aiReflexion';
 
 export type AIProvider = 'offline' | 'cloud' | 'mock' | 'local-llm' | 'gemini';
+
+// ─── 即時洞察快取（避免每次對話重算）──
+let _insightsCache: { data: RealtimeInsights; expiry: number } | null = null;
+let _crossInsightsCache: { data: string; expiry: number } | null = null;
+const INSIGHTS_TTL = 60_000; // 1 分鐘快取
+
+async function getCachedInsightsPrompt(): Promise<string> {
+  const now = Date.now();
+  try {
+    // Realtime insights
+    if (!_insightsCache || _insightsCache.expiry < now) {
+      const data = await computeRealtimeInsights();
+      _insightsCache = { data, expiry: now + INSIGHTS_TTL };
+    }
+    // Cross-module insights
+    if (!_crossInsightsCache || _crossInsightsCache.expiry < now) {
+      const crossInsights = await computeCrossModuleInsights();
+      const briefing = await generateDailyBriefing();
+      const parts = [
+        insightsToPromptText(_insightsCache.data),
+        crossInsightsToPromptText(crossInsights),
+        dailyBriefingToPromptText(briefing),
+      ].filter(Boolean);
+      _crossInsightsCache = { data: parts.join('\n\n'), expiry: now + INSIGHTS_TTL };
+    }
+    return _crossInsightsCache.data;
+  } catch (e) {
+    console.warn('[AI] Failed to compute insights for prompt:', e);
+    return '';
+  }
+}
 
 // 重試配置
 const RETRY_CONFIG = {
@@ -140,6 +217,10 @@ export type AIResponse = {
   citations?: EvidenceRef[];
   error?: string;
   thinking?: { step: string; detail: string; status: 'done' | 'checking' | 'warning' | 'info' }[];
+  /** 本輪寫入工具成功後蒸餾的技能，由 UI 合併進本地訓練庫 */
+  learnedSkills?: LearnedSkill[];
+  /** 可點選選單（例如訂餐多選一），由聊天室渲染 */
+  choiceMenu?: AssistantChoiceMenu;
 };
 
 type CampusAssistantRequest = {
@@ -214,10 +295,97 @@ export type AIContext = {
     state: 'live' | 'empty' | 'missing' | 'blocked';
     detail?: string;
   }>;
+  appDataRecords?: Array<{
+    key: string;
+    label: string;
+    text: string;
+    priority?: number;
+  }>;
+  calendarEvents?: Array<{
+    id: string;
+    title: string;
+    startAt?: string;
+    endAt?: string;
+    location?: string;
+    type?: string;
+  }>;
+  notifications?: Array<{ id: string; title: string; body?: string; read?: boolean }>;
+  conversations?: Array<{
+    id: string;
+    memberCount?: number;
+    unreadCount?: number;
+    lastMessageAt?: string | null;
+    lastMessage?: string;
+  }>;
+  orders?: Array<{
+    id: string;
+    status: string;
+    cafeteria?: string;
+    merchantName?: string;
+    total?: number;
+    items?: Array<{ name: string; quantity: number; price?: number }>;
+  }>;
+  repairRequests?: Array<{
+    id: string;
+    type: string;
+    title?: string;
+    status: string;
+    room?: string;
+    priority?: string;
+  }>;
+  healthAppointments?: Array<{
+    id: string;
+    department: string;
+    date: string;
+    timeSlot: string;
+    status: string;
+    doctorName?: string;
+  }>;
+  seatReservations?: Array<{
+    id: string;
+    seatId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    status: string;
+  }>;
+  libraryLoans?: Array<{
+    id: string;
+    bookId: string;
+    bookTitle?: string;
+    dueAt?: string;
+    status: string;
+  }>;
+  printJobs?: Array<{
+    id: string;
+    printerId: string;
+    fileName: string;
+    pages: number;
+    status: string;
+    cost?: number;
+  }>;
+  washingReservations?: Array<{
+    id: string;
+    machineId: string;
+    startTime: string;
+    endTime?: string;
+    status: string;
+  }>;
+  dormPackages?: Array<{
+    id: string;
+    carrier: string;
+    trackingNumber: string;
+    status: string;
+    location?: string;
+  }>;
   // 自動訓練洞察（從歷史對話學習）
   trainingInsights?: string;
   // 對話上下文摘要（讓 API 也知道目前對話狀態）
   contextSummary?: string;
+  // 即時演算洞察（由 aiRealtimeAnalytics + aiCrossModuleInference 產生）
+  _realtimeInsightsPrompt?: string;
+  // 智慧行動結果（由 aiSmartActions 自動執行產生）
+  _smartActionResult?: SmartActionResult;
 };
 
 const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
@@ -517,21 +685,26 @@ function buildSystemPrompt(context: AIContext): string {
     '- 記得對話脈絡，能延續之前的話題',
     '',
     '## 核心能力',
-    '1. 深度推理：「我還能畢業嗎？」→ 計算已修學分 vs 128 門檻，分析各類學分夠不夠',
-    '2. 跨領域關聯：「下午有空嗎？」→ 同時查課表+作業截止+活動，綜合判斷',
-    '3. 情境感知：現在是' + mealTime + '時段，你會根據時間調整回答',
-    '4. 個人化分析：根據課表、作業繳交狀況來分析風險',
-    '5. 多輪對話：記得前面聊什麼，能處理追問、換話題',
-    '6. 生活建議：吃什麼、去哪玩、心情不好都能聊',
+    '1. 即時資料演算：你已經預先計算了 GPA 趨勢、學分進度、出席風險、作業截止分析，回答時直接引用數據',
+    '2. 主動行動執行：使用者說「查成績」「查課表」「查作業」你已經自動查好了，直接用結果回答',
+    '3. 跨模組推理：你能串聯 成績+出席+作業+課表+天氣 做深層洞察，例如「微積分出席率低+成績差=高風險」',
+    '4. 深度推理：「我還能畢業嗎？」→ 已計算好的學分進度直接回答，精確到數字',
+    '5. 情境感知：現在是' + mealTime + '時段，你會根據時間調整回答',
+    '6. 主動提醒：偵測到風險（逾期作業、低出席、成績下滑）就主動告知，不需使用者問',
+    '7. 多輪對話：記得前面聊什麼，能處理追問、換話題',
+    '8. 生活建議：吃什麼、去哪玩、心情不好都能聊',
     '',
     '## 回答原則（非常重要）',
     '- 繁體中文，友善簡潔，像朋友聊天',
-    '- **直接回答不繞圈子**。問「會被當嗎」就分析風險，別回「請查看成績系統」',
+    '- **直接回答不繞圈子**。問「會被當嗎」就用已計算的 GPA 和出席數據分析風險，別回「請查看成績系統」',
     '- **永遠不要只說「沒有資料」就結束**。即使沒有即時資料，也要給有用的一般性建議',
-    '- 有個人資料就引用具體數據（課名、截止日）',
+    '- **有數據就引用數據**：你已經有完整的成績、課表、出席、作業分析結果，回答時一定要引用具體數字',
+    '- **主動關聯**：回答課表問題時，也提醒相關的作業截止日和出席狀況',
+    '- **主動建議行動**：不只是告知資料，還要建議下一步該做什麼',
     '- 不要捏造數據，但可給常識性建議',
     '- 學生表達情緒 → 先同理再建議',
     '- 簡單問題 2-3 句，複雜問題有結構但不囉嗦',
+    '- **每次回答結尾都要加上「建議選項：」提供 2-3 個相關的後續操作**',
     '',
     '## 靜宜大學知識庫',
     '',
@@ -636,6 +809,20 @@ function buildSystemPrompt(context: AIContext): string {
     });
   }
 
+  if (context.appDataRecords && context.appDataRecords.length > 0) {
+    parts.push('');
+    parts.push('【App 可檢索資料索引】');
+    parts.push(
+      '以下是 App 已讀取且使用者可存取的資料摘要；回答使用者個人狀態、訂單、借閱、課業、宿舍、健康、列印、交通等問題時優先使用。',
+    );
+    context.appDataRecords
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+      .slice(0, 28)
+      .forEach((record) => {
+        parts.push(`- [${record.label}] ${limitText(record.text, 180)}`);
+      });
+  }
+
   // ── 校園公開資料 ──
   const hasAnnouncements = context.announcements && context.announcements.length > 0;
   const hasEvents = context.events && context.events.length > 0;
@@ -706,6 +893,29 @@ function buildSystemPrompt(context: AIContext): string {
     parts.push(context.trainingInsights);
   }
 
+  // ── 即時演算洞察注入 ──
+  // 由 aiRealtimeAnalytics + aiCrossModuleInference 即時演算
+  if (context._realtimeInsightsPrompt && context._realtimeInsightsPrompt.length > 0) {
+    parts.push('');
+    parts.push(context._realtimeInsightsPrompt);
+  }
+
+  // ── 智慧行動結果注入 ──
+  // 偵測到使用者意圖後自動查詢，結果附在 prompt 中
+  if (context._smartActionResult) {
+    const r = context._smartActionResult;
+    parts.push('');
+    parts.push('## 已自動為使用者執行查詢');
+    parts.push(`操作：${r.title}`);
+    parts.push(`結果：`);
+    parts.push(r.data);
+    if (r.suggestions && r.suggestions.length > 0) {
+      parts.push(`可建議的後續操作：${r.suggestions.join('、')}`);
+    }
+    parts.push('');
+    parts.push('**重要：請根據上述查詢結果直接回答使用者。用自然語言整理資料，加上你的分析和建議。不要只是複製貼上，要像真人助理一樣消化資料後給出有洞察力的回答。**');
+  }
+
   return parts.join('\n');
 }
 
@@ -761,6 +971,677 @@ function extractSuggestions(content: string): string[] {
     parsed.push('開啟導航');
 
   return parsed.length > 0 ? parsed : [];
+}
+
+function compactJson(value: unknown, maxChars = 420): string {
+  try {
+    return JSON.stringify(value ?? null).slice(0, maxChars);
+  } catch {
+    return String(value ?? '').slice(0, maxChars);
+  }
+}
+
+function limitText(value: string | undefined, maxChars: number): string {
+  if (!value) return '';
+  return value.length > maxChars ? `${value.slice(0, maxChars)}...` : value;
+}
+
+function joinWithinBudget(lines: string[], maxChars: number): string {
+  const output: string[] = [];
+  let used = 0;
+  for (const line of lines.filter(Boolean)) {
+    const next = `${line}\n`;
+    if (used + next.length > maxChars) break;
+    output.push(line);
+    used += next.length;
+  }
+  return output.join('\n');
+}
+
+function tokenizeForSearch(text: string): string[] {
+  const normalized = text.toLowerCase();
+  const latin = normalized.match(/[a-z0-9_]+/g) ?? [];
+  const cjk = Array.from(normalized.replace(/[^\u4e00-\u9fff]/g, ''));
+  return Array.from(new Set([...latin, ...cjk])).filter((token) => token.length > 0);
+}
+
+function retrieveAppDataRecords(
+  records: AIContext['appDataRecords'] | undefined,
+  userText: string,
+  maxRecords: number,
+): NonNullable<AIContext['appDataRecords']> {
+  const source = records ?? [];
+  if (source.length === 0) return [];
+
+  const queryTokens = tokenizeForSearch(userText);
+  if (queryTokens.length === 0) {
+    return [...source].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)).slice(0, maxRecords);
+  }
+
+  return source
+    .map((record, index) => {
+      const haystack = `${record.key} ${record.label} ${record.text}`.toLowerCase();
+      const tokenScore = queryTokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+      return {
+        record,
+        index,
+        score: tokenScore * 20 + (record.priority ?? 0),
+      };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, maxRecords)
+    .map((entry) => entry.record);
+}
+
+function formatAppDataRecords(records: NonNullable<AIContext['appDataRecords']>): string {
+  return records.map((record) => `- [${record.label}] ${limitText(record.text, 220)}`).join('\n');
+}
+
+type OnDeviceContextSection = {
+  label: string;
+  coverageKeys: string[];
+  terms: string[];
+  line: string;
+};
+
+function includesAny(text: string, terms: string[]): boolean {
+  return terms.some((term) => text.includes(term.toLowerCase()));
+}
+
+function getCoverageSummary(context: AIContext | undefined, keys?: string[], maxRows = 8): string {
+  const rows = context?.appDataCoverage ?? [];
+  const selected = keys?.length
+    ? rows.filter((row) => keys.includes(row.key))
+    : rows.filter((row) => row.state === 'blocked' || row.count > 0);
+
+  return selected
+    .slice(0, maxRows)
+    .map(
+      (item) =>
+        `${item.label}:${item.state}(${item.count})${item.detail ? `-${limitText(item.detail, 50)}` : ''}`,
+    )
+    .join('；');
+}
+
+function scoreContextSection(section: OnDeviceContextSection, userText: string): number {
+  let score = includesAny(userText, section.terms) ? 100 : 0;
+
+  if (
+    includesAny(userText, [
+      '我',
+      '我的',
+      '今天',
+      '明天',
+      '現在',
+      '狀態',
+      '待辦',
+      '需要做',
+      '摘要',
+      '總結',
+    ])
+  ) {
+    if (
+      section.coverageKeys.some((key) =>
+        ['courses', 'assignments', 'calendar', 'notifications', 'next_actions', 'risk'].includes(
+          key,
+        ),
+      )
+    ) {
+      score += 40;
+    }
+  }
+
+  if (section.coverageKeys.some((key) => ['orders', 'library', 'print', 'dorm', 'health'].includes(key))) {
+    score += includesAny(userText, ['訂', '借', '印', '宿舍', '健康', '預約', '報修']) ? 20 : 0;
+  }
+
+  return score;
+}
+
+function buildOnDeviceAppPrompt(
+  context?: AIContext,
+  contextLength = 4096,
+  userText = '',
+): string {
+  const promptBudget = contextLength <= 2048 ? 1300 : 2600;
+  const normalizedUserText = userText.toLowerCase();
+  const blockedCoverage = getCoverageSummary(
+    context,
+    context?.appDataCoverage?.filter((row) => row.state === 'blocked').map((row) => row.key),
+    5,
+  );
+
+  const contextSections: OnDeviceContextSection[] = [
+    {
+      label: '學業',
+      coverageKeys: ['courses', 'assignments', 'risk', 'next_actions'],
+      terms: [
+        '課',
+        '課程',
+        '上課',
+        '老師',
+        '教授',
+        '作業',
+        '成績',
+        '學分',
+        '畢業',
+        '考試',
+        '待辦',
+      ],
+      line: `學業資料：課程=${compactJson(context?.courses?.slice(0, 5), 420)}；作業=${compactJson(
+        context?.pendingAssignments?.slice(0, 5),
+        420,
+      )}；成績=${compactJson(context?.gradesSummary, 240)}；週報=${compactJson(
+        context?.weeklyReport,
+        260,
+      )}`,
+    },
+    {
+      label: '行事曆通知',
+      coverageKeys: ['calendar', 'notifications', 'next_actions'],
+      terms: ['行事曆', '通知', '提醒', '今天', '明天', '等一下', '待辦', '安排', '時間'],
+      line: `行事曆/通知：行事曆=${compactJson(
+        context?.calendarEvents?.slice(0, 5),
+        360,
+      )}；通知=${compactJson(context?.notifications?.slice(0, 5), 360)}`,
+    },
+    {
+      label: '餐飲訂單',
+      coverageKeys: ['menus', 'orders'],
+      terms: ['吃', '餐', '菜單', '午餐', '晚餐', '早餐', '訂單', '點餐', '下單', '付款'],
+      line: `餐飲/訂單：菜單=${compactJson(context?.menus?.slice(0, 6), 420)}；訂單=${compactJson(
+        context?.orders?.slice(0, 4),
+        360,
+      )}`,
+    },
+    {
+      label: '地點活動公告',
+      coverageKeys: ['pois', 'events', 'announcements'],
+      terms: ['在哪', '哪裡', '地點', '位置', '怎麼去', '導航', '公告', '活動', '報名', '消息'],
+      line: `地點/公告/活動：地點=${compactJson(context?.pois?.slice(0, 5), 360)}；公告=${compactJson(
+        context?.announcements?.slice(0, 4),
+        320,
+      )}；活動=${compactJson(context?.events?.slice(0, 4), 320)}`,
+    },
+    {
+      label: '圖書館',
+      coverageKeys: ['library'],
+      terms: ['圖書', '借書', '借閱', '還書', '館藏', '座位', '自習', '圖書館'],
+      line: `圖書館資料：借閱=${compactJson(
+        context?.libraryLoans?.slice(0, 5),
+        420,
+      )}；座位預約=${compactJson(context?.seatReservations?.slice(0, 4), 320)}`,
+    },
+    {
+      label: '列印',
+      coverageKeys: ['print'],
+      terms: ['列印', '影印', '印', '文件', '印表機', 'printer'],
+      line: `列印資料：${compactJson(context?.printJobs?.slice(0, 5), 420)}`,
+    },
+    {
+      label: '宿舍',
+      coverageKeys: ['dorm', 'washing', 'repairs'],
+      terms: ['宿舍', '包裹', '洗衣', '洗衣機', '烘衣', '報修', '維修', '壞了', '寢室'],
+      line: `宿舍資料：包裹=${compactJson(
+        context?.dormPackages?.slice(0, 4),
+        320,
+      )}；洗衣=${compactJson(context?.washingReservations?.slice(0, 4), 300)}；報修=${compactJson(
+        context?.repairRequests?.slice(0, 4),
+        320,
+      )}`,
+    },
+    {
+      label: '健康',
+      coverageKeys: ['health'],
+      terms: ['健康', '看醫生', '門診', '預約', '頭痛', '肚子痛', '不舒服', '診所', '心理'],
+      line: `健康預約：${compactJson(context?.healthAppointments?.slice(0, 5), 420)}`,
+    },
+    {
+      label: '訊息',
+      coverageKeys: ['notifications'],
+      terms: ['訊息', '聊天', '對話', '未讀', 'message'],
+      line: `訊息/對話：${compactJson(context?.conversations?.slice(0, 5), 380)}`,
+    },
+  ];
+
+  const rankedSections = contextSections
+    .map((section, index) => ({
+      section,
+      index,
+      score: scoreContextSection(section, normalizedUserText),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const relevantCoverageKeys = rankedSections
+    .filter((entry) => entry.score > 0)
+    .flatMap((entry) => entry.section.coverageKeys);
+  const focusedCoverage =
+    getCoverageSummary(context, relevantCoverageKeys, 8) || getCoverageSummary(context, undefined, 8);
+  const retrievedRecords = retrieveAppDataRecords(context?.appDataRecords, userText, contextLength <= 2048 ? 6 : 10);
+  const retrievedRecordText = formatAppDataRecords(retrievedRecords);
+
+  const sections = [
+    '你是這個校園 App 內的本機 AI 助理，使用已下載的裝置端模型回答。',
+    '回答 APP 相關問題時，只能優先依據下方「使用者資料」與「APP 內資料」。如果資料沒有出現，就說目前 APP 沒提供或沒有權限，不要猜。',
+    'App 端已先讀取使用者可存取的資料並建立索引；下方「本題檢索資料」是從所有已讀資料中挑出的相關記錄。',
+    '如果資料狀態是 blocked/missing/empty，要明確說明目前缺權限、未同步或沒有資料；不要編造不存在的借閱、列印、宿舍、訂單或行事曆資料。',
+    '使用者要求代理操作時，先說明你能協助整理資料與交給 App 確認卡/按鈕執行；真正會寫入、下單、預約、送訊息、報修、請假或發布的操作必須經 App 確認流程，不要宣稱已經完成。',
+    '若無工具可呼叫、查詢失敗或寫入被拒：仍須交付代理產物（分步計畫、表格式草稿、建議導頁／畫面）；誠實說明技術邊界，但禁止只用一句話要使用者自己去處理就結束。',
+    '回答使用繁體中文，直接、具體、可執行。能引用 APP 內資料時要列出重點；資料不足時給下一步。',
+    `使用者資料：姓名=${context?.userName ?? '未命名'}；uid=${context?.userId ?? 'unknown'}；學校=${context?.schoolId ?? 'unknown'}；角色=${context?.role ?? 'student'}`,
+    context?.appPulseSummary ? `App 脈動：${limitText(context.appPulseSummary, 320)}` : '',
+    context?.contextSummary ? `對話/頁面摘要：${limitText(context.contextSummary, 180)}` : '',
+    blockedCoverage ? `目前被權限擋住的資料：${blockedCoverage}` : '',
+    focusedCoverage ? `本題相關資料覆蓋：${focusedCoverage}` : '',
+    retrievedRecordText ? `本題檢索資料：\n${retrievedRecordText}` : '',
+    ...rankedSections.map((entry) => entry.section.line),
+    context?.trainingInsights ? `本機學習洞察：${limitText(context.trainingInsights, 220)}` : '',
+  ];
+
+  return joinWithinBudget(sections, promptBudget);
+}
+
+function buildOnDeviceMessages(messages: AIMessage[], context?: AIContext, contextLength = 4096) {
+  const lastUserText =
+    [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
+  const recent = messages
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .slice(contextLength <= 2048 ? -2 : -4)
+    .map((message) => ({
+      role: message.role,
+      content: limitText(message.content, contextLength <= 2048 ? 220 : 420),
+    }));
+
+  return [
+    {
+      role: 'system' as const,
+      content: buildOnDeviceAppPrompt(context, contextLength, lastUserText),
+    },
+    ...recent,
+  ];
+}
+
+/**
+ * 建構包含自主查詢結果的本地代理訊息序列。
+ * 若有代理結果：主 system 仍為 buildOnDeviceAppPrompt，並追加 buildLocalAgentContextAppendix；
+ * 否則退回到舊的 buildOnDeviceMessages 行為。
+ */
+/** 本機代理對話：結合規則思考鏈與實際工具／訂餐等執行步驟 */
+function buildOnDeviceAssistantThinking(
+  lastMsg: string,
+  context: AIContext | undefined,
+  agentResult: AgentQueryResult | null,
+): NonNullable<AIResponse['thinking']> {
+  const chain = buildThinkingChain(lastMsg, {
+    hasCourses: (context?.courses?.length ?? 0) > 0,
+    hasAssignments: (context?.pendingAssignments?.length ?? 0) > 0,
+    hasGrades: !!context?.gradesSummary,
+    hasAnnouncements: (context?.announcements?.length ?? 0) > 0,
+    hasEvents: (context?.events?.length ?? 0) > 0,
+    hasMenus: (context?.menus?.length ?? 0) > 0,
+    hasPois: (context?.pois?.length ?? 0) > 0,
+    hasMemory: false,
+  });
+  const steps: NonNullable<AIResponse['thinking']> = [...chain.steps.slice(0, 8)];
+  if (agentResult?.intents?.length) {
+    for (const it of agentResult.intents.slice(0, 4)) {
+      steps.push({
+        step: '代理意圖',
+        detail: `${it.tool}：${it.reason}`,
+        status: 'done',
+      });
+    }
+  }
+  const maxToolSteps = 7;
+  let toolStepBudget = maxToolSteps;
+  for (const r of agentResult?.results ?? []) {
+    if (toolStepBudget <= 0) break;
+    steps.push({
+      step: `工具：${r.tool}`,
+      detail: r.result.success
+        ? r.result.summary.slice(0, 120)
+        : (r.result.error ?? r.result.summary).slice(0, 120),
+      status: r.result.success ? 'done' : 'warning',
+    });
+    toolStepBudget--;
+  }
+  for (const ea of agentResult?.executedActions ?? []) {
+    if (toolStepBudget <= 0) break;
+    steps.push({
+      step: ea.result.isWrite ? '代理寫入' : '操作結果',
+      detail: `${ea.tool} → ${ea.result.summary.slice(0, 110)}`,
+      status: ea.result.success ? 'done' : 'warning',
+    });
+    toolStepBudget--;
+  }
+  for (const fa of agentResult?.failedActions ?? []) {
+    if (toolStepBudget <= 0) break;
+    steps.push({
+      step: '尚缺條件',
+      detail: `${fa.tool}：${fa.missingInfo}`,
+      status: 'warning',
+    });
+    toolStepBudget--;
+  }
+  return steps.slice(0, 14);
+}
+
+function buildOnDeviceAgentMessages(
+  messages: AIMessage[],
+  context: AIContext | undefined,
+  agentResult: AgentQueryResult | null,
+  contextLength = 4096,
+  reflexionHint?: string,
+) {
+  const lastUserText =
+    [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+
+  // 沒有查詢結果時退回舊邏輯
+  if (!agentResult || (agentResult.results.length === 0 && agentResult.pendingWriteActions.length === 0)) {
+    return buildOnDeviceMessages(messages, context, contextLength);
+  }
+
+  const basePrompt = buildOnDeviceAppPrompt(context, contextLength, lastUserText);
+  const appendix = buildLocalAgentContextAppendix(agentResult, reflexionHint, contextLength <= 2048 ? 2800 : 4200);
+
+  const bridge =
+    appendix.trim().length > 0
+      ? '\n\n---\n【以下為 APP 自動查詢／工具結果（若與使用者上一句無關請忽略，仍須先直接回答使用者問題）】\n---\n\n'
+      : '';
+
+  const maxSystemChars = contextLength <= 2048 ? 7000 : 15000;
+  let systemPrompt = basePrompt + bridge + appendix;
+  if (systemPrompt.length > maxSystemChars) {
+    const headReserve = basePrompt.length + bridge.length + 200;
+    const tailBudget = Math.max(900, maxSystemChars - headReserve);
+    systemPrompt =
+      basePrompt +
+      bridge +
+      appendix.slice(0, tailBudget) +
+      (appendix.length > tailBudget ? '\n…（附錄過長已截斷）' : '');
+  }
+
+  // ── 預算：system prompt 佔約 60%，留 40% 給對話歷史 ──
+  const systemTokenEstimate = Math.ceil(systemPrompt.length / 2); // 粗估中文 1 字 ≈ 2 token
+  const historyBudget = contextLength - systemTokenEstimate - 256; // 256 buffer for generation
+  const maxHistory = contextLength <= 2048 ? 2 : historyBudget > 1500 ? 6 : 4;
+  const maxMsgLen = contextLength <= 2048 ? 200 : 400;
+
+  const recent = messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .slice(-maxHistory)
+    .map((m) => ({
+      role: m.role,
+      content: limitText(m.content, maxMsgLen),
+    }));
+
+  return [
+    { role: 'system' as const, content: systemPrompt },
+    ...recent,
+  ];
+}
+
+async function tryChatWithOnDeviceAssistant(
+  messages: AIMessage[],
+  context?: AIContext,
+  signal?: AbortSignal,
+  onToken?: StreamingCallback,
+): Promise<AIResponse | null> {
+  let hadSavedModel = false;
+
+  try {
+    const { localAssistant } = await import('./localAssistant');
+    const { localLLM, MODEL_REGISTRY } = await import('./localLLMInference');
+    const savedModelId = await localLLM.getSavedModelId();
+    const downloadedModels = await localLLM.getDownloadedModels();
+    hadSavedModel =
+      (!!savedModelId && (await localLLM.isModelDownloaded(savedModelId))) ||
+      downloadedModels.length > 0;
+
+    // 先檢查 native runtime 是否可用
+    const runtime = localLLM.getRuntimeAvailability();
+    if (!runtime.available) {
+      console.log('[AI] On-device LLM runtime unavailable, falling through:', runtime.reason);
+      return null;
+    }
+
+    const ready = localAssistant.isModelReady() || (await localAssistant.restoreDownloadedModel());
+    if (!ready) {
+      if (!hadSavedModel) return null;
+      const state = localLLM.getState();
+      return {
+        content: '',
+        error: state.error ?? '已找到模型檔案，但無法載入。請重新啟動 App，或到「本地 AI 模型」重新啟用。',
+      };
+    }
+
+    // ══ 自主代理模式 v2：查詢 + 鏈式自動執行寫入 ══
+    const lastMsg = messages[messages.length - 1]?.content ?? '';
+    let agentResult: AgentQueryResult | null = null;
+
+    const greetingOnly =
+      lastMsg.trim().length > 0 &&
+      /^(你好|嗨|哈囉|Hi|Hello|謝謝|感恩|再見|拜拜|早安|晚安|在嗎)[\s!！。.]*$/i.test(lastMsg.trim());
+
+    if (lastMsg.length > 0 && context && !greetingOnly) {
+      try {
+        console.log('[AI Agent v2] 自主查詢 + 代理執行開始...');
+        // 不傳 modelInference：小模型選工具易幻覺、與使用者問題脫鉤；僅用 regex + 語意描述匹配
+        agentResult = await autonomousQuery(lastMsg, {
+          userId: context.userId,
+          schoolId: context.schoolId,
+          role: context.role,
+        });
+        const execCount = agentResult.executedActions?.length ?? 0;
+        const failCount = agentResult.failedActions?.length ?? 0;
+        console.log(`[AI Agent v2] 完成: ${agentResult.intents.length} 意圖, ${agentResult.results.length} 讀取, ${execCount} 寫入已執行, ${failCount} 無法執行, ${agentResult.totalTimeMs}ms`);
+      } catch (e) {
+        console.warn('[AI Agent v2] 自主查詢失敗 (non-fatal):', e);
+      }
+    }
+
+    /** 代理失敗時：僅附簡短事實摘要（不再多一輪反思 LLM，避免指令疊加拖累小模型） */
+    let reflexionHint: string | undefined;
+    if (
+      agentResult &&
+      context &&
+      lastMsg.length > 0 &&
+      evaluateLocalAgentForReflexion(agentResult)
+    ) {
+      reflexionHint = composeQuickLocalReflection(agentResult) || undefined;
+      if (reflexionHint) rememberReflexion(context.userId, reflexionHint);
+    }
+
+    const onDeviceThinking =
+      context && lastMsg.length > 0
+        ? buildOnDeviceAssistantThinking(lastMsg, context, agentResult)
+        : undefined;
+
+    const llmState = localLLM.getState();
+    const modelConfig = llmState.modelId ? MODEL_REGISTRY[llmState.modelId] : undefined;
+    const contextLength = modelConfig?.contextLength ?? 4096;
+    const maxTokens = Math.min(
+      Number(getConfig().maxTokens) || 768,
+      contextLength <= 2048 ? 384 : 640,
+    );
+
+    // 建構包含查詢結果 + 執行結果的訊息
+    const agentMessages = buildOnDeviceAgentMessages(messages, context, agentResult, contextLength, reflexionHint);
+
+    let partial = '';
+    const result = await localLLM.generate({
+      messages: agentMessages,
+      signal,
+      maxTokens,
+      onToken: onToken
+        ? (token) => {
+            partial += token;
+            onToken(partial, false);
+          }
+        : undefined,
+    });
+
+    if (!result.content) {
+      // 如果模型沒輸出但有代理執行結果，直接用系統生成的回覆
+      if (agentResult && (agentResult.executedActions?.length > 0 || agentResult.results.length > 0)) {
+        const fallbackParts: string[] = [];
+        for (const ea of agentResult.executedActions ?? []) {
+          fallbackParts.push(ea.result.success ? `✅ ${ea.reason}：${ea.result.summary}` : `❌ ${ea.reason}：${ea.result.summary}`);
+        }
+        for (const r of agentResult.results) {
+          if (r.result.success && r.result.summary) fallbackParts.push(`📋 ${r.reason}：${r.result.summary}`);
+        }
+        for (const fa of agentResult.failedActions ?? []) {
+          fallbackParts.push(`⚠️ ${fa.reason}無法自動完成：${fa.missingInfo}`);
+        }
+        const fallback = fallbackParts.join('\n\n');
+        onToken?.(fallback, true);
+        const agentLearnedFallback = agentResult
+          ? collectLearnedSkillsFromToolRound(
+              (agentResult.executedActions ?? []).map((ea) => ({ result: ea.result })),
+            )
+          : [];
+        return {
+          content: fallback,
+          suggestions: [],
+          thinking: onDeviceThinking,
+          learnedSkills: mergeLearnedSkillDrafts(agentLearnedFallback),
+          choiceMenu: agentResult?.choiceMenu,
+        };
+      }
+      return {
+        content: '',
+        error: '本機模型沒有產生回覆，請稍後重試或重新啟用模型。',
+        thinking: onDeviceThinking,
+      };
+    }
+
+    // v2: 模型回答中的 [EXECUTE:...] 當作備用路徑（小模型偶爾能產生）
+    let finalContent = result.content;
+    const executeCommands = parseExecuteCommands(finalContent);
+    let execLearnedDrafts: LearnedSkill[] = [];
+    let execChoiceMenu: AssistantChoiceMenu | undefined;
+    if (executeCommands.length > 0 && context) {
+      console.log(`[AI Agent v2] 模型額外產生 ${executeCommands.length} 個執行指令（備用路徑）`);
+      const execResults = await executeAgentActions(executeCommands, {
+        userId: context.userId,
+        schoolId: context.schoolId,
+        role: context.role,
+        lastUserMessage: lastMsg.trim(),
+      });
+      execChoiceMenu = lastChoiceMenuFromToolResults(execResults.map((r) => ({ result: r.result })));
+      execLearnedDrafts = collectLearnedSkillsFromToolRound(
+        execResults.map((r) => ({ result: r.result })),
+      );
+      const execSummary = execResults
+        .map(r => r.result.success ? `✅ ${r.result.summary}` : `❌ ${r.result.summary}`)
+        .join('\n');
+      finalContent = finalContent.replace(/\[EXECUTE:\w+:\{[^}]*\}]/g, '').trim();
+      if (execSummary) finalContent += '\n\n' + execSummary;
+    }
+
+    onToken?.(finalContent, true);
+
+    const agentLearnedDrafts = agentResult
+      ? collectLearnedSkillsFromToolRound(
+          (agentResult.executedActions ?? []).map((ea) => ({ result: ea.result })),
+        )
+      : [];
+
+    return {
+      content: finalContent,
+      suggestions: extractSuggestions(finalContent),
+      thinking: onDeviceThinking,
+      learnedSkills: mergeLearnedSkillDrafts(agentLearnedDrafts, execLearnedDrafts),
+      choiceMenu: execChoiceMenu ?? agentResult?.choiceMenu,
+    };
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e;
+    console.warn('[AI] On-device LLM auto-detect failed:', e);
+    const errMsg = String(e?.message ?? '');
+    const isRuntimeIssue = /initLlama|initContext|RNLlama|NativeModule|TurboModule|native module|只支援.*原生/i.test(errMsg);
+    if (isRuntimeIssue) {
+      console.log('[AI] On-device LLM runtime issue, falling through to other providers');
+      return null;
+    }
+    if (hadSavedModel) {
+      return {
+        content: '',
+        error: `本機模型推理失敗：${e?.message ?? '未知錯誤'}`,
+      };
+    }
+    return null;
+  }
+}
+
+export async function shouldPreferOnDeviceAssistant(): Promise<boolean> {
+  const config = getConfig();
+  if (config.isReleaseLike) return false;
+
+  try {
+    const { localAssistant } = await import('./localAssistant');
+    return localAssistant.isModelReady() || (await localAssistant.restoreDownloadedModel());
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e;
+    console.warn('[AI] On-device LLM readiness check failed:', e);
+    return false;
+  }
+}
+
+export async function hasSavedOnDeviceAssistant(): Promise<boolean> {
+  const config = getConfig();
+  if (config.isReleaseLike) return false;
+
+  try {
+    const { localLLM } = await import('./localLLMInference');
+    const state = localLLM.getState();
+    if (state.status === 'ready' && state.modelId) return true;
+
+    const modelId = await localLLM.getSavedModelId();
+    if (modelId && (await localLLM.isModelDownloaded(modelId))) return true;
+
+    const downloadedModels = await localLLM.getDownloadedModels();
+    return downloadedModels.length > 0;
+  } catch (e: any) {
+    console.warn('[AI] On-device LLM saved-model check failed:', e);
+    return false;
+  }
+}
+
+export async function chatWithOnDeviceAssistantStreaming(
+  messages: AIMessage[],
+  context: AIContext,
+  onToken: StreamingCallback,
+  signal?: AbortSignal,
+): Promise<AIResponse> {
+  const config = getConfig();
+
+  if (config.isReleaseLike) {
+    const errorResponse = {
+      content: '',
+      error: '上架版本不直接載入裝置端模型；請使用後端代理 AI。',
+    };
+    onToken('', true);
+    return errorResponse;
+  }
+
+  try {
+    const response = await tryChatWithOnDeviceAssistant(messages, context, signal, onToken);
+    if (response) return response;
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return { content: '', error: '請求已取消' };
+    return {
+      content: '',
+      error: `本機模型推理失敗：${e?.message ?? '未知錯誤'}`,
+    };
+  }
+
+  onToken('', true);
+  return {
+    content: '',
+    error: '找不到可載入的本機模型。請到「本地 AI 模型」重新下載或啟用模型。',
+  };
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2097,6 +2978,27 @@ export async function chatWithAI(
 ): Promise<AIResponse> {
   const config = getConfig();
 
+  // ── AI 自主代理模式：不再預先注入資料 ──
+  // Gemini 會透過 function calling 自己決定要查什麼資料
+  // 只有在非 Gemini 模式才用舊的注入邏輯作為降級
+  if (config.aiProvider !== 'gemini') {
+    try {
+      const lastMsg = messages[messages.length - 1]?.content ?? '';
+      const insightsPrompt = await getCachedInsightsPrompt();
+      if (insightsPrompt) {
+        context = { ...context, _realtimeInsightsPrompt: insightsPrompt };
+      }
+      if (lastMsg.length > 0 && lastMsg.length < 200) {
+        const actionResult = await detectAndExecuteSmartAction(lastMsg);
+        if (actionResult && actionResult.success) {
+          context = { ...context, _smartActionResult: actionResult };
+        }
+      }
+    } catch (e) {
+      console.warn('[AI] Legacy insights injection failed (non-fatal):', e);
+    }
+  }
+
   try {
     if (config.isReleaseLike) {
       const managedResponse = await callManagedAI(messages, context, signal);
@@ -2106,6 +3008,10 @@ export async function chatWithAI(
         error: 'AI 服務目前無法連線；上架版本只允許透過後端代理呼叫 AI。',
       };
     }
+
+    // ── 自動偵測本地 LLM：若模型已下載/啟用就優先載入使用，無需手動切換 provider ──
+    const onDeviceResponse = await tryChatWithOnDeviceAssistant(messages, context, signal);
+    if (onDeviceResponse) return onDeviceResponse;
 
     if (isDeviceOnlyProvider(config.aiProvider)) {
       return await mockAIResponse(messages, context, signal);
@@ -2126,6 +3032,17 @@ export async function chatWithAI(
     if (config.aiProvider === 'local-llm') {
       const localResponse = await callLocalLLM(messages, context, signal);
       if (localResponse) return localResponse;
+      // local-llm 失敗 → 嘗試 Gemini 作為後備
+      console.log('[AI] local-llm failed, trying Gemini fallback...');
+      try {
+        const geminiResponse = await callGeminiAPI(messages, context, signal);
+        if (geminiResponse) return geminiResponse;
+      } catch (e) {
+        console.warn('[AI] Gemini fallback also failed:', e);
+      }
+      // Gemini 也失敗 → 嘗試 managed cloud
+      const cloudFallback = await callManagedAI(messages, context, signal);
+      if (cloudFallback) return cloudFallback;
       return await mockAIResponse(messages, context, signal);
     }
 
@@ -2160,6 +3077,23 @@ export async function chatWithCampusAssistant(
 ): Promise<AIResponse> {
   const config = getConfig();
 
+  // ── AI 自主代理模式：Gemini 透過 function calling 自主查詢 ──
+  if (config.aiProvider !== 'gemini') {
+    try {
+      const lastMsg = messages[messages.length - 1]?.content ?? '';
+      const insightsPrompt = await getCachedInsightsPrompt();
+      if (insightsPrompt) context = { ...context, _realtimeInsightsPrompt: insightsPrompt };
+      if (lastMsg.length > 0 && lastMsg.length < 200) {
+        const actionResult = await detectAndExecuteSmartAction(lastMsg);
+        if (actionResult?.success) {
+          context = { ...context, _smartActionResult: actionResult };
+        }
+      }
+    } catch (e) {
+      console.warn('[AI] CampusAssistant insights injection failed:', e);
+    }
+  }
+
   if (config.isReleaseLike) {
     const cloudResponse = await callManagedAI(messages, context, signal);
     if (cloudResponse) return cloudResponse;
@@ -2168,6 +3102,10 @@ export async function chatWithCampusAssistant(
       error: 'Campus Assistant 暫時不可用；上架版本只允許透過後端代理呼叫 AI。',
     };
   }
+
+  // ── 自動偵測本地 LLM：若模型已下載/啟用就優先載入使用 ──
+  const onDeviceResponse = await tryChatWithOnDeviceAssistant(messages, context, signal);
+  if (onDeviceResponse) return onDeviceResponse;
 
   // ── Offline 模式：完全不呼叫雲端或本地 server ──
   if (isDeviceOnlyProvider(config.aiProvider)) {
@@ -2191,6 +3129,13 @@ export async function chatWithCampusAssistant(
   if (config.aiProvider === 'local-llm') {
     const localResponse = await callLocalLLM(messages, context, signal);
     if (localResponse) return localResponse;
+    // local-llm 失敗 → 嘗試 Gemini
+    try {
+      const geminiResponse = await callGeminiAPI(messages, context, signal);
+      if (geminiResponse) return geminiResponse;
+    } catch (e) {
+      console.warn('[AI] Campus: Gemini fallback failed:', e);
+    }
   }
 
   // ── Cloud 模式 ──
@@ -2241,17 +3186,32 @@ export function getAIStatus(): {
   provider: AIProvider;
   configured: boolean;
   webSearchEnabled: boolean;
+  localModelReady?: boolean;
 } {
   const config = getConfig();
+
+  // 檢查本地 LLM 是否就緒
+  let localModelReady = false;
+  try {
+    // 同步檢查：直接 require 避免 async
+    const { localLLM } = require('./localLLMInference');
+    localModelReady = localLLM.getState().status === 'ready';
+  } catch {
+    // ignore — llama.rn 可能未安裝
+  }
+
   const configured = config.isReleaseLike
     ? hasUsableFirebaseConfig()
-    : config.aiProvider === 'offline' ||
+    : localModelReady ||
+      config.aiProvider === 'offline' ||
       config.aiProvider === 'mock' ||
       config.aiProvider === 'local-llm' ||
       config.aiProvider === 'gemini' ||
       hasUsableFirebaseConfig();
 
-  return { provider: config.aiProvider, configured, webSearchEnabled: config.webSearchEnabled };
+  const effectiveProvider: AIProvider = localModelReady ? 'local-llm' : config.aiProvider;
+
+  return { provider: effectiveProvider, configured, webSearchEnabled: config.webSearchEnabled, localModelReady };
 }
 
 /**
@@ -2285,9 +3245,46 @@ function getGeminiApiKey(): string | null {
   return extra.geminiApiKey ?? process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? null;
 }
 
+function learnedSkillsFromExecutedActions(
+  actions: Array<{ result: ToolCallResult }>,
+): LearnedSkill[] | undefined {
+  const list = collectLearnedSkillsFromToolRound(actions.map((a) => ({ result: a.result })));
+  return list.length ? list : undefined;
+}
+
+function lastChoiceMenuFromToolResults(
+  actions: Array<{ result: ToolCallResult }>,
+): AssistantChoiceMenu | undefined {
+  for (let i = actions.length - 1; i >= 0; i--) {
+    const m = actions[i].result.choiceMenu;
+    if (m?.options?.length) return m;
+  }
+  return undefined;
+}
+
+function mergeLearnedSkillDrafts(...groups: LearnedSkill[][]): LearnedSkill[] | undefined {
+  const flat = groups.flat();
+  if (!flat.length) return undefined;
+  const seen = new Set<string>();
+  const out: LearnedSkill[] = [];
+  for (const s of flat) {
+    const k = s.title.trim().toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+  }
+  return out.length ? out : undefined;
+}
+
 /**
  * 呼叫 Google Gemini API（開發測試用 direct mode）。
  * 正式版本會在進入這裡前改走 callManagedAI。
+ */
+/**
+ * 呼叫 Gemini API — 自主代理模式（Function Calling）
+ *
+ * AI 模型自己決定要查什麼資料、呼叫哪些工具、分析後回答。
+ * 支援多輪工具呼叫循環（最多 5 輪），直到 AI 產出最終文字回答。
  */
 async function callGeminiAPI(
   messages: AIMessage[],
@@ -2297,20 +3294,17 @@ async function callGeminiAPI(
   const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
 
-  const systemPrompt = buildSystemPrompt(context);
+  const systemPrompt = buildAgentSystemPrompt(context);
+  const toolsPayload = toGeminiToolsPayload(context.role);
 
   // Build Gemini-format messages
-  const geminiContents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+  const geminiContents: Array<any> = [];
 
-  // System instruction goes as first "user" turn with model acknowledgment
+  // System instruction
   geminiContents.push({ role: 'user', parts: [{ text: systemPrompt }] });
   geminiContents.push({
     role: 'model',
-    parts: [
-      {
-        text: '明白！我已了解所有校園資料和你的個人資訊，我會根據這些真實資料來回答你的問題。有什麼我可以幫你的？',
-      },
-    ],
+    parts: [{ text: '我已準備好，會自主查詢資料並分析後回答。有什麼需要我幫忙的？' }],
   });
 
   // Add conversation history
@@ -2322,65 +3316,245 @@ async function callGeminiAPI(
     });
   }
 
-  // Ensure last message is from user
   if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role !== 'user') {
     return null;
   }
 
+  const MAX_TOOL_ROUNDS = 5;
+  const model = 'gemini-2.0-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const executedActions: Array<{ tool: string; result: ToolCallResult }> = [];
+  let reflexionsUsed = 0;
+  const lastUserMessage =
+    [...messages].reverse().find((m) => m.role === 'user')?.content?.trim() ?? '';
+
   try {
-    const model = 'gemini-2.0-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          contents: geminiContents,
+          tools: toolsPayload,
+          tool_config: { function_calling_config: { mode: 'AUTO' } },
+          generationConfig: {
+            temperature: 0.7,
+            topP: 0.95,
+            topK: 40,
+            maxOutputTokens: 4096,
+          },
+          safetySettings: [
+            { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+            { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+          ],
+        }),
+      });
 
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal,
-      body: JSON.stringify({
-        contents: geminiContents,
-        generationConfig: {
-          temperature: 0.8,
-          topP: 0.95,
-          topK: 40,
-          maxOutputTokens: 2048,
-        },
-        safetySettings: [
-          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
-          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
-        ],
-      }),
-    });
+      if (!resp.ok) {
+        console.warn(`[AI Agent] Gemini API error: ${resp.status}`);
+        // 如果有之前的工具結果，用那些組成回答
+        if (executedActions.length > 0) {
+          return buildResponseFromToolResults(executedActions);
+        }
+        return null;
+      }
 
-    if (!resp.ok) {
-      console.warn(`[AI] Gemini API error: ${resp.status}`);
-      return null;
+      const data = await resp.json();
+      const candidate = data?.candidates?.[0];
+      if (!candidate) return null;
+
+      const { functionCalls, textResponse } = parseGeminiFunctionCalls(candidate);
+
+      // 如果 AI 回傳純文字（沒有 function call），表示已完成分析
+      if (functionCalls.length === 0) {
+        if (!textResponse) return null;
+        const suggestions = extractSuggestions(textResponse);
+        const cleanContent = textResponse.replace(/\n*(?:建議選項|建議)[：:][^\n]*/g, '').trim();
+        return {
+          content: cleanContent,
+          suggestions: suggestions.length > 0 ? suggestions : undefined,
+          actions: executedActions.filter(a => a.result.isWrite).map(a => ({
+            type: 'completed' as const,
+            label: a.result.summary,
+            tool: a.tool,
+          })) as any,
+          learnedSkills: learnedSkillsFromExecutedActions(executedActions),
+          choiceMenu: lastChoiceMenuFromToolResults(executedActions.map((a) => ({ result: a.result }))),
+        };
+      }
+
+      // 執行所有 function calls
+      console.log(`[AI Agent] Round ${round + 1}: ${functionCalls.length} tool calls: ${functionCalls.map(f => f.name).join(', ')}`);
+
+      // 把 AI 的 function call 回應加入對話
+      geminiContents.push(candidate.content);
+
+      // 執行工具並收集結果
+      const toolResponses: any[] = [];
+      for (const fc of functionCalls) {
+        const result = await executeTool(fc.name, fc.args, {
+          userId: context.userId,
+          schoolId: context.schoolId,
+          role: context.role,
+          lastUserMessage,
+        });
+        executedActions.push({ tool: fc.name, result });
+        toolResponses.push({
+          functionResponse: {
+            name: fc.name,
+            response: {
+              content: JSON.stringify({
+                success: result.success,
+                summary: result.summary,
+                data: result.data,
+                error: result.error,
+                choiceMenu: result.choiceMenu,
+              }),
+            },
+          },
+        });
+      }
+
+      // 把工具結果回傳給 Gemini
+      geminiContents.push({ role: 'function', parts: toolResponses });
+
+      // Reflexion：本輪有失敗工具時，先語言化反思再進下一輪（不中斷 ReAct 循環）
+      const roundResults = functionCalls.map((fc, idx) => ({
+        tool: fc.name,
+        result: executedActions[executedActions.length - functionCalls.length + idx].result,
+      }));
+      if (
+        reflexionsUsed < MAX_REFLEXIONS_PER_GEMINI_TRIAL &&
+        evaluateToolRoundForReflexion(roundResults)
+      ) {
+        const lastUserMsg =
+          [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+        const payload = buildReflectorUserPayloadForTools(lastUserMsg, roundResults);
+        try {
+          const reflection = await generateReflectionViaGemini(apiKey, payload, signal);
+          if (reflection) {
+            rememberReflexion(context.userId, reflection);
+            reflexionsUsed++;
+            geminiContents.push({
+              role: 'user',
+              parts: [
+                {
+                  text:
+                    `【上一輪工具結果反思（內部）】\n${reflection}\n請依此調整下一輪工具呼叫或最終回答，並正視錯誤原因。`,
+                },
+              ],
+            });
+            geminiContents.push({
+              role: 'model',
+              parts: [{ text: '收到，我會依反思修正後續策略。' }],
+            });
+          }
+        } catch (re) {
+          console.warn('[Reflexion] Gemini reflector failed (non-fatal):', re);
+        }
+      }
     }
 
-    const data = await resp.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return null;
-
-    // Parse suggestions from response
-    const suggestions = extractSuggestions(text);
-
-    // Clean the content (remove the "建議選項：..." line from display)
-    const cleanContent = text.replace(/\n*(?:建議選項|建議)[：:][^\n]*/g, '').trim();
-
-    return {
-      content: cleanContent,
-      suggestions: suggestions.length > 0 ? suggestions : undefined,
-    };
+    // 達到最大循環次數，用已收集的結果組成回答
+    if (executedActions.length > 0) {
+      return buildResponseFromToolResults(executedActions);
+    }
+    return null;
   } catch (e: any) {
     if (e.name === 'AbortError') throw e;
-    console.warn('[AI] Gemini API call failed:', e);
+    console.warn('[AI Agent] Gemini function calling failed:', e);
+    // 如果有部分工具結果，仍然嘗試回傳
+    if (executedActions.length > 0) {
+      return buildResponseFromToolResults(executedActions);
+    }
     return null;
   }
 }
 
+/**
+ * 自主代理的精簡系統提示詞
+ * 不再注入大量資料，而是告訴 AI 如何使用工具自主查詢
+ */
+function buildAgentSystemPrompt(context: AIContext): string {
+  const now = new Date();
+  const hour = now.getHours();
+  const DAY = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+
+  return [
+    '# 你是「小靜」— 靜宜大學 AI 校園全能代理',
+    '',
+    '## 核心身份',
+    '你是一個能自主行動的 AI 代理，不只是回答問題，更能主動查詢資料、分析數據、代替使用者執行操作。',
+    '',
+    '## 行為準則',
+    '1. **自主查詢**：不要猜測或說「請自行查看」。使用工具查詢真實資料後再回答。',
+    '2. **深度分析**：查到資料後進行演算和推理，給出洞察而非原始數據。',
+    '3. **主動代理**：使用者說「幫我報名」「幫我預約」就直接執行，不要只給指引。',
+    '4. **多工具串聯**：複雜問題可連續呼叫多個工具。如「我今天忙嗎？」→ 查課表 + 查作業 + 查行事曆。',
+    '5. **經驗固化**：當寫入工具成功完成使用者任務後，App 會把「原意＋工具與參數要點」存成可重用技能；之後類似問題請優先參考對話中的【自訂技能】區塊（仍須以當下 App 資料為準）。',
+    '6. **無工具仍代理**：沒有 function 可呼叫或後端拒絕時，仍要輸出可執行計畫、草稿欄位、App 導頁建議；不可把任務丟回使用者就結案（可說明無法遠端代辦的具體原因）。',
+    '7. **角色感知**：',
+    context.role === 'teacher' ? '  目前使用者是教師，可使用點名、出作業、批改等教師工具。' :
+      context.role === 'admin' ? '  目前使用者是管理者，可使用管理工具。' :
+      '  目前使用者是學生，以學習輔助和生活便利為主。',
+    '',
+    '## 人格',
+    '- 像學長姐一樣親切但專業',
+    '- 繁體中文，友善簡潔',
+    '- 有幽默感但不在嚴肅話題開玩笑',
+    '- 先同理情緒再建議行動',
+    '',
+    '## 回答格式',
+    '- 直接回答，不繞圈子',
+    '- 引用查到的數據佐證',
+    '- 主動關聯：回答課表時也提醒相關作業',
+    '- 結尾加「建議選項：」提供 2-3 個後續操作',
+    '',
+    '## 靜宜大學基本資訊',
+    '位於台中市沙鹿區台灣大道七段200號，1956年創校，天主教大學。',
+    '學院：外語/人社/管理/理學/資訊/國際。畢業需128學分。',
+    '校園服務：蓋夏圖書館、濟時樓學餐、伯鐸樓美食街、至善樓衛保+諮商。',
+    '',
+    `## 當前環境`,
+    `時間：${DAY[now.getDay()]} ${now.toLocaleDateString('zh-TW')} ${hour}:${String(now.getMinutes()).padStart(2, '0')}`,
+    context.userName ? `使用者：${context.userName}` : '',
+    context.userId ? `已登入` : '未登入',
+    `學校：${context.schoolId}`,
+    '',
+    '## 重要：你有工具可以自主查詢所有資料，請一定要先查再答！',
+    '',
+    buildNoToolSurrogatePromptSection(),
+    formatReflexionHintsForSystemPrompt(context.userId),
+  ].filter(Boolean).join('\n');
+}
+
+/**
+ * 當 Gemini 達到最大工具循環但沒給最終回答時，
+ * 用收集到的工具結果組成一個回答。
+ */
+function buildResponseFromToolResults(
+  actions: Array<{ tool: string; result: ToolCallResult }>,
+): AIResponse {
+  const parts = actions
+    .filter(a => a.result.success)
+    .map(a => a.result.summary);
+
+  return {
+    content: parts.length > 0
+      ? parts.join('\n\n')
+      : '查詢完成，但沒有找到相關資料。',
+    suggestions: ['再查一次', '換個問題'],
+    learnedSkills: learnedSkillsFromExecutedActions(actions.map((a) => ({ result: a.result }))),
+    choiceMenu: lastChoiceMenuFromToolResults(actions.map((a) => ({ result: a.result }))),
+  };
+}
+
 // ─── Local LLM (FastAPI) Integration ────────────────────────────────
 
-import { getAIServerBaseUrl } from './cloudFunctions';
+import { getAIServerBaseUrl, getFirebaseAuthHeaders } from './cloudFunctions';
 
 /**
  * 呼叫本地 LLM server（非 streaming）
@@ -2397,7 +3571,7 @@ async function callLocalLLM(
   try {
     const resp = await fetch(`${baseUrl}/api/chat/sync`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getFirebaseAuthHeaders()) },
       signal,
       body: JSON.stringify({
         message: lastMessage,
@@ -2446,6 +3620,22 @@ export async function chatWithLocalLLMStreaming(
 ): Promise<AIResponse> {
   const config = getConfig();
 
+  // ── 即時演算 + 智慧行動注入 ──
+  try {
+    const lastMsg = messages[messages.length - 1]?.content ?? '';
+    const insightsPrompt = await getCachedInsightsPrompt();
+    if (insightsPrompt) context = { ...context, _realtimeInsightsPrompt: insightsPrompt };
+    if (lastMsg.length > 0 && lastMsg.length < 200) {
+      const actionResult = await detectAndExecuteSmartAction(lastMsg);
+      if (actionResult?.success) {
+        console.log(`[AI] Streaming smart action: ${actionResult.action}`);
+        context = { ...context, _smartActionResult: actionResult };
+      }
+    }
+  } catch (e) {
+    console.warn('[AI] Streaming insights injection failed:', e);
+  }
+
   if (config.isReleaseLike) {
     const cloudResponse = await callManagedAI(messages, context, signal);
     if (cloudResponse) {
@@ -2460,6 +3650,15 @@ export async function chatWithLocalLLMStreaming(
     return errorResponse;
   }
 
+  // ── 自動偵測本地 LLM：若模型已下載/啟用就優先載入使用（支援 streaming） ──
+  try {
+    const onDeviceResponse = await tryChatWithOnDeviceAssistant(messages, context, signal, onToken);
+    if (onDeviceResponse) return onDeviceResponse;
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return { content: '', error: '請求已取消' };
+    throw e;
+  }
+
   // ── Offline / Mock 模式：用內建語意引擎產生完整答案，不發送任何網路請求 ──
   if (isDeviceOnlyProvider(config.aiProvider)) {
     const fallback = await mockAIResponse(messages, context, signal);
@@ -2470,23 +3669,32 @@ export async function chatWithLocalLLMStreaming(
   // ── On-Device LLM 模式：完全本地推理（llama.rn） ──
   if (config.aiProvider === 'local-llm') {
     try {
-      const { localAssistant } = await import('./localAssistant');
-      if (localAssistant.isModelReady()) {
-        const lastMsg = messages[messages.length - 1]?.content ?? '';
-        const result = await localAssistant.chat(lastMsg, {
-          onToken: (token) => onToken(token, false),
-          signal,
-        });
-        onToken(result.content, true);
-        return {
-          content: result.content,
-          suggestions: extractSuggestions(result.content),
-        };
-      }
+      const onDeviceResponse = await tryChatWithOnDeviceAssistant(messages, context, signal, onToken);
+      if (onDeviceResponse) return onDeviceResponse;
     } catch (e: any) {
+      if (e?.name === 'AbortError') return { content: '', error: '請求已取消' };
       console.warn('[AI] On-device LLM failed:', e);
     }
-    // On-device LLM 不可用 → fallback to offline engine
+    // On-device LLM 不可用 → 嘗試 Gemini → managed cloud → mock
+    console.log('[AI] local-llm streaming failed, trying Gemini fallback...');
+    try {
+      const geminiResponse = await callGeminiAPI(messages, context, signal);
+      if (geminiResponse) {
+        onToken(geminiResponse.content, true);
+        return geminiResponse;
+      }
+    } catch (e) {
+      console.warn('[AI] Gemini streaming fallback failed:', e);
+    }
+    try {
+      const cloudResponse = await callManagedAI(messages, context, signal);
+      if (cloudResponse) {
+        onToken(cloudResponse.content, true);
+        return cloudResponse;
+      }
+    } catch (e) {
+      console.warn('[AI] Cloud streaming fallback failed:', e);
+    }
     const fallback = await mockAIResponse(messages, context, signal);
     onToken(fallback.content, true);
     return fallback;
@@ -2520,7 +3728,7 @@ export async function chatWithLocalLLMStreaming(
   try {
     const resp = await fetch(`${baseUrl}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getFirebaseAuthHeaders()) },
       signal,
       body: JSON.stringify({
         message: lastMessage,
@@ -2623,7 +3831,7 @@ export async function submitFeedback(params: {
   try {
     await fetch(`${baseUrl}/api/feedback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getFirebaseAuthHeaders()) },
       body: JSON.stringify({
         message_id: params.messageId,
         user_message: params.userMessage,

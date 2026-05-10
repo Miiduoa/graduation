@@ -27,7 +27,7 @@ import { EventsScreen } from './EventsScreen';
 import { EventDetailScreen } from './EventDetailScreen';
 import { AIChatScreen } from './AIChatScreen';
 import { CampusSocialScreen } from './CampusSocialScreen';
-import { SmartCalendarScreen } from './SmartCalendarScreen';
+import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import type { CampusActorRole } from '../data';
@@ -83,8 +83,8 @@ export function HomeStack() {
       />
       <Stack.Screen
         name="SmartCalendarScreen"
-        component={SmartCalendarScreen}
-        options={{ title: '智慧行事曆', headerShown: false }}
+        component={UnifiedCalendarScreen}
+        options={{ title: '行事曆', headerShown: false }}
       />
     </Stack.Navigator>
   );
