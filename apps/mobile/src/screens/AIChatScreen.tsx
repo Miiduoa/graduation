@@ -67,6 +67,7 @@ import {
 } from '../services/aiAmbientAwareness';
 import { formatAIToolLayerForPrompt, runAIToolLayer } from '../services/aiToolLayer';
 import { shouldUseWebSearch } from '../services/webSearch';
+import { executeAgentWrite } from '../services/agentWrite';
 import { buildNavigationTarget, navigateToTarget } from '../utils/courseNavigation';
 import {
   getPuDiningCafeterias,
@@ -6391,6 +6392,78 @@ export function AIChatScreen(props: any) {
   // ── Other handlers ──
   const handleAction = async (proposal: AssistantActionProposal) => {
     const { action, params } = proposal;
+
+    const isSubmitLeaveInput = (
+      x: unknown,
+    ): x is { courseId: string; date: string; type: string } => {
+      if (!x || typeof x !== 'object') return false;
+      const o = x as Record<string, unknown>;
+      return (
+        typeof o.courseId === 'string' &&
+        o.courseId.length > 0 &&
+        typeof o.date === 'string' &&
+        o.date.length > 0 &&
+        typeof o.type === 'string' &&
+        o.type.length > 0
+      );
+    };
+
+    const promptConfirmSubmitLeave = (input: { courseId: string; date: string; type: string }) => {
+      const p = params as Record<string, unknown> | undefined;
+      const groupId = typeof p?.groupId === 'string' ? p.groupId : undefined;
+      Alert.alert(
+        '確認送出請假',
+        `日期：${input.date}\n假別：${input.type}\n確認後將向伺服端建立待審申請。`,
+        [
+          { text: '取消', style: 'cancel' },
+          {
+            text: '確認送出',
+            onPress: () => {
+              void (async () => {
+                try {
+                  const result = await executeAgentWrite({
+                    toolName: 'submitLeaveRequest',
+                    input: { ...input },
+                    context: { groupId, timezone: 'Asia/Taipei' },
+                  });
+                  Alert.alert(
+                    '已建立請假申請',
+                    `申請編號：${result.requestId ?? '—'}\n狀態：${result.status ?? 'pending'}`,
+                  );
+                } catch (e: any) {
+                  Alert.alert('送出失敗', e?.message ? String(e.message) : String(e));
+                }
+              })();
+            },
+          },
+        ],
+      );
+    };
+
+    if (proposal.requiresConfirmation && action === 'queue_action') {
+      const p = params as Record<string, unknown> | undefined;
+      if (p?.toolName === 'submitLeaveRequest' && isSubmitLeaveInput(p.input)) {
+        promptConfirmSubmitLeave(p.input);
+        return;
+      }
+    }
+
+    if (proposal.requiresConfirmation && action === 'draft_message') {
+      const p = params as Record<string, unknown> | undefined;
+      if (p?.draftType === 'leave_request') {
+        if (p.toolName === 'submitLeaveRequest' && isSubmitLeaveInput(p.input)) {
+          promptConfirmSubmitLeave(p.input);
+          return;
+        }
+        Alert.alert(
+          '無法直接送出',
+          '此草稿按鈕缺少課程與日期。請再描述一次請假（含日期、課名），或從課程頁開啟助理，以產生「送出請假」。',
+          [{ text: '好' }],
+        );
+        return;
+      }
+    }
+
     if (proposal.requiresConfirmation && action !== 'navigate') {
       Alert.alert(
         '需要你確認',

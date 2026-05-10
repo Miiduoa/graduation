@@ -34,6 +34,7 @@ const {
   buildModelBackedAssistantResponse,
 } = require('../lib/assistantCompose');
 const { queueAssistantActionDrafts, writeAssistantAuditLog } = require('../lib/assistantQueue');
+const { resolveLeaveSubmitPayload } = require('../lib/leaveIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
 
 const db = getFirestore();
@@ -265,28 +266,61 @@ async function executeCampusAssistantCore({
 
   if (intent === 'leave_request') {
     if (!uid) {
-      response.content = '請假草稿需要知道你的身分與課程情境。請先登入後再讓我幫你整理。';
+      response.content = '請假需要知道你的身分與課程。請先登入後再讓我幫你整理。';
       response.suggestions = ['今日公告', '查課表', '功能說明'];
       return await finalizeResponse();
     }
 
+    const contextCourseId =
+      context.courseId != null && String(context.courseId).trim()
+        ? String(context.courseId).trim()
+        : null;
+
+    const leavePayload = await resolveLeaveSubmitPayload({
+      uid,
+      lastUserMessage,
+      timeZone,
+      prefetchedTodaySchedule: prefetched.todaySchedule,
+      contextCourseId,
+    });
+
+    if (leavePayload.incomplete || !leavePayload.courseId) {
+      response.content = [
+        '我想幫你送出請假，但目前無法從你的課表對應到具體課程或日期。',
+        '',
+        '請在訊息裡補上「哪一天」（例如：明天、下禮拜三、5/12）以及課程名稱；若在課程頁開啟助理，也會優先帶入目前課程。',
+      ].join('\n');
+      response.suggestions = ['明天微積分請假', '查課表', '查請假規則'];
+      response.citations = [
+        { type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' },
+      ];
+      return await finalizeResponse();
+    }
+
     response.content = [
-      '我可以先幫你整理請假草稿，但不會直接送出。',
+      '我已從你的課表與訊息整理出請假內容，送出前請再確認。',
       '',
-      '草稿內容：',
-      '您好，我因身體不適／個人事由，想申請相關課程請假。請協助確認是否需要補交證明文件，謝謝。',
+      `預計請假日期：${leavePayload.date}`,
+      `假別：${leavePayload.type}`,
       '',
-      '送出前請確認日期、課程、假別與證明文件。',
+      '點「送出請假」後會在伺服端建立待審申請，不會在未確認時直接生效。',
     ].join('\n');
-    response.suggestions = ['補上日期', '改成病假', '查請假規則'];
+    response.suggestions = ['改成病假', '換一天', '查請假規則'];
     response.actions = [
       assistantAction({
-        label: '建立請假草稿',
-        action: 'draft_message',
-        params: { screen: 'Today', nested: 'AIChat', draftType: 'leave_request' },
+        label: '送出請假',
+        action: 'queue_action',
+        params: {
+          toolName: 'submitLeaveRequest',
+          input: {
+            courseId: leavePayload.courseId,
+            date: leavePayload.date,
+            type: leavePayload.type,
+          },
+        },
         requiresConfirmation: true,
         sensitivity: 'high',
-        evidenceRefs: [{ type: 'system', id: 'leave-request-draft', label: '請假草稿' }],
+        evidenceRefs: [{ type: 'system', id: 'leave-request-submit', label: '請假申請' }],
       }),
     ];
     response.citations = [
