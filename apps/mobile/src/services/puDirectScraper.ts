@@ -357,21 +357,35 @@ const COMMON_HEADERS: Record<string, string> = {
 
 async function nativeFetch(
   url: string,
-  options: { method?: string; body?: string; contentType?: string } = {},
+  options: { method?: string; body?: string; contentType?: string; timeoutMs?: number } = {},
 ): Promise<{ html: string; status: number }> {
   const headers: Record<string, string> = { ...COMMON_HEADERS };
   if (options.body && options.contentType) headers['Content-Type'] = options.contentType;
 
-  const response = await fetch(url, {
-    method: options.method ?? 'GET',
-    headers,
-    body: options.body,
-    credentials: 'include', // 讓原生 cookie jar 管理 cookie
-    redirect: 'follow', // 讓原生層自動跟隨 redirect
-  });
+  // 加入超時機制，預設 15 秒（避免校園伺服器無回應時永遠卡住）
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 15000);
 
-  const html = await response.text();
-  return { html, status: response.status };
+  try {
+    const response = await fetch(url, {
+      method: options.method ?? 'GET',
+      headers,
+      body: options.body,
+      credentials: 'include', // 讓原生 cookie jar 管理 cookie
+      redirect: 'follow', // 讓原生層自動跟隨 redirect
+      signal: controller.signal,
+    });
+
+    const html = await response.text();
+    return { html, status: response.status };
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`連線逾時，伺服器沒有回應（${url.includes('alcat') ? 'E校園' : '校園系統'}）`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ─── Public API ──────────────────────────────────────────

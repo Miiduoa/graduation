@@ -43,6 +43,11 @@ const {
   requirePostJson,
   writeHttpError,
 } = require('./securityUtils');
+const {
+  assertSessionOwner,
+  isLocalMockAuthAllowed,
+  verifyRequestFirebaseUser,
+} = require('./sessionSecurity');
 const { normalizeCafeteriaPilotStatus, resolveCafeteriaOrderingMetadata } = require('./cafeterias');
 const {
   answerWithServerWebSearch,
@@ -354,7 +359,6 @@ function resolveProvisionedRole({ existingLink, existingUser }) {
   return existingLink?.role || existingUser?.role || 'student';
 }
 
-const UNIVERSAL_DEV_ACCOUNT_PASSWORD = 'nickkookoo';
 const PROVIDENCE_UNIVERSITY_SCHOOL_ID = 'pu';
 const UNIVERSAL_DEV_ACCOUNTS = [
   {
@@ -377,14 +381,44 @@ function normalizeDevAccountEmail(email) {
     .toLowerCase();
 }
 
+function getUniversalDevAccountPassword() {
+  return String(process.env.UNIVERSAL_DEV_ACCOUNT_PASSWORD || '').trim();
+}
+
+function getUniversalDevAllowedSchools() {
+  return String(process.env.UNIVERSAL_DEV_ALLOWED_SCHOOLS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function assertUniversalDevSchoolAllowed(schoolId) {
+  const allowedSchools = getUniversalDevAllowedSchools();
+  if (allowedSchools.length === 0 && getAppRuntimeEnv() === 'development') {
+    return;
+  }
+
+  if (!allowedSchools.includes(schoolId)) {
+    const error = new Error('Universal dev account is not allowed for this school');
+    error.statusCode = 403;
+    throw error;
+  }
+}
+
 function authenticateUniversalDevAccount(email, password) {
   const normalizedEmail = normalizeDevAccountEmail(email);
   const normalizedPassword = String(password || '').trim();
+  const configuredPassword = getUniversalDevAccountPassword();
+
+  if (!configuredPassword) {
+    const error = new Error('Universal dev account password is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
 
   return (
     UNIVERSAL_DEV_ACCOUNTS.find(
-      (account) =>
-        account.email === normalizedEmail && normalizedPassword === UNIVERSAL_DEV_ACCOUNT_PASSWORD,
+      (account) => account.email === normalizedEmail && normalizedPassword === configuredPassword,
     ) || null
   );
 }
@@ -403,7 +437,7 @@ function buildPuStudentEmail(studentId) {
   return `${studentId.toLowerCase()}@pu.edu.tw`;
 }
 
-async function createPuTronClassSession({ studentId, cookies, session }) {
+async function createOwnedPuTronClassSession({ studentId, cookies, session, ownerUid }) {
   const sessionId = nodeCrypto.randomBytes(16).toString('hex');
   await db
     .collection('_puTronClassSessions')
@@ -411,6 +445,7 @@ async function createPuTronClassSession({ studentId, cookies, session }) {
     .set(
       {
         studentId,
+        ownerUid: ownerUid || null,
         cookies,
         userId: session?.userId ?? null,
         userName: session?.userName ?? null,
@@ -423,7 +458,7 @@ async function createPuTronClassSession({ studentId, cookies, session }) {
   return sessionId;
 }
 
-async function createPuCampusSession({ studentId, cookies }) {
+async function createOwnedPuCampusSession({ studentId, cookies, ownerUid }) {
   const sessionId = nodeCrypto.randomBytes(16).toString('hex');
   await db
     .collection('_puSessions')
@@ -431,6 +466,7 @@ async function createPuCampusSession({ studentId, cookies }) {
     .set(
       {
         studentId,
+        ownerUid: ownerUid || null,
         cookies,
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
@@ -572,7 +608,6 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
   if (userRecord) {
     userRecord = await auth.updateUser(userRecord.uid, {
       email: account.email,
-      password: UNIVERSAL_DEV_ACCOUNT_PASSWORD,
       displayName: account.displayName,
       emailVerified: true,
       disabled: false,
@@ -581,7 +616,6 @@ async function provisionUniversalDevAccount({ account, schoolId }) {
     userRecord = await auth.createUser({
       uid: account.uid,
       email: account.email,
-      password: UNIVERSAL_DEV_ACCOUNT_PASSWORD,
       displayName: account.displayName,
       emailVerified: true,
     });
@@ -3532,6 +3566,8 @@ exports.signInUniversalDevAccount = onRequest(
         return;
       }
 
+      assertUniversalDevSchoolAllowed(schoolId);
+
       const account = authenticateUniversalDevAccount(email, password);
       if (!account) {
         res.status(401).json({ error: 'Invalid universal dev account credentials' });
@@ -3575,6 +3611,11 @@ exports.signInPuStudentId = onRequest(
         return;
       }
 
+      if (skipFirebase && !isLocalMockAuthAllowed()) {
+        res.status(403).json({ error: 'Local mock auth is disabled for this runtime' });
+        return;
+      }
+
       enforceRateLimit({
         scope: 'pu-student-login-ip',
         key: ip,
@@ -3601,7 +3642,6 @@ exports.signInPuStudentId = onRequest(
       }
 
       // TronClass 登入：失敗不阻塞 E校園登入（軟性失敗）
-      let tronClassSessionId = null;
       let tronClassLoginResult = { success: false, cookies: null, session: null, error: null };
       try {
         tronClassLoginResult = await tcLogin(rawStudentId, password);
@@ -3611,12 +3651,7 @@ exports.signInPuStudentId = onRequest(
           Object.keys(tronClassLoginResult.cookies).length > 0 &&
           tronClassLoginResult.session
         ) {
-          tronClassSessionId = await createPuTronClassSession({
-            studentId: rawStudentId,
-            cookies: tronClassLoginResult.cookies,
-            session: tronClassLoginResult.session,
-          });
-          console.log('[signInPuStudentId] TronClass login OK, sessionId:', tronClassSessionId);
+          console.log('[signInPuStudentId] TronClass login OK');
         } else {
           console.warn(
             '[signInPuStudentId] TronClass login failed (soft):',
@@ -3626,11 +3661,6 @@ exports.signInPuStudentId = onRequest(
       } catch (tcErr) {
         console.warn('[signInPuStudentId] TronClass login threw (soft):', tcErr?.message || tcErr);
       }
-
-      const puSessionId = await createPuCampusSession({
-        studentId: rawStudentId,
-        cookies: loginResult.cookies,
-      });
 
       const [profileResult, coursesResult, gradesResult, announcementsResult] = await Promise.all([
         puFetchStudentInfo(loginResult.cookies),
@@ -3644,84 +3674,69 @@ exports.signInPuStudentId = onRequest(
         profile.name || loginResult.studentName || `${studentId} 同學`,
       ).trim();
       const department = String(profile.class || '').trim();
-
-      if (skipFirebase) {
-        res.set('Cache-Control', 'no-store');
-        res.json({
-          success: true,
-          uid: buildPuStudentUid(studentId),
-          studentId,
-          displayName,
-          department,
-          isNewUser: false,
-          puSessionId,
-          tronClassSessionId,
-          tronClassUserId: tronClassLoginResult.session?.userId ?? null,
-          tronClassOk: !!tronClassSessionId,
-          studentInfo: profileResult.success ? profileResult.studentInfo || null : null,
-          courses: coursesResult.success
-            ? {
-                courses: coursesResult.courses || [],
-                studentInfo: {
-                  class: coursesResult.studentInfo?.class ?? null,
-                  className: coursesResult.studentInfo?.class ?? null,
-                  studentId: coursesResult.studentInfo?.studentId ?? null,
-                  name: coursesResult.studentInfo?.name ?? null,
-                  currentSemester: coursesResult.semester ?? null,
-                },
-                semester: coursesResult.semester ?? null,
-                totalCredits: coursesResult.totalCredits ?? 0,
-              }
-            : null,
-          grades: gradesResult.success
-            ? {
-                grades: gradesResult.grades || [],
-                allSemesters: gradesResult.allSemesters || [],
-                summary: gradesResult.summary || {},
-              }
-            : null,
-          announcements: announcementsResult.success
-            ? announcementsResult.announcements || []
-            : null,
-        });
-        return;
-      }
-
       const email = buildPuStudentEmail(studentId);
       const uid = buildPuStudentUid(studentId);
-      const { getAuth } = require('firebase-admin/auth');
-      const auth = getAuth();
+      const ownerUid = skipFirebase ? null : uid;
+      let customToken = null;
+      let isNewUser = false;
 
-      const { isNewUser } = await ensurePuStudentAuthUser({
-        auth,
-        uid,
-        displayName,
-        email,
-      });
+      if (!skipFirebase) {
+        const { getAuth } = require('firebase-admin/auth');
+        const auth = getAuth();
 
-      await upsertPuStudentProfile({
-        uid,
+        const userResult = await ensurePuStudentAuthUser({
+          auth,
+          uid,
+          displayName,
+          email,
+        });
+        isNewUser = userResult.isNewUser;
+
+        await upsertPuStudentProfile({
+          uid,
+          studentId,
+          displayName,
+          email,
+          department,
+          isNewUser,
+        });
+
+        await syncAuthClaims(uid, {
+          role: 'student',
+          schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+        });
+
+        customToken = await auth.createCustomToken(uid, {
+          schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
+          role: 'student',
+        });
+      }
+
+      const puSessionId = await createOwnedPuCampusSession({
         studentId,
-        displayName,
-        email,
-        department,
-        isNewUser,
+        cookies: loginResult.cookies,
+        ownerUid,
       });
 
-      await syncAuthClaims(uid, {
-        role: 'student',
-        schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-      });
-
-      const customToken = await auth.createCustomToken(uid, {
-        schoolId: PROVIDENCE_UNIVERSITY_SCHOOL_ID,
-        role: 'student',
-      });
+      let tronClassSessionId = null;
+      if (
+        tronClassLoginResult.success &&
+        tronClassLoginResult.cookies &&
+        Object.keys(tronClassLoginResult.cookies).length > 0 &&
+        tronClassLoginResult.session
+      ) {
+        tronClassSessionId = await createOwnedPuTronClassSession({
+          studentId,
+          cookies: tronClassLoginResult.cookies,
+          session: tronClassLoginResult.session,
+          ownerUid,
+        });
+      }
 
       res.set('Cache-Control', 'no-store');
       res.json({
         success: true,
-        customToken,
+        ...(customToken ? { customToken } : {}),
         uid,
         studentId,
         displayName,
@@ -3954,23 +3969,20 @@ exports.verifySSOCallback = onRequest(
         return;
       }
 
-      let transactionData = null;
-      if (transactionId || state) {
-        if (!transactionId || !state) {
-          res.status(400).json({
-            error: 'transactionId and state must be provided together',
-          });
-          return;
-        }
-
-        transactionData = await validateAndConsumeSsoTransaction({
-          transactionId,
-          schoolId,
-          provider,
-          redirectUri,
-          state,
+      if (!transactionId || !state) {
+        res.status(400).json({
+          error: 'transactionId and state are required',
         });
+        return;
       }
+
+      const transactionData = await validateAndConsumeSsoTransaction({
+        transactionId,
+        schoolId,
+        provider,
+        redirectUri,
+        state,
+      });
 
       const userInfo = await adapter.verify({
         code,
@@ -7865,7 +7877,7 @@ exports.startLiveSession = onCall({ region: REGION }, async (request) => {
   }
 
   const sessionId = `${new Date().toISOString().slice(0, 10)}_${Date.now()}`;
-  const qrToken = `${groupId}_${sessionId}_${Math.random().toString(36).slice(2, 10)}`;
+  const qrToken = `${groupId}_${sessionId}_${nodeCrypto.randomBytes(12).toString('base64url')}`;
   const qrExpiresAt = new Date(Date.now() + qrExpiryMinutes * 60 * 1000);
 
   const liveSessionRef = db
@@ -8290,6 +8302,11 @@ exports.puAuthenticate = onCall(
   },
   async (request) => {
     try {
+      const ownerUid = request.auth?.uid;
+      if (!ownerUid) {
+        throw new HttpsError('unauthenticated', 'Must be logged in');
+      }
+
       const { uid, upassword } = request.data || {};
 
       if (!uid || !upassword) {
@@ -8311,19 +8328,11 @@ exports.puAuthenticate = onCall(
         throw new HttpsError('authentication-failed', loginResult.error || 'Login failed');
       }
 
-      // Store session cookies securely in a temporary session store
-      // In production, you would serialize and encrypt these cookies
-      const sessionId = nodeCrypto.randomBytes(16).toString('hex');
-      const sessionData = {
-        uid,
+      const sessionId = await createOwnedPuCampusSession({
+        studentId: normalizePuStudentId(uid),
         cookies: loginResult.cookies,
-        createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000), // 12 hour validity
-      };
-
-      // Store in Firestore temporarily
-      const db = getFirestore();
-      await db.collection('_puSessions').doc(sessionId).set(sessionData, { merge: true });
+        ownerUid,
+      });
 
       console.log(`[puAuthenticate] Login successful for user: ${uid}`);
 
@@ -8352,6 +8361,11 @@ exports.puFetchData = onCall(
   },
   async (request) => {
     try {
+      const ownerUid = request.auth?.uid;
+      if (!ownerUid) {
+        throw new HttpsError('unauthenticated', 'Must be logged in');
+      }
+
       const { sessionId, dataType, semester } = request.data || {};
 
       if (!sessionId || !dataType) {
@@ -8382,6 +8396,10 @@ exports.puFetchData = onCall(
       }
 
       const sessionData = sessionDoc.data();
+      if (sessionData.ownerUid !== ownerUid) {
+        throw new HttpsError('permission-denied', 'Session does not belong to this user');
+      }
+
       const now = new Date();
 
       // Check session expiration
@@ -8438,6 +8456,7 @@ exports.puFetchCampusData = onRequest(
     try {
       assertTrustedOrigin(req);
       requirePostJson(req);
+      const authUser = await verifyRequestFirebaseUser(req);
 
       const sessionId = String(req.body?.sessionId || '').trim();
       const dataType = String(req.body?.dataType || '').trim();
@@ -8476,6 +8495,8 @@ exports.puFetchCampusData = onRequest(
       }
 
       const sessionData = sessionDoc.data();
+      assertSessionOwner(sessionData, authUser.uid);
+
       const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
       if (
         !sessionData?.cookies ||
@@ -8539,6 +8560,7 @@ exports.puRefreshTronClassSession = onRequest(
     try {
       assertTrustedOrigin(req);
       requirePostJson(req);
+      const authUser = await verifyRequestFirebaseUser(req);
 
       const studentId = normalizePuStudentId(req.body?.studentId);
       const password = String(req.body?.password || '');
@@ -8575,10 +8597,11 @@ exports.puRefreshTronClassSession = onRequest(
         return;
       }
 
-      const tronClassSessionId = await createPuTronClassSession({
+      const tronClassSessionId = await createOwnedPuTronClassSession({
         studentId,
         cookies: loginResult.cookies,
         session: loginResult.session,
+        ownerUid: authUser.uid,
       });
 
       res.set('Cache-Control', 'no-store');
@@ -8603,6 +8626,7 @@ exports.puFetchTronClassData = onRequest(
     try {
       assertTrustedOrigin(req);
       requirePostJson(req);
+      const authUser = await verifyRequestFirebaseUser(req);
 
       const sessionId = String(req.body?.sessionId || '').trim();
       const dataType = String(req.body?.dataType || '').trim();
@@ -8621,6 +8645,20 @@ exports.puFetchTronClassData = onRequest(
         'homeworkScores',
         'examStatus',
         'announcements',
+        'activityDetail',
+        'homeworkDetail',
+        'homeworkSubmissions',
+        'examDetail',
+        'examAttempts',
+        'discussions',
+        'discussionPosts',
+        'courseAnnouncements',
+        'materials',
+        'gradeDetails',
+        'courseMembers',
+        'learningActivities',
+        'syllabus',
+        'courseFullData',
       ];
 
       if (!sessionId || !dataType) {
@@ -8648,6 +8686,8 @@ exports.puFetchTronClassData = onRequest(
       }
 
       const sessionData = sessionDoc.data();
+      assertSessionOwner(sessionData, authUser.uid);
+
       if (!sessionData?.cookies || Object.keys(sessionData.cookies).length === 0) {
         await sessionRef.delete().catch(() => null);
         res.status(401).json({ error: 'Invalid or expired TronClass session' });
@@ -8960,6 +9000,10 @@ exports.puFetchTronClassData = onRequest(
       }
 
       console.error('[puFetchTronClassData] Error:', error);
+      if (error?.statusCode) {
+        writeHttpError(res, error, 'Failed to fetch TronClass data');
+        return;
+      }
       res.status(502).json({ error: message });
     }
   },

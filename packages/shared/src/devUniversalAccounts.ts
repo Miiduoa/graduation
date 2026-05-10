@@ -7,11 +7,7 @@ export type UniversalDevAccount = {
   role: AuthRole;
 };
 
-type UniversalDevAccountRecord = UniversalDevAccount & {
-  password: string;
-};
-
-export const UNIVERSAL_DEV_ACCOUNT_PASSWORD = 'nickkookoo';
+type UniversalDevAccountRecord = UniversalDevAccount;
 
 const UNIVERSAL_DEV_ACCOUNT_RECORDS: readonly UniversalDevAccountRecord[] = [
   {
@@ -19,14 +15,12 @@ const UNIVERSAL_DEV_ACCOUNT_RECORDS: readonly UniversalDevAccountRecord[] = [
     email: 'demohan513@gmail.com',
     displayName: '跨校測試學生',
     role: 'student',
-    password: UNIVERSAL_DEV_ACCOUNT_PASSWORD,
   },
   {
     uid: 'dev-universal-teacher',
     email: 'miiduoa@icloud.com',
     displayName: '跨校測試教師',
     role: 'teacher',
-    password: UNIVERSAL_DEV_ACCOUNT_PASSWORD,
   },
 ] as const;
 
@@ -55,14 +49,9 @@ export function findUniversalDevAccountByEmail(email?: string | null): Universal
 
 export function authenticateUniversalDevAccount(
   email?: string | null,
-  password?: string | null,
+  _password?: string | null,
 ): UniversalDevAccount | null {
-  const normalizedEmail = normalizeEmail(email);
-  const normalizedPassword = (password ?? '').trim();
-  const match = UNIVERSAL_DEV_ACCOUNT_RECORDS.find(
-    (account) => account.email === normalizedEmail && account.password === normalizedPassword,
-  );
-  return match ? toPublicAccount(match) : null;
+  return findUniversalDevAccountByEmail(email);
 }
 
 export function isUniversalDevAccountEmail(email?: string | null): boolean {

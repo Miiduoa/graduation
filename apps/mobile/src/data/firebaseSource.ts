@@ -125,6 +125,31 @@ export class FirebaseDataError extends Error {
   }
 }
 
+function getFirebaseErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const record = error as { code?: unknown; originalError?: unknown };
+  if (typeof record.code === 'string') return record.code;
+  return getFirebaseErrorCode(record.originalError);
+}
+
+function isPermissionDeniedError(error: unknown): boolean {
+  const code = getFirebaseErrorCode(error);
+  if (code === 'permission-denied') return true;
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /Missing or insufficient permissions|permission-denied/i.test(message);
+}
+
+function logFirebaseReadFailure(label: string, error: unknown): void {
+  if (isPermissionDeniedError(error)) {
+    console.debug(`[firebase] Failed to fetch ${label}:`, error);
+    return;
+  }
+  // 失物招領等非核心路徑失敗時避免 console.error 在開發模式刷版／誤以為與當前操作有關
+  const quietAuxiliary = /lostFoundItems|失物招領/i.test(label);
+  const logger = quietAuxiliary ? console.debug : console.error;
+  logger(`[firebase] Failed to fetch ${label}:`, error);
+}
+
 // ===== 工具函數 =====
 
 const DEFAULT_SCHOOL_ID = PROVIDENCE_UNIVERSITY_SCHOOL_ID;
@@ -338,7 +363,7 @@ async function fetchCollection<T extends { id: string }>(
     return snap.docs.map((d) => parseDocument<T>(d));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[firebase] Failed to fetch ${collectionName}:`, error);
+    logFirebaseReadFailure(collectionName, error);
     throw new FirebaseDataError(
       `無法載入${getCollectionLabel(collectionName)}：${message}`,
       collectionName,
@@ -361,7 +386,7 @@ async function fetchCollectionAtPath<T extends { id: string }>(
     return snap.docs.map((d) => parseDocument<T>(d));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[firebase] Failed to fetch ${pathSegments.join('/')}:`, error);
+    logFirebaseReadFailure(pathSegments.join('/'), error);
     throw new FirebaseDataError(
       `無法載入${pathSegments.join('/')}：${message}`,
       pathSegments.join('/'),
@@ -387,7 +412,7 @@ async function fetchDocumentAtPath<T extends { id: string }>(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[firebase] Failed to fetch ${pathSegments.join('/')}:`, error);
+    logFirebaseReadFailure(pathSegments.join('/'), error);
     throw new FirebaseDataError(
       `無法載入${pathSegments.join('/')}：${message}`,
       pathSegments.join('/'),
@@ -688,7 +713,7 @@ async function fetchDocument<T extends { id: string }>(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error(`[firebase] Failed to fetch ${collectionName}/${docId}:`, error);
+    logFirebaseReadFailure(`${collectionName}/${docId}`, error);
     throw new FirebaseDataError(
       `無法載入${getCollectionLabel(collectionName)}：${message}`,
       collectionName,

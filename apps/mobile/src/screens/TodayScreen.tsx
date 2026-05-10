@@ -22,6 +22,8 @@ import { useAsyncList } from '../hooks/useAsyncList';
 import { useDataSource } from '../hooks/useDataSource';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { executeTool } from '../services/aiAgentTools';
+import type { ToolCallResult } from '../services/aiAgentTools';
 import { usePermissions } from '../hooks/usePermissions';
 import { getStreakStorageKey, refreshUserStreak, useAmbientCues } from '../features/engagement';
 import { useSchedule } from '../state/schedule';
@@ -437,6 +439,179 @@ function SectionHeader({
           <Ionicons name="chevron-forward" size={14} color={theme.colors.accent} />
         </Pressable>
       )}
+    </View>
+  );
+}
+
+// ─── AI Daily Insights Card ────────────────────────────
+function AIDailyInsightsCard({
+  userId,
+  schoolId,
+  role,
+  onAskAI,
+}: {
+  userId: string;
+  schoolId: string;
+  role?: string;
+  onAskAI: () => void;
+}) {
+  const [insights, setInsights] = useState<ToolCallResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ctx = { userId, schoolId, role: role as any };
+        const result = await executeTool('daily_briefing', {}, ctx);
+        if (!cancelled) setInsights(result);
+      } catch {
+        if (!cancelled) setInsights(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, schoolId, role]);
+
+  if (loading) {
+    return (
+      <View>
+        <SectionHeader title="AI 每日分析" />
+        <GlassCard>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <LinearGradient
+              colors={['#7C3AED', '#A78BFA']}
+              style={{
+                width: 40, height: 40, borderRadius: 14,
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="sparkles" size={20} color="#FFF" />
+            </LinearGradient>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>
+                AI 正在分析你的學業資料...
+              </Text>
+            </View>
+          </View>
+        </GlassCard>
+      </View>
+    );
+  }
+
+  if (!insights || !insights.success) return null;
+
+  // Parse summary into sections
+  const summaryLines = (insights.summary ?? '').split('\n').filter((l) => l.trim());
+  const sections: { icon: string; title: string; content: string }[] = [];
+  let currentSection: { icon: string; title: string; content: string } | null = null;
+
+  for (const line of summaryLines) {
+    if (line.startsWith('═══')) continue; // skip header
+    if (line.startsWith('📅')) continue; // skip date (already shown in header)
+    const sectionMatch = line.match(/^([\p{Emoji_Presentation}\p{Extended_Pictographic}])\s*(.+?):/u);
+    if (sectionMatch) {
+      if (currentSection) sections.push(currentSection);
+      currentSection = { icon: sectionMatch[1], title: sectionMatch[2], content: '' };
+    } else if (currentSection && line.trim()) {
+      currentSection.content += (currentSection.content ? '\n' : '') + line.trim();
+    }
+  }
+  if (currentSection) sections.push(currentSection);
+
+  const visibleSections = expanded ? sections : sections.slice(0, 2);
+
+  return (
+    <View>
+      <SectionHeader
+        title="AI 每日分析"
+        action="深度報告"
+        onAction={onAskAI}
+      />
+      <GlassCard>
+        {/* Header */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <LinearGradient
+            colors={['#7C3AED', '#6366F1']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{
+              width: 44, height: 44, borderRadius: 15,
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="analytics" size={22} color="#FFF" />
+          </LinearGradient>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>
+              今日學業概覽
+            </Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              根據你的真實資料自動生成
+            </Text>
+          </View>
+        </View>
+
+        {/* Insight Sections */}
+        {visibleSections.map((sec, i) => (
+          <View
+            key={i}
+            style={{
+              paddingVertical: 12,
+              borderTopWidth: i > 0 ? 1 : 0,
+              borderTopColor: `${theme.colors.border}40`,
+            }}
+          >
+            <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600', marginBottom: 4 }}>
+              {sec.icon} {sec.title}
+            </Text>
+            <Text
+              style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 20 }}
+              numberOfLines={expanded ? undefined : 2}
+            >
+              {sec.content || '暫無資料'}
+            </Text>
+          </View>
+        ))}
+
+        {/* Expand / Collapse */}
+        {sections.length > 2 && (
+          <Pressable
+            onPress={() => setExpanded(!expanded)}
+            style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+              gap: 4, paddingTop: 12, borderTopWidth: 1, borderTopColor: `${theme.colors.border}40`,
+            }}
+          >
+            <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '600' }}>
+              {expanded ? '收起' : `展開全部 ${sections.length} 項`}
+            </Text>
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={theme.colors.accent}
+            />
+          </Pressable>
+        )}
+
+        {/* CTA */}
+        <Pressable
+          onPress={onAskAI}
+          style={({ pressed }) => ({
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+            gap: 8, marginTop: 14, paddingVertical: 12, borderRadius: 14,
+            backgroundColor: `${theme.colors.accent}12`,
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color={theme.colors.accent} />
+          <Text style={{ color: theme.colors.accent, fontSize: 14, fontWeight: '600' }}>
+            跟 AI 助理深入討論
+          </Text>
+        </Pressable>
+      </GlassCard>
     </View>
   );
 }
@@ -1006,6 +1181,16 @@ export function TodayScreen(props: Record<string, unknown>) {
                 ))}
               </GlassCard>
             </View>
+          )}
+
+          {/* ═══ AI Daily Insights ═══ */}
+          {auth.user && (
+            <AIDailyInsightsCard
+              userId={auth.user.uid}
+              schoolId={school.id}
+              role={auth.profile?.role}
+              onAskAI={() => nav?.navigate?.('AIChat')}
+            />
           )}
 
           {/* ═══ Quick Actions — Gradient Grid ═══ */}

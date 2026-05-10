@@ -2,11 +2,10 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CoursesHomeScreen } from './CoursesHomeScreen';
-import { CourseScheduleScreen } from './CourseScheduleScreen';
 import { AddCourseScreen } from './AddCourseScreen';
 import { GradesScreen } from './GradesScreen';
 import { CreditAuditStack } from './CreditAuditStack';
-import { CalendarScreen } from './CalendarScreen';
+import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { AICourseAdvisorScreen } from './AICourseAdvisorScreen';
 import { AIChatScreen } from './AIChatScreen';
 import { CourseHubScreen } from './CourseHubScreen';
@@ -75,8 +74,8 @@ export function AcademicStack() {
       />
       <Stack.Screen
         name="CourseSchedule"
-        component={CourseScheduleScreen}
-        options={{ title: '課表' }}
+        component={UnifiedCalendarScreen}
+        options={{ title: '行事曆', headerShown: false }}
       />
       {/* 需要 courses.create 權限 — 教師/主管/管理員 */}
       <Stack.Screen name="AddCourse" component={GuardedAddCourse} options={{ title: '新增課程' }} />
@@ -116,7 +115,7 @@ export function AcademicStack() {
         component={CreditAuditStack}
         options={{ headerShown: false }}
       />
-      <Stack.Screen name="Calendar" component={CalendarScreen} options={{ title: '行事曆' }} />
+      <Stack.Screen name="Calendar" component={UnifiedCalendarScreen} options={{ title: '行事曆', headerShown: false }} />
       <Stack.Screen
         name="AICourseAdvisor"
         component={AICourseAdvisorScreen}

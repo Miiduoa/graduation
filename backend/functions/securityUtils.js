@@ -46,6 +46,8 @@ function isProductionRuntime() {
 }
 
 function isUniversalDevAccountsEnabled() {
+  if (isProductionRuntime()) return false;
+
   const override = String(process.env.UNIVERSAL_DEV_ACCOUNTS_ENABLED || '')
     .trim()
     .toLowerCase();

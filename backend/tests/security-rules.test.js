@@ -246,6 +246,130 @@ describe('firestore security rules', () => {
     );
   });
 
+  test('deny group post impersonation on create', async () => {
+    await seedFirestore(async (db) => {
+      await db.collection('groups').doc('group-1').set({ schoolId: 'tw-demo-uni' });
+      await db.collection('groups').doc('group-1').collection('members').doc('alice').set({
+        role: 'student',
+        status: 'active',
+      });
+    });
+
+    const db = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(
+      db.collection('groups').doc('group-1').collection('posts').doc('post-1').set({
+        title: 'Impersonated post',
+        body: 'This should fail',
+        authorId: 'bob',
+        kind: 'discussion',
+      }),
+    );
+  });
+
+  test('deny group comment impersonation on create', async () => {
+    await seedFirestore(async (db) => {
+      await db.collection('groups').doc('group-1').set({ schoolId: 'tw-demo-uni' });
+      await db.collection('groups').doc('group-1').collection('members').doc('alice').set({
+        role: 'student',
+        status: 'active',
+      });
+      await db
+        .collection('groups')
+        .doc('group-1')
+        .collection('posts')
+        .doc('post-1')
+        .set({
+          title: 'Post',
+          body: 'Body',
+          authorId: 'alice',
+        });
+    });
+
+    const db = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(
+      db
+        .collection('groups')
+        .doc('group-1')
+        .collection('posts')
+        .doc('post-1')
+        .collection('comments')
+        .doc('comment-1')
+        .set({
+          body: 'Impersonated comment',
+          authorId: 'bob',
+        }),
+    );
+  });
+
+  test('deny live question impersonation on create', async () => {
+    await seedFirestore(async (db) => {
+      await db.collection('groups').doc('group-1').set({ schoolId: 'tw-demo-uni' });
+      await db.collection('groups').doc('group-1').collection('members').doc('alice').set({
+        role: 'student',
+        status: 'active',
+      });
+      await db
+        .collection('groups')
+        .doc('group-1')
+        .collection('liveSessions')
+        .doc('session-1')
+        .set({
+          active: true,
+          teacherId: 'teacher-1',
+        });
+    });
+
+    const db = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(
+      db
+        .collection('groups')
+        .doc('group-1')
+        .collection('liveSessions')
+        .doc('session-1')
+        .collection('questions')
+        .doc('question-1')
+        .set({
+          text: 'Impersonated question',
+          authorId: 'bob',
+          answered: false,
+        }),
+    );
+  });
+
+  test('deny students from directly writing attendance records', async () => {
+    await seedFirestore(async (db) => {
+      await db.collection('groups').doc('group-1').set({ schoolId: 'tw-demo-uni' });
+      await db.collection('groups').doc('group-1').collection('members').doc('alice').set({
+        role: 'student',
+        status: 'active',
+      });
+      await db
+        .collection('groups')
+        .doc('group-1')
+        .collection('attendanceSessions')
+        .doc('session-1')
+        .set({
+          active: true,
+          teacherId: 'teacher-1',
+        });
+    });
+
+    const db = testEnv.authenticatedContext('alice').firestore();
+    await assertFails(
+      db
+        .collection('groups')
+        .doc('group-1')
+        .collection('attendanceSessions')
+        .doc('session-1')
+        .collection('attendanceRecords')
+        .doc('alice')
+        .set({
+          uid: 'alice',
+          status: 'present',
+        }),
+    );
+  });
+
   test('deny client-created wallet transactions', async () => {
     const db = testEnv.authenticatedContext('alice').firestore();
 

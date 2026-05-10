@@ -2,7 +2,7 @@ import Constants from 'expo-constants';
 import { signInWithCustomToken } from 'firebase/auth';
 
 import {
-  authenticateUniversalDevAccount,
+  findUniversalDevAccountByEmail,
   type UniversalDevAccount,
 } from '@campus/shared/src/devUniversalAccounts';
 
@@ -17,6 +17,15 @@ type UniversalDevAuthResponse = {
   isNewUser?: boolean;
   error?: string;
 };
+
+function getExtra(): Record<string, unknown> {
+  return (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
+}
+
+function isLocalMockAuthAllowed(): boolean {
+  const extra = getExtra();
+  return extra.appEnv === 'development' && extra.allowLocalMockAuth === true;
+}
 
 export type UniversalDevSignInResult = UniversalDevAccount & {
   isMock: boolean;
@@ -42,7 +51,7 @@ async function parseFunctionJsonResponse(
 }
 
 function getCloudFunctionUrl(functionName: string): string {
-  const extra = (Constants.expoConfig?.extra ?? {}) as {
+  const extra = getExtra() as {
     firebase?: { projectId?: string };
     cloudFunctionRegion?: string;
   };
@@ -61,12 +70,16 @@ export async function signInWithUniversalDevAccount(params: {
   password: string;
   schoolId: string;
 }): Promise<UniversalDevSignInResult> {
-  const account = authenticateUniversalDevAccount(params.email, params.password);
+  const account = findUniversalDevAccountByEmail(params.email);
   if (!account) {
     throw new Error('測試帳號或密碼錯誤');
   }
 
   if (!hasUsableFirebaseConfig()) {
+    if (!isLocalMockAuthAllowed()) {
+      throw new Error('本機 mock 登入未啟用');
+    }
+
     await saveMockAuthSession({
       uid: account.uid,
       email: account.email,

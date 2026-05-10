@@ -17,6 +17,9 @@
  *   所以 TronClass 登入必須走後端 Node.js（可以 pin IPv4）。
  */
 
+import Constants from 'expo-constants';
+import { signInWithCustomToken } from 'firebase/auth';
+
 import { saveMockAuthSession, type MockAuthSession } from './mockAuth';
 import {
   puLogin,
@@ -47,6 +50,7 @@ import {
 import { getAdapter } from '../data/apiAdapters';
 import { PUAdapter } from '../data/apiAdapters/PUAdapter';
 import { getCloudFunctionUrl } from './cloudFunctions';
+import { getAuthInstance, hasUsableFirebaseConfig } from '../firebase';
 import type { UserRole } from '../state/auth';
 
 // ─── Progress Callback ──────────────────────────────────
@@ -89,6 +93,16 @@ export function isStudentIdLoginAvailable(): boolean {
   return true;
 }
 
+function getExpoExtra(): Record<string, unknown> {
+  return ((Constants.expoConfig as { extra?: Record<string, unknown> } | null)?.extra ??
+    {}) as Record<string, unknown>;
+}
+
+function isLocalMockAuthAllowed(): boolean {
+  const extra = getExpoExtra();
+  return extra.appEnv === 'development' && extra.allowLocalMockAuth === true;
+}
+
 // ─── Backend Unified Login ──────────────────────────────
 
 /**
@@ -102,6 +116,7 @@ async function tryBackendUnifiedLogin(
   success: boolean;
   data?: {
     uid: string;
+    customToken?: string;
     studentId: string;
     displayName: string;
     department: string;
@@ -117,10 +132,11 @@ async function tryBackendUnifiedLogin(
 }> {
   try {
     const url = getCloudFunctionUrl('signInPuStudentId');
+    const useLocalMockAuth = !hasUsableFirebaseConfig() && isLocalMockAuthAllowed();
     console.log('[studentIdAuth] Trying backend unified login…');
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000); // 2 秒逾時（Cloud Functions 未部署時快速失敗）
+    const timeout = setTimeout(() => controller.abort(), 20000);
 
     let response: Response;
     try {
@@ -131,7 +147,7 @@ async function tryBackendUnifiedLogin(
         body: JSON.stringify({
           studentId,
           password,
-          skipFirebase: true,
+          ...(useLocalMockAuth ? { skipFirebase: true } : {}),
         }),
       });
     } finally {
@@ -152,11 +168,16 @@ async function tryBackendUnifiedLogin(
       return { success: false, error: errorMsg };
     }
 
+    if (!useLocalMockAuth && typeof data.customToken !== 'string') {
+      return { success: false, error: '登入端點未回傳 Firebase token' };
+    }
+
     console.log('[studentIdAuth] Backend unified login succeeded!');
     return {
       success: true,
       data: {
         uid: data.uid as string,
+        customToken: data.customToken as string | undefined,
         studentId: (data.studentId as string) || studentId,
         displayName: (data.displayName as string) || `${studentId} 同學`,
         department: (data.department as string) || '',
@@ -204,7 +225,7 @@ export async function signInWithStudentId(params: {
     throw new Error('請輸入密碼');
   }
 
-  // 儲存帳密供 TronClass session 過期後自動刷新（SecureStore 持久化）
+  // 帳密只暫存在記憶體，用於本次 app 執行期間自動刷新 TronClass session。
   await setTCSavedCredentials(studentId, params.password);
 
   progress('authenticating', '驗證靜宜帳密');
@@ -216,8 +237,9 @@ export async function signInWithStudentId(params: {
     return await handleBackendLoginSuccess(backendResult.data, params, progress);
   }
 
-  // ── 策略 B: 降級為手機直連 E校園 + 後端代理 TronClass ──
-  console.log('[studentIdAuth] Falling back to hybrid login…');
+  // ── 策略 B: 後端失敗 → 降級為手機直連 E校園 + TronClass ──
+  // 無論後端為何失敗（404、timeout、網路錯誤），都自動降級
+  console.log('[studentIdAuth] Backend unavailable, falling back to hybrid login…');
   return await handleHybridLogin(studentId, params, progress);
 }
 
@@ -304,7 +326,13 @@ async function handleBackendLoginSuccess(
     studentId,
     loginAccount: params.studentId,
   };
-  await saveMockAuthSession(mockSession);
+  if (data.customToken) {
+    await signInWithCustomToken(getAuthInstance(), data.customToken);
+  } else {
+    // 後端未回傳 customToken → 用 mock auth（開發模式常見：Cloud Functions 未完全部署）
+    console.log('[studentIdAuth] No customToken from backend, using mock auth session');
+    await saveMockAuthSession(mockSession);
+  }
 
   const result: StudentIdLoginResult = {
     uid,
@@ -416,8 +444,12 @@ async function handleHybridLogin(
     }
   })();
 
-  // 等待兩者完成
-  await Promise.allSettled([tcLoginPromise, puLoginPromise]);
+  // 等待兩者完成（最多等 15 秒，避免 IPv6 DNS 問題卡太久）
+  const loginTimeout = new Promise<void>((resolve) => setTimeout(resolve, 15000));
+  await Promise.race([
+    Promise.allSettled([tcLoginPromise, puLoginPromise]),
+    loginTimeout,
+  ]);
 
   // ── 判斷登入結果 ──
   if (!puLoginOk && !tcLoginOk) {
@@ -533,20 +565,14 @@ async function handleHybridLogin(
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
     }
   } else if (!tcLoginOk && puLoginOk) {
-    // E校園 成功但 TronClass 失敗 → 再試一次 TronClass
-    progress('syncingTronClass', '登入 TronClass');
-    try {
-      const { tcLogin } = await import('./tronClassClient');
-      const retryResult = await tcLogin(userAccount, password);
-      console.log('[studentIdAuth] Hybrid: TronClass retry', retryResult.success ? 'OK' : 'FAILED');
-    } catch (err) {
-      console.warn('[studentIdAuth] Hybrid: TronClass retry error (continuing):', err);
-    }
+    // E校園 成功但 TronClass 失敗 → 不重試（避免再等 20+ 秒）
+    console.log('[studentIdAuth] Hybrid: TronClass failed, skipping retry to avoid long wait');
+    progress('syncingTronClass', 'TronClass 暫時無法連線');
 
-    progress('syncingTronClass', '同步 TronClass 課程資料');
+    // 仍然嘗試用 E校園 session 同步可用的資料
     try {
       await syncAllData(session!, { includeEssential: true });
-      console.log('[studentIdAuth] Hybrid: syncAllData completed');
+      console.log('[studentIdAuth] Hybrid: syncAllData completed (E-campus only)');
     } catch (err) {
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
     }
