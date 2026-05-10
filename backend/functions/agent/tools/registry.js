@@ -5,8 +5,10 @@ const getAssignments = require('./getAssignments');
 const getAnnouncements = require('./getAnnouncements');
 const searchCampusDocs = require('./searchCampusDocs');
 const getPrioritySummary = require('./getPrioritySummary');
+const getLibraryLoans = require('./getLibraryLoans');
 const submitLeaveRequest = require('./submitLeaveRequest');
 const getLeaveRequestStatus = require('./getLeaveRequestStatus');
+const reflectOnGap = require('./reflectOnGap');
 
 const tools = [
   getTodaySchedule,
@@ -14,7 +16,9 @@ const tools = [
   getAnnouncements,
   searchCampusDocs,
   getPrioritySummary,
+  getLibraryLoans,
   getLeaveRequestStatus,
+  reflectOnGap,
   submitLeaveRequest,
 ];
 
