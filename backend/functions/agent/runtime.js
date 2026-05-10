@@ -128,6 +128,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
       startedAt,
       prefetched,
       recordStep,
+      routingIntent: intentMeta.name,
     });
   } catch (err) {
     if (uid && schoolId) {
@@ -201,6 +202,8 @@ async function runCampusAssistantWithAgentRuntime(request) {
     intent: {
       name: intentMeta.name,
       confidence: intentMeta.confidence,
+      source: intentMeta.source,
+      ...(intentMeta.category && { category: intentMeta.category, subIntent: intentMeta.subIntent }),
     },
     evaluation: {
       score: evaluation.score,
