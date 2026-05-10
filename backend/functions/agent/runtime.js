@@ -16,6 +16,7 @@ const { classifyIntent } = require('./classifyIntent');
 const { evaluateAnswer } = require('./evaluateAnswer');
 const { executeCampusAssistantCore } = require('./executeCampusAssistantCore');
 const { runTool } = require('./tools/registry');
+const { getIntentWritePlan } = require('./intentWritePlan');
 
 async function runCampusAssistantWithAgentRuntime(request) {
   const runId = createRequestId();
@@ -117,6 +118,61 @@ async function runCampusAssistantWithAgentRuntime(request) {
       prefetched = { todaySchedule, assignments, announcements, dailyBrief, prioritySummary };
     } catch (e) {
       await recordStep('prefetch_error', {}, { error: String(e?.message || e) }, 0);
+    }
+
+    const writePlan = getIntentWritePlan(intentMeta.name);
+    if (writePlan) {
+      const tw0 = Date.now();
+      if (writePlan.requiresConfirmation) {
+        await recordStep(
+          'intent_write_deferred',
+          { intent: intentMeta.name, tool: writePlan.toolName },
+          { reason: 'requires_confirmation' },
+          Date.now() - tw0,
+        );
+      } else {
+        try {
+          const buildInput =
+            typeof writePlan.buildInput === 'function' ? writePlan.buildInput : null;
+          const toolInput = buildInput
+            ? buildInput({ lastUserMessage, context, prefetched })
+            : null;
+          if (!toolInput || typeof toolInput !== 'object') {
+            await recordStep(
+              'intent_write_skipped',
+              { intent: intentMeta.name, tool: writePlan.toolName },
+              { reason: 'missing_or_invalid_input' },
+              Date.now() - tw0,
+            );
+          } else {
+            const writeCtx = {
+              uid,
+              schoolId,
+              groupId: context.groupId,
+              timeZone,
+              prefetched,
+            };
+            const writeResult = await runTool(writePlan.toolName, writeCtx, toolInput);
+            prefetched = {
+              ...prefetched,
+              autoWriteResults: {
+                ...(prefetched.autoWriteResults && typeof prefetched.autoWriteResults === 'object'
+                  ? prefetched.autoWriteResults
+                  : {}),
+                [writePlan.toolName]: writeResult,
+              },
+            };
+            await recordStep(writePlan.toolName, toolInput, writeResult, Date.now() - tw0);
+          }
+        } catch (e) {
+          await recordStep(
+            'intent_write_error',
+            { intent: intentMeta.name, tool: writePlan.toolName },
+            { error: String(e?.message || e) },
+            Date.now() - tw0,
+          );
+        }
+      }
     }
   }
 

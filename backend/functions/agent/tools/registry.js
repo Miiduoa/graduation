@@ -5,6 +5,7 @@ const getAssignments = require('./getAssignments');
 const getAnnouncements = require('./getAnnouncements');
 const searchCampusDocs = require('./searchCampusDocs');
 const getPrioritySummary = require('./getPrioritySummary');
+const submitLeaveRequest = require('./submitLeaveRequest');
 
 const tools = [
   getTodaySchedule,
@@ -12,6 +13,7 @@ const tools = [
   getAnnouncements,
   searchCampusDocs,
   getPrioritySummary,
+  submitLeaveRequest,
 ];
 
 const byName = new Map(tools.map((t) => [t.name, t]));
@@ -22,4 +24,9 @@ async function runTool(name, ctx, input) {
   return tool.execute(ctx, input);
 }
 
-module.exports = { tools, runTool, byName };
+function toolRequiresConfirmation(name) {
+  const tool = byName.get(name);
+  return tool && tool.requiresConfirmation === true;
+}
+
+module.exports = { tools, runTool, byName, toolRequiresConfirmation };
