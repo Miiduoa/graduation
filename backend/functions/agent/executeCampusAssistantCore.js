@@ -36,6 +36,7 @@ const {
 const { queueAssistantActionDrafts, writeAssistantAuditLog } = require('../lib/assistantQueue');
 const { resolveLeaveSubmitPayload } = require('../lib/leaveIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
+const { runTool } = require('./tools/registry');
 
 const db = getFirestore();
 const { assertActiveSchoolMember } = createAuthzHelpers(db);
@@ -262,6 +263,58 @@ async function executeCampusAssistantCore({
         pois.length;
       return await finalizeResponse();
     }
+  }
+
+  if (intent === 'leave_status') {
+    if (!uid) {
+      response.content = '要查請假審核狀態請先登入，我才能讀取你的申請紀錄。';
+      response.suggestions = ['今日公告', '查課表', '功能說明'];
+      return await finalizeResponse();
+    }
+
+    const toolCtx = {
+      uid,
+      schoolId,
+      groupId: context.groupId,
+      timeZone,
+      prefetched: {},
+    };
+    let leaveRows = { items: [], count: 0 };
+    try {
+      leaveRows = await runTool('getLeaveRequestStatus', toolCtx, { limit: 10 });
+    } catch (e) {
+      console.warn('[AI] getLeaveRequestStatus failed:', e?.message || e);
+      response.content = '目前無法讀取請假紀錄，請稍後再試或聯絡管理員。';
+      response.suggestions = ['查課表', '今日公告', '功能說明'];
+      return await finalizeResponse();
+    }
+
+    const items = Array.isArray(leaveRows.items) ? leaveRows.items : [];
+    if (items.length === 0) {
+      response.content = '你最近沒有請假申請紀錄，或資料尚未同步。若剛送出請假，可稍後再問一次。';
+      response.suggestions = ['我要請假', '查課表', '今日公告'];
+      return await finalizeResponse();
+    }
+
+    const statusZh = (s) => {
+      const x = String(s || '').toLowerCase();
+      if (x === 'pending') return '待審核';
+      if (x === 'approved' || x === 'accepted') return '已核准';
+      if (x === 'rejected' || x === 'denied') return '已駁回';
+      return s || '未知';
+    };
+
+    const lines = items.map((row, i) => {
+      const date = row.date || '（日期待定）';
+      const typ = row.type || '—';
+      const st = statusZh(row.status);
+      return `${i + 1}. ${date}｜${typ}｜${st}`;
+    });
+
+    response.content = ['以下是您最近的請假申請狀態（最多 10 筆）：', '', ...lines].join('\n');
+    response.suggestions = ['我要請假', '查課表', '今日公告'];
+    response.debug.sourcesUsed = items.length;
+    return await finalizeResponse();
   }
 
   if (intent === 'leave_request') {
