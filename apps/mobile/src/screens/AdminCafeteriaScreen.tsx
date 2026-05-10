@@ -36,6 +36,8 @@ import {
   CROWD_LABELS,
   CROWD_COLORS,
   estimateCrowdLevel,
+  subscribeOrders,
+  setOrderSchoolId,
   type Cafeteria,
   type CafeteriaId,
   type Vendor,
@@ -60,25 +62,35 @@ export function AdminCafeteriaScreen(props: any) {
   const [announcements, setAnnouncements] = useState<CafeteriaAnnouncement[]>([]);
   const [inspections, setInspections] = useState<InspectionRecord[]>([]);
 
-  // 初始化數據
+  // 初始化數據（管理員看全部訂單 — 即時訂閱）
   useEffect(() => {
-    loadAllData();
-  }, []);
+    setOrderSchoolId('pu');
 
-  const loadAllData = async () => {
-    try {
-      const [ordersData, announcementsData, inspectionsData] = await Promise.all([
-        getOrders(),
-        getAnnouncements(),
-        getInspections(),
-      ]);
-      setOrders(ordersData);
-      setAnnouncements(announcementsData);
-      setInspections(inspectionsData);
-    } catch (err) {
-      console.error('Failed to load admin data:', err);
+    // 即時訂閱全校訂單
+    const unsub = subscribeOrders(
+      { schoolId: 'pu' },
+      (liveOrders) => setOrders(liveOrders),
+    );
+
+    // 若 Firestore 不可用，fallback 一次性載入
+    if (!unsub) {
+      getOrders()
+        .then(setOrders)
+        .catch((err) => console.error('Failed to load orders:', err));
     }
-  };
+
+    // 載入公告 + 稽查
+    getAnnouncements()
+      .then(setAnnouncements)
+      .catch((err) => console.error('Failed to load announcements:', err));
+    getInspections()
+      .then(setInspections)
+      .catch((err) => console.error('Failed to load inspections:', err));
+
+    return () => {
+      unsub?.();
+    };
+  }, []);
 
   return (
     <Screen noPadding>
@@ -541,11 +553,18 @@ function InspectionsTab(props: { inspections: InspectionRecord[]; onRefresh: () 
 function VendorsTab() {
   const [selectedCafeteria, setSelectedCafeteria] = useState<CafeteriaId | null>(null);
   const [expandedVendor, setExpandedVendor] = useState<string | null>(null);
+  const [allVendors, setAllVendors] = useState<Vendor[]>(VENDORS); // 初始值用本地，之後用 Firestore
+
+  useEffect(() => {
+    getVendors()
+      .then((vs) => { if (vs.length > 0) setAllVendors(vs); })
+      .catch(() => {});
+  }, []);
 
   const filteredVendors = useMemo(
     () =>
-      selectedCafeteria ? VENDORS.filter((v) => v.cafeteriaId === selectedCafeteria) : VENDORS,
-    [selectedCafeteria],
+      selectedCafeteria ? allVendors.filter((v) => v.cafeteriaId === selectedCafeteria) : allVendors,
+    [selectedCafeteria, allVendors],
   );
 
   return (

@@ -8,7 +8,7 @@
  * 角色：店家老闆（Vendor Owner）
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -37,6 +37,8 @@ import {
   getReviews,
   getOrders,
   updateOrderStatus,
+  subscribeOrders,
+  setOrderSchoolId,
   estimateWaitTime,
   isVendorCurrentlyOpen,
   getFlashDeals,
@@ -84,7 +86,9 @@ export function VendorManagementScreen(props: any) {
   const [vendorOrders, setVendorOrders] = useState<Order[]>([]);
   const [vendorReviews, setVendorReviews] = useState<Review[]>([]);
 
-  // 載入本店訂單（用 vendorId 篩選）
+  // 即時訂閱本店訂單（Firestore onSnapshot）
+  const unsubOrdersRef = useRef<ReturnType<typeof subscribeOrders>>(null);
+
   const loadOrders = useCallback(async () => {
     try {
       const orders = await getOrders(undefined, myVendor.id);
@@ -105,9 +109,27 @@ export function VendorManagementScreen(props: any) {
   }, [myVendor.id]);
 
   useEffect(() => {
-    loadOrders();
+    // 設定 schoolId 以便 Firestore 查詢
+    setOrderSchoolId('pu'); // 靜宜大學
+
+    // 嘗試 real-time 訂閱；若失敗就 fallback 一次性 getOrders
+    const unsub = subscribeOrders(
+      { vendorId: myVendor.id },
+      (orders) => setVendorOrders(orders),
+    );
+    unsubOrdersRef.current = unsub;
+
+    if (!unsub) {
+      // Firestore 不可用，退回手動載入
+      loadOrders();
+    }
+
     loadReviews();
-  }, [loadOrders, loadReviews]);
+
+    return () => {
+      unsubOrdersRef.current?.();
+    };
+  }, [myVendor.id, loadOrders, loadReviews]);
 
   // 訂單統計
   const orderStats = useMemo(() => {
@@ -147,13 +169,16 @@ export function VendorManagementScreen(props: any) {
       ? (vendorReviews.reduce((sum, r) => sum + r.rating, 0) / vendorReviews.length).toFixed(1)
       : '未評';
 
-  // 處理訂單狀態更新（更新後重新載入訂單列表）
+  // 處理訂單狀態更新（若有即時訂閱會自動更新，否則手動 reload）
   const handleUpdateOrderStatus = useCallback(
     async (orderId: string, newStatus: OrderStatus) => {
       try {
         await updateOrderStatus(orderId, newStatus);
         Alert.alert('成功', `訂單已更新為 ${ORDER_STATUS_LABELS[newStatus]}`);
-        await loadOrders(); // 重新載入訂單
+        // 若無 real-time 訂閱才手動 reload
+        if (!unsubOrdersRef.current) {
+          await loadOrders();
+        }
       } catch (e) {
         Alert.alert('錯誤', '更新訂單狀態失敗');
       }

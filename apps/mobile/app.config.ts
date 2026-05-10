@@ -219,7 +219,7 @@ export default ({ config }: any) => {
     ],
     ...(featureAvailability.widgets ? ['./src/widgets/expo-widget-plugin.js'] : []),
   ];
-  const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'offline';
+  const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'gemini';
   const releaseAiProvider = isReleaseLike ? 'cloud' : configuredAiProvider;
 
   const androidIntentFilters = [
@@ -319,6 +319,7 @@ export default ({ config }: any) => {
       aiProvider: releaseAiProvider,
       aiRuntimeMode: isReleaseLike ? 'production-backend' : 'development-configured',
       aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
+      geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
       aiWebSearchEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, true),
       aiWebLearningEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, true),
       devPreferCloudAssistant: parseBoolean(

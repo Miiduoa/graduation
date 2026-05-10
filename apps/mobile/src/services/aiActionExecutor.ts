@@ -370,17 +370,56 @@ function defaultActionsForTool(tool: AgentTool): AssistantActionProposal[] {
 }
 
 async function executeOrderMeal(ctx: AIActionExecutorContext): Promise<AIActionExecutionResult> {
-  const { params, userId, schoolId, dataSource, menus, cafeterias, userMessage } = ctx;
+  const { params, userId, schoolId, dataSource, menus, cafeterias } = ctx;
   const authBlock = requireSignedIn(userId);
   if (authBlock) return authBlock;
   const schoolBlock = requireSchool(schoolId);
   if (schoolBlock) return schoolBlock;
   if (ctx.isOnline === false) return blocked('目前離線，不能送到餐廳點餐系統。');
 
-  const menu = chooseMenu(params, menus, userMessage);
-  const cafeteria = chooseCafeteria(params, cafeterias, menu, userMessage);
-  if (!cafeteria)
+  const itemId = asString(params.itemId ?? params.menuItemId).trim();
+  const vendorId = asString(params.vendorId).trim();
+  const qtyRaw = params.quantity;
+  const quantity =
+    typeof qtyRaw === 'number' && Number.isFinite(qtyRaw) && qtyRaw > 0
+      ? Math.floor(qtyRaw)
+      : (() => {
+          const n = parseInt(asString(qtyRaw), 10);
+          return Number.isFinite(n) && n > 0 ? n : 0;
+        })();
+
+  if (!itemId) {
+    return blocked(
+      '缺少餐點 ID（itemId），請從下方選單選擇品項或指定可下單餐點。',
+      defaultActionsForTool(ctx.tool),
+    );
+  }
+  if (!vendorId) {
+    return blocked(
+      '缺少店家 ID（vendorId），無法辨識要送到哪一間店。',
+      defaultActionsForTool(ctx.tool),
+    );
+  }
+  if (quantity < 1) {
+    return blocked('請提供有效的數量（quantity），至少為 1。', defaultActionsForTool(ctx.tool));
+  }
+
+  const menu = menus.find((m) => m.id === itemId);
+  if (!menu || typeof menu.price !== 'number') {
+    return blocked(
+      '找不到可下單的正式品項或價格，請從餐廳頁選擇可下單餐點。',
+      defaultActionsForTool(ctx.tool),
+    );
+  }
+
+  const cafeteria =
+    cafeterias.find((c) => c.id === vendorId || c.merchantId === vendorId) ?? null;
+  if (!cafeteria) {
     return blocked('缺少可驗證的餐廳資料，不能建立正式訂單。', defaultActionsForTool(ctx.tool));
+  }
+  if (menu.cafeteriaId && menu.cafeteriaId !== cafeteria.id) {
+    return blocked('餐點與店家不符，請重新選擇。', defaultActionsForTool(ctx.tool));
+  }
   if (
     cafeteria.orderingEnabled !== true ||
     cafeteria.pilotStatus === 'inactive' ||
@@ -391,14 +430,7 @@ async function executeOrderMeal(ctx: AIActionExecutorContext): Promise<AIActionE
       defaultActionsForTool(ctx.tool),
     );
   }
-  if (!menu || typeof menu.price !== 'number') {
-    return blocked(
-      '找不到可下單的正式品項或價格，請從餐廳頁選擇可下單餐點。',
-      defaultActionsForTool(ctx.tool),
-    );
-  }
 
-  const quantity = typeof params.quantity === 'number' && params.quantity > 0 ? params.quantity : 1;
   const totalAmount = menu.price * quantity;
   const order = await dataSource.createOrder({
     userId: userId!,
@@ -423,7 +455,7 @@ async function executeOrderMeal(ctx: AIActionExecutorContext): Promise<AIActionE
 
   return executed(
     [
-      '下單成功，餐廳點餐系統已收到訂單。',
+      '已送出訂單。',
       `訂單編號：${order.id}`,
       `餐廳：${cafeteria.name}`,
       `餐點：${menu.name} x ${quantity}`,

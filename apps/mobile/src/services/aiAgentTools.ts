@@ -37,6 +37,24 @@ import {
 } from '../data/puAIAgentData';
 import type { AssistantChoiceMenu } from '../data/types';
 
+/** 與 AIChatScreen 訂餐選單一致：itemId@@vendorId */
+const DINING_CHOICE_ID_SEP = '@@';
+
+function diningVendorKeyForMenu(m: { cafeteriaId?: string; cafeteria_id?: string; cafeteria?: string }, cafeterias: any[]): string {
+  const cid = m.cafeteriaId ?? m.cafeteria_id ?? '';
+  const caf =
+    cafeterias.find((c: any) => c.id === cid) ??
+    cafeterias.find((c: any) => c.name === m.cafeteria);
+  if (caf) return String(caf.merchantId ?? caf.id ?? '').trim();
+  return String(cid ?? '').trim();
+}
+
+function encodeDiningChoiceMenuId(m: { id?: string }, cafeterias: any[]): string {
+  const v = diningVendorKeyForMenu(m as any, cafeterias);
+  if (!v || !m?.id) return String(m.id ?? '');
+  return `${m.id}${DINING_CHOICE_ID_SEP}${v}`;
+}
+
 /** Cloud Function createOrder 錯誤 → 使用者可讀說明（勿只顯示 not-found） */
 function formatCreateOrderToolError(e: unknown): string {
   const anyErr = e as { code?: string; message?: string };
@@ -748,7 +766,42 @@ export type ExecutorContext = {
   role?: CampusActorRole;
   /** 當前使用者自然語言請求（用於成功後蒸餾技能；勿傳內部工具選擇 prompt） */
   lastUserMessage?: string;
+  /** 上一輪 choiceMenu；registry 用於解析「第 N 個」這類回覆 */
+  lastChoiceMenu?: AssistantChoiceMenu;
 };
+
+async function executeRegistryTool(
+  toolName: string,
+  args: Record<string, string>,
+  ctx: ExecutorContext,
+): Promise<ToolCallResult> {
+  // Lazy require 避免 aiToolRegistry <-> aiAgentTools 的 legacy fallback 循環相依。
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { executeToolStandard } = require('./aiToolRegistry') as typeof import('./aiToolRegistry');
+  const result = await executeToolStandard(toolName, args, {
+    userId: ctx.userId,
+    schoolId: ctx.schoolId,
+    role: ctx.role,
+    lastUserMessage: ctx.lastUserMessage,
+    lastChoiceMenu: ctx.lastChoiceMenu,
+  });
+
+  return {
+    success: result.success,
+    data: result.data,
+    error: result.error,
+    isWrite: result.isWrite,
+    summary: result.summary,
+    learnedSkill: result.learnedSkill,
+    choiceMenu: result.choiceMenu,
+    ...({
+      errorCode: result.errorCode,
+      isDraft: result.isDraft,
+      missingInfo: result.missingInfo,
+      recordId: result.recordId,
+    } as any),
+  };
+}
 
 /**
  * 執行單一工具呼叫
@@ -759,6 +812,11 @@ export async function executeTool(
   ctx: ExecutorContext,
 ): Promise<ToolCallResult> {
   try {
+    switch (toolName) {
+      case 'order_food':
+        return await executeRegistryTool('order_food', args, ctx);
+    }
+
     const executor = TOOL_EXECUTORS[toolName];
     if (!executor) {
       return { success: false, error: `未知的工具: ${toolName}`, summary: '無法執行' };
@@ -1968,6 +2026,22 @@ const TOOL_EXECUTORS: Record<
         return { success: false, isWrite: true, summary: '目前沒有菜單資料，無法訂餐。請先開啟餐廳/點餐頁面同步資料。' };
       }
 
+      let cafeteriasForMenus: any[] = [];
+      if (hasDataSource()) {
+        try {
+          cafeteriasForMenus = await getDataSource().listCafeterias(ctx.schoolId);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (isProvidenceDiningSchoolId(ctx.schoolId)) {
+        const localCafs = getPuDiningCafeterias(ctx.schoolId);
+        const existingIds = new Set(cafeteriasForMenus.map((c: any) => c.id));
+        for (const lc of localCafs) {
+          if (!existingIds.has(lc.id)) cafeteriasForMenus.push(lc);
+        }
+      }
+
       // ── 2. 智慧模糊匹配 ──
       const normalize = (s: string) => s.toLowerCase().replace(/[\s｜|／/,，、\-—_()（）]/g, '');
       const keyword = normalize(itemName);
@@ -2007,10 +2081,10 @@ const TOOL_EXECUTORS: Record<
                 title: '熱門／可點餐點',
                 prompt: '點選一項會幫你帶入訂餐請求',
                 options: pickMenus.map((m: any, i: number) => ({
-                  id: `pick-${i}-${m.id ?? i}`,
+                  id: encodeDiningChoiceMenuId(m, cafeteriasForMenus),
                   label: `${m.name}${typeof m.price === 'number' ? ` · $${m.price}` : ''}`,
                   subtitle: m.cafeteria ? String(m.cafeteria) : undefined,
-                  sendAsUser: `幫我點${m.name}`,
+                  sendAsUser: `幫我點第${i + 1}個`,
                 })),
               }
             : undefined;
@@ -2031,7 +2105,7 @@ const TOOL_EXECUTORS: Record<
           title: '請選擇餐點',
           prompt: '點選後會以你的名義送出訂餐請求（仍受後端接單條件限制）',
           options: slice.map((m: any, i: number) => ({
-            id: `ord-${i}-${m.id ?? i}`,
+            id: encodeDiningChoiceMenuId(m, cafeteriasForMenus),
             label: `${m.name}${typeof m.price === 'number' ? ` · $${m.price}` : ''}`,
             subtitle: m.cafeteria ? String(m.cafeteria) : undefined,
             sendAsUser: `幫我點第${i + 1}個`,
@@ -2048,29 +2122,31 @@ const TOOL_EXECUTORS: Record<
       // ── 5. 唯一匹配 → 直接下單 ──
       const matched = matches[0];
       const cafeteriaId = matched.cafeteriaId ?? matched.cafeteria_id ?? '';
-      let remoteCafeterias: any[] = [];
-      let cafeterias: any[] = [];
-      if (hasDataSource()) {
-        try {
-          remoteCafeterias = await getDataSource().listCafeterias(ctx.schoolId);
-        } catch {
-          /* ignore */
-        }
-      }
-      cafeterias = [...remoteCafeterias];
-      if (isProvidenceDiningSchoolId(ctx.schoolId)) {
-        const localCafs = getPuDiningCafeterias(ctx.schoolId);
-        const existingIds = new Set(cafeterias.map((c: any) => c.id));
-        for (const lc of localCafs) {
-          if (!existingIds.has(lc.id)) cafeterias.push(lc);
-        }
-      }
+      const remoteCafeterias: any[] = hasDataSource()
+        ? await getDataSource().listCafeterias(ctx.schoolId).catch(() => [])
+        : [];
+      const cafeterias = [...cafeteriasForMenus];
       const cafeteria = cafeterias.find((c: any) => c.id === cafeteriaId)
         ?? cafeterias.find((c: any) => c.name === matched.cafeteria)
         ?? cafeterias[0];
 
-      const quantity = parseInt(args.quantity ?? '1', 10) || 1;
+      const vendorId = diningVendorKeyForMenu(matched, cafeterias);
+      const itemId = String(matched.id ?? '').trim();
+      if (!itemId) {
+        return { success: false, isWrite: true, summary: '無法辨識餐點 ID（itemId），請改點選下方選單或換個說法。' };
+      }
+      if (!vendorId) {
+        return { success: false, isWrite: true, summary: '無法辨識店家 ID（vendorId），請確認菜單已同步或改選其他餐廳。' };
+      }
+
+      const quantity = parseInt(String(args.quantity ?? '1'), 10);
+      if (!Number.isFinite(quantity) || quantity < 1) {
+        return { success: false, isWrite: true, summary: '請提供有效的數量（quantity），至少為 1。' };
+      }
       const price = matched.price ?? 0;
+      if (typeof price !== 'number') {
+        return { success: false, isWrite: true, summary: '此品項缺少可下單價格，無法建立訂單。' };
+      }
       const totalAmount = price * quantity;
 
       // 建立訂單
@@ -2089,6 +2165,13 @@ const TOOL_EXECUTORS: Record<
       }
 
       const finalCafeteriaId = cafeteria?.id ?? cafeteriaId;
+      if (cafeteria && matched.cafeteriaId && matched.cafeteriaId !== cafeteria.id) {
+        return {
+          success: false,
+          isWrite: true,
+          summary: '餐點與店家資料不一致，請重新選擇品項。',
+        };
+      }
       const remoteIds = new Set(remoteCafeterias.map((c: any) => c.id));
       if (remoteIds.size > 0 && finalCafeteriaId && !remoteIds.has(finalCafeteriaId)) {
         const displayName =
@@ -2125,7 +2208,7 @@ const TOOL_EXECUTORS: Record<
       return {
         success: true, isWrite: true, data: order,
         summary: [
-          `已為你下單！`,
+          `已送出訂單。`,
           `餐點：${matched.name} x ${quantity}`,
           cafeteria?.name ? `餐廳：${cafeteria.name}` : (matched.cafeteria ? `餐廳：${matched.cafeteria}` : ''),
           price ? `金額：$${totalAmount}` : '',
@@ -2308,12 +2391,25 @@ const TOOL_EXECUTORS: Record<
 // ════════════════════════════════════════════════════════════
 
 /**
- * 將工具宣告轉為 Gemini API 的 tools 格式
+ * 將工具宣告轉為 Gemini API 的 tools 格式。
+ *
+ * 合併來源：
+ *   1. 既有 readTools / writeTools（保留向後相容）
+ *   2. aiToolRegistry 的 canonical 工具（如 order_food / reserve_seat / create_reminder）
+ *   後者會覆寫同名項，讓 Gemini 看到 schema 更嚴謹的版本。
  */
 export function toGeminiToolsPayload(role?: CampusActorRole) {
-  const declarations = getToolDeclarations(role);
+  const legacy = getToolDeclarations(role);
+  // Lazy require 避免循環相依
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { getRegistryGeminiDeclarations } = require('./aiToolRegistry') as typeof import('./aiToolRegistry');
+  const canonical = getRegistryGeminiDeclarations(role);
+  const map = new Map<string, GeminiToolDeclaration>();
+  for (const d of legacy) map.set(d.name, d);
+  for (const d of canonical) map.set(d.name, d as unknown as GeminiToolDeclaration);
+  const merged = Array.from(map.values());
   return [{
-    function_declarations: declarations.map(d => ({
+    function_declarations: merged.map(d => ({
       name: d.name,
       description: d.description,
       parameters: d.parameters,

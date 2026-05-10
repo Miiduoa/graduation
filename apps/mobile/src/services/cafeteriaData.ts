@@ -7,6 +7,20 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getDb, getFunctionsInstance, getAuthInstance } from '../firebase';
+import {
+  collection,
+  doc,
+  query as fsQuery,
+  where,
+  orderBy as fsOrderBy,
+  limit as fsLimit,
+  getDocs,
+  getDoc,
+  onSnapshot,
+  type Unsubscribe,
+} from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
 
 // ═══════════════════════════════════════════════════════
 // 型別定義
@@ -3676,9 +3690,116 @@ export async function addReview(review: Omit<Review, 'id' | 'createdAt'>): Promi
   return newReview;
 }
 
-// ── 訂單 ──
+// ── 訂單（統一資料源：Firestore 優先，AsyncStorage 離線降級）──
 
+/** 解析學校 ID — 從當前登入使用者 */
+let _cachedSchoolId: string | null = null;
+export function setOrderSchoolId(schoolId: string): void {
+  _cachedSchoolId = schoolId;
+}
+function _getSchoolId(): string | null {
+  return _cachedSchoolId;
+}
+
+/** 嘗試取得 Firebase 連線（靜默失敗） */
+function _tryFirebase(): boolean {
+  try {
+    getDb();
+    getAuthInstance();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 從 Firestore doc data 映射到本地 Order 型別 */
+function _mapFirestoreToLocalOrder(id: string, data: Record<string, any>): Order {
+  const toIso = (v: any): string | null => {
+    if (typeof v === 'string' && v) return v;
+    if (v && typeof v.toDate === 'function') return v.toDate().toISOString();
+    if (v && typeof v.seconds === 'number') return new Date(v.seconds * 1000).toISOString();
+    return null;
+  };
+  return {
+    id,
+    studentUid: data.userId ?? data.studentUid ?? '',
+    vendorId: data.merchantId ?? data.vendorId ?? data.cafeteriaId ?? '',
+    cafeteriaId: (data.cafeteriaId ?? 'jingyuan') as CafeteriaId,
+    items: Array.isArray(data.items)
+      ? data.items.map((it: any) => ({
+          menuItemId: it.menuItemId ?? it.id ?? '',
+          menuItemName: it.name ?? it.menuItemName ?? '',
+          quantity: it.quantity ?? 1,
+          unitPrice: it.price ?? it.unitPrice ?? 0,
+          selectedOptions: it.selectedOptions ?? it.options ?? [],
+          subtotal: it.subtotal ?? (it.price ?? 0) * (it.quantity ?? 1),
+        }))
+      : [],
+    totalPrice: data.totalAmount ?? data.total ?? data.totalPrice ?? 0,
+    status: (data.status ?? 'pending') as OrderStatus,
+    note: data.note ?? '',
+    createdAt: toIso(data.createdAt) ?? new Date().toISOString(),
+    estimatedPickup: toIso(data.pickupTime) ?? data.estimatedPickup ?? null,
+    completedAt: toIso(data.completedAt) ?? null,
+    cancelledAt: toIso(data.cancelledAt) ?? null,
+    cancelReason: data.cancelReason ?? null,
+    queueNumber: typeof data.queueNumber === 'number' ? data.queueNumber : (typeof data.queueNumber === 'string' ? parseInt(data.queueNumber, 10) || null : null),
+  };
+}
+
+/**
+ * 取得訂單 — Firestore 優先
+ * studentUid: 學生看自己的訂單
+ * vendorId: 店家看本店訂單（對應 Firestore 的 merchantId 或 cafeteriaId）
+ */
 export async function getOrders(studentUid?: string, vendorId?: string): Promise<Order[]> {
+  const schoolId = _getSchoolId();
+
+  // ── 嘗試 Firestore ──
+  if (schoolId && _tryFirebase()) {
+    try {
+      const db = getDb();
+      const ordersRef = collection(db, 'schools', schoolId, 'orders');
+      let q;
+      if (studentUid) {
+        q = fsQuery(ordersRef, where('userId', '==', studentUid), fsLimit(50));
+      } else if (vendorId) {
+        // 店家查詢：可能存成 merchantId 或 cafeteriaId
+        q = fsQuery(ordersRef, where('cafeteriaId', '==', vendorId), fsLimit(50));
+      } else {
+        q = fsQuery(ordersRef, fsLimit(50));
+      }
+      const snap = await getDocs(q);
+      const firestoreOrders = snap.docs.map(d => _mapFirestoreToLocalOrder(d.id, d.data()));
+
+      // 也嘗試用 merchantId 查（某些訂單可能用 merchantId 存）
+      if (vendorId && firestoreOrders.length === 0) {
+        const q2 = fsQuery(ordersRef, where('merchantId', '==', vendorId), fsLimit(50));
+        const snap2 = await getDocs(q2);
+        const extra = snap2.docs.map(d => _mapFirestoreToLocalOrder(d.id, d.data()));
+        firestoreOrders.push(...extra);
+      }
+
+      if (firestoreOrders.length > 0) {
+        // 同步到本地快取
+        const existing = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
+        const existingIds = new Set(existing.map(o => o.id));
+        for (const fo of firestoreOrders) {
+          if (!existingIds.has(fo.id)) existing.push(fo);
+          else {
+            const idx = existing.findIndex(e => e.id === fo.id);
+            if (idx >= 0) existing[idx] = fo; // 用雲端版本覆蓋
+          }
+        }
+        await writeStorage(STORAGE_KEYS.orders, existing);
+        return firestoreOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      }
+    } catch (err) {
+      console.warn('[cafeteriaData] Firestore getOrders failed, falling back to local:', err);
+    }
+  }
+
+  // ── 降級：AsyncStorage ──
   const orders = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
   return orders
     .filter((o) => {
@@ -3689,12 +3810,76 @@ export async function getOrders(studentUid?: string, vendorId?: string): Promise
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
+/**
+ * 建立訂單 — Firestore Cloud Function 優先
+ */
 export async function createOrder(
   order: Omit<
     Order,
     'id' | 'createdAt' | 'status' | 'completedAt' | 'cancelledAt' | 'cancelReason' | 'queueNumber'
   >,
 ): Promise<Order> {
+  const schoolId = _getSchoolId();
+
+  // ── 嘗試 Firestore Cloud Function ──
+  if (schoolId && _tryFirebase() && getAuthInstance().currentUser) {
+    try {
+      const createOrderFn = httpsCallable<
+        Record<string, unknown>,
+        { orderId?: string; total?: number }
+      >(getFunctionsInstance(), 'createOrder');
+
+      const result = await createOrderFn({
+        schoolId,
+        cafeteriaId: order.cafeteriaId || order.vendorId,
+        merchantId: order.vendorId,
+        items: order.items.map(it => ({
+          menuItemId: it.menuItemId,
+          name: it.menuItemName,
+          price: it.unitPrice,
+          quantity: it.quantity,
+          note: '',
+        })),
+        totalAmount: order.totalPrice,
+        note: order.note || '',
+      });
+
+      const orderId = result.data?.orderId;
+      if (orderId) {
+        // 從 Firestore 讀回完整訂單
+        const db = getDb();
+        const docRef = doc(db, 'schools', schoolId, 'orders', orderId);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const newOrder = _mapFirestoreToLocalOrder(snap.id, snap.data());
+          // 同步到本地
+          const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
+          local.push(newOrder);
+          await writeStorage(STORAGE_KEYS.orders, local);
+          return newOrder;
+        }
+        // docRef 可能還沒同步，用已知資訊建構
+        const fallback: Order = {
+          ...order,
+          id: orderId,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          completedAt: null,
+          cancelledAt: null,
+          cancelReason: null,
+          queueNumber: null,
+        };
+        const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
+        local.push(fallback);
+        await writeStorage(STORAGE_KEYS.orders, local);
+        return fallback;
+      }
+    } catch (err) {
+      console.warn('[cafeteriaData] Firestore createOrder failed, falling back to local:', err);
+    }
+  }
+
+  // ── 降級：本地建立 ──
   const orders = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
   const queueNumber =
     orders.filter(
@@ -3716,11 +3901,45 @@ export async function createOrder(
   return newOrder;
 }
 
+/**
+ * 更新訂單狀態 — Cloud Function 優先（店家接單/製作/完成/取消）
+ */
 export async function updateOrderStatus(
   orderId: string,
   status: OrderStatus,
   extra?: Partial<Order>,
 ): Promise<Order | null> {
+  const schoolId = _getSchoolId();
+
+  // ── 嘗試 Firestore Cloud Function ──
+  if (schoolId && _tryFirebase()) {
+    try {
+      const updateFn = httpsCallable<
+        { schoolId: string; orderId: string; status: string },
+        { success?: boolean }
+      >(getFunctionsInstance(), 'updateOrderStatus');
+      await updateFn({ schoolId, orderId, status });
+
+      // 讀回更新後的訂單
+      const db = getDb();
+      const docRef = doc(db, 'schools', schoolId, 'orders', orderId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const updated = _mapFirestoreToLocalOrder(snap.id, snap.data());
+        // 同步本地
+        const local = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
+        const idx = local.findIndex(o => o.id === orderId);
+        if (idx >= 0) local[idx] = updated;
+        else local.push(updated);
+        await writeStorage(STORAGE_KEYS.orders, local);
+        return updated;
+      }
+    } catch (err) {
+      console.warn('[cafeteriaData] Firestore updateOrderStatus failed, falling back:', err);
+    }
+  }
+
+  // ── 降級：本地更新 ──
   const orders = await readStorage<Order[]>(STORAGE_KEYS.orders, []);
   const idx = orders.findIndex((o) => o.id === orderId);
   if (idx < 0) return null;
@@ -3734,6 +3953,46 @@ export async function updateOrderStatus(
   };
   await writeStorage(STORAGE_KEYS.orders, orders);
   return orders[idx];
+}
+
+/**
+ * 即時訂單監聽（Firestore onSnapshot）
+ * 店家端用：即時收到新訂單 / 狀態變更
+ * 學生端用：即時看到自己訂單被接單/製作完成
+ *
+ * @param filter - { studentUid } 或 { vendorId } 擇一
+ * @param onUpdate - 訂單列表更新回呼
+ * @returns 取消監聽函數（null 表示無法建立監聽）
+ */
+export function subscribeOrders(
+  filter: { studentUid?: string; vendorId?: string; schoolId?: string },
+  onUpdate: (orders: Order[]) => void,
+): Unsubscribe | null {
+  const schoolId = filter.schoolId ?? _getSchoolId();
+  if (!schoolId || !_tryFirebase()) return null;
+
+  try {
+    const db = getDb();
+    const ordersRef = collection(db, 'schools', schoolId, 'orders');
+    let q;
+    if (filter.studentUid) {
+      q = fsQuery(ordersRef, where('userId', '==', filter.studentUid), fsOrderBy('createdAt', 'desc'), fsLimit(30));
+    } else if (filter.vendorId) {
+      q = fsQuery(ordersRef, where('cafeteriaId', '==', filter.vendorId), fsOrderBy('createdAt', 'desc'), fsLimit(50));
+    } else {
+      q = fsQuery(ordersRef, fsOrderBy('createdAt', 'desc'), fsLimit(50));
+    }
+
+    return onSnapshot(q, (snap) => {
+      const orders = snap.docs.map(d => _mapFirestoreToLocalOrder(d.id, d.data()));
+      onUpdate(orders);
+    }, (err) => {
+      console.warn('[cafeteriaData] onSnapshot error:', err);
+    });
+  } catch (err) {
+    console.warn('[cafeteriaData] subscribeOrders failed:', err);
+    return null;
+  }
 }
 
 // ── 收藏 ──
