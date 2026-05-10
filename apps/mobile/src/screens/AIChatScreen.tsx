@@ -213,6 +213,19 @@ type Message = {
   paramCollect?: { tool: AgentTool; collected: Record<string, any>; nextParam: ToolParameter };
   proactiveTrigger?: ProactiveTrigger;
   thinkingSteps?: ThinkingStepUI[];
+  /** 雲端助理本輪實際呼叫的工具（後端回傳） */
+  assistantToolsUsed?: string[];
+};
+
+const ASSISTANT_TOOL_LABELS: Record<string, string> = {
+  getTodaySchedule: '課表',
+  getAssignments: '作業',
+  getAnnouncements: '公告',
+  searchCampusDocs: '校園文件',
+  getPrioritySummary: '今日要事',
+  getLibraryLoans: '圖書借閱',
+  getLeaveRequestStatus: '請假狀態',
+  reflectOnGap: '需求紀錄',
 };
 
 const DINING_CAFETERIA_VALUE_LABELS: Record<string, string> = {
@@ -599,6 +612,18 @@ function ToolConfirmCard(props: {
           <Text style={{ color: '#fff', fontWeight: '700' }}>確認執行</Text>
         </Pressable>
       </View>
+      {tool.requiresConfirmation ? (
+        <Text
+          style={{
+            marginTop: 12,
+            fontSize: 11,
+            color: theme.colors.muted,
+            lineHeight: 16,
+          }}
+        >
+          送出後仍需老師或系統審核；在審核／店家確認完成前，不視為已核准或已接單。
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -1187,6 +1212,25 @@ function MessageBubble(props: {
         </View>
       )}
 
+      {!isUser &&
+        message.assistantToolsUsed &&
+        message.assistantToolsUsed.length > 0 &&
+        (message.agentType === 'text' || !message.agentType) && (
+          <Text
+            style={{
+              marginTop: 6,
+              marginLeft: 2,
+              fontSize: 11,
+              color: theme.colors.muted,
+            }}
+          >
+            本次查詢使用：
+            {message.assistantToolsUsed
+              .map((id) => ASSISTANT_TOOL_LABELS[id] ?? id)
+              .join('、')}
+          </Text>
+        )}
+
       {/* Tool Confirm Card */}
       {message.agentType === 'tool_confirm' && message.toolExecution && (
         <ToolConfirmCard
@@ -1384,6 +1428,8 @@ export function AIChatScreen(props: any) {
   );
   const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeNode[]>([]);
   const [trainingDB, setTrainingDB] = useState<LocalTrainingDB>(() => getDefaultTrainingDB());
+  /** 校園助理雲端多輪對話（Firestore 與後端 tool 歷史） */
+  const [campusAssistantSessionId, setCampusAssistantSessionId] = useState<string | undefined>();
   const lastQAPairIdRef = useRef<string | null>(null); // 追蹤最近的 QA pair，用於回饋評分
   // ── GPT 級本地 AI 大腦 ──
   const [aiBrain, setAiBrain] = useState<LocalAIBrain>(() => createAIBrain());
@@ -1875,10 +1921,16 @@ export function AIChatScreen(props: any) {
       aiBrain.conversationSummary,
     ],
   );
-  const aiContext = useMemo<AIContext>(() => buildLiveAIContext(appRuntimeData), [
-    buildLiveAIContext,
-    appRuntimeData,
-  ]);
+  const aiContext = useMemo<AIContext>(() => {
+    const base = buildLiveAIContext(appRuntimeData);
+    return campusAssistantSessionId
+      ? { ...base, campusAssistantSessionId }
+      : base;
+  }, [buildLiveAIContext, appRuntimeData, campusAssistantSessionId]);
+
+  useEffect(() => {
+    setCampusAssistantSessionId(undefined);
+  }, [auth.user?.uid]);
 
   // ── Greeting ──
   useEffect(() => {
@@ -3710,6 +3762,8 @@ export function AIChatScreen(props: any) {
       `• 備註：${params.note || '無'}${sourceLine}`,
       '',
       orderBoundary,
+      '',
+      '（提醒：若已送出點餐請求，仍須餐廳端確認接單後才視為成立。）',
     ].join('\n');
   }
 
@@ -4273,7 +4327,7 @@ export function AIChatScreen(props: any) {
       case 'record_mood':
         return `已記錄今天的心情！\n情緒：${params.level === '5' ? '很好' : params.level === '4' ? '不錯' : params.level === '3' ? '普通' : '需關注'}\n\n本週心情趨勢：穩定偏好 📈\n連續記錄 ${Math.floor(Math.random() * 10) + 3} 天！`;
       case 'reserve_seat':
-        return `已預約成功！\n類型：${params.type === 'group_room' ? '團體討論室 B' : params.type === 'quiet_zone' ? '安靜閱覽區' : '個人自習座位 A-23'}\n樓層：${params.floor || '3F'}\n時段：${params.time_slot === 'morning' ? '上午' : params.time_slot === 'evening' ? '晚上' : '下午'}\n\n請於預約時段開始 15 分鐘內入座。`;
+        return `已預約成功！\n類型：${params.type === 'group_room' ? '團體討論室 B' : params.type === 'quiet_zone' ? '安靜閱覽區' : '個人自習座位 A-23'}\n樓層：${params.floor || '3F'}\n時段：${params.time_slot === 'morning' ? '上午' : params.time_slot === 'evening' ? '晚上' : '下午'}\n\n請於預約時段開始 15 分鐘內入座。\n\n（已送出請求，仍須圖書館／系統審核或確認後才視為有效預約。）`;
       case 'search_book':
         return `查詢結果：\n\n1.「${params.query || '程式設計'}」— 館藏 3 本，可借 2 本\n   位置：2F 書庫 005.1 區\n\n2. 相關推薦：「資料結構與演算法」— 可借\n\n需要我幫你預約借閱嗎？`;
       case 'report_repair':
@@ -4285,7 +4339,7 @@ export function AIChatScreen(props: any) {
       case 'post_lost':
         return `遺失公告已發布！\n\n物品：${params.item || '物品'}\n地點：${params.location || '校園'}\n\nAI 正在自動比對拾獲物資料庫...\n目前找到 ${Math.random() > 0.5 ? '1' : '0'} 筆可能的配對。`;
       case 'request_leave':
-        return `請假申請已提交！\n\n課程：${params.course || '課程'}\n假別：${params.reason === 'sick' ? '病假' : '事假'}\n日期：${params.date || '今天'}\n\n狀態：待教師審核\n我會在教師回覆後通知你。`;
+        return `請假申請已提交！\n\n課程：${params.course || '課程'}\n假別：${params.reason === 'sick' ? '病假' : '事假'}\n日期：${params.date || '今天'}\n\n狀態：待教師審核\n我會在教師回覆後通知你。\n\n（已送出請求，仍須任課老師／系統審核通過後才視為核准。）`;
       case 'check_grades':
         return '成績資料需要從教務系統即時查詢才能確保正確。\n\n正在前往成績查詢頁面...';
       case 'check_assignments': {
@@ -6142,6 +6196,7 @@ export function AIChatScreen(props: any) {
                   suggestions: aiResponse.suggestions,
                   actions: aiResponse.actions,
                   choiceMenu: aiResponse.choiceMenu,
+                  assistantToolsUsed: aiResponse.assistantToolsUsed,
                   thinkingSteps: [
                     ...deliberationSteps,
                     ...(((aiResponse as any).thinking as ThinkingStepUI[] | undefined) ?? []),
@@ -6150,6 +6205,10 @@ export function AIChatScreen(props: any) {
               : m,
           ),
         );
+
+        if (aiResponse.campusAssistantSessionId) {
+          setCampusAssistantSessionId(aiResponse.campusAssistantSessionId);
+        }
 
         // ✅ 補強回答成功 → 全面蒸餾學習到本地 AI 大腦
         if (!aiResponse.error && finalContent.length > 0) {
@@ -6243,6 +6302,9 @@ export function AIChatScreen(props: any) {
             });
           } else {
             const fallback = await chatWithCampusAssistant(aiMessages, aiContext);
+            if (fallback.campusAssistantSessionId) {
+              setCampusAssistantSessionId(fallback.campusAssistantSessionId);
+            }
             setMessages((prev) =>
               prev.map((m) =>
                 m.id === responseId
@@ -6252,6 +6314,7 @@ export function AIChatScreen(props: any) {
                       suggestions: fallback.suggestions,
                       actions: fallback.actions,
                       choiceMenu: fallback.choiceMenu,
+                      assistantToolsUsed: fallback.assistantToolsUsed,
                     }
                   : m,
               ),

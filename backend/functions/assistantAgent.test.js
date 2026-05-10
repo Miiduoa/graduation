@@ -4,6 +4,7 @@ const {
   buildToolDefinitions,
   callAssistantModel,
   normalizeAssistantActions,
+  parseProviderOrder,
   resolvePermissionScope,
   shouldUseServerWebSearch,
 } = require('./assistantAgent');
@@ -159,6 +160,13 @@ describe('assistant agent policy', () => {
     const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
     expect(body.tools?.length).toBe(1);
     expect(body.tool_choice).toBe('auto');
+  });
+
+  test('parseProviderOrder reads ASSISTANT_MODEL_PROVIDERS as groq then gemini', () => {
+    process.env.ASSISTANT_MODEL_PROVIDERS = 'groq,gemini';
+    expect(parseProviderOrder()).toEqual(['groq', 'gemini']);
+    process.env.ASSISTANT_MODEL_PROVIDERS = ' GROQ , Gemini ';
+    expect(parseProviderOrder()).toEqual(['groq', 'gemini']);
   });
 
   test('defaults to free Groq then Gemini provider order', async () => {

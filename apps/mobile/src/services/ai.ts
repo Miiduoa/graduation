@@ -113,6 +113,9 @@ async function getCachedInsightsPrompt(): Promise<string> {
   }
 }
 
+/** 送交 askCampusAssistant 的對話窗口（與後端 buildModelBackedAssistantResponse 對齊） */
+export const CAMPUS_ASSISTANT_MESSAGE_WINDOW = 20;
+
 // 重試配置
 const RETRY_CONFIG = {
   maxRetries: 3,
@@ -215,6 +218,10 @@ export type AIResponse = {
   suggestions?: string[];
   actions?: AssistantActionProposal[];
   citations?: EvidenceRef[];
+  /** 本輪 LLM 實際呼叫的工具名稱（後端 askCampusAssistant） */
+  assistantToolsUsed?: string[];
+  /** askCampusAssistant 多輪對話用，後端 debug.sessionId */
+  campusAssistantSessionId?: string;
   error?: string;
   thinking?: { step: string; detail: string; status: 'done' | 'checking' | 'warning' | 'info' }[];
   /** 本輪寫入工具成功後蒸餾的技能，由 UI 合併進本地訓練庫 */
@@ -233,6 +240,8 @@ type CampusAssistantRequest = {
     locale?: string;
     timezone?: string;
     clientCapabilities?: string[];
+    /** 與後端 Firestore 對話記憶對齊；首次可省略，由回應 debug.sessionId 取得 */
+    sessionId?: string;
   };
 };
 
@@ -242,6 +251,7 @@ type CampusAssistantResponse = AIResponse & {
   intent?: { name?: string; confidence?: number };
   evaluation?: { score?: number; needsUserReview?: boolean; reason?: string };
   clarifyingQuestion?: string | null;
+  assistantToolsUsed?: string[];
   debug?: Record<string, unknown>;
 };
 
@@ -306,6 +316,8 @@ export type AIContext = {
     text: string;
     priority?: number;
   }>;
+  /** 校園助理雲端多輪 session（與 askCampusAssistant context.sessionId 對應） */
+  campusAssistantSessionId?: string;
   calendarEvents?: Array<{
     id: string;
     title: string;
@@ -2962,7 +2974,7 @@ async function callCampusAssistant(
     );
 
     const result = await callable({
-      messages: messages.slice(-12),
+      messages: messages.slice(-CAMPUS_ASSISTANT_MESSAGE_WINDOW),
       context: {
         schoolId: context.schoolId,
         screen: (context as any).screen,
@@ -2970,6 +2982,9 @@ async function callCampusAssistant(
         courseId: (context as any).courseId,
         locale: 'zh-TW',
         timezone: 'Asia/Taipei',
+        ...(context.campusAssistantSessionId
+          ? { sessionId: context.campusAssistantSessionId }
+          : {}),
       },
     });
 
@@ -2979,12 +2994,23 @@ async function callCampusAssistant(
     if (data.clarifyingQuestion && !content.includes(data.clarifyingQuestion)) {
       content = [content, `（補充：${data.clarifyingQuestion}）`].filter(Boolean).join('\n\n');
     }
+    const sessionFromDebug =
+      data.debug && typeof data.debug === 'object' && typeof (data.debug as any).sessionId === 'string'
+        ? String((data.debug as any).sessionId)
+        : undefined;
+    const toolsFromData = Array.isArray((data as CampusAssistantResponse).assistantToolsUsed)
+      ? (data as CampusAssistantResponse).assistantToolsUsed!.filter(
+          (t): t is string => typeof t === 'string' && t.length > 0,
+        )
+      : undefined;
     return {
       content,
       suggestions: data.suggestions ?? extractSuggestions(data.content ?? ''),
       actions: filteredActions,
       citations: data.citations,
       error: data.error,
+      ...(toolsFromData && toolsFromData.length > 0 ? { assistantToolsUsed: toolsFromData } : {}),
+      ...(sessionFromDebug ? { campusAssistantSessionId: sessionFromDebug } : {}),
     };
   } catch (e: any) {
     console.warn('[AI] askCampusAssistant failed, falling back:', e?.code ?? e?.message ?? e);

@@ -32,7 +32,12 @@ async function runCampusAssistantWithAgentRuntime(request) {
 
   const rawMessages = Array.isArray(request.data?.messages) ? request.data.messages : [];
   const context =
-    request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
+    request.data?.context && typeof request.data.context === 'object' ? { ...request.data.context } : {};
+  let sessionId = context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null;
+  if (uid && !sessionId) {
+    sessionId = createRequestId();
+    context.sessionId = sessionId;
+  }
   const timeZone = context.timezone || 'Asia/Taipei';
   const lastUserMessage = getLastUserMessage(rawMessages);
   const intentMeta = classifyIntent(lastUserMessage);
@@ -176,10 +181,18 @@ async function runCampusAssistantWithAgentRuntime(request) {
     }
   }
 
+  const requestForCore = {
+    ...request,
+    data: {
+      ...request.data,
+      context,
+    },
+  };
+
   let coreResult;
   try {
     coreResult = await executeCampusAssistantCore({
-      request,
+      request: requestForCore,
       runId,
       startedAt,
       prefetched,
@@ -251,6 +264,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     suggestions: response.suggestions,
     actions: response.actions,
     citations: response.citations,
+    assistantToolsUsed: Array.isArray(response.assistantToolsUsed) ? response.assistantToolsUsed : [],
     error: response.error,
     usage: response.usage,
     debug: response.debug,
@@ -275,6 +289,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
       route: envelope.debug.route,
       requestId: envelope.debug.requestId,
       sourcesUsed: envelope.debug.sourcesUsed,
+      ...(envelope.debug.sessionId && { sessionId: envelope.debug.sessionId }),
     };
   }
 

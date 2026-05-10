@@ -149,6 +149,9 @@ async function executeCampusAssistantCore({
     response.debug.modelProvider = modelTrace.provider;
     response.debug.model = modelTrace.model;
     if (modelTrace.errors?.length) response.debug.modelErrors = modelTrace.errors.slice(0, 2);
+    if (uid && context.sessionId) {
+      response.debug.sessionId = String(context.sessionId);
+    }
     await writeAssistantAuditLog({
       uid,
       schoolId,
@@ -200,14 +203,23 @@ async function executeCampusAssistantCore({
     );
 
     const tRag = Date.now();
-    const knowledgeChunks = await searchCampusDocs.execute(
+    const ragResult = await searchCampusDocs.execute(
       { uid, schoolId, groupId: context.groupId, timeZone },
       { query: lastUserMessage },
     );
+    const campusChunks = ragResult.campusChunks ?? [];
+    const ragWebAnswer =
+      ragResult.webFallback && ragResult.webFallback.content
+        ? {
+            content: ragResult.webFallback.content,
+            sources: ragResult.webFallback.sources || [],
+            confidence: ragResult.webFallback.confidence,
+          }
+        : null;
     await recordStep(
       'searchCampusDocs',
       { queryLen: lastUserMessage.length },
-      { chunkCount: knowledgeChunks.length },
+      { chunkCount: campusChunks.length, webFallback: Boolean(ragWebAnswer) },
       Date.now() - tRag,
     );
 
@@ -230,15 +242,18 @@ async function executeCampusAssistantCore({
       actorRole,
       permissionScope,
       structuredContext,
-      knowledgeChunks,
-      webAnswer: null,
+      knowledgeChunks: campusChunks,
+      webAnswer: ragWebAnswer,
       toolCtx: {
         uid,
         schoolId,
         groupId: context.groupId,
         timeZone,
         prefetched,
+        intent,
       },
+      uid,
+      sessionId: context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null,
     });
     modelTrace = {
       provider: modelBacked.modelResult?.provider || 'none',
@@ -254,13 +269,20 @@ async function executeCampusAssistantCore({
           : ['查看詳情', '今日摘要', '推薦餐點'];
       response.actions = modelBacked.response.actions;
       response.citations = modelBacked.response.citations;
+      if (
+        Array.isArray(modelBacked.response.assistantToolsUsed) &&
+        modelBacked.response.assistantToolsUsed.length > 0
+      ) {
+        response.assistantToolsUsed = modelBacked.response.assistantToolsUsed;
+      }
       response.debug.route = 'agent_model_rag';
       response.debug.sourcesUsed =
-        knowledgeChunks.length +
+        campusChunks.length +
         announcements.length +
         events.length +
         menus.length +
-        pois.length;
+        pois.length +
+        (ragWebAnswer?.sources?.length || 0);
       return await finalizeResponse();
     }
   }

@@ -2,7 +2,7 @@ const nodeCrypto = require('crypto');
 const { zodToJsonSchema } = require('zod-to-json-schema');
 
 const DEFAULT_PROVIDER_ORDER = ['groq', 'gemini'];
-const DEFAULT_GROQ_MODEL = 'qwen/qwen3-32b';
+const DEFAULT_GROQ_MODEL = 'llama-3.3-70b-versatile';
 const MAX_WEB_SOURCES = 4;
 const WEB_TIMEOUT_MS = 7000;
 
@@ -509,9 +509,15 @@ function buildAgentSystemPrompt({
   const toolBlock = toolPromptSection
     ? [
         '',
+        '推理策略：',
+        '1. 先判斷問題需要哪些資料（可能不只一個工具）。',
+        '2. 若需要多個工具，先呼叫最基礎的（例如課表），再依結果決定下一步。',
+        '3. 若某工具回傳空結果，可換查詢策略（例如改用 searchCampusDocs 全文檢索）。',
+        '4. 若所有工具仍無法回答、且屬校園相關，先呼叫 reflectOnGap，再告知已記錄缺口與目前無該資料；禁止編造數據。',
+        '',
         '可使用工具（名稱與用途；實際呼叫以 API tools 為準）：',
         toolPromptSection,
-        '僅在需要時呼叫工具。寫入／提交類操作須由使用者確認後由系統執行，請勿宣稱已直接完成。',
+        '寫入／提交類操作須由使用者確認後由系統執行，請勿宣稱已直接完成。',
       ].join('\n')
     : '';
 
@@ -521,6 +527,10 @@ function buildAgentSystemPrompt({
     '回答必須用繁體中文，直接、可執行，避免空泛自我介紹。',
     '所有會寫入、通知、預約、提交、付款或影響他人的動作，都只能產生待確認草稿，不可說已直接完成。',
     '只能使用已提供的授權資料與公開 web evidence；沒有資料就明說，不要編造課表、作業、成績、班次、價格或即時狀態。',
+    '你的第一優先是回答使用者訊息中最明確的問題。',
+    '只有在使用者問題很籠統（例如「幫我整理一下今天」「今天怎樣」）時，才主動產生今日摘要或簡報。',
+    '若使用者問的是單一查詢（例如：還沒還的書、某一門課、某一份作業），請專注回答該問題，不要額外附上與問題無關的長篇摘要。',
+    '當所有工具都無法解決、且問題明顯屬於校園相關時，先呼叫 reflectOnGap，再誠實說明「目前沒有這類／這份資料」；禁止編造數據。',
     '回答若使用來源，請在文字中簡短提到來源名稱。',
     '',
     `schoolId=${schoolId || 'unknown'} actorRole=${actorRole || 'student'} permissionScope=${permissionScope || 'public'}`,
@@ -703,7 +713,7 @@ async function callAssistantModel({
         const result = await callGeminiGenerate({
           fetchImpl,
           apiKey: env('GEMINI_API_KEY') || env('GOOGLE_API_KEY'),
-          model: env('GEMINI_MODEL', 'gemini-2.0-flash'),
+          model: env('GEMINI_MODEL', 'gemini-2.5-flash'),
           messages,
         });
         if (result?.content) return { ...result, errors };
@@ -736,6 +746,13 @@ async function callAssistantModelWithTools({
   const { tools, runTool } = require('./agent/tools/registry');
   const toolDefs = buildToolDefinitions(tools.filter((t) => !t.requiresConfirmation));
 
+  const toolsInvoked = [];
+  function recordToolName(name) {
+    const n = name && String(name).trim();
+    if (!n || toolsInvoked.includes(n)) return;
+    toolsInvoked.push(n);
+  }
+
   let currentMessages = [...messages];
 
   for (let round = 0; round < maxRounds; round += 1) {
@@ -747,7 +764,11 @@ async function callAssistantModelWithTools({
     });
 
     if (!result.toolCalls || result.toolCalls.length === 0) {
-      return result;
+      const transcriptMessages = [...currentMessages];
+      if (result.content) {
+        transcriptMessages.push({ role: 'assistant', content: result.content });
+      }
+      return { ...result, transcriptMessages, toolsInvoked };
     }
 
     const assistantMsg = {
@@ -759,6 +780,7 @@ async function callAssistantModelWithTools({
     const toolResults = await Promise.all(
       result.toolCalls.map(async (call) => {
         const name = call?.function?.name;
+        recordToolName(name);
         let args = {};
         try {
           const raw = call?.function?.arguments;
@@ -788,12 +810,17 @@ async function callAssistantModelWithTools({
   }
 
   const finalOrder = currentMessages.some((m) => m.role === 'tool') ? ['groq'] : providerOrder;
-  return callAssistantModel({
+  const finalResult = await callAssistantModel({
     messages: currentMessages,
     toolDefs: undefined,
     fetchImpl,
     providerOrder: finalOrder,
   });
+  const transcriptMessages = [...currentMessages];
+  if (finalResult.content) {
+    transcriptMessages.push({ role: 'assistant', content: finalResult.content });
+  }
+  return { ...finalResult, transcriptMessages, toolsInvoked };
 }
 
 module.exports = {
@@ -808,6 +835,7 @@ module.exports = {
   hashUserId,
   normalizeAssistantAction,
   normalizeAssistantActions,
+  parseProviderOrder,
   rankKnowledgeChunks,
   resolvePermissionScope,
   shouldUseServerWebSearch,
