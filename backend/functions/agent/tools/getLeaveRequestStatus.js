@@ -53,6 +53,8 @@ async function execute(ctx, rawInput) {
 
 module.exports = {
   name: 'getLeaveRequestStatus',
+  description:
+    '查詢目前登入使用者的請假申請狀態（日期、假別、審核狀態 pending/approved/rejected 等）。使用者問「老師有審核嗎」「請假通過了嗎」「假單狀態」時呼叫。',
   inputSchema,
   execute,
   requiresConfirmation: false,
