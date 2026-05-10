@@ -1,4 +1,5 @@
 const nodeCrypto = require('crypto');
+const { zodToJsonSchema } = require('zod-to-json-schema');
 
 const DEFAULT_PROVIDER_ORDER = ['groq', 'gemini'];
 const DEFAULT_GROQ_MODEL = 'qwen/qwen3-32b';
@@ -447,6 +448,34 @@ async function answerWithServerWebSearch(query, options = {}) {
   return buildGroundedWebSummary(query, [...wiki, ...ddg]);
 }
 
+function zodSchemaToOpenAiParameters(schema) {
+  if (!schema || typeof schema !== 'object') {
+    return { type: 'object', properties: {} };
+  }
+  try {
+    const json = zodToJsonSchema(schema, { target: 'openApi3', $refStrategy: 'none' });
+    delete json.$schema;
+    return json;
+  } catch {
+    return { type: 'object', properties: {} };
+  }
+}
+
+/**
+ * OpenAI / Groq Chat Completions 的 tools 陣列（function calling）。
+ * @param {Array<{ name: string, description?: string, inputSchema?: import('zod').ZodTypeAny }>} toolsList
+ */
+function buildToolDefinitions(toolsList) {
+  return (toolsList || []).map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description || t.name,
+      parameters: t.inputSchema ? zodSchemaToOpenAiParameters(t.inputSchema) : { type: 'object', properties: {} },
+    },
+  }));
+}
+
 function buildAgentSystemPrompt({
   schoolId,
   actorRole,
@@ -454,6 +483,7 @@ function buildAgentSystemPrompt({
   structuredContext = {},
   knowledgeChunks = [],
   webAnswer = null,
+  toolPromptSection = '',
 }) {
   const contextText = JSON.stringify(structuredContext, (_key, value) => {
     if (typeof value === 'string') return truncate(value, 700);
@@ -476,6 +506,15 @@ function buildAgentSystemPrompt({
         .join('\n\n')
     : '';
 
+  const toolBlock = toolPromptSection
+    ? [
+        '',
+        '可使用工具（名稱與用途；實際呼叫以 API tools 為準）：',
+        toolPromptSection,
+        '僅在需要時呼叫工具。寫入／提交類操作須由使用者確認後由系統執行，請勿宣稱已直接完成。',
+      ].join('\n')
+    : '';
+
   return [
     '你是「小靜」，一個可上架使用的校園 AI 代理。',
     '你不能宣稱自己和 Codex、ChatGPT 或任何前沿模型有相同參數量；只能說明可透過後端模型、RAG、工具和回饋改善能力。',
@@ -490,19 +529,25 @@ function buildAgentSystemPrompt({
     truncate(contextText, 5000),
     knowledgeText ? `\n可檢索知識：\n${knowledgeText}` : '',
     webText ? `\n公開網路證據：\n${webText}` : '',
+    toolBlock,
   ]
     .filter(Boolean)
     .join('\n');
 }
 
-function toOpenAiCompatBody(messages, model) {
-  return {
+function toOpenAiCompatBody(messages, model, tools = []) {
+  const body = {
     model,
     messages,
     max_tokens: Number(env('ASSISTANT_MODEL_MAX_TOKENS', '900')),
     temperature: Number(env('ASSISTANT_MODEL_TEMPERATURE', '0.4')),
     stream: false,
   };
+  if (tools.length > 0) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+  }
+  return body;
 }
 
 async function callOpenAiCompatChat({
@@ -512,6 +557,7 @@ async function callOpenAiCompatChat({
   apiKey,
   model,
   messages,
+  tools = [],
 }) {
   if (!apiKey || !model || typeof fetchImpl !== 'function') return null;
   let lastError = null;
@@ -522,7 +568,7 @@ async function callOpenAiCompatChat({
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(toOpenAiCompatBody(messages, model)),
+      body: JSON.stringify(toOpenAiCompatBody(messages, model, tools)),
     });
 
     if (response.status === 429 || response.status >= 500) {
@@ -540,10 +586,17 @@ async function callOpenAiCompatChat({
     }
 
     const data = await response.json();
+    const message = data?.choices?.[0]?.message;
+    const rawToolCalls = message?.tool_calls;
+    const toolCalls =
+      Array.isArray(rawToolCalls) && rawToolCalls.length > 0 ? rawToolCalls : null;
+    const content =
+      message?.content != null && String(message.content).length > 0 ? String(message.content) : '';
     return {
       provider,
       model,
-      content: data?.choices?.[0]?.message?.content || '',
+      content,
+      toolCalls,
       usage: data?.usage || null,
     };
   }
@@ -598,10 +651,38 @@ async function callGeminiGenerate({ fetchImpl = globalThis.fetch, apiKey, model,
 
 async function callAssistantModel({
   messages,
+  toolDefs,
   fetchImpl = globalThis.fetch,
   providerOrder = parseProviderOrder(),
 }) {
   const errors = [];
+
+  if (Array.isArray(toolDefs) && toolDefs.length > 0) {
+    try {
+      const result = await callOpenAiCompatChat({
+        fetchImpl,
+        provider: 'groq',
+        baseUrl: env('GROQ_BASE_URL', 'https://api.groq.com/openai/v1'),
+        apiKey: env('GROQ_API_KEY'),
+        model: env('GROQ_MODEL', env('OPENAI_COMPAT_MODEL', DEFAULT_GROQ_MODEL)),
+        messages,
+        tools: toolDefs,
+      });
+      if (result && (result.toolCalls?.length > 0 || result.content)) {
+        return { ...result, errors };
+      }
+    } catch (error) {
+      errors.push({ provider: 'groq', message: error?.message || String(error) });
+    }
+    return {
+      provider: 'none',
+      model: null,
+      content: '',
+      toolCalls: null,
+      usage: null,
+      errors,
+    };
+  }
 
   for (const provider of providerOrder) {
     try {
@@ -613,8 +694,9 @@ async function callAssistantModel({
           apiKey: env('GROQ_API_KEY'),
           model: env('GROQ_MODEL', env('OPENAI_COMPAT_MODEL', DEFAULT_GROQ_MODEL)),
           messages,
+          tools: [],
         });
-        if (result?.content) return result;
+        if (result?.content) return { ...result, errors };
       }
 
       if (provider === 'gemini') {
@@ -624,7 +706,7 @@ async function callAssistantModel({
           model: env('GEMINI_MODEL', 'gemini-2.0-flash'),
           messages,
         });
-        if (result?.content) return result;
+        if (result?.content) return { ...result, errors };
       }
     } catch (error) {
       errors.push({ provider, message: error?.message || String(error) });
@@ -640,12 +722,88 @@ async function callAssistantModel({
   };
 }
 
+/**
+ * requiresConfirmation 的工具不列入 toolDefs，僅能由 executeAgentWrite 在使用者確認後執行。
+ * 含 tool 角色之對話僅 Groq OpenAI 相容 API 能可靠續寫；最後一輪若歷史含 tool 則只用 groq。
+ */
+async function callAssistantModelWithTools({
+  messages,
+  toolCtx,
+  fetchImpl = globalThis.fetch,
+  providerOrder = parseProviderOrder(),
+  maxRounds = 3,
+}) {
+  const { tools, runTool } = require('./agent/tools/registry');
+  const toolDefs = buildToolDefinitions(tools.filter((t) => !t.requiresConfirmation));
+
+  let currentMessages = [...messages];
+
+  for (let round = 0; round < maxRounds; round += 1) {
+    const result = await callAssistantModel({
+      messages: currentMessages,
+      toolDefs,
+      fetchImpl,
+      providerOrder,
+    });
+
+    if (!result.toolCalls || result.toolCalls.length === 0) {
+      return result;
+    }
+
+    const assistantMsg = {
+      role: 'assistant',
+      content: result.content || null,
+      tool_calls: result.toolCalls,
+    };
+
+    const toolResults = await Promise.all(
+      result.toolCalls.map(async (call) => {
+        const name = call?.function?.name;
+        let args = {};
+        try {
+          const raw = call?.function?.arguments;
+          args = raw && String(raw).trim() ? JSON.parse(raw) : {};
+        } catch {
+          args = {};
+        }
+        try {
+          if (!name) throw new Error('missing tool name');
+          const output = await runTool(name, toolCtx, args);
+          return {
+            role: 'tool',
+            tool_call_id: call.id,
+            content: JSON.stringify(output),
+          };
+        } catch (e) {
+          return {
+            role: 'tool',
+            tool_call_id: call.id,
+            content: JSON.stringify({ error: String(e?.message || e) }),
+          };
+        }
+      }),
+    );
+
+    currentMessages = [...currentMessages, assistantMsg, ...toolResults];
+  }
+
+  const finalOrder = currentMessages.some((m) => m.role === 'tool') ? ['groq'] : providerOrder;
+  return callAssistantModel({
+    messages: currentMessages,
+    toolDefs: undefined,
+    fetchImpl,
+    providerOrder: finalOrder,
+  });
+}
+
 module.exports = {
   SAFE_AGENT_ACTIONS,
   SENSITIVE_AGENT_ACTIONS,
   answerWithServerWebSearch,
   buildAgentSystemPrompt,
+  buildToolDefinitions,
   callAssistantModel,
+  callAssistantModelWithTools,
   createRequestId,
   hashUserId,
   normalizeAssistantAction,

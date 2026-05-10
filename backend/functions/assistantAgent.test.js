@@ -1,5 +1,7 @@
+const { z } = require('zod');
 const {
   answerWithServerWebSearch,
+  buildToolDefinitions,
   callAssistantModel,
   normalizeAssistantActions,
   resolvePermissionScope,
@@ -122,6 +124,41 @@ describe('assistant agent policy', () => {
       content: 'Gemini 後端回答',
       usage: { totalTokenCount: 8 },
     });
+  });
+
+  test('Groq returns tool_calls in body when toolDefs provided', async () => {
+    process.env.GROQ_API_KEY = 'test-key';
+    process.env.GROQ_MODEL = 'qwen/qwen3-32b';
+    const toolCall = {
+      id: 'call_1',
+      type: 'function',
+      function: { name: 'fakeTool', arguments: '{}' },
+    };
+    const fetchImpl = jest.fn().mockResolvedValue(
+      mockResponse({
+        json: {
+          choices: [{ message: { content: '', tool_calls: [toolCall] } }],
+          usage: { total_tokens: 5 },
+        },
+      }),
+    );
+
+    const toolDefs = buildToolDefinitions([
+      { name: 'fakeTool', description: '測試', inputSchema: z.object({ foo: z.string().optional() }) },
+    ]);
+
+    const result = await callAssistantModel({
+      messages: [{ role: 'user', content: 'hi' }],
+      toolDefs,
+      fetchImpl,
+      providerOrder: ['groq'],
+    });
+
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0].function.name).toBe('fakeTool');
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body);
+    expect(body.tools?.length).toBe(1);
+    expect(body.tool_choice).toBe('auto');
   });
 
   test('defaults to free Groq then Gemini provider order', async () => {

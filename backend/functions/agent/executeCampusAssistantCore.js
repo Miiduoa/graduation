@@ -182,16 +182,9 @@ async function executeCampusAssistantCore({
     }
   }
 
-  const modelEligibleIntents = new Set([
-    'general',
-    'help',
-    'announcements',
-    'events',
-    'menus',
-    'pois',
-    'credit_audit',
-  ]);
-  if (modelEligibleIntents.has(intent) && lastUserMessage) {
+  /** 空集合表示所有 intent 皆先嘗試 LLM＋工具；靜態分支僅在 LLM 無回覆時 fallback */
+  const INTENTS_SKIP_LLM = new Set();
+  if (!INTENTS_SKIP_LLM.has(intent) && lastUserMessage) {
     const tFetch = Date.now();
     const [announcements, events, menus, pois] = await Promise.all([
       fetchAssistantAnnouncements(schoolId),
@@ -239,6 +232,13 @@ async function executeCampusAssistantCore({
       structuredContext,
       knowledgeChunks,
       webAnswer: null,
+      toolCtx: {
+        uid,
+        schoolId,
+        groupId: context.groupId,
+        timeZone,
+        prefetched,
+      },
     });
     modelTrace = {
       provider: modelBacked.modelResult?.provider || 'none',

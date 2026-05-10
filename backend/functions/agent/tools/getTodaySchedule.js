@@ -14,4 +14,10 @@ async function execute(ctx, rawInput) {
   });
 }
 
-module.exports = { name: 'getTodaySchedule', inputSchema, execute };
+module.exports = {
+  name: 'getTodaySchedule',
+  description:
+    '取得今天的課程時間表，含課程名稱、地點、時段。使用者詢問今天有沒有課、幾點上課、今天課表時呼叫。',
+  inputSchema,
+  execute,
+};

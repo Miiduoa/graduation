@@ -18,4 +18,10 @@ async function execute(ctx, rawInput) {
   });
 }
 
-module.exports = { name: 'searchCampusDocs', inputSchema, execute };
+module.exports = {
+  name: 'searchCampusDocs',
+  description:
+    '校園／課程知識 RAG 檢索。使用者問規定、辦法、校園知識且結構化上下文不足時，用簡短 query 檢索相關片段。',
+  inputSchema,
+  execute,
+};

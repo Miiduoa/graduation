@@ -26,4 +26,10 @@ async function execute(ctx, rawInput) {
   return executeSync(ctx, rawInput);
 }
 
-module.exports = { name: 'getPrioritySummary', inputSchema, execute };
+module.exports = {
+  name: 'getPrioritySummary',
+  description:
+    '從 prefetch 的今日課表、作業、公告濃縮成今日重點摘要（節數、下一則作業、一則公告）。需 ctx.prefetched 已有資料；問「今天重點」「摘要」時可呼叫。',
+  inputSchema,
+  execute,
+};
