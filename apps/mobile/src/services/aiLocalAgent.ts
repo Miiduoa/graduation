@@ -19,6 +19,11 @@ import {
   type ToolCallResult,
   type GeminiToolDeclaration,
 } from './aiAgentTools';
+import {
+  executeToolStandard,
+  getToolSpec,
+  type StandardToolResult,
+} from './aiToolRegistry';
 import type { AssistantChoiceMenu, CampusActorRole } from '../data';
 
 // ════════════════════════════════════════════════════════════
@@ -1665,14 +1670,69 @@ export function parseExecuteCommands(modelResponse: string): ParsedAction[] {
   return actions;
 }
 
+/**
+ * 把 StandardToolResult 轉成 ToolCallResult（相容舊回傳介面）。
+ * 為了讓上游已經 read 過的程式碼不需要改：
+ * - 把 errorCode、isDraft、missingInfo 攤到 result，方便 UI 判斷。
+ */
+function toToolCallResult(std: StandardToolResult): ToolCallResult {
+  const compatErrorParts = [std.error, std.summary].filter(Boolean) as string[];
+  return {
+    success: std.success,
+    summary: std.summary,
+    data: std.data,
+    error: std.success ? undefined : (std.error ?? compatErrorParts[0]),
+    isWrite: std.isWrite,
+    choiceMenu: std.choiceMenu,
+    learnedSkill: std.learnedSkill,
+    // ── 擴充欄位（額外屬性，不破壞既有型別） ──
+    ...({
+      errorCode: std.errorCode,
+      isDraft: std.isDraft,
+      missingInfo: std.missingInfo,
+      recordId: std.recordId,
+    } as any),
+  };
+}
+
+/**
+ * 全域 Action 執行入口。
+ *
+ * 策略：
+ * 1. 若 tool 在 registry（canonical 名稱或 alias）→ 走 executeToolStandard，
+ *    取得標準化結果，再轉回 ToolCallResult 相容形狀。
+ * 2. 否則 fallback 到舊 executeTool。
+ *
+ * lastChoiceMenu：用於把上一輪 AI 提供的清單跟使用者「幫我點第 N 個」對齊。
+ */
 export async function executeAgentActions(
   actions: ParsedAction[],
-  ctx: { userId?: string; schoolId: string; role?: CampusActorRole; lastUserMessage?: string },
+  ctx: {
+    userId?: string;
+    schoolId: string;
+    role?: CampusActorRole;
+    lastUserMessage?: string;
+    lastChoiceMenu?: AssistantChoiceMenu;
+    isOnline?: boolean;
+  },
 ): Promise<Array<{ tool: string; result: ToolCallResult }>> {
   const results: Array<{ tool: string; result: ToolCallResult }> = [];
   for (const action of actions) {
-    const result = await executeTool(action.tool, action.args, ctx);
-    results.push({ tool: action.tool, result });
+    const spec = getToolSpec(action.tool);
+    if (spec) {
+      const std = await executeToolStandard(action.tool, action.args, {
+        userId: ctx.userId,
+        schoolId: ctx.schoolId,
+        role: ctx.role,
+        lastUserMessage: ctx.lastUserMessage,
+        lastChoiceMenu: ctx.lastChoiceMenu,
+        isOnline: ctx.isOnline,
+      });
+      results.push({ tool: action.tool, result: toToolCallResult(std) });
+    } else {
+      const result = await executeTool(action.tool, action.args, ctx);
+      results.push({ tool: action.tool, result });
+    }
   }
   return results;
 }

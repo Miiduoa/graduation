@@ -9,19 +9,12 @@ import {
 const LEGACY_FAKE_DINING_NAMES = ['濟時樓學生餐廳', '伯鐸樓美食街', '思源樓輕食區'];
 
 describe('dining agent data', () => {
-  it('uses verified Providence dining options in order parameters', () => {
+  it('order_meal requires vendorId, itemId, and quantity for backend createOrder', () => {
     const orderTool = getToolById('order_meal');
-    const labels =
-      orderTool?.parameters
-        .find((param) => param.name === 'cafeteria')
-        ?.options?.map((option) => option.label) ?? [];
-
-    expect(labels).toEqual(
-      expect.arrayContaining(['靜園餐廳', '宜園餐廳', '至善美食廣場一樓', 'OK 便利商店']),
-    );
-    for (const fakeName of LEGACY_FAKE_DINING_NAMES) {
-      expect(labels.join('\n')).not.toContain(fakeName);
-    }
+    const names = orderTool?.parameters.map((p) => p.name) ?? [];
+    expect(names).toEqual(expect.arrayContaining(['vendorId', 'itemId', 'quantity']));
+    const required = orderTool?.parameters.filter((p) => p.required).map((p) => p.name) ?? [];
+    expect(required).toEqual(expect.arrayContaining(['vendorId', 'itemId', 'quantity']));
   });
 
   it('falls back to the official dining catalog instead of fake cafeteria data', () => {
