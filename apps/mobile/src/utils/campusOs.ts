@@ -237,6 +237,8 @@ export function getInboxIntent(task: InboxTask): InboxIntent {
   if (task.preferredIntent) return task.preferredIntent;
 
   switch (task.kind) {
+    case 'assistant_queue':
+      return 'verify';
     case 'assignment':
     case 'quiz':
       return 'submit';
@@ -249,6 +251,9 @@ export function getInboxIntent(task: InboxTask): InboxIntent {
 }
 
 export function getInboxUrgency(task: InboxTask): InboxUrgency {
+  if (task.kind === 'assistant_queue' && task.queueAction === 'review_ai_suggestion') {
+    return task.priority <= 0 ? 'high' : 'medium';
+  }
   if (task.kind === 'live') return 'critical';
   if (task.priority >= 90) return 'critical';
   if (task.priority >= 70) return 'high';
@@ -290,29 +295,39 @@ export function toInboxItem(task: InboxTask): InboxItem {
     urgency,
     freshness,
     actionLabel: task.actionLabel ?? getActionLabel(intent),
+    actionTarget:
+      task.kind === 'assistant_queue' && task.sourceRunId
+        ? { tab: 'Today', screen: 'AIChat', params: { sourceRunId: task.sourceRunId } }
+        : undefined,
     reason:
       task.reason ??
-      (task.kind === 'live'
-        ? '課堂正在進行，錯過會直接影響出席與互動'
-        : task.kind === 'assignment'
-          ? '這項作業會影響本週進度'
-          : task.kind === 'quiz'
-            ? '評量接近截止，延後會壓縮準備時間'
-            : '這則更新可能改變你的下一步'),
+      (task.kind === 'assistant_queue'
+        ? '助理建議需要你確認後再採取行動'
+        : task.kind === 'live'
+          ? '課堂正在進行，錯過會直接影響出席與互動'
+          : task.kind === 'assignment'
+            ? '這項作業會影響本週進度'
+            : task.kind === 'quiz'
+              ? '評量接近截止，延後會壓縮準備時間'
+              : '這則更新可能改變你的下一步'),
     consequence:
       task.consequence ??
-      (task.kind === 'live'
-        ? '可能錯過簽到、課堂互動或教材說明'
-        : task.kind === 'group'
-          ? '可能漏看課程異動、公告或回覆'
-          : '可能變成更高壓的臨時處理'),
+      (task.kind === 'assistant_queue'
+        ? '跳過確認可能誤解 AI 意圖或漏掉重要提醒'
+        : task.kind === 'live'
+          ? '可能錯過簽到、課堂互動或教材說明'
+          : task.kind === 'group'
+            ? '可能漏看課程異動、公告或回覆'
+            : '可能變成更高壓的臨時處理'),
     nextStep:
       task.nextStep ??
-      (task.kind === 'live'
-        ? '現在進入課堂模式'
-        : task.kind === 'group'
-          ? '先看更新，再決定是否進一步處理'
-          : '先打開內容，確認要求與完成條件'),
+      (task.kind === 'assistant_queue'
+        ? '開啟 AI 對話檢視與 run 相關的脈絡'
+        : task.kind === 'live'
+          ? '現在進入課堂模式'
+          : task.kind === 'group'
+            ? '先看更新，再決定是否進一步處理'
+            : '先打開內容，確認要求與完成條件'),
   };
 }
 

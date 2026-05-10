@@ -237,6 +237,11 @@ type CampusAssistantRequest = {
 };
 
 type CampusAssistantResponse = AIResponse & {
+  schemaVersion?: number;
+  run?: { runId?: string; status?: string };
+  intent?: { name?: string; confidence?: number };
+  evaluation?: { score?: number; needsUserReview?: boolean; reason?: string };
+  clarifyingQuestion?: string | null;
   debug?: Record<string, unknown>;
 };
 
@@ -401,6 +406,7 @@ const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
       'queue_action',
       'open_url',
       'check_in',
+      'review_ai_suggestion',
     ],
     preconditions: ['signed_in', 'is_self', 'school_member'],
     effects: ['navigate_only', 'create_draft', 'schedule_local_reminder', 'write_user_queue'],
@@ -417,6 +423,7 @@ const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
       'submit_draft',
       'open_url',
       'check_in',
+      'review_ai_suggestion',
     ],
     preconditions: ['signed_in', 'school_member', 'teaching_staff'],
     effects: ['navigate_only', 'create_draft', 'write_group_data', 'write_user_queue'],
@@ -430,6 +437,7 @@ const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
       'queue_action',
       'submit_draft',
       'open_url',
+      'review_ai_suggestion',
     ],
     preconditions: ['signed_in', 'school_member', 'service_staff'],
     effects: ['navigate_only', 'create_draft', 'write_school_data'],
@@ -443,6 +451,7 @@ const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
       'queue_action',
       'submit_draft',
       'open_url',
+      'review_ai_suggestion',
     ],
     preconditions: ['signed_in', 'school_member', 'service_staff'],
     effects: ['navigate_only', 'create_draft', 'write_school_data'],
@@ -456,6 +465,7 @@ const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
       'queue_action',
       'submit_draft',
       'open_url',
+      'review_ai_suggestion',
     ],
     preconditions: ['signed_in', 'school_member', 'teaching_staff'],
     effects: ['navigate_only', 'create_draft', 'write_school_data'],
@@ -469,6 +479,7 @@ const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
       'queue_action',
       'submit_draft',
       'open_url',
+      'review_ai_suggestion',
     ],
     preconditions: ['signed_in', 'school_member', 'admin'],
     effects: ['navigate_only', 'create_draft', 'write_school_data'],
@@ -482,6 +493,7 @@ const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
       'queue_action',
       'submit_draft',
       'open_url',
+      'review_ai_suggestion',
     ],
     preconditions: ['signed_in', 'school_member', 'admin'],
     effects: ['navigate_only', 'create_draft', 'write_school_data'],
@@ -1388,6 +1400,11 @@ async function tryChatWithOnDeviceAssistant(
   signal?: AbortSignal,
   onToken?: StreamingCallback,
 ): Promise<AIResponse | null> {
+  /** 僅在離線／裝置內建 provider 使用本地助理，不作為線上主路徑 */
+  if (!isDeviceOnlyProvider(getConfig().aiProvider)) {
+    return null;
+  }
+
   let hadSavedModel = false;
 
   try {
@@ -2950,10 +2967,14 @@ async function callCampusAssistant(
       },
     });
 
-    const data = result.data;
+    const data = result.data as CampusAssistantResponse;
     const filteredActions = filterActionsByRole(data.actions, context.role);
+    let content = data.content ?? '';
+    if (data.clarifyingQuestion && !content.includes(data.clarifyingQuestion)) {
+      content = [content, `（補充：${data.clarifyingQuestion}）`].filter(Boolean).join('\n\n');
+    }
     return {
-      content: data.content ?? '',
+      content,
       suggestions: data.suggestions ?? extractSuggestions(data.content ?? ''),
       actions: filteredActions,
       citations: data.citations,
@@ -2978,42 +2999,20 @@ export async function chatWithAI(
 ): Promise<AIResponse> {
   const config = getConfig();
 
-  // ── AI 自主代理模式：不再預先注入資料 ──
-  // Gemini 會透過 function calling 自己決定要查什麼資料
-  // 只有在非 Gemini 模式才用舊的注入邏輯作為降級
-  if (config.aiProvider !== 'gemini') {
-    try {
-      const lastMsg = messages[messages.length - 1]?.content ?? '';
-      const insightsPrompt = await getCachedInsightsPrompt();
-      if (insightsPrompt) {
-        context = { ...context, _realtimeInsightsPrompt: insightsPrompt };
-      }
-      if (lastMsg.length > 0 && lastMsg.length < 200) {
-        const actionResult = await detectAndExecuteSmartAction(lastMsg);
-        if (actionResult && actionResult.success) {
-          context = { ...context, _smartActionResult: actionResult };
-        }
-      }
-    } catch (e) {
-      console.warn('[AI] Legacy insights injection failed (non-fatal):', e);
-    }
-  }
-
   try {
+    const managedFirst = await callManagedAI(messages, context, signal);
+    if (managedFirst) return managedFirst;
+
     if (config.isReleaseLike) {
-      const managedResponse = await callManagedAI(messages, context, signal);
-      if (managedResponse) return managedResponse;
       return {
         content: '',
         error: 'AI 服務目前無法連線；上架版本只允許透過後端代理呼叫 AI。',
       };
     }
 
-    // ── 自動偵測本地 LLM：若模型已下載/啟用就優先載入使用，無需手動切換 provider ──
-    const onDeviceResponse = await tryChatWithOnDeviceAssistant(messages, context, signal);
-    if (onDeviceResponse) return onDeviceResponse;
-
     if (isDeviceOnlyProvider(config.aiProvider)) {
+      const onDeviceResponse = await tryChatWithOnDeviceAssistant(messages, context, signal);
+      if (onDeviceResponse) return onDeviceResponse;
       return await mockAIResponse(messages, context, signal);
     }
 
@@ -3046,9 +3045,9 @@ export async function chatWithAI(
       return await mockAIResponse(messages, context, signal);
     }
 
-    const managedResponse = await callManagedAI(messages, context, signal);
-    if (managedResponse) {
-      return managedResponse;
+    const managedFallback = await callManagedAI(messages, context, signal);
+    if (managedFallback) {
+      return managedFallback;
     }
 
     if (isStrictRealDataMode()) {
@@ -3077,87 +3076,69 @@ export async function chatWithCampusAssistant(
 ): Promise<AIResponse> {
   const config = getConfig();
 
-  // ── AI 自主代理模式：Gemini 透過 function calling 自主查詢 ──
-  if (config.aiProvider !== 'gemini') {
-    try {
-      const lastMsg = messages[messages.length - 1]?.content ?? '';
-      const insightsPrompt = await getCachedInsightsPrompt();
-      if (insightsPrompt) context = { ...context, _realtimeInsightsPrompt: insightsPrompt };
-      if (lastMsg.length > 0 && lastMsg.length < 200) {
-        const actionResult = await detectAndExecuteSmartAction(lastMsg);
-        if (actionResult?.success) {
-          context = { ...context, _smartActionResult: actionResult };
-        }
-      }
-    } catch (e) {
-      console.warn('[AI] CampusAssistant insights injection failed:', e);
-    }
-  }
-
-  if (config.isReleaseLike) {
+  try {
     const cloudResponse = await callManagedAI(messages, context, signal);
     if (cloudResponse) return cloudResponse;
-    return {
-      content: '',
-      error: 'Campus Assistant 暫時不可用；上架版本只允許透過後端代理呼叫 AI。',
-    };
-  }
 
-  // ── 自動偵測本地 LLM：若模型已下載/啟用就優先載入使用 ──
-  const onDeviceResponse = await tryChatWithOnDeviceAssistant(messages, context, signal);
-  if (onDeviceResponse) return onDeviceResponse;
+    if (config.isReleaseLike) {
+      return {
+        content: '',
+        error: 'Campus Assistant 暫時不可用；上架版本只允許透過後端代理呼叫 AI。',
+      };
+    }
 
-  // ── Offline 模式：完全不呼叫雲端或本地 server ──
-  if (isDeviceOnlyProvider(config.aiProvider)) {
-    return mockAIResponse(messages, context, signal);
-  }
+    if (isDeviceOnlyProvider(config.aiProvider)) {
+      const onDeviceResponse = await tryChatWithOnDeviceAssistant(messages, context, signal);
+      if (onDeviceResponse) return onDeviceResponse;
+      return mockAIResponse(messages, context, signal);
+    }
 
-  // ── Gemini 優先模式：直接用 Gemini API（真正的 LLM 理解力） ──
-  if (config.aiProvider === 'gemini') {
+    if (config.aiProvider === 'gemini') {
+      try {
+        const geminiResponse = await callGeminiAPI(messages, context, signal);
+        if (geminiResponse) return geminiResponse;
+      } catch (e: any) {
+        if (e.name === 'AbortError') throw e;
+        console.warn('[AI] Gemini failed, falling back:', e);
+      }
+      return mockAIResponse(messages, context, signal);
+    }
+
+    if (config.aiProvider === 'local-llm') {
+      const localResponse = await callLocalLLM(messages, context, signal);
+      if (localResponse) return localResponse;
+      try {
+        const geminiResponse = await callGeminiAPI(messages, context, signal);
+        if (geminiResponse) return geminiResponse;
+      } catch (e) {
+        console.warn('[AI] Campus: Gemini fallback failed:', e);
+      }
+    }
+
+    const cloudAgain = await callManagedAI(messages, context, signal);
+    if (cloudAgain) return cloudAgain;
+
+    if (isStrictRealDataMode()) {
+      return {
+        content: '',
+        error: 'Campus Assistant 暫時不可用；已停用 mock 回退以維持真實資料策略。',
+      };
+    }
+
     try {
       const geminiResponse = await callGeminiAPI(messages, context, signal);
       if (geminiResponse) return geminiResponse;
     } catch (e: any) {
       if (e.name === 'AbortError') throw e;
-      console.warn('[AI] Gemini failed, falling back:', e);
     }
-    // Gemini 失敗 → mock
+
     return mockAIResponse(messages, context, signal);
-  }
-
-  // ── Local LLM 模式 ──
-  if (config.aiProvider === 'local-llm') {
-    const localResponse = await callLocalLLM(messages, context, signal);
-    if (localResponse) return localResponse;
-    // local-llm 失敗 → 嘗試 Gemini
-    try {
-      const geminiResponse = await callGeminiAPI(messages, context, signal);
-      if (geminiResponse) return geminiResponse;
-    } catch (e) {
-      console.warn('[AI] Campus: Gemini fallback failed:', e);
-    }
-  }
-
-  // ── Cloud 模式 ──
-  const cloudResponse = await callManagedAI(messages, context, signal);
-  if (cloudResponse) return cloudResponse;
-
-  if (isStrictRealDataMode()) {
-    return {
-      content: '',
-      error: 'Campus Assistant 暫時不可用；已停用 mock 回退以維持真實資料策略。',
-    };
-  }
-
-  // ── 所有外部服務失敗 → 嘗試 Gemini → mock ──
-  try {
-    const geminiResponse = await callGeminiAPI(messages, context, signal);
-    if (geminiResponse) return geminiResponse;
   } catch (e: any) {
-    if (e.name === 'AbortError') throw e;
+    if (e.name === 'AbortError') {
+      return { content: '', error: '請求已取消' };
+    }
+    throw e;
   }
-
-  return mockAIResponse(messages, context, signal);
 }
 
 /**

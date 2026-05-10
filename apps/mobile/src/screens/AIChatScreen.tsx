@@ -1776,6 +1776,9 @@ export function AIChatScreen(props: any) {
       ? props.route.params.proactiveReportId
       : null;
 
+  const routeSourceRunId =
+    typeof props?.route?.params?.sourceRunId === 'string' ? props.route.params.sourceRunId : null;
+
   useEffect(() => {
     let cancelled = false;
     async function loadReports() {
@@ -6407,6 +6410,17 @@ export function AIChatScreen(props: any) {
       return;
     }
 
+    if (action === 'review_ai_suggestion') {
+      const sid =
+        params && typeof (params as any).sourceRunId === 'string'
+          ? String((params as any).sourceRunId)
+          : null;
+      if (sid) {
+        nav?.navigate?.('AIChat', { sourceRunId: sid });
+      }
+      return;
+    }
+
     if ((action === 'navigate' || action === 'start_navigation') && params) {
       const screen = typeof params.screen === 'string' ? params.screen : null;
       const nested = typeof params.nested === 'string' ? params.nested : null;
@@ -6582,6 +6596,29 @@ export function AIChatScreen(props: any) {
                 </Text>
               </View>
             </View>
+
+            {routeSourceRunId ? (
+              <View
+                style={{
+                  marginBottom: 12,
+                  padding: 12,
+                  borderRadius: 12,
+                  backgroundColor: `${theme.colors.accent}14`,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                }}
+              >
+                <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '700' }}>
+                  此對話與助理執行紀錄相連
+                </Text>
+                <Text
+                  style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}
+                  selectable
+                >
+                  runId：{routeSourceRunId}
+                </Text>
+              </View>
+            ) : null}
 
             {/* Proactive Banners */}
             {proactiveMessages.map((pm, i) => (

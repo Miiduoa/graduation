@@ -862,7 +862,7 @@ export type AttendanceSummary = {
 
 export type InboxTask = {
   id: string;
-  kind: 'live' | 'assignment' | 'quiz' | 'group';
+  kind: 'live' | 'assignment' | 'quiz' | 'group' | 'assistant_queue';
   groupId: string;
   groupName: string;
   title: string;
@@ -877,6 +877,10 @@ export type InboxTask = {
   reason?: string;
   consequence?: string;
   nextStep?: string;
+  /** AI agent run（例如待確認建議） */
+  sourceRunId?: string;
+  actionQueueId?: string;
+  queueAction?: string;
 };
 
 export type InboxIntent = 'submit' | 'join' | 'review' | 'read' | 'reply' | 'navigate' | 'verify';
