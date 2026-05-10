@@ -385,7 +385,7 @@ export function GroupDetailScreen(props: any) {
               await addDoc(collection(db, 'groups', groupId, 'posts', postRef.id, 'comments'), {
                 body: `**AI 初步回答（供參考）：**\n\n${aiResponse.content}\n\n_此回答由 AI 自動生成，請以教師和同學的回答為準。_`,
                 createdAt: serverTimestamp(),
-                authorId: 'ai-assistant',
+                authorId: auth.user.uid,
                 authorName: 'AI 助理',
                 isAI: true,
               });

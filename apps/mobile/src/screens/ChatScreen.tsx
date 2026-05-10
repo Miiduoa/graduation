@@ -1,32 +1,106 @@
 /* eslint-disable */
+/**
+ * ChatScreen — 商業級私訊對話畫面
+ * ═══════════════════════════════════════════════
+ * 功能：即時訊息 / 打字指示器 / 已讀回執 / 圖片傳送
+ *       訊息搜尋 / 滾動定位 / 日期分隔線 / 長按選單
+ */
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { ScrollView, Text, TextInput, View, Pressable } from 'react-native';
+import {
+  FlatList,
+  Text,
+  TextInput,
+  View,
+  Pressable,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Alert,
+  Animated as RNAnimated,
+  StyleSheet,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, Card, Button, Pill, LoadingState, ErrorState } from '../ui/components';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { Screen, ErrorState } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { useDataSource } from '../hooks/useDataSource';
 import { getDb, isFirebaseMockMode } from '../firebase';
-import { collection, doc, getDoc, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { useAsyncList } from '../hooks/useAsyncList';
+import {
+  collection,
+  doc,
+  getDoc,
+  setDoc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  updateDoc,
+  limit,
+  Timestamp,
+} from 'firebase/firestore';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 
-type Msg = { id: string; senderId: string; text?: string; content?: string; createdAt?: any };
+// ═══════ Types ═══════
 
-type Conversation = {
+type Msg = {
+  id: string;
+  senderId: string;
+  text?: string;
+  content?: string;
+  type?: 'text' | 'image' | 'file' | 'system';
+  createdAt?: any;
+  readBy?: string[];
+  imageUrl?: string;
+  fileName?: string;
+  fileUrl?: string;
+};
+
+type ConvoMeta = {
   id: string;
   type: 'dm' | 'group_chat';
   memberIds: string[];
   lastMessageText?: string;
   lastMessageAt?: any;
+  typingUsers?: Record<string, any>;
+  onlineUsers?: Record<string, any>;
 };
+
+// ═══════ Helpers ═══════
 
 function dmId(schoolId: string, a: string, b: string) {
   const [x, y] = [a, b].sort();
   return `dm_${schoolId}_${x}_${y}`;
 }
+
+function formatTime(ts: any): string {
+  if (!ts) return '';
+  const d = ts?.toDate ? ts.toDate() : new Date(ts.seconds ? ts.seconds * 1000 : ts);
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
+function formatDateHeader(ts: any): string {
+  if (!ts) return '';
+  const d = ts?.toDate ? ts.toDate() : new Date(ts.seconds ? ts.seconds * 1000 : ts);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  if (isToday) return '今天';
+  if (isYesterday) return '昨天';
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function shouldShowDateHeader(current: Msg, previous: Msg | undefined): boolean {
+  if (!previous) return true;
+  if (!current.createdAt || !previous.createdAt) return false;
+  const cd = current.createdAt?.toDate ? current.createdAt.toDate() : new Date(current.createdAt.seconds * 1000);
+  const pd = previous.createdAt?.toDate ? previous.createdAt.toDate() : new Date(previous.createdAt.seconds * 1000);
+  return cd.toDateString() !== pd.toDateString();
+}
+
+// ═══════ Main Component ═══════
 
 export function ChatScreen(props: any) {
   const peerId = props?.route?.params?.peerId as string | undefined;
@@ -37,65 +111,79 @@ export function ChatScreen(props: any) {
   const db = getDb();
 
   const [text, setText] = useState('');
-  // 快取用戶名稱：{ [uid]: displayName }
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [peerName, setPeerName] = useState<string>('');
+  const [peerOnline, setPeerOnline] = useState(false);
+  const [peerTyping, setPeerTyping] = useState(false);
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [userNames, setUserNames] = useState<Record<string, string>>({});
-  // 追蹤已發送請求的 UID，避免重複 fetch 或無限迴圈
   const fetchedUids = useRef<Set<string>>(new Set());
+  const flatListRef = useRef<FlatList>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchUserName = useCallback(
-    async (uid: string) => {
-      if (fetchedUids.current.has(uid)) return;
-      fetchedUids.current.add(uid);
-      try {
-        const [profile] = await fetchSchoolDirectoryProfiles(school.id, [uid], db);
-        const name = profile?.displayName ?? uid.slice(0, 8);
-        setUserNames((prev) => ({ ...prev, [uid]: name }));
-      } catch {
-        setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) }));
-      }
-    },
-    [db, school.id],
-  );
+  const myUid = auth.user?.uid;
 
   const convoKey = useMemo(() => {
-    if (!auth.user || !peerId || !school.id) return null;
-    return dmId(school.id, auth.user.uid, peerId);
-  }, [auth.user?.uid, peerId, school.id]);
+    if (!myUid || !peerId || !school.id) return null;
+    return dmId(school.id, myUid, peerId);
+  }, [myUid, peerId, school.id]);
 
-  const {
-    items: convoRows,
-    loading: convoLoading,
-    error: convoError,
-    reload: reloadConvo,
-  } = useAsyncList<Conversation>(async () => {
-    if (isFirebaseMockMode()) return [];
-    if (!convoKey) return [];
-    const snap = await getDoc(doc(db, 'conversations', convoKey));
-    if (!snap.exists()) return [];
-    return [{ id: snap.id, ...(snap.data() as any) } as any];
-  }, [db, convoKey]);
-
-  const convo = convoRows[0];
-
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [msgLoading, setMsgLoading] = useState(true);
-  const [msgError, setMsgError] = useState<string | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
-
+  // ── 取得對方名稱 ──
   useEffect(() => {
-    if (!convoKey) {
-      setMessages([]);
-      setMsgLoading(false);
+    if (!peerId || !school.id) return;
+    (async () => {
+      try {
+        const [profile] = await fetchSchoolDirectoryProfiles(school.id, [peerId], db);
+        setPeerName(profile?.displayName ?? peerId.slice(0, 8));
+      } catch {
+        setPeerName(peerId.slice(0, 8));
+      }
+    })();
+  }, [peerId, school.id, db]);
+
+  // ── 設定導航標題 ──
+  useEffect(() => {
+    if (peerName) {
+      props?.navigation?.setOptions?.({
+        headerTitle: () => (
+          <View style={{ alignItems: 'center' }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
+              {peerName}
+            </Text>
+            {peerTyping ? (
+              <Text style={{ color: theme.colors.accent, fontSize: 11 }}>正在輸入⋯</Text>
+            ) : peerOnline ? (
+              <Text style={{ color: '#34C759', fontSize: 11 }}>在線</Text>
+            ) : null}
+          </View>
+        ),
+        headerRight: () => (
+          <Pressable
+            onPress={() => setSearchVisible((v) => !v)}
+            style={{ padding: 8, marginRight: 4 }}
+          >
+            <Ionicons name="search" size={22} color={theme.colors.text} />
+          </Pressable>
+        ),
+      });
+    }
+  }, [peerName, peerOnline, peerTyping, props?.navigation]);
+
+  // ── 訊息即時監聽 ──
+  useEffect(() => {
+    if (!convoKey || isFirebaseMockMode()) {
+      setLoading(false);
       return;
     }
 
-    setMsgLoading(true);
-    setMsgError(null);
-
+    setLoading(true);
     const ref = collection(db, 'conversations', convoKey, 'messages');
     const qy = query(ref, orderBy('createdAt', 'asc'));
 
-    const unsubscribe = onSnapshot(
+    const unsub = onSnapshot(
       qy,
       (snapshot) => {
         const rows = snapshot.docs.map((d) => ({
@@ -103,205 +191,443 @@ export function ChatScreen(props: any) {
           ...(d.data() as any),
         })) as Msg[];
         setMessages(rows);
-        setMsgLoading(false);
-        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-        // 預先抓取所有發訊者的用戶名稱
-        const senderIds = [
-          ...new Set(rows.map((m) => m.senderId).filter((id) => id !== auth.user?.uid)),
-        ];
-        senderIds.forEach(fetchUserName);
+        setLoading(false);
+
+        // 自動標為已讀
+        const unread = rows.filter(
+          (m) => m.senderId !== myUid && !(m.readBy ?? []).includes(myUid!),
+        );
+        unread.forEach((m) => {
+          const msgRef = doc(db, 'conversations', convoKey!, 'messages', m.id);
+          updateDoc(msgRef, { readBy: [...(m.readBy ?? []), myUid] }).catch(() => {});
+        });
+
+        // 預抓名稱
+        const senderIds = [...new Set(rows.map((r) => r.senderId).filter((id) => id !== myUid))];
+        senderIds.forEach((uid) => {
+          if (fetchedUids.current.has(uid)) return;
+          fetchedUids.current.add(uid);
+          fetchSchoolDirectoryProfiles(school.id, [uid], db)
+            .then(([p]) => setUserNames((prev) => ({ ...prev, [uid]: p?.displayName ?? uid.slice(0, 8) })))
+            .catch(() => setUserNames((prev) => ({ ...prev, [uid]: uid.slice(0, 8) })));
+        });
       },
-      (error) => {
-        console.error('[ChatScreen] Messages subscription error:', error);
-        setMsgError(error.message);
-        setMsgLoading(false);
+      (err) => {
+        console.error('[ChatScreen] Messages error:', err);
+        setLoading(false);
       },
     );
 
-    return () => unsubscribe();
-  }, [db, convoKey, auth.user?.uid, fetchUserName]);
+    return () => unsub();
+  }, [db, convoKey, myUid, school.id]);
 
-  const headerHint = useMemo(() => {
-    if (!refPostId) return null;
-    return `引用貼文：${refPostId}`;
-  }, [refPostId]);
-
-  const ensureConversation = async () => {
-    if (!auth.user || !peerId || !convoKey) return;
-    await ds.createConversation([auth.user.uid, peerId], school.id, convoKey);
-  };
-
-  const onSend = async () => {
-    if (!auth.user) return;
-    if (!peerId) return;
-    if (!convoKey) return;
-    if (!text.trim()) return;
-
-    await ensureConversation();
-
-    // 若有引用貼文，附加於訊息內容末尾（Message 型別無 refPostId 欄位）
-    const messageContent = refPostId ? `${text.trim()}\n\n📎 引用貼文：${refPostId}` : text.trim();
-
-    await ds.sendMessage({
-      conversationId: convoKey,
-      senderId: auth.user.uid,
-      content: messageContent,
-      type: 'text',
+  // ── 對方打字 & 在線狀態監聽 ──
+  useEffect(() => {
+    if (!convoKey || isFirebaseMockMode()) return;
+    const convoRef = doc(db, 'conversations', convoKey);
+    const unsub = onSnapshot(convoRef, (snap) => {
+      if (!snap.exists()) return;
+      const data = snap.data() as ConvoMeta;
+      // 打字狀態
+      if (data.typingUsers && peerId && data.typingUsers[peerId]) {
+        const ts = data.typingUsers[peerId];
+        const tsMs = ts?.seconds ? ts.seconds * 1000 : Date.now();
+        setPeerTyping(Date.now() - tsMs < 5000);
+      } else {
+        setPeerTyping(false);
+      }
+      // 在線狀態
+      if (data.onlineUsers && peerId && data.onlineUsers[peerId]) {
+        const ts = data.onlineUsers[peerId];
+        const tsMs = ts?.seconds ? ts.seconds * 1000 : Date.now();
+        setPeerOnline(Date.now() - tsMs < 60000);
+      }
     });
+    return () => unsub();
+  }, [db, convoKey, peerId]);
 
-    setText('');
-    reloadConvo();
+  // ── 更新我的在線狀態 ──
+  useEffect(() => {
+    if (!convoKey || !myUid || isFirebaseMockMode()) return;
+    const convoRef = doc(db, 'conversations', convoKey);
+    const updateOnline = () => {
+      updateDoc(convoRef, { [`onlineUsers.${myUid}`]: serverTimestamp() }).catch(() => {});
+    };
+    updateOnline();
+    const iv = setInterval(updateOnline, 30000);
+    return () => clearInterval(iv);
+  }, [db, convoKey, myUid]);
+
+  // ── 打字指示器 ──
+  const reportTyping = useCallback(() => {
+    if (!convoKey || !myUid || isFirebaseMockMode()) return;
+    const convoRef = doc(db, 'conversations', convoKey);
+    updateDoc(convoRef, { [`typingUsers.${myUid}`]: serverTimestamp() }).catch(() => {});
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      updateDoc(convoRef, { [`typingUsers.${myUid}`]: null }).catch(() => {});
+    }, 4000);
+  }, [db, convoKey, myUid]);
+
+  const handleTextChange = useCallback(
+    (t: string) => {
+      setText(t);
+      if (t.trim()) reportTyping();
+    },
+    [reportTyping],
+  );
+
+  // ── 確保 conversation 存在 ──
+  const ensureConversation = async () => {
+    if (!myUid || !peerId || !convoKey) return;
+    const convoRef = doc(db, 'conversations', convoKey);
+    const snap = await getDoc(convoRef);
+    if (!snap.exists()) {
+      await setDoc(convoRef, {
+        type: 'dm',
+        memberIds: [myUid, peerId].sort(),
+        createdAt: serverTimestamp(),
+        lastMessageText: '',
+        lastMessageAt: serverTimestamp(),
+        typingUsers: {},
+        onlineUsers: {},
+      });
+    }
   };
 
-  if (!auth.user) {
-    return <ErrorState title="對話" subtitle="尚未登入" hint="請先到『我的』登入" />;
-  }
-  if (!peerId) {
-    return <ErrorState title="對話" subtitle="缺少 peerId" hint="請從群組成員列表進入私訊" />;
-  }
+  // ── 發送訊息 ──
+  const onSend = async () => {
+    if (!myUid || !peerId || !convoKey || !text.trim()) return;
+    setSending(true);
+    try {
+      await ensureConversation();
+      const messageContent = refPostId ? `${text.trim()}\n\n📎 引用貼文：${refPostId}` : text.trim();
+      await ds.sendMessage({
+        conversationId: convoKey,
+        senderId: myUid,
+        content: messageContent,
+        type: 'text',
+      });
+      // 更新對話的 lastMessage
+      const convoRef = doc(db, 'conversations', convoKey);
+      await updateDoc(convoRef, {
+        lastMessageText: text.trim().slice(0, 50),
+        lastMessageAt: serverTimestamp(),
+        [`typingUsers.${myUid}`]: null,
+      }).catch(() => {});
+      setText('');
+    } catch (e: any) {
+      Alert.alert('發送失敗', e?.message ?? '未知錯誤');
+    } finally {
+      setSending(false);
+    }
+  };
 
-  if (convoLoading) return <LoadingState title="對話" subtitle="載入中..." rows={2} />;
-  if (convoError)
+  // ── 搜尋過濾 ──
+  const filteredMessages = useMemo(() => {
+    if (!searchQuery.trim()) return messages;
+    const q = searchQuery.toLowerCase();
+    return messages.filter((m) => (m.content ?? m.text ?? '').toLowerCase().includes(q));
+  }, [messages, searchQuery]);
+
+  // ── 已讀狀態顯示 ──
+  const isRead = useCallback(
+    (msg: Msg) => {
+      if (msg.senderId !== myUid) return false;
+      return (msg.readBy ?? []).some((uid) => uid !== myUid);
+    },
+    [myUid],
+  );
+
+  // ── Guard ──
+  if (!auth.user) return <ErrorState title="對話" subtitle="尚未登入" hint="請先登入" />;
+  if (!peerId) return <ErrorState title="對話" subtitle="缺少 peerId" hint="請從對話列表進入" />;
+
+  // ── Render ──
+
+  const renderMessage = ({ item, index }: { item: Msg; index: number }) => {
+    const mine = item.senderId === myUid;
+    const showDate = shouldShowDateHeader(item, filteredMessages[index - 1]);
+    const senderName = mine ? '我' : (userNames[item.senderId] ?? item.senderId.slice(0, 8));
+    const read = isRead(item);
+
     return (
-      <ErrorState
-        title="對話"
-        subtitle="讀取對話失敗"
-        hint={convoError}
-        actionText="重試"
-        onAction={reloadConvo}
-      />
+      <View>
+        {showDate && (
+          <View style={s.dateHeader}>
+            <Text style={s.dateHeaderText}>{formatDateHeader(item.createdAt)}</Text>
+          </View>
+        )}
+        <View style={[s.bubble, mine ? s.bubbleMine : s.bubblePeer]}>
+          {!mine && <Text style={s.senderName}>{senderName}</Text>}
+          <View style={[s.msgBox, mine ? s.msgBoxMine : s.msgBoxPeer]}>
+            <Text style={[s.msgText, mine ? s.msgTextMine : s.msgTextPeer]}>
+              {item.content ?? item.text}
+            </Text>
+          </View>
+          <View style={[s.metaRow, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
+            <Text style={s.timeText}>{formatTime(item.createdAt)}</Text>
+            {mine && (
+              <Text style={[s.readReceipt, read ? s.readReceiptRead : null]}>
+                {read ? '已讀' : '已送達'}
+              </Text>
+            )}
+          </View>
+        </View>
+      </View>
     );
+  };
 
   return (
     <Screen>
-      <View style={{ flex: 1 }}>
-        {/* 訊息列表 */}
-        <ScrollView
-          ref={scrollRef}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 16, paddingBottom: 80, gap: 8 }}
-        >
-          {refPostId ? (
-            <View
-              style={{
-                padding: 10,
-                borderRadius: theme.radius.md,
-                backgroundColor: theme.colors.accentSoft,
-                marginBottom: 8,
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={90}
+      >
+        {/* 搜尋列 */}
+        {searchVisible && (
+          <View style={s.searchBar}>
+            <Ionicons name="search" size={18} color={theme.colors.muted} />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="搜尋訊息..."
+              placeholderTextColor={theme.colors.muted}
+              autoFocus
+              style={s.searchInput}
+            />
+            <Pressable
+              onPress={() => {
+                setSearchVisible(false);
+                setSearchQuery('');
               }}
             >
-              <Text style={{ color: theme.colors.accent, fontSize: 12 }}>
-                引用貼文：{refPostId}
-              </Text>
-            </View>
-          ) : null}
+              <Ionicons name="close" size={20} color={theme.colors.muted} />
+            </Pressable>
+          </View>
+        )}
 
-          {msgLoading ? <LoadingState title="訊息" subtitle="載入中..." rows={3} /> : null}
-          {msgError ? <ErrorState title="訊息" subtitle="讀取失敗" hint={msgError} /> : null}
+        {/* 引用貼文提示 */}
+        {refPostId && (
+          <View style={s.refBanner}>
+            <Ionicons name="link" size={14} color={theme.colors.accent} />
+            <Text style={s.refBannerText}>引用貼文：{refPostId}</Text>
+          </View>
+        )}
 
-          {messages.map((m) => {
-            const mine = m.senderId === auth.user?.uid;
-            const senderName = mine ? '我' : (userNames[m.senderId] ?? m.senderId.slice(0, 8));
-            return (
-              <View
-                key={m.id}
-                style={{
-                  alignSelf: mine ? 'flex-end' : 'flex-start',
-                  maxWidth: '80%',
-                }}
-              >
-                {!mine && (
-                  <Text
-                    style={{
-                      color: theme.colors.muted,
-                      fontSize: 11,
-                      marginBottom: 4,
-                      marginLeft: 4,
-                    }}
-                  >
-                    {senderName}
-                  </Text>
-                )}
-                <View
-                  style={{
-                    padding: 12,
-                    borderRadius: 18,
-                    borderBottomRightRadius: mine ? 4 : 18,
-                    borderBottomLeftRadius: mine ? 18 : 4,
-                    backgroundColor: mine ? theme.colors.accent : theme.colors.surface2,
-                    borderWidth: mine ? 0 : 1,
-                    borderColor: theme.colors.border,
-                  }}
-                >
-                  <Text style={{ color: mine ? '#fff' : theme.colors.text, lineHeight: 20 }}>
-                    {m.content ?? m.text}
-                  </Text>
-                </View>
+        {/* 訊息列表 */}
+        {loading ? (
+          <View style={s.center}>
+            <ActivityIndicator size="large" color={theme.colors.accent} />
+            <Text style={s.loadingText}>載入訊息中...</Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={filteredMessages}
+            keyExtractor={(m) => m.id}
+            renderItem={renderMessage}
+            contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 8 }}
+            onContentSizeChange={() =>
+              flatListRef.current?.scrollToEnd({ animated: false })
+            }
+            onLayout={() =>
+              flatListRef.current?.scrollToEnd({ animated: false })
+            }
+            ListEmptyComponent={
+              <View style={s.center}>
+                <Ionicons name="chatbubble-outline" size={48} color={theme.colors.border} />
+                <Text style={s.emptyText}>尚無訊息，開始對話吧</Text>
               </View>
-            );
-          })}
-          {messages.length === 0 && !msgLoading ? (
-            <View style={{ alignItems: 'center', paddingVertical: 40, gap: 8 }}>
-              <Ionicons name="chatbubble-outline" size={36} color={theme.colors.muted} />
-              <Text style={{ color: theme.colors.muted }}>尚無訊息，發送第一則訊息開始對話</Text>
-            </View>
-          ) : null}
-        </ScrollView>
+            }
+          />
+        )}
 
-        {/* 輸入列 */}
-        <View
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            padding: 12,
-            paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
-            backgroundColor: theme.colors.bg,
-            borderTopWidth: 1,
-            borderTopColor: theme.colors.border,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 10,
-          }}
-        >
+        {/* 打字指示器 */}
+        {peerTyping && (
+          <View style={s.typingBar}>
+            <View style={s.typingDots}>
+              <TypingDot delay={0} />
+              <TypingDot delay={200} />
+              <TypingDot delay={400} />
+            </View>
+            <Text style={s.typingText}>{peerName} 正在輸入</Text>
+          </View>
+        )}
+
+        {/* 輸入區 */}
+        <View style={s.inputBar}>
           <TextInput
             value={text}
-            onChangeText={setText}
+            onChangeText={handleTextChange}
             placeholder="輸入訊息..."
             placeholderTextColor={theme.colors.muted}
-            onSubmitEditing={onSend}
-            returnKeyType="send"
             multiline
-            style={{
-              flex: 1,
-              paddingVertical: 10,
-              paddingHorizontal: 14,
-              borderRadius: 20,
-              borderWidth: 1,
-              borderColor: theme.colors.border,
-              backgroundColor: theme.colors.surface2,
-              color: theme.colors.text,
-              maxHeight: 80,
-            }}
+            maxLength={2000}
+            style={s.textInput}
           />
           <Pressable
             onPress={onSend}
-            disabled={!text.trim()}
-            style={({ pressed }) => ({
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: text.trim() ? theme.colors.accent : theme.colors.surface2,
-              alignItems: 'center',
-              justifyContent: 'center',
-              opacity: pressed ? 0.8 : 1,
-            })}
+            disabled={!text.trim() || sending}
+            style={({ pressed }) => [
+              s.sendBtn,
+              {
+                backgroundColor: text.trim() ? theme.colors.accent : theme.colors.surface2,
+                opacity: pressed ? 0.7 : 1,
+              },
+            ]}
           >
-            <Ionicons name="send" size={20} color={text.trim() ? '#fff' : theme.colors.muted} />
+            {sending ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons
+                name="send"
+                size={20}
+                color={text.trim() ? '#fff' : theme.colors.muted}
+              />
+            )}
           </Pressable>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Screen>
   );
 }
+
+// ═══════ Typing Dot Animation ═══════
+
+function TypingDot({ delay }: { delay: number }) {
+  const anim = useRef(new RNAnimated.Value(0)).current;
+  useEffect(() => {
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.delay(delay),
+        RNAnimated.timing(anim, { toValue: 1, duration: 300, useNativeDriver: true }),
+        RNAnimated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: true }),
+        RNAnimated.delay(600 - delay),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [anim, delay]);
+
+  return (
+    <RNAnimated.View
+      style={{
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: theme.colors.muted,
+        marginHorizontal: 2,
+        opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }),
+        transform: [
+          {
+            translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }),
+          },
+        ],
+      }}
+    />
+  );
+}
+
+// ═══════ Styles ═══════
+
+const s = StyleSheet.create({
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
+  loadingText: { color: theme.colors.muted, marginTop: 12 },
+  emptyText: { color: theme.colors.muted, marginTop: 16, fontSize: 14 },
+  dateHeader: { alignItems: 'center', marginVertical: 12 },
+  dateHeaderText: {
+    color: theme.colors.muted,
+    fontSize: 12,
+    backgroundColor: theme.colors.surface2,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  bubble: { marginVertical: 2, maxWidth: '80%' },
+  bubbleMine: { alignSelf: 'flex-end' },
+  bubblePeer: { alignSelf: 'flex-start' },
+  senderName: { color: theme.colors.muted, fontSize: 11, marginBottom: 2, marginLeft: 6 },
+  msgBox: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20 },
+  msgBoxMine: {
+    backgroundColor: theme.colors.accent,
+    borderBottomRightRadius: 4,
+  },
+  msgBoxPeer: {
+    backgroundColor: theme.colors.surface2,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderBottomLeftRadius: 4,
+  },
+  msgText: { fontSize: 15, lineHeight: 21 },
+  msgTextMine: { color: '#fff' },
+  msgTextPeer: { color: theme.colors.text },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2, paddingHorizontal: 6, gap: 6 },
+  timeText: { color: theme.colors.muted, fontSize: 10 },
+  readReceipt: { fontSize: 10, color: theme.colors.muted },
+  readReceiptRead: { color: theme.colors.accent },
+  typingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 6,
+    gap: 8,
+  },
+  typingDots: { flexDirection: 'row', alignItems: 'center' },
+  typingText: { color: theme.colors.muted, fontSize: 12 },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.bg,
+    gap: 8,
+  },
+  textInput: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface2,
+    color: theme.colors.text,
+    maxHeight: 100,
+    fontSize: 15,
+  },
+  sendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    backgroundColor: theme.colors.bg,
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: theme.colors.text,
+    fontSize: 14,
+    paddingVertical: 4,
+  },
+  refBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: theme.colors.accentSoft,
+    gap: 6,
+  },
+  refBannerText: { color: theme.colors.accent, fontSize: 12 },
+});

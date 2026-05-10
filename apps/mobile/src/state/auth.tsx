@@ -32,7 +32,7 @@ import { clearMockAuthSession, loadMockAuthSession } from '../services/mockAuth'
 import { clearUserScopedStorage } from '../services/scopedStorage';
 import { clearPUCache } from '../services/puDataCache';
 import { clearPUSession } from '../services/studentIdAuth';
-import { clearTCSession } from '../services/tronClassClient';
+import { clearTCSession, purgeLegacyTCSensitiveStorage } from '../services/tronClassClient';
 
 import type { UserRole as DataUserRole } from '../data/types';
 import type { MerchantAssignment } from '../data/types';
@@ -364,23 +364,32 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, [isAdmin, profile?.role, profile?.schoolMembershipRole]);
 
   const refreshProfile = useCallback(async () => {
-    if (!hasUsableFirebaseConfig()) {
-      const session = await loadMockAuthSession();
-      if (!session) {
-        setUser(null);
-        setProfile(null);
-        return;
-      }
-
-      setUser(toMockFirebaseUser(session));
-      setProfile(toMockUserProfile(session));
+    // ── 先檢查 mock auth session（hybrid login 使用 mock auth 即使有 Firebase config）──
+    const mockSession = await loadMockAuthSession();
+    if (mockSession) {
+      setUser(toMockFirebaseUser(mockSession));
+      setProfile(toMockUserProfile(mockSession));
       setError(null);
+      setLoading(false);
+      setProfileLoading(false);
+      return;
+    }
+
+    // ── 沒有 mock session → 嘗試 Firebase Auth ──
+    if (!hasUsableFirebaseConfig()) {
+      setUser(null);
+      setProfile(null);
+      setLoading(false);
+      setProfileLoading(false);
       return;
     }
 
     const currentUser = getAuthInstance().currentUser;
     if (!currentUser) {
+      setUser(null);
       setProfile(null);
+      setLoading(false);
+      setProfileLoading(false);
       return;
     }
 
@@ -410,6 +419,10 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    purgeLegacyTCSensitiveStorage().catch((e) => {
+      console.warn('[auth] Sensitive legacy storage cleanup failed:', e);
+    });
+
     if (!hasUsableFirebaseConfig()) {
       let isCancelled = false;
 
@@ -444,15 +457,40 @@ export function AuthProvider(props: { children: React.ReactNode }) {
 
       const currentRequestId = ++requestIdRef.current;
 
+      // Firebase Auth 沒有登入使用者 → 檢查 mock auth session（hybrid login 用的）
+      if (!u) {
+        try {
+          const mockSession = await loadMockAuthSession();
+          if (!isCancelled && requestIdRef.current === currentRequestId) {
+            if (mockSession) {
+              setUser(toMockFirebaseUser(mockSession));
+              setProfile(toMockUserProfile(mockSession));
+              setError(null);
+            } else {
+              setUser(null);
+              setProfile(null);
+            }
+            setTokenError(null);
+            setTokenExpired(false);
+          }
+        } catch (e) {
+          if (!isCancelled && requestIdRef.current === currentRequestId) {
+            setUser(null);
+            setProfile(null);
+          }
+        } finally {
+          if (!isCancelled && requestIdRef.current === currentRequestId) {
+            setLoading(false);
+            setProfileLoading(false);
+          }
+        }
+        return;
+      }
+
       setUser(u);
       setLoading(true);
-      setProfileLoading(!!u);
+      setProfileLoading(true);
       setError(null);
-
-      if (!u) {
-        setTokenError(null);
-        setTokenExpired(false);
-      }
 
       try {
         const p = await loadProfile(u);

@@ -462,3 +462,47 @@ AI 層必須遵守跟 App 一樣的資料權限，不可以因為是後端就直
 - 為什麼不讀全部
 - 怎麼控管權限
 - 怎麼逐步升級到機器學習與個人化推薦
+
+## 17. Agentic 商業化落地（裝置端編排 + ai-server 管線）
+
+上架與長期維運角度，**不必**為了「Agentic」名詞而導入 LangGraph 或 MongoDB：多一種執行引擎與資料庫就多一份 SRE、資安盤點與月費。本專題採 **明確狀態機 + 檢索管線** 對齊 Planning／Supervisor／Adaptive-RAG／CRAG／GraphRAG 等能力即可。
+
+### 17.1 架構（與現有 Firebase／Chroma 對齊）
+
+```mermaid
+flowchart LR
+  subgraph mobile [Mobile]
+    UI[AIChatScreen]
+    Orch[aiAgentOrchestrator]
+    Tools[autonomousQuery / tool layer]
+    UI --> Orch
+    Orch -->|"上下文 appendix"| Tools
+  end
+  subgraph cloud [Cloud]
+    CF[Cloud Functions askCampusAssistant]
+    AIS[ai-server FastAPI]
+    Chroma[Chroma RAG]
+    FS[Firestore]
+    CF --> AIS
+    AIS --> Chroma
+    AIS --> FS
+  end
+  mobile --> CF
+```
+
+- **行動端**：[`apps/mobile/src/services/aiAgentOrchestrator.ts`](apps/mobile/src/services/aiAgentOrchestrator.ts) 的 `orchestrate()` 負責記憶、Adaptive-RAG 策略、監督路由、計畫與檢索摘要；在 [`AIChatScreen`](apps/mobile/src/screens/AIChatScreen.tsx) 以 `skipToolExecution: true` 與既有代理路徑分工，避免重複寫入；`buildOrchestratorContextSection` 注入 [`ai.ts`](apps/mobile/src/services/ai.ts) 的 system／本機 prompt。
+- **GraphRAG（務實版）**：[`seedKnowledgeGraphFromCampusContext`](apps/mobile/src/services/aiAgentOrchestrator.ts) 將當回合自 Firestore／App 聚合得到的公告、活動、課程、地點灌入記憶體圖譜，避免「重啟即空圖」且無需另購圖資料庫。
+- **雲端 RAG**：[`backend/ai-server/rag/agentic_pipeline.py`](backend/ai-server/rag/agentic_pipeline.py) 提供 **Adaptive**（跳過寒暄／單次檢索／多查詢擴展）與 **CRAG 風格**二次檢索；[`server.py`](backend/ai-server/server.py) 的 `_build_messages` 改接該管線，仍由 `build_system_prompt` 組裝最終提示。
+
+### 17.2 為何不預設 LangGraph／Mongo
+
+| 選項 | 主要取捨 |
+|------|----------|
+| **LangGraph** | 除錯與版本鎖定成本高；MVP 可用 FastAPI + 顯式 async 函式達成順序管線。 |
+| **Mongo 當主記憶** | 與 Firebase 生態重疊，個資與稽核多一套；記憶與圖狀態以 Firestore／可序列化狀態 + Chroma metadata 較一致。 |
+
+### 17.3 合規與成本（產品敘述要點）
+
+- **上架版**：`APP_ENV=preview`／`production` 時應以 **Cloud Functions／ai-server 代理** 呼叫模型，不將正式 API key 放在客戶端（與第 2.1 節一致）。
+- **可觀測性**：編排器 `debugTrace` 可併入對話「思考過程」UI（步數上限），便於商業除錯與專題驗收。
+- **成本**：Adaptive `skip_rag` 可減少無謂 embedding 查詢；CRAG 二次檢索只在評分不佳時觸發，利於控制 Chroma／LLM 呼叫頻率。

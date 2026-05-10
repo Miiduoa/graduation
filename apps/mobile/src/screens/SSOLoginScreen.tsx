@@ -280,6 +280,11 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                   );
                 })}
               </View>
+              <Button
+                text="取消登入"
+                kind="secondary"
+                onPress={handleRetry}
+              />
             </View>
           </AnimatedCard>
         ) : null}

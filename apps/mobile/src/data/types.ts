@@ -585,6 +585,21 @@ export type AssistantActionProposal = {
   status?: 'proposed' | 'draft' | 'pending_confirmation' | 'confirmed' | 'dismissed';
 };
 
+/** AI 回覆附帶的可點選選單（優先於純文字編號列表） */
+export type AssistantChoiceOption = {
+  id: string;
+  label: string;
+  /** 點選後當成使用者訊息送出；未設則用 label */
+  sendAsUser?: string;
+  subtitle?: string;
+};
+
+export type AssistantChoiceMenu = {
+  title?: string;
+  prompt?: string;
+  options: AssistantChoiceOption[];
+};
+
 export type NextBestAction = {
   id: string;
   title: string;

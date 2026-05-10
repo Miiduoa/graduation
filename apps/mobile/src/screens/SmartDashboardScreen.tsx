@@ -2503,7 +2503,7 @@ export function SmartDashboardScreen(props: any) {
               {
                 icon: 'calendar-outline',
                 label: '智慧行事曆',
-                nav: () => nav?.navigate?.('SmartCalendarScreen'),
+                nav: () => nav?.navigate?.('SmartCalendarScreen', { initialTab: 'smart' }),
               },
               {
                 icon: 'trophy-outline',

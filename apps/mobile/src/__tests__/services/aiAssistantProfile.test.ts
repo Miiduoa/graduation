@@ -8,7 +8,13 @@ import {
   getAssistantIdentityAnswer,
   getAssistantProfileTrainingSeeds,
 } from '../../data/aiAssistantProfile';
-import { exportTrainingInsights, getDefaultTrainingDB } from '../../data/puAIAgentData';
+import {
+  distillLearnedSkillFromToolSuccess,
+  exportTrainingInsights,
+  getDefaultTrainingDB,
+  isInternalToolSelectionPrompt,
+  mergeLearnedSkill,
+} from '../../data/puAIAgentData';
 import { chatWithCampusAssistant } from '../../services/ai';
 
 describe('AI assistant capability profile', () => {
@@ -32,11 +38,15 @@ describe('AI assistant capability profile', () => {
     expect(prompt).toContain('確認卡');
     expect(prompt).toContain('草稿');
     expect(prompt).toContain('不偽造完成');
+    expect(prompt).toContain('createOrder');
+    expect(prompt).toContain('訂餐流程');
+    expect(prompt).toContain('無工具鏈');
+    expect(prompt).toContain('代理義務');
   });
 
   it('seeds local training examples for parameter honesty and confirmed execution', () => {
     const seeds = getAssistantProfileTrainingSeeds();
-    expect(seeds.goodExamples.length).toBeGreaterThanOrEqual(8);
+    expect(seeds.goodExamples.length).toBeGreaterThanOrEqual(12);
     expect(seeds.goodExamples.some((example) => example.q.includes('參數'))).toBe(true);
     expect(seeds.goodExamples.some((example) => example.a.includes('確認卡'))).toBe(true);
 
@@ -63,6 +73,25 @@ describe('AI assistant capability profile', () => {
     expect(answer).toContain('不能把 App 端模型參數量');
     expect(answer).toContain('雲端或本地 LLM');
     expect(answer).toContain('工具權限');
+  });
+
+  it('distills a skill after successful tool pattern (and skips internal tool prompts)', () => {
+    expect(isInternalToolSelectionPrompt('你是校園 AI 助理的「工具選擇器」。\n## 可用工具')).toBe(
+      true,
+    );
+    const skill = distillLearnedSkillFromToolSuccess(
+      '幫我點蛋餅',
+      'create_order',
+      { itemName: '蛋餅', quantity: '1' },
+      '已為你下單！',
+    );
+    expect(skill).not.toBeNull();
+    expect(skill!.source).toBe('distilled');
+    expect(skill!.procedure).toContain('create_order');
+    const db = mergeLearnedSkill(getDefaultTrainingDB(), skill!);
+    const insights = exportTrainingInsights(db, '幫我點早餐蛋餅');
+    expect(insights).toContain('成功任務蒸餾');
+    expect(insights).toContain('校園訂餐');
   });
 
   it('does not call client-side Gemini in release builds', async () => {

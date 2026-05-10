@@ -15,6 +15,24 @@ const REQUIRED_PROVIDER_FIELDS = {
   ],
 };
 
+const REQUIRED_RELEASE_PROVIDER_FIELDS = {
+  oidc: ['issuer', 'jwksUri'],
+};
+
+function getRuntimeEnv() {
+  const explicit = String(process.env.APP_ENV || '').trim().toLowerCase();
+  if (explicit === 'production' || explicit === 'preview') return explicit;
+
+  const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  if (nodeEnv === 'production') return 'production';
+  return 'development';
+}
+
+function isReleaseRuntime() {
+  const runtime = getRuntimeEnv();
+  return runtime === 'production' || runtime === 'preview';
+}
+
 function hasConfigValue(value) {
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
@@ -34,7 +52,12 @@ function getMissingSsoConfigFields(ssoConfig) {
     return [];
   }
 
-  return REQUIRED_PROVIDER_FIELDS[ssoConfig.provider].filter(
+  const requiredFields = [
+    ...REQUIRED_PROVIDER_FIELDS[ssoConfig.provider],
+    ...(isReleaseRuntime() ? REQUIRED_RELEASE_PROVIDER_FIELDS[ssoConfig.provider] || [] : []),
+  ];
+
+  return requiredFields.filter(
     (field) => !hasConfigValue(ssoConfig[field]),
   );
 }
@@ -166,6 +189,50 @@ function verifyPkceChallenge(codeVerifier, expectedCodeChallenge) {
   }
 }
 
+async function verifyOidcIdToken({ idToken, ssoConfig, expectedNonce }) {
+  if (!idToken) {
+    throw new Error('Missing OIDC id_token');
+  }
+
+  let payload;
+
+  if (ssoConfig.jwksUri) {
+    const { createRemoteJWKSet, jwtVerify } = await import('jose');
+    const jwks = createRemoteJWKSet(new URL(ssoConfig.jwksUri));
+    const verified = await jwtVerify(idToken, jwks, {
+      audience: ssoConfig.clientId,
+      ...(ssoConfig.issuer ? { issuer: ssoConfig.issuer } : {}),
+    });
+    payload = verified.payload;
+  } else {
+    if (isReleaseRuntime()) {
+      throw new Error('OIDC jwksUri is required for token verification');
+    }
+    payload = decodeJWT(idToken);
+    const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+    if (!aud.includes(ssoConfig.clientId)) {
+      throw new Error('OIDC audience validation failed');
+    }
+    if (ssoConfig.issuer && payload.iss !== ssoConfig.issuer) {
+      throw new Error('OIDC issuer validation failed');
+    }
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (!payload.exp) {
+    throw new Error('OIDC id_token exp is required');
+  }
+  if (Number(payload.exp) < nowSeconds) {
+    throw new Error('OIDC id_token has expired');
+  }
+
+  if (expectedNonce && payload.nonce !== expectedNonce) {
+    throw new Error('OIDC nonce validation failed');
+  }
+
+  return payload;
+}
+
 async function verifyOIDC({
   code,
   redirectUri,
@@ -204,10 +271,11 @@ async function verifyOIDC({
   const tokens = await tokenResponse.json();
 
   if (tokens.id_token) {
-    const decoded = decodeJWT(tokens.id_token);
-    if (expectedNonce && decoded.nonce && decoded.nonce !== expectedNonce) {
-      throw new Error('OIDC nonce validation failed');
-    }
+    const decoded = await verifyOidcIdToken({
+      idToken: tokens.id_token,
+      ssoConfig,
+      expectedNonce,
+    });
     return {
       sub: decoded.sub,
       email: decoded.email,
@@ -217,6 +285,10 @@ async function verifyOIDC({
       department: decoded.department || decoded.ou,
       accessToken: tokens.access_token,
     };
+  }
+
+  if (isReleaseRuntime()) {
+    throw new Error('OIDC id_token is required');
   }
 
   const userInfoResponse = await fetch(ssoConfig.userInfoUrl, {
@@ -361,6 +433,8 @@ function toPublicSsoConfig(config = {}, ssoConfig = null) {
           authorizationEndpoint: ssoConfig.authorizationEndpoint,
           tokenEndpoint: ssoConfig.tokenEndpoint,
           userInfoEndpoint: ssoConfig.userInfoEndpoint,
+          issuer: ssoConfig.issuer,
+          jwksUri: ssoConfig.jwksUri,
           casServerUrl: ssoConfig.casServerUrl,
           samlEntryPoint: ssoConfig.samlEntryPoint,
           scopes: ssoConfig.scopes,
@@ -389,4 +463,7 @@ module.exports = {
   getProviderAdapter,
   normalizeSetupStatus,
   toPublicSsoConfig,
+  __test: {
+    verifyOidcIdToken,
+  },
 };

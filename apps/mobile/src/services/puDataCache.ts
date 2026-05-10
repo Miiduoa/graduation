@@ -20,7 +20,7 @@ import {
   type PUAnnouncement,
   type PUStudentInfo,
 } from './puDirectScraper';
-import { getCloudFunctionUrl } from './cloudFunctions';
+import { getCloudFunctionUrl, getFirebaseAuthHeaders } from './cloudFunctions';
 import {
   tcFetchCourses,
   tcFetchActivities,
@@ -145,7 +145,7 @@ async function fetchPUCampusBackend<T>(
   try {
     response = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await getFirebaseAuthHeaders()) },
       signal: controller.signal,
       body: JSON.stringify({
         sessionId,
