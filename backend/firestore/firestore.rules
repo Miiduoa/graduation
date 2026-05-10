@@ -957,5 +957,11 @@ service cloud.firestore {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow write: if false;
     }
+
+    // Leave requests（由 Cloud Functions Admin 建立；客戶端僅可讀自己的資料）
+    match /leaveRequests/{requestId} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create, update, delete: if false;
+    }
   }
 }

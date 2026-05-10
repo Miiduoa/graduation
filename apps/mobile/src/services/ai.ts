@@ -553,6 +553,9 @@ function getConfig() {
       rawWebSearch == null
         ? process.env.NODE_ENV !== 'test'
         : rawWebSearch === true || String(rawWebSearch).toLowerCase() === 'true',
+    devPreferCloudAssistant:
+      extra.devPreferCloudAssistant === true ||
+      String(process.env.EXPO_PUBLIC_DEV_PREFER_CLOUD_ASSISTANT ?? '').toLowerCase() === 'true',
   };
 }
 
@@ -2942,6 +2945,9 @@ async function callCampusAssistant(
   signal?: AbortSignal,
 ): Promise<AIResponse | null> {
   if (!hasUsableFirebaseConfig()) {
+    console.warn(
+      '[AI] 略過 askCampusAssistant：Firebase Web 設定不可用。Simulator/本機測雲端請設定 EXPO_PUBLIC_FIREBASE_API_KEY、PROJECT_ID、APP_ID 等。',
+    );
     return null;
   }
 
@@ -3084,6 +3090,14 @@ export async function chatWithCampusAssistant(
       return {
         content: '',
         error: 'Campus Assistant 暫時不可用；上架版本只允許透過後端代理呼叫 AI。',
+      };
+    }
+
+    if (config.devPreferCloudAssistant && hasUsableFirebaseConfig()) {
+      return {
+        content: '',
+        error:
+          'Campus Assistant 雲端不可用（askCampusAssistant 失敗或未呼叫）。已啟用 EXPO_PUBLIC_DEV_PREFER_CLOUD_ASSISTANT，停止改用離線/mock。請檢查登入、網路、Functions region 與後端部署。',
       };
     }
 

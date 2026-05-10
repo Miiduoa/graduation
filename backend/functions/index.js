@@ -1139,6 +1139,7 @@ function generateGroupJoinCode(length = 8) {
 // =====================================================
 
 exports.askCampusAssistant = require('./agent/handlers/askCampusAssistant');
+exports.executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 
 exports.getAgentRunDebug = onCall(
   {
