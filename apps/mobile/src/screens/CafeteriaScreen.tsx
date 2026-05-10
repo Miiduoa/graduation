@@ -7,7 +7,7 @@
  *   店家 — 管理菜單 → 接單/出餐 → 查看評價 → 營業狀態切換
  *   管理員 — 管理公告 → 衛生稽查 → 店家管理 → 統計數據
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -35,6 +35,8 @@ import {
   addReview,
   getOrders,
   createOrder,
+  subscribeOrders,
+  setOrderSchoolId,
   getFavoriteVendors,
   toggleFavoriteVendor,
   estimateCrowdLevel,
@@ -104,6 +106,9 @@ export function CafeteriaScreen(props: any) {
 
   // 載入收藏 + 創新功能資料
   useEffect(() => {
+    // 設定 schoolId 供 Firestore 訂單查詢使用
+    setOrderSchoolId('pu');
+
     getFavoriteVendors()
       .then(setFavorites)
       .catch(() => {});
@@ -1765,11 +1770,26 @@ function InfoRow(props: { label: string; value: string }) {
 
 function OrdersModal(props: { userUid: string; role: string; onClose: () => void }) {
   const [orders, setOrders] = useState<Order[]>([]);
+  const unsubRef = useRef<ReturnType<typeof subscribeOrders>>(null);
 
   useEffect(() => {
-    getOrders(props.userUid)
-      .then(setOrders)
-      .catch(() => {});
+    // 嘗試即時訂閱學生的訂單，失敗時 fallback 到一次性查詢
+    const unsub = subscribeOrders(
+      { studentUid: props.userUid },
+      (liveOrders) => setOrders(liveOrders),
+    );
+    unsubRef.current = unsub;
+
+    if (!unsub) {
+      // Firestore 不可用，使用一次性載入
+      getOrders(props.userUid)
+        .then(setOrders)
+        .catch(() => {});
+    }
+
+    return () => {
+      unsubRef.current?.();
+    };
   }, [props.userUid]);
 
   return (

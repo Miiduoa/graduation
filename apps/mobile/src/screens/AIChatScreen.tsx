@@ -339,6 +339,23 @@ function parseDiningChoiceIndex(message: string): number | null {
   return suffixChoice ? parseSmallPositiveInt(suffixChoice[1]) : null;
 }
 
+/** choiceMenu.option.id：itemId@@vendorId（vendorId = merchantId ?? cafeteriaId） */
+const DINING_CHOICE_ID_SEP = '@@';
+
+function parseDiningChoiceOptionId(
+  optionId: string,
+): { itemId: string; vendorId: string } | null {
+  const parts = String(optionId).split(DINING_CHOICE_ID_SEP);
+  if (parts.length === 2 && parts[0].trim() && parts[1].trim()) {
+    return { itemId: parts[0].trim(), vendorId: parts[1].trim() };
+  }
+  const legacy = String(optionId).match(/^ord-\d+-(.+)$/);
+  if (legacy?.[1]) {
+    return { itemId: legacy[1].trim(), vendorId: '' };
+  }
+  return null;
+}
+
 function parseDiningRecommendationLine(
   line: string,
 ): { index: number; itemName: string; cafeteria?: string } | null {
@@ -621,7 +638,9 @@ function ToolConfirmCard(props: {
             lineHeight: 16,
           }}
         >
-          送出後仍需老師或系統審核；在審核／店家確認完成前，不視為已核准或已接單。
+          {tool.id === 'order_meal'
+            ? '確認後會向餐廳點餐系統送出；仍須店家端確認接單後才視為成立。'
+            : '送出後仍需老師或系統審核；在審核／店家確認完成前，不視為已核准或已接單。'}
         </Text>
       ) : null}
     </View>
@@ -1923,10 +1942,26 @@ export function AIChatScreen(props: any) {
   );
   const aiContext = useMemo<AIContext>(() => {
     const base = buildLiveAIContext(appRuntimeData);
+    // ── 把上一輪 AI 回覆的 choiceMenu 帶進 context，
+    //    供 aiToolRegistry 解析「幫我點第 N 個」這類自然語言索引。
+    const lastChoiceMenu = (() => {
+      const list = messages ?? [];
+      for (let i = list.length - 1; i >= 0; i--) {
+        const m = list[i];
+        if (m.role === 'assistant' && (m.choiceMenu?.options?.length ?? 0) > 0) {
+          return m.choiceMenu;
+        }
+      }
+      return undefined;
+    })();
+    const enriched: AIContext = {
+      ...base,
+      ...(lastChoiceMenu ? { lastChoiceMenu } : {}),
+    };
     return campusAssistantSessionId
-      ? { ...base, campusAssistantSessionId }
-      : base;
-  }, [buildLiveAIContext, appRuntimeData, campusAssistantSessionId]);
+      ? { ...enriched, campusAssistantSessionId }
+      : enriched;
+  }, [buildLiveAIContext, appRuntimeData, campusAssistantSessionId, messages]);
 
   useEffect(() => {
     setCampusAssistantSessionId(undefined);
@@ -2344,6 +2379,41 @@ export function AIChatScreen(props: any) {
     const choiceIndex = parseDiningChoiceIndex(userMessage);
     if (!choiceIndex) return null;
 
+    const recentWithChoice = [...(messages ?? [])]
+      .reverse()
+      .find((m) => m.role === 'assistant' && (m.choiceMenu?.options?.length ?? 0) > 0);
+    if (recentWithChoice?.choiceMenu?.options) {
+      const opt = recentWithChoice.choiceMenu.options[choiceIndex - 1];
+      if (opt) {
+        const parsed = parseDiningChoiceOptionId(opt.id);
+        let itemId = parsed?.itemId ?? '';
+        let vendorId = parsed?.vendorId ?? '';
+        if (itemId && !vendorId) {
+          const menuRow = diningMenus.find((menu) => menu.id === itemId);
+          const cafe = menuRow?.cafeteriaId
+            ? diningCafeterias.find((c) => c.id === menuRow.cafeteriaId)
+            : undefined;
+          vendorId = cafe ? (cafe.merchantId ?? cafe.id) : '';
+        }
+        if (itemId && vendorId) {
+          const labelName = opt.label.replace(/\s*·\s*\$[\d.]+.*$/, '').trim();
+          const qm = userMessage.match(
+            /(\d+)\s*(?:份|杯|個|碗|盒)|([1-9一二三四五六七八九十])\s*(?:份|杯|個|碗|盒)/,
+          );
+          let q = 1;
+          if (qm?.[1]) q = parseInt(qm[1], 10);
+          else if (qm?.[2]) q = parseSmallPositiveInt(qm[2]) ?? 1;
+          return {
+            itemId,
+            vendorId,
+            menuItemId: itemId,
+            items: labelName,
+            quantity: typeof q === 'number' && q > 0 ? q : 1,
+          };
+        }
+      }
+    }
+
     const recentAssistantMessages = [...(messages ?? [])]
       .reverse()
       .filter((message) => message.role === 'assistant' && message.content)
@@ -2380,9 +2450,15 @@ export function AIChatScreen(props: any) {
                 requestedCafeteria.includes(compactText(cafeteria.name))),
           );
 
+      const vid = selectedCafeteria
+        ? (selectedCafeteria.merchantId ?? selectedCafeteria.id)
+        : '';
       return {
         items: selectedMenu?.name ?? parsedLine.itemName,
         menuItemId: selectedMenu?.id,
+        itemId: selectedMenu?.id,
+        vendorId: vid,
+        quantity: 1,
         cafeteria:
           selectedMenu?.cafeteriaId?.split('-caf-').pop() ??
           selectedCafeteria?.id?.split('-caf-').pop() ??
@@ -2493,12 +2569,17 @@ export function AIChatScreen(props: any) {
       const selectedCafeteria = findDiningCafeteriaForParams(params, userMessage);
       const orderingBlock = getRestaurantOrderingBlock(selectedCafeteria);
       steps.push({
-        step: '驗證可執行性',
-        detail: orderingBlock
-          ? `${orderingBlock}不能直接假下單`
-          : '餐廳端條件仍會在送單時由後端再次驗證',
-        status: orderingBlock ? 'warning' : 'checking',
+        step: '訂餐草稿',
+        detail: '已為你建立訂餐草稿，請在下方確認送出',
+        status: 'done',
       });
+      if (orderingBlock) {
+        steps.push({
+          step: '驗證可執行性',
+          detail: `${orderingBlock}不能直接假下單`,
+          status: 'warning',
+        });
+      }
     } else if (toolMatch?.requiresConfirmation) {
       steps.push({
         step: '安全確認',
@@ -4151,6 +4232,44 @@ export function AIChatScreen(props: any) {
       if (/現在|馬上|立刻|盡快|越快越好/.test(msg)) params.pickup_time = '盡快';
       const timeMatch = msg.match(/(\d{1,2})[:：點](\d{1,2})?/);
       if (timeMatch) params.pickup_time = `${timeMatch[1]}:${timeMatch[2] ?? '00'}`;
+
+      if (tool.id === 'order_meal') {
+        const selMenu = params.itemId
+          ? diningMenus.find((m) => m.id === params.itemId)
+          : params.menuItemId
+            ? diningMenus.find((m) => m.id === params.menuItemId)
+            : findDiningMenuForParams(params, msg);
+        const selCafe = params.vendorId
+          ? diningCafeterias.find(
+              (c) => c.id === params.vendorId || c.merchantId === params.vendorId,
+            )
+          : selMenu?.cafeteriaId
+            ? diningCafeterias.find((c) => c.id === selMenu.cafeteriaId)
+            : findDiningCafeteriaForParams(params, msg);
+        if (selMenu) {
+          params.itemId = selMenu.id;
+          params.menuItemId = selMenu.id;
+          if (!params.items) params.items = selMenu.name;
+        }
+        if (selCafe) {
+          params.vendorId = selCafe.merchantId ?? selCafe.id;
+        }
+        if (
+          typeof params.quantity !== 'number' ||
+          !Number.isFinite(params.quantity) ||
+          params.quantity < 1
+        ) {
+          const qm = msg.match(/(\d+)\s*(?:份|杯|個|碗|盒)/);
+          if (qm) params.quantity = parseInt(qm[1], 10);
+        }
+        if (
+          typeof params.quantity !== 'number' ||
+          !Number.isFinite(params.quantity) ||
+          params.quantity < 1
+        ) {
+          params.quantity = 1;
+        }
+      }
     }
     if (tool.id === 'book_health') {
       if (msg.includes('諮商') || msg.includes('心理')) params.department = 'mental';
@@ -4223,13 +4342,16 @@ export function AIChatScreen(props: any) {
 
   function createConfirmMessage(tool: AgentTool, params: Record<string, any>): Message {
     const execId = genMsgId('exec');
+    const isOrderMeal = tool.id === 'order_meal';
     const execution: ToolExecution = {
       id: execId,
       toolId: tool.id,
       status: 'confirming',
       params,
       startedAt: new Date().toISOString(),
-      confirmationMessage: `確認要${tool.name}嗎？`,
+      confirmationMessage: isOrderMeal
+        ? '確認後會呼叫後端建立訂單；送出前仍可取消。'
+        : `確認要${tool.name}嗎？`,
     };
     setAgentContext((prev) => ({
       ...prev,
@@ -4241,7 +4363,9 @@ export function AIChatScreen(props: any) {
     return {
       id: genMsgId(),
       role: 'assistant',
-      content: `我已準備好幫你${tool.name}，請確認以下內容：`,
+      content: isOrderMeal
+        ? '已為你建立訂餐草稿，請在下方確認送出'
+        : `我已準備好幫你${tool.name}，請確認以下內容：`,
       timestamp: new Date(),
       agentType: 'tool_confirm',
       toolExecution: execution,

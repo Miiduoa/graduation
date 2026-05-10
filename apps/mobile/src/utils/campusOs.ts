@@ -85,6 +85,16 @@ const ROLE_ACTION_GRAPH: Record<CampusActorRole, Set<AgentActionKind | string>> 
     'submit_draft',
     'open_url',
   ]),
+  vendor: new Set([
+    'navigate',
+    'start_navigation',
+    'draft_message',
+    'queue_action',
+    'submit_draft',
+    'open_url',
+    'manage_orders',
+    'update_menu',
+  ]),
 };
 
 export function canRoleUseAction(

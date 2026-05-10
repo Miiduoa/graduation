@@ -63,6 +63,11 @@ import {
   type ToolCallResult,
 } from './aiAgentTools';
 import {
+  executeToolStandard,
+  getToolSpec,
+  type StandardToolResult,
+} from './aiToolRegistry';
+import {
   autonomousQuery,
   buildLocalAgentContextAppendix,
   parseExecuteCommands,
@@ -403,6 +408,13 @@ export type AIContext = {
   _realtimeInsightsPrompt?: string;
   // 智慧行動結果（由 aiSmartActions 自動執行產生）
   _smartActionResult?: SmartActionResult;
+  /**
+   * 上一輪 AI 回覆所提供的 choiceMenu。由 UI 從 messages 抓取最新一筆並注入。
+   * 用於 aiToolRegistry 的「幫我點第 N 個」自然語言索引解析。
+   */
+  lastChoiceMenu?: AssistantChoiceMenu;
+  /** 是否離線（由呼叫端注入；registry 寫入型工具會做檢查） */
+  isOnline?: boolean;
 };
 
 const ROLE_ACTION_POLICIES: RoleActionPolicy[] = [
@@ -1561,13 +1573,15 @@ async function tryChatWithOnDeviceAssistant(
         schoolId: context.schoolId,
         role: context.role,
         lastUserMessage: lastMsg.trim(),
+        lastChoiceMenu: context.lastChoiceMenu,
+        isOnline: context.isOnline,
       });
       execChoiceMenu = lastChoiceMenuFromToolResults(execResults.map((r) => ({ result: r.result })));
       execLearnedDrafts = collectLearnedSkillsFromToolRound(
         execResults.map((r) => ({ result: r.result })),
       );
       const execSummary = execResults
-        .map(r => r.result.success ? `✅ ${r.result.summary}` : `❌ ${r.result.summary}`)
+        .map((r) => formatToolResultLine(r.result))
         .join('\n');
       finalContent = finalContent.replace(/\[EXECUTE:\w+:\{[^}]*\}]/g, '').trim();
       if (execSummary) finalContent += '\n\n' + execSummary;
@@ -3230,7 +3244,9 @@ export function getAIStatus(): {
       config.aiProvider === 'gemini' ||
       hasUsableFirebaseConfig();
 
-  const effectiveProvider: AIProvider = localModelReady ? 'local-llm' : config.aiProvider;
+  // 只有在明確設定 local-llm 時，才顯示/走本機模型 provider，避免 gemini 模式被誤判。
+  const effectiveProvider: AIProvider =
+    config.aiProvider === 'local-llm' && localModelReady ? 'local-llm' : config.aiProvider;
 
   return { provider: effectiveProvider, configured, webSearchEnabled: config.webSearchEnabled, localModelReady };
 }
@@ -3281,6 +3297,80 @@ function lastChoiceMenuFromToolResults(
     if (m?.options?.length) return m;
   }
   return undefined;
+}
+
+/**
+ * Gemini function calling → 統一 router：registry 優先、legacy fallback。
+ * 把 StandardToolResult 攤平成 ToolCallResult 介面，順便保留 errorCode/isDraft/missingInfo。
+ */
+async function routeToolCallInGemini(
+  toolName: string,
+  rawArgs: Record<string, unknown>,
+  ctx: {
+    userId?: string;
+    schoolId: string;
+    role?: CampusActorRole;
+    lastUserMessage?: string;
+    lastChoiceMenu?: AssistantChoiceMenu;
+    isOnline?: boolean;
+  },
+): Promise<ToolCallResult> {
+  if (getToolSpec(toolName)) {
+    const std: StandardToolResult = await executeToolStandard(toolName, rawArgs, ctx);
+    return {
+      success: std.success,
+      summary: std.summary,
+      data: std.data,
+      error: std.error,
+      isWrite: std.isWrite,
+      choiceMenu: std.choiceMenu,
+      learnedSkill: std.learnedSkill,
+      ...({
+        errorCode: std.errorCode,
+        isDraft: std.isDraft,
+        missingInfo: std.missingInfo,
+        recordId: std.recordId,
+      } as any),
+    };
+  }
+  const stringArgs: Record<string, string> = {};
+  for (const [k, v] of Object.entries(rawArgs ?? {})) {
+    if (v == null) continue;
+    stringArgs[k] = typeof v === 'string' ? v : String(v);
+  }
+  return executeTool(toolName, stringArgs, {
+    userId: ctx.userId,
+    schoolId: ctx.schoolId,
+    role: ctx.role,
+    lastUserMessage: ctx.lastUserMessage,
+  });
+}
+
+/**
+ * 把單一工具結果格式化為一行 user-facing 文字。
+ * 嚴格區分草稿 / 已執行 / 等補資訊 / 失敗：
+ *  - success && isWrite && !isDraft  → ✅ 已完成
+ *  - success && isDraft              → 📝 草稿，需到對應頁面送出
+ *  - success && !isWrite             → 📌 直接顯示讀取結果
+ *  - !success && missing_info        → ❓ 缺資訊，等使用者補
+ *  - !success （其他）               → ❌ 失敗摘要
+ */
+function formatToolResultLine(result: ToolCallResult): string {
+  const r = result as ToolCallResult & {
+    isDraft?: boolean;
+    errorCode?: string;
+    missingInfo?: Array<{ prompt: string }>;
+  };
+  if (r.success) {
+    if (r.isDraft) return `📝 ${r.summary}`;
+    if (r.isWrite) return `✅ ${r.summary}`;
+    return `📌 ${r.summary}`;
+  }
+  if (r.errorCode === 'missing_info') {
+    const head = r.missingInfo?.[0]?.prompt ?? r.summary;
+    return `❓ ${head}`;
+  }
+  return `❌ ${r.summary}`;
 }
 
 function mergeLearnedSkillDrafts(...groups: LearnedSkill[][]): LearnedSkill[] | undefined {
@@ -3416,12 +3506,18 @@ async function callGeminiAPI(
       // 執行工具並收集結果
       const toolResponses: any[] = [];
       for (const fc of functionCalls) {
-        const result = await executeTool(fc.name, fc.args, {
-          userId: context.userId,
-          schoolId: context.schoolId,
-          role: context.role,
-          lastUserMessage,
-        });
+        const result = await routeToolCallInGemini(
+          fc.name,
+          fc.args ?? {},
+          {
+            userId: context.userId,
+            schoolId: context.schoolId,
+            role: context.role,
+            lastUserMessage,
+            lastChoiceMenu: context.lastChoiceMenu,
+            isOnline: context.isOnline,
+          },
+        );
         executedActions.push({ tool: fc.name, result });
         toolResponses.push({
           functionResponse: {
@@ -3433,6 +3529,12 @@ async function callGeminiAPI(
                 data: result.data,
                 error: result.error,
                 choiceMenu: result.choiceMenu,
+                // 給 Gemini 看到的補充資訊：是否草稿、缺欄位、錯誤碼
+                ...({
+                  isDraft: (result as any).isDraft,
+                  errorCode: (result as any).errorCode,
+                  missingInfo: (result as any).missingInfo,
+                } as any),
               }),
             },
           },
@@ -3514,10 +3616,11 @@ function buildAgentSystemPrompt(context: AIContext): string {
     '1. **自主查詢**：不要猜測或說「請自行查看」。使用工具查詢真實資料後再回答。',
     '2. **深度分析**：查到資料後進行演算和推理，給出洞察而非原始數據。',
     '3. **主動代理**：使用者說「幫我報名」「幫我預約」就直接執行，不要只給指引。',
-    '4. **多工具串聯**：複雜問題可連續呼叫多個工具。如「我今天忙嗎？」→ 查課表 + 查作業 + 查行事曆。',
-    '5. **經驗固化**：當寫入工具成功完成使用者任務後，App 會把「原意＋工具與參數要點」存成可重用技能；之後類似問題請優先參考對話中的【自訂技能】區塊（仍須以當下 App 資料為準）。',
-    '6. **無工具仍代理**：沒有 function 可呼叫或後端拒絕時，仍要輸出可執行計畫、草稿欄位、App 導頁建議；不可把任務丟回使用者就結案（可說明無法遠端代辦的具體原因）。',
-    '7. **角色感知**：',
+    '4. **訂餐優先工具**：使用者要求「幫我訂餐」「再點一份」「換菜色」「幫我點第二個」時，優先呼叫 `order_food` 工具；不要只用文字叫使用者去點餐頁。',
+    '5. **多工具串聯**：複雜問題可連續呼叫多個工具。如「我今天忙嗎？」→ 查課表 + 查作業 + 查行事曆。',
+    '6. **經驗固化**：當寫入工具成功完成使用者任務後，App 會把「原意＋工具與參數要點」存成可重用技能；之後類似問題請優先參考對話中的【自訂技能】區塊（仍須以當下 App 資料為準）。',
+    '7. **無工具仍代理**：沒有 function 可呼叫或後端拒絕時，仍要輸出可執行計畫、草稿欄位、App 導頁建議；不可把任務丟回使用者就結案（可說明無法遠端代辦的具體原因）。',
+    '8. **角色感知**：',
     context.role === 'teacher' ? '  目前使用者是教師，可使用點名、出作業、批改等教師工具。' :
       context.role === 'admin' ? '  目前使用者是管理者，可使用管理工具。' :
       '  目前使用者是學生，以學習輔助和生活便利為主。',
@@ -3559,10 +3662,8 @@ function buildAgentSystemPrompt(context: AIContext): string {
 function buildResponseFromToolResults(
   actions: Array<{ tool: string; result: ToolCallResult }>,
 ): AIResponse {
-  const parts = actions
-    .filter(a => a.result.success)
-    .map(a => a.result.summary);
-
+  // 草稿/完成/失敗都顯示，幫助使用者知道實際發生了什麼。
+  const parts = actions.map((a) => formatToolResultLine(a.result));
   return {
     content: parts.length > 0
       ? parts.join('\n\n')

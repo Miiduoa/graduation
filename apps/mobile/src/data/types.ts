@@ -476,7 +476,8 @@ export type CampusActorRole =
   | 'department'
   | 'department_head'
   | 'admin'
-  | 'school';
+  | 'school'
+  | 'vendor';
 
 export type ActionPrecondition =
   | 'signed_in'
