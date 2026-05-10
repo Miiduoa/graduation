@@ -321,6 +321,10 @@ export default ({ config }: any) => {
       aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
       aiWebSearchEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, true),
       aiWebLearningEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, true),
+      devPreferCloudAssistant: parseBoolean(
+        process.env.EXPO_PUBLIC_DEV_PREFER_CLOUD_ASSISTANT,
+        false,
+      ),
       enableMockSSO: !isReleaseLike && process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === 'true',
       enableUniversalDevAccounts,
       allowLocalMockAuth,
