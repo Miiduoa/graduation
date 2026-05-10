@@ -28,6 +28,7 @@ const SAFE_AGENT_ACTIONS = new Set([
   'schedule_reminder',
   'split_assignment',
   'start_navigation',
+  'review_ai_suggestion',
 ]);
 
 const SENSITIVE_AGENT_ACTIONS = new Set([
@@ -38,6 +39,7 @@ const SENSITIVE_AGENT_ACTIONS = new Set([
   'split_assignment',
   'submit_draft',
   'check_in',
+  'review_ai_suggestion',
 ]);
 
 function env(name, fallback = '') {

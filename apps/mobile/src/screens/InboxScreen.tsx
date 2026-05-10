@@ -86,6 +86,11 @@ export function InboxScreen(props: any) {
       return;
     }
 
+    if (item.kind === 'assistant_queue' && item.sourceRunId) {
+      nav?.navigate?.('AIChat', { sourceRunId: item.sourceRunId });
+      return;
+    }
+
     if ((item.kind === 'assignment' || item.kind === 'quiz') && item.assignmentId) {
       nav?.navigate?.('收件匣', {
         screen: 'AssignmentDetail',
@@ -180,13 +185,15 @@ export function InboxScreen(props: any) {
                 <ActionableInboxRow
                   key={item.id}
                   icon={
-                    item.kind === 'live'
-                      ? 'pulse-outline'
-                      : item.kind === 'assignment'
-                        ? 'document-text-outline'
-                        : item.kind === 'quiz'
-                          ? 'help-circle-outline'
-                          : 'mail-outline'
+                    item.kind === 'assistant_queue'
+                      ? 'chatbubbles-outline'
+                      : item.kind === 'live'
+                        ? 'pulse-outline'
+                        : item.kind === 'assignment'
+                          ? 'document-text-outline'
+                          : item.kind === 'quiz'
+                            ? 'help-circle-outline'
+                            : 'mail-outline'
                   }
                   title={`${item.title} · ${item.groupName}`}
                   reason={item.reason ?? '這個項目需要你確認下一步'}

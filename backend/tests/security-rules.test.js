@@ -725,6 +725,32 @@ describe('firestore security rules', () => {
       malloryDb.collection('users').doc('alice').collection('aiSessions').doc('session-1').get(),
     );
   });
+
+  test('agentRuns: owner can read, others cannot; client cannot write', async () => {
+    await seedFirestore(async (db) => {
+      await db.collection('users').doc('alice').collection('agentRuns').doc('run-1').set({
+        runId: 'run-1',
+        userId: 'alice',
+        status: 'completed',
+      });
+    });
+
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(
+      aliceDb.collection('users').doc('alice').collection('agentRuns').doc('run-1').get(),
+    );
+    await assertFails(
+      aliceDb.collection('users').doc('alice').collection('agentRuns').doc('run-2').set({
+        runId: 'run-2',
+        status: 'running',
+      }),
+    );
+
+    const malloryDb = testEnv.authenticatedContext('mallory').firestore();
+    await assertFails(
+      malloryDb.collection('users').doc('alice').collection('agentRuns').doc('run-1').get(),
+    );
+  });
 });
 
 describe('storage security rules', () => {

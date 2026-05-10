@@ -1,0 +1,15 @@
+{
+  "intentConfidence": {
+    "leave_request": 0.92,
+    "assignment_planning": 0.9,
+    "assignment_status": 0.88,
+    "announcements": 0.9,
+    "events": 0.88,
+    "menus": 0.87,
+    "pois": 0.86,
+    "credit_audit": 0.85,
+    "help": 0.9,
+    "study_summary": 0.82,
+    "general": 0.55
+  }
+}

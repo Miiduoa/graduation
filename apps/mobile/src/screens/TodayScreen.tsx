@@ -1144,7 +1144,13 @@ export function TodayScreen(props: Record<string, unknown>) {
                     <InboxTaskRow
                       title={task.title}
                       label={
-                        task.kind === 'live' ? '課堂' : task.kind === 'assignment' ? '作業' : '群組'
+                        task.kind === 'live'
+                          ? '課堂'
+                          : task.kind === 'assistant_queue'
+                            ? 'AI'
+                            : task.kind === 'assignment'
+                              ? '作業'
+                              : '群組'
                       }
                       dueAt={task.dueAt ? formatDueWindow(task.dueAt) : undefined}
                       urgency={task.urgency}
@@ -1155,6 +1161,8 @@ export function TodayScreen(props: Record<string, unknown>) {
                             sessionId: task.sessionId,
                             isTeacher: teachingMode,
                           });
+                        } else if (task.kind === 'assistant_queue' && task.sourceRunId) {
+                          nav?.navigate?.('AIChat', { sourceRunId: task.sourceRunId });
                         } else if (task.assignmentId) {
                           nav?.navigate?.('收件匣', {
                             screen: 'AssignmentDetail',
