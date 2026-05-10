@@ -1,6 +1,7 @@
 {
   "intentConfidence": {
     "leave_request": 0.92,
+    "leave_status": 0.9,
     "assignment_planning": 0.9,
     "assignment_status": 0.88,
     "announcements": 0.9,

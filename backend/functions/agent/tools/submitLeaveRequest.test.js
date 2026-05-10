@@ -1,8 +1,29 @@
 'use strict';
 
 const mockSet = jest.fn();
-const mockDoc = jest.fn(() => ({ id: 'gen-id', set: mockSet }));
-const mockCollection = jest.fn(() => ({ doc: mockDoc }));
+const mockCourseGet = jest.fn();
+const mockLeaveDoc = jest.fn(() => ({ id: 'gen-id', set: mockSet }));
+
+const mockCollection = jest.fn((name) => {
+  if (name === 'leaveRequests') {
+    return { doc: mockLeaveDoc };
+  }
+  if (name === 'users') {
+    return {
+      doc: jest.fn(() => ({
+        collection: jest.fn((sub) => {
+          if (sub === 'courses') {
+            return {
+              doc: jest.fn(() => ({ get: mockCourseGet })),
+            };
+          }
+          return { doc: jest.fn(() => ({})) };
+        }),
+      })),
+    };
+  }
+  return { doc: jest.fn() };
+});
 
 jest.mock('firebase-admin/firestore', () => ({
   getFirestore: jest.fn(() => ({ collection: mockCollection })),
@@ -14,6 +35,7 @@ const submitLeaveRequest = require('./submitLeaveRequest');
 describe('submitLeaveRequest tool', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockCourseGet.mockResolvedValue({ exists: false, data: () => ({}) });
   });
 
   test('writes leave request document', async () => {
@@ -32,8 +54,33 @@ describe('submitLeaveRequest tool', () => {
         date: '2026-05-11',
         type: 'sick',
         status: 'pending',
+        groupId: null,
       }),
     );
+  });
+
+  test('prefers ctx.groupId over course doc', async () => {
+    mockCourseGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ groupId: 'g-course' }),
+    });
+    await submitLeaveRequest.execute(
+      { uid: 'u1', schoolId: 's1', groupId: 'g-ctx' },
+      { courseId: 'c1', date: '2026-05-11', type: 'sick' },
+    );
+    expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({ groupId: 'g-ctx' }));
+  });
+
+  test('loads groupId from users/uid/courses/courseId when ctx has none', async () => {
+    mockCourseGet.mockResolvedValue({
+      exists: true,
+      data: () => ({ groupId: 'g-course' }),
+    });
+    await submitLeaveRequest.execute(
+      { uid: 'u1', schoolId: 's1' },
+      { courseId: 'c1', date: '2026-05-11', type: 'sick' },
+    );
+    expect(mockSet).toHaveBeenCalledWith(expect.objectContaining({ groupId: 'g-course' }));
   });
 
   test('throws without uid', async () => {

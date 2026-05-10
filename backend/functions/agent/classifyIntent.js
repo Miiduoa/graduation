@@ -19,6 +19,8 @@ function mapRichCategoryToAssistantIntent(category, rawMessage) {
   switch (category) {
     case 'food':
       return 'menus';
+    case 'leave_status':
+      return 'leave_status';
     case 'leave':
       return 'leave_request';
     case 'location':

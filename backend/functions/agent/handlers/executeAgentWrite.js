@@ -4,11 +4,13 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore } = require('firebase-admin/firestore');
 const { createAuthzHelpers } = require('../../authz');
 const { fetchAssistantUserProfile } = require('../../lib/assistantFetchers');
-const { runTool } = require('../tools/registry');
+const { runTool, byName } = require('../tools/registry');
 
 const REGION = 'asia-east1';
 
-const ALLOWED_TOOLS = new Set(['submitLeaveRequest']);
+const ALLOWED_TOOLS = new Set(
+  [...byName.values()].filter((t) => t.requiresConfirmation === true).map((t) => t.name),
+);
 
 const db = getFirestore();
 const { assertActiveSchoolMember } = createAuthzHelpers(db);

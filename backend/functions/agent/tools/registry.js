@@ -6,6 +6,7 @@ const getAnnouncements = require('./getAnnouncements');
 const searchCampusDocs = require('./searchCampusDocs');
 const getPrioritySummary = require('./getPrioritySummary');
 const submitLeaveRequest = require('./submitLeaveRequest');
+const getLeaveRequestStatus = require('./getLeaveRequestStatus');
 
 const tools = [
   getTodaySchedule,
@@ -13,6 +14,7 @@ const tools = [
   getAnnouncements,
   searchCampusDocs,
   getPrioritySummary,
+  getLeaveRequestStatus,
   submitLeaveRequest,
 ];
 
