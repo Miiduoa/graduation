@@ -57,6 +57,8 @@ async function execute(ctx, rawInput) {
 
 module.exports = {
   name: 'submitLeaveRequest',
+  description:
+    '（僅限使用者確認後由後端代為執行，不開放給 LLM 自動呼叫。）建立一筆待審請假申請。',
   inputSchema,
   execute,
   /** 為 true 時 runtime prefetch 後不會自動執行，須前端確認後呼叫 executeAgentWrite */
