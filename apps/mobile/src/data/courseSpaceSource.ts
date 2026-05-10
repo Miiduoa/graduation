@@ -371,11 +371,54 @@ export async function getAttendanceSummary(courseSpaceId: string): Promise<Atten
   };
 }
 
+async function listActionQueueInboxTasks(userId: string): Promise<InboxTask[]> {
+  if (isFirebaseMockMode()) return [];
+  const db = getDb();
+  const snap = await getDocs(query(collection(db, 'users', userId, 'actionQueue'), limit(30))).catch(
+    () => null,
+  );
+  const rows = snap?.docs ?? [];
+  const out: InboxTask[] = [];
+  for (const docSnap of rows) {
+    const data = docSnap.data() as Record<string, unknown>;
+    const status = String(data.status || '');
+    if (!['pending_confirmation', 'draft'].includes(status)) continue;
+    const action = String(data.action || '');
+    const title = String(data.title || data.label || '待確認動作').slice(0, 120);
+    const sourceRunId = typeof data.sourceRunId === 'string' ? data.sourceRunId : undefined;
+    const urgency = String(data.urgency || '');
+    const priority = urgency === 'critical' || urgency === 'high' ? 0 : 1;
+    out.push({
+      id: `aq-${docSnap.id}`,
+      kind: 'assistant_queue',
+      groupId: 'campus-assistant',
+      groupName: 'AI 助理',
+      title,
+      subtitle:
+        action === 'review_ai_suggestion'
+          ? '請確認助理建議'
+          : sourceRunId
+            ? `Run：${sourceRunId.slice(0, 8)}…`
+            : '待辦',
+      priority,
+      dueAt: data.dueAt ? toDate(data.dueAt as any) : null,
+      preferredIntent: 'verify',
+      actionLabel: '開啟 AI',
+      sourceRunId,
+      actionQueueId: docSnap.id,
+      queueAction: action,
+    });
+  }
+  return out;
+}
+
 export async function listInboxTasks(userId: string, schoolId?: string): Promise<InboxTask[]> {
   if (isFirebaseMockMode()) return [];
   const db = getDb();
   const memberships = await listCourseMemberships(db, userId, schoolId);
-  if (memberships.length === 0) return [];
+  if (memberships.length === 0) {
+    return (await listActionQueueInboxTasks(userId)).slice(0, 14);
+  }
 
   const now = Date.now();
   const tasks = await Promise.all(
@@ -556,15 +599,17 @@ export async function listInboxTasks(userId: string, schoolId?: string): Promise
     }),
   );
 
-  return tasks
-    .flat()
+  const fromGroups = tasks.flat();
+  const fromAssistantQueue = await listActionQueueInboxTasks(userId);
+
+  return [...fromAssistantQueue, ...fromGroups]
     .sort((left, right) => {
       if (left.priority !== right.priority) return left.priority - right.priority;
       const timeA = left.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
       const timeB = right.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
       return timeA - timeB;
     })
-    .slice(0, 12);
+    .slice(0, 14);
 }
 
 export async function getCourseGradebook(

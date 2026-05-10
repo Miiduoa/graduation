@@ -693,6 +693,11 @@ service cloud.firestore {
         }
       }
 
+      match /agentRuns/{runId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+
       match /actionQueue/{actionId} {
         allow read: if isSelf(uid);
         allow create: if isSelf(uid)
