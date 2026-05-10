@@ -12,6 +12,8 @@ const PERSONAL_INTENTS = new Set([
   'credit_audit',
   'grades_analysis',
   'personal_schedule',
+  'leave_request',
+  'leave_status',
 ]);
 
 const CAMPUS_INTERNAL_INTENTS = new Set(['announcements', 'events', 'menus', 'pois']);

@@ -35,4 +35,16 @@ describe('classifyIntent', () => {
     expect(r.source).toBe('rich');
     expect(r.confidence).toBe(1);
   });
+
+  test('rich: teacher approval question maps to leave_status', () => {
+    const r = classifyIntent('老師有審核了嗎');
+    expect(r.name).toBe('leave_status');
+    expect(r.source).toBe('rich');
+    expect(r.category).toBe('leave_status');
+  });
+
+  test('leave_status: 請假通過了嗎', () => {
+    const r = classifyIntent('請假通過了嗎');
+    expect(r.name).toBe('leave_status');
+  });
 });
