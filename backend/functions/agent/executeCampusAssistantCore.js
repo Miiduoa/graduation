@@ -52,6 +52,7 @@ async function executeCampusAssistantCore({
   startedAt,
   prefetched = {},
   recordStep = async () => {},
+  routingIntent = null,
 }) {
   const uid = request.auth?.uid ?? null;
   const rawMessages = Array.isArray(request.data?.messages) ? request.data.messages : [];
@@ -59,7 +60,10 @@ async function executeCampusAssistantCore({
     request.data?.context && typeof request.data.context === 'object' ? request.data.context : {};
   const timeZone = context.timezone || 'Asia/Taipei';
   const lastUserMessage = getLastUserMessage(rawMessages);
-  const intent = detectCampusAssistantIntent(lastUserMessage);
+  const intent =
+    typeof routingIntent === 'string' && routingIntent.trim()
+      ? routingIntent.trim()
+      : detectCampusAssistantIntent(lastUserMessage);
 
   const userProfile = uid ? await fetchAssistantUserProfile(uid) : null;
   const schoolId = userProfile?.schoolId ?? context.schoolId ?? null;
