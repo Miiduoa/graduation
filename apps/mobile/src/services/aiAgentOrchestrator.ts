@@ -575,6 +575,7 @@ const TOOL_TO_AGENT: Record<string, SubAgentType> = {
   query_gpa: 'academic', query_course_modules: 'academic',
   // Dining
   query_dining_menu: 'dining', query_cafeterias: 'dining', create_order: 'dining',
+  query_menus: 'dining', recommend_lunch: 'dining',
   query_orders: 'dining', cancel_order: 'dining',
   // Campus Life
   query_announcements: 'campus_life', query_events: 'campus_life',
