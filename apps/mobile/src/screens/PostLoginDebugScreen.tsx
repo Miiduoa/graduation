@@ -30,10 +30,6 @@ export function PostLoginDebugScreen() {
     setBootstrap(getLastPostLoginEngineBootstrap());
     setCacheMeta(await getPuCacheDebugMetadata());
     const schoolId = profile?.primarySchoolId ?? profile?.schoolId ?? null;
-    const repairPath =
-      schoolId && user?.uid
-        ? `schools/${schoolId}/repairRequests（與 Functions submitRepairRequest 寫入同一 collection）`
-        : '（需 primarySchoolId / schoolId 才顯示報修路徑）';
     const mem = getInMemoryPostLoginContext();
     setPlcMemoryText(mem ? JSON.stringify({ primary: mem.roles.primaryRole, source: mem.roles.source, builtAt: mem.builtAt }, null, 2) : '（無記憶體 PostLoginContext）');
     if (schoolId) {
@@ -65,22 +61,32 @@ export function PostLoginDebugScreen() {
 
     if (!hasUsableFirebaseConfig() || !user?.uid) {
       setRuns([]);
+      setAgentRuns([]);
       setLatestRunSummary('—');
       setLoading(false);
       return;
     }
     try {
       const db = getDb();
-      const snap = await getDocs(
-        query(collection(db, 'users', user.uid, 'postLoginRuns'), limit(5)),
-      );
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const [snapPl, snapAr] = await Promise.all([
+        getDocs(query(collection(db, 'users', user.uid, 'postLoginRuns'), limit(5))),
+        getDocs(query(collection(db, 'users', user.uid, 'agentRuns'), limit(5))),
+      ]);
+      const rows = snapPl.docs.map((d) => ({ id: d.id, ...d.data() }));
       rows.sort((a, b) => {
         const ta = String((a as { createdAt?: { seconds?: number } }).createdAt?.seconds ?? 0);
         const tb = String((b as { createdAt?: { seconds?: number } }).createdAt?.seconds ?? 0);
         return tb.localeCompare(ta);
       });
       setRuns(rows);
+
+      const ar = snapAr.docs.map((d) => ({ id: d.id, ...d.data() }));
+      ar.sort((a, b) => {
+        const ta = String((a as { updatedAt?: { seconds?: number } }).updatedAt?.seconds ?? 0);
+        const tb = String((b as { updatedAt?: { seconds?: number } }).updatedAt?.seconds ?? 0);
+        return tb.localeCompare(ta);
+      });
+      setAgentRuns(ar);
       const latest = rows[0] as {
         outputs?: {
           puCourseCount?: number;
@@ -105,6 +111,7 @@ export function PostLoginDebugScreen() {
     } catch (e) {
       console.warn('[PostLoginDebug] load runs failed:', e);
       setRuns([]);
+      setAgentRuns([]);
       setLatestRunSummary('—');
     } finally {
       setLoading(false);
