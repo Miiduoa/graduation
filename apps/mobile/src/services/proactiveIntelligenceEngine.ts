@@ -28,6 +28,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAnyCachedCourses, getAnyCachedGrades, getAnyCachedAnnouncements } from './puDataCache';
+import { getCachedRoleInference, getCachedCourseRelations } from './postLoginDataRouter';
 import { getFullAcademicInsights } from './academicInsightsEngine';
 import { getCampusPulseSnapshot } from './campusPulseEngine';
 import { getGamificationState } from './gamificationEngine';

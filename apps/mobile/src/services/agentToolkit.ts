@@ -11,6 +11,7 @@ import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
 import { registerTool, type AgentTool, type ToolResult } from './agentReasoningEngine';
 import { getAnyCachedCourses, getAnyCachedGrades, getAnyCachedTCAttendance } from './puDataCache';
+import { getCachedRoleInference, getCachedClassmates, getCachedMyTeachers, getCachedMyStudents } from './postLoginDataRouter';
 
 // ═══════════════════════════════════════════════════
 // 1. campus_query — 校園資料查詢
