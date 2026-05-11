@@ -36,6 +36,11 @@ import {
   type LearnedSkill,
 } from '../data/puAIAgentData';
 import type { AssistantChoiceMenu } from '../data/types';
+import {
+  formatLunchRecommendationReply,
+  recommendLunchCandidates,
+  type LunchMenuRow,
+} from './recommendLunch';
 
 /** 與 AIChatScreen 訂餐選單一致：itemId@@vendorId */
 const DINING_CHOICE_ID_SEP = '@@';
@@ -208,6 +213,22 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
         properties: {
           cafeteria: { type: 'string', description: '指定餐廳名稱，留空查全部' },
           keyword: { type: 'string', description: '搜尋關鍵字，例如「滷肉飯」「蛋餅」' },
+        },
+      },
+    },
+    {
+      name: 'recommend_lunch',
+      description:
+        '依已載入菜單推薦午餐／正餐（排除飲料甜點為主），先給候選再請使用者確認是否下單。不要用它取代 create_order。',
+      parameters: {
+        type: 'object',
+        properties: {
+          budget: { type: 'string', description: '預算上限（元），可留空' },
+          timeSlot: {
+            type: 'string',
+            description: 'lunch / dinner / breakfast，預設 lunch',
+            enum: ['lunch', 'dinner', 'breakfast'],
+          },
         },
       },
     },
@@ -1315,6 +1336,59 @@ const TOOL_EXECUTORS: Record<
       return { success: true, data: menus, summary: `今日菜單:\n${summary}` };
     } catch {
       return { success: true, data: [], summary: '查詢菜單失敗。' };
+    }
+  },
+
+  recommend_lunch: async (args, ctx) => {
+    try {
+      let menus: any[] = [];
+      if (hasDataSource()) {
+        try {
+          const ds = getDataSource();
+          const firestoreMenus = await ds.listMenus(ctx.schoolId);
+          if (firestoreMenus?.length) menus.push(...firestoreMenus);
+        } catch { /* ignore */ }
+      }
+      if (isProvidenceDiningSchoolId(ctx.schoolId)) {
+        const localMenus = getPuDiningMenuItems(ctx.schoolId);
+        if (localMenus?.length) {
+          const existingNames = new Set(menus.map((m: any) => m.name?.toLowerCase()));
+          for (const lm of localMenus) {
+            if (!existingNames.has(lm.name?.toLowerCase())) menus.push(lm);
+          }
+        }
+      }
+      const rows: LunchMenuRow[] = menus
+        .map((m: any) => ({
+          id: String(m.id ?? ''),
+          name: String(m.name ?? ''),
+          price: typeof m.price === 'number' ? m.price : undefined,
+          cafeteria: m.cafeteria,
+          category: m.category,
+          isPopular: Boolean(m.isPopular),
+        }))
+        .filter((r) => r.id && r.name);
+      if (rows.length === 0) {
+        return {
+          success: true,
+          data: { items: [] },
+          summary:
+            '目前沒有菜單資料，無法推薦午餐。請先到「校園 → 點餐」同步菜單後再問我。',
+        };
+      }
+      const budgetRaw = args.budget?.trim();
+      const budgetCap = budgetRaw ? parseInt(budgetRaw, 10) : undefined;
+      const slot =
+        args.timeSlot === 'dinner' || args.timeSlot === 'breakfast' ? args.timeSlot : 'lunch';
+      const mealLabel = slot === 'dinner' ? '晚餐' : slot === 'breakfast' ? '早餐' : '午餐';
+      const { items } = recommendLunchCandidates(rows, {
+        budgetCap: Number.isFinite(budgetCap) && (budgetCap as number) > 0 ? budgetCap : undefined,
+        maxItems: 3,
+      });
+      const answer = formatLunchRecommendationReply(items, { mealLabel });
+      return { success: true, data: { items }, summary: answer, isWrite: false };
+    } catch {
+      return { success: false, summary: '午餐推薦失敗，請稍後再試。' };
     }
   },
 

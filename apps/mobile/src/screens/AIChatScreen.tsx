@@ -198,6 +198,73 @@ type ThinkingStepUI = {
   status: 'done' | 'checking' | 'warning' | 'info';
 };
 
+/** AI Agent 訂餐成功後的結構化摘要（搭配成功卡 UI） */
+type OrderSuccessSummary = {
+  orderId: string;
+  merchantLabel: string;
+  itemName: string;
+  quantity: number;
+  total?: number;
+  statusHint?: string;
+};
+
+function extractCreateOrderSuccess(
+  executed: Array<{ tool: string; result: { success: boolean; data?: unknown } }>,
+): OrderSuccessSummary | undefined {
+  const hit = [...executed]
+    .reverse()
+    .find((a) => a.tool === 'create_order' && a.result.success && a.result.data != null);
+  if (!hit?.result.data || typeof hit.result.data !== 'object') return undefined;
+  const d = hit.result.data as Record<string, unknown>;
+  const items = Array.isArray(d.items) ? (d.items as Record<string, unknown>[]) : [];
+  const item = items[0] ?? {};
+  const orderId = String(d.id ?? '').trim();
+  if (!orderId) return undefined;
+  const itemName = String(item.name ?? item.menuItemName ?? '餐點');
+  const quantityRaw = item.quantity;
+  const quantity =
+    typeof quantityRaw === 'number' && Number.isFinite(quantityRaw) && quantityRaw > 0
+      ? quantityRaw
+      : 1;
+  const merchantLabel = String(d.merchantName ?? d.cafeteria ?? '餐廳');
+  const total = typeof d.totalAmount === 'number' ? d.totalAmount : undefined;
+  return { orderId, merchantLabel, itemName, quantity, total, statusHint: '待店家確認' };
+}
+
+function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
+  const { summary } = props;
+  const totalLine =
+    typeof summary.total === 'number' ? `金額約 $${summary.total}（以店家確認為準）` : undefined;
+  return (
+    <View
+      style={{
+        marginTop: 10,
+        padding: 14,
+        borderRadius: 14,
+        backgroundColor: '#10B98112',
+        borderWidth: 1,
+        borderColor: '#10B98155',
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Ionicons name="checkmark-circle" size={22} color="#10B981" />
+        <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>訂單已送出</Text>
+      </View>
+      <Text style={{ color: theme.colors.text, fontSize: 14, lineHeight: 22 }}>
+        已幫你向「{summary.merchantLabel}」點 {summary.quantity} 份「{summary.itemName}」。可到「校園 → 點餐 →
+        我的訂單」看進度。
+      </Text>
+      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 8 }}>
+        訂單編號：{summary.orderId}
+        {summary.statusHint ? ` · ${summary.statusHint}` : ''}
+      </Text>
+      {totalLine ? (
+        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>{totalLine}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 type Message = {
   id: string;
   role: MessageRole;
@@ -206,6 +273,8 @@ type Message = {
   suggestions?: string[];
   /** 可點選選項（例如訂餐多選一），點擊後當成使用者訊息送出 */
   choiceMenu?: AssistantChoiceMenu;
+  /** 訂餐已成功送出時顯示，避免畫面仍停留在上一輪選單 */
+  orderSuccess?: OrderSuccessSummary;
   actions?: AssistantActionProposal[];
   agentType?: AgentMessageType;
   toolExecution?: ToolExecution;
@@ -457,8 +526,8 @@ function TypingIndicator() {
 
 // ── Thinking Bubble ──
 function ThinkingBubble(props: { steps: ThinkingStepUI[]; collapsed?: boolean }) {
-  const { steps, collapsed } = props;
-  const [isExpanded, setIsExpanded] = useState(!collapsed);
+  const { steps } = props;
+  const [isExpanded, setIsExpanded] = useState(false);
   const statusIcon: Record<string, { icon: string; color: string }> = {
     done: { icon: 'checkmark-circle', color: '#10B981' },
     checking: { icon: 'sync-outline', color: '#6366F1' },
@@ -481,7 +550,7 @@ function ThinkingBubble(props: { steps: ThinkingStepUI[]; collapsed?: boolean })
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <Ionicons name="bulb-outline" size={14} color={theme.colors.accent} />
         <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600', flex: 1 }}>
-          思考過程
+          怎麼做到的（選看）
         </Text>
         <Ionicons
           name={isExpanded ? 'chevron-up' : 'chevron-down'}
@@ -1213,7 +1282,7 @@ function MessageBubble(props: {
       )}
 
       {/* Main bubble */}
-      {message.content.length > 0 && (
+          {message.content.length > 0 && (
         <View
           style={{
             padding: 14,
@@ -1232,6 +1301,8 @@ function MessageBubble(props: {
           </Text>
         </View>
       )}
+
+      {!isUser && message.orderSuccess && <OrderSuccessCard summary={message.orderSuccess} />}
 
       {!isUser &&
         message.assistantToolsUsed &&
@@ -5624,6 +5695,15 @@ export function AIChatScreen(props: any) {
             if (agentResult.failedActions.length > 0) {
               content += (content ? '\n\n' : '') + agentResult.failedActions.map(a => `${a.reason}：${a.missingInfo}`).join('\n');
             }
+            const orderSuccessSummary = extractCreateOrderSuccess(agentResult.executedActions);
+            const onlyCreateOrderOk =
+              orderSuccessSummary &&
+              successActions.length === 1 &&
+              successActions[0].tool === 'create_order';
+            const bubbleContent =
+              onlyCreateOrderOk && orderSuccessSummary
+                ? `已幫你向「${orderSuccessSummary.merchantLabel}」點 ${orderSuccessSummary.quantity} 份「${orderSuccessSummary.itemName}」，詳情見下方卡片。`
+                : content || '已處理你的請求。';
             // 根據操作類型動態生成建議
             const intentType = agentResult.intents[0]?.tool ?? 'unknown';
             const dynamicSuggestions = intentType === 'create_order'
@@ -5645,16 +5725,31 @@ export function AIChatScreen(props: any) {
             const orderMsg: Message = {
               id: genMsgId(),
               role: 'assistant',
-              content: content || '已處理你的請求。',
+              content: bubbleContent,
               timestamp: new Date(),
               agentType: 'tool_result',
               thinkingSteps: [
                 ...toolLayerThinkingSteps,
                 ...reflexionSteps,
-                { step: stepLabel, detail: `已自動完成`, status: 'done' as const },
+                {
+                  step: orderSuccessSummary ? '訂餐' : stepLabel,
+                  detail: orderSuccessSummary ? '已幫你送出訂單' : '已自動完成',
+                  status: 'done' as const,
+                },
               ],
-              choiceMenu: agentResult.choiceMenu,
+              choiceMenu: orderSuccessSummary ? undefined : agentResult.choiceMenu,
+              orderSuccess: orderSuccessSummary,
               suggestions: dynamicSuggestions,
+              actions: orderSuccessSummary
+                ? [
+                    {
+                      label: '查看訂單狀態',
+                      action: 'navigate',
+                      params: { screen: '校園', nested: 'Ordering', initialTab: 2 },
+                    },
+                    { label: '再點一份', action: 'navigate', params: { screen: '校園', nested: 'Ordering' } },
+                  ]
+                : undefined,
             };
             setIsTyping(false);
             setMessages((prev) => [...prev, orderMsg]);
@@ -5710,9 +5805,11 @@ export function AIChatScreen(props: any) {
           suggestions:
             toolLayerResult.intent === 'schedule_lookup'
               ? ['設定上課提醒', '查作業截止', '查明天行程']
-              : toolLayerResult.intent === 'order_action' || toolLayerResult.intent === 'dining_lookup'
-                ? ['幫我點第一個', '換便宜一點', '開啟點餐']
-                : ['查我的資料總覽', '查通知', '還有什麼待辦'],
+              :             toolLayerResult.intent === 'recommend_lunch'
+                ? ['好，幫我點這個', '換一個', '開啟點餐']
+                : toolLayerResult.intent === 'order_action' || toolLayerResult.intent === 'dining_lookup'
+                  ? ['幫我點第一個', '換便宜一點', '開啟點餐']
+                  : ['查我的資料總覽', '查通知', '還有什麼待辦'],
         };
         setIsTyping(false);
         setMessages((prev) => [...prev, toolLayerMsg]);

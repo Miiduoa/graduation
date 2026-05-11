@@ -1,6 +1,13 @@
 import type { AssistantActionProposal, CampusActorRole } from '../data/types';
 import type { AIContext } from './ai';
 import {
+  filterMainMealCandidates,
+  formatLunchRecommendationReply,
+  messageWantsMainMealRecommendation,
+  parseBudgetCapFromMessage,
+  recommendLunchCandidates,
+} from './recommendLunch';
+import {
   getPermissions,
   getRoleGroup,
   type AppRole,
@@ -10,6 +17,7 @@ import {
 
 export type AIToolLayerIntent =
   | 'schedule_lookup'
+  | 'recommend_lunch'
   | 'assignment_lookup'
   | 'calendar_lookup'
   | 'dining_lookup'
@@ -228,6 +236,12 @@ function detectIntent(message: string): { intent: AIToolLayerIntent; confidence:
   const msg = message.toLowerCase();
   const rules: Array<[AIToolLayerIntent, RegExp, number, string]> = [
     ['schedule_lookup', /課表|上課|有課|什麼課|哪幾堂課|幾堂課|幾點上課|早八/, 0.92, '課表查詢'],
+    [
+      'recommend_lunch',
+      /推薦.*(午餐|午飯|正餐)|午餐.*(推薦|吃什麼|要吃)|今天中午吃什麼|中午吃什麼|吃午飯|午飯吃什麼|幫我.*午餐|今天.*午餐|正餐.*吃什麼/,
+      0.9,
+      '午餐推薦',
+    ],
     ['order_action', /幫我.*(點|訂)|我要(點|訂|吃)|點餐|訂餐|下單|來一份|點一份/, 0.9, '點餐代理'],
     ['dining_lookup', /吃什麼|推薦.*(餐|吃)|餐點|菜單|餐廳|午餐|晚餐|早餐|好餓/, 0.82, '餐飲查詢'],
     ['assignment_lookup', /作業|截止|待繳|期限|逾期|deadline/, 0.9, '作業演算'],
@@ -684,26 +698,26 @@ export function runAIToolLayer(params: {
   });
   const steps: AIToolLayerStep[] = [
     {
-      step: '理解意圖',
-      detail: `分類為 ${detected.toolName}`,
+      step: '先看你的問題',
+      detail: `歸在「${detected.toolName}」這一類`,
       status: detected.confidence >= 0.7 ? 'done' : 'checking',
     },
     {
-      step: '讀取 App 資料',
-      detail: `可檢索資料 ${context?.appDataRecords?.length ?? 0} 筆；覆蓋 ${context?.appDataCoverage?.length ?? 0} 類資料`,
+      step: '讀一下 App 裡的資料',
+      detail: `約 ${context?.appDataRecords?.length ?? 0} 筆可搜、${context?.appDataCoverage?.length ?? 0} 類有載入`,
       status: (context?.appDataRecords?.length ?? 0) > 0 ? 'done' : 'warning',
     },
     {
-      step: '執行資料演算',
-      detail: `已產生 ${insights.length} 個使用者狀態洞察`,
+      step: '整理重點',
+      detail: `順手標出 ${insights.length} 件可能和你有關的狀態`,
       status: 'done',
     },
     {
-      step: '評估跨角色影響',
+      step: '會不會牽連到別人',
       detail:
         crossRoleEffects.length > 0
-          ? `此任務會牽涉 ${crossRoleEffects.map((effect) => effect.targetRoles.join('/')).join('、')}`
-          : '此問題目前只讀取使用者/App 資料，不觸發其他角色待辦',
+          ? `可能會通知到：${crossRoleEffects.map((effect) => effect.targetRoles.join('、')).join('；')}`
+          : '這題多半只動到你手機裡的資料，不會丟給店家或行政',
       status: crossRoleEffects.some((effect) => effect.confirmationRequired) ? 'warning' : 'done',
     },
   ];
@@ -756,6 +770,34 @@ export function runAIToolLayer(params: {
       };
     }
 
+    case 'recommend_lunch': {
+      const menus = context?.menus ?? [];
+      if (menus.length === 0) {
+        return {
+          ...detected,
+          handled: true,
+          steps,
+          insights,
+          crossRoleEffects,
+          answer:
+            '目前沒有載入菜單，我沒辦法幫你挑餐。請先到「校園 → 點餐」或餐廳頁同步菜單，再問我一次。',
+          actions: [{ label: '開啟點餐', action: 'navigate', params: { screen: '校園', nested: 'Ordering' } }],
+        };
+      }
+      const budget = parseBudgetCapFromMessage(message);
+      const mealLabel = /晚餐|晚飯|今晚/.test(message) ? '晚餐' : /早餐|早飯/.test(message) ? '早餐' : '午餐';
+      const { items } = recommendLunchCandidates(menus, { budgetCap: budget, maxItems: 3 });
+      return {
+        ...detected,
+        handled: true,
+        steps,
+        insights,
+        crossRoleEffects,
+        answer: formatLunchRecommendationReply(items, { mealLabel }),
+        actions: [{ label: '開啟點餐', action: 'navigate', params: { screen: '校園', nested: 'Ordering' } }],
+      };
+    }
+
     case 'assignment_lookup': {
       const assignments = context?.pendingAssignments ?? [];
       if (assignments.length === 0) {
@@ -786,9 +828,12 @@ export function runAIToolLayer(params: {
       const q = normalize(message);
       const wantsCheap = /便宜|平價|划算|省/.test(message);
       const wantsVeg = /素|蔬|菜|健康|清淡/.test(message);
-      let filtered = menus.filter((menu) => normalize(`${menu.name}${menu.cafeteria ?? ''}`).includes(q) || q.includes(normalize(menu.name)));
-      if (filtered.length === 0 && wantsVeg) filtered = menus.filter((menu) => /素|蔬|菜|沙拉/.test(menu.name));
-      if (filtered.length === 0) filtered = [...menus];
+      const basePool = messageWantsMainMealRecommendation(message) ? filterMainMealCandidates(menus) : [...menus];
+      let filtered = basePool.filter(
+        (menu) => normalize(`${menu.name}${menu.cafeteria ?? ''}`).includes(q) || q.includes(normalize(menu.name)),
+      );
+      if (filtered.length === 0 && wantsVeg) filtered = basePool.filter((menu) => /素|蔬|菜|沙拉/.test(menu.name));
+      if (filtered.length === 0) filtered = [...basePool];
       if (wantsCheap) filtered.sort((a, b) => (a.price ?? 9999) - (b.price ?? 9999));
       const list = filtered
         .slice(0, 6)
