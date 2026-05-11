@@ -10,15 +10,15 @@ import {
   SegmentedControl,
   EmptyListPlaceholder,
   Spinner,
-} from '../ui/components';
-import { useAuth } from '../state/auth';
-import { useSchedule } from '../state/schedule';
-import { useSchool } from '../state/school';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme } from '../ui/theme';
-import { analytics } from '../services/analytics';
-import { useDataSource } from '../hooks/useDataSource';
-import { useAsyncList } from '../hooks/useAsyncList';
+} from '../../ui/components';
+import { useAuth } from '../../state/auth';
+import { useSchedule } from '../../state/schedule';
+import { useSchool } from '../../state/school';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
+import { theme } from '../../ui/theme';
+import { analytics } from '../../services/analytics';
+import { useDataSource } from '../../hooks/useDataSource';
+import { useAsyncList } from '../../hooks/useAsyncList';
 
 type ViewMode = 'week' | 'day' | 'list';
 
@@ -228,7 +228,7 @@ function findMatchingPoi(location: string, pois: CampusPoi[]): CampusPoi | null 
   return bestMatch && bestMatch.score >= 70 ? bestMatch.poi : null;
 }
 
-export function CourseScheduleScreen(props: Record<string, unknown>) {
+export function CourseSchedulePanel(props: Record<string, unknown>) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nav = props?.navigation as any;
   const auth = useAuth();
