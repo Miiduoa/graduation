@@ -123,6 +123,11 @@ export function PostLoginDebugScreen() {
   }, [load]);
 
   const textSecondary = { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 };
+  const schoolIdForRepair = profile?.primarySchoolId ?? profile?.schoolId ?? null;
+  const repairFirestorePath =
+    schoolIdForRepair && user?.uid
+      ? `schools/${schoolIdForRepair}/repairRequests`
+      : null;
 
   return (
     <Screen>
@@ -178,6 +183,35 @@ export function PostLoginDebugScreen() {
               </Text>
             </View>
           ))}
+        </AnimatedCard>
+
+        <AnimatedCard
+          title="AI 報修 / Cloud agent 對照"
+          subtitle="Console：與 App 寫入同一 repairRequests；Functions log 搜 submitRepairRequest"
+        >
+          <Text style={textSecondary}>
+            Firestore 報修 collection：{repairFirestorePath ?? '（無 schoolId）'}
+          </Text>
+          <Text style={{ ...textSecondary, marginTop: 8 }}>
+            agentRuns 內 steps／toolCalls 可查是否呼叫工具與 output（payload）；若 tool 回傳 JSON 內含 error
+            鍵，後續模型仍宣稱成功，代表最終文案未吃 tool result。
+          </Text>
+        </AnimatedCard>
+
+        <AnimatedCard title="Firestore agentRuns" subtitle="最近 5 筆 campus assistant／agent 執行（新→舊）">
+          <Divider spacing={8} />
+          {agentRuns.length === 0 ? (
+            <Text style={textSecondary}>無資料或尚未產生 run</Text>
+          ) : (
+            agentRuns.map((r) => (
+              <View key={String((r as { id?: string }).id)} style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '700' }}>
+                  {(r as { id?: string }).id}
+                </Text>
+                <Text style={textSecondary}>{JSON.stringify(r, null, 2)}</Text>
+              </View>
+            ))
+          )}
         </AnimatedCard>
 
         <AnimatedCard title="Firestore postLoginRuns" subtitle="最近 5 筆（新→舊）">
