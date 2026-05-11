@@ -54,6 +54,7 @@ import {
 } from '../services/proactiveAI';
 import { isEffectivelyOnline } from '../services/offline';
 import { executeAgentToolAction, type AIActionExecutionResult } from '../services/aiActionExecutor';
+import { AgentCardList } from '../components/AgentCards';
 import {
   buildAIAppContext,
   emptyAIAppRuntimeData,
@@ -286,6 +287,8 @@ type Message = {
   assistantToolsUsed?: string[];
   /** askCampusAssistant 本輪 runId（對應 Firestore agentRuns） */
   campusAssistantRunId?: string;
+  /** 後端 agent/chat 回傳的卡片（課表/作業/公告/導頁等） */
+  cards?: Array<{ kind: string; payload: Record<string, any> }>;
 };
 
 const ASSISTANT_TOOL_LABELS: Record<string, string> = {
@@ -1303,6 +1306,8 @@ function MessageBubble(props: {
       )}
 
       {!isUser && message.orderSuccess && <OrderSuccessCard summary={message.orderSuccess} />}
+
+      {!isUser && message.cards && message.cards.length > 0 && <AgentCardList cards={message.cards} />}
 
       {!isUser &&
         message.assistantToolsUsed &&
@@ -6427,6 +6432,7 @@ export function AIChatScreen(props: any) {
                   choiceMenu: aiResponse.choiceMenu,
                   campusAssistantRunId: aiResponse.campusAssistantRunId,
                   assistantToolsUsed: aiResponse.assistantToolsUsed,
+                  cards: (aiResponse as any).cards,
                   thinkingSteps: [
                     ...deliberationSteps,
                     ...(((aiResponse as any).thinking as ThinkingStepUI[] | undefined) ?? []),
@@ -6435,6 +6441,22 @@ export function AIChatScreen(props: any) {
               : m,
           ),
         );
+
+        // 導航 cards：收到就直接跳頁（同時 UI 也會顯示可點卡片）
+        const cards = (aiResponse as any)?.cards as
+          | Array<{ kind: string; payload: { screen?: string; params?: any } }>
+          | undefined;
+        if (cards && cards.length > 0 && nav?.navigate) {
+          for (const card of cards) {
+            if (card?.kind === 'navigate' && card?.payload?.screen) {
+              try {
+                nav.navigate(card.payload.screen, card.payload.params ?? {});
+              } catch (e) {
+                // ignore navigation errors (route missing / params mismatch)
+              }
+            }
+          }
+        }
 
         if (aiResponse.campusAssistantSessionId) {
           setCampusAssistantSessionId(aiResponse.campusAssistantSessionId);
