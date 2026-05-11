@@ -3,6 +3,7 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CoursesHomeScreen } from './CoursesHomeScreen';
 import { AddCourseScreen } from './AddCourseScreen';
+import { AcademicScreen } from './AcademicScreen';
 import { GradesScreen } from './GradesScreen';
 import { CreditAuditStack } from './CreditAuditStack';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
@@ -96,7 +97,13 @@ export function AcademicStack() {
         component={AttendanceScreen}
         options={{ title: '智慧點名', headerShown: false }}
       />
-      {/* 需要 courses.grade 權限 — 教師/主管/管理員 */}
+      {/* 學業總覽 — 整合成績/AI分析/成績簿/學習分析 */}
+      <Stack.Screen
+        name="AcademicOverview"
+        component={AcademicScreen}
+        options={{ title: '學業總覽', headerShown: false }}
+      />
+      {/* 保留個別路由以供深層連結使用 */}
       <Stack.Screen
         name="CourseGradebook"
         component={GuardedGradebook}
@@ -104,7 +111,6 @@ export function AcademicStack() {
       />
       <Stack.Screen name="Classroom" component={ClassroomScreen} options={{ title: '課堂互動' }} />
       <Stack.Screen name="Grades" component={GradesScreen} options={{ title: '成績查詢' }} />
-      {/* 需要分析權限 — 管理員/教師 */}
       <Stack.Screen
         name="LearningAnalytics"
         component={GuardedLearningAnalytics}

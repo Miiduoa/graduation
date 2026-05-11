@@ -15,6 +15,7 @@ import { AttendanceScreen } from './AttendanceScreen';
 import { ClassroomScreen } from './ClassroomScreen';
 import { LearningAnalyticsScreen } from './LearningAnalyticsScreen';
 import { CourseGradebookScreen } from './CourseGradebookScreen';
+import { AcademicScreen } from './AcademicScreen';
 import { QuizTakingScreen } from './QuizTakingScreen';
 import { PeerReviewScreen } from './PeerReviewScreen';
 import { useThemeMode } from '../state/theme';
@@ -57,6 +58,12 @@ export function TeachingStack() {
         name="Attendance"
         component={AttendanceScreen}
         options={{ title: '點名中心' }}
+      />
+      {/* 學業總覽 — 整合成績/AI分析/成績簿/學習分析 */}
+      <Stack.Screen
+        name="AcademicOverview"
+        component={AcademicScreen}
+        options={{ title: '學業總覽', headerShown: false }}
       />
       <Stack.Screen
         name="CourseGradebook"
