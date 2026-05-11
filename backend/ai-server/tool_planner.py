@@ -171,6 +171,19 @@ def _format_order_success(output: dict[str, Any]) -> str:
     )
 
 
+def _format_reminder_success(output: dict[str, Any]) -> str:
+    rid = output.get("reminderId") or "未知"
+    title = output.get("title") or "提醒事項"
+    at = output.get("time") or "稍後"
+    return (
+        "✅ 已幫你建立提醒。\n"
+        f"標題：{title}\n"
+        f"時間：{at}\n"
+        f"提醒編號：{rid}\n"
+        "你可以到行事曆頁面查看或調整。"
+    )
+
+
 def _format_list_repairs_success(output: dict[str, Any]) -> str:
     items = output.get("items") or []
     if not items:
@@ -307,6 +320,18 @@ def _build_cards(traces: list[ToolCallTrace]) -> list[ResponseCard]:
                     },
                 )
             )
+        elif trace.name == "createReminder":
+            cards.append(
+                ResponseCard(
+                    kind="reminder_created",
+                    payload={
+                        "reminderId": trace.output.get("reminderId"),
+                        "title": trace.output.get("title"),
+                        "time": trace.output.get("time"),
+                        "source": trace.output.get("source"),
+                    },
+                )
+            )
         else:  # pragma: no cover — defensive
             cards.append(ResponseCard(kind="tool_succeeded", payload={
                 "tool": trace.name,
@@ -379,6 +404,8 @@ def _build_final_text(traces: list[ToolCallTrace], llm_content: str) -> str:
                     title = it.get("title") or "公告"
                     lines.append(f"• {title}")
                 pieces.append("\n".join(lines))
+        elif trace.name == "createReminder":
+            pieces.append(_format_reminder_success(trace.output))
         else:
             pieces.append(
                 f"✅ 已執行 {trace.name}：{json.dumps(trace.output, ensure_ascii=False)}"
@@ -407,6 +434,12 @@ async def run_agent_turn(
     """
     run_id = f"py_agent_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}"
     tools_spec = list_openai_tools()
+    logger.info(
+        "run_agent_turn start | uid=%s | msg=%r | tools=%s",
+        ctx.uid,
+        user_message[:60],
+        [t["function"]["name"] for t in tools_spec],
+    )
 
     messages = build_agent_messages(
         user_message=user_message,
@@ -417,6 +450,11 @@ async def run_agent_turn(
     plan: llm_client.ChatPlan
     try:
         plan = await llm_client.chat_with_tools(messages, tools_spec)
+        logger.info(
+            "LLM plan | tool_calls=%s | content_len=%d",
+            [c.name for c in plan.tool_calls],
+            len(plan.content or ""),
+        )
     except Exception as exc:
         logger.exception("LLM planner failed")
         return AgentTurn(
