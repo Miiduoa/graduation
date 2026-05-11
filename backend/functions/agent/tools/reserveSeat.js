@@ -1,7 +1,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 
 const inputSchema = z.object({
   seatId: z.string().min(1),

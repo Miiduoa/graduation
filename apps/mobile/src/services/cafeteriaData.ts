@@ -297,7 +297,7 @@ export const VENDORS: Vendor[] = [
     avgPrice: 65,
     tags: ['自助餐', '便宜', '份量大'],
     imageUrl: null,
-    ownerUid: null,
+    ownerUid: 'test-vendor', // 測試店家帳號 UID
   },
   {
     id: 'jy-02',

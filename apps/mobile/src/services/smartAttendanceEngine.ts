@@ -27,6 +27,8 @@ import {
   seedCachedTCCourses,
   seedCachedTCAttendance,
 } from './puDataCache';
+import { loadMockAuthSession } from './mockAuth';
+import { isTestAccount, getTestClassRoster } from './testSeedData';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -405,7 +407,20 @@ export async function getCourseStudents(courseId: number): Promise<
   } catch (e) {
     console.log('Failed to fetch members:', e);
   }
-  // Fallback
+  // 測試帳號 → 回傳共用同學名冊
+  try {
+    const session = await loadMockAuthSession();
+    if (session && isTestAccount(session.uid)) {
+      const roster = getTestClassRoster();
+      return roster.map((c) => ({
+        id: c.uid,
+        name: c.displayName,
+        avatarUrl: null,
+      }));
+    }
+  } catch (_) { /* ignore */ }
+
+  // Fallback — 一般帳號無 TronClass 時
   return FALLBACK_STUDENTS.map((name, i) => ({
     id: `STU${String(i + 1).padStart(3, '0')}`,
     name,

@@ -35,10 +35,26 @@ const {
 } = require('../lib/assistantCompose');
 const { queueAssistantActionDrafts, writeAssistantAuditLog } = require('../lib/assistantQueue');
 const { resolveLeaveSubmitPayload } = require('../lib/leaveIntentResolve');
+const {
+  resolveReserveSeatInput,
+  resolveBorrowBookInput,
+  resolveRepairInput,
+  resolveWashReserveInput,
+  resolveFoodOrderInput,
+} = require('../lib/campusWriteIntentResolve');
 const searchCampusDocs = require('./tools/searchCampusDocs');
 const { runTool } = require('./tools/registry');
 
 const db = getFirestore();
+
+/** 這些意圖走結構化寫入草稿（含確認卡），略過 LLM 主路徑以免搶答成一般聊天 */
+const INTENTS_SKIP_LLM = new Set([
+  'reserve_seat',
+  'borrow_book',
+  'submit_repair_request',
+  'wash_reserve',
+  'food_order',
+]);
 const { assertActiveSchoolMember } = createAuthzHelpers(db);
 
 function resolvePermissionScope(intent, hasAuth) {
@@ -185,8 +201,6 @@ async function executeCampusAssistantCore({
     }
   }
 
-  /** 空集合表示所有 intent 皆先嘗試 LLM＋工具；靜態分支僅在 LLM 無回覆時 fallback */
-  const INTENTS_SKIP_LLM = new Set();
   if (!INTENTS_SKIP_LLM.has(intent) && lastUserMessage) {
     const tFetch = Date.now();
     const [announcements, events, menus, pois] = await Promise.all([
@@ -401,6 +415,173 @@ async function executeCampusAssistantCore({
     response.citations = [
       { type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' },
     ];
+    return await finalizeResponse();
+  }
+
+  if (intent === 'reserve_seat') {
+    if (!uid) {
+      response.content = '預約座位需要先登入。登入後再告訴我日期、時段與座位（或說「圖書館三樓隨便一席」）。';
+      response.suggestions = ['功能說明', '今日公告', '查課表'];
+      return await finalizeResponse();
+    }
+    const seatInput = resolveReserveSeatInput(lastUserMessage, timeZone);
+    if (!seatInput) {
+      response.content = [
+        '我可以幫你建立「圖書館／自習室」座位預約草稿，但目前無法從這句話辨識日期、時間或座位。',
+        '',
+        '請補上例如：明天早上 9:00、圖書館三樓 A-15（或說隨便一席）。',
+      ].join('\n');
+      response.suggestions = ['明天 9:00 圖書館三樓隨便一席', '查課表', '今日公告'];
+      return await finalizeResponse();
+    }
+    response.content = [
+      '我已整理座位預約內容，確認後才會寫入 seatReservations。',
+      '',
+      `座位：${seatInput.seatId}｜日期：${seatInput.date}｜${seatInput.startTime}–${seatInput.endTime}`,
+    ].join('\n');
+    response.suggestions = ['改時段', '換座位', '查課表'];
+    response.actions = [
+      assistantAction({
+        label: '確認預約座位',
+        action: 'queue_action',
+        params: { toolName: 'reserveSeat', input: seatInput },
+        requiresConfirmation: true,
+        sensitivity: 'high',
+        evidenceRefs: [{ type: 'system', id: 'reserve-seat', label: '座位預約' }],
+      }),
+    ];
+    response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];
+    return await finalizeResponse();
+  }
+
+  if (intent === 'borrow_book') {
+    if (!uid) {
+      response.content = '借書需要先登入。請用《書名》或書籍 ID 告訴我要借哪一本。';
+      response.suggestions = ['功能說明', '今日公告', '查課表'];
+      return await finalizeResponse();
+    }
+    const bookInput = await resolveBorrowBookInput(lastUserMessage, schoolId);
+    if (!bookInput) {
+      response.content = [
+        '我可以幫你建立借書草稿，但找不到對應的館藏 bookId。',
+        '',
+        '請用《完整或部分書名》再試一次，或到圖書館查詢館藏代碼。',
+      ].join('\n');
+      response.suggestions = ['借《資料結構》', '查課表', '今日公告'];
+      return await finalizeResponse();
+    }
+    response.content = '我已整理借書申請，確認後會建立 libraryLoans 並扣庫存。';
+    response.suggestions = ['換一本', '查借閱', '今日公告'];
+    response.actions = [
+      assistantAction({
+        label: '確認借書',
+        action: 'queue_action',
+        params: { toolName: 'borrowBook', input: bookInput },
+        requiresConfirmation: true,
+        sensitivity: 'high',
+        evidenceRefs: [{ type: 'system', id: 'borrow-book', label: '圖書借閱' }],
+      }),
+    ];
+    response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];
+    return await finalizeResponse();
+  }
+
+  if (intent === 'submit_repair_request') {
+    if (!uid) {
+      response.content = '宿舍報修需要先登入。請描述故障位置（棟別、房號）與狀況。';
+      response.suggestions = ['功能說明', '今日公告', '查課表'];
+      return await finalizeResponse();
+    }
+    const repairInput = resolveRepairInput(lastUserMessage);
+    if (!repairInput) {
+      response.content = '我可以幫你送報修單，但請至少描述故障類型與位置（例如：A棟 301 冷氣不冷）。';
+      response.suggestions = ['A棟301冷氣不冷', '今日公告', '查課表'];
+      return await finalizeResponse();
+    }
+    response.content = [
+      '我已整理宿舍報修草稿，確認後會寫入 repairRequests。',
+      '',
+      `${repairInput.dormitory} ${repairInput.room}｜類別：${repairInput.category}`,
+      repairInput.description.slice(0, 200),
+    ].join('\n');
+    response.suggestions = ['修改描述', '今日公告', '查課表'];
+    response.actions = [
+      assistantAction({
+        label: '確認送出報修',
+        action: 'queue_action',
+        params: { toolName: 'submitRepairRequest', input: repairInput },
+        requiresConfirmation: true,
+        sensitivity: 'high',
+        evidenceRefs: [{ type: 'system', id: 'repair-request', label: '宿舍報修' }],
+      }),
+    ];
+    response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];
+    return await finalizeResponse();
+  }
+
+  if (intent === 'wash_reserve') {
+    if (!uid) {
+      response.content = '預約洗衣機需要先登入。請告訴我時段（例如：今晚 8 點）。';
+      response.suggestions = ['功能說明', '今日公告', '查課表'];
+      return await finalizeResponse();
+    }
+    const washInput = await resolveWashReserveInput(lastUserMessage, schoolId);
+    if (!washInput) {
+      response.content =
+        '我可以幫你預約洗衣機，但目前找不到可預約的機台或無法解析時間。請確認學校是否已建立 washingMachines 資料。';
+      response.suggestions = ['今晚八點洗衣', '今日公告', '查課表'];
+      return await finalizeResponse();
+    }
+    response.content = [
+      '我已整理洗衣機預約草稿，確認後會寫入 washingReservations 並更新機台狀態。',
+      '',
+      `機台：${washInput.machineId}｜開始：${washInput.startTime}｜${washInput.dormitory}`,
+    ].join('\n');
+    response.suggestions = ['改時間', '今日公告', '查課表'];
+    response.actions = [
+      assistantAction({
+        label: '確認預約洗衣',
+        action: 'queue_action',
+        params: { toolName: 'reserveWashingMachine', input: washInput },
+        requiresConfirmation: true,
+        sensitivity: 'high',
+        evidenceRefs: [{ type: 'system', id: 'wash-reserve', label: '洗衣預約' }],
+      }),
+    ];
+    response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];
+    return await finalizeResponse();
+  }
+
+  if (intent === 'food_order') {
+    if (!uid) {
+      response.content = '線上訂餐需要先登入。請說明餐廳與品項（例如：學生餐廳雞排飯＋紅茶）。';
+      response.suggestions = ['功能說明', '今日公告', '推薦餐點'];
+      return await finalizeResponse();
+    }
+    const orderInput = await resolveFoodOrderInput(lastUserMessage, schoolId);
+    if (!orderInput) {
+      response.content =
+        '我可以幫你建立訂單草稿（schools/.../orders），但目前無法從菜單對應品項或找不到餐廳資料。';
+      response.suggestions = ['換個說法點餐', '推薦餐點', '今日公告'];
+      return await finalizeResponse();
+    }
+    response.content = [
+      '我已整理訂餐草稿，確認後會寫入 orders（與使用者鏡像）。',
+      '',
+      `品項數：${orderInput.items.length}（總價將由後端依菜單計算稅金）`,
+    ].join('\n');
+    response.suggestions = ['修改品項', '推薦餐點', '今日公告'];
+    response.actions = [
+      assistantAction({
+        label: '確認下單',
+        action: 'queue_action',
+        params: { toolName: 'createOrder', input: orderInput },
+        requiresConfirmation: true,
+        sensitivity: 'high',
+        evidenceRefs: [{ type: 'system', id: 'create-order', label: '餐廳訂單' }],
+      }),
+    ];
+    response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];
     return await finalizeResponse();
   }
 

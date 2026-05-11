@@ -15,4 +15,18 @@ describe('intentWritePlan', () => {
     expect(getIntentWritePlan('menus')).toBeNull();
     expect(getIntentWritePlan('')).toBeNull();
   });
+
+  test('write intents map to tools', () => {
+    expect(getIntentWritePlan('reserve_seat')).toMatchObject({ toolName: 'reserveSeat', requiresConfirmation: true });
+    expect(getIntentWritePlan('borrow_book')).toMatchObject({ toolName: 'borrowBook', requiresConfirmation: true });
+    expect(getIntentWritePlan('submit_repair_request')).toMatchObject({
+      toolName: 'submitRepairRequest',
+      requiresConfirmation: true,
+    });
+    expect(getIntentWritePlan('wash_reserve')).toMatchObject({
+      toolName: 'reserveWashingMachine',
+      requiresConfirmation: true,
+    });
+    expect(getIntentWritePlan('food_order')).toMatchObject({ toolName: 'createOrder', requiresConfirmation: true });
+  });
 });

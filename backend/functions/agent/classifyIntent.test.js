@@ -47,4 +47,15 @@ describe('classifyIntent', () => {
     const r = classifyIntent('請假通過了嗎');
     expect(r.name).toBe('leave_status');
   });
+
+  test('rich: library seat reservation maps to reserve_seat', () => {
+    const r = classifyIntent('幫我明天早上九點在圖書館三樓預約一個座位');
+    expect(r.name).toBe('reserve_seat');
+    expect(r.source).toBe('rich');
+  });
+
+  test('keyword_fallback: food_order', () => {
+    const r = classifyIntent('幫我在學生餐廳點一份雞排飯跟一杯紅茶');
+    expect(r.name).toBe('food_order');
+  });
 });

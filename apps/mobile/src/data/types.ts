@@ -238,7 +238,10 @@ export type UserRole =
   | 'principal'
   | 'admin'
   | 'staff'
-  | 'alumni';
+  | 'alumni'
+  | 'department'
+  | 'school'
+  | 'vendor';
 
 export type RoleGroup = 'student' | 'teacher' | 'staff' | 'department_head' | 'admin';
 

@@ -556,9 +556,10 @@ function VendorsTab() {
   const [allVendors, setAllVendors] = useState<Vendor[]>(VENDORS); // 初始值用本地，之後用 Firestore
 
   useEffect(() => {
-    getVendors()
-      .then((vs) => { if (vs.length > 0) setAllVendors(vs); })
-      .catch(() => {});
+    try {
+      const vs = getVendors();
+      if (vs.length > 0) setAllVendors(vs);
+    } catch (_) { /* ignore */ }
   }, []);
 
   const filteredVendors = useMemo(
