@@ -18,6 +18,26 @@ const INTENT_WRITE_PLANS = {
     toolName: 'submitLeaveRequest',
     requiresConfirmation: true,
   },
+  reserve_seat: {
+    toolName: 'reserveSeat',
+    requiresConfirmation: true,
+  },
+  borrow_book: {
+    toolName: 'borrowBook',
+    requiresConfirmation: true,
+  },
+  submit_repair_request: {
+    toolName: 'submitRepairRequest',
+    requiresConfirmation: true,
+  },
+  wash_reserve: {
+    toolName: 'reserveWashingMachine',
+    requiresConfirmation: true,
+  },
+  food_order: {
+    toolName: 'createOrder',
+    requiresConfirmation: true,
+  },
 };
 
 /**

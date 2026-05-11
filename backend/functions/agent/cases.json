@@ -7,10 +7,73 @@
     "announcements": 0.9,
     "events": 0.88,
     "menus": 0.87,
+    "food_order": 0.88,
+    "reserve_seat": 0.9,
+    "borrow_book": 0.88,
+    "submit_repair_request": 0.87,
+    "wash_reserve": 0.86,
     "pois": 0.86,
     "credit_audit": 0.85,
     "help": 0.9,
     "study_summary": 0.82,
     "general": 0.55
-  }
+  },
+  "writeToolFewShots": [
+    {
+      "input": "幫我明天下午兩點在圖書館三樓 A-15 預約座位",
+      "expectedTool": "reserveSeat",
+      "toolInput": {
+        "seatId": "lib-3F-A15",
+        "date": "2026-05-12",
+        "startTime": "14:00",
+        "endTime": "16:00"
+      }
+    },
+    {
+      "input": "幫我借《資料結構》這本書",
+      "expectedTool": "borrowBook",
+      "toolInput": { "bookId": "book-ds-101" }
+    },
+    {
+      "input": "我宿舍冷氣壞掉了，幫我送一個報修單",
+      "expectedTool": "submitRepairRequest",
+      "toolInput": {
+        "dormitory": "A棟",
+        "room": "301",
+        "category": "hvac",
+        "description": "冷氣不冷",
+        "urgency": "normal"
+      }
+    },
+    {
+      "input": "幫我預約今天晚上 8 點宿舍洗衣機",
+      "expectedTool": "reserveWashingMachine",
+      "toolInput": {
+        "dormitory": "宿舍",
+        "machineId": "wm-demo-1",
+        "startTime": "2026-05-11T12:00:00.000Z"
+      }
+    },
+    {
+      "input": "幫我在學生餐廳點一份雞排飯跟一杯紅茶",
+      "expectedTool": "createOrder",
+      "toolInput": {
+        "cafeteriaId": "student-cafeteria",
+        "items": [
+          {
+            "menuItemId": "item-chicken-rice",
+            "name": "雞排飯",
+            "price": 85,
+            "quantity": 1
+          },
+          {
+            "menuItemId": "item-black-tea",
+            "name": "紅茶",
+            "price": 25,
+            "quantity": 1
+          }
+        ]
+      }
+    }
+  ]
 }

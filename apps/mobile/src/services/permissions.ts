@@ -59,7 +59,10 @@ export type AppRole =
   | 'department_head'
   | 'principal'
   | 'admin'
-  | 'alumni';
+  | 'alumni'
+  | 'department'
+  | 'school'
+  | 'vendor';
 
 // Map roles to their effective role group for tab/feature decisions
 export type RoleGroup = 'student' | 'teacher' | 'staff' | 'department_head' | 'admin';
@@ -70,11 +73,14 @@ export function getRoleGroup(role: AppRole): RoleGroup {
     case 'professor':
       return 'teacher';
     case 'staff':
+    case 'vendor':
       return 'staff';
     case 'department_head':
     case 'principal':
+    case 'department':
       return 'department_head';
     case 'admin':
+    case 'school':
       return 'admin';
     case 'student':
     case 'alumni':
@@ -335,6 +341,9 @@ export function getRoleDisplayName(role: AppRole): string {
     principal: '系所主管',
     admin: '管理員',
     alumni: '校友',
+    department: '系辦',
+    school: '校方',
+    vendor: '店家',
   };
   return names[role] ?? '使用者';
 }

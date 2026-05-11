@@ -484,6 +484,7 @@ function buildAgentSystemPrompt({
   knowledgeChunks = [],
   webAnswer = null,
   toolPromptSection = '',
+  writeFewShotBlock = '',
 }) {
   const contextText = JSON.stringify(structuredContext, (_key, value) => {
     if (typeof value === 'string') return truncate(value, 700);
@@ -540,6 +541,7 @@ function buildAgentSystemPrompt({
     knowledgeText ? `\n可檢索知識：\n${knowledgeText}` : '',
     webText ? `\n公開網路證據：\n${webText}` : '',
     toolBlock,
+    writeFewShotBlock ? truncate(String(writeFewShotBlock), 3500) : '',
   ]
     .filter(Boolean)
     .join('\n');
