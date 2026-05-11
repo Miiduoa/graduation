@@ -11,14 +11,14 @@ import {
   ErrorState,
   SectionTitle,
   Divider,
-} from '../ui/components';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { theme, softShadowStyle } from '../ui/theme';
-import { useSchool } from '../state/school';
-import { useAuth } from '../state/auth';
-import { useDataSource } from '../hooks/useDataSource';
-import { useAsyncList } from '../hooks/useAsyncList';
-import { formatDateTime } from '../utils/format';
+} from '../../ui/components';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
+import { theme, softShadowStyle } from '../../ui/theme';
+import { useSchool } from '../../state/school';
+import { useAuth } from '../../state/auth';
+import { useDataSource } from '../../hooks/useDataSource';
+import { useAsyncList } from '../../hooks/useAsyncList';
+import { formatDateTime } from '../../utils/format';
 import {
   pickAndParseICalFile,
   exportAndShareICalFile,
@@ -26,7 +26,7 @@ import {
   convertAssignmentsToICalEvents,
   type ICalEvent,
   type ParsedCalendar,
-} from '../services/ical';
+} from '../../services/ical';
 
 type CalendarEvent = {
   id: string;
@@ -225,7 +225,7 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
   );
 }
 
-export function CalendarScreen(props: any) {
+export function CalendarPanel(props: any) {
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
