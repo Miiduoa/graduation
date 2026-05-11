@@ -12,6 +12,7 @@ The planner takes care of converting those returns into user-facing text.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import os
 from typing import Any
@@ -340,6 +341,97 @@ async def _create_food_order(
     return {"success": True, **result}
 
 
+# ─── createReminder ──────────────────────────────────────────────────
+
+
+def _parse_reminder_time(raw: Any) -> datetime.datetime:
+    """Accept ISO-like datetime or HH:MM; default to 30 mins later."""
+    now = datetime.datetime.now()
+    default_time = now + datetime.timedelta(minutes=30)
+    if raw is None:
+        return default_time
+
+    text = str(raw).strip()
+    if not text:
+        return default_time
+
+    # HH:MM -> today or next day if time already passed.
+    hhmm = text.replace("：", ":")
+    try:
+        if len(hhmm) in {4, 5} and ":" in hhmm:
+            hour, minute = hhmm.split(":", 1)
+            dt = now.replace(hour=int(hour), minute=int(minute), second=0, microsecond=0)
+            if dt < now:
+                dt = dt + datetime.timedelta(days=1)
+            return dt
+    except Exception:
+        pass
+
+    # ISO strings (including trailing Z)
+    try:
+        normalized = text.replace("Z", "+00:00")
+        parsed = datetime.datetime.fromisoformat(normalized)
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone().replace(tzinfo=None)
+        return parsed
+    except Exception:
+        return default_time
+
+
+async def _create_reminder(
+    ctx: AgentToolContext, args: dict[str, Any]
+) -> dict[str, Any]:
+    if not ctx.uid:
+        raise ToolExecutionError("missing_uid", "尚未登入，無法建立提醒。")
+    if not ctx.school_id:
+        raise ToolExecutionError("missing_school", "缺少學校資訊，無法建立提醒。")
+
+    title = str(args.get("title") or "").strip()
+    if not title:
+        raise ToolExecutionError("missing_title", "缺少提醒標題 (title)。")
+
+    source = str(args.get("source") or "ai_assistant").strip() or "ai_assistant"
+    note = str(args.get("note") or "").strip()
+    start_at = _parse_reminder_time(args.get("time"))
+    end_at = start_at + datetime.timedelta(minutes=30)
+
+    def _write() -> str:
+        db = _firestore_client()
+        col = (
+            db.collection("users")
+            .document(ctx.uid)
+            .collection("schools")
+            .document(ctx.school_id)
+            .collection("calendarEvents")
+        )
+        payload = {
+            "userId": ctx.uid,
+            "schoolId": ctx.school_id,
+            "title": title,
+            "description": note or f"來源：{source}",
+            "startAt": start_at.isoformat(),
+            "endAt": end_at.isoformat(),
+            "allDay": False,
+            "type": "personal",
+            "sourceType": "custom",
+            "reminder": 0,
+            "source": source,
+            "createdAt": _server_timestamp(),
+            "updatedAt": _server_timestamp(),
+        }
+        _, ref = col.add(payload)
+        return ref.id
+
+    reminder_id = await asyncio.to_thread(_write)
+    return {
+        "success": True,
+        "reminderId": reminder_id,
+        "title": title,
+        "time": start_at.isoformat(),
+        "source": source,
+    }
+
+
 # ─── Registration ────────────────────────────────────────────────────
 
 
@@ -491,4 +583,34 @@ def register_default_tools() -> None:
         description=GET_ANNOUNCEMENTS_SPEC["function"]["description"],
         parameters=GET_ANNOUNCEMENTS_SPEC["function"]["parameters"],
         handler=get_latest_announcements,
+    )
+    register_tool(
+        name="createReminder",
+        description=(
+            "幫使用者建立提醒/行事曆事件。"
+            "需要 title；可選 time（ISO 8601 或 HH:MM）、source、note。"
+            "成功時回 success=True 與 reminderId。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "提醒標題。"},
+                "time": {
+                    "type": "string",
+                    "description": "提醒時間，可用 ISO 8601 或 HH:MM，不填則預設 30 分鐘後。",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "來源，例如 assignment/course/ai_assistant。",
+                },
+                "note": {
+                    "type": "string",
+                    "description": "提醒備註。",
+                },
+            },
+            "required": ["title"],
+            "additionalProperties": False,
+        },
+        handler=_create_reminder,
+        requires_confirmation=True,
     )
