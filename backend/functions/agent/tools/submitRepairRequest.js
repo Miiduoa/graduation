@@ -7,7 +7,7 @@ const inputSchema = z.object({
   dormitory: z.string().min(1),
   room: z.string().min(1),
   category: z.string().min(1),
-  description: z.string().min(1),
+  description: z.string().min(1).max(1000),
   urgency: z.enum(['low', 'normal', 'high']).optional().default('normal'),
 });
 
@@ -21,6 +21,7 @@ async function execute(ctx, rawInput) {
   const db = getFirestore();
   const repairRef = await db
     .collection('schools').doc(schoolId).collection('repairRequests').add({
+      schoolId,
       userId: uid,
       dormitory: input.dormitory,
       room: input.room,

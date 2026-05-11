@@ -451,6 +451,7 @@ async function executeOrderMeal(ctx: AIActionExecutorContext): Promise<AIActionE
     totalAmount,
     pickupTime: params.pickup_time,
     note: params.note,
+    source: 'ai_agent',
   });
 
   return executed(

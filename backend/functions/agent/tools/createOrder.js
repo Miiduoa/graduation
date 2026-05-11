@@ -42,6 +42,7 @@ async function execute(ctx, rawInput) {
   const orderPayload = {
     userId: uid,
     schoolId,
+    source: 'ai_agent',
     cafeteriaId: input.cafeteriaId,
     merchantId: cafeteriaData.merchantId || input.cafeteriaId,
     cafeteria: cafeteriaData.name || input.cafeteriaId,

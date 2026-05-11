@@ -29,6 +29,7 @@ import {
 } from './puDataCache';
 import { loadMockAuthSession } from './mockAuth';
 import { isTestAccount, getTestClassRoster } from './testSeedData';
+import { getCachedCourseStudents, getCachedClassmates, isTeacherOfCourse } from './postLoginDataRouter';
 
 // ============================================================================
 // TYPE DEFINITIONS
