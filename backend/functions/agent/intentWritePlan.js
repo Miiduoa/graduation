@@ -27,7 +27,7 @@ const INTENT_WRITE_PLANS = {
     requiresConfirmation: true,
   },
   submit_repair_request: {
-    toolName: 'submitRepairRequest',
+    toolName: 'createDormRepairRequest',
     requiresConfirmation: true,
   },
   wash_reserve: {

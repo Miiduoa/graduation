@@ -301,6 +301,21 @@ const INTENT_PATTERNS = [
       '退宿',
       '住宿',
     ],
+    subIntentMap: {
+      repair_status: [
+        '狀態',
+        '進度',
+        '好了',
+        '處理',
+        '查詢',
+        '查看',
+        '列表',
+        '紀錄',
+        '追蹤',
+        '單號',
+        '我的報修',
+      ],
+    },
   },
   {
     category: 'transport',

@@ -10,7 +10,7 @@ const {
   fetchAssistantUserProfile,
   fetchAssistantDailyBrief,
 } = require('../lib/assistantFetchers');
-const { getLastUserMessage } = require('../lib/assistantFormat');
+const { getLastUserMessage, isDormRepairStatusQueryMessage } = require('../lib/assistantFormat');
 const { writeReviewAiSuggestionQueueItem } = require('../lib/assistantQueue');
 const { classifyIntent } = require('./classifyIntent');
 const { evaluateAnswer } = require('./evaluateAnswer');
@@ -40,7 +40,14 @@ async function runCampusAssistantWithAgentRuntime(request) {
   }
   const timeZone = context.timezone || 'Asia/Taipei';
   const lastUserMessage = getLastUserMessage(rawMessages);
-  const intentMeta = classifyIntent(lastUserMessage);
+  let intentMeta = classifyIntent(lastUserMessage);
+  if (intentMeta.name === 'submit_repair_request' && isDormRepairStatusQueryMessage(lastUserMessage)) {
+    intentMeta = {
+      ...intentMeta,
+      name: 'check_repair_status',
+      source: `${intentMeta.source || 'rich'}_repair_status_guard`,
+    };
+  }
 
   const db = getFirestore();
   const steps = [];

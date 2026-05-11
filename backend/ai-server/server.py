@@ -54,6 +54,9 @@ if ENABLE_RAG:
 
 from self_training.dpo_trainer import save_feedback
 from self_training.growth_engine import run_growth_cycle, get_growth_stats
+from tools import AgentToolContext
+from tools.actions import register_default_tools
+from tool_planner import run_agent_turn
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,6 +85,8 @@ async def lifespan(app: FastAPI):
     global _campus_knowledge, _growth_task
 
     logger.info("LLM provider: %s", LLM_PROVIDER)
+    register_default_tools()
+    logger.info("Agent tools registered: createDormRepairRequest / listMyDormRepairs / createFoodOrder")
     _campus_knowledge = get_full_knowledge_text()
     if ENABLE_RAG:
         logger.info("Indexing APP knowledge (RAG enabled)...")
@@ -193,6 +198,12 @@ class WebSearchRequest(BaseModel):
     query: str
 
 
+class AgentChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = Field(default_factory=list)
+    context: dict = Field(default_factory=dict)
+
+
 # ─── Chat Endpoints ──────────────────────────────────────────────────
 
 async def _build_messages(req: ChatRequest) -> list[dict]:
@@ -288,6 +299,107 @@ async def web_search(req: WebSearchRequest, _user: dict = Depends(require_fireba
         "content": content,
         "sources": [source.__dict__ for source in sources],
     }
+
+
+# ─── Agent endpoint (tool-using) ─────────────────────────────────────
+
+
+async def _write_agent_run(
+    *,
+    uid: str | None,
+    school_id: str | None,
+    envelope: dict,
+    user_message: str,
+) -> None:
+    """Best-effort write of an agentRuns document so the Debug screen can
+    inspect what tools fired and what they returned.
+    """
+    if not uid or not school_id:
+        return
+    try:
+        _ensure_firebase_app()
+        from firebase_admin import firestore
+
+        def _write() -> None:
+            db = firestore.client()
+            doc = (
+                db.collection("users").doc(uid)
+                .collection("agentRuns").doc(envelope["runId"])
+            )
+            doc.set({
+                "runId": envelope["runId"],
+                "userId": uid,
+                "schoolId": school_id,
+                "source": "ai_server_python",
+                "status": "completed",
+                "userMessage": user_message,
+                "finalAnswer": envelope.get("content"),
+                "steps": envelope.get("toolCalls", []),
+                "toolCalls": envelope.get("toolCalls", []),
+                "cards": envelope.get("cards", []),
+                "plannerFinishReason": envelope.get("plannerFinishReason"),
+                "modelProvider": envelope.get("provider"),
+                "model": envelope.get("model"),
+                "createdAt": firestore.SERVER_TIMESTAMP,
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            })
+
+        await asyncio.to_thread(_write)
+    except Exception as exc:  # pragma: no cover - logging only
+        logger.warning("[agentRuns] write failed: %s", exc)
+
+
+@app.post("/api/agent/chat")
+async def agent_chat(
+    req: AgentChatRequest,
+    user: dict = Depends(require_firebase_user),
+):
+    """Tool-using chat endpoint.
+
+    The LLM is asked (via OpenAI function calling) whether to invoke a tool.
+    If yes, the server executes it and BUILDS THE USER-FACING TEXT FROM THE
+    TOOL'S RETURN VALUE — the LLM does not get to declare success on its own.
+    """
+    uid = user.get("uid") or user.get("user_id")
+    school_id = (
+        req.context.get("schoolId")
+        or user.get("schoolId")
+        or user.get("school_id")
+    )
+    if not uid:
+        raise HTTPException(status_code=401, detail="Missing user id")
+    if not school_id:
+        raise HTTPException(status_code=400, detail="Missing schoolId in context")
+
+    tool_ctx = AgentToolContext(
+        uid=str(uid),
+        school_id=str(school_id),
+        user_name=req.context.get("userName"),
+        role=req.context.get("role"),
+    )
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in (req.history or [])
+        if m.role in {"user", "assistant"} and isinstance(m.content, str)
+    ]
+    turn = await run_agent_turn(
+        user_message=req.message,
+        history=history,
+        user_context={
+            "userName": req.context.get("userName"),
+            "schoolId": school_id,
+            "role": req.context.get("role"),
+        },
+        ctx=tool_ctx,
+    )
+    envelope = turn.to_dict()
+    await _write_agent_run(
+        uid=str(uid),
+        school_id=str(school_id),
+        envelope=envelope,
+        user_message=req.message,
+    )
+    return envelope
 
 
 def _extract_suggestions(text: str) -> list[str]:

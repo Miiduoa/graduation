@@ -11,6 +11,7 @@
     "reserve_seat": 0.9,
     "borrow_book": 0.88,
     "submit_repair_request": 0.87,
+    "check_repair_status": 0.88,
     "wash_reserve": 0.86,
     "pois": 0.86,
     "credit_audit": 0.85,
@@ -36,7 +37,7 @@
     },
     {
       "input": "我宿舍冷氣壞掉了，幫我送一個報修單",
-      "expectedTool": "submitRepairRequest",
+      "expectedTool": "createDormRepairRequest",
       "toolInput": {
         "dormitory": "A棟",
         "room": "301",
