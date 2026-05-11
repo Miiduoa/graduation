@@ -1,3 +1,5 @@
+import type { PostLoginEngineBootstrap } from '../services/postLoginBootstrapStore';
+
 // ─── 基本角色 ────────────────────────────────────────────────────────────────
 export type PrimaryRole =
   | 'student'
@@ -106,7 +108,7 @@ export interface PostLoginContext {
   partialErrors: string[]; // 哪些來源抓失敗（不阻斷主流程）
 }
 
-// ─── 各引擎都要實作的介面 ─────────────────────────────────────────────────────
+// ─── 各引擎都要實作的介面（payload 與 finalize bootstrap 對齊）────────────────────
 export interface CampusEngineInitializable {
-  initFromPostLoginContext(ctx: PostLoginContext): void | Promise<void>;
+  initFromPostLoginContext(ctx: PostLoginEngineBootstrap): void | Promise<void>;
 }

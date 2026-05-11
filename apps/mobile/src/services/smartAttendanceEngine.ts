@@ -29,7 +29,7 @@ import {
 } from './puDataCache';
 import { loadMockAuthSession } from './mockAuth';
 import { isTestAccount, getTestClassRoster } from './testSeedData';
-import type { PostLoginEngineBootstrap } from './finalizePostLoginClient';
+import type { PostLoginEngineBootstrap } from './postLoginBootstrapStore';
 
 // ============================================================================
 // TYPE DEFINITIONS

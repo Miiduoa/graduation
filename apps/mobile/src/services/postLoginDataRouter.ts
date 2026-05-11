@@ -27,7 +27,7 @@ import { loadMockAuthSession, saveMockAuthSession } from './mockAuth';
 import { isTestAccount, getTestClassRoster, TEST_UIDS } from './testSeedData';
 import { campusEventBus } from './campusEventBus';
 import { getAuthInstance } from '../firebase';
-import { tryCallFinalizePostLogin } from './finalizePostLoginClient';
+import { setLastPostLoginEngineBootstrap, tryCallFinalizePostLogin } from './finalizePostLoginClient';
 import { getPostLoginContext } from '../data/postLoginDataRouter';
 import type { PrimaryRole } from '../data/postLoginTypes';
 import type { UserRole } from '../state/auth';
@@ -432,7 +432,7 @@ export async function routePostLoginData(
   let roleInference: RoleInferenceResult;
   let effectiveRole: UserRole = currentRole;
 
-  if (serverFinalize?.resolved?.primaryRole) {
+  if (serverFinalize?.success && serverFinalize.resolved?.primaryRole) {
     effectiveRole = serverFinalize.resolved.primaryRole as UserRole;
     const tcCourses = await getAnyCachedTCCourses();
     const teachingCount =
@@ -524,6 +524,25 @@ export async function routePostLoginData(
       });
     }
   } catch (_) { /* EventBus 可能尚未初始化 */ }
+
+  const authUser = getAuthInstance().currentUser;
+  if (authUser) {
+    setLastPostLoginEngineBootstrap({
+      uid: authUser.uid,
+      schoolId: serverFinalize?.context?.schoolId ?? null,
+      primaryRole: effectiveRole,
+      runId: serverFinalize?.runId ?? null,
+      postLoginRoles: serverFinalize?.resolved?.roles,
+      courseLiteCount: serverFinalize?.context?.courses?.length,
+      finalizeOk: serverFinalize?.success === true,
+      finalizeFailed: Boolean(serverFinalize && serverFinalize.success === false),
+      finalizeSkipped: serverFinalize === null,
+      errorCode: serverFinalize && serverFinalize.success === false ? serverFinalize.errorCode ?? null : null,
+      errorMessage:
+        serverFinalize && serverFinalize.success === false ? serverFinalize.errorMessage ?? null : null,
+      bootstrapAt: new Date().toISOString(),
+    });
+  }
 
   console.log(`[postLoginDataRouter] Completed in ${elapsed}ms`);
   return result;

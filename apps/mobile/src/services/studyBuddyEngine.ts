@@ -21,7 +21,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAnyCachedCourses, getAnyCachedGrades, getAnyCachedTCCourses } from './puDataCache';
 import { getCachedClassmates } from './postLoginDataRouter';
-import type { PostLoginEngineBootstrap } from './finalizePostLoginClient';
+import type { PostLoginEngineBootstrap } from './postLoginBootstrapStore';
 import type { PUCourse, PUCourseResult, PUGradeResult } from './puDirectScraper';
 import type { TCCourse } from './tronClassClient';
 

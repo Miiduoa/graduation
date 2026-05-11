@@ -1,5 +1,6 @@
 import type { AgentMemory, LocalTrainingDB } from '../data/puAIAgentData';
 import { exportTrainingInsights } from '../data/puAIAgentData';
+import type { PostLoginContext } from '../data/postLoginTypes';
 import type {
   Announcement,
   AttendanceSession,
@@ -43,6 +44,7 @@ import type {
 import type { DataSource } from '../data/source';
 import type { AIContext } from './ai';
 import type { ProactiveAIReport } from './proactiveAI';
+import { getInMemoryPostLoginContext } from './postLoginContextHolder';
 
 type AnyAssignment = {
   id: string;
@@ -134,6 +136,8 @@ export type AIAppContextInput = {
   dialogContextSummary?: string;
   conversationSummary?: string;
   now?: Date;
+  /** 若未傳，buildAIAppContext 會在 schoolId 相符時改用 getInMemoryPostLoginContext() */
+  postLoginContext?: PostLoginContext | null;
 };
 
 export function emptyAIAppRuntimeData(): AIAppRuntimeData {
@@ -606,7 +610,86 @@ function buildAppDataRecords(
   return records;
 }
 
-export function buildAIAppContext(input: AIAppContextInput): AIContext {
+function roleFromPostLoginContext(plc: PostLoginContext): AIAppContextInput['role'] {
+  switch (plc.roles.primaryRole) {
+    case 'student':
+      return 'student';
+    case 'teacher':
+      return 'teacher';
+    case 'departmentAdmin':
+      return 'department_head';
+    case 'admin':
+      return 'admin';
+    case 'staff':
+    case 'shopOwner':
+      return 'staff';
+    default:
+      return 'student';
+  }
+}
+
+function postLoginCoursesToAiCourses(plc: PostLoginContext): Course[] {
+  const student = plc.asStudent?.courses ?? [];
+  const teaching = plc.asTeacher?.teachingCourses ?? [];
+  const byId = new Map<string, (typeof student)[0]>();
+  for (const c of student) byId.set(c.id, c);
+  for (const c of teaching) byId.set(c.id, c);
+  return [...byId.values()].map((c) => ({
+    id: c.id,
+    code: c.code,
+    name: c.name,
+    instructor: c.teacherNames?.[0] ?? '',
+    credits: c.credits,
+    semester: c.semesterId,
+    schedule: (c.schedule ?? []).map((s) => ({
+      dayOfWeek: s.weekday,
+      startTime: '',
+      endTime: '',
+      location: s.room ?? '',
+      startPeriod: s.periodStart,
+      endPeriod: s.periodEnd,
+    })),
+  }));
+}
+
+/** 當畫面未帶課程／作業／公告時，優先使用 PostLoginContext（記憶體或呼叫端傳入） */
+function mergeWithPostLoginContext(raw: AIAppContextInput): AIAppContextInput {
+  const plc =
+    raw.postLoginContext ??
+    (() => {
+      const m = getInMemoryPostLoginContext();
+      return m && m.schoolId === raw.schoolId ? m : null;
+    })();
+  if (!plc) return raw;
+
+  const coursesFromPlc = postLoginCoursesToAiCourses(plc);
+  const pendingFromPlc =
+    plc.asStudent?.pendingAssignments?.map((a) => ({
+      id: a.id,
+      title: a.title,
+      groupName: a.courseId,
+      dueAt: a.dueAt,
+      isLate: a.status === 'overdue',
+    })) ?? [];
+  const announcementsFromPlc = plc.latestAnnouncements.map((a) => ({
+    id: a.id,
+    title: a.title,
+    body: '',
+    publishedAt: a.publishedAt,
+    source: a.source,
+  }));
+
+  return {
+    ...raw,
+    role: raw.role ?? roleFromPostLoginContext(plc),
+    courses: raw.courses?.length ? raw.courses : coursesFromPlc,
+    pendingAssignments: raw.pendingAssignments?.length ? raw.pendingAssignments : pendingFromPlc,
+    announcements: raw.announcements?.length ? raw.announcements : announcementsFromPlc,
+  };
+}
+
+export function buildAIAppContext(raw: AIAppContextInput): AIContext {
+  const input = mergeWithPostLoginContext(raw);
   const data = runtime(input.runtimeData);
   const appPulseSummary = buildAIAppPulseSummary(input);
   const dialogSummary = [input.dialogContextSummary, input.conversationSummary]
