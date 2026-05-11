@@ -223,6 +223,8 @@ export type AIResponse = {
   suggestions?: string[];
   actions?: AssistantActionProposal[];
   citations?: EvidenceRef[];
+  /** 後端 agent/chat 回傳的結構化 cards（用於 UI 渲染/導頁） */
+  cards?: Array<{ kind: string; payload: Record<string, any> }>;
   /** 本輪 LLM 實際呼叫的工具名稱（後端 askCampusAssistant） */
   assistantToolsUsed?: string[];
   /** askCampusAssistant 多輪對話用，後端 debug.sessionId */
@@ -3753,7 +3755,8 @@ async function callLocalLLM(
   const history = messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
 
   try {
-    const resp = await fetch(`${baseUrl}/api/chat/sync`, {
+    // Tool-calling endpoint：回傳 { content, cards, runId, ... }
+    const resp = await fetch(`${baseUrl}/api/agent/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await getFirebaseAuthHeaders()) },
       signal,
@@ -3764,6 +3767,7 @@ async function callLocalLLM(
           schoolId: context.schoolId,
           userId: context.userId,
           userName: context.userName,
+          role: context.role,
           announcements: context.announcements?.slice(0, 5),
           events: context.events?.slice(0, 5),
           menus: context.menus?.slice(0, 10),
@@ -3775,15 +3779,17 @@ async function callLocalLLM(
           appPulseSummary: context.appPulseSummary,
           appDataCoverage: context.appDataCoverage,
         },
-        stream: false,
       }),
     });
 
     if (!resp.ok) return null;
-    const data = await resp.json();
+    const data = (await resp.json()) as any;
+    const content = String(data?.content ?? '');
     return {
-      content: data.content ?? '',
-      suggestions: data.suggestions ?? extractSuggestions(data.content ?? ''),
+      content,
+      cards: Array.isArray(data?.cards) ? data.cards : [],
+      campusAssistantRunId: typeof data?.runId === 'string' ? data.runId : undefined,
+      suggestions: Array.isArray(data?.suggestions) ? data.suggestions : extractSuggestions(content),
     };
   } catch (e) {
     console.warn('[AI] Local LLM call failed:', e);
@@ -3916,9 +3922,11 @@ export async function chatWithLocalLLMStreaming(
   const history = messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
 
   let fullContent = '';
+  let cards: Array<{ kind: string; payload: Record<string, any> }> | undefined;
 
   try {
-    const resp = await fetch(`${baseUrl}/api/chat`, {
+    // 新版 agent endpoint：回傳 { content, cards }（不走 SSE streaming）
+    const resp = await fetch(`${baseUrl}/api/agent/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await getFirebaseAuthHeaders()) },
       signal,
@@ -3926,59 +3934,26 @@ export async function chatWithLocalLLMStreaming(
         message: lastMessage,
         history,
         context: {
-          schoolId: context.schoolId,
-          userId: context.userId,
           userName: context.userName,
-          announcements: context.announcements?.slice(0, 5),
-          events: context.events?.slice(0, 5),
-          menus: context.menus?.slice(0, 10),
-          pois: context.pois?.slice(0, 10),
-          courses: context.courses,
-          pendingAssignments: context.pendingAssignments,
-          gradesSummary: context.gradesSummary,
-          weeklyReport: context.weeklyReport,
-          appPulseSummary: context.appPulseSummary,
-          appDataCoverage: context.appDataCoverage,
+          schoolId: context.schoolId,
+          role: (context as any)?.role,
         },
-        stream: true,
       }),
     });
 
-    if (!resp.ok || !resp.body) {
+    if (!resp.ok) {
       throw new Error(`HTTP ${resp.status}`);
     }
 
-    const reader = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const payload = JSON.parse(line.slice(6));
-          if (payload.token) {
-            fullContent += payload.token;
-            onToken(fullContent, false);
-          }
-          if (payload.done) {
-            onToken(fullContent, true);
-          }
-        } catch {
-          // ignore malformed lines
-        }
-      }
+    const data = (await resp.json()) as any;
+    fullContent = String(data?.content ?? '');
+    if (Array.isArray(data?.cards)) {
+      cards = data.cards as Array<{ kind: string; payload: Record<string, any> }>;
     }
+    onToken(fullContent, true);
   } catch (e: any) {
     if (e.name === 'AbortError') {
-      return { content: fullContent || '', error: '請求已取消' };
+      return { content: fullContent || '', cards, error: '請求已取消' };
     }
     console.warn('[AI] Streaming error:', e);
     if (!fullContent) {
@@ -4000,6 +3975,7 @@ export async function chatWithLocalLLMStreaming(
 
   return {
     content: fullContent,
+    cards,
     suggestions: extractSuggestions(fullContent),
   };
 }

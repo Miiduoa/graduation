@@ -345,7 +345,8 @@ async def _create_food_order(
 
 def register_default_tools() -> None:
     """Idempotent. Called once at server startup."""
-    if "createDormRepairRequest" in tool_names():
+    # 若已註冊過新版工具（含 navigate/query），就直接跳過。
+    if "navigateToScreen" in tool_names():
         return
 
     register_tool(
@@ -446,4 +447,48 @@ def register_default_tools() -> None:
         },
         handler=_create_food_order,
         requires_confirmation=True,
+    )
+
+    # ─── 新增：導航/查詢工具 ────────────────────────────────────────────
+    from .navigate import NAVIGATE_TOOL_SPEC, navigate_to_screen
+    from .queries import (
+        GET_ANNOUNCEMENTS_SPEC,
+        GET_GRADES_SPEC,
+        GET_PENDING_ASSIGNMENTS_SPEC,
+        GET_TODAY_SCHEDULE_SPEC,
+        get_latest_announcements,
+        get_my_grades,
+        get_pending_assignments,
+        get_today_schedule,
+    )
+
+    register_tool(
+        name=NAVIGATE_TOOL_SPEC["function"]["name"],
+        description=NAVIGATE_TOOL_SPEC["function"]["description"],
+        parameters=NAVIGATE_TOOL_SPEC["function"]["parameters"],
+        handler=navigate_to_screen,
+    )
+    register_tool(
+        name=GET_PENDING_ASSIGNMENTS_SPEC["function"]["name"],
+        description=GET_PENDING_ASSIGNMENTS_SPEC["function"]["description"],
+        parameters=GET_PENDING_ASSIGNMENTS_SPEC["function"]["parameters"],
+        handler=get_pending_assignments,
+    )
+    register_tool(
+        name=GET_TODAY_SCHEDULE_SPEC["function"]["name"],
+        description=GET_TODAY_SCHEDULE_SPEC["function"]["description"],
+        parameters=GET_TODAY_SCHEDULE_SPEC["function"]["parameters"],
+        handler=get_today_schedule,
+    )
+    register_tool(
+        name=GET_GRADES_SPEC["function"]["name"],
+        description=GET_GRADES_SPEC["function"]["description"],
+        parameters=GET_GRADES_SPEC["function"]["parameters"],
+        handler=get_my_grades,
+    )
+    register_tool(
+        name=GET_ANNOUNCEMENTS_SPEC["function"]["name"],
+        description=GET_ANNOUNCEMENTS_SPEC["function"]["description"],
+        parameters=GET_ANNOUNCEMENTS_SPEC["function"]["parameters"],
+        handler=get_latest_announcements,
     )
