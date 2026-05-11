@@ -8,7 +8,8 @@
   },
   "functions": [
     {
-      "source": "backend/functions"
+      "source": "backend/functions",
+      "predeploy": ["pnpm --filter @campus/shared run build:cjs"]
     }
   ]
 }

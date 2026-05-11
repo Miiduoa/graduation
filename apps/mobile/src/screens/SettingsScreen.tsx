@@ -382,6 +382,13 @@ export function SettingsScreen(props: any) {
                     />
                   </View>
                 </View>
+
+                <ListItem
+                  icon="git-network-outline"
+                  title="Post-login 除錯"
+                  subtitle="runs、bootstrap、puDataCache v1"
+                  onPress={() => nav?.navigate?.('PostLoginDebug')}
+                />
               </View>
             )}
           </AnimatedCard>

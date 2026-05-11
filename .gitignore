@@ -39,6 +39,9 @@ expo-env.d.ts
 backend/.firebase/
 backend/functions/lib/
 
+# Generated CJS for Cloud Functions (built by `pnpm --filter @campus/shared run build:cjs`, see firebase.json predeploy)
+packages/shared/dist-cjs/
+
 # Python
 __pycache__/
 *.pyc

@@ -402,6 +402,12 @@ export async function hasTCSession(): Promise<boolean> {
   return !!_tcBackendSessionId;
 }
 
+/** 後端 `_puTronClassSessions` 的 session id（供 finalizePostLogin 等使用） */
+export async function getTCBackendSessionId(): Promise<string | null> {
+  await ensureBackendSessionLoaded();
+  return _tcBackendSessionId;
+}
+
 /**
  * 驗證 TronClass session 是否仍然有效。
  * 嘗試呼叫 profile API — 如果 401/403 代表 session 已過期。
