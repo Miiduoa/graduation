@@ -227,6 +227,8 @@ export type AIResponse = {
   assistantToolsUsed?: string[];
   /** askCampusAssistant 多輪對話用，後端 debug.sessionId */
   campusAssistantSessionId?: string;
+  /** 後端 agent runtime 單次執行 ID（users/{uid}/agentRuns） */
+  campusAssistantRunId?: string;
   error?: string;
   thinking?: { step: string; detail: string; status: 'done' | 'checking' | 'warning' | 'info' }[];
   /** 本輪寫入工具成功後蒸餾的技能，由 UI 合併進本地訓練庫 */
@@ -3012,6 +3014,10 @@ async function callCampusAssistant(
       data.debug && typeof data.debug === 'object' && typeof (data.debug as any).sessionId === 'string'
         ? String((data.debug as any).sessionId)
         : undefined;
+    const runIdFromEnvelope =
+      data.run && typeof data.run === 'object' && typeof (data.run as any).runId === 'string'
+        ? String((data.run as any).runId)
+        : undefined;
     const toolsFromData = Array.isArray((data as CampusAssistantResponse).assistantToolsUsed)
       ? (data as CampusAssistantResponse).assistantToolsUsed!.filter(
           (t): t is string => typeof t === 'string' && t.length > 0,
@@ -3025,11 +3031,53 @@ async function callCampusAssistant(
       error: data.error,
       ...(toolsFromData && toolsFromData.length > 0 ? { assistantToolsUsed: toolsFromData } : {}),
       ...(sessionFromDebug ? { campusAssistantSessionId: sessionFromDebug } : {}),
+      ...(runIdFromEnvelope ? { campusAssistantRunId: runIdFromEnvelope } : {}),
     };
   } catch (e: any) {
     console.warn('[AI] askCampusAssistant failed, falling back:', e?.code ?? e?.message ?? e);
     return null;
   }
+}
+
+/** 訂餐／報修／座位／請假等需可靠 tool-use：避免先走本機 LLM 導致「找不到可載入模型」阻斷雲端後備。 */
+function lastUserMessageNeedsReliableCloudAssistant(messages: AIMessage[]): boolean {
+  const last = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const t = String(last).toLowerCase();
+  if (!t.trim()) return false;
+  return /點餐|訂餐|下單|報修|維修|維修單|請假|預約座位|借書|還書|洗衣|掛號|退選|加選|選課/.test(t);
+}
+
+async function tryReliableCloudInsteadOfLocalLLM(
+  messages: AIMessage[],
+  context: AIContext,
+  signal?: AbortSignal,
+): Promise<AIResponse | null> {
+  if (!lastUserMessageNeedsReliableCloudAssistant(messages)) return null;
+  console.log('[AI] Tool-critical message: skip local-llm primary path, trying managed cloud then Gemini.');
+  try {
+    await waitForRateLimit();
+    const cloudResponse = await callManagedAI(messages, context, signal);
+    if (cloudResponse) {
+      resetRateLimitState();
+      return cloudResponse;
+    }
+  } catch (e) {
+    console.warn('[AI] Managed cloud (critical-path) failed:', e);
+  }
+  try {
+    const geminiResponse = await callGeminiAPI(messages, context, signal);
+    if (geminiResponse) {
+      resetRateLimitState();
+      return geminiResponse;
+    }
+  } catch (e) {
+    console.warn('[AI] Gemini (critical-path) failed:', e);
+  }
+  return {
+    content: '',
+    error:
+      '這類操作需要連線可靠雲端助理；目前雲端不可用，且不得以本機模型替代。請稍後再試或到對應 App 頁面完成。',
+  };
 }
 
 /**
@@ -3075,6 +3123,9 @@ export async function chatWithAI(
     }
 
     if (config.aiProvider === 'local-llm') {
+      const criticalBypass = await tryReliableCloudInsteadOfLocalLLM(messages, context, signal);
+      if (criticalBypass) return criticalBypass;
+
       const localResponse = await callLocalLLM(messages, context, signal);
       if (localResponse) return localResponse;
       // local-llm 失敗 → 嘗試 Gemini 作為後備
@@ -3159,6 +3210,9 @@ export async function chatWithCampusAssistant(
     }
 
     if (config.aiProvider === 'local-llm') {
+      const criticalBypass = await tryReliableCloudInsteadOfLocalLLM(messages, context, signal);
+      if (criticalBypass) return criticalBypass;
+
       const localResponse = await callLocalLLM(messages, context, signal);
       if (localResponse) return localResponse;
       try {
@@ -3756,6 +3810,14 @@ export async function chatWithLocalLLMStreaming(
     }
   } catch (e) {
     console.warn('[AI] Streaming insights injection failed:', e);
+  }
+
+  if (!config.isReleaseLike) {
+    const criticalBypass = await tryReliableCloudInsteadOfLocalLLM(messages, context, signal);
+    if (criticalBypass) {
+      onToken(criticalBypass.content || '', true);
+      return criticalBypass;
+    }
   }
 
   if (config.isReleaseLike) {

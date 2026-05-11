@@ -1604,7 +1604,19 @@ const TOOL_EXECUTORS: Record<
         room: args.room,
         schoolId: ctx.schoolId,
       } as any);
-      return { success: true, isWrite: true, data: req, summary: `✅ 已提交維修申請「${args.title}」` };
+      if (!req?.id) {
+        return {
+          success: false,
+          isWrite: true,
+          summary: '報修失敗：目前系統忙碌，請改用宿舍頁面處理。',
+        };
+      }
+      return {
+        success: true,
+        isWrite: true,
+        data: req,
+        summary: `✅ 已提交維修申請（編號：${req.id}）「${args.title}」`,
+      };
     } catch (e: any) {
       return { success: false, error: e.message, summary: '提交維修申請失敗。', isWrite: true };
     }
@@ -2206,14 +2218,22 @@ const TOOL_EXECUTORS: Record<
         source: 'ai_agent',
       } as any);
 
+      if (!order?.id) {
+        return {
+          success: false,
+          isWrite: true,
+          summary: '訂餐失敗：目前系統忙碌，請改到餐廳點餐頁面完成。',
+        };
+      }
+
       return {
         success: true, isWrite: true, data: order,
         summary: [
-          `已送出訂單。`,
+          `✅ 已送出訂單。`,
           `餐點：${matched.name} x ${quantity}`,
           cafeteria?.name ? `餐廳：${cafeteria.name}` : (matched.cafeteria ? `餐廳：${matched.cafeteria}` : ''),
           price ? `金額：$${totalAmount}` : '',
-          `訂單編號：${order?.id ?? '已建立'}`,
+          `訂單編號：${order.id}`,
           `狀態：待店家確認`,
         ].filter(Boolean).join('\n'),
       };

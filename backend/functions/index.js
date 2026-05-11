@@ -4727,9 +4727,21 @@ exports.submitRepairRequest = onCall(
         createdAt: FieldValue.serverTimestamp(),
       });
 
+    const verify = await repairRef.get();
+    if (!verify.exists) {
+      return {
+        success: false,
+        errorCode: 'verify_failed',
+        requestId: null,
+        repairId: null,
+      };
+    }
+
+    const repairId = repairRef.id;
     return {
       success: true,
-      requestId: repairRef.id,
+      requestId: repairId,
+      repairId,
     };
   },
 );

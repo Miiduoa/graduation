@@ -20,60 +20,100 @@ const inputSchema = z.object({
 });
 
 async function execute(ctx, rawInput) {
-  const input = inputSchema.parse(rawInput ?? {});
-  const uid = ctx.uid;
-  const schoolId = ctx.schoolId;
-  if (!uid) throw new Error('createOrder requires ctx.uid');
-  if (!schoolId) throw new Error('createOrder requires ctx.schoolId');
+  try {
+    if (String(process.env.DEBUG_FORCE_CREATE_ORDER_ERROR || '').trim() === '1') {
+      return {
+        success: false,
+        errorCode: 'debug_forced_failure',
+        errorMessage: 'DEBUG_FORCE_CREATE_ORDER_ERROR',
+      };
+    }
 
-  const db = getFirestore();
+    const input = inputSchema.parse(rawInput ?? {});
+    const uid = ctx.uid;
+    const schoolId = ctx.schoolId;
+    if (!uid) {
+      return { success: false, errorCode: 'missing_uid', errorMessage: 'createOrder requires ctx.uid' };
+    }
+    if (!schoolId) {
+      return { success: false, errorCode: 'missing_school', errorMessage: 'createOrder requires ctx.schoolId' };
+    }
 
-  const cafeteriaRef = db.collection('schools').doc(schoolId).collection('cafeterias').doc(input.cafeteriaId);
-  const cafeteriaDoc = await cafeteriaRef.get();
-  if (!cafeteriaDoc.exists) throw new Error('找不到此餐廳，請確認餐廳 ID。');
+    const db = getFirestore();
 
-  const cafeteriaData = cafeteriaDoc.data() || {};
-  if (cafeteriaData.orderingEnabled === false) throw new Error('此餐廳目前暫停接單。');
+    const cafeteriaRef = db.collection('schools').doc(schoolId).collection('cafeterias').doc(input.cafeteriaId);
+    const cafeteriaDoc = await cafeteriaRef.get();
+    if (!cafeteriaDoc.exists) {
+      return { success: false, errorCode: 'cafeteria_not_found', errorMessage: '找不到此餐廳，請確認餐廳 ID。' };
+    }
 
-  const subtotal = input.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const tax = Math.round(subtotal * 0.05);
-  const total = subtotal + tax;
+    const cafeteriaData = cafeteriaDoc.data() || {};
+    if (cafeteriaData.orderingEnabled === false) {
+      return { success: false, errorCode: 'ordering_disabled', errorMessage: '此餐廳目前暫停接單。' };
+    }
 
-  const orderPayload = {
-    userId: uid,
-    schoolId,
-    source: 'ai_agent',
-    cafeteriaId: input.cafeteriaId,
-    merchantId: cafeteriaData.merchantId || input.cafeteriaId,
-    cafeteria: cafeteriaData.name || input.cafeteriaId,
-    items: input.items,
-    subtotal,
-    tax,
-    total,
-    totalAmount: total,
-    pickupTime: input.pickupTime || null,
-    note: input.note || null,
-    paymentMethod: input.paymentMethod,
-    status: 'pending',
-    paymentStatus: 'pending',
-    createdAt: FieldValue.serverTimestamp(),
-  };
+    const subtotal = input.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const tax = Math.round(subtotal * 0.05);
+    const total = subtotal + tax;
 
-  const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc();
-  const userOrderRef = db.collection('users').doc(uid).collection('schools').doc(schoolId)
-    .collection('orders').doc(orderRef.id);
+    const orderPayload = {
+      userId: uid,
+      schoolId,
+      source: 'ai_agent',
+      cafeteriaId: input.cafeteriaId,
+      merchantId: cafeteriaData.merchantId || input.cafeteriaId,
+      cafeteria: cafeteriaData.name || input.cafeteriaId,
+      items: input.items,
+      subtotal,
+      tax,
+      total,
+      totalAmount: total,
+      pickupTime: input.pickupTime || null,
+      note: input.note || null,
+      paymentMethod: input.paymentMethod,
+      status: 'pending',
+      paymentStatus: 'pending',
+      createdAt: FieldValue.serverTimestamp(),
+    };
 
-  await db.runTransaction(async (tx) => {
-    tx.set(orderRef, orderPayload);
-    tx.set(userOrderRef, orderPayload);
-  });
+    const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc();
+    const userOrderRef = db
+      .collection('users')
+      .doc(uid)
+      .collection('schools')
+      .doc(schoolId)
+      .collection('orders')
+      .doc(orderRef.id);
 
-  return {
-    orderId: orderRef.id,
-    cafeteria: cafeteriaData.name || input.cafeteriaId,
-    total,
-    itemCount: input.items.length,
-  };
+    await db.runTransaction(async (tx) => {
+      tx.set(orderRef, orderPayload);
+      tx.set(userOrderRef, orderPayload);
+    });
+
+    const verify = await orderRef.get();
+    if (!verify.exists) {
+      return {
+        success: false,
+        errorCode: 'verify_failed',
+        errorMessage: 'Order document missing after write',
+      };
+    }
+
+    return {
+      success: true,
+      orderId: orderRef.id,
+      cafeteria: cafeteriaData.name || input.cafeteriaId,
+      total,
+      itemCount: input.items.length,
+    };
+  } catch (e) {
+    const isZod = e && typeof e === 'object' && e.name === 'ZodError';
+    return {
+      success: false,
+      errorCode: isZod ? 'invalid_input' : 'write_failed',
+      errorMessage: String(e?.message || e).slice(0, 400),
+    };
+  }
 }
 
 module.exports = {

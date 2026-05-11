@@ -58,4 +58,14 @@ describe('classifyIntent', () => {
     const r = classifyIntent('幫我在學生餐廳點一份雞排飯跟一杯紅茶');
     expect(r.name).toBe('food_order');
   });
+
+  test('查看報修狀態 maps to check_repair_status (keyword_fallback)', () => {
+    const r = classifyIntent('查看報修狀態');
+    expect(r.name).toBe('check_repair_status');
+  });
+
+  test('幫我宿舍冷氣報修 maps to submit_repair_request (keyword_fallback)', () => {
+    const r = classifyIntent('幫我宿舍冷氣報修');
+    expect(r.name).toBe('submit_repair_request');
+  });
 });

@@ -13,7 +13,9 @@ const reserveSeat = require('./reserveSeat');
 const borrowBook = require('./borrowBook');
 const returnBook = require('./returnBook');
 const renewBook = require('./renewBook');
-const submitRepairRequest = require('./submitRepairRequest');
+const createDormRepairRequest = require('./createDormRepairRequest');
+const listMyDormRepairs = require('./listMyDormRepairs');
+const getDormRepairStatus = require('./getDormRepairStatus');
 const reserveWashingMachine = require('./reserveWashingMachine');
 const createOrder = require('./createOrder');
 const cancelOrder = require('./cancelOrder');
@@ -32,7 +34,9 @@ const tools = [
   borrowBook,
   returnBook,
   renewBook,
-  submitRepairRequest,
+  createDormRepairRequest,
+  listMyDormRepairs,
+  getDormRepairStatus,
   reserveWashingMachine,
   createOrder,
   cancelOrder,

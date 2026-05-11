@@ -13,6 +13,14 @@ const {
   toJsDate,
   formatAssistantDate,
 } = require('../lib/assistantFormat');
+
+function extractRepairIdFromMessage(text) {
+  const s = String(text ?? '');
+  const labeled = s.match(/(?:單號|編號|repair\s*id|工單)[：:\s]*([A-Za-z0-9_-]{10,})/i);
+  if (labeled) return labeled[1].trim();
+  const loose = s.match(/\b([A-Za-z0-9]{20,28})\b/);
+  return loose ? loose[1] : null;
+}
 const {
   assistantAction,
   resolveAssistantActorRole,
@@ -52,6 +60,8 @@ const INTENTS_SKIP_LLM = new Set([
   'reserve_seat',
   'borrow_book',
   'submit_repair_request',
+  'check_repair_status',
+  'leave_status',
   'wash_reserve',
   'food_order',
 ]);
@@ -353,6 +363,136 @@ async function executeCampusAssistantCore({
     return await finalizeResponse();
   }
 
+  if (intent === 'check_repair_status') {
+    if (!uid) {
+      response.content = '要查宿舍報修狀態請先登入，我才能讀取你的報修紀錄。';
+      response.suggestions = ['今日公告', '查課表', '功能說明'];
+      return await finalizeResponse();
+    }
+
+    const toolCtx = {
+      uid,
+      schoolId,
+      groupId: context.groupId,
+      timeZone,
+      prefetched: {},
+    };
+
+    const repairId = extractRepairIdFromMessage(lastUserMessage);
+    if (repairId) {
+      try {
+        const tOne = Date.now();
+        const one = await runTool('getDormRepairStatus', toolCtx, { repairId });
+        await recordStep('getDormRepairStatus', { repairId }, one, Date.now() - tOne);
+        if (one?.forbidden) {
+          response.content = [
+            '這筆報修不存在，或不屬於你的帳號，無法顯示狀態。',
+            '',
+            '請確認單號，或改問「列出我的報修」查看你名下的紀錄。',
+          ].join('\n');
+          response.suggestions = ['列出我的報修', '今日公告', '查課表'];
+          return await finalizeResponse();
+        }
+        if (!one?.found) {
+          response.content = [
+            '找不到這筆報修，或你不具備檢視權限。',
+            '',
+            '若剛送出報修，可先到「宿舍 → 我的報修」確認是否已寫入；或改問「列出我的報修」。',
+          ].join('\n');
+          response.suggestions = ['列出我的報修', '今日公告', '查課表'];
+          return await finalizeResponse();
+        }
+        const st = String(one.status || 'unknown');
+        const stZh =
+          st === 'pending'
+            ? '待處理'
+            : st === 'assigned' || st === 'in_progress'
+              ? '處理中'
+              : st === 'completed'
+                ? '已完成'
+                : st === 'cancelled'
+                  ? '已取消'
+                  : st;
+        response.content = [
+          `報修單 ${one.repairId} 狀態：${stZh}`,
+          '',
+          `位置：${one.dormitory || '—'} ${one.room || ''}`.trim(),
+          `類別：${one.category || '—'}`,
+          one.description ? `描述摘要：${one.description}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        response.suggestions = ['列出我的報修', '今日公告', '查課表'];
+        response.actions = [
+          assistantAction({
+            label: '開啟宿舍／我的報修',
+            action: 'navigate',
+            params: { screen: '校園', nested: 'Dormitory' },
+            requiresConfirmation: false,
+            sensitivity: 'low',
+            evidenceRefs: [{ type: 'system', id: 'dorm-repairs', label: '宿舍報修' }],
+          }),
+        ];
+        response.debug.sourcesUsed = 1;
+        return await finalizeResponse();
+      } catch (e) {
+        console.warn('[AI] getDormRepairStatus failed:', e?.message || e);
+        response.content = '目前無法讀取該筆報修狀態，請稍後再試或到宿舍頁面查看。';
+        response.suggestions = ['列出我的報修', '今日公告', '查課表'];
+        return await finalizeResponse();
+      }
+    }
+
+    let listRows = { items: [], count: 0 };
+    try {
+      const tList = Date.now();
+      listRows = await runTool('listMyDormRepairs', toolCtx, { limit: 15 });
+      await recordStep('listMyDormRepairs', { limit: 15 }, listRows, Date.now() - tList);
+    } catch (e) {
+      console.warn('[AI] listMyDormRepairs failed:', e?.message || e);
+      response.content = '目前無法讀取報修列表，請稍後再試或到宿舍頁面查看「我的報修」。';
+      response.suggestions = ['今日公告', '查課表', '功能說明'];
+      return await finalizeResponse();
+    }
+
+    const items = Array.isArray(listRows.items) ? listRows.items : [];
+    if (items.length === 0) {
+      response.content =
+        '你最近沒有宿舍報修紀錄，或資料尚未同步。若剛送出報修，可稍後再問一次，或到宿舍頁確認。';
+      response.suggestions = ['我要報修', '今日公告', '查課表'];
+      return await finalizeResponse();
+    }
+
+    const statusZh = (s) => {
+      const x = String(s || '').toLowerCase();
+      if (x === 'pending') return '待處理';
+      if (x === 'assigned' || x === 'in_progress') return '處理中';
+      if (x === 'completed') return '已完成';
+      if (x === 'cancelled') return '已取消';
+      return s || '未知';
+    };
+
+    const lines = items.map((row, i) => {
+      const loc = `${row.dormitory || ''} ${row.room || ''}`.trim() || '—';
+      return `${i + 1}. ${row.repairId}｜${statusZh(row.status)}｜${loc}`;
+    });
+
+    response.content = ['以下是您最近的宿舍報修（最多 15 筆）：', '', ...lines].join('\n');
+    response.suggestions = ['我要報修', '今日公告', '查課表'];
+    response.actions = [
+      assistantAction({
+        label: '開啟宿舍／我的報修',
+        action: 'navigate',
+        params: { screen: '校園', nested: 'Dormitory' },
+        requiresConfirmation: false,
+        sensitivity: 'low',
+        evidenceRefs: [{ type: 'system', id: 'dorm-repairs', label: '宿舍報修' }],
+      }),
+    ];
+    response.debug.sourcesUsed = items.length;
+    return await finalizeResponse();
+  }
+
   if (intent === 'leave_request') {
     if (!uid) {
       response.content = '請假需要知道你的身分與課程。請先登入後再讓我幫你整理。';
@@ -406,6 +546,7 @@ async function executeCampusAssistantCore({
             date: leavePayload.date,
             type: leavePayload.type,
           },
+          agentRunId: requestId,
         },
         requiresConfirmation: true,
         sensitivity: 'high',
@@ -444,7 +585,7 @@ async function executeCampusAssistantCore({
       assistantAction({
         label: '確認預約座位',
         action: 'queue_action',
-        params: { toolName: 'reserveSeat', input: seatInput },
+        params: { toolName: 'reserveSeat', input: seatInput, agentRunId: requestId },
         requiresConfirmation: true,
         sensitivity: 'high',
         evidenceRefs: [{ type: 'system', id: 'reserve-seat', label: '座位預約' }],
@@ -476,7 +617,7 @@ async function executeCampusAssistantCore({
       assistantAction({
         label: '確認借書',
         action: 'queue_action',
-        params: { toolName: 'borrowBook', input: bookInput },
+        params: { toolName: 'borrowBook', input: bookInput, agentRunId: requestId },
         requiresConfirmation: true,
         sensitivity: 'high',
         evidenceRefs: [{ type: 'system', id: 'borrow-book', label: '圖書借閱' }],
@@ -509,7 +650,7 @@ async function executeCampusAssistantCore({
       assistantAction({
         label: '確認送出報修',
         action: 'queue_action',
-        params: { toolName: 'submitRepairRequest', input: repairInput },
+        params: { toolName: 'createDormRepairRequest', input: repairInput, agentRunId: requestId },
         requiresConfirmation: true,
         sensitivity: 'high',
         evidenceRefs: [{ type: 'system', id: 'repair-request', label: '宿舍報修' }],
@@ -542,7 +683,7 @@ async function executeCampusAssistantCore({
       assistantAction({
         label: '確認預約洗衣',
         action: 'queue_action',
-        params: { toolName: 'reserveWashingMachine', input: washInput },
+        params: { toolName: 'reserveWashingMachine', input: washInput, agentRunId: requestId },
         requiresConfirmation: true,
         sensitivity: 'high',
         evidenceRefs: [{ type: 'system', id: 'wash-reserve', label: '洗衣預約' }],
@@ -575,7 +716,7 @@ async function executeCampusAssistantCore({
       assistantAction({
         label: '確認下單',
         action: 'queue_action',
-        params: { toolName: 'createOrder', input: orderInput },
+        params: { toolName: 'createOrder', input: orderInput, agentRunId: requestId },
         requiresConfirmation: true,
         sensitivity: 'high',
         evidenceRefs: [{ type: 'system', id: 'create-order', label: '餐廳訂單' }],

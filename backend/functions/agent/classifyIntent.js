@@ -1,7 +1,7 @@
 'use strict';
 
 const cases = require('./cases.json');
-const { detectCampusAssistantIntent } = require('../lib/assistantFormat');
+const { detectCampusAssistantIntent, isDormRepairStatusQueryMessage } = require('../lib/assistantFormat');
 const {
   classifyRichIntent,
   richRawScoreToConfidence01,
@@ -55,6 +55,8 @@ function mapRichCategoryToAssistantIntent(category, rawMessage, richSubIntent) {
       return 'study_summary';
     case 'health':
     case 'dorm': {
+      if (richSubIntent === 'repair_status') return 'check_repair_status';
+      if (isDormRepairStatusQueryMessage(rawMessage)) return 'check_repair_status';
       if (/洗衣機|洗衣/.test(m) && /預約|幫我|訂|今晚|明天/.test(m)) return 'wash_reserve';
       if (
         /報修|維修|送.*單|送一個.*單/.test(m) ||
