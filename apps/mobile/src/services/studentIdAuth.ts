@@ -200,6 +200,7 @@ async function tryBackendUnifiedLogin(
 }
 
 import { seedTestData } from './testSeedData';
+import { routePostLoginData } from './postLoginDataRouter';
 
 // ─── 測試帳號 ──────────────────────────────────────────
 // 每個角色各一組，帳號格式: test_<role>，密碼統一 test1234
@@ -330,6 +331,11 @@ async function tryTestAccountLogin(
 
   // 注入跨角色互聯的種子資料（課表、成績、訂單等）
   await seedTestData(test.role);
+
+  // 執行資料路由（測試帳號也要建立關聯圖）
+  try {
+    await routePostLoginData(test.role);
+  } catch (_) { /* ignore */ }
 
   progress('linking', '完成');
 
@@ -536,6 +542,17 @@ async function handleBackendLoginSuccess(
     console.warn('[studentIdAuth] syncAllData failed (continuing):', err);
   }
 
+  // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
+  try {
+    const routeResult = await routePostLoginData(result.role);
+    if (routeResult.roleInference.inferredRole !== result.role) {
+      result.role = routeResult.roleInference.inferredRole;
+      console.log(`[studentIdAuth] Role updated to: ${result.role} (${routeResult.roleInference.reason})`);
+    }
+  } catch (err) {
+    console.warn('[studentIdAuth] postLoginDataRouter failed (continuing):', err);
+  }
+
   return result;
 }
 
@@ -736,6 +753,17 @@ async function handleHybridLogin(
     } catch (err) {
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
     }
+  }
+
+  // ── 登入後資料路由：推斷角色 + 建立師生關聯 ──
+  try {
+    const routeResult = await routePostLoginData(result.role);
+    if (routeResult.roleInference.inferredRole !== result.role) {
+      result.role = routeResult.roleInference.inferredRole;
+      console.log(`[studentIdAuth] Hybrid: Role updated to: ${result.role} (${routeResult.roleInference.reason})`);
+    }
+  } catch (err) {
+    console.warn('[studentIdAuth] Hybrid: postLoginDataRouter failed (continuing):', err);
   }
 
   return result;

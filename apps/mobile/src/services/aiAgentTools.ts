@@ -2203,6 +2203,7 @@ const TOOL_EXECUTORS: Record<
         }],
         totalAmount,
         note: args.note,
+        source: 'ai_agent',
       } as any);
 
       return {

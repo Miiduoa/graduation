@@ -2595,6 +2595,7 @@ export const firebaseSource: DataSource = {
         pickupTime?: string;
         note?: string;
         paymentMethod?: string;
+        source?: string;
       },
       { orderId?: string; total?: number }
     >(getFunctionsInstance(), 'createOrder');
@@ -2611,6 +2612,9 @@ export const firebaseSource: DataSource = {
       pickupTime: (data as Record<string, unknown>).pickupTime as string | undefined,
       note: (data as Record<string, unknown>).note as string | undefined,
       paymentMethod: (data as Record<string, unknown>).paymentMethod as string | undefined,
+      ...((data as Record<string, unknown>).source === 'ai_agent'
+        ? { source: 'ai_agent' as const }
+        : {}),
     });
     const orderId = result.data?.orderId;
     if (!orderId) {
