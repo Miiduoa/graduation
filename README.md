@@ -578,8 +578,8 @@ pnpm dev:web
 
 1. 設定 Firebase project env。
 2. 設定 `EXPO_PUBLIC_DATA_SOURCE_MODE=hybrid` 或 `firebase`。
-3. 設定 Functions endpoint。
-4. 啟動 emulator 或部署 Functions。
+3. 設定 Functions endpoint（`EXPO_PUBLIC_FIREBASE_PROJECT_ID` 等；靜宜適配器會組出正式 Cloud Functions URL）。
+4. 部署 Functions 到 **Blaze** 正式專案（見 `docs/firebase-blaze-production.md`；本 repo 已停用日常 `firebase emulators:start` 跑 Functions）。
 5. 用 PU login 或 dev account flow 測試。
 
 ### AI server 設定
@@ -605,7 +605,7 @@ pnpm ai:grow
 | `pnpm dev`           | 預設啟動 Web                             |
 | `pnpm dev:mobile`    | 啟動 Expo mobile                         |
 | `pnpm dev:web`       | 啟動 Next.js Web                         |
-| `pnpm dev:functions` | 啟動 Firebase Functions emulator         |
+| `pnpm dev:functions` | 僅印出說明（已停用本機 Functions emulator；請 deploy 到 Blaze 正式專案，見 `docs/firebase-blaze-production.md`） |
 | `pnpm dev:ai`        | 啟動 AI server                           |
 | `pnpm lint`          | mobile + web + functions + shared lint   |
 | `pnpm typecheck`     | mobile + web + shared typecheck          |
