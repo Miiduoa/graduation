@@ -18,6 +18,7 @@ export function PostLoginDebugScreen() {
   const { user, profile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [runs, setRuns] = useState<Record<string, unknown>[]>([]);
+  const [agentRuns, setAgentRuns] = useState<Record<string, unknown>[]>([]);
   const [cacheMeta, setCacheMeta] = useState<Awaited<ReturnType<typeof getPuCacheDebugMetadata>>>([]);
   const [bootstrap, setBootstrap] = useState(getLastPostLoginEngineBootstrap());
   const [claimsText, setClaimsText] = useState<string>('—');
@@ -29,6 +30,10 @@ export function PostLoginDebugScreen() {
     setBootstrap(getLastPostLoginEngineBootstrap());
     setCacheMeta(await getPuCacheDebugMetadata());
     const schoolId = profile?.primarySchoolId ?? profile?.schoolId ?? null;
+    const repairPath =
+      schoolId && user?.uid
+        ? `schools/${schoolId}/repairRequests（與 Functions submitRepairRequest 寫入同一 collection）`
+        : '（需 primarySchoolId / schoolId 才顯示報修路徑）';
     const mem = getInMemoryPostLoginContext();
     setPlcMemoryText(mem ? JSON.stringify({ primary: mem.roles.primaryRole, source: mem.roles.source, builtAt: mem.builtAt }, null, 2) : '（無記憶體 PostLoginContext）');
     if (schoolId) {
