@@ -215,6 +215,8 @@ type Message = {
   thinkingSteps?: ThinkingStepUI[];
   /** 雲端助理本輪實際呼叫的工具（後端回傳） */
   assistantToolsUsed?: string[];
+  /** askCampusAssistant 本輪 runId（對應 Firestore agentRuns） */
+  campusAssistantRunId?: string;
 };
 
 const ASSISTANT_TOOL_LABELS: Record<string, string> = {
@@ -5858,6 +5860,8 @@ export function AIChatScreen(props: any) {
                   suggestions: aiResponse.suggestions,
                   actions: aiResponse.actions,
                   choiceMenu: aiResponse.choiceMenu,
+                  campusAssistantRunId: aiResponse.campusAssistantRunId,
+                  assistantToolsUsed: aiResponse.assistantToolsUsed,
                   thinkingSteps: [
                     {
                       step: '同步狀態',
@@ -6324,6 +6328,7 @@ export function AIChatScreen(props: any) {
                   suggestions: aiResponse.suggestions,
                   actions: aiResponse.actions,
                   choiceMenu: aiResponse.choiceMenu,
+                  campusAssistantRunId: aiResponse.campusAssistantRunId,
                   assistantToolsUsed: aiResponse.assistantToolsUsed,
                   thinkingSteps: [
                     ...deliberationSteps,
@@ -6583,6 +6588,13 @@ export function AIChatScreen(props: any) {
   // ── Other handlers ──
   const handleAction = async (proposal: AssistantActionProposal) => {
     const { action, params } = proposal;
+    const queueAgentRunId =
+      params &&
+      typeof params === 'object' &&
+      typeof (params as Record<string, unknown>).agentRunId === 'string' &&
+      String((params as Record<string, unknown>).agentRunId).trim()
+        ? String((params as Record<string, unknown>).agentRunId).trim()
+        : undefined;
 
     const isSubmitLeaveInput = (
       x: unknown,
@@ -6616,6 +6628,7 @@ export function AIChatScreen(props: any) {
                     toolName: 'submitLeaveRequest',
                     input: { ...input },
                     context: { groupId, timezone: 'Asia/Taipei' },
+                    ...(queueAgentRunId ? { agentRunId: queueAgentRunId } : {}),
                   });
                   Alert.alert(
                     '已建立請假申請',
@@ -6635,6 +6648,152 @@ export function AIChatScreen(props: any) {
       const p = params as Record<string, unknown> | undefined;
       if (p?.toolName === 'submitLeaveRequest' && isSubmitLeaveInput(p.input)) {
         promptConfirmSubmitLeave(p.input);
+        return;
+      }
+
+      const isCreateDormRepairQueueInput = (x: unknown): x is Record<string, unknown> => {
+        if (!x || typeof x !== 'object') return false;
+        const o = x as Record<string, unknown>;
+        return (
+          typeof o.dormitory === 'string' &&
+          o.dormitory.length > 0 &&
+          typeof o.room === 'string' &&
+          o.room.length > 0 &&
+          typeof o.category === 'string' &&
+          o.category.length > 0 &&
+          typeof o.description === 'string' &&
+          o.description.length > 0
+        );
+      };
+
+      const isCreateOrderQueueInput = (x: unknown): x is Record<string, unknown> => {
+        if (!x || typeof x !== 'object') return false;
+        const o = x as Record<string, unknown>;
+        if (typeof o.cafeteriaId !== 'string' || !o.cafeteriaId.trim()) return false;
+        return Array.isArray(o.items) && o.items.length > 0;
+      };
+
+      const repairFailCopy = '報修失敗：目前系統忙碌，請改用宿舍頁面處理。';
+      const orderFailCopy = '訂餐失敗：目前系統忙碌，請改到餐廳點餐頁面完成。';
+
+      if (p?.toolName === 'createDormRepairRequest' && isCreateDormRepairQueueInput(p.input)) {
+        const input = p.input;
+        Alert.alert(
+          '確認送出報修',
+          `宿舍：${String(input.dormitory)} ${String(input.room)}\n類別：${String(input.category)}\n\n確認後將寫入學校 repairRequests。`,
+          [
+            { text: '取消', style: 'cancel' },
+            {
+              text: '確認送出',
+              onPress: () => {
+                void (async () => {
+                  try {
+                    const result = await executeAgentWrite({
+                      toolName: 'createDormRepairRequest',
+                      input,
+                      context: { timezone: 'Asia/Taipei' },
+                      ...(queueAgentRunId ? { agentRunId: queueAgentRunId } : {}),
+                    });
+                    if (result.success === false) {
+                      Alert.alert(
+                        '報修失敗',
+                        typeof result.errorMessage === 'string' && result.errorMessage.trim()
+                          ? `${result.errorMessage}\n\n請改用宿舍頁面完成報修。`
+                          : repairFailCopy,
+                      );
+                      return;
+                    }
+                    const rid =
+                      typeof result.repairId === 'string' && result.repairId
+                        ? result.repairId
+                        : typeof result.requestId === 'string' && result.requestId
+                          ? result.requestId
+                          : undefined;
+                    if (result.success === true && rid) {
+                      Alert.alert(`報修已送出`, `報修編號：${rid}\n\n可到「宿舍 → 我的報修」查看進度。`, [
+                        {
+                          text: '查看報修狀態',
+                          onPress: () => {
+                            handleAction({
+                              ...proposal,
+                              requiresConfirmation: false,
+                              action: 'navigate',
+                              params: { screen: '校園', nested: 'Dormitory' },
+                            });
+                          },
+                        },
+                        { text: '好', style: 'default' },
+                      ]);
+                    } else {
+                      Alert.alert('報修未成功', repairFailCopy);
+                    }
+                  } catch {
+                    Alert.alert('報修未成功', repairFailCopy);
+                  }
+                })();
+              },
+            },
+          ],
+        );
+        return;
+      }
+
+      if (p?.toolName === 'createOrder' && isCreateOrderQueueInput(p.input)) {
+        const input = p.input;
+        const itemCount = Array.isArray(input.items) ? input.items.length : 0;
+        Alert.alert(
+          '確認下單',
+          `餐廳 ID：${String(input.cafeteriaId)}\n品項數：${itemCount}\n\n確認後將寫入 orders。`,
+          [
+            { text: '取消', style: 'cancel' },
+            {
+              text: '確認下單',
+              onPress: () => {
+                void (async () => {
+                  try {
+                    const result = await executeAgentWrite({
+                      toolName: 'createOrder',
+                      input,
+                      context: { timezone: 'Asia/Taipei' },
+                      ...(queueAgentRunId ? { agentRunId: queueAgentRunId } : {}),
+                    });
+                    if (result.success === false) {
+                      Alert.alert(
+                        '訂單建立失敗',
+                        typeof result.errorMessage === 'string' && result.errorMessage.trim()
+                          ? `${result.errorMessage}\n\n請改到餐廳訂單頁面完成下單。`
+                          : orderFailCopy,
+                      );
+                      return;
+                    }
+                    const oid =
+                      typeof result.orderId === 'string' && result.orderId ? result.orderId : undefined;
+                    if (result.success === true && oid) {
+                      Alert.alert(`訂單已建立`, `訂單編號：${oid}\n\n可到「校園 → 點餐」查看訂單狀態。`, [
+                        {
+                          text: '查看我的訂單',
+                          onPress: () => {
+                            handleAction({
+                              ...proposal,
+                              requiresConfirmation: false,
+                              action: 'navigate',
+                              params: { screen: '校園', nested: 'Ordering', initialTab: 2 },
+                            });
+                          },
+                        },
+                        { text: '好', style: 'default' },
+                      ]);
+                    } else {
+                      Alert.alert('訂餐未成功', orderFailCopy);
+                    }
+                  } catch {
+                    Alert.alert('訂餐未成功', orderFailCopy);
+                  }
+                })();
+              },
+            },
+          ],
+        );
         return;
       }
     }

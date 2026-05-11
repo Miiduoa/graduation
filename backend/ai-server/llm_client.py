@@ -2,6 +2,11 @@
 
 Both Together.ai and Groq expose an OpenAI-compatible chat completions API,
 so they share a single code path.  Ollama uses its own format.
+
+This module also exposes `chat_with_tools(messages, tools)` so that the agent
+runtime can ask the LLM to emit structured tool calls (OpenAI function-calling
+format).  For providers that don't support native tool calls we fall back to a
+JSON-mode prompt and parse the response.
 """
 
 from __future__ import annotations
@@ -9,7 +14,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import AsyncIterator
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator
 
 import asyncio as _asyncio
 import time as _time
@@ -266,6 +272,201 @@ def chat_sync(messages: list[dict], **kwargs) -> str:
     else:
         raw = _oai_chat_sync(messages, **kwargs)
     return _strip_think(raw)
+
+
+@dataclass
+class ToolCall:
+    """A single function call requested by the LLM."""
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class ChatPlan:
+    """Result of `chat_with_tools`.
+
+    Either:
+      * `tool_calls` is non-empty (LLM wants to invoke tools), or
+      * `content` is the assistant's final reply.
+    """
+    content: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    raw_finish_reason: str | None = None
+    provider: str = ""
+    model: str = ""
+
+
+def _safe_parse_arguments(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, str) or not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _parse_oai_tool_calls(message: dict[str, Any]) -> list[ToolCall]:
+    raw_calls = message.get("tool_calls") or []
+    out: list[ToolCall] = []
+    for idx, call in enumerate(raw_calls):
+        if not isinstance(call, dict):
+            continue
+        fn = call.get("function") or {}
+        name = str(fn.get("name") or "").strip()
+        if not name:
+            continue
+        out.append(
+            ToolCall(
+                id=str(call.get("id") or f"call_{idx}"),
+                name=name,
+                arguments=_safe_parse_arguments(fn.get("arguments")),
+            )
+        )
+    return out
+
+
+async def _oai_chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    *,
+    tool_choice: str = "auto",
+    **kwargs,
+) -> ChatPlan:
+    client = await _get_async_client()
+    body = _oai_body(messages, stream=False, **kwargs)
+    body["tools"] = tools
+    body["tool_choice"] = tool_choice
+    for attempt in range(4):
+        resp = await client.post(
+            f"{OPENAI_COMPAT_BASE_URL}/chat/completions",
+            headers=_oai_headers(),
+            json=body,
+        )
+        if resp.status_code == 429:
+            wait = float(resp.headers.get("retry-after", 2 ** attempt))
+            logger.warning(
+                "Rate limited (429) on tool call, retrying in %.1fs (attempt %d)",
+                wait,
+                attempt + 1,
+            )
+            await _asyncio.sleep(wait)
+            continue
+        resp.raise_for_status()
+        data = resp.json()
+        choice = data["choices"][0]
+        message = choice.get("message", {}) or {}
+        return ChatPlan(
+            content=_strip_think(str(message.get("content") or "")),
+            tool_calls=_parse_oai_tool_calls(message),
+            raw_finish_reason=choice.get("finish_reason"),
+            provider=LLM_PROVIDER,
+            model=OPENAI_COMPAT_MODEL,
+        )
+    resp.raise_for_status()
+    return ChatPlan(provider=LLM_PROVIDER, model=OPENAI_COMPAT_MODEL)
+
+
+_JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}")
+
+
+def _fallback_tool_prompt(tools: list[dict]) -> str:
+    tool_block = json.dumps(
+        [t.get("function", t) for t in tools], ensure_ascii=False, indent=2
+    )
+    return (
+        "你必須以「單一 JSON 物件」回答，不要加任何說明文字、不要包 code fence。"
+        "格式必須是下面兩種其中之一：\n"
+        '  1) {"tool": "<tool name>", "arguments": { ... }}  ← 想呼叫工具時\n'
+        '  2) {"tool": null, "reply": "..."}                 ← 直接回答時\n\n'
+        "可用工具如下（必須使用一模一樣的名稱與 JSON Schema）：\n"
+        f"{tool_block}\n"
+    )
+
+
+async def _fallback_chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    **kwargs,
+) -> ChatPlan:
+    """For providers without native function calling: ask the model for JSON."""
+    instruction = _fallback_tool_prompt(tools)
+    augmented = list(messages)
+    augmented.insert(0, {"role": "system", "content": instruction})
+    raw = await chat(augmented, **kwargs)
+
+    match = _JSON_OBJECT_RE.search(raw or "")
+    if not match:
+        return ChatPlan(
+            content=raw,
+            tool_calls=[],
+            raw_finish_reason="fallback_no_json",
+            provider=LLM_PROVIDER,
+            model=MODEL_NAME if LLM_PROVIDER == "ollama" else OPENAI_COMPAT_MODEL,
+        )
+    try:
+        parsed = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return ChatPlan(
+            content=raw,
+            tool_calls=[],
+            raw_finish_reason="fallback_bad_json",
+            provider=LLM_PROVIDER,
+            model=MODEL_NAME if LLM_PROVIDER == "ollama" else OPENAI_COMPAT_MODEL,
+        )
+    if isinstance(parsed, dict) and parsed.get("tool"):
+        name = str(parsed["tool"]).strip()
+        args = parsed.get("arguments") if isinstance(parsed.get("arguments"), dict) else {}
+        return ChatPlan(
+            content="",
+            tool_calls=[ToolCall(id="fallback_0", name=name, arguments=args)],
+            raw_finish_reason="fallback_tool_call",
+            provider=LLM_PROVIDER,
+            model=MODEL_NAME if LLM_PROVIDER == "ollama" else OPENAI_COMPAT_MODEL,
+        )
+    reply = ""
+    if isinstance(parsed, dict):
+        reply = str(parsed.get("reply") or "")
+    return ChatPlan(
+        content=reply or raw,
+        tool_calls=[],
+        raw_finish_reason="fallback_plain_reply",
+        provider=LLM_PROVIDER,
+        model=MODEL_NAME if LLM_PROVIDER == "ollama" else OPENAI_COMPAT_MODEL,
+    )
+
+
+async def chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    *,
+    tool_choice: str = "auto",
+    **kwargs,
+) -> ChatPlan:
+    """Ask the LLM either to call a tool or produce a final answer.
+
+    Uses native OpenAI function-calling for Groq / Together (`tool_calls`
+    in the response). Falls back to a JSON-only prompt for Ollama or any
+    provider that returns a 400 because tools aren't supported.
+    """
+    if LLM_PROVIDER in {"together", "groq"} and tools:
+        try:
+            return await _oai_chat_with_tools(
+                messages, tools, tool_choice=tool_choice, **kwargs
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 400:
+                logger.warning(
+                    "Provider %s rejected tool spec (400); falling back to JSON mode: %s",
+                    LLM_PROVIDER,
+                    exc.response.text[:300],
+                )
+            else:
+                raise
+    return await _fallback_chat_with_tools(messages, tools, **kwargs)
 
 
 async def health_check() -> dict:

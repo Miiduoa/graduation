@@ -2813,7 +2813,7 @@ export const firebaseSource: DataSource = {
         urgency?: string;
         images?: string[];
       },
-      { requestId?: string }
+      { success?: boolean; requestId?: string; repairId?: string; errorCode?: string }
     >(getFunctionsInstance(), 'submitRepairRequest');
     const result = await submitRepairRequest({
       schoolId: resolvedSchoolId,
@@ -2824,7 +2824,17 @@ export const firebaseSource: DataSource = {
       urgency: data.priority,
       images: data.images,
     });
-    const requestId = result.data?.requestId;
+    const payload = result.data as
+      | { success?: boolean; requestId?: string; repairId?: string; errorCode?: string }
+      | undefined;
+    if (payload?.success === false) {
+      throw new Error(
+        payload.errorCode === 'verify_failed'
+          ? '報修寫入後驗證失敗，請稍後到宿舍頁再試。'
+          : '建立報修單失敗，請改用宿舍頁面處理。',
+      );
+    }
+    const requestId = payload?.repairId ?? payload?.requestId;
     if (!requestId) {
       throw new Error('建立報修單失敗');
     }

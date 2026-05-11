@@ -20,7 +20,7 @@ describe('intentWritePlan', () => {
     expect(getIntentWritePlan('reserve_seat')).toMatchObject({ toolName: 'reserveSeat', requiresConfirmation: true });
     expect(getIntentWritePlan('borrow_book')).toMatchObject({ toolName: 'borrowBook', requiresConfirmation: true });
     expect(getIntentWritePlan('submit_repair_request')).toMatchObject({
-      toolName: 'submitRepairRequest',
+      toolName: 'createDormRepairRequest',
       requiresConfirmation: true,
     });
     expect(getIntentWritePlan('wash_reserve')).toMatchObject({

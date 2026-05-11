@@ -187,7 +187,7 @@ export function PostLoginDebugScreen() {
 
         <AnimatedCard
           title="AI 報修 / Cloud agent 對照"
-          subtitle="Console：與 App 寫入同一 repairRequests；Functions log 搜 submitRepairRequest"
+            subtitle="Console：與 App 寫入同一 repairRequests；Functions log 搜 createDormRepairRequest 或 submitRepairRequest（callable）"
         >
           <Text style={textSecondary}>
             Firestore 報修 collection：{repairFirestorePath ?? '（無 schoolId）'}
