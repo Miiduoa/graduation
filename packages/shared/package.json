@@ -6,7 +6,8 @@
   "main": "./src/index.ts",
   "scripts": {
     "lint": "eslint src --ext .ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build:cjs": "tsc -p tsconfig.cjs.json"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

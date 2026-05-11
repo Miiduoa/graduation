@@ -751,6 +751,58 @@ describe('firestore security rules', () => {
       malloryDb.collection('users').doc('alice').collection('agentRuns').doc('run-1').get(),
     );
   });
+
+  test('postLoginRuns: owner can read, client cannot write', async () => {
+    await seedFirestore(async (db) => {
+      await db.collection('users').doc('alice').collection('postLoginRuns').doc('r1').set({
+        resolvedRole: 'student',
+      });
+    });
+
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(
+      aliceDb.collection('users').doc('alice').collection('postLoginRuns').doc('r1').get(),
+    );
+    await assertFails(
+      aliceDb.collection('users').doc('alice').collection('postLoginRuns').doc('r2').set({
+        resolvedRole: 'teacher',
+      }),
+    );
+
+    const malloryDb = testEnv.authenticatedContext('mallory').firestore();
+    await assertFails(
+      malloryDb.collection('users').doc('alice').collection('postLoginRuns').doc('r1').get(),
+    );
+  });
+
+  test('courseRosters: active member in accessUids can read; others cannot', async () => {
+    await seedFirestore(async (db) => {
+      await db.collection('schools').doc('tw-demo-uni').collection('members').doc('alice').set({
+        status: 'active',
+        role: 'member',
+      });
+      await db.collection('schools').doc('tw-demo-uni').collection('members').doc('bob').set({
+        status: 'active',
+        role: 'member',
+      });
+      await db
+        .collection('schools')
+        .doc('tw-demo-uni')
+        .collection('courseRosters')
+        .doc('tron_1')
+        .set({ accessUids: ['alice'], tronCourseId: 1 });
+    });
+
+    const aliceDb = testEnv.authenticatedContext('alice').firestore();
+    await assertSucceeds(
+      aliceDb.collection('schools').doc('tw-demo-uni').collection('courseRosters').doc('tron_1').get(),
+    );
+
+    const bobDb = testEnv.authenticatedContext('bob').firestore();
+    await assertFails(
+      bobDb.collection('schools').doc('tw-demo-uni').collection('courseRosters').doc('tron_1').get(),
+    );
+  });
 });
 
 describe('storage security rules', () => {

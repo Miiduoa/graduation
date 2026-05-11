@@ -79,3 +79,12 @@ export async function puCacheClearAll(): Promise<void> {
   const targets = keys.filter((k) => k.startsWith(PU_CACHE_PREFIX));
   if (targets.length > 0) await AsyncStorage.multiRemove(targets);
 }
+
+/** 切換學校或換帳號時清掉該學校在 @pu_cache_v1: 下的項目（不動 @campus_cache_ 等）。 */
+export async function puCacheClearForSchool(schoolId: string): Promise<void> {
+  if (!schoolId.trim()) return;
+  const keys = await AsyncStorage.getAllKeys();
+  const needle = `${schoolId}:`;
+  const targets = keys.filter((k) => k.startsWith(PU_CACHE_PREFIX) && k.includes(needle));
+  if (targets.length > 0) await AsyncStorage.multiRemove(targets);
+}

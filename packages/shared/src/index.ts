@@ -65,3 +65,4 @@ export * from './creditAudit';
 export * from './puGradRequirements';
 export * from './tenant';
 export * from './puAuth';
+export * from './postLoginRoles';

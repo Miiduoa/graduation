@@ -29,7 +29,7 @@ import {
 } from './puDataCache';
 import { loadMockAuthSession } from './mockAuth';
 import { isTestAccount, getTestClassRoster } from './testSeedData';
-import { getCachedCourseStudents, getCachedClassmates, isTeacherOfCourse } from './postLoginDataRouter';
+import type { PostLoginEngineBootstrap } from './finalizePostLoginClient';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -901,3 +901,14 @@ export const generateNumberCode_legacy = (sessionId: string) => ({
 export const validateNumberCode = (sessionId: string, code: string) => /^\d{6}$/.test(code);
 export const validateRotatingQR_legacy = validateRotatingQR;
 export const calculateFraudScore = () => ({ score: 0, flags: [] });
+
+let postLoginBootstrap: PostLoginEngineBootstrap | null = null;
+
+/** 由 postLoginDataRouter 在登入後注入（供日後點名流程讀取 server 解析結果） */
+export function initFromPostLoginContext(ctx: PostLoginEngineBootstrap): void {
+  postLoginBootstrap = ctx;
+}
+
+export function getPostLoginBootstrapForAttendance(): PostLoginEngineBootstrap | null {
+  return postLoginBootstrap;
+}
