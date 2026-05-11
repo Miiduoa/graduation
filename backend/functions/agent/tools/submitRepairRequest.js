@@ -12,6 +12,12 @@ const inputSchema = z.object({
 });
 
 async function execute(ctx, rawInput) {
+  // 除錯：在 Functions 環境變數設 DEBUG_FORCE_SUBMIT_REPAIR_ERROR=1 可強制失敗，
+  // 用來驗證客戶端／最終模型是否仍宣稱報修成功（勿在正式環境長開）。
+  if (String(process.env.DEBUG_FORCE_SUBMIT_REPAIR_ERROR || '').trim() === '1') {
+    throw new Error('[DEBUG] submitRepairRequest forced failure (unset DEBUG_FORCE_SUBMIT_REPAIR_ERROR)');
+  }
+
   const input = inputSchema.parse(rawInput ?? {});
   const uid = ctx.uid;
   const schoolId = ctx.schoolId;
