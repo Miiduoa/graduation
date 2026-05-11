@@ -6673,8 +6673,14 @@ export function AIChatScreen(props: any) {
         return Array.isArray(o.items) && o.items.length > 0;
       };
 
-      const repairFailCopy = '報修失敗：目前系統忙碌，請改用宿舍頁面處理。';
-      const orderFailCopy = '訂餐失敗：目前系統忙碌，請改到餐廳點餐頁面完成。';
+      // 固定失敗文案：規格明定失敗 UI 不可出現 ✅、不可給「查看狀態」navigate action。
+      const REPAIR_FAIL_COPY = '報修失敗：目前系統忙碌，請改用宿舍頁面處理。';
+      const ORDER_FAIL_COPY = '訂餐失敗：目前系統忙碌，請改到餐廳點餐頁面完成。';
+
+      const pushAssistantMessage = (msg: Message) => {
+        setMessages((prev) => [...prev, msg]);
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 60);
+      };
 
       if (p?.toolName === 'createDormRepairRequest' && isCreateDormRepairQueueInput(p.input)) {
         const input = p.input;
@@ -6687,6 +6693,16 @@ export function AIChatScreen(props: any) {
               text: '確認送出',
               onPress: () => {
                 void (async () => {
+                  const renderRepairFailure = () => {
+                    pushAssistantMessage({
+                      id: genMsgId('repair-fail'),
+                      role: 'assistant',
+                      content: REPAIR_FAIL_COPY,
+                      timestamp: new Date(),
+                      agentType: 'tool_result',
+                      suggestions: ['前往宿舍頁面', '查看我的報修'],
+                    });
+                  };
                   try {
                     const result = await executeAgentWrite({
                       toolName: 'createDormRepairRequest',
@@ -6694,41 +6710,43 @@ export function AIChatScreen(props: any) {
                       context: { timezone: 'Asia/Taipei' },
                       ...(queueAgentRunId ? { agentRunId: queueAgentRunId } : {}),
                     });
-                    if (result.success === false) {
-                      Alert.alert(
-                        '報修失敗',
-                        typeof result.errorMessage === 'string' && result.errorMessage.trim()
-                          ? `${result.errorMessage}\n\n請改用宿舍頁面完成報修。`
-                          : repairFailCopy,
-                      );
-                      return;
-                    }
                     const rid =
                       typeof result.repairId === 'string' && result.repairId
                         ? result.repairId
                         : typeof result.requestId === 'string' && result.requestId
                           ? result.requestId
                           : undefined;
-                    if (result.success === true && rid) {
-                      Alert.alert(`報修已送出`, `報修編號：${rid}\n\n可到「宿舍 → 我的報修」查看進度。`, [
-                        {
-                          text: '查看報修狀態',
-                          onPress: () => {
-                            handleAction({
-                              ...proposal,
-                              requiresConfirmation: false,
-                              action: 'navigate',
-                              params: { screen: '校園', nested: 'Dormitory' },
-                            });
-                          },
-                        },
-                        { text: '好', style: 'default' },
-                      ]);
-                    } else {
-                      Alert.alert('報修未成功', repairFailCopy);
+                    if (result.success !== true || !rid) {
+                      renderRepairFailure();
+                      return;
                     }
+                    pushAssistantMessage({
+                      id: genMsgId('repair-ok'),
+                      role: 'assistant',
+                      content: [
+                        '✅ 已提交宿舍報修申請。',
+                        '',
+                        `報修單號：${rid}`,
+                        `位置：${String(input.dormitory)} ${String(input.room)}`,
+                        `類別：${String(input.category)}`,
+                        '',
+                        '可到「宿舍 → 我的報修」追蹤後續狀態。',
+                      ].join('\n'),
+                      timestamp: new Date(),
+                      agentType: 'tool_result',
+                      suggestions: ['查看報修狀態', '列出我的報修', '今日公告'],
+                      actions: [
+                        {
+                          label: '開啟宿舍／我的報修',
+                          action: 'navigate',
+                          params: { screen: '校園', nested: 'Dormitory' },
+                          requiresConfirmation: false,
+                          sensitivity: 'low',
+                        },
+                      ],
+                    });
                   } catch {
-                    Alert.alert('報修未成功', repairFailCopy);
+                    renderRepairFailure();
                   }
                 })();
               },
@@ -6750,6 +6768,16 @@ export function AIChatScreen(props: any) {
               text: '確認下單',
               onPress: () => {
                 void (async () => {
+                  const renderOrderFailure = () => {
+                    pushAssistantMessage({
+                      id: genMsgId('order-fail'),
+                      role: 'assistant',
+                      content: ORDER_FAIL_COPY,
+                      timestamp: new Date(),
+                      agentType: 'tool_result',
+                      suggestions: ['前往點餐頁面', '查看我的訂單'],
+                    });
+                  };
                   try {
                     const result = await executeAgentWrite({
                       toolName: 'createOrder',
@@ -6757,37 +6785,46 @@ export function AIChatScreen(props: any) {
                       context: { timezone: 'Asia/Taipei' },
                       ...(queueAgentRunId ? { agentRunId: queueAgentRunId } : {}),
                     });
-                    if (result.success === false) {
-                      Alert.alert(
-                        '訂單建立失敗',
-                        typeof result.errorMessage === 'string' && result.errorMessage.trim()
-                          ? `${result.errorMessage}\n\n請改到餐廳訂單頁面完成下單。`
-                          : orderFailCopy,
-                      );
+                    const oid =
+                      typeof result.orderId === 'string' && result.orderId
+                        ? result.orderId
+                        : undefined;
+                    if (result.success !== true || !oid) {
+                      renderOrderFailure();
                       return;
                     }
-                    const oid =
-                      typeof result.orderId === 'string' && result.orderId ? result.orderId : undefined;
-                    if (result.success === true && oid) {
-                      Alert.alert(`訂單已建立`, `訂單編號：${oid}\n\n可到「校園 → 點餐」查看訂單狀態。`, [
+                    const totalText =
+                      typeof result.total === 'number' ? `\n金額：$${result.total}` : '';
+                    const cafeteriaText =
+                      typeof result.cafeteria === 'string' && result.cafeteria
+                        ? `\n餐廳：${result.cafeteria}`
+                        : '';
+                    pushAssistantMessage({
+                      id: genMsgId('order-ok'),
+                      role: 'assistant',
+                      content: [
+                        '✅ 下單成功。',
+                        '',
+                        `訂單編號：${oid}${cafeteriaText}${totalText}`,
+                        `品項數：${itemCount}`,
+                        '',
+                        '可到「校園 → 點餐」查看訂單狀態。',
+                      ].join('\n'),
+                      timestamp: new Date(),
+                      agentType: 'tool_result',
+                      suggestions: ['查看我的訂單', '推薦餐點', '今日公告'],
+                      actions: [
                         {
-                          text: '查看我的訂單',
-                          onPress: () => {
-                            handleAction({
-                              ...proposal,
-                              requiresConfirmation: false,
-                              action: 'navigate',
-                              params: { screen: '校園', nested: 'Ordering', initialTab: 2 },
-                            });
-                          },
+                          label: '查看我的訂單',
+                          action: 'navigate',
+                          params: { screen: '校園', nested: 'Ordering', initialTab: 2 },
+                          requiresConfirmation: false,
+                          sensitivity: 'low',
                         },
-                        { text: '好', style: 'default' },
-                      ]);
-                    } else {
-                      Alert.alert('訂餐未成功', orderFailCopy);
-                    }
+                      ],
+                    });
                   } catch {
-                    Alert.alert('訂餐未成功', orderFailCopy);
+                    renderOrderFailure();
                   }
                 })();
               },
