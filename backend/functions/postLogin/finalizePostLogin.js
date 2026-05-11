@@ -14,6 +14,7 @@ const { resolveUserRoles } = require('../../../packages/shared/dist-cjs/postLogi
 
 const MAX_MEMBER_COURSES = 10;
 const MAX_EMAIL_LOOKUPS = 40;
+const MAX_POST_LOGIN_RUNS = 20;
 
 function normEmail(v) {
   if (typeof v !== 'string') return null;
@@ -27,6 +28,29 @@ async function findUidByEmail(db, emailNorm) {
   if (snap.empty) return null;
   if (snap.docs.length > 1) return null;
   return snap.docs[0].id;
+}
+
+/** 刪除最舊的 run，只保留最近 MAX_POST_LOGIN_RUNS 筆（分批讀取與刪除） */
+async function pruneOldPostLoginRuns(userRef) {
+  const dbInst = userRef.firestore;
+  const PAGE = 100;
+  const CHUNK = 400;
+  for (;;) {
+    const snap = await userRef
+      .collection('postLoginRuns')
+      .orderBy('createdAt', 'desc')
+      .limit(PAGE)
+      .get();
+    if (snap.size <= MAX_POST_LOGIN_RUNS) return;
+    const toDelete = snap.docs.slice(MAX_POST_LOGIN_RUNS);
+    if (!toDelete.length) return;
+    for (let i = 0; i < toDelete.length; i += CHUNK) {
+      const slice = toDelete.slice(i, i + CHUNK);
+      const delBatch = dbInst.batch();
+      slice.forEach((d) => delBatch.delete(d.ref));
+      await delBatch.commit();
+    }
+  }
 }
 
 async function runFinalizePostLogin(request) {
@@ -67,14 +91,20 @@ async function runFinalizePostLogin(request) {
   if (tronSessionId) {
     const tronRef = db.collection('_puTronClassSessions').doc(tronSessionId);
     const tronSnap = await tronRef.get();
-    if (tronSnap.exists) {
-      tronData = tronSnap.data() || {};
-      assertSessionOwner(tronData, uid);
-      const tronExpires = tronData?.expiresAt?.toDate?.() ?? null;
-      if (!tronData?.cookies || !tronExpires || tronExpires < new Date()) {
-        tronData = null;
-      }
+    if (!tronSnap.exists) {
+      throw new HttpsError('failed-precondition', 'TronClass session not found');
     }
+    const tronCandidate = tronSnap.data() || {};
+    try {
+      assertSessionOwner(tronCandidate, uid);
+    } catch {
+      throw new HttpsError('permission-denied', 'TronClass session does not belong to this user');
+    }
+    const tronExpires = tronCandidate?.expiresAt?.toDate?.() ?? null;
+    if (!tronCandidate?.cookies || !tronExpires || tronExpires < new Date()) {
+      throw new HttpsError('failed-precondition', 'TronClass session expired');
+    }
+    tronData = tronCandidate;
   }
 
   const errors = [];
@@ -174,6 +204,7 @@ async function runFinalizePostLogin(request) {
             .collection('courseRosters')
             .doc(`tron_${courseId}`);
           const courseMeta = (tcCourses || []).find((c) => c.id === courseId) || {};
+          const accessUidList = [...accessUidSet];
           await rosterRef.set(
             {
               tronCourseId: courseId,
@@ -185,7 +216,7 @@ async function runFinalizePostLogin(request) {
                 role: m.role || '',
                 email: normEmail(m.email || m.login_email || m.mail),
               })),
-              accessUids: [...accessUidSet],
+              accessUids: FieldValue.arrayUnion(...accessUidList),
               updatedAt: FieldValue.serverTimestamp(),
               updatedByUid: uid,
             },
@@ -202,6 +233,17 @@ async function runFinalizePostLogin(request) {
       else errors.push({ code: 'tron_members', message: s.reason?.message || String(s.reason) });
     }
   }
+
+  const puCoursesFailed = errors.some((e) => e.code === 'pu_courses');
+  const tronCoursesFailed = errors.some((e) => e.code === 'tron_courses');
+  const tronRostersFailed = errors.some((e) => e.code === 'tron_members');
+  const partial = errors.length > 0;
+  const sourcesUsed = {
+    pu: true,
+    tronCourses: !!(tronData?.cookies),
+    tronProfile: !!(tronData?.cookies),
+    rosters: !!(tronData?.cookies && teachingCourseIds.length > 0),
+  };
 
   const externalIds = {
     puStudentId:
@@ -250,12 +292,23 @@ async function runFinalizePostLogin(request) {
       tcCourseCount: (tcCourses || []).length,
       rosterCourses: rosterSummaries.length,
       rosterMemberTotal: rosterSummaries.reduce((a, r) => a + (r.memberCount || 0), 0),
+      sourcesUsed,
+      partial,
+      puCoursesFailed,
+      tronCoursesFailed,
+      tronRostersFailed,
     },
     errors,
     createdAt: FieldValue.serverTimestamp(),
   });
 
   await batch.commit();
+
+  try {
+    await pruneOldPostLoginRuns(userRef);
+  } catch (e) {
+    console.warn('[finalizePostLogin] prune postLoginRuns failed:', e);
+  }
 
   const { getAuth } = require('firebase-admin/auth');
   const auth = getAuth();
@@ -286,6 +339,11 @@ async function runFinalizePostLogin(request) {
       puCourseCount: (puResult.courses || []).length,
       tcCourseCount: (tcCourses || []).length,
       rosterCourses: rosterSummaries.length,
+      partial,
+      sourcesUsed,
+      puCoursesFailed,
+      tronCoursesFailed,
+      tronRostersFailed,
     },
     context: {
       user: { uid, email: userDoc.email || null },
