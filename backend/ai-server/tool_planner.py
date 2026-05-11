@@ -234,6 +234,16 @@ def _build_cards(traces: list[ToolCallTrace]) -> list[ResponseCard]:
                     },
                 )
             )
+        elif trace.name == "navigateToScreen":
+            cards.append(
+                ResponseCard(
+                    kind="navigate",
+                    payload={
+                        "screen": trace.output.get("screen"),
+                        "params": trace.output.get("params") or {},
+                    },
+                )
+            )
         elif trace.name == "createFoodOrder":
             cards.append(
                 ResponseCard(
@@ -251,6 +261,46 @@ def _build_cards(traces: list[ToolCallTrace]) -> list[ResponseCard]:
             cards.append(
                 ResponseCard(
                     kind="repair_list",
+                    payload={
+                        "count": trace.output.get("count", 0),
+                        "items": trace.output.get("items") or [],
+                    },
+                )
+            )
+        elif trace.name == "getPendingAssignments":
+            cards.append(
+                ResponseCard(
+                    kind="assignment_list",
+                    payload={
+                        "count": trace.output.get("count", 0),
+                        "items": trace.output.get("items") or [],
+                    },
+                )
+            )
+        elif trace.name == "getTodaySchedule":
+            cards.append(
+                ResponseCard(
+                    kind="schedule_today",
+                    payload={
+                        "weekday": trace.output.get("weekday"),
+                        "courses": trace.output.get("courses") or [],
+                    },
+                )
+            )
+        elif trace.name == "getMyGrades":
+            cards.append(
+                ResponseCard(
+                    kind="grades_list",
+                    payload={
+                        "count": trace.output.get("count", 0),
+                        "items": trace.output.get("items") or [],
+                    },
+                )
+            )
+        elif trace.name == "getLatestAnnouncements":
+            cards.append(
+                ResponseCard(
+                    kind="announcements_list",
                     payload={
                         "count": trace.output.get("count", 0),
                         "items": trace.output.get("items") or [],
@@ -277,10 +327,58 @@ def _build_final_text(traces: list[ToolCallTrace], llm_content: str) -> str:
             continue
         if trace.name == "createDormRepairRequest":
             pieces.append(_format_repair_success(trace.output))
+        elif trace.name == "navigateToScreen":
+            screen = trace.output.get("screen", "")
+            pieces.append(f"好的，正在帶你前往{screen}頁面。")
         elif trace.name == "createFoodOrder":
             pieces.append(_format_order_success(trace.output))
         elif trace.name == "listMyDormRepairs":
             pieces.append(_format_list_repairs_success(trace.output))
+        elif trace.name == "getPendingAssignments":
+            items = trace.output.get("items") or []
+            if not items:
+                pieces.append("目前查無待繳作業，繼續加油！")
+            else:
+                lines = [f"你有 {len(items)} 筆待繳作業："]
+                for it in items[:5]:
+                    title = it.get("title") or "未知作業"
+                    due = it.get("dueAt") or "無截止時間"
+                    lines.append(f"• {title}（截止：{due}）")
+                pieces.append("\n".join(lines))
+        elif trace.name == "getTodaySchedule":
+            courses = trace.output.get("courses") or []
+            if not courses:
+                pieces.append("今天沒有排課，可以好好休息！")
+            else:
+                weekday_zh = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
+                wd = trace.output.get("weekday", 0)
+                lines = [f"{weekday_zh[wd]}課表（共 {len(courses)} 堂）："]
+                for c in courses:
+                    name = c.get("courseName") or "課程"
+                    room = c.get("room") or "未知教室"
+                    lines.append(f"• {name} ｜ {room}")
+                pieces.append("\n".join(lines))
+        elif trace.name == "getMyGrades":
+            items = trace.output.get("items") or []
+            if not items:
+                pieces.append("目前查無成績資料。")
+            else:
+                lines = [f"找到 {len(items)} 筆成績："]
+                for it in items[:8]:
+                    name = it.get("courseName") or it.get("name") or "課程"
+                    score = it.get("score") or it.get("grade") or "未登錄"
+                    lines.append(f"• {name}：{score}")
+                pieces.append("\n".join(lines))
+        elif trace.name == "getLatestAnnouncements":
+            items = trace.output.get("items") or []
+            if not items:
+                pieces.append("目前沒有最新公告。")
+            else:
+                lines = [f"最新 {len(items)} 則公告："]
+                for it in items[:5]:
+                    title = it.get("title") or "公告"
+                    lines.append(f"• {title}")
+                pieces.append("\n".join(lines))
         else:
             pieces.append(
                 f"✅ 已執行 {trace.name}：{json.dumps(trace.output, ensure_ascii=False)}"
