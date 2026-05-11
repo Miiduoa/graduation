@@ -151,6 +151,7 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // courseRosters：僅以已知 rosterId（例如 tron_{courseId}）讀單一 doc。前端禁止對此 collection 做全量 list / 無篩選 query。
       match /courseRosters/{rosterId} {
         allow read: if isSchoolMember(schoolId)
           && (
