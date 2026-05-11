@@ -1326,6 +1326,8 @@ export type Order = {
   totalPrice?: number;
   pickupTime?: string;
   note?: string;
+  /** 訂單建立管道，例如 AI 助理代下單為 ai_agent */
+  source?: string;
   createdAt: string;
   updatedAt?: string;
 };

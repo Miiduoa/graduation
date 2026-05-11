@@ -20,6 +20,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAnyCachedCourses, getAnyCachedGrades, getAnyCachedTCCourses } from './puDataCache';
+import { getCachedClassmates } from './postLoginDataRouter';
 import type { PUCourse, PUCourseResult, PUGradeResult } from './puDirectScraper';
 import type { TCCourse } from './tronClassClient';
 
@@ -752,6 +753,28 @@ export async function getStudyBuddyMatches(
  * 只取與我相同課程的同學 → 天然具備課程重疊
  */
 async function getRealClassmateProfiles(myProfile: StudyProfile): Promise<StudyProfile[]> {
+  // 優先使用 postLoginDataRouter 預載的同學名冊
+  try {
+    const cachedMates = await getCachedClassmates();
+    if (cachedMates && cachedMates.length > 0) {
+      console.log(`[StudyBuddy] Using ${cachedMates.length} cached classmates from postLoginDataRouter`);
+      return cachedMates
+        .filter((c) => c.id !== myProfile.userId)
+        .map((c) => ({
+          userId: c.id,
+          displayName: c.name,
+          department: '同班同學',
+          courses: myProfile.courses.slice(0, 3), // 共用課程
+          strengths: myProfile.courses.slice(0, 2).map(categorizeCourseSimple).filter((v, i, a) => a.indexOf(v) === i),
+          weaknesses: [],
+          studyStyle: { preferGroup: true, preferQuiet: false, preferOnline: false, preferTeaching: false, preferLearning: true },
+          availableSlots: [],
+          isPublic: true,
+          lastActive: Date.now(),
+        }));
+    }
+  } catch (_) { /* fallthrough to TC fetch */ }
+
   const { getCourseStudents } = await import('./smartAttendanceEngine');
   const tcCourses = await getAnyCachedTCCourses();
   if (!tcCourses || tcCourses.length === 0) return [];

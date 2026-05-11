@@ -4474,6 +4474,7 @@ exports.createOrder = onCall(
     const pickupTime = request.data?.pickupTime;
     const note = request.data?.note;
     const paymentMethod = request.data?.paymentMethod;
+    const source = request.data?.source === 'ai_agent' ? 'ai_agent' : undefined;
 
     if (!schoolId || !cafeteriaId || items.length === 0) {
       throw new HttpsError('invalid-argument', 'Missing required fields');
@@ -4518,6 +4519,7 @@ exports.createOrder = onCall(
       status: 'pending',
       paymentStatus: 'pending',
       createdAt: FieldValue.serverTimestamp(),
+      ...(source ? { source } : {}),
     };
 
     const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc();
@@ -4690,6 +4692,10 @@ exports.submitRepairRequest = onCall(
       throw new HttpsError('invalid-argument', 'Missing required fields');
     }
 
+    if (String(description).length > 1000) {
+      throw new HttpsError('invalid-argument', 'Description must be at most 1000 characters');
+    }
+
     await assertActiveSchoolMember(schoolId, uid);
 
     const repairRef = await db
@@ -4697,6 +4703,7 @@ exports.submitRepairRequest = onCall(
       .doc(schoolId)
       .collection('repairRequests')
       .add({
+        schoolId,
         userId: uid,
         dormitory,
         room,
