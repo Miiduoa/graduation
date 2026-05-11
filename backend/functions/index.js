@@ -96,6 +96,7 @@ const {
   tcFetchSyllabus,
   tcFetchCourseFullData,
 } = require('./tronClassScraper');
+const { runFinalizePostLogin } = require('./postLogin/finalizePostLogin');
 
 // TDX API 金鑰（透過 firebase functions:secrets:set 設定）
 const TDX_CLIENT_ID = defineSecret('TDX_CLIENT_ID');
@@ -298,11 +299,13 @@ async function syncAuthClaims(uid, userData = {}) {
   const currentUser = await db.collection('users').doc(uid).get();
   const profile = currentUser.exists ? currentUser.data() : {};
   const role = userData.role || profile?.role || 'student';
-  const schoolId = userData.schoolId || profile?.schoolId || null;
+  const schoolId = userData.schoolId || profile?.schoolId || profile?.primarySchoolId || null;
+  const postLoginRoles = Array.isArray(profile?.postLoginRoles) ? profile.postLoginRoles : [];
 
   await auth.setCustomUserClaims(uid, {
     role,
     ...(schoolId ? { schoolId } : {}),
+    ...(postLoginRoles.length ? { roles: postLoginRoles.slice(0, 12) } : {}),
   });
 }
 
@@ -2693,6 +2696,15 @@ exports.updateUserProfile = onCall(
 
     return { success: true };
   },
+);
+
+exports.finalizePostLogin = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 120,
+    memory: '512MiB',
+  },
+  async (request) => runFinalizePostLogin(request),
 );
 
 exports.onUserProfileChanged = onDocumentWritten(

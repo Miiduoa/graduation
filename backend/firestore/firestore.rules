@@ -151,6 +151,18 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      match /courseRosters/{rosterId} {
+        allow read: if isSchoolMember(schoolId)
+          && (
+            hasEditorRole(schoolId)
+            || (
+              'accessUids' in resource.data
+              && request.auth.uid in resource.data.accessUids
+            )
+          );
+        allow write: if false;
+      }
+
       match /serviceRoles/{uid} {
         allow read: if isSelf(uid) || hasEditorRole(schoolId);
         allow write: if false;
@@ -552,6 +564,11 @@ service cloud.firestore {
         && request.resource.data.primarySchoolId == resource.data.primarySchoolId
         && request.resource.data.createdAt == resource.data.createdAt;
       allow delete: if false;
+
+      match /postLoginRuns/{runId} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
 
       match /pushTokens/{tokenId} {
         allow read, write: if isSelf(uid);

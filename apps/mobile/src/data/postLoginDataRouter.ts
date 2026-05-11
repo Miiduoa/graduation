@@ -106,6 +106,15 @@ export async function getPostLoginContext(schoolId: string): Promise<PostLoginCo
 
 // ─── 內部函式 ────────────────────────────────────────────────────────────────
 
+function mapStoredAppRoleToPrimary(stored: string): PrimaryRole | null {
+  if (stored === 'student' || stored === 'alumni') return 'student';
+  if (stored === 'teacher' || stored === 'professor' || stored === 'principal') return 'teacher';
+  if (stored === 'department' || stored === 'department_head') return 'departmentAdmin';
+  if (stored === 'admin' || stored === 'school') return 'admin';
+  if (stored === 'staff' || stored === 'vendor') return 'staff';
+  return null;
+}
+
 function resolveRoles(params: {
   uid: string;
   userDoc: Record<string, unknown>;
@@ -113,9 +122,23 @@ function resolveRoles(params: {
 }): ResolvedRoles {
   const storedRole = params.userDoc?.role as string | undefined;
 
-  // 如果 Firestore 已有明確的非 student role，直接信任
-  if (storedRole && storedRole !== 'student') {
-    return buildResolvedRoles(storedRole as PrimaryRole, 'firestore');
+  // App / Firestore 角色字串 → PrimaryRole
+  const fromStored = storedRole ? mapStoredAppRoleToPrimary(storedRole) : null;
+  if (fromStored && fromStored !== 'student') {
+    return buildResolvedRoles(fromStored, 'firestore');
+  }
+
+  const userEmail =
+    typeof params.userDoc?.email === 'string' ? params.userDoc.email.toLowerCase().trim() : '';
+  if (
+    userEmail &&
+    (params.tronCourses?.some((c) => {
+      const te = c.teacherEmail?.toLowerCase().trim();
+      return Boolean(te && te === userEmail);
+    }) ??
+      false)
+  ) {
+    return buildResolvedRoles('teacher', 'tron');
   }
 
   // TronClass：isTeacher 由呼叫端標記，或 teacherUserId 對到自己 → 老師
@@ -187,6 +210,7 @@ function normalizeCourses(params: {
     });
   }
 
+  // 去重：(semesterId, code) 有 Tron 則以 Tron 為主；僅 PU 才補 source: 'pu'
   const tronCodes = new Set(courses.map((c) => `${c.semesterId}:${c.code}`));
   for (const pc of params.puCourses) {
     const semesterId = pc.semesterId ?? 'unknown';

@@ -200,7 +200,27 @@ async function tryBackendUnifiedLogin(
 }
 
 import { seedTestData } from './testSeedData';
-import { routePostLoginData } from './postLoginDataRouter';
+import { syncPostLoginContextFromCaches } from './postLoginContextFromCaches';
+import { routePostLoginData, routePostLoginDataWithContext } from './postLoginDataRouter';
+
+async function runPostLoginContextPipeline(p: {
+  uid: string;
+  schoolId: string;
+  role: UserRole;
+  email: string;
+}): Promise<void> {
+  try {
+    await syncPostLoginContextFromCaches({
+      uid: p.uid,
+      schoolId: p.schoolId,
+      role: p.role,
+      email: p.email,
+    });
+    await routePostLoginDataWithContext(p.schoolId);
+  } catch (e) {
+    console.warn('[studentIdAuth] post-login context pipeline failed (continuing):', e);
+  }
+}
 
 // ─── 測試帳號 ──────────────────────────────────────────
 // 每個角色各一組，帳號格式: test_<role>，密碼統一 test1234
@@ -333,11 +353,25 @@ async function tryTestAccountLogin(
   await seedTestData(test.role);
 
   // 執行資料路由（測試帳號也要建立關聯圖）
+  let routedRole: UserRole = test.role;
   try {
-    await routePostLoginData(test.role);
+    const routeResult = await routePostLoginData(test.role);
+    routedRole = routeResult.roleInference.inferredRole;
   } catch (_) { /* ignore */ }
 
+  await runPostLoginContextPipeline({
+    uid,
+    email,
+    schoolId,
+    role: routedRole,
+  });
+
   progress('linking', '完成');
+
+  if (routedRole !== test.role) {
+    mockSession.role = routedRole;
+    await saveMockAuthSession(mockSession);
+  }
 
   // 建立虛擬 PU session
   const session: PUSession = {
@@ -352,7 +386,7 @@ async function tryTestAccountLogin(
     displayName: test.displayName,
     studentId: test.studentId,
     department: test.department,
-    role: test.role,
+    role: routedRole,
     schoolId,
     session,
   };
@@ -552,6 +586,13 @@ async function handleBackendLoginSuccess(
   } catch (err) {
     console.warn('[studentIdAuth] postLoginDataRouter failed (continuing):', err);
   }
+
+  await runPostLoginContextPipeline({
+    uid: result.uid,
+    schoolId: result.schoolId,
+    role: result.role,
+    email: result.email,
+  });
 
   return result;
 }
@@ -765,6 +806,13 @@ async function handleHybridLogin(
   } catch (err) {
     console.warn('[studentIdAuth] Hybrid: postLoginDataRouter failed (continuing):', err);
   }
+
+  await runPostLoginContextPipeline({
+    uid: result.uid,
+    schoolId: result.schoolId,
+    role: result.role,
+    email: result.email,
+  });
 
   return result;
 }

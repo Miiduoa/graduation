@@ -26,6 +26,7 @@ import {
   getAnyCachedTCTodos,
   getAnyCachedStudentInfo,
 } from './puDataCache';
+import { resolveActivePostLoginContext } from './postLoginContextFromCaches';
 import type { PUCourse, PUGrade } from './puDirectScraper';
 import type { TCActivity, TCAttendance } from './tronClassClient';
 import { computeRealtimeInsights } from './aiRealtimeAnalytics';
@@ -321,7 +322,12 @@ async function execQueryAttendance(): Promise<SmartActionResult> {
 }
 
 async function execQueryAssignments(): Promise<SmartActionResult> {
-  const [acts, todos, tcc] = await Promise.all([getAnyCachedTCActivities(), getAnyCachedTCTodos(), getAnyCachedTCCourses()]);
+  const [acts, todos, tcc, ctx] = await Promise.all([
+    getAnyCachedTCActivities(),
+    getAnyCachedTCTodos(),
+    getAnyCachedTCCourses(),
+    resolveActivePostLoginContext(),
+  ]);
   const cm = new Map<number, string>();
   if (tcc) for (const c of tcc) cm.set(c.id, c.name);
 
@@ -329,6 +335,15 @@ async function execQueryAssignments(): Promise<SmartActionResult> {
   const all: T[] = [];
   if (acts) for (const [cid, as] of Object.entries(acts)) { const cn = cm.get(Number(cid)) ?? `課程#${cid}`; for (const a of as) if (['homework', 'quiz', 'exam'].includes(a.type)) all.push({ ...a, _cn: cn }); }
   if (todos) for (const t of todos) if (!all.some((a) => a.id === t.id)) all.push({ ...t, _cn: cm.get(t.course_id) ?? `課程#${t.course_id}` });
+
+  if (all.length === 0 && ctx?.asStudent?.pendingAssignments?.length) {
+    const pend = ctx.asStudent.pendingAssignments;
+    const lines = [
+      '📝 作業（PostLogin 標準化視角）：\n',
+      ...pend.map((a) => `  📋 ${a.title}（課程 id ${a.courseId}）— 截止：${a.dueAt || '未設定'} — ${a.status}`),
+    ];
+    return { success: true, action: 'query_assignments', title: '作業', data: lines.join('\n'), suggestions: ['查課表', '全面分析'] };
+  }
 
   if (all.length === 0) return { success: true, action: 'query_assignments', title: '作業', data: '目前沒有作業資料。' };
 

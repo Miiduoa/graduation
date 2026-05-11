@@ -36,21 +36,34 @@ import {
   type TCAttendance,
 } from './tronClassClient';
 
-// ─── Cache Keys ──────────────────────────────────────────
+// ─── Cache Keys（v1 namespace + 舊版遷移）──────────────────
 
-const PREFIX = '@pu_cache:';
+const LEGACY_PREFIX = '@pu_cache:';
 const KEYS = {
-  courses: `${PREFIX}courses`,
-  grades: `${PREFIX}grades`,
-  announcements: `${PREFIX}announcements`,
-  studentInfo: `${PREFIX}studentInfo`,
-  tcCourses: `${PREFIX}tc_courses`,
-  tcActivities: `${PREFIX}tc_activities`,
-  tcModules: `${PREFIX}tc_modules`,
-  tcAttendance: `${PREFIX}tc_attendance`,
-  tcTodos: `${PREFIX}tc_todos`,
-  lastSync: `${PREFIX}lastSync`,
+  courses: 'puCache:v1:pu:courses',
+  grades: 'puCache:v1:pu:grades',
+  announcements: 'puCache:v1:pu:announcements',
+  studentInfo: 'puCache:v1:pu:studentInfo',
+  tcCourses: 'puCache:v1:tron:courses',
+  tcActivities: 'puCache:v1:tron:activities',
+  tcModules: 'puCache:v1:tron:modules',
+  tcAttendance: 'puCache:v1:tron:attendance',
+  tcTodos: 'puCache:v1:tron:todos',
+  lastSync: 'puCache:v1:meta:lastSync',
 } as const;
+
+const LEGACY_KEYS: Record<(typeof KEYS)[keyof typeof KEYS], string> = {
+  [KEYS.courses]: `${LEGACY_PREFIX}courses`,
+  [KEYS.grades]: `${LEGACY_PREFIX}grades`,
+  [KEYS.announcements]: `${LEGACY_PREFIX}announcements`,
+  [KEYS.studentInfo]: `${LEGACY_PREFIX}studentInfo`,
+  [KEYS.tcCourses]: `${LEGACY_PREFIX}tc_courses`,
+  [KEYS.tcActivities]: `${LEGACY_PREFIX}tc_activities`,
+  [KEYS.tcModules]: `${LEGACY_PREFIX}tc_modules`,
+  [KEYS.tcAttendance]: `${LEGACY_PREFIX}tc_attendance`,
+  [KEYS.tcTodos]: `${LEGACY_PREFIX}tc_todos`,
+  [KEYS.lastSync]: `${LEGACY_PREFIX}lastSync`,
+};
 
 // ─── TTL (毫秒) ─────────────────────────────────────────
 
@@ -66,20 +79,83 @@ const TTL = {
   tcTodos: 30 * 60 * 1000, // 30 分鐘（待辦最即時）
 } as const;
 
-// ─── Cached Entry 結構 ──────────────────────────────────
+// ─── Cached Entry 結構（postLoginRouter 與引擎僅依賴此介面）──
 
-type CacheEntry<T> = {
+export type PuTypedCacheEntry<T> = {
   data: T;
-  fetchedAt: number; // epoch ms
+  fetchedAt: string; // ISO
+  source: 'tron' | 'pu' | 'firebase' | 'mixed';
+  ttlMs: number;
 };
+
+type CacheEntry<T> = PuTypedCacheEntry<T>;
+
+function keySourceAndTtl(key: string): { source: CacheEntry<unknown>['source']; ttlMs: number } {
+  if (key.includes(':tron:')) {
+    if (key.includes('todos')) return { source: 'tron', ttlMs: TTL.tcTodos };
+    if (key.includes('activities')) return { source: 'tron', ttlMs: TTL.tcActivities };
+    if (key.includes('attendance')) return { source: 'tron', ttlMs: TTL.tcAttendance };
+    if (key.includes('modules')) return { source: 'tron', ttlMs: TTL.tcModules };
+    if (key.includes('courses')) return { source: 'tron', ttlMs: TTL.tcCourses };
+    return { source: 'tron', ttlMs: TTL.tcCourses };
+  }
+  if (key.includes(':meta:')) return { source: 'mixed', ttlMs: Number.MAX_SAFE_INTEGER };
+  if (key.includes('announcements')) return { source: 'pu', ttlMs: TTL.announcements };
+  if (key.includes('grades')) return { source: 'pu', ttlMs: TTL.grades };
+  if (key.includes('studentInfo')) return { source: 'pu', ttlMs: TTL.studentInfo };
+  if (key.includes('courses')) return { source: 'pu', ttlMs: TTL.courses };
+  return { source: 'pu', ttlMs: TTL.courses };
+}
+
+function normalizeRawEntry<T>(
+  raw: string,
+  key: string,
+): CacheEntry<T> | null {
+  try {
+    const parsed = JSON.parse(raw) as {
+      data: T;
+      fetchedAt?: number | string;
+      source?: CacheEntry<T>['source'];
+      ttlMs?: number;
+    };
+    if (parsed == null || typeof parsed !== 'object' || !('data' in parsed)) return null;
+    const { source, ttlMs } = keySourceAndTtl(key);
+    let fetchedAtIso: string;
+    if (typeof parsed.fetchedAt === 'string' && parsed.fetchedAt.trim()) {
+      fetchedAtIso = parsed.fetchedAt;
+    } else if (typeof parsed.fetchedAt === 'number' && Number.isFinite(parsed.fetchedAt)) {
+      fetchedAtIso = new Date(parsed.fetchedAt).toISOString();
+    } else {
+      fetchedAtIso = new Date().toISOString();
+    }
+    return {
+      data: parsed.data,
+      fetchedAt: fetchedAtIso,
+      source: parsed.source ?? source,
+      ttlMs: typeof parsed.ttlMs === 'number' ? parsed.ttlMs : ttlMs,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // ─── 通用讀寫 ────────────────────────────────────────────
 
 async function readCache<T>(key: string): Promise<CacheEntry<T> | null> {
   try {
     const raw = await AsyncStorage.getItem(key);
-    if (!raw) return null;
-    return JSON.parse(raw) as CacheEntry<T>;
+    if (raw) {
+      return normalizeRawEntry<T>(raw, key);
+    }
+    const legacy = LEGACY_KEYS[key as keyof typeof LEGACY_KEYS];
+    if (!legacy) return null;
+    const oldRaw = await AsyncStorage.getItem(legacy);
+    if (!oldRaw) return null;
+    const migrated = normalizeRawEntry<T>(oldRaw, key);
+    if (migrated) {
+      await AsyncStorage.setItem(key, JSON.stringify(migrated)).catch(() => undefined);
+    }
+    return migrated;
   } catch {
     return null;
   }
@@ -87,7 +163,13 @@ async function readCache<T>(key: string): Promise<CacheEntry<T> | null> {
 
 async function writeCache<T>(key: string, data: T): Promise<void> {
   try {
-    const entry: CacheEntry<T> = { data, fetchedAt: Date.now() };
+    const { source, ttlMs } = keySourceAndTtl(key);
+    const entry: CacheEntry<T> = {
+      data,
+      fetchedAt: new Date().toISOString(),
+      source,
+      ttlMs,
+    };
     await AsyncStorage.setItem(key, JSON.stringify(entry));
   } catch (err) {
     console.warn('[puDataCache] writeCache failed:', key, err);
@@ -120,9 +202,16 @@ export async function seedCachedTCAttendance(data: TCAttendance[]): Promise<void
   await writeCache(KEYS.tcAttendance, data);
 }
 
+function fetchedAtToMs(entry: CacheEntry<unknown> | null): number {
+  if (!entry) return 0;
+  const t = Date.parse(entry.fetchedAt);
+  return Number.isFinite(t) ? t : 0;
+}
+
 function isExpired(entry: CacheEntry<unknown> | null, ttl: number): boolean {
   if (!entry) return true;
-  return Date.now() - entry.fetchedAt > ttl;
+  const ttlUse = typeof entry.ttlMs === 'number' ? entry.ttlMs : ttl;
+  return Date.now() - fetchedAtToMs(entry) > ttlUse;
 }
 
 type PUCampusBackendDataType = 'courses' | 'grades' | 'announcements' | 'studentInfo';
@@ -807,12 +896,34 @@ export async function refreshStaleData(session: PUSession): Promise<void> {
 
 /** 登出時呼叫 */
 export async function clearPUCache(): Promise<void> {
-  await AsyncStorage.multiRemove(Object.values(KEYS));
+  await AsyncStorage.multiRemove([...Object.values(KEYS), ...Object.values(LEGACY_KEYS)]);
   console.log('[puDataCache] cache cleared');
+}
+
+/** 開發診斷：列出 v1 快取條目摘要 */
+export async function getPuCacheDebugMetadata(): Promise<
+  { key: string; fetchedAt: string | null; source: string | null; ttlMs: number | null }[]
+> {
+  const keys = Object.values(KEYS) as string[];
+  const out: { key: string; fetchedAt: string | null; source: string | null; ttlMs: number | null }[] =
+    [];
+  for (const k of keys) {
+    const entry = await readCache<unknown>(k);
+    out.push({
+      key: k,
+      fetchedAt: entry?.fetchedAt ?? null,
+      source: entry?.source ?? null,
+      ttlMs: entry?.ttlMs ?? null,
+    });
+  }
+  return out;
 }
 
 /** 取得最後同步時間 */
 export async function getLastSyncTime(): Promise<number | null> {
-  const raw = await AsyncStorage.getItem(KEYS.lastSync);
+  let raw = await AsyncStorage.getItem(KEYS.lastSync);
+  if (!raw) {
+    raw = await AsyncStorage.getItem(LEGACY_KEYS[KEYS.lastSync]);
+  }
   return raw ? parseInt(raw, 10) : null;
 }

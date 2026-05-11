@@ -25,14 +25,23 @@ import {
   subscribeToTokenRefresh,
 } from '../firebase';
 import { findSchoolById, resolveSchoolByEmail } from '@campus/shared/src/schools';
+import { buildPostLoginContext } from '../data/postLoginDataRouter';
 import { clearAllCache } from '../data/cachedSource';
 import { clearAllOfflineData, getOfflineQueue } from '../services/offline';
 import { getCachedPushToken, removePushTokenFromFirestore } from '../services/notifications';
 import { clearMockAuthSession, loadMockAuthSession } from '../services/mockAuth';
 import { clearUserScopedStorage } from '../services/scopedStorage';
+import { puCacheClearAll } from '../data/puDataCache';
 import { clearPUCache } from '../services/puDataCache';
+import { setInMemoryPostLoginContext } from '../services/postLoginContextHolder';
+import type { PUAnnouncement } from '../services/puDirectScraper';
+import {
+  getAnyCachedAnnouncements,
+  getAnyCachedCourses,
+  getAnyCachedTCCourses,
+} from '../services/puDataCache';
 import { clearPUSession } from '../services/studentIdAuth';
-import { clearTCSession, purgeLegacyTCSensitiveStorage } from '../services/tronClassClient';
+import { clearTCSession, purgeLegacyTCSensitiveStorage, type TCCourse } from '../services/tronClassClient';
 
 import type { UserRole as DataUserRole } from '../data/types';
 import type { MerchantAssignment } from '../data/types';
@@ -46,6 +55,8 @@ export type UserProfile = {
   schoolId?: string | null;
   primarySchoolId?: string | null;
   role: UserRole;
+  /** 登入後多身分（Firestore users.postLoginRoles，與 custom claims.roles 對齊） */
+  postLoginRoles?: string[] | null;
   schoolMembershipRole?: string | null;
   displayName?: string | null;
   department?: string | null;
@@ -226,6 +237,10 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
 
     const userRole = (data.role as UserRole) ?? 'student';
     const roleGroup = getRoleGroup(userRole);
+    const postLoginRolesRaw = data.postLoginRoles as unknown;
+    const postLoginRoles = Array.isArray(postLoginRolesRaw)
+      ? (postLoginRolesRaw as string[]).filter((x) => typeof x === 'string')
+      : null;
 
     return {
       uid: u.uid,
@@ -233,6 +248,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       schoolId,
       primarySchoolId: schoolId,
       role: userRole,
+      postLoginRoles: postLoginRoles?.length ? postLoginRoles : null,
       schoolMembershipRole,
       displayName: (data.displayName as string) ?? null,
       department: (data.department as string) ?? null,
@@ -253,6 +269,7 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       schoolId: null,
       primarySchoolId: null,
       role: 'student',
+      postLoginRoles: null,
       schoolMembershipRole: null,
       displayName: null,
       department: null,
@@ -283,6 +300,7 @@ function toMockUserProfile(session: {
     schoolId: session.schoolId,
     primarySchoolId: session.schoolId,
     role: session.role,
+    postLoginRoles: null,
     schoolMembershipRole: null,
     displayName: session.displayName,
     department: session.department ?? null,
@@ -330,6 +348,61 @@ function toMockFirebaseUser(session: { uid: string; email: string; displayName: 
   } as User;
 }
 
+function mapPuAnnouncementsForPostLogin(
+  rows: PUAnnouncement[] | null,
+): Array<{ id: string; title: string; publishedAt: string }> | null {
+  if (!rows?.length) return null;
+  return rows.map((a) => ({
+    id: a.url?.trim() ? a.url : `pu:${a.title}`,
+    title: a.title,
+    publishedAt: a.date?.trim() ? a.date : new Date().toISOString(),
+  }));
+}
+
+/** 將 services/puDataCache 讀出的資料轉成 data/postLoginDataRouter 所需形狀。 */
+function mapCachesForBuildPostLoginContext(params: {
+  uid: string;
+  puCourseResult: Awaited<ReturnType<typeof getAnyCachedCourses>>;
+  tcCourses: TCCourse[] | null;
+  puAnnouncements: PUAnnouncement[] | null;
+}): {
+  puCourses: Parameters<typeof buildPostLoginContext>[0]['puCourses'];
+  tronCourses: Parameters<typeof buildPostLoginContext>[0]['tronCourses'];
+  puAnnouncements: Parameters<typeof buildPostLoginContext>[0]['puAnnouncements'];
+} {
+  const { uid, puCourseResult, tcCourses, puAnnouncements } = params;
+  const semesterFallback = puCourseResult?.semester ?? null;
+  const puCourses =
+    puCourseResult && puCourseResult.courses.length > 0
+      ? puCourseResult.courses.map((c) => ({
+          code: c.code,
+          name: c.name,
+          credits: c.credits,
+          teacherName: c.teacherName,
+          teacherEmail: c.teacherEmail,
+          semesterId: semesterFallback ?? undefined,
+        }))
+      : null;
+  const tronCourses =
+    tcCourses && tcCourses.length > 0
+      ? tcCourses.map((tc) => ({
+          id: String(tc.id),
+          name: tc.name,
+          courseCode: tc.course_code,
+          credits: tc.credit ?? 0,
+          semesterId: tc.semester?.code ?? 'unknown',
+          teacherName: tc.instructors?.[0]?.name,
+          isTeacher: tc.role === 'teacher',
+          teacherUserId: tc.role === 'teacher' ? uid : undefined,
+        }))
+      : null;
+  return {
+    puCourses,
+    tronCourses,
+    puAnnouncements: mapPuAnnouncementsForPostLogin(puAnnouncements),
+  };
+}
+
 export function AuthProvider(props: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -362,6 +435,46 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       role === 'principal'
     );
   }, [isAdmin, profile?.role, profile?.schoolMembershipRole]);
+
+  const runPostLoginContext = useCallback(async (nextProfile: UserProfile | null) => {
+    try {
+      if (!nextProfile?.uid) return;
+      const schoolId = nextProfile.primarySchoolId ?? nextProfile.schoolId ?? null;
+      if (!schoolId) return;
+
+      const [puCourseResult, tcCourses, puAnnouncements] = await Promise.all([
+        getAnyCachedCourses().catch(() => null),
+        getAnyCachedTCCourses().catch(() => null),
+        getAnyCachedAnnouncements().catch(() => null),
+      ]);
+
+      const mapped = mapCachesForBuildPostLoginContext({
+        uid: nextProfile.uid,
+        puCourseResult,
+        tcCourses,
+        puAnnouncements,
+      });
+
+      const ctx = await buildPostLoginContext({
+        uid: nextProfile.uid,
+        schoolId,
+        userDoc: {
+          role: nextProfile.role,
+          email: nextProfile.email ?? null,
+          postLoginRoles: nextProfile.postLoginRoles ?? null,
+        },
+        puCourses: mapped.puCourses,
+        tronCourses: mapped.tronCourses,
+        tronMembers: null,
+        pendingAssignments: null,
+        schoolMembers: null,
+        puAnnouncements: mapped.puAnnouncements,
+      });
+      setInMemoryPostLoginContext(ctx);
+    } catch (e) {
+      console.warn('[auth] runPostLoginContext failed:', e);
+    }
+  }, []);
 
   const refreshProfile = useCallback(async () => {
     // ── 先檢查 mock auth session（hybrid login 使用 mock auth 即使有 Firebase config）──
@@ -405,6 +518,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       if (requestIdRef.current === currentRequestId) {
         setProfile(p);
         setError(null);
+        runPostLoginContext(p);
       }
     } catch (e) {
       if (requestIdRef.current === currentRequestId) {
@@ -416,7 +530,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         setProfileLoading(false);
       }
     }
-  }, []);
+  }, [runPostLoginContext]);
 
   useEffect(() => {
     purgeLegacyTCSensitiveStorage().catch((e) => {
@@ -496,6 +610,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
         const p = await loadProfile(u);
         if (!isCancelled && requestIdRef.current === currentRequestId) {
           setProfile(p);
+          runPostLoginContext(p);
         }
       } catch (e) {
         if (!isCancelled && requestIdRef.current === currentRequestId) {
@@ -531,7 +646,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       unsub();
       unsubToken();
     };
-  }, []);
+  }, [runPostLoginContext]);
 
   useEffect(() => {
     const checkPendingData = async () => {
@@ -633,7 +748,9 @@ export function AuthProvider(props: { children: React.ReactNode }) {
 
       // 清除靜宜大學快取和 session
       clearPUSession();
+      setInMemoryPostLoginContext(null);
       await clearPUCache().catch(() => {});
+      await puCacheClearAll().catch(() => {});
 
       setTokenError(null);
       setTokenExpired(false);

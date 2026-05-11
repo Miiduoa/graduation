@@ -22,6 +22,7 @@ import { BugReportScreen } from './BugReportScreen';
 import { ThemePreviewScreen } from './ThemePreviewScreen';
 import { FeedbackScreen } from './FeedbackScreen';
 import { HelpScreen } from './HelpScreen';
+import { PostLoginDebugScreen } from './PostLoginDebugScreen';
 import { MerchantHubScreen } from './MerchantHubScreen';
 import { CreditAuditStack } from './CreditAuditStack';
 import AIModelManagerScreen from './AIModelManagerScreen';
@@ -130,6 +131,11 @@ export function MeStack() {
       />
 
       <Stack.Screen name="Help" component={HelpScreen} options={{ title: '幫助中心' }} />
+      <Stack.Screen
+        name="PostLoginDebug"
+        component={PostLoginDebugScreen}
+        options={{ title: 'Post-login 除錯' }}
+      />
       <Stack.Screen name="Feedback" component={FeedbackScreen} options={{ title: '意見回饋' }} />
       <Stack.Screen name="BugReport" component={BugReportScreen} options={{ title: '回報問題' }} />
 

@@ -21,6 +21,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAnyCachedCourses, getAnyCachedGrades, getAnyCachedTCCourses } from './puDataCache';
 import { getCachedClassmates } from './postLoginDataRouter';
+import type { PostLoginEngineBootstrap } from './finalizePostLoginClient';
 import type { PUCourse, PUCourseResult, PUGradeResult } from './puDirectScraper';
 import type { TCCourse } from './tronClassClient';
 
@@ -930,4 +931,14 @@ export async function createStudyGroup(
   groups.push(group);
   await AsyncStorage.setItem(KEYS.groups, JSON.stringify(groups));
   return group;
+}
+
+let postLoginBootstrap: PostLoginEngineBootstrap | null = null;
+
+export function initFromPostLoginContext(ctx: PostLoginEngineBootstrap): void {
+  postLoginBootstrap = ctx;
+}
+
+export function getPostLoginBootstrapForStudyBuddy(): PostLoginEngineBootstrap | null {
+  return postLoginBootstrap;
 }

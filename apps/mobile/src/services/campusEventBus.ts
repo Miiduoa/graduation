@@ -152,6 +152,34 @@ export type CampusEvent =
     }
   | { type: 'streak:updated'; payload: { userId: string; days: number; isAtRisk: boolean } }
   | { type: 'nudge:triggered'; payload: { userId: string; nudgeType: string; message: string } }
+  // ─── 登入後資料路由（舊版關聯圖 + 新版 context 就緒）──
+  | {
+      type: 'post_login_data_routed';
+      payload: {
+        role: string;
+        courseCount: number;
+        classmateCount: number;
+        studentCount: number;
+        teacherCount: number;
+      };
+    }
+  | {
+      type: 'role_updated';
+      payload: { previousRole: string; newRole: string; reason: string };
+    }
+  | {
+      type: 'post_login_context_ready';
+      payload: {
+        schoolId: string;
+        role: string;
+        roleSource: string;
+        courseCount: number;
+        pendingAssignmentCount: number;
+        teachingCourseCount: number;
+        studentRosterApprox: number;
+        builtAt: string;
+      };
+    }
   // ─── 通用 ───
   | { type: 'user:daily_login'; payload: { userId: string; role: string; timestamp: number } };
 

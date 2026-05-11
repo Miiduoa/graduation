@@ -1,22 +1,9 @@
 /**
- * postLoginDataRouter.ts — 登入後跨角色資料匹配引擎
+ * postLoginDataRouter.ts — 登入後「舊版」跨角色關聯與 EventBus
  *
- * 職責：
- *   1. 自動推斷使用者角色（TronClass profile.role + 課程 membership.role）
- *   2. 解析課表建立師生關聯圖（teacherName → courses → students）
- *   3. 預載 TronClass 課程成員名冊（同班同學 / 修課學生）
- *   4. 建構角色感知的資料視圖，供各引擎消費
- *
- * 資料流：
- *   signInWithStudentId
- *     → puDataCache (courses, grades, studentInfo, announcements)
- *     → postLoginDataRouter.routePostLoginData(uid, role)
- *       → inferRole()           自動推斷角色
- *       → buildCourseRelations() 師生/同學關聯
- *       → preloadCourseMembersForRole() 預載名冊
- *       → broadcastToEngines()  推送到各引擎
- *
- * 儲存：AsyncStorage @campus:role_data:*
+ * 與 `src/data/postLoginDataRouter.ts` 分工：
+ *   - data/postLoginDataRouter：只做 buildPostLoginContext / getPostLoginContext（標準化 + @pu_cache_v1:），無 EventBus。
+ *   - 本檔：routePostLoginData（關聯圖、同學名冊、@campus:role_data:）＋依 PostLoginContext 補發事件（見 routePostLoginDataWithContext）。
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -39,6 +26,10 @@ import {
 import { loadMockAuthSession, saveMockAuthSession } from './mockAuth';
 import { isTestAccount, getTestClassRoster, TEST_UIDS } from './testSeedData';
 import { campusEventBus } from './campusEventBus';
+import { getAuthInstance } from '../firebase';
+import { tryCallFinalizePostLogin } from './finalizePostLoginClient';
+import { getPostLoginContext } from '../data/postLoginDataRouter';
+import type { PrimaryRole } from '../data/postLoginTypes';
 import type { UserRole } from '../state/auth';
 import type { PUCourse, PUCourseResult } from './puDirectScraper';
 
@@ -423,11 +414,50 @@ export async function routePostLoginData(
   const start = Date.now();
   console.log('[postLoginDataRouter] Starting post-login data routing…');
 
-  // ── Step 1: 推斷角色 ──
-  const roleInference = await inferRole(currentRole);
-  console.log(
-    `[postLoginDataRouter] Role inference: ${currentRole} → ${roleInference.inferredRole} (${roleInference.confidence}: ${roleInference.reason})`,
-  );
+  // ── Step 0: 後端 finalize（權威角色 + Firestore / claims）──
+  let serverFinalize: Awaited<ReturnType<typeof tryCallFinalizePostLogin>> = null;
+  try {
+    serverFinalize = await tryCallFinalizePostLogin();
+    if (serverFinalize?.success) {
+      const u = getAuthInstance().currentUser;
+      if (u) {
+        await u.getIdToken(true).catch(() => undefined);
+      }
+    }
+  } catch (e) {
+    console.warn('[postLoginDataRouter] finalizePostLogin skipped:', e);
+  }
+
+  // ── Step 1: 推斷角色（優先採用伺服器解析）──
+  let roleInference: RoleInferenceResult;
+  let effectiveRole: UserRole = currentRole;
+
+  if (serverFinalize?.resolved?.primaryRole) {
+    effectiveRole = serverFinalize.resolved.primaryRole as UserRole;
+    const tcCourses = await getAnyCachedTCCourses();
+    const teachingCount =
+      tcCourses?.filter((c) => String(c.role || '').toLowerCase() === 'teacher').length ?? 0;
+    const enrolledCount =
+      tcCourses?.filter((c) => String(c.role || '').toLowerCase() === 'student').length ?? 0;
+    roleInference = {
+      inferredRole: effectiveRole,
+      confidence: (serverFinalize.resolved.confidence as RoleInferenceResult['confidence']) || 'high',
+      reason: serverFinalize.resolved.reasons?.join('; ') || 'finalizePostLogin',
+      tcProfileRole: null,
+      hasTeachingCourses: teachingCount > 0,
+      teachingCourseCount: teachingCount,
+      enrolledCourseCount: enrolledCount,
+    };
+    console.log(
+      `[postLoginDataRouter] Server role: ${currentRole} → ${effectiveRole} (${roleInference.confidence})`,
+    );
+  } else {
+    roleInference = await inferRole(currentRole);
+    effectiveRole = roleInference.inferredRole;
+    console.log(
+      `[postLoginDataRouter] Role inference: ${currentRole} → ${roleInference.inferredRole} (${roleInference.confidence}: ${roleInference.reason})`,
+    );
+  }
 
   // 如果推斷的角色不同 → 更新 MockAuthSession
   if (roleInference.inferredRole !== currentRole) {
@@ -445,7 +475,7 @@ export async function routePostLoginData(
 
   // ── Step 2: 建立課程關聯 ──
   const { relations, classmates, myStudents, myTeachers } = await buildCourseRelations(
-    roleInference.inferredRole,
+    effectiveRole,
   );
   console.log(
     `[postLoginDataRouter] Relations built: ${relations.length} courses, ${classmates.length} classmates, ${myStudents.length} students, ${myTeachers.length} teachers`,
@@ -486,7 +516,6 @@ export async function routePostLoginData(
       teacherCount: myTeachers.length,
     });
 
-    // 如果角色有變化，發出角色更新事件
     if (roleInference.inferredRole !== currentRole) {
       campusEventBus.emit('role_updated', {
         previousRole: currentRole,
@@ -498,6 +527,59 @@ export async function routePostLoginData(
 
   console.log(`[postLoginDataRouter] Completed in ${elapsed}ms`);
   return result;
+}
+
+function primaryRoleToUserRole(primary: PrimaryRole): UserRole {
+  switch (primary) {
+    case 'student':
+      return 'student';
+    case 'teacher':
+      return 'teacher';
+    case 'departmentAdmin':
+      return 'department';
+    case 'admin':
+      return 'admin';
+    case 'staff':
+    case 'shopOwner':
+      return 'staff';
+    default:
+      return 'student';
+  }
+}
+
+/**
+ * 在 buildPostLoginContext 已寫入快取後呼叫：依 PostLoginContext 發 `post_login_context_ready`
+ *（與舊版 `post_login_data_routed` 分開，避免同一輪登入重複計數）。
+ */
+export async function routePostLoginDataWithContext(schoolId: string): Promise<void> {
+  const ctx = await getPostLoginContext(schoolId);
+  if (!ctx) {
+    console.log('[postLoginDataRouter] routePostLoginDataWithContext: no PostLoginContext, skip');
+    return;
+  }
+
+  const role = primaryRoleToUserRole(ctx.roles.primaryRole);
+  const studentCourseCount = ctx.asStudent?.courses.length ?? 0;
+  const teachingCount = ctx.asTeacher?.teachingCourses.length ?? 0;
+  const courseCount = Math.max(studentCourseCount, teachingCount);
+  const pendingN = ctx.asStudent?.pendingAssignments.length ?? 0;
+  const studentRosterApprox =
+    ctx.asTeacher?.teachingCourses.reduce((n, c) => n + c.studentUids.length, 0) ?? 0;
+
+  try {
+    campusEventBus.emit('post_login_context_ready', {
+      schoolId,
+      role,
+      roleSource: ctx.roles.source,
+      courseCount,
+      pendingAssignmentCount: pendingN,
+      teachingCourseCount: teachingCount,
+      studentRosterApprox,
+      builtAt: ctx.builtAt,
+    });
+  } catch {
+    /* EventBus 可能尚未初始化 */
+  }
 }
 
 // ═══════════════════════════════════════════════════════
