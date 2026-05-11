@@ -33,8 +33,11 @@ for d in (DATA_DIR, CHROMA_DIR, TRAINING_DIR, FEEDBACK_DIR, LORA_OUTPUT_DIR, SEL
 # "ollama"   – local Ollama server (development)
 # "together" – Together.ai cloud API (production)
 # "groq"     – Groq cloud API (free fallback)
-
-LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")
+#
+# 預設改為 groq：訂餐／工具除錯時可避免未啟動 Ollama 卻被當成「本機模型失敗」。
+# 本機純離線除錯請在 .env 設 LLM_PROVIDER=ollama。
+# LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")
 
 # Ollama (local development)
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")

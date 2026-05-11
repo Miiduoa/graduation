@@ -4455,6 +4455,10 @@ export function AIChatScreen(props: any) {
       case 'search_book':
         return `查詢結果：\n\n1.「${params.query || '程式設計'}」— 館藏 3 本，可借 2 本\n   位置：2F 書庫 005.1 區\n\n2. 相關推薦：「資料結構與演算法」— 可借\n\n需要我幫你預約借閱嗎？`;
       case 'report_repair':
+        // 連線模式不應走此模擬字串（會假造 RP 工單號）；正式流程應經確認卡 + executeAgentToolAction。
+        if (!isOfflineAI) {
+          return `（內部提示）報修應經「確認送出」後由後端寫入 schools/.../repairRequests。\n若你看到這段文字，代表仍誤入了未接 DataSource 的模擬路徑，請檢查工具路由。`;
+        }
         return `維修單已提交！\n\n工單編號：RP-${Date.now().toString().slice(-6)}\n類別：${params.category === 'ac' ? '冷氣/暖氣' : params.category === 'plumbing' ? '水管/馬桶' : '設施維修'}\n房號：${params.room || '未指定'}\n預計處理時間：1-3 個工作天\n\n我會在維修完成時通知你。`;
       case 'check_laundry':
         return '洗衣機使用狀態：\n\n希嘉學苑：\n  1號 — 使用中（剩餘 23 分鐘）\n  2號 — 空閒 ✅\n  3號 — 空閒 ✅\n\n思高學苑：\n  1號 — 使用中（剩餘 41 分鐘）\n  2號 — 空閒 ✅';
