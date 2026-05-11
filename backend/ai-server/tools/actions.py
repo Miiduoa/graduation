@@ -163,7 +163,6 @@ async def _list_my_dorm_repairs(
         limit = 10
 
     def _read() -> list[dict[str, Any]]:
-        from firebase_admin import firestore as fb_firestore  # noqa: F401  # for type imports
         db = _firestore_client()
         query = (
             db.collection("schools")
