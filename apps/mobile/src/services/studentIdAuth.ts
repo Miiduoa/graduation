@@ -199,12 +199,166 @@ async function tryBackendUnifiedLogin(
   }
 }
 
+import { seedTestData } from './testSeedData';
+
+// ─── 測試帳號 ──────────────────────────────────────────
+// 每個角色各一組，帳號格式: test_<role>，密碼統一 test1234
+// 用正常的學號/密碼欄位登入即可，不經過真實校園系統
+
+type TestAccount = {
+  account: string;       // 登入帳號（輸入在學號欄位）
+  password: string;      // 密碼
+  role: UserRole;
+  displayName: string;
+  department: string;
+  studentId: string;     // 模擬學號
+};
+
+const TEST_ACCOUNTS: TestAccount[] = [
+  {
+    account: 'test_student',
+    password: 'test1234',
+    role: 'student',
+    displayName: '測試學生',
+    department: '資訊工程學系',
+    studentId: 'T11100001',
+  },
+  {
+    account: 'test_teacher',
+    password: 'test1234',
+    role: 'teacher',
+    displayName: '測試教師',
+    department: '資訊工程學系',
+    studentId: 'T90000001',
+  },
+  {
+    account: 'test_staff',
+    password: 'test1234',
+    role: 'staff',
+    displayName: '測試職員',
+    department: '總務處',
+    studentId: 'S90000001',
+  },
+  {
+    account: 'test_department',
+    password: 'test1234',
+    role: 'department',
+    displayName: '測試系辦',
+    department: '資訊工程學系',
+    studentId: 'D90000001',
+  },
+  {
+    account: 'test_department_head',
+    password: 'test1234',
+    role: 'department_head',
+    displayName: '測試系主任',
+    department: '資訊工程學系',
+    studentId: 'H90000001',
+  },
+  {
+    account: 'test_admin',
+    password: 'test1234',
+    role: 'admin',
+    displayName: '測試管理員',
+    department: '資訊中心',
+    studentId: 'A90000001',
+  },
+  {
+    account: 'test_school',
+    password: 'test1234',
+    role: 'school',
+    displayName: '測試校方',
+    department: '校長室',
+    studentId: 'X90000001',
+  },
+  {
+    account: 'test_vendor',
+    password: 'test1234',
+    role: 'vendor',
+    displayName: '測試店家老闆',
+    department: '靜園美食街',
+    studentId: 'V90000001',
+  },
+];
+
+/** 取得所有測試帳號列表（供外部 UI 顯示） */
+export function getTestAccounts(): ReadonlyArray<{ account: string; password: string; role: UserRole; displayName: string }> {
+  return TEST_ACCOUNTS.map((a) => ({
+    account: a.account,
+    password: a.password,
+    role: a.role,
+    displayName: a.displayName,
+  }));
+}
+
+/**
+ * 嘗試用測試帳號登入。若帳密匹配測試帳號就直接回傳結果，不經過真實校園系統。
+ */
+async function tryTestAccountLogin(
+  account: string,
+  password: string,
+  schoolId: string,
+  progress: OnLoginProgress,
+): Promise<StudentIdLoginResult | null> {
+  const test = TEST_ACCOUNTS.find(
+    (t) => t.account.toLowerCase() === account.toLowerCase() && t.password === password,
+  );
+  if (!test) return null;
+
+  console.log(`[studentIdAuth] 🧪 Test account login: ${test.account} (${test.role})`);
+
+  progress('authenticating', '驗證測試帳號');
+  progress('syncingCampus', '載入測試資料');
+
+  const uid = `test-${test.role}`;
+  const email = `${test.account}@test.campus.app`;
+
+  // 建立 mock session（不連真實伺服器）
+  const mockSession: MockAuthSession = {
+    uid,
+    email,
+    schoolId,
+    displayName: test.displayName,
+    role: test.role,
+    department: test.department,
+    studentId: test.studentId,
+    loginAccount: test.account,
+  };
+  await saveMockAuthSession(mockSession);
+
+  progress('syncingTronClass', '注入測試資料');
+
+  // 注入跨角色互聯的種子資料（課表、成績、訂單等）
+  await seedTestData(test.role);
+
+  progress('linking', '完成');
+
+  // 建立虛擬 PU session
+  const session: PUSession = {
+    loggedIn: true,
+    studentName: test.displayName,
+  };
+  _currentPUSession = session;
+
+  return {
+    uid,
+    email,
+    displayName: test.displayName,
+    studentId: test.studentId,
+    department: test.department,
+    role: test.role,
+    schoolId,
+    session,
+  };
+}
+
 // ─── Main Login ─────────────────────────────────────────
 
 /**
  * 用學號 + 密碼登入靜宜大學。
  *
  * 策略：
+ *   0. 若帳密匹配測試帳號 → 直接建 mock session，不連伺服器
  *   1. 優先用後端 signInPuStudentId（同時登入 E校園 + TronClass）
  *   2. 若後端不可用，降級為手機直連 E校園 + 後端代理 TronClass
  */
@@ -223,6 +377,12 @@ export async function signInWithStudentId(params: {
   }
   if (!params.password.trim()) {
     throw new Error('請輸入密碼');
+  }
+
+  // ── 策略 0: 測試帳號快速登入 ──
+  const testResult = await tryTestAccountLogin(studentId, params.password, params.schoolId, progress);
+  if (testResult) {
+    return testResult;
   }
 
   // 帳密只暫存在記憶體，用於本次 app 執行期間自動刷新 TronClass session。
