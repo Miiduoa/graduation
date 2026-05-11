@@ -20,7 +20,7 @@ function mapRichCategoryToAssistantIntent(category, rawMessage, richSubIntent) {
   switch (category) {
     case 'food':
       if (
-        /幫我(?:在)?[^。]{0,12}訂餐|我要訂餐|線上訂餐|幫我點|我要點|外帶|來一份|雞排飯|學生餐廳.*點|點一份|點一杯/.test(m) ||
+        /幫我(?:在)?[^。]{0,12}訂餐|我要訂餐|線上訂餐|幫我點|我要點|外帶|來一份|雞排飯|學生餐廳.*點|點一份|點一杯|幫我訂(?:午餐|晚餐|早餐)|我要訂(?:午餐|晚餐|早餐)|訂(?:午餐|晚餐|早餐)/.test(m) ||
         (/點餐|下單/.test(m) && /幫我|我要/.test(m)) ||
         (richSubIntent === 'order' && /我要|幫我|來一份|點一份|外帶|學生餐廳/.test(m))
       ) {
@@ -59,8 +59,11 @@ function mapRichCategoryToAssistantIntent(category, rawMessage, richSubIntent) {
       if (isDormRepairStatusQueryMessage(rawMessage)) return 'check_repair_status';
       if (/洗衣機|洗衣/.test(m) && /預約|幫我|訂|今晚|明天/.test(m)) return 'wash_reserve';
       if (
-        /報修|維修|送.*單|送一個.*單/.test(m) ||
-        (/壞了|故障|不冷|不會轉|漏水/.test(m) && /宿舍|冷氣|房|燈|水|馬桶/.test(m))
+        /報修|維修|送.*單|送一個.*單|維修單|送\s*修|送.*報修/.test(m) ||
+        (/壞了|故障|不冷|不會轉|漏水|怪怪的|好熱|太熱|熱爆|不涼|沒風|異音|忽冷忽熱/.test(m) &&
+          /宿舍|冷氣|房|燈|水|馬桶|空調|房間/.test(m)) ||
+        (/怪怪的|不大正常|不太對/.test(m) && /冷氣|空調|房|宿舍/.test(m)) ||
+        (/(好熱|太熱|熱爆)/.test(m) && /(房|冷氣|空調|宿舍)/.test(m))
       ) {
         return 'submit_repair_request';
       }

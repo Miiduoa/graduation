@@ -365,8 +365,8 @@ async function executeCampusAssistantCore({
 
   if (intent === 'check_repair_status') {
     if (!uid) {
-      response.content = '要查宿舍報修狀態請先登入，我才能讀取你的報修紀錄。';
-      response.suggestions = ['今日公告', '查課表', '功能說明'];
+      response.content = '先登入才能查宿舍報修。';
+      response.suggestions = ['功能說明'];
       return await finalizeResponse();
     }
 
@@ -385,21 +385,13 @@ async function executeCampusAssistantCore({
         const one = await runTool('getDormRepairStatus', toolCtx, { repairId });
         await recordStep('getDormRepairStatus', { repairId }, one, Date.now() - tOne);
         if (one?.forbidden) {
-          response.content = [
-            '這筆報修不存在，或不屬於你的帳號，無法顯示狀態。',
-            '',
-            '請確認單號，或改問「列出我的報修」查看你名下的紀錄。',
-          ].join('\n');
-          response.suggestions = ['列出我的報修', '今日公告', '查課表'];
+          response.content = '查不到這筆報修，或它不屬於你的帳號；可改問「我的報修」列出清單。';
+          response.suggestions = ['我的報修'];
           return await finalizeResponse();
         }
         if (!one?.found) {
-          response.content = [
-            '找不到這筆報修，或你不具備檢視權限。',
-            '',
-            '若剛送出報修，可先到「宿舍 → 我的報修」確認是否已寫入；或改問「列出我的報修」。',
-          ].join('\n');
-          response.suggestions = ['列出我的報修', '今日公告', '查課表'];
+          response.content = '找不到這筆報修；若剛送出，請稍後到宿舍「我的報修」確認，或改問「我的報修」。';
+          response.suggestions = ['我的報修'];
           return await finalizeResponse();
         }
         const st = String(one.status || 'unknown');
@@ -413,16 +405,15 @@ async function executeCampusAssistantCore({
                 : st === 'cancelled'
                   ? '已取消'
                   : st;
+        const loc = `${one.dormitory || '—'} ${one.room || ''}`.trim();
+        const descShort = one.description ? String(one.description).slice(0, 48) : '';
         response.content = [
-          `報修單 ${one.repairId} 狀態：${stZh}`,
-          '',
-          `位置：${one.dormitory || '—'} ${one.room || ''}`.trim(),
-          `類別：${one.category || '—'}`,
-          one.description ? `描述摘要：${one.description}` : '',
+          `報修單 ${one.repairId}：${stZh}｜${loc}｜${one.category || '—'}`,
+          descShort ? `摘要：${descShort}${String(one.description).length > 48 ? '…' : ''}` : '',
         ]
           .filter(Boolean)
           .join('\n');
-        response.suggestions = ['列出我的報修', '今日公告', '查課表'];
+        response.suggestions = ['我的報修'];
         response.actions = [
           assistantAction({
             label: '開啟宿舍／我的報修',
@@ -437,8 +428,8 @@ async function executeCampusAssistantCore({
         return await finalizeResponse();
       } catch (e) {
         console.warn('[AI] getDormRepairStatus failed:', e?.message || e);
-        response.content = '目前無法讀取該筆報修狀態，請稍後再試或到宿舍頁面查看。';
-        response.suggestions = ['列出我的報修', '今日公告', '查課表'];
+        response.content = '暫時讀不到這筆報修狀態，請稍後再試或到宿舍頁查看。';
+        response.suggestions = ['我的報修'];
         return await finalizeResponse();
       }
     }
@@ -450,16 +441,15 @@ async function executeCampusAssistantCore({
       await recordStep('listMyDormRepairs', { limit: 15 }, listRows, Date.now() - tList);
     } catch (e) {
       console.warn('[AI] listMyDormRepairs failed:', e?.message || e);
-      response.content = '目前無法讀取報修列表，請稍後再試或到宿舍頁面查看「我的報修」。';
-      response.suggestions = ['今日公告', '查課表', '功能說明'];
+      response.content = '暫時讀不到報修列表，請稍後再試或到宿舍「我的報修」查看。';
+      response.suggestions = ['我的報修'];
       return await finalizeResponse();
     }
 
     const items = Array.isArray(listRows.items) ? listRows.items : [];
     if (items.length === 0) {
-      response.content =
-        '你最近沒有宿舍報修紀錄，或資料尚未同步。若剛送出報修，可稍後再問一次，或到宿舍頁確認。';
-      response.suggestions = ['我要報修', '今日公告', '查課表'];
+      response.content = '最近沒有宿舍報修紀錄；若剛送出，請稍後再問或到宿舍頁確認。';
+      response.suggestions = ['我要報修'];
       return await finalizeResponse();
     }
 
@@ -477,8 +467,8 @@ async function executeCampusAssistantCore({
       return `${i + 1}. ${row.repairId}｜${statusZh(row.status)}｜${loc}`;
     });
 
-    response.content = ['以下是您最近的宿舍報修（最多 15 筆）：', '', ...lines].join('\n');
-    response.suggestions = ['我要報修', '今日公告', '查課表'];
+    response.content = [`宿舍報修 ${items.length} 筆（最多顯示 15）：`, '', ...lines].join('\n');
+    response.suggestions = ['我要報修'];
     response.actions = [
       assistantAction({
         label: '開啟宿舍／我的報修',
@@ -629,23 +619,21 @@ async function executeCampusAssistantCore({
 
   if (intent === 'submit_repair_request') {
     if (!uid) {
-      response.content = '宿舍報修需要先登入。請描述故障位置（棟別、房號）與狀況。';
-      response.suggestions = ['功能說明', '今日公告', '查課表'];
+      response.content = '報修要先登入，並說明棟別、房號與狀況。';
+      response.suggestions = ['功能說明'];
       return await finalizeResponse();
     }
     const repairInput = resolveRepairInput(lastUserMessage);
     if (!repairInput) {
-      response.content = '我可以幫你送報修單，但請至少描述故障類型與位置（例如：A棟 301 冷氣不冷）。';
-      response.suggestions = ['A棟301冷氣不冷', '今日公告', '查課表'];
+      response.content = '請補上位置與狀況（例：A棟 301 冷氣不冷）。';
+      response.suggestions = ['A棟301冷氣不冷'];
       return await finalizeResponse();
     }
-    response.content = [
-      '我已整理宿舍報修草稿，確認後會寫入 repairRequests。',
-      '',
-      `${repairInput.dormitory} ${repairInput.room}｜類別：${repairInput.category}`,
-      repairInput.description.slice(0, 200),
-    ].join('\n');
-    response.suggestions = ['修改描述', '今日公告', '查課表'];
+    const descSnippet = repairInput.description.slice(0, 120);
+    response.content = `已整理好報修草稿：${repairInput.dormitory} ${repairInput.room}｜${repairInput.category}。${descSnippet}${
+      repairInput.description.length > 120 ? '…' : ''
+    }`;
+    response.suggestions = ['我的報修'];
     response.actions = [
       assistantAction({
         label: '確認送出報修',
@@ -695,23 +683,18 @@ async function executeCampusAssistantCore({
 
   if (intent === 'food_order') {
     if (!uid) {
-      response.content = '線上訂餐需要先登入。請說明餐廳與品項（例如：學生餐廳雞排飯＋紅茶）。';
-      response.suggestions = ['功能說明', '今日公告', '推薦餐點'];
+      response.content = '訂餐要先登入，並說明餐廳與品項（例：學生餐廳雞排飯＋紅茶）。';
+      response.suggestions = ['功能說明'];
       return await finalizeResponse();
     }
     const orderInput = await resolveFoodOrderInput(lastUserMessage, schoolId);
     if (!orderInput) {
-      response.content =
-        '我可以幫你建立訂單草稿（schools/.../orders），但目前無法從菜單對應品項或找不到餐廳資料。';
-      response.suggestions = ['換個說法點餐', '推薦餐點', '今日公告'];
+      response.content = '目前對不到菜單品項或餐廳資料，請換個品名或到學餐頁確認。';
+      response.suggestions = ['換個說法點餐'];
       return await finalizeResponse();
     }
-    response.content = [
-      '我已整理訂餐草稿，確認後會寫入 orders（與使用者鏡像）。',
-      '',
-      `品項數：${orderInput.items.length}（總價將由後端依菜單計算稅金）`,
-    ].join('\n');
-    response.suggestions = ['修改品項', '推薦餐點', '今日公告'];
+    response.content = `已整理好訂餐草稿（${orderInput.items.length} 項），按下確認後會送出。`;
+    response.suggestions = ['修改品項'];
     response.actions = [
       assistantAction({
         label: '確認下單',

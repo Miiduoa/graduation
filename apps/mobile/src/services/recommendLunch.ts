@@ -1,0 +1,121 @@
+/**
+ * 午餐／正餐推薦：排除飲料點心、主食優先排序（供 aiToolLayer、工具層共用）。
+ */
+
+export type LunchMenuRow = {
+  id: string;
+  name: string;
+  price?: number;
+  cafeteria?: string;
+  category?: string;
+  isPopular?: boolean;
+};
+
+const DRINK_DESSERT_SNACK =
+  /飲料|手搖|奶茶|咖啡|茶飲|紅茶|綠茶|可樂|氣泡|果汁|冰沙|點心|甜點|蛋糕|布丁|冰淇淋|餅乾|小點|加購飲|杯飲/;
+
+const MAIN_CATEGORY_HINT =
+  /主食|便當|套餐|定食|麵|飯|湯麵|炒飯|燴飯|排餐|鍋物|火鍋|自助餐|蔬食|素食|早午餐|brunch|^main$|^set$|^soup$/i;
+
+function norm(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[\s｜|／/,，、\-—_()（）]/g, '');
+}
+
+/** 排除明顯飲料／甜點／點心類（依分類與品名） */
+export function isLikelyNonMainMeal(row: LunchMenuRow): boolean {
+  const cat = String(row.category ?? '').toLowerCase();
+  const name = String(row.name ?? '');
+  if (cat === 'beverage' || cat === 'dessert') return true;
+  if (DRINK_DESSERT_SNACK.test(cat) || DRINK_DESSERT_SNACK.test(name)) return true;
+  if (/飲料|甜點|點心|咖啡|茶|冷飲|熱飲/.test(cat) && !/餐|飯|麵|便當/.test(cat)) return true;
+  return false;
+}
+
+export function filterMainMealCandidates(menus: LunchMenuRow[]): LunchMenuRow[] {
+  const mains = menus.filter((m) => !isLikelyNonMainMeal(m));
+  if (mains.length > 0) return mains;
+  return [...menus];
+}
+
+function mainMealSortScore(row: LunchMenuRow, budgetCap?: number): number {
+  let score = 0;
+  const cat = String(row.category ?? '');
+  const name = String(row.name ?? '');
+  if (MAIN_CATEGORY_HINT.test(cat)) score += 40;
+  if (row.isPopular) score += 25;
+  const price = typeof row.price === 'number' ? row.price : 9999;
+  if (typeof budgetCap === 'number' && Number.isFinite(budgetCap) && budgetCap > 0) {
+    if (price <= budgetCap) score += 15;
+    score -= Math.min(price, 500) * 0.02;
+  } else {
+    score -= price * 0.01;
+  }
+  score -= name.length * 0.05;
+  return score;
+}
+
+export type RecommendLunchOptions = {
+  budgetCap?: number;
+  /** 預留：午／晚等，目前僅影響文案可擴充 */
+  timeSlot?: 'lunch' | 'dinner' | 'breakfast';
+  maxItems?: number;
+};
+
+/**
+ * 從菜單中挑出適合當正餐的候選並排序。
+ */
+export function recommendLunchCandidates(
+  menus: LunchMenuRow[],
+  opts: RecommendLunchOptions = {},
+): { items: LunchMenuRow[]; topPick: LunchMenuRow | undefined } {
+  const maxItems = Math.min(Math.max(opts.maxItems ?? 3, 1), 8);
+  const pool = filterMainMealCandidates(menus);
+  const sorted = [...pool].sort(
+    (a, b) => mainMealSortScore(b, opts.budgetCap) - mainMealSortScore(a, opts.budgetCap),
+  );
+  const items = sorted.slice(0, maxItems);
+  return { items, topPick: items[0] };
+}
+
+const BUDGET_RE = /預算\s*(\d{2,4})|(\d{2,4})\s*元(?:以內|以下)?|便宜.*(\d{2,4})/;
+
+export function parseBudgetCapFromMessage(message: string): number | undefined {
+  const m = message.match(BUDGET_RE);
+  if (!m) return undefined;
+  const raw = m[1] ?? m[2] ?? m[3];
+  const n = parseInt(raw ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function itemLine(m: LunchMenuRow, withIndex: boolean, index: number): string {
+  const core = `${m.name}${typeof m.price === 'number' ? ` $${m.price}` : ''}${m.cafeteria ? `（${m.cafeteria}）` : ''}`;
+  return withIndex ? `${index}. ${core}` : core;
+}
+
+/** 使用者向：單品推薦 + 候選列表一句話 */
+export function formatLunchRecommendationReply(
+  items: LunchMenuRow[],
+  opts?: { mealLabel?: string },
+): string {
+  const label = opts?.mealLabel ?? '午餐';
+  if (items.length === 0) {
+    return `我翻了你載入的菜單，暫時找不到適合當${label}的主食類品項（可能多為飲料或未分類）。要不要先到「校園 → 點餐」同步菜單，或換個說法（例如指定想吃的類型）？`;
+  }
+  const top = items[0];
+  const rest = items.slice(1, 3);
+  let body = `今天${label}幫你挑這道：${itemLine(top, false, 0)}`;
+  if (rest.length > 0) {
+    body += `\n\n其他主食候選：\n${rest.map((m, i) => itemLine(m, true, i + 1)).join('\n')}`;
+  }
+  body += '\n\n要我直接幫你下單的話，回「好，幫我點這個」或點下面選項；想換別種再說「換一個」。';
+  return body;
+}
+
+/** 訊息是否在問「午／晚正餐吃什麼」（用於 dining_lookup 主食過濾） */
+export function messageWantsMainMealRecommendation(message: string): boolean {
+  const m = message.trim();
+  if (/飲料|奶茶|咖啡|手搖|甜點|點心/.test(m)) return false;
+  return /午餐|晚餐|早餐|今天中午|今晚吃|吃午飯|吃晚飯|正餐|吃什麼好|覓食/.test(m);
+}

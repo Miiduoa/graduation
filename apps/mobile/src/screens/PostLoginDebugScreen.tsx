@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, View, Text, ActivityIndicator } from 'react-native';
 import { collection, getDocs, limit, query } from 'firebase/firestore';
 
@@ -12,6 +12,50 @@ import { getPostLoginContext } from '../data/postLoginDataRouter';
 import { getPuCacheDebugMetadata } from '../services/puDataCache';
 import { getLastPostLoginEngineBootstrap } from '../services/postLoginBootstrapStore';
 import { getInMemoryPostLoginContext } from '../services/postLoginContextHolder';
+
+/** 掃描本批 agentRuns 的 steps／toolCalls，粗算疑似失敗步驟（供小型日誌分析）。 */
+function summarizeAgentRunToolHealth(runs: Record<string, unknown>[]): string {
+  let totalSteps = 0;
+  let failedSteps = 0;
+  const byTool: Record<string, number> = {};
+  for (const r of runs) {
+    const row = r as { toolCalls?: unknown[]; steps?: unknown[] };
+    const steps = Array.isArray(row.toolCalls) ? row.toolCalls : row.steps;
+    if (!Array.isArray(steps)) continue;
+    for (const step of steps) {
+      if (!step || typeof step !== 'object') continue;
+      const s = step as Record<string, unknown>;
+      const tool = String(s.tool ?? s.name ?? '?');
+      totalSteps += 1;
+      let out = s.output;
+      if (typeof out === 'string') {
+        try {
+          out = JSON.parse(out) as Record<string, unknown>;
+        } catch {
+          /* 保留字串 */
+        }
+      }
+      const bad =
+        out &&
+        typeof out === 'object' &&
+        ((out as { success?: boolean }).success === false ||
+          (out as { error?: unknown }).error != null ||
+          Boolean((out as { errorMessage?: string }).errorMessage));
+      if (bad) {
+        failedSteps += 1;
+        byTool[tool] = (byTool[tool] ?? 0) + 1;
+      }
+    }
+  }
+  const top = Object.entries(byTool)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([k, v]) => `${k}×${v}`)
+    .join('、');
+  return `載入 ${runs.length} 筆 run；tool 步驟 ${totalSteps} 步，其中 output 含 success:false 或 error／errorMessage：${failedSteps} 步${
+    top ? `（${top}）` : ''
+  }。細節見各筆 JSON 的 toolCalls／steps。`;
+}
 
 export function PostLoginDebugScreen() {
   const theme = useTheme();
@@ -70,7 +114,7 @@ export function PostLoginDebugScreen() {
       const db = getDb();
       const [snapPl, snapAr] = await Promise.all([
         getDocs(query(collection(db, 'users', user.uid, 'postLoginRuns'), limit(5))),
-        getDocs(query(collection(db, 'users', user.uid, 'agentRuns'), limit(5))),
+        getDocs(query(collection(db, 'users', user.uid, 'agentRuns'), limit(25))),
       ]);
       const rows = snapPl.docs.map((d) => ({ id: d.id, ...d.data() }));
       rows.sort((a, b) => {
@@ -121,6 +165,8 @@ export function PostLoginDebugScreen() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const agentRunToolSummary = useMemo(() => summarizeAgentRunToolHealth(agentRuns), [agentRuns]);
 
   const textSecondary = { color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 };
   const schoolIdForRepair = profile?.primarySchoolId ?? profile?.schoolId ?? null;
@@ -198,7 +244,11 @@ export function PostLoginDebugScreen() {
           </Text>
         </AnimatedCard>
 
-        <AnimatedCard title="Firestore agentRuns" subtitle="最近 5 筆 campus assistant／agent 執行（新→舊）">
+        <AnimatedCard title="Firestore agentRuns" subtitle="最近 25 筆 campus assistant／agent 執行（新→舊）">
+          <Text style={{ ...textSecondary, marginBottom: 8 }}>{agentRunToolSummary}</Text>
+          <Text style={textSecondary}>
+            大量抽樣請用 Firebase Console 或見 docs/agentruns-sampling.md。
+          </Text>
           <Divider spacing={8} />
           {agentRuns.length === 0 ? (
             <Text style={textSecondary}>無資料或尚未產生 run</Text>

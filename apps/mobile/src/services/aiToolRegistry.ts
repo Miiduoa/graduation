@@ -1332,6 +1332,23 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     handler: makeLegacyHandler('query_menus', 'read'),
   },
   {
+    name: 'recommend_lunch',
+    description: '推薦午餐／正餐主食候選（排除飲料為主），不下單。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'budget', description: '預算上限（元）', type: 'string' },
+      {
+        name: 'timeSlot',
+        description: 'lunch / dinner / breakfast',
+        type: 'enum',
+        enum: ['lunch', 'dinner', 'breakfast'],
+        default: 'lunch',
+      },
+    ],
+    handler: makeLegacyHandler('recommend_lunch', 'read'),
+  },
+  {
     name: 'query_orders',
     description: '查詢訂單。',
     kind: 'read',

@@ -366,7 +366,20 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'query_events', args: {}, priority: 8, reason: '查詢活動' });
   }
 
-  if (/吃|餐[廳點]|菜單|午餐|晚餐|早餐|便當|價[格錢]|好吃|美食|飯/.test(msg) && !/評分|打分|幾星|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg)) {
+  if (
+    /推薦.*(午餐|午飯|正餐)|午餐.*(推薦|吃什麼|要吃)|今天中午吃什麼|中午吃什麼|吃午飯|午飯吃什麼|幫我.*午餐|今天.*午餐|正餐.*吃什麼/.test(msg) &&
+    !/幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg)
+  ) {
+    const timeSlot = /晚餐|晚飯|今晚/.test(msg) ? 'dinner' : /早餐|早飯/.test(msg) ? 'breakfast' : 'lunch';
+    const budgetMatch = origMsg.match(/預算\s*(\d{2,4})|(\d{2,4})\s*元(?:以內|以下)?/);
+    const budget = budgetMatch?.[1] ?? budgetMatch?.[2];
+    intents.push({
+      tool: 'recommend_lunch',
+      args: { timeSlot, ...(budget ? { budget } : {}) },
+      priority: 14,
+      reason: '午餐／正餐推薦',
+    });
+  } else if (/吃|餐[廳點]|菜單|午餐|晚餐|早餐|便當|價[格錢]|好吃|美食|飯/.test(msg) && !/評分|打分|幾星|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg)) {
     // 萃取食物關鍵字，例如「我想吃滷肉飯」→ keyword=「滷肉飯」
     const foodKw = origMsg.match(/(?:想吃|想喝|有沒有|有什麼|吃)\s*(.{1,10}?)(?:嗎|呢|的|吧|啊|？|$)/)?.[1]?.trim() ?? '';
     const menuArgs: Record<string, string> = {};
@@ -941,9 +954,12 @@ export function analyzeIntents(message: string): DetectedIntent[] {
 // ════════════════════════════════════════════════════════════
 
 function pickChoiceMenuFromAgent(
-  executed: Array<{ result: ToolCallResult }>,
-  reads: Array<{ result: ToolCallResult }>,
+  executed: Array<{ tool: string; result: ToolCallResult }>,
+  reads: Array<{ tool: string; result: ToolCallResult }>,
 ): AssistantChoiceMenu | undefined {
+  const hadSuccessfulOrder = executed.some((e) => e.tool === 'create_order' && e.result.success);
+  if (hadSuccessfulOrder) return undefined;
+
   for (let i = executed.length - 1; i >= 0; i--) {
     const m = executed[i].result.choiceMenu;
     if (m?.options?.length) return m;
@@ -1199,8 +1215,8 @@ export async function autonomousQuery(
     executedActions,
     failedActions,
     choiceMenu: pickChoiceMenuFromAgent(
-      executedActions.map((ea) => ({ result: ea.result })),
-      readResults.map((r) => ({ result: r.result })),
+      executedActions.map((ea) => ({ tool: ea.tool, result: ea.result })),
+      readResults.map((r) => ({ tool: r.tool, result: r.result })),
     ),
     pendingWriteActions: [], // v2 不再有 "pending"，全部自動執行或報告失敗
   };
@@ -1821,10 +1837,18 @@ export async function autonomousQueryWithReflexion(
             tool: newTool, args: newArgs, successCount: 1, lastUsed: Date.now(),
             source: 'reflexion', description: `透過反思學會：${message.slice(0, 30)}`,
           });
+          const mergedExec = [
+            ...lastResult.executedActions,
+            { tool: newTool, result: retryResult, reason: `(反思後重試) ${newTool}` },
+          ];
           return {
             ...lastResult,
-            executedActions: [...lastResult.executedActions, { tool: newTool, result: retryResult, reason: `(反思後重試) ${newTool}` }],
+            executedActions: mergedExec,
             failedActions: [],
+            choiceMenu: pickChoiceMenuFromAgent(
+              mergedExec.map((ea) => ({ tool: ea.tool, result: ea.result })),
+              lastResult.results.map((r) => ({ tool: r.tool, result: r.result })),
+            ),
             reflexionTraces: traces,
           };
         }

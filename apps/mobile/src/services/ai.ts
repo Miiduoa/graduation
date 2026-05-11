@@ -270,7 +270,15 @@ export type AIContext = {
   // 公開校園資料
   announcements?: Array<{ id: string; title: string; source?: string }>;
   events?: Array<{ id: string; title: string; location?: string; startsAt?: string }>;
-  menus?: Array<{ id: string; name: string; price?: number; cafeteria?: string }>;
+  menus?: Array<{
+    id: string;
+    name: string;
+    price?: number;
+    cafeteria?: string;
+    /** 店家分類（主食、飲料等），供午餐推薦過濾 */
+    category?: string;
+    isPopular?: boolean;
+  }>;
   pois?: Array<{ id: string; name: string; category?: string }>;
   // 個人化學習資料（新增）
   courses?: Array<{

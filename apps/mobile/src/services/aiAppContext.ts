@@ -717,6 +717,8 @@ export function buildAIAppContext(raw: AIAppContextInput): AIContext {
       name: menu.name ?? menu.cafeteria,
       price: menu.price,
       cafeteria: menu.cafeteria,
+      category: menu.category != null ? String(menu.category) : undefined,
+      isPopular: Boolean(menu.popular),
     })),
     pois: (input.pois ?? []).map((poi) => ({
       id: poi.id,

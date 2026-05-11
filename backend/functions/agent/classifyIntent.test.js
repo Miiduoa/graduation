@@ -68,4 +68,24 @@ describe('classifyIntent', () => {
     const r = classifyIntent('幫我宿舍冷氣報修');
     expect(r.name).toBe('submit_repair_request');
   });
+
+  test('冷氣怪怪的 maps to submit_repair_request', () => {
+    const r = classifyIntent('A棟301冷氣怪怪的');
+    expect(r.name).toBe('submit_repair_request');
+  });
+
+  test('房間好熱與冷氣 maps to submit_repair_request', () => {
+    const r = classifyIntent('房間好熱 冷氣不涼');
+    expect(r.name).toBe('submit_repair_request');
+  });
+
+  test('幫我訂午餐雞排飯 maps to food_order', () => {
+    const r = classifyIntent('幫我訂午餐雞排飯');
+    expect(r.name).toBe('food_order');
+  });
+
+  test('幫我訂早餐 maps to food_order', () => {
+    const r = classifyIntent('幫我訂早餐三明治');
+    expect(r.name).toBe('food_order');
+  });
 });
