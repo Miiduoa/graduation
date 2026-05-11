@@ -9,6 +9,14 @@ const getLibraryLoans = require('./getLibraryLoans');
 const submitLeaveRequest = require('./submitLeaveRequest');
 const getLeaveRequestStatus = require('./getLeaveRequestStatus');
 const reflectOnGap = require('./reflectOnGap');
+const reserveSeat = require('./reserveSeat');
+const borrowBook = require('./borrowBook');
+const returnBook = require('./returnBook');
+const renewBook = require('./renewBook');
+const submitRepairRequest = require('./submitRepairRequest');
+const reserveWashingMachine = require('./reserveWashingMachine');
+const createOrder = require('./createOrder');
+const cancelOrder = require('./cancelOrder');
 
 const tools = [
   getTodaySchedule,
@@ -20,6 +28,14 @@ const tools = [
   getLeaveRequestStatus,
   reflectOnGap,
   submitLeaveRequest,
+  reserveSeat,
+  borrowBook,
+  returnBook,
+  renewBook,
+  submitRepairRequest,
+  reserveWashingMachine,
+  createOrder,
+  cancelOrder,
 ];
 
 const byName = new Map(tools.map((t) => [t.name, t]));

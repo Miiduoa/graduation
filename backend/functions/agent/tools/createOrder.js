@@ -1,0 +1,84 @@
+'use strict';
+
+const { z } = require('zod');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+
+const orderItemSchema = z.object({
+  menuItemId: z.string().min(1),
+  name: z.string().min(1),
+  price: z.number().nonnegative(),
+  quantity: z.number().int().min(1),
+  note: z.string().optional(),
+});
+
+const inputSchema = z.object({
+  cafeteriaId: z.string().min(1),
+  items: z.array(orderItemSchema).min(1),
+  pickupTime: z.string().optional(),
+  note: z.string().optional(),
+  paymentMethod: z.string().optional().default('campus_card'),
+});
+
+async function execute(ctx, rawInput) {
+  const input = inputSchema.parse(rawInput ?? {});
+  const uid = ctx.uid;
+  const schoolId = ctx.schoolId;
+  if (!uid) throw new Error('createOrder requires ctx.uid');
+  if (!schoolId) throw new Error('createOrder requires ctx.schoolId');
+
+  const db = getFirestore();
+
+  const cafeteriaRef = db.collection('schools').doc(schoolId).collection('cafeterias').doc(input.cafeteriaId);
+  const cafeteriaDoc = await cafeteriaRef.get();
+  if (!cafeteriaDoc.exists) throw new Error('找不到此餐廳，請確認餐廳 ID。');
+
+  const cafeteriaData = cafeteriaDoc.data() || {};
+  if (cafeteriaData.orderingEnabled === false) throw new Error('此餐廳目前暫停接單。');
+
+  const subtotal = input.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const tax = Math.round(subtotal * 0.05);
+  const total = subtotal + tax;
+
+  const orderPayload = {
+    userId: uid,
+    schoolId,
+    cafeteriaId: input.cafeteriaId,
+    merchantId: cafeteriaData.merchantId || input.cafeteriaId,
+    cafeteria: cafeteriaData.name || input.cafeteriaId,
+    items: input.items,
+    subtotal,
+    tax,
+    total,
+    totalAmount: total,
+    pickupTime: input.pickupTime || null,
+    note: input.note || null,
+    paymentMethod: input.paymentMethod,
+    status: 'pending',
+    paymentStatus: 'pending',
+    createdAt: FieldValue.serverTimestamp(),
+  };
+
+  const orderRef = db.collection('schools').doc(schoolId).collection('orders').doc();
+  const userOrderRef = db.collection('users').doc(uid).collection('schools').doc(schoolId)
+    .collection('orders').doc(orderRef.id);
+
+  await db.runTransaction(async (tx) => {
+    tx.set(orderRef, orderPayload);
+    tx.set(userOrderRef, orderPayload);
+  });
+
+  return {
+    orderId: orderRef.id,
+    cafeteria: cafeteriaData.name || input.cafeteriaId,
+    total,
+    itemCount: input.items.length,
+  };
+}
+
+module.exports = {
+  name: 'createOrder',
+  description: '幫使用者向學校餐廳下訂單。需要 cafeteriaId、items 陣列（含 menuItemId、name、price、quantity）。可選 pickupTime 和 note。',
+  inputSchema,
+  execute,
+  requiresConfirmation: true,
+};
