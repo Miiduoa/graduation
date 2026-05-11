@@ -54,7 +54,7 @@ import {
 } from '../services/proactiveAI';
 import { isEffectivelyOnline } from '../services/offline';
 import { executeAgentToolAction, type AIActionExecutionResult } from '../services/aiActionExecutor';
-import { AgentCardList } from '../components/AgentCards';
+import { AgentCardList, type AgentCard } from '../components/AgentCards';
 import {
   buildAIAppContext,
   emptyAIAppRuntimeData,
@@ -288,7 +288,7 @@ type Message = {
   /** askCampusAssistant 本輪 runId（對應 Firestore agentRuns） */
   campusAssistantRunId?: string;
   /** 後端 agent/chat 回傳的卡片（課表/作業/公告/導頁等） */
-  cards?: Array<{ kind: string; payload: Record<string, any> }>;
+  cards?: Array<{ kind: AgentCard['kind']; payload: Record<string, any> }>;
 };
 
 const ASSISTANT_TOOL_LABELS: Record<string, string> = {

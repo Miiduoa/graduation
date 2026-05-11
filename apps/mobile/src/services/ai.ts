@@ -13,6 +13,7 @@
  * - EXPO_PUBLIC_AI_MAX_TOKENS（預設 1000）
  */
 
+import type { AgentCard } from '../components/AgentCards';
 import Constants from 'expo-constants';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import type {
@@ -224,7 +225,7 @@ export type AIResponse = {
   actions?: AssistantActionProposal[];
   citations?: EvidenceRef[];
   /** 後端 agent/chat 回傳的結構化 cards（用於 UI 渲染/導頁） */
-  cards?: Array<{ kind: string; payload: Record<string, any> }>;
+  cards?: Array<{ kind: AgentCard['kind']; payload: Record<string, any> }>;
   /** 本輪 LLM 實際呼叫的工具名稱（後端 askCampusAssistant） */
   assistantToolsUsed?: string[];
   /** askCampusAssistant 多輪對話用，後端 debug.sessionId */
@@ -3922,7 +3923,7 @@ export async function chatWithLocalLLMStreaming(
   const history = messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
 
   let fullContent = '';
-  let cards: Array<{ kind: string; payload: Record<string, any> }> | undefined;
+  let cards: Array<{ kind: AgentCard['kind']; payload: Record<string, any> }> | undefined;
 
   try {
     // 新版 agent endpoint：回傳 { content, cards }（不走 SSE streaming）
@@ -3948,7 +3949,7 @@ export async function chatWithLocalLLMStreaming(
     const data = (await resp.json()) as any;
     fullContent = String(data?.content ?? '');
     if (Array.isArray(data?.cards)) {
-      cards = data.cards as Array<{ kind: string; payload: Record<string, any> }>;
+      cards = data.cards as Array<{ kind: AgentCard['kind']; payload: Record<string, any> }>;
     }
     onToken(fullContent, true);
   } catch (e: any) {
