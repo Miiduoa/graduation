@@ -6,7 +6,7 @@
     "node": "20"
   },
   "scripts": {
-    "serve": "firebase emulators:start --only functions",
+    "serve": "node -e \"console.log('[functions] 已停用本機 firebase emulators:start --only functions。請改: firebase deploy --only functions（Blaze 專案）。說明: docs/firebase-blaze-production.md');\"",
     "shell": "firebase functions:shell",
     "deploy": "firebase deploy --only functions",
     "logs": "firebase functions:log",

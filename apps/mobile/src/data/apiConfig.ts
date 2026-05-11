@@ -7,6 +7,20 @@ import {
 
 export type ApiEnvironment = 'development' | 'staging' | 'production';
 
+/** 靜宜／PU 適配器：一律打正式 Cloud Functions（與 Firestore 同一專案），不依賴本機 Functions emulator。 */
+function twPuCloudFunctionsBaseUrl(): string {
+  const trimmedOverride = (process.env.EXPO_PUBLIC_CLOUD_FUNCTION_BASE_URL ?? '').trim();
+  if (trimmedOverride) {
+    return trimmedOverride.replace(/\/+$/, '');
+  }
+  const region = (process.env.EXPO_PUBLIC_CLOUD_FUNCTION_REGION ?? 'asia-east1').trim() || 'asia-east1';
+  const projectId =
+    (process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID ?? 'campus-demo-3a869').trim() || 'campus-demo-3a869';
+  return `https://${region}-${projectId}.cloudfunctions.net`;
+}
+
+const TW_PU_CF_BASE = twPuCloudFunctionsBaseUrl();
+
 const API_URLS: Record<string, Record<ApiEnvironment, string>> = {
   'tw-nchu': {
     development: 'http://localhost:3000',
@@ -19,9 +33,9 @@ const API_URLS: Record<string, Record<ApiEnvironment, string>> = {
     production: 'https://api.demo.edu.tw',
   },
   'tw-pu': {
-    development: 'http://localhost:5001/campus-demo-3a869/asia-east1',
-    staging: 'https://asia-east1-campus-demo-3a869.cloudfunctions.net',
-    production: 'https://asia-east1-campus-demo-3a869.cloudfunctions.net',
+    development: TW_PU_CF_BASE,
+    staging: TW_PU_CF_BASE,
+    production: TW_PU_CF_BASE,
   },
 };
 

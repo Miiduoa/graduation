@@ -6,9 +6,6 @@
   "storage": {
     "rules": "backend/storage/storage.rules"
   },
-  "emulators": {
-    "singleProjectMode": false
-  },
   "functions": [
     {
       "source": "backend/functions"
