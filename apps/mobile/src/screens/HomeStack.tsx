@@ -26,7 +26,7 @@ import { AnnouncementDetailScreen } from './AnnouncementDetailScreen';
 import { EventsScreen } from './EventsScreen';
 import { EventDetailScreen } from './EventDetailScreen';
 import { AIChatScreen } from './AIChatScreen';
-import { CampusSocialScreen } from './CampusSocialScreen';
+import { CommunityScreen } from './CommunityScreen';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
@@ -78,7 +78,7 @@ export function HomeStack() {
       <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI 助理' }} />
       <Stack.Screen
         name="CampusSocialScreen"
-        component={CampusSocialScreen}
+        component={CommunityScreen}
         options={{ title: '校園社群', headerShown: false }}
       />
       <Stack.Screen

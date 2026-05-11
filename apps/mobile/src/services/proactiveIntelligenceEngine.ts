@@ -237,7 +237,7 @@ async function checkGpaTrend(): Promise<SmartNudge[]> {
         timestamp: now,
         actions: [
           { label: '查看學業分析', route: 'AcademicInsightsScreen' },
-          { label: '找學伴幫忙', route: 'StudyBuddyScreen' },
+          { label: '找學伴幫忙', route: 'CampusSocialScreen' },
         ],
         metadata: {
           source: 'gpa_analyzer',
@@ -326,7 +326,7 @@ async function checkCampusOpportunities(): Promise<SmartNudge[]> {
         color: '#3B82F6',
         timestamp: now,
         expiresAt: now + 2 * 60 * 60 * 1000,
-        actions: [{ label: '查看校園脈動', route: 'CampusPulseScreen' }],
+        actions: [{ label: '查看校園脈動', route: 'CampusSocialScreen' }],
         metadata: {
           source: 'campus_pulse',
           confidence: best.confidence,
@@ -356,7 +356,7 @@ async function checkCampusOpportunities(): Promise<SmartNudge[]> {
         color: '#F59E0B',
         timestamp: now,
         expiresAt: now + 1 * 60 * 60 * 1000,
-        actions: [{ label: '查看校園脈動', route: 'CampusPulseScreen' }],
+        actions: [{ label: '查看校園脈動', route: 'CampusSocialScreen' }],
         metadata: {
           source: 'campus_pulse',
           confidence: 0.7,
@@ -382,7 +382,7 @@ async function checkCampusOpportunities(): Promise<SmartNudge[]> {
         color: '#F97316',
         timestamp: now,
         expiresAt: now + 2 * 60 * 60 * 1000,
-        actions: [{ label: '查看停車狀況', route: 'CampusPulseScreen' }],
+        actions: [{ label: '查看停車狀況', route: 'CampusSocialScreen' }],
         metadata: {
           source: 'campus_pulse',
           confidence: 0.75,
@@ -520,7 +520,7 @@ function checkScheduleNudges(courses: PUCourse[]): SmartNudge[] {
         expiresAt: now + 3 * 60 * 60 * 1000,
         actions: [
           { label: '開始專注', actionId: 'start_pomodoro' },
-          { label: '找讀書夥伴', route: 'StudyBuddyScreen' },
+          { label: '找讀書夥伴', route: 'CampusSocialScreen' },
         ],
         metadata: {
           source: 'schedule',
@@ -546,7 +546,7 @@ function checkScheduleNudges(courses: PUCourse[]): SmartNudge[] {
       color: '#8B5CF6',
       timestamp: now,
       expiresAt: now + 1 * 60 * 60 * 1000,
-      actions: [{ label: '查看校園脈動', route: 'CampusPulseScreen' }],
+      actions: [{ label: '查看校園脈動', route: 'CampusSocialScreen' }],
       metadata: {
         source: 'wellbeing',
         confidence: 0.6,
