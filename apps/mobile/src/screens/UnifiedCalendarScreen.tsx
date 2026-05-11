@@ -12,10 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
-// 直接匯入三個現有畫面元件
-import { CourseScheduleScreen } from './CourseScheduleScreen';
-import { CalendarScreen } from './CalendarScreen';
-import { SmartCalendarScreen } from './SmartCalendarScreen';
+import { CourseSchedulePanel } from './unifiedCalendar/CourseSchedulePanel';
+import { CalendarPanel } from './unifiedCalendar/CalendarPanel';
+import { SmartCalendarPanel } from './unifiedCalendar/SmartCalendarPanel';
 
 type TabKey = 'schedule' | 'calendar' | 'smart';
 
@@ -105,13 +104,13 @@ export function UnifiedCalendarScreen(props: Record<string, unknown>) {
       {/* ─── Content — 只渲染當前 tab ─── */}
       <View style={{ flex: 1 }}>
         {activeTab === 'schedule' && (
-          <CourseScheduleScreen {...props} />
+          <CourseSchedulePanel {...props} />
         )}
         {activeTab === 'calendar' && (
-          <CalendarScreen {...props} />
+          <CalendarPanel {...props} />
         )}
         {activeTab === 'smart' && (
-          <SmartCalendarScreen />
+          <SmartCalendarPanel />
         )}
       </View>
     </View>

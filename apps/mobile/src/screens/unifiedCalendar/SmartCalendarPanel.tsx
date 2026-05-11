@@ -20,9 +20,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { theme } from '../ui/theme';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { useThemeMode } from '../state/theme';
+import { theme } from '../../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
+import { useThemeMode } from '../../state/theme';
 import {
   getCalendarData,
   getDeadlines,
@@ -37,8 +37,8 @@ import {
   type PomodoroSession,
   type PomodoroStats,
   type WeekView,
-} from '../services/smartCalendarEngine';
-import { earnXP } from '../services/gamificationEngine';
+} from '../../services/smartCalendarEngine';
+import { earnXP } from '../../services/gamificationEngine';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -49,7 +49,7 @@ const DAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 
 // ─── Main Screen ─────────────────────────────────────────
 
-export function SmartCalendarScreen() {
+export function SmartCalendarPanel() {
   useThemeMode();
   const insets = useSafeAreaInsets();
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
