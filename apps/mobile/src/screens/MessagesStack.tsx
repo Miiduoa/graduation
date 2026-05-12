@@ -14,6 +14,7 @@ import { AssignmentDetailScreen } from './AssignmentDetailScreen';
 import { DmsScreen } from './DmsScreen';
 import { FriendSearchScreen } from './FriendSearchScreen';
 import { FriendsManageScreen } from './FriendsManageScreen';
+import { FollowingListsScreen } from './FollowingListsScreen';
 import { ChatScreen } from './ChatScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 
@@ -64,6 +65,7 @@ export function MessagesStack() {
       <Stack.Screen name="Dms" component={DmsScreen} options={{ title: '私訊' }} />
       <Stack.Screen name="FriendsManage" component={FriendsManageScreen} options={{ title: '好友與邀請' }} />
       <Stack.Screen name="FriendSearch" component={FriendSearchScreen} options={{ title: '搜尋／加好友' }} />
+      <Stack.Screen name="FollowingLists" component={FollowingListsScreen} options={{ title: '追蹤與粉絲' }} />
       <Stack.Screen name="Chat" component={ChatScreen} options={{ title: '對話' }} />
     </Stack.Navigator>
   );

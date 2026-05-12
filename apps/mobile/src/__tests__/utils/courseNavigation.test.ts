@@ -1,6 +1,18 @@
-import { buildCourseNavigationTarget, buildNavigationTarget, migrateTabName } from '../../utils/courseNavigation';
+jest.mock('../../app/useAIOverlay', () => ({
+  aiOverlay: {
+    open: jest.fn(),
+    close: jest.fn(),
+  },
+}));
+
+import { buildCourseNavigationTarget, buildNavigationTarget, migrateTabName, navigateToTarget } from '../../utils/courseNavigation';
+import { aiOverlay } from '../../app/useAIOverlay';
 
 describe('courseNavigation utilities (4+1 AI-First nav)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('routes student course entry to the unified 學習 Tab', () => {
     expect(buildCourseNavigationTarget('student')).toEqual({
       tab: '學習',
@@ -47,6 +59,23 @@ describe('courseNavigation utilities (4+1 AI-First nav)', () => {
       screen: 'Attendance',
       params: undefined,
     });
+  });
+
+  it('navigateToTarget opens AI overlay with proactiveReportId', () => {
+    const navigate = jest.fn();
+    navigateToTarget({ navigate }, {
+      tab: 'Today',
+      screen: 'AIChat',
+      params: { proactiveReportId: 'report-xyz' },
+    });
+    expect(aiOverlay.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'chat',
+        proactiveReportId: 'report-xyz',
+        source: 'navigateToTarget',
+      }),
+    );
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   describe('migrateTabName', () => {

@@ -22,6 +22,8 @@ import { aiBrain, type BrainInsight } from '../services/aiBrain';
 
 export interface AIFloatingBallProps {
   size?: number;
+  /** Maestro／自動化 id */
+  testID?: string;
   onPress: () => void;
   onLongPress?: () => void;
   /** 是否強調脈動（例如有新洞察） */
@@ -54,6 +56,7 @@ function useUnreadInsights(): { count: number; criticalCount: number } {
 
 export function AIFloatingBall({
   size = 60,
+  testID = 'ai-floating-ball',
   onPress,
   onLongPress,
   hasUnreadInsights: hasUnreadOverride,
@@ -165,6 +168,7 @@ export function AIFloatingBall({
         }}
       >
         <Pressable
+          testID={testID}
           onPress={() => {
             Animated.sequence([
               Animated.timing(press, {

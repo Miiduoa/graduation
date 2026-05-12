@@ -26,11 +26,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
 import { theme, softShadowStyle } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useNotifications } from '../state/notifications';
 import { usePermissions } from '../hooks/usePermissions';
+import { rootNavigateCampusCommunity, rootNavigate, rootNavigateMeScreen } from '../app/rootNavigation';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.85, 360);
@@ -72,7 +72,6 @@ export function useHeaderDrawer(): { visible: boolean; open: () => void; close: 
 export function HeaderDrawerHost() {
   const { visible } = useHeaderDrawer();
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<any>();
   const auth = useAuth();
   const notifs = useNotifications();
   const {
@@ -123,13 +122,8 @@ export function HeaderDrawerHost() {
 
   const go = (screen: string, params?: any) => {
     handleClose();
-    // 進入 '我的' Tab 內的對應 screen
     setTimeout(() => {
-      try {
-        navigation.navigate('我的' as any, { screen, params });
-      } catch (err) {
-        console.warn('[HeaderDrawer] navigate failed:', err);
-      }
+      rootNavigateMeScreen(screen, params);
     }, 220);
   };
 
@@ -299,11 +293,7 @@ export function HeaderDrawerHost() {
                 onPress={() => {
                   handleClose();
                   setTimeout(() => {
-                    try {
-                      navigation.navigate('Today' as never, { screen: 'CampusSocialScreen' });
-                    } catch (e) {
-                      console.warn('[HeaderDrawer] campus social navigate failed:', e);
-                    }
+                    rootNavigateCampusCommunity();
                   }, 220);
                 }}
               />
@@ -386,7 +376,7 @@ export function HeaderDrawerHost() {
                     tint={theme.colors.roleTeacher}
                     onPress={() => {
                       handleClose();
-                      setTimeout(() => navigation.navigate('學習' as any), 220);
+                      setTimeout(() => rootNavigate('學習'), 220);
                     }}
                   />
                 )}
@@ -411,15 +401,21 @@ export function HeaderDrawerHost() {
                     icon="stats-chart-outline"
                     label="系所審核與數據"
                     tint={theme.colors.calm}
-                    onPress={() => go('AdminDashboard')}
+                    onPress={() => {
+                      handleClose();
+                      setTimeout(() => rootNavigate('學習'), 220);
+                    }}
                   />
                 )}
-                {isStaff && (
+                {isStaff && !isAdmin && (
                   <DrawerRow
                     icon="construct-outline"
-                    label="設施與工單"
+                    label="設施與工單（工作首頁）"
                     tint={theme.colors.warning}
-                    onPress={() => go('AdminDashboard')}
+                    onPress={() => {
+                      handleClose();
+                      setTimeout(() => rootNavigate('學習'), 220);
+                    }}
                   />
                 )}
                 {auth.profile?.merchantAssignments?.some(
