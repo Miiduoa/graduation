@@ -94,6 +94,51 @@ function pickLatestChoiceMenu(result: any): AssistantChoiceMenu | undefined {
   return undefined;
 }
 
+/** 測試用：模擬上一輪助理提供的訂餐選單 */
+function diningOrderMenuFixture(): AssistantChoiceMenu {
+  return {
+    title: '請選擇餐點',
+    producedByTool: 'create_order',
+    options: [
+      { id: 'x@@1', label: '滷肉飯｜A', subtitle: '靜園' },
+      { id: 'y@@1', label: '雞腿飯｜B', subtitle: '宜園' },
+      { id: 'z@@1', label: '素飯｜C', subtitle: '凱園' },
+    ],
+  };
+}
+
+function eventRegisterMenuFixture(): AssistantChoiceMenu {
+  return {
+    title: '請選擇活動',
+    producedByTool: 'register_event',
+    options: [
+      { id: 'evt-a', label: 'AI 工作坊', sendAsUser: '幫我報名第1個' },
+      { id: 'evt-b', label: '校慶園遊', sendAsUser: '幫我報名第2個' },
+    ],
+  };
+}
+
+async function assertToolsWithChoiceMenu(
+  message: string,
+  menu: AssistantChoiceMenu,
+  anyOfTools: string[],
+): Promise<void> {
+  const r = await autonomousQuery(
+    message,
+    {
+      userId: TEST_USER_ID,
+      schoolId: TEST_SCHOOL_ID,
+      role: 'student',
+      lastChoiceMenu: menu,
+      isOnline: true,
+    },
+    undefined,
+    [],
+  );
+  const tools = collectToolsCalled(r);
+  expect(anyOfTools.some((t) => tools.has(t))).toBe(true);
+}
+
 async function runConversation(name: string, turns: Turn[]) {
   sectionHeader(name);
   let lastChoiceMenu: AssistantChoiceMenu | undefined;
@@ -358,6 +403,60 @@ describe('AI 口語／模糊／跨功能 對話壓測', () => {
     ]);
   });
 
+  it('選單短跟進矩陣（口語確認、序號、活動取消）', async () => {
+    const dine = diningOrderMenuFixture();
+    await assertToolsWithChoiceMenu('第二個', dine, ['create_order']);
+    await assertToolsWithChoiceMenu('第2個', dine, ['create_order']);
+    await assertToolsWithChoiceMenu('最後一個', dine, ['create_order']);
+    await assertToolsWithChoiceMenu('好', dine, ['create_order']);
+    await assertToolsWithChoiceMenu('ok', dine, ['create_order']);
+    await assertToolsWithChoiceMenu('要這個', dine, ['create_order']);
+    await assertToolsWithChoiceMenu('欸那就第一個吧', dine, ['create_order']);
+    const ev = eventRegisterMenuFixture();
+    await assertToolsWithChoiceMenu('第二個', ev, ['register_event']);
+    await assertToolsWithChoiceMenu('算了我還是不去了', ev, ['unregister_event', 'query_events']);
+  });
+
+  it('密集口語場景 ① 飲食／時段課表／宿舍／列印', async () => {
+    await runConversation('場景①', [
+      { user: '宵夜到底要吃啥啊選擇困難', anyOfTools: ['query_menus', 'recommend_lunch'] },
+      { user: '想喝手搖可是不知道哪家開著', anyOfTools: ['query_menus'] },
+      { user: '待會有課嗎我還想睡', anyOfTools: ['query_courses'] },
+      { user: '等一下要上啥啦', anyOfTools: ['query_courses'] },
+      { user: '包裹到了沒啊前天說出貨', anyOfTools: ['query_dorm_info'] },
+      { user: '洗衣機現在有空嗎', anyOfTools: ['query_dorm_info'] },
+      { user: '列印店在學校哪裡啊', anyOfTools: ['comprehensive_analysis'] },
+    ]);
+  });
+
+  it('密集口語場景 ② 成績學分／活動／公告天氣／總覽', async () => {
+    await runConversation('場景②', [
+      { user: '超怕二一啦你幫我看下成績趨勢', anyOfTools: ['predict_gpa', 'query_grades'] },
+      { user: '學分到底還差多少我真的會癱', anyOfTools: ['analyze_credits'] },
+      { user: '校慶有啥活動不無聊的那種', anyOfTools: ['query_events'] },
+      { user: '我現在心很累需要一鍵總覽', anyOfTools: ['comprehensive_analysis', 'daily_briefing'] },
+      { user: '雨大到會不會停課啊干', anyOfTools: ['query_announcements', 'query_calendar', 'comprehensive_analysis'] },
+    ]);
+  });
+
+  it('密集口語場景 ③ 抱怨式提問與懶人句', async () => {
+    await runConversation('場景③', [
+      { user: '幹嘛又要交作業了我還沒動筆', anyOfTools: ['query_assignments'] },
+      { user: '到底哪堂課最會點名啦靠', anyOfTools: ['query_courses', 'query_attendance'] },
+      { user: 'wifi 爛到爆宿舍能不能修', anyOfTools: ['create_repair_request', 'query_dorm_info'] },
+      { user: '借的書過期了會罰多少', anyOfTools: ['query_loans', 'query_library'] },
+      { user: 'deadline 是明天還是後天我忘了', anyOfTools: ['query_assignments', 'query_calendar'] },
+    ]);
+  });
+
+  it('密集口語場景 ④ 更像真人的猶豫與改口', async () => {
+    await runConversation('場景④', [
+      { user: '其實我也不確定要不要退選', anyOfTools: ['drop_course', 'query_enrollments', 'query_courses', 'comprehensive_analysis'] },
+      { user: '算了還是先看我口袋還有多少錢', anyOfTools: ['query_orders', 'comprehensive_analysis'] },
+      { user: '要不然你直接給我今日懶人包', anyOfTools: ['daily_briefing', 'comprehensive_analysis'] },
+    ]);
+  });
+
   it('訂餐選單後只回「第一個」：必須帶 lastChoiceMenu（重現真機 bug）', async () => {
     const menu: AssistantChoiceMenu = {
       title: '請選擇餐點',
@@ -367,19 +466,38 @@ describe('AI 口語／模糊／跨功能 對話壓測', () => {
         { id: 'm2@@v2', label: '永和豆漿 | 蛋餅', subtitle: '宜園餐廳', sendAsUser: '幫我點第2個' },
       ],
     };
-    const r = await autonomousQuery(
-      '第一個',
+    await assertToolsWithChoiceMenu('第一個', menu, ['create_order']);
+  });
+
+  it('密集口語場景 ⑤ 長句夾雜多意圖', async () => {
+    await runConversation('場景⑤', [
       {
-        userId: TEST_USER_ID,
-        schoolId: TEST_SCHOOL_ID,
-        role: 'student',
-        lastChoiceMenu: menu,
-        isOnline: true,
+        user: '我人卡在圖書館晚點還有課可是肚子狂叫該先幹嘛',
+        anyOfTools: ['query_courses', 'recommend_lunch', 'query_library', 'query_menus', 'comprehensive_analysis'],
       },
-      undefined,
-      [],
-    );
-    const tools = collectToolsCalled(r);
-    expect(tools.has('create_order')).toBe(true);
+      { user: '不管了先說颱風有沒有放假好了', anyOfTools: ['query_announcements', 'comprehensive_analysis'] },
+      { user: '欸你很急先幫我看通知未讀有哪些', anyOfTools: ['query_notifications'] },
+    ]);
+  });
+
+  it('密集口語場景 ⑥ 選課／教室／文具式說法', async () => {
+    await runConversation('場景⑥', [
+      { user: '我想多修一門通識要怎麼加選', anyOfTools: ['enroll_course', 'query_courses', 'query_enrollments'] },
+      { user: '教室在牛頓大樓到底是幾樓啊', anyOfTools: ['query_courses', 'query_calendar', 'comprehensive_analysis'] },
+      { user: '影印多少張以內免費這種規定在哪看', anyOfTools: ['comprehensive_analysis', 'query_announcements'] },
+    ]);
+  });
+
+  it('圖書館選單短跟進（隨便／第一個）', async () => {
+    const bookMenu: AssistantChoiceMenu = {
+      title: '借書',
+      producedByTool: 'borrow_book',
+      options: [
+        { id: 'bk1', label: '人工智慧導論', subtitle: '可借' },
+        { id: 'bk2', label: '深度學習', subtitle: '可借' },
+      ],
+    };
+    await assertToolsWithChoiceMenu('隨便', bookMenu, ['borrow_book']);
+    await assertToolsWithChoiceMenu('第一個', bookMenu, ['borrow_book']);
   });
 });

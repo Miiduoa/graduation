@@ -174,6 +174,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           AssignmentDetail: 'group/:groupId/assignment/:assignmentId',
           Dms: 'dms',
           FriendSearch: 'friend-search',
+          FriendsManage: 'friends',
           Chat: 'chat/:peerId',
           AdminCourseVerify: 'course-verify',
         },
