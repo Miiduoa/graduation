@@ -348,7 +348,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
 
   // ── 課程/課表 ──
   if (
-    /課[表程]|今天[有的].*課|上什麼課|有什麼課|什麼課|哪堂課|今天的課|明天.*課|下一堂|下一節|接下來.*課|幾點.*課|星期.*課|what'?s\s+my\s+(?:class|schedule)|\bclass(?:es)?\b.*\btoday\b|\btoday\b.*\bclass(?:es)?\b/.test(
+    /課[表程]|今天[有的].*課|上什麼課|有什麼課|什麼課|哪堂課|今天的課|明天.*課|下一堂|下一節|接下來.*課|幾點.*課|星期.*課|有課嗎|有沒有課|待會.*課|等等.*課|等一下.*課|等一下.*上|等等要上|待會要上|上啥|要上啥|接下來上|教室.*幾樓|幾樓.*教室|教室在哪|哪間教室|上課地點|教學大樓|what'?s\s+my\s+(?:class|schedule)|\bclass(?:es)?\b.*\btoday\b|\btoday\b.*\bclass(?:es)?\b/.test(
       msg,
     )
   ) {
@@ -410,7 +410,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'query_student_info', args: {}, priority: 10, reason: '個人資料' });
   }
 
-  if (/公告|最新消息|校務|學校.*通知/.test(msg)) {
+  if (/公告|最新消息|校務|學校.*通知|停課|補假|颱風|天氣假/.test(msg)) {
     intents.push({ tool: 'query_announcements', args: {}, priority: 8, reason: '查詢公告' });
   }
 
@@ -431,7 +431,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
       priority: 14,
       reason: '午餐／正餐推薦',
     });
-  } else if (/吃|餐[廳點]|菜單|午餐|晚餐|早餐|便當|價[格錢]|好吃|美食|飯/.test(msg) && !/評分|打分|幾星|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg)) {
+  } else if (/吃|餐[廳點]|菜單|午餐|晚餐|早餐|便當|宵夜|消夜|手搖|奶茶|珍奶|價[格錢]|好吃|美食|飯/.test(msg) && !/評分|打分|幾星|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg)) {
     // 萃取食物關鍵字，例如「我想吃滷肉飯」→ keyword=「滷肉飯」
     const foodKw = origMsg.match(/(?:想吃|想喝|有沒有|有什麼|吃)\s*(.{1,10}?)(?:嗎|呢|的|吧|啊|？|$)/)?.[1]?.trim() ?? '';
     const menuArgs: Record<string, string> = {};
@@ -439,6 +439,14 @@ export function analyzeIntents(message: string): DetectedIntent[] {
       menuArgs.keyword = foodKw;
     }
     intents.push({ tool: 'query_menus', args: menuArgs, priority: 8, reason: foodKw ? `查詢「${foodKw}」` : '查詢餐廳' });
+  }
+
+  // ── 列印地點／怎麼印（非「幫我印檔案」）──
+  if (
+    (/列印店|影印店|影印|去哪.*列印|哪裡.*列印|哪邊.*列印|列印在哪|哪.*印東西|影印.*免費|免費.*影印|印.*免費|幾張.*免費|列印.*規定/.test(msg)) &&
+    !/幫我印|想印|要列印|印一下|\.pdf|\.doc|份數|黑白|彩色/.test(msg)
+  ) {
+    intents.push({ tool: 'comprehensive_analysis', args: {}, priority: 9, reason: '列印相關指引' });
   }
 
   if (/圖書[館室]|借書|還書|座位|自習|k書|讀書/.test(msg) && !/幫我/.test(msg)) {
@@ -475,7 +483,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'query_conversations', args: {}, priority: 7, reason: '查詢訊息' });
   }
 
-  if (/訂單|外送|外賣|付款|消費|交易/.test(msg) && !/取消/.test(msg)) {
+  if (/訂單|外送|外賣|付款|消費|交易|口袋|餘額|花多少|零用錢|生活費|還剩多少|省下多少|我的錢|沒錢了/.test(msg) && !/取消/.test(msg)) {
     intents.push({ tool: 'query_orders', args: { status: 'all' }, priority: 7, reason: '查詢訂單' });
   }
 
@@ -487,7 +495,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'query_health_records', args: {}, priority: 7, reason: '查詢健康' });
   }
 
-  if (/借閱|借了.*書|我的書|圖書.*紀錄/.test(msg)) {
+  if (/借閱|借了.*書|我的書|圖書.*紀錄|借的書|書.*過期|過期.*書|借書.*過期/.test(msg)) {
     intents.push({ tool: 'query_loans', args: {}, priority: 8, reason: '查詢借閱' });
   }
 
@@ -496,7 +504,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 綜合分析 ──
-  if (/分析|報告|總結|全面|整體|狀態|怎麼樣|概況|overview/.test(msg)) {
+  if (/分析|報告|總結|全面|整體|狀態|怎麼樣|概況|overview|總覽|一鍵|懶得逐個查/.test(msg)) {
     intents.push({ tool: 'comprehensive_analysis', args: {}, priority: 10, reason: '綜合分析' });
   }
 
@@ -516,6 +524,10 @@ export function analyzeIntents(message: string): DetectedIntent[] {
         reason: isTomorrow ? '明日簡報' : '今日簡報',
       });
     }
+  }
+
+  if (/懶人包|今日重點/.test(msg) && !/吃飯|訂餐|點餐|想[吃喝]|便當|蛋餅|奶茶|飲料|宵夜|手搖/.test(msg)) {
+    intents.push({ tool: 'daily_briefing', args: {}, priority: 16, reason: '今日懶人包' });
   }
 
   // ── 餓 → 推薦午餐／晚餐（不拘泥句首，允許口語前綴如「欸」「幹我」）──
@@ -733,7 +745,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 報修 ──
-  if (/報修|維修|壞了|故障|水管|電|燈/.test(msg)) {
+  if (/報修|維修|壞了|故障|水管|電|燈|爛掉|爛到|斷線|上不了網|無法連線|\bwifi\b|網路|網絡/.test(msg)) {
     const typeMap: Record<string, string> = { '水': 'plumbing', '電': 'electrical', '燈': 'electrical', '家具': 'furniture', '冷氣': 'appliance' };
     let repairType = 'other';
     for (const [k, v] of Object.entries(typeMap)) { if (msg.includes(k)) { repairType = v; break; } }
@@ -928,9 +940,12 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   // 「隨便/你就…幫我處理」屬綜合求助，勿走 order_food，否則 semanticUnderstand 易誤判為訂餐
   const isVagueHelpRequest =
     /(?:隨便|随便|你就).{0,14}處理|幫我處理一下|幫我搞定/.test(msg);
+  const skipOrderForBriefingPack =
+    /懶人包|今日重點/.test(msg) && !/吃飯|訂餐|點餐|想[吃喝]|便當|蛋餅|奶茶|飲料|宵夜|手搖/.test(msg);
   // 排除已被其他意圖處理的訊息（請假、報修、預約、取消、查詢等）
   if (
     !isVagueHelpRequest &&
+    !skipOrderForBriefingPack &&
     !/請.*假|報修|維修|預約.*座|預約.*看|掛號|借.*(?:書|本)|借閱|還書|選課|退選|報名.*活動|發.*訊|繳交|簽到|簽倒|签倒|打卡|點名|取消.*訂|不要.*訂|查看|查詢|看一下|看看|查.*訂單|我的訂單/.test(msg)
   ) {
     // 先用語意推理：訊息「幫我訂午餐」要解析成 intent=order_food + meal_time=lunch（item=null）
@@ -1293,24 +1308,36 @@ export async function autonomousQuery(
     }
   }
 
+  // 新話題覆蓋訂餐選單：剛列出餐點又問課表／教室時，勿讓選單誤觸發 create_order 或汙染推理
+  let effectiveLastChoiceMenu = ctx.lastChoiceMenu;
+  const rm = resolvedMessage.trim();
+  if (
+    effectiveLastChoiceMenu?.producedByTool === 'create_order' &&
+    /有課嗎|有沒有課|待會.*課|等等.*課|等一下.*課|等等要上|待會要上|上啥|上什麼|什麼課|哪堂|課表|教室|點名|哪堂課/.test(rm) &&
+    !/幫我點|訂餐|點餐|要吃|想喝|喝.*飲|午餐|晚餐|早餐|宵夜|手搖|奶茶|便當|菜單|餐廳|滷肉|雞腿|蛋餅/.test(rm)
+  ) {
+    effectiveLastChoiceMenu = undefined;
+  }
+
   const toolCtx = {
     ...ctx,
     lastUserMessage: resolvedMessage,
-    lastChoiceMenu: ctx.lastChoiceMenu,
+    lastChoiceMenu: effectiveLastChoiceMenu,
   };
 
   // ── Step 0.4: 上下文延續 — 如果上一輪的 choiceMenu 標示了 producedByTool
   //    而使用者只回了「第 N 個 / 對 / 好啊 / 第一個就好」這種 short follow-up，
   //    直接路由回那個工具，讓 handler 用 lastChoiceMenu + ordinal 自己解析。
   const followUpToolFromMenu = (() => {
-    const menu = ctx.lastChoiceMenu;
+    const menu = effectiveLastChoiceMenu;
     if (!menu?.producedByTool || !menu.options?.length) return null;
     const m = resolvedMessage.trim();
-    if (m.length > 16) return null; // 訊息太長代表不是純跟進
-    const hasOrdinal = /第\s*[一二兩三四五六七八九十\d]+|最後[一那]?[個本份項道杯碗]?/.test(m);
+    if (m.length > 36) return null; // 略放寬：「欸那就第二個吧」仍屬選單跟進
+    const hasOrdinal =
+      /第\s*[一二兩三四五六七八九十\d]+(?:個|份|杯|碗|本|項|道)?|最後[一那]?(?:個|本|份|杯|碗)/.test(m);
     // 允許「對對對」「對對對就那個」「好好好」這類重複/語氣加強
     const isConfirm =
-      /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?|就[這那]個|就好|就[那這]個就好|就那個|就這個)$/.test(m) ||
+      /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?|就[這那]個|就好|就[那這]個就好|就那個|就這個|行|好啊|要這個|買這個|就它)$/.test(m) ||
       /^(?:對|好){1,4}(?:就[那這]個|就好|啊|啦|耶|喔|哦)?$/.test(m) ||
       /^(?:對對對|好好好|沒錯|對啊).*(?:就[那這]?個|就好)?$/.test(m);
     const fitsMenuLabel = menu.options.some((o) => o.label && m.includes(o.label.slice(0, 4)));
@@ -1349,6 +1376,23 @@ export async function autonomousQuery(
   }
 
   let intents = analyzeIntents(resolvedMessage);
+
+  // 短選單跟進：語意層常把「隨便」誤判成 create_order，導致擋掉 borrow_book 的 unshift
+  if (followUpToolFromMenu) {
+    const m = resolvedMessage.trim();
+    const menuShortFollow =
+      m.length <= 36 &&
+      (/第\s*[一二兩三四五六七八九十\d]+(?:個|份|杯|碗|本|項|道)?|最後[一那]?(?:個|本|份|杯|碗)/.test(m) ||
+        /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?|就[這那]個|就好|就[那這]個就好|就那個|就這個|行|好啊|要這個|買這個|就它)$/.test(m) ||
+        /^(?:對|好){1,4}(?:就[那這]個|就好|啊|啦|耶|喔|哦)?$/.test(m) ||
+        /^(?:對對對|好好好|沒錯|對啊).*(?:就[那這]?個|就好)?$/.test(m) ||
+        (/隨便|随便|都可以|任一/.test(m) && /^(?:borrow_book|create_order)$/.test(followUpToolFromMenu)) ||
+        (followUpToolFromMenu === 'register_event' &&
+          /不去了|不想去|不參加|取消報名|取消.*活動|還是不去|算了.*不去/.test(m)));
+    if (menuShortFollow) {
+      intents = intents.filter((i) => !i.isWrite || i.tool === followUpToolFromMenu);
+    }
+  }
 
   // ── 若有 followUpToolFromMenu，且使用者沒有「新的寫入意圖」→ 補上
   // 規則：若 analyzeIntents 已經找到任何 write intent（代表使用者表達了新動作），

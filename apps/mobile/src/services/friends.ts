@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -33,6 +34,16 @@ function col(db: Firestore) {
 
 export function directionalRequestId(schoolId: string, fromUid: string, toUid: string) {
   return `req_${schoolId}_${fromUid}_${toUid}`;
+}
+
+/** 相對於自己的對象 UID（單一向度好友文件）。 */
+export function opponentUidFromFriendship(f: Friendship, myUid: string): string {
+  return f.fromUid === myUid ? f.toUid : f.fromUid;
+}
+
+/** 撤回邀請／略過對方／解除好友／清除封鎖列，皆刪除該 friendships 文件。 */
+export async function removeFriendship(friendshipId: string) {
+  await deleteDoc(doc(getDb(), 'friendships', friendshipId));
 }
 
 export async function sendFriendRequest(schoolId: string, fromUid: string, toUid: string) {

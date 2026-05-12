@@ -958,7 +958,10 @@ service cloud.firestore {
         && resource.data.schoolId == request.resource.data.schoolId
         && resource.data.fromUid == request.resource.data.fromUid
         && resource.data.toUid == request.resource.data.toUid;
-      allow delete: if false;
+      allow delete: if isSignedIn()
+        && friendshipInvolves(request.auth.uid)
+        && isSchoolMember(resource.data.schoolId)
+        && resource.data.status in ['pending', 'accepted', 'blocked'];
     }
 
     match /follows/{followId} {

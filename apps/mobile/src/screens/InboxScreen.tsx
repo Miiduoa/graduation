@@ -196,6 +196,43 @@ export function InboxScreen(props: any) {
               <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
             </Pressable>
             <Pressable
+              onPress={() => nav?.navigate?.('FriendsManage')}
+              accessibilityRole="button"
+              accessibilityLabel="管理好友與邀請"
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: theme.space.md,
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                opacity: pressed ? 0.88 : 1,
+              })}
+            >
+              <View
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.accentSoft,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="people-outline" size={19} color={theme.colors.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>好友與邀請</Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  查看邀請、我的好友、複製 UID
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+            </Pressable>
+            <Pressable
               onPress={() => nav?.navigate?.('FriendSearch')}
               accessibilityRole="button"
               accessibilityLabel="搜尋聯絡人並加好友"

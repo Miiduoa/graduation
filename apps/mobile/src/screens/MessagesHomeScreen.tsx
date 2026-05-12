@@ -292,6 +292,24 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
             </View>
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel="好友與邀請"
+              onPress={() => nav?.navigate?.('FriendsManage')}
+              style={({ pressed }) => ({
+                width: 46,
+                height: 46,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Ionicons name="people-outline" size={22} color={theme.colors.accent} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
               accessibilityLabel="搜尋同校聯絡人並加好友"
               onPress={() => nav?.navigate?.('FriendSearch')}
               style={({ pressed }) => ({

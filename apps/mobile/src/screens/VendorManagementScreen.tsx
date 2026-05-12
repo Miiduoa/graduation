@@ -47,7 +47,6 @@ import {
   CATEGORY_LABELS,
   ORDER_STATUS_LABELS,
   ORDER_STATUS_COLORS,
-  SAMPLE_MENUS,
   SAMPLE_REVIEWS,
   type Vendor,
   type MenuItem,
@@ -165,7 +164,7 @@ export function VendorManagementScreen(props: any) {
   }, [vendorOrders]);
 
   // 菜單項目（async 載入，支援店家自訂覆蓋）
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => SAMPLE_MENUS[myVendor.id] ?? []);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(() => getMenuItems(myVendor.id));
 
   const loadMenu = useCallback(async () => {
     try {
