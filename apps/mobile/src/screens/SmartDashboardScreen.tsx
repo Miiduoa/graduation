@@ -79,6 +79,9 @@ import {
   type TCCourse,
   type TCAttendance,
 } from '../services/tronClassClient';
+import { campusEventBus } from '../services/campusEventBus';
+import { getDeadlines, type Deadline } from '../services/smartCalendarEngine';
+import { getAnyCachedTCTodos } from '../services/puDataCache';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -2145,10 +2148,100 @@ export function SmartDashboardScreen(props: any) {
   const [tcAttendance, setTcAttendance] = useState<TCAttendance[]>([]);
   const [attendanceCourses, setAttendanceCourses] = useState<AttendanceCourse[]>([]);
   const [hasTronClass, setHasTronClass] = useState(false);
+  const [deadlines, setDeadlines] = useState<Deadline[]>([]);
+  const [pendingTodos, setPendingTodos] = useState(0);
+  const [aiBriefing, setAiBriefing] = useState<string | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const displayName = useMemo(
     () => auth.profile?.displayName ?? auth.user?.email?.split('@')[0] ?? '同學',
     [auth.profile?.displayName, auth.user?.email],
+  );
+
+  /** AI 分析使用者資料，生成個人化每日簡報 */
+  const generateAIBriefing = useCallback(
+    (
+      insightsData: FullAcademicInsights | null,
+      deadlinesData: Deadline[],
+      todosCount: number,
+      attendanceData: TCAttendance[],
+      coursesData: TCCourse[],
+    ) => {
+      const parts: string[] = [];
+      const now = new Date();
+      const hour = now.getHours();
+
+      // 1. 出席風險分析
+      const lowAttendance = attendanceData.filter((a) => a.rate < 70);
+      if (lowAttendance.length > 0) {
+        parts.push(
+          `⚠️ ${lowAttendance.length} 門課出席率低於 70%，建議優先處理出席問題，部分課程可能影響學期成績。`,
+        );
+      } else if (attendanceData.length > 0) {
+        const avgRate = Math.round(
+          attendanceData.reduce((s, a) => s + a.rate, 0) / attendanceData.length,
+        );
+        if (avgRate >= 90) {
+          parts.push(`✅ 出席率 ${avgRate}%，保持得很好！`);
+        }
+      }
+
+      // 2. 截止日緊急分析
+      const urgentDeadlines = deadlinesData.filter((d) => d.remainingHours < 48 && !d.completed);
+      const upcomingDeadlines = deadlinesData.filter(
+        (d) => d.remainingHours >= 48 && d.remainingHours < 168 && !d.completed,
+      );
+      if (urgentDeadlines.length > 0) {
+        const names = urgentDeadlines.slice(0, 3).map((d) => d.title).join('、');
+        parts.push(
+          `🔴 ${urgentDeadlines.length} 項作業/考試即將到期（48 小時內）：${names}。建議立即處理。`,
+        );
+      } else if (upcomingDeadlines.length > 0) {
+        parts.push(
+          `📋 本週有 ${upcomingDeadlines.length} 項待辦，時間充裕但建議提早規劃。`,
+        );
+      }
+
+      // 3. GPA 趨勢分析
+      if (insightsData) {
+        const { trend, currentGpa, predictedNextGpa } = insightsData.gpaPrediction;
+        if (trend === 'declining' && currentGpa > 0) {
+          parts.push(
+            `📉 GPA 呈下降趨勢（目前 ${currentGpa.toFixed(2)}），AI 預測下學期 ${predictedNextGpa.toFixed(2)}。建議加強弱勢科目的複習。`,
+          );
+        } else if (trend === 'improving' && currentGpa > 0) {
+          parts.push(
+            `📈 GPA 穩步提升中（${currentGpa.toFixed(2)} → 預測 ${predictedNextGpa.toFixed(2)}），繼續保持！`,
+          );
+        }
+
+        // 4. 風險評估
+        if (insightsData.riskAssessment.level === 'critical' || insightsData.riskAssessment.level === 'warning') {
+          parts.push(
+            `🚨 學業風險：高。主要風險因素：${insightsData.riskAssessment.factors.slice(0, 2).join('、')}。`,
+          );
+        }
+
+        // 5. AI 推薦
+        const topRec = insightsData.recommendations[0];
+        if (topRec) {
+          parts.push(`💡 AI 建議：${topRec.title} — ${topRec.description}`);
+        }
+      }
+
+      // 6. 今日課程提醒
+      const today = now.getDay();
+      if (hour < 18 && coursesData.length > 0) {
+        parts.push(`📚 今天有 ${coursesData.length} 門課程，記得準時上課。`);
+      }
+
+      if (parts.length === 0) {
+        parts.push('目前沒有需要特別注意的事項，保持學習節奏！');
+      }
+
+      setAiBriefing(parts.join('\n\n'));
+    },
+    [],
   );
 
   const loadData = useCallback(async () => {
@@ -2179,6 +2272,8 @@ export function SmartDashboardScreen(props: any) {
       setPulseAggregates(aggregateData.status === 'fulfilled' ? aggregateData.value : []);
 
       // Load TronClass real data
+      let tcCrs: TCCourse[] = [];
+      let tcAtt: TCAttendance[] = [];
       try {
         const hasTC = await hasTCSession();
         setHasTronClass(hasTC);
@@ -2188,13 +2283,33 @@ export function SmartDashboardScreen(props: any) {
             tcFetchAttendance(),
             getAttendanceCourses(),
           ]);
-          if (courses.status === 'fulfilled') setTcCourses(courses.value);
-          if (attendance.status === 'fulfilled') setTcAttendance(attendance.value);
+          if (courses.status === 'fulfilled') { tcCrs = courses.value; setTcCourses(tcCrs); }
+          if (attendance.status === 'fulfilled') { tcAtt = attendance.value; setTcAttendance(tcAtt); }
           if (attCourses.status === 'fulfilled') setAttendanceCourses(attCourses.value);
         }
       } catch {
         /* TronClass optional */
       }
+
+      // Load deadlines + todos for AI briefing
+      let dlData: Deadline[] = [];
+      let todosCount = 0;
+      try {
+        dlData = await getDeadlines();
+        setDeadlines(dlData);
+        const todos = await getAnyCachedTCTodos();
+        todosCount = todos?.filter((t) => t.status !== 'submitted' && t.status !== 'graded').length ?? 0;
+        setPendingTodos(todosCount);
+      } catch {}
+
+      // Generate AI briefing from real data
+      generateAIBriefing(
+        insightsData.status === 'fulfilled' ? insightsData.value : null,
+        dlData,
+        todosCount,
+        tcAtt,
+        tcCrs,
+      );
 
       // Auto daily check-in
       if (gamData.status === 'fulfilled') {
@@ -2211,7 +2326,41 @@ export function SmartDashboardScreen(props: any) {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [auth.profile?.department, auth.user?.uid, displayName, ds, school.id]);
+  }, [auth.profile?.department, auth.user?.uid, displayName, ds, school.id, generateAIBriefing]);
+
+  // ─── Event Bus 即時監聽 — 點名/成績/作業等事件自動刷新 ───
+  useEffect(() => {
+    const unsubs = [
+      campusEventBus.on('attendance:checked_in', () => loadData()),
+      campusEventBus.on('session:ended', () => loadData()),
+      campusEventBus.on('grade:updated', () => loadData()),
+      campusEventBus.on('assignment:submitted', () => loadData()),
+      campusEventBus.on('xp:earned', () => {
+        // XP 變動時只刷新 gamification state（輕量）
+        getGamificationState(displayName, auth.profile?.department ?? '').then((g) =>
+          setGamification(g),
+        ).catch(() => {});
+      }),
+    ];
+    return () => unsubs.forEach((fn) => fn());
+  }, [loadData, displayName, auth.profile?.department]);
+
+  // ─── 定時輪詢 — 每 60 秒靜默刷新關鍵資料 ───
+  useEffect(() => {
+    refreshTimerRef.current = setInterval(() => {
+      // 靜默刷新（不觸發 loading indicator）
+      Promise.allSettled([
+        getDeadlines().then((dl) => setDeadlines(dl)),
+        getAnyCachedTCTodos().then((todos) => {
+          setPendingTodos(todos?.filter((t) => t.status !== 'submitted' && t.status !== 'graded').length ?? 0);
+        }),
+        getAttendanceCourses().then((c) => setAttendanceCourses(c)),
+      ]).catch(() => {});
+    }, 60_000);
+    return () => {
+      if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -2321,6 +2470,163 @@ export function SmartDashboardScreen(props: any) {
 
         {/* 2. XP Progress */}
         {gamification && <XPProgressBar gamification={gamification} />}
+
+        {/* ── AI 智慧日報 ── */}
+        {aiBriefing && (
+          <View
+            style={{
+              marginHorizontal: theme.space.lg,
+              marginBottom: theme.space.lg,
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radius.lg,
+              padding: theme.space.md,
+              borderWidth: 1,
+              borderColor: theme.colors.accent + '30',
+            }}
+          >
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: theme.space.sm,
+                marginBottom: theme.space.md,
+              }}
+            >
+              <View
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 14,
+                  backgroundColor: theme.colors.accent + '20',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                }}
+              >
+                <Ionicons name={'sparkles' as any} size={16} color={theme.colors.accent} />
+              </View>
+              <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700', flex: 1 }}>
+                AI 今日分析
+              </Text>
+              <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
+                即時更新
+              </Text>
+            </View>
+            <Text
+              style={{
+                color: theme.colors.textSecondary,
+                fontSize: 13,
+                lineHeight: 20,
+              }}
+            >
+              {aiBriefing}
+            </Text>
+          </View>
+        )}
+
+        {/* ── 緊急截止日提醒 ── */}
+        {deadlines.filter((d) => !d.completed && d.remainingHours < 72).length > 0 && (
+          <View
+            style={{
+              marginHorizontal: theme.space.lg,
+              marginBottom: theme.space.lg,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: theme.space.sm,
+                marginBottom: theme.space.sm,
+              }}
+            >
+              <Ionicons name={'alarm-outline' as any} size={16} color={theme.colors.danger} />
+              <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '700' }}>
+                即將截止
+              </Text>
+              {pendingTodos > 0 && (
+                <View
+                  style={{
+                    backgroundColor: theme.colors.danger,
+                    borderRadius: 10,
+                    paddingHorizontal: 7,
+                    paddingVertical: 2,
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+                    {pendingTodos}
+                  </Text>
+                </View>
+              )}
+            </View>
+            {deadlines
+              .filter((d) => !d.completed && d.remainingHours < 72)
+              .sort((a, b) => a.remainingHours - b.remainingHours)
+              .slice(0, 5)
+              .map((dl) => {
+                const isUrgent = dl.remainingHours < 24;
+                const badgeColor = isUrgent ? theme.colors.danger : theme.colors.warning;
+                const hoursText =
+                  dl.remainingHours < 1
+                    ? '不到 1 小時'
+                    : dl.remainingHours < 24
+                      ? `${Math.round(dl.remainingHours)} 小時`
+                      : `${Math.round(dl.remainingHours / 24)} 天`;
+                return (
+                  <View
+                    key={dl.id}
+                    style={{
+                      backgroundColor: theme.colors.surface,
+                      borderRadius: theme.radius.md,
+                      padding: theme.space.sm,
+                      marginBottom: 6,
+                      borderWidth: 1,
+                      borderColor: isUrgent ? theme.colors.danger + '40' : theme.colors.border,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: theme.space.sm,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: 3,
+                        backgroundColor: badgeColor,
+                      }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}
+                        numberOfLines={1}
+                      >
+                        {dl.title}
+                      </Text>
+                      {dl.courseName ? (
+                        <Text
+                          style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }}
+                          numberOfLines={1}
+                        >
+                          {dl.courseName}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View
+                      style={{
+                        backgroundColor: badgeColor + '20',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: theme.radius.sm,
+                      }}
+                    >
+                      <Text style={{ color: badgeColor, fontSize: 11, fontWeight: '600' }}>
+                        {hoursText}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+          </View>
+        )}
 
         {/* Quick Actions — 簡潔任務區 */}
         <AutopilotMissionRail
@@ -2498,12 +2804,15 @@ export function SmartDashboardScreen(props: any) {
               {
                 icon: 'chatbubble-ellipses-outline',
                 label: '校園社群',
-                nav: () => nav?.navigate?.('CampusSocialScreen'),
+                nav: () => nav?.navigate?.('Today', { screen: 'CampusSocialScreen' }),
               },
               {
                 icon: 'calendar-outline',
                 label: '智慧行事曆',
-                nav: () => nav?.navigate?.('SmartCalendarScreen', { initialTab: 'smart' }),
+                nav: () =>
+                  navigateToCourseScreen(nav, auth.profile?.role, 'CoursesHome', {
+                    initialTab: 'calendar',
+                  }),
               },
               {
                 icon: 'trophy-outline',

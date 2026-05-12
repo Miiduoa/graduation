@@ -18,8 +18,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../ui/theme';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { theme } from '../../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import {
   getStudyBuddyMatches,
   getStudyGroups,
@@ -32,8 +32,8 @@ import {
   type StudyProfile,
   type TimeSlot,
   type CourseReviewSummary,
-} from '../services/studyBuddyEngine';
-import { earnXP } from '../services/gamificationEngine';
+} from '../../services/studyBuddyEngine';
+import { earnXP } from '../../services/gamificationEngine';
 
 if (Platform.OS === 'android') {
   if (UIManager.setLayoutAnimationEnabledExperimental) {
@@ -294,7 +294,7 @@ const StudyGroupCard: React.FC<StudyGroupCardProps> = ({ group }) => {
 // ============================================================================
 // MAIN SCREEN
 // ============================================================================
-export function StudyBuddyScreen() {
+export function StudyBuddyPanel() {
   const insets = useSafeAreaInsets();
 
   const [activeTab, setActiveTab] = useState<TabType>('buddy');
