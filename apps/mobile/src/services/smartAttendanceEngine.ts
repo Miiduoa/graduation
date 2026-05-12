@@ -338,7 +338,7 @@ export async function getAttendanceCourses(): Promise<AttendanceCourse[]> {
     }
   } catch (_) {}
 
-  // Fallback 層級 2：從 E校園快取讀取課表（與 TodayScreen 完全一致）
+  // Fallback 層級 2：從 E校園快取讀取課表（與 SmartDashboard / 課表資料源一致）
   try {
     const puCourses = await getAnyCachedCourses();
     if (puCourses && puCourses.courses.length > 0) {

@@ -17,6 +17,7 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/LearningAnalyticsScreen.tsx',
   'apps/mobile/src/screens/MenuDetailScreen.tsx',
   'apps/mobile/src/screens/MessagesHomeScreen.tsx',
+  'apps/mobile/src/screens/PostLoginDebugScreen.tsx',
   'apps/mobile/src/screens/ProfileEditScreen.tsx',
 ];
 

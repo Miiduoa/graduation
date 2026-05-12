@@ -4,7 +4,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CoursesHomeScreen } from './CoursesHomeScreen';
 import { AddCourseScreen } from './AddCourseScreen';
 import { AcademicScreen } from './AcademicScreen';
-import { GradesScreen } from './GradesScreen';
 import { CreditAuditStack } from './CreditAuditStack';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { AICourseAdvisorScreen } from './AICourseAdvisorScreen';
@@ -14,8 +13,6 @@ import { CourseModulesScreen } from './CourseModulesScreen';
 import { QuizCenterScreen } from './QuizCenterScreen';
 import { AttendanceScreen } from './AttendanceScreen';
 import { ClassroomScreen } from './ClassroomScreen';
-import { LearningAnalyticsScreen } from './LearningAnalyticsScreen';
-import { CourseGradebookScreen } from './CourseGradebookScreen';
 import { QuizTakingScreen } from './QuizTakingScreen';
 import { PeerReviewScreen } from './PeerReviewScreen';
 import AttendanceLiveScreen from './AttendanceLiveScreen';
@@ -25,6 +22,18 @@ import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
 
 const Stack = createNativeStackNavigator<any, undefined>();
+
+type AcademicTab = 'grades' | 'insights' | 'gradebook' | 'analytics';
+
+function withAcademicInitialTab(tab: AcademicTab) {
+  return function AcademicTabRoute(props: any) {
+    const mergedParams = { ...(props.route?.params ?? {}), initialTab: tab };
+    return <AcademicScreen {...props} route={{ ...props.route, params: mergedParams }} />;
+  };
+}
+
+const AcademicGradesRoute = withAcademicInitialTab('grades');
+const AcademicInsightsRoute = withAcademicInitialTab('insights');
 
 // 包裝需要「開課/管理」權限的畫面
 function GuardedAddCourse(props: any) {
@@ -44,17 +53,19 @@ function GuardedAttendance(props: any) {
 }
 
 function GuardedGradebook(props: any) {
+  const mergedParams = { ...(props.route?.params ?? {}), initialTab: 'gradebook' as const };
   return (
     <RouteGuard requires="courses.grade">
-      <CourseGradebookScreen {...props} />
+      <AcademicScreen {...props} route={{ ...props.route, params: mergedParams }} />
     </RouteGuard>
   );
 }
 
 function GuardedLearningAnalytics(props: any) {
+  const mergedParams = { ...(props.route?.params ?? {}), initialTab: 'analytics' as const };
   return (
     <RouteGuard requires={['admin.analytics', 'courses.manage']}>
-      <LearningAnalyticsScreen {...props} />
+      <AcademicScreen {...props} route={{ ...props.route, params: mergedParams }} />
     </RouteGuard>
   );
 }
@@ -110,7 +121,12 @@ export function AcademicStack() {
         options={{ title: '課內成績簿' }}
       />
       <Stack.Screen name="Classroom" component={ClassroomScreen} options={{ title: '課堂互動' }} />
-      <Stack.Screen name="Grades" component={GradesScreen} options={{ title: '成績查詢' }} />
+      <Stack.Screen name="Grades" component={AcademicGradesRoute} options={{ title: '成績查詢', headerShown: false }} />
+      <Stack.Screen
+        name="AcademicInsights"
+        component={AcademicInsightsRoute}
+        options={{ title: '學業 AI 分析', headerShown: false }}
+      />
       <Stack.Screen
         name="LearningAnalytics"
         component={GuardedLearningAnalytics}

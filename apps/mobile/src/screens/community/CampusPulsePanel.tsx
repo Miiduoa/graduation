@@ -17,10 +17,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useDataSource } from '../hooks/useDataSource';
-import { useSchool } from '../state/school';
-import { theme } from '../ui/theme';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
+import { useDataSource } from '../../hooks/useDataSource';
+import { useSchool } from '../../state/school';
+import { theme } from '../../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import {
   getCampusPulseSnapshot,
   submitCrowdReport,
@@ -31,8 +31,8 @@ import {
   type CampusEvent,
   type PulseInsight,
   type CrowdLevel,
-} from '../services/campusPulseEngine';
-import { earnXP } from '../services/gamificationEngine';
+} from '../../services/campusPulseEngine';
+import { earnXP } from '../../services/gamificationEngine';
 
 if (UIManager.setLayoutAnimationEnabledExperimental && Platform.OS === 'android') {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -818,7 +818,7 @@ const FeedbackAnimation: React.FC<FeedbackAnimationProps> = ({ feedback, onAnima
   );
 };
 
-export function CampusPulseScreen() {
+export function CampusPulsePanel() {
   const insets = useSafeAreaInsets();
   const ds = useDataSource();
   const { school } = useSchool();
