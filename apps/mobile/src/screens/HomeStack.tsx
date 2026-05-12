@@ -3,11 +3,12 @@
  * HomeStack — Today Tab (精簡版)
  *
  * 只保留核心路由：
- * - TodayHome: SmartDashboard（統一儀表板，整合學業分析 + 校園脈動）
+ * - TodayHome: SmartDashboard（統一儀表板）
  * - 公告/活動詳情
- * - AIChat
  * - 校園社群（唯一的社交入口）
  * - 智慧行事曆
+ *
+ * AI 對話已改為全域 Overlay（App 層 AIOverlayHost），不再在此 Stack 註冊。
  *
  * 移除的冗餘路由：
  * - ClassicToday → 與 SmartDashboard 重複

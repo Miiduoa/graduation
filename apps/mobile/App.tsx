@@ -4,7 +4,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   NavigationContainer,
   DefaultTheme,
-  useNavigationContainerRef,
   type LinkingOptions,
 } from '@react-navigation/native';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -67,6 +66,7 @@ import { useProactiveAIReporter } from './src/app/useProactiveAIReporter';
 import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
+import { rootNavigationRef, type RootTabParamList } from './src/app/rootNavigation';
 
 /**
  * 4+1 AI-First 導航架構
@@ -82,16 +82,6 @@ import { usePermissions } from './src/hooks/usePermissions';
  * - AI-First: AI 不是其中一個 Tab，而是整個 App 的作業系統（懸浮在所有畫面之上）
  * - 角色策略: Tab 名字統一，內容由 LearnStack 等內部 dispatcher 依角色適配
  */
-type RootTabParamList = {
-  Today: undefined;
-  學習: undefined;
-  校園: undefined;
-  訊息: undefined;
-  我的: undefined; // 隱藏 Tab：不顯示在 Tab Bar，僅透過 HeaderDrawer 內部 navigate 觸發
-};
-
-type AppNavigationRef = ReturnType<typeof useNavigationContainerRef<RootTabParamList>>;
-
 const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
 type TabKey = keyof RootTabParamList;
@@ -175,6 +165,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           Dms: 'dms',
           FriendSearch: 'friend-search',
           FriendsManage: 'friends',
+          FollowingLists: 'following-lists',
           Chat: 'chat/:peerId',
           AdminCourseVerify: 'course-verify',
         },
@@ -556,6 +547,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     return (
       <Pressable
         key={route.key}
+        testID={`tab-${String(route.name)}`}
         accessibilityRole="button"
         accessibilityState={focused ? { selected: true } : {}}
         accessibilityLabel={options.tabBarAccessibilityLabel}
@@ -702,9 +694,9 @@ function AppTabNavigator() {
   );
 }
 
-function AppNavigation({ navigationRef }: { navigationRef: AppNavigationRef }) {
+function AppNavigation() {
   const auth = useAuth();
-  usePushNotifications(navigationRef, auth.user?.uid);
+  usePushNotifications(rootNavigationRef, auth.user?.uid);
   useAIAmbientAwareness();
   useAIBrainLifecycle();
   useProactiveAIReporter();
@@ -739,7 +731,7 @@ function AppNavigation({ navigationRef }: { navigationRef: AppNavigationRef }) {
 
   return (
     <NavigationContainer
-      ref={navigationRef}
+      ref={rootNavigationRef}
       theme={navTheme}
       linking={linking}
       fallback={
@@ -767,7 +759,6 @@ function AppNavigation({ navigationRef }: { navigationRef: AppNavigationRef }) {
 }
 
 function AppInner() {
-  const navigationRef = useNavigationContainerRef<RootTabParamList>();
   const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -836,7 +827,7 @@ function AppInner() {
           <ToastProvider>
             <AuthAwareStateProviders>
               <DemoProvider>
-                <AppNavigation navigationRef={navigationRef} />
+                <AppNavigation />
               </DemoProvider>
             </AuthAwareStateProviders>
           </ToastProvider>

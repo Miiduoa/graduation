@@ -71,12 +71,12 @@ tags:
 # 截圖 - 主畫面
 - takeScreenshot: main_screen_after_onboarding
 
-# 驗證底部導覽列
+# 驗證底部導覽列（4+1：四 Tab + 中央 AI 球）
 - assertVisible:
-    text: '活動'
+    text: '今天'
 - assertVisible:
-    text: '地圖'
+    text: '學習'
 - assertVisible:
-    text: '餐廳'
+    text: '校園'
 - assertVisible:
-    text: '我的'
+    text: '訊息'

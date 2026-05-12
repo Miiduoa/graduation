@@ -121,7 +121,11 @@ jobs:
           mkdir -p .maestro/results
           maestro test .maestro/flows/01_onboarding.yaml \
             --format junit \
-            --output .maestro/results/smoke-results.xml \
+            --output .maestro/results/smoke-onboarding.xml \
+            --env APP_ID=com.campus.app
+          maestro test .maestro/flows/11_navigation_ai_first.yaml \
+            --format junit \
+            --output .maestro/results/smoke-ai-first.xml \
             --env APP_ID=com.campus.app
 
       - name: Run Full Test Suite

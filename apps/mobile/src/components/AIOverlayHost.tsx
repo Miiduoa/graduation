@@ -50,7 +50,10 @@ export function AIOverlayHost() {
       statusBarTranslucent
     >
       {overlay.mode === 'chat' ? (
-        <ChatModeOverlay initialPrompt={overlay.initialPrompt} />
+        <ChatModeOverlay
+          initialPrompt={overlay.initialPrompt}
+          proactiveReportId={overlay.proactiveReportId}
+        />
       ) : overlay.mode === 'quick' ? (
         <QuickCommandOverlay />
       ) : (
@@ -61,7 +64,13 @@ export function AIOverlayHost() {
 }
 
 // ─── 1. Chat 模式：全螢幕對話 ─────────────────────────
-function ChatModeOverlay({ initialPrompt }: { initialPrompt?: string }) {
+function ChatModeOverlay({
+  initialPrompt,
+  proactiveReportId,
+}: {
+  initialPrompt?: string;
+  proactiveReportId?: string;
+}) {
   const insets = useSafeAreaInsets();
   const slide = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const navigation = useNavigation<any>();
@@ -85,14 +94,20 @@ function ChatModeOverlay({ initialPrompt }: { initialPrompt?: string }) {
   };
 
   // AIChatScreen 是 1 個獨立 Screen，這裡用 props 注入 navigation/route 來模擬導航環境
-  const fakeRoute = useMemo(
-    () => ({
+  const fakeRoute = useMemo(() => {
+    const params: Record<string, string> = {};
+    if (typeof initialPrompt === 'string' && initialPrompt.trim()) {
+      params.prompt = initialPrompt.trim();
+    }
+    if (typeof proactiveReportId === 'string' && proactiveReportId.trim()) {
+      params.proactiveReportId = proactiveReportId.trim();
+    }
+    return {
       key: 'AIOverlay-Chat',
       name: 'AIChat',
-      params: initialPrompt ? { prompt: initialPrompt } : undefined,
-    }),
-    [initialPrompt],
-  );
+      params: Object.keys(params).length ? params : undefined,
+    };
+  }, [initialPrompt, proactiveReportId]);
 
   return (
     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }}>

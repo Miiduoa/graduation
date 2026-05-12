@@ -120,11 +120,17 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
 
       // 使用 functional update 來獲取當前狀態的快照，避免閉包問題
       let notificationsSnapshot: Notification[] = [];
+      let wasUnread = false;
 
       setNotifications((prev) => {
         notificationsSnapshot = prev;
+        const target = prev.find((n) => n.id === id);
+        wasUnread = !!target && !target.read;
+        if (!wasUnread) return prev;
         return prev.map((n) => (n.id === id ? { ...n, read: true } : n));
       });
+
+      if (!wasUnread) return;
 
       try {
         await setDoc(
@@ -132,8 +138,26 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
           { read: true, readAt: serverTimestamp() },
           { merge: true },
         );
-      } catch (e) {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'mark_notifications_read',
+          { action: 'single', notificationId: id },
+          'success',
+          undefined,
+          '使用者在通知中心將單則通知標為已讀',
+        );
+      } catch (e: any) {
         console.warn('Failed to mark notification as read:', e);
+        const errMsg = e?.message != null ? String(e.message) : String(e);
+        void import('../services/aiBrain').then(({ aiBrain }) =>
+          aiBrain.reportToolOutcome(
+            'mark_notifications_read',
+            { action: 'single', notificationId: id },
+            'failure',
+            errMsg,
+            '通知標為已讀失敗',
+          ),
+        );
         // 回滾時也使用 functional update，確保只回滾我們的修改
         setNotifications((current) => {
           // 檢查是否已經被其他操作修改過，如果是則不回滾
@@ -188,8 +212,26 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
       }
 
       await batch.commit();
-    } catch (e) {
+      const { aiBrain } = await import('../services/aiBrain');
+      aiBrain.reportToolOutcome(
+        'mark_notifications_read',
+        { action: 'all', notificationIds: unreadIds },
+        'success',
+        undefined,
+        `使用者在通知中心將 ${unreadIds.length} 則通知全部標為已讀`,
+      );
+    } catch (e: any) {
       console.warn('Failed to mark all notifications as read:', e);
+      const errMsg = e?.message != null ? String(e.message) : String(e);
+      void import('../services/aiBrain').then(({ aiBrain }) =>
+        aiBrain.reportToolOutcome(
+          'mark_notifications_read',
+          { action: 'all', notificationIds: unreadIds },
+          'failure',
+          errMsg,
+          '全部通知標為已讀失敗',
+        ),
+      );
       // 精確回滾：只回滾我們修改過的項目
       setNotifications((current) =>
         current.map((n) => {

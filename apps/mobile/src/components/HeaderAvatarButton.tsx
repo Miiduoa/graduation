@@ -27,6 +27,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
 
   return (
     <Pressable
+      testID="header-avatar-button"
       onPress={() => headerDrawer.open()}
       hitSlop={10}
       accessibilityRole="button"

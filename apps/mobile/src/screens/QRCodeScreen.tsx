@@ -31,6 +31,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { PureQRCode } from '../ui/PureQRCode';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { parseAddFriendUid } from '../utils/campusFriendLink';
 
 let QRCodeNative: any = null;
 try {
@@ -149,6 +150,16 @@ function parseQRPayload(
     return { type, data: payload, isValid: isValid && !isExpired };
   } catch {
     return null;
+  }
+}
+
+/** 開啟訊息 Tab 的「搜尋／加好友」並帶入對方 UID。 */
+function navigateToFriendSearchWithPreset(nav: any, presetUid: string) {
+  try {
+    const tabNav = nav?.getParent?.();
+    tabNav?.navigate?.('訊息', { screen: 'FriendSearch', params: { presetUid } });
+  } catch {
+    nav?.navigate?.('FriendSearch', { presetUid });
   }
 }
 
@@ -281,6 +292,12 @@ export function QRCodeScreen(props: any) {
     }
   }, [mode, qrType, auth.user?.uid, schoolId, regenerateQR]);
 
+  useEffect(() => {
+    if (props?.route?.params?.openScanMode) {
+      setMode('scan');
+    }
+  }, [props?.route?.params?.openScanMode]);
+
   const handleBarCodeScanned = (scanningResult: { type: string; data: string }) => {
     if (scanned) return;
     setScanned(true);
@@ -327,6 +344,11 @@ export function QRCodeScreen(props: any) {
     setIsCameraActive(false);
 
     analytics.logEvent('qr_scanned', { type, is_valid: isValid });
+    const presetAddFriend = parseAddFriendUid(data.trim());
+    if (presetAddFriend && nav) {
+      navigateToFriendSearchWithPreset(nav, presetAddFriend);
+      analytics.logEvent('qr_action', { action: 'add_friend_deep_link_auto' });
+    }
     setTimeout(() => setScanned(false), 2000);
   };
 
@@ -366,6 +388,13 @@ export function QRCodeScreen(props: any) {
   };
 
   const handleProcessScanResult = (data: string) => {
+    const addPreset = parseAddFriendUid(data.trim());
+    if (addPreset) {
+      navigateToFriendSearchWithPreset(nav, addPreset);
+      analytics.logEvent('qr_action', { action: 'add_friend_deep_link' });
+      return;
+    }
+
     const parsed = parseQRPayload(data);
 
     if (parsed && !parsed.isValid) {
@@ -392,19 +421,13 @@ export function QRCodeScreen(props: any) {
           analytics.logEvent('qr_action', { action: 'checkin' });
           Alert.alert('簽到成功', `已完成活動簽到！\n簽到時間：${new Date().toLocaleString()}`);
           return;
-        case 'profile':
-          const userId = parsed.data.u;
-          Alert.alert('個人名片', `用戶：${userId}`, [
-            { text: '關閉' },
-            {
-              text: '發送訊息',
-              onPress: () => {
-                analytics.logEvent('qr_action', { action: 'send_message', target_user: userId });
-                nav?.navigate?.('收件匣', { screen: 'Chat', params: { peerId: userId } });
-              },
-            },
-          ]);
+        case 'profile': {
+          const userId =
+            parsed.data.u != null && typeof parsed.data.u === 'string' ? parsed.data.u : '';
+          if (userId) navigateToFriendSearchWithPreset(nav, userId);
+          analytics.logEvent('qr_action', { action: 'profile_qr_friend_search' });
           return;
+        }
         case 'custom':
           Alert.alert('自訂內容', parsed.data.content || '無內容');
           return;
