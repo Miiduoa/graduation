@@ -17,6 +17,7 @@ export type Permission =
   | 'courses.manage'
   | 'courses.grade'
   | 'courses.attendance'
+  | 'courses.catalog'
   // Campus
   | 'campus.map'
   | 'campus.cafeteria'
@@ -94,6 +95,7 @@ const ROLE_PERMISSIONS: Record<RoleGroup, readonly Permission[]> = {
   student: [
     'announcements.view',
     'courses.view',
+    'courses.catalog',
     'campus.map',
     'campus.cafeteria',
     'campus.library',
@@ -113,6 +115,7 @@ const ROLE_PERMISSIONS: Record<RoleGroup, readonly Permission[]> = {
     'announcements.create',
     'announcements.edit',
     'courses.view',
+    'courses.catalog',
     'courses.create',
     'courses.manage',
     'courses.grade',
@@ -133,6 +136,7 @@ const ROLE_PERMISSIONS: Record<RoleGroup, readonly Permission[]> = {
   ],
   staff: [
     'announcements.view',
+    'courses.catalog',
     'campus.map',
     'campus.cafeteria',
     'campus.library',
@@ -156,6 +160,7 @@ const ROLE_PERMISSIONS: Record<RoleGroup, readonly Permission[]> = {
     'announcements.edit',
     'announcements.delete',
     'courses.view',
+    'courses.catalog',
     'courses.create',
     'courses.manage',
     'courses.grade',
@@ -185,6 +190,7 @@ const ROLE_PERMISSIONS: Record<RoleGroup, readonly Permission[]> = {
     'announcements.edit',
     'announcements.delete',
     'courses.view',
+    'courses.catalog',
     'courses.create',
     'courses.manage',
     'courses.grade',
@@ -243,56 +249,23 @@ export type TabConfig = {
   icon: { active: string; inactive: string };
 };
 
-export function getTabsForRole(role: AppRole): TabConfig[] {
-  const roleGroup = getRoleGroup(role);
+/**
+ * 新導航：4 個 Tab + 中央 AI 球（不是 Tab，是懸浮按鈕）。
+ * Tab 名字在所有角色下統一；角色差異藏在「Tab 內部內容」與 AI 球可用工具。
+ *
+ * 順序：今天 | 學習 | [AI 球] | 校園 | 訊息
+ * （AI 球以 placeholder 佔位，由 FloatingTabBar 在中央渲染懸浮 FAB）
+ */
+export const UNIFIED_TABS: TabConfig[] = [
+  { key: 'Today', label: '今天', icon: { active: 'sunny', inactive: 'sunny-outline' } },
+  { key: '學習', label: '學習', icon: { active: 'book', inactive: 'book-outline' } },
+  { key: '校園', label: '校園', icon: { active: 'map', inactive: 'map-outline' } },
+  { key: '訊息', label: '訊息', icon: { active: 'chatbubbles', inactive: 'chatbubbles-outline' } },
+];
 
-  const sharedBefore: TabConfig[] = [
-    { key: 'Today', label: 'Today', icon: { active: 'sunny', inactive: 'sunny-outline' } },
-  ];
-
-  const sharedAfter: TabConfig[] = [
-    { key: '校園', label: '校園', icon: { active: 'map', inactive: 'map-outline' } },
-    { key: '收件匣', label: '收件匣', icon: { active: 'mail', inactive: 'mail-outline' } },
-    {
-      key: '我的',
-      label: '我的',
-      icon: { active: 'person-circle', inactive: 'person-circle-outline' },
-    },
-  ];
-
-  const roleTab: TabConfig = (() => {
-    switch (roleGroup) {
-      case 'teacher':
-        return {
-          key: '教學',
-          label: '教學',
-          icon: { active: 'school', inactive: 'school-outline' },
-        };
-      case 'staff':
-        return {
-          key: '服務',
-          label: '服務',
-          icon: { active: 'construct', inactive: 'construct-outline' },
-        };
-      case 'department_head':
-        return {
-          key: '審核',
-          label: '審核',
-          icon: { active: 'checkmark-circle', inactive: 'checkmark-circle-outline' },
-        };
-      case 'admin':
-        return {
-          key: '管理',
-          label: '管理',
-          icon: { active: 'shield-checkmark', inactive: 'shield-checkmark-outline' },
-        };
-      case 'student':
-      default:
-        return { key: '課程', label: '課程', icon: { active: 'book', inactive: 'book-outline' } };
-    }
-  })();
-
-  return [...sharedBefore, roleTab, ...sharedAfter];
+export function getTabsForRole(_role: AppRole): TabConfig[] {
+  // 統一回傳同樣的 4 個 Tab，角色差異移到 Tab 內部處理
+  return UNIFIED_TABS;
 }
 
 // Screen-level access control
@@ -314,20 +287,9 @@ export function canAccessScreen(role: AppRole, screenName: ScreenName): boolean 
 }
 
 // Get the initial route name based on role
-export function getInitialRoute(role: AppRole): string {
-  const roleGroup = getRoleGroup(role);
-  switch (roleGroup) {
-    case 'admin':
-      return '管理';
-    case 'department_head':
-      return '審核';
-    case 'teacher':
-      return '教學';
-    case 'staff':
-      return '服務';
-    default:
-      return 'Today';
-  }
+// 新導航：所有角色都從「今天」開始；角色差異透過內容適配呈現
+export function getInitialRoute(_role: AppRole): string {
+  return 'Today';
 }
 
 // Role display names (Traditional Chinese)

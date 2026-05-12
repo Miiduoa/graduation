@@ -216,7 +216,7 @@ function buildStudentLearningCues(
         body: '同學多半會先處理正在進行的課堂，再回頭看其他更新。你現在進去最不容易掉隊。',
         ctaLabel: '進入課堂',
         target: {
-          tab: '課程',
+          tab: '學習',
           screen: 'Classroom',
           params: {
             groupId: liveSpace.groupId,
@@ -238,7 +238,7 @@ function buildStudentLearningCues(
         body: '這和你現在最可能被延後的課務一致。先完成這一步，後面的壓力會明顯小很多。',
         ctaLabel: '前往處理',
         target: {
-          tab: surface === 'inbox' ? '收件匣' : '課程',
+          tab: surface === 'inbox' ? '訊息' : '學習',
           screen: surface === 'inbox' ? 'GroupAssignments' : 'CourseHub',
           params: { groupId: completionSpace.groupId },
         },
@@ -273,7 +273,7 @@ function buildTeacherLearningCues(
         body: '這門課的當前節奏已經形成。先進課堂看簽到與互動，比先做其他管理更貼近現場。',
         ctaLabel: '查看課堂',
         target: {
-          tab: '教學',
+          tab: '學習',
           screen: 'Classroom',
           params: {
             groupId: liveSpace.groupId,
@@ -295,7 +295,7 @@ function buildTeacherLearningCues(
         body: '現在批改或發布回饋，最能回應學生已經開始的節奏，也能讓下一步更清楚。',
         ctaLabel: '查看批改',
         target: {
-          tab: '教學',
+          tab: '學習',
           screen: 'CourseGradebook',
           params: { groupId: completionSpace.groupId, groupName: completionSpace.name },
         },
@@ -415,7 +415,7 @@ async function buildAdminCue(schoolId: string): Promise<AmbientCue[]> {
       headline,
       body: '當公告、活動與成員狀態一起變動時，管理者通常先回到總覽確認哪個模組最需要你介入。',
       ctaLabel: '查看總覽',
-      target: { tab: '管理', screen: 'AdminDashboard' },
+      target: { tab: '學習', screen: 'AdminDashboard' },
       metric:
         typeof latestAnnouncement?.title === 'string'
           ? `最新公告：${latestAnnouncement.title}`
@@ -449,7 +449,7 @@ async function buildDepartmentCue(schoolId: string): Promise<AmbientCue[]> {
           : '目前待審核量偏低',
       body: '同類角色通常會先把堆積中的審核清掉，再回頭看統計與長期報表，避免節奏被未決事項拖住。',
       ctaLabel: '查看審核',
-      target: { tab: '審核', screen: 'DepartmentHub' },
+      target: { tab: '學習', screen: 'DepartmentHub' },
       metric: pendingCount > 0 ? `${pendingCount} 件待審核` : undefined,
       distinctUserCount: Math.max(pendingCount, 1),
       updatedAt: new Date(),

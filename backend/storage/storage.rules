@@ -19,11 +19,25 @@ service firebase.storage {
       return request.resource.contentType.matches('image/.*');
     }
 
-    function isValidDocument() {
-      return request.resource.contentType.matches('application/pdf')
-          || request.resource.contentType.matches('application/msword')
-          || request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*')
-          || request.resource.contentType.matches('text/.*');
+    function isValidVideo() {
+      return request.resource.contentType.matches('video/.*');
+    }
+
+    function isValidAudio() {
+      return request.resource.contentType.matches('audio/.*');
+    }
+
+    function isSchoolMemberStorage(schoolId) {
+      return isAuthenticated()
+        && firestore.exists(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/schools/$(schoolId)/members/$(request.auth.uid)).data.status == 'active';
+    }
+
+    function campusMediaOk() {
+      return (isValidImage() && maxSize(10))
+        || (isValidVideo() && maxSize(100))
+        || (isValidAudio() && maxSize(20))
+        || (isValidDocument() && maxSize(50));
     }
 
     function isAllowedUpload() {
@@ -199,6 +213,22 @@ service firebase.storage {
     match /temp/{userId}/{fileName} {
       allow read: if isOwner(userId);
       allow write: if isOwner(userId) && maxSize(50);
+    }
+
+    match /schools/{schoolId}/campusPosts/{postId}/{fileName} {
+      allow read: if isSchoolMemberStorage(schoolId);
+      allow write: if isSchoolMemberStorage(schoolId) && campusMediaOk();
+    }
+
+    match /schools/{schoolId}/stories/{storyId}/{fileName} {
+      allow read: if isSchoolMemberStorage(schoolId);
+      allow write: if isSchoolMemberStorage(schoolId)
+        && (isValidImage() && maxSize(10) || isValidVideo() && maxSize(100));
+    }
+
+    match /conversations/{conversationId}/media/{uploadId}/{fileName} {
+      allow read: if conversationMember(conversationId);
+      allow write: if conversationMember(conversationId) && campusMediaOk();
     }
 
     match /{allPaths=**} {

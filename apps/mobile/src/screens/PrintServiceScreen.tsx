@@ -231,11 +231,45 @@ export function PrintServiceScreen(props: any) {
               setSelectedFile(null);
               setSelectedScenario(null);
               setSelectedTab('history');
+              try {
+                const { aiBrain } = await import('../services/aiBrain');
+                aiBrain.reportToolOutcome(
+                  'print_file',
+                  {
+                    printerId: selectedStation.id,
+                    location: selectedStation.name,
+                    fileName: selectedFile.name,
+                    pages: estPages,
+                    copies,
+                    color: colorMode === 'color',
+                    duplex,
+                  },
+                  'success',
+                  undefined,
+                  `在「${selectedStation.name}」列印 ${selectedFile.name}（${estPages} 頁）`,
+                );
+              } catch (brainErr) {
+                console.warn('[PrintService] brain.observe failed:', brainErr);
+              }
               Alert.alert(
                 '已送出 ✅',
                 `列印工作已送至 ${selectedStation.name}\n${duplex ? '🌿 獲得 2 環保積分！' : ''}`,
               );
             } catch (err: any) {
+              try {
+                const { aiBrain } = await import('../services/aiBrain');
+                aiBrain.reportToolOutcome(
+                  'print_file',
+                  {
+                    printerId: selectedStation.id,
+                    fileName: selectedFile.name,
+                  },
+                  'failure',
+                  err?.message,
+                );
+              } catch (brainErr) {
+                console.warn('[PrintService] brain.observe failed:', brainErr);
+              }
               Alert.alert('送出失敗', err?.message ?? '請稍後再試');
             }
           },

@@ -19,6 +19,8 @@ describe('intentWritePlan', () => {
   test('write intents map to tools', () => {
     expect(getIntentWritePlan('reserve_seat')).toMatchObject({ toolName: 'reserveSeat', requiresConfirmation: true });
     expect(getIntentWritePlan('borrow_book')).toMatchObject({ toolName: 'borrowBook', requiresConfirmation: true });
+    expect(getIntentWritePlan('renew_book')).toMatchObject({ toolName: 'renewBook', requiresConfirmation: true });
+    expect(getIntentWritePlan('return_book')).toMatchObject({ toolName: 'returnBook', requiresConfirmation: true });
     expect(getIntentWritePlan('submit_repair_request')).toMatchObject({
       toolName: 'createDormRepairRequest',
       requiresConfirmation: true,

@@ -2,8 +2,7 @@
 /**
  * 🏫 校園社群 — Community Screen
  *
- * 整合三個社交功能為一：社群動態 | 校園脈動 | 學習夥伴
- * 用頂部 segmented tab 切換。
+ * 四個分頁：動態（Firestore 貼文）| 看板 | 即時（Story + LBS）| 學伴
  */
 import React, { useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
@@ -12,26 +11,38 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
-import { CampusSocialPanel } from './community/CampusSocialPanel';
-import { CampusPulsePanel } from './community/CampusPulsePanel';
+import { HomeFeedScreen } from './social/HomeFeedScreen';
+import { BoardsScreen } from './social/BoardsScreen';
+import { RealtimeSocialScreen } from './social/RealtimeSocialScreen';
 import { StudyBuddyPanel } from './community/StudyBuddyPanel';
+import { CampusSocialNavProvider } from './social/CampusSocialNavContext';
 
-type TabKey = 'social' | 'pulse' | 'buddy';
+type TabKey = 'feed' | 'boards' | 'realtime' | 'buddy';
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
-  { key: 'social', label: '社群', icon: 'chatbubbles-outline' },
-  { key: 'pulse', label: '脈動', icon: 'pulse-outline' },
+  { key: 'feed', label: '動態', icon: 'sparkles-outline' },
+  { key: 'boards', label: '看板', icon: 'grid-outline' },
+  { key: 'realtime', label: '即時', icon: 'flash-outline' },
   { key: 'buddy', label: '學伴', icon: 'people-outline' },
 ];
+
+const LEGACY_TAB: Record<string, TabKey> = {
+  social: 'feed',
+  pulse: 'realtime',
+};
 
 export function CommunityScreen(props: Record<string, unknown>) {
   useThemeMode();
   const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<TabKey>('social');
+  const [activeTab, setActiveTab] = useState<TabKey>('feed');
+  const stackNav = (props as any)?.navigation;
 
-  // 支援從 route.params.initialTab 指定初始 tab
+  // 支援從 route.params.initialTab 指定初始 tab（含舊版 social / pulse 別名）
   const route = (props as any)?.route;
-  const initialTab = route?.params?.initialTab as TabKey | undefined;
+  const rawInitial = route?.params?.initialTab as string | undefined;
+  const initialTab: TabKey | undefined = rawInitial
+    ? (LEGACY_TAB[rawInitial] ?? (rawInitial as TabKey))
+    : undefined;
   useEffect(() => {
     if (initialTab && TABS.some((t) => t.key === initialTab)) {
       setActiveTab(initialTab);
@@ -102,11 +113,14 @@ export function CommunityScreen(props: Record<string, unknown>) {
       </View>
 
       {/* ─── Content ─── */}
-      <View style={{ flex: 1 }}>
-        {activeTab === 'social' && <CampusSocialPanel />}
-        {activeTab === 'pulse' && <CampusPulsePanel />}
-        {activeTab === 'buddy' && <StudyBuddyPanel />}
-      </View>
+      <CampusSocialNavProvider navigation={stackNav}>
+        <View style={{ flex: 1 }}>
+          {activeTab === 'feed' && <HomeFeedScreen />}
+          {activeTab === 'boards' && <BoardsScreen />}
+          {activeTab === 'realtime' && <RealtimeSocialScreen />}
+          {activeTab === 'buddy' && <StudyBuddyPanel />}
+        </View>
+      </CampusSocialNavProvider>
     </View>
   );
 }

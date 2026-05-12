@@ -201,13 +201,23 @@ async function requestFollowRedirects(
   throw new Error('TronClass redirect chain exceeded limit');
 }
 
-async function tcFetchJson(url, cookies) {
-  const result = await httpsRequest(url, {
-    cookies,
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+function isSessionInvalidStatus(status) {
+  return status === 302 || status === 401 || status === 403;
+}
+
+function isSessionExpiredError(error) {
+  return String(error?.message || '').includes('session 已失效');
+}
+
+function toNumberOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseTcJsonResponse(result) {
+  if (isSessionInvalidStatus(result.status)) {
+    throw new Error('TronClass session 已失效，請重新登入');
+  }
 
   if (result.status !== 200) {
     throw new Error(`HTTP ${result.status}`);
@@ -218,6 +228,31 @@ async function tcFetchJson(url, cookies) {
   }
 
   return JSON.parse(result.body);
+}
+
+async function tcFetchJson(url, cookies, options = {}) {
+  const result = await httpsRequest(url, {
+    method: options.method || 'GET',
+    body: options.body,
+    cookies,
+    headers: {
+      Accept: 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+
+  return parseTcJsonResponse(result);
+}
+
+async function tcPostJson(url, cookies, payload) {
+  return tcFetchJson(url, cookies, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+  });
 }
 
 async function tcFetchAllPages(basePath, dataKey, cookies, params = {}, pageSize = 20) {
@@ -239,7 +274,12 @@ async function tcFetchAllPages(basePath, dataKey, cookies, params = {}, pageSize
 
     allItems.push(...items);
 
-    const totalPages = typeof data.pages === 'number' ? data.pages : 1;
+    const totalPages =
+      typeof data.pages === 'number'
+        ? data.pages
+        : typeof data.paging?.pages === 'number'
+          ? data.paging.pages
+          : 1;
     if (page >= totalPages) {
       break;
     }
@@ -252,12 +292,25 @@ async function tcFetchAllPages(basePath, dataKey, cookies, params = {}, pageSize
 async function tcEnsureUserId(cookies, knownUserId = null) {
   if (knownUserId) return knownUserId;
 
+  const profile = await tcFetchJson(`${TC_BASE}/api/profile`, cookies).catch((error) => {
+    if (isSessionExpiredError(error)) {
+      throw error;
+    }
+    return null;
+  });
+  const profileUserId = toNumberOrNull(profile?.id ?? profile?.user_id ?? profile?.userId);
+  if (profileUserId) return profileUserId;
+
   const indexPage = await httpsRequest(`${TC_BASE}/user/index`, {
     cookies,
     headers: {
       Accept: 'text/html',
     },
   });
+
+  if (isSessionInvalidStatus(indexPage.status) || indexPage.body.includes('/auth/realms/pu')) {
+    throw new Error('TronClass session 已失效，請重新登入');
+  }
 
   const userId = parseUserIdFromHtml(indexPage.body);
   return userId || null;
@@ -378,7 +431,17 @@ async function tcLoginCas(uid, password) {
     maxRedirects: 3,
   });
 
-  const userId = parseUserIdFromHtml(indexPage.body);
+  let userId = parseUserIdFromHtml(indexPage.body);
+  let userName = parseUserNameFromHtml(indexPage.body, uid);
+  if (!userId) {
+    const profile = await tcFetchJson(`${TC_BASE}/api/profile`, indexPage.cookies).catch(() => null);
+    const profileUserId = toNumberOrNull(profile?.id ?? profile?.user_id ?? profile?.userId);
+    if (profileUserId) {
+      userId = profileUserId;
+      userName = profile.name ?? profile.display_name ?? userName;
+    }
+  }
+
   if (!userId) {
     if (isCredentialError(loginResult.body) || isCredentialError(indexPage.body)) {
       return { success: false, cookies: {}, session: null, error: 'TronClass CAS 帳號或密碼錯誤' };
@@ -423,7 +486,7 @@ async function tcLoginCas(uid, password) {
     session: {
       loggedIn: true,
       userId,
-      userName: parseUserNameFromHtml(indexPage.body, uid),
+      userName,
     },
   };
 }
@@ -486,34 +549,100 @@ async function tcLogin(uid, password) {
 }
 
 async function tcFetchCourses(cookies, { userId, status = 'ongoing' } = {}) {
-  const resolvedUserId = await tcEnsureUserId(cookies, userId);
-  if (!resolvedUserId) {
-    throw new Error('TronClass session 已失效，請重新登入');
+  let items = [];
+  try {
+    items = await tcFetchMyCourses(cookies, status);
+  } catch (error) {
+    if (isSessionExpiredError(error)) {
+      throw error;
+    }
+    console.warn('[TronClass] /api/my-courses failed, falling back to user courses:', error);
   }
 
-  const conditions = JSON.stringify({ status: [status] });
-  const fields =
-    'id,name,course_code,department(id,name),teachers(id,name,avatar_url),cover_image_url,student_count,status,role';
-  const items = await tcFetchAllPages(
-    `api/users/${resolvedUserId}/courses`,
-    'courses',
-    cookies,
-    { conditions, fields },
-    50,
-  );
+  if (items.length === 0) {
+    const resolvedUserId = await tcEnsureUserId(cookies, userId);
+    if (!resolvedUserId) {
+      throw new Error('TronClass session 已失效，請重新登入');
+    }
 
-  return items.map((course) => ({
+    const conditions = JSON.stringify({ status: [status] });
+    const fields =
+      'id,name,course_code,department(id,name),teachers(id,name,avatar_url),cover_image_url,student_count,status,role';
+    items = await tcFetchAllPages(
+      `api/users/${resolvedUserId}/courses`,
+      'courses',
+      cookies,
+      { conditions, fields },
+      50,
+    );
+  }
+
+  return items.map((course) => normalizeTcCourse(course, status));
+}
+
+async function tcFetchMyCourses(cookies, status = 'ongoing') {
+  const allCourses = [];
+  const pageSize = 50;
+  const tronStatus = status === 'upcoming' ? 'notStarted' : status;
+
+  for (let page = 1; ; page += 1) {
+    const data = await tcPostJson(`${TC_BASE}/api/my-courses`, cookies, {
+      conditions: { status: [tronStatus] },
+      page,
+      page_size: pageSize,
+    });
+
+    const courses = Array.isArray(data?.courses) ? data.courses : [];
+    if (courses.length === 0) break;
+
+    allCourses.push(...courses);
+
+    const totalPages =
+      typeof data?.paging?.pages === 'number'
+        ? data.paging.pages
+        : typeof data?.pages === 'number'
+          ? data.pages
+          : 1;
+    if (page >= totalPages) break;
+  }
+
+  return allCourses;
+}
+
+function normalizeTcCourse(course, fallbackStatus) {
+  const department =
+    course.department && typeof course.department === 'object' ? course.department : null;
+  const people = course.teachers ?? course.instructors ?? [];
+  const rawCredit = course.credit ?? course.credits ?? null;
+  const credit =
+    typeof rawCredit === 'string'
+      ? Number.parseFloat(rawCredit) || null
+      : typeof rawCredit === 'number'
+        ? rawCredit
+        : null;
+
+  return {
     id: course.id,
     name: course.name,
     course_code: course.course_code || '',
-    department_name: course.department?.name ?? null,
-    department_id: course.department?.id ?? null,
-    status: course.status ?? status,
-    role: course.role ?? 'student',
-    teachers: course.teachers ?? [],
-    cover_image_url: course.cover_image_url ?? null,
-    student_count: course.student_count ?? 0,
-  }));
+    department,
+    department_name: department?.name ?? course.department_name ?? null,
+    department_id: department?.id ?? course.department_id ?? null,
+    instructors: people,
+    teachers: people,
+    credit,
+    semester: course.semester ?? null,
+    klass: course.klass ?? null,
+    grade: course.grade ?? null,
+    course_outline: course.course_outline ?? null,
+    start_date: course.start_date ?? null,
+    end_date: course.end_date ?? null,
+    status: course.status ?? fallbackStatus,
+    role: course.role ?? course.enroll_role ?? 'student',
+    cover_image_url: course.cover_image_url ?? course.cover?.url ?? null,
+    student_count: course.student_count ?? course.course_attributes?.student_count ?? 0,
+    classroom_schedule: course.classroom_schedule ?? null,
+  };
 }
 
 async function tcFetchModules(cookies, courseId) {
@@ -584,6 +713,24 @@ async function tcFetchAttendance(cookies, { userId: _userId } = {}) {
 }
 
 async function tcFetchProfile(cookies, { userId } = {}) {
+  const profile = await tcFetchJson(`${TC_BASE}/api/profile`, cookies).catch((error) => {
+    if (isSessionExpiredError(error)) {
+      throw error;
+    }
+    return null;
+  });
+  const profileId = toNumberOrNull(profile?.id ?? profile?.user_id ?? profile?.userId);
+  if (profileId) {
+    return {
+      id: profileId,
+      name: profile.name ?? '',
+      login_name: profile.login_name ?? profile.user_no ?? '',
+      email: profile.email ?? null,
+      avatar_url: profile.avatar_url ?? profile.avatar_big_url ?? null,
+      role: profile.role ?? 'student',
+    };
+  }
+
   const resolvedUserId = await tcEnsureUserId(cookies, userId);
   if (!resolvedUserId) {
     throw new Error('TronClass session 已失效，請重新登入');

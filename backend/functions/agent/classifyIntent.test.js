@@ -54,6 +54,15 @@ describe('classifyIntent', () => {
     expect(r.source).toBe('rich');
   });
 
+  test('rich: library renew and return map to dedicated intents', () => {
+    expect(classifyIntent('幫我續借快到期的書').name).toBe('renew_book');
+    expect(classifyIntent('幫我還書').name).toBe('return_book');
+  });
+
+  test('ambiguous demonstrative request remains general', () => {
+    expect(classifyIntent('幫我處理一下那個').name).toBe('general');
+  });
+
   test('keyword_fallback: food_order', () => {
     const r = classifyIntent('幫我在學生餐廳點一份雞排飯跟一杯紅茶');
     expect(r.name).toBe('food_order');

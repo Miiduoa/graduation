@@ -14,15 +14,15 @@
 
 import { getDataSource, hasDataSource, type DataSource } from '../data/source';
 import {
-  getCachedCourses,
-  getCachedGrades,
-  getCachedAnnouncements,
-  getCachedStudentInfo,
-  getCachedTCCourses,
-  getCachedTCActivities,
-  getCachedTCModules,
-  getCachedTCAttendance,
-  getCachedTCTodos,
+  getAnyCachedCourses as getCachedCourses,
+  getAnyCachedGrades as getCachedGrades,
+  getAnyCachedAnnouncements as getCachedAnnouncements,
+  getAnyCachedStudentInfo as getCachedStudentInfo,
+  getAnyCachedTCCourses as getCachedTCCourses,
+  getAnyCachedTCActivities as getCachedTCActivities,
+  getAnyCachedTCModules,
+  getAnyCachedTCAttendance as getCachedTCAttendance,
+  getAnyCachedTCTodos as getCachedTCTodos,
   syncAllData,
 } from './puDataCache';
 import type { CampusActorRole } from '../data';
@@ -41,6 +41,8 @@ import {
   recommendLunchCandidates,
   type LunchMenuRow,
 } from './recommendLunch';
+import { understand, rankMenuCandidates, type SemanticFrame } from './aiSemanticReasoner';
+import { recordUnknownConcept, lookupLearnedConcept, linkConceptToMeaning } from './aiActiveLearning';
 
 /** 與 AIChatScreen 訂餐選單一致：itemId@@vendorId */
 const DINING_CHOICE_ID_SEP = '@@';
@@ -58,6 +60,137 @@ function encodeDiningChoiceMenuId(m: { id?: string }, cafeterias: any[]): string
   const v = diningVendorKeyForMenu(m as any, cafeterias);
   if (!v || !m?.id) return String(m.id ?? '');
   return `${m.id}${DINING_CHOICE_ID_SEP}${v}`;
+}
+
+// ─── 共用：從訊息中解析「第 N 個」/「最後一個」 ───
+function parseOrdinalFromMessage(msg: string): number | null {
+  if (!msg) return null;
+  const cn: Record<string, number> = { 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  const m = msg.match(/第\s*([一二兩三四五六七八九十\d]+)\s*[個份項道杯碗本]/);
+  if (m) {
+    const n = cn[m[1]] ?? parseInt(m[1], 10);
+    if (Number.isFinite(n) && n >= 1) return n;
+  }
+  if (/最後[一那]?個/.test(msg)) return -1;
+  if (/^第一個$/.test(msg.trim())) return 1;
+  return null;
+}
+
+// ─── 語意層輔助：時段中文、選單建構、共用下單流程 ───
+function mealTimeLabel(t: 'breakfast' | 'lunch' | 'dinner' | 'snack'): string {
+  return t === 'breakfast' ? '早餐' : t === 'lunch' ? '午餐' : t === 'dinner' ? '晚餐' : '下午茶';
+}
+
+function buildDiningChoiceMenu(
+  menus: any[],
+  cafeterias: any[],
+  frame?: SemanticFrame,
+): AssistantChoiceMenu {
+  const titleSuffix = frame?.slots.meal_time
+    ? `（${mealTimeLabel(frame.slots.meal_time)}推薦）`
+    : '';
+  return {
+    title: `請選擇餐點${titleSuffix}`,
+    prompt: '點選下方任一項，就可以幫你下單；或回「第 N 個」、「不是這個是 XXX」我就學會了',
+    producedByTool: 'create_order',
+    options: menus.slice(0, 8).map((m: any, i: number) => ({
+      id: encodeDiningChoiceMenuId(m, cafeterias),
+      label: `${m.name}${typeof m.price === 'number' ? ` · $${m.price}` : ''}`,
+      subtitle: m.cafeteria ? String(m.cafeteria) : undefined,
+      sendAsUser: `幫我點第${i + 1}個`,
+    })),
+  };
+}
+
+/** 共用下單流程；matches.length === 1 與 ordinal-resolved 都會走這裡 */
+async function placeOrderWith(
+  matched: any,
+  quantity: number,
+  cafeteriasForMenus: any[],
+  ctx: ExecutorContext,
+  args: Record<string, string>,
+): Promise<ToolCallResult> {
+  const cafeteriaId = matched.cafeteriaId ?? matched.cafeteria_id ?? '';
+  const cafeteria =
+    cafeteriasForMenus.find((c: any) => c.id === cafeteriaId) ??
+    cafeteriasForMenus.find((c: any) => c.name === matched.cafeteria) ??
+    cafeteriasForMenus[0];
+  const vendorId = diningVendorKeyForMenu(matched, cafeteriasForMenus);
+  const itemId = String(matched.id ?? '').trim();
+  if (!itemId) {
+    return { success: false, isWrite: true, summary: '無法辨識餐點 ID（itemId），請改點選下方選單或換個說法。' };
+  }
+  if (!vendorId) {
+    return { success: false, isWrite: true, summary: '無法辨識店家 ID（vendorId），請確認菜單已同步或改選其他餐廳。' };
+  }
+  const qty = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+  const price = matched.price ?? 0;
+  if (typeof price !== 'number') {
+    return { success: false, isWrite: true, summary: '此品項缺少可下單價格，無法建立訂單。' };
+  }
+  const totalAmount = price * qty;
+
+  if (!hasDataSource()) {
+    return {
+      success: true,
+      isWrite: true,
+      summary: [
+        '已幫你選好餐點！',
+        `餐點：${matched.name} x ${qty}`,
+        cafeteria?.name ? `餐廳：${cafeteria.name}` : matched.cafeteria ? `餐廳：${matched.cafeteria}` : '',
+        price ? `金額：$${totalAmount}` : '',
+        '請到點餐頁面完成最終確認下單。',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    };
+  }
+
+  const ds = getDataSource();
+  const order = await ds.createOrder({
+    userId: ctx.userId,
+    schoolId: ctx.schoolId,
+    cafeteriaId: cafeteria?.id ?? cafeteriaId,
+    merchantId: cafeteria?.merchantId ?? cafeteria?.id ?? cafeteriaId,
+    cafeteria: cafeteria?.name ?? matched.cafeteria ?? '校園餐廳',
+    merchantName: cafeteria?.name ?? matched.cafeteria ?? '校園餐廳',
+    items: [
+      {
+        menuItemId: matched.id,
+        name: matched.name,
+        price,
+        quantity: qty,
+        note: args.note,
+      },
+    ],
+    totalAmount,
+    note: args.note,
+    source: 'ai_agent',
+  } as any);
+
+  if (!order?.id) {
+    return {
+      success: false,
+      isWrite: true,
+      summary: '訂餐失敗：目前系統忙碌，請改到餐廳點餐頁面完成。',
+    };
+  }
+
+  return {
+    success: true,
+    isWrite: true,
+    data: order,
+    summary: [
+      '✅ 已送出訂單。',
+      `餐點：${matched.name} x ${qty}`,
+      cafeteria?.name ? `餐廳：${cafeteria.name}` : matched.cafeteria ? `餐廳：${matched.cafeteria}` : '',
+      price ? `金額：$${totalAmount}` : '',
+      `訂單編號：${order.id}`,
+      '狀態：待店家確認',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+  };
 }
 
 /** Cloud Function createOrder 錯誤 → 使用者可讀說明（勿只顯示 not-found） */
@@ -304,6 +437,11 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
     {
       name: 'daily_briefing',
       description: '產生今日簡報：今天的課程、待繳作業、重要通知、行事曆事件的整合摘要。使用者問到「今天有什麼」「今日摘要」時使用。',
+      parameters: { type: 'object', properties: {} },
+    },
+    {
+      name: 'assistant_help',
+      description: '說明 AI 校園助理可以做哪些事，以及哪些操作需要更多資訊或確認。',
       parameters: { type: 'object', properties: {} },
     },
   ];
@@ -1285,7 +1423,22 @@ const TOOL_EXECUTORS: Record<
       const summary = limited.map((e, i) =>
         `${i + 1}. ${e.title}${e.location ? ` @${e.location}` : ''}${e.startsAt ? ` — ${new Date(e.startsAt).toLocaleDateString('zh-TW')}` : ''}`
       ).join('\n');
-      return { success: true, data: limited, summary: `近期活動:\n${summary}` };
+      return {
+        success: true,
+        data: limited,
+        summary: `近期活動:\n${summary}\n\n點選下方或回「第 N 個」即可報名（若已額滿會由後端回覆）。`,
+        choiceMenu: {
+          title: '近期活動',
+          producedByTool: 'register_event',
+          prompt: '選一場活動報名',
+          options: limited.slice(0, 8).map((e: any, i: number) => ({
+            id: String(e.id ?? ''),
+            label: String(e.title ?? `活動 ${i + 1}`),
+            subtitle: e.location ? String(e.location) : undefined,
+            sendAsUser: `報名第${i + 1}個活動`,
+          })),
+        },
+      };
     } catch {
       return { success: true, data: [], summary: '查詢活動失敗。' };
     }
@@ -1570,6 +1723,20 @@ const TOOL_EXECUTORS: Record<
     };
   },
 
+  assistant_help: async () => {
+    return {
+      success: true,
+      isWrite: false,
+      summary: [
+        '我可以協助校園 App 內的任務：',
+        '1. 查課表、作業、成績、學分進度與每日簡報',
+        '2. 查公告、活動、餐廳、圖書館、宿舍、包裹與交通資訊',
+        '3. 在資訊足夠時代辦訂餐、請假、圖書館座位、借書、洗衣機、報修、通知已讀與訊息發送',
+        '會寫入資料的操作，我會先確認必要資訊；缺房號、課程或目標時會先追問。',
+      ].join('\n'),
+    };
+  },
+
   // ─────── 寫入工具 ───────
 
   send_message: async (args, ctx) => {
@@ -1607,34 +1774,193 @@ const TOOL_EXECUTORS: Record<
 
   register_event: async (args, ctx) => {
     if (!hasDataSource() || !ctx.userId) return { success: false, error: '未登入', summary: '需要登入才能報名。', isWrite: true };
+    const ds = getDataSource();
+    // 1. 處理「第 N 個」/ lastChoiceMenu 選擇
+    let eventId = (args.eventId ?? '').trim();
+    if (!eventId && ctx.lastChoiceMenu && ctx.lastUserMessage) {
+      const ord = parseOrdinalFromMessage(ctx.lastUserMessage);
+      if (ord != null) {
+        const opt = ctx.lastChoiceMenu.options[ord - 1];
+        if (opt) eventId = String(opt.id ?? '').split('@@')[0];
+      }
+    }
+    // 2. 仍沒有 eventId → 列出可報名活動 + choiceMenu，反問使用者
+    if (!eventId) {
+      try {
+        const list = await ds.listEvents(ctx.schoolId).catch(() => [] as any[]);
+        const active = (Array.isArray(list) ? list : []).slice(0, 8);
+        if (active.length === 0) {
+          return { success: false, isWrite: false, summary: '目前沒有可報名的活動。' };
+        }
+        return {
+          success: false, isWrite: false,
+          summary: `請選擇要報名的活動：\n\n${active.map((e: any, i: number) => `${i + 1}. ${e.title ?? e.name}${e.location ? `（${e.location}）` : ''}`).join('\n')}\n\n點選下方任一項，或回「第 N 個」。`,
+          choiceMenu: {
+            title: '請選擇活動',
+            producedByTool: 'register_event',
+            options: active.map((e: any, i: number) => ({
+              id: String(e.id ?? e.eventId ?? ''),
+              label: String(e.title ?? e.name ?? `活動 ${i + 1}`),
+              subtitle: e.location ? String(e.location) : undefined,
+              sendAsUser: `幫我報名第${i + 1}個`,
+            })),
+          },
+        };
+      } catch (e: any) {
+        return { success: false, error: e.message, summary: '無法取得活動清單。', isWrite: false };
+      }
+    }
+    // 3. 有 eventId → 正常執行
     try {
-      const ds = getDataSource();
-      await ds.registerEvent(args.eventId, ctx.userId, ctx.schoolId);
-      return { success: true, isWrite: true, summary: `✅ 已報名活動 ${args.eventId}` };
+      await ds.registerEvent(eventId, ctx.userId, ctx.schoolId);
+      return { success: true, isWrite: true, summary: `✅ 已報名活動 ${eventId}` };
     } catch (e: any) {
-      return { success: false, error: e.message, summary: '報名活動失敗。', isWrite: true };
+      return { success: false, error: e.message, summary: `報名活動失敗：${e.message ?? '未知錯誤'}`, isWrite: true };
     }
   },
 
   reserve_library_seat: async (args, ctx) => {
     if (!hasDataSource() || !ctx.userId) return { success: false, error: '未登入', summary: '需要登入才能預約。', isWrite: true };
+    const ds = getDataSource();
+    const date = args.date || new Date().toISOString().split('T')[0];
+    const startTime = args.startTime || '09:00';
+    const endTime = args.endTime || '12:00';
+    let seatId = (args.seatId ?? '').trim();
+    if (!seatId && ctx.lastChoiceMenu && ctx.lastUserMessage) {
+      const ord = parseOrdinalFromMessage(ctx.lastUserMessage);
+      if (ord != null) {
+        const opt = ctx.lastChoiceMenu.options[ord - 1];
+        if (opt) seatId = String(opt.id ?? '').split('@@')[0];
+      }
+    }
+    if (!seatId) {
+      try {
+        const seats = await (ds as any).listSeats?.(ctx.schoolId).catch(() => []) ?? [];
+        const available = (Array.isArray(seats) ? seats : []).filter((s: any) => s.available !== false && s.status !== 'occupied').slice(0, 8);
+        if (available.length === 0) {
+          return { success: false, isWrite: false, summary: '目前圖書館沒有可預約的空座位。' };
+        }
+        return {
+          success: false, isWrite: false,
+          summary: `這些座位可選：\n\n${available.map((s: any, i: number) => `${i + 1}. ${s.zone ?? s.name ?? s.seatId ?? `座位 ${i + 1}`}${s.floor ? `（${s.floor}）` : ''}`).join('\n')}\n\n點下方或說「第 N 個」就幫你預約 ${date} ${startTime}-${endTime}。`,
+          choiceMenu: {
+            title: '請選擇座位',
+            producedByTool: 'reserve_library_seat',
+            options: available.map((s: any, i: number) => ({
+              id: String(s.id ?? s.seatId ?? ''),
+              label: String(s.zone ?? s.name ?? `座位 ${i + 1}`),
+              subtitle: s.floor ? String(s.floor) : undefined,
+              sendAsUser: `預約第${i + 1}個座位 ${date} ${startTime}-${endTime}`,
+            })),
+          },
+        };
+      } catch (e: any) {
+        return { success: false, error: e.message, summary: '無法取得座位資料。', isWrite: false };
+      }
+    }
     try {
-      const ds = getDataSource();
-      const reservation = await ds.reserveSeat(args.seatId, ctx.userId, args.date, args.startTime, args.endTime, ctx.schoolId);
-      return { success: true, isWrite: true, data: reservation, summary: `✅ 已預約座位 ${args.seatId}（${args.date} ${args.startTime}-${args.endTime}）` };
+      const reservation = await ds.reserveSeat(seatId, ctx.userId, date, startTime, endTime, ctx.schoolId);
+      return { success: true, isWrite: true, data: reservation, summary: `✅ 已預約座位 ${seatId}（${date} ${startTime}-${endTime}）` };
     } catch (e: any) {
-      return { success: false, error: e.message, summary: '預約座位失敗。', isWrite: true };
+      return { success: false, error: e.message, summary: `預約座位失敗：${e.message ?? '未知錯誤'}`, isWrite: true };
     }
   },
 
   borrow_book: async (args, ctx) => {
     if (!hasDataSource() || !ctx.userId) return { success: false, error: '未登入', summary: '需要登入才能借書。', isWrite: true };
+    const ds = getDataSource();
+    let bookId = (args.bookId ?? '').trim();
+
+    // 1. 從 lastChoiceMenu 解 ordinal
+    if (!bookId && ctx.lastChoiceMenu && ctx.lastUserMessage) {
+      const ord = parseOrdinalFromMessage(ctx.lastUserMessage);
+      if (ord != null) {
+        const opt = ctx.lastChoiceMenu.options[ord - 1];
+        if (opt) bookId = String(opt.id ?? '').split('@@')[0];
+      } else if (/隨便|都可以|任一|相關|挑一?本|選一?本/.test(ctx.lastUserMessage)) {
+        const opt = ctx.lastChoiceMenu.options[0];
+        if (opt) bookId = String(opt.id ?? '').split('@@')[0];
+      }
+    }
+
+    // 2. 從 lastUserMessage 抽書名關鍵字（中／日／英書名）
+    const userMsg = ctx.lastUserMessage ?? '';
+    const bookKw =
+      userMsg.match(/(?:借|借閱)\s*[《「『"]([^》」』"]{2,30})[》」』"]/)?.[1] ??
+      userMsg.match(/(?:借|借閱)\s*([^\s，,。的這那一]{2,15})\s*這?本/)?.[1] ??
+      '';
+
+    // 3. 如果有關鍵字 → 用搜尋找書
+    if (!bookId && bookKw) {
+      try {
+        const results: any = await (ds as any).searchBooks?.(bookKw, ctx.schoolId).catch(() => null);
+        const books: any[] = Array.isArray(results) ? results : (results?.items ?? []);
+        const exact = books.find((b) => String(b.title ?? '').includes(bookKw));
+        if (exact) bookId = String(exact.id ?? exact.bookId ?? '');
+        else if (books.length > 0) {
+          return {
+            success: false, isWrite: false,
+            summary: `搜尋「${bookKw}」找到 ${books.length} 本相關書籍：\n\n${books.slice(0, 6).map((b: any, i: number) => `${i + 1}. ${b.title ?? b.name}${b.author ? `（${b.author}）` : ''}`).join('\n')}\n\n回我「第 N 本」就幫你借。`,
+            choiceMenu: {
+              title: '請選擇書籍',
+              producedByTool: 'borrow_book',
+              options: books.slice(0, 6).map((b: any, i: number) => ({
+                id: String(b.id ?? b.bookId ?? ''),
+                label: String(b.title ?? b.name ?? `書籍 ${i + 1}`),
+                subtitle: b.author ? String(b.author) : undefined,
+                sendAsUser: `借第${i + 1}本`,
+              })),
+            },
+          };
+        }
+      } catch { /* 搜尋失敗，繼續往下 */ }
+    }
+
+    // 4. 還是沒有 bookId → 看使用者是否說「隨便」「都可以」→ AI 直接代決定
+    const wantsAutoPick = /隨便|都可以|都好|隨機|任意|你選|你決定|你幫我選/.test(userMsg);
+    if (!bookId) {
+      try {
+        // mockSource / dataSource 沒有 listAllBooks，用 searchBooks('') 取得全部
+        const allBooks: any = await (ds as any).searchBooks?.('', ctx.schoolId).catch(() => null);
+        const books: any[] = Array.isArray(allBooks) ? allBooks : (allBooks?.items ?? []);
+        const top = books.slice(0, 8);
+        if (wantsAutoPick && top.length > 0) {
+          // AI 直接決定（hash 挑前 3 名其中之一，避免每次同一本）
+          const seed = (new Date().getDate() + (ctx.userId?.length ?? 0)) % Math.min(3, top.length);
+          bookId = String(top[seed].id ?? top[seed].bookId ?? '');
+          if (!bookId) {
+            return { success: false, isWrite: false, summary: '找不到可借的書，請晚點再試。' };
+          }
+        } else if (top.length > 0) {
+          return {
+            success: false, isWrite: false,
+            summary: `${bookKw ? `找不到「${bookKw}」，` : ''}這幾本書可以借：\n\n${top.map((b: any, i: number) => `${i + 1}. ${b.title ?? b.name}${b.author ? `（${b.author}）` : ''}`).join('\n')}\n\n回我「第 N 本」就幫你借。`,
+            choiceMenu: {
+              title: '請選擇書籍',
+              producedByTool: 'borrow_book',
+              options: top.map((b: any, i: number) => ({
+                id: String(b.id ?? b.bookId ?? ''),
+                label: String(b.title ?? b.name ?? `書籍 ${i + 1}`),
+                subtitle: b.author ? String(b.author) : undefined,
+                sendAsUser: `借第${i + 1}本`,
+              })),
+            },
+          };
+        }
+      } catch { /* ignore */ }
+      if (!bookId) {
+        return {
+          success: false, isWrite: false,
+          summary: '請告訴我要借哪本書？可以說書名（例如「幫我借《人工智慧導論》」），我幫你搜尋並借閱。',
+        };
+      }
+    }
+
     try {
-      const ds = getDataSource();
-      const loan = await ds.borrowBook(args.bookId, ctx.userId, ctx.schoolId);
-      return { success: true, isWrite: true, data: loan, summary: `✅ 已借閱書籍 ${args.bookId}` };
+      const loan = await ds.borrowBook(bookId, ctx.userId, ctx.schoolId);
+      return { success: true, isWrite: true, data: loan, summary: `✅ 已借閱書籍 ${bookId}` };
     } catch (e: any) {
-      return { success: false, error: e.message, summary: '借閱失敗。', isWrite: true };
+      return { success: false, error: e.message, summary: `借閱失敗：${e.message ?? '未知錯誤'}`, isWrite: true };
     }
   },
 
@@ -1689,7 +2015,7 @@ const TOOL_EXECUTORS: Record<
         success: true,
         isWrite: true,
         data: req,
-        summary: `✅ 已提交維修申請（編號：${req.id}）「${args.title}」`,
+        summary: `✅ 已提交維修申請（編號：${req.id}）「${args.title}」${args.room ? `\n地點：${args.room}` : ''}`,
       };
     } catch (e: any) {
       return { success: false, error: e.message, summary: '提交維修申請失敗。', isWrite: true };
@@ -1841,10 +2167,18 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource()) {
       return { success: false, isWrite: true, summary: '無法簽到：資料來源未連接。' };
     }
+    const courseSpaceId = (args.courseSpaceId ?? '').trim();
+    if (!courseSpaceId) {
+      return {
+        success: false,
+        isWrite: false,
+        summary: '簽到需要當前課程的 QR Code 或場次代碼。請打開 App 「課程 → 簽到」掃碼，或告訴我哪堂課的代碼。',
+      };
+    }
     try {
       const ds = getDataSource();
       const result = await ds.checkInAttendance({
-        courseSpaceId: args.courseSpaceId,
+        courseSpaceId,
         sessionId: args.sessionId,
         qrToken: args.qrToken,
       });
@@ -1852,7 +2186,7 @@ const TOOL_EXECUTORS: Record<
         success: result.success,
         isWrite: true,
         data: result,
-        summary: result.success ? '簽到成功！' : '簽到失敗，請確認 QR Code 或場次是否正確。',
+        summary: result.success ? '✅ 簽到成功！' : '簽到失敗，請確認 QR Code 或場次是否正確。',
       };
     } catch (e: any) {
       return { success: false, isWrite: true, summary: `簽到失敗：${e?.message ?? '未知錯誤'}` };
@@ -1883,10 +2217,44 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource() || !ctx.userId) {
       return { success: false, isWrite: true, summary: '無法預約洗衣機：資料來源或使用者未登入。' };
     }
+    const ds = getDataSource();
+    let machineId = (args.machineId ?? '').trim();
+    if (!machineId && ctx.lastChoiceMenu && ctx.lastUserMessage) {
+      const ord = parseOrdinalFromMessage(ctx.lastUserMessage);
+      if (ord != null) {
+        const opt = ctx.lastChoiceMenu.options[ord - 1];
+        if (opt) machineId = String(opt.id ?? '').split('@@')[0];
+      }
+    }
+    if (!machineId) {
+      try {
+        const dorm: any = await (ds as any).getDormInfo?.(ctx.userId, ctx.schoolId).catch(() => null);
+        const machines: any[] = dorm?.washingMachines ?? dorm?.machines ?? [];
+        const available = machines.filter((m: any) => m.available !== false && m.status !== 'in_use').slice(0, 8);
+        if (available.length === 0) {
+          return { success: false, isWrite: false, summary: '目前沒有空的洗衣機，請晚點再試。' };
+        }
+        return {
+          success: false, isWrite: false,
+          summary: `可用洗衣機：\n\n${available.map((m: any, i: number) => `${i + 1}. ${m.label ?? m.name ?? m.id}${m.floor ? `（${m.floor}）` : ''}`).join('\n')}\n\n回「第 N 個」就幫你預約。`,
+          choiceMenu: {
+            title: '請選擇洗衣機',
+            producedByTool: 'reserve_washing_machine',
+            options: available.map((m: any, i: number) => ({
+              id: String(m.id ?? m.machineId ?? ''),
+              label: String(m.label ?? m.name ?? `洗衣機 ${i + 1}`),
+              subtitle: m.floor ? String(m.floor) : undefined,
+              sendAsUser: `預約第${i + 1}個洗衣機`,
+            })),
+          },
+        };
+      } catch (e: any) {
+        return { success: false, error: e.message, summary: '無法取得洗衣機清單。', isWrite: false };
+      }
+    }
     try {
-      const ds = getDataSource();
-      const reservation = await ds.reserveWashingMachine(args.machineId, ctx.userId, ctx.schoolId);
-      return { success: true, isWrite: true, data: reservation, summary: `洗衣機預約成功！機器 ID: ${args.machineId}` };
+      const reservation = await ds.reserveWashingMachine(machineId, ctx.userId, ctx.schoolId);
+      return { success: true, isWrite: true, data: reservation, summary: `✅ 洗衣機預約成功！機器：${machineId}` };
     } catch (e: any) {
       return { success: false, isWrite: true, summary: `預約洗衣機失敗：${e?.message ?? '未知錯誤'}` };
     }
@@ -2083,8 +2451,13 @@ const TOOL_EXECUTORS: Record<
       return { success: false, isWrite: true, summary: '請先登入才能訂餐哦！' };
     }
     try {
-      const itemName = (args.itemName ?? '').trim();
-      if (!itemName) return { success: false, isWrite: true, summary: '請告訴我你想點什麼餐點。' };
+      const rawItemName = (args.itemName ?? '').trim();
+
+      // ── 0. 語意推理：理解使用者真正想表達什麼 ──
+      const userMsg = ctx.lastUserMessage ?? rawItemName;
+      const frame = understand(userMsg, {
+        lastChoiceMenu: ctx.lastChoiceMenu,
+      });
 
       // ── 1. 合併所有菜單來源（Firestore + 本地官方目錄）──
       let allMenus: any[] = [];
@@ -2128,22 +2501,198 @@ const TOOL_EXECUTORS: Record<
         }
       }
 
-      // ── 2. 智慧模糊匹配 ──
+      // ── 2A. 位置引用：「第 N 個」或「對/就那個」直接從 lastChoiceMenu 解析 ──
+      const refUsesLastMenu =
+        (frame.reference?.type === 'ordinal' || frame.reference?.type === 'confirmation' || frame.reference?.type === 'demonstrative') &&
+        ctx.lastChoiceMenu?.options?.length;
+      if (refUsesLastMenu) {
+        const idx = frame.reference?.type === 'ordinal'
+          ? (frame.reference.index === -1 ? ctx.lastChoiceMenu!.options.length : (frame.reference.index ?? 1))
+          : 1; // confirmation / demonstrative → 預設挑第一個
+        const opt = ctx.lastChoiceMenu!.options[idx - 1];
+        if (opt) {
+          // 從 option.id 解析 itemId — 通常是 "itemId@@vendorId" 或菜單 slug
+          const idParts = String(opt.id ?? '').split('@@');
+          const resolvedItemId = idParts[0] ?? '';
+          const matchedByIdOrName = allMenus.find(
+            (m) => String(m.id ?? '') === resolvedItemId || String(m.name ?? '') === opt.label,
+          ) || allMenus.find((m) => String(opt.label ?? '').includes(String(m.name ?? '')));
+          if (matchedByIdOrName) {
+            // 學會：「第 N 個」在這個對話裡 = matchedByIdOrName.name
+            linkConceptToMeaning(opt.label, {
+              meaning: '位置引用（lastChoiceMenu 對應項）',
+              itemName: matchedByIdOrName.name,
+              source: 'inferred',
+              confidence: 0.95,
+            });
+            return await placeOrderWith(matchedByIdOrName, frame.slots.quantity ?? 1, cafeteriasForMenus, ctx, args);
+          }
+          // 找不到也不要報「找不到 第 N 個」，而是反問
+          return {
+            success: false,
+            isWrite: false,
+            summary: `「${opt.label}」目前不在可下單清單中。你想找其他類似的餐點嗎？`,
+          };
+        }
+      }
+
+      // ── 2A-bis. 「隨便/你決定」+ 上一輪有餐單 → AI 直接代決定（top-1 by ranking）──
+      if (frame.constraints.autoPick) {
+        // 優先從 lastChoiceMenu 的選項中挑
+        const pool: any[] = (() => {
+          if (ctx.lastChoiceMenu?.options?.length) {
+            return ctx.lastChoiceMenu.options
+              .map((opt) => {
+                const idParts = String(opt.id ?? '').split('@@');
+                const resolvedItemId = idParts[0] ?? '';
+                return (
+                  allMenus.find((m) => String(m.id ?? '') === resolvedItemId) ??
+                  allMenus.find((m) => String(m.name ?? '') === opt.label) ??
+                  allMenus.find((m) => String(opt.label ?? '').includes(String(m.name ?? '')))
+                );
+              })
+              .filter(Boolean);
+          }
+          return rankMenuCandidates(allMenus, frame);
+        })();
+        if (pool.length === 0) {
+          return {
+            success: false,
+            isWrite: false,
+            summary: '目前沒有可下單的選項。',
+          };
+        }
+        // 「隨便」→ 不要每次選同一個，從前 3 名裡用日期 hash 挑一個
+        const top = pool.slice(0, Math.min(3, pool.length));
+        const seed = (new Date().getDate() + (ctx.userId?.length ?? 0)) % top.length;
+        const picked = top[seed];
+        return await placeOrderWith(picked, frame.slots.quantity ?? 1, cafeteriasForMenus, ctx, args);
+      }
+
+      // ── 2B. 純時段詞「幫我訂午餐／晚餐」→ 推薦該時段熱門 ──
+      const isMealTimeOnly =
+        frame.intent === 'order_food' &&
+        frame.slots.meal_time &&
+        !frame.slots.item &&
+        !frame.reference;
+      if (isMealTimeOnly) {
+        const ranked = rankMenuCandidates(allMenus, frame).slice(0, 8);
+        if (ranked.length === 0) {
+          return {
+            success: false,
+            isWrite: false,
+            summary: `目前看起來沒有適合${mealTimeLabel(frame.slots.meal_time!)}的選項，要不要看完整菜單？`,
+          };
+        }
+        return {
+          success: true,
+          isWrite: false,
+          summary: `${mealTimeLabel(frame.slots.meal_time!)}推薦${frame.constraints.spicy === true ? '（辣味）' : frame.constraints.vegetarian ? '（素食）' : ''}：\n\n${ranked
+            .map(
+              (m, i) =>
+                `${i + 1}. ${m.name}${typeof m.price === 'number' ? ` $${m.price}` : ''}${m.cafeteria ? `（${m.cafeteria}）` : ''}`,
+            )
+            .join('\n')}\n\n點選下方任一項，或說「第 N 個」就幫你下單。`,
+          choiceMenu: buildDiningChoiceMenu(ranked, cafeteriasForMenus, frame),
+        };
+      }
+
+      // ── 2B-bis. 只有 constraints/category（清淡/辣/素/便宜...）→ 用條件過濾現有 menu/lastChoiceMenu ──
+      const hasUsefulConstraint =
+        frame.constraints.vegetarian ||
+        frame.constraints.spicy === true ||
+        frame.constraints.spicy === 'avoid' ||
+        frame.constraints.warm ||
+        frame.constraints.cold ||
+        frame.constraints.quick ||
+        frame.constraints.maxPrice != null ||
+        (frame.constraints.avoidAllergens && frame.constraints.avoidAllergens.length > 0) ||
+        Boolean(frame.slots.category);
+      if (hasUsefulConstraint && !frame.slots.item && !frame.reference && !frame.slots.meal_time) {
+        // 優先在 lastChoiceMenu 提到的品項中過濾
+        let pool = allMenus;
+        if (ctx.lastChoiceMenu?.options?.length) {
+          const fromMenu = ctx.lastChoiceMenu.options
+            .map((opt) => {
+              const idParts = String(opt.id ?? '').split('@@');
+              const id = idParts[0];
+              return (
+                allMenus.find((m) => String(m.id ?? '') === id) ??
+                allMenus.find((m) => String(opt.label ?? '').includes(String(m.name ?? '')))
+              );
+            })
+            .filter(Boolean);
+          if (fromMenu.length > 0) pool = fromMenu as any[];
+        }
+        const ranked = rankMenuCandidates(pool, frame).slice(0, 8);
+        if (ranked.length === 0) {
+          return {
+            success: false,
+            isWrite: false,
+            summary: `找不到符合條件的選項。要不要換個說法？例如「素食午餐」「便宜的早餐」。`,
+          };
+        }
+        // 偏好條件描述
+        const desc = [
+          frame.constraints.vegetarian && '素食',
+          frame.constraints.spicy === true && '辣味',
+          frame.constraints.spicy === 'avoid' && '不辣',
+          frame.constraints.warm && '熱食',
+          frame.constraints.cold && '冷飲',
+          frame.constraints.maxPrice != null && `預算 $${frame.constraints.maxPrice} 以下`,
+          frame.slots.category === 'beverage' && '飲料',
+          frame.slots.category === 'dessert' && '甜點',
+        ].filter(Boolean).join('、');
+        return {
+          success: true,
+          isWrite: false,
+          summary: `${desc ? desc + '推薦：' : '符合條件的選項：'}\n\n${ranked
+            .map((m: any, i: number) => `${i + 1}. ${m.name}${typeof m.price === 'number' ? ` $${m.price}` : ''}${m.cafeteria ? `（${m.cafeteria}）` : ''}`)
+            .join('\n')}\n\n回我「第 N 個」就幫你下單。`,
+          choiceMenu: buildDiningChoiceMenu(ranked, cafeteriasForMenus, frame),
+        };
+      }
+
+      // ── 2C. 沒有 itemName 也沒有 reference 也沒有 meal_time → 反問而非報錯 ──
+      if (!rawItemName && !frame.slots.item && !frame.reference) {
+        // 如果上一輪有餐單，就把它端出來再讓使用者挑（而不是又問一遍）
+        if (ctx.lastChoiceMenu?.options?.length) {
+          return {
+            success: false,
+            isWrite: false,
+            summary: '上面那份清單還能用喔，回我「第 N 個」就幫你下單；或告訴我你的條件（素食、不辣、便宜一點⋯）。',
+            choiceMenu: ctx.lastChoiceMenu,
+          };
+        }
+        return {
+          success: false,
+          isWrite: false,
+          summary: '你想吃什麼？可以告訴我具體餐點名（例如「滷肉飯」）、時段（午餐／晚餐）、或描述（清淡的、辣的）。也可以說「隨便」我幫你決定。',
+        };
+      }
+
+      // ── 2D. 一般匹配（含學習過的別名）──
+      const itemName = frame.slots.item ?? rawItemName;
       const normalize = (s: string) => s.toLowerCase().replace(/[\s｜|／/,，、\-—_()（）]/g, '');
       const keyword = normalize(itemName);
 
-      // 找出所有匹配的餐點（支援部分匹配）
       const findMatches = (): any[] => {
-        // 完全匹配
+        // 0. 學習過的概念別名
+        const learned = lookupLearnedConcept(itemName);
+        if (learned?.itemName) {
+          const byLearned = allMenus.filter((m) => normalize(m.name) === normalize(learned.itemName!));
+          if (byLearned.length > 0) return byLearned;
+        }
+        // 1. 完全匹配
         const exact = allMenus.filter(m => normalize(m.name) === keyword);
         if (exact.length > 0) return exact;
-        // 名稱包含關鍵字
+        // 2. 名稱包含關鍵字
         const includes = allMenus.filter(m => normalize(m.name).includes(keyword));
         if (includes.length > 0) return includes;
-        // 關鍵字包含名稱
+        // 3. 關鍵字包含名稱
         const reverse = allMenus.filter(m => keyword.includes(normalize(m.name)));
         if (reverse.length > 0) return reverse;
-        // 拆字匹配（≥60% 字元命中）
+        // 4. 拆字匹配（≥60% 字元命中）
         const chars = [...keyword];
         const fuzzy = allMenus.filter(m => {
           const n = normalize(m.name);
@@ -2155,29 +2704,40 @@ const TOOL_EXECUTORS: Record<
 
       const matches = findMatches();
 
-      // ── 3. 無匹配 → 推薦類似餐點 ──
+      // ── 3. 無匹配 → 主動標記為 unknownConcept，並反問（不是報「找不到」）──
       if (matches.length === 0) {
-        const pickMenus = allMenus.slice(0, 8);
-        const suggestions = allMenus.slice(0, 10).map((m: any) =>
+        // ➤ 主動學習：記住這個我不會的詞
+        recordUnknownConcept(itemName, {
+          message: userMsg,
+          hypothesis: (() => {
+            // 字元交集最高的 known item 作為推測
+            const termChars = new Set([...itemName]);
+            let best: { name: string; overlap: number } | null = null;
+            for (const m of allMenus) {
+              const itemChars = new Set([...String(m.name ?? '')]);
+              let overlap = 0;
+              termChars.forEach((c) => { if (itemChars.has(c)) overlap++; });
+              if (!best || overlap > best.overlap) best = { name: m.name, overlap };
+            }
+            return best && best.overlap > 0
+              ? { guess: best.name, reason: `${best.overlap}/${itemName.length} 字重疊`, confidence: Math.min(0.7, best.overlap / itemName.length) }
+              : undefined;
+          })(),
+        });
+
+        const ranked = rankMenuCandidates(allMenus, frame).slice(0, 8);
+        // 重組：如果語意層有 mealTime/constraints，按那個推薦
+        const pickMenus = ranked.length > 0 ? ranked : allMenus.slice(0, 8);
+        const suggestions = pickMenus.map((m: any) =>
           `• ${m.name}${typeof m.price === 'number' ? ` $${m.price}` : ''}${m.cafeteria ? `（${m.cafeteria}）` : ''}`
         ).join('\n');
-        const choiceMenu: AssistantChoiceMenu | undefined =
-          pickMenus.length > 0
-            ? {
-                title: '熱門／可點餐點',
-                prompt: '點選一項會幫你帶入訂餐請求',
-                options: pickMenus.map((m: any, i: number) => ({
-                  id: encodeDiningChoiceMenuId(m, cafeteriasForMenus),
-                  label: `${m.name}${typeof m.price === 'number' ? ` · $${m.price}` : ''}`,
-                  subtitle: m.cafeteria ? String(m.cafeteria) : undefined,
-                  sendAsUser: `幫我點第${i + 1}個`,
-                })),
-              }
-            : undefined;
+        const friendlyAsk = frame.slots.meal_time
+          ? `沒有完全叫「${itemName}」的餐點，這是${mealTimeLabel(frame.slots.meal_time)}的推薦：`
+          : `我這裡找不到叫「${itemName}」的餐點，是不是想點下面其中一項？`;
         return {
-          success: false, isWrite: true,
-          summary: `找不到「${itemName}」這道餐點。\n\n目前可點的有：\n${suggestions}\n\n你可以說「幫我點 XXX」來下單，或點下方選單。`,
-          choiceMenu,
+          success: false, isWrite: false,
+          summary: `${friendlyAsk}\n\n${suggestions}\n\n你可以說「第 N 個」幫你下單，或回我比較像哪一項，我下次就學會了。`,
+          choiceMenu: buildDiningChoiceMenu(pickMenus, cafeteriasForMenus, frame),
         };
       }
 
@@ -2320,10 +2880,45 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource()) {
       return { success: false, isWrite: true, summary: '無法取消訂單：資料來源未連接。' };
     }
+    const ds = getDataSource();
+    let orderId = (args.orderId ?? '').trim();
+    if (!orderId && ctx.lastChoiceMenu && ctx.lastUserMessage) {
+      const ord = parseOrdinalFromMessage(ctx.lastUserMessage);
+      if (ord != null) {
+        const opt = ctx.lastChoiceMenu.options[ord - 1];
+        if (opt) orderId = String(opt.id ?? '').split('@@')[0];
+      }
+    }
+    if (!orderId) {
+      try {
+        const orders = await (ds as any).listOrders?.(ctx.userId, ctx.schoolId).catch(() => []) ?? [];
+        const pending = (Array.isArray(orders) ? orders : []).filter((o: any) =>
+          !/completed|cancelled|refunded/i.test(String(o.status ?? '')),
+        ).slice(0, 8);
+        if (pending.length === 0) {
+          return { success: false, isWrite: false, summary: '目前沒有可取消的訂單。' };
+        }
+        return {
+          success: false, isWrite: false,
+          summary: `這些訂單可以取消：\n\n${pending.map((o: any, i: number) => `${i + 1}. ${o.items?.[0]?.name ?? o.cafeteria ?? '訂單'} · $${o.totalAmount ?? '?'}`).join('\n')}\n\n回「取消第 N 個」就幫你處理。`,
+          choiceMenu: {
+            title: '請選擇要取消的訂單',
+            producedByTool: 'cancel_order',
+            options: pending.map((o: any, i: number) => ({
+              id: String(o.id ?? o.orderId ?? ''),
+              label: String(o.items?.[0]?.name ?? o.cafeteria ?? `訂單 ${i + 1}`),
+              subtitle: o.totalAmount != null ? `$${o.totalAmount}` : undefined,
+              sendAsUser: `取消第${i + 1}個訂單`,
+            })),
+          },
+        };
+      } catch (e: any) {
+        return { success: false, error: e.message, summary: '無法取得訂單清單。', isWrite: false };
+      }
+    }
     try {
-      const ds = getDataSource();
-      await ds.cancelOrder(args.orderId, ctx.userId, ctx.schoolId);
-      return { success: true, isWrite: true, summary: `訂單已取消（ID: ${args.orderId}）。` };
+      await ds.cancelOrder(orderId, ctx.userId, ctx.schoolId);
+      return { success: true, isWrite: true, summary: `✅ 訂單已取消（ID: ${orderId}）。` };
     } catch (e: any) {
       return { success: false, isWrite: true, summary: `取消訂單失敗：${e?.message ?? '未知錯誤'}` };
     }

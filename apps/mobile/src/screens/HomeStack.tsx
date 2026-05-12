@@ -25,8 +25,11 @@ import { AnnouncementsScreen } from './AnnouncementsScreen';
 import { AnnouncementDetailScreen } from './AnnouncementDetailScreen';
 import { EventsScreen } from './EventsScreen';
 import { EventDetailScreen } from './EventDetailScreen';
-import { AIChatScreen } from './AIChatScreen';
 import { CommunityScreen } from './CommunityScreen';
+import { BoardDetailScreen } from './social/BoardDetailScreen';
+import { PostComposeScreen } from './social/PostComposeScreen';
+import { PostDetailScreen } from './social/PostDetailScreen';
+import { StoryComposeScreen } from './social/StoryComposeScreen';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
@@ -36,7 +39,6 @@ const Stack = createNativeStackNavigator<any, undefined>();
 
 const HOME_ROUTE_ROLE_REQUIREMENTS: Record<string, CampusActorRole[]> = {
   TodayHome: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
-  AIChat: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
   CampusSocialScreen: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
 };
 
@@ -75,12 +77,15 @@ export function HomeStack() {
       />
       <Stack.Screen name="活動總覽" component={EventsScreen} options={{ title: '活動' }} />
       <Stack.Screen name="活動詳情" component={EventDetailScreen} options={{ title: '活動詳情' }} />
-      <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: 'AI 助理' }} />
       <Stack.Screen
         name="CampusSocialScreen"
         component={CommunityScreen}
         options={{ title: '校園社群', headerShown: false }}
       />
+      <Stack.Screen name="BoardDetail" component={BoardDetailScreen} options={{ title: '看板' }} />
+      <Stack.Screen name="PostCompose" component={PostComposeScreen} options={{ title: '發文' }} />
+      <Stack.Screen name="StoryCompose" component={StoryComposeScreen} options={{ title: '發 Story' }} />
+      <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ title: '貼文' }} />
       <Stack.Screen
         name="SmartCalendarScreen"
         component={UnifiedCalendarScreen}
