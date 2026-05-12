@@ -201,6 +201,25 @@ export function LostFoundPostScreen(props: any) {
       }
       // DataSource 未就緒時仍允許導覽回上頁（示範模式）
 
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          isEditing ? 'update_lost_found' : 'post_lost',
+          {
+            type,
+            title: title.trim(),
+            category,
+            location: finalLocation.trim(),
+            tags: characteristics,
+          },
+          'success',
+          undefined,
+          `${isEditing ? '更新' : '發布'}失物招領「${title.trim()}」（${finalLocation.trim()}）`,
+        );
+      } catch (brainErr) {
+        console.warn('[LostFoundPost] brain.observe failed:', brainErr);
+      }
+
       Alert.alert(
         isEditing ? '更新成功' : '發布成功',
         type === 'lost'
@@ -214,6 +233,17 @@ export function LostFoundPostScreen(props: any) {
         ],
       );
     } catch (error: any) {
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          isEditing ? 'update_lost_found' : 'post_lost',
+          { type, title: title.trim(), category, location: finalLocation.trim() },
+          'failure',
+          error?.message,
+        );
+      } catch (brainErr) {
+        console.warn('[LostFoundPost] brain.observe failed:', brainErr);
+      }
       Alert.alert('發布失敗', error?.message ?? '請稍後再試');
     } finally {
       setSubmitting(false);

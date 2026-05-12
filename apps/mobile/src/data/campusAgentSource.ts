@@ -53,7 +53,7 @@ function normalizeUrgency(priority: number): NextBestAction['urgency'] {
 function actionTargetFromTask(task: InboxTask): NextBestAction['actionTarget'] {
   if (task.kind === 'live' && task.sessionId) {
     return {
-      tab: '課程',
+      tab: '學習',
       screen: 'Classroom',
       params: { groupId: task.groupId, sessionId: task.sessionId },
     };
@@ -61,14 +61,14 @@ function actionTargetFromTask(task: InboxTask): NextBestAction['actionTarget'] {
 
   if ((task.kind === 'assignment' || task.kind === 'quiz') && task.assignmentId) {
     return {
-      tab: '收件匣',
+      tab: '訊息',
       screen: 'AssignmentDetail',
       params: { groupId: task.groupId, assignmentId: task.assignmentId },
     };
   }
 
   return {
-    tab: '收件匣',
+    tab: '訊息',
     screen: 'GroupDetail',
     params: { groupId: task.groupId },
   };
@@ -415,7 +415,7 @@ export async function listNextBestActions(
         nextStep: '打開課程中樞',
         actionLabel: '查看課程',
         actionTarget: {
-          tab: '課程',
+          tab: '學習',
           screen: 'CourseHub',
           params: { groupId: firstCourse.groupId },
         },

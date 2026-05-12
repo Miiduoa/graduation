@@ -57,7 +57,7 @@ function navigateFromNotificationData(
       break;
     case 'group_post':
       if (data.groupId && data.postId) {
-        nav.navigate('收件匣', {
+        nav.navigate('訊息', {
           screen: 'GroupPost',
           params: { groupId: data.groupId, postId: data.postId },
         });
@@ -65,7 +65,7 @@ function navigateFromNotificationData(
       break;
     case 'assignment':
       if (data.groupId && data.assignmentId) {
-        nav.navigate('收件匣', {
+        nav.navigate('訊息', {
           screen: 'AssignmentDetail',
           params: { groupId: data.groupId, assignmentId: data.assignmentId },
         });
@@ -73,7 +73,7 @@ function navigateFromNotificationData(
       break;
     case 'message':
       if (data.peerId) {
-        nav.navigate('收件匣', { screen: 'Chat', params: { kind: 'dm', peerId: data.peerId } });
+        nav.navigate('訊息', { screen: 'Chat', params: { kind: 'dm', peerId: data.peerId } });
       }
       break;
     default:

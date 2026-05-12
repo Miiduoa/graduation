@@ -27,6 +27,15 @@ import {
 } from '../services/ai';
 import { analytics } from '../services/analytics';
 import { getFirstStorageValue, getScopedStorageKey } from '../services/scopedStorage';
+import { useSchedule } from '../state/schedule';
+import { queryCatalog } from '../services/courseCatalogClient';
+import { getCurrentCatalogSemester } from '../data/courseCatalogConstants';
+import {
+  recommendFromCatalog,
+  deriveStudentGrade,
+  type CatalogRecommendation,
+} from '../services/courseRecommendationEngine';
+import { getAnyCachedGrades, getAnyCachedCourses } from '../services/puDataCache';
 
 type CourseCategory = 'required' | 'elective' | 'general' | 'free';
 type CourseDifficulty = 'easy' | 'medium' | 'hard';
@@ -127,7 +136,14 @@ export function AICourseAdvisorScreen(props: any) {
   const [chatInput, setChatInput] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
   const [recommendations, setRecommendations] = useState<RecommendedCourse[]>([]);
+  const [analysisMeta, setAnalysisMeta] = useState<{
+    semester: string;
+    candidateCount: number;
+    usedSignals: string[];
+    source: '靜宜大學課綱查詢系統' | '本地 mock';
+  } | null>(null);
   const [aiStatus] = useState(() => getAIStatus());
+  const schedule = useSchedule();
   const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'ai'; message: string }[]>([
     {
       role: 'ai',
@@ -279,72 +295,216 @@ export function AICourseAdvisorScreen(props: any) {
     userName: auth.profile?.displayName,
   };
 
+  /**
+   * 把 CatalogRecommendation 映射成既有 UI 的 RecommendedCourse
+   * 保留 reasons / matchScore / warnings 等資訊
+   */
+  const catalogRecToUI = (rec: CatalogRecommendation, idx: number): RecommendedCourse => {
+    const category: CourseCategory = rec.courseType?.includes('必修')
+      ? 'required'
+      : rec.courseType?.includes('通識')
+        ? 'general'
+        : 'elective';
+    const difficulty: CourseDifficulty =
+      rec.predictedGrade >= 85 ? 'easy' : rec.predictedGrade >= 75 ? 'medium' : 'hard';
+    const instructorWithClass = rec.classOffered
+      ? `${rec.teacher || '待公布'}　·　${rec.classOffered}`
+      : rec.teacher || '待公布';
+    return {
+      id: `cat-${rec.catalogCode}-${idx}`,
+      name: rec.courseName,
+      instructor: instructorWithClass,
+      credits: rec.credits,
+      category,
+      difficulty,
+      rating: Math.max(3.0, Math.min(5.0, 3.5 + rec.predictedGrade / 50)),
+      enrollment: rec.enrolled ?? 0,
+      capacity: rec.capacity ?? 999,
+      schedule: rec.timePlace || '時間未公布',
+      reasons: rec.reasons.concat(rec.warnings.map((w) => `⚠️ ${w}`)),
+      matchScore: rec.matchScore,
+    };
+  };
+
   const handleStartAnalysis = async () => {
     setIsAnalyzing(true);
     analytics.logEvent('ai_course_analysis_started', { schoolId: school.id });
 
     try {
-      if (aiStatus.provider !== 'mock' && aiStatus.configured) {
-        const prompt = `作為選課助理，請根據以下資訊為學生推薦課程：
-        
-學生興趣：${preferences.interests.join('、')}
-目標學分：${preferences.targetCredits}
-難度偏好：${preferences.preferredDifficulty === 'any' ? '不限' : getDifficultyLabel(preferences.preferredDifficulty as CourseDifficulty)}
-避開早八：${preferences.avoidEarly ? '是' : '否'}
+      // ── Step 1：抓使用者全部可用資料 ─────────────────
+      const usedSignals: string[] = [];
 
-可選課程：
-${availableCourses
-  .slice(0, 15)
-  .map((c: any) => `- ${c.name}（${c.credits}學分，${c.instructor}）`)
-  .join('\n')}
+      const [grades, currentCourses] = await Promise.all([
+        getAnyCachedGrades(),
+        getAnyCachedCourses(),
+      ]);
+      if (grades?.grades?.length) usedSignals.push(`歷史成績 ${grades.grades.length} 筆`);
+      if (currentCourses?.courses?.length)
+        usedSignals.push(`本學期 ${currentCourses.courses.length} 門課`);
+      if (auth.profile?.department) usedSignals.push(`本系：${auth.profile.department}`);
 
-請推薦 5 門最適合的課程，每門課程說明推薦原因。請用 JSON 格式回覆：
-[{"name": "課程名", "reasons": ["原因1", "原因2"], "matchScore": 85}]`;
+      // ── Step 2：從靜宜課綱查詢系統抓本學期候選池 ────
+      const currentSemester = getCurrentCatalogSemester();
 
-        const messages: AIMessage[] = [{ role: 'user', content: prompt }];
-        const response = await aiChatRef.current.chat(messages, aiContext);
+      // 推算使用者年級（供顯示與下方匹配）
+      const { grade: userGrade } = deriveStudentGrade(
+        auth.profile?.studentId,
+        currentSemester.code,
+      );
+      if (userGrade) usedSignals.push(`年級：大${userGrade}`);
+      if (auth.profile?.studentId) usedSignals.push('學籍資料');
 
-        if (response.content && !response.error) {
-          try {
-            const jsonMatch = response.content.match(/\[[\s\S]*\]/);
-            if (jsonMatch) {
-              const aiRecommendations = JSON.parse(jsonMatch[0]);
-              const mapped = aiRecommendations.map((rec: any, idx: number) => {
-                const course = availableCourses.find(
-                  (c: any) => c.name.includes(rec.name) || rec.name.includes(c.name),
-                );
-                return {
-                  id: `ai-${idx}`,
-                  name: rec.name || course?.name || '未知課程',
-                  instructor: course?.instructor || '待查詢',
-                  credits: course?.credits || 3,
-                  category: (course?.category as CourseCategory) || 'elective',
-                  difficulty: 'medium' as CourseDifficulty,
-                  rating: 4.0 + Math.random() * 0.8,
-                  enrollment: Math.floor(Math.random() * 40) + 20,
-                  capacity: 60,
-                  schedule: course?.schedule || '待查詢',
-                  reasons: rec.reasons || ['AI 推薦'],
-                  matchScore: rec.matchScore || 80,
-                };
-              });
-              setRecommendations(mapped);
-              setIsAnalyzing(false);
-              setShowResults(true);
-              analytics.logEvent('ai_course_analysis_completed', { count: mapped.length });
-              return;
-            }
-          } catch (parseError) {
-            console.error('Failed to parse AI recommendations:', parseError);
-          }
+      if (schedule.courses?.length) usedSignals.push(`個人課表 ${schedule.courses.length} 門`);
+      if (preferences.interests?.length)
+        usedSignals.push(`興趣：${preferences.interests.join('、')}`);
+      usedSignals.push(
+        `偏好：目標 ${preferences.targetCredits} 學分${preferences.avoidEarly ? '、避早八' : ''}`,
+      );
+
+      // 並行抓取：(a) 本系全部開課 (b) 通識課程 — 兩者合併為候選池
+      const generalResult = await queryCatalog(
+        { semester: currentSemester.code, courseType: 'general' },
+        { limit: 200 },
+      );
+      const departmentResult = auth.profile?.department
+        ? await queryCatalog(
+            { semester: currentSemester.code, department: auth.profile.department },
+            { limit: 300 },
+          )
+        : { courses: [] as typeof generalResult.courses };
+
+      const candidates: typeof generalResult.courses = [];
+      const seen = new Set<string>();
+      for (const c of departmentResult.courses) {
+        if (!seen.has(c.code)) {
+          candidates.push(c);
+          seen.add(c.code);
+        }
+      }
+      for (const c of generalResult.courses) {
+        if (!seen.has(c.code)) {
+          candidates.push(c);
+          seen.add(c.code);
         }
       }
 
-      await new Promise((r) => setTimeout(r, 2000));
-      const mockRecs = generateMockRecommendations();
-      setRecommendations(mockRecs);
+      // 還不夠（使用者無系所）→ 再抓本學期所有開課
+      if (candidates.length < 30) {
+        const fallback = await queryCatalog(
+          { semester: currentSemester.code },
+          { limit: 300 },
+        );
+        for (const c of fallback.courses) {
+          if (!seen.has(c.code)) {
+            candidates.push(c);
+            seen.add(c.code);
+          }
+        }
+      }
+      usedSignals.push(
+        `候選：本系 ${departmentResult.courses.length} 門 + 通識 ${generalResult.courses.length} 門`,
+      );
+
+      let source: '靜宜大學課綱查詢系統' | '本地 mock' = '靜宜大學課綱查詢系統';
+
+      // ── Step 3：呼叫本地演算引擎，做完整 multi-criteria 評分 ──
+      let catalogRecs: CatalogRecommendation[] = [];
+      if (candidates.length > 0) {
+        catalogRecs = await recommendFromCatalog(candidates, {
+          profile: auth.profile,
+          preferences: {
+            avoidEarly: preferences.avoidEarly,
+            targetCredits: preferences.targetCredits,
+            interests: preferences.interests,
+            preferredLanguage:
+              preferences.preferredTime === 'any' ? undefined : undefined,
+          } as any,
+          scheduleEvents: schedule.courses.flatMap((c: any) =>
+            (c.schedule ?? []).map((s: any) => ({
+              dayOfWeek: s.dayOfWeek,
+              startTime: s.startTime,
+              endTime: s.endTime,
+              name: c.name,
+              courseCode: c.code,
+            })),
+          ),
+        });
+      }
+
+      // ── Step 4：若有 LLM 可用，請它對前 10 名做「自然語推薦理由」加值 ──
+      if (
+        catalogRecs.length > 0 &&
+        aiStatus.provider !== 'mock' &&
+        aiStatus.configured
+      ) {
+        try {
+          const top = catalogRecs.slice(0, 10);
+          const prompt = `你是靜宜大學選課助理。我已經用本地演算法（畢業缺口 / 衝堂 / 興趣 / 歷史成績）算出候選課程清單，請為每一門加上 1 句「個人化建議」（繁體中文，30字內），協助學生決定。
+
+學生背景：
+- 系所：${auth.profile?.department ?? '未填'}
+- 興趣：${preferences.interests.join('、')}
+- 目標學分：${preferences.targetCredits}
+- 避開早八：${preferences.avoidEarly ? '是' : '否'}
+
+候選課程（matchScore 由本地引擎算出）：
+${top
+  .map(
+    (r, i) =>
+      `${i + 1}. ${r.courseName}｜${r.teacher}｜${r.credits}學分｜${r.timePlace}｜系統理由: ${r.reasons.slice(0, 2).join('；')}`,
+  )
+  .join('\n')}
+
+請用 JSON 回覆：[{"index":1,"advice":"..."}]，不要其它文字。`;
+          const messages: AIMessage[] = [{ role: 'user', content: prompt }];
+          const response = await aiChatRef.current.chat(messages, aiContext);
+          if (response.content && !response.error) {
+            const m = response.content.match(/\[[\s\S]*\]/);
+            if (m) {
+              const advices = JSON.parse(m[0]) as Array<{ index: number; advice: string }>;
+              for (const a of advices) {
+                const idx = a.index - 1;
+                if (catalogRecs[idx] && a.advice) {
+                  catalogRecs[idx].reasons.unshift(`AI 建議：${a.advice}`);
+                }
+              }
+              usedSignals.push(`LLM 個人化建議 (${aiStatus.provider})`);
+            }
+          }
+        } catch (err) {
+          console.warn('[advisor] LLM annotation failed', err);
+        }
+      }
+
+      // ── Step 5：mapping & 顯示 ───────────────────────
+      if (catalogRecs.length === 0) {
+        // 候選池抓不到（離線/查詢系統暫時不可用）— 退回到 mock
+        source = '本地 mock';
+        const mockRecs = generateMockRecommendations();
+        setRecommendations(mockRecs);
+        setAnalysisMeta({
+          semester: currentSemester.label,
+          candidateCount: 0,
+          usedSignals,
+          source,
+        });
+      } else {
+        setRecommendations(catalogRecs.slice(0, 10).map(catalogRecToUI));
+        setAnalysisMeta({
+          semester: currentSemester.label,
+          candidateCount: candidates.length,
+          usedSignals,
+          source,
+        });
+      }
       setIsAnalyzing(false);
       setShowResults(true);
+      analytics.logEvent('ai_course_analysis_completed', {
+        count: catalogRecs.length,
+        candidates: candidates.length,
+        semester: currentSemester.code,
+        source,
+      });
     } catch (error) {
       console.error('Analysis failed:', error);
       setIsAnalyzing(false);
@@ -650,10 +810,12 @@ ${availableCourses
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
-                          分析完成！
+                          分析完成
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
-                          為你找到 {recommendations.length} 門推薦課程
+                          {analysisMeta
+                            ? `${analysisMeta.semester}　候選 ${analysisMeta.candidateCount} 門　推薦 ${recommendations.length} 門`
+                            : `為你找到 ${recommendations.length} 門推薦課程`}
                         </Text>
                       </View>
                       <Pressable onPress={() => setShowResults(false)}>
@@ -663,6 +825,48 @@ ${availableCourses
                       </Pressable>
                     </View>
                   </AnimatedCard>
+
+                  {analysisMeta ? (
+                    <AnimatedCard delay={50}>
+                      <View style={{ gap: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Ionicons
+                            name="information-circle-outline"
+                            size={18}
+                            color={theme.colors.accent}
+                          />
+                          <Text
+                            style={{
+                              color: theme.colors.text,
+                              fontWeight: '700',
+                              fontSize: 13,
+                            }}
+                          >
+                            演算法依據（{analysisMeta.source}）
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                          {analysisMeta.usedSignals.map((s) => (
+                            <View
+                              key={s}
+                              style={{
+                                paddingHorizontal: 10,
+                                paddingVertical: 4,
+                                borderRadius: 12,
+                                backgroundColor: theme.colors.surface2,
+                              }}
+                            >
+                              <Text style={{ color: theme.colors.text, fontSize: 11 }}>{s}</Text>
+                            </View>
+                          ))}
+                        </View>
+                        <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 16 }}>
+                          推薦分數 = 畢業缺口加分 + 興趣命中 + 歷史同類分數 + 本系開課加權
+                          − 衝堂 − 額滿 − 早八扣分（依你的偏好）
+                        </Text>
+                      </View>
+                    </AnimatedCard>
+                  ) : null}
 
                   {recommendations.map((course, idx) => (
                     <AnimatedCard key={course.id} delay={idx * 50}>

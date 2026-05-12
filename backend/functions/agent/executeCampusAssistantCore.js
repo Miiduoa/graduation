@@ -59,6 +59,8 @@ const db = getFirestore();
 const INTENTS_SKIP_LLM = new Set([
   'reserve_seat',
   'borrow_book',
+  'renew_book',
+  'return_book',
   'submit_repair_request',
   'check_repair_status',
   'leave_status',
@@ -69,6 +71,53 @@ const { assertActiveSchoolMember } = createAuthzHelpers(db);
 
 function resolvePermissionScope(intent, hasAuth) {
   return resolveAgentPermissionScope(intent, hasAuth);
+}
+
+function extractLoanIdFromMessage(text) {
+  const s = String(text ?? '');
+  const labeled = s.match(/(?:借閱|loan|loanId|紀錄|編號|單號)[：:\s]*([A-Za-z0-9_-]{8,})/i);
+  if (labeled) return labeled[1].trim();
+  const loose = s.match(/\b([A-Za-z0-9_-]{18,32})\b/);
+  return loose ? loose[1] : null;
+}
+
+function dueTime(row) {
+  const d = toJsDate(row?.dueAt ?? row?.dueDate);
+  return d ? d.getTime() : Number.POSITIVE_INFINITY;
+}
+
+function chooseLibraryLoan(loans, message) {
+  if (!Array.isArray(loans) || loans.length === 0) return null;
+  const text = String(message ?? '').toLowerCase();
+  const explicitLoanId = extractLoanIdFromMessage(text);
+  if (explicitLoanId) {
+    const exact = loans.find((loan) => String(loan.id) === explicitLoanId || String(loan.loanId) === explicitLoanId);
+    if (exact) return exact;
+  }
+  const titleMatch = text.match(/[《「『"]([^》」』"]{2,80})[》」』"]/)?.[1];
+  if (titleMatch) {
+    const matched = loans.find((loan) =>
+      String(loan.bookTitle || loan.title || '').toLowerCase().includes(titleMatch.toLowerCase()),
+    );
+    if (matched) return matched;
+  }
+  const active = loans.filter((loan) => !['returned', 'cancelled'].includes(String(loan.status || '').toLowerCase()));
+  const pool = active.length > 0 ? active : loans;
+  return [...pool].sort((a, b) => dueTime(a) - dueTime(b))[0] || null;
+}
+
+async function resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage }) {
+  const loanId = extractLoanIdFromMessage(lastUserMessage);
+  if (loanId) return { input: { loanId }, loan: { id: loanId } };
+
+  const result = await runTool(
+    'getLibraryLoans',
+    { uid, schoolId, timeZone, prefetched: {} },
+    { onlyOverdue: /逾期|過期/.test(String(lastUserMessage || '')) },
+  ).catch(() => ({ loans: [] }));
+  const loan = chooseLibraryLoan(result.loans, lastUserMessage);
+  if (!loan?.id) return null;
+  return { input: { loanId: String(loan.id) }, loan };
 }
 
 /**
@@ -611,6 +660,53 @@ async function executeCampusAssistantCore({
         requiresConfirmation: true,
         sensitivity: 'high',
         evidenceRefs: [{ type: 'system', id: 'borrow-book', label: '圖書借閱' }],
+      }),
+    ];
+    response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];
+    return await finalizeResponse();
+  }
+
+  if (intent === 'renew_book' || intent === 'return_book') {
+    if (!uid) {
+      response.content = intent === 'renew_book' ? '續借需要先登入，我才能讀取你的借閱紀錄。' : '還書登記需要先登入，我才能讀取你的借閱紀錄。';
+      response.suggestions = ['登入後查借閱', '今日公告', '功能說明'];
+      return await finalizeResponse();
+    }
+
+    const resolvedLoan = await resolveLibraryLoanInput({ uid, schoolId, timeZone, lastUserMessage });
+    if (!resolvedLoan) {
+      response.content = [
+        intent === 'renew_book'
+          ? '我可以幫你建立續借確認，但目前找不到可續借的借閱紀錄。'
+          : '我可以幫你建立還書確認，但目前找不到未歸還的借閱紀錄。',
+        '',
+        '請補上借閱紀錄編號，或先問「我有哪些書還沒還？」讓我列出清單。',
+      ].join('\n');
+      response.suggestions = ['我有哪些書還沒還？', '今日摘要', '功能說明'];
+      return await finalizeResponse();
+    }
+
+    const isRenew = intent === 'renew_book';
+    const loanTitle = resolvedLoan.loan.bookTitle || resolvedLoan.loan.title || resolvedLoan.loan.bookId || resolvedLoan.loan.id;
+    response.content = [
+      isRenew ? '我已整理續借確認，確認後才會更新借閱期限。' : '我已整理還書確認，確認後才會更新借閱狀態。',
+      '',
+      `書籍：${loanTitle}`,
+      resolvedLoan.loan.dueAt ? `到期：${formatAssistantDate(toJsDate(resolvedLoan.loan.dueAt), timeZone)}` : '',
+    ].filter(Boolean).join('\n');
+    response.suggestions = isRenew ? ['查看借閱', '改續借其他書', '今日摘要'] : ['查看借閱', '改還其他書', '今日摘要'];
+    response.actions = [
+      assistantAction({
+        label: isRenew ? '確認續借' : '確認還書',
+        action: 'queue_action',
+        params: {
+          toolName: isRenew ? 'renewBook' : 'returnBook',
+          input: resolvedLoan.input,
+          agentRunId: requestId,
+        },
+        requiresConfirmation: true,
+        sensitivity: 'high',
+        evidenceRefs: [{ type: 'system', id: isRenew ? 'renew-book' : 'return-book', label: isRenew ? '圖書續借' : '圖書還書' }],
       }),
     ];
     response.citations = [{ type: 'system', id: 'campus-agent-confirmation', label: '敏感動作需使用者確認' }];

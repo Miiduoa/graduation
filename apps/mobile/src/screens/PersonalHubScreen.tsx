@@ -24,6 +24,8 @@ import { theme } from '../ui/theme';
 import { ContextStrip } from '../ui/campusOs';
 import { resolveRoleMode } from '../utils/campusOs';
 import { navigateToCourseHome } from '../utils/courseNavigation';
+import { AIBrainOverviewCard } from '../components/AIBrainOverviewCard';
+import { aiOverlay } from '../app/useAIOverlay';
 
 interface ListRowProps {
   icon: string;
@@ -193,7 +195,7 @@ export function PersonalHubScreen(props: any) {
             paddingBottom: 24,
           }}
         >
-          {/* ⚙️ 右上角設定齒輪 */}
+          {/* ⚙️ 右上角設定齒輪：開啟全功能 HeaderDrawer */}
           <View
             style={{
               position: 'absolute',
@@ -203,7 +205,14 @@ export function PersonalHubScreen(props: any) {
             }}
           >
             <Pressable
-              onPress={() => nav?.navigate?.('Settings')}
+              onPress={() => {
+                try {
+                  const { headerDrawer } = require('../components/HeaderDrawer');
+                  headerDrawer.open();
+                } catch {
+                  nav?.navigate?.('Settings');
+                }
+              }}
               hitSlop={12}
               style={({ pressed }) => ({
                 width: 38,
@@ -216,7 +225,7 @@ export function PersonalHubScreen(props: any) {
               })}
             >
               <Ionicons
-                name="settings-outline"
+                name="menu-outline"
                 size={20}
                 color={isDark ? 'rgba(255,255,255,0.7)' : theme.colors.textSecondary}
               />
@@ -319,67 +328,17 @@ export function PersonalHubScreen(props: any) {
           </Pressable>
         ) : null}
 
-        <SectionHeader title="個人與偏好" />
-        <GroupedCard>
-          {activeMerchantAssignments.length > 0 ? (
-            <ListRow
-              icon="storefront-outline"
-              title="商家接單"
-              meta={`${activeMerchantAssignments.length} 間`}
-              tint={theme.colors.accent}
-              onPress={() => nav?.navigate?.('MerchantHub')}
-            />
-          ) : null}
-          <ListRow
-            icon="person-outline"
-            title="個人資料"
-            meta={auth.user ? '已綁定' : '未登入'}
-            onPress={() => nav?.navigate?.(auth.user ? 'ProfileEdit' : 'SSOLogin')}
-          />
-          <ListRow
-            icon="notifications-outline"
-            title="通知與提醒"
-            meta={notifs.unreadCount > 0 ? `${notifs.unreadCount} 則` : '已整理'}
-            tint={theme.colors.warning}
-            onPress={() => nav?.navigate?.('NotificationSettings')}
-          />
-          <ListRow
-            icon="accessibility-outline"
-            title="語言與無障礙"
-            meta="偏好"
-            tint={theme.colors.calm}
-            onPress={() => nav?.navigate?.('AccessibilitySettings')}
-            isLast
-          />
-        </GroupedCard>
-
-        <SectionHeader title="長期規劃與安全" />
-        <GroupedCard>
-          <ListRow
-            icon="school-outline"
-            title="學分與畢業規劃"
-            meta="規劃"
-            tint={theme.colors.roleTeacher}
-            onPress={() => nav?.navigate?.('CreditAuditStack')}
-          />
-          <ListRow
-            icon="trophy-outline"
-            title="成就與積分"
-            meta="成長"
-            tint={theme.colors.achievement}
-            onPress={() => nav?.navigate?.('Achievements')}
-          />
-          <ListRow
-            icon="shield-checkmark-outline"
-            title="帳號安全與資料"
-            meta="安全"
-            tint={theme.colors.urgent}
-            onPress={() => nav?.navigate?.('DataExport')}
-            isLast
-          />
-        </GroupedCard>
-
         <SectionHeader title="AI 與工具" />
+        <View style={{ marginHorizontal: theme.space.lg, marginBottom: 12 }}>
+          <AIBrainOverviewCard
+            onPress={() =>
+              aiOverlay.open({
+                mode: 'insights',
+                source: 'personal_hub_brain_card',
+              })
+            }
+          />
+        </View>
         <GroupedCard>
           <ListRow
             icon="hardware-chip-outline"
@@ -389,21 +348,56 @@ export function PersonalHubScreen(props: any) {
             onPress={() => nav?.navigate?.('AIModelManager')}
           />
           <ListRow
-            icon="search-outline"
-            title="全域搜尋"
-            meta="搜尋"
-            tint={theme.colors.calm}
-            onPress={() => nav?.navigate?.('GlobalSearch')}
+            icon="trophy-outline"
+            title="成就與積分"
+            meta="成長"
+            tint={theme.colors.achievement}
+            onPress={() => nav?.navigate?.('Achievements')}
           />
           <ListRow
-            icon="grid-outline"
-            title="小工具"
-            meta="Widget"
-            tint={theme.colors.warning}
-            onPress={() => nav?.navigate?.('WidgetPreview')}
+            icon="school-outline"
+            title="學分與畢業規劃"
+            meta="規劃"
+            tint={theme.colors.roleTeacher}
+            onPress={() => nav?.navigate?.('CreditAuditStack')}
             isLast
           />
         </GroupedCard>
+
+        <View style={{ marginHorizontal: theme.space.lg, marginTop: 16 }}>
+          <Pressable
+            onPress={() => {
+              try {
+                const { headerDrawer } = require('../components/HeaderDrawer');
+                headerDrawer.open();
+              } catch {
+                nav?.navigate?.('Settings');
+              }
+            }}
+            style={({ pressed }) => ({
+              padding: 14,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.surface,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
+            <Ionicons name="apps-outline" size={20} color={theme.colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '700' }}>
+                所有設定與工具
+              </Text>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                通知、語言、帳號、隱私、回饋等請從左上角頭像開啟
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.muted} />
+          </Pressable>
+        </View>
 
         {isTeacher || isDepartmentHead || isStaff || isAdmin ? (
           <>

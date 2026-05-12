@@ -1,26 +1,5 @@
-/* eslint-disable */
-import React from 'react';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { DepartmentHubScreen } from './DepartmentHubScreen';
-import { useThemeMode } from '../state/theme';
-import { createStackScreenOptions } from '../ui/navigationTheme';
-
-const Stack = createNativeStackNavigator<any, undefined>();
-
-export function DepartmentStack() {
-  useThemeMode();
-
-  return (
-    <Stack.Navigator
-      id={undefined}
-      initialRouteName="DepartmentHub"
-      screenOptions={createStackScreenOptions()}
-    >
-      <Stack.Screen
-        name="DepartmentHub"
-        component={DepartmentHubScreen}
-        options={{ title: '審核', headerShown: false }}
-      />
-    </Stack.Navigator>
-  );
-}
+/**
+ * @deprecated 自 4+1 AI-First 導航起，DepartmentStack 已整合進 LearnStack（依角色 dispatch）。
+ * 保留此檔案僅為向後相容；新代碼請直接使用 LearnStack。
+ */
+export { LearnStack as DepartmentStack } from './LearnStack';

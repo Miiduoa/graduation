@@ -24,7 +24,9 @@ import { useAmbientCues } from '../features/engagement';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { AmbientCueCard } from '../ui/campusOs';
 import { shadowStyle, theme } from '../ui/theme';
-import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { navigateToCourseScreen, migrateTabName } from '../utils/courseNavigation';
+import { aiOverlay } from '../app/useAIOverlay';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -327,47 +329,27 @@ export function CampusHubScreen(props: Record<string, unknown>) {
   });
 
   // ═══════════════════════════════════════════════════════
-  // Service Categories — ALL app features organized
+  // 9 個實體校園服務磚（精簡版，3x3 格）
+  // 設計原則：只放「實體位置/物理服務」；抽象功能交給 AI 球
   // ═══════════════════════════════════════════════════════
 
   const serviceSections: ServiceSection[] = useMemo(
     () => [
       {
-        title: '快捷入口',
-        emoji: '⚡',
+        title: '師生連結',
+        emoji: '💬',
         items: [
           {
-            icon: 'sparkles-outline',
-            label: 'AI 助理',
-            tint: theme.colors.accent,
-            crossTab: { tab: 'Today', screen: 'AIChat' },
-            keywords: ['ai', '助理', '聊天', '問問題'],
-          },
-          {
-            icon: 'map-outline',
-            label: '校園地圖',
-            tint: '#3b82f6',
-            screen: 'Map',
-            keywords: ['地圖', '導航', '位置', '在哪'],
-          },
-          {
-            icon: 'search-outline',
-            label: '全校搜尋',
-            tint: '#8b5cf6',
-            crossTab: { tab: '我的', screen: 'GlobalSearch' },
-            keywords: ['搜尋', '找', '查詢'],
-          },
-          {
-            icon: 'qr-code-outline',
-            label: 'QR Code',
-            tint: '#6366f1',
-            crossTab: { tab: '我的', screen: 'QRCode' },
-            keywords: ['qr', 'code', '掃碼', '條碼'],
+            icon: 'people-circle-outline',
+            label: '校園社群',
+            tint: theme.colors.social,
+            crossTab: { tab: 'Today', screen: 'CampusSocialScreen' },
+            keywords: ['社群', '看板', '動態', '匿名', '學伴', '即時', 'story', '發文'],
           },
         ],
       },
       {
-        title: '校園生活',
+        title: '校園服務',
         emoji: '🏫',
         items: [
           {
@@ -398,46 +380,6 @@ export function CampusHubScreen(props: Record<string, unknown>) {
             screen: 'TransportHub',
             keywords: ['交通', '公車', '搭車', '車站', '高鐵'],
           },
-        ],
-      },
-      {
-        title: '學業工具',
-        emoji: '📖',
-        items: [
-          {
-            icon: 'stats-chart-outline',
-            label: '成績查詢',
-            tint: '#f59e0b',
-            crossTab: { tab: '課程', screen: 'Grades' },
-            keywords: ['成績', '分數', 'gpa', '學期成績'],
-          },
-          {
-            icon: 'document-text-outline',
-            label: '作業',
-            tint: '#ef4444',
-            crossTab: { tab: '課程', screen: 'CourseHub' },
-            keywords: ['作業', '報告', '繳交', '截止'],
-          },
-          {
-            icon: 'calendar-outline',
-            label: '行事曆',
-            tint: '#8b5cf6',
-            crossTab: { tab: '課程', screen: 'Calendar' },
-            keywords: ['行事曆', '日曆', '日程', '排程'],
-          },
-          {
-            icon: 'checkbox-outline',
-            label: '出席紀錄',
-            tint: '#10b981',
-            crossTab: { tab: '課程', screen: 'Attendance' },
-            keywords: ['出席', '點名', '缺席', '曠課'],
-          },
-        ],
-      },
-      {
-        title: '服務與支援',
-        emoji: '🔧',
-        items: [
           {
             icon: 'print-outline',
             label: '列印',
@@ -446,70 +388,19 @@ export function CampusHubScreen(props: Record<string, unknown>) {
             keywords: ['列印', '印表機', '影印', '掃描'],
           },
           {
-            icon: 'search-circle-outline',
-            label: '失物招領',
-            tint: theme.colors.warning,
-            screen: 'LostFound',
-            keywords: ['失物', '招領', '撿到', '遺失'],
-          },
-          ...(paymentsEnabled
-            ? [
-                {
-                  icon: 'card-outline' as keyof typeof Ionicons.glyphMap,
-                  label: '付款',
-                  tint: theme.colors.streak,
-                  screen: 'Payment',
-                  keywords: ['付款', '支付', '繳費', '儲值'],
-                },
-              ]
-            : []),
-          {
             icon: 'heart-outline',
             label: '健康',
             tint: theme.colors.danger,
             screen: 'Health',
             keywords: ['健康', '醫療', '診所', '保健'],
           },
-        ],
-      },
-      {
-        title: '社群與資訊',
-        emoji: '📢',
-        items: [
           {
-            icon: 'megaphone-outline',
-            label: '公告',
-            tint: '#f97316',
-            crossTab: { tab: 'Today', screen: '公告總覽' },
-            keywords: ['公告', '通知', '新聞', '消息'],
+            icon: 'search-circle-outline',
+            label: '失物招領',
+            tint: theme.colors.warning,
+            screen: 'LostFound',
+            keywords: ['失物', '招領', '撿到', '遺失'],
           },
-          {
-            icon: 'calendar-number-outline',
-            label: '活動',
-            tint: '#ec4899',
-            crossTab: { tab: 'Today', screen: '活動總覽' },
-            keywords: ['活動', '講座', '比賽', '報名'],
-          },
-          {
-            icon: 'people-outline',
-            label: '社團',
-            tint: '#06b6d4',
-            crossTab: { tab: '收件匣', screen: 'Groups' },
-            keywords: ['社團', '群組', '加入'],
-          },
-          {
-            icon: 'trophy-outline',
-            label: '成就',
-            tint: '#eab308',
-            crossTab: { tab: '我的', screen: 'Achievements' },
-            keywords: ['成就', '積分', '徽章', '獎勵'],
-          },
-        ],
-      },
-      {
-        title: '更多',
-        emoji: '⚙️',
-        items: [
           {
             icon: 'accessibility-outline',
             label: '無障礙路線',
@@ -517,27 +408,25 @@ export function CampusHubScreen(props: Record<string, unknown>) {
             screen: 'AccessibleRoute',
             keywords: ['無障礙', '輪椅', '電梯', '坡道'],
           },
-          {
-            icon: 'navigate-circle-outline',
-            label: 'AR 導航',
-            tint: theme.colors.accent,
-            screen: 'ARNavigation',
-            keywords: ['ar', '導航', '擴增實境'],
-          },
-          {
-            icon: 'bug-outline',
-            label: '回報問題',
-            tint: '#78716c',
-            crossTab: { tab: '我的', screen: 'BugReport' },
-            keywords: ['回報', 'bug', '問題', '建議'],
-          },
-          {
-            icon: 'download-outline',
-            label: '資料匯出',
-            tint: '#64748b',
-            crossTab: { tab: '我的', screen: 'DataExport' },
-            keywords: ['匯出', '下載', '備份', '資料'],
-          },
+          ...(paymentsEnabled
+            ? [
+                {
+                  icon: 'card-outline' as keyof typeof Ionicons.glyphMap,
+                  label: '校園支付',
+                  tint: theme.colors.streak,
+                  screen: 'Payment',
+                  keywords: ['付款', '支付', '繳費', '儲值'],
+                },
+              ]
+            : [
+                {
+                  icon: 'navigate-circle-outline' as keyof typeof Ionicons.glyphMap,
+                  label: 'AR 導航',
+                  tint: theme.colors.accent,
+                  screen: 'ARNavigation',
+                  keywords: ['ar', '導航', '擴增實境'],
+                },
+              ]),
         ],
       },
     ],
@@ -572,12 +461,17 @@ export function CampusHubScreen(props: Record<string, unknown>) {
   const handleServicePress = useCallback(
     (item: ServiceItem) => {
       if (item.crossTab) {
-        if (item.crossTab.tab === '課程' || item.crossTab.tab === '教學') {
+        if (
+          item.crossTab.tab === '課程' ||
+          item.crossTab.tab === '教學' ||
+          item.crossTab.tab === '學習'
+        ) {
           navigateToCourseScreen(nav, auth.profile?.role, item.crossTab.screen);
           return;
         }
-        // Cross-tab navigation: navigate to another tab's screen
-        nav?.navigate?.(item.crossTab.tab, { screen: item.crossTab.screen });
+        // 自動將舊 Tab 名稱遷移到新導航
+        const tab = migrateTabName(item.crossTab.tab);
+        nav?.navigate?.(tab, { screen: item.crossTab.screen });
       } else if (item.screen) {
         nav?.navigate?.(item.screen);
       }
@@ -586,8 +480,8 @@ export function CampusHubScreen(props: Record<string, unknown>) {
   );
 
   const handleAIPress = useCallback(() => {
-    nav?.navigate?.('Today', { screen: 'AIChat' });
-  }, [nav]);
+    aiOverlay.open({ mode: 'chat', source: 'campus_hub' });
+  }, []);
 
   // ═══════════════════════════════════════════════════════
   // Render
@@ -614,28 +508,31 @@ export function CampusHubScreen(props: Record<string, unknown>) {
         keyboardShouldPersistTaps="handled"
       >
         {/* ── Header ── */}
-        <View style={{ gap: theme.space.xs }}>
-          <Text
-            style={{
-              color: theme.colors.muted,
-              fontSize: theme.typography.overline.fontSize,
-              fontWeight: theme.typography.overline.fontWeight ?? '700',
-              letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
-              textTransform: 'uppercase',
-            }}
-          >
-            {school.name}
-          </Text>
-          <Text
-            style={{
-              color: theme.colors.text,
-              fontSize: theme.typography.display.fontSize,
-              fontWeight: theme.typography.display.fontWeight ?? '800',
-              letterSpacing: theme.typography.display.letterSpacing,
-            }}
-          >
-            校園
-          </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+          <HeaderAvatarButton />
+          <View style={{ flex: 1, gap: theme.space.xs }}>
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: theme.typography.overline.fontSize,
+                fontWeight: theme.typography.overline.fontWeight ?? '700',
+                letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
+                textTransform: 'uppercase',
+              }}
+            >
+              {school.name}
+            </Text>
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontSize: theme.typography.display.fontSize,
+                fontWeight: theme.typography.display.fontWeight ?? '800',
+                letterSpacing: theme.typography.display.letterSpacing,
+              }}
+            >
+              校園
+            </Text>
+          </View>
         </View>
 
         {/* ── Search Bar + AI Button ── */}

@@ -8,7 +8,7 @@ import { Screen, Card, Pill, LoadingState, ErrorState, SectionTitle } from '../u
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
-import { getCachedTCCourses, refreshTCCourses } from '../services/puDataCache';
+import { getAnyCachedTCCourses, refreshTCCourses } from '../services/puDataCache';
 import { tcFetchHomeworkActivities } from '../services/tronClassClient';
 import type { TCCourse } from '../services/tronClassClient';
 
@@ -153,7 +153,7 @@ export function GroupAssignmentsScreen(props: any) {
       setError(null);
       try {
         // 先取得課程列表
-        let courses: TCCourse[] = (await getCachedTCCourses().catch(() => null)) ?? [];
+        let courses: TCCourse[] = (await getAnyCachedTCCourses().catch(() => null)) ?? [];
         if (courses.length === 0) {
           courses = (await refreshTCCourses().catch(() => null)) ?? [];
         }

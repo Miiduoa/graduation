@@ -50,44 +50,44 @@ import { NetworkStatusBanner } from './src/ui/OfflineBanner';
 import { ConflictResolutionModal } from './src/ui/ConflictResolutionModal';
 
 import { HomeStack } from './src/screens/HomeStack';
-import { AcademicStack } from './src/screens/AcademicStack';
+import { LearnStack } from './src/screens/LearnStack';
 import { MapStack } from './src/screens/MapStack';
 import { MessagesStack } from './src/screens/MessagesStack';
 import { MeStack } from './src/screens/MeStack';
-import { TeachingStack } from './src/screens/TeachingStack';
-import { StaffStack } from './src/screens/StaffStack';
-import { DepartmentStack } from './src/screens/DepartmentStack';
-import { AdminStack } from './src/screens/AdminStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
 import { usePushNotifications } from './src/app/usePushNotifications';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
+import { useAIBrainLifecycle } from './src/app/useAIBrain';
+import { GlobalAIConfirmModalHost } from './src/components/GlobalAIConfirmModalHost';
+import { AIOverlayHost } from './src/components/AIOverlayHost';
+import { aiOverlay } from './src/app/useAIOverlay';
+import { HeaderDrawerHost } from './src/components/HeaderDrawer';
+import { AIFloatingBall } from './src/components/AIFloatingBall';
 import { useProactiveAIReporter } from './src/app/useProactiveAIReporter';
 import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
 
 /**
- * 5-Tab 心理學導航架構（Hick's Law + Progressive Disclosure）
+ * 4+1 AI-First 導航架構
  *
- * Today / [課程|教學|服務|審核|管理] / 校園 / 收件匣 / 我的
+ *   [ 今天 ] [ 學習 ]  ✨AI 球✨  [ 校園 ] [ 訊息 ]
+ *
+ * + 隱藏 Tab「我的」：透過左上角頭像抽屜（HeaderDrawer）開啟
  *
  * 設計根據：
- * - Hick's Law: 首層只保留 5 個穩定入口，避免首頁變成功能總表
- * - Temporal Self-Regulation: Today 只處理下一步、今日課務與校園情境
- * - Context-Dependent Memory: 課程主流程與收件匣分工清楚，減少切換迷失
- * - Spatial Cognition: 校園服務依移動與生活情境集中到同一入口
- * - RBAC: 第二個 Tab 根據使用者角色動態改變
+ * - Hick's Law: 首層只 4 個情境 Tab（今天/學習/校園/訊息），名字所有角色一致
+ * - Fitts's Law: 中央 AI 球比兩側 Tab 大、突出 → 高頻最易點
+ * - Spatial Memory: 左上頭像 = 個人，右下/中央 AI = 助理（與通用心智模型對齊）
+ * - AI-First: AI 不是其中一個 Tab，而是整個 App 的作業系統（懸浮在所有畫面之上）
+ * - 角色策略: Tab 名字統一，內容由 LearnStack 等內部 dispatcher 依角色適配
  */
 type RootTabParamList = {
   Today: undefined;
-  課程: undefined;
-  教學: undefined;
-  服務: undefined;
-  審核: undefined;
-  管理: undefined;
+  學習: undefined;
   校園: undefined;
-  收件匣: undefined;
-  我的: undefined;
+  訊息: undefined;
+  我的: undefined; // 隱藏 Tab：不顯示在 Tab Bar，僅透過 HeaderDrawer 內部 navigate 觸發
 };
 
 type AppNavigationRef = ReturnType<typeof useNavigationContainerRef<RootTabParamList>>;
@@ -95,39 +95,6 @@ type AppNavigationRef = ReturnType<typeof useNavigationContainerRef<RootTabParam
 const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
 type TabKey = keyof RootTabParamList;
-
-// Static TAB_CONFIG for backward compatibility - will be replaced by dynamic config in FloatingTabBar
-const TAB_CONFIG: Array<{
-  key: string;
-  label: string;
-  icon: { active: string; inactive: string };
-}> = [
-  {
-    key: 'Today',
-    label: 'Today',
-    icon: { active: 'sunny', inactive: 'sunny-outline' },
-  },
-  {
-    key: '課程',
-    label: '課程',
-    icon: { active: 'book', inactive: 'book-outline' },
-  },
-  {
-    key: '校園',
-    label: '校園',
-    icon: { active: 'map', inactive: 'map-outline' },
-  },
-  {
-    key: '收件匣',
-    label: '收件匣',
-    icon: { active: 'mail', inactive: 'mail-outline' },
-  },
-  {
-    key: '我的',
-    label: '我的',
-    icon: { active: 'person-circle', inactive: 'person-circle-outline' },
-  },
-];
 
 const linking: LinkingOptions<RootTabParamList> = {
   prefixes: [Linking.createURL('/'), 'campus://'],
@@ -140,37 +107,26 @@ const linking: LinkingOptions<RootTabParamList> = {
           公告詳情: 'announcement/:id',
           活動總覽: 'events',
           活動詳情: 'event/:id',
-          AIChat: 'ai-chat',
           CampusSocialScreen: 'community',
+          BoardDetail: 'board/:boardId',
+          PostCompose: 'post/new',
+          StoryCompose: 'story/new',
+          PostDetail: 'post/:postId',
           SmartCalendarScreen: 'calendar',
         },
       },
-      課程: {
+      學習: {
         screens: {
+          LearnHome: 'learn',
           CoursesHome: 'courses',
-          CourseSchedule: 'schedule',
-          AddCourse: 'course/new',
-          CourseHub: 'course-hub',
-          CourseModules: 'course-modules',
-          QuizCenter: 'quiz-center',
-          Attendance: 'attendance',
-          Classroom: 'classroom/:sessionId',
-          AcademicOverview: 'academic-overview',
-          AcademicInsights: 'academic-insights',
-          LearningAnalytics: 'learning-analytics',
-          CourseGradebook: 'course-gradebook',
-          Grades: 'grades',
-          Calendar: 'calendar',
-          AICourseAdvisor: 'ai-advisor',
-          AIChat: 'course-ai-chat',
-        },
-      },
-      教學: {
-        screens: {
           TeachingHub: 'teaching',
+          StaffHub: 'staff',
+          DepartmentHub: 'department',
+          AdminDashboard: 'admin',
           CourseSchedule: 'schedule',
           AddCourse: 'course/new',
           CourseHub: 'course-hub',
+          CourseCatalog: 'course-catalog',
           CourseModules: 'course-modules',
           QuizCenter: 'quiz-center',
           Attendance: 'attendance',
@@ -182,24 +138,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           Grades: 'grades',
           Calendar: 'calendar',
           AICourseAdvisor: 'ai-advisor',
-          AIChat: 'course-ai-chat',
-        },
-      },
-      服務: {
-        screens: {
-          StaffHub: 'staff',
-          MapStack: 'map',
-          MessagesStack: 'messages',
-        },
-      },
-      審核: {
-        screens: {
-          DepartmentHub: 'department',
-        },
-      },
-      管理: {
-        screens: {
-          AdminDashboard: 'admin',
+          AdminCourseVerify: 'course-verify',
         },
       },
       校園: {
@@ -224,7 +163,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           Payment: 'payment',
         },
       },
-      收件匣: {
+      訊息: {
         screens: {
           Inbox: 'inbox',
           MessagesHome: 'messages',
@@ -234,6 +173,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           GroupAssignments: 'group/:groupId/assignments',
           AssignmentDetail: 'group/:groupId/assignment/:assignmentId',
           Dms: 'dms',
+          FriendSearch: 'friend-search',
           Chat: 'chat/:peerId',
           AdminCourseVerify: 'course-verify',
         },
@@ -572,21 +512,100 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * FloatingTabBar — Calm Clarity 設計語言 with RBAC Support
+ * FloatingTabBar — 4+1 AI-First 導航
+ *
+ * 佈局：
+ *   [ 今天 ] [ 學習 ]  ✨AI 球✨  [ 校園 ] [ 訊息 ]
+ *
+ * - 4 個情境 Tab 平均分布兩側
+ * - 中央 AI 球凸出於 TabBar 上方（懸浮 FAB）
+ * - 「我的」Tab 不顯示於 Bar 上，僅供 HeaderDrawer 內部 navigate 觸發
  *
  * 心理學：
- * - Fitts's Law: 5 個清楚命名的 Tab 仍維持穩定大目標區，降低誤觸
- * - Affordance: 清晰的選中/未選中視覺差異
- * - Gestalt 接近法則: 毛玻璃背景與底部安全區完整融合
- * - RBAC: 根據使用者角色動態調整 Tab 配置
+ * - Fitts's Law：AI 球大且置中 → 高頻最易點
+ * - Affordance：球體會脈動（活的）vs Tab 是死的（被動）
+ * - Mental Model：使用者學到「找東西點 Tab；要 AI 做點球」
  */
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const isDark = theme.mode === 'dark';
   const permissions = usePermissions();
 
-  // Get dynamic tab config based on role
-  const dynamicTabs = permissions.tabs;
+  // 只顯示 4 個情境 Tab，過濾掉 '我的' 隱藏 Tab
+  const visibleTabKeys = permissions.tabs.map((t) => t.key);
+  const visibleRoutes = state.routes.filter((r) => visibleTabKeys.includes(r.name));
+
+  // 將 4 個 Tab 分成左 2 / 右 2，中央留給 AI 球
+  const leftRoutes = visibleRoutes.slice(0, 2);
+  const rightRoutes = visibleRoutes.slice(2, 4);
+
+  const renderTab = (route: typeof visibleRoutes[number]) => {
+    const originalIndex = state.routes.findIndex((r) => r.key === route.key);
+    const { options } = descriptors[route.key];
+    const focused = state.index === originalIndex;
+    const config = permissions.tabs.find((t) => t.key === route.name);
+    const iconName: keyof typeof Ionicons.glyphMap = config
+      ? focused
+        ? (config.icon.active as keyof typeof Ionicons.glyphMap)
+        : (config.icon.inactive as keyof typeof Ionicons.glyphMap)
+      : focused
+        ? 'ellipse'
+        : 'ellipse-outline';
+
+    return (
+      <Pressable
+        key={route.key}
+        accessibilityRole="button"
+        accessibilityState={focused ? { selected: true } : {}}
+        accessibilityLabel={options.tabBarAccessibilityLabel}
+        onPress={() => {
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
+        }}
+        style={({ pressed }) => ({
+          flex: 1,
+          transform: [{ scale: pressed ? 0.94 : 1 }],
+        })}
+      >
+        <View
+          style={{
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 2,
+            paddingVertical: 9,
+            paddingHorizontal: 4,
+            borderRadius: 16,
+            backgroundColor: focused
+              ? isDark
+                ? 'rgba(37,99,235,0.16)'
+                : 'rgba(37,99,235,0.08)'
+              : 'transparent',
+            minHeight: 50,
+          }}
+        >
+          <Ionicons
+            name={iconName}
+            size={focused ? 22 : 20}
+            color={focused ? theme.colors.accent : theme.colors.muted}
+          />
+          <Text
+            style={{
+              fontSize: 10,
+              fontWeight: focused ? '700' : '500',
+              color: focused ? theme.colors.accent : theme.colors.muted,
+              letterSpacing: focused ? 0 : 0.1,
+            }}
+          >
+            {config?.label ?? route.name}
+          </Text>
+        </View>
+      </Pressable>
+    );
+  };
 
   return (
     <View
@@ -595,116 +614,73 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         bottom: Math.max(insets.bottom, 8) + 8,
         left: 12,
         right: 12,
-        borderRadius: 26,
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 6,
-        paddingHorizontal: 8,
-        borderWidth: 1,
-        borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
-        backgroundColor: isDark ? 'rgba(26,29,39,0.97)' : 'rgba(255,255,255,0.98)',
-        ...softShadowStyle(theme.shadows.soft),
+        height: 64,
       }}
+      pointerEvents="box-none"
     >
-      {state.routes.map((route, index) => {
-        const { options } = descriptors[route.key];
-        const focused = state.index === index;
-        const config = dynamicTabs.find((t) => t.key === route.name);
-        const iconName: keyof typeof Ionicons.glyphMap = config
-          ? focused
-            ? (config.icon.active as keyof typeof Ionicons.glyphMap)
-            : (config.icon.inactive as keyof typeof Ionicons.glyphMap)
-          : focused
-            ? 'ellipse'
-            : 'ellipse-outline';
+      {/* TabBar 本體 */}
+      <View
+        style={{
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          borderRadius: 26,
+          paddingVertical: 6,
+          paddingHorizontal: 8,
+          borderWidth: 1,
+          borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+          backgroundColor: isDark ? 'rgba(26,29,39,0.97)' : 'rgba(255,255,255,0.98)',
+          ...softShadowStyle(theme.shadows.soft),
+        }}
+      >
+        {leftRoutes.map(renderTab)}
 
-        return (
-          <Pressable
-            key={route.key}
-            accessibilityRole="button"
-            accessibilityState={focused ? { selected: true } : {}}
-            accessibilityLabel={options.tabBarAccessibilityLabel}
-            onPress={() => {
-              const event = navigation.emit({
-                type: 'tabPress',
-                target: route.key,
-                canPreventDefault: true,
-              });
-              if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
-            }}
-            style={({ pressed }) => ({
-              flex: 1,
-              transform: [{ scale: pressed ? 0.94 : 1 }],
-            })}
-          >
-            <View
-              style={{
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 3,
-                paddingVertical: 9,
-                paddingHorizontal: 4,
-                borderRadius: 18,
-                backgroundColor: focused
-                  ? isDark
-                    ? 'rgba(37,99,235,0.16)'
-                    : 'rgba(37,99,235,0.08)'
-                  : 'transparent',
-                minHeight: 52,
-              }}
-            >
-              <Ionicons
-                name={iconName}
-                size={focused ? 22 : 20}
-                color={focused ? theme.colors.accent : theme.colors.muted}
-              />
-              <Text
-                style={{
-                  fontSize: 10,
-                  fontWeight: focused ? '700' : '500',
-                  color: focused ? theme.colors.accent : theme.colors.muted,
-                  letterSpacing: focused ? 0 : 0.1,
-                }}
-              >
-                {config?.label ?? route.name}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
+        {/* 中央留白給 AI 球（球本身 absolute 定位於上方） */}
+        <View
+          style={{
+            width: 72,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          pointerEvents="none"
+        />
+
+        {rightRoutes.map(renderTab)}
+      </View>
+
+      {/* 中央懸浮 AI 球 */}
+      <View
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: -18,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        pointerEvents="box-none"
+      >
+        <AIFloatingBall
+          size={62}
+          onPress={() => aiOverlay.open({ mode: 'chat', source: 'tabbar' })}
+          onLongPress={() => aiOverlay.open({ mode: 'quick', source: 'tabbar_long' })}
+        />
+      </View>
     </View>
   );
 }
 
 /**
- * RoleAwareTabNavigator — Dynamically render tabs based on user role
- * Maps role-specific tab keys to stack components
+ * AppTabNavigator — 統一的 4+1 導航
+ *
+ * 4 個情境 Tab + 1 個隱藏 Tab（我的，透過 HeaderDrawer 觸發）
+ * 不再依角色變 Tab 結構，角色適配交給 LearnStack 內部 dispatcher。
  */
-function RoleAwareTabNavigator() {
-  const permissions = usePermissions();
-
-  // Map initialRoute to RootTabParamList keys
-  const getInitialRouteName = (): keyof RootTabParamList => {
-    switch (permissions.initialRoute) {
-      case '管理':
-        return '管理';
-      case '審核':
-        return '審核';
-      case '教學':
-        return '教學';
-      case '服務':
-        return '服務';
-      case 'Today':
-        return 'Today';
-      default:
-        return 'Today';
-    }
-  };
-
+function AppTabNavigator() {
   return (
     <Tab.Navigator
       id={undefined}
-      initialRouteName={getInitialRouteName()}
+      initialRouteName="Today"
       tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={() => ({
         headerShown: false,
@@ -712,18 +688,15 @@ function RoleAwareTabNavigator() {
       })}
     >
       <Tab.Screen name="Today" component={HomeStack} />
-
-      {/* Render role-specific tab */}
-      {permissions.isStudent && <Tab.Screen name="課程" component={AcademicStack} />}
-      {permissions.isTeacher && <Tab.Screen name="教學" component={TeachingStack} />}
-      {permissions.isStaff && <Tab.Screen name="服務" component={StaffStack} />}
-      {permissions.isDepartmentHead && <Tab.Screen name="審核" component={DepartmentStack} />}
-      {permissions.isAdmin && <Tab.Screen name="管理" component={AdminStack} />}
-
-      {/* Shared tabs */}
+      <Tab.Screen name="學習" component={LearnStack} />
       <Tab.Screen name="校園" component={MapStack} />
-      <Tab.Screen name="收件匣" component={MessagesStack} />
-      <Tab.Screen name="我的" component={MeStack} />
+      <Tab.Screen name="訊息" component={MessagesStack} />
+      {/* 隱藏 Tab：僅作為 HeaderDrawer 跳轉用，不顯示於 TabBar */}
+      <Tab.Screen
+        name="我的"
+        component={MeStack}
+        options={{ tabBarButton: () => null }}
+      />
     </Tab.Navigator>
   );
 }
@@ -732,6 +705,7 @@ function AppNavigation({ navigationRef }: { navigationRef: AppNavigationRef }) {
   const auth = useAuth();
   usePushNotifications(navigationRef, auth.user?.uid);
   useAIAmbientAwareness();
+  useAIBrainLifecycle();
   useProactiveAIReporter();
   useWebLearningSync();
 
@@ -782,7 +756,10 @@ function AppNavigation({ navigationRef }: { navigationRef: AppNavigationRef }) {
     >
       <View style={{ flex: 1 }}>
         <NetworkStatusBanner />
-        <RoleAwareTabNavigator />
+        <AppTabNavigator />
+        <GlobalAIConfirmModalHost />
+        <AIOverlayHost />
+        <HeaderDrawerHost />
       </View>
     </NavigationContainer>
   );

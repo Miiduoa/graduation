@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
 import React, { useMemo, useEffect, useState } from 'react';
-import { ScrollView, View, Text, Pressable, StyleSheet } from 'react-native';
+import { ScrollView, View, Text, Pressable, StyleSheet, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { collection, query, where, limit, orderBy, onSnapshot } from 'firebase/firestore';
@@ -23,6 +23,7 @@ type GroupSummary = {
 
 type ConversationSummary = {
   id: string;
+  peerId?: string;
   participantName: string;
   lastMessage?: string;
   lastMessageAt?: Date;
@@ -43,6 +44,23 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
   const [unreadDmsCount, setUnreadDmsCount] = useState(0);
   const [recentDms, setRecentDms] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [inboxFilter, setInboxFilter] = useState('');
+
+  const filteredRecentGroups = useMemo(() => {
+    const q = inboxFilter.trim().toLowerCase();
+    if (!q) return recentGroups;
+    return recentGroups.filter((g) => (g.name ?? '').toLowerCase().includes(q));
+  }, [recentGroups, inboxFilter]);
+
+  const filteredRecentDms = useMemo(() => {
+    const q = inboxFilter.trim().toLowerCase();
+    if (!q) return recentDms;
+    return recentDms.filter(
+      (d) =>
+        (d.participantName ?? '').toLowerCase().includes(q) ||
+        (d.lastMessage ?? '').toString().toLowerCase().includes(q),
+    );
+  }, [recentDms, inboxFilter]);
 
   useEffect(() => {
     if (isFirebaseMockMode()) {
@@ -135,6 +153,7 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
 
                 return {
                   id: d.id,
+                  peerId: otherUserId,
                   participantName,
                   lastMessage: data.lastMessage?.content || data.lastMessageText,
                   lastMessageAt:
@@ -203,6 +222,95 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
           </Text>
         </View>
 
+        <Pressable
+          onPress={() => nav?.getParent()?.navigate?.('Today', { screen: 'CampusSocialScreen' })}
+          accessibilityRole="button"
+          accessibilityLabel="開啟校園社群"
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.space.md,
+            paddingHorizontal: theme.space.md,
+            paddingVertical: theme.space.md,
+            borderRadius: theme.radius.lg,
+            backgroundColor: theme.colors.socialSoft,
+            borderWidth: 1,
+            borderColor: theme.colors.social + '35',
+            opacity: pressed ? 0.88 : 1,
+          })}
+        >
+          <View
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              backgroundColor: theme.colors.social + '22',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="planet-outline" size={20} color={theme.colors.social} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>校園社群</Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              動態、看板、即時、學伴
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+        </Pressable>
+
+        {auth.user ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View
+              style={{
+                flex: 1,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                paddingHorizontal: theme.space.md,
+                paddingVertical: theme.space.sm,
+                backgroundColor: theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radius.lg,
+              }}
+            >
+              <Ionicons name="search" size={18} color={theme.colors.muted} />
+              <TextInput
+                value={inboxFilter}
+                onChangeText={setInboxFilter}
+                placeholder="搜尋此頁群組與私訊預覽"
+                placeholderTextColor={theme.colors.muted}
+                style={{ flex: 1, paddingVertical: 6, color: theme.colors.text, fontSize: 15 }}
+              />
+              {inboxFilter.length > 0 && (
+                <Pressable hitSlop={8} onPress={() => setInboxFilter('')}>
+                  <Ionicons name="close-circle" size={18} color={theme.colors.muted} />
+                </Pressable>
+              )}
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="搜尋同校聯絡人並加好友"
+              onPress={() => nav?.navigate?.('FriendSearch')}
+              style={({ pressed }) => ({
+                width: 46,
+                height: 46,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.accentSoft,
+                borderWidth: 1,
+                borderColor: theme.colors.accent + '40',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: pressed ? 0.85 : 1,
+              })}
+            >
+              <Ionicons name="person-add-outline" size={22} color={theme.colors.accent} />
+            </Pressable>
+          </View>
+        ) : null}
+
         {auth.user && totalUnread > 0 && (
           <View style={{ gap: theme.space.sm, flexDirection: 'row' }}>
             {unreadGroupsCount > 0 && (
@@ -263,7 +371,12 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
             >
               群組
             </Text>
-            {recentGroups.map((g) => (
+            {filteredRecentGroups.length === 0 ? (
+              <Text style={{ color: theme.colors.muted, fontSize: 14, paddingHorizontal: 4 }}>
+                沒有符合的群組
+              </Text>
+            ) : (
+              filteredRecentGroups.map((g) => (
               <Pressable
                 key={g.id}
                 onPress={() => nav?.navigate?.('GroupDetail', { groupId: g.id })}
@@ -327,7 +440,8 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
                   </View>
                 )}
               </Pressable>
-            ))}
+              ))
+            )}
             <Pressable
               onPress={() => nav?.navigate?.('Groups')}
               style={({ pressed }) => ({
@@ -362,10 +476,15 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
             >
               私訊
             </Text>
-            {recentDms.map((dm) => (
+            {filteredRecentDms.length === 0 ? (
+              <Text style={{ color: theme.colors.muted, fontSize: 14, paddingHorizontal: 4 }}>
+                沒有符合的私訊預覽
+              </Text>
+            ) : (
+              filteredRecentDms.map((dm) => (
               <Pressable
                 key={dm.id}
-                onPress={() => nav?.navigate?.('Chat', { conversationId: dm.id })}
+                onPress={() => nav?.navigate?.('Chat', { peerId: dm.peerId, conversationId: dm.id })}
                 style={({ pressed }) => ({
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -425,7 +544,8 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
                   />
                 )}
               </Pressable>
-            ))}
+              ))
+            )}
             <Pressable
               onPress={() => nav?.navigate?.('Dms')}
               style={({ pressed }) => ({

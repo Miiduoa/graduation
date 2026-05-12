@@ -358,6 +358,7 @@ function resolveProvisionedRole({ existingLink, existingUser }) {
 }
 
 const PROVIDENCE_UNIVERSITY_SCHOOL_ID = 'pu';
+const PU_BACKEND_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const UNIVERSAL_DEV_ACCOUNTS = [
   {
     uid: 'dev-universal-student',
@@ -448,7 +449,7 @@ async function createOwnedPuTronClassSession({ studentId, cookies, session, owne
         userId: session?.userId ?? null,
         userName: session?.userName ?? null,
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + PU_BACKEND_SESSION_TTL_MS),
       },
       { merge: true },
     );
@@ -467,7 +468,7 @@ async function createOwnedPuCampusSession({ studentId, cookies, ownerUid }) {
         ownerUid: ownerUid || null,
         cookies,
         createdAt: new Date(),
-        expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + PU_BACKEND_SESSION_TTL_MS),
       },
       { merge: true },
     );
@@ -1144,6 +1145,30 @@ function generateGroupJoinCode(length = 8) {
 exports.askCampusAssistant = require('./agent/handlers/askCampusAssistant');
 exports.executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 exports.aiOrderFood = require('./aiOrderFood');
+
+// ──────────────────────────────────────────────────────
+// 訂餐強化模組 (ordering)
+// 完整的「真實訂餐流程」相關 Cloud Functions：
+//   - assignQueueNumber       號碼牌 atomic counter
+//   - dailyQueueReset         每日凌晨重置號碼牌
+//   - walletHold / Capture / Release   錢包 pre-auth 流程
+//   - refundCaptured          已 capture 後的真退款
+//   - verifyPickupCode        店家核銷取餐碼
+//   - scheduledOrderTimeoutSweep  訂單超時自動處理
+//   - scheduledFlashDealExpiry    閃購到期清理
+//   - onInspectionWritten     稽查連動店家停權
+// ──────────────────────────────────────────────────────
+const ordering = require('./ordering');
+exports.assignQueueNumber = ordering.assignQueueNumber;
+exports.dailyQueueReset = ordering.dailyQueueReset;
+exports.walletHold = ordering.walletHold;
+exports.walletCapture = ordering.walletCapture;
+exports.walletRelease = ordering.walletRelease;
+exports.refundCaptured = ordering.refundCaptured;
+exports.verifyPickupCode = ordering.verifyPickupCode;
+exports.scheduledOrderTimeoutSweep = ordering.scheduledOrderTimeoutSweep;
+exports.scheduledFlashDealExpiry = ordering.scheduledFlashDealExpiry;
+exports.onInspectionWritten = ordering.onInspectionWritten;
 
 exports.getAgentRunDebug = onCall(
   {
@@ -7381,7 +7406,7 @@ exports.puFetchTronClassData = onRequest(
       await sessionRef.set(
         {
           lastUsedAt: new Date(),
-          expiresAt: new Date(Date.now() + 12 * 60 * 60 * 1000),
+          expiresAt: new Date(Date.now() + PU_BACKEND_SESSION_TTL_MS),
           ...(userId ? { userId } : {}),
         },
         { merge: true },

@@ -57,6 +57,12 @@ import {
   type Review,
   type FlashDeal,
 } from '../services/cafeteriaData';
+import {
+  VENDOR_CANCEL_REASONS,
+  consumePickupCode,
+  type CancelReasonCode,
+  type VendorCancelReason,
+} from '../services/ordering';
 
 // ══════════════════════════════════════════════════
 // 主畫面
@@ -85,6 +91,16 @@ export function VendorManagementScreen(props: any) {
   const [cancelReason, setCancelReason] = useState('');
   const [vendorOrders, setVendorOrders] = useState<Order[]>([]);
   const [vendorReviews, setVendorReviews] = useState<Review[]>([]);
+  const [selectedCancelCode, setSelectedCancelCode] = useState<VendorCancelReason>(
+    'vendor_sold_out',
+  );
+  const [pickupModal, setPickupModal] = useState<{
+    open: boolean;
+    order: Order | null;
+    input: string;
+    error: string | null;
+    busy: boolean;
+  }>({ open: false, order: null, input: '', error: null, busy: false });
 
   // 即時訂閱本店訂單（Firestore onSnapshot）
   const unsubOrdersRef = useRef<ReturnType<typeof subscribeOrders>>(null);
@@ -171,11 +187,31 @@ export function VendorManagementScreen(props: any) {
 
   // 處理訂單狀態更新（若有即時訂閱會自動更新，否則手動 reload）
   const handleUpdateOrderStatus = useCallback(
-    async (orderId: string, newStatus: OrderStatus) => {
+    async (
+      orderId: string,
+      newStatus: OrderStatus,
+      cancelReasonCode?: CancelReasonCode,
+      cancelReasonText?: string,
+    ) => {
       try {
-        await updateOrderStatus(orderId, newStatus);
+        await updateOrderStatus(
+          orderId,
+          newStatus,
+          newStatus === 'cancelled' && cancelReasonCode
+            ? { cancelReason: cancelReasonCode }
+            : undefined,
+        );
+
+        // 若是 vendor 取消，本地也標記原因細節（雲端 trigger 端另行處理退款）
+        if (newStatus === 'cancelled' && cancelReasonCode) {
+          console.info('[VendorManagement] cancelled order', {
+            orderId,
+            code: cancelReasonCode,
+            text: cancelReasonText,
+          });
+        }
+
         Alert.alert('成功', `訂單已更新為 ${ORDER_STATUS_LABELS[newStatus]}`);
-        // 若無 real-time 訂閱才手動 reload
         if (!unsubOrdersRef.current) {
           await loadOrders();
         }
@@ -185,6 +221,53 @@ export function VendorManagementScreen(props: any) {
     },
     [loadOrders],
   );
+
+  /** 店家核銷取餐碼 → 標記訂單 completed */
+  const handleVerifyPickupCode = useCallback(async () => {
+    const order = pickupModal.order;
+    if (!order) return;
+    const code = pickupModal.input.trim().toUpperCase();
+    if (code.length !== 6) {
+      setPickupModal((p) => ({ ...p, error: '取餐碼應為 6 位英數字' }));
+      return;
+    }
+    setPickupModal((p) => ({ ...p, busy: true, error: null }));
+    try {
+      const result = await consumePickupCode({
+        schoolId: 'pu',
+        orderId: order.id,
+        shortCode: code,
+        operatorUid: auth.user?.uid ?? 'unknown',
+      });
+      if (!result.ok) {
+        const reasonMsg: Record<string, string> = {
+          not_found: '取餐碼錯誤',
+          already_consumed: '此取餐碼已被使用',
+          expired: '取餐碼已過期',
+          wrong_vendor: '此取餐碼不屬於本店',
+          order_not_ready: '訂單尚未準備好',
+          revoked: '此取餐碼已被撤銷',
+        };
+        setPickupModal((p) => ({
+          ...p,
+          busy: false,
+          error: reasonMsg[result.reason ?? ''] ?? '核銷失敗',
+        }));
+        return;
+      }
+      // 標記訂單完成
+      await updateOrderStatus(order.id, 'completed');
+      Alert.alert('取餐成功', '已標記訂單完成');
+      setPickupModal({ open: false, order: null, input: '', error: null, busy: false });
+      if (!unsubOrdersRef.current) await loadOrders();
+    } catch (err: any) {
+      setPickupModal((p) => ({
+        ...p,
+        busy: false,
+        error: err?.message ?? '核銷失敗',
+      }));
+    }
+  }, [pickupModal.order, pickupModal.input, auth.user?.uid, loadOrders]);
 
   const handleToggleOpen = useCallback(() => {
     setIsOpen(!isOpen);
@@ -343,6 +426,9 @@ export function VendorManagementScreen(props: any) {
             orders={vendorOrders}
             onSelectOrder={setSelectedOrder}
             onUpdateStatus={handleUpdateOrderStatus}
+            onVerifyPickup={(order) =>
+              setPickupModal({ open: true, order, input: '', error: null, busy: false })
+            }
             onShowCancel={setShowCancelModal}
           />
         )}
@@ -384,15 +470,66 @@ export function VendorManagementScreen(props: any) {
                   color: theme.colors.text,
                   fontWeight: '700',
                   fontSize: 16,
-                  marginBottom: 12,
+                  marginBottom: 4,
                 }}
               >
-                取消訂單 #{selectedOrder.id}
+                取消訂單 #{selectedOrder.id.slice(-6)}
               </Text>
+              <Text
+                style={{
+                  color: theme.colors.muted,
+                  fontSize: 12,
+                  marginBottom: 14,
+                }}
+              >
+                請選擇取消原因。系統會依此原因自動執行退款。
+              </Text>
+
+              {/* 原因 picker */}
+              <View style={{ gap: 8, marginBottom: 12 }}>
+                {VENDOR_CANCEL_REASONS.map((r) => {
+                  const selected = selectedCancelCode === r.code;
+                  return (
+                    <Pressable
+                      key={r.code}
+                      onPress={() => setSelectedCancelCode(r.code as VendorCancelReason)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 10,
+                        paddingVertical: 10,
+                        paddingHorizontal: 12,
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: selected ? theme.colors.danger : theme.colors.border,
+                        backgroundColor: selected
+                          ? `${theme.colors.danger}10`
+                          : theme.colors.surface,
+                      }}
+                    >
+                      <Ionicons
+                        name={selected ? 'radio-button-on' : 'radio-button-off'}
+                        size={20}
+                        color={selected ? theme.colors.danger : theme.colors.muted}
+                      />
+                      <Text
+                        style={{
+                          flex: 1,
+                          color: theme.colors.text,
+                          fontWeight: selected ? '700' : '500',
+                        }}
+                      >
+                        {r.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
               <TextInput
                 value={cancelReason}
                 onChangeText={setCancelReason}
-                placeholder="輸入取消原因（可選）"
+                placeholder="補充說明（選填，會傳給學生）"
                 placeholderTextColor={theme.colors.muted}
                 style={{
                   borderWidth: 1,
@@ -401,7 +538,7 @@ export function VendorManagementScreen(props: any) {
                   padding: 12,
                   color: theme.colors.text,
                   marginBottom: 16,
-                  minHeight: 80,
+                  minHeight: 60,
                   textAlignVertical: 'top',
                 }}
                 multiline
@@ -421,9 +558,15 @@ export function VendorManagementScreen(props: any) {
                 </Pressable>
                 <Pressable
                   onPress={() => {
-                    handleUpdateOrderStatus(selectedOrder.id, 'cancelled');
+                    handleUpdateOrderStatus(
+                      selectedOrder.id,
+                      'cancelled',
+                      selectedCancelCode,
+                      cancelReason.trim() || undefined,
+                    );
                     setShowCancelModal(false);
                     setCancelReason('');
+                    setSelectedCancelCode('vendor_sold_out');
                     setSelectedOrder(null);
                   }}
                   style={{
@@ -434,13 +577,143 @@ export function VendorManagementScreen(props: any) {
                     alignItems: 'center',
                   }}
                 >
-                  <Text style={{ color: '#fff', fontWeight: '600' }}>確認取消</Text>
+                  <Text style={{ color: '#fff', fontWeight: '600' }}>確認取消並退款</Text>
                 </Pressable>
               </View>
             </View>
           </View>
         </Modal>
       )}
+
+      {/* 取餐碼核銷 Modal */}
+      <Modal
+        visible={pickupModal.open}
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setPickupModal({ open: false, order: null, input: '', error: null, busy: false })
+        }
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.65)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <View
+            style={{
+              width: '100%',
+              maxWidth: 380,
+              backgroundColor: theme.colors.background,
+              borderRadius: 16,
+              padding: 20,
+            }}
+          >
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontWeight: '700',
+                fontSize: 18,
+                marginBottom: 6,
+              }}
+            >
+              核銷取餐碼
+            </Text>
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: 12,
+                marginBottom: 14,
+              }}
+            >
+              請學生出示 6 位英數字取餐碼，輸入後核銷並標記取餐完成。
+            </Text>
+
+            <TextInput
+              value={pickupModal.input}
+              onChangeText={(t) =>
+                setPickupModal((p) => ({ ...p, input: t.toUpperCase(), error: null }))
+              }
+              placeholder="例如：A3K7M9"
+              placeholderTextColor={theme.colors.muted}
+              autoCapitalize="characters"
+              maxLength={6}
+              style={{
+                borderWidth: 2,
+                borderColor: pickupModal.error
+                  ? theme.colors.danger
+                  : theme.colors.border,
+                borderRadius: 10,
+                padding: 16,
+                color: theme.colors.text,
+                fontSize: 28,
+                fontWeight: '900',
+                letterSpacing: 6,
+                textAlign: 'center',
+                marginBottom: 10,
+              }}
+            />
+
+            {pickupModal.error && (
+              <Text
+                style={{
+                  color: theme.colors.danger,
+                  fontSize: 13,
+                  marginBottom: 10,
+                  textAlign: 'center',
+                }}
+              >
+                {pickupModal.error}
+              </Text>
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+              <Pressable
+                onPress={() =>
+                  setPickupModal({
+                    open: false,
+                    order: null,
+                    input: '',
+                    error: null,
+                    busy: false,
+                  })
+                }
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                  backgroundColor: theme.colors.surface,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: theme.colors.text, fontWeight: '600' }}>取消</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleVerifyPickupCode}
+                disabled={pickupModal.busy || pickupModal.input.length !== 6}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                  backgroundColor:
+                    pickupModal.busy || pickupModal.input.length !== 6
+                      ? theme.colors.muted
+                      : theme.colors.success,
+                  alignItems: 'center',
+                  opacity: pickupModal.busy ? 0.6 : 1,
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700' }}>
+                  {pickupModal.busy ? '核銷中...' : '確認核銷'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }
@@ -638,8 +911,9 @@ function OrdersTab(props: {
   onSelectOrder: (order: Order) => void;
   onUpdateStatus: (orderId: string, status: OrderStatus) => void;
   onShowCancel: (show: boolean) => void;
+  onVerifyPickup?: (order: Order) => void;
 }) {
-  const { orders, onSelectOrder, onUpdateStatus, onShowCancel } = props;
+  const { orders, onSelectOrder, onUpdateStatus, onShowCancel, onVerifyPickup } = props;
 
   const groupedOrders = useMemo(() => {
     return {
@@ -724,8 +998,14 @@ function OrdersTab(props: {
               <OrderCard
                 key={order.id}
                 order={order}
-                onAccept={() => onUpdateStatus(order.id, 'completed')}
-                actionLabel="已取餐"
+                onAccept={() => {
+                  if (onVerifyPickup) {
+                    onVerifyPickup(order);
+                  } else {
+                    onUpdateStatus(order.id, 'completed');
+                  }
+                }}
+                actionLabel="掃描取餐碼"
               />
             ))}
           </View>

@@ -602,6 +602,9 @@ export type AssistantChoiceMenu = {
   title?: string;
   prompt?: string;
   options: AssistantChoiceOption[];
+  /** 產生此選單的工具名稱。用於：當使用者下一輪只回「第 N 個 / 對 / 好」時，agent
+   *  能直接路由回同一個工具補上 args，而不用猜意圖。 */
+  producedByTool?: string;
 };
 
 export type NextBestAction = {
@@ -1070,6 +1073,19 @@ export type Conversation = {
   updatedAt?: string;
 };
 
+export type MessageType =
+  | 'text'
+  | 'image'
+  | 'file'
+  | 'location'
+  | 'system'
+  | 'video'
+  | 'audio'
+  | 'sticker'
+  | 'gif'
+  | 'poll'
+  | 'reply';
+
 export type Message = {
   id: string;
   conversationId: string;
@@ -1080,11 +1096,14 @@ export type Message = {
   attachments?: Attachment[];
   readBy?: string[];
   createdAt: string;
+  /** 擴充：訊息鍵入反應 emoji -> uid[] */
+  reactions?: Record<string, string[]>;
+  replyTo?: { messageId: string; preview: string; senderId?: string };
+  recalledAt?: string | null;
+  mediaUrl?: string;
+  /** 推播 / 顯示用提及 */
+  mentions?: string[];
 };
-
-export type MessageType = 'text' | 'image' | 'file' | 'location' | 'system';
-
-// ===== 失物招領 =====
 
 export type LostFoundItem = {
   id: string;

@@ -625,7 +625,14 @@ export function CourseHubScreen(props: any) {
           activeSessions={activeSessions}
           roleMode={roleMode}
           onOpenToday={() => nav?.navigate?.('Today', { screen: 'TodayHome' })}
-          onOpenAI={() => nav?.navigate?.('Today', { screen: 'AIChat' })}
+          onOpenAI={() => {
+            try {
+              const { aiOverlay } = require('../app/useAIOverlay');
+              aiOverlay.open({ mode: 'chat', source: 'course_hub' });
+            } catch {
+              nav?.navigate?.('Today');
+            }
+          }}
         />
 
         {/* 統計摘要 */}

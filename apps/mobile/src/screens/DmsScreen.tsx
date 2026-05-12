@@ -220,7 +220,7 @@ export function DmsScreen(props: any) {
 
     return (
       <Pressable
-        onPress={() => nav?.navigate?.('Chat', { kind: 'dm', peerId })}
+        onPress={() => nav?.navigate?.('Chat', { peerId, conversationId: item.id })}
         style={({ pressed }) => [s.row, pressed && { opacity: 0.7 }]}
       >
         {/* 頭像 */}
@@ -253,13 +253,13 @@ export function DmsScreen(props: any) {
     <Screen>
       <View style={{ flex: 1 }}>
         {/* 搜尋列 */}
-        <View style={s.searchBar}>
-          <View style={s.searchBox}>
+        <View style={[s.searchBar, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+          <View style={[s.searchBox, { flex: 1 }]}>
             <Ionicons name="search" size={16} color={theme.colors.muted} />
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="搜尋對話..."
+              placeholder="搜尋對話（暱稱或內文）"
               placeholderTextColor={theme.colors.muted}
               style={s.searchInput}
             />
@@ -269,6 +269,24 @@ export function DmsScreen(props: any) {
               </Pressable>
             )}
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="搜尋聯絡人並加好友"
+            onPress={() => nav?.navigate?.('FriendSearch')}
+            style={({ pressed }) => ({
+              width: 42,
+              height: 42,
+              borderRadius: 12,
+              backgroundColor: theme.colors.accentSoft,
+              borderWidth: 1,
+              borderColor: theme.colors.accent + '40',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.75 : 1,
+            })}
+          >
+            <Ionicons name="person-add-outline" size={20} color={theme.colors.accent} />
+          </Pressable>
         </View>
 
         {loading ? (
@@ -296,7 +314,7 @@ export function DmsScreen(props: any) {
                 <Ionicons name="chatbubble-ellipses-outline" size={48} color={theme.colors.border} />
                 <Text style={s.emptyTitle}>沒有對話</Text>
                 <Text style={s.emptySubtitle}>
-                  {searchQuery ? '找不到符合的對話' : '到群組成員列表開始私訊'}
+                  {searchQuery ? '找不到符合的對話' : '用右上角加好友搜尋同校聯絡人，或到群組開始私訊'}
                 </Text>
               </View>
             }

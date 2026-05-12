@@ -25,6 +25,8 @@ import {
   type StandardToolResult,
 } from './aiToolRegistry';
 import type { AssistantChoiceMenu, CampusActorRole } from '../data';
+import { understand as semanticUnderstand } from './aiSemanticReasoner';
+import { linkConceptToMeaning } from './aiActiveLearning';
 
 // ════════════════════════════════════════════════════════════
 // 0. 對話上下文指代解析 (Anaphora Resolution)
@@ -32,25 +34,38 @@ import type { AssistantChoiceMenu, CampusActorRole } from '../data';
 
 export type ConversationTurn = { role: 'user' | 'assistant'; content: string };
 
-/** 從 AI 回覆中提取有序列表項目 */
+/**
+ * 從 AI 回覆中提取列表項目。支援三種列表格式：
+ *   1) `1. 項目` / `1) 項目` / `1、項目`（有序）
+ *   2) `• 項目` / `- 項目` / `* 項目`（無序 — index 依出現順序）
+ *   3) `項目 | 說明 (位置)` / `項目｜說明（位置）`（pipe 分隔）
+ * 同一段中若混用，會合併編號（讓「第 N 個」對應使用者看到的第 N 行）。
+ */
 function extractListItems(text: string): Array<{ index: number; text: string; name: string; detail: string; location: string }> {
   const items: Array<{ index: number; text: string; name: string; detail: string; location: string }> = [];
   const lines = text.split('\n');
   let idx = 0;
   for (const line of lines) {
-    const m = line.match(/^\s*(\d+)[.、)）]\s*(.+)/);
-    if (m) {
-      idx++;
-      const fullText = m[2].trim();
-      const parts = fullText.match(/^([^|｜]+?)(?:\s*[|｜]\s*(.+?))?(?:\s*[（(](.+?)[)）])?$/);
-      items.push({
-        index: idx,
-        text: fullText,
-        name: parts?.[1]?.trim() ?? fullText,
-        detail: parts?.[2]?.trim() ?? '',
-        location: parts?.[3]?.trim() ?? '',
-      });
+    // 有序：1. xxx
+    let m = line.match(/^\s*(\d+)[.、)）]\s*(.+)/);
+    let fullText: string | null = null;
+    if (m) fullText = m[2].trim();
+    // 無序：• xxx / - xxx / * xxx
+    if (!fullText) {
+      const m2 = line.match(/^\s*[•·●○*\-+]\s+(.+)/);
+      if (m2) fullText = m2[1].trim();
     }
+    if (!fullText) continue;
+
+    idx++;
+    const parts = fullText.match(/^([^|｜]+?)(?:\s*[|｜]\s*(.+?))?(?:\s*[（(](.+?)[)）])?$/);
+    items.push({
+      index: idx,
+      text: fullText,
+      name: parts?.[1]?.trim() ?? fullText,
+      detail: parts?.[2]?.trim() ?? '',
+      location: parts?.[3]?.trim() ?? '',
+    });
   }
   return items;
 }
@@ -63,7 +78,7 @@ export function resolveConversationReference(
   history: ConversationTurn[],
 ): { resolvedItemName: string; resolvedDetail: string; resolvedLocation: string; originalContext: string; referenceType: 'ordinal' | 'demonstrative' | 'confirmation' } | null {
   const msg = message.trim();
-  const ordinalMatch = msg.match(/第\s*([一二三四五六七八九十\d]+)\s*個/);
+  const ordinalMatch = msg.match(/第\s*([一二三四五六七八九十\d]+)\s*[個本]/);
   const demonstrativeMatch = /就?(?:剛剛?|上面|前面)?那[一個]?個?啊?|就[是]?(?:那|這|它)啊?|對[，,]?\s*(?:就是)?(?:那|這|它)/.test(msg);
   const confirmMatch = /^(?:對|好[的啊]?|可以|沒問題|ok|OK|嗯|恩|是[的啊]?)\s*$/.test(msg);
   if (!ordinalMatch && !demonstrativeMatch && !confirmMatch) return null;
@@ -148,6 +163,11 @@ export type DetectedIntent = {
   prereqRead?: { tool: string; args: Record<string, string> };
   /** 寫入操作需要從前置讀取結果中提取的 key */
   resolveFromRead?: (readResult: ToolCallResult, msg: string) => Record<string, string>;
+  /**
+   * 寫入工具實際需要哪些 args；空陣列 = handler 自己決定（語意層處理）。
+   * 不設定時 → 沿用舊行為（任何 empty arg 都算 missing）。
+   */
+  requiredArgs?: string[];
 };
 
 /**
@@ -270,6 +290,18 @@ function extractContent(msg: string): string {
   return '';
 }
 
+function extractRoom(msg: string): string {
+  const buildingRoom = msg.match(/([A-Za-z])\s*(?:棟|館)?\s*(\d{3,4})(?:房|室)?/i);
+  if (buildingRoom) return `${buildingRoom[1].toUpperCase()}${buildingRoom[2]}`;
+  const room = msg.match(/(?:在|房間|寢室|宿舍|地點[:：]?)?\s*([A-Za-z]?\s?\d{3,4})(?:房|室)?/i);
+  return room?.[1]?.replace(/\s+/g, '').toUpperCase() ?? '';
+}
+
+function isRoomOnlyMessage(msg: string): boolean {
+  const s = msg.trim();
+  return /^(?:在\s*)?(?:[A-Za-z]\s*(?:棟|館)?\s*)?\d{3,4}(?:房|室)?$/i.test(s);
+}
+
 /**
  * 從讀取結果中模糊匹配目標名稱，返回 ID
  */
@@ -302,12 +334,24 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   const timeArgs = extractTime(msg);
   const content = extractContent(origMsg);
 
+  if (
+    /^(?:你會什麼|你會啥|你能做什麼|你能幹嘛|你可以做什麼|可以幹嘛|能做什麼|有啥用|有啥功能|會啥|功能|功能說明|使用說明|怎麼用|help|幫助)\??$/i.test(
+      origMsg.trim(),
+    )
+  ) {
+    intents.push({ tool: 'assistant_help', args: {}, priority: 20, reason: '能力說明' });
+  }
+
   // ══════════════════════════════════
   // 讀取意圖（priority >= 7）
   // ══════════════════════════════════
 
   // ── 課程/課表 ──
-  if (/課[表程]|今天[有的].*課|上什麼課|下一堂|幾點.*課|星期.*課|明天.*課/.test(msg)) {
+  if (
+    /課[表程]|今天[有的].*課|上什麼課|有什麼課|什麼課|哪堂課|今天的課|明天.*課|下一堂|下一節|接下來.*課|幾點.*課|星期.*課|what'?s\s+my\s+(?:class|schedule)|\bclass(?:es)?\b.*\btoday\b|\btoday\b.*\bclass(?:es)?\b/.test(
+      msg,
+    )
+  ) {
     const filter = /今天|今日/.test(msg) ? 'today' : /下一堂|下一節|接下來/.test(msg) ? 'next' : 'all';
     intents.push({ tool: 'query_courses', args: { filter }, priority: 10, reason: '查詢課程' });
   }
@@ -316,17 +360,23 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'query_grades', args: {}, priority: 10, reason: '查詢成績' });
   }
 
-  if (/作業|功課|報告|繳交|deadline|截止|考試|測驗|quiz|exam|待辦|todo/.test(msg)) {
+  if (/作業|功課|課業|報告|繳交|deadline|截止|考試|測驗|quiz|exam|待辦|todo|期末|draft|要交|交沒|該交/.test(msg)) {
     const status = /逾期|過期|遲交/.test(msg) ? 'overdue' : /全部/.test(msg) ? 'all' : 'pending';
     intents.push({ tool: 'query_assignments', args: { status }, priority: 10, reason: '查詢作業' });
   }
 
-  // ── 請假（寫入）vs 查出席（讀取）──
-  if (/幫我.*請假|我要請假|請.*假|請病假|請事假/.test(msg)) {
+  // ── 請假（寫入）vs 查出席／假單（讀取）──
+  // 「請假單」為名詞，勿誤觸申請請假；須有動作語境（要請／申請／幫我請…）
+  const wantsApplyLeave =
+    (/幫我.*請假|我要請假|請病假|請事假/.test(msg) ||
+      (/請假/.test(msg) && /要請|想請|申請|辦|跟老師請|跟課堂請/.test(msg))) &&
+    !/請假單|假單/.test(msg);
+  if (wantsApplyLeave) {
     const reasonMatch = origMsg.match(/(?:因為|原因|因)\s*(.{2,20})/);
     const courseMatch = origMsg.match(/(?:的|課|堂)\s*(.{2,15}?)(?:的|請假|$)/);
-    const reason = reasonMatch?.[1]?.trim() || (/生病|不舒服|發燒|感冒|頭痛|拉肚子/.test(msg) ? '身體不適' : /事|家|私/.test(msg) ? '個人事務' : '個人因素');
-    const leaveType = /生病|不舒服|發燒|感冒|頭痛|拉肚子|身體/.test(msg) ? 'sick' : /公假|公務/.test(msg) ? 'official' : 'personal';
+    const isSickLeave = /病假|生病|不舒服|發燒|感冒|頭痛|拉肚子|身體/.test(msg);
+    const reason = reasonMatch?.[1]?.trim() || (isSickLeave ? '身體不適' : /事|家|私/.test(msg) ? '個人事務' : '個人因素');
+    const leaveType = isSickLeave ? 'sick' : /公假|公務/.test(msg) ? 'official' : 'personal';
     // 使用 extractTime 的日期解析（支援下禮拜X、星期X、明天等）
     const dateArg = timeArgs.date ?? '';
     intents.push({
@@ -340,6 +390,8 @@ export function analyzeIntents(message: string): DetectedIntent[] {
       reason: `請假（${reason}${dateArg ? ` ${dateArg}` : ''}）`,
       prereqRead: { tool: 'query_courses', args: {} },
     });
+  } else if (/請假單|假單/.test(msg) && /查|看|過|審|還沒|進度|狀態/.test(msg)) {
+    intents.push({ tool: 'query_attendance', args: {}, priority: 10, reason: '查詢請假狀態' });
   } else if (/出席|缺席|出勤|曠課|到課|點名/.test(msg)) {
     intents.push({ tool: 'query_attendance', args: {}, priority: 10, reason: '查詢出席' });
   } else if (/請假/.test(msg) && /紀錄|查|幾次|狀態/.test(msg)) {
@@ -395,19 +447,31 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'query_library', args: { action, keyword }, priority: 8, reason: '查詢圖書館' });
   }
 
-  if (/公車|巴士|交通|怎麼[去到]|搭車|火車|高鐵|ubike/.test(msg)) {
+  if (/公車|巴士|校車|交通|怎麼[去到]|搭車|火車|高鐵|ubike|怎麼搭|\bbus\b|shuttle/.test(msg)) {
     intents.push({ tool: 'query_bus', args: {}, priority: 7, reason: '查詢交通' });
   }
 
-  if (/未讀|notification|消息/.test(msg) && !/幫我/.test(msg)) {
+  if (
+    (/未讀|notifications?\b.*\bunread\b|\bunread\b.*notif|消息|有沒有通知|看一下通知|查通知/.test(msg) ||
+      (/通知/.test(msg) && /看|查|有沒有|嗎|啦|一下|未讀/.test(msg))) &&
+    !/幫我.*(發|傳|送|私訊).*(?:訊|消息)|標.*已讀|全部.*已讀/.test(msg)
+  ) {
     intents.push({ tool: 'query_notifications', args: { unreadOnly: 'true' }, priority: 7, reason: '查詢通知' });
   }
 
-  if (/行事曆|日程|行程|排程|calendar|幾號.*有|這週/.test(msg) && !/新增|建立|修改|刪除|加/.test(msg)) {
+  if (
+    /行事曆|日程|行程|排程|calendar|\bmy\s+schedule\b|\bschedule\b|幾號.*有|這週/.test(msg) &&
+    !/新增|建立|修改|刪除|加/.test(msg)
+  ) {
     intents.push({ tool: 'query_calendar', args: {}, priority: 8, reason: '查詢行事曆' });
   }
 
-  if (/私訊|訊息|對話|聊天|dm|message|有人找/.test(msg) && !/幫我.*[發送傳]/.test(msg)) {
+  if (
+    /私訊|訊息|對話|聊天|dm|message|有人找|誰找過我|誰傳給我|密我|一直密|狂密|敲我|已讀不回|不回我|誰密我/.test(
+      msg,
+    ) &&
+    !/幫我.*[發送傳]/.test(msg)
+  ) {
     intents.push({ tool: 'query_conversations', args: {}, priority: 7, reason: '查詢訊息' });
   }
 
@@ -436,11 +500,36 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'comprehensive_analysis', args: {}, priority: 10, reason: '綜合分析' });
   }
 
-  // ── 今日簡報 ──
-  if (/今天|今日.*[嗎有什]|摘要|簡報|briefing|早安.*什|忙不忙/.test(msg)) {
+  // ── 今日／明日簡報 ──
+  if (
+    (/今天.*[忙嗎有什麼活動]|今日.*[嗎有什]|摘要|簡報|briefing|早安.*什|忙不忙|忙嗎|明天.*[忙嗎有]|明日.*[忙嗎有]|這禮拜.*[忙嗎有]|下禮拜.*[忙嗎有]/.test(
+      msg,
+    )) &&
+    !/有什麼課|什麼課|課表|上課|課堂|微積分|課程/.test(msg)
+  ) {
     if (intents.length === 0) {
-      intents.push({ tool: 'daily_briefing', args: {}, priority: 10, reason: '今日簡報' });
+      const isTomorrow = /明天|明日/.test(msg);
+      intents.push({
+        tool: 'daily_briefing',
+        args: isTomorrow ? { day: 'tomorrow' } : {},
+        priority: 10,
+        reason: isTomorrow ? '明日簡報' : '今日簡報',
+      });
     }
+  }
+
+  // ── 餓 → 推薦午餐／晚餐（不拘泥句首，允許口語前綴如「欸」「幹我」）──
+  if (
+    /好餓|超餓|很餓|有點餓|肚子餓|肚子.{0,2}餓|肚餓|又餓|餓扁|餓死|快餓死|好想吃東西|想[吃喝]點什麼|嘴饞/.test(msg)
+  ) {
+    const hour = new Date().getHours();
+    const timeSlot = hour < 10 ? 'breakfast' : hour < 14 ? 'lunch' : hour < 17 ? 'snack' : 'dinner';
+    intents.push({
+      tool: 'recommend_lunch',
+      args: { timeSlot },
+      priority: 13,
+      reason: '依時段推薦餐點',
+    });
   }
 
   // ══════════════════════════════════
@@ -448,13 +537,24 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   // 現在帶真實參數 + 前置讀取鏈
   // ══════════════════════════════════
 
-  // ── 發送訊息 ──
-  if (/[發送傳].*訊息|私訊/.test(msg)) {
-    const nameMatch = origMsg.match(/(?:給|跟|傳給|發給|私訊)\s*([^\s,，。！]{1,10})/);
+  // ── 發送訊息（「私訊誰找過我」為查詢，排除私訊後接「誰」）──
+  if (
+    /(?:幫我)?[發送傳].*訊息|(?:幫我)?私訊(?!誰)|^通知\s*[\u4e00-\u9fa5A-Za-z]{1,8}|(?:幫我)?(?:傳給|發給)/.test(
+      origMsg,
+    )
+  ) {
+    const notifyMatch = origMsg.match(/^通知\s*([^\s,，。！的]{1,4}?)(?=(?:今天|明天|後天|下週|下禮拜|這週|早上|下午|晚上|中午|的|把|改|要|$))\s*(.*)$/);
+    // 名字應該短（2~4 字中文），且在「明天/今天/這個/那個/說/要/把」等代名詞前截斷
+    const nameMatch =
+      notifyMatch ??
+      origMsg.match(/(?:給|跟|傳給|發給|私訊|通知)\s*([^\s,，。！的明今這那個說要把要請我]{1,4})/) ??
+      origMsg.match(/^通知\s*([^\s,，。！的明今這那個說要把]{1,4})/);
     const peerName = nameMatch?.[1] ?? '';
+    const messageContent = notifyMatch?.[2]?.replace(/^的/, '').trim() || content || '你好';
     intents.push({
       tool: 'send_message', isWrite: true, priority: 12,
-      args: { peerId: peerName, content: content || '你好' },
+      args: { peerId: peerName, content: messageContent },
+      requiredArgs: [],
       reason: `發送訊息給 ${peerName || '(待確認)'}`,
       prereqRead: { tool: 'query_conversations', args: {} },
       resolveFromRead: (res, m) => {
@@ -482,6 +582,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'register_event', isWrite: true, priority: 12,
       args: { eventId: '' },
+      requiredArgs: [],
       reason: `報名活動「${eventName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_events', args: {} },
       resolveFromRead: (res) => {
@@ -497,6 +598,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'unregister_event', isWrite: true, priority: 12,
       args: { eventId: '' },
+      requiredArgs: [],
       reason: `取消報名「${eventName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_events', args: {} },
       resolveFromRead: (res) => {
@@ -507,7 +609,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 預約圖書館座位 ──
-  if (/預約.*座位|訂.*座/.test(msg)) {
+  if (/預約.*座位|訂.*座|\bbook\b.*(?:圖書館|座位|位子|席)|(?:圖書館|座位|位子).*\bbook\b/i.test(msg)) {
     intents.push({
       tool: 'reserve_library_seat', isWrite: true, priority: 12,
       args: {
@@ -516,6 +618,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
         startTime: timeArgs.startTime ?? '09:00',
         endTime: timeArgs.endTime ?? '12:00',
       },
+      requiredArgs: [],
       reason: '預約圖書館座位',
       prereqRead: { tool: 'query_library', args: { action: 'seats', keyword: '' } },
       resolveFromRead: (res) => {
@@ -531,11 +634,12 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 借書 ──
-  if (/幫我.*借.*書|借.*這本/.test(msg)) {
+  if (/幫我.*借.*[書本]|借.*這本|借閱.*[書本]|借.*一本|隨便.*借|借.*隨便/.test(msg)) {
     const bookName = origMsg.match(/借\s*[「『"]?([^」』"\s]{2,20})/)?.[1] ?? '';
     intents.push({
       tool: 'borrow_book', isWrite: true, priority: 12,
       args: { bookId: '' },
+      requiredArgs: [],
       reason: `借閱「${bookName || '(待查找)'}」`,
       prereqRead: { tool: 'query_library', args: { action: 'search', keyword: bookName } },
       resolveFromRead: (res) => {
@@ -551,6 +655,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'renew_book', isWrite: true, priority: 12,
       args: { loanId: '' },
+      requiredArgs: [],
       reason: `續借「${bookName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_loans', args: {} },
       resolveFromRead: (res) => {
@@ -566,6 +671,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'return_book', isWrite: true, priority: 12,
       args: { loanId: '' },
+      requiredArgs: [],
       reason: `歸還「${bookName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_loans', args: {} },
       resolveFromRead: (res) => {
@@ -596,6 +702,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'delete_calendar_event', isWrite: true, priority: 12,
       args: { eventId: '' },
+      requiredArgs: [],
       reason: `刪除行程「${eventName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_calendar', args: {} },
       resolveFromRead: (res) => {
@@ -615,6 +722,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
         ...(timeArgs.startAt ? { startAt: timeArgs.startAt } : {}),
         ...(timeArgs.endAt ? { endAt: timeArgs.endAt } : {}),
       },
+      requiredArgs: [],
       reason: `修改行程「${eventName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_calendar', args: {} },
       resolveFromRead: (res) => {
@@ -629,10 +737,12 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     const typeMap: Record<string, string> = { '水': 'plumbing', '電': 'electrical', '燈': 'electrical', '家具': 'furniture', '冷氣': 'appliance' };
     let repairType = 'other';
     for (const [k, v] of Object.entries(typeMap)) { if (msg.includes(k)) { repairType = v; break; } }
+    const room = extractRoom(origMsg);
     const desc = content || origMsg.replace(/幫我|請|報修/g, '').trim();
     intents.push({
       tool: 'create_repair_request', isWrite: true, priority: 12,
-      args: { type: repairType, title: desc.slice(0, 30), description: desc },
+      args: { type: repairType, title: desc.slice(0, 30), description: desc, room },
+      requiredArgs: ['room', 'description'],
       reason: `報修：${desc.slice(0, 20)}`,
     });
   }
@@ -643,6 +753,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'submit_assignment', isWrite: true, priority: 12,
       args: { assignmentId: '', groupId: '', content: content || '已完成' },
+      requiredArgs: [],
       reason: `繳交作業「${assignName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_assignments', args: { status: 'pending' } },
       resolveFromRead: (res) => {
@@ -674,6 +785,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'enroll_course', isWrite: true, priority: 12,
       args: { courseId: '', semester: '' },
+      requiredArgs: [],
       reason: `選課「${courseName || '(待確認)'}」`,
       prereqRead: { tool: 'query_courses', args: { filter: 'all' } },
       resolveFromRead: (res) => {
@@ -692,6 +804,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'drop_course', isWrite: true, priority: 12,
       args: { enrollmentId: '' },
+      requiredArgs: [],
       reason: `退選「${courseName || '(待確認)'}」`,
       prereqRead: { tool: 'query_enrollments', args: {} },
       resolveFromRead: (res) => {
@@ -706,6 +819,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'cancel_seat_reservation', isWrite: true, priority: 12,
       args: { reservationId: '' },
+      requiredArgs: [],
       reason: '取消座位預約',
       prereqRead: { tool: 'query_library', args: { action: 'seats', keyword: '' } },
       resolveFromRead: (res) => {
@@ -719,11 +833,19 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     });
   }
 
-  // ── 簽到 ──
-  if (/簽到|打卡|出席.*簽/.test(msg)) {
+  // ── 簽到（含口誤「簽倒」、簡體「签倒」）──
+  if (/已經.*簽到|已簽到|簽到.*了|已經.*簽倒|簽倒.*了/.test(msg) || /已签倒|签倒/.test(msg)) {
+    intents.push({
+      tool: 'query_attendance',
+      args: {},
+      priority: 10,
+      reason: '查詢簽到狀態',
+    });
+  } else if (/簽到|簽倒|签倒|打卡|出席.*簽/.test(msg)) {
     intents.push({
       tool: 'check_in_attendance', isWrite: true, priority: 12,
       args: { courseSpaceId: '', sessionId: '' },
+      requiredArgs: [],
       reason: '簽到',
       prereqRead: { tool: 'query_courses', args: { filter: 'today' } },
       resolveFromRead: (res) => {
@@ -742,7 +864,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 預約看診 ──
-  if (/預約.*看[診病]|掛號|看.*醫生|健康中心.*預約/.test(msg)) {
+  if (/預約.*看[診病]|掛號|掛個號|看.*醫生|健康中心.*預約/.test(msg)) {
     const deptMap: Record<string, string> = { '牙': 'dental', '心理': 'counseling', '物理治療': 'physical_therapy', '復健': 'physical_therapy' };
     let dept = 'general';
     for (const [k, v] of Object.entries(deptMap)) { if (msg.includes(k)) { dept = v; break; } }
@@ -764,6 +886,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'reserve_washing_machine', isWrite: true, priority: 12,
       args: { machineId: '' },
+      requiredArgs: [],
       reason: '預約洗衣機',
       prereqRead: { tool: 'query_dorm_info', args: {} },
       resolveFromRead: (res) => {
@@ -779,7 +902,13 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 失物招領 ──
-  if (/失物|遺失|撿到|拾獲|丟了|掉了/.test(msg)) {
+  // 失物招領 — 排除「壞掉了/報修/弄壞/故障」這類非失物語境
+  if (
+    /失物|遺失|撿到|拾獲|不見了|搞丟|遺落|找不到.*(?:東西|錢包|手機|鑰匙|學生證)|\bi\s+lost\s+my\b|\blost\s+my\s+(?:wallet|phone|keys|card|airpods)\b/.test(
+      msg,
+    ) ||
+    (/丟了|掉了/.test(msg) && !/壞.*[了掉]|報修|維修|故障|破[了]|裂[開了]|燒壞|弄壞/.test(msg))
+  ) {
     const isFound = /撿到|拾獲/.test(msg);
     const desc = content || origMsg.replace(/幫我|請|失物招領/g, '').trim();
     const locMatch = origMsg.match(/(?:在|於)\s*([^\s,，。]{2,15})/);
@@ -795,33 +924,83 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     });
   }
 
-  // ── 訂餐 / 點餐 ──
-  // 排除已被其他意圖處理的訊息（請假、報修、預約等）
-  if (!/請.*假|報修|維修|預約.*座|預約.*看|掛號|借.*書|還書|選課|退選|報名.*活動|發.*訊|繳交|簽到|打卡|點名/.test(msg)) {
-    // 匹配模式：幫我點X、我要點X、點一碗X、訂一份X、來個X、買個X
-    const orderMatch = origMsg.match(/(?:幫我[點訂]|我要[點訂吃]|給我|來[一個份碗]?|買[一個份]?|訂[一個份碗]?|點[一個份碗]?)\s*(.{1,20}?)(?:吧|啊|呀|喔|哦|！|!|$)/);
-    // 也匹配直接說食物名+動詞的模式：「牛肉麵 一碗」、「點牛肉麵」
-    const orderMatch2 = origMsg.match(/^(?:點|訂)\s*(.{2,15})$/);
-    // 「我想吃X」模式
-    const orderMatch3 = origMsg.match(/(?:我想[吃喝]|想[吃喝]|好想[吃喝])\s*(.{1,15}?)(?:吧|啊|呀|喔|哦|！|!|$)/);
-    const foodName = orderMatch?.[1]?.trim() ?? orderMatch2?.[1]?.trim() ?? orderMatch3?.[1]?.trim() ?? '';
+  // ── 訂餐 / 點餐（語意層驅動，不再字串匹配）──
+  // 「隨便/你就…幫我處理」屬綜合求助，勿走 order_food，否則 semanticUnderstand 易誤判為訂餐
+  const isVagueHelpRequest =
+    /(?:隨便|随便|你就).{0,14}處理|幫我處理一下|幫我搞定/.test(msg);
+  // 排除已被其他意圖處理的訊息（請假、報修、預約、取消、查詢等）
+  if (
+    !isVagueHelpRequest &&
+    !/請.*假|報修|維修|預約.*座|預約.*看|掛號|借.*(?:書|本)|借閱|還書|選課|退選|報名.*活動|發.*訊|繳交|簽到|簽倒|签倒|打卡|點名|取消.*訂|不要.*訂|查看|查詢|看一下|看看|查.*訂單|我的訂單/.test(msg)
+  ) {
+    // 先用語意推理：訊息「幫我訂午餐」要解析成 intent=order_food + meal_time=lunch（item=null）
+    // 而不是 itemName='午餐' 去字串匹配
+    let frame: ReturnType<typeof semanticUnderstand> | null = null;
+    try {
+      frame = semanticUnderstand(origMsg);
+    } catch (_e) {
+      frame = null;
+    }
 
-    // 驗證 foodName 不是非食物操作關鍵字
-    const isNotFood = /假|修|預約|借|還|選|退|報名|發|繳|簽|打卡|點名|課|訊息/.test(foodName);
-
-    if (foodName && !isNotFood && /點|訂|幫我|我要|我想吃|想吃|來[一個份碗]|買/.test(msg)) {
-      // 萃取數量
-      const qtyMatch = origMsg.match(/(\d+)\s*[碗份個杯盤]/);
-      const quantity = qtyMatch?.[1] ?? '1';
-      // 萃取備註
-      const noteMatch = origMsg.match(/[，,]\s*(.{2,20})$/);
-      const note = noteMatch?.[1] ?? '';
-
+    if (frame && frame.intent === 'order_food') {
+      // 數量從語意層拿
+      const quantity = String(frame.slots.quantity ?? 1);
+      const itemName = frame.slots.item && !/^(?:的|點的|一點的)$/.test(frame.slots.item)
+        ? frame.slots.item
+        : '';
+      // 構造 args：只放非空欄位（gate 會用 requiredArgs 判斷，handler 自己用語意層）
+      const orderArgs: Record<string, string> = { quantity };
+      if (itemName) orderArgs.itemName = itemName;
       intents.push({
-        tool: 'create_order', isWrite: true, priority: 15, // 高於 query_menus 的 8
-        args: { itemName: foodName, quantity, ...(note ? { note } : {}) },
-        reason: `訂餐「${foodName}」x${quantity}`,
+        tool: 'create_order',
+        isWrite: true,
+        priority: 15,
+        args: orderArgs,
+        // create_order 沒有「死掉的必填」：handler 用 lastUserMessage+lastChoiceMenu+frame 自己解析
+        requiredArgs: [],
+        reason: frame.slots.meal_time
+          ? `訂餐：${frame.slots.meal_time === 'lunch' ? '午餐' : frame.slots.meal_time === 'dinner' ? '晚餐' : '早餐'}推薦`
+          : frame.reference?.type === 'ordinal'
+            ? `訂餐：選第 ${frame.reference.index} 個`
+            : itemName
+              ? `訂餐「${itemName}」x${quantity}`
+              : '訂餐',
       });
+    } else if (
+      frame &&
+      frame.intent === 'unknown' &&
+      (frame.constraints.vegetarian ||
+        frame.constraints.spicy != null ||
+        frame.constraints.warm ||
+        frame.constraints.cold ||
+        frame.constraints.quick ||
+        frame.constraints.maxPrice != null ||
+        frame.constraints.autoPick)
+    ) {
+      intents.push({
+        tool: 'create_order',
+        isWrite: true,
+        priority: 15,
+        args: { quantity: '1' },
+        requiredArgs: [],
+        reason: '餐點偏好推薦',
+      });
+    } else if (frame && frame.intent === 'unknown') {
+      // 語意層放棄；用舊的 regex fallback（向後相容）
+      const orderMatch = origMsg.match(/(?:幫我[點訂]|我要[點訂吃]|給我|來[一個份碗]?|買[一個份]?|訂[一個份碗]?|點[一個份碗]?)\s*(.{1,20}?)(?:吧|啊|呀|喔|哦|！|!|$)/);
+      const orderMatch2 = origMsg.match(/^(?:點|訂)\s*(.{2,15})$/);
+      const orderMatch3 = origMsg.match(/(?:我想[吃喝]|想[吃喝]|好想[吃喝])\s*(.{1,15}?)(?:吧|啊|呀|喔|哦|！|!|$)/);
+      const foodName = orderMatch?.[1]?.trim() ?? orderMatch2?.[1]?.trim() ?? orderMatch3?.[1]?.trim() ?? '';
+      const isNotFood = /假|修|預約|借|還|選|退|報名|發|繳|簽|打卡|點名|課|訊息/.test(foodName);
+      if (foodName && !isNotFood && /點|訂|幫我|我要|我想吃|想吃|來[一個份碗]|買/.test(msg)) {
+        const qtyMatch = origMsg.match(/(\d+)\s*[碗份個杯盤]/);
+        const quantity = qtyMatch?.[1] ?? '1';
+        intents.push({
+          tool: 'create_order', isWrite: true, priority: 15,
+          args: { itemName: foodName, quantity },
+          reason: `訂餐「${foodName}」x${quantity}`,
+        });
+      }
     }
   }
 
@@ -830,6 +1009,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'cancel_order', isWrite: true, priority: 12,
       args: { orderId: '' },
+      requiredArgs: [],
       reason: '取消訂單',
       prereqRead: { tool: 'query_orders', args: { status: 'pending' } },
       resolveFromRead: (res) => {
@@ -853,10 +1033,14 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 領包裹 ──
-  if (/領.*包裹|取.*包裹|確認.*領取/.test(msg)) {
+  if (
+    /(?:我要|我去|幫我|確認|我已|已經).*(?:領|取).*包裹|包裹.*(?:確認領取|已領|取件)/.test(msg) &&
+    !/有人|誰|被.*領|領.*嗎|取.*嗎|有沒有|查|狀態/.test(msg)
+  ) {
     intents.push({
       tool: 'confirm_package_pickup', isWrite: true, priority: 12,
       args: { packageId: '' },
+      requiredArgs: [],
       reason: '確認領取包裹',
       prereqRead: { tool: 'query_dorm_info', args: {} },
       resolveFromRead: (res) => {
@@ -876,6 +1060,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'start_attendance', isWrite: true, priority: 12,
       args: { courseSpaceId: '' },
+      requiredArgs: [],
       reason: '開始點名',
       prereqRead: { tool: 'query_courses', args: { filter: 'today' } },
       resolveFromRead: (res) => {
@@ -933,7 +1118,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 列印 ──
-  if (/列印|印.*文件|print/.test(msg)) {
+  if (/列印|幫我印|想印|要列印|印一下|印個|印.*文件|print/i.test(msg)) {
     const fileName = origMsg.match(/(?:列印|印)\s*[「『"]?([^」』"\s]{2,30})/)?.[1] ?? 'document.pdf';
     const copies = msg.match(/(\d+)\s*份/)?.[1] ?? '1';
     const isColor = /彩色|color/.test(msg);
@@ -944,9 +1129,17 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     });
   }
 
+  // ── 超口語／意圖不明：給預設動作，避免完全沒工具 ──
+  if (/忘記今天要幹嘛|忘記.*今天.*要|今天到底要幹嘛|今天要幹嘛/.test(msg) && intents.length === 0) {
+    intents.push({ tool: 'daily_briefing', args: {}, priority: 11, reason: '今日行程提示' });
+  }
+  if (/(?:隨便|随便|你就).{0,14}處理|幫我處理一下|幫我搞定/.test(msg) && intents.length === 0) {
+    intents.push({ tool: 'comprehensive_analysis', args: {}, priority: 10, reason: '綜合建議' });
+  }
+
   // 排序：高優先級先執行
   intents.sort((a, b) => b.priority - a.priority);
-  return intents.slice(0, 6);
+  return intents.slice(0, 12);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -992,17 +1185,87 @@ export type AgentQueryResult = {
  */
 export async function autonomousQuery(
   message: string,
-  ctx: { userId?: string; schoolId: string; role?: CampusActorRole },
+  ctx: {
+    userId?: string;
+    schoolId: string;
+    role?: CampusActorRole;
+    /** 上一輪 AI 回覆的可點選清單，讓「第 N 個」/「就那個」等指代解析能用 */
+    lastChoiceMenu?: AssistantChoiceMenu;
+    /** 連線狀態（離線時某些寫入會走草稿） */
+    isOnline?: boolean;
+  },
   /** 可選的模型推理回調 — 當所有規則都失敗時，讓模型自己選工具 */
   modelInference?: (prompt: string) => Promise<string>,
   /** 對話歷史（用於指代解析） */
   conversationHistory?: ConversationTurn[],
 ): Promise<AgentQueryResult> {
   const start = Date.now();
+  // 上下文校正可能在 Step -1 改寫成「幫我點 X」（讓 Step 0+ 走正常 order_food 流程）
+  let contextCorrectedMessage: string | null = null;
+
+  // ── Step -1: 主動學習 — 偵測「校正型」訊息 ──
+  // 模式：
+  //   1. 不是 X 是 Y          → X 等於 Y
+  //   2. X 應該是 Y / X 是指 Y → X 等於 Y
+  //   3. 不是 X，要 Y / 不是 X，是 Y → 拒絕 X，期望偏 Y
+  //   4. 我說的 X 是 Y         → X 等於 Y
+  //   5. 是 Y 啦 / 我說 Y      → 若上一輪 AI 提到「找不到 X」，將 X→Y
+  try {
+    const correction =
+      message.match(/(?:不是|不對是|錯了是)\s*[「『"]?([^「『"，,。]{1,12})[」』"]?\s*(?:是|應該是|指的是|意思是|要|想要|找|想找)\s*[「『"]?([^「『"，,。]{1,30})[」』"]?/) ??
+      message.match(/(?:我說的|我講的)\s*[「『"]?([^「『"，,。]{1,12})[」』"]?\s*(?:是|是指|就是)\s*[「『"]?([^「『"，,。]{1,30})[」』"]?/) ??
+      message.match(/[「『"]?([^「『"，,。]{1,12})[」』"]?\s*(?:應該是|是指|就是指)\s*[「『"]?([^「『"，,。]{1,30})[」』"]?/);
+    if (correction) {
+      const [, badTerm, goodTerm] = correction;
+      linkConceptToMeaning(badTerm.trim(), {
+        meaning: `使用者澄清：${badTerm.trim()} = ${goodTerm.trim()}`,
+        itemName: goodTerm.trim(),
+        aliases: [badTerm.trim()],
+        source: 'user_clarified',
+        confidence: 1,
+      });
+      console.log(`[AI Agent] 主動學習：${badTerm.trim()} → ${goodTerm.trim()}`);
+    } else if (conversationHistory && conversationHistory.length > 0) {
+      // 模式 5：使用者只回「是 Y 啦 / 我說 Y / 是 Y」，需要從上一輪 assistant
+      //         回覆中抓到「找不到 X / 沒有 X」這類錯誤詞 X，學會 X→Y。
+      // Greedy 的 char class 會吃掉句尾語氣詞，所以 capture 用「非語氣詞 + 非標點」
+      const shortCorrection =
+        message.match(/^(?:是|我說|意思是)\s*[「『"]?([^「『"，,。啦喔嗯耶哦呀的！\s]{2,20})[」』"]?\s*(?:啦|喔|嗯|耶|哦|呀|的|！)?$/) ??
+        message.match(/^([^「『"，,。才對啦這個]{2,15})\s*(?:才對|啦才對|這個|這個才對)$/);
+      if (shortCorrection) {
+        const goodTerm = shortCorrection[1].trim();
+        const lastAssistant = [...conversationHistory].reverse().find((t) => t.role === 'assistant');
+        if (lastAssistant) {
+          const badMatch =
+            lastAssistant.content.match(/找不到叫?「([^」]{2,15})」/) ??
+            lastAssistant.content.match(/沒有.*?「([^」]{2,15})」/);
+          if (badMatch) {
+            const badTerm = badMatch[1].trim();
+            linkConceptToMeaning(badTerm, {
+              meaning: `使用者澄清（上下文）：${badTerm} = ${goodTerm}`,
+              itemName: goodTerm,
+              aliases: [badTerm],
+              source: 'user_clarified',
+              confidence: 0.9,
+            });
+            console.log(`[AI Agent] 上下文校正學習：${badTerm} → ${goodTerm}`);
+            // 重寫訊息，讓後續流程把它當成「幫我點 ${goodTerm}」
+            contextCorrectedMessage = `幫我點 ${goodTerm}`;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[AI Agent] correction handler failed:', e);
+  }
 
   // ── Step 0: 指代解析 ──
-  let resolvedMessage = message;
-  if (conversationHistory && conversationHistory.length > 0) {
+  let resolvedMessage = contextCorrectedMessage ?? message;
+  // 如果 ctx.lastChoiceMenu 已經帶來上一輪的選單，**不要**改寫訊息：
+  // 讓語意層直接解析「第 N 個 / 第一個 / 最後一個」，handler 用 lastChoiceMenu 對齊。
+  // 重寫只在沒有 lastChoiceMenu 但有對話歷史時使用（往回掃 plain text）。
+  const skipReferenceRewrite = (ctx.lastChoiceMenu?.options?.length ?? 0) > 0;
+  if (!skipReferenceRewrite && conversationHistory && conversationHistory.length > 0) {
     const ref = resolveConversationReference(message, conversationHistory);
     if (ref) {
       console.log(`[AI Agent] 指代解析: "${message}" → "${ref.resolvedItemName}" (${ref.referenceType})`);
@@ -1016,7 +1279,56 @@ export async function autonomousQuery(
     }
   }
 
-  const toolCtx = { ...ctx, lastUserMessage: resolvedMessage };
+  if (isRoomOnlyMessage(resolvedMessage) && conversationHistory && conversationHistory.length > 0) {
+    const room = extractRoom(resolvedMessage);
+    const recentAssistantAskedRoom = [...conversationHistory]
+      .reverse()
+      .some((t) => t.role === 'assistant' && /缺少：room|房號|地點|報修|維修/.test(t.content));
+    const recentRepair = [...conversationHistory]
+      .reverse()
+      .find((t) => t.role === 'user' && /報修|維修|壞了|故障|冷氣|水管|電|燈/.test(t.content));
+    if (room && recentAssistantAskedRoom && recentRepair) {
+      resolvedMessage = `${recentRepair.content} 在 ${room}`;
+      console.log(`[AI Agent] 報修房號補齊: "${message}" → "${resolvedMessage}"`);
+    }
+  }
+
+  const toolCtx = {
+    ...ctx,
+    lastUserMessage: resolvedMessage,
+    lastChoiceMenu: ctx.lastChoiceMenu,
+  };
+
+  // ── Step 0.4: 上下文延續 — 如果上一輪的 choiceMenu 標示了 producedByTool
+  //    而使用者只回了「第 N 個 / 對 / 好啊 / 第一個就好」這種 short follow-up，
+  //    直接路由回那個工具，讓 handler 用 lastChoiceMenu + ordinal 自己解析。
+  const followUpToolFromMenu = (() => {
+    const menu = ctx.lastChoiceMenu;
+    if (!menu?.producedByTool || !menu.options?.length) return null;
+    const m = resolvedMessage.trim();
+    if (m.length > 16) return null; // 訊息太長代表不是純跟進
+    const hasOrdinal = /第\s*[一二兩三四五六七八九十\d]+|最後[一那]?[個本份項道杯碗]?/.test(m);
+    // 允許「對對對」「對對對就那個」「好好好」這類重複/語氣加強
+    const isConfirm =
+      /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?|就[這那]個|就好|就[那這]個就好|就那個|就這個)$/.test(m) ||
+      /^(?:對|好){1,4}(?:就[那這]個|就好|啊|啦|耶|喔|哦)?$/.test(m) ||
+      /^(?:對對對|好好好|沒錯|對啊).*(?:就[那這]?個|就好)?$/.test(m);
+    const fitsMenuLabel = menu.options.some((o) => o.label && m.includes(o.label.slice(0, 4)));
+    const isAutoPickFollowUp =
+      /隨便|随便|都可以|任一|相關|挑一?本|選一?本/.test(m) &&
+      /^(?:borrow_book|create_order)$/.test(menu.producedByTool);
+    const isEventUnregisterFollowUp =
+      menu.producedByTool === 'register_event' &&
+      /不去了|不想去|不參加|取消報名|取消.*活動|還是不去|算了.*不去/.test(m);
+    if (isEventUnregisterFollowUp) return 'unregister_event';
+    if (hasOrdinal || isConfirm || fitsMenuLabel || isAutoPickFollowUp) {
+      return menu.producedByTool;
+    }
+    return null;
+  })();
+  if (followUpToolFromMenu) {
+    console.log(`[AI Agent] 短回應路由：${followUpToolFromMenu}（透過 lastChoiceMenu.producedByTool）`);
+  }
 
   // ── Step 0.5: 技能快取查找 — 已學會的操作直接執行 ──
   const cachedSkill = findLearnedSkill(resolvedMessage);
@@ -1037,6 +1349,22 @@ export async function autonomousQuery(
   }
 
   let intents = analyzeIntents(resolvedMessage);
+
+  // ── 若有 followUpToolFromMenu，且使用者沒有「新的寫入意圖」→ 補上
+  // 規則：若 analyzeIntents 已經找到任何 write intent（代表使用者表達了新動作），
+  //      就不要再硬塞 followUp，避免「取消最後一筆訂單」既觸發 cancel_order 又觸發 create_order
+  const hasExistingWriteIntent = intents.some((i) => i.isWrite);
+  if (followUpToolFromMenu && !intents.some((i) => i.tool === followUpToolFromMenu) && !hasExistingWriteIntent) {
+    const isWrite = /^(?:create_|send_|submit_|register_|reserve_|borrow_|renew_|return_|cancel_|drop_|delete_|update_|mark_|rate_|unregister_|confirm_|check_in|join_|start_)/.test(followUpToolFromMenu) || followUpToolFromMenu === 'request_leave';
+    intents.unshift({
+      tool: followUpToolFromMenu,
+      args: {},
+      requiredArgs: [],
+      priority: 20,
+      reason: '上下文延續',
+      isWrite,
+    });
+  }
 
   // ── Fallback 1: regex 全部 miss → 用語意推理 ──
   if (intents.length === 0) {
@@ -1151,9 +1479,26 @@ export async function autonomousQuery(
     }
 
     // 檢查必要參數是否齊全
-    const missingRequired = Object.entries(finalArgs)
-      .filter(([_, v]) => v === '' || v === undefined || v === null)
-      .map(([k]) => k);
+    // - 若有 requiredArgs：只檢查列出的欄位（其餘 empty 是 OK 的，由 handler 用語意層處理）
+    // - 沒設 requiredArgs：fallback 用舊邏輯（任何 empty 都算缺少）
+    let missingRequired: string[];
+    if (Array.isArray(wi.requiredArgs)) {
+      missingRequired = wi.requiredArgs.filter((key) => {
+        const v = finalArgs[key];
+        return v === '' || v === undefined || v === null;
+      });
+    } else {
+      missingRequired = Object.entries(finalArgs)
+        .filter(([_, v]) => v === '' || v === undefined || v === null)
+        .map(([k]) => k);
+    }
+
+    // 把空字串 args 清掉，避免 handler 看到空字串以為「有指定空值」
+    for (const key of Object.keys(finalArgs)) {
+      if (finalArgs[key] === '' || finalArgs[key] === undefined || finalArgs[key] === null) {
+        delete finalArgs[key];
+      }
+    }
 
     if (missingRequired.length > 0) {
       failedActions.push({
@@ -1189,17 +1534,22 @@ export async function autonomousQuery(
 
   // 加入已執行操作的結果
   for (const ea of executedActions) {
-    contextParts.push(
-      ea.result.success
-        ? `【✅ ${ea.reason}】\n${ea.result.summary}`
-        : `【❌ ${ea.reason}失敗】\n${ea.result.summary ?? ea.result.error ?? '執行失敗'}`,
-    );
+    const r = ea.result;
+    // 成功 → ✅；失敗但有 choiceMenu / isWrite=false → 屬於「需要使用者澄清」，不顯示失敗紅標
+    const isClarification = !r.success && r.isWrite === false && Boolean(r.summary || (r as any).choiceMenu);
+    if (r.success) {
+      contextParts.push(`【✅ ${ea.reason}】\n${r.summary ?? ''}`);
+    } else if (isClarification) {
+      contextParts.push(`【💡 ${ea.reason}】\n${r.summary ?? ''}`);
+    } else {
+      contextParts.push(`【❌ ${ea.reason}失敗】\n${r.summary ?? r.error ?? '執行失敗'}`);
+    }
   }
 
   // 加入無法執行的操作
   for (const fa of failedActions) {
     contextParts.push(
-      `【⚠️ ${fa.reason}無法自動執行】\n${fa.missingInfo}。助理仍須代理：請在回覆中附分步計畫＋草稿欄位範例＋建議導頁，不可只推回使用者。`,
+      `【💭 ${fa.reason}需要補充資訊】\n${fa.missingInfo}。請在回覆中：(1) 列出 2-3 個合理選項（用 1. 2. 3. 編號清單）讓使用者直接選；(2) 已知資訊不要重複問；(3) 結尾告訴使用者「回我選的編號或具體名稱，我馬上幫你執行」。`,
     );
   }
 
@@ -1501,6 +1851,25 @@ export function inferIntentFromToolDescriptions(
   const msgTokens = tokenize(msg);
   if (msgTokens.length === 0) return [];
 
+  // 與 analyzeIntents 尾段一致，但優先於「學習記憶」——避免「隨便」曾被訂餐綁死後誤觸發 create_order
+  if (/(?:隨便|随便|你就).{0,14}處理|幫我處理一下|幫我搞定/.test(msg)) {
+    return [{
+      tool: 'comprehensive_analysis',
+      args: {},
+      priority: 15,
+      reason: '綜合建議（語意後備）',
+      isWrite: false,
+    }];
+  }
+
+  // 短訊息（≤6 字）且沒有動詞/疑問詞 → 不要亂猜工具
+  // 例如：「在 B302」「嗨」「對」「好啊」這類補充/招呼，不該主動觸發寫入
+  const isShort = message.trim().length <= 6;
+  const hasIntentVerb = /幫我|我要|想要|請|查|看|顯示|列出|送|發|報|預約|借|還|取消|刪除|新增|修改|更新|簽到|打卡|繳|報名|參加|請假|登記|怎麼|為什麼|哪裡|什麼|幾點|是否/.test(message);
+  if (isShort && !hasIntentVerb) {
+    return [];
+  }
+
   // 1. 先查學習記憶
   const memoryKey = msgTokens.sort().join('|');
   const learned = learnedPatterns.get(memoryKey);
@@ -1774,7 +2143,13 @@ export type ReflexionTrace = {
  */
 export async function autonomousQueryWithReflexion(
   message: string,
-  ctx: { userId?: string; schoolId: string; role?: CampusActorRole },
+  ctx: {
+    userId?: string;
+    schoolId: string;
+    role?: CampusActorRole;
+    lastChoiceMenu?: AssistantChoiceMenu;
+    isOnline?: boolean;
+  },
   modelInference: (prompt: string) => Promise<string>,
   conversationHistory?: ConversationTurn[],
 ): Promise<AgentQueryResult & { reflexionTraces: ReflexionTrace[] }> {

@@ -21,6 +21,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { PUCourse, PUCourseResult, PUGradeResult } from './puDirectScraper';
 import type { TCCourse } from './tronClassClient';
 import { getAnyCachedGrades, getAnyCachedCourses, getAnyCachedTCCourses } from './puDataCache';
+import type { CatalogCourse } from './courseCatalogClient';
+import type { UserProfile } from '../state/auth';
 
 const RECOMMENDATION_CACHE_KEY = '@course_rec:optimization';
 
@@ -561,4 +563,501 @@ export async function getCachedScheduleOptimization(): Promise<ScheduleOptimizat
     if (raw) return JSON.parse(raw);
   } catch {}
   return null;
+}
+
+// ─── Catalog × User Data 真實推薦 ────────────────────────
+//
+// 將 課綱查詢系統 抓到的真實開課（CatalogCourse[]）×
+// 使用者全部個人資料（學系/年級/歷史成績/目前課表/已修課程/偏好）
+// 做演算，產生「具體一門課」的推薦。
+
+export type CatalogRecommendationInput = {
+  /** 候選池（建議由 queryCatalog() 抓取） */
+  candidates: CatalogCourse[];
+  /** 個人資料（系、年級、學號） */
+  profile?: UserProfile | null;
+  /** 已修成績 */
+  grades?: PUGradeResult | null;
+  /** 本學期已選課（用於衝堂/避免重複） */
+  currentCourses?: PUCourseResult | null;
+  /** 同學的已選清單（Today / schedule.courses）— 偵測衝堂用 */
+  scheduleEvents?: Array<{
+    dayOfWeek?: number;
+    startTime?: string;
+    endTime?: string;
+    name?: string;
+    courseCode?: string;
+  }>;
+  /** 使用者偏好（興趣、避早八、目標學分等） */
+  preferences?: Partial<SchedulePreference> & {
+    interests?: string[];
+    avoidEarly?: boolean;
+    targetCredits?: number;
+    preferredLanguage?: string;
+  };
+};
+
+export type CatalogRecommendation = {
+  catalogCode: string;
+  courseName: string;
+  nameEn: string;
+  teacher: string;
+  credits: number;
+  department: string;
+  classOffered: string; // 班級 cla_cn，例：資管三A
+  courseType: string;
+  timePlace: string;
+  enrolled: number | null;
+  capacity: number | null;
+  language: string;
+  syllabusUrl: string | null;
+  matchScore: number; // 0–100
+  predictedGrade: number;
+  reasons: string[];
+  warnings: string[];
+  tags: string[];
+};
+
+// ─── 學號 → 年級 / 班級對照工具 ──────────────────────────
+
+/**
+ * 從學號 + 當前學期推得學生目前的「年級」與「入學民國學年」。
+ *
+ * 靜宜大學學號格式（10 碼或 9 碼）：
+ *   - 大學部：YYYDDDSSS（例：1110700321 → 學年 111、系代碼 0700、序號 321）
+ *   - 通常前 3 碼是民國入學學年（例：111 = 2022 入學）。
+ *
+ * 計算規則：
+ *   currentGrade = (當前學年 - 入學學年) + 1
+ *   若是下學期（part=2），仍歸在同年級；若已超過 4 升學/畢業 → 仍回傳 4 作為上限。
+ */
+export function deriveStudentGrade(
+  studentId?: string | null,
+  semesterCode?: string,
+): { grade: number | null; enrollYear: number | null } {
+  if (!studentId) return { grade: null, enrollYear: null };
+  const m = String(studentId).match(/^([0-9]{3})/);
+  if (!m) return { grade: null, enrollYear: null };
+  const enrollYear = parseInt(m[1], 10);
+  if (Number.isNaN(enrollYear) || enrollYear < 90 || enrollYear > 130) {
+    return { grade: null, enrollYear: null };
+  }
+  // 當前學年：semesterCode 形式如 '1142' → 學年 114
+  let currentYear: number;
+  if (semesterCode && semesterCode.length >= 3) {
+    currentYear = parseInt(semesterCode.slice(0, semesterCode.length - 1), 10);
+    if (Number.isNaN(currentYear)) currentYear = new Date().getFullYear() - 1911;
+  } else {
+    currentYear = new Date().getFullYear() - 1911;
+  }
+  const grade = Math.min(Math.max(currentYear - enrollYear + 1, 1), 6);
+  return { grade, enrollYear };
+}
+
+/**
+ * 從 catalog course 的 cla_cn / classOffered 抽出年級與系所縮寫。
+ *
+ * cla_cn 範例：
+ *   - "資管一A"    → { dept: "資管", grade: 1, section: "A" }
+ *   - "資管三B"    → { dept: "資管", grade: 3, section: "B" }
+ *   - "資管A班"    → { dept: "資管", grade: null, section: "A" }   // 跨年級
+ *   - "通識"       → { dept: null,   grade: null, section: null }
+ *   - "資管碩一"   → { dept: "資管", grade: 1, section: null, level: "graduate" }
+ */
+export function parseClassOffered(claCn: string | undefined | null): {
+  deptAbbr: string | null;
+  grade: number | null;
+  section: string | null;
+  isGraduate: boolean;
+} {
+  if (!claCn) return { deptAbbr: null, grade: null, section: null, isGraduate: false };
+  const s = claCn.trim();
+  const GRADE_MAP: Record<string, number> = {
+    一: 1, '1': 1, 二: 2, '2': 2, 三: 3, '3': 3,
+    四: 4, '4': 4, 五: 5, '5': 5,
+  };
+  const isGraduate = /碩|博/.test(s);
+
+  // pattern A: 「<dept>[碩|博]?<grade><sec?>」  e.g. 資管三A、資管碩一、資管一
+  let m = s.match(/^(.+?)(碩|博)?\s*([一二三四五12345])\s*([A-Z])?\s*班?$/);
+  if (m) {
+    return {
+      deptAbbr: m[1] || null,
+      grade: GRADE_MAP[m[3]] ?? null,
+      section: m[4] ?? null,
+      isGraduate: isGraduate || !!m[2],
+    };
+  }
+  // pattern B: 「<dept>[碩|博]?<sec>班?」 (跨年級)  e.g. 資管A班、會計B
+  m = s.match(/^(.+?)(碩|博)?\s*([A-Z])\s*班?$/);
+  if (m) {
+    return {
+      deptAbbr: m[1] || null,
+      grade: null,
+      section: m[3],
+      isGraduate: isGraduate || !!m[2],
+    };
+  }
+  // pattern C: 「<dept>[碩|博]?」單純系名
+  m = s.match(/^(.+?)(碩|博)?$/);
+  if (m) {
+    return {
+      deptAbbr: m[1] || null,
+      grade: null,
+      section: null,
+      isGraduate: isGraduate || !!m[2],
+    };
+  }
+  return { deptAbbr: null, grade: null, section: null, isGraduate };
+}
+
+/** 系所縮寫表 — 用於匹配 cla_cn 開頭 */
+const DEPT_ABBR_MAP: Record<string, string[]> = {
+  // 資訊學院
+  資管系: ['資管'], 資訊管理學系: ['資管'], 資訊管理: ['資管'],
+  資工系: ['資工'], 資訊工程學系: ['資工'], 資訊工程: ['資工'],
+  人工智慧系: ['AI', '人智', '人工智慧'], 人工智慧學系: ['AI', '人智'],
+  資科系: ['資科'], 資訊科學暨應用學系: ['資科'],
+  // 理學院
+  食營系: ['食營', '食品'], 食品營養學系: ['食營'],
+  應化系: ['應化'], 應用化學系: ['應化'],
+  化科系: ['化科'], 化粧品科學系: ['化科'],
+  財工系: ['財工'], 財務工程學系: ['財工'],
+  // 管理學院
+  會計系: ['會計'], 會計學系: ['會計'],
+  觀光系: ['觀光'], 觀光事業學系: ['觀光'],
+  財金系: ['財金'], 財務金融學系: ['財金'],
+  國企系: ['國企'], 國際企業學系: ['國企'],
+  行銷數位經營系: ['行銷', '數位經營'],
+  // 外語學院
+  英文系: ['英文', '英語'], 英國語文學系: ['英文'],
+  日文系: ['日文'], 日本語文學系: ['日文'],
+  西文系: ['西文', '西班牙'], 西班牙語文學系: ['西文'],
+  // 人社院
+  中文系: ['中文'], 中國文學系: ['中文'],
+  台文系: ['台文'], 台灣文學系: ['台文'],
+  法律系: ['法律'], 法律學系: ['法律'],
+  生態系: ['生態'], 生態人文學系: ['生態'],
+  大傳系: ['大傳'], 大眾傳播學系: ['大傳'],
+  社工系: ['社工'], 社會工作與兒童少年福利學系: ['社工'],
+  // 教育中心
+  師培中心: ['師培'], 教育研究所: ['教研'], 教研所: ['教研'],
+};
+
+function abbrForDepartment(dept: string | null | undefined): string[] {
+  if (!dept) return [];
+  const direct = DEPT_ABBR_MAP[dept];
+  if (direct) return direct;
+  // 嘗試把長名（資訊管理學系）截尾匹配
+  const candidates = Object.keys(DEPT_ABBR_MAP).filter((key) => key.length >= 4);
+  for (const key of candidates) {
+    if (dept.includes(key) || key.includes(dept)) {
+      return DEPT_ABBR_MAP[key];
+    }
+  }
+  // fallback：直接取前 2-3 字元當縮寫
+  const stripped = dept.replace(/系|學系|碩士班|博士班|所|研究所|學位學程|學程|專班|班/g, '');
+  return [stripped.slice(0, 4), stripped.slice(0, 3), stripped.slice(0, 2)].filter(
+    (s, i, arr) => s.length >= 2 && arr.indexOf(s) === i,
+  );
+}
+
+/**
+ * 把 catalog 候選 × 個人資料 做出真實推薦。
+ *
+ * 評分要素：
+ *  1. 畢業學分缺口（critical 缺口 +25、high +18、medium +10）
+ *  2. 個人類別偏好（歷史成績高的類別 +15）
+ *  3. 興趣關鍵字命中（每命中 +6，最高 +18）
+ *  4. 已修同類預估分數（>= 85 +12, >= 75 +6）
+ *  5. 衝堂（-50）/ 已修過（-100）/ 已滿（-15）
+ *  6. 時段偏好（avoidEarly 時，1-2 節 -10）
+ *  7. 偏好語言加分 / 同系所必修加分
+ *  8. 平衡：候選若分散到不同日 +5
+ *  9. ★ 系所/年級匹配（cla_cn）：本系 +12、本系本年級 +30、本系跨1年級 -8、跨2+ 直接過濾
+ */
+export function generateCatalogRecommendations(
+  input: CatalogRecommendationInput,
+): CatalogRecommendation[] {
+  const candidates = input.candidates ?? [];
+  const grades = input.grades ?? null;
+  const profile = input.profile ?? null;
+  const prefs = input.preferences ?? {};
+
+  // 已修課程集合（用於避免推已修過的）
+  const passedCourseNames = new Set<string>();
+  const passedCategoryScores = new Map<number, number[]>();
+  if (grades?.grades) {
+    for (const g of grades.grades) {
+      const score = typeof g.score === 'number' ? g.score : parseFloat(String(g.score));
+      if (!isNaN(score) && score >= 60) {
+        passedCourseNames.add(g.courseName);
+        const cat = encodeCourseCategory(g.courseName, g.courseType);
+        const arr = passedCategoryScores.get(cat) ?? [];
+        arr.push(score);
+        passedCategoryScores.set(cat, arr);
+      }
+    }
+  }
+  const categoryAvg = new Map<number, number>();
+  passedCategoryScores.forEach((arr, k) =>
+    categoryAvg.set(k, arr.reduce((a, b) => a + b, 0) / arr.length),
+  );
+
+  // 畢業缺口（會依使用者歷史成績推算）
+  const gaps = grades ? analyzeGraduationGaps(grades) : [];
+  const gapWeight: Record<string, number> = {};
+  for (const g of gaps) {
+    if (g.urgency === 'critical') gapWeight[g.category] = 25;
+    else if (g.urgency === 'high') gapWeight[g.category] = 18;
+    else if (g.urgency === 'medium') gapWeight[g.category] = 10;
+  }
+
+  // 現有課表（衝堂用）
+  const schedule = input.scheduleEvents ?? [];
+
+  // 使用者年級 / 系所縮寫
+  const semesterCode = candidates[0]?.semester ?? '';
+  const { grade: userGrade } = deriveStudentGrade(profile?.studentId, semesterCode);
+  const userDeptAbbrs = abbrForDepartment(profile?.department);
+  const isUserGraduate = /碩|博|研究所|碩士|博士/.test(profile?.department ?? '');
+
+  const results: CatalogRecommendation[] = [];
+
+  for (const c of candidates) {
+    const reasons: string[] = [];
+    const warnings: string[] = [];
+    let score = 50;
+
+    // (0) 已修過 → 直接跳過
+    if (passedCourseNames.has(c.name)) {
+      continue;
+    }
+
+    // (★) 系所 / 年級 匹配（早於其他規則，可能整門過濾掉）
+    const cls = parseClassOffered(c.classOffered);
+    const isOwnDept =
+      !!cls.deptAbbr &&
+      userDeptAbbrs.some(
+        (abbr) => cls.deptAbbr === abbr || cls.deptAbbr!.includes(abbr) || abbr.includes(cls.deptAbbr!),
+      );
+    const isGeneral =
+      c.courseTypeKey === 'general' ||
+      /通識|博雅|體育|軍訓|全民國防|服務學習/.test(c.courseType + c.name);
+
+    // 學生 vs 研究所層級不符 → 直接過濾
+    if (cls.isGraduate && !isUserGraduate) {
+      continue;
+    }
+    if (!cls.isGraduate && isUserGraduate && cls.deptAbbr) {
+      // 研究生通常不選大學部課；保留但降權
+      score -= 18;
+    }
+
+    // 系所匹配（順序很重要：本系 → 通識/體育 → 別系必修過濾 → 別系選修降權）
+    if (isOwnDept && cls.deptAbbr) {
+      score += 12;
+      reasons.push(`本系開課（${c.classOffered}）`);
+
+      // 年級匹配
+      if (userGrade != null && cls.grade != null) {
+        const diff = cls.grade - userGrade;
+        if (diff === 0) {
+          score += 30;
+          reasons.push(`本年級（大${userGrade}）課程`);
+        } else if (Math.abs(diff) === 1) {
+          score -= 8;
+          if (diff < 0) warnings.push('前一年級課程（可能已修）');
+          else warnings.push('下一年級才開的課（可能還沒先修）');
+        } else if (Math.abs(diff) >= 2) {
+          // 大幅跨年級的本系課直接過濾
+          continue;
+        }
+      } else if (userGrade != null && cls.grade == null) {
+        // 本系跨年級課（例：資管A班）→ 小加分
+        score += 4;
+        reasons.push('本系跨年級選修');
+      }
+    } else if (isGeneral) {
+      // 通識 / 體育 / 全民國防 → 不分系，所有人皆可
+      score += 2;
+    } else if (cls.deptAbbr && c.courseTypeKey === 'required') {
+      // 別系的必修（年級＋班別綁定）→ 通常無法選 → 過濾
+      continue;
+    } else if (cls.deptAbbr) {
+      // 別系一般選修 → 降權但不過濾（跨系選修可能）
+      score -= 6;
+      // 別系年級不符也再扣
+      if (userGrade != null && cls.grade != null && Math.abs(cls.grade - userGrade) >= 2) {
+        score -= 6;
+      }
+    }
+
+    // (1) 衝堂
+    const conflict = c.slots.some((s) =>
+      schedule.some(
+        (e) =>
+          e.dayOfWeek === s.dayOfWeek &&
+          e.startTime &&
+          e.endTime &&
+          s.startTime < e.endTime &&
+          s.endTime > e.startTime,
+      ),
+    );
+    if (conflict) {
+      score -= 50;
+      warnings.push('與目前已選課程衝堂');
+    }
+
+    // (2) 已滿
+    if (c.capacity != null && c.enrolled != null && c.enrolled >= c.capacity) {
+      score -= 15;
+      warnings.push('目前已額滿');
+    }
+
+    // (3) 畢業缺口加分
+    const courseGenre = (() => {
+      if (/體育|運動/.test(c.name)) return '體育';
+      if (/通識|博雅|人文|藝術/.test(c.name)) return '通識';
+      if (/服務學習|志工/.test(c.name)) return '服務學習';
+      if (c.courseTypeKey === 'required') return '必修';
+      if (c.courseTypeKey === 'elective') return '選修';
+      return '其他';
+    })();
+    if (gapWeight[courseGenre]) {
+      score += gapWeight[courseGenre];
+      reasons.push(`補${courseGenre}學分缺口`);
+    }
+
+    // (4) 類別歷史成績偏好
+    const cat = encodeCourseCategory(c.name, c.courseType);
+    const avg = categoryAvg.get(cat);
+    if (avg && avg >= 85) {
+      score += 15;
+      reasons.push(`你在類似課程平均 ${Math.round(avg)} 分，表現優異`);
+    } else if (avg && avg >= 75) {
+      score += 6;
+      reasons.push(`你在類似課程平均 ${Math.round(avg)} 分`);
+    }
+
+    // (5) 興趣關鍵字
+    if (prefs.interests && prefs.interests.length > 0) {
+      let hits = 0;
+      for (const kw of prefs.interests) {
+        if (!kw) continue;
+        if (c.name.includes(kw) || c.nameEn.toLowerCase().includes(kw.toLowerCase())) {
+          hits++;
+          reasons.push(`命中興趣：${kw}`);
+        }
+      }
+      score += Math.min(18, hits * 6);
+    }
+
+    // (6) 同系/年級 — 已在頂部的 ★ 區塊處理（用 classOffered/cla_cn）
+
+    // (7) 時段偏好
+    const earlySlot = c.slots.some((s) => s.periods.includes(1) || s.periods.includes(2));
+    if (prefs.avoidEarly && earlySlot) {
+      score -= 10;
+      warnings.push('包含早八時段');
+    }
+    if (prefs.lunchBreak) {
+      const eatsLunch = c.slots.some((s) =>
+        s.periods.some((p) => p === 99) ||
+        (s.startTime <= '13:00' && s.endTime >= '12:00'),
+      );
+      if (eatsLunch) {
+        score -= 8;
+        warnings.push('佔用午休時段');
+      }
+    }
+
+    // (8) 語言偏好
+    if (prefs.preferredLanguage && c.languageKey === prefs.preferredLanguage) {
+      score += 6;
+      reasons.push(`授課語言：${c.language}`);
+    }
+
+    // (9) 必修 / 通識 tag
+    if (c.courseTypeKey === 'required') {
+      score += 12;
+      reasons.push('必修課程');
+    } else if (c.courseTypeKey === 'general') {
+      score += 4;
+    }
+
+    // (10) tags
+    if (c.tags.includes('micro_credit')) reasons.push('微學分（彈性）');
+    if (c.tags.includes('emi')) reasons.push('全英語授課');
+    if (c.tags.includes('practical')) reasons.push('實務／實習導向');
+
+    // (11) 預測分數
+    const predicted = grades ? predictGradeForCourse(c.name, c.courseType, grades) : 75;
+
+    // (12) 太低的就不出
+    score = Math.max(0, Math.min(100, score));
+    if (score < 35) continue;
+
+    results.push({
+      catalogCode: c.code,
+      courseName: c.name,
+      nameEn: c.nameEn,
+      teacher: c.teacher,
+      credits: c.credits,
+      department: c.department,
+      classOffered: c.classOffered,
+      courseType: c.courseType,
+      timePlace: c.timePlaceRaw,
+      enrolled: c.enrolled,
+      capacity: c.capacity,
+      language: c.language,
+      syllabusUrl: c.syllabusUrl,
+      matchScore: Math.round(score),
+      predictedGrade: predicted,
+      reasons: reasons.length > 0 ? reasons : ['符合你的偏好設定'],
+      warnings,
+      tags: c.tags,
+    });
+  }
+
+  // 目標學分滿足偵測
+  if (prefs.targetCredits && results.length > 1) {
+    let acc = 0;
+    let cutoff = 0;
+    const sorted = [...results].sort((a, b) => b.matchScore - a.matchScore);
+    for (let i = 0; i < sorted.length; i++) {
+      acc += sorted[i].credits;
+      if (acc >= prefs.targetCredits) {
+        cutoff = i + 1;
+        break;
+      }
+    }
+    if (cutoff > 0) {
+      for (let i = 0; i < cutoff; i++) {
+        sorted[i].reasons.push('組合可達到目標學分');
+      }
+    }
+  }
+
+  return results.sort((a, b) => b.matchScore - a.matchScore);
+}
+
+/**
+ * 一鍵：抓使用者所有快取資料 + 課綱候選池 → 推薦結果
+ * 供 UI 直接呼叫。
+ */
+export async function recommendFromCatalog(
+  candidates: CatalogCourse[],
+  extra: Pick<CatalogRecommendationInput, 'profile' | 'scheduleEvents' | 'preferences'> = {},
+): Promise<CatalogRecommendation[]> {
+  const [grades, currentCourses] = await Promise.all([
+    getAnyCachedGrades(),
+    getAnyCachedCourses(),
+  ]);
+  return generateCatalogRecommendations({
+    candidates,
+    grades,
+    currentCourses,
+    ...extra,
+  });
 }

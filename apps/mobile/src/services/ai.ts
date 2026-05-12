@@ -1485,11 +1485,23 @@ async function tryChatWithOnDeviceAssistant(
       try {
         console.log('[AI Agent v2] 自主查詢 + 代理執行開始...');
         // 不傳 modelInference：小模型選工具易幻覺、與使用者問題脫鉤；僅用 regex + 語意描述匹配
-        agentResult = await autonomousQuery(lastMsg, {
-          userId: context.userId,
-          schoolId: context.schoolId,
-          role: context.role,
-        });
+        agentResult = await autonomousQuery(
+          lastMsg,
+          {
+            userId: context.userId,
+            schoolId: context.schoolId,
+            role: context.role,
+            lastChoiceMenu: context.lastChoiceMenu,
+            isOnline: context.isOnline,
+          },
+          undefined,
+          messages
+            .filter((m) => m.role === 'user' || m.role === 'assistant')
+            .map((m) => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content,
+            })),
+        );
         const execCount = agentResult.executedActions?.length ?? 0;
         const failCount = agentResult.failedActions?.length ?? 0;
         console.log(`[AI Agent v2] 完成: ${agentResult.intents.length} 意圖, ${agentResult.results.length} 讀取, ${execCount} 寫入已執行, ${failCount} 無法執行, ${agentResult.totalTimeMs}ms`);

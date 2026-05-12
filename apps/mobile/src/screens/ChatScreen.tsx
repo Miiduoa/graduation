@@ -40,6 +40,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
+import { recallChatMessage, toggleMessageReaction } from '../services/messaging';
 
 // ═══════ Types ═══════
 
@@ -54,6 +55,8 @@ type Msg = {
   imageUrl?: string;
   fileName?: string;
   fileUrl?: string;
+  reactions?: Record<string, string[]>;
+  recalledAt?: any;
 };
 
 type ConvoMeta = {
@@ -103,12 +106,20 @@ function shouldShowDateHeader(current: Msg, previous: Msg | undefined): boolean 
 // ═══════ Main Component ═══════
 
 export function ChatScreen(props: any) {
-  const peerId = props?.route?.params?.peerId as string | undefined;
+  const peerParam = props?.route?.params?.peerId as string | undefined;
+  const conversationIdParam = props?.route?.params?.conversationId as string | undefined;
   const refPostId = props?.route?.params?.refPostId as string | undefined;
+  const conversationTitle = props?.route?.params?.conversationTitle as string | undefined;
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
   const db = getDb();
+
+  const [peerId, setPeerId] = useState<string | undefined>(peerParam);
+
+  useEffect(() => {
+    setPeerId(peerParam);
+  }, [peerParam]);
 
   const [text, setText] = useState('');
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -127,12 +138,34 @@ export function ChatScreen(props: any) {
   const myUid = auth.user?.uid;
 
   const convoKey = useMemo(() => {
+    if (conversationIdParam) return conversationIdParam;
     if (!myUid || !peerId || !school.id) return null;
     return dmId(school.id, myUid, peerId);
-  }, [myUid, peerId, school.id]);
+  }, [conversationIdParam, myUid, peerId, school.id]);
+
+  /* 由對話列表進入時，用 conversationId 反查對象（DM） */
+  useEffect(() => {
+    if (!conversationIdParam || peerParam || !myUid) return;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'conversations', conversationIdParam));
+        if (!snap.exists()) return;
+        const data = snap.data() as ConvoMeta;
+        const mids = Array.isArray(data.memberIds) ? data.memberIds : [];
+        const other = mids.find((m) => m !== myUid);
+        if (other) setPeerId(other);
+      } catch (_) {
+        /* ignore */
+      }
+    })();
+  }, [conversationIdParam, peerParam, myUid, db]);
 
   // ── 取得對方名稱 ──
   useEffect(() => {
+    if (conversationTitle) {
+      setPeerName(conversationTitle);
+      return;
+    }
     if (!peerId || !school.id) return;
     (async () => {
       try {
@@ -142,7 +175,7 @@ export function ChatScreen(props: any) {
         setPeerName(peerId.slice(0, 8));
       }
     })();
-  }, [peerId, school.id, db]);
+  }, [peerId, school.id, db, conversationTitle]);
 
   // ── 設定導航標題 ──
   useEffect(() => {
@@ -279,12 +312,13 @@ export function ChatScreen(props: any) {
 
   // ── 確保 conversation 存在 ──
   const ensureConversation = async () => {
-    if (!myUid || !peerId || !convoKey) return;
+    if (conversationIdParam || !myUid || !peerId || !convoKey || !school.id) return;
     const convoRef = doc(db, 'conversations', convoKey);
     const snap = await getDoc(convoRef);
     if (!snap.exists()) {
       await setDoc(convoRef, {
         type: 'dm',
+        schoolId: school.id,
         memberIds: [myUid, peerId].sort(),
         createdAt: serverTimestamp(),
         lastMessageText: '',
@@ -297,11 +331,13 @@ export function ChatScreen(props: any) {
 
   // ── 發送訊息 ──
   const onSend = async () => {
-    if (!myUid || !peerId || !convoKey || !text.trim()) return;
+    if (!myUid || !convoKey || !text.trim()) return;
+    if (!conversationIdParam && !peerId) return;
     setSending(true);
+    const draftText = text.trim();
     try {
       await ensureConversation();
-      const messageContent = refPostId ? `${text.trim()}\n\n📎 引用貼文：${refPostId}` : text.trim();
+      const messageContent = refPostId ? `${draftText}\n\n📎 引用貼文：${refPostId}` : draftText;
       await ds.sendMessage({
         conversationId: convoKey,
         senderId: myUid,
@@ -311,12 +347,40 @@ export function ChatScreen(props: any) {
       // 更新對話的 lastMessage
       const convoRef = doc(db, 'conversations', convoKey);
       await updateDoc(convoRef, {
-        lastMessageText: text.trim().slice(0, 50),
+        lastMessageText: draftText.slice(0, 50),
         lastMessageAt: serverTimestamp(),
         [`typingUsers.${myUid}`]: null,
       }).catch(() => {});
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'send_message',
+          {
+            peerId,
+            conversationId: convoKey,
+            contentPreview: draftText.slice(0, 60),
+            length: draftText.length,
+          },
+          'success',
+          undefined,
+          `傳訊息給 ${peerId}：${draftText.slice(0, 30)}`,
+        );
+      } catch (brainErr) {
+        console.warn('[ChatScreen] brain.observe failed:', brainErr);
+      }
       setText('');
     } catch (e: any) {
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'send_message',
+          { peerId, conversationId: convoKey, length: draftText.length },
+          'failure',
+          e?.message,
+        );
+      } catch (brainErr) {
+        console.warn('[ChatScreen] brain.observe failed:', brainErr);
+      }
       Alert.alert('發送失敗', e?.message ?? '未知錯誤');
     } finally {
       setSending(false);
@@ -341,7 +405,7 @@ export function ChatScreen(props: any) {
 
   // ── Guard ──
   if (!auth.user) return <ErrorState title="對話" subtitle="尚未登入" hint="請先登入" />;
-  if (!peerId) return <ErrorState title="對話" subtitle="缺少 peerId" hint="請從對話列表進入" />;
+  if (!convoKey) return <ErrorState title="對話" subtitle="無法開啟對話" hint="請從對話列表進入" />;
 
   // ── Render ──
 
@@ -358,22 +422,63 @@ export function ChatScreen(props: any) {
             <Text style={s.dateHeaderText}>{formatDateHeader(item.createdAt)}</Text>
           </View>
         )}
-        <View style={[s.bubble, mine ? s.bubbleMine : s.bubblePeer]}>
+        <Pressable
+          onLongPress={() => {
+            if (!convoKey || !myUid || isFirebaseMockMode()) return;
+            const actions: { text: string; onPress?: () => void; style?: 'destructive' | 'cancel' }[] = [];
+            if (!item.recalledAt) {
+              actions.push({
+                text: '👍',
+                onPress: () =>
+                  toggleMessageReaction(convoKey, item.id, myUid, '👍').catch(() => {}),
+              });
+              actions.push({
+                text: '❤️',
+                onPress: () =>
+                  toggleMessageReaction(convoKey, item.id, myUid, '❤️').catch(() => {}),
+              });
+            }
+            if (mine && !item.recalledAt) {
+              actions.push({
+                text: '撤回',
+                style: 'destructive',
+                onPress: () =>
+                  recallChatMessage(convoKey, item.id, myUid).catch(() => {}),
+              });
+            }
+            actions.push({ text: '取消', style: 'cancel' });
+            Alert.alert('訊息', undefined, actions as any);
+          }}
+          delayLongPress={380}
+          style={[s.bubble, mine ? s.bubbleMine : s.bubblePeer]}
+        >
           {!mine && <Text style={s.senderName}>{senderName}</Text>}
           <View style={[s.msgBox, mine ? s.msgBoxMine : s.msgBoxPeer]}>
             <Text style={[s.msgText, mine ? s.msgTextMine : s.msgTextPeer]}>
-              {item.content ?? item.text}
+              {item.recalledAt ? '訊息已撤回' : item.content ?? item.text}
             </Text>
           </View>
+          {item.reactions &&
+            Object.keys(item.reactions).length > 0 && (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                {Object.entries(item.reactions).map(([emoji, uids]) =>
+                  (uids?.length ?? 0) > 0 ? (
+                    <Text key={emoji} style={{ fontSize: 12, color: theme.colors.muted }}>
+                      {emoji} {uids!.length}
+                    </Text>
+                  ) : null,
+                )}
+              </View>
+            )}
           <View style={[s.metaRow, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
             <Text style={s.timeText}>{formatTime(item.createdAt)}</Text>
-            {mine && (
+            {mine && !item.recalledAt && (
               <Text style={[s.readReceipt, read ? s.readReceiptRead : null]}>
                 {read ? '已讀' : '已送達'}
               </Text>
             )}
           </View>
-        </View>
+        </Pressable>
       </View>
     );
   };

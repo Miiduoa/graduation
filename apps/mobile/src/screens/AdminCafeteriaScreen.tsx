@@ -46,6 +46,11 @@ import {
   type CafeteriaAnnouncement,
   type InspectionRecord,
 } from '../services/cafeteriaData';
+import {
+  enforceInspection,
+  deriveEnforcementAction,
+  liftVendorSuspension,
+} from '../services/ordering';
 
 // ══════════════════════════════════════════════════
 // 主畫面
@@ -1032,6 +1037,42 @@ function VendorManagementCard(props: {
           <InfoRow label="評價數" value={v.ratingCount.toString()} />
           <InfoRow label="平均消費" value={`$${v.avgPrice}`} />
           <InfoRow label="營業時間" value={`${v.openTime}~${v.closeTime}`} />
+
+          {!v.isOpen && (
+            <Pressable
+              onPress={() => {
+                Alert.alert(
+                  '解除店家停權',
+                  `確定要解除「${v.name}」的停權狀態嗎？\n\n注意：若稽查未重新通過，建議先確認改善情況。`,
+                  [
+                    { text: '取消', style: 'cancel' },
+                    {
+                      text: '確認解禁',
+                      style: 'destructive',
+                      onPress: async () => {
+                        const ok = await liftVendorSuspension('pu', v.id, 'admin');
+                        Alert.alert(
+                          ok ? '已解禁' : '解禁失敗',
+                          ok ? `${v.name} 已恢復接單` : '請稍後再試',
+                        );
+                      },
+                    },
+                  ],
+                );
+              }}
+              style={{
+                marginTop: 6,
+                paddingVertical: 10,
+                borderRadius: 8,
+                backgroundColor: theme.colors.warning,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>
+                解除店家停權
+              </Text>
+            </Pressable>
+          )}
         </View>
       )}
     </Pressable>
@@ -1305,7 +1346,7 @@ function CreateInspectionModal(props: { onClose: () => void }) {
 
     setIsLoading(true);
     try {
-      await addInspection({
+      const newRecord = await addInspection({
         vendorId,
         cafeteriaId: selectedVendor.cafeteriaId,
         inspectorName: inspectorName.trim(),
@@ -1320,7 +1361,27 @@ function CreateInspectionModal(props: { onClose: () => void }) {
         overallComment: comment.trim(),
         passed,
       });
-      Alert.alert('成功', `稽查紀錄已保存 (${totalScore} 分，${passed ? '及格' : '不及格'})`);
+
+      // 自動連動 — 依分數決定是否暫停接單 / 強制下架 / 召回未取訂單
+      const action = deriveEnforcementAction(totalScore);
+      const enforcement = await enforceInspection('pu', newRecord as InspectionRecord);
+
+      const actionLabel: Record<string, string> = {
+        no_action: '通過，無連動處置',
+        warning: '警告（仍可營業）',
+        suspend_ordering: '暫停接單 7 天',
+        force_close: '強制下架 + 已退款未取訂單',
+        recall_pending_orders: '召回未取訂單',
+      };
+
+      const detail = enforcement.affectedOrderIds.length
+        ? `\n\n已自動退款 ${enforcement.affectedOrderIds.length} 筆未取訂單`
+        : '';
+
+      Alert.alert(
+        '稽查紀錄已保存',
+        `分數：${totalScore} 分 (${passed ? '及格' : '不及格'})\n處置：${actionLabel[action]}${detail}`,
+      );
       onClose();
     } catch (err) {
       Alert.alert('失敗', '保存稽查紀錄時出錯，請稍後再試');

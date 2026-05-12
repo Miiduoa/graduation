@@ -274,21 +274,51 @@ export function DormitoryScreen(props: any) {
           text: '送出報修',
           onPress: async (desc) => {
             if (!desc?.trim()) return Alert.alert('請輸入描述');
+            const room =
+              dormInfo?.building && dormInfo?.room
+                ? `${dormInfo.building} ${dormInfo.room}`
+                : '未指定';
+            const label = REPAIR_CATEGORIES.find((c) => c.id === cat)?.label ?? '';
             try {
               const newRepair = await ds.createRepairRequest({
                 type: toRepairType(cat),
-                title: `${REPAIR_CATEGORIES.find((c) => c.id === cat)?.label ?? ''}問題`,
+                title: `${label}問題`,
                 description: desc,
-                room:
-                  dormInfo?.building && dormInfo?.room
-                    ? `${dormInfo.building} ${dormInfo.room}`
-                    : '未指定',
+                room,
                 userId: auth.user!.uid,
                 schoolId: school?.id,
               });
               setRepairs([newRepair, ...repairs]);
+              try {
+                const { aiBrain } = await import('../services/aiBrain');
+                aiBrain.reportToolOutcome(
+                  'report_repair',
+                  {
+                    type: cat,
+                    room,
+                    description: desc.slice(0, 80),
+                    location: room,
+                  },
+                  'success',
+                  undefined,
+                  `在「${room}」報修：${label}（${desc.slice(0, 40)}）`,
+                );
+              } catch (brainErr) {
+                console.warn('[Dormitory] brain.observe failed:', brainErr);
+              }
               Alert.alert('報修成功 ✅', '維修人員將盡快處理');
-            } catch {
+            } catch (e: any) {
+              try {
+                const { aiBrain } = await import('../services/aiBrain');
+                aiBrain.reportToolOutcome(
+                  'report_repair',
+                  { type: cat, room },
+                  'failure',
+                  e?.message,
+                );
+              } catch (brainErr) {
+                console.warn('[Dormitory] brain.observe failed:', brainErr);
+              }
               Alert.alert('報修失敗', '請稍後再試');
             }
           },
@@ -341,8 +371,35 @@ export function DormitoryScreen(props: any) {
                   m.id === machine.id ? { ...m, status: 'reserved' as LaundryStatus } : m,
                 ),
               );
+              try {
+                const { aiBrain } = await import('../services/aiBrain');
+                aiBrain.reportToolOutcome(
+                  'reserve_washing_machine',
+                  {
+                    machineId: machine.id,
+                    floor: machine.floor,
+                    type: machine.type,
+                  },
+                  'success',
+                  undefined,
+                  `預約 ${machine.floor} ${machine.number} 號${machine.type === 'washer' ? '洗衣機' : '烘乾機'}`,
+                );
+              } catch (brainErr) {
+                console.warn('[Dormitory] brain.observe failed:', brainErr);
+              }
               Alert.alert('預約成功 ✅', '請在 10 分鐘內前往使用');
             } catch (e: any) {
+              try {
+                const { aiBrain } = await import('../services/aiBrain');
+                aiBrain.reportToolOutcome(
+                  'reserve_washing_machine',
+                  { machineId: machine.id },
+                  'failure',
+                  e?.message,
+                );
+              } catch (brainErr) {
+                console.warn('[Dormitory] brain.observe failed:', brainErr);
+              }
               Alert.alert('預約失敗', e?.message ?? '請稍後再試');
             }
           },

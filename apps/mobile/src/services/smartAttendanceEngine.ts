@@ -30,6 +30,19 @@ import {
 import { loadMockAuthSession } from './mockAuth';
 import { isTestAccount, getTestClassRoster } from './testSeedData';
 import type { PostLoginEngineBootstrap } from './postLoginBootstrapStore';
+import { getDb, isFirebaseMockMode } from '../firebase';
+import {
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  where,
+  serverTimestamp,
+  type Unsubscribe,
+} from 'firebase/firestore';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -166,43 +179,110 @@ const STORAGE = {
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // ============================================================================
-// FALLBACK DATA (when TronClass unavailable)
+// FIRESTORE 即時同步層 — 跨裝置 sessions 同步
 // ============================================================================
 
-// (已移除硬編碼假課程 — 改由 puDataCache 統一快取提供真實課表資料)
+const FIRESTORE_COLLECTION = 'attendanceSessions';
+const FIRESTORE_LEAVES_COLLECTION = 'attendanceLeaves';
 
-const FALLBACK_STUDENTS = [
-  '陳浩然',
-  '劉思媗',
-  '黃子軒',
-  '李欣怡',
-  '王彥程',
-  '張冠文',
-  '簡芷昱',
-  '吳昱鋮',
-  '林昱彬',
-  '楊庭昕',
-  '鍾承鴻',
-  '洪晉熙',
-  '謝承洋',
-  '曾奕晴',
-  '郭昱辰',
-  '何欣諺',
-  '盧昀希',
-  '蕭岑芮',
-  '徐昱軒',
-  '陳旻琪',
-  '邱品澐',
-  '賈昕妤',
-  '江冠廷',
-  '許庭佑',
-  '彭昱涵',
-  '林昱陞',
-  '李芯昀',
-  '王昀軒',
-  '朱昱彤',
-  '周旻樂',
-];
+/** 將本地 session 寫入 Firestore（教師建立/更新時呼叫） */
+async function syncSessionToFirestore(session: AttendanceSession): Promise<void> {
+  if (isFirebaseMockMode()) return;
+  try {
+    const db = getDb();
+    const ref = doc(collection(db, FIRESTORE_COLLECTION), session.id);
+    await setDoc(ref, {
+      ...session,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (e) {
+    console.warn('[Attendance] Firestore sync failed (non-fatal):', e);
+  }
+}
+
+/** 從 Firestore 讀取進行中的場次（學生端用） */
+async function fetchActiveSessionsFromFirestore(courseIds?: string[]): Promise<AttendanceSession[]> {
+  if (isFirebaseMockMode()) return [];
+  try {
+    const db = getDb();
+    const col = collection(db, FIRESTORE_COLLECTION);
+    const q = query(col, where('status', '==', 'active'));
+    const snap = await getDocs(q);
+    let sessions: AttendanceSession[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as AttendanceSession;
+      sessions.push({ ...data, id: d.id });
+    });
+    // 如果有課程 ID 過濾
+    if (courseIds && courseIds.length > 0) {
+      const idSet = new Set(courseIds);
+      sessions = sessions.filter((s) => idSet.has(s.courseId));
+    }
+    return sessions;
+  } catch (e) {
+    console.warn('[Attendance] Firestore fetch failed:', e);
+    return [];
+  }
+}
+
+/** 即時監聽進行中場次（用於 AttendanceLiveScreen 即時更新） */
+export function subscribeToSession(
+  sessionId: string,
+  callback: (session: AttendanceSession | null) => void,
+): Unsubscribe {
+  if (isFirebaseMockMode()) {
+    // fallback：每 3 秒輪詢本地
+    const interval = setInterval(async () => {
+      const s = await getSessionById(sessionId);
+      callback(s);
+    }, 3000);
+    return () => clearInterval(interval);
+  }
+  const db = getDb();
+  const ref = doc(collection(db, FIRESTORE_COLLECTION), sessionId);
+  return onSnapshot(ref, (snap) => {
+    if (snap.exists()) {
+      callback({ ...(snap.data() as AttendanceSession), id: snap.id });
+    } else {
+      callback(null);
+    }
+  }, (err) => {
+    console.warn('[Attendance] onSnapshot error:', err);
+  });
+}
+
+/** 即時監聽學生可見的進行中場次 */
+export function subscribeToActiveSessions(
+  courseIds: string[],
+  callback: (sessions: AttendanceSession[]) => void,
+): Unsubscribe {
+  if (isFirebaseMockMode()) {
+    const interval = setInterval(async () => {
+      const s = await getActiveSessions();
+      callback(s);
+    }, 5000);
+    return () => clearInterval(interval);
+  }
+  const db = getDb();
+  const col = collection(db, FIRESTORE_COLLECTION);
+  const q = query(col, where('status', '==', 'active'));
+  return onSnapshot(q, (snap) => {
+    const idSet = new Set(courseIds);
+    const sessions: AttendanceSession[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as AttendanceSession;
+      if (idSet.size === 0 || idSet.has(data.courseId)) {
+        sessions.push({ ...data, id: d.id });
+      }
+    });
+    callback(sessions);
+  }, (err) => {
+    console.warn('[Attendance] subscribeToActiveSessions error:', err);
+  });
+}
+
+// (已移除硬編碼假課程 — 改由 puDataCache 統一快取提供真實課表資料)
+// (已移除 FALLBACK_STUDENTS 假名字 — 無真實名冊時回傳空陣列)
 
 // ============================================================================
 // QR CODE SYSTEM — 每 3 秒旋轉的 TOTP 碼
@@ -421,12 +501,9 @@ export async function getCourseStudents(courseId: number): Promise<
     }
   } catch (_) { /* ignore */ }
 
-  // Fallback — 一般帳號無 TronClass 時
-  return FALLBACK_STUDENTS.map((name, i) => ({
-    id: `STU${String(i + 1).padStart(3, '0')}`,
-    name,
-    avatarUrl: null,
-  }));
+  // 無法取得真實名冊 — 回傳空陣列，UI 層應顯示「無法載入名冊」
+  console.warn('[Attendance] No real student roster available');
+  return [];
 }
 
 // ============================================================================
@@ -487,6 +564,9 @@ export async function createSession(config: {
   sessions.push(session);
   await AsyncStorage.setItem(STORAGE.SESSIONS, JSON.stringify(sessions));
 
+  // 同步到 Firestore — 讓學生端即時看到
+  await syncSessionToFirestore(session);
+
   // Emit event → 行事曆 + 推播引擎會自動反應
   campusEventBus.emit('session:started', {
     sessionId: id,
@@ -536,30 +616,38 @@ export async function getActiveSessions(): Promise<AttendanceSession[]> {
 export async function getActiveSessionsForStudent(
   enrolledCourseIds?: string[],
 ): Promise<AttendanceSession[]> {
-  const sessions = await getAllSessions();
-  const active = sessions.filter((s) => s.status === 'active');
-
-  // 如果有提供已選課清單，嚴格過濾
-  if (enrolledCourseIds && enrolledCourseIds.length > 0) {
-    const idSet = new Set(enrolledCourseIds);
-    return active.filter((s) => idSet.has(s.courseId));
+  // 1. 嘗試取得學生的選課 ID 列表
+  let courseIdFilter: string[] = enrolledCourseIds || [];
+  if (courseIdFilter.length === 0) {
+    try {
+      const cachedRaw = await AsyncStorage.getItem(STORAGE.COURSES);
+      if (cachedRaw) {
+        const cachedCourses: AttendanceCourse[] = JSON.parse(cachedRaw);
+        courseIdFilter = cachedCourses.filter((c) => c.role === 'student').map((c) => c.id);
+      }
+    } catch (_) {}
   }
 
-  // 沒有提供時，嘗試從快取的課程列表中過濾
-  try {
-    const cachedRaw = await AsyncStorage.getItem(STORAGE.COURSES);
-    if (cachedRaw) {
-      const cachedCourses: AttendanceCourse[] = JSON.parse(cachedRaw);
-      const studentCourseIds = new Set(
-        cachedCourses.filter((c) => c.role === 'student').map((c) => c.id),
-      );
-      if (studentCourseIds.size > 0) {
-        return active.filter((s) => studentCourseIds.has(s.courseId));
-      }
-    }
-  } catch (_) {}
+  // 2. 同時查詢本機 + Firestore（教師場次在雲端）
+  const [localSessions, firestoreSessions] = await Promise.all([
+    getAllSessions().then((s) => s.filter((ss) => ss.status === 'active')),
+    fetchActiveSessionsFromFirestore(courseIdFilter.length > 0 ? courseIdFilter : undefined),
+  ]);
 
-  return active;
+  // 3. 合併去重（以 session.id 為主鍵，Firestore 版本優先）
+  const merged = new Map<string, AttendanceSession>();
+  localSessions.forEach((s) => merged.set(s.id, s));
+  firestoreSessions.forEach((s) => merged.set(s.id, s)); // Firestore 覆蓋本地
+
+  let results = Array.from(merged.values());
+
+  // 4. 嚴格過濾：只回傳學生修的課
+  if (courseIdFilter.length > 0) {
+    const idSet = new Set(courseIdFilter);
+    results = results.filter((s) => idSet.has(s.courseId));
+  }
+
+  return results;
 }
 
 /** 結束點名場次 */
@@ -576,6 +664,18 @@ export async function endSession(sessionId: string): Promise<void> {
   session.excusedCount = session.records.filter((r) => r.status === 'excused').length;
 
   await AsyncStorage.setItem(STORAGE.SESSIONS, JSON.stringify(sessions));
+
+  // 同步到 Firestore — 學生端 + 管理端即時看到完成
+  await syncSessionToFirestore(session);
+
+  // 嘗試回寫 TronClass（best-effort — API 端點可能不可用）
+  try {
+    if (await hasTCSession()) {
+      // TronClass attendance write-back API 目前返回 404/403
+      // 當 API 可用時，這裡應呼叫 tcSubmitAttendanceRecords()
+      console.log('[Attendance] TronClass write-back: API endpoints currently unavailable (404/403). Session data saved locally and to Firestore.');
+    }
+  } catch (_) {}
 
   // Emit event → 出席分析 + 風險預警
   const rate =
@@ -639,6 +739,9 @@ export async function checkIn(
 
   await AsyncStorage.setItem(STORAGE.SESSIONS, JSON.stringify(sessions));
 
+  // 同步到 Firestore — 教師端即時看到學生簽到
+  syncSessionToFirestore(session).catch(() => {});
+
   // Emit event → XP + 校園脈動
   campusEventBus.emit('attendance:checked_in', {
     sessionId,
@@ -683,6 +786,9 @@ export async function updateStudentStatus(
   session.excusedCount = session.records.filter((r) => r.status === 'excused').length;
 
   await AsyncStorage.setItem(STORAGE.SESSIONS, JSON.stringify(sessions));
+
+  // 同步到 Firestore
+  syncSessionToFirestore(session).catch(() => {});
 }
 
 // ============================================================================
@@ -772,19 +878,70 @@ export async function getStudentAnalytics(studentId?: string): Promise<StudentAn
       ? Math.round(courseBreakdown.reduce((sum, c) => sum + c.rate, 0) / courseBreakdown.length)
       : 0;
 
+  // 從本地 session records 計算真實連勝天數 + 星期幾出席模式
+  const allSessions = await getAllSessions();
+  const myRecords = allSessions
+    .filter((s) => s.status === 'completed')
+    .sort((a, b) => b.startTime - a.startTime);
+
+  // ── 計算連勝 ──
+  let currentStreak = 0;
+  let bestStreak = 0;
+  let tempStreak = 0;
+  for (const sess of myRecords) {
+    const myRec = studentId
+      ? sess.records.find((r) => r.studentId === studentId)
+      : sess.records.find((r) => r.status === 'present' || r.status === 'late');
+    const wasPresent = myRec && (myRec.status === 'present' || myRec.status === 'late');
+    if (wasPresent) {
+      tempStreak++;
+      bestStreak = Math.max(bestStreak, tempStreak);
+    } else {
+      if (currentStreak === 0) currentStreak = tempStreak;
+      tempStreak = 0;
+    }
+  }
+  if (currentStreak === 0) currentStreak = tempStreak;
+  bestStreak = Math.max(bestStreak, tempStreak);
+
+  // ── 計算星期幾出席率 ──
+  const dayNames = ['日', '一', '二', '三', '四', '五', '六'];
+  const dayStats = new Map<number, { total: number; attended: number }>();
+  for (let d = 0; d < 7; d++) dayStats.set(d, { total: 0, attended: 0 });
+  for (const sess of myRecords) {
+    const dayOfWeek = new Date(sess.startTime).getDay();
+    const stat = dayStats.get(dayOfWeek)!;
+    stat.total++;
+    const myRec = studentId
+      ? sess.records.find((r) => r.studentId === studentId)
+      : sess.records[0];
+    if (myRec && (myRec.status === 'present' || myRec.status === 'late')) {
+      stat.attended++;
+    }
+  }
+  // 只回傳週一到週五（有課的日子）
+  const weekdayPattern = [1, 2, 3, 4, 5]
+    .map((d) => {
+      const stat = dayStats.get(d)!;
+      return {
+        day: dayNames[d],
+        rate: stat.total > 0 ? Math.round((stat.attended / stat.total) * 100) : 0,
+      };
+    });
+
+  // 如果本地沒有 session 資料，從 TronClass 課程出席率推算
+  if (myRecords.length === 0 && courseBreakdown.length > 0) {
+    const avgRate = overallRate;
+    weekdayPattern.forEach((wp) => { wp.rate = avgRate; });
+  }
+
   return {
     studentId: studentId || '',
     overallRate,
     courseBreakdown,
-    streak: { current: 5, best: 12 },
+    streak: { current: currentStreak, best: bestStreak },
     riskLevel: overallRate >= 85 ? 'safe' : overallRate >= 70 ? 'warning' : 'danger',
-    weekdayPattern: [
-      { day: '一', rate: 92 },
-      { day: '二', rate: 88 },
-      { day: '三', rate: 85 },
-      { day: '四', rate: 80 },
-      { day: '五', rate: 78 },
-    ],
+    weekdayPattern,
   };
 }
 
@@ -841,6 +998,155 @@ export async function getTeacherAnalytics(courseId?: string): Promise<TeacherAna
       date: s.sessionDate,
       rate: Math.round(((s.presentCount + s.lateCount) / s.totalStudents) * 100),
     })),
+  };
+}
+
+// ============================================================================
+// HIGH RISK STUDENTS（教師用 — 哪些學生快被扣考）
+// ============================================================================
+
+export type HighRiskStudent = {
+  studentId: string;
+  studentName: string;
+  courseId: string;
+  courseName: string;
+  attendanceRate: number;
+  absences: number;
+  totalSessions: number;
+  riskLevel: 'warning' | 'danger'; // warning: 70-80%, danger: <70%
+};
+
+/** 取得所有高風險學生（出席率低於 80% 的） — 教師 + 管理者用 */
+export async function getHighRiskStudents(courseId?: string): Promise<HighRiskStudent[]> {
+  const sessions = await getAllSessions(courseId);
+  const completedSessions = sessions.filter((s) => s.status === 'completed');
+  if (completedSessions.length === 0) return [];
+
+  // 按課程分組
+  const courseMap = new Map<string, { courseName: string; sessions: AttendanceSession[] }>();
+  completedSessions.forEach((s) => {
+    if (!courseMap.has(s.courseId)) {
+      courseMap.set(s.courseId, { courseName: s.courseName, sessions: [] });
+    }
+    courseMap.get(s.courseId)!.sessions.push(s);
+  });
+
+  const riskStudents: HighRiskStudent[] = [];
+
+  courseMap.forEach(({ courseName, sessions: courseSessions }, cId) => {
+    // 計算每位學生的出席率
+    const studentStats = new Map<string, { name: string; present: number; total: number }>();
+    courseSessions.forEach((s) => {
+      s.records.forEach((r) => {
+        if (!studentStats.has(r.studentId)) {
+          studentStats.set(r.studentId, { name: r.studentName, present: 0, total: 0 });
+        }
+        const stat = studentStats.get(r.studentId)!;
+        stat.total++;
+        if (r.status === 'present' || r.status === 'late' || r.status === 'excused') {
+          stat.present++;
+        }
+      });
+    });
+
+    studentStats.forEach((stat, sId) => {
+      const rate = stat.total > 0 ? Math.round((stat.present / stat.total) * 100) : 100;
+      if (rate < 80) {
+        riskStudents.push({
+          studentId: sId,
+          studentName: stat.name,
+          courseId: cId,
+          courseName,
+          attendanceRate: rate,
+          absences: stat.total - stat.present,
+          totalSessions: stat.total,
+          riskLevel: rate < 70 ? 'danger' : 'warning',
+        });
+      }
+    });
+  });
+
+  return riskStudents.sort((a, b) => a.attendanceRate - b.attendanceRate);
+}
+
+// ============================================================================
+// ADMIN ANALYTICS（管理者用 — 全系/全校跨課程彙總）
+// ============================================================================
+
+export type AdminAnalytics = {
+  totalCourses: number;
+  totalSessions: number;
+  overallAttendanceRate: number;
+  courseRanking: {
+    courseId: string;
+    courseName: string;
+    instructorName: string;
+    sessions: number;
+    averageRate: number;
+  }[];
+  riskStudentCount: number;
+  departmentSummary: {
+    department: string;
+    courseCount: number;
+    avgRate: number;
+  }[];
+};
+
+/** 管理者全系出席率統計（跨所有課程彙總） */
+export async function getAdminAnalytics(): Promise<AdminAnalytics> {
+  const courses = await getAttendanceCourses();
+  const allSessions = await getAllSessions();
+  const completedSessions = allSessions.filter((s) => s.status === 'completed');
+
+  // 課程排名（依出席率）
+  const courseRanking = courses.map((c) => {
+    const courseSess = completedSessions.filter((s) => s.courseId === c.id);
+    const avgRate = courseSess.length > 0
+      ? Math.round(
+          courseSess.reduce(
+            (sum, s) => sum + ((s.presentCount + s.lateCount) / Math.max(s.totalStudents, 1)) * 100,
+            0,
+          ) / courseSess.length,
+        )
+      : c.rate;
+    return {
+      courseId: c.id,
+      courseName: c.name,
+      instructorName: c.instructorName,
+      sessions: courseSess.length || c.totalSessions,
+      averageRate: avgRate,
+    };
+  }).sort((a, b) => a.averageRate - b.averageRate);
+
+  // 科系彙總
+  const deptMap = new Map<string, { count: number; totalRate: number }>();
+  courses.forEach((c) => {
+    const dept = c.department || '未分類';
+    if (!deptMap.has(dept)) deptMap.set(dept, { count: 0, totalRate: 0 });
+    const d = deptMap.get(dept)!;
+    d.count++;
+    d.totalRate += c.rate;
+  });
+  const departmentSummary = Array.from(deptMap.entries()).map(([dept, d]) => ({
+    department: dept,
+    courseCount: d.count,
+    avgRate: d.count > 0 ? Math.round(d.totalRate / d.count) : 0,
+  }));
+
+  // 全域出席率
+  const overallRate = courses.length > 0
+    ? Math.round(courses.reduce((sum, c) => sum + c.rate, 0) / courses.length)
+    : 0;
+
+  const riskStudents = await getHighRiskStudents();
+
+  return {
+    totalCourses: courses.length,
+    totalSessions: completedSessions.length,
+    overallAttendanceRate: overallRate,
+    courseRanking,
+    riskStudentCount: riskStudents.length,
+    departmentSummary,
   };
 }
 

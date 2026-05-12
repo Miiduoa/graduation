@@ -26,6 +26,14 @@ const INTENT_WRITE_PLANS = {
     toolName: 'borrowBook',
     requiresConfirmation: true,
   },
+  renew_book: {
+    toolName: 'renewBook',
+    requiresConfirmation: true,
+  },
+  return_book: {
+    toolName: 'returnBook',
+    requiresConfirmation: true,
+  },
   submit_repair_request: {
     toolName: 'createDormRepairRequest',
     requiresConfirmation: true,

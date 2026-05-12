@@ -1,6 +1,7 @@
 /* eslint-disable */
 import React, { useMemo } from 'react';
 import { RefreshControl, ScrollView, Text, View, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { CourseSpace, InboxTask } from '../data';
@@ -20,6 +21,8 @@ import {
 } from '../ui/campusOs';
 import { formatDueWindow, isTeachingRole, resolveRoleMode, toInboxItem } from '../utils/campusOs';
 import { navigateToCourseHome, navigateToCourseScreen } from '../utils/courseNavigation';
+import { aiOverlay } from '../app/useAIOverlay';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
 export function InboxScreen(props: any) {
   const nav = props?.navigation;
@@ -87,19 +90,23 @@ export function InboxScreen(props: any) {
     }
 
     if (item.kind === 'assistant_queue' && item.sourceRunId) {
-      nav?.navigate?.('AIChat', { sourceRunId: item.sourceRunId });
+      aiOverlay.open({
+        mode: 'chat',
+        prompt: `這是助理任務 ${item.sourceRunId}，幫我繼續處理。`,
+        source: 'inbox_assistant',
+      });
       return;
     }
 
     if ((item.kind === 'assignment' || item.kind === 'quiz') && item.assignmentId) {
-      nav?.navigate?.('收件匣', {
+      nav?.navigate?.('訊息', {
         screen: 'AssignmentDetail',
         params: { groupId: item.groupId, assignmentId: item.assignmentId },
       });
       return;
     }
 
-    nav?.navigate?.('收件匣', { screen: 'GroupDetail', params: { groupId: item.groupId } });
+    nav?.navigate?.('訊息', { screen: 'GroupDetail', params: { groupId: item.groupId } });
   };
 
   return (
@@ -122,29 +129,111 @@ export function InboxScreen(props: any) {
           gap: 14,
         }}
       >
-        <View style={{ gap: theme.space.xs }}>
-          <Text
-            style={{
-              color: theme.colors.muted,
-              fontSize: theme.typography.overline.fontSize,
-              fontWeight: theme.typography.overline.fontWeight ?? '700',
-              letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
-              textTransform: 'uppercase',
-            }}
-          >
-            收件匣
-          </Text>
-          <Text
-            style={{
-              color: theme.colors.text,
-              fontSize: theme.typography.display.fontSize,
-              fontWeight: theme.typography.display.fontWeight ?? '800',
-              letterSpacing: theme.typography.display.letterSpacing,
-            }}
-          >
-            任務
-          </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+          <HeaderAvatarButton />
+          <View style={{ flex: 1, gap: theme.space.xs }}>
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: theme.typography.overline.fontSize,
+                fontWeight: theme.typography.overline.fontWeight ?? '700',
+                letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
+                textTransform: 'uppercase',
+              }}
+            >
+              訊息
+            </Text>
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontSize: theme.typography.display.fontSize,
+                fontWeight: theme.typography.display.fontWeight ?? '800',
+                letterSpacing: theme.typography.display.letterSpacing,
+              }}
+            >
+              任務
+            </Text>
+          </View>
         </View>
+
+        {auth.user ? (
+          <>
+            <Pressable
+              onPress={() => nav?.getParent()?.navigate?.('Today', { screen: 'CampusSocialScreen' })}
+              accessibilityRole="button"
+              accessibilityLabel="開啟校園社群"
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: theme.space.md,
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.socialSoft,
+                borderWidth: 1,
+                borderColor: theme.colors.social + '35',
+                opacity: pressed ? 0.88 : 1,
+              })}
+            >
+              <View
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.social + '22',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="planet-outline" size={19} color={theme.colors.social} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>校園社群</Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  動態、看板、即時 Story、學伴
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+            </Pressable>
+            <Pressable
+              onPress={() => nav?.navigate?.('FriendSearch')}
+              accessibilityRole="button"
+              accessibilityLabel="搜尋聯絡人並加好友"
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: theme.space.md,
+                paddingHorizontal: 16,
+                paddingVertical: 14,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.accentSoft,
+                borderWidth: 1,
+                borderColor: theme.colors.accent + '33',
+                opacity: pressed ? 0.88 : 1,
+              })}
+            >
+              <View
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.accent + '18',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="person-add-outline" size={19} color={theme.colors.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>搜尋／加好友</Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                  依通訊錄找同校對象並送出好友邀請
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+            </Pressable>
+          </>
+        ) : null}
 
         {!auth.user ? (
           <CompletionState

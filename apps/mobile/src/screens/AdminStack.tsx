@@ -1,26 +1,5 @@
-/* eslint-disable */
-import React from 'react';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { AdminDashboardScreen } from './AdminDashboardScreen';
-import { useThemeMode } from '../state/theme';
-import { createStackScreenOptions } from '../ui/navigationTheme';
-
-const Stack = createNativeStackNavigator<any, undefined>();
-
-export function AdminStack() {
-  useThemeMode();
-
-  return (
-    <Stack.Navigator
-      id={undefined}
-      initialRouteName="AdminDashboard"
-      screenOptions={createStackScreenOptions()}
-    >
-      <Stack.Screen
-        name="AdminDashboard"
-        component={AdminDashboardScreen}
-        options={{ title: '管理', headerShown: false }}
-      />
-    </Stack.Navigator>
-  );
-}
+/**
+ * @deprecated 自 4+1 AI-First 導航起，AdminStack 已整合進 LearnStack（依角色 dispatch）。
+ * 保留此檔案僅為向後相容；新代碼請直接使用 LearnStack。
+ */
+export { LearnStack as AdminStack } from './LearnStack';
