@@ -19,11 +19,11 @@ SCREEN_KNOWLEDGE: dict[str, dict] = {
         "actions": ["文字對話", "快捷指令", "清除對話記錄"],
         "guide": "首頁右下角的 AI 助理按鈕，或首頁快速入口",
     },
-    "CourseScheduleScreen": {
-        "path": "課程 > 課表",
-        "description": "顯示本學期課表，依日期/週檢視，可點擊課程查看詳情",
-        "actions": ["檢視課表", "切換週次", "點擊查看課程詳情"],
-        "guide": "底部選單「課程」→ 上方「課表」分頁",
+    "UnifiedCalendarScreen": {
+        "path": "課程或 Today > 行事曆（課表｜行事曆｜智慧助手）",
+        "description": "統一行事曆：課表網格、月曆與事件、截止日與番茄鐘等智慧功能",
+        "actions": ["切換頂部分頁", "檢視課表", "匯入／訂閱 iCal", "管理截止日"],
+        "guide": "學生「課程」分頁內 CourseSchedule／Calendar 路由，或 Today 內 SmartCalendarScreen",
     },
     "CoursesHomeScreen": {
         "path": "課程 > 課程首頁",
@@ -37,11 +37,11 @@ SCREEN_KNOWLEDGE: dict[str, dict] = {
         "actions": ["查看教材", "繳交作業", "參加測驗", "查看成績"],
         "guide": "課程首頁或課表中，點擊任何一門課就會進入",
     },
-    "GradesScreen": {
-        "path": "課程 > 成績",
-        "description": "檢視各科成績與 GPA 計算，支援學期篩選",
-        "actions": ["查看各科成績", "查看 GPA", "切換學期"],
-        "guide": "底部選單「課程」→ 上方「成績」分頁",
+    "AcademicOverview": {
+        "path": "課程或教學 > 學業總覽",
+        "description": "成績、AI 學業分析、教師成績簿、學習分析等以分頁整合",
+        "actions": ["切換學業分頁", "檢視 GPA", "檢視風險預測", "管理成績簿"],
+        "guide": "路由 AcademicOverview；深連結成績單仍可用 Grades／CourseGradebook／LearningAnalytics",
     },
     "CreditAuditScreen": {
         "path": "課程 > 學分試算",

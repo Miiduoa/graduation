@@ -49,7 +49,7 @@ const DAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 
 // ─── Main Screen ─────────────────────────────────────────
 
-export function SmartCalendarPanel() {
+export function SmartCalendarPanel({ embedded }: { embedded?: boolean } = {}) {
   useThemeMode();
   const insets = useSafeAreaInsets();
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
@@ -154,7 +154,7 @@ export function SmartCalendarPanel() {
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       <ScrollView
         contentContainerStyle={{
-          paddingTop: insets.top + 16,
+          paddingTop: embedded ? 8 : insets.top + 16,
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 32,
         }}
         refreshControl={
@@ -166,15 +166,17 @@ export function SmartCalendarPanel() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.md }}>
-          <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
-            智慧行事曆
-          </Text>
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 14, marginTop: 4 }}>
-            AI 幫你管理時間，專注學習
-          </Text>
-        </View>
+        {/* Header — 嵌入模式隱藏 */}
+        {!embedded && (
+          <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.md }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+              智慧行事曆
+            </Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 14, marginTop: 4 }}>
+              AI 幫你管理時間，專注學習
+            </Text>
+          </View>
+        )}
 
         {/* Week Summary */}
         {weekView && <WeekSummaryCard weekView={weekView} />}

@@ -21,7 +21,8 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getAnyCachedCourses } from './puDataCache';
+import { getAnyCachedCourses, getAnyCachedTCActivities, getAnyCachedTCTodos, getAnyCachedTCCourses } from './puDataCache';
+import type { TCActivity, TCCourse as TCCourseType } from './tronClassClient';
 import type { PUCourse } from './puDirectScraper';
 
 // ─── Types ───────────────────────────────────────────────
@@ -148,7 +149,27 @@ const KEYS = {
   studyPlans: '@smart_cal:study_plans',
   pomodoro: '@smart_cal:pomodoro',
   pomodoroStats: '@smart_cal:pomodoro_stats',
+  fakeCleaned: '@smart_cal:fake_cleaned_v1',
 } as const;
+
+// 一次性清除舊版假資料快取（dl_real_ 開頭的是舊版 generateDeadlinesFromRealCourses 產生的假資料）
+(async () => {
+  try {
+    const cleaned = await AsyncStorage.getItem(KEYS.fakeCleaned);
+    if (cleaned) return; // 已清除過
+    const raw = await AsyncStorage.getItem(KEYS.deadlines);
+    if (raw) {
+      const deadlines: Array<{ id: string }> = JSON.parse(raw);
+      const hasFake = deadlines.some((d) => d.id.startsWith('dl_real_'));
+      if (hasFake) {
+        // 只保留非假資料（手動新增或 TronClass 來源）
+        const real = deadlines.filter((d) => !d.id.startsWith('dl_real_'));
+        await AsyncStorage.setItem(KEYS.deadlines, JSON.stringify(real));
+      }
+    }
+    await AsyncStorage.setItem(KEYS.fakeCleaned, 'true');
+  } catch {}
+})();
 
 const TYPE_COLORS: Record<CalendarEventType, string> = {
   class: '#3B82F6',
@@ -215,12 +236,28 @@ async function saveEvents(events: CalendarEvent[]): Promise<void> {
 }
 
 async function loadDeadlines(): Promise<Deadline[]> {
+  // 優先從 TronClass 真實作業/考試取得截止日
+  const realDeadlines = await syncDeadlinesFromTronClass();
+  if (realDeadlines.length > 0) {
+    // 合併手動新增的截止日（如果有）
+    try {
+      const raw = await AsyncStorage.getItem(KEYS.deadlines);
+      if (raw) {
+        const manual: Deadline[] = JSON.parse(raw);
+        const manualOnly = manual.filter((d) => d.id.startsWith('dl_manual_'));
+        if (manualOnly.length > 0) {
+          return [...realDeadlines, ...manualOnly];
+        }
+      }
+    } catch {}
+    return realDeadlines;
+  }
+  // 無 TronClass 資料時，嘗試讀取本地存檔
   try {
     const raw = await AsyncStorage.getItem(KEYS.deadlines);
     if (raw) return JSON.parse(raw);
   } catch {}
-  // 無本地存檔時，從真實課表生成示範截止日（非假資料）
-  return generateDeadlinesFromRealCourses();
+  return [];
 }
 
 async function saveDeadlines(deadlines: Deadline[]): Promise<void> {
@@ -243,66 +280,136 @@ async function savePomodoroSessions(sessions: PomodoroSession[]): Promise<void> 
   } catch {}
 }
 
-// ─── 基於真實課表的預設截止日生成 ─────────────────────────
+// ─── 從 TronClass 真實資料同步截止日 ─────────────────────────
+
+/** TronClass activity type → Deadline type 對映 */
+const TC_TYPE_MAP: Record<string, Deadline['type']> = {
+  homework: 'assignment',
+  exam: 'exam',
+  quiz: 'quiz',
+  survey: 'other',
+  forum: 'other',
+  web_link: 'other',
+  material: 'other',
+};
+
+const TC_TYPE_ICONS: Record<Deadline['type'], string> = {
+  assignment: 'document-text-outline',
+  exam: 'school-outline',
+  quiz: 'calculator-outline',
+  project: 'folder-outline',
+  other: 'ellipsis-horizontal-outline',
+};
+
+const TC_TYPE_COLORS: Record<Deadline['type'], string> = {
+  assignment: '#EF4444',
+  exam: '#F97316',
+  quiz: '#3B82F6',
+  project: '#8B5CF6',
+  other: '#6B7280',
+};
 
 /**
- * 從使用者真實課表生成示範截止日（非假資料）
- * 當沒有 TronClass 作業資料時，基於真實課程產生佔位截止日
- * 這樣使用者看到的課程名稱一定與課表一致
+ * 從 TronClass 真實作業/考試/測驗資料生成截止日
+ * 使用 getAnyCachedTCActivities + getAnyCachedTCTodos
+ * 只取有 end_time 且尚未過期太久的項目
  */
-async function generateDeadlinesFromRealCourses(): Promise<Deadline[]> {
-  const cached = await getAnyCachedCourses();
-  if (!cached?.courses || cached.courses.length === 0) {
-    // 完全無課表資料 → 回傳空陣列，不顯示假資料
-    return [];
+async function syncDeadlinesFromTronClass(): Promise<Deadline[]> {
+  const [activitiesMap, todos, tcCourses] = await Promise.all([
+    getAnyCachedTCActivities(),
+    getAnyCachedTCTodos(),
+    getAnyCachedTCCourses(),
+  ]);
+
+  // 建構 course_id → course name 對照表
+  const courseNameMap = new Map<number, string>();
+  const courseCodeMap = new Map<number, string>();
+  if (tcCourses) {
+    for (const c of tcCourses) {
+      courseNameMap.set(c.id, c.name);
+      courseCodeMap.set(c.id, c.course_code || `TC${c.id}`);
+    }
   }
 
   const now = Date.now();
   const hour = 60 * 60 * 1000;
-  const day = 24 * hour;
+  // 只顯示未來 + 過期不超過 7 天的截止日
+  const cutoff = now - 7 * 24 * hour;
+  const seen = new Set<string>(); // 用 activity id 去重
+  const deadlines: Deadline[] = [];
 
-  // 從真實課程中取最多 5 門來產生示範截止日
-  const courses = cached.courses.slice(0, 5);
-  const deadlineTypes: Array<{ type: Deadline['type']; titleSuffix: string; icon: string }> = [
-    { type: 'assignment', titleSuffix: '作業', icon: 'document-text' },
-    { type: 'project', titleSuffix: '報告', icon: 'folder-outline' },
-    { type: 'quiz', titleSuffix: '小考', icon: 'calculator-outline' },
-    { type: 'assignment', titleSuffix: '習題', icon: 'create-outline' },
-    { type: 'exam', titleSuffix: '期中考', icon: 'school-outline' },
-  ];
+  /** 將單個 TCActivity 轉為 Deadline */
+  function activityToDeadline(act: TCActivity): Deadline | null {
+    // 需要有截止日
+    if (!act.end_time) return null;
 
-  const priorities: Array<Deadline['priority']> = ['high', 'high', 'medium', 'medium', 'low'];
-  const colors = ['#EF4444', '#F97316', '#3B82F6', '#F97316', '#10B981'];
-  const hoursOffsets = [18, 72, 120, 48, 168]; // 截止時間偏移（小時）
-  const estimatedHoursList = [3, 8, 2, 4, 3];
+    const dueAt = new Date(act.end_time).getTime();
+    if (isNaN(dueAt) || dueAt < cutoff) return null;
 
-  return courses.map((course, i) => {
-    const idx = i % deadlineTypes.length;
-    const courseName = course.name || '未知課程';
-    const courseCode = course.code || `C${i + 1}`;
-    const offsetHours = hoursOffsets[idx];
+    const key = `tc_${act.id}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+
+    const deadlineType = TC_TYPE_MAP[act.type] || 'other';
+    // 跳過非任務型 activity（如 material, web_link）
+    if (deadlineType === 'other' && act.type !== 'survey') return null;
+
+    const isCompleted = act.status === 'submitted' || act.status === 'graded';
+    const remainingHours = Math.max(0, (dueAt - now) / hour);
+
+    // 根據剩餘時間推算優先級
+    let priority: Deadline['priority'] = 'low';
+    if (remainingHours < 24) priority = 'high';
+    else if (remainingHours < 72) priority = 'medium';
+
+    // 根據類型估算所需時間
+    const estimatedHours = deadlineType === 'exam' ? 4 : deadlineType === 'quiz' ? 1 : 3;
+    const prioWeight = priority === 'high' ? 1.5 : priority === 'medium' ? 1.0 : 0.7;
+    const urgencyScore = remainingHours > 0
+      ? Math.min(10, (estimatedHours / remainingHours) * 10 * prioWeight)
+      : 10;
+
+    const courseName = courseNameMap.get(act.course_id) || '未知課程';
+    const courseCode = courseCodeMap.get(act.course_id) || `TC${act.course_id}`;
 
     return {
-      id: `dl_real_${i + 1}`,
-      title: `${courseName} ${deadlineTypes[idx].titleSuffix}`,
+      id: key,
+      title: act.title || `${courseName} ${act.type}`,
       courseName,
       courseCode,
-      dueAt: now + offsetHours * hour,
-      type: deadlineTypes[idx].type,
-      completed: false,
-      priority: priorities[idx],
-      estimatedHours: estimatedHoursList[idx],
-      remainingHours: offsetHours,
-      urgencyScore: Math.min(
-        10,
-        (estimatedHoursList[idx] / offsetHours) *
-          10 *
-          (priorities[idx] === 'high' ? 1.5 : priorities[idx] === 'medium' ? 1.0 : 0.7),
-      ),
-      icon: deadlineTypes[idx].icon,
-      color: colors[idx],
+      dueAt,
+      type: deadlineType,
+      completed: isCompleted,
+      priority,
+      estimatedHours,
+      remainingHours,
+      urgencyScore,
+      icon: TC_TYPE_ICONS[deadlineType],
+      color: TC_TYPE_COLORS[deadlineType],
     };
-  });
+  }
+
+  // 1) 從 todos（待辦清單）取得 — 通常就是未完成的作業
+  if (todos) {
+    for (const act of todos) {
+      const dl = activityToDeadline(act);
+      if (dl) deadlines.push(dl);
+    }
+  }
+
+  // 2) 從所有課程的 activities 取得（可能包含已完成的）
+  if (activitiesMap) {
+    for (const courseId of Object.keys(activitiesMap)) {
+      const acts = activitiesMap[Number(courseId)];
+      if (!acts) continue;
+      for (const act of acts) {
+        const dl = activityToDeadline(act);
+        if (dl) deadlines.push(dl);
+      }
+    }
+  }
+
+  return deadlines;
 }
 
 // ─── Course Schedule → Calendar ─────────────────────────

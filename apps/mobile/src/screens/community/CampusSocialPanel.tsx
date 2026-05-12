@@ -23,9 +23,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { theme } from '../ui/theme';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
-import { useThemeMode } from '../state/theme';
+import { theme } from '../../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
+import { useThemeMode } from '../../state/theme';
 import {
   getSocialFeed,
   createPost,
@@ -43,8 +43,8 @@ import {
   type SocialComment,
   type SocialStats,
   type PollOption,
-} from '../services/campusSocialEngine';
-import { earnXP } from '../services/gamificationEngine';
+} from '../../services/campusSocialEngine';
+import { earnXP } from '../../services/gamificationEngine';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -65,7 +65,7 @@ const ALL_CATEGORIES: (PostCategory | 'all')[] = [
 
 // ─── Main Screen ─────────────────────────────────────────
 
-export function CampusSocialScreen() {
+export function CampusSocialPanel() {
   useThemeMode();
   const insets = useSafeAreaInsets();
   const [posts, setPosts] = useState<SocialPost[]>([]);

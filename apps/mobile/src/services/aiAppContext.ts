@@ -1214,3 +1214,101 @@ export async function loadAIAppRuntimeData(params: {
     loadIssues,
   };
 }
+
+// ════════════════════════════════════════════════════════════
+// AI Ambient Awareness（原 aiAmbientAwareness.ts，已併入）
+// ════════════════════════════════════════════════════════════
+
+import { loadAiPersonalContext, type AiPersonalContext } from '../features/ai';
+
+export type AIAmbientAwarenessReason =
+  | 'startup'
+  | 'mount'
+  | 'foreground-timer'
+  | 'app-active'
+  | 'app-background'
+  | 'manual';
+
+export type AIAmbientAwarenessSnapshot = {
+  runtimeData: AIAppRuntimeData;
+  personalContext: AiPersonalContext | null;
+  refreshedAt: number;
+  reason: AIAmbientAwarenessReason | string;
+};
+
+const DEFAULT_MIN_INTERVAL_MS = 15_000;
+
+let _ambientSnapshot: AIAmbientAwarenessSnapshot = {
+  runtimeData: emptyAIAppRuntimeData(),
+  personalContext: null,
+  refreshedAt: 0,
+  reason: 'startup',
+};
+let _ambientInFlight: Promise<AIAmbientAwarenessSnapshot> | null = null;
+const _ambientListeners = new Set<(snapshot: AIAmbientAwarenessSnapshot) => void>();
+
+function _notifyAmbient(snapshot: AIAmbientAwarenessSnapshot) {
+  _ambientListeners.forEach((listener) => {
+    try { listener(snapshot); } catch (e) { console.warn('[AIAmbientAwareness] listener failed:', e); }
+  });
+}
+
+export function getAIAmbientAwarenessSnapshot(): AIAmbientAwarenessSnapshot {
+  return _ambientSnapshot;
+}
+
+export function subscribeAIAmbientAwareness(
+  listener: (snapshot: AIAmbientAwarenessSnapshot) => void,
+): () => void {
+  _ambientListeners.add(listener);
+  listener(_ambientSnapshot);
+  return () => { _ambientListeners.delete(listener); };
+}
+
+export async function refreshAIAmbientAwareness(params: {
+  dataSource: DataSource;
+  userId?: string | null;
+  schoolId?: string | null;
+  reason?: AIAmbientAwarenessReason | string;
+  force?: boolean;
+  minIntervalMs?: number;
+}): Promise<AIAmbientAwarenessSnapshot> {
+  const now = Date.now();
+  const minIntervalMs = params.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS;
+  if (!params.force && now - _ambientSnapshot.refreshedAt < minIntervalMs) return _ambientSnapshot;
+  if (_ambientInFlight) return _ambientInFlight;
+
+  _ambientInFlight = (async () => {
+    try {
+      const [runtimeData, personalContext] = await Promise.all([
+        loadAIAppRuntimeData({
+          dataSource: params.dataSource,
+          userId: params.userId ?? null,
+          schoolId: params.schoolId ?? null,
+        }),
+        params.userId && params.schoolId
+          ? loadAiPersonalContext({ uid: params.userId, schoolId: params.schoolId }).catch((e) => {
+              console.warn('[AIAmbientAwareness] personal context load failed:', e);
+              return null;
+            })
+          : Promise.resolve(null),
+      ]);
+
+      _ambientSnapshot = {
+        runtimeData,
+        personalContext,
+        refreshedAt: Date.now(),
+        reason: params.reason ?? 'manual',
+      };
+      _notifyAmbient(_ambientSnapshot);
+      return _ambientSnapshot;
+    } catch (error) {
+      console.warn('[AIAmbientAwareness] refresh failed:', error);
+      return _ambientSnapshot;
+    } finally {
+      _ambientInFlight = null;
+    }
+  })();
+
+  return _ambientInFlight;
+}

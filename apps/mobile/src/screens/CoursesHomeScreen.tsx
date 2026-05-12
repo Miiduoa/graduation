@@ -24,6 +24,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { SegmentedControl, Spinner } from '../ui/components';
 import { isTeachingRole } from '../utils/campusOs';
+import { SmartCalendarPanel } from './unifiedCalendar/SmartCalendarPanel';
 import {
   getCachedTCCourses,
   getCachedTCActivities,
@@ -54,16 +55,17 @@ import {
 
 // ─── Types ──────────────────────────────────────────────
 
-type TabKey = 'schedule' | 'courses' | 'homework' | 'grades';
+type TabKey = 'schedule' | 'courses' | 'homework' | 'grades' | 'calendar';
 
 const TAB_OPTIONS = [
   { key: 'schedule', label: '課表' },
   { key: 'courses', label: '課程' },
   { key: 'homework', label: '作業' },
   { key: 'grades', label: '成績' },
+  { key: 'calendar', label: '行事曆' },
 ];
 
-// ─── Schedule helpers (inlined from CourseScheduleScreen) ─
+// ─── Schedule helpers（與統一行事曆課表分頁共用邏輯）─
 const WEEKDAYS_SHORT = ['日', '一', '二', '三', '四', '五', '六'];
 const PERIODS = [
   { period: 1, time: '08:10-09:00' },
@@ -1415,6 +1417,34 @@ export function CoursesHomeScreen(props: any) {
   }, [loadAllData]);
 
   const hasTCData = tcCourses.length > 0;
+
+  // 行事曆 tab 使用 SmartCalendarPanel（自帶 ScrollView），其他 tab 用外層 ScrollView
+  if (tab === 'calendar') {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+        {/* Header + Tabs — 固定在頂部 */}
+        <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 16, gap: 14, paddingBottom: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ gap: 2 }}>
+              <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>課程</Text>
+              <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>我的課程</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Pressable onPress={() => nav?.navigate?.('AIChat')} style={({ pressed }) => ({ width: 38, height: 38, borderRadius: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
+                <Ionicons name="sparkles" size={18} color="#FF6B9A" />
+              </Pressable>
+              <Pressable onPress={() => nav?.navigate?.('CreditAuditStack')} style={({ pressed }) => ({ width: 38, height: 38, borderRadius: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
+                <Ionicons name="calculator-outline" size={18} color={theme.colors.accent} />
+              </Pressable>
+            </View>
+          </View>
+          <SegmentedControl options={TAB_OPTIONS} selected={tab} onChange={(k: any) => setTab(k as TabKey)} />
+        </View>
+        {/* SmartCalendarPanel 佔滿剩餘空間（嵌入模式隱藏標題） */}
+        <SmartCalendarPanel embedded />
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>

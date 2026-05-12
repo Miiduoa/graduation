@@ -3,7 +3,6 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { TeachingHubScreen } from './TeachingHubScreen';
 import { AddCourseScreen } from './AddCourseScreen';
-import { GradesScreen } from './GradesScreen';
 import { CreditAuditStack } from './CreditAuditStack';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { AICourseAdvisorScreen } from './AICourseAdvisorScreen';
@@ -13,8 +12,6 @@ import { CourseModulesScreen } from './CourseModulesScreen';
 import { QuizCenterScreen } from './QuizCenterScreen';
 import { AttendanceScreen } from './AttendanceScreen';
 import { ClassroomScreen } from './ClassroomScreen';
-import { LearningAnalyticsScreen } from './LearningAnalyticsScreen';
-import { CourseGradebookScreen } from './CourseGradebookScreen';
 import { AcademicScreen } from './AcademicScreen';
 import { QuizTakingScreen } from './QuizTakingScreen';
 import { PeerReviewScreen } from './PeerReviewScreen';
@@ -22,6 +19,20 @@ import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 
 const Stack = createNativeStackNavigator<any, undefined>();
+
+type AcademicTab = 'grades' | 'insights' | 'gradebook' | 'analytics';
+
+function withAcademicInitialTab(tab: AcademicTab) {
+  return function AcademicTabRoute(props: any) {
+    const mergedParams = { ...(props.route?.params ?? {}), initialTab: tab };
+    return <AcademicScreen {...props} route={{ ...props.route, params: mergedParams }} />;
+  };
+}
+
+const AcademicGradesRoute = withAcademicInitialTab('grades');
+const AcademicInsightsRoute = withAcademicInitialTab('insights');
+const AcademicGradebookRoute = withAcademicInitialTab('gradebook');
+const AcademicAnalyticsRoute = withAcademicInitialTab('analytics');
 
 export function TeachingStack() {
   useThemeMode();
@@ -67,15 +78,20 @@ export function TeachingStack() {
       />
       <Stack.Screen
         name="CourseGradebook"
-        component={CourseGradebookScreen}
-        options={{ title: '課內成績簿' }}
+        component={AcademicGradebookRoute}
+        options={{ title: '課內成績簿', headerShown: false }}
       />
       <Stack.Screen name="Classroom" component={ClassroomScreen} options={{ title: '課堂互動' }} />
-      <Stack.Screen name="Grades" component={GradesScreen} options={{ title: '成績查詢' }} />
+      <Stack.Screen name="Grades" component={AcademicGradesRoute} options={{ title: '成績查詢', headerShown: false }} />
+      <Stack.Screen
+        name="AcademicInsights"
+        component={AcademicInsightsRoute}
+        options={{ title: '學業 AI 分析', headerShown: false }}
+      />
       <Stack.Screen
         name="LearningAnalytics"
-        component={LearningAnalyticsScreen}
-        options={{ title: '學習分析' }}
+        component={AcademicAnalyticsRoute}
+        options={{ title: '學習分析', headerShown: false }}
       />
       <Stack.Screen
         name="CreditAuditStack"

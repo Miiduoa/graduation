@@ -14,14 +14,12 @@ import { useThemeMode } from '../state/theme';
 
 import { CourseSchedulePanel } from './unifiedCalendar/CourseSchedulePanel';
 import { CalendarPanel } from './unifiedCalendar/CalendarPanel';
-import { SmartCalendarPanel } from './unifiedCalendar/SmartCalendarPanel';
 
-type TabKey = 'schedule' | 'calendar' | 'smart';
+type TabKey = 'schedule' | 'calendar';
 
 const TABS: { key: TabKey; label: string; icon: string }[] = [
   { key: 'schedule', label: '課表', icon: 'grid-outline' },
   { key: 'calendar', label: '行事曆', icon: 'calendar-outline' },
-  { key: 'smart', label: '智慧助手', icon: 'sparkles-outline' },
 ];
 
 export function UnifiedCalendarScreen(props: Record<string, unknown>) {
@@ -108,9 +106,6 @@ export function UnifiedCalendarScreen(props: Record<string, unknown>) {
         )}
         {activeTab === 'calendar' && (
           <CalendarPanel {...props} />
-        )}
-        {activeTab === 'smart' && (
-          <SmartCalendarPanel />
         )}
       </View>
     </View>

@@ -12,9 +12,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
-import { CampusSocialScreen } from './CampusSocialScreen';
-import { CampusPulseScreen } from './CampusPulseScreen';
-import { StudyBuddyScreen } from './StudyBuddyScreen';
+import { CampusSocialPanel } from './community/CampusSocialPanel';
+import { CampusPulsePanel } from './community/CampusPulsePanel';
+import { StudyBuddyPanel } from './community/StudyBuddyPanel';
 
 type TabKey = 'social' | 'pulse' | 'buddy';
 
@@ -103,9 +103,9 @@ export function CommunityScreen(props: Record<string, unknown>) {
 
       {/* ─── Content ─── */}
       <View style={{ flex: 1 }}>
-        {activeTab === 'social' && <CampusSocialScreen />}
-        {activeTab === 'pulse' && <CampusPulseScreen />}
-        {activeTab === 'buddy' && <StudyBuddyScreen />}
+        {activeTab === 'social' && <CampusSocialPanel />}
+        {activeTab === 'pulse' && <CampusPulsePanel />}
+        {activeTab === 'buddy' && <StudyBuddyPanel />}
       </View>
     </View>
   );
