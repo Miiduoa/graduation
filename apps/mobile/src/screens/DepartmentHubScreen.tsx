@@ -8,6 +8,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { useAmbientCues } from '../features/engagement';
 import { AmbientCueCard } from '../ui/campusOs';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { getFirestore, collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { getApp } from 'firebase/app';
 
@@ -281,11 +282,14 @@ export function DepartmentHubScreen(props: any) {
         }}
       >
         {/* Header */}
-        <View style={{ gap: 4 }}>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
-            系所主管
-          </Text>
-          <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>審核與統計分析</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <HeaderAvatarButton />
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
+              系所主管
+            </Text>
+            <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>審核與統計分析</Text>
+          </View>
         </View>
 
         {ambientCue ? (

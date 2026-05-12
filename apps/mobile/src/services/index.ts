@@ -19,3 +19,55 @@ export * from './memberDirectory';
 export { localLLM, MODEL_REGISTRY, estimateTokens } from './localLLMInference';
 export { agentReason, registerTool, getRegisteredTools } from './agentReasoningEngine';
 export { localAssistant } from './localAssistant';
+export {
+  aiBrain,
+  getAIBrain,
+  type BrainSnapshot,
+  type BrainListener,
+  type AskOptions,
+  type AskResult,
+} from './aiBrain';
+export {
+  startRealtimeSync,
+  stopRealtimeSync,
+  subscribeRealtimeEvents,
+  type RealtimeEvent,
+  type RealtimeEventKind,
+} from './aiRealtimeSync';
+export {
+  observeInteraction,
+  recordFeedback,
+  recordToolOutcome,
+  subscribeLearning,
+  inferPreferencesFromHistory,
+  type LearningInteraction,
+  type LearningSnapshot,
+  type FeedbackPayload,
+} from './aiContinualLearning';
+export {
+  buildActionPlan,
+  executePlan,
+  classifyRisk,
+  registerPendingPlan,
+  consumePendingPlan,
+  dismissPendingPlan,
+  listPendingPlans,
+  subscribePendingPlans,
+  type ActionPlan,
+  type ActionStep,
+  type ActionRisk,
+  type ActionStatus,
+  type StepOutcome,
+  type ActionExecutionReport,
+  type ActionExecutionContext,
+} from './aiActionCoordinator';
+export {
+  startProactiveThinker,
+  stopProactiveThinker,
+  subscribeProactiveInsights,
+  getProactiveInsights,
+  dismissInsight as dismissProactiveInsight,
+  runOnce as runProactiveOnce,
+  type BrainInsight,
+  type InsightCategory,
+} from './aiProactiveThinker';

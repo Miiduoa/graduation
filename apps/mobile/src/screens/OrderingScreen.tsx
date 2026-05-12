@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, Pressable, ScrollView, Alert, Animated, RefreshControl } from 'react-native';
+import { View, Text, Pressable, ScrollView, Alert, Animated, RefreshControl, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Screen,
@@ -21,12 +21,23 @@ import { useSchool } from '../state/school';
 import { getDataSource, hasDataSource } from '../data/source';
 import { isEffectivelyOnline, addToOfflineQueue } from '../services/offline';
 import { analytics } from '../services/analytics';
+import { aiBrain } from '../services/aiBrain';
 import type {
   Cafeteria as DataCafeteria,
   MenuItem as DataMenuItem,
   Order as DataOrder,
 } from '../data/types';
 import { useDataSource } from '../hooks/useDataSource';
+import {
+  checkAllergens,
+  getDietaryProfile,
+  updateDietaryProfile,
+  getMyPickupCode,
+  type AllergenCheckResult,
+  type DietaryProfile,
+  type PickupCode,
+} from '../services/ordering';
+import { TextInput as RNTextInput } from 'react-native';
 
 type MenuItem = {
   id: string;
@@ -46,7 +57,7 @@ type CafeteriaOption = DataCafeteria & {
   pilotStatus: 'inactive' | 'pilot' | 'live';
 };
 
-type OrderStatus = 'pending' | 'preparing' | 'ready' | 'completed' | 'cancelled';
+type OrderStatus = 'pending' | 'confirmed' | 'preparing' | 'ready' | 'completed' | 'cancelled';
 
 type Order = {
   id: string;
@@ -147,7 +158,9 @@ const MOCK_ORDERS: Order[] = [
 function getStatusLabel(status: OrderStatus): string {
   switch (status) {
     case 'pending':
-      return '等待中';
+      return '等待確認';
+    case 'confirmed':
+      return '已接單';
     case 'preparing':
       return '製作中';
     case 'ready':
@@ -165,6 +178,8 @@ function getStatusColor(status: OrderStatus): string {
   switch (status) {
     case 'pending':
       return theme.colors.muted;
+    case 'confirmed':
+      return '#2563EB';
     case 'preparing':
       return '#F59E0B';
     case 'ready':
@@ -226,6 +241,18 @@ export function OrderingScreen(props: any) {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [pickupCodeViewer, setPickupCodeViewer] = useState<{
+    open: boolean;
+    code: PickupCode | null;
+    orderQueue: number | null;
+    vendorName: string;
+  }>({ open: false, code: null, orderQueue: null, vendorName: '' });
+  const [dietaryModal, setDietaryModal] = useState<{
+    open: boolean;
+    profile: DietaryProfile | null;
+    allergenInput: string;
+    dislikeInput: string;
+  }>({ open: false, profile: null, allergenInput: '', dislikeInput: '' });
 
   const previousCafeteriaKeyRef = useRef<string | null>(null);
   const aiPrefillKeyRef = useRef<string | null>(null);
@@ -551,6 +578,46 @@ export function OrderingScreen(props: any) {
       return;
     }
 
+    // ===== 過敏原檢查（下單前最後防線）=====
+    try {
+      const dietary = await getDietaryProfile(auth.user.uid);
+      const itemsForCheck = cart.map((c) => ({
+        id: c.menuItem.id,
+        name: c.menuItem.name,
+        allergens: (c.menuItem as any).allergens ?? [],
+      }));
+      const allergenResult = await checkAllergens(itemsForCheck, dietary);
+
+      if (allergenResult.severity === 'block') {
+        Alert.alert(
+          '過敏原警告',
+          `${allergenResult.message}\n\n是否仍要繼續下單？`,
+          [
+            { text: '取消', style: 'cancel' },
+            {
+              text: '我了解風險，繼續下單',
+              style: 'destructive',
+              onPress: () => confirmAndPlaceOrder(),
+            },
+          ],
+        );
+        return;
+      }
+      if (allergenResult.severity === 'warn') {
+        Alert.alert('提醒', allergenResult.message, [
+          { text: '返回修改', style: 'cancel' },
+          { text: '繼續下單', onPress: () => confirmAndPlaceOrder() },
+        ]);
+        return;
+      }
+    } catch (err) {
+      console.warn('[OrderingScreen] allergen check failed:', err);
+    }
+
+    confirmAndPlaceOrder();
+  };
+
+  const confirmAndPlaceOrder = () => {
     Alert.alert('確認訂單', `共 ${cartCount} 項商品，總計 $${cartTotal}`, [
       { text: '取消', style: 'cancel' },
       {
@@ -585,8 +652,60 @@ export function OrderingScreen(props: any) {
               cafeteria_id: selectedCafeteria.id,
             });
 
-            const queueNumber =
-              (createdOrder as any)?.queueNumber ?? Math.floor(Math.random() * 50) + 30;
+            try {
+              aiBrain.reportToolOutcome(
+                'order_meal',
+                {
+                  cafeteria: selectedCafeteria.name,
+                  cafeteriaId: selectedCafeteria.id,
+                  itemCount: cartCount,
+                  totalAmount: cartTotal,
+                  itemNames: cart.map((c) => c.menuItem.name).slice(0, 5).join('、'),
+                },
+                'success',
+                undefined,
+                `在「${selectedCafeteria.name}」訂購 ${cartCount} 項餐點`,
+              );
+              for (const item of cart) {
+                aiBrain.observe({
+                  kind: 'observation',
+                  tool: 'order_meal',
+                  args: {
+                    cafeteria: selectedCafeteria.name,
+                    itemName: item.menuItem.name,
+                    keyword: item.menuItem.name,
+                    quantity: item.quantity,
+                  },
+                  outcome: 'success',
+                  summary: `偏好菜色：${item.menuItem.name}（${selectedCafeteria.name}）`,
+                  tags: ['cafeteria', 'order_meal'],
+                });
+              }
+            } catch (brainError) {
+              console.warn('[OrderingScreen] brain.observe failed:', brainError);
+            }
+
+            // 號碼牌：優先用 Cloud Function 取得，否則退回時間戳序號（不再用 Math.random）
+            let queueNumber: number = (createdOrder as any)?.queueNumber ?? 0;
+            if (!queueNumber) {
+              try {
+                const { httpsCallable } = await import('firebase/functions');
+                const { getFunctionsInstance } = await import('../firebase');
+                const fn = httpsCallable<
+                  { schoolId: string; vendorId: string },
+                  { ok?: boolean; serial?: number }
+                >(getFunctionsInstance(), 'assignQueueNumber');
+                const result = await fn({
+                  schoolId: school.id,
+                  vendorId: selectedCafeteria.id,
+                });
+                if (result.data?.serial) queueNumber = result.data.serial;
+              } catch {
+                // fallback：每分鐘一號（demo 用，跨日不會衝突）
+                const t = new Date();
+                queueNumber = Math.max(1, t.getHours() * 60 + t.getMinutes() - 7 * 60);
+              }
+            }
             const estimatedTime = Math.max(...cart.map((c) => c.menuItem.waitTime));
 
             const newOrder: Order = {
@@ -610,6 +729,21 @@ export function OrderingScreen(props: any) {
             );
           } catch (error: any) {
             console.error('Failed to place order:', error);
+            try {
+              aiBrain.reportToolOutcome(
+                'order_meal',
+                {
+                  cafeteria: selectedCafeteria.name,
+                  cafeteriaId: selectedCafeteria.id,
+                  itemCount: cartCount,
+                },
+                'failure',
+                error?.message,
+                `在「${selectedCafeteria.name}」嘗試訂購 ${cartCount} 項餐點`,
+              );
+            } catch (brainError) {
+              console.warn('[OrderingScreen] brain.observe failed:', brainError);
+            }
             Alert.alert('下單失敗', error?.message ?? '請稍後再試或聯繫店家。', [{ text: '確定' }]);
           } finally {
             setSubmittingOrder(false);
@@ -1180,6 +1314,40 @@ export function OrderingScreen(props: any) {
 
           {selectedTab === 2 && (
             <View style={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}>
+              <Pressable
+                onPress={async () => {
+                  if (!auth.user) return;
+                  const profile = await getDietaryProfile(auth.user.uid);
+                  setDietaryModal({
+                    open: true,
+                    profile,
+                    allergenInput: '',
+                    dislikeInput: '',
+                  });
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: 12,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.surface2,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                }}
+              >
+                <Ionicons name="restaurant" size={20} color={theme.colors.accent} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
+                    飲食偏好與過敏原
+                  </Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
+                    設定後下單時會自動比對攔截
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+              </Pressable>
+
               {orders.length === 0 ? (
                 <AnimatedCard>
                   <View style={{ alignItems: 'center', paddingVertical: 40 }}>
@@ -1292,7 +1460,16 @@ export function OrderingScreen(props: any) {
                       </View>
 
                       {order.status === 'ready' && (
-                        <View
+                        <Pressable
+                          onPress={async () => {
+                            const code = await getMyPickupCode(order.id);
+                            setPickupCodeViewer({
+                              open: true,
+                              code,
+                              orderQueue: order.queueNumber,
+                              vendorName: order.cafeteria,
+                            });
+                          }}
                           style={{
                             padding: 14,
                             borderRadius: theme.radius.md,
@@ -1303,12 +1480,48 @@ export function OrderingScreen(props: any) {
                           }}
                         >
                           <Ionicons
-                            name="checkmark-circle"
+                            name="qr-code"
                             size={24}
                             color={theme.colors.success}
                           />
-                          <Text style={{ color: theme.colors.success, fontWeight: '700', flex: 1 }}>
-                            餐點已準備好，請前往取餐！
+                          <View style={{ flex: 1 }}>
+                            <Text
+                              style={{ color: theme.colors.success, fontWeight: '700' }}
+                            >
+                              餐點已準備好，請前往取餐！
+                            </Text>
+                            <Text
+                              style={{
+                                color: theme.colors.success,
+                                fontSize: 11,
+                                marginTop: 2,
+                              }}
+                            >
+                              點擊顯示取餐碼
+                            </Text>
+                          </View>
+                          <Ionicons
+                            name="chevron-forward"
+                            size={18}
+                            color={theme.colors.success}
+                          />
+                        </Pressable>
+                      )}
+
+                      {order.status === 'confirmed' && (
+                        <View
+                          style={{
+                            padding: 14,
+                            borderRadius: theme.radius.md,
+                            backgroundColor: '#2563EB15',
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 10,
+                          }}
+                        >
+                          <Ionicons name="restaurant" size={24} color="#2563EB" />
+                          <Text style={{ color: '#2563EB', fontWeight: '600', flex: 1 }}>
+                            店家已接單，即將開始製作
                           </Text>
                         </View>
                       )}
@@ -1342,6 +1555,447 @@ export function OrderingScreen(props: any) {
           )}
         </ScrollView>
       </View>
+
+      {/* PickupCode Modal — 學生取餐時出示給店員 */}
+      <Modal
+        visible={pickupCodeViewer.open}
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setPickupCodeViewer({ open: false, code: null, orderQueue: null, vendorName: '' })
+        }
+      >
+        <Pressable
+          onPress={() =>
+            setPickupCodeViewer({ open: false, code: null, orderQueue: null, vendorName: '' })
+          }
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <Pressable
+            onPress={() => {}}
+            style={{
+              width: '100%',
+              maxWidth: 360,
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radius.lg,
+              padding: 24,
+              alignItems: 'center',
+            }}
+          >
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: 13,
+                marginBottom: 4,
+              }}
+            >
+              {pickupCodeViewer.vendorName}
+            </Text>
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontSize: 16,
+                fontWeight: '700',
+                marginBottom: 16,
+              }}
+            >
+              請出示取餐碼給店員
+            </Text>
+
+            {pickupCodeViewer.code ? (
+              <>
+                <View
+                  style={{
+                    paddingVertical: 24,
+                    paddingHorizontal: 16,
+                    borderRadius: theme.radius.md,
+                    borderWidth: 2,
+                    borderColor: theme.colors.success,
+                    backgroundColor: `${theme.colors.success}10`,
+                    marginBottom: 16,
+                    alignItems: 'center',
+                    minWidth: 280,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontSize: 48,
+                      fontWeight: '900',
+                      color: theme.colors.success,
+                      letterSpacing: 8,
+                      fontFamily: 'System',
+                    }}
+                  >
+                    {pickupCodeViewer.code.shortCode}
+                  </Text>
+                </View>
+
+                {pickupCodeViewer.orderQueue != null && (
+                  <Text
+                    style={{
+                      color: theme.colors.text,
+                      fontSize: 22,
+                      fontWeight: '800',
+                      marginBottom: 4,
+                    }}
+                  >
+                    號碼 #{pickupCodeViewer.orderQueue}
+                  </Text>
+                )}
+
+                <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 16 }}>
+                  有效期限：{new Date(pickupCodeViewer.code.expiresAt).toLocaleTimeString('zh-TW', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </Text>
+              </>
+            ) : (
+              <View style={{ paddingVertical: 32, alignItems: 'center' }}>
+                <Ionicons name="alert-circle" size={48} color={theme.colors.warning} />
+                <Text style={{ color: theme.colors.muted, marginTop: 12, textAlign: 'center' }}>
+                  找不到取餐碼。請聯繫店家或重新整理。
+                </Text>
+              </View>
+            )}
+
+            <Pressable
+              onPress={() =>
+                setPickupCodeViewer({ open: false, code: null, orderQueue: null, vendorName: '' })
+              }
+              style={{
+                paddingHorizontal: 24,
+                paddingVertical: 12,
+                borderRadius: theme.radius.full,
+                backgroundColor: theme.colors.surface2,
+                marginTop: 8,
+              }}
+            >
+              <Text style={{ color: theme.colors.text, fontWeight: '600' }}>關閉</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* 飲食偏好設定 Modal */}
+      <Modal
+        visible={dietaryModal.open}
+        transparent
+        animationType="slide"
+        onRequestClose={() =>
+          setDietaryModal({ open: false, profile: null, allergenInput: '', dislikeInput: '' })
+        }
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: theme.colors.background,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              padding: 20,
+              paddingBottom: 36,
+              maxHeight: '85%',
+            }}
+          >
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+                飲食偏好與過敏原
+              </Text>
+              <Pressable
+                onPress={() =>
+                  setDietaryModal({
+                    open: false,
+                    profile: null,
+                    allergenInput: '',
+                    dislikeInput: '',
+                  })
+                }
+              >
+                <Ionicons name="close" size={24} color={theme.colors.muted} />
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text
+                style={{
+                  color: theme.colors.muted,
+                  fontSize: 12,
+                  marginBottom: 16,
+                  lineHeight: 18,
+                }}
+              >
+                嚴格過敏原會在下單前攔截，並要求二次確認；不喜歡食材則只會提醒不擋。
+              </Text>
+
+              {/* 嚴格過敏原 */}
+              <Text
+                style={{
+                  color: theme.colors.text,
+                  fontWeight: '700',
+                  fontSize: 14,
+                  marginBottom: 8,
+                }}
+              >
+                嚴格過敏原（會攔截下單）
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {(dietaryModal.profile?.allergens ?? []).map((a) => (
+                  <Pressable
+                    key={a}
+                    onPress={() => {
+                      if (!dietaryModal.profile) return;
+                      setDietaryModal((m) => ({
+                        ...m,
+                        profile: {
+                          ...m.profile!,
+                          allergens: m.profile!.allergens.filter((x) => x !== a),
+                        },
+                      }));
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: theme.radius.full,
+                      backgroundColor: `${theme.colors.danger}20`,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.danger, fontSize: 12, fontWeight: '700' }}>
+                      {a}
+                    </Text>
+                    <Ionicons name="close" size={14} color={theme.colors.danger} />
+                  </Pressable>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 18 }}>
+                <RNTextInput
+                  value={dietaryModal.allergenInput}
+                  onChangeText={(t) =>
+                    setDietaryModal((m) => ({ ...m, allergenInput: t }))
+                  }
+                  placeholder="輸入過敏原（如：花生）"
+                  placeholderTextColor={theme.colors.muted}
+                  style={{
+                    flex: 1,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    borderRadius: 8,
+                    padding: 10,
+                    color: theme.colors.text,
+                  }}
+                />
+                <Pressable
+                  onPress={() => {
+                    const word = dietaryModal.allergenInput.trim();
+                    if (!word || !dietaryModal.profile) return;
+                    if (dietaryModal.profile.allergens.includes(word)) {
+                      setDietaryModal((m) => ({ ...m, allergenInput: '' }));
+                      return;
+                    }
+                    setDietaryModal((m) => ({
+                      ...m,
+                      allergenInput: '',
+                      profile: {
+                        ...m.profile!,
+                        allergens: [...m.profile!.allergens, word],
+                      },
+                    }));
+                  }}
+                  style={{
+                    paddingHorizontal: 16,
+                    justifyContent: 'center',
+                    borderRadius: 8,
+                    backgroundColor: theme.colors.danger,
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '700' }}>新增</Text>
+                </Pressable>
+              </View>
+
+              {/* 不喜歡食材 */}
+              <Text
+                style={{
+                  color: theme.colors.text,
+                  fontWeight: '700',
+                  fontSize: 14,
+                  marginBottom: 8,
+                }}
+              >
+                不喜歡食材（只提醒）
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {(dietaryModal.profile?.dislikes ?? []).map((d) => (
+                  <Pressable
+                    key={d}
+                    onPress={() => {
+                      if (!dietaryModal.profile) return;
+                      setDietaryModal((m) => ({
+                        ...m,
+                        profile: {
+                          ...m.profile!,
+                          dislikes: m.profile!.dislikes.filter((x) => x !== d),
+                        },
+                      }));
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: theme.radius.full,
+                      backgroundColor: theme.colors.surface,
+                    }}
+                  >
+                    <Text style={{ color: theme.colors.text, fontSize: 12 }}>{d}</Text>
+                    <Ionicons name="close" size={14} color={theme.colors.muted} />
+                  </Pressable>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 18 }}>
+                <RNTextInput
+                  value={dietaryModal.dislikeInput}
+                  onChangeText={(t) =>
+                    setDietaryModal((m) => ({ ...m, dislikeInput: t }))
+                  }
+                  placeholder="輸入不喜歡的食材（如：香菜）"
+                  placeholderTextColor={theme.colors.muted}
+                  style={{
+                    flex: 1,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    borderRadius: 8,
+                    padding: 10,
+                    color: theme.colors.text,
+                  }}
+                />
+                <Pressable
+                  onPress={() => {
+                    const word = dietaryModal.dislikeInput.trim();
+                    if (!word || !dietaryModal.profile) return;
+                    if (dietaryModal.profile.dislikes.includes(word)) {
+                      setDietaryModal((m) => ({ ...m, dislikeInput: '' }));
+                      return;
+                    }
+                    setDietaryModal((m) => ({
+                      ...m,
+                      dislikeInput: '',
+                      profile: {
+                        ...m.profile!,
+                        dislikes: [...m.profile!.dislikes, word],
+                      },
+                    }));
+                  }}
+                  style={{
+                    paddingHorizontal: 16,
+                    justifyContent: 'center',
+                    borderRadius: 8,
+                    backgroundColor: theme.colors.accent,
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '700' }}>新增</Text>
+                </Pressable>
+              </View>
+
+              {/* 飲食類型 toggle */}
+              <Text
+                style={{
+                  color: theme.colors.text,
+                  fontWeight: '700',
+                  fontSize: 14,
+                  marginBottom: 8,
+                }}
+              >
+                飲食類型
+              </Text>
+              {[
+                { key: 'vegetarian' as const, label: '素食' },
+                { key: 'vegan' as const, label: '純素' },
+                { key: 'halal' as const, label: '清真 (Halal)' },
+              ].map((opt) => {
+                const checked = dietaryModal.profile?.[opt.key] ?? false;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    onPress={() => {
+                      if (!dietaryModal.profile) return;
+                      setDietaryModal((m) => ({
+                        ...m,
+                        profile: { ...m.profile!, [opt.key]: !checked },
+                      }));
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                      paddingVertical: 10,
+                    }}
+                  >
+                    <Ionicons
+                      name={checked ? 'checkbox' : 'square-outline'}
+                      size={22}
+                      color={checked ? theme.colors.accent : theme.colors.muted}
+                    />
+                    <Text style={{ color: theme.colors.text, fontWeight: '500' }}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+
+              <Pressable
+                onPress={async () => {
+                  if (!auth.user || !dietaryModal.profile) return;
+                  await updateDietaryProfile(auth.user.uid, {
+                    allergens: dietaryModal.profile.allergens,
+                    dislikes: dietaryModal.profile.dislikes,
+                    vegetarian: dietaryModal.profile.vegetarian,
+                    vegan: dietaryModal.profile.vegan,
+                    halal: dietaryModal.profile.halal,
+                  });
+                  Alert.alert('已儲存', '飲食偏好已更新');
+                  setDietaryModal({
+                    open: false,
+                    profile: null,
+                    allergenInput: '',
+                    dislikeInput: '',
+                  });
+                }}
+                style={{
+                  marginTop: 16,
+                  paddingVertical: 14,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.accent,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>儲存設定</Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }

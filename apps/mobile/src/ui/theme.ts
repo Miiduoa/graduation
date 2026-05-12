@@ -90,10 +90,14 @@ export type ThemeShadow = {
  * 心理學：明確的物件感知 (Object Perception)，減少認知負荷
  */
 export type SoftShadow = {
-  shadowColor: string;
-  shadowOpacity: number;
-  shadowRadius: number;
-  shadowOffset: { width: number; height: number };
+  shadowColor?: string;
+  shadowOpacity?: number;
+  shadowRadius?: number;
+  shadowOffset?: { width: number; height: number };
+  color?: string;
+  opacity?: number;
+  radius?: number;
+  offset?: { width: number; height: number };
   elevation: number;
 };
 
@@ -659,10 +663,10 @@ export function shadowStyle(shadow: ThemeShadow) {
 
 export function softShadowStyle(shadow: SoftShadow) {
   return {
-    shadowColor: shadow.shadowColor,
-    shadowOpacity: shadow.shadowOpacity,
-    shadowRadius: shadow.shadowRadius,
-    shadowOffset: shadow.shadowOffset,
+    shadowColor: shadow.shadowColor ?? shadow.color ?? '#000',
+    shadowOpacity: shadow.shadowOpacity ?? shadow.opacity ?? 0.16,
+    shadowRadius: shadow.shadowRadius ?? shadow.radius ?? 12,
+    shadowOffset: shadow.shadowOffset ?? shadow.offset ?? { width: 0, height: 4 },
     elevation: shadow.elevation,
   };
 }

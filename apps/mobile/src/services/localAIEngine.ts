@@ -3075,6 +3075,16 @@ export function needsClarification(
   const suggestedQuestions: string[] = [];
   const missingSlots: string[] = [];
 
+  const t = text.trim();
+  // 選單跟進短句（第 N 個／最後一個／對好可以）：不應用「greeting 還是課程」這類雙意圖亂問
+  if (
+    /^第\s*[一二兩三四五六七八九十\d]+\s*個?$/.test(t) ||
+    /^最後[一那]?個$/.test(t) ||
+    /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?)$/.test(t)
+  ) {
+    return { needed: false, reason: '', suggestedQuestions: [], missingSlots: [] };
+  }
+
   // 1. 意圖不明確
   if (intent.confidence < 0.35) {
     reasons.push('意圖不明確');
@@ -3092,6 +3102,9 @@ export function needsClarification(
         emotion: '心理諮詢',
         grades: '成績',
         transport: '交通',
+        greeting: '打招呼',
+        general: '一般',
+        help: '功能說明',
       };
       suggestedQuestions.push(
         `你是想問${intentNames[top2[0].intent] ?? top2[0].intent}還是${intentNames[top2[1].intent] ?? top2[1].intent}的問題呢？`,

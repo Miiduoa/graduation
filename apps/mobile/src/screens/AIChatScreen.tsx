@@ -1487,6 +1487,8 @@ export function AIChatScreen(props: any) {
 
   // ── State ──
   const [messages, setMessages] = useState<Message[]>([]);
+  /** 對話紀錄從 AsyncStorage 讀取完成後才為 true，避免與「注入 prompt」賽艇蓋掉新訊息 */
+  const [historyHydrated, setHistoryHydrated] = useState(false);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [aiStatusTick, setAiStatusTick] = useState(0);
@@ -1508,6 +1510,7 @@ export function AIChatScreen(props: any) {
   );
   const appRuntimeDataRef = useRef<AIAppRuntimeData>(appRuntimeData);
   const mountedRef = useRef(true);
+  const deliveredRouteSeedPromptRef = useRef<string | null>(null);
   const [latestProactiveReports, setLatestProactiveReports] = useState<ProactiveAIReport[]>([]);
   const [showCapabilities, setShowCapabilities] = useState(true);
   const [recentExecutions, setRecentExecutions] = useState<ToolExecution[]>(() =>
@@ -1637,6 +1640,10 @@ export function AIChatScreen(props: any) {
     () => getAIChatHistoryStorageKey(auth.user?.uid ?? null, school.id),
     [auth.user?.uid, school.id],
   );
+
+  useEffect(() => {
+    deliveredRouteSeedPromptRef.current = null;
+  }, [chatHistoryKey]);
 
   // ── Memory persistence (per-user isolation) ──
   useEffect(() => {
@@ -1868,6 +1875,7 @@ export function AIChatScreen(props: any) {
   // ── History persistence ──
   useEffect(() => {
     let cancelled = false;
+    setHistoryHydrated(false);
     async function loadHistory() {
       try {
         const restored = await loadAIChatHistory(chatHistoryKey);
@@ -1884,6 +1892,8 @@ export function AIChatScreen(props: any) {
         }
       } catch (e) {
         console.warn('[AIChat] load fail:', e);
+      } finally {
+        if (!cancelled) setHistoryHydrated(true);
       }
     }
     loadHistory();
@@ -1922,6 +1932,9 @@ export function AIChatScreen(props: any) {
 
   const routeSourceRunId =
     typeof props?.route?.params?.sourceRunId === 'string' ? props.route.params.sourceRunId : null;
+
+  const routeSeedPrompt =
+    typeof props?.route?.params?.prompt === 'string' ? props.route.params.prompt.trim() : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -5647,6 +5660,17 @@ export function AIChatScreen(props: any) {
       const recentHistory: ConversationTurn[] = (messages ?? [])
         .slice(-10)
         .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      // 與 aiContext 相同：從對話中取出上一則仍有選單的助理訊息，供「第一個」等短句路由到 create_order
+      const lastChoiceMenuForAgent = (() => {
+        const list = messages ?? [];
+        for (let i = list.length - 1; i >= 0; i--) {
+          const m = list[i];
+          if (m.role === 'assistant' && (m.choiceMenu?.options?.length ?? 0) > 0) {
+            return m.choiceMenu;
+          }
+        }
+        return undefined;
+      })();
       // 檢查是否為指代訊息（「第一個」「那個」「就剛剛那個」）
       const isReferenceMessage = /第[一二三四五六七八九十\d]+個|就?(?:剛剛?|上面|前面)?那[一個]?個?|就[是]?[那這它]|^(?:對|好[的啊]?|可以|沒問題|ok|OK|嗯|恩|是[的啊]?)\s*$/.test(userMsg.content.trim());
       const isWriteIntent = toolLayerResult.intent === 'order_action'
@@ -5668,8 +5692,14 @@ export function AIChatScreen(props: any) {
               return '';
             }
           };
-          // 使用 Reflexion 版本：失敗後自動反思重試 + 探索式學習
-          const agentCtx = { userId: auth.user?.uid, schoolId: school.id, role: userRole as any };
+          // 使用 Reflexion 版本：失敗後自動反思重試 + 探索式學習（務必帶入 lastChoiceMenu，否則「第一個」無法接續訂餐）
+          const agentCtx = {
+            userId: auth.user?.uid,
+            schoolId: school.id,
+            role: userRole as any,
+            isOnline: true,
+            ...(lastChoiceMenuForAgent ? { lastChoiceMenu: lastChoiceMenuForAgent } : {}),
+          };
           let agentResult: AgentQueryResult = await autonomousQueryWithReflexion(
             userMsg.content, agentCtx, modelInferenceCallback, recentHistory,
           );
@@ -6703,6 +6733,17 @@ export function AIChatScreen(props: any) {
       setIsTyping(false);
     }
   };
+
+  // Overlay / deeplink 用：route.params.prompt 必須在歷史載入後再送出，否則 setMessages(restored) 會蓋掉新訊息
+  useEffect(() => {
+    if (!routeSeedPrompt || !historyHydrated) return;
+    if (deliveredRouteSeedPromptRef.current === routeSeedPrompt) return;
+    deliveredRouteSeedPromptRef.current = routeSeedPrompt;
+    const id = requestAnimationFrame(() => {
+      void handleSend(routeSeedPrompt);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [routeSeedPrompt, historyHydrated]);
 
   // ── Other handlers ──
   const handleAction = async (proposal: AssistantActionProposal) => {

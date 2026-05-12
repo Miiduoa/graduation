@@ -1,0 +1,385 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * AI 對話模擬器 — 口語、模糊、跨功能壓測（Node / Jest，不需開模擬器）。
+ *
+ * 跑法：
+ *   cd apps/mobile && npx jest src/__tests__/services/aiConversationSim.test.ts --runInBand
+ *
+ *   AI_SIM_VERBOSE=1  → 印 intents
+ */
+
+jest.mock('../../firebase', () => ({
+  getFirebaseApp: jest.fn(() => ({})),
+  hasUsableFirebaseConfig: jest.fn(() => false),
+}));
+
+import { expect } from '@jest/globals';
+import { mockSource } from '../../data/mockSource';
+import { setDataSource } from '../../data/source';
+import type { AssistantChoiceMenu } from '../../services/aiToolRegistry';
+import { autonomousQuery } from '../../services/aiLocalAgent';
+
+const VERBOSE = process.env.AI_SIM_VERBOSE === '1';
+const TEST_USER_ID = 'sim-user-1';
+const TEST_SCHOOL_ID = 'pu';
+
+type Turn = {
+  user: string;
+  /** 軟檢查：只 console.warn */
+  expect?: string[] | RegExp;
+  /** 硬檢查：至少一個 intent / read / write 必須是下列之一 */
+  anyOfTools?: string[];
+  /** 若 true：不允許完全沒有意圖（問候類除外時不要設） */
+  mustReact?: boolean;
+};
+
+function collectToolsCalled(r: any): Set<string> {
+  const s = new Set<string>();
+  for (const i of r.intents ?? []) s.add(i.tool);
+  for (const e of r.executedActions ?? []) s.add(e.tool);
+  for (const x of r.results ?? []) s.add(x.tool);
+  return s;
+}
+
+function sectionHeader(title: string) {
+  console.log('\n' + '═'.repeat(60));
+  console.log('▶ ' + title);
+  console.log('═'.repeat(60));
+}
+
+function fmtResult(r: any): string {
+  const lines: string[] = [];
+  const exec = r.executedActions ?? [];
+  const failed = r.failedActions ?? [];
+  const intents = r.intents ?? [];
+  const ctx = String(r.contextText ?? '').trim();
+
+  const readIntents = intents.filter((i: any) => !i.isWrite);
+  for (const ri of readIntents) {
+    lines.push(`📖 ${ri.tool}: ${ri.reason}`);
+  }
+
+  for (const e of exec) {
+    const ok = e.result?.success ? '✅' : '💡';
+    const summary = String(e.result?.summary ?? '').split('\n').slice(0, 6).join('\n');
+    lines.push(`${ok} ${e.tool}: ${summary}`);
+    if (e.result?.choiceMenu?.options?.length) {
+      lines.push('   選單:');
+      e.result.choiceMenu.options.slice(0, 3).forEach((o: any, i: number) => {
+        lines.push(`   ${i + 1}. ${o.label}${o.subtitle ? ' / ' + o.subtitle : ''}`);
+      });
+    }
+  }
+  for (const f of failed) {
+    lines.push(`❌ ${f.tool}: ${f.reason} (${f.missingInfo})`);
+  }
+  if (r.choiceMenu?.options?.length && exec.length === 0) {
+    lines.push('   ChoiceMenu:');
+    r.choiceMenu.options.slice(0, 3).forEach((o: any, i: number) => {
+      lines.push(`   ${i + 1}. ${o.label}`);
+    });
+  }
+  if (lines.length === 0) {
+    if (ctx) return `[CTX] ${ctx.split('\n').slice(0, 3).join(' | ')}`;
+    return '[NO TOOL CALL]';
+  }
+  return lines.join('\n');
+}
+
+function pickLatestChoiceMenu(result: any): AssistantChoiceMenu | undefined {
+  for (const e of result.executedActions ?? []) {
+    if (e.result?.choiceMenu?.options?.length) return e.result.choiceMenu;
+  }
+  if (result.choiceMenu?.options?.length) return result.choiceMenu;
+  return undefined;
+}
+
+async function runConversation(name: string, turns: Turn[]) {
+  sectionHeader(name);
+  let lastChoiceMenu: AssistantChoiceMenu | undefined;
+  const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const results: Array<{ user: string; result: any }> = [];
+
+  for (let i = 0; i < turns.length; i++) {
+    const { user, expect: expected, anyOfTools, mustReact } = turns[i];
+    console.log(`\n  👤 Turn ${i + 1}: "${user}"`);
+    if (lastChoiceMenu) {
+      console.log(`     (carry choiceMenu w/ ${lastChoiceMenu.options.length} opts)`);
+    }
+    const result = await autonomousQuery(
+      user,
+      {
+        userId: TEST_USER_ID,
+        schoolId: TEST_SCHOOL_ID,
+        role: 'student',
+        lastChoiceMenu,
+        isOnline: true,
+      },
+      undefined,
+      conversationHistory,
+    );
+
+    const text = fmtResult(result);
+    console.log('  🤖 ' + text.split('\n').join('\n     '));
+
+    if (VERBOSE) {
+      console.log(
+        '     [intents]',
+        (result.intents ?? []).map((x: any) => `${x.tool}(${JSON.stringify(x.args)})`).join('; '),
+      );
+    }
+
+    const tools = collectToolsCalled(result);
+    if (anyOfTools?.length) {
+      const hit = anyOfTools.some((t) => tools.has(t));
+      expect(hit).toBe(true);
+    }
+    if (mustReact) {
+      expect(tools.size).toBeGreaterThan(0);
+    }
+
+    if (expected) {
+      const combined =
+        (result.executedActions ?? []).map((e: any) => String(e.result?.summary ?? '')).join('\n') +
+        '\n' +
+        (result.failedActions ?? []).map((f: any) => f.reason + f.missingInfo).join('\n');
+      if (Array.isArray(expected)) {
+        for (const term of expected) {
+          if (!combined.includes(term)) {
+            console.log(`     ⚠️  期望包含 "${term}" 但沒看到`);
+          }
+        }
+      } else if (expected instanceof RegExp) {
+        if (!expected.test(combined)) {
+          console.log(`     ⚠️  期望符合 ${expected} 但沒看到`);
+        }
+      }
+    }
+
+    conversationHistory.push({ role: 'user', content: user });
+    const asstReply =
+      (result.executedActions ?? [])
+        .map((e: any) => String(e.result?.summary ?? ''))
+        .filter(Boolean)
+        .join('\n') ||
+      (result.failedActions ?? []).map((f: any) => `${f.reason}: ${f.missingInfo}`).join('\n') ||
+      (result.results ?? [])
+        .map((x: any) => String(x.result?.summary ?? ''))
+        .filter(Boolean)
+        .join('\n') ||
+      '(未呼叫工具)';
+    conversationHistory.push({ role: 'assistant', content: asstReply });
+
+    const next = pickLatestChoiceMenu(result);
+    if (next) lastChoiceMenu = next;
+    results.push({ user, result });
+  }
+
+  return results;
+}
+
+describe('AI 口語／模糊／跨功能 對話壓測', () => {
+  beforeAll(() => {
+    setDataSource(mockSource as any);
+  });
+
+  jest.setTimeout(400000);
+
+  it('baseline：原 7 場回歸', async () => {
+    await runConversation('Scenario 1 — 訂餐', [
+      { user: '幫我訂午餐', anyOfTools: ['create_order'] },
+      { user: '隨便幫我點', anyOfTools: ['create_order'] },
+      { user: '我想吃點清淡的', anyOfTools: ['create_order'] },
+      { user: '幫我點第一個', anyOfTools: ['create_order'] },
+      { user: '不是炸的，要素的', anyOfTools: ['create_order'] },
+      { user: '幫我點滷肉飯', anyOfTools: ['create_order'] },
+      { user: '查看我的訂單', anyOfTools: ['query_orders'] },
+      { user: '取消最後一筆訂單', anyOfTools: ['cancel_order'] },
+    ]);
+
+    await runConversation('Scenario 2 — 請假/簽到', [
+      { user: '我明天頭痛要請假', anyOfTools: ['request_leave'] },
+      { user: '幫我請病假', anyOfTools: ['request_leave'] },
+      { user: '我要幫今天的微積分課簽到', anyOfTools: ['check_in_attendance', 'query_courses'] },
+      { user: '我已經簽到了', anyOfTools: ['check_in_attendance', 'query_attendance'] },
+    ]);
+
+    await runConversation('Scenario 3 — 圖書館', [
+      { user: '我想預約自習座位', anyOfTools: ['reserve_library_seat', 'query_library'] },
+      { user: '第一個就好', anyOfTools: ['reserve_library_seat'] },
+      { user: '幫我借《人工智慧》這本書', anyOfTools: ['borrow_book'] },
+      { user: '隨便借一本相關的', anyOfTools: ['borrow_book'] },
+    ]);
+
+    await runConversation('Scenario 4 — 宿舍', [
+      { user: '宿舍冷氣壞掉了幫我報修', anyOfTools: ['create_repair_request'] },
+      { user: '在 B302' },
+      { user: '我要預約洗衣機', anyOfTools: ['reserve_washing_machine'] },
+      { user: '有人領我的包裹嗎', anyOfTools: ['query_dorm_info'] },
+    ]);
+
+    await runConversation('Scenario 5 — 模糊', [
+      { user: '我好餓', anyOfTools: ['recommend_lunch'] },
+      { user: '今天吃什麼好', anyOfTools: ['query_menus'] },
+      { user: '便宜一點的', anyOfTools: ['create_order'] },
+      { user: '對對對就那個', anyOfTools: ['create_order'] },
+    ]);
+
+    await runConversation('Scenario 6 — 複合', [
+      { user: '我明天忙嗎', anyOfTools: ['daily_briefing'] },
+      { user: '趕快幫我把未讀通知看一下啦', anyOfTools: ['query_notifications'] },
+      { user: '幫我把所有通知都標為已讀', anyOfTools: ['mark_notifications_read'] },
+      { user: '通知小敏明天的會議改到 10 點', anyOfTools: ['send_message'] },
+      { user: '今天我有什麼活動', anyOfTools: ['query_events'] },
+    ]);
+
+    await runConversation('Scenario 7 — 邊界', [
+      { user: '嗨' },
+      { user: '你會啥', anyOfTools: ['assistant_help'] },
+      { user: 'asdfghjkl' },
+      { user: '😊' },
+      { user: '我要點 ZZZ 一份', anyOfTools: ['create_order'] },
+      { user: '是雞腿飯啦', anyOfTools: ['create_order'] },
+    ]);
+  });
+
+  it('口語訂餐與情緒化說法', async () => {
+    await runConversation('口語訂餐', [
+      { user: '幹我好餓喔有沒有東西吃', anyOfTools: ['recommend_lunch'] },
+      { user: '肚餓扁了啦快救我', anyOfTools: ['recommend_lunch'] },
+      { user: '欸幫我搞個晚餐好不好懒得想', anyOfTools: ['create_order', 'recommend_lunch'] },
+      { user: '不要辣不要油這種啦你懂', anyOfTools: ['create_order'] },
+      { user: '隨便啦你決定快一點', anyOfTools: ['create_order'] },
+      { user: '那…最後一個好了', anyOfTools: ['create_order'] },
+    ]);
+  });
+
+  it('課業／成績／作業 模糊問法', async () => {
+    await runConversation('課業', [
+      { user: '欸我今天到底有什麼課啊超混亂', anyOfTools: ['query_courses'] },
+      { user: '下禮拜會不會很忙', anyOfTools: ['daily_briefing', 'query_courses', 'comprehensive_analysis'] },
+      { user: '我作業是不是快爆了', anyOfTools: ['query_assignments'] },
+      { user: '成績爛不爛啊', anyOfTools: ['query_grades', 'predict_gpa'] },
+      { user: '還差多少學分才能畢業', anyOfTools: ['analyze_credits'] },
+    ]);
+  });
+
+  it('交通／公告／行事曆', async () => {
+    await runConversation('校園資訊', [
+      { user: '校車怎麼搭啊我完全沒概念', anyOfTools: ['query_bus'] },
+      { user: '學校最近有發什麼公告', anyOfTools: ['query_announcements'] },
+      { user: '我這週行程表長怎樣', anyOfTools: ['query_calendar', 'daily_briefing'] },
+      { user: '今天下午有空嗎…大概', anyOfTools: ['query_calendar', 'query_courses', 'daily_briefing'] },
+    ]);
+  });
+
+  it('訊息／通知 口語', async () => {
+    await runConversation('訊息通知', [
+      { user: '幫我看一下有沒有通知', anyOfTools: ['query_notifications'] },
+      { user: '私訊誰找過我', anyOfTools: ['query_conversations'] },
+      { user: '我聊天列表亂掉了啦', anyOfTools: ['query_conversations'] },
+    ]);
+  });
+
+  it('健康／失物／列印／綜合', async () => {
+    await runConversation('健康失物列印', [
+      { user: '身體不太舒服想掛個號', anyOfTools: ['query_health_records', 'create_health_appointment'] },
+      { user: '幫我預約健康檢查', anyOfTools: ['create_health_appointment', 'query_health_records'] },
+      { user: '我錢包不見了哭啊', anyOfTools: ['create_lost_found'] },
+      { user: '撿到一隻 AirPods', anyOfTools: ['create_lost_found'] },
+      { user: '幫我印一下期中報告.pdf 黑白兩份', anyOfTools: ['create_print_job'] },
+      { user: '我現在整個人狀態超糟你大概查一下', anyOfTools: ['comprehensive_analysis', 'daily_briefing', 'query_courses'] },
+    ]);
+  });
+
+  it('活動／報名口語', async () => {
+    await runConversation('活動', [
+      { user: '最近有沒有什麼好玩的活動啊', anyOfTools: ['query_events'] },
+      { user: '第一個我想去', anyOfTools: ['register_event'] },
+      { user: '算了我還是不去了', anyOfTools: ['unregister_event', 'query_events', 'register_event'] },
+    ]);
+  });
+
+  it('超模糊廢話仍要接球（至少回工具或分析）', async () => {
+    await runConversation('模糊', [
+      { user: '欸欸欸我忘記今天要幹嘛了', anyOfTools: ['daily_briefing', 'query_courses', 'query_calendar'] },
+      { user: '你就…隨便幫我處理一下可以嗎', anyOfTools: ['daily_briefing', 'comprehensive_analysis', 'query_notifications'] },
+      { user: '我是誰我在哪我在幹嘛', anyOfTools: ['query_student_info', 'daily_briefing', 'comprehensive_analysis'] },
+      { user: '今天會不會被當', anyOfTools: ['predict_gpa', 'query_grades'] },
+    ]);
+  });
+
+  it('口語大雜燴（情緒＋多意圖＋半截句）', async () => {
+    await runConversation('大雜燴', [
+      {
+        user: '煩死了啦肚子又餓又有通知未讀到底要先幹嘛',
+        anyOfTools: ['query_notifications', 'recommend_lunch', 'daily_briefing', 'comprehensive_analysis', 'query_menus'],
+      },
+      { user: '算了先隨便來點能吃的啦不要想', anyOfTools: ['create_order', 'recommend_lunch', 'query_menus'] },
+      { user: '欸我剛剛是不是已經簽到啦還是沒', anyOfTools: ['query_attendance', 'check_in_attendance'] },
+      { user: '那個行政大樓旁邊公車站到底在哪我路痴', anyOfTools: ['query_bus'] },
+      { user: '我覺得我完蛋了課業壓力好大', anyOfTools: ['query_assignments', 'comprehensive_analysis', 'daily_briefing'] },
+    ]);
+  });
+
+  it('中英夾雜、英文片語與拼音碎唸', async () => {
+    await runConversation('中英夾雜', [
+      { user: '欸 today 我到底有什麼課啦干', anyOfTools: ['query_courses'] },
+      { user: '幫我看一下有沒有 unread notification 好嗎', anyOfTools: ['query_notifications'] },
+      { user: '校門口附近有 bus 嗎還是都要走过去', anyOfTools: ['query_bus'] },
+      { user: '幫我 book 一下圖書館位子啦拜託', anyOfTools: ['reserve_library_seat', 'query_library'] },
+      { user: 'this week 的 schedule 幫我瞄一眼', anyOfTools: ['query_calendar', 'daily_briefing'] },
+      { user: 'I lost my wallet 在圖書館附近…', anyOfTools: ['create_lost_found'] },
+      { user: 'gg 了期末 draft 到底要交沒', anyOfTools: ['query_assignments'] },
+    ]);
+  });
+
+  it('錯字口誤與懶打鍵盤', async () => {
+    await runConversation('錯字', [
+      { user: '完蛋我要簽倒啦遲到爆', anyOfTools: ['check_in_attendance', 'query_attendance'] },
+      { user: '請假單還沒過欸想查一下', anyOfTools: ['query_attendance'] },
+      { user: 'hhh我忘記今天要幹嘛了救命', anyOfTools: ['daily_briefing', 'query_courses', 'query_calendar', 'comprehensive_analysis'] },
+      { user: '成績在哪看啊🥺期末已經來了', anyOfTools: ['query_grades'] },
+    ]);
+  });
+
+  it('反向澄清、拖台詞與碎唸起句', async () => {
+    await runConversation('反向碎唸', [
+      { user: '我不是要吃飯我是想看成績好嗎', anyOfTools: ['query_grades', 'query_menus', 'comprehensive_analysis'] },
+      { user: '就是…呃…公告啦學校有沒有發新的', anyOfTools: ['query_announcements'] },
+      { user: '算了睡不著先掛個號好了', anyOfTools: ['create_health_appointment', 'query_health_records'] },
+    ]);
+  });
+
+  it('社交口語（密我／已讀）', async () => {
+    await runConversation('社交嘴砲', [
+      { user: '靠邀誰剛剛一直密我啦很煩欸', anyOfTools: ['query_conversations'] },
+      { user: '已讀不回是不是欠揍啦開玩笑的', anyOfTools: ['query_conversations', 'query_notifications'] },
+    ]);
+  });
+
+  it('訂餐選單後只回「第一個」：必須帶 lastChoiceMenu（重現真機 bug）', async () => {
+    const menu: AssistantChoiceMenu = {
+      title: '請選擇餐點',
+      producedByTool: 'create_order',
+      options: [
+        { id: 'm1@@v1', label: 'Morning House | 蛋餅', subtitle: '靜園餐廳', sendAsUser: '幫我點第1個' },
+        { id: 'm2@@v2', label: '永和豆漿 | 蛋餅', subtitle: '宜園餐廳', sendAsUser: '幫我點第2個' },
+      ],
+    };
+    const r = await autonomousQuery(
+      '第一個',
+      {
+        userId: TEST_USER_ID,
+        schoolId: TEST_SCHOOL_ID,
+        role: 'student',
+        lastChoiceMenu: menu,
+        isOnline: true,
+      },
+      undefined,
+      [],
+    );
+    const tools = collectToolsCalled(r);
+    expect(tools.has('create_order')).toBe(true);
+  });
+});

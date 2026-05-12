@@ -12,6 +12,7 @@ import { useSchool } from '../state/school';
 import { useAmbientCues } from '../features/engagement';
 import { AmbientCueCard } from '../ui/campusOs';
 import type { Course, Assignment, AttendanceSession } from '../data/types';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
 type CourseStats = {
   course: Course;
@@ -234,13 +235,16 @@ export function TeachingHubScreen(props: any) {
         }}
       >
         {/* Header */}
-        <View style={{ gap: 4 }}>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
-            教學主流程
-          </Text>
-          <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>
-            管理課程、評分與互動
-          </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <HeaderAvatarButton />
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
+              教學主流程
+            </Text>
+            <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>
+              管理課程、評分與互動
+            </Text>
+          </View>
         </View>
 
         {ambientCue ? (

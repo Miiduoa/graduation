@@ -22,19 +22,33 @@ import { useSchool } from '../state/school';
 import { useSchedule } from '../state/schedule';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { SegmentedControl, Spinner } from '../ui/components';
 import { isTeachingRole } from '../utils/campusOs';
 import { SmartCalendarPanel } from './unifiedCalendar/SmartCalendarPanel';
 import {
+  getAnyCachedCourses,
+  getAnyCachedGrades,
+  getAnyCachedTCCourses,
+  getAnyCachedTCActivities,
+  getAnyCachedTCAttendance,
+  getAnyCachedTCGrades,
+  getAnyCachedTCTodos,
+  getCachedCourses,
+  getCachedGrades,
   getCachedTCCourses,
   getCachedTCActivities,
   getCachedTCAttendance,
   getCachedTCTodos,
+  refreshCourses,
+  refreshGrades,
   refreshTCCourses,
   refreshTCActivitiesForCourses,
   refreshTCAttendance,
   refreshTCTodos,
+  seedCachedTCGrades,
 } from '../services/puDataCache';
+import { getPUSession } from '../services/studentIdAuth';
 import {
   tcFetchGrades,
   tcLogin,
@@ -52,6 +66,7 @@ import {
   type TCExamSubmission,
   type TCScoreItem,
 } from '../services/tronClassClient';
+import type { PUCourse, PUCourseResult, PUGrade, PUGradeResult } from '../services/puDirectScraper';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -104,6 +119,115 @@ type CourseSlot = {
   color: string;
   credits?: number;
 };
+
+function isTronClassCourse(course: TCCourse): boolean {
+  return course.id > 0;
+}
+
+function parseNumericScore(value: number | string | null | undefined): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const normalized = String(value ?? '').replace(/[^\d.-]/g, '').trim();
+  if (!normalized) return null;
+  const score = Number(normalized);
+  return Number.isFinite(score) ? score : null;
+}
+
+function scoreToGradePoint(score: number): number {
+  if (score >= 90) return 4.0;
+  if (score >= 85) return 3.7;
+  if (score >= 80) return 3.3;
+  if (score >= 77) return 3.0;
+  if (score >= 73) return 2.7;
+  if (score >= 70) return 2.3;
+  if (score >= 67) return 2.0;
+  if (score >= 63) return 1.7;
+  if (score >= 60) return 1.0;
+  return 0.0;
+}
+
+function convertPUCoursesToTC(puCourses: PUCourse[], semester: string | null): TCCourse[] {
+  return puCourses.map((course, index) => ({
+    id: -(index + 1),
+    name: course.name || course.nameEn || course.code || '未命名課程',
+    course_code: course.code || `pu-${index + 1}`,
+    department: null,
+    instructors: course.teacherName ? [{ id: 0, name: course.teacherName }] : [],
+    credit: typeof course.credits === 'number' ? course.credits : null,
+    semester: semester ? { code: semester, id: 0, name: semester } : null,
+    klass: course.classOffered ? { id: 0, name: course.classOffered } : null,
+    grade: null,
+    course_outline: null,
+    start_date: null,
+    end_date: null,
+    status: 'ongoing',
+    role: 'student',
+    student_count: 0,
+    classroom_schedule: course.timePlaceRaw || course.location || null,
+  }));
+}
+
+function convertPUGradesToTC(puGrades: PUGrade[]): TCGradeItem[] {
+  return puGrades.map((grade, index) => {
+    const score = parseNumericScore(grade.score);
+    return {
+      course_id: -(index + 1),
+      course_name: grade.courseName || grade.courseNameEn || '未命名課程',
+      final_score: score,
+      final_grade: null,
+      grade_point: score == null ? null : scoreToGradePoint(score),
+      credits: typeof grade.credits === 'number' ? grade.credits : 0,
+      semester: grade.semester || '',
+    };
+  });
+}
+
+function formatCourseSchedule(value: unknown): string | null {
+  if (typeof value === 'string') return value.trim() || null;
+  return null;
+}
+
+async function readCachedPUFallbackData(): Promise<{
+  courses: TCCourse[];
+  grades: TCGradeItem[];
+}> {
+  const [cachedCourses, cachedGrades] = await Promise.all([
+    getCachedCourses().then((data) => data ?? getAnyCachedCourses()),
+    getCachedGrades().then((data) => data ?? getAnyCachedGrades()),
+  ]);
+
+  return {
+    courses: cachedCourses?.courses?.length
+      ? convertPUCoursesToTC(cachedCourses.courses, cachedCourses.semester)
+      : [],
+    grades: cachedGrades?.grades?.length ? convertPUGradesToTC(cachedGrades.grades) : [],
+  };
+}
+
+async function refreshPUFallbackData(): Promise<{
+  courses: TCCourse[];
+  grades: TCGradeItem[];
+}> {
+  const session = getPUSession();
+  if (!session) return readCachedPUFallbackData();
+
+  const [courseData, gradeData] = await Promise.all([
+    refreshCourses(session).catch(() => null as PUCourseResult | null),
+    refreshGrades(session).catch(() => null as PUGradeResult | null),
+  ]);
+  const cachedFallback =
+    !courseData?.courses?.length || !gradeData?.grades?.length
+      ? await readCachedPUFallbackData()
+      : { courses: [], grades: [] };
+
+  return {
+    courses: courseData?.courses?.length
+      ? convertPUCoursesToTC(courseData.courses, courseData.semester)
+      : cachedFallback.courses,
+    grades: gradeData?.grades?.length
+      ? convertPUGradesToTC(gradeData.grades)
+      : cachedFallback.grades,
+  };
+}
 
 function timeToperiod(t: string): number {
   const [h, m] = t.split(':').map(Number);
@@ -288,6 +412,110 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
             <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>連線</Text>
           )}
         </Pressable>
+      </View>
+    </View>
+  );
+}
+
+// ─── Course Tools Section ────────────────────────────────
+// 選課工具：低頻使用，只在「課表」tab 內出現。
+// 包含：課綱查詢 / AI 選課助理 / 學分檢核
+
+function CourseToolsSection(props: { nav: any; variant: 'compact' | 'empty' }) {
+  const tools = [
+    {
+      id: 'catalog',
+      title: '課綱查詢',
+      subtitle: '全校課程搜尋',
+      icon: 'library-outline' as const,
+      color: '#3B82F6',
+      onPress: () => props.nav?.navigate?.('CourseCatalog'),
+    },
+    {
+      id: 'advisor',
+      title: 'AI 選課助理',
+      subtitle: '依你的資料推薦',
+      icon: 'sparkles-outline' as const,
+      color: '#FF6B9A',
+      onPress: () => props.nav?.navigate?.('AICourseAdvisor'),
+    },
+    {
+      id: 'credit',
+      title: '學分檢核',
+      subtitle: '畢業進度',
+      icon: 'calculator-outline' as const,
+      color: theme.colors.accent,
+      onPress: () => props.nav?.navigate?.('CreditAuditStack'),
+    },
+  ];
+
+  return (
+    <View
+      style={{
+        marginTop: props.variant === 'compact' ? 20 : 12,
+        gap: 10,
+      }}
+    >
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <View>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
+            選課工具
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+            學期初/末查課、找替代方案、評估畢業進度
+          </Text>
+        </View>
+      </View>
+
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        {tools.map((t) => (
+          <Pressable
+            key={t.id}
+            onPress={t.onPress}
+            style={({ pressed }) => ({
+              flex: 1,
+              padding: 12,
+              borderRadius: 14,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              opacity: pressed ? 0.7 : 1,
+              gap: 8,
+              minHeight: 96,
+            })}
+          >
+            <View
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 10,
+                backgroundColor: `${t.color}1A`,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name={t.icon} size={18} color={t.color} />
+            </View>
+            <Text
+              style={{
+                color: theme.colors.text,
+                fontWeight: '700',
+                fontSize: 13,
+              }}
+            >
+              {t.title}
+            </Text>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 14 }}>
+              {t.subtitle}
+            </Text>
+          </Pressable>
+        ))}
       </View>
     </View>
   );
@@ -543,15 +771,21 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
       {props.courses.map((course, idx) => {
         const instructor = course.instructors?.[0]?.name ?? '未知';
         const semester = course.semester?.name ?? '';
+        const fromTronClass = isTronClassCourse(course);
+        const scheduleText = formatCourseSchedule(course.classroom_schedule);
         return (
           <Pressable
             key={course.id}
-            onPress={() =>
-              props.nav?.navigate?.('CourseHub', {
-                groupId: String(course.id),
-                groupName: course.name,
-              })
-            }
+            onPress={() => {
+              if (fromTronClass) {
+                props.nav?.navigate?.('CourseHub', {
+                  groupId: String(course.id),
+                  groupName: course.name,
+                });
+              } else {
+                props.nav?.navigate?.('CourseSchedule');
+              }
+            }}
             style={({ pressed }) => ({
               padding: 14,
               borderRadius: 14,
@@ -589,72 +823,84 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                   <Text style={{ color: theme.colors.muted, fontSize: 12 }}>{semester}</Text>
                 </View>
               ) : null}
+              {!fromTronClass ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="cloud-offline-outline" size={12} color={theme.colors.muted} />
+                  <Text style={{ color: theme.colors.muted, fontSize: 12 }}>E 校園</Text>
+                </View>
+              ) : null}
             </View>
-            <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-              <Pressable
-                onPress={() =>
-                  props.nav?.navigate?.('CourseModules', {
-                    groupId: String(course.id),
-                    groupName: course.name,
-                  })
-                }
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                  paddingHorizontal: 10,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                  backgroundColor: '#2563EB14',
-                  borderWidth: 1,
-                  borderColor: '#2563EB22',
-                }}
-              >
-                <Ionicons name="albums-outline" size={12} color="#2563EB" />
-                <Text style={{ color: '#2563EB', fontSize: 11, fontWeight: '700' }}>教材</Text>
-              </Pressable>
-              <Pressable
-                onPress={() =>
-                  props.nav?.navigate?.('QuizCenter', {
-                    groupId: String(course.id),
-                    groupName: course.name,
-                  })
-                }
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                  paddingHorizontal: 10,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                  backgroundColor: `${theme.colors.info}14`,
-                  borderWidth: 1,
-                  borderColor: `${theme.colors.info}22`,
-                }}
-              >
-                <Ionicons name="help-circle-outline" size={12} color={theme.colors.info} />
-                <Text style={{ color: theme.colors.info, fontSize: 11, fontWeight: '700' }}>
-                  測驗
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => props.nav?.navigate?.('Grades')}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                  paddingHorizontal: 10,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                  backgroundColor: '#0EA5E914',
-                  borderWidth: 1,
-                  borderColor: '#0EA5E922',
-                }}
-              >
-                <Ionicons name="stats-chart-outline" size={12} color="#0EA5E9" />
-                <Text style={{ color: '#0EA5E9', fontSize: 11, fontWeight: '700' }}>成績</Text>
-              </Pressable>
-            </View>
+            {fromTronClass ? (
+              <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                <Pressable
+                  onPress={() =>
+                    props.nav?.navigate?.('CourseModules', {
+                      groupId: String(course.id),
+                      groupName: course.name,
+                    })
+                  }
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 999,
+                    backgroundColor: '#2563EB14',
+                    borderWidth: 1,
+                    borderColor: '#2563EB22',
+                  }}
+                >
+                  <Ionicons name="albums-outline" size={12} color="#2563EB" />
+                  <Text style={{ color: '#2563EB', fontSize: 11, fontWeight: '700' }}>教材</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() =>
+                    props.nav?.navigate?.('QuizCenter', {
+                      groupId: String(course.id),
+                      groupName: course.name,
+                    })
+                  }
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 999,
+                    backgroundColor: `${theme.colors.info}14`,
+                    borderWidth: 1,
+                    borderColor: `${theme.colors.info}22`,
+                  }}
+                >
+                  <Ionicons name="help-circle-outline" size={12} color={theme.colors.info} />
+                  <Text style={{ color: theme.colors.info, fontSize: 11, fontWeight: '700' }}>
+                    測驗
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => props.nav?.navigate?.('Grades')}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 999,
+                    backgroundColor: '#0EA5E914',
+                    borderWidth: 1,
+                    borderColor: '#0EA5E922',
+                  }}
+                >
+                  <Ionicons name="stats-chart-outline" size={12} color="#0EA5E9" />
+                  <Text style={{ color: '#0EA5E9', fontSize: 11, fontWeight: '700' }}>成績</Text>
+                </Pressable>
+              </View>
+            ) : scheduleText ? (
+              <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }} numberOfLines={2}>
+                {scheduleText}
+              </Text>
+            ) : null}
           </Pressable>
         );
       })}
@@ -883,10 +1129,16 @@ function GradesView(props: {
   const [examScores, setExamScores] = useState<ExamScoreRow[]>([]);
   const [courseSummaries, setCourseSummaries] = useState<CourseScoreSummary[]>([]);
   const [loadingExams, setLoadingExams] = useState(false);
+  const tronClassCourses = useMemo(() => props.courses.filter(isTronClassCourse), [props.courses]);
 
   // 載入各門課的小考/測驗分數 + score-items 百分比
   useEffect(() => {
-    if (props.courses.length === 0) return;
+    if (tronClassCourses.length === 0) {
+      setExamScores([]);
+      setCourseSummaries([]);
+      setLoadingExams(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       setLoadingExams(true);
@@ -894,7 +1146,7 @@ function GradesView(props: {
         const allRows: ExamScoreRow[] = [];
         const summaries: CourseScoreSummary[] = [];
 
-        for (const course of props.courses) {
+        for (const course of tronClassCourses) {
           try {
             const [exams, scoreItems] = await Promise.all([
               tcFetchCourseExams(course.id).catch(() => [] as TCExamInfo[]),
@@ -974,7 +1226,7 @@ function GradesView(props: {
     return () => {
       cancelled = true;
     };
-  }, [props.courses]);
+  }, [tronClassCourses]);
 
   const totalCredits = props.grades.reduce((s, g) => s + (g.credits ?? 0), 0);
   const gpa =
@@ -1329,29 +1581,93 @@ export function CoursesHomeScreen(props: any) {
   const [tcTodos, setTcTodos] = useState<TCActivity[]>([]);
   const [tcGrades, setTcGrades] = useState<TCGradeItem[]>([]);
 
-  // Load all cached data on mount
+  const applyPUFallback = useCallback(async () => {
+    const fallback = await refreshPUFallbackData();
+    if (fallback.courses.length > 0) {
+      setTcCourses((current) =>
+        current.some(isTronClassCourse) ? current : fallback.courses,
+      );
+    }
+    if (fallback.grades.length > 0) {
+      setTcGrades((current) =>
+        current.some((grade) => grade.course_id > 0) ? current : fallback.grades,
+      );
+    }
+  }, []);
+
+  // Load all cached data on mount — stale-while-revalidate
   const loadAllData = useCallback(async () => {
     setDataLoading(true);
     try {
-      const [courses, activities, attendance, todos] = await Promise.all([
+      // 1. 先用 getAnyCached*（不管 TTL）立即顯示
+      const [courses, activities, attendance, todos, cachedGrades, puFallback] = await Promise.all([
+        getAnyCachedTCCourses(),
+        getAnyCachedTCActivities(),
+        getAnyCachedTCAttendance(),
+        getAnyCachedTCTodos(),
+        getAnyCachedTCGrades(),
+        readCachedPUFallbackData().catch(() => ({ courses: [], grades: [] })),
+      ]);
+      if (courses?.length) {
+        setTcCourses(courses);
+      } else if (puFallback.courses.length > 0) {
+        setTcCourses(puFallback.courses);
+      }
+      if (activities) setTcActivities(activities);
+      if (attendance) setTcAttendance(attendance);
+      if (todos) setTcTodos(todos);
+      const tcCachedGrades = Array.isArray(cachedGrades) ? (cachedGrades as TCGradeItem[]) : [];
+      if (tcCachedGrades.length > 0) {
+        setTcGrades(tcCachedGrades);
+      } else if (puFallback.grades.length > 0) {
+        setTcGrades(puFallback.grades);
+      }
+
+      // 2. 背景檢查 TTL，過期則靜默刷新
+      const [freshCourses, freshActivities, freshAttendance, freshTodos] = await Promise.all([
         getCachedTCCourses(),
         getCachedTCActivities(),
         getCachedTCAttendance(),
         getCachedTCTodos(),
       ]);
-      if (courses) setTcCourses(courses);
-      if (activities) setTcActivities(activities);
-      if (attendance) setTcAttendance(attendance);
-      if (todos) setTcTodos(todos);
+      // 如果任一過期（返回 null），觸發背景刷新
+      if (!freshCourses || !freshActivities || !freshAttendance || !freshTodos) {
+        refreshTCCourses().then((rc) => {
+          if (rc?.length) {
+            setTcCourses(rc);
+            const ids = rc.map((c) => c.id);
+            Promise.allSettled([
+              !freshActivities ? refreshTCActivitiesForCourses(ids).then((a) => setTcActivities(a)) : Promise.resolve(),
+              !freshAttendance ? refreshTCAttendance().then((a) => { if (a) setTcAttendance(a); }) : Promise.resolve(),
+              !freshTodos ? refreshTCTodos().then((t) => { if (t) setTcTodos(t); }) : Promise.resolve(),
+            ]);
+          } else {
+            applyPUFallback().catch(() => {});
+          }
+        }).catch(() => {
+          applyPUFallback().catch(() => {});
+        });
+      }
 
-      // Grades (no cache helper, fetch directly)
+      // 3. Grades — 取得後寫入快取
       try {
         const grades = await tcFetchGrades();
-        setTcGrades(grades);
-      } catch {}
-    } catch {}
-    setDataLoading(false);
-  }, []);
+        // 寫入快取供其他引擎使用
+        if (grades.length > 0) {
+          setTcGrades(grades);
+          seedCachedTCGrades(grades).catch(() => {});
+        } else if (puFallback.grades.length > 0) {
+          setTcGrades(puFallback.grades);
+        }
+      } catch {
+        if (puFallback.grades.length > 0) setTcGrades(puFallback.grades);
+      }
+    } catch {
+      await applyPUFallback().catch(() => {});
+    } finally {
+      setDataLoading(false);
+    }
+  }, [applyPUFallback]);
 
   useEffect(() => {
     loadAllData();
@@ -1362,7 +1678,7 @@ export function CoursesHomeScreen(props: any) {
     setRefreshing(true);
     try {
       const courses = await refreshTCCourses();
-      if (courses) {
+      if (courses?.length) {
         setTcCourses(courses);
         const courseIds = courses.map((c) => c.id);
         const [activities, attendance, todos] = await Promise.all([
@@ -1375,16 +1691,27 @@ export function CoursesHomeScreen(props: any) {
         if (todos) setTcTodos(todos);
         try {
           const grades = await tcFetchGrades();
-          setTcGrades(grades);
-        } catch {}
+          if (grades.length > 0) {
+            setTcGrades(grades);
+            seedCachedTCGrades(grades).catch(() => {});
+          } else {
+            await applyPUFallback();
+          }
+        } catch {
+          await applyPUFallback().catch(() => {});
+        }
+      } else {
+        await applyPUFallback();
       }
       // Also refresh schedule
       try {
         await schedule.refreshSchedule();
       } catch {}
-    } catch {}
+    } catch {
+      await applyPUFallback().catch(() => {});
+    }
     setRefreshing(false);
-  }, [schedule]);
+  }, [applyPUFallback, schedule]);
 
   // Schedule courses
   const courseSlots = useMemo((): CourseSlot[] => {
@@ -1416,7 +1743,13 @@ export function CoursesHomeScreen(props: any) {
     loadAllData();
   }, [loadAllData]);
 
-  const hasTCData = tcCourses.length > 0;
+  const hasCourseData = tcCourses.length > 0;
+  const hasTronClassData = tcCourses.some(isTronClassCourse);
+  const hasHomeworkData =
+    hasTronClassData ||
+    tcTodos.length > 0 ||
+    Object.values(tcActivities).some((items) => items.length > 0);
+  const hasGradeData = tcGrades.length > 0 || tcAttendance.length > 0 || hasCourseData;
 
   // 行事曆 tab 使用 SmartCalendarPanel（自帶 ScrollView），其他 tab 用外層 ScrollView
   if (tab === 'calendar') {
@@ -1425,14 +1758,14 @@ export function CoursesHomeScreen(props: any) {
         {/* Header + Tabs — 固定在頂部 */}
         <View style={{ paddingTop: insets.top + 12, paddingHorizontal: 16, gap: 14, paddingBottom: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ gap: 2 }}>
-              <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>課程</Text>
-              <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>我的課程</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+              <HeaderAvatarButton />
+              <View style={{ gap: 2, flex: 1 }}>
+                <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>學習</Text>
+                <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>我的課程</Text>
+              </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={() => nav?.navigate?.('AIChat')} style={({ pressed }) => ({ width: 38, height: 38, borderRadius: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
-                <Ionicons name="sparkles" size={18} color="#FF6B9A" />
-              </Pressable>
               <Pressable onPress={() => nav?.navigate?.('CreditAuditStack')} style={({ pressed }) => ({ width: 38, height: 38, borderRadius: 12, backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, alignItems: 'center', justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
                 <Ionicons name="calculator-outline" size={18} color={theme.colors.accent} />
               </Pressable>
@@ -1466,41 +1799,28 @@ export function CoursesHomeScreen(props: any) {
       >
         {/* Header */}
         <View
-          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
         >
-          <View style={{ gap: 2 }}>
-            <Text
-              style={{
-                color: theme.colors.muted,
-                fontSize: 11,
-                fontWeight: '700',
-                letterSpacing: 1.5,
-                textTransform: 'uppercase',
-              }}
-            >
-              課程
-            </Text>
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
-              我的課程
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+            <HeaderAvatarButton />
+            <View style={{ gap: 2, flex: 1 }}>
+              <Text
+                style={{
+                  color: theme.colors.muted,
+                  fontSize: 11,
+                  fontWeight: '700',
+                  letterSpacing: 1.5,
+                  textTransform: 'uppercase',
+                }}
+              >
+                學習
+              </Text>
+              <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+                我的課程
+              </Text>
+            </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable
-              onPress={() => nav?.navigate?.('AIChat')}
-              style={({ pressed }) => ({
-                width: 38,
-                height: 38,
-                borderRadius: 12,
-                backgroundColor: theme.colors.surface,
-                borderWidth: 1,
-                borderColor: theme.colors.border,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: pressed ? 0.7 : 1,
-              })}
-            >
-              <Ionicons name="sparkles" size={18} color="#FF6B9A" />
-            </Pressable>
             <Pressable
               onPress={() => nav?.navigate?.('CreditAuditStack')}
               style={({ pressed }) => ({
@@ -1547,40 +1867,46 @@ export function CoursesHomeScreen(props: any) {
               </Text>
             </View>
           ) : courseSlots.length > 0 ? (
-            <MiniScheduleView courses={courseSlots} onCoursePress={handleCoursePress} />
+            <>
+              <MiniScheduleView courses={courseSlots} onCoursePress={handleCoursePress} />
+              <CourseToolsSection nav={nav} variant="compact" />
+            </>
           ) : (
-            <View style={{ alignItems: 'center', paddingVertical: 30, gap: 8 }}>
-              <Ionicons
-                name="calendar-outline"
-                size={40}
-                color={theme.colors.muted}
-                style={{ opacity: 0.5 }}
-              />
-              <Text style={{ color: theme.colors.muted, fontSize: 14 }}>尚無課表資料</Text>
-              <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                請先連線 TronClass 或手動新增課程
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                <Pressable
-                  onPress={() => nav?.navigate?.('CourseSchedule')}
-                  style={({ pressed }) => ({
-                    paddingHorizontal: 18,
-                    paddingVertical: 8,
-                    borderRadius: 16,
-                    backgroundColor: theme.colors.accent,
-                    opacity: pressed ? 0.8 : 1,
-                  })}
-                >
-                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>完整課表</Text>
-                </Pressable>
+            <>
+              <View style={{ alignItems: 'center', paddingVertical: 30, gap: 8 }}>
+                <Ionicons
+                  name="calendar-outline"
+                  size={40}
+                  color={theme.colors.muted}
+                  style={{ opacity: 0.5 }}
+                />
+                <Text style={{ color: theme.colors.muted, fontSize: 14 }}>尚無課表資料</Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                  請先連線 TronClass 或手動新增課程
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                  <Pressable
+                    onPress={() => nav?.navigate?.('CourseSchedule')}
+                    style={({ pressed }) => ({
+                      paddingHorizontal: 18,
+                      paddingVertical: 8,
+                      borderRadius: 16,
+                      backgroundColor: theme.colors.accent,
+                      opacity: pressed ? 0.8 : 1,
+                    })}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>完整課表</Text>
+                  </Pressable>
+                </View>
               </View>
-            </View>
+              <CourseToolsSection nav={nav} variant="empty" />
+            </>
           ))}
 
         {/* Courses tab */}
         {tab === 'courses' &&
           !dataLoading &&
-          (hasTCData ? (
+          (hasCourseData ? (
             <CourseListView courses={tcCourses} nav={nav} onRefresh={handleRefresh} />
           ) : (
             <TCLoginSection onSuccess={handleLoginSuccess} profile={auth.profile} />
@@ -1589,7 +1915,7 @@ export function CoursesHomeScreen(props: any) {
         {/* Homework tab */}
         {tab === 'homework' &&
           !dataLoading &&
-          (hasTCData ? (
+          (hasHomeworkData ? (
             <HomeworkView activities={tcActivities} courses={tcCourses} todos={tcTodos} nav={nav} />
           ) : (
             <TCLoginSection onSuccess={handleLoginSuccess} profile={auth.profile} />
@@ -1598,7 +1924,7 @@ export function CoursesHomeScreen(props: any) {
         {/* Grades tab */}
         {tab === 'grades' &&
           !dataLoading &&
-          (hasTCData || tcGrades.length > 0 || tcAttendance.length > 0 ? (
+          (hasGradeData ? (
             <GradesView grades={tcGrades} attendance={tcAttendance} courses={tcCourses} />
           ) : (
             <TCLoginSection onSuccess={handleLoginSuccess} profile={auth.profile} />

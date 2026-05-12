@@ -35,6 +35,8 @@ function mapRichCategoryToAssistantIntent(category, rawMessage, richSubIntent) {
       return 'pois';
     case 'library': {
       if (/預約.*座位|座位.*預約|自習室|圖書館.*座位|搶座/.test(m)) return 'reserve_seat';
+      if (/續借|延長.*借|再借|renew/i.test(m)) return 'renew_book';
+      if (/還書|歸還|return/i.test(m)) return 'return_book';
       if (/借書|借閱|幫我借|我要借/.test(m)) return 'borrow_book';
       return 'pois';
     }
@@ -55,6 +57,8 @@ function mapRichCategoryToAssistantIntent(category, rawMessage, richSubIntent) {
       return 'study_summary';
     case 'health':
     case 'dorm': {
+      const hasDormRepairSignal = /宿舍|報修|維修|維修單|工單|冷氣|空調|房間|洗衣|洗衣機|包裹/.test(m);
+      if (!hasDormRepairSignal) return 'general';
       if (richSubIntent === 'repair_status') return 'check_repair_status';
       if (isDormRepairStatusQueryMessage(rawMessage)) return 'check_repair_status';
       if (/洗衣機|洗衣/.test(m) && /預約|幫我|訂|今晚|明天/.test(m)) return 'wash_reserve';

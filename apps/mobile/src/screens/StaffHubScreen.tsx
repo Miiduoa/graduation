@@ -7,6 +7,7 @@ import { theme } from '../ui/theme';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useDataSource } from '../hooks/useDataSource';
 import { useAuth } from '../state/auth';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
 export function StaffHubScreen(props: any) {
   const nav = props?.navigation;
@@ -88,11 +89,14 @@ export function StaffHubScreen(props: any) {
         }}
       >
         {/* Header */}
-        <View style={{ gap: 4 }}>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
-            校園服務
-          </Text>
-          <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>設施管理與服務</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <HeaderAvatarButton />
+          <View style={{ flex: 1, gap: 4 }}>
+            <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
+              校園服務
+            </Text>
+            <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>設施管理與服務</Text>
+          </View>
         </View>
 
         {/* Pending Work Orders */}

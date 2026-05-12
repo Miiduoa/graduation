@@ -25,6 +25,7 @@ import { getDb } from '../firebase';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useAmbientCues } from '../features/engagement';
 import { AmbientCueCard } from '../ui/campusOs';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import {
   bulkDeleteSchoolEvents,
   bulkUpdateSchoolAnnouncements,
@@ -1038,6 +1039,17 @@ export function AdminDashboardScreen(props: any) {
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <HeaderAvatarButton />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>
+              學習 · 管理員模式
+            </Text>
+            <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '800' }}>
+              管理後台
+            </Text>
+          </View>
+        </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TabButton
             icon="grid"

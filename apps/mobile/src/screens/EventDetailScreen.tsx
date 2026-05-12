@@ -214,8 +214,32 @@ export function EventDetailScreen(props: any) {
       await ds.registerEvent(id, auth.user.uid, school.id);
       reloadRegistrations();
       setSuccessMsg(status === 'waitlist' ? '已加入候補名單' : '報名成功！');
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'register_event',
+          { eventId: id, eventTitle: item?.title, location: item?.location },
+          'success',
+          undefined,
+          `報名活動「${item?.title ?? ''}」`,
+        );
+      } catch (brainErr) {
+        console.warn('[EventDetail] brain.observe failed:', brainErr);
+      }
     } catch (e: any) {
       setErr(e?.message ?? '報名失敗');
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'register_event',
+          { eventId: id, eventTitle: item?.title },
+          'failure',
+          e?.message,
+          `報名活動「${item?.title ?? ''}」`,
+        );
+      } catch (brainErr) {
+        console.warn('[EventDetail] brain.observe failed:', brainErr);
+      }
     } finally {
       setActionLoading(false);
     }

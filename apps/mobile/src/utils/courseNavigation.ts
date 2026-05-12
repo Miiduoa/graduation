@@ -12,20 +12,41 @@ export type NavigationTarget = {
   params?: Record<string, unknown>;
 };
 
+/**
+ * 新導航 (4+1) 的 Tab 名稱集合。所有舊名都會被映射到這 5 個之一。
+ */
+const NEW_TAB_NAMES = new Set(['Today', '學習', '校園', '訊息', '我的']);
+
+/**
+ * 舊 Tab → 新 Tab 的映射：
+ *   課程/教學/服務/審核/管理 → 學習
+ *   收件匣 → 訊息
+ *   其他維持
+ */
+export function migrateTabName(name: string | null | undefined): string {
+  if (!name) return 'Today';
+  if (NEW_TAB_NAMES.has(name)) return name;
+  if (name === '課程' || name === '教學' || name === '服務' || name === '審核' || name === '管理') {
+    return '學習';
+  }
+  if (name === '收件匣') return '訊息';
+  return name;
+}
+
 function isCourseTabName(name: string | null | undefined): boolean {
-  return name === '課程' || name === '教學';
+  return name === '課程' || name === '教學' || name === '學習';
 }
 
-export function getCourseRootTab(role: CourseNavigationRole): '課程' | '教學' | null {
-  if (role === 'teacher' || role === 'professor') return '教學';
-  if (!role || role === 'guest' || role === 'student' || role === 'alumni') return '課程';
-  return null;
+/**
+ * 取得課程相關的根 Tab。新導航下，所有角色都使用 '學習'，
+ * 內部由 LearnStack dispatcher 依角色選擇正確的首頁。
+ */
+export function getCourseRootTab(_role: CourseNavigationRole): '學習' {
+  return '學習';
 }
 
-export function getRoleFallbackTab(role: CourseNavigationRole): string {
-  if (role === 'admin') return '管理';
-  if (role === 'principal' || role === 'department') return '審核';
-  if (role === 'staff') return '服務';
+export function getRoleFallbackTab(_role: CourseNavigationRole): string {
+  // 新導航：所有角色都從 'Today' fallback；管理/審核入口移到 HeaderDrawer
   return 'Today';
 }
 
@@ -33,15 +54,10 @@ export function normalizeCourseScreen(
   role: CourseNavigationRole,
   screen?: string | null,
 ): string | undefined {
-  const rootTab = getCourseRootTab(role);
-  if (!rootTab) return undefined;
-
-  if (!screen) {
-    return rootTab === '教學' ? 'TeachingHub' : 'CoursesHome';
+  // 新導航：所有角色的 LearnStack 都以 'LearnHome' 為首頁（內部 dispatcher 決定顯示內容）
+  if (!screen || screen === 'CoursesHome' || screen === 'TeachingHub') {
+    return 'LearnHome';
   }
-
-  if (rootTab === '教學' && screen === 'CoursesHome') return 'TeachingHub';
-  if (rootTab === '課程' && screen === 'TeachingHub') return 'CoursesHome';
   return screen;
 }
 
@@ -50,15 +66,9 @@ export function buildCourseNavigationTarget(
   screen?: string | null,
   params?: Record<string, unknown>,
 ): NavigationTarget {
-  const rootTab = getCourseRootTab(role);
-  if (!rootTab) {
-    return { tab: getRoleFallbackTab(role) };
-  }
-
   const targetScreen = screen === 'CourseHub' && !params?.groupId ? undefined : screen;
-
   return {
-    tab: rootTab,
+    tab: '學習',
     screen: normalizeCourseScreen(role, targetScreen),
     params,
   };
@@ -70,12 +80,14 @@ export function buildNavigationTarget(
   screen?: string | null,
   params?: Record<string, unknown>,
 ): NavigationTarget {
-  if (isCourseTabName(tab)) {
+  const newTab = migrateTabName(tab);
+
+  if (isCourseTabName(tab) || newTab === '學習') {
     return buildCourseNavigationTarget(role, screen, params);
   }
 
   return {
-    tab,
+    tab: newTab,
     screen: screen ?? undefined,
     params,
   };
@@ -87,15 +99,34 @@ export function navigateToTarget(
 ): void {
   if (!navigation?.navigate) return;
 
+  // 攔截：AI Chat 已不是 Stack 內的 Screen，改用全域 overlay
+  if (target.screen === 'AIChat' || target.screen === 'AIChatScreen') {
+    try {
+      // 動態 require 避開循環依賴
+      const { aiOverlay } = require('../app/useAIOverlay');
+      const prompt =
+        target.params && typeof target.params === 'object' && 'prompt' in target.params
+          ? (target.params as { prompt?: string }).prompt
+          : undefined;
+      aiOverlay.open({ mode: 'chat', prompt, source: 'navigateToTarget' });
+      return;
+    } catch (err) {
+      console.warn('[navigateToTarget] AI overlay redirect failed, falling back:', err);
+    }
+  }
+
+  // 自動將任何舊 Tab 名稱遷移到新導航結構
+  const tab = migrateTabName(target.tab);
+
   if (target.screen) {
     navigation.navigate(
-      target.tab,
+      tab,
       target.params ? { screen: target.screen, params: target.params } : { screen: target.screen },
     );
     return;
   }
 
-  navigation.navigate(target.tab, target.params);
+  navigation.navigate(tab, target.params);
 }
 
 export function navigateToCourseScreen(

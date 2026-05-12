@@ -55,6 +55,10 @@ import {
   getModeName,
   getModeIcon,
   getStatusColor,
+  getHighRiskStudents,
+  type HighRiskStudent,
+  getAdminAnalytics,
+  type AdminAnalytics,
 } from '../services/smartAttendanceEngine';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -151,6 +155,8 @@ export function AttendanceScreen(props: any) {
   const [completedSessions, setCompletedSessions] = useState<AttendanceSession[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
   const [overallRate, setOverallRate] = useState(0);
+  const [riskStudents, setRiskStudents] = useState<HighRiskStudent[]>([]);
+  const [adminAnalytics, setAdminAnalytics] = useState<AdminAnalytics | null>(null);
 
   // ── Role detection: combine permissions + course data ──
   const routeIsTeacher = props?.route?.params?.isTeacher as boolean | undefined;
@@ -186,6 +192,14 @@ export function AttendanceScreen(props: any) {
         setActiveSessions(active);
         const leaves = await getLeaveRequests();
         setLeaveRequests(leaves);
+        // 載入高風險學生
+        const risks = await getHighRiskStudents();
+        setRiskStudents(risks);
+        // 管理者：載入全系統計
+        if (isAdmin || isDepartmentHead) {
+          const analytics = await getAdminAnalytics();
+          setAdminAnalytics(analytics);
+        }
       } else {
         // 學生：只看「我有修的課 + 老師已啟動點名」的場次
         const myEnrolledIds = allCourses.filter((c) => c.role === 'student').map((c) => c.id);
@@ -256,11 +270,39 @@ export function AttendanceScreen(props: any) {
         reason: leaveReason,
         category: leaveCategory,
       });
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'request_leave',
+          {
+            courseId: course.id,
+            courseName: course.name,
+            category: leaveCategory,
+            reason: leaveReason.slice(0, 80),
+          },
+          'success',
+          undefined,
+          `${course.name}請假（${leaveCategory}）：${leaveReason.slice(0, 40)}`,
+        );
+      } catch (brainErr) {
+        console.warn('[Attendance] brain.observe failed:', brainErr);
+      }
       Alert.alert('已提交', '假單已送出，等待教師審核');
       setShowLeaveModal(false);
       setLeaveReason('');
       await loadData();
-    } catch (e) {
+    } catch (e: any) {
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'request_leave',
+          { courseId: course.id, category: leaveCategory },
+          'failure',
+          e?.message,
+        );
+      } catch (brainErr) {
+        console.warn('[Attendance] brain.observe failed:', brainErr);
+      }
       Alert.alert('提交失敗');
     }
   };
@@ -688,6 +730,110 @@ export function AttendanceScreen(props: any) {
                 </GroupedCard>
               </>
             )}
+
+            {/* ═══ TEACHER: High Risk Students ═══ */}
+            {riskStudents.length > 0 && (
+              <>
+                <SectionHeader title="高風險學生" trailing={<Text style={{ color: theme.colors.muted, fontSize: 12 }}>{riskStudents.length} 位低於 80%</Text>} />
+                <GroupedCard>
+                  {riskStudents.slice(0, 10).map((stu, idx) => {
+                    const ratePercent = Math.round(stu.attendanceRate * 100);
+                    const isDanger = ratePercent < 60;
+                    const statusColor = isDanger ? '#EF4444' : '#F59E0B';
+                    const statusBg = isDanger ? '#FEE2E2' : '#FEF3C7';
+                    const statusLabel = isDanger ? '危險' : '警告';
+                    return (
+                      <View
+                        key={stu.studentId || idx}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingVertical: 12,
+                          paddingHorizontal: 16,
+                          borderBottomWidth: idx < Math.min(riskStudents.length, 10) - 1 ? 0.5 : 0,
+                          borderBottomColor: theme.colors.border,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 18,
+                            backgroundColor: statusBg,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginRight: 12,
+                          }}
+                        >
+                          <Ionicons
+                            name={isDanger ? 'warning' : 'alert-circle'}
+                            size={18}
+                            color={statusColor}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={{
+                              color: theme.colors.text,
+                              fontSize: 15,
+                              fontWeight: '600',
+                            }}
+                          >
+                            {stu.studentName}
+                          </Text>
+                          <Text
+                            style={{
+                              color: theme.colors.muted,
+                              fontSize: 12,
+                              marginTop: 2,
+                            }}
+                          >
+                            {stu.courseName ?? '未知課程'} · 缺席 {stu.absences}/{stu.totalSessions} 次
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text
+                            style={{
+                              color: statusColor,
+                              fontSize: 16,
+                              fontWeight: '700',
+                            }}
+                          >
+                            {ratePercent}%
+                          </Text>
+                          <View
+                            style={{
+                              backgroundColor: statusBg,
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              borderRadius: 4,
+                              marginTop: 2,
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: statusColor,
+                                fontSize: 10,
+                                fontWeight: '600',
+                              }}
+                            >
+                              {statusLabel}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {riskStudents.length > 10 && (
+                    <View style={{ padding: 12, alignItems: 'center' }}>
+                      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                        還有 {riskStudents.length - 10} 位高風險學生...
+                      </Text>
+                    </View>
+                  )}
+                </GroupedCard>
+              </>
+            )}
           </>
         )}
 
@@ -974,6 +1120,210 @@ export function AttendanceScreen(props: any) {
                 );
               })}
             </GroupedCard>
+          </>
+        )}
+
+        {/* ═══ ADMIN: Department Analytics ═══ */}
+        {(isAdmin || isDepartmentHead) && adminAnalytics && (
+          <>
+            <SectionHeader title="全系出席總覽" trailing={<Text style={{ color: theme.colors.muted, fontSize: 12 }}>管理者儀表板</Text>} />
+            <GroupedCard>
+              {/* 總覽數字 */}
+              <View
+                style={{
+                  flexDirection: 'row',
+                  paddingVertical: 16,
+                  paddingHorizontal: 16,
+                  borderBottomWidth: 0.5,
+                  borderBottomColor: theme.colors.border,
+                }}
+              >
+                {[
+                  { label: '課程數', value: adminAnalytics.totalCourses, icon: 'book' as const },
+                  { label: '點名場次', value: adminAnalytics.totalSessions, icon: 'clipboard' as const },
+                  { label: '風險學生', value: adminAnalytics.riskStudentCount, icon: 'warning' as const },
+                ].map((item, i) => (
+                  <View key={i} style={{ flex: 1, alignItems: 'center' }}>
+                    <Ionicons
+                      name={item.icon}
+                      size={20}
+                      color={item.icon === 'warning' && item.value > 0 ? '#EF4444' : theme.colors.accent}
+                    />
+                    <Text
+                      style={{
+                        color: theme.colors.text,
+                        fontSize: 20,
+                        fontWeight: '700',
+                        marginTop: 4,
+                      }}
+                    >
+                      {item.value}
+                    </Text>
+                    <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+                      {item.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              {/* 全系平均出席率 */}
+              <View style={{ paddingVertical: 14, paddingHorizontal: 16, borderBottomWidth: 0.5, borderBottomColor: theme.colors.border }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600' }}>
+                    全系平均出席率
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 18,
+                      fontWeight: '700',
+                      color: adminAnalytics.overallAttendanceRate >= 80
+                        ? theme.colors.success
+                        : adminAnalytics.overallAttendanceRate >= 60
+                          ? '#F59E0B'
+                          : '#EF4444',
+                    }}
+                  >
+                    {adminAnalytics.overallAttendanceRate}%
+                  </Text>
+                </View>
+                <View
+                  style={{
+                    height: 6,
+                    backgroundColor: theme.colors.border,
+                    borderRadius: 3,
+                    marginTop: 8,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <View
+                    style={{
+                      height: '100%',
+                      width: `${Math.min(adminAnalytics.overallAttendanceRate, 100)}%`,
+                      backgroundColor:
+                        adminAnalytics.overallAttendanceRate >= 80
+                          ? theme.colors.success
+                          : adminAnalytics.overallAttendanceRate >= 60
+                            ? '#F59E0B'
+                            : '#EF4444',
+                      borderRadius: 3,
+                    }}
+                  />
+                </View>
+              </View>
+            </GroupedCard>
+
+            {/* 課程排名 */}
+            {adminAnalytics.courseRanking.length > 0 && (
+              <>
+                <SectionHeader title="課程出席率排名" trailing={<Text style={{ color: theme.colors.muted, fontSize: 12 }}>{adminAnalytics.courseRanking.length} 門課</Text>} />
+                <GroupedCard>
+                  {adminAnalytics.courseRanking.slice(0, 8).map((course, idx) => {
+                    const rateColor =
+                      course.averageRate >= 80
+                        ? theme.colors.success
+                        : course.averageRate >= 60
+                          ? '#F59E0B'
+                          : '#EF4444';
+                    return (
+                      <View
+                        key={course.courseId}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingVertical: 12,
+                          paddingHorizontal: 16,
+                          borderBottomWidth: idx < Math.min(adminAnalytics.courseRanking.length, 8) - 1 ? 0.5 : 0,
+                          borderBottomColor: theme.colors.border,
+                        }}
+                      >
+                        <View
+                          style={{
+                            width: 24,
+                            height: 24,
+                            borderRadius: 12,
+                            backgroundColor: idx < 3 ? theme.colors.accent + '20' : theme.colors.border,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            marginRight: 12,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              fontWeight: '700',
+                              color: idx < 3 ? theme.colors.accent : theme.colors.muted,
+                            }}
+                          >
+                            {idx + 1}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600' }}
+                            numberOfLines={1}
+                          >
+                            {course.courseName}
+                          </Text>
+                          <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+                            {course.instructorName} · {course.sessions} 場次
+                          </Text>
+                        </View>
+                        <Text style={{ color: rateColor, fontSize: 15, fontWeight: '700' }}>
+                          {course.averageRate}%
+                        </Text>
+                      </View>
+                    );
+                  })}
+                  {adminAnalytics.courseRanking.length > 8 && (
+                    <View style={{ padding: 12, alignItems: 'center' }}>
+                      <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+                        還有 {adminAnalytics.courseRanking.length - 8} 門課...
+                      </Text>
+                    </View>
+                  )}
+                </GroupedCard>
+              </>
+            )}
+
+            {/* 系所摘要 */}
+            {adminAnalytics.departmentSummary.length > 0 && (
+              <>
+                <SectionHeader title="系所出席摘要" />
+                <GroupedCard>
+                  {adminAnalytics.departmentSummary.map((dept, idx) => (
+                    <View
+                      key={dept.department}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingVertical: 12,
+                        paddingHorizontal: 16,
+                        borderBottomWidth: idx < adminAnalytics.departmentSummary.length - 1 ? 0.5 : 0,
+                        borderBottomColor: theme.colors.border,
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '600' }}>
+                          {dept.department}
+                        </Text>
+                        <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+                          {dept.courseCount} 門課
+                        </Text>
+                      </View>
+                      <Text
+                        style={{
+                          fontSize: 15,
+                          fontWeight: '700',
+                          color: dept.avgRate >= 80 ? theme.colors.success : dept.avgRate >= 60 ? '#F59E0B' : '#EF4444',
+                        }}
+                      >
+                        {dept.avgRate}%
+                      </Text>
+                    </View>
+                  ))}
+                </GroupedCard>
+              </>
+            )}
           </>
         )}
 

@@ -81,7 +81,11 @@ import {
 } from '../services/tronClassClient';
 import { campusEventBus } from '../services/campusEventBus';
 import { getDeadlines, type Deadline } from '../services/smartCalendarEngine';
-import { getAnyCachedTCTodos } from '../services/puDataCache';
+import { getAnyCachedTCTodos, seedCachedTCCourses, seedCachedTCAttendance } from '../services/puDataCache';
+import { BrainInsightCards } from '../components/BrainInsightCards';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
+import { aiOverlay } from '../app/useAIOverlay';
+import type { BrainInsight } from '../services/aiBrain';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -120,9 +124,19 @@ function GreetingHeader({
 
   return (
     <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.lg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
-        <Ionicons name={greetingIcon as any} size={20} color={theme.colors.accent} />
-        <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>{greeting}</Text>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.space.md,
+          marginBottom: theme.space.sm,
+        }}
+      >
+        <HeaderAvatarButton />
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.space.sm }}>
+          <Ionicons name={greetingIcon as any} size={18} color={theme.colors.accent} />
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>{greeting}</Text>
+        </View>
       </View>
       <Text
         style={{
@@ -2283,8 +2297,8 @@ export function SmartDashboardScreen(props: any) {
             tcFetchAttendance(),
             getAttendanceCourses(),
           ]);
-          if (courses.status === 'fulfilled') { tcCrs = courses.value; setTcCourses(tcCrs); }
-          if (attendance.status === 'fulfilled') { tcAtt = attendance.value; setTcAttendance(tcAtt); }
+          if (courses.status === 'fulfilled') { tcCrs = courses.value; setTcCourses(tcCrs); seedCachedTCCourses(tcCrs).catch(() => {}); }
+          if (attendance.status === 'fulfilled') { tcAtt = attendance.value; setTcAttendance(tcAtt); seedCachedTCAttendance(tcAtt).catch(() => {}); }
           if (attCourses.status === 'fulfilled') setAttendanceCourses(attCourses.value);
         }
       } catch {
@@ -2375,7 +2389,7 @@ export function SmartDashboardScreen(props: any) {
     (action: NextBestAction) => {
       const target = action.actionTarget;
       if (!target) {
-        nav?.navigate?.('AIChat', { prompt: action.title });
+        aiOverlay.open({ mode: 'chat', prompt: action.title, source: 'smart_dashboard' });
         return;
       }
 
@@ -2395,15 +2409,15 @@ export function SmartDashboardScreen(props: any) {
   );
 
   const openAI = useCallback(() => {
-    nav?.navigate?.('AIChat');
-  }, [nav]);
+    aiOverlay.open({ mode: 'chat', source: 'smart_dashboard_open_ai' });
+  }, []);
 
   const startAgentMode = useCallback(
     (modeKey: AgentModeKey) => {
       const mode = AGENT_MODES.find((item) => item.key === modeKey) ?? AGENT_MODES[0];
-      nav?.navigate?.('AIChat', { prompt: mode.prompt });
+      aiOverlay.open({ mode: 'chat', prompt: mode.prompt, source: 'agent_mode' });
     },
-    [nav],
+    [],
   );
 
   if (loading) {
@@ -2522,6 +2536,25 @@ export function SmartDashboardScreen(props: any) {
             </Text>
           </View>
         )}
+
+        {/* ── AI Brain 即時洞察卡片 ── */}
+        <BrainInsightCards
+          maxVisible={3}
+          onActionPress={(insight: BrainInsight) => {
+            aiOverlay.open({
+              mode: 'chat',
+              prompt: insight.actionSuggestion ?? insight.title,
+              source: 'dashboard_insight_action',
+            });
+          }}
+          onCardPress={(insight: BrainInsight) => {
+            aiOverlay.open({
+              mode: 'chat',
+              prompt: insight.title,
+              source: 'dashboard_insight_card',
+            });
+          }}
+        />
 
         {/* ── 緊急截止日提醒 ── */}
         {deadlines.filter((d) => !d.completed && d.remainingHours < 72).length > 0 && (
@@ -2787,24 +2820,24 @@ export function SmartDashboardScreen(props: any) {
           <View style={{ flexDirection: 'row', gap: theme.space.sm, flexWrap: 'wrap' }}>
             {[
               {
+                icon: 'chatbubbles-outline',
+                label: 'AI 助理',
+                nav: () => aiOverlay.open({ mode: 'chat', source: 'dashboard_shortcut' }),
+              },
+              {
+                icon: 'chatbubble-ellipses-outline',
+                label: '校園社群',
+                nav: () => nav?.navigate?.('CampusSocialScreen'),
+              },
+              {
                 icon: 'qr-code-outline',
                 label: '智慧點名',
                 nav: () => navigateToCourseScreen(nav, auth.profile?.role, 'Attendance'),
               },
               {
-                icon: 'chatbubbles-outline',
-                label: 'AI 助理',
-                nav: () => nav?.navigate?.('Today', { screen: 'AIChat' }),
-              },
-              {
                 icon: 'school-outline',
                 label: '選課顧問',
                 nav: () => navigateToCourseScreen(nav, auth.profile?.role, 'AICourseAdvisor'),
-              },
-              {
-                icon: 'chatbubble-ellipses-outline',
-                label: '校園社群',
-                nav: () => nav?.navigate?.('Today', { screen: 'CampusSocialScreen' }),
               },
               {
                 icon: 'calendar-outline',

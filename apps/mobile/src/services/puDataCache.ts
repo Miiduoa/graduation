@@ -49,6 +49,7 @@ const KEYS = {
   tcModules: 'puCache:v1:tron:modules',
   tcAttendance: 'puCache:v1:tron:attendance',
   tcTodos: 'puCache:v1:tron:todos',
+  tcGrades: 'puCache:v1:tron:grades',
   lastSync: 'puCache:v1:meta:lastSync',
 } as const;
 
@@ -62,6 +63,7 @@ const LEGACY_KEYS: Record<(typeof KEYS)[keyof typeof KEYS], string> = {
   [KEYS.tcModules]: `${LEGACY_PREFIX}tc_modules`,
   [KEYS.tcAttendance]: `${LEGACY_PREFIX}tc_attendance`,
   [KEYS.tcTodos]: `${LEGACY_PREFIX}tc_todos`,
+  [KEYS.tcGrades]: `${LEGACY_PREFIX}tc_grades`,
   [KEYS.lastSync]: `${LEGACY_PREFIX}lastSync`,
 };
 
@@ -77,6 +79,7 @@ const TTL = {
   tcModules: 12 * 60 * 60 * 1000, // 12 小時
   tcAttendance: 6 * 60 * 60 * 1000, // 6 小時
   tcTodos: 30 * 60 * 1000, // 30 分鐘（待辦最即時）
+  tcGrades: 6 * 60 * 60 * 1000, // 6 小時
 } as const;
 
 // ─── Cached Entry 結構（postLoginRouter 與引擎僅依賴此介面）──
@@ -96,6 +99,7 @@ function keySourceAndTtl(key: string): { source: CacheEntry<unknown>['source']; 
     if (key.includes('activities')) return { source: 'tron', ttlMs: TTL.tcActivities };
     if (key.includes('attendance')) return { source: 'tron', ttlMs: TTL.tcAttendance };
     if (key.includes('modules')) return { source: 'tron', ttlMs: TTL.tcModules };
+    if (key.includes('grades')) return { source: 'tron', ttlMs: TTL.tcGrades };
     if (key.includes('courses')) return { source: 'tron', ttlMs: TTL.tcCourses };
     return { source: 'tron', ttlMs: TTL.tcCourses };
   }
@@ -632,6 +636,16 @@ export async function getAnyCachedTCAttendance(): Promise<TCAttendance[] | null>
   return (await readCache<TCAttendance[]>(KEYS.tcAttendance))?.data ?? null;
 }
 
+/** TronClass 成績快取 — 寫入 */
+export async function seedCachedTCGrades(data: unknown[]): Promise<void> {
+  await writeCache(KEYS.tcGrades, data);
+}
+
+/** TronClass 成績快取 — 讀取（不管 TTL） */
+export async function getAnyCachedTCGrades(): Promise<unknown[] | null> {
+  return (await readCache<unknown[]>(KEYS.tcGrades))?.data ?? null;
+}
+
 // ─── TronClass 刷新 ─────────────────────────────────────
 
 export async function refreshTCCourses(): Promise<TCCourse[] | null> {
@@ -926,4 +940,52 @@ export async function getLastSyncTime(): Promise<number | null> {
     raw = await AsyncStorage.getItem(LEGACY_KEYS[KEYS.lastSync]);
   }
   return raw ? parseInt(raw, 10) : null;
+}
+
+// ─── Stale-While-Revalidate ─────────────────────────────
+
+/**
+ * 通用 stale-while-revalidate 讀取。
+ *
+ * 行為：
+ *   1. 先從快取讀取（不管 TTL），有就立即回傳 → UI 秒開
+ *   2. 如果已過 TTL，背景觸發 refreshFn 更新快取
+ *   3. refreshFn 完成後呼叫 onFresh callback，UI 可據此刷新
+ *
+ * 效果：使用者永遠看到「上次成功的資料」，同時背景自動拉最新。
+ */
+export async function staleWhileRevalidate<T>(opts: {
+  cacheKey: keyof typeof KEYS;
+  ttl: number;
+  refreshFn: () => Promise<T | null>;
+  onFresh?: (data: T) => void;
+}): Promise<T | null> {
+  const key = KEYS[opts.cacheKey];
+  const entry = await readCache<T>(key);
+
+  // 1. 立即回傳快取（即使過期）
+  const staleData = entry?.data ?? null;
+
+  // 2. 如果過期，背景刷新
+  if (isExpired(entry, opts.ttl)) {
+    opts.refreshFn()
+      .then((freshData) => {
+        if (freshData != null && opts.onFresh) {
+          opts.onFresh(freshData);
+        }
+      })
+      .catch((err) => {
+        console.warn(`[puDataCache] staleWhileRevalidate refresh failed for ${opts.cacheKey}:`, err);
+      });
+  }
+
+  return staleData;
+}
+
+/** 判斷某快取 key 是否過期（供外部使用） */
+export async function isCacheStale(cacheKey: keyof typeof KEYS): Promise<boolean> {
+  const key = KEYS[cacheKey];
+  const entry = await readCache<unknown>(key);
+  const { ttlMs } = keySourceAndTtl(key);
+  return isExpired(entry, ttlMs);
 }

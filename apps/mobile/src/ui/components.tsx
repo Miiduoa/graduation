@@ -16,7 +16,13 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
+
+function useSafeInsetsOrDefault() {
+  const value = React.useContext(SafeAreaInsetsContext);
+  return value ?? { top: 0, right: 0, bottom: 0, left: 0 };
+}
 import { theme, shadowStyle, softShadowStyle } from './theme';
 import { formatCountdown } from '../utils/format';
 export { LoadingOverlay } from './feedback/LoadingOverlay';
@@ -41,6 +47,7 @@ export function Screen(props: {
   noPadding?: boolean;
   headerRight?: React.ReactNode;
 }) {
+  const insets = useSafeInsetsOrDefault();
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       {(props.title || props.headerRight) && (
@@ -50,7 +57,7 @@ export function Screen(props: {
             alignItems: 'flex-end',
             justifyContent: 'space-between',
             paddingHorizontal: theme.space.lg,
-            paddingTop: theme.space.lg,
+            paddingTop: Math.max(insets.top, 8) + theme.space.xs,
             paddingBottom: theme.space.sm,
           }}
         >
