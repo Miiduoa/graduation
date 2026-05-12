@@ -104,11 +104,21 @@ export function navigateToTarget(
     try {
       // 動態 require 避開循環依賴
       const { aiOverlay } = require('../app/useAIOverlay');
+      const tp = target.params && typeof target.params === 'object' ? target.params : undefined;
       const prompt =
-        target.params && typeof target.params === 'object' && 'prompt' in target.params
-          ? (target.params as { prompt?: string }).prompt
+        tp && typeof (tp as { prompt?: unknown }).prompt === 'string'
+          ? (tp as { prompt: string }).prompt
           : undefined;
-      aiOverlay.open({ mode: 'chat', prompt, source: 'navigateToTarget' });
+      const proactiveReportId =
+        tp && typeof (tp as { proactiveReportId?: unknown }).proactiveReportId === 'string'
+          ? (tp as { proactiveReportId: string }).proactiveReportId
+          : undefined;
+      aiOverlay.open({
+        mode: 'chat',
+        prompt,
+        proactiveReportId,
+        source: 'navigateToTarget',
+      });
       return;
     } catch (err) {
       console.warn('[navigateToTarget] AI overlay redirect failed, falling back:', err);

@@ -29,6 +29,8 @@ import {
   type Friendship,
 } from '../services/friends';
 import { RelationshipButtons } from '../components/RelationshipButtons';
+import { PureQRCode } from '../ui/PureQRCode';
+import { buildAddFriendDeepLink } from '../utils/campusFriendLink';
 
 export function FriendsManageScreen(props: any) {
   const nav = props?.navigation;
@@ -106,6 +108,17 @@ export function FriendsManageScreen(props: any) {
     if (accepted.length) s.push({ title: '我的好友', data: accepted });
     return s;
   }, [incoming, outgoing, accepted]);
+  const addFriendQr = useMemo(() => (myUid ? buildAddFriendDeepLink(myUid) : ''), [myUid]);
+
+  const openQrScanTab = () => {
+    try {
+      const tabNav = nav?.getParent?.();
+      tabNav?.navigate?.('我的', { screen: 'QRCode', params: { openScanMode: true } });
+    } catch (e: any) {
+      Alert.alert('無法開啟掃描', e?.message ?? '請到「我的」→「QR 碼」改用掃描模式。');
+    }
+  };
+
 
   const copyMyUid = async () => {
     if (!myUid) return;
@@ -122,16 +135,37 @@ export function FriendsManageScreen(props: any) {
   }, [props?.navigation]);
 
   const listHeader = (
-    <View style={styles.headerBlock}>
-      <Pressable style={styles.chip} onPress={() => void copyMyUid()}>
-        <Ionicons name="copy-outline" size={17} color={theme.colors.accent} />
-        <Text style={styles.chipTxt}>複製我的 UID</Text>
-      </Pressable>
-      <Pressable style={styles.chipOutline} onPress={() => nav?.navigate?.('FriendSearch')}>
-        <Ionicons name="search" size={17} color={theme.colors.accent} />
-        <Text style={styles.chipTxt}>搜尋／加好友</Text>
-      </Pressable>
-    </View>
+    <>
+      <View style={styles.headerBlock}>
+        <Pressable style={styles.chip} onPress={() => void copyMyUid()}>
+          <Ionicons name="copy-outline" size={17} color={theme.colors.accent} />
+          <Text style={styles.chipTxt}>複製我的 UID</Text>
+        </Pressable>
+        <Pressable style={styles.chipOutline} onPress={() => nav?.navigate?.('FriendSearch')}>
+          <Ionicons name="search" size={17} color={theme.colors.accent} />
+          <Text style={styles.chipTxt}>搜尋／加好友</Text>
+        </Pressable>
+      </View>
+      <View style={styles.headerBlock}>
+        <Pressable style={styles.chipOutline} onPress={() => nav?.navigate?.('FollowingLists')}>
+          <Ionicons name="pulse-outline" size={17} color={theme.colors.accent} />
+          <Text style={styles.chipTxt}>追蹤與粉絲</Text>
+        </Pressable>
+        <Pressable style={styles.chipOutline} onPress={openQrScanTab}>
+          <Ionicons name="qr-code-outline" size={17} color={theme.colors.accent} />
+          <Text style={styles.chipTxt}>掃描加好友</Text>
+        </Pressable>
+      </View>
+      {addFriendQr ? (
+        <View style={styles.qrCard}>
+          <Text style={styles.qrTitle}>我的加好友 QR</Text>
+          <View style={styles.qrFrame}>
+            <PureQRCode value={addFriendQr} size={150} color="#111" backgroundColor="#fff" />
+          </View>
+          <Text style={styles.qrHint}>掃描後會自動開啟「搜尋／加好友」並帶入你的帳號</Text>
+        </View>
+      ) : null}
+    </>
   );
 
   if (!auth.user) {
@@ -247,6 +281,18 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   chipTxt: { fontSize: 14, fontWeight: '800', color: theme.colors.accent },
+  qrCard: {
+    padding: 14,
+    marginBottom: 18,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    alignItems: 'center',
+  },
+  qrTitle: { fontSize: 15, fontWeight: '800', color: theme.colors.text, marginBottom: 10 },
+  qrFrame: { padding: 12, backgroundColor: '#fff', borderRadius: theme.radius.md },
+  qrHint: { fontSize: 11, color: theme.colors.muted, marginTop: 10, textAlign: 'center' },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '800',

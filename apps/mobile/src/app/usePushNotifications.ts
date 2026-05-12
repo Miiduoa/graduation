@@ -6,6 +6,9 @@ import {
   syncPushTokenForUser,
 } from '../services/notifications';
 
+import { rootNavigateNested, rootNavigationRef } from './rootNavigation';
+import { aiOverlay } from './useAIOverlay';
+
 type NavigationLike = {
   current: {
     navigate: (route: string, params?: unknown) => void;
@@ -31,58 +34,65 @@ function getNotificationResponseKey(response: {
   return `${identifier ?? 'unknown'}:${actionIdentifier}:${JSON.stringify(data ?? {})}`;
 }
 
-function navigateFromNotificationData(
-  nav: { navigate: (route: string, params?: unknown) => void },
-  rawData: unknown,
-) {
+function navigateFromNotificationData(rawData: unknown) {
   const data = rawData && typeof rawData === 'object' ? (rawData as Record<string, unknown>) : {};
 
   switch (data.type) {
     case 'ai_proactive':
-      nav.navigate('Today', {
-        screen: 'AIChat',
-        params:
-          typeof data.reportId === 'string' ? { proactiveReportId: data.reportId } : undefined,
+      aiOverlay.open({
+        mode: 'chat',
+        source: 'push_ai_proactive',
+        proactiveReportId: typeof data.reportId === 'string' ? data.reportId : undefined,
       });
       break;
     case 'announcement':
-      if (data.announcementId) {
-        nav.navigate('Today', { screen: '公告詳情', params: { id: data.announcementId } });
+      if (typeof data.announcementId === 'string' && data.announcementId) {
+        rootNavigateNested('Today', '公告詳情', { id: data.announcementId });
       }
       break;
     case 'event':
-      if (data.eventId) {
-        nav.navigate('Today', { screen: '活動詳情', params: { id: data.eventId } });
+      if (typeof data.eventId === 'string' && data.eventId) {
+        rootNavigateNested('Today', '活動詳情', { id: data.eventId });
       }
       break;
     case 'group_post':
-      if (data.groupId && data.postId) {
-        nav.navigate('訊息', {
-          screen: 'GroupPost',
-          params: { groupId: data.groupId, postId: data.postId },
+      if (typeof data.groupId === 'string' && typeof data.postId === 'string') {
+        rootNavigateNested('訊息', 'GroupPost', {
+          groupId: data.groupId,
+          postId: data.postId,
         });
       }
       break;
     case 'assignment':
-      if (data.groupId && data.assignmentId) {
-        nav.navigate('訊息', {
-          screen: 'AssignmentDetail',
-          params: { groupId: data.groupId, assignmentId: data.assignmentId },
+      if (typeof data.groupId === 'string' && typeof data.assignmentId === 'string') {
+        rootNavigateNested('訊息', 'AssignmentDetail', {
+          groupId: data.groupId,
+          assignmentId: data.assignmentId,
         });
       }
       break;
+    case 'friend_request':
+    case 'friend_invite':
+      rootNavigateNested('訊息', 'FriendsManage');
+      break;
+    case 'friend_accepted':
+      rootNavigateNested('訊息', 'FriendsManage');
+      break;
     case 'message':
-      if (data.peerId) {
-        nav.navigate('訊息', { screen: 'Chat', params: { kind: 'dm', peerId: data.peerId } });
+      if (typeof data.peerId === 'string' && data.peerId) {
+        rootNavigateNested('訊息', 'Chat', { kind: 'dm', peerId: data.peerId });
       }
       break;
     default:
-      nav.navigate('我的', { screen: 'Notifications' });
+      rootNavigateNested('我的', 'Notifications');
       break;
   }
 }
 
-export function usePushNotifications(navigationRef: NavigationLike, uid: string | undefined) {
+/**
+ * navigationRef 保留與 App.tsx 的相容簽章；實際導頁一律走 rootNavigationRef + aiOverlay。
+ */
+export function usePushNotifications(_navigationRef: NavigationLike, uid: string | undefined) {
   const responseListener = useRef<RemovableSubscription | null>(null);
   const lastHandledResponseKeyRef = useRef<string | null>(null);
 
@@ -123,11 +133,16 @@ export function usePushNotifications(navigationRef: NavigationLike, uid: string 
         return;
       }
 
-      const nav = navigationRef.current;
-      if (!nav) return;
+      const rawPayload = response?.notification?.request?.content?.data;
+      const isAiProactive =
+        rawPayload &&
+        typeof rawPayload === 'object' &&
+        (rawPayload as Record<string, unknown>).type === 'ai_proactive';
+
+      if (!isAiProactive && !rootNavigationRef.isReady()) return;
 
       lastHandledResponseKeyRef.current = responseKey;
-      navigateFromNotificationData(nav, response?.notification?.request?.content?.data);
+      navigateFromNotificationData(rawPayload);
 
       if (options?.clearLastResponse) {
         await clearLastNotificationResponseAsync().catch((error) => {
@@ -141,7 +156,13 @@ export function usePushNotifications(navigationRef: NavigationLike, uid: string 
         const response = await getLastNotificationResponseAsync();
         if (!response || cancelled) return;
 
-        if (!navigationRef.current) {
+        const rawPayload = response.notification?.request?.content?.data;
+        const isAiProactive =
+          rawPayload &&
+          typeof rawPayload === 'object' &&
+          (rawPayload as Record<string, unknown>).type === 'ai_proactive';
+
+        if (!isAiProactive && !rootNavigationRef.isReady()) {
           if (attempt < 10) {
             setTimeout(() => {
               void tryHandleInitialResponse(attempt + 1);
@@ -173,5 +194,5 @@ export function usePushNotifications(navigationRef: NavigationLike, uid: string 
         responseListener.current = null;
       }
     };
-  }, [navigationRef]);
+  }, []);
 }

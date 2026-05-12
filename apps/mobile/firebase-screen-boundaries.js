@@ -9,6 +9,9 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/DepartmentHubScreen.tsx',
   'apps/mobile/src/screens/DmsScreen.tsx',
   'apps/mobile/src/screens/FeedbackScreen.tsx',
+  'apps/mobile/src/screens/FollowingListsScreen.tsx',
+  'apps/mobile/src/screens/FriendSearchScreen.tsx',
+  'apps/mobile/src/screens/FriendsManageScreen.tsx',
   'apps/mobile/src/screens/GlobalSearchScreen.tsx',
   'apps/mobile/src/screens/GroupDetailScreen.tsx',
   'apps/mobile/src/screens/GroupMembersScreen.tsx',
@@ -19,6 +22,7 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/MessagesHomeScreen.tsx',
   'apps/mobile/src/screens/PostLoginDebugScreen.tsx',
   'apps/mobile/src/screens/ProfileEditScreen.tsx',
+  'apps/mobile/src/screens/social/PostDetailScreen.tsx',
 ];
 
 module.exports = {
