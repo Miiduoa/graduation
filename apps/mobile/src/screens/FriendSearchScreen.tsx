@@ -7,7 +7,6 @@ import {
   FlatList,
   Pressable,
   ActivityIndicator,
-  Alert,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -21,10 +20,10 @@ import { useSchool } from '../state/school';
 import { isFirebaseMockMode } from '../firebase';
 import type { SchoolDirectoryProfile } from '../services/memberDirectory';
 import { searchSchoolDirectoryByDisplayNamePrefix } from '../services/memberDirectory';
+import { RelationshipButtons } from '../components/RelationshipButtons';
+import { PeerFollowButton } from '../components/PeerFollowButton';
 import {
-  sendFriendRequest,
   getFriendshipBetween,
-  acceptFriendRequest,
   type Friendship,
 } from '../services/friends';
 
@@ -38,65 +37,8 @@ type RowProps = {
 };
 
 function FriendshipRow(props: RowProps) {
-  const {
-    profile,
-    friendship,
-    myUid,
-    loadingRel,
-    navigation: navigationProp,
-    onFriendshipChange,
-  } = props;
-  const nav = navigationProp as any;
-  const { school } = useSchool();
-
-  const [busy, setBusy] = useState(false);
-
-  const status = friendship?.status;
-  const isIncomingPending =
-    status === 'pending' &&
-    friendship &&
-    friendship.toUid === myUid &&
-    friendship.fromUid !== myUid;
-  const isOutgoingPending =
-    status === 'pending' &&
-    friendship &&
-    friendship.fromUid === myUid &&
-    friendship.toUid === profile.uid;
-  const isFriend = status === 'accepted';
-  const isBlocked = status === 'blocked';
-
-  const onAddFriend = async () => {
-    if (!school?.id) return;
-    setBusy(true);
-    try {
-      await sendFriendRequest(school.id, myUid, profile.uid);
-      const next = await getFriendshipBetween(school.id, myUid, profile.uid);
-      onFriendshipChange(profile.uid, next);
-      Alert.alert('已送出邀請');
-    } catch (e: any) {
-      Alert.alert('無法送出', e?.message ?? String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onAccept = async () => {
-    if (!friendship?.id) return;
-    setBusy(true);
-    try {
-      await acceptFriendRequest(friendship.id);
-      const next = await getFriendshipBetween(school.id!, myUid, profile.uid);
-      onFriendshipChange(profile.uid, next);
-    } catch (e: any) {
-      Alert.alert('接受失敗', e?.message ?? String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onMessage = () => {
-    nav?.navigate?.('Chat', { peerId: profile.uid });
-  };
+  const { profile, friendship, myUid, loadingRel, navigation: navigationProp, onFriendshipChange } =
+    props;
 
   const label = profile.displayName ?? profile.uid.slice(0, 8);
   const sub = [profile.roleLabel, profile.department].filter(Boolean).join(' · ');
@@ -110,38 +52,23 @@ function FriendshipRow(props: RowProps) {
           {profile.uid}
         </Text>
       </View>
-      <View style={styles.cardActions}>
-        {loadingRel ? (
-          <ActivityIndicator size="small" color={theme.colors.accent} />
-        ) : isBlocked ? (
-          <Text style={styles.meta}>無法操作</Text>
-        ) : isFriend ? (
-          <Pressable onPress={onMessage} style={[styles.btn, styles.btnPrimary]} disabled={busy}>
-            <Text style={styles.btnPrimaryText}>私訊</Text>
-          </Pressable>
-        ) : isIncomingPending ? (
-          <Pressable onPress={onAccept} style={[styles.btn, styles.btnPrimary]} disabled={busy}>
-            <Text style={styles.btnPrimaryText}>接受好友</Text>
-          </Pressable>
-        ) : isOutgoingPending ? (
-          <Text style={styles.meta}>邀請已送出</Text>
-        ) : (
-          <>
-            <Pressable onPress={onAddFriend} style={[styles.btn, styles.btnOutline]} disabled={busy}>
-              <Text style={styles.btnOutlineText}>加好友</Text>
-            </Pressable>
-            <Pressable onPress={onMessage} style={[styles.btn, styles.btnGhost]} disabled={busy}>
-              <Text style={styles.btnGhostText}>私訊</Text>
-            </Pressable>
-          </>
-        )}
-      </View>
+      <PeerFollowButton myUid={myUid} peerUid={profile.uid} compact />
+      <RelationshipButtons
+        profileUid={profile.uid}
+        myUid={myUid}
+        friendship={friendship}
+        loadingRel={loadingRel}
+        navigation={navigationProp}
+        onFriendshipChange={onFriendshipChange}
+        style={{ marginTop: 12, alignSelf: 'stretch' }}
+      />
     </View>
   );
 }
 
 export function FriendSearchScreen(props: any) {
   const nav = props?.navigation;
+  const presetUid = props?.route?.params?.presetUid as string | undefined;
   const auth = useAuth();
   const { school } = useSchool();
   const myUid = auth.user?.uid ?? '';
@@ -156,6 +83,12 @@ export function FriendSearchScreen(props: any) {
     const t = setTimeout(() => setDebounced(text.trim()), 380);
     return () => clearTimeout(t);
   }, [text]);
+
+  useEffect(() => {
+    if (presetUid && typeof presetUid === 'string' && presetUid.trim().length >= 18) {
+      setText(presetUid.trim());
+    }
+  }, [presetUid]);
 
   useEffect(() => {
     props?.navigation?.setOptions?.({ title: '搜尋／加好友' });
@@ -309,19 +242,6 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: '800', color: theme.colors.text },
   cardSub: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 4 },
   uidHint: { fontSize: 11, color: theme.colors.muted, marginTop: 6 },
-  cardActions: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
-  btn: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10 },
-  btnOutline: {
-    borderWidth: 1,
-    borderColor: theme.colors.accent,
-    backgroundColor: theme.colors.bg,
-  },
-  btnOutlineText: { color: theme.colors.accent, fontWeight: '800', fontSize: 13 },
-  btnPrimary: { backgroundColor: theme.colors.accent },
-  btnPrimaryText: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  btnGhost: { backgroundColor: theme.colors.surface2 },
-  btnGhostText: { color: theme.colors.text, fontWeight: '700', fontSize: 13 },
-  meta: { color: theme.colors.muted, fontSize: 13 },
   help: { color: theme.colors.muted, textAlign: 'center', fontSize: 14 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
 });

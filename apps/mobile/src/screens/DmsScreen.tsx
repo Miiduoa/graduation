@@ -271,6 +271,24 @@ export function DmsScreen(props: any) {
           </View>
           <Pressable
             accessibilityRole="button"
+            accessibilityLabel="好友與邀請"
+            onPress={() => nav?.navigate?.('FriendsManage')}
+            style={({ pressed }) => ({
+              width: 42,
+              height: 42,
+              borderRadius: 12,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.75 : 1,
+            })}
+          >
+            <Ionicons name="people-outline" size={20} color={theme.colors.accent} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="搜尋聯絡人並加好友"
             onPress={() => nav?.navigate?.('FriendSearch')}
             style={({ pressed }) => ({
