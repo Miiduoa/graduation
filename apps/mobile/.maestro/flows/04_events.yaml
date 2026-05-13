@@ -1,4 +1,5 @@
 # 04_events.yaml
+# campus://home/events → 活動總覽
 
 appId: ${APP_ID}
 name: Events Flow
@@ -17,25 +18,11 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- extendedWaitUntil:
-    visible: '快速入口'
-    timeout: 120000
-
-- waitForAnimationToEnd:
-    timeout: 1500
-
-- scrollUntilVisible:
-    element:
-      id: 'e2e-open-events'
-    direction: DOWN
-    timeout: 30000
-
-- tapOn:
-    id: 'e2e-open-events'
+- openLink: campus://home/events
 
 - extendedWaitUntil:
     visible: '活動'
-    timeout: 15000
+    timeout: 20000
 
 - takeScreenshot: events_list
 
@@ -83,3 +70,4 @@ tags:
     optional: true
 
 - back
+    

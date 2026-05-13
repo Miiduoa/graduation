@@ -1,5 +1,5 @@
 # 03_announcements.yaml
-# 從 Today 儀表快速入口進入公告總覽
+# 以 deep link 開啟公告總覽（不依賴儀表捲動／Metro 是否已載入新按鈕）
 
 appId: ${APP_ID}
 name: Announcements Flow
@@ -18,25 +18,11 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- extendedWaitUntil:
-    visible: '快速入口'
-    timeout: 120000
-
-- waitForAnimationToEnd:
-    timeout: 1500
-
-- scrollUntilVisible:
-    element:
-      id: 'e2e-open-announcements'
-    direction: DOWN
-    timeout: 30000
-
-- tapOn:
-    id: 'e2e-open-announcements'
+- openLink: campus://home/announcements
 
 - extendedWaitUntil:
-    visible: '搜尋公告（標題/內文/來源）'
-    timeout: 15000
+    visible: '公告'
+    timeout: 20000
 
 - takeScreenshot: announcements_list
 
@@ -52,7 +38,6 @@ tags:
 
 - takeScreenshot: announcements_search_result
 
-# 點第一則列表項（標題列之下）
 - tapOn:
     index: 1
     optional: true
