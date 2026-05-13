@@ -13,7 +13,8 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { theme } from '../../ui/theme';
+import { theme, shadowStyle } from '../../ui/theme';
+import { EmptyState } from '../../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useAuth } from '../../state/auth';
 import { useSchool } from '../../state/school';
@@ -53,13 +54,13 @@ export function HomeFeedScreen() {
   const likeFlightRef = useRef(false);
 
   const load = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id) {
+    if (isFirebaseMockMode() || !school?.id || !auth.user?.uid) {
       setPosts([]);
       return;
     }
     const rows = await fetchRecentCampusPosts(school.id, undefined, 50);
     setPosts(rankFeedPosts(rows, 60));
-  }, [school?.id]);
+  }, [school?.id, auth.user?.uid]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -151,12 +152,12 @@ export function HomeFeedScreen() {
           onPress={() => nav?.navigate?.('PostCompose' as never)}
           style={styles.composeFab}
         >
-          <Ionicons name="add" size={24} color="#fff" />
+          <Ionicons name="add" size={24} color={theme.colors.onAccent} />
         </Pressable>
       </View>
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator />
+          <ActivityIndicator color={theme.colors.accent} />
         </View>
       ) : (
         <FlatList
@@ -170,9 +171,11 @@ export function HomeFeedScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
-            <Text style={{ color: theme.colors.textSecondary, textAlign: 'center', padding: 24 }}>
-              尚無校園貼文。點右上角 + 或到「看板」發第一篇吧。
-            </Text>
+            <EmptyState
+              showCalmHero
+              title="尚無校園貼文"
+              subtitle="點右上角 + 發第一篇，或到「看板」逛逛。"
+            />
           }
           renderItem={({ item }) => {
             const uid = auth.user?.uid;
@@ -233,49 +236,69 @@ export function HomeFeedScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 14 },
+  root: {
+    flex: 1,
+    backgroundColor: theme.colors.bg,
+    paddingHorizontal: theme.layout.screenHorizontalPadding,
+  },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 4,
-    marginBottom: 10,
+    marginTop: theme.layout.contentPaddingTop,
+    marginBottom: theme.layout.sectionGap,
   },
-  title: { fontSize: 18, fontWeight: '800', color: theme.colors.text },
+  title: {
+    fontSize: theme.typography.h1.fontSize,
+    fontWeight: theme.typography.h1.fontWeight ?? '700',
+    letterSpacing: theme.typography.h1.letterSpacing,
+    color: theme.colors.text,
+  },
   composeFab: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: theme.radius.md,
     backgroundColor: theme.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadowStyle(theme.shadows.sm),
   },
   card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: 14,
-    marginBottom: 10,
+    backgroundColor: theme.colors.surfaceElevated,
+    borderRadius: theme.radius.xl,
+    padding: theme.layout.cardPadding,
+    marginBottom: theme.layout.sectionGap,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
+    ...(theme.mode === 'light' ? shadowStyle(theme.shadows.md) : shadowStyle(theme.shadows.sm)),
   },
   cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
-    paddingTop: 10,
+    marginTop: theme.space.md,
+    paddingTop: theme.space.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.colors.border,
     gap: 18,
   },
   statHit: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   statLabel: { fontSize: 13, fontWeight: '700', color: theme.colors.textSecondary },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  cardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: theme.space.md,
+  },
   author: { fontSize: 12, color: theme.colors.accent, fontWeight: '700', flex: 1, marginRight: 8 },
   meta: { fontSize: 12, color: theme.colors.textSecondary },
   cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text, marginBottom: 4 },
   preview: { fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20 },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  tags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.space.sm,
+    marginTop: theme.space.sm,
+  },
   tag: { fontSize: 12, color: theme.colors.textSecondary },
 });
 

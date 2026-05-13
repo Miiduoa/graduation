@@ -9,6 +9,8 @@ export type ThemeColors = {
   surfaceElevated: string;
   surfaceInteractive: string;
   surfaceInteractiveStrong: string;
+  /** 區塊／捲動區底色 — 介於 bg 與 surface 之間，強化分段感 */
+  surfaceMuted: string;
   border: string;
   separator: string;
   text: string;
@@ -75,6 +77,18 @@ export type ThemeColors = {
   roleAdmin: string;
   roleAdminSoft: string;
   focusSurface: string;
+  /** 語意別名：主色（同 accent，供元件語意化使用） */
+  primary: string;
+  /** 語意別名：輔色／獎勵色（同 gold） */
+  secondary: string;
+  /** 卡片／浮起區塊底色 */
+  card: string;
+  /** 鋪滿主色／accent 按鈕上的文字與圖示（維持對比） */
+  onAccent: string;
+  /** 底部導覽列半透明底 */
+  chromeTabBar: string;
+  chromeTabBorder: string;
+  chromeTabItemActive: string;
 };
 
 export type ThemeShadow = {
@@ -135,6 +149,33 @@ export type ThemeSpace = {
   section: number;
 };
 
+/**
+ * 版面語意權杖：與 space 階梯對齊，避免各處魔法數字。
+ * 留白取向：較鬆的垂直節奏、列表分隔與卡片內距，維持校園助手定位但降低壓迫感。
+ */
+export type ThemeLayout = {
+  /** 畫面／捲動內容左右內縮 */
+  screenPadding: number;
+  /** 與 screenPadding 相同；語意化命名，方便閱讀版面程式 */
+  screenHorizontalPadding: number;
+  /** 垂直堆疊區塊之間的 gap（ScrollView / 設定列表節奏） */
+  sectionGap: number;
+  /** 主區塊之間較鬆的節奏（個人頁、公告列表分段） */
+  sectionGapLarge: number;
+  /** 卡片內距 */
+  cardPadding: number;
+  /** 列表列垂直內距（維持觸控高度） */
+  listItemVertical: number;
+  /** FlatList / 搜尋結果等列與列之間的垂直呼吸空間 */
+  listSeparatorGap: number;
+  /** Screen 內容區頂部與標題列下方的距離 */
+  contentPaddingTop: number;
+  /** 懸浮按鈕／Tab 中央 AI 球等相對導覽列的位移參考 */
+  fabOffset: number;
+  /** 浮動 Tab Bar 占用：ScrollView / FlatList 底部留白 */
+  scrollBottomInset: number;
+};
+
 export type ThemeTypographyScale = {
   fontSize: number;
   lineHeight: number;
@@ -164,6 +205,15 @@ export type ThemeAnimation = {
   spring: { friction: number; tension: number };
 };
 
+/** 全 App 共用的柔和漸層（抽屜頭、個人頁、AI 球） */
+export type ThemeGradients = {
+  drawerHeader: readonly [string, string];
+  profileHero: readonly [string, string, string];
+  avatar: readonly [string, string];
+  aiOrbNormal: readonly [string, string, string];
+  aiOrbUrgent: readonly [string, string, string];
+};
+
 export type SchoolBrand = {
   primary: string;
   secondary?: string;
@@ -176,32 +226,50 @@ export type Theme = {
   shadows: ThemeShadows;
   radius: ThemeRadius;
   space: ThemeSpace;
+  layout: ThemeLayout;
   typography: ThemeTypography;
   animation: ThemeAnimation;
+  gradients: ThemeGradients;
   schoolId?: string;
   brand?: SchoolBrand;
 };
 
 const sharedRadius: ThemeRadius = {
   full: 9999,
-  xl: 24,
-  lg: 18,
-  md: 14,
-  sm: 10,
-  xs: 6,
+  xl: 28,
+  lg: 22,
+  md: 18,
+  sm: 14,
+  xs: 10,
 };
 
 const sharedSpace: ThemeSpace = {
   xxs: 2,
   xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
-  xl: 32,
-  xxl: 48,
-  xxxl: 64,
-  section: 40,
+  sm: 12,
+  md: 20,
+  lg: 32,
+  xl: 40,
+  xxl: 56,
+  xxxl: 80,
+  section: 56,
 };
+
+const sharedLayout: ThemeLayout = {
+  screenPadding: sharedSpace.lg + sharedSpace.xs,
+  screenHorizontalPadding: sharedSpace.lg + sharedSpace.xs,
+  sectionGap: sharedSpace.md + sharedSpace.md,
+  sectionGapLarge: sharedSpace.section,
+  cardPadding: sharedSpace.xl,
+  listItemVertical: sharedSpace.sm + sharedSpace.xs,
+  listSeparatorGap: sharedSpace.md,
+  contentPaddingTop: sharedSpace.lg,
+  fabOffset: 20,
+  scrollBottomInset: 130,
+};
+
+/** 與浮動 Tab Bar 對齊的捲動底部留白（供 navigationTheme 轉匯） */
+export const TAB_BAR_SCROLL_BOTTOM_PADDING = sharedLayout.scrollBottomInset;
 
 const sharedTypography: ThemeTypography = {
   hero: {
@@ -236,8 +304,8 @@ const sharedTypography: ThemeTypography = {
   },
   body: {
     fontSize: 15,
-    lineHeight: 24,
-    letterSpacing: 0.1,
+    lineHeight: 26,
+    letterSpacing: 0.06,
     fontWeight: '400',
   },
   bodySmall: {
@@ -324,92 +392,102 @@ export function createDarkTheme(
   brand?: SchoolBrand,
 ): Theme {
   const gold = brand?.secondary ?? DEFAULT_GOLD;
+  const orbLilac = lighten(accent, 0.42);
+  const orbPeri = lighten('#818CF8', 0.12);
   return {
     mode: 'dark',
     colors: {
-      bg: '#0C0A13',
-      background: '#0C0A13',
-      surface: '#1A1625',
-      surface2: '#241F33',
-      surface3: '#2E2841',
-      surfaceElevated: '#2A2440',
-      surfaceInteractive: '#241F33',
-      surfaceInteractiveStrong: '#342D4D',
-      border: '#332B4D',
-      separator: '#2A2440',
-      text: '#F5F3FF',
-      textSecondary: '#A8A0C0',
-      muted: '#7C7496',
+      bg: '#15121E',
+      background: '#15121E',
+      surface: '#211C2E',
+      surface2: '#2B253A',
+      surface3: '#352F45',
+      surfaceElevated: '#2F2842',
+      surfaceInteractive: '#2B253A',
+      surfaceInteractiveStrong: '#3A3350',
+      surfaceMuted: '#1A1628',
+      border: '#3E3758',
+      separator: '#302A44',
+      text: '#F7F4FF',
+      textSecondary: '#B4ABCC',
+      muted: '#8C85A3',
       accent,
-      accentSoft: createAccentSoft(accent, 0.18),
+      accentSoft: createAccentSoft(accent, 0.2),
       accentHover: lighten(accent, 0.16),
       accentStrong: lighten(accent, 0.28),
       gold,
-      goldSoft: rgba(gold, 0.18),
+      goldSoft: rgba(gold, 0.2),
       gradientStart: accent,
-      gradientMid: '#7C3AED',
-      gradientEnd: lighten(accent, 0.3),
-      success: '#34D399',
-      successSoft: 'rgba(52,211,153,0.16)',
-      danger: '#FB7185',
-      error: '#FB7185',
-      dangerSoft: 'rgba(251,113,133,0.16)',
-      warning: '#FBBF24',
-      warningSoft: 'rgba(251,191,36,0.16)',
-      info: '#818CF8',
-      infoSoft: 'rgba(129,140,248,0.16)',
+      gradientMid: '#8B7FD8',
+      gradientEnd: lighten(accent, 0.32),
+      success: '#5EEAD4',
+      successSoft: 'rgba(94,234,212,0.14)',
+      danger: '#FDA4AF',
+      error: '#FDA4AF',
+      dangerSoft: 'rgba(253,164,175,0.14)',
+      warning: '#FCD34D',
+      warningSoft: 'rgba(252,211,77,0.14)',
+      info: '#A5B4FC',
+      infoSoft: 'rgba(165,180,252,0.14)',
       focusRing: rgba(accent, 0.45),
-      overlay: 'rgba(12,10,19,0.80)',
-      disabledBg: 'rgba(255,255,255,0.06)',
-      disabledText: 'rgba(255,255,255,0.22)',
-      cardShadow: 'rgba(0,0,0,0.55)',
-      shimmer: 'rgba(255,255,255,0.04)',
+      overlay: 'rgba(12,10,19,0.78)',
+      disabledBg: 'rgba(255,255,255,0.07)',
+      disabledText: 'rgba(255,255,255,0.24)',
+      cardShadow: 'rgba(0,0,0,0.5)',
+      shimmer: 'rgba(255,255,255,0.05)',
       achievement: gold,
-      achievementSoft: rgba(gold, 0.18),
-      streak: '#FB7185',
-      streakSoft: 'rgba(251,113,133,0.16)',
-      growth: '#34D399',
-      growthSoft: 'rgba(52,211,153,0.16)',
-      calm: '#818CF8',
-      calmSoft: 'rgba(129,140,248,0.16)',
-      gentleWarn: '#FBBF24',
-      gentleWarnSoft: 'rgba(251,191,36,0.16)',
-      urgent: '#FB7185',
-      urgentSoft: 'rgba(251,113,133,0.16)',
-      fresh: '#818CF8',
-      freshSoft: 'rgba(129,140,248,0.16)',
-      social: '#A78BFA',
-      socialSoft: 'rgba(167,139,250,0.18)',
-      confidenceHigh: '#34D399',
-      confidenceHighSoft: 'rgba(52,211,153,0.16)',
-      confidenceMedium: '#FBBF24',
-      confidenceMediumSoft: 'rgba(251,191,36,0.16)',
-      confidenceLow: '#FB7185',
-      confidenceLowSoft: 'rgba(251,113,133,0.16)',
+      achievementSoft: rgba(gold, 0.2),
+      streak: '#FDA4AF',
+      streakSoft: 'rgba(253,164,175,0.14)',
+      growth: '#5EEAD4',
+      growthSoft: 'rgba(94,234,212,0.14)',
+      calm: '#A5B4FC',
+      calmSoft: 'rgba(165,180,252,0.14)',
+      gentleWarn: '#FCD34D',
+      gentleWarnSoft: 'rgba(252,211,77,0.14)',
+      urgent: '#FDA4AF',
+      urgentSoft: 'rgba(253,164,175,0.14)',
+      fresh: '#A5B4FC',
+      freshSoft: 'rgba(165,180,252,0.14)',
+      social: '#C4B5FD',
+      socialSoft: 'rgba(196,181,253,0.18)',
+      confidenceHigh: '#5EEAD4',
+      confidenceHighSoft: 'rgba(94,234,212,0.14)',
+      confidenceMedium: '#FCD34D',
+      confidenceMediumSoft: 'rgba(252,211,77,0.14)',
+      confidenceLow: '#FDA4AF',
+      confidenceLowSoft: 'rgba(253,164,175,0.14)',
       roleStudent: accent,
-      roleStudentSoft: createAccentSoft(accent, 0.18),
-      roleTeacher: '#34D399',
-      roleTeacherSoft: 'rgba(52,211,153,0.16)',
+      roleStudentSoft: createAccentSoft(accent, 0.2),
+      roleTeacher: '#5EEAD4',
+      roleTeacherSoft: 'rgba(94,234,212,0.14)',
       roleAdmin: gold,
-      roleAdminSoft: rgba(gold, 0.18),
-      focusSurface: rgba(accent, 0.16),
+      roleAdminSoft: rgba(gold, 0.2),
+      focusSurface: rgba(accent, 0.18),
+      primary: accent,
+      secondary: gold,
+      card: '#2F2842',
+      onAccent: '#FFFFFF',
+      chromeTabBar: 'rgba(40,36,56,0.96)',
+      chromeTabBorder: 'rgba(255,255,255,0.09)',
+      chromeTabItemActive: createAccentSoft(accent, 0.22),
     },
     shadows: {
-      sm: { color: '#0C0A13', opacity: 0.24, radius: 8, offsetY: 2, elevation: 2 },
-      md: { color: '#0C0A13', opacity: 0.32, radius: 16, offsetY: 4, elevation: 5 },
-      lg: { color: '#0C0A13', opacity: 0.4, radius: 24, offsetY: 8, elevation: 8 },
-      xl: { color: '#0C0A13', opacity: 0.5, radius: 36, offsetY: 12, elevation: 14 },
-      glow: { color: accent, opacity: 0.3, radius: 24, offsetY: 0, elevation: 0 },
+      sm: { color: '#0B0912', opacity: 0.22, radius: 10, offsetY: 3, elevation: 2 },
+      md: { color: '#0B0912', opacity: 0.3, radius: 18, offsetY: 5, elevation: 5 },
+      lg: { color: '#0B0912', opacity: 0.38, radius: 26, offsetY: 8, elevation: 8 },
+      xl: { color: '#0B0912', opacity: 0.46, radius: 38, offsetY: 12, elevation: 14 },
+      glow: { color: accent, opacity: 0.28, radius: 26, offsetY: 0, elevation: 0 },
       soft: {
-        shadowColor: '#0C0A13',
-        shadowOpacity: 0.24,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 3 },
-        elevation: 3,
+        shadowColor: '#0B0912',
+        shadowOpacity: 0.26,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 4,
       },
       inset: {
-        shadowColor: '#0C0A13',
-        shadowOpacity: 0.14,
+        shadowColor: '#0B0912',
+        shadowOpacity: 0.16,
         shadowRadius: 4,
         shadowOffset: { width: 0, height: 1 },
         elevation: 0,
@@ -417,8 +495,16 @@ export function createDarkTheme(
     },
     radius: sharedRadius,
     space: sharedSpace,
+    layout: sharedLayout,
     typography: sharedTypography,
     animation: sharedAnimation,
+    gradients: {
+      drawerHeader: ['#3D3558', '#221B32'] as const,
+      profileHero: ['#3D3558', '#261F38', '#15121E'] as const,
+      avatar: [lighten(accent, 0.22), accent] as const,
+      aiOrbNormal: [orbLilac, lighten(accent, 0.12), orbPeri] as const,
+      aiOrbUrgent: ['#FECDD3', '#FB7185', '#9F1239'] as const,
+    },
     schoolId,
     brand,
   };
@@ -430,101 +516,119 @@ export function createLightTheme(
   brand?: SchoolBrand,
 ): Theme {
   const gold = brand?.secondary ?? DEFAULT_GOLD;
+  const orbLilac = '#DDD6FE';
+  const orbPeri = '#C4D0FF';
   return {
     mode: 'light',
     colors: {
-      bg: '#FAF9FC',
-      background: '#FAF9FC',
-      surface: '#FFFFFF',
-      surface2: '#F3F1F8',
-      surface3: '#EBE8F3',
+      bg: '#FCF8FB',
+      background: '#FCF8FB',
+      surface: '#FFFCFD',
+      surface2: '#F3ECFA',
+      surface3: '#EDE5F5',
       surfaceElevated: '#FFFFFF',
-      surfaceInteractive: '#F3F1F8',
-      surfaceInteractiveStrong: '#EBE8F3',
-      border: '#E2DFF0',
-      separator: '#EBE8F3',
-      text: '#1A1333',
-      textSecondary: '#5B5270',
-      muted: '#9490A8',
+      surfaceInteractive: '#F3ECFA',
+      surfaceInteractiveStrong: '#EDE5F5',
+      surfaceMuted: '#EFE6F7',
+      border: '#E5DEF0',
+      separator: '#EDE5F5',
+      text: '#18122E',
+      textSecondary: '#564F6D',
+      muted: '#8F89A3',
       accent,
-      accentSoft: createAccentSoft(accent, 0.1),
+      accentSoft: createAccentSoft(accent, 0.12),
       accentHover: lighten(accent, 0.12),
       accentStrong: lighten(accent, 0.22),
       gold,
-      goldSoft: rgba(gold, 0.12),
+      goldSoft: rgba(gold, 0.14),
       gradientStart: accent,
-      gradientMid: '#7C3AED',
-      gradientEnd: '#A78BFA',
-      success: '#10B981',
-      successSoft: 'rgba(16,185,129,0.10)',
-      danger: '#EF4444',
-      error: '#EF4444',
-      dangerSoft: 'rgba(239,68,68,0.10)',
-      warning: '#F59E0B',
-      warningSoft: 'rgba(245,158,11,0.10)',
-      info: '#6366F1',
-      infoSoft: 'rgba(99,102,241,0.10)',
-      focusRing: rgba(accent, 0.25),
-      overlay: 'rgba(26,19,51,0.40)',
-      disabledBg: 'rgba(148,144,168,0.12)',
-      disabledText: 'rgba(148,144,168,0.55)',
-      cardShadow: 'rgba(91,33,182,0.06)',
-      shimmer: 'rgba(255,255,255,0.85)',
+      gradientMid: '#8B7FD8',
+      gradientEnd: '#C4B5FD',
+      success: '#0D9F7A',
+      successSoft: 'rgba(13,159,122,0.11)',
+      danger: '#DC3D4E',
+      error: '#DC3D4E',
+      dangerSoft: 'rgba(220,61,78,0.11)',
+      warning: '#D97706',
+      warningSoft: 'rgba(217,119,6,0.11)',
+      info: '#5B63E8',
+      infoSoft: 'rgba(91,99,232,0.11)',
+      focusRing: rgba(accent, 0.28),
+      overlay: 'rgba(24,18,46,0.38)',
+      disabledBg: 'rgba(143,137,163,0.12)',
+      disabledText: 'rgba(143,137,163,0.55)',
+      cardShadow: 'rgba(91,33,182,0.07)',
+      shimmer: 'rgba(255,255,255,0.9)',
       achievement: gold,
-      achievementSoft: rgba(gold, 0.12),
-      streak: '#EF4444',
-      streakSoft: 'rgba(239,68,68,0.10)',
-      growth: '#10B981',
-      growthSoft: 'rgba(16,185,129,0.10)',
-      calm: '#6366F1',
-      calmSoft: 'rgba(99,102,241,0.10)',
-      gentleWarn: '#F59E0B',
-      gentleWarnSoft: 'rgba(245,158,11,0.10)',
-      urgent: '#EF4444',
-      urgentSoft: 'rgba(239,68,68,0.10)',
-      fresh: '#6366F1',
-      freshSoft: 'rgba(99,102,241,0.10)',
-      social: '#7C3AED',
-      socialSoft: 'rgba(124,58,237,0.10)',
-      confidenceHigh: '#10B981',
-      confidenceHighSoft: 'rgba(16,185,129,0.10)',
-      confidenceMedium: '#F59E0B',
-      confidenceMediumSoft: 'rgba(245,158,11,0.10)',
-      confidenceLow: '#EF4444',
-      confidenceLowSoft: 'rgba(239,68,68,0.10)',
+      achievementSoft: rgba(gold, 0.14),
+      streak: '#DC3D4E',
+      streakSoft: 'rgba(220,61,78,0.11)',
+      growth: '#0D9F7A',
+      growthSoft: 'rgba(13,159,122,0.11)',
+      calm: '#5B63E8',
+      calmSoft: 'rgba(91,99,232,0.11)',
+      gentleWarn: '#D97706',
+      gentleWarnSoft: 'rgba(217,119,6,0.11)',
+      urgent: '#DC3D4E',
+      urgentSoft: 'rgba(220,61,78,0.11)',
+      fresh: '#5B63E8',
+      freshSoft: 'rgba(91,99,232,0.11)',
+      social: '#6D4FB8',
+      socialSoft: 'rgba(124,92,237,0.12)',
+      confidenceHigh: '#0D9F7A',
+      confidenceHighSoft: 'rgba(13,159,122,0.11)',
+      confidenceMedium: '#D97706',
+      confidenceMediumSoft: 'rgba(217,119,6,0.11)',
+      confidenceLow: '#DC3D4E',
+      confidenceLowSoft: 'rgba(220,61,78,0.11)',
       roleStudent: accent,
-      roleStudentSoft: createAccentSoft(accent, 0.1),
-      roleTeacher: '#10B981',
-      roleTeacherSoft: 'rgba(16,185,129,0.10)',
+      roleStudentSoft: createAccentSoft(accent, 0.12),
+      roleTeacher: '#0D9F7A',
+      roleTeacherSoft: 'rgba(13,159,122,0.11)',
       roleAdmin: gold,
-      roleAdminSoft: rgba(gold, 0.12),
-      focusSurface: rgba(accent, 0.08),
+      roleAdminSoft: rgba(gold, 0.14),
+      focusSurface: rgba(accent, 0.1),
+      primary: accent,
+      secondary: gold,
+      card: '#FFFCFD',
+      onAccent: '#FFFFFF',
+      chromeTabBar: 'rgba(255,252,253,0.97)',
+      chromeTabBorder: 'rgba(126,109,169,0.14)',
+      chromeTabItemActive: createAccentSoft(accent, 0.14),
     },
     shadows: {
-      sm: { color: '#1A1333', opacity: 0.05, radius: 8, offsetY: 2, elevation: 2 },
-      md: { color: '#1A1333', opacity: 0.08, radius: 16, offsetY: 4, elevation: 5 },
-      lg: { color: '#1A1333', opacity: 0.1, radius: 24, offsetY: 8, elevation: 8 },
-      xl: { color: '#1A1333', opacity: 0.12, radius: 32, offsetY: 12, elevation: 12 },
-      glow: { color: accent, opacity: 0.2, radius: 24, offsetY: 0, elevation: 0 },
+      sm: { color: '#2C2248', opacity: 0.11, radius: 12, offsetY: 4, elevation: 3 },
+      md: { color: '#2C2248', opacity: 0.16, radius: 22, offsetY: 6, elevation: 6 },
+      lg: { color: '#2C2248', opacity: 0.2, radius: 28, offsetY: 10, elevation: 10 },
+      xl: { color: '#2C2248', opacity: 0.24, radius: 36, offsetY: 14, elevation: 14 },
+      glow: { color: accent, opacity: 0.22, radius: 26, offsetY: 0, elevation: 0 },
       soft: {
-        shadowColor: '#1A1333',
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 3 },
-        elevation: 3,
+        shadowColor: '#2C2248',
+        shadowOpacity: 0.12,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 5 },
+        elevation: 5,
       },
       inset: {
-        shadowColor: '#1A1333',
-        shadowOpacity: 0.04,
-        shadowRadius: 3,
+        shadowColor: '#2C2248',
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
         shadowOffset: { width: 0, height: 1 },
         elevation: 0,
       },
     },
     radius: sharedRadius,
     space: sharedSpace,
+    layout: sharedLayout,
     typography: sharedTypography,
     animation: sharedAnimation,
+    gradients: {
+      drawerHeader: ['#EDE9FF', '#FFF5FB'] as const,
+      profileHero: ['#EDE9FF', '#FFF5FB', '#FCF8FB'] as const,
+      avatar: [lighten(accent, 0.12), accent] as const,
+      aiOrbNormal: [orbLilac, lighten(accent, 0.08), orbPeri] as const,
+      aiOrbUrgent: ['#FECACA', lighten('#FB7185', 0.08), '#E11D48'] as const,
+    },
     schoolId,
     brand,
   };

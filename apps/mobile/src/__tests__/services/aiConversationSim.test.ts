@@ -17,7 +17,27 @@ import { expect } from '@jest/globals';
 import { mockSource } from '../../data/mockSource';
 import { setDataSource } from '../../data/source';
 import type { AssistantChoiceMenu } from '../../services/aiToolRegistry';
-import { autonomousQuery } from '../../services/aiLocalAgent';
+import { autonomousQuery, resetAdaptiveLearnedPatternsForTests } from '../../services/aiLocalAgent';
+import { getToolDeclarations } from '../../services/aiAgentTools';
+import type { CampusActorRole } from '../../data/types';
+
+beforeEach(() => {
+  resetAdaptiveLearnedPatternsForTests();
+});
+
+/** getToolDeclarations：student/vendor/department/department_head/school 僅共通工具；teacher、admin、staff 另含教學區塊（start_attendance、create_assignment、grade_submission、create_announcement）。 */
+function toolNamesForRole(role: CampusActorRole): Set<string> {
+  return new Set(getToolDeclarations(role).map((d) => d.name));
+}
+
+function pickTools(role: CampusActorRole, names: readonly string[]): string[] {
+  const ok = toolNamesForRole(role);
+  const bad = names.filter((n) => !ok.has(n));
+  if (bad.length > 0) {
+    throw new Error(`pickTools(${role}) 含未宣告工具: ${bad.join(', ')}`);
+  }
+  return [...names];
+}
 
 const VERBOSE = process.env.AI_SIM_VERBOSE === '1';
 const TEST_USER_ID = 'sim-user-1';
@@ -139,8 +159,11 @@ async function assertToolsWithChoiceMenu(
   expect(anyOfTools.some((t) => tools.has(t))).toBe(true);
 }
 
-async function runConversation(name: string, turns: Turn[]) {
-  sectionHeader(name);
+type RunConversationOpts = { role?: CampusActorRole };
+
+async function runConversation(name: string, turns: Turn[], opts?: RunConversationOpts) {
+  const actorRole = opts?.role ?? 'student';
+  sectionHeader(opts?.role != null ? `${name}（角色：${actorRole}）` : name);
   let lastChoiceMenu: AssistantChoiceMenu | undefined;
   const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   const results: Array<{ user: string; result: any }> = [];
@@ -156,7 +179,7 @@ async function runConversation(name: string, turns: Turn[]) {
       {
         userId: TEST_USER_ID,
         schoolId: TEST_SCHOOL_ID,
-        role: 'student',
+        role: actorRole,
         lastChoiceMenu,
         isOnline: true,
       },
@@ -499,5 +522,335 @@ describe('AI 口語／模糊／跨功能 對話壓測', () => {
     };
     await assertToolsWithChoiceMenu('隨便', bookMenu, ['borrow_book']);
     await assertToolsWithChoiceMenu('第一個', bookMenu, ['borrow_book']);
+  });
+
+  it('全工具補齊①：圖書館續借／還書／取消座位', async () => {
+    await runConversation('圖書館進階', [
+      { user: '幫我續借人工智慧那本', anyOfTools: ['renew_book', 'query_loans'] },
+      { user: '還書要把程式設計那本歸還', anyOfTools: ['return_book', 'query_loans'] },
+      { user: '算了圖書館自習座位預約我要取消', anyOfTools: ['cancel_seat_reservation', 'query_library'] },
+    ]);
+  });
+
+  it('全工具補齊②：包裹領取、餐點評分、加社群、發文、繳交、行事曆', async () => {
+    await runConversation('生活寫入大補帖', [
+      { user: '我去宿舍領包裹了確認取件', anyOfTools: ['confirm_package_pickup', 'query_dorm_info'] },
+      { user: '便當雞腿飯超讚給五顆星啦', anyOfTools: ['rate_menu_item', 'query_menus'] },
+      { user: '加入讀書會群組 cs-read-99', anyOfTools: ['join_group'] },
+      { user: '小組發文問大家期末要不要一起念', anyOfTools: ['create_group_post'] },
+      {
+        user: '報告作業我都寫完了幫我繳交一下',
+        anyOfTools: ['submit_assignment', 'query_assignments'],
+      },
+      {
+        user: '幫我加讀書會行程進明天下午三點行事曆',
+        anyOfTools: ['create_calendar_event'],
+      },
+      {
+        user: '刪除行程期中考複習那個我不需要了',
+        anyOfTools: ['delete_calendar_event', 'query_calendar'],
+      },
+      {
+        user: '修改行程讀書會改到晚上七點好不好',
+        anyOfTools: ['update_calendar_event', 'query_calendar'],
+      },
+    ]);
+  });
+
+  it('全工具補齊③：教師／教學場（點名、出作業、批改、公告）', async () => {
+    await runConversation(
+      '教學端',
+      [
+        { user: '這堂微積分課開始點名吧', anyOfTools: ['start_attendance', 'query_courses'] },
+        { user: '幫我出作業「期末專題提案」截止下週', anyOfTools: ['create_assignment', 'query_courses'] },
+        {
+          user: '批改作業幫學生小明的繳交打88分寫得不錯',
+          anyOfTools: ['grade_submission'],
+        },
+        {
+          user: '發布公告停課因為颱風來了緊急通知',
+          anyOfTools: ['create_announcement'],
+        },
+      ],
+      { role: 'teacher' },
+    );
+  });
+
+  it('地獄難度：破碎句、英中夾雜、假裝系統錯亂、多意圖黏在一起', async () => {
+    await runConversation('地獄口語', [
+      {
+        user: '呃那個啦明天那個課然後我又餓又想看公告你随意',
+        anyOfTools: ['query_courses', 'query_announcements', 'recommend_lunch', 'comprehensive_analysis', 'daily_briefing', 'query_menus'],
+      },
+      {
+        user: 'not 飯 ok? I need 成績 + bus route + 失物 錢包 same time thx',
+        anyOfTools: ['query_grades', 'query_bus', 'create_lost_found', 'comprehensive_analysis'],
+      },
+      {
+        user: '退選啦干不想修微積分了啦幫我退',
+        anyOfTools: ['drop_course', 'query_enrollments'],
+      },
+      {
+        user: '幫我私訊阿銘跟他說錢還你了不要再已讀不回',
+        anyOfTools: ['send_message'],
+      },
+      {
+        user: '………算了你直接 comprehensive 我整個人爆炸塞車遲到又有作業 due',
+        anyOfTools: ['comprehensive_analysis', 'daily_briefing', 'query_assignments', 'query_courses'],
+      },
+      {
+        user: '欸如果我用火星文講：Orz 簽到 簽倒 簽道 三選一要幫我打卡啦',
+        anyOfTools: ['check_in_attendance', 'query_courses', 'query_attendance'],
+      },
+    ]);
+  });
+
+  it('十分鐘口語馬拉松（連續多輪、模擬真實碎念）', async () => {
+    await runConversation('馬拉松 A', [
+      { user: '早安我還沒醒先給我懶人包', anyOfTools: ['daily_briefing', 'comprehensive_analysis'] },
+      { user: '等等我其實只想知道今天第一堂在哪', anyOfTools: ['query_courses'] },
+      { user: '幹趕不上簽到了', anyOfTools: ['check_in_attendance', 'query_attendance'] },
+      { user: '下課想吃素的路線規劃一下', anyOfTools: ['recommend_lunch', 'query_menus', 'create_order'] },
+      { user: '下午請假頭痛一整個爆炸', anyOfTools: ['request_leave'] },
+      { user: '回宿舍順便看包裹還在不在', anyOfTools: ['query_dorm_info'] },
+      { user: '順便預約洗衣機不然沒內褲穿', anyOfTools: ['reserve_washing_machine'] },
+      { user: '晚上自習位子要有插座那種', anyOfTools: ['reserve_library_seat', 'query_library'] },
+      { user: '幫我借一本演算法導論參考書', anyOfTools: ['borrow_book', 'query_library'] },
+      { user: '睡前盤點我要繳的作業還有啥', anyOfTools: ['query_assignments'] },
+    ]);
+    await runConversation('馬拉松 B（情緒反轉）', [
+      { user: '算了整天廢我只想看活動有沒有票', anyOfTools: ['query_events'] },
+      { user: '最爛那種活動不要推薦給我', anyOfTools: ['query_events', 'comprehensive_analysis'] },
+      { user: '還是報名第一個試試', anyOfTools: ['register_event'] },
+      { user: '後悔不想去了可以嗎', anyOfTools: ['unregister_event', 'query_events', 'register_event'] },
+      { user: '錢包又掉了我要發失物', anyOfTools: ['create_lost_found'] },
+      { user: '印論文一式兩份黑白雙面感恩', anyOfTools: ['create_print_job'] },
+      { user: '最後罵一下已讀不回的人', anyOfTools: ['query_conversations'] },
+      { user: '不清通知我睡不著全部已讀啦', anyOfTools: ['mark_notifications_read'] },
+    ]);
+  });
+});
+
+describe('AI 分角色對話壓測', () => {
+  beforeAll(() => {
+    setDataSource(mockSource as any);
+  });
+
+  jest.setTimeout(400000);
+
+  it('student：學生端口語混搭', async () => {
+    const r = 'student' as const;
+    await runConversation(
+      '學生壓測',
+      [
+        { user: '欸我到底今天幾堂課啊腦袋打結', anyOfTools: pickTools(r, ['query_courses']) },
+        {
+          user: '微積分那堂我來不及簽到你快救我打卡',
+          anyOfTools: pickTools(r, ['check_in_attendance', 'query_courses']),
+        },
+        {
+          user: '我頭超痛明天想請一整天的假別管哪堂了啦',
+          anyOfTools: pickTools(r, ['request_leave']),
+        },
+        {
+          user: '便宜又能飽的最好不要太油',
+          anyOfTools: pickTools(r, ['recommend_lunch', 'query_menus', 'create_order']),
+        },
+        {
+          user: '幫我點個雞腿飯備註少鹽',
+          anyOfTools: pickTools(r, ['create_order']),
+        },
+        {
+          user: '我上次訂的都還在嗎想看看',
+          anyOfTools: pickTools(r, ['query_orders']),
+        },
+        {
+          user: '宿網死掉房間又熱這能報修了吧',
+          anyOfTools: pickTools(r, ['create_repair_request']),
+        },
+        {
+          user: '在 B508',
+          anyOfTools: pickTools(r, ['create_repair_request']),
+        },
+        {
+          user: '圖書館晚點有沒有位子啦',
+          anyOfTools: pickTools(r, ['query_library', 'reserve_library_seat']),
+        },
+        {
+          user: '學校有沒有發什麼很吵的公告',
+          anyOfTools: pickTools(r, ['query_announcements']),
+        },
+        {
+          user: '我整個人像快爆掉你一鍵講講我到底怎麼了',
+          anyOfTools: pickTools(r, ['comprehensive_analysis', 'daily_briefing']),
+        },
+      ],
+      { role: r },
+    );
+  });
+
+  it('teacher：教學端口語', async () => {
+    const r = 'teacher' as const;
+    await runConversation(
+      '教師壓測',
+      [
+        {
+          user: '這節資料結構開始點名啦同學都進來沒',
+          anyOfTools: pickTools(r, ['start_attendance', 'query_courses']),
+        },
+        {
+          user: '幫我上傳個作業叫期末報告初稿截止下星期五',
+          anyOfTools: pickTools(r, ['create_assignment', 'query_courses']),
+        },
+        {
+          user: '小明那題程式作業繳交情況順便查一下細節',
+          anyOfTools: pickTools(r, ['query_homework_detail', 'query_course_members']),
+        },
+        {
+          user: '幫批改：繳交單號 sub-old-1 這份給個 92 順便寫不錯但格式要統一',
+          anyOfTools: pickTools(r, ['grade_submission']),
+        },
+        {
+          user: '颱風假那種要在課程群組貼個正式公告',
+          anyOfTools: pickTools(r, ['create_announcement', 'create_group_post']),
+        },
+        {
+          user: '今天課堂上有誰修了退選我需要名單感覺',
+          anyOfTools: pickTools(r, ['query_course_members', 'query_courses']),
+        },
+        {
+          user: '上週發的教材連結我到底丟過沒查一下資料夾類的',
+          anyOfTools: pickTools(r, ['query_materials', 'query_courses']),
+        },
+        {
+          user: '同學們出勤太爛幫我看整體出席長怎樣',
+          anyOfTools: pickTools(r, ['query_attendance']),
+        },
+        {
+          user: '成績要登了先瞄一眼班級平均分走向',
+          anyOfTools: pickTools(r, ['query_grades', 'predict_gpa']),
+        },
+      ],
+      { role: r },
+    );
+  });
+
+  it('staff：總務／行政口吻＋告示', async () => {
+    const r = 'staff' as const;
+    await runConversation(
+      '總務壓測',
+      [
+        {
+          user: '行政大樓二樓廁所燈不亮請先開個修繕',
+          anyOfTools: pickTools(r, ['create_repair_request']),
+        },
+        { user: '在 B215', anyOfTools: pickTools(r, ['create_repair_request']) },
+        {
+          user: '麻煩全校公告一下飲水機這週清洗中午別接水',
+          anyOfTools: pickTools(r, ['create_announcement']),
+        },
+        {
+          user: '我還想看看最近已經貼過哪些公告別重複發',
+          anyOfTools: pickTools(r, ['query_announcements']),
+        },
+        {
+          user: '臨時代課這堂心理健康幫開始點名',
+          anyOfTools: pickTools(r, ['start_attendance', 'query_courses']),
+        },
+        {
+          user: '隨堂想要出個小考作業題目附連結請同學繳交',
+          anyOfTools: pickTools(r, ['create_assignment', 'query_courses']),
+        },
+        {
+          user: '幫統整一下收件匣未讀有哪些雜項',
+          anyOfTools: pickTools(r, ['query_notifications', 'daily_briefing']),
+        },
+      ],
+      { role: r },
+    );
+  });
+
+  it('vendor：餐廳／攤商店主口吻', async () => {
+    const r = 'vendor' as const;
+    await runConversation(
+      '餐飲業者壓測',
+      [
+        {
+          user: '今天我們便當主菜有哪幾樣要上線看一下',
+          anyOfTools: pickTools(r, ['query_menus', 'query_announcements']),
+        },
+        {
+          user: '中午不知道推哪幾道給學生冷熱都要有',
+          anyOfTools: pickTools(r, ['recommend_lunch', 'query_menus']),
+        },
+        {
+          user: '幫我看一下這週線上訂單還卡在待處理的有誰',
+          anyOfTools: pickTools(r, ['query_orders']),
+        },
+        {
+          user: '有人點大碗滷肉飯兩份不要香菜',
+          anyOfTools: pickTools(r, ['create_order']),
+        },
+        {
+          user: '飲料甜度客訴那件幫評分紀錄補個五顆安撫一下',
+          anyOfTools: pickTools(r, ['rate_menu_item', 'query_menus']),
+        },
+        {
+          user: '櫃台撿到手機一枝幫我登拾獲招領',
+          anyOfTools: pickTools(r, ['create_lost_found']),
+        },
+        {
+          user: '欸我到底能在這個助理裡面做哪些事啦',
+          anyOfTools: pickTools(r, ['assistant_help']),
+        },
+        {
+          user: '今天整體營運狀況你亂講一份摘要就好',
+          anyOfTools: pickTools(r, ['daily_briefing', 'comprehensive_analysis', 'query_orders']),
+        },
+      ],
+      { role: r },
+    );
+  });
+
+  it('admin：管理端公告與教學操作', async () => {
+    const r = 'admin' as const;
+    await runConversation(
+      '管理員壓測',
+      [
+        {
+          user: '發緊急公告全校停課一天因為強颱那種語氣官方一點',
+          anyOfTools: pickTools(r, ['create_announcement']),
+        },
+        {
+          user: '再確認現在已經掛在上的公告頭條有哪幾則',
+          anyOfTools: pickTools(r, ['query_announcements']),
+        },
+        {
+          user: '研究生院這堂研究方法幫我先開始點名啦人手不夠',
+          anyOfTools: pickTools(r, ['start_attendance', 'query_courses']),
+        },
+        {
+          user: '出一份作業叫文獻綜述初稿統一下週三交',
+          anyOfTools: pickTools(r, ['create_assignment', 'query_courses']),
+        },
+        {
+          user: '幫把那個 sub-admin-zz 這份先給個 76 評語寫可加強引用',
+          anyOfTools: pickTools(r, ['grade_submission']),
+        },
+        {
+          user: '幫我發個訊息給教務組說補考場次調整請轉發導師',
+          anyOfTools: pickTools(r, ['send_message']),
+        },
+        {
+          user: '順便把教務會議改期這件事加進明天下午三點行程',
+          anyOfTools: pickTools(r, ['create_calendar_event']),
+        },
+        {
+          user: '今天校園運作概況來個超短總覽',
+          anyOfTools: pickTools(r, ['daily_briefing', 'comprehensive_analysis', 'query_announcements']),
+        },
+      ],
+      { role: r },
+    );
   });
 });

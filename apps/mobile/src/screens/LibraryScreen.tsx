@@ -723,6 +723,7 @@ export function LibraryScreen(props: Record<string, unknown>) {
             ) : searchQuery && !isSearching ? (
               <EmptyState
                 icon="search-outline"
+                variant="search"
                 title="沒有找到結果"
                 subtitle="試試其他關鍵字，或用自然語言描述你想找的"
               />

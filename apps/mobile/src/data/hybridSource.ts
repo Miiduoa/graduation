@@ -944,7 +944,7 @@ export const hybridSource: DataSource = {
         building,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listWashingMachines:', error);
+      logFallbackToMock('listWashingMachines', error);
       return mockSource.listWashingMachines(schoolId, building);
     }
   },
@@ -1002,7 +1002,7 @@ export const hybridSource: DataSource = {
         options,
       );
     } catch (error) {
-      console.warn('[HybridSource] Falling back to mock listPrinters:', error);
+      logFallbackToMock('listPrinters', error);
       return mockSource.listPrinters(schoolId, options);
     }
   },

@@ -30,6 +30,7 @@
 | 檔案整理索引   | [`docs/PROJECT_FILE_ORGANIZATION.md`](docs/PROJECT_FILE_ORGANIZATION.md)                         |
 | AI 架構        | [`docs/AI_ASSISTANT_ARCHITECTURE.md`](docs/AI_ASSISTANT_ARCHITECTURE.md)                         |
 | Firebase 邊界  | [`docs/architecture/firebase-data-boundaries.md`](docs/architecture/firebase-data-boundaries.md) |
+| App 圖示產線   | [`apps/mobile/assets/ICON_REGENERATION.txt`](apps/mobile/assets/ICON_REGENERATION.txt)（ComfyUI / Flux、`scripts/generate-campus-app-icon-comfyui.py`） |
 | 法務文件       | [`docs/legal/`](docs/legal/)                                                                     |
 
 ## 目錄
@@ -150,14 +151,14 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 
 | 面向              | 盤點結果                                                                                                                                                                                                 |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Git tracked files | 約 `743` 個                                                                                                                                                                                              |
+| Git tracked files | 約 `758` 個（複核：`git ls-files`，再 `wc -l`）；含 Expo / iOS 圖示、`assets/` 備份目錄與 ComfyUI 腳本時會隨資產增減                                                                              |
 | Mobile UI         | `101` 個 `*Screen.tsx`、`14` 個 `*Stack.tsx`                                                                                                                                                             |
 | Web routes        | `20` 個 `apps/web/**/page.tsx`、`4` 個 `apps/web/**/route.ts`                                                                                                                                            |
 | Backend Functions | 約 `75` 個 `onCall` 匯出（`backend/functions/index.js` 約 `69` + `ordering/*` 等）、`14` 個 `onRequest`、`7` 個 `onSchedule`（`index.js` + `ordering/orderTimeout.js`、`ordering/queueNumber.js`）、`5` 個 Firestore `onDocument*`（`index.js` 四個 + `ordering/inspectionTrigger.js` 一個） |
-| 測試檔            | Mobile `35`（`apps/mobile/src/__tests__`）、Web `5`（`apps/web/src/**/*.test.*`）、Backend Functions `21`（`backend/functions/**/*.test.js`）、Rules `1`（`backend/tests/security-rules.test.js`）           |
+| 測試檔            | Mobile `38`（`apps/mobile/src/__tests__`；不含 `pnpm ai:train:long` 專用之 `apps/mobile/scripts/ai-training-long.test.ts`）、Web `5`（`apps/web/src/**/*.test.*`）、Backend Functions `21`（`backend/functions/**/*.test.js`）、Rules `1`（`backend/tests/security-rules.test.js`） |
 | GitHub workflows  | `5` 個：CI、Release、EAS Build、Preview Deploy、Maestro E2E                                                                                                                                            |
 | Maestro           | `.maestro` 底下 `11` 個 `*.yaml` flow 檔                                                                                                                                                                 |
-| `scripts/`        | `bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`、`ai-app-scenario-marathon.sh`；對應 root `package.json` 尚有 `live-review:file`、`test:ai:marathon` 等                                  |
+| `scripts/`        | `bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`、`ai-app-scenario-marathon.sh`、`flux-campus-icon-workflow.api.json`、`generate-campus-app-icon-comfyui.py`、`generate_app_icon_comfy.py`；對應 root `package.json` 尚有 `live-review:file`、`test:ai:marathon` 等 |
 | AI server         | `backend/ai-server/` 包含 FastAPI service、RAG、training、evaluation、self-training、web search                                                                                                        |
 
 ## Monorepo 結構
@@ -181,6 +182,7 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 │   │   ├── ios/                 # iOS native project
 │   │   ├── ios-widget/          # iOS Widget
 │   │   ├── android-widget/      # Android Widget
+│   │   ├── scripts/             # 長時 AI／代理 Jest（供 pnpm ai:train:long）
 │   │   └── .maestro/            # Maestro E2E flows
 │   └── web/                     # Next.js App Router / PWA
 │       ├── src/app/             # pages and route handlers
@@ -596,6 +598,19 @@ pnpm ai:grow
 
 如果使用本地 provider，例如 Ollama，請確認 provider endpoint 可用。若使用 Together / Groq 類 provider，key 必須放 server-side env，不要放進 `EXPO_PUBLIC_*`。
 
+### App 圖示產線（選用｜ComfyUI / Flux）
+
+若要重產 Expo / iOS launcher 所用 **PNG 資產**（例如 `apps/mobile/assets/icon*.png`、`splash-icon`、`favicon.png`，以及 [`ios/mobile/Images.xcassets/AppIcon.appiconset/`](apps/mobile/ios/mobile/Images.xcassets/AppIcon.appiconset/) 內 `App-Icon-1024x1024@1x.png`），請對照 **`apps/mobile/assets/ICON_REGENERATION.txt`**。概要如下：
+
+| 產物 / 輔助檔                                                                                                                                 | 說明 |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| [`scripts/generate-campus-app-icon-comfyui.py`](scripts/generate-campus-app-icon-comfyui.py)                                                | 呼叫本機 **ComfyUI HTTP API**（預設 `http://127.0.0.1:8188`）跑出 1024×1024 master，例：`apps/mobile/assets/icon_master_comfyui_1024.png`。說明檔內 Python / venv **路徑為作者機器範例**，請換成你自己的 ComfyUI 安裝路徑。 |
+| [`scripts/flux-campus-icon-workflow.api.json`](scripts/flux-campus-icon-workflow.api.json)                                                  | ComfyUI「Develop Mode → Save (API Format)」的 **工作流程備份**，便於對照／還原節點。 |
+| [`scripts/generate_app_icon_comfy.py`](scripts/generate_app_icon_comfy.py)                                                                  | 另一組 ComfyUI 相關產圖腳本，依檔內 CLI 使用。 |
+| `apps/mobile/assets/_backup_icons_<時間戳>/` 與 `AppIcon.appiconset/_backup_icons_<時間戳>/`                                               | **覆寫前備份**：避免一次替換回不去舊版圖示（詳見說明檔）。 |
+
+主題色與 splash 視覺應持續與 [`apps/mobile/app.config.ts`](apps/mobile/app.config.ts) 對齊；說明檔備註例：靜宜紫 `#5B21B6`、金 `#D4A843`、深色底 `#1a1a2e`。
+
 ## 常用指令
 
 ### Root
@@ -614,7 +629,7 @@ pnpm ai:grow
 | `pnpm format`        | Prettier write                           |
 | `pnpm test:rules`    | Firestore / Storage emulator rules tests |
 | `pnpm live-review:file` | 對單檔做 live review：`node scripts/live-file-review.mjs`（見 root script） |
-| `pnpm test:ai:marathon` | AI 長程情境壓力腳本（`scripts/ai-app-scenario-marathon.sh`）                 |
+| `pnpm test:ai:marathon` | 自根目錄重複跑離線 AI／代理 Jest 與後端 `agent/selfTrainingScenarios`（`scripts/ai-app-scenario-marathon.sh`；預設一小時，`DURATION_SECONDS` 或可傳秒數為第一引數）；log 預設 `tmp/ai-marathon.log`（可由 `AI_MARATHON_LOG` 覆寫） |
 | `pnpm version:patch` | bump patch version                       |
 | `pnpm version:minor` | bump minor version                       |
 | `pnpm version:major` | bump major version                       |
@@ -630,10 +645,13 @@ pnpm --filter mobile lint
 pnpm --filter mobile typecheck
 pnpm --filter mobile test
 pnpm --filter mobile test:coverage
+pnpm --filter mobile ai:train:long
 pnpm --filter mobile test:ai:self
 pnpm --filter mobile test:ai:proactive
 pnpm --filter mobile test:ai:web
 ```
+
+`ai:train:long`：使用 [`apps/mobile/jest.ai-training.config.js`](apps/mobile/jest.ai-training.config.js)，僅載入 [`apps/mobile/scripts/ai-training-long.test.ts`](apps/mobile/scripts/ai-training-long.test.ts)，與一般 `pnpm --filter mobile test` 分流；適合機器接上電源、`NODE_OPTIONS` 已拉高 heap 的情境。
 
 ### Web
 
@@ -672,7 +690,8 @@ pnpm submit:android
 
 | 區塊      | 測試工具                      | 目前重點                                                                                                        |
 | --------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Mobile    | Jest / jest-expo              | config、data source、AI、notifications、storage、web search、proactive AI、course navigation、components、hooks |
+| Mobile    | Jest / jest-expo              | 預設 `jest.config.js` 的 `testMatch` 僅跑 `src/__tests__/**/*.test.{ts,tsx}`；涵蓋 data source、**deep linking**（如 `architecture/linkingConfig`）、AI 對話品質／模擬、**馬拉松**（`aiConversationMarathon`）、**代理廣覆蓋**（`aiAgentWideCoverage`）、proactive / web search 等。長時間 heap 訓練：**`pnpm --filter mobile ai:train:long`**（`jest.ai-training.config.js` + `scripts/ai-training-long.test.ts`，不混入一般 `pnpm --filter mobile test`） |
+
 | Web       | Vitest / Testing Library      | navigation、SSO、runtime、Firestore path、page context                                                          |
 | Functions | Jest                          | authz、cafeteria、assistant agent、SSO、`agent/` 意圖與 tools、notifications、post-login、`tronClassScraper` 等（約 `21` 個 `*.test.js`） |
 | Rules     | Firebase emulator + node test | Firestore / Storage security boundary                                                                           |

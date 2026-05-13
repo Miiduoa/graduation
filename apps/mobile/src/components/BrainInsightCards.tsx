@@ -18,6 +18,8 @@ import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { aiBrain, type BrainInsight } from '../services/aiBrain';
 import { theme } from '../ui/theme';
+import type { ThemeColors } from '../ui/theme';
+import { useTheme } from '../state/theme';
 
 export interface BrainInsightCardsProps {
   /** 最多顯示幾張，預設 3 */
@@ -36,41 +38,44 @@ export interface BrainInsightCardsProps {
   showRefresh?: boolean;
 }
 
-const SEVERITY_STYLES: Record<
+function buildSeverityPalette(c: ThemeColors): Record<
   BrainInsight['severity'],
   { color: string; bg: string; border: string; icon: keyof typeof Ionicons.glyphMap }
-> = {
-  critical: {
-    color: '#DC2626',
-    bg: '#FEE2E2',
-    border: '#FCA5A5',
-    icon: 'alert-circle' as const,
-  },
-  danger: {
-    color: '#EA580C',
-    bg: '#FED7AA',
-    border: '#FDBA74',
-    icon: 'warning' as const,
-  },
-  warning: {
-    color: '#CA8A04',
-    bg: '#FEF3C7',
-    border: '#FDE68A',
-    icon: 'alert-outline' as const,
-  },
-  watch: {
-    color: '#2563EB',
-    bg: '#DBEAFE',
-    border: '#BFDBFE',
-    icon: 'eye-outline' as const,
-  },
-  safe: {
-    color: '#059669',
-    bg: '#D1FAE5',
-    border: '#A7F3D0',
-    icon: 'sparkles-outline' as const,
-  },
-};
+> {
+  const edge = (hex: string) => `${hex}59`;
+  return {
+    critical: {
+      color: c.danger,
+      bg: c.dangerSoft,
+      border: edge(c.danger),
+      icon: 'alert-circle',
+    },
+    danger: {
+      color: c.warning,
+      bg: c.warningSoft,
+      border: edge(c.warning),
+      icon: 'warning',
+    },
+    warning: {
+      color: c.gentleWarn,
+      bg: c.gentleWarnSoft,
+      border: edge(c.gentleWarn),
+      icon: 'alert-outline',
+    },
+    watch: {
+      color: c.info,
+      bg: c.infoSoft,
+      border: edge(c.info),
+      icon: 'eye-outline',
+    },
+    safe: {
+      color: c.success,
+      bg: c.successSoft,
+      border: edge(c.success),
+      icon: 'sparkles-outline',
+    },
+  };
+}
 
 const CATEGORY_LABEL: Record<BrainInsight['category'], string> = {
   next_action: '下一步',
@@ -187,13 +192,14 @@ function InsightCard(props: {
   onDismiss: () => void;
 }) {
   const { insight, onPress, onAction, onDismiss } = props;
-  const palette = SEVERITY_STYLES[insight.severity] ?? SEVERITY_STYLES.watch;
-  const isDark = theme.mode === 'dark';
+  const th = useTheme();
+  const severityStyles = useMemo(() => buildSeverityPalette(th.colors), [th]);
+  const palette = severityStyles[insight.severity] ?? severityStyles.watch;
+  const isDark = th.mode === 'dark';
 
   return (
     <Pressable
       onPress={onPress}
-      accessibilityRole="button"
       accessibilityLabel={insight.title}
       style={({ pressed }) => [
         styles.card,
@@ -222,7 +228,7 @@ function InsightCard(props: {
           accessibilityRole="button"
           accessibilityLabel="忽略"
         >
-          <Ionicons name="close" size={16} color={theme.colors.muted} />
+          <Ionicons name="close" size={16} color={th.colors.muted} />
         </Pressable>
       </View>
 
@@ -248,10 +254,10 @@ function InsightCard(props: {
             accessibilityRole="button"
             accessibilityLabel={insight.actionSuggestion}
           >
-            <Text style={styles.actionButtonText} numberOfLines={1}>
+            <Text style={[styles.actionButtonText, { color: th.colors.onAccent }]} numberOfLines={1}>
               {insight.actionSuggestion}
             </Text>
-            <Ionicons name="arrow-forward" size={12} color="#fff" />
+            <Ionicons name="arrow-forward" size={12} color={th.colors.onAccent} />
           </Pressable>
         )}
       </View>
@@ -291,7 +297,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     borderColor: theme.colors.border,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: theme.radius.md,
     padding: 14,
   },
   emptyText: {
@@ -299,7 +305,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   card: {
-    borderRadius: 14,
+    borderRadius: theme.radius.md,
     borderWidth: 1,
     padding: 12,
     gap: 8,
@@ -350,7 +356,7 @@ const styles = StyleSheet.create({
   },
   metaPill: {
     backgroundColor: theme.colors.surface2,
-    borderRadius: 8,
+    borderRadius: theme.radius.sm,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
@@ -368,7 +374,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   actionButtonText: {
-    color: '#fff',
     fontSize: 11,
     fontWeight: '700',
   },

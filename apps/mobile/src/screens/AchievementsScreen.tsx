@@ -618,7 +618,7 @@ export function AchievementsScreen(props: Record<string, unknown>) {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      if (school?.id) {
+      if (school?.id && auth.user?.uid) {
         const rows = await loadLeaderboardSnapshot(school.id);
         if (rows.length > 0) {
           const entries = rows.map((row, index) => ({
@@ -660,7 +660,7 @@ export function AchievementsScreen(props: Record<string, unknown>) {
 
   // 訂閱排行榜
   useEffect(() => {
-    if (!school?.id) return;
+    if (!school?.id || !auth.user?.uid) return;
     return subscribeLeaderboard({
       schoolId: school.id,
       onChange: (rows) => {
@@ -820,7 +820,10 @@ export function AchievementsScreen(props: Record<string, unknown>) {
     <Screen>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        contentContainerStyle={{
+          gap: theme.layout.sectionGapLarge,
+          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
+        }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

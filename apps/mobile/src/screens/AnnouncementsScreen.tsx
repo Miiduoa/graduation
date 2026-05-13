@@ -36,6 +36,7 @@ import { useSearchHistory, POPULAR_SEARCHES } from '../state/searchHistory';
 import { useToast } from '../ui/Toast';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, softShadowStyle } from '../ui/theme';
+import { useTheme } from '../state/theme';
 import { formatDateTime } from '../utils/format';
 
 type Announcement = {
@@ -46,6 +47,8 @@ type Announcement = {
   publishedAt: unknown;
 };
 
+type AnnouncementIconInfo = { name: string; bg: string; color: string };
+
 type AnnouncementView = 'all' | 'important' | 'today';
 
 function isImportantAnnouncement(a: Announcement): boolean {
@@ -55,17 +58,17 @@ function isImportantAnnouncement(a: Announcement): boolean {
   );
 }
 
-const ICON_MAP: Record<string, { name: string; bg: string; color: string }> = {
-  important: { name: 'alert-circle', bg: 'rgba(239,68,68,0.15)', color: '#EF4444' },
-  general: { name: 'megaphone', bg: 'rgba(99,102,241,0.15)', color: '#6366F1' },
-};
-
-function getAnnouncementIcon(a: Announcement) {
-  if (isImportantAnnouncement(a)) return ICON_MAP.important;
-  return ICON_MAP.general;
-}
-
 export function AnnouncementsScreen(props: Record<string, unknown>) {
+  const th = useTheme();
+  const getAnnouncementIcon = useCallback(
+    (a: Announcement): AnnouncementIconInfo => {
+      if (isImportantAnnouncement(a)) {
+        return { name: 'alert-circle', bg: th.colors.dangerSoft, color: th.colors.danger };
+      }
+      return { name: 'megaphone', bg: th.colors.infoSoft, color: th.colors.info };
+    },
+    [th],
+  );
   const navigation = useNavigation();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const nav = (props?.navigation ?? navigation) as any;
@@ -225,9 +228,9 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
         <View style={{ flex: 1 }}>
           <View
             style={{
-              paddingTop: insets.top + 12,
-              paddingBottom: 20,
-              paddingHorizontal: 20,
+              paddingTop: insets.top + theme.space.md,
+              paddingBottom: theme.space.lg,
+              paddingHorizontal: theme.layout.screenPadding,
               backgroundColor: theme.colors.bg,
             }}
           >
@@ -236,7 +239,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                 flexDirection: 'row',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                marginBottom: 16,
+                marginBottom: theme.space.md,
               }}
             >
               <Text
@@ -273,7 +276,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
               )}
             </View>
 
-            <View style={{ flexDirection: 'row', gap: 10 }}>
+            <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
               <View
                 style={{
                   paddingHorizontal: 14,
@@ -347,10 +350,10 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
             </View>
           </View>
 
-          <View style={{ flex: 1, paddingHorizontal: 16, gap: 12 }}>
+          <View style={{ flex: 1, paddingHorizontal: theme.layout.screenPadding, gap: theme.layout.sectionGap }}>
             {isOffline && lastFetchTime && <OfflineDataNotice cachedAt={lastFetchTime} />}
 
-            <View style={{ marginTop: 4 }}>
+            <View style={{ marginTop: theme.space.xs }}>
               <SearchBar
                 value={q}
                 onChange={(v) => {
@@ -366,7 +369,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
+              contentContainerStyle={{ gap: theme.space.sm, paddingVertical: theme.space.sm }}
             >
               {viewFilters.map((f) => {
                 const isActive = activeView === f.key;
@@ -570,6 +573,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
               />
             ) : items.length === 0 ? (
               <EmptyState
+                showCalmHero
                 title="沒有公告"
                 subtitle="目前沒有公告內容"
                 hint="下拉刷新或稍後再試。"
@@ -609,7 +613,10 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                 <FlatList
                   data={items}
                   keyExtractor={(item) => item.id}
-                  contentContainerStyle={{ gap: 12, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+                  contentContainerStyle={{
+                    gap: theme.layout.sectionGap,
+                    paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
+                  }}
                   refreshControl={
                     <RefreshControl
                       refreshing={refreshing}
@@ -664,7 +671,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
                             borderColor: theme.colors.border,
                             borderLeftWidth: 4,
                             borderLeftColor: accentColor,
-                            gap: 12,
+                            gap: theme.space.md,
                             ...softShadowStyle(theme.shadows.soft),
                           }}
                         >

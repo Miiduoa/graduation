@@ -78,11 +78,11 @@ export function SettingsScreen(props: any) {
     <Screen>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ gap: 14, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
+        contentContainerStyle={{ gap: theme.layout.sectionGap, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
         <AnimatedCard title="外觀" subtitle="">
           <View style={{ gap: 0 }}>
-            <View style={{ paddingVertical: 14, paddingHorizontal: 16 }}>
+            <View style={{ paddingVertical: theme.layout.listItemVertical, paddingHorizontal: theme.layout.screenPadding }}>
               <Text
                 style={{
                   color: theme.colors.textSecondary,
@@ -153,7 +153,7 @@ export function SettingsScreen(props: any) {
                   justifyContent: 'center',
                 }}
               >
-                <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+                <Text style={{ color: theme.colors.onAccent, fontSize: 16, fontWeight: '700' }}>
                   {school.name.charAt(0)}
                 </Text>
               </View>
@@ -203,7 +203,7 @@ export function SettingsScreen(props: any) {
               }
             />
             <Divider spacing={0} />
-            <View style={{ paddingVertical: 14, paddingHorizontal: 16 }}>
+            <View style={{ paddingVertical: theme.layout.listItemVertical, paddingHorizontal: theme.layout.screenPadding }}>
               <Button
                 text="清除快取"
                 kind="accent-ghost"

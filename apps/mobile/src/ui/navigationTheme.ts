@@ -1,19 +1,17 @@
 import { BottomTabNavigationOptions } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationOptions } from '@react-navigation/native-stack';
-import { theme, shadowStyle } from './theme';
+import { theme, shadowStyle, TAB_BAR_SCROLL_BOTTOM_PADDING } from './theme';
 import { Platform } from 'react-native';
 
 /**
- * 浮動 Tab Bar 所需的 ScrollView 底部留白。
- * Tab Bar 高度 68px + 底部偏移 ~44px（含 safe area）= 112px，加 12px 喘息空間 = 124px。
+ * 浮動 Tab Bar 所需的 ScrollView 底部留白（與 theme.layout.scrollBottomInset 對齊）。
  */
-export const TAB_BAR_CONTENT_BOTTOM_PADDING = 124;
+export const TAB_BAR_CONTENT_BOTTOM_PADDING = TAB_BAR_SCROLL_BOTTOM_PADDING;
 
 export function createStackScreenOptions(): NativeStackNavigationOptions {
-  const isDark = theme.mode === 'dark';
   return {
     headerStyle: {
-      backgroundColor: isDark ? theme.colors.surface : theme.colors.bg,
+      backgroundColor: theme.mode === 'dark' ? theme.colors.surface : theme.colors.bg,
     },
     headerTitleStyle: {
       color: theme.colors.text,
@@ -30,24 +28,23 @@ export function createStackScreenOptions(): NativeStackNavigationOptions {
 }
 
 export function createTabScreenOptions(_routeName: string): BottomTabNavigationOptions {
-  const isDark = theme.mode === 'dark';
   return {
     headerShown: false,
     tabBarStyle: {
       position: 'absolute',
-      left: 20,
-      right: 20,
+      left: 24,
+      right: 24,
       bottom: Platform.OS === 'ios' ? 30 : 18,
-      backgroundColor: isDark ? theme.colors.surface : '#FFFFFFEE',
+      backgroundColor: theme.colors.chromeTabBar,
       borderTopColor: 'transparent',
       borderTopWidth: 0,
-      borderRadius: theme.radius.xl,
+      borderRadius: theme.radius.full,
       height: 68,
       paddingTop: 8,
       paddingBottom: 8,
       paddingHorizontal: 8,
-      borderWidth: isDark ? 1 : 0,
-      borderColor: isDark ? theme.colors.border : 'transparent',
+      borderWidth: 1,
+      borderColor: theme.colors.chromeTabBorder,
       ...shadowStyle(theme.shadows.lg),
     },
     tabBarLabelStyle: {

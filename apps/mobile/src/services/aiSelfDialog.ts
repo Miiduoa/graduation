@@ -4,15 +4,21 @@
  * 提示句集合與 aiConversationSim.test.ts 對齊並補上多行場景句。
  */
 
-import { setDataSource } from '../data/source';
 import { mockSource } from '../data/mockSource';
-import { autonomousQuery } from './aiLocalAgent';
+import type { CampusActorRole } from '../data/types';
+import { setDataSource } from '../data/source';
+import { autonomousQuery, type AgentQueryResult } from './aiLocalAgent';
 
 export type AISelfDialogScenario = {
   id: string;
   description: string;
   messages: Array<{ role: 'user' | 'assistant'; content: string }>;
   expectedTopics?: string[];
+  /** intents／executed／results 至少須出現其一（寬鬆驗收） */
+  expectAnyTools?: string[];
+  /** contextText 須包含的子字串（選填） */
+  expectContextIncludes?: string[];
+  role?: CampusActorRole;
 };
 
 export type AISelfDialogFailure = {
@@ -144,15 +150,93 @@ export const DEFAULT_SELF_DIALOG_PROMPTS: string[] = [
   "影印多少張以內免費這種規定在哪看",
   "煩死了啦肚子又餓又有通知未讀到底要先幹嘛",
   "你會什麼",
-  "我人卡在圖書館晚點還有課可是肚子狂叫該先幹嘛"
+  "我人卡在圖書館晚點還有課可是肚子狂叫該先幹嘛",
+  "幫我續借人工智慧那本",
+  "還書要把程式設計那本歸還",
+  "算了圖書館自習座位預約我要取消",
+  "我去宿舍領包裹了確認取件",
+  "便當雞腿飯超讚給五顆星啦",
+  "加入讀書會群組 cs-read-99",
+  "小組發文問大家期末要不要一起念",
+  "報告作業我都寫完了幫我繳交一下",
+  "幫我加讀書會行程進明天下午三點行事曆",
+  "刪除行程期中考複習那個我不需要了",
+  "修改行程讀書會改到晚上七點好不好",
+  "這堂微積分課開始點名吧",
+  "幫我出作業期末專題提案截止下週",
+  "批改作業幫學生小明的繳交打88分寫得不錯",
+  "發布公告停課因為颱風來了緊急通知",
+  "呃那個啦明天那個課然後我又餓又想看公告你随意",
+  "not 飯 ok I need 成績 bus route 失物錢包",
+  "退選啦干不想修微積分了啦幫我退",
+  "幫我私訊阿銘跟他說錢還你了不要再已讀不回",
+  "………算了你直接 comprehensive 我整個人爆炸塞車遲到又有作業 due",
+  "Orz 簽到簽倒簽道三選一要幫我打卡啦",
+  "早安我還沒醒先給我懶人包",
+  "等等我其實只想知道今天第一堂在哪",
+  "幹趕不上簽到了",
+  "下課想吃素的路線規劃一下",
+  "下午請假頭痛一整個爆炸",
+  "順便預約洗衣機不然沒內褲穿",
+  "後悔不想去了可以嗎",
+  "印論文一式兩份黑白雙面感恩",
+  "期中考啥時侯啦我真的會謝 quiz schedule",
+  "這課配分佔比到底怎麼蒜…會不會被當啊",
+  "tronclass 討論區有沒有新串啊救命",
+  "老師上船的講義ppt在哪下載啊找不到",
+  "微積分課誰在修啦同學名單給我瞄一眼",
+  "作業繳交狀態跟詳請帮我看一下行不行",
+  "課堂公告是不是又發新的了我漏看了",
+  "论坛有没有新帖子啊我慌了",
+  "讲义课件在哪下载急死了",
+  "帮我查挂号预约记录谢谢",
+  "幫我查預約健康檢查的紀錄好不好",
+  "明天牙痛幫我预约挂号好不好啦",
+  "幫我把面試加到行事曆明天下午兩點好不好",
+  "改一下行程面試換到晚上七點啦干",
+  "刪掉行程面試那個我不去了",
+  "幫我din訂晚餐啦随便啦快",
+  "把這週行程sync到我的brain裡啦（行事曆）",
+  "今天有啥活動我就廢不想動腦",
+  "餐廳老闆：今天便當線上單幫我對一下有沒有漏單",
+  "行政端：麻煩發全校公告飲水機清洗那種口吻正式一點"
 ];
 
 export const AI_SELF_DIALOG_SCENARIOS: AISelfDialogScenario[] = [];
 
 export function evaluateSelfDialogResponse(
-  _scenario: AISelfDialogScenario,
-  _response: string,
+  scenario: AISelfDialogScenario,
+  result: AgentQueryResult,
 ): AISelfDialogFailure | null {
+  const tools = new Set<string>();
+  for (const i of result.intents ?? []) tools.add(i.tool);
+  for (const e of result.executedActions ?? []) tools.add(e.tool);
+  for (const r of result.results ?? []) tools.add(r.tool);
+
+  if (scenario.expectAnyTools?.length) {
+    const hit = scenario.expectAnyTools.some((t) => tools.has(t));
+    if (!hit) {
+      return {
+        scenarioId: scenario.id,
+        reason: `missing_any_tool:${scenario.expectAnyTools.join(',')}`,
+        actual: [...tools].join(','),
+      };
+    }
+  }
+
+  if (scenario.expectContextIncludes?.length) {
+    const ctx = String(result.contextText ?? '');
+    for (const kw of scenario.expectContextIncludes) {
+      if (!ctx.includes(kw)) {
+        return {
+          scenarioId: scenario.id,
+          reason: `context_missing:${kw}`,
+          actual: ctx.slice(0, 280),
+        };
+      }
+    }
+  }
+
   return null;
 }
 
@@ -209,7 +293,9 @@ export async function runAISelfDialogEvaluation(options?: {
   };
 
   const failures: AISelfDialogFailure[] = [];
+  const maxFailureDetails = 48;
   let passed = 0;
+  let failed = 0;
   const rand = mulberry32(seed >>> 0);
 
   for (let i = 0; i < rounds; i++) {
@@ -218,19 +304,22 @@ export async function runAISelfDialogEvaluation(options?: {
       await autonomousQuery(msg, ctx, undefined, []);
       passed += 1;
     } catch (e: unknown) {
-      failures.push({
-        scenarioId: `round-${i}`,
-        reason: 'throw',
-        actual: e instanceof Error ? e.message : String(e),
-      });
-      if (failures.length >= maxFailures) break;
+      failed += 1;
+      if (failures.length < maxFailureDetails) {
+        failures.push({
+          scenarioId: `round-${i}`,
+          reason: 'throw',
+          actual: e instanceof Error ? e.message : String(e),
+        });
+      }
+      if (failed >= maxFailures) break;
     }
   }
 
   return {
-    total: rounds,
+    total: passed + failed,
     passed,
-    failed: failures.length,
+    failed,
     failures,
     durationMs: Date.now() - t0,
   };
