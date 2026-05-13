@@ -113,7 +113,10 @@ export function CafeteriaScreen(props: any) {
     | {
         status: 'data';
         level: 'low' | 'medium' | 'high';
-        sampleSize: number;
+        source: 'merged' | 'reports_only' | 'orders_only';
+        reportSampleSize: number;
+        orderWeightedSum: number;
+        ordersInPressureModel: number;
         lastUpdated: Date | null;
       }
     | { status: 'empty' };
@@ -150,8 +153,11 @@ export function CafeteriaScreen(props: any) {
           setCafeteriaCrowd({
             status: 'data',
             level: r.level,
-            sampleSize: r.sampleSize,
-            lastUpdated: r.lastUpdated,
+            source: r.source,
+            reportSampleSize: r.reportSampleSize,
+            orderWeightedSum: r.orderWeightedSum,
+            ordersInPressureModel: r.ordersInPressureModel,
+            lastUpdated: r.lastReportAt,
           });
         } else {
           setCafeteriaCrowd({ status: 'empty' });
@@ -309,13 +315,20 @@ export function CafeteriaScreen(props: any) {
                   即時人潮
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
-                  尚無此餐廳最近的使用者回報，無法推算擁擠度。請至校園地圖開啟對應餐廳（靜園／宜園／至善）並使用「回報目前人潮」。
+                  尚無足夠「現場回報」與「今日訂單取餐時段」訊號。請至校園地圖回報人潮，或使用線上訂餐（預估取餐時間將納入推算）。
                 </Text>
               </View>
             );
           }
 
-          const { level, sampleSize, lastUpdated } = cafeteriaCrowd;
+          const {
+            level,
+            source,
+            reportSampleSize,
+            orderWeightedSum,
+            ordersInPressureModel,
+            lastUpdated,
+          } = cafeteriaCrowd;
           const cafeteriaLabel =
             focusCafeteriaId === 'jingyuan'
               ? '靜園餐廳'
@@ -336,7 +349,7 @@ export function CafeteriaScreen(props: any) {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <Ionicons name="people-outline" size={16} color={CROWD_COLORS[level]} />
                 <Text style={{ color: CROWD_COLORS[level], fontSize: 13, fontWeight: '700' }}>
-                  即時人潮 · {cafeteriaLabel}
+                  即時繁忙度 · {cafeteriaLabel}
                 </Text>
                 <View
                   style={{
@@ -358,12 +371,18 @@ export function CafeteriaScreen(props: any) {
                 </View>
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 12, marginBottom: 2 }}>
-                依據校園地圖餐廳 POI 的使用者回報加權計算（有效樣本 {sampleSize} 筆）。
+                {source === 'merged'
+                  ? `合併推算：現場有效樣本 ${reportSampleSize} 筆；訂單取餐時段加權 ${orderWeightedSum}（${ordersInPressureModel} 單，不代表人人已到現場）。`
+                  : source === 'reports_only'
+                    ? `依現場回報加權（有效樣本 ${reportSampleSize} 筆）。`
+                    : `依今日線上訂單與預估取餐時間加權（加權 ${orderWeightedSum}，${ordersInPressureModel} 單；不代表實際現場人數）。`}
               </Text>
               <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
                 {lastUpdated
-                  ? `最近更新：${lastUpdated.toLocaleString()}`
-                  : '時間資訊將隨回報寫入後顯示'}
+                  ? `回報最近更新：${lastUpdated.toLocaleString()}`
+                  : source === 'orders_only'
+                    ? '無現場回報時間戳；訊號來自訂單推估'
+                    : '時間資訊將隨回報寫入後顯示'}
               </Text>
             </View>
           );

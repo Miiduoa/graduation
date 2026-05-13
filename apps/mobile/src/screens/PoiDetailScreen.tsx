@@ -43,6 +43,13 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { formatRelativeTime, toDate } from '../utils/format';
+import {
+  cafeteriaIdFromCrowdPoiId,
+  fetchCafeteriaCrowdSummary,
+  CROWD_LABELS,
+  CROWD_COLORS,
+  type CafeteriaCrowdSummaryOk,
+} from '../services/cafeteriaData';
 
 type CrowdInfo = {
   level: CrowdLevel;
@@ -272,6 +279,7 @@ export function PoiDetailScreen(props: any) {
   const auth = useAuth();
 
   const [crowdInfo, setCrowdInfo] = useState<CrowdInfo | null>(null);
+  const [cafeteriaBlend, setCafeteriaBlend] = useState<CafeteriaCrowdSummaryOk | null>(null);
   const [userRating, setUserRating] = useState(0);
   const [userComment, setUserComment] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -303,9 +311,25 @@ export function PoiDetailScreen(props: any) {
 
   const { items: crowdReports, reload: reloadCrowdReports, loading: crowdReportsLoading } =
     useAsyncList<PoiCrowdReport>(
-    () => (id ? ds.listPoiCrowdReports(id, school.id) : Promise.resolve([])),
-    [ds, id, school.id],
-  );
+      () => (id ? ds.listPoiCrowdReports(id, school.id) : Promise.resolve([])),
+      [ds, id, school.id],
+    );
+
+  useEffect(() => {
+    const cid = id ? cafeteriaIdFromCrowdPoiId(id) : null;
+    if (!cid) {
+      setCafeteriaBlend(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchCafeteriaCrowdSummary(cid, ds.listPoiCrowdReports, school.id).then((r) => {
+      if (cancelled) return;
+      setCafeteriaBlend(r.ok ? r : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, ds, school.id]);
 
   const myReview = useMemo(() => {
     if (!auth.user) return null;
@@ -517,6 +541,11 @@ export function PoiDetailScreen(props: any) {
         level,
       });
       await reloadCrowdReports();
+      const cid = cafeteriaIdFromCrowdPoiId(id);
+      if (cid) {
+        const blend = await fetchCafeteriaCrowdSummary(cid, ds.listPoiCrowdReports, school.id);
+        setCafeteriaBlend(blend.ok ? blend : null);
+      }
       setSuccessMsg(`已收到你的「${crowdLevelConfig[level].label}」回報，感謝協助更新現場資訊`);
     } catch (e: any) {
       setErr(e?.message ?? '送出人潮回報失敗');
@@ -912,6 +941,26 @@ export function PoiDetailScreen(props: any) {
             }
             delay={100}
           >
+            {cafeteriaBlend ? (
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: theme.colors.muted,
+                  textAlign: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: 12,
+                }}
+              >
+                餐廳綜合推算（現場回報＋訂單取餐時段）：{CROWD_LABELS[cafeteriaBlend.level]} ·
+                {cafeteriaBlend.source === 'merged'
+                  ? ' 合併'
+                  : cafeteriaBlend.source === 'orders_only'
+                    ? ' 訂單推估為主'
+                    : ' 回報為主'}
+                （訂單加權 {cafeteriaBlend.orderWeightedSum}，{cafeteriaBlend.ordersInPressureModel}{' '}
+                單；訂單不代表人已到店）
+              </Text>
+            ) : null}
             <View style={{ alignItems: 'center', padding: 16 }}>
               <View
                 style={{
@@ -1002,6 +1051,46 @@ export function PoiDetailScreen(props: any) {
               最後更新：{crowdInfo.lastUpdated.toLocaleTimeString()}
             </Text>
           </AnimatedCard>
+        ) : item && isDiningPoiCategory(item.category) && cafeteriaBlend ? (
+          <AnimatedCard title="即時繁忙度" subtitle="現場回報＋訂單取餐時段加權（訂單不代表人已到店）" delay={100}>
+            <View style={{ alignItems: 'center', padding: 16 }}>
+              <View
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: 40,
+                  backgroundColor: `${CROWD_COLORS[cafeteriaBlend.level]}20`,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 12,
+                }}
+              >
+                <Ionicons name="analytics-outline" size={36} color={CROWD_COLORS[cafeteriaBlend.level]} />
+              </View>
+              <Text
+                style={{
+                  color: CROWD_COLORS[cafeteriaBlend.level],
+                  fontWeight: '900',
+                  fontSize: 20,
+                }}
+              >
+                {CROWD_LABELS[cafeteriaBlend.level]}
+              </Text>
+              <Text style={{ color: theme.colors.muted, marginTop: 8, fontSize: 12, textAlign: 'center' }}>
+                {cafeteriaBlend.source === 'merged'
+                  ? `合併：現場有效樣本 ${cafeteriaBlend.reportSampleSize} 筆 · 訂單加權 ${cafeteriaBlend.orderWeightedSum}（${cafeteriaBlend.ordersInPressureModel} 單）`
+                  : cafeteriaBlend.source === 'orders_only'
+                    ? `主要依訂單取餐時段推估：加權 ${cafeteriaBlend.orderWeightedSum}（${cafeteriaBlend.ordersInPressureModel} 單）`
+                    : `主要依現場回報（${cafeteriaBlend.reportSampleSize} 筆有效樣本）`}
+              </Text>
+            </View>
+            <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+              <Button
+                text={auth.user ? '回報目前人潮' : '登入後可回報人潮'}
+                onPress={handleReportCrowd}
+              />
+            </View>
+          </AnimatedCard>
         ) : item && isDiningPoiCategory(item.category) ? (
           <AnimatedCard
             title="即時人潮"
@@ -1009,7 +1098,7 @@ export function PoiDetailScreen(props: any) {
             delay={100}
           >
             <Text style={{ color: theme.colors.muted, fontSize: 13, paddingHorizontal: 16 }}>
-              學生餐廳人潮僅依真實回報計算。請登入後使用下方按鈕回報現場狀況。
+              學生餐廳繁忙度結合現場回報與今日訂單取餐時段。若仍無訊號，請登入後回報現場或改用線上訂餐以建立取餐時間資料。
             </Text>
             <View style={{ marginTop: 16, paddingHorizontal: 16, paddingBottom: 16 }}>
               <Button
