@@ -753,6 +753,13 @@ export async function earnXP(action: XPAction): Promise<{
 
   await saveState(state);
 
+  try {
+    const { notifyFromXpAction } = await import('./companionEngine');
+    await notifyFromXpAction(action);
+  } catch {
+    /* companion optional */
+  }
+
   return {
     xpGained,
     totalXP: state.totalXP,

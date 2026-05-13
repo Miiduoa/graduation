@@ -67,6 +67,8 @@ import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
 import { rootNavigationRef, type RootTabParamList } from './src/app/rootNavigation';
+import { initCrossModuleConnections } from './src/services/crossModuleConnector';
+import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
 
 /**
  * 4+1 AI-First 導航架構
@@ -180,6 +182,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           QRCode: 'qrcode',
           GlobalSearch: 'search',
           Achievements: 'achievements',
+          CampusGarden: 'campus-garden',
           DataExport: 'data-export',
           AccountDeletion: 'account-deletion',
           SSOLogin: 'sso-login',
@@ -480,6 +483,11 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
         school?.id
       ) {
         syncEssentialData(school.id).catch(console.error);
+      }
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        import('./src/services/companionEngine')
+          .then(({ applyForegroundCompanionTick }) => applyForegroundCompanionTick())
+          .catch(() => void 0);
       }
       appState.current = nextAppState;
     };
@@ -807,6 +815,9 @@ function AppInner() {
     initOfflineModeSync().then((cleanup) => {
       offlineModeCleanup = cleanup;
     });
+
+    initCrossModuleConnections();
+    registerCompanionCampusBusBridge();
 
     return () => {
       networkCleanup?.();

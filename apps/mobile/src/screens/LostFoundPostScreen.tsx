@@ -197,6 +197,16 @@ export function LostFoundPostScreen(props: any) {
           await ds.updateLostFoundItem(editId, itemData);
         } else {
           await ds.createLostFoundItem(itemData as any);
+          try {
+            const { emitLostFoundPosted } = await import('../services/campusEventBus');
+            emitLostFoundPosted({
+              userId: auth.user.uid,
+              itemId: `local_${Date.now()}`,
+              type: type === 'lost' ? 'lost' : 'found',
+            });
+          } catch {
+            /* optional bus */
+          }
         }
       }
       // DataSource 未就緒時仍允許導覽回上頁（示範模式）

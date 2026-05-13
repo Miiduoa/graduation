@@ -40,6 +40,7 @@ import {
   fetchCampusDiningCrowdSummary,
   subscribeOrders,
   setOrderSchoolId,
+  estimateVendorPrepWaitFromOrders,
   type Cafeteria,
   type CafeteriaId,
   type Vendor,
@@ -201,7 +202,7 @@ export function AdminCafeteriaScreen(props: any) {
           />
         )}
 
-        {activeTab === 'vendors' && <VendorsTab />}
+        {activeTab === 'vendors' && <VendorsTab orders={orders} />}
 
         {activeTab === 'statistics' && <StatisticsTab orders={orders} />}
       </ScrollView>
@@ -230,7 +231,11 @@ function OverviewTab(props: {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchCampusDiningCrowdSummary(ds.listPoiCrowdReports, school.id).then((r) => {
+    void fetchCampusDiningCrowdSummary(
+      ds.listPoiCrowdReports,
+      school.id,
+      orders.length > 0 ? orders : undefined,
+    ).then((r) => {
       if (cancelled) return;
       if (r.ok) {
         setCampusCrowdStatus(r.level);
@@ -251,7 +256,7 @@ function OverviewTab(props: {
     return () => {
       cancelled = true;
     };
-  }, [ds, school.id]);
+  }, [ds, school.id, orders]);
 
   // 計算統計數據
   const stats = useMemo(() => {
@@ -624,7 +629,7 @@ function InspectionsTab(props: { inspections: InspectionRecord[]; onRefresh: () 
 // 店家管理 Tab
 // ══════════════════════════════════════════════════
 
-function VendorsTab() {
+function VendorsTab(props: { orders: Order[] }) {
   const [selectedCafeteria, setSelectedCafeteria] = useState<CafeteriaId | null>(null);
   const [expandedVendor, setExpandedVendor] = useState<string | null>(null);
   const [allVendors, setAllVendors] = useState<Vendor[]>(VENDORS); // 初始值用本地，之後用 Firestore
@@ -702,6 +707,7 @@ function VendorsTab() {
           <VendorManagementCard
             key={vendor.id}
             vendor={vendor}
+            orders={props.orders}
             isExpanded={expandedVendor === vendor.id}
             onToggleExpand={() =>
               setExpandedVendor(expandedVendor === vendor.id ? null : vendor.id)
@@ -1049,11 +1055,16 @@ function InspectionCard(props: { inspection: InspectionRecord }) {
 
 function VendorManagementCard(props: {
   vendor: Vendor;
+  orders: Order[];
   isExpanded: boolean;
   onToggleExpand: () => void;
 }) {
-  const { vendor: v, isExpanded, onToggleExpand } = props;
+  const { vendor: v, orders, isExpanded, onToggleExpand } = props;
   const cafeteriaName = CAFETERIAS.find((c) => c.id === v.cafeteriaId)?.name ?? '';
+  const prepEst = useMemo(
+    () => estimateVendorPrepWaitFromOrders(v.id, orders),
+    [v.id, orders],
+  );
 
   return (
     <Pressable
@@ -1106,6 +1117,13 @@ function VendorManagementCard(props: {
           <InfoRow label="評價數" value={v.ratingCount.toString()} />
           <InfoRow label="平均消費" value={`$${v.avgPrice}`} />
           <InfoRow label="營業時間" value={`${v.openTime}~${v.closeTime}`} />
+          <InfoRow
+            label="近期製作耗時（訂單推算）"
+            value={
+              prepEst.labelZh ??
+              (prepEst.sampleSize === 0 ? '尚無已完成／可取餐之時間戳樣本' : '—')
+            }
+          />
 
           {!v.isOpen && (
             <Pressable

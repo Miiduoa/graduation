@@ -1,8 +1,15 @@
 /**
- * 靜宜大學蓋夏圖書館 — 完整真實資料
- * 資料來源：https://library.pu.edu.tw/
- *          https://www.lib.pu.edu.tw/history/floorplan.html
- *          https://www.lib.pu.edu.tw/service/holdingprivilege.html
+ * 靜宜大學蓋夏圖書館 — App 內樓層／書架／服務資訊（離線友好）
+ *
+ * **館藏是否在館、複本、預約** 請以官方 OPAC 為準：
+ * https://webpacx.lib.pu.edu.tw/
+ *
+ * 本檔書目資料（LIBRARY_BOOKS 等）用於館內導覽、搜尋體驗示意，非即時流通紀錄。
+ *
+ * 空間／開館／借閱規則參考：
+ * https://library.pu.edu.tw/
+ * https://www.lib.pu.edu.tw/history/floorplan.html
+ * https://www.lib.pu.edu.tw/service/holdingprivilege.html
  */
 
 // ═══════════════════════════════════════════════════

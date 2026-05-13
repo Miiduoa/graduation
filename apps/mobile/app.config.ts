@@ -319,6 +319,8 @@ export default ({ config }: any) => {
       aiProvider: releaseAiProvider,
       aiRuntimeMode: isReleaseLike ? 'production-backend' : 'development-configured',
       aiServerBaseUrl: process.env.EXPO_PUBLIC_AI_SERVER_URL ?? '',
+      /** Cloudflare Worker OPAC proxy base URL (no trailing slash); empty → device direct fetch only */
+      libraryOpacProxyUrl: process.env.EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL ?? '',
       geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
       aiWebSearchEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, true),
       aiWebLearningEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, true),

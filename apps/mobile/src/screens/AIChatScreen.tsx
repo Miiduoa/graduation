@@ -12,6 +12,7 @@ import {
   Easing,
   Alert,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
@@ -1161,6 +1162,196 @@ function ChoiceMenuCard(props: {
   );
 }
 
+/**
+ * 助理長文排版：將編號清單、區塊標題【】、項目符號與「已逾期」拆成可掃讀區塊（避免單一 Text 牆）。
+ */
+function AssistantRichMessageBody({ content, textColor }: { content: string; textColor: string }) {
+  const muted = theme.colors.muted;
+  const border = theme.colors.separator;
+  const accent = theme.colors.accent;
+  const lines = content.split('\n');
+  const out: React.ReactNode[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      out.push(<View key={`assistant-fmt-${i}`} style={{ height: 8 }} />);
+      continue;
+    }
+
+    const numbered = line.match(/^\s*(\d+)\.\s+(.*)$/);
+    if (numbered) {
+      let body = numbered[2];
+      const overdue = /逾期|⚠️/.test(body);
+      body = body.replace(/\s*⚠️\s*逾期\s*$/u, '').replace(/\s*逾期\s*$/u, '').trim();
+      out.push(
+        <View
+          key={`assistant-fmt-${i}`}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            marginBottom: 12,
+            paddingBottom: 12,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: border,
+          }}
+        >
+          <View
+            style={{
+              minWidth: 28,
+              height: 28,
+              borderRadius: 8,
+              backgroundColor: theme.colors.accentSoft,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginRight: 10,
+              marginTop: 1,
+            }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '700', color: accent }}>{numbered[1]}</Text>
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ color: textColor, fontSize: 14, lineHeight: 22 }}>{body}</Text>
+            {overdue ? (
+              <View
+                style={{
+                  alignSelf: 'flex-start',
+                  marginTop: 8,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 6,
+                  backgroundColor: theme.colors.dangerSoft,
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.danger }}>已逾期</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>,
+      );
+      continue;
+    }
+
+    if (/^【/.test(trimmed) && /】/.test(trimmed)) {
+      out.push(
+        <Text
+          key={`assistant-fmt-${i}`}
+          style={{
+            marginTop: out.length > 0 ? 12 : 0,
+            marginBottom: 6,
+            fontSize: 13,
+            fontWeight: '700',
+            color: accent,
+            lineHeight: 20,
+          }}
+        >
+          {trimmed}
+        </Text>,
+      );
+      continue;
+    }
+
+    if (trimmed.startsWith('以下是我自主查詢')) {
+      const segments = trimmed
+        .split(/(?=【)/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (let s = 0; s < segments.length; s++) {
+        const seg = segments[s];
+        if (seg.startsWith('以下是我自主查詢')) {
+          out.push(
+            <Text
+              key={`assistant-fmt-${i}-s${s}`}
+              style={{
+                marginBottom: 10,
+                fontSize: 12,
+                lineHeight: 18,
+                color: muted,
+              }}
+            >
+              {seg}
+            </Text>,
+          );
+        } else if (/^【/.test(seg)) {
+          out.push(
+            <Text
+              key={`assistant-fmt-${i}-s${s}`}
+              style={{
+                marginBottom: 6,
+                fontSize: 13,
+                fontWeight: '700',
+                color: accent,
+                lineHeight: 20,
+              }}
+            >
+              {seg}
+            </Text>,
+          );
+        } else {
+          out.push(
+            <Text
+              key={`assistant-fmt-${i}-s${s}`}
+              style={{
+                marginBottom: 8,
+                color: textColor,
+                fontSize: 14,
+                lineHeight: 22,
+              }}
+            >
+              {seg}
+            </Text>,
+          );
+        }
+      }
+      continue;
+    }
+
+    if (/^共\s*\d+\s*項/.test(trimmed) || /^共\s*\d+\s*筆/.test(trimmed)) {
+      out.push(
+        <Text
+          key={`assistant-fmt-${i}`}
+          style={{
+            marginBottom: 10,
+            fontSize: 13,
+            fontWeight: '600',
+            color: theme.colors.textSecondary,
+          }}
+        >
+          {trimmed}
+        </Text>,
+      );
+      continue;
+    }
+
+    if (/^[-*•]\s/.test(trimmed)) {
+      out.push(
+        <View
+          key={`assistant-fmt-${i}`}
+          style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 }}
+        >
+          <Text style={{ marginRight: 8, color: accent, fontWeight: '700', marginTop: 2 }}>•</Text>
+          <Text style={{ flex: 1, color: textColor, fontSize: 14, lineHeight: 22 }}>
+            {trimmed.replace(/^[-*•]\s+/, '')}
+          </Text>
+        </View>,
+      );
+      continue;
+    }
+
+    out.push(
+      <Text
+        key={`assistant-fmt-${i}`}
+        style={{ marginBottom: 8, color: textColor, fontSize: 14, lineHeight: 22 }}
+      >
+        {line}
+      </Text>,
+    );
+  }
+
+  return <View>{out}</View>;
+}
+
 // ── Message Bubble (Enhanced) ──
 function MessageBubble(props: {
   message: Message;
@@ -1297,11 +1488,11 @@ function MessageBubble(props: {
             borderColor: theme.colors.border,
           }}
         >
-          <Text
-            style={{ color: isUser ? '#fff' : theme.colors.text, lineHeight: 22, fontSize: 14 }}
-          >
-            {message.content}
-          </Text>
+          {isUser ? (
+            <Text style={{ color: '#fff', lineHeight: 22, fontSize: 14 }}>{message.content}</Text>
+          ) : (
+            <AssistantRichMessageBody content={message.content} textColor={theme.colors.text} />
+          )}
         </View>
       )}
 

@@ -13,6 +13,7 @@ import { MenuDetailScreen } from './MenuDetailScreen';
 import { OrderingScreen } from './OrderingScreen';
 import { MenuSubscriptionScreen } from './MenuSubscriptionScreen';
 import { LibraryScreen } from './LibraryScreen';
+import { LibraryCatalogScreen } from './LibraryCatalogScreen';
 import { HealthScreen } from './HealthScreen';
 import { DormitoryScreen } from './DormitoryScreen';
 import { PrintServiceScreen } from './PrintServiceScreen';
@@ -74,6 +75,11 @@ export function MapStack() {
         options={{ title: '菜單訂閱' }}
       />
       <Stack.Screen name="Library" component={LibraryScreen} options={{ title: '圖書館' }} />
+      <Stack.Screen
+        name="LibraryCatalog"
+        component={LibraryCatalogScreen}
+        options={{ title: '館藏查詢', headerShown: false }}
+      />
       <Stack.Screen name="Health" component={HealthScreen} options={{ title: '校園健康' }} />
       <Stack.Screen name="Dormitory" component={DormitoryScreen} options={{ title: '宿舍服務' }} />
       <Stack.Screen

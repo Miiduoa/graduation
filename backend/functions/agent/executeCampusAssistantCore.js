@@ -66,6 +66,7 @@ const INTENTS_SKIP_LLM = new Set([
   'leave_status',
   'wash_reserve',
   'food_order',
+  'pois',
 ]);
 const { assertActiveSchoolMember } = createAuthzHelpers(db);
 

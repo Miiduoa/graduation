@@ -43,7 +43,7 @@ import {
   distillLearnedSkillFromToolSuccess,
   type LearnedSkill,
 } from '../data/puAIAgentData';
-import type { AssistantChoiceMenu } from '../data/types';
+import type { AssistantChoiceMenu, InboxTask } from '../data/types';
 import {
   formatLunchRecommendationReply,
   recommendLunchCandidates,
@@ -317,7 +317,7 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
         properties: {
           status: {
             type: 'string',
-            description: '篩選狀態：pending=未繳, overdue=逾期, all=全部',
+            description: '篩選：pending=尚未繳交（含已逾期但未繳）, overdue=已逾期且尚未繳交, all=全部相關作業/考試狀態',
             enum: ['pending', 'overdue', 'all'],
           },
         },
@@ -1102,6 +1102,30 @@ export async function executeTool(
   }
 }
 
+/** TronClass activity.type：是否為作業／測驗類（排除討論區、教材等） */
+function tcActivityTypeIsAssignmentLike(type: unknown): boolean {
+  const t = String(type ?? '').toLowerCase();
+  if (!t) return false;
+  return (
+    t === 'homework' ||
+    t === 'quiz' ||
+    t === 'exam' ||
+    t === 'assignment' ||
+    t === 'online_quiz' ||
+    t.includes('homework') ||
+    t.includes('quiz') ||
+    t.includes('exam') ||
+    t.includes('作業') ||
+    t.includes('測驗')
+  );
+}
+
+/** 與 PUAdapter.listInboxTasks 篩選一致：已繳／已評分不視為待繳 */
+function tcActivityNeedsSubmit(activity: { status?: unknown }): boolean {
+  const s = String(activity.status ?? '').toLowerCase();
+  return s !== 'graded' && s !== 'submitted';
+}
+
 // ── 工具執行器映射 ──
 
 const TOOL_EXECUTORS: Record<
@@ -1249,58 +1273,98 @@ const TOOL_EXECUTORS: Record<
   query_assignments: async (args, ctx) => {
     const tcActivities = await getCachedTCActivities();
     const tcTodos = await getCachedTCTodos();
+    const tcCourses = await getCachedTCCourses();
+    const courseNameById = new Map<number, string>();
+    if (tcCourses) {
+      for (const c of tcCourses) {
+        courseNameById.set(c.id, c.name);
+      }
+    }
     const now = new Date();
 
-    let items: any[] = [];
-
-    // TronClass activities — may be Record<number, TCActivity[]> or TCActivity[]
     const activityList: any[] = Array.isArray(tcActivities)
       ? tcActivities
-      : tcActivities ? Object.values(tcActivities).flat() : [];
-    if (activityList.length > 0) {
-      items.push(...activityList.map((a: any) => ({
-        id: a.id ?? a.activity_id,
-        title: a.title ?? a.name,
-        courseName: a.course_name ?? '未知課程',
-        dueAt: a.end_time ?? a.due_date ?? a.deadline,
-        type: a.type ?? 'assignment',
-        isOverdue: a.end_time ? new Date(a.end_time) < now : false,
-      })));
-    }
+      : tcActivities
+        ? Object.values(tcActivities).flat()
+        : [];
 
-    // TronClass todos
-    if (tcTodos && tcTodos.length > 0) {
-      items.push(...tcTodos.filter((t: any) => !items.some(a => a.id === t.id)).map((t: any) => ({
+    const items: any[] = [];
+    const seenKeys = new Set<string>();
+
+    const rowKeyFromTc = (a: any): string =>
+      a?.id != null ? `tc-activity-${a.id}` : `tc-fallback-${String(a?.title ?? '')}-${String(a?.course_id ?? '')}`;
+
+    const pushInboxTaskRow = (t: InboxTask) => {
+      if (t.kind !== 'assignment' && t.kind !== 'quiz') return;
+      const needsSubmit = t.preferredIntent === 'submit';
+      const akey = t.assignmentId ?? undefined;
+      const dedupeKey = akey ?? `inbox-${t.id}`;
+      if (seenKeys.has(dedupeKey)) return;
+      seenKeys.add(dedupeKey);
+      const dueRaw =
+        t.dueAt instanceof Date ? t.dueAt.toISOString() : t.dueAt != null ? String(t.dueAt) : undefined;
+      items.push({
         id: t.id,
-        title: t.title ?? t.name,
-        courseName: t.course_name ?? '未知課程',
-        dueAt: t.end_time ?? t.due_date,
-        type: 'todo',
-        isOverdue: t.end_time ? new Date(t.end_time) < now : false,
-      })));
-    }
+        assignmentKey: akey,
+        title: t.title,
+        courseName: t.groupName ?? '',
+        dueAt: dueRaw,
+        type: t.kind,
+        isOverdue: t.dueAt ? new Date(t.dueAt as Date) < now : false,
+        needsSubmit,
+      });
+    };
 
-    // DataSource fallback
-    if (items.length === 0 && hasDataSource() && ctx.userId) {
+    const pushTcRow = (a: any) => {
+      if (!tcActivityTypeIsAssignmentLike(a.type)) return;
+      const rk = rowKeyFromTc(a);
+      if (seenKeys.has(rk)) return;
+      seenKeys.add(rk);
+      const dueRaw = a.end_time ?? a.due_date ?? a.deadline;
+      const cid = typeof a.course_id === 'number' ? a.course_id : parseInt(String(a.course_id ?? ''), 10);
+      const cn =
+        (a.course_name && String(a.course_name)) ||
+        (!Number.isNaN(cid) ? courseNameById.get(cid) : undefined) ||
+        (!Number.isNaN(cid) ? `課程#${cid}` : '未知課程');
+      items.push({
+        id: a.id ?? a.activity_id,
+        assignmentKey: a.id != null ? `tc-activity-${a.id}` : undefined,
+        title: a.title ?? a.name ?? '未命名',
+        courseName: cn,
+        dueAt: dueRaw,
+        type: a.type ?? 'assignment',
+        isOverdue: dueRaw ? new Date(dueRaw) < now : false,
+        needsSubmit: tcActivityNeedsSubmit(a),
+      });
+    };
+
+    if (hasDataSource() && ctx.userId) {
       try {
         const ds = getDataSource();
         const inboxTasks = await ds.listInboxTasks(ctx.userId, ctx.schoolId);
-        items = inboxTasks.map(t => ({
-          id: t.id,
-          title: (t as any).title ?? t.id,
-          courseName: (t as any).groupName ?? '',
-          dueAt: (t as any).dueAt,
-          type: (t as any).kind ?? 'task',
-          isOverdue: (t as any).dueAt ? new Date((t as any).dueAt) < now : false,
-        }));
-      } catch { /* ignore */ }
+        for (const t of inboxTasks) {
+          pushInboxTaskRow(t);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    for (const a of activityList) {
+      pushTcRow(a);
+    }
+
+    if (tcTodos && tcTodos.length > 0) {
+      for (const t of tcTodos) {
+        pushTcRow(t);
+      }
     }
 
     const status = args.status ?? 'all';
     if (status === 'overdue') {
-      items = items.filter(i => i.isOverdue);
+      items.splice(0, items.length, ...items.filter((i) => i.isOverdue && i.needsSubmit));
     } else if (status === 'pending') {
-      items = items.filter(i => !i.isOverdue);
+      items.splice(0, items.length, ...items.filter((i) => i.needsSubmit));
     }
 
     // 按截止日排序
@@ -1316,13 +1380,14 @@ const TOOL_EXECUTORS: Record<
 
     const summary = items.slice(0, 10).map((item, i) => {
       const due = item.dueAt ? new Date(item.dueAt).toLocaleDateString('zh-TW') : '無截止日';
-      return `${i + 1}. ${item.title} (${item.courseName}) — ${due}${item.isOverdue ? ' ⚠️逾期' : ''}`;
+      const sub = item.needsSubmit === false ? ' ✓已處理' : '';
+      return `${i + 1}. ${item.title} (${item.courseName}) — ${due}${item.isOverdue ? ' ⚠️逾期' : ''}${sub}`;
     }).join('\n');
 
     return {
       success: true,
       data: items,
-      summary: `共 ${items.length} 項待處理:\n${summary}`,
+      summary: `共 ${items.length} 項（作業/測驗）：\n${summary}`,
     };
   },
 

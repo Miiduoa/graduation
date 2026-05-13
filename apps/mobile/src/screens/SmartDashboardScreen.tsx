@@ -95,9 +95,11 @@ import { campusEventBus } from '../services/campusEventBus';
 import { getDeadlines, type Deadline } from '../services/smartCalendarEngine';
 import { getAnyCachedTCTodos, seedCachedTCCourses, seedCachedTCAttendance } from '../services/puDataCache';
 import { BrainInsightCards } from '../components/BrainInsightCards';
+import { CompanionStrip } from '../components/CompanionStrip';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { aiOverlay } from '../app/useAIOverlay';
 import type { BrainInsight } from '../services/aiBrain';
+import type { CompanionPublicSnapshot } from '../services/companionEngine';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -2308,6 +2310,7 @@ export function SmartDashboardScreen(props: any) {
   const [riskSnapshots, setRiskSnapshots] = useState<StudentRiskSnapshot[]>([]);
   const [pulseAggregates, setPulseAggregates] = useState<PulseAggregate[]>([]);
   const [gamification, setGamification] = useState<GamificationState | null>(null);
+  const [companionSnapshot, setCompanionSnapshot] = useState<CompanionPublicSnapshot | null>(null);
   const [optimization, setOptimization] = useState<ScheduleOptimization | null>(null);
   const [agentMode, setAgentMode] = useState<AgentModeKey>('route');
   const [tcCourses, setTcCourses] = useState<TCCourse[]>([]);
@@ -2432,6 +2435,19 @@ export function SmartDashboardScreen(props: any) {
       setInsights(insightsData.status === 'fulfilled' ? insightsData.value : null);
       setPulse(pulseData.status === 'fulfilled' ? pulseData.value : null);
       setGamification(gamData.status === 'fulfilled' ? gamData.value : null);
+
+      try {
+        const ce = await import('../services/companionEngine');
+        await ce.applyForegroundCompanionTick();
+        if (gamData.status === 'fulfilled') {
+          const g = gamData.value;
+          await ce.syncCompanionMilestones(g.level, g.streak.current);
+        }
+        setCompanionSnapshot(await ce.getCompanionSnapshot());
+      } catch {
+        setCompanionSnapshot(null);
+      }
+
       setOptimization(optData.status === 'fulfilled' ? optData.value : null);
       setNextActions(actionData.status === 'fulfilled' ? actionData.value : []);
       setRiskSnapshots(riskData.status === 'fulfilled' ? riskData.value : []);
@@ -2738,6 +2754,14 @@ export function SmartDashboardScreen(props: any) {
         >
         {/* 2. XP Progress */}
         {gamification && <XPProgressBar gamification={gamification} />}
+        {companionSnapshot ? (
+          <CompanionStrip
+            snapshot={companionSnapshot}
+            onPressExpand={() =>
+              props?.navigation?.navigate?.('我的', { screen: 'CampusGarden' })
+            }
+          />
+        ) : null}
 
         {/* ── AI 智慧日報 ── */}
         {aiBriefing && (
@@ -3060,10 +3084,7 @@ export function SmartDashboardScreen(props: any) {
         )}
 
         {/* 11. Quick Actions */}
-        <View
-          testID="e2e-dashboard-quick-actions"
-          style={{ marginHorizontal: theme.space.lg, marginBottom: theme.space.lg }}
-        >
+        <View style={{ marginHorizontal: theme.space.lg, marginBottom: theme.space.lg }}>
           <Text
             style={{
               color: theme.colors.text,

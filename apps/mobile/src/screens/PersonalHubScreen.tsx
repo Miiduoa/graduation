@@ -373,6 +373,13 @@ export function PersonalHubScreen(props: any) {
             onPress={() => nav?.navigate?.('Achievements')}
           />
           <ListRow
+            icon="leaf-outline"
+            title="校園園地"
+            meta="同伴與作物"
+            tint="#22C55E"
+            onPress={() => nav?.navigate?.('CampusGarden')}
+          />
+          <ListRow
             icon="school-outline"
             title="學分與畢業規劃"
             meta="規劃"
