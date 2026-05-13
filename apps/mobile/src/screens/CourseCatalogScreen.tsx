@@ -348,9 +348,9 @@ function CourseCard(props: {
           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
             選課代號 {c.code}
             {props.showRemain && c.remaining != null && c.capacity != null
-              ? `　·　餘額 ${c.remaining}/${c.capacity}`
+              ? ` · 餘額 ${c.remaining}/${c.capacity}`
               : c.capacity != null
-                ? `　·　容量 ${c.capacity}`
+                ? ` · 容量 ${c.capacity}`
                 : ''}
           </Text>
         </View>

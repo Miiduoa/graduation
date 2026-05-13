@@ -11,17 +11,19 @@ tags:
 
 - launchApp
 
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 開啟頭像抽屜
 - tapOn:
     id: 'header-avatar-button'
 
-- assertVisible:
-    text: '個人'
+- extendedWaitUntil:
+    visible: '個人'
     timeout: 5000
+
 
 - takeScreenshot: drawer_open
 
@@ -29,9 +31,10 @@ tags:
 - tapOn:
     text: '我的 QR Code'
 
-- assertVisible:
-    text: 'QR 碼'
+- extendedWaitUntil:
+    visible: 'QR 碼'
     timeout: 5000
+
 
 - takeScreenshot: qr_code_screen
 
@@ -45,9 +48,10 @@ tags:
 - tapOn:
     text: '成就與積分'
 
-- assertVisible:
-    text: '成就與積分'
+- extendedWaitUntil:
+    visible: '成就與積分'
     timeout: 5000
+
 
 - takeScreenshot: achievements_screen
 

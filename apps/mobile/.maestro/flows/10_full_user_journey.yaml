@@ -16,10 +16,11 @@ tags:
 - launchApp
 
 # === 1. 完成 Onboarding ===
-- assertVisible:
-    text: '歡迎'
+- extendedWaitUntil:
+    visible: '歡迎'
     timeout: 10000
     optional: true
+
 
 # 快速跳過 Onboarding
 - repeat:
@@ -34,9 +35,10 @@ tags:
     optional: true
 
 # 等待主畫面
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # === 2. 瀏覽公告 ===
 # 查看公告列表

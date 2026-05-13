@@ -13,18 +13,20 @@ tags:
 - launchApp
 
 # 等待主畫面載入
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 導航到地圖頁面
 - tapOn:
     text: '地圖'
 
 # 等待地圖頁面載入
-- assertVisible:
-    text: '地圖'
+- extendedWaitUntil:
+    visible: '地圖'
     timeout: 5000
+
 
 # 截圖 - 地圖頁面
 - takeScreenshot: map_screen

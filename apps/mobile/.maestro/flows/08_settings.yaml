@@ -13,9 +13,10 @@ tags:
 - launchApp
 
 # 等待主畫面載入
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 導航到「我的」頁面
 - tapOn:
@@ -32,9 +33,10 @@ tags:
     optional: true
 
 # 等待設定頁面
-- assertVisible:
-    text: '設定'
+- extendedWaitUntil:
+    visible: '設定'
     timeout: 5000
+
 
 # 截圖 - 設定頁面
 - takeScreenshot: settings_screen
@@ -76,9 +78,10 @@ tags:
     optional: true
 
 # 等待無障礙設定頁面
-- assertVisible:
-    text: '無障礙設定'
+- extendedWaitUntil:
+    visible: '無障礙設定'
     timeout: 5000
+
 
 # 截圖 - 無障礙設定
 - takeScreenshot: accessibility_settings
@@ -99,9 +102,10 @@ tags:
     optional: true
 
 # 等待語言設定頁面
-- assertVisible:
-    text: '語言設定'
+- extendedWaitUntil:
+    visible: '語言設定'
     timeout: 5000
+
 
 # 截圖 - 語言設定
 - takeScreenshot: language_settings
@@ -132,9 +136,10 @@ tags:
     optional: true
 
 # 等待通知設定頁面
-- assertVisible:
-    text: '通知設定'
+- extendedWaitUntil:
+    visible: '通知設定'
     timeout: 5000
+
 
 # 截圖 - 通知設定
 - takeScreenshot: notification_settings
@@ -153,9 +158,10 @@ tags:
     optional: true
 
 # 等待資料匯出頁面
-- assertVisible:
-    text: '資料匯出'
+- extendedWaitUntil:
+    visible: '資料匯出'
     timeout: 5000
+
 
 # 截圖 - 資料匯出
 - takeScreenshot: data_export

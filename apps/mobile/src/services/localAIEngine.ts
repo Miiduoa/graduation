@@ -3076,11 +3076,13 @@ export function needsClarification(
   const missingSlots: string[] = [];
 
   const t = text.trim();
+  const tBare = t.replace(/[。？！!?…〜~]+$/g, '').trim();
   // 選單跟進短句（第 N 個／最後一個／對好可以）：不應用「greeting 還是課程」這類雙意圖亂問
+  // ★ 需同時支援繁體「個」與簡體「个」，否則「第一个」會被當成低信心題而誤問
   if (
-    /^第\s*[一二兩三四五六七八九十\d]+\s*個?$/.test(t) ||
-    /^最後[一那]?個$/.test(t) ||
-    /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?)$/.test(t)
+    /^第\s*[一二两兩三四五六七八九十百千\d]+\s*[個个]?$/.test(tBare) ||
+    /^最(?:後|后)[一那]?[個个]$/.test(tBare) ||
+    /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?)$/.test(tBare)
   ) {
     return { needed: false, reason: '', suggestedQuestions: [], missingSlots: [] };
   }
