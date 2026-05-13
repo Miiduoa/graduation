@@ -1,5 +1,5 @@
 # 10_full_user_journey.yaml
-# 迴歸：不使用 clearState（Expo dev client 需保留 Metro bundle URL）
+# Deep link 迴歸路徑（避免依賴儀表捲動與載入時間）
 
 appId: ${APP_ID}
 name: Full User Journey
@@ -18,104 +18,53 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- extendedWaitUntil:
-    visible: '快速入口'
-    timeout: 120000
-
-- waitForAnimationToEnd:
-    timeout: 1500
-
-# 公告
-- scrollUntilVisible:
-    element:
-      id: 'e2e-open-announcements'
-    direction: DOWN
-    timeout: 30000
-
-- tapOn:
-    id: 'e2e-open-announcements'
+- openLink: campus://home/announcements
 
 - extendedWaitUntil:
-    visible: '搜尋公告（標題/內文/來源）'
-    timeout: 15000
+    visible: '公告'
+    timeout: 20000
 
 - takeScreenshot: journey_01_announcements
 
-- tapOn:
-    index: 0
-    optional: true
-
-- takeScreenshot: journey_02_announcement_detail_optional
-
 - back
 
-# 活動
-- scrollUntilVisible:
-    element:
-      id: 'e2e-open-events'
-    direction: DOWN
-    timeout: 30000
-
-- tapOn:
-    id: 'e2e-open-events'
+- openLink: campus://home/events
 
 - extendedWaitUntil:
     visible: '活動'
-    timeout: 15000
+    timeout: 20000
     optional: true
 
 - takeScreenshot: journey_03_events
 
 - back
 
-# 校園／地圖
-- tapOn:
-    id: 'tab-校園'
+- openLink: campus://campus/map
 
-- scrollUntilVisible:
-    element:
-      id: 'e2e-campus-open-map'
-    direction: DOWN
-    timeout: 30000
-
-- tapOn:
-    id: 'e2e-campus-open-map'
+- extendedWaitUntil:
+    visible: '校園地圖'
+    timeout: 20000
+    optional: true
 
 - takeScreenshot: journey_05_map
 
-- tapOn:
-    text: '餐廳'
-    optional: true
-
-- takeScreenshot: journey_06_map_cafeteria_filter_optional
-
 - back
 
-# 餐廳
-- scrollUntilVisible:
-    element:
-      id: 'e2e-campus-open-cafeteria'
-    direction: DOWN
-    timeout: 30000
+- openLink: campus://campus/cafeteria
 
-- tapOn:
-    id: 'e2e-campus-open-cafeteria'
+- extendedWaitUntil:
+    visible: '餐廳'
+    timeout: 20000
+    optional: true
 
 - takeScreenshot: journey_07_cafeteria
 
 - back
 
-# 個人抽屜
-- tapOn:
-    id: 'tab-Today'
-
-- waitForAnimationToEnd:
-    timeout: 2000
-
 - extendedWaitUntil:
     visible:
-      id: 'tab-Today'
-    timeout: 15000
+      id: 'header-avatar-button'
+    timeout: 120000
 
 - tapOn:
     id: 'header-avatar-button'

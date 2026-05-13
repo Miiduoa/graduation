@@ -1,5 +1,5 @@
 # 12_campus_hub_and_social.yaml
-# 校園 Hub 磚 → 校園社群（動態／看板）
+# campus://home/community → 校園社群
 
 appId: ${APP_ID}
 name: Campus Hub & Social
@@ -19,27 +19,11 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- tapOn:
-    id: 'tab-校園'
-
-- extendedWaitUntil:
-    visible: '搜尋服務、地點、功能'
-    timeout: 20000
-
-- takeScreenshot: campus_hub
-
-- scrollUntilVisible:
-    element:
-      text: '校園社群'
-    direction: DOWN
-    timeout: 30000
-
-- tapOn:
-    text: '校園社群'
+- openLink: campus://home/community
 
 - extendedWaitUntil:
     visible: '校園社群'
-    timeout: 15000
+    timeout: 20000
 
 - assertVisible:
     text: '動態'
@@ -47,11 +31,9 @@ tags:
 - tapOn:
     text: '看板'
 
-- extendedWaitUntil:
-    visible: '看板'
-    timeout: 8000
-    optional: true
+- waitForAnimationToEnd:
+    timeout: 1500
 
-- takeScreenshot: campus_social_boards_optional
+- takeScreenshot: campus_social_boards
 
 - back
