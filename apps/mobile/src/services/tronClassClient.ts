@@ -387,14 +387,10 @@ export async function setTCBackendSession(
   _tcBackendSessionLoaded = true;
   _tcUserId = typeof userId === 'number' && Number.isFinite(userId) ? userId : _tcUserId;
 
+  const payload = JSON.stringify({ sessionId: normalized, userId: _tcUserId });
+  // 寫入 secureStorage，然後清理舊的 AsyncStorage
+  await secureSetItem(TC_BACKEND_SESSION_KEY, payload).catch(() => undefined);
   await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
-  await secureSetItem(
-    TC_BACKEND_SESSION_KEY,
-    JSON.stringify({
-      sessionId: normalized,
-      userId: _tcUserId,
-    }),
-  );
 }
 
 export async function clearTCSession(): Promise<void> {
