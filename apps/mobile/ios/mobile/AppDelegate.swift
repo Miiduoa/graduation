@@ -47,7 +47,7 @@ public class AppDelegate: ExpoAppDelegate {
     return options
   }
 
-  open override func application(
+  public func application(
     _ application: UIApplication,
     configurationForConnecting connectingSceneSession: UISceneSession,
     options: UIScene.ConnectionOptions

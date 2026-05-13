@@ -1180,6 +1180,9 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     /懶人包|今日重點/.test(msg) && !/吃飯|訂餐|點餐|想[吃喝]|便當|蛋餅|奶茶|飲料|宵夜|手搖/.test(msg);
   const orderFoodContext =
     /吃|喝|餓|餐|飯|麵|便當|午餐|晚餐|早餐|宵夜|消夜|飲料|手搖|奶茶|珍奶|菜單|點餐|訂餐|點|訂|買|來一|素|辣|炸|油|清淡|便宜/.test(msg);
+  const hasInvalidOrderQuantity =
+    /(?:^|[^\d])(?:[-−－]\s*\d+|0)\s*[碗份個杯盤道]/.test(msg) ||
+    /負\s*\d+\s*[碗份個杯盤道]/.test(msg);
   const gradeQueryCue = /成績|分數|幾分|考幾分|gpa|績點|排名|學期成績/i.test(msg);
   const isMenuBrowseQuestion =
     /不知道|哪家|哪間|哪裡|開著|開嗎|有沒有/.test(msg) &&
@@ -1194,6 +1197,16 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   ) {
     // 先用語意推理：訊息「幫我訂午餐」要解析成 intent=order_food + meal_time=lunch（item=null）
     // 而不是 itemName='午餐' 去字串匹配
+    if (hasInvalidOrderQuantity) {
+      intents.push({
+        tool: 'create_order',
+        isWrite: true,
+        priority: 15,
+        args: { quantity: '' },
+        requiredArgs: ['quantity'],
+        reason: '訂餐數量無效',
+      });
+    } else {
     let frame: ReturnType<typeof semanticUnderstand> | null = null;
     try {
       frame = semanticUnderstand(origMsg);
@@ -1261,6 +1274,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
           reason: `訂餐「${foodName}」x${quantity}`,
         });
       }
+    }
     }
   }
 

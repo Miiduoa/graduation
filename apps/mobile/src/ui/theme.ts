@@ -516,34 +516,41 @@ export function createLightTheme(
   brand?: SchoolBrand,
 ): Theme {
   const gold = brand?.secondary ?? DEFAULT_GOLD;
-  const orbLilac = '#DDD6FE';
-  const orbPeri = '#C4D0FF';
+  /**
+   * AI 球等小面積：必須與 chromeTabBar 白／淺灰底有足夠對比；
+   * 第三段固定在 accent（辨識度）；前兩段略收斂淺色，避免「发白」淡出。
+   */
+  const orbTint = lighten(accent, 0.14);
+  const orbMid = lighten(accent, 0.02);
   return {
     mode: 'light',
     colors: {
-      bg: '#FCF8FB',
-      background: '#FCF8FB',
-      surface: '#FFFCFD',
-      surface2: '#F3ECFA',
-      surface3: '#EDE5F5',
+      bg: '#FFFFFF',
+      background: '#FFFFFF',
+      surface: '#FFFFFF',
+      surface2: '#F5F5F5',
+      surface3: '#EEEEEE',
       surfaceElevated: '#FFFFFF',
-      surfaceInteractive: '#F3ECFA',
-      surfaceInteractiveStrong: '#EDE5F5',
-      surfaceMuted: '#EFE6F7',
-      border: '#E5DEF0',
-      separator: '#EDE5F5',
-      text: '#18122E',
-      textSecondary: '#564F6D',
-      muted: '#8F89A3',
+      surfaceInteractive: '#F5F5F5',
+      surfaceInteractiveStrong: '#EBEBEB',
+      surfaceMuted: '#FAFAFA',
+      border: '#E4E4E7',
+      separator: '#F4F4F5',
+      /** 白底主文：對比約 16:1，利於 WCAG AA */
+      text: '#111827',
+      textSecondary: '#374151',
+      /** 次要說明：灰 500，正常字級約 4.6:1 */
+      muted: '#6B7280',
       accent,
       accentSoft: createAccentSoft(accent, 0.12),
       accentHover: lighten(accent, 0.12),
       accentStrong: lighten(accent, 0.22),
       gold,
       goldSoft: rgba(gold, 0.14),
-      gradientStart: accent,
-      gradientMid: '#8B7FD8',
-      gradientEnd: '#C4B5FD',
+      /** 大面積漸層預設改中性色；品牌紫僅限 accent／按鈕等小面積 */
+      gradientStart: '#F9FAFB',
+      gradientMid: '#E4E4E7',
+      gradientEnd: '#FFFFFF',
       success: '#0D9F7A',
       successSoft: 'rgba(13,159,122,0.11)',
       danger: '#DC3D4E',
@@ -554,10 +561,10 @@ export function createLightTheme(
       info: '#5B63E8',
       infoSoft: 'rgba(91,99,232,0.11)',
       focusRing: rgba(accent, 0.28),
-      overlay: 'rgba(24,18,46,0.38)',
-      disabledBg: 'rgba(143,137,163,0.12)',
-      disabledText: 'rgba(143,137,163,0.55)',
-      cardShadow: 'rgba(91,33,182,0.07)',
+      overlay: 'rgba(15,23,42,0.45)',
+      disabledBg: 'rgba(107,114,128,0.12)',
+      disabledText: '#9CA3AF',
+      cardShadow: 'rgba(15,23,42,0.06)',
       shimmer: 'rgba(255,255,255,0.9)',
       achievement: gold,
       achievementSoft: rgba(gold, 0.14),
@@ -573,8 +580,8 @@ export function createLightTheme(
       urgentSoft: 'rgba(220,61,78,0.11)',
       fresh: '#5B63E8',
       freshSoft: 'rgba(91,99,232,0.11)',
-      social: '#6D4FB8',
-      socialSoft: 'rgba(124,92,237,0.12)',
+      social: '#5B21B6',
+      socialSoft: createAccentSoft(accent, 0.1),
       confidenceHigh: '#0D9F7A',
       confidenceHighSoft: 'rgba(13,159,122,0.11)',
       confidenceMedium: '#D97706',
@@ -587,30 +594,30 @@ export function createLightTheme(
       roleTeacherSoft: 'rgba(13,159,122,0.11)',
       roleAdmin: gold,
       roleAdminSoft: rgba(gold, 0.14),
-      focusSurface: rgba(accent, 0.1),
+      focusSurface: 'rgba(17,24,39,0.06)',
       primary: accent,
       secondary: gold,
-      card: '#FFFCFD',
+      card: '#FFFFFF',
       onAccent: '#FFFFFF',
-      chromeTabBar: 'rgba(255,252,253,0.97)',
-      chromeTabBorder: 'rgba(126,109,169,0.14)',
-      chromeTabItemActive: createAccentSoft(accent, 0.14),
+      chromeTabBar: 'rgba(255,255,255,0.98)',
+      chromeTabBorder: 'rgba(15,23,42,0.1)',
+      chromeTabItemActive: createAccentSoft(accent, 0.1),
     },
     shadows: {
-      sm: { color: '#2C2248', opacity: 0.11, radius: 12, offsetY: 4, elevation: 3 },
-      md: { color: '#2C2248', opacity: 0.16, radius: 22, offsetY: 6, elevation: 6 },
-      lg: { color: '#2C2248', opacity: 0.2, radius: 28, offsetY: 10, elevation: 10 },
-      xl: { color: '#2C2248', opacity: 0.24, radius: 36, offsetY: 14, elevation: 14 },
-      glow: { color: accent, opacity: 0.22, radius: 26, offsetY: 0, elevation: 0 },
+      sm: { color: '#000000', opacity: 0.09, radius: 12, offsetY: 4, elevation: 3 },
+      md: { color: '#000000', opacity: 0.12, radius: 22, offsetY: 6, elevation: 6 },
+      lg: { color: '#000000', opacity: 0.14, radius: 28, offsetY: 10, elevation: 10 },
+      xl: { color: '#000000', opacity: 0.18, radius: 36, offsetY: 14, elevation: 14 },
+      glow: { color: accent, opacity: 0.18, radius: 26, offsetY: 0, elevation: 0 },
       soft: {
-        shadowColor: '#2C2248',
-        shadowOpacity: 0.12,
+        shadowColor: '#000000',
+        shadowOpacity: 0.1,
         shadowRadius: 14,
         shadowOffset: { width: 0, height: 5 },
         elevation: 5,
       },
       inset: {
-        shadowColor: '#2C2248',
+        shadowColor: '#000000',
         shadowOpacity: 0.05,
         shadowRadius: 4,
         shadowOffset: { width: 0, height: 1 },
@@ -623,10 +630,10 @@ export function createLightTheme(
     typography: sharedTypography,
     animation: sharedAnimation,
     gradients: {
-      drawerHeader: ['#EDE9FF', '#FFF5FB'] as const,
-      profileHero: ['#EDE9FF', '#FFF5FB', '#FCF8FB'] as const,
+      drawerHeader: ['#F9FAFB', '#FFFFFF'] as const,
+      profileHero: ['#F9FAFB', '#FFFFFF', '#FFFFFF'] as const,
       avatar: [lighten(accent, 0.12), accent] as const,
-      aiOrbNormal: [orbLilac, lighten(accent, 0.08), orbPeri] as const,
+      aiOrbNormal: [orbTint, orbMid, accent] as const,
       aiOrbUrgent: ['#FECACA', lighten('#FB7185', 0.08), '#E11D48'] as const,
     },
     schoolId,
@@ -730,11 +737,13 @@ export function applyTheme(mode: ThemeMode, schoolId?: string, fallbackAccent?: 
     next = mode === 'light' ? lightTheme : darkTheme;
   }
 
-  if (
+  const sameCore =
     _currentTheme.mode === next.mode &&
     _currentTheme.schoolId === next.schoolId &&
-    _currentTheme.colors.accent === next.colors.accent
-  ) {
+    _currentTheme.colors.accent === next.colors.accent;
+  /** 漸層／品牌球體 token 單獨改版時也要套用，否則 HMR 後仍握著舊 Theme 參考 */
+  const sameGradients = JSON.stringify(_currentTheme.gradients) === JSON.stringify(next.gradients);
+  if (sameCore && sameGradients) {
     return;
   }
 

@@ -14,6 +14,7 @@ import {
   getDefaultTrainingDB,
   isInternalToolSelectionPrompt,
   mergeLearnedSkill,
+  redactSensitiveUserTextForAI,
 } from '../../data/puAIAgentData';
 import { chatWithCampusAssistant } from '../../services/ai';
 
@@ -92,6 +93,26 @@ describe('AI assistant capability profile', () => {
     const insights = exportTrainingInsights(db, '幫我點早餐蛋餅');
     expect(insights).toContain('成功任務蒸餾');
     expect(insights).toContain('校園訂餐');
+  });
+
+  it('redacts sensitive user text before skill distillation', () => {
+    const text = '我的身分證 A123456789，電話 0912-345-678，密碼=abc123，信箱 test@example.com';
+    const redacted = redactSensitiveUserTextForAI(text);
+
+    expect(redacted).not.toContain('A123456789');
+    expect(redacted).not.toContain('0912-345-678');
+    expect(redacted).not.toContain('abc123');
+    expect(redacted).not.toContain('test@example.com');
+
+    const skill = distillLearnedSkillFromToolSuccess(
+      text,
+      'send_message',
+      { content: '電話 0912-345-678', peerId: 'peer-1' },
+      '已送出',
+    );
+    expect(skill?.procedure).not.toContain('0912-345-678');
+    expect(skill?.procedure).not.toContain('abc123');
+    expect(skill?.procedure).toContain('[電話已遮蔽]');
   });
 
   it('does not call client-side Gemini in release builds', async () => {

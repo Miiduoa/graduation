@@ -1,0 +1,181 @@
+{
+  "style_suffix": "Single square app UI button icon, cute flat cartoon sticker style, thick friendly outlines, lots of empty padding around the main silhouette, soft cream to pale lavender background, accent colors deep purple #7C3AED and warm gold #D4A843, no letters or numbers, centered, crisp edges, mobile-first clarity.",
+  "icons": [
+    {
+      "id": "ic_tab_today",
+      "prompt": "Cheerful sun rising behind a tiny calendar page miniature."
+    },
+    {
+      "id": "ic_tab_study",
+      "prompt": "Cute open textbook with a small bookmark ribbon and spark dot."
+    },
+    {
+      "id": "ic_tab_campus",
+      "prompt": "Folded campus map pin with mini building block silhouette."
+    },
+    {
+      "id": "ic_tab_messages",
+      "prompt": "Two overlapping speech bubbles with rounded cartoon corners."
+    },
+    {
+      "id": "ic_profile",
+      "prompt": "Simple friendly user bust avatar in a circle frame."
+    },
+    {
+      "id": "ic_close",
+      "prompt": "Bold X dismiss mark with rounded stroke ends."
+    },
+    {
+      "id": "ic_chevron_forward",
+      "prompt": "Single right-pointing chevron arrow, thick stroke."
+    },
+    {
+      "id": "ic_session_expired_clock",
+      "prompt": "Clock face with small warning dot, session timeout metaphor."
+    },
+    {
+      "id": "ic_warning_triangle",
+      "prompt": "Equilateral warning triangle with exclamation dot center."
+    },
+    {
+      "id": "ic_search",
+      "prompt": "Magnifying glass tilted, thick cartoon outline."
+    },
+    {
+      "id": "ic_clear_circle",
+      "prompt": "Circle with a small X inside meaning clear input."
+    },
+    {
+      "id": "ic_ai_sparkles",
+      "prompt": "Three sparkle stars clustered like magic AI assist button."
+    },
+    {
+      "id": "ic_navigate_pin",
+      "prompt": "Navigation arrow merged with map location teardrop pin."
+    },
+    {
+      "id": "ic_ar_glasses",
+      "prompt": "Chunky AR smart glasses front view, playful tech."
+    },
+    {
+      "id": "ic_people_community",
+      "prompt": "Three small people silhouettes in a gentle huddle circle."
+    },
+    {
+      "id": "ic_restaurant",
+      "prompt": "Fork and spoon cross badge, dining metaphor."
+    },
+    {
+      "id": "ic_library",
+      "prompt": "Stack of two books with a tiny plant on top."
+    },
+    {
+      "id": "ic_dorm",
+      "prompt": "Tiny house dorm with heart window, home away from home."
+    },
+    {
+      "id": "ic_bus",
+      "prompt": "Front view of cute shuttle bus with rounded windows."
+    },
+    {
+      "id": "ic_print",
+      "prompt": "Desktop printer with single sheet popping out."
+    },
+    {
+      "id": "ic_health_heart",
+      "prompt": "Heart with medical plus sign, wellness icon."
+    },
+    {
+      "id": "ic_lost_found",
+      "prompt": "Magnifying glass over a small suitcase tag."
+    },
+    {
+      "id": "ic_accessibility",
+      "prompt": "Universal access person in motion circle symbol simplified."
+    },
+    {
+      "id": "ic_payment_card",
+      "prompt": "Credit card with chip stripe, payments metaphor."
+    },
+    {
+      "id": "ic_ar_nav_badge",
+      "prompt": "Compass rose fused with camera corner brackets AR style."
+    },
+    {
+      "id": "ic_globe_social",
+      "prompt": "Globe with small chat bubble orbit, social campus net."
+    },
+    {
+      "id": "ic_qr_code",
+      "prompt": "Stylized QR tile pattern block simplified not readable."
+    },
+    {
+      "id": "ic_trophy",
+      "prompt": "Gold trophy cup with star shine lines."
+    },
+    {
+      "id": "ic_school",
+      "prompt": "Graduation cap with tassel tilted cheerfully."
+    },
+    {
+      "id": "ic_notifications",
+      "prompt": "Bell with tiny notification dot on upper right."
+    },
+    {
+      "id": "ic_options",
+      "prompt": "Three vertical sliders equalizer settings cartoon."
+    },
+    {
+      "id": "ic_settings",
+      "prompt": "Gear cog with rounded teeth friendly not industrial."
+    },
+    {
+      "id": "ic_ai_chip",
+      "prompt": "Square AI processor chip with corner pins cute."
+    },
+    {
+      "id": "ic_grid_widgets",
+      "prompt": "Four-square app grid window widgets preview."
+    },
+    {
+      "id": "ic_admin_shield",
+      "prompt": "Shield with check badge administrator trust."
+    },
+    {
+      "id": "ic_verify",
+      "prompt": "Clipboard with bold checkmark completion."
+    },
+    {
+      "id": "ic_analytics_chart",
+      "prompt": "Tiny bar chart with upward friendly arrow."
+    },
+    {
+      "id": "ic_facilities_wrench",
+      "prompt": "Wrench and tiny bolt facilities maintenance."
+    },
+    {
+      "id": "ic_store_merchant",
+      "prompt": "Storefront awning with window merchant shop."
+    },
+    {
+      "id": "ic_privacy_export",
+      "prompt": "Shield with downward arrow document export safe."
+    },
+    {
+      "id": "ic_trash_delete",
+      "prompt": "Trash bin with lid slightly open cartoon."
+    },
+    {
+      "id": "ic_help",
+      "prompt": "Question mark inside soft circle help desk."
+    },
+    {
+      "id": "ic_feedback_chat",
+      "prompt": "Speech bubble with three typing dots feedback."
+    },
+    {
+      "id": "ic_bug_report",
+      "prompt": "Cute beetle bug with tiny antennae dev issue."
+    }
+  ]
+}

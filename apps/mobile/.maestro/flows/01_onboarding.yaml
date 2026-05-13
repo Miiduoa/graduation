@@ -10,27 +10,31 @@ tags:
 
 ---
 # 注意：勿在此對 Expo development client 使用 clearState — Maestro 會 reinstall，會清空 JS bundle URL，出現「No script URL provided」（需 Metro：`pnpm dev`）。
-# 啟動 App（Metro 需已執行；若先前曾 reinstall，可能需先跑一次 Reload）
+# 啟動 App（development client 需先有 Metro：`pnpm dev` / `expo start`，見上方）
 - launchApp
 
-- tapOn:
-    text: 'Reload'
-    optional: true
-
-# 等待進入主 shell（底部 Tab「今天」來自 permissions UNIFIED_TABS）
 - extendedWaitUntil:
     visible:
       id: 'tab-Today'
     timeout: 45000
 
-- takeScreenshot: main_screen_after_cold_start
+# iOS 部分版本在連續截視圖／斷言之間需放行動畫，否則 XCTest 會 kAXErrorInvalidUIElement
+- waitForAnimationToEnd:
+    timeout: 3000
 
-# 驗證底部導覽列（4+1：四 Tab + 中央 AI 球；RN testID tab-<路由名>）
-- assertVisible:
-    id: 'tab-Today'
-- assertVisible:
-    id: 'tab-學習'
-- assertVisible:
-    id: 'tab-校園'
-- assertVisible:
-    id: 'tab-訊息'
+- extendedWaitUntil:
+    visible:
+      id: 'tab-學習'
+    timeout: 20000
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-校園'
+    timeout: 20000
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-訊息'
+    timeout: 20000
+
+- takeScreenshot: main_screen_after_cold_start

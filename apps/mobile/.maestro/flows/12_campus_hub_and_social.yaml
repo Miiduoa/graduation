@@ -1,0 +1,57 @@
+# 12_campus_hub_and_social.yaml
+# 校園 Hub 磚 → 校園社群（動態／看板）
+
+appId: ${APP_ID}
+name: Campus Hub & Social
+tags:
+  - smoke
+  - campus
+  - social
+
+---
+- launchApp
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-Today'
+    timeout: 45000
+
+- waitForAnimationToEnd:
+    timeout: 2500
+
+- tapOn:
+    id: 'tab-校園'
+
+- extendedWaitUntil:
+    visible: '校園'
+    timeout: 15000
+
+- takeScreenshot: campus_hub
+
+- scrollUntilVisible:
+    element:
+      text: '校園社群'
+    direction: DOWN
+    timeout: 30000
+
+- tapOn:
+    text: '校園社群'
+
+- extendedWaitUntil:
+    visible: '校園社群'
+    timeout: 15000
+
+- assertVisible:
+    text: '動態'
+
+- tapOn:
+    text: '看板'
+
+- extendedWaitUntil:
+    visible: '看板'
+    timeout: 8000
+    optional: true
+
+- takeScreenshot: campus_social_boards_optional
+
+- back

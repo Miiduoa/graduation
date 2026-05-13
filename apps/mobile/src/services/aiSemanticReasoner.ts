@@ -340,6 +340,8 @@ function extractConcreteItemName(
   let candidate = m?.[1]?.trim() ?? '';
 
   if (!candidate) return null;
+  candidate = candidate.split(/但|但是|不過|可是/)[0]?.trim() ?? candidate;
+  if (!candidate) return null;
 
   // 去除已被識別成 meal_time / category 的字
   for (const r of removedTerms) {

@@ -328,6 +328,38 @@ function checkMissing(
   return missing;
 }
 
+function checkInvalid(
+  spec: ToolSpec,
+  args: Record<string, unknown>,
+): ToolMissingField[] {
+  const invalid: ToolMissingField[] = [];
+  for (const field of spec.fields) {
+    const value = args[field.name];
+    if (!fieldHasValue(value)) continue;
+    if (field.type === 'integer' || field.type === 'number') {
+      const n = Number(asString(value));
+      if (!Number.isFinite(n) || (field.type === 'integer' && !Number.isInteger(n))) {
+        invalid.push({
+          field: field.name,
+          prompt: `請提供有效的「${field.description}」。`,
+          type: field.type,
+          example: field.example,
+        });
+        continue;
+      }
+      if (field.name === 'quantity' && n < 1) {
+        invalid.push({
+          field: field.name,
+          prompt: '請提供有效的數量，至少為 1。',
+          type: field.type,
+          example: field.example ?? '1',
+        });
+      }
+    }
+  }
+  return invalid;
+}
+
 function isWriteKind(kind: ToolKind): boolean {
   return kind === 'write' || kind === 'cross_role_write';
 }
@@ -1537,6 +1569,10 @@ export async function executeToolStandard(
   const missing = checkMissing(spec, args2);
   if (missing.length > 0) {
     return makeMissingInfo(spec.name, missing, writeKind);
+  }
+  const invalid = checkInvalid(spec, args2);
+  if (invalid.length > 0) {
+    return makeMissingInfo(spec.name, invalid, writeKind);
   }
 
   try {

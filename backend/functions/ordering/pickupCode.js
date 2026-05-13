@@ -16,12 +16,12 @@
 
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
-const crypto = require('crypto');
+const nodeCrypto = require('crypto');
 
 const REGION = 'asia-east1';
 
 function sha256(input) {
-  return crypto.createHash('sha256').update(input).digest('hex');
+  return nodeCrypto.createHash('sha256').update(input).digest('hex');
 }
 
 module.exports.verifyPickupCode = onCall({ region: REGION }, async (request) => {

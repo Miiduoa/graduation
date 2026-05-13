@@ -189,6 +189,20 @@ describe('aiToolRegistry — Stage 3：自然語言 → 工具參數', () => {
     expect(lastCall?.quantity).toBe(1);
   });
 
+  it('負數或零數量不可送出訂餐', async () => {
+    mockAiOrderFoodCallable.mockClear();
+    const r = await executeToolStandard(
+      'order_food',
+      { vendorId: 'v1', itemId: 'm1', quantity: '-3' },
+      baseCtx,
+    );
+
+    expect(r.success).toBe(false);
+    expect(r.errorCode).toBe('missing_info');
+    expect(r.missingInfo?.[0]?.field).toBe('quantity');
+    expect(mockAiOrderFoodCallable).not.toHaveBeenCalled();
+  });
+
   it('「幫我點第 2 個」+ lastChoiceMenu → 自動填 itemId/vendorId', async () => {
     const r = await executeToolStandard('order_food', {}, {
       ...baseCtx,

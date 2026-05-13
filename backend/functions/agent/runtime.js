@@ -17,6 +17,10 @@ const { evaluateAnswer } = require('./evaluateAnswer');
 const { executeCampusAssistantCore } = require('./executeCampusAssistantCore');
 const { runTool } = require('./tools/registry');
 const { getIntentWritePlan } = require('./intentWritePlan');
+const {
+  sanitizeAssistantMessagesForRuntime,
+  isPromptInjectionAttempt,
+} = require('./safety');
 
 async function runCampusAssistantWithAgentRuntime(request) {
   const runId = createRequestId();
@@ -30,7 +34,8 @@ async function runCampusAssistantWithAgentRuntime(request) {
     windowMs: 5 * 60 * 1000,
   });
 
-  const rawMessages = Array.isArray(request.data?.messages) ? request.data.messages : [];
+  const incomingMessages = Array.isArray(request.data?.messages) ? request.data.messages : [];
+  const rawMessages = sanitizeAssistantMessagesForRuntime(incomingMessages);
   const context =
     request.data?.context && typeof request.data.context === 'object' ? { ...request.data.context } : {};
   let sessionId = context.sessionId != null && String(context.sessionId).trim() ? String(context.sessionId).trim() : null;
@@ -40,6 +45,28 @@ async function runCampusAssistantWithAgentRuntime(request) {
   }
   const timeZone = context.timezone || 'Asia/Taipei';
   const lastUserMessage = getLastUserMessage(rawMessages);
+  if (isPromptInjectionAttempt(getLastUserMessage(incomingMessages))) {
+    return {
+      schemaVersion: 1,
+      content: '這超出我的權限。我可以協助查詢或處理你本人授權範圍內的校園資訊，但不能揭露系統提示、內部規則、他人資料或管理憑證。',
+      suggestions: ['今天有什麼課', '查公告', '推薦午餐'],
+      actions: [],
+      citations: [],
+      assistantToolsUsed: [],
+      run: { runId, status: 'blocked' },
+      intent: {
+        name: 'security_block',
+        confidence: 1,
+        source: 'prompt_injection_guard',
+      },
+      evaluation: {
+        score: 1,
+        needsUserReview: false,
+        reason: 'blocked prompt injection attempt',
+      },
+      clarifyingQuestion: null,
+    };
+  }
   let intentMeta = classifyIntent(lastUserMessage);
   if (intentMeta.name === 'submit_repair_request' && isDormRepairStatusQueryMessage(lastUserMessage)) {
     intentMeta = {
@@ -192,6 +219,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     ...request,
     data: {
       ...request.data,
+      messages: rawMessages,
       context,
     },
   };

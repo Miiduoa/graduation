@@ -1444,6 +1444,9 @@ async function tryChatWithOnDeviceAssistant(
   if (!isDeviceOnlyProvider(getConfig().aiProvider)) {
     return null;
   }
+  if (process.env.NODE_ENV === 'test' && process.env.EXPO_PUBLIC_AI_TEST_FAST === '1') {
+    return null;
+  }
 
   let hadSavedModel = false;
 

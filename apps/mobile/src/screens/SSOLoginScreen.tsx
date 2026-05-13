@@ -181,6 +181,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                 學號
               </Text>
               <TextInput
+                testID="student-id-input"
                 value={studentIdInput}
                 onChangeText={setStudentIdInput}
                 placeholder="E校園帳號"
@@ -207,6 +208,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                 密碼
               </Text>
               <TextInput
+                testID="student-password-input"
                 value={studentPwInput}
                 onChangeText={setStudentPwInput}
                 placeholder="輸入 e 校園密碼"
