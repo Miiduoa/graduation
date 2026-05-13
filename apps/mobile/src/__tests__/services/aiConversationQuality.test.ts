@@ -93,6 +93,22 @@ describe('AI 對話品質回歸', () => {
     expect(result.intents.some((i) => i.tool === 'daily_briefing')).toBe(false);
   });
 
+  it('幫我訂午餐：推薦／待選（isWrite:false）須保留選單，才可接「第一個」送單', async () => {
+    const first = await autonomousQuery('幫我訂午餐', CTX);
+    expect(first.choiceMenu?.producedByTool).toBe('create_order');
+    expect((first.choiceMenu?.options?.length ?? 0)).toBeGreaterThan(0);
+
+    const browseOnly = first.executedActions.some(
+      (a) => a.tool === 'create_order' && a.result.success && a.result.isWrite === false,
+    );
+    expect(browseOnly).toBe(true);
+
+    const second = await autonomousQuery('第一個', { ...CTX, lastChoiceMenu: first.choiceMenu });
+    expect(second.executedActions.some((a) => a.tool === 'create_order' && a.result.isWrite === true)).toBe(
+      true,
+    );
+  });
+
   it('使用者說已經簽到時不重複簽到', async () => {
     const result = await autonomousQuery('我已經簽到了', CTX);
 

@@ -16,9 +16,10 @@ tags:
 - launchApp
 
 # 等待 Onboarding 畫面載入
-- assertVisible:
-    text: '歡迎使用校園助手'
+- extendedWaitUntil:
+    visible: '歡迎使用校園助手'
     timeout: 10000
+
 
 # 截圖 - Onboarding 第一頁
 - takeScreenshot: onboarding_page_1
@@ -64,9 +65,10 @@ tags:
     text: '開始使用'
 
 # 等待主畫面載入
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 截圖 - 主畫面
 - takeScreenshot: main_screen_after_onboarding

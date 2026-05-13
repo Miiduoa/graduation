@@ -14,9 +14,10 @@ tags:
 - launchApp
 
 # 主儀表／今天
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 12000
+
 
 # 底部情境 Tab（標籤為 permissions.ts 的 UNIFIED_TABS.label）
 - assertVisible:
@@ -34,9 +35,10 @@ tags:
 - tapOn:
     id: 'header-avatar-button'
 
-- assertVisible:
-    text: '個人'
+- extendedWaitUntil:
+    visible: '個人'
     timeout: 5000
+
 
 - takeScreenshot: header_drawer_open
 
@@ -50,8 +52,7 @@ tags:
     optional: true
 
 - extendedWaitUntil:
-    visible:
-      text: 'AI 校園助理'
+    visible: 'AI 校園助理'
     timeout: 8000
     optional: true
 

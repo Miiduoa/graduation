@@ -42,6 +42,8 @@
   "scripts": {
     "dev": "pnpm dev:web",
     "dev:mobile": "pnpm --filter mobile start",
+    "ios:sim": "pnpm ios:mobile:sim",
+    "ios:mobile:sim": "pnpm --filter mobile ios:sim",
     "dev:web": "pnpm --filter web dev",
     "dev:functions": "pnpm --filter functions serve",
     "dev:ai": "cd backend/ai-server && ./run.sh",

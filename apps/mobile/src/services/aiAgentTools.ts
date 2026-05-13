@@ -2392,7 +2392,15 @@ const TOOL_EXECUTORS: Record<
         }).join('\n');
         return {
           success: true, isWrite: false,
-          summary: `${dateStr}（${dayNames[dayOfWeek]}）有以下課程：\n\n${list}\n\n你要請哪堂課的假？還是全部都請？你可以說「全部都請」或指定課程名稱。`,
+          summary: [
+            `假別：${leaveTypeLabel}`,
+            '',
+            `${dateStr}（${dayNames[dayOfWeek]}）有以下課程：`,
+            '',
+            list,
+            '',
+            '你要請哪堂課的假？還是全部都請？你可以說「全部都請」或指定課程名稱。',
+          ].join('\n'),
           data: targetCourses.map((c: any) => ({ id: c.id, name: c.name })),
         };
       }

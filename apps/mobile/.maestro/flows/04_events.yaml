@@ -13,18 +13,20 @@ tags:
 - launchApp
 
 # 等待主畫面載入
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 導航到活動頁面
 - tapOn:
     text: '活動'
 
 # 等待活動頁面載入
-- assertVisible:
-    text: '活動'
+- extendedWaitUntil:
+    visible: '活動'
     timeout: 5000
+
 
 # 截圖 - 活動列表
 - takeScreenshot: events_list

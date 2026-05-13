@@ -13,18 +13,20 @@ tags:
 - launchApp
 
 # 等待主畫面載入
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 導航到餐廳頁面
 - tapOn:
     text: '餐廳'
 
 # 等待餐廳頁面載入
-- assertVisible:
-    text: '餐廳'
+- extendedWaitUntil:
+    visible: '餐廳'
     timeout: 5000
+
 
 # 截圖 - 餐廳菜單列表
 - takeScreenshot: cafeteria_menu_list

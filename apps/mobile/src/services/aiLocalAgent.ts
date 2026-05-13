@@ -1165,8 +1165,13 @@ function pickChoiceMenuFromAgent(
   executed: Array<{ tool: string; result: ToolCallResult }>,
   reads: Array<{ tool: string; result: ToolCallResult }>,
 ): AssistantChoiceMenu | undefined {
-  const hadSuccessfulOrder = executed.some((e) => e.tool === 'create_order' && e.result.success);
-  if (hadSuccessfulOrder) return undefined;
+  // 只有「已完成實際下單（寫入）」才收起選單。
+  // 訂時段／多筆相符時會 success:true + isWrite:false 並附上 choiceMenu，若誤判成已下單會把選單剝掉，
+  // 使用者回「第一個」就接不到 create_order ordinal，整段對話形同白痴。
+  const hadCompletedPurchase = executed.some(
+    (e) => e.tool === 'create_order' && e.result.success && e.result.isWrite === true,
+  );
+  if (hadCompletedPurchase) return undefined;
 
   for (let i = executed.length - 1; i >= 0; i--) {
     const m = executed[i].result.choiceMenu;
@@ -1334,7 +1339,7 @@ export async function autonomousQuery(
     const m = resolvedMessage.trim();
     if (m.length > 36) return null; // 略放寬：「欸那就第二個吧」仍屬選單跟進
     const hasOrdinal =
-      /第\s*[一二兩三四五六七八九十\d]+(?:個|份|杯|碗|本|項|道)?|最後[一那]?(?:個|本|份|杯|碗)/.test(m);
+      /第\s*[一二两兩三四五六七八九十百千\d]+(?:[個个]|(?:份|杯|碗|本|項|道))?|最(?:後|后)[一那]?(?:[個个]|(?:本|份|杯|碗))/.test(m);
     // 允許「對對對」「對對對就那個」「好好好」這類重複/語氣加強
     const isConfirm =
       /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?|就[這那]個|就好|就[那這]個就好|就那個|就這個|行|好啊|要這個|買這個|就它)$/.test(m) ||
@@ -1382,7 +1387,7 @@ export async function autonomousQuery(
     const m = resolvedMessage.trim();
     const menuShortFollow =
       m.length <= 36 &&
-      (/第\s*[一二兩三四五六七八九十\d]+(?:個|份|杯|碗|本|項|道)?|最後[一那]?(?:個|本|份|杯|碗)/.test(m) ||
+      (/第\s*[一二两兩三四五六七八九十百千\d]+(?:[個个]|(?:份|杯|碗|本|項|道))?|最(?:後|后)[一那]?(?:[個个]|(?:本|份|杯|碗))/.test(m) ||
         /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?|就[這那]個|就好|就[那這]個就好|就那個|就這個|行|好啊|要這個|買這個|就它)$/.test(m) ||
         /^(?:對|好){1,4}(?:就[那這]個|就好|啊|啦|耶|喔|哦)?$/.test(m) ||
         /^(?:對對對|好好好|沒錯|對啊).*(?:就[那這]?個|就好)?$/.test(m) ||
