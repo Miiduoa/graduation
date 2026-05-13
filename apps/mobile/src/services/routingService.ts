@@ -270,6 +270,22 @@ async function osrmRoute(
   return null;
 }
 
+/**
+ * 僅查詢 OSM 步行路網（routing.openstreetmap.de foot profile）。
+ * 供校園 AR 導航等需要「真實人行道／步道」幾何時使用；失敗時由上層改走本地路網備援。
+ */
+export async function getFootRoute(
+  from: LatLng,
+  to: LatLng,
+): Promise<{
+  distance: number;
+  duration: number;
+  steps: RouteStep[];
+  geometry: [number, number][];
+} | null> {
+  return osrmRoute(from, to, 'foot');
+}
+
 function buildInstruction(step: any, profile: 'foot' | 'bike' | 'car' = 'car'): string {
   const maneuver = step.maneuver?.type ?? '';
   const modifier = step.maneuver?.modifier ?? '';

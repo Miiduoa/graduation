@@ -46,7 +46,7 @@ export function PostDetailScreen(props: any) {
   const [likeBusy, setLikeBusy] = useState(false);
 
   const loadPost = useCallback(async () => {
-    if (!postId || !school?.id || isFirebaseMockMode()) {
+    if (!postId || !school?.id || !auth.user?.uid || isFirebaseMockMode()) {
       setPost(null);
       return;
     }
@@ -56,16 +56,16 @@ export function PostDetailScreen(props: any) {
       return;
     }
     setPost({ id: snap.id, ...(snap.data() as Omit<CampusPostDoc, 'id'>) });
-  }, [postId, school?.id]);
+  }, [postId, school?.id, auth.user?.uid]);
 
   const loadReplies = useCallback(async () => {
-    if (!postId || !school?.id || isFirebaseMockMode()) {
+    if (!postId || !school?.id || !auth.user?.uid || isFirebaseMockMode()) {
       setReplies([]);
       return;
     }
     const rows = await listCampusReplies(school.id, postId);
     setReplies(rows);
-  }, [postId, school?.id]);
+  }, [postId, school?.id, auth.user?.uid]);
 
   const hydrateNames = useCallback(async () => {
     if (!school?.id || isFirebaseMockMode()) return;
@@ -228,6 +228,14 @@ export function PostDetailScreen(props: any) {
     );
   }
 
+  if (!auth.user) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ color: theme.colors.textSecondary }}>請先登入以查看貼文</Text>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -253,7 +261,9 @@ export function PostDetailScreen(props: any) {
         return (
         <ScrollView
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 36 }}
+          contentContainerStyle={{
+            paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + theme.space.xl,
+          }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <View style={styles.headerRow}>
@@ -287,17 +297,23 @@ export function PostDetailScreen(props: any) {
             </View>
           </View>
 
-          <Text style={[styles.commentHeader, { marginTop: 14 }]}>討論串 · {threadedReplies.length}</Text>
+          <Text style={[styles.commentHeader, { marginTop: theme.space.md }]}>討論串 · {threadedReplies.length}</Text>
           {threadedReplies.length === 0 ? (
-            <Text style={{ color: theme.colors.textSecondary, marginTop: 12 }}>尚無留言，當第一人吧。</Text>
+            <Text style={{ color: theme.colors.textSecondary, marginTop: theme.space.sm }}>尚無留言，當第一人吧。</Text>
           ) : (
             threadedReplies.map((item) => (
               <View
                 key={item.id}
                 style={[
                   styles.commentCard,
-                  { marginTop: 10 },
-                  item.threadDepth ? { marginLeft: 14 + Math.min(item.threadDepth, 6) * 12 } : null,
+                  { marginTop: theme.space.sm },
+                  item.threadDepth
+                    ? {
+                        marginLeft:
+                          theme.layout.screenPadding +
+                          Math.min(item.threadDepth, 6) * theme.space.sm,
+                      }
+                    : null,
                 ]}
               >
                 <View style={styles.commentTop}>
@@ -313,8 +329,14 @@ export function PostDetailScreen(props: any) {
             ))
           )}
 
-          <View style={[styles.replyComposer, { marginTop: 26 }]}>
-            <Text style={{ fontWeight: '700', color: theme.colors.text, marginBottom: 8 }}>寫留言</Text>
+          <View style={styles.replyComposer}>
+            <Text
+              style={{
+                fontWeight: '700',
+                color: theme.colors.text,
+                marginBottom: theme.space.sm,
+              }}
+            >寫留言</Text>
             {replyParentId ? (
               <View style={styles.replyTargetBar}>
                 <Text style={{ flex: 1, color: theme.colors.textSecondary, fontSize: 13 }}>
@@ -358,20 +380,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingHorizontal: theme.layout.screenPadding,
+    paddingTop: theme.space.md,
   },
-  author: { flex: 1, fontSize: 12, color: theme.colors.accent, fontWeight: '700', marginRight: 12 },
+  author: {
+    flex: 1,
+    fontSize: 12,
+    color: theme.colors.accent,
+    fontWeight: '700',
+    marginRight: theme.space.md,
+  },
   title: {
-    paddingHorizontal: 16,
+    paddingHorizontal: theme.layout.screenPadding,
     fontSize: 22,
     fontWeight: '900',
     color: theme.colors.text,
-    marginTop: 6,
-    marginBottom: 10,
+    marginTop: theme.space.sm,
+    marginBottom: theme.space.md,
   },
   body: {
-    paddingHorizontal: 16,
+    paddingHorizontal: theme.layout.screenPadding,
     fontSize: 16,
     lineHeight: 24,
     color: theme.colors.text,
@@ -379,9 +407,9 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    marginTop: 16,
-    gap: 14,
+    paddingHorizontal: theme.layout.screenPadding,
+    marginTop: theme.space.lg,
+    gap: theme.layout.sectionGap,
   },
   statChip: {
     flexDirection: 'row',
@@ -396,18 +424,18 @@ const styles = StyleSheet.create({
   },
   statTxt: { fontSize: 14, fontWeight: '700', color: theme.colors.textSecondary },
   replyComposer: {
-    marginHorizontal: 16,
-    marginTop: 22,
+    marginHorizontal: theme.layout.screenPadding,
+    marginTop: theme.space.xl,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.colors.border,
-    paddingTop: 14,
+    paddingTop: theme.space.md,
   },
   row: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   replyInput: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
     borderRadius: theme.radius.sm,
-    padding: 10,
+    padding: theme.space.sm,
     minHeight: 72,
     textAlignVertical: 'top',
     color: theme.colors.text,
@@ -426,14 +454,14 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: theme.colors.text,
     fontSize: 15,
-    paddingHorizontal: 16,
+    paddingHorizontal: theme.layout.screenPadding,
   },
   commentCard: {
-    marginHorizontal: 16,
-    marginRight: 12,
+    marginHorizontal: theme.layout.screenPadding,
+    marginRight: theme.space.md,
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.sm,
-    padding: 12,
+    padding: theme.space.md,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
@@ -441,9 +469,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    marginBottom: theme.space.sm,
   },
-  commentWho: { fontSize: 12, color: theme.colors.textSecondary, fontWeight: '700', flex: 1, marginRight: 8 },
+  commentWho: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontWeight: '700',
+    flex: 1,
+    marginRight: theme.space.sm,
+  },
   commentBody: { fontSize: 15, color: theme.colors.text, lineHeight: 22 },
   replyTargetBar: {
     flexDirection: 'row',

@@ -1,0 +1,25 @@
+校園助手 App 圖示 — 重新產生說明（ComfyUI / Flux.1 Dev）
+
+產物路徑
+  - 1024 主檔（保留檔名供對照）：apps/mobile/assets/icon_master_comfyui_1024.png
+  - Expo：icon.png、adaptive-icon.png、splash-icon.png、favicon.png（48×48）
+  - iOS 原生：apps/mobile/ios/mobile/Images.xcassets/AppIcon.appiconset/App-Icon-1024x1024@1x.png
+  - 覆寫前備份：assets/_backup_icons_<時間戳>/ 與 AppIcon.appiconset/_backup_icons_<時間戳>/
+
+如何再跑一遍（本機 ComfyUI 須已啟動，預設 http://127.0.0.1:8188）
+  1) cd 至 ComfyUI 目錄並啟動 venv：
+     source .venv/bin/activate
+  2) 若未開服，可執行：python main.py --listen 127.0.0.1 --port 8188
+  3) 於專案根目錄執行：
+     /Users/miiduoa/Desktop/AI圖像本地引擎/.venv/bin/python scripts/generate-campus-app-icon-comfyui.py \
+       --out apps/mobile/assets/icon_master_comfyui_1024.png --seed 20260513
+     （可改 --seed、--steps、或用 --positive「完整自訂英文 prompt」）
+  4) 將新 master 複製到 icon.png / adaptive-icon.png / splash-icon.png，
+     sips -z 48 48 master.png --out apps/mobile/assets/favicon.png
+     並複製到 ios/.../App-Icon-1024x1024@1x.png
+
+API 工作流程備份（可貼到「Develop Mode → Save (API Format)」對照）
+  scripts/flux-campus-icon-workflow.api.json
+
+設計依據
+  app 名稱「校園助手」、主題色靜宜紫 #5B21B6、金 #D4A843、splash / adaptive 底 #1a1a2e（見 app.config.ts）。

@@ -203,11 +203,7 @@ export function AIFloatingBall({
           }}
         >
           <LinearGradient
-            colors={
-              isUrgent
-                ? ['#F87171', '#DC2626', '#7F1D1D']
-                : ['#A78BFA', theme.colors.accent, '#1E40AF']
-            }
+            colors={[...(isUrgent ? theme.gradients.aiOrbUrgent : theme.gradients.aiOrbNormal)]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={{
@@ -217,10 +213,10 @@ export function AIFloatingBall({
               alignItems: 'center',
               justifyContent: 'center',
               borderWidth: 2,
-              borderColor: 'rgba(255,255,255,0.25)',
+              borderColor: 'rgba(255,255,255,0.28)',
             }}
           >
-            <Ionicons name="sparkles" size={size * 0.42} color="#fff" />
+            <Ionicons name="sparkles" size={size * 0.42} color={theme.colors.onAccent} />
           </LinearGradient>
 
           {/* 紅點徽章 */}
@@ -234,14 +230,14 @@ export function AIFloatingBall({
                 height: 18,
                 paddingHorizontal: 4,
                 borderRadius: 9,
-                backgroundColor: isUrgent ? '#DC2626' : '#EF4444',
+                backgroundColor: isUrgent ? theme.colors.danger : theme.colors.streak,
                 alignItems: 'center',
                 justifyContent: 'center',
                 borderWidth: 2,
-                borderColor: '#fff',
+                borderColor: theme.colors.chromeTabBar,
               }}
             >
-              <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.onAccent, fontSize: 10, fontWeight: '800' }}>
                 {displayCount > 9 ? '9+' : displayCount}
               </Text>
             </View>

@@ -24,6 +24,7 @@ import { useAmbientCues } from '../features/engagement';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { AmbientCueCard } from '../ui/campusOs';
 import { shadowStyle, theme } from '../ui/theme';
+import { EmptyState } from '../ui/components';
 import { navigateToCourseScreen, migrateTabName } from '../utils/courseNavigation';
 import { aiOverlay } from '../app/useAIOverlay';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
@@ -89,7 +90,7 @@ function ServiceTile(props: {
         style={{
           width: 40,
           height: 40,
-          borderRadius: 14,
+          borderRadius: theme.radius.md,
           backgroundColor: `${props.tint}18`,
           alignItems: 'center',
           justifyContent: 'center',
@@ -118,7 +119,14 @@ function ServiceTile(props: {
 
 function SectionHeader(props: { emoji: string; title: string }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.space.sm,
+        marginBottom: theme.space.sm,
+      }}
+    >
       <Text style={{ fontSize: 15 }}>{props.emoji}</Text>
       <Text
         style={{
@@ -193,7 +201,7 @@ function SearchBar(props: {
           ...shadowStyle(theme.shadows.md),
         })}
       >
-        <Ionicons name="sparkles" size={20} color="#fff" />
+        <Ionicons name="sparkles" size={20} color={theme.colors.onAccent} />
       </Pressable>
     </View>
   );
@@ -217,7 +225,8 @@ function CompactMapCard(props: { onPress: () => void; onARPress: () => void }) {
       <View
         style={{
           height: 100,
-          backgroundColor: theme.mode === 'dark' ? '#1A2A3A' : '#E8F4FD',
+          backgroundColor:
+            theme.mode === 'dark' ? theme.colors.surface3 : theme.colors.infoSoft,
           justifyContent: 'center',
           alignItems: 'center',
           borderWidth: 1,
@@ -251,7 +260,7 @@ function CompactMapCard(props: { onPress: () => void; onARPress: () => void }) {
               justifyContent: 'center',
             }}
           >
-            <Ionicons name="navigate" size={18} color="#fff" />
+            <Ionicons name="navigate" size={18} color={theme.colors.onAccent} />
           </View>
           <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>
             校園地圖
@@ -376,7 +385,7 @@ export function CampusHubScreen(props: Record<string, unknown>) {
           {
             icon: 'bus-outline',
             label: '交通',
-            tint: '#3b82f6',
+            tint: theme.colors.info,
             screen: 'TransportHub',
             keywords: ['交通', '公車', '搭車', '車站', '高鐵'],
           },
@@ -404,7 +413,7 @@ export function CampusHubScreen(props: Record<string, unknown>) {
           {
             icon: 'accessibility-outline',
             label: '無障礙路線',
-            tint: '#0ea5e9',
+            tint: theme.colors.fresh,
             screen: 'AccessibleRoute',
             keywords: ['無障礙', '輪椅', '電梯', '坡道'],
           },
@@ -499,8 +508,8 @@ export function CampusHubScreen(props: Record<string, unknown>) {
           />
         }
         contentContainerStyle={{
-          paddingTop: insets.top + theme.space.md,
-          paddingHorizontal: theme.space.lg,
+          paddingTop: insets.top + theme.space.lg,
+          paddingHorizontal: theme.layout.screenPadding,
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + theme.space.lg,
           gap: theme.space.lg,
         }}
@@ -573,43 +582,41 @@ export function CampusHubScreen(props: Record<string, unknown>) {
           <View key={section.title} style={{ gap: theme.space.md }}>
             <SectionHeader emoji={section.emoji} title={section.title} />
             {/* Render rows of 4 */}
-            {Array.from({ length: Math.ceil(section.items.length / 4) }, (_, rowIdx) => (
-              <View key={rowIdx} style={{ flexDirection: 'row', gap: theme.space.sm }}>
-                {section.items.slice(rowIdx * 4, rowIdx * 4 + 4).map((item) => (
-                  <ServiceTile
-                    key={item.label}
-                    icon={item.icon}
-                    label={item.label}
-                    tint={item.tint}
-                    highlight={section.title === '快捷入口' && item.label === 'AI 助理'}
-                    onPress={() => handleServicePress(item)}
-                  />
-                ))}
-                {/* Fill empty slots to keep grid alignment */}
-                {section.items.slice(rowIdx * 4, rowIdx * 4 + 4).length < 4 &&
-                  Array.from(
-                    { length: 4 - section.items.slice(rowIdx * 4, rowIdx * 4 + 4).length },
-                    (_, i) => <View key={`empty-${i}`} style={{ flex: 1, minWidth: 72 }} />,
-                  )}
-              </View>
-            ))}
+            {Array.from({ length: Math.ceil(section.items.length / 4) }, (_, rowIdx) => {
+              const rowItems = section.items.slice(rowIdx * 4, rowIdx * 4 + 4);
+              const fillerCount = 4 - rowItems.length;
+
+              return (
+                <View key={rowIdx} style={{ flexDirection: 'row', gap: theme.space.sm }}>
+                  {rowItems.map((item) => (
+                    <ServiceTile
+                      key={item.label}
+                      icon={item.icon}
+                      label={item.label}
+                      tint={item.tint}
+                      highlight={section.title === '快捷入口' && item.label === 'AI 助理'}
+                      onPress={() => handleServicePress(item)}
+                    />
+                  ))}
+                  {Array.from({ length: fillerCount }, (_, i) => (
+                    <View key={`empty-${i}`} style={{ flex: 1, minWidth: 72 }} />
+                  ))}
+                </View>
+              );
+            })}
           </View>
         ))}
 
         {/* ── Empty search state ── */}
-        {searchQuery && filteredSections.length === 0 && (
-          <View style={{ alignItems: 'center', paddingVertical: 40, gap: theme.space.md }}>
-            <Ionicons name="search-outline" size={48} color={theme.colors.muted} />
-            <Text style={{ color: theme.colors.muted, fontSize: 15, textAlign: 'center' }}>
-              找不到「{searchQuery}」相關的服務
-            </Text>
-            <Pressable onPress={handleAIPress}>
-              <Text style={{ color: theme.colors.accent, fontSize: 14, fontWeight: '600' }}>
-                問問 AI 助理 →
-              </Text>
-            </Pressable>
-          </View>
-        )}
+        {searchQuery.length > 0 && filteredSections.length === 0 ? (
+          <EmptyState
+            variant="search"
+            title={`找不到「${searchQuery}」相關的服務`}
+            subtitle="試試其他關鍵字，或請 AI 助理協助。"
+            actionText="問問 AI 助理"
+            onAction={handleAIPress}
+          />
+        ) : null}
       </ScrollView>
     </View>
   );

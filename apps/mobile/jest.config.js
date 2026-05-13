@@ -17,7 +17,8 @@ module.exports = {
       statements: 50,
     },
   },
-  testMatch: ['**/__tests__/**/*.test.{ts,tsx}', '**/*.test.{ts,tsx}'],
+  /** scripts/*.test.ts 僅供手動指令（見 ai:train:long），不納入預設 test */
+  testMatch: ['<rootDir>/src/__tests__/**/*.test.{ts,tsx}'],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   testEnvironment: 'jsdom',
   maxWorkers: 2,

@@ -9,6 +9,7 @@
  *   - 學生資料: 30 天（幾乎不會變）
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import {
   puFetchCourses,
   puFetchGrades,
@@ -28,12 +29,31 @@ import {
   tcFetchAttendance,
   tcFetchProfile,
   tcFetchTodos,
+  tcFetchAnnouncements,
+  tcFetchExams,
+  tcFetchScoreItems,
+  tcFetchHomeworkActivities,
+  tcFetchDiscussions,
+  tcFetchMaterials,
+  tcFetchCourseMembers,
+  tcFetchCourseAnnouncements,
+  tcFetchHomeworkDetail,
+  tcFetchHomeworkSubmissions,
+  tcFetchSyllabus,
   autoRefreshTCSession,
   hasTCSession,
   type TCCourse,
   type TCActivity,
   type TCModule,
   type TCAttendance,
+  type TCAnnouncementItem,
+  type TCExam,
+  type TCScoreItem,
+  type TCDiscussion,
+  type TCMaterial,
+  type TCCourseMember,
+  type TCHomeworkDetail,
+  type TCHomeworkSubmission,
 } from './tronClassClient';
 
 // ─── Cache Keys（v1 namespace + 舊版遷移）──────────────────
@@ -50,6 +70,17 @@ const KEYS = {
   tcAttendance: 'puCache:v1:tron:attendance',
   tcTodos: 'puCache:v1:tron:todos',
   tcGrades: 'puCache:v1:tron:grades',
+  tcAnnouncements: 'puCache:v1:tron:announcements',
+  tcExams: 'puCache:v1:tron:exams',
+  tcScoreItems: 'puCache:v1:tron:scoreItems',
+  tcHomeworkActivities: 'puCache:v1:tron:homeworkActivities',
+  tcHomeworkDetails: 'puCache:v1:tron:homeworkDetails',
+  tcHomeworkSubmissions: 'puCache:v1:tron:homeworkSubmissions',
+  tcDiscussions: 'puCache:v1:tron:discussions',
+  tcMaterials: 'puCache:v1:tron:materials',
+  tcCourseMembers: 'puCache:v1:tron:courseMembers',
+  tcCourseAnnouncements: 'puCache:v1:tron:courseAnnouncements',
+  tcSyllabus: 'puCache:v1:tron:syllabus',
   lastSync: 'puCache:v1:meta:lastSync',
 } as const;
 
@@ -64,6 +95,17 @@ const LEGACY_KEYS: Record<(typeof KEYS)[keyof typeof KEYS], string> = {
   [KEYS.tcAttendance]: `${LEGACY_PREFIX}tc_attendance`,
   [KEYS.tcTodos]: `${LEGACY_PREFIX}tc_todos`,
   [KEYS.tcGrades]: `${LEGACY_PREFIX}tc_grades`,
+  [KEYS.tcAnnouncements]: `${LEGACY_PREFIX}tc_announcements`,
+  [KEYS.tcExams]: `${LEGACY_PREFIX}tc_exams`,
+  [KEYS.tcScoreItems]: `${LEGACY_PREFIX}tc_scoreItems`,
+  [KEYS.tcHomeworkActivities]: `${LEGACY_PREFIX}tc_homeworkActivities`,
+  [KEYS.tcHomeworkDetails]: `${LEGACY_PREFIX}tc_homeworkDetails`,
+  [KEYS.tcHomeworkSubmissions]: `${LEGACY_PREFIX}tc_homeworkSubmissions`,
+  [KEYS.tcDiscussions]: `${LEGACY_PREFIX}tc_discussions`,
+  [KEYS.tcMaterials]: `${LEGACY_PREFIX}tc_materials`,
+  [KEYS.tcCourseMembers]: `${LEGACY_PREFIX}tc_courseMembers`,
+  [KEYS.tcCourseAnnouncements]: `${LEGACY_PREFIX}tc_courseAnnouncements`,
+  [KEYS.tcSyllabus]: `${LEGACY_PREFIX}tc_syllabus`,
   [KEYS.lastSync]: `${LEGACY_PREFIX}lastSync`,
 };
 
@@ -80,6 +122,17 @@ const TTL = {
   tcAttendance: 6 * 60 * 60 * 1000, // 6 小時
   tcTodos: 30 * 60 * 1000, // 30 分鐘（待辦最即時）
   tcGrades: 6 * 60 * 60 * 1000, // 6 小時
+  tcAnnouncements: 30 * 60 * 1000, // 30 分鐘
+  tcExams: 2 * 60 * 60 * 1000, // 2 小時
+  tcScoreItems: 6 * 60 * 60 * 1000, // 6 小時
+  tcHomeworkActivities: 1 * 60 * 60 * 1000, // 1 小時（作業變動頻繁）
+  tcHomeworkDetails: 2 * 60 * 60 * 1000, // 2 小時
+  tcHomeworkSubmissions: 1 * 60 * 60 * 1000, // 1 小時
+  tcDiscussions: 1 * 60 * 60 * 1000, // 1 小時
+  tcMaterials: 6 * 60 * 60 * 1000, // 6 小時
+  tcCourseMembers: 24 * 60 * 60 * 1000, // 24 小時（成員不常變）
+  tcCourseAnnouncements: 30 * 60 * 1000, // 30 分鐘
+  tcSyllabus: 24 * 60 * 60 * 1000, // 24 小時
 } as const;
 
 // ─── Cached Entry 結構（postLoginRouter 與引擎僅依賴此介面）──
@@ -96,10 +149,21 @@ type CacheEntry<T> = PuTypedCacheEntry<T>;
 function keySourceAndTtl(key: string): { source: CacheEntry<unknown>['source']; ttlMs: number } {
   if (key.includes(':tron:')) {
     if (key.includes('todos')) return { source: 'tron', ttlMs: TTL.tcTodos };
+    if (key.includes('homeworkSubmissions')) return { source: 'tron', ttlMs: TTL.tcHomeworkSubmissions };
+    if (key.includes('homeworkDetails')) return { source: 'tron', ttlMs: TTL.tcHomeworkDetails };
+    if (key.includes('homeworkActivities')) return { source: 'tron', ttlMs: TTL.tcHomeworkActivities };
     if (key.includes('activities')) return { source: 'tron', ttlMs: TTL.tcActivities };
     if (key.includes('attendance')) return { source: 'tron', ttlMs: TTL.tcAttendance };
     if (key.includes('modules')) return { source: 'tron', ttlMs: TTL.tcModules };
+    if (key.includes('scoreItems')) return { source: 'tron', ttlMs: TTL.tcScoreItems };
     if (key.includes('grades')) return { source: 'tron', ttlMs: TTL.tcGrades };
+    if (key.includes('exams')) return { source: 'tron', ttlMs: TTL.tcExams };
+    if (key.includes('discussions')) return { source: 'tron', ttlMs: TTL.tcDiscussions };
+    if (key.includes('materials')) return { source: 'tron', ttlMs: TTL.tcMaterials };
+    if (key.includes('courseMembers')) return { source: 'tron', ttlMs: TTL.tcCourseMembers };
+    if (key.includes('courseAnnouncements')) return { source: 'tron', ttlMs: TTL.tcCourseAnnouncements };
+    if (key.includes('syllabus')) return { source: 'tron', ttlMs: TTL.tcSyllabus };
+    if (key.includes('announcements')) return { source: 'tron', ttlMs: TTL.tcAnnouncements };
     if (key.includes('courses')) return { source: 'tron', ttlMs: TTL.tcCourses };
     return { source: 'tron', ttlMs: TTL.tcCourses };
   }
@@ -321,6 +385,10 @@ function normalizeStudentInfo(
 }
 
 async function ensureTronClassSession(): Promise<void> {
+  if (Platform.OS === 'web' && !(await hasTCSession())) {
+    throw new Error('Web 版需要後端 TronClass session，略過直接連線以避免 CORS 錯誤');
+  }
+
   // 先嘗試一個輕量的 session 檢查
   // tcFetchProfile 內部的 fetchTronClassBackend 遇到 401 會自動嘗試
   // auto-refresh 一次，所以如果成功就代表 session 有效或已刷新。
@@ -646,6 +714,94 @@ export async function getAnyCachedTCGrades(): Promise<unknown[] | null> {
   return (await readCache<unknown[]>(KEYS.tcGrades))?.data ?? null;
 }
 
+// ── TronClass 公告快取 ──
+export async function seedCachedTCAnnouncements(data: TCAnnouncementItem[]): Promise<void> {
+  await writeCache(KEYS.tcAnnouncements, data);
+}
+export async function getAnyCachedTCAnnouncements(): Promise<TCAnnouncementItem[] | null> {
+  return (await readCache<TCAnnouncementItem[]>(KEYS.tcAnnouncements))?.data ?? null;
+}
+
+// ── TronClass 考試快取 (per course, keyed by courseId) ──
+export async function seedCachedTCExams(data: Record<number, TCExam[]>): Promise<void> {
+  await writeCache(KEYS.tcExams, data);
+}
+export async function getAnyCachedTCExams(): Promise<Record<number, TCExam[]> | null> {
+  return (await readCache<Record<number, TCExam[]>>(KEYS.tcExams))?.data ?? null;
+}
+
+// ── TronClass 評分項目快取 ──
+export async function seedCachedTCScoreItems(data: Record<number, TCScoreItem[]>): Promise<void> {
+  await writeCache(KEYS.tcScoreItems, data);
+}
+export async function getAnyCachedTCScoreItems(): Promise<Record<number, TCScoreItem[]> | null> {
+  return (await readCache<Record<number, TCScoreItem[]>>(KEYS.tcScoreItems))?.data ?? null;
+}
+
+// ── TronClass 作業活動快取 (per course) ──
+export async function seedCachedTCHomeworkActivities(data: Record<number, unknown[]>): Promise<void> {
+  await writeCache(KEYS.tcHomeworkActivities, data);
+}
+export async function getAnyCachedTCHomeworkActivities(): Promise<Record<number, unknown[]> | null> {
+  return (await readCache<Record<number, unknown[]>>(KEYS.tcHomeworkActivities))?.data ?? null;
+}
+
+// ── TronClass 作業詳情快取 ──
+export async function seedCachedTCHomeworkDetails(data: Record<string, TCHomeworkDetail>): Promise<void> {
+  await writeCache(KEYS.tcHomeworkDetails, data);
+}
+export async function getAnyCachedTCHomeworkDetails(): Promise<Record<string, TCHomeworkDetail> | null> {
+  return (await readCache<Record<string, TCHomeworkDetail>>(KEYS.tcHomeworkDetails))?.data ?? null;
+}
+
+// ── TronClass 作業提交快取 ──
+export async function seedCachedTCHomeworkSubmissions(data: Record<string, TCHomeworkSubmission[]>): Promise<void> {
+  await writeCache(KEYS.tcHomeworkSubmissions, data);
+}
+export async function getAnyCachedTCHomeworkSubmissions(): Promise<Record<string, TCHomeworkSubmission[]> | null> {
+  return (await readCache<Record<string, TCHomeworkSubmission[]>>(KEYS.tcHomeworkSubmissions))?.data ?? null;
+}
+
+// ── TronClass 討論區快取 ──
+export async function seedCachedTCDiscussions(data: Record<number, TCDiscussion[]>): Promise<void> {
+  await writeCache(KEYS.tcDiscussions, data);
+}
+export async function getAnyCachedTCDiscussions(): Promise<Record<number, TCDiscussion[]> | null> {
+  return (await readCache<Record<number, TCDiscussion[]>>(KEYS.tcDiscussions))?.data ?? null;
+}
+
+// ── TronClass 教材快取 ──
+export async function seedCachedTCMaterials(data: Record<number, TCMaterial[]>): Promise<void> {
+  await writeCache(KEYS.tcMaterials, data);
+}
+export async function getAnyCachedTCMaterials(): Promise<Record<number, TCMaterial[]> | null> {
+  return (await readCache<Record<number, TCMaterial[]>>(KEYS.tcMaterials))?.data ?? null;
+}
+
+// ── TronClass 課程成員快取 ──
+export async function seedCachedTCCourseMembers(data: Record<number, TCCourseMember[]>): Promise<void> {
+  await writeCache(KEYS.tcCourseMembers, data);
+}
+export async function getAnyCachedTCCourseMembers(): Promise<Record<number, TCCourseMember[]> | null> {
+  return (await readCache<Record<number, TCCourseMember[]>>(KEYS.tcCourseMembers))?.data ?? null;
+}
+
+// ── TronClass 課程公告快取 ──
+export async function seedCachedTCCourseAnnouncements(data: Record<number, TCAnnouncementItem[]>): Promise<void> {
+  await writeCache(KEYS.tcCourseAnnouncements, data);
+}
+export async function getAnyCachedTCCourseAnnouncements(): Promise<Record<number, TCAnnouncementItem[]> | null> {
+  return (await readCache<Record<number, TCAnnouncementItem[]>>(KEYS.tcCourseAnnouncements))?.data ?? null;
+}
+
+// ── TronClass 教學大綱快取 ──
+export async function seedCachedTCSyllabus(data: Record<number, unknown>): Promise<void> {
+  await writeCache(KEYS.tcSyllabus, data);
+}
+export async function getAnyCachedTCSyllabus(): Promise<Record<number, unknown> | null> {
+  return (await readCache<Record<number, unknown>>(KEYS.tcSyllabus))?.data ?? null;
+}
+
 // ─── TronClass 刷新 ─────────────────────────────────────
 
 export async function refreshTCCourses(): Promise<TCCourse[] | null> {
@@ -708,6 +864,119 @@ export async function refreshTCTodos(): Promise<TCActivity[] | null> {
   return data;
 }
 
+export async function refreshTCAnnouncements(): Promise<TCAnnouncementItem[] | null> {
+  console.log('[puDataCache] refreshing TronClass announcements…');
+  await ensureTronClassSession();
+  const data = await tcFetchAnnouncements();
+  await writeCache(KEYS.tcAnnouncements, data);
+  return data;
+}
+
+export async function refreshTCExamsForCourses(
+  courseIds: number[],
+): Promise<Record<number, TCExam[]>> {
+  console.log(`[puDataCache] refreshing TronClass exams for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
+  const result: Record<number, TCExam[]> = {};
+  await Promise.allSettled(
+    courseIds.map(async (id) => {
+      result[id] = await tcFetchExams(id);
+    }),
+  );
+  await writeCache(KEYS.tcExams, result);
+  return result;
+}
+
+export async function refreshTCScoreItemsForCourses(
+  courseIds: number[],
+): Promise<Record<number, TCScoreItem[]>> {
+  console.log(`[puDataCache] refreshing TronClass score items for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
+  const result: Record<number, TCScoreItem[]> = {};
+  await Promise.allSettled(
+    courseIds.map(async (id) => {
+      result[id] = await tcFetchScoreItems(id);
+    }),
+  );
+  await writeCache(KEYS.tcScoreItems, result);
+  return result;
+}
+
+export async function refreshTCHomeworkActivitiesForCourses(
+  courseIds: number[],
+): Promise<Record<number, unknown[]>> {
+  console.log(`[puDataCache] refreshing TronClass homework activities for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
+  const result: Record<number, unknown[]> = {};
+  await Promise.allSettled(
+    courseIds.map(async (id) => {
+      result[id] = await tcFetchHomeworkActivities(id);
+    }),
+  );
+  await writeCache(KEYS.tcHomeworkActivities, result);
+  return result;
+}
+
+export async function refreshTCDiscussionsForCourses(
+  courseIds: number[],
+): Promise<Record<number, TCDiscussion[]>> {
+  console.log(`[puDataCache] refreshing TronClass discussions for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
+  const result: Record<number, TCDiscussion[]> = {};
+  await Promise.allSettled(
+    courseIds.map(async (id) => {
+      result[id] = await tcFetchDiscussions(id);
+    }),
+  );
+  await writeCache(KEYS.tcDiscussions, result);
+  return result;
+}
+
+export async function refreshTCMaterialsForCourses(
+  courseIds: number[],
+): Promise<Record<number, TCMaterial[]>> {
+  console.log(`[puDataCache] refreshing TronClass materials for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
+  const result: Record<number, TCMaterial[]> = {};
+  await Promise.allSettled(
+    courseIds.map(async (id) => {
+      result[id] = await tcFetchMaterials(id);
+    }),
+  );
+  await writeCache(KEYS.tcMaterials, result);
+  return result;
+}
+
+export async function refreshTCCourseMembersForCourses(
+  courseIds: number[],
+): Promise<Record<number, TCCourseMember[]>> {
+  console.log(`[puDataCache] refreshing TronClass course members for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
+  const result: Record<number, TCCourseMember[]> = {};
+  await Promise.allSettled(
+    courseIds.map(async (id) => {
+      result[id] = await tcFetchCourseMembers(id);
+    }),
+  );
+  await writeCache(KEYS.tcCourseMembers, result);
+  return result;
+}
+
+export async function refreshTCCourseAnnouncementsForCourses(
+  courseIds: number[],
+): Promise<Record<number, TCAnnouncementItem[]>> {
+  console.log(`[puDataCache] refreshing TronClass course announcements for ${courseIds.length} courses…`);
+  await ensureTronClassSession();
+  const result: Record<number, TCAnnouncementItem[]> = {};
+  await Promise.allSettled(
+    courseIds.map(async (id) => {
+      result[id] = await tcFetchCourseAnnouncements(id);
+    }),
+  );
+  await writeCache(KEYS.tcCourseAnnouncements, result);
+  return result;
+}
+
 // ─── 一次全部抓取（登入後呼叫） ─────────────────────────
 
 export type SyncAllResult = {
@@ -720,6 +989,14 @@ export type SyncAllResult = {
   tcModules: Record<number, TCModule[]> | null;
   tcAttendance: TCAttendance[] | null;
   tcTodos: TCActivity[] | null;
+  tcAnnouncements: TCAnnouncementItem[] | null;
+  tcExams: Record<number, TCExam[]> | null;
+  tcScoreItems: Record<number, TCScoreItem[]> | null;
+  tcHomeworkActivities: Record<number, unknown[]> | null;
+  tcDiscussions: Record<number, TCDiscussion[]> | null;
+  tcMaterials: Record<number, TCMaterial[]> | null;
+  tcCourseMembers: Record<number, TCCourseMember[]> | null;
+  tcCourseAnnouncements: Record<number, TCAnnouncementItem[]> | null;
 };
 
 export type SyncAllOptions = {
@@ -805,11 +1082,20 @@ export async function syncAllData(
   let tcModules: Record<number, TCModule[]> | null = null;
   let tcAttendance: TCAttendance[] | null = null;
   let tcTodos: TCActivity[] | null = null;
+  let tcAnnouncements: TCAnnouncementItem[] | null = null;
+  let tcExams: Record<number, TCExam[]> | null = null;
+  let tcScoreItems: Record<number, TCScoreItem[]> | null = null;
+  let tcHomeworkActivities: Record<number, unknown[]> | null = null;
+  let tcDiscussions: Record<number, TCDiscussion[]> | null = null;
+  let tcMaterials: Record<number, TCMaterial[]> | null = null;
+  let tcCourseMembers: Record<number, TCCourseMember[]> | null = null;
+  let tcCourseAnnouncements: Record<number, TCAnnouncementItem[]> | null = null;
 
   const courseIds = tcCourses?.map((c) => c.id) ?? [];
 
+  // 第一波：核心資料（作業、模組、出席、待辦、公告）
   if (courseIds.length > 0) {
-    [tcActivities, tcModules, tcAttendance, tcTodos] = await Promise.all([
+    [tcActivities, tcModules, tcAttendance, tcTodos, tcAnnouncements] = await Promise.all([
       refreshTCActivitiesForCourses(courseIds).catch((e) => {
         console.warn('[puDataCache] TC activities sync error:', e);
         return null;
@@ -826,15 +1112,53 @@ export async function syncAllData(
         console.warn('[puDataCache] TC todos sync error:', e);
         return null;
       }),
+      refreshTCAnnouncements().catch((e) => {
+        console.warn('[puDataCache] TC announcements sync error:', e);
+        return null;
+      }),
     ]);
+
+    // 第二波：詳細資料（考試、評分、作業活動、討論、教材、成員、課程公告）
+    // 背景非阻塞執行，不影響主流程
+    Promise.all([
+      refreshTCExamsForCourses(courseIds).then((r) => { tcExams = r; }).catch((e) => {
+        console.warn('[puDataCache] TC exams sync error:', e);
+      }),
+      refreshTCScoreItemsForCourses(courseIds).then((r) => { tcScoreItems = r; }).catch((e) => {
+        console.warn('[puDataCache] TC scoreItems sync error:', e);
+      }),
+      refreshTCHomeworkActivitiesForCourses(courseIds).then((r) => { tcHomeworkActivities = r; }).catch((e) => {
+        console.warn('[puDataCache] TC homeworkActivities sync error:', e);
+      }),
+      refreshTCDiscussionsForCourses(courseIds).then((r) => { tcDiscussions = r; }).catch((e) => {
+        console.warn('[puDataCache] TC discussions sync error:', e);
+      }),
+      refreshTCMaterialsForCourses(courseIds).then((r) => { tcMaterials = r; }).catch((e) => {
+        console.warn('[puDataCache] TC materials sync error:', e);
+      }),
+      refreshTCCourseMembersForCourses(courseIds).then((r) => { tcCourseMembers = r; }).catch((e) => {
+        console.warn('[puDataCache] TC courseMembers sync error:', e);
+      }),
+      refreshTCCourseAnnouncementsForCourses(courseIds).then((r) => { tcCourseAnnouncements = r; }).catch((e) => {
+        console.warn('[puDataCache] TC courseAnnouncements sync error:', e);
+      }),
+    ]).then(() => {
+      console.log('[puDataCache] 第二波詳細資料同步完成');
+    }).catch(() => {
+      console.warn('[puDataCache] 第二波詳細資料部分同步失敗');
+    });
   } else {
-    [tcAttendance, tcTodos] = await Promise.all([
+    [tcAttendance, tcTodos, tcAnnouncements] = await Promise.all([
       refreshTCAttendance().catch((e) => {
         console.warn('[puDataCache] TC attendance sync error:', e);
         return null;
       }),
       refreshTCTodos().catch((e) => {
         console.warn('[puDataCache] TC todos sync error:', e);
+        return null;
+      }),
+      refreshTCAnnouncements().catch((e) => {
+        console.warn('[puDataCache] TC announcements sync error:', e);
         return null;
       }),
     ]);
@@ -852,8 +1176,9 @@ export async function syncAllData(
     tcModules,
     tcAttendance,
     tcTodos,
+    tcAnnouncements,
   ].filter((value) => value != null).length;
-  console.log(`[puDataCache] syncAllData done: ${successCount}/9 succeeded`);
+  console.log(`[puDataCache] syncAllData done: ${successCount}/10 core items succeeded`);
 
   return {
     courses,
@@ -865,6 +1190,14 @@ export async function syncAllData(
     tcModules,
     tcAttendance,
     tcTodos,
+    tcAnnouncements,
+    tcExams,
+    tcScoreItems,
+    tcHomeworkActivities,
+    tcDiscussions,
+    tcMaterials,
+    tcCourseMembers,
+    tcCourseAnnouncements,
   };
 }
 
@@ -897,6 +1230,25 @@ export async function refreshStaleData(session: PUSession): Promise<void> {
 
   const tcAttEntry = await readCache<TCAttendance[]>(KEYS.tcAttendance);
   if (isExpired(tcAttEntry, TTL.tcAttendance)) tasks.push(refreshTCAttendance());
+
+  const tcAnnEntry = await readCache<TCAnnouncementItem[]>(KEYS.tcAnnouncements);
+  if (isExpired(tcAnnEntry, TTL.tcAnnouncements)) tasks.push(refreshTCAnnouncements());
+
+  // 詳細資料在背景刷新（需要 courseIds）
+  const cachedTCCourses = (await readCache<TCCourse[]>(KEYS.tcCourses))?.data;
+  if (cachedTCCourses && cachedTCCourses.length > 0) {
+    const ids = cachedTCCourses.map((c) => c.id);
+    const examsEntry = await readCache(KEYS.tcExams);
+    if (isExpired(examsEntry, TTL.tcExams)) tasks.push(refreshTCExamsForCourses(ids));
+    const hwEntry = await readCache(KEYS.tcHomeworkActivities);
+    if (isExpired(hwEntry, TTL.tcHomeworkActivities)) tasks.push(refreshTCHomeworkActivitiesForCourses(ids));
+    const matEntry = await readCache(KEYS.tcMaterials);
+    if (isExpired(matEntry, TTL.tcMaterials)) tasks.push(refreshTCMaterialsForCourses(ids));
+    const discEntry = await readCache(KEYS.tcDiscussions);
+    if (isExpired(discEntry, TTL.tcDiscussions)) tasks.push(refreshTCDiscussionsForCourses(ids));
+    const caEntry = await readCache(KEYS.tcCourseAnnouncements);
+    if (isExpired(caEntry, TTL.tcCourseAnnouncements)) tasks.push(refreshTCCourseAnnouncementsForCourses(ids));
+  }
 
   if (tasks.length > 0) {
     console.log(`[puDataCache] refreshStaleData: ${tasks.length} items stale, refreshing…`);

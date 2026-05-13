@@ -145,8 +145,6 @@ export function HeaderDrawerHost() {
     ? auth.profile?.displayName ?? auth.user.email ?? '校園使用者'
     : '校園訪客';
 
-  const isDark = theme.mode === 'dark';
-
   return (
     <Modal
       visible={visible}
@@ -163,30 +161,25 @@ export function HeaderDrawerHost() {
             backgroundColor: theme.colors.bg,
             transform: [{ translateX: slide }],
             ...softShadowStyle({
-              color: '#000',
-              opacity: 0.3,
-              radius: 20,
-              offset: { width: 4, height: 0 },
+              shadowColor: theme.mode === 'dark' ? '#050308' : '#2C2248',
+              shadowOpacity: theme.mode === 'dark' ? 0.5 : 0.12,
+              shadowRadius: 22,
+              shadowOffset: { width: 5, height: 0 },
               elevation: 16,
             }),
           }}
         >
           <ScrollView
             contentContainerStyle={{
-              paddingBottom: insets.bottom + 40,
+              paddingBottom: insets.bottom + theme.space.section,
             }}
           >
             {/* ─── 頭部：身分卡 ─── */}
-            <LinearGradient
-              colors={
-                isDark
-                  ? (['#2E1065', '#1A0A3E'] as [string, string])
-                  : (['#EDE9FE', '#F5F3FF'] as [string, string])
-              }
+            <LinearGradient colors={[...theme.gradients.drawerHeader]}
               style={{
-                paddingTop: insets.top + 16,
-                paddingBottom: 18,
-                paddingHorizontal: 18,
+                paddingTop: insets.top + theme.layout.cardPadding,
+                paddingBottom: theme.layout.sectionGapLarge,
+                paddingHorizontal: theme.layout.screenHorizontalPadding,
               }}
             >
               <View
@@ -194,7 +187,7 @@ export function HeaderDrawerHost() {
                   flexDirection: 'row',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  marginBottom: 14,
+                  marginBottom: theme.layout.sectionGapLarge,
                 }}
               >
                 <Pressable
@@ -202,7 +195,7 @@ export function HeaderDrawerHost() {
                   style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
                 >
                   <LinearGradient
-                    colors={[theme.colors.accent, '#7C3AED']}
+                    colors={[...theme.gradients.avatar]}
                     style={{
                       width: 56,
                       height: 56,
@@ -211,7 +204,7 @@ export function HeaderDrawerHost() {
                       justifyContent: 'center',
                     }}
                   >
-                    <Ionicons name="person" size={26} color="#fff" />
+                    <Ionicons name="person" size={26} color={theme.colors.onAccent} />
                   </LinearGradient>
                 </Pressable>
                 <Pressable
@@ -254,7 +247,7 @@ export function HeaderDrawerHost() {
                       borderRadius: 999,
                     }}
                   >
-                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
+                    <Text style={{ color: theme.colors.onAccent, fontSize: 11, fontWeight: '700' }}>
                       {roleDisplayName}
                     </Text>
                   </View>
@@ -272,12 +265,12 @@ export function HeaderDrawerHost() {
                     paddingVertical: 8,
                     paddingHorizontal: 14,
                     backgroundColor: theme.colors.accent,
-                    borderRadius: 10,
+                    borderRadius: theme.radius.md,
                     alignSelf: 'flex-start',
                     opacity: pressed ? 0.85 : 1,
                   })}
                 >
-                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
+                  <Text style={{ color: theme.colors.onAccent, fontSize: 12, fontWeight: '700' }}>
                     學校帳號登入
                   </Text>
                 </Pressable>
@@ -356,7 +349,7 @@ export function HeaderDrawerHost() {
               <DrawerRow
                 icon="hardware-chip-outline"
                 label="AI 模型管理"
-                tint="#8B5CF6"
+                tint={theme.colors.social}
                 onPress={() => go('AIModelManager')}
               />
               <DrawerRow

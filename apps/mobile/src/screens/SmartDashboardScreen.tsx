@@ -2482,6 +2482,12 @@ export function SmartDashboardScreen(props: any) {
           <AgentModeDock selected={agentMode} onSelect={setAgentMode} onStart={startAgentMode} />
         </LinearGradient>
 
+        <View
+          style={{
+            backgroundColor: theme.colors.surfaceMuted,
+            paddingTop: theme.layout.sectionGap,
+          }}
+        >
         {/* 2. XP Progress */}
         {gamification && <XPProgressBar gamification={gamification} />}
 
@@ -2876,6 +2882,7 @@ export function SmartDashboardScreen(props: any) {
               </Pressable>
             ))}
           </View>
+        </View>
         </View>
       </ScrollView>
     </View>

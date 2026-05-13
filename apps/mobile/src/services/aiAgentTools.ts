@@ -23,6 +23,14 @@ import {
   getAnyCachedTCModules,
   getAnyCachedTCAttendance as getCachedTCAttendance,
   getAnyCachedTCTodos as getCachedTCTodos,
+  getAnyCachedTCAnnouncements as getCachedTCAnnouncements,
+  getAnyCachedTCExams as getCachedTCExams,
+  getAnyCachedTCScoreItems as getCachedTCScoreItems,
+  getAnyCachedTCHomeworkActivities as getCachedTCHomeworkActivities,
+  getAnyCachedTCDiscussions as getCachedTCDiscussions,
+  getAnyCachedTCMaterials as getCachedTCMaterials,
+  getAnyCachedTCCourseMembers as getCachedTCCourseMembers,
+  getAnyCachedTCCourseAnnouncements as getCachedTCCourseAnnouncements,
   syncAllData,
 } from './puDataCache';
 import type { CampusActorRole } from '../data';
@@ -831,6 +839,77 @@ export function getToolDeclarations(role?: CampusActorRole): GeminiToolDeclarati
         type: 'object',
         properties: {
           semester: { type: 'string', description: '學期（選填）' },
+        },
+      },
+    },
+    {
+      name: 'query_exams',
+      description: '查詢課程的考試列表，包含考試時間、總分、提交次數等詳細資訊。',
+      parameters: {
+        type: 'object',
+        properties: {
+          courseId: { type: 'number', description: '課程 ID（選填，不填則查全部）' },
+        },
+      },
+    },
+    {
+      name: 'query_score_items',
+      description: '查詢課程的評分項目（評量方式及佔比），包含作業、考試、出席等各項配分。',
+      parameters: {
+        type: 'object',
+        properties: {
+          courseId: { type: 'number', description: '課程 ID（選填）' },
+        },
+      },
+    },
+    {
+      name: 'query_discussions',
+      description: '查詢課程的討論區列表，包含貼文數、最新回覆時間等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          courseId: { type: 'number', description: '課程 ID（選填）' },
+        },
+      },
+    },
+    {
+      name: 'query_materials',
+      description: '查詢課程教材與資源，包含檔案名稱、大小、類型等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          courseId: { type: 'number', description: '課程 ID（選填）' },
+        },
+      },
+    },
+    {
+      name: 'query_course_members',
+      description: '查詢課程的成員名單（同學、教師、助教）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          courseId: { type: 'number', description: '課程 ID' },
+        },
+        required: ['courseId'],
+      },
+    },
+    {
+      name: 'query_homework_detail',
+      description: '查詢各課程的作業活動詳情，包含繳交狀態、截止時間、提交紀錄等。',
+      parameters: {
+        type: 'object',
+        properties: {
+          courseId: { type: 'number', description: '課程 ID（選填）' },
+        },
+      },
+    },
+    {
+      name: 'query_course_announcements',
+      description: '查詢特定課程的公告列表。',
+      parameters: {
+        type: 'object',
+        properties: {
+          courseId: { type: 'number', description: '課程 ID（選填）' },
         },
       },
     },
@@ -3081,6 +3160,103 @@ const TOOL_EXECUTORS: Record<
     } catch (e: any) {
       return { success: true, data: null, summary: '選課紀錄查詢失敗。' };
     }
+  },
+
+  // ── 新增詳細查詢工具 ──
+
+  query_exams: async (args: any) => {
+    const cached = await getCachedTCExams();
+    if (!cached) return { success: true, data: null, summary: '暫無考試資料。' };
+    const entries = args.courseId ? { [args.courseId]: cached[args.courseId] ?? [] } : cached;
+    const allExams = Object.entries(entries).flatMap(([cid, exams]) =>
+      (exams as any[]).map((e: any) => ({ ...e, courseId: Number(cid) }))
+    );
+    if (allExams.length === 0) return { success: true, data: [], summary: '目前沒有考試。' };
+    const summary = allExams.map((e: any, i: number) =>
+      `${i + 1}. ${e.title}（${e.start_time ?? '未定'} ~ ${e.end_time ?? '未定'}）${e.is_closed ? '[已結束]' : ''}`
+    ).join('\n');
+    return { success: true, data: allExams, summary: `考試列表:\n${summary}` };
+  },
+
+  query_score_items: async (args: any) => {
+    const cached = await getCachedTCScoreItems();
+    if (!cached) return { success: true, data: null, summary: '暫無評分項目資料。' };
+    const entries = args.courseId ? { [args.courseId]: cached[args.courseId] ?? [] } : cached;
+    const items = Object.entries(entries).flatMap(([cid, arr]) =>
+      (arr as any[]).map((s: any) => ({ ...s, courseId: Number(cid) }))
+    );
+    if (items.length === 0) return { success: true, data: [], summary: '目前沒有評分項目。' };
+    const summary = items.map((s: any) => `• ${s.name}（${s.percentage ?? 0}%）`).join('\n');
+    return { success: true, data: items, summary: `評分項目:\n${summary}` };
+  },
+
+  query_discussions: async (args: any) => {
+    const cached = await getCachedTCDiscussions();
+    if (!cached) return { success: true, data: null, summary: '暫無討論區資料。' };
+    const entries = args.courseId ? { [args.courseId]: cached[args.courseId] ?? [] } : cached;
+    const discussions = Object.entries(entries).flatMap(([cid, arr]) =>
+      (arr as any[]).map((d: any) => ({ ...d, courseId: Number(cid) }))
+    );
+    if (discussions.length === 0) return { success: true, data: [], summary: '目前沒有討論區。' };
+    const summary = discussions.map((d: any) =>
+      `• ${d.title}（${d.post_count ?? 0} 篇貼文）${d.is_locked ? '[已鎖定]' : ''}`
+    ).join('\n');
+    return { success: true, data: discussions, summary: `討論區:\n${summary}` };
+  },
+
+  query_materials: async (args: any) => {
+    const cached = await getCachedTCMaterials();
+    if (!cached) return { success: true, data: null, summary: '暫無教材資料。' };
+    const entries = args.courseId ? { [args.courseId]: cached[args.courseId] ?? [] } : cached;
+    const materials = Object.entries(entries).flatMap(([cid, arr]) =>
+      (arr as any[]).map((m: any) => ({ ...m, courseId: Number(cid) }))
+    );
+    if (materials.length === 0) return { success: true, data: [], summary: '目前沒有教材。' };
+    const summary = materials.map((m: any) =>
+      `• ${m.title ?? m.file_name ?? '未命名'}（${m.type ?? 'file'}）`
+    ).join('\n');
+    return { success: true, data: materials, summary: `教材列表:\n${summary}` };
+  },
+
+  query_course_members: async (args: any) => {
+    if (!args.courseId) return { success: true, data: null, summary: '請指定課程 ID。' };
+    const cached = await getCachedTCCourseMembers();
+    const members = cached?.[args.courseId] ?? [];
+    if (members.length === 0) return { success: true, data: [], summary: '暫無成員資料。' };
+    const teachers = members.filter((m: any) => m.role === 'teacher' || m.role === 'ta');
+    const students = members.filter((m: any) => m.role === 'student');
+    const summary = `教師/助教: ${teachers.map((t: any) => t.name).join('、') || '無'}\n學生: 共 ${students.length} 人`;
+    return { success: true, data: members, summary };
+  },
+
+  query_homework_detail: async (args: any) => {
+    const cached = await getCachedTCHomeworkActivities();
+    if (!cached) return { success: true, data: null, summary: '暫無作業活動資料。' };
+    const entries = args.courseId ? { [args.courseId]: cached[args.courseId] ?? [] } : cached;
+    const homeworks = Object.entries(entries).flatMap(([cid, arr]) =>
+      (arr as any[]).map((h: any) => ({ ...h, courseId: Number(cid) }))
+    );
+    if (homeworks.length === 0) return { success: true, data: [], summary: '目前沒有作業。' };
+    const summary = homeworks.map((h: any) => {
+      const submitted = Array.isArray(h.homework_submissions) && h.homework_submissions.length > 0;
+      const status = submitted ? '✓已繳' : h.is_closed ? '✗已截止' : '○待繳';
+      return `${status} ${h.title}${h.end_time ? `（截止: ${h.end_time.slice(0, 16).replace('T', ' ')}）` : ''}`;
+    }).join('\n');
+    return { success: true, data: homeworks, summary: `作業詳情:\n${summary}` };
+  },
+
+  query_course_announcements: async (args: any) => {
+    const cached = await getCachedTCCourseAnnouncements();
+    if (!cached) return { success: true, data: null, summary: '暫無課程公告。' };
+    const entries = args.courseId ? { [args.courseId]: cached[args.courseId] ?? [] } : cached;
+    const announcements = Object.entries(entries).flatMap(([cid, arr]) =>
+      (arr as any[]).map((a: any) => ({ ...a, courseId: Number(cid) }))
+    );
+    if (announcements.length === 0) return { success: true, data: [], summary: '目前沒有課程公告。' };
+    const summary = announcements.slice(0, 10).map((a: any) =>
+      `• ${a.title}${a.created_at ? `（${a.created_at.slice(0, 10)}）` : ''}`
+    ).join('\n');
+    return { success: true, data: announcements, summary: `課程公告:\n${summary}` };
   },
 };
 

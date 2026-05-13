@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "expo start",
     "start": "expo start",
+    "start:clean": "expo start -c",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "ios:sim": "expo run:ios",
@@ -12,6 +13,7 @@
     "lint": "eslint App.tsx src --ext .ts,.tsx",
     "test": "NODE_OPTIONS='--max-old-space-size=4096' jest --runInBand",
     "test:ai:self": "NODE_OPTIONS='--max-old-space-size=4096' EXPO_PUBLIC_AI_PROVIDER=offline EXPO_PUBLIC_AI_TEST_FAST=1 AI_SELF_TEST_ROUNDS=${AI_SELF_TEST_ROUNDS:-10000} jest src/__tests__/services/aiSelfDialog.test.ts --runInBand",
+    "ai:train:long": "NODE_OPTIONS='--max-old-space-size=8192 --expose-gc' EXPO_PUBLIC_AI_PROVIDER=offline EXPO_PUBLIC_AI_TEST_FAST=1 jest --config jest.ai-training.config.js --runInBand --testTimeout=4200000",
     "test:ai:marathon": "bash ../../scripts/ai-app-scenario-marathon.sh",
     "test:ai:proactive": "NODE_OPTIONS='--max-old-space-size=4096' jest src/__tests__/services/proactiveAI.test.ts --runInBand",
     "test:ai:web": "NODE_OPTIONS='--max-old-space-size=4096' jest src/__tests__/services/webSearch.test.ts src/__tests__/services/webLearning.test.ts src/__tests__/services/aiWebSearchIntegration.test.ts --runInBand",

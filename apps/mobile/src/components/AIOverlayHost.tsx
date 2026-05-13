@@ -110,7 +110,7 @@ function ChatModeOverlay({
   }, [initialPrompt, proactiveReportId]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)' }}>
+    <View style={{ flex: 1, backgroundColor: theme.colors.overlay }}>
       <Pressable
         onPress={handleClose}
         style={{ position: 'absolute', top: 0, bottom: 0, left: 0, right: 0 }}
@@ -120,15 +120,15 @@ function ChatModeOverlay({
           flex: 1,
           marginTop: Math.max(insets.top + 8, 50),
           backgroundColor: theme.colors.bg,
-          borderTopLeftRadius: 26,
-          borderTopRightRadius: 26,
+          borderTopLeftRadius: theme.radius.xl,
+          borderTopRightRadius: theme.radius.xl,
           overflow: 'hidden',
           transform: [{ translateY: slide }],
           ...softShadowStyle({
-            color: '#000',
-            opacity: 0.3,
-            radius: 24,
-            offset: { width: 0, height: -8 },
+            shadowColor: theme.mode === 'dark' ? '#090712' : '#2C2248',
+            shadowOpacity: theme.mode === 'dark' ? 0.45 : 0.14,
+            shadowRadius: 26,
+            shadowOffset: { width: 0, height: -8 },
             elevation: 20,
           }),
         }}
@@ -144,9 +144,9 @@ function ChatModeOverlay({
         >
           <View
             style={{
-              width: 40,
-              height: 4,
-              borderRadius: 2,
+              width: 44,
+              height: 5,
+              borderRadius: theme.radius.full,
               backgroundColor: theme.colors.border,
             }}
           />
@@ -252,7 +252,7 @@ function InsightsOverlay() {
     <Animated.View
       style={{
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: theme.colors.overlay,
         opacity,
       }}
     >
@@ -265,7 +265,7 @@ function InsightsOverlay() {
           marginTop: Math.max(insets.top + 60, 80),
           marginHorizontal: 16,
           backgroundColor: theme.colors.bg,
-          borderRadius: 24,
+          borderRadius: theme.radius.xl,
           maxHeight: SCREEN_HEIGHT * 0.7,
           overflow: 'hidden',
           transform: [{ translateY: slide }],
@@ -293,7 +293,7 @@ function InsightsOverlay() {
                 style={{
                   width: 32,
                   height: 32,
-                  borderRadius: 10,
+                  borderRadius: theme.radius.sm,
                   backgroundColor: theme.colors.accent + '22',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -493,7 +493,7 @@ function QuickCommandOverlay() {
   };
 
   return (
-    <Animated.View pointerEvents="box-none" style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', opacity }}>
+    <Animated.View pointerEvents="box-none" style={{ flex: 1, backgroundColor: theme.colors.overlay, opacity }}>
       <Pressable
         onPress={handleClose}
         style={{
@@ -517,14 +517,14 @@ function QuickCommandOverlay() {
           paddingTop: 12,
           paddingHorizontal: 16,
           backgroundColor: theme.colors.bg,
-          borderTopLeftRadius: 24,
-          borderTopRightRadius: 24,
+          borderTopLeftRadius: theme.radius.xl,
+          borderTopRightRadius: theme.radius.xl,
           transform: [{ translateY: slide }],
           ...softShadowStyle({
-            color: '#000',
-            opacity: 0.25,
-            radius: 20,
-            offset: { width: 0, height: -6 },
+            shadowColor: theme.mode === 'dark' ? '#090712' : '#2C2248',
+            shadowOpacity: theme.mode === 'dark' ? 0.42 : 0.12,
+            shadowRadius: 22,
+            shadowOffset: { width: 0, height: -6 },
             elevation: Platform.OS === 'android' ? 26 : 16,
           }),
         }}
@@ -532,9 +532,9 @@ function QuickCommandOverlay() {
         <View style={{ alignItems: 'center', marginBottom: 8 }}>
           <View
             style={{
-              width: 40,
-              height: 4,
-              borderRadius: 2,
+              width: 44,
+              height: 5,
+              borderRadius: theme.radius.full,
               backgroundColor: theme.colors.border,
             }}
           />
@@ -588,7 +588,7 @@ function QuickCommandOverlay() {
                 width: '47%',
                 paddingVertical: 14,
                 paddingHorizontal: 12,
-                borderRadius: 14,
+                borderRadius: theme.radius.md,
                 backgroundColor: theme.colors.surface,
                 borderWidth: 1,
                 borderColor: theme.colors.border,
@@ -603,7 +603,7 @@ function QuickCommandOverlay() {
                 style={{
                   width: 32,
                   height: 32,
-                  borderRadius: 10,
+                  borderRadius: theme.radius.sm,
                   backgroundColor: cmd.tint + '22',
                   alignItems: 'center',
                   justifyContent: 'center',

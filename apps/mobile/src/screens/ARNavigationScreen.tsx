@@ -30,15 +30,13 @@ import {
   type DirectionType,
   type Location as ARLocation,
 } from '../services/ar';
+import { getFootRoute, type LatLng, type RouteStep } from '../services/routingService';
 import { useDataSource } from '../hooks/useDataSource';
 import { useGeolocation } from '../hooks/useGeolocation';
-import { useSchool } from '../state/school';
 import {
   findShortestPath,
   pathToNavigationSteps,
   CAMPUS_PATH_NODES,
-  getCampusPoi,
-  type CampusPathNode,
 } from '../data/puCampusData';
 
 type ARMode = 'preview' | 'navigating' | 'arrived';
@@ -50,6 +48,95 @@ type NavigationStep = {
   direction: 'straight' | 'left' | 'right' | 'up' | 'down' | 'destination';
   landmark?: string;
 };
+
+/**
+ * OSRM GeoJSON 座標為 [lng, lat]，轉成 AR / RN 慣用之 latitude, longitude
+ */
+function geometryLngLatToARLocations(geometry: [number, number][]): ARLocation[] {
+  return geometry.map(([lng, lat]) => ({ latitude: lat, longitude: lng }));
+}
+
+function routeStepToNavigationStep(step: RouteStep, index: number): NavigationStep {
+  let direction: NavigationStep['direction'] = 'straight';
+  const m = step.maneuver;
+  const instr = step.instruction;
+  if (m === 'arrive') direction = 'destination';
+  else if (/左轉|向左|稍微左轉|急轉左/.test(instr)) direction = 'left';
+  else if (/右轉|向右|稍微右轉|急轉右/.test(instr)) direction = 'right';
+
+  return {
+    id: String(index + 1),
+    instruction: instr,
+    distance: Math.round(step.distance),
+    direction,
+    landmark: step.name?.trim() ? step.name : undefined,
+  };
+}
+
+/**
+ * 優先使用 OpenStreetMap 步行路網真實折線；失敗時回退校園 A* 節點路網。
+ */
+async function buildARNavigationRoute(params: {
+  start: ARLocation;
+  destination: { lat: number; lng: number; name: string };
+  campusSnapNodes: ARLocation[];
+}): Promise<{ points: ARLocation[]; distance: number; steps: NavigationStep[] }> {
+  const { start, destination: dest, campusSnapNodes } = params;
+  const from: LatLng = { lat: start.latitude, lng: start.longitude };
+  const to: LatLng = { lat: dest.lat, lng: dest.lng };
+
+  const foot = await getFootRoute(from, to);
+  if (foot && foot.geometry.length >= 2) {
+    const points = geometryLngLatToARLocations(foot.geometry);
+    const steps =
+      foot.steps.length > 0
+        ? foot.steps.map((s, i) => routeStepToNavigationStep(s, i))
+        : generateRealNavigationSteps(
+            start.latitude,
+            start.longitude,
+            dest.lat,
+            dest.lng,
+            dest.name,
+          );
+    return {
+      points,
+      distance: Math.round(foot.distance),
+      steps,
+    };
+  }
+
+  const pathNodes = findShortestPath(start.latitude, start.longitude, dest.lat, dest.lng);
+  const routeFromPathNetwork: ARLocation[] = pathNodes.map((n) => ({
+    latitude: n.lat,
+    longitude: n.lng,
+  }));
+
+  const route =
+    routeFromPathNetwork.length >= 2
+      ? routeFromPathNetwork
+      : buildOutdoorRoute(
+          start,
+          { latitude: dest.lat, longitude: dest.lng },
+          campusSnapNodes,
+        );
+
+  const distance = Math.round(calculateRouteDistance(route));
+  const steps = generateRealNavigationSteps(
+    start.latitude,
+    start.longitude,
+    dest.lat,
+    dest.lng,
+    dest.name,
+  );
+
+  return {
+    points: route,
+    distance:
+      distance ||
+      Math.round(calculateDistance(start, { latitude: dest.lat, longitude: dest.lng })),
+    steps,
+  };
+}
 
 /**
  * 使用校園路網 A* 路徑規劃產生真實導航步驟
@@ -173,8 +260,9 @@ export function ARNavigationScreen(props: any) {
   const [routePoints, setRoutePoints] = useState<ARLocation[]>([]);
   const [routeTotalDistance, setRouteTotalDistance] = useState(0);
   const [deviationDistance, setDeviationDistance] = useState<number | null>(null);
+  /** 開始導航後由 OSRM 步行路網或備援路網填入；preview 模式為 null */
+  const [footNavigationSteps, setFootNavigationSteps] = useState<NavigationStep[] | null>(null);
 
-  const { school } = useSchool();
   const ds = useDataSource();
   const geo = useGeolocation({
     enableHighAccuracy: true,
@@ -209,6 +297,7 @@ export function ARNavigationScreen(props: any) {
       setRoutePoints([]);
       setRouteTotalDistance(0);
       setDeviationDistance(null);
+      setFootNavigationSteps(null);
       if (typeof destinationLat === 'number' && typeof destinationLng === 'number') {
         setTarget({
           id: destinationId,
@@ -322,7 +411,7 @@ export function ARNavigationScreen(props: any) {
     return getDirectionType(calculateRelativeAngle(bearingToTarget, compassHeading));
   }, [bearingToTarget, compassHeading, distanceRemaining]);
 
-  const generatedSteps = useMemo(() => {
+  const previewNavigationSteps = useMemo(() => {
     if (!target) return FALLBACK_STEPS;
     return generateRealNavigationSteps(
       geo.latitude ?? null,
@@ -332,6 +421,11 @@ export function ARNavigationScreen(props: any) {
       target.name,
     );
   }, [target, geo.latitude, geo.longitude]);
+
+  const generatedSteps =
+    footNavigationSteps && footNavigationSteps.length > 0
+      ? footNavigationSteps
+      : previewNavigationSteps;
 
   const currentInstruction = useMemo(() => {
     if (mode !== 'navigating') return generatedSteps[currentStep] ?? generatedSteps[0];
@@ -422,27 +516,27 @@ export function ARNavigationScreen(props: any) {
     const now = Date.now();
     if (lastRecalcAtRef.current && now - lastRecalcAtRef.current < ROUTE_RECALC_INTERVAL_MS) return;
 
-    // 重新使用 A* 路網規劃
-    const recalcPath = findShortestPath(
-      routeProgress.snappedLocation.latitude,
-      routeProgress.snappedLocation.longitude,
-      target.lat,
-      target.lng,
-    );
-    const newRoute: ARLocation[] =
-      recalcPath.length >= 2
-        ? recalcPath.map((n) => ({ latitude: n.lat, longitude: n.lng }))
-        : buildOutdoorRoute(
-            routeProgress.snappedLocation,
-            { latitude: target.lat, longitude: target.lng },
-            campusNodes,
-          );
-    const newDistance = calculateRouteDistance(newRoute);
-
-    setRoutePoints(newRoute);
-    setRouteTotalDistance(newDistance);
-    setDistanceRemaining(Math.round(newDistance));
     lastRecalcAtRef.current = now;
+
+    let cancelled = false;
+    const snapped = routeProgress.snappedLocation;
+
+    void (async () => {
+      const built = await buildARNavigationRoute({
+        start: snapped,
+        destination: { lat: target.lat, lng: target.lng, name: target.name },
+        campusSnapNodes: campusNodes,
+      });
+      if (cancelled) return;
+      setRoutePoints(built.points);
+      setRouteTotalDistance(built.distance);
+      setDistanceRemaining(Math.round(built.distance));
+      setFootNavigationSteps(built.steps);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [campusNodes, mode, routeProgress, target]);
 
   const totalDistance = useMemo(() => {
@@ -480,43 +574,31 @@ export function ARNavigationScreen(props: any) {
     }
     const position = await geo.getCurrentPosition();
 
+    if (!position || !target) {
+      Alert.alert('無法取得位置', '請確認 GPS 已開啟後再試一次。');
+      return;
+    }
+
+    const startLocation: ARLocation = {
+      latitude: position.latitude!,
+      longitude: position.longitude!,
+    };
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    const built = await buildARNavigationRoute({
+      start: startLocation,
+      destination: { lat: target.lat, lng: target.lng, name: target.name },
+      campusSnapNodes: campusNodes,
+    });
+
+    setRoutePoints(built.points);
+    setRouteTotalDistance(built.distance);
+    setFootNavigationSteps(built.steps);
+    setDistanceRemaining(Math.round(built.distance));
+
     setMode('navigating');
     setCurrentStep(0);
-    if (position && target) {
-      const startLocation: ARLocation = {
-        latitude: position.latitude!,
-        longitude: position.longitude!,
-      };
-      const destinationLocation: ARLocation = { latitude: target.lat, longitude: target.lng };
-
-      // 使用校園路網 A* 路徑規劃產生精準路線點
-      const pathNodes = findShortestPath(
-        position.latitude!,
-        position.longitude!,
-        target.lat,
-        target.lng,
-      );
-      const routeFromPathNetwork: ARLocation[] = pathNodes.map((n) => ({
-        latitude: n.lat,
-        longitude: n.lng,
-      }));
-
-      // 如果路網節點太少，再用 buildOutdoorRoute 補間
-      const route =
-        routeFromPathNetwork.length >= 2
-          ? routeFromPathNetwork
-          : buildOutdoorRoute(startLocation, destinationLocation, campusNodes);
-
-      setRoutePoints(route);
-      const routeDistance = calculateRouteDistance(route);
-      setRouteTotalDistance(routeDistance);
-      setDistanceRemaining(
-        Math.round(routeDistance || calculateDistance(startLocation, destinationLocation)),
-      );
-    } else {
-      setDistanceRemaining(totalDistance > 1 ? totalDistance : 150);
-    }
     setLastVoiceAnnouncement('');
   };
 
@@ -527,7 +609,13 @@ export function ARNavigationScreen(props: any) {
   const handleEndNavigation = () => {
     Alert.alert('結束導航', '確定要結束目前的導航嗎？', [
       { text: '取消', style: 'cancel' },
-      { text: '結束', onPress: () => setMode('preview') },
+      {
+        text: '結束',
+        onPress: () => {
+          setFootNavigationSteps(null);
+          setMode('preview');
+        },
+      },
     ]);
   };
 

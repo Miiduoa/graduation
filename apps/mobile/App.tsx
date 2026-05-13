@@ -126,7 +126,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           LearningAnalytics: 'learning-analytics',
           CourseGradebook: 'course-gradebook',
           Grades: 'grades',
-          Calendar: 'calendar',
+          Calendar: 'learn/calendar',
           AICourseAdvisor: 'ai-advisor',
           AdminCourseVerify: 'course-verify',
         },
@@ -167,7 +167,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           FriendsManage: 'friends',
           FollowingLists: 'following-lists',
           Chat: 'chat/:peerId',
-          AdminCourseVerify: 'course-verify',
+          AdminCourseVerify: 'messages/course-verify',
         },
       },
       我的: {
@@ -520,7 +520,6 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
  */
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
-  const isDark = theme.mode === 'dark';
   const permissions = usePermissions();
 
   // 只顯示 4 個情境 Tab，過濾掉 '我的' 隱藏 Tab
@@ -571,13 +570,9 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             gap: 2,
             paddingVertical: 9,
             paddingHorizontal: 4,
-            borderRadius: 16,
-            backgroundColor: focused
-              ? isDark
-                ? 'rgba(37,99,235,0.16)'
-                : 'rgba(37,99,235,0.08)'
-              : 'transparent',
-            minHeight: 50,
+            borderRadius: theme.radius.md,
+            backgroundColor: focused ? theme.colors.chromeTabItemActive : 'transparent',
+            minHeight: 52,
           }}
         >
           <Ionicons
@@ -617,12 +612,12 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           flex: 1,
           flexDirection: 'row',
           alignItems: 'center',
-          borderRadius: 26,
+          borderRadius: theme.radius.xl,
           paddingVertical: 6,
-          paddingHorizontal: 8,
+          paddingHorizontal: 10,
           borderWidth: 1,
-          borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
-          backgroundColor: isDark ? 'rgba(26,29,39,0.97)' : 'rgba(255,255,255,0.98)',
+          borderColor: theme.colors.chromeTabBorder,
+          backgroundColor: theme.colors.chromeTabBar,
           ...softShadowStyle(theme.shadows.soft),
         }}
       >
@@ -647,7 +642,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           position: 'absolute',
           left: 0,
           right: 0,
-          top: -18,
+          top: -theme.layout.fabOffset,
           alignItems: 'center',
           justifyContent: 'center',
         }}

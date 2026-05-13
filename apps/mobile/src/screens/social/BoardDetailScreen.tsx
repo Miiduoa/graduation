@@ -50,13 +50,13 @@ export function BoardDetailScreen(props: any) {
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id || !boardId) {
+    if (isFirebaseMockMode() || !school?.id || !boardId || !auth.user?.uid) {
       setPosts([]);
       return;
     }
     const rows = await fetchRecentCampusPosts(school.id, boardId, 45);
     setPosts(rankFeedPosts(rows, 50));
-  }, [school?.id, boardId]);
+  }, [school?.id, boardId, auth.user?.uid]);
 
   const loadMetaAndSub = useCallback(async () => {
     if (!school?.id || !boardId || !auth.user?.uid) return;
@@ -117,6 +117,14 @@ export function BoardDetailScreen(props: any) {
     );
   }
 
+  if (!auth.user) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ color: theme.colors.textSecondary }}>請先登入以瀏覽看板</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.root, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }]}>
       <View style={styles.boardMeta}>
@@ -169,7 +177,9 @@ export function BoardDetailScreen(props: any) {
               此看板尚未有貼文，成為第一篇吧。
             </Text>
           }
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+  ItemSeparatorComponent={() => (
+    <View style={{ height: theme.layout.listSeparatorGap, backgroundColor: 'transparent' }} />
+  )}
           renderItem={({ item }) => {
             const { likes, cc } = engagementLine(item);
             return (
@@ -202,17 +212,17 @@ export function BoardDetailScreen(props: any) {
 }
 
 const styles = StyleSheet.create({
-  boardMeta: { marginBottom: 8 },
-  root: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 14 },
+  boardMeta: { marginBottom: theme.space.sm },
+  root: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: theme.layout.screenPadding },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   composeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginVertical: 10,
-    gap: 10,
+    marginVertical: theme.space.md,
+    gap: theme.space.sm,
   },
-  hint: { fontSize: 12, color: theme.colors.textSecondary, marginBottom: 6 },
+  hint: { fontSize: 12, color: theme.colors.textSecondary, marginBottom: theme.space.sm },
   subBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -244,19 +254,29 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.md,
-    padding: 14,
+    padding: theme.layout.cardPadding,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  badge: { fontSize: 11, color: theme.colors.accent, fontWeight: '700', marginBottom: 6 },
+  badge: {
+    fontSize: 11,
+    color: theme.colors.accent,
+    fontWeight: '700',
+    marginBottom: theme.space.sm,
+  },
   title: { fontSize: 16, fontWeight: '800', color: theme.colors.text },
-  preview: { marginTop: 6, fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20 },
+  preview: {
+    marginTop: theme.space.sm,
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
+  },
   cardFoot: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    marginTop: 10,
-    paddingTop: 10,
+    gap: theme.space.md,
+    marginTop: theme.space.md,
+    paddingTop: theme.space.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.colors.border,
   },

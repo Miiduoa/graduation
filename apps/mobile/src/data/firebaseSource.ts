@@ -2922,7 +2922,8 @@ export const firebaseSource: DataSource = {
           constraints,
         );
       } catch (error) {
-        console.warn('[firebaseSource] listWashingMachines school-scoped read failed:', error);
+        const logger = isPermissionDeniedError(error) ? console.debug : console.warn;
+        logger('[firebaseSource] listWashingMachines school-scoped read failed:', error);
       }
     }
 
@@ -3043,7 +3044,8 @@ export const firebaseSource: DataSource = {
           options,
         );
       } catch (error) {
-        console.warn('[firebaseSource] listPrinters school-scoped read failed:', error);
+        const logger = isPermissionDeniedError(error) ? console.debug : console.warn;
+        logger('[firebaseSource] listPrinters school-scoped read failed:', error);
       }
     }
 

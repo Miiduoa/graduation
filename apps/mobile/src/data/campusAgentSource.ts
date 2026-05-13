@@ -12,6 +12,7 @@ import {
   updateDoc,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import { Platform } from 'react-native';
 
 import { getAuthInstance, getDb, getFunctionsInstance, isFirebaseMockMode } from '../firebase';
 import { submitCrowdReport as submitLocalCrowdReport } from '../services/campusPulseEngine';
@@ -177,6 +178,12 @@ function parsePulseAggregate(
     bestTimeToVisit: typeof row.bestTimeToVisit === 'string' ? row.bestTimeToVisit : undefined,
     updatedAt: toDate(row.updatedAt),
   };
+}
+
+function shouldSkipPulseCallableFallback(): boolean {
+  // Firebase callable functions still issue browser fetches; the PU demo function is not CORS-enabled
+  // for localhost, so Web should use Firestore rows or seeded aggregates instead of producing console errors.
+  return Platform.OS === 'web';
 }
 
 function parseAcademicSourceSnapshot(
@@ -524,20 +531,22 @@ export async function listPulseAggregates(schoolId = 'tw-pu'): Promise<PulseAggr
       snap?.docs.map((docSnap) => parsePulseAggregate(docSnap.data(), docSnap.id, schoolId)) ?? [];
     if (stored.length > 0) return stored;
 
-    try {
-      const callable = httpsCallable<{ schoolId?: string }, { aggregates?: PulseAggregate[] }>(
-        getFunctionsInstance(),
-        'listPulseAggregates',
-      );
-      const result = await callable({ schoolId });
-      if (Array.isArray(result.data.aggregates)) {
-        return result.data.aggregates.map((aggregate) => ({
-          ...aggregate,
-          updatedAt: toDate((aggregate as any).updatedAt),
-        }));
+    if (!shouldSkipPulseCallableFallback()) {
+      try {
+        const callable = httpsCallable<{ schoolId?: string }, { aggregates?: PulseAggregate[] }>(
+          getFunctionsInstance(),
+          'listPulseAggregates',
+        );
+        const result = await callable({ schoolId });
+        if (Array.isArray(result.data.aggregates)) {
+          return result.data.aggregates.map((aggregate) => ({
+            ...aggregate,
+            updatedAt: toDate((aggregate as any).updatedAt),
+          }));
+        }
+      } catch {
+        // Fall through to seeded aggregates.
       }
-    } catch {
-      // Fall through to seeded aggregates.
     }
   }
 

@@ -38,7 +38,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
     >
       <View>
         <LinearGradient
-          colors={[theme.colors.accent, '#7C3AED']}
+          colors={[...theme.gradients.avatar]}
           style={{
             width: size,
             height: size,
@@ -50,7 +50,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
           {auth.user ? (
             <Text
               style={{
-                color: '#fff',
+                color: theme.colors.onAccent,
                 fontSize: size * 0.45,
                 fontWeight: '800',
               }}
@@ -58,7 +58,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
               {initial}
             </Text>
           ) : (
-            <Ionicons name="person-outline" size={size * 0.5} color="#fff" />
+            <Ionicons name="person-outline" size={size * 0.5} color={theme.colors.onAccent} />
           )}
         </LinearGradient>
         {/* 紅點：未讀通知 */}
@@ -79,7 +79,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
               borderColor: theme.colors.bg,
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 9, fontWeight: '800' }}>
               {notifs.unreadCount > 9 ? '9+' : notifs.unreadCount}
             </Text>
           </View>

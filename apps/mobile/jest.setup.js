@@ -1,5 +1,4 @@
 import '@testing-library/jest-native/extend-expect';
-
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
@@ -137,3 +136,10 @@ jest.setTimeout(15000);
 
 // Configure global act environment for React 19
 global.IS_REACT_ACT_ENVIRONMENT = true;
+
+
+// inferIntent 記憶體學習映射會跨測試汙染意圖；延遲 require 以免搶先於測試檔 jest.mock。
+beforeEach(() => {
+  const { resetAdaptiveLearnedPatternsForTests } = require('./src/services/aiLocalAgent');
+  resetAdaptiveLearnedPatternsForTests();
+});

@@ -698,6 +698,7 @@ export function EventsScreen(props: any) {
 
           {items.length === 0 ? (
             <EmptyState
+              showCalmHero
               title={
                 debouncedQuery.trim() && activeFilterCount > 0
                   ? `找不到「${debouncedQuery}」相關的活動`

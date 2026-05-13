@@ -1,0 +1,101 @@
+{
+  "38": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "flux1-dev.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "40": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "clip_l.safetensors",
+      "clip_name2": "t5xxl_fp16.safetensors",
+      "type": "flux",
+      "device": "default"
+    }
+  },
+  "39": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    }
+  },
+  "27": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    }
+  },
+  "45": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "40",
+        0
+      ],
+      "text": "Mobile app icon, flat minimal vector illustration style, iOS aesthetic, large centered symbol with safe margins inside rounded square (content inside ~80% center so iOS corner mask does not clip edges), no readable letters. Theme: intelligent campus assistant for Chinese university students. Motif: abstract open book merged with small sparkle or neural node, subtle graduation-cap silhouette hint. Color palette: deep violet accent #5B21B6, warm gold #D4A843, dark indigo-navy background #1a1a2e matching app splash screen, high contrast, clean shapes, soft gradient highlight only on the emblem. Professional, trustworthy, modern; masterpiece, sharp edges, crisp graphic design."
+    }
+  },
+  "42": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "45",
+        0
+      ]
+    }
+  },
+  "31": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "38",
+        0
+      ],
+      "seed": 20260513,
+      "steps": 24,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "positive": [
+        "45",
+        0
+      ],
+      "negative": [
+        "42",
+        0
+      ],
+      "latent_image": [
+        "27",
+        0
+      ],
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "31",
+        0
+      ],
+      "vae": [
+        "39",
+        0
+      ]
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ],
+      "filename_prefix": "campus_app_icon"
+    }
+  }
+}
