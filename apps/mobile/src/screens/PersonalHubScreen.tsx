@@ -8,6 +8,7 @@ import {
   View,
   ActivityIndicator,
   Platform,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,11 +22,13 @@ import { useSchool } from '../state/school';
 import { usePermissions } from '../hooks/usePermissions';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { BrandFluxImageHeader } from '../ui/BrandFluxImageHeader';
 import { ContextStrip } from '../ui/campusOs';
 import { resolveRoleMode } from '../utils/campusOs';
 import { navigateToCourseHome } from '../utils/courseNavigation';
 import { AIBrainOverviewCard } from '../components/AIBrainOverviewCard';
 import { aiOverlay } from '../app/useAIOverlay';
+import { generatedUiAssets } from '../ui/generatedUiAssets';
 
 interface ListRowProps {
   icon: string;
@@ -184,12 +187,10 @@ export function PersonalHubScreen(props: any) {
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + 40,
         }}
       >
-        <LinearGradient
-          colors={[...theme.gradients.profileHero]}
-          style={{
-            paddingTop: insets.top + theme.space.lg,
-            paddingBottom: 24,
-          }}
+        <BrandFluxImageHeader
+          variant="personal"
+          paddingTop={insets.top + theme.space.lg}
+          paddingBottom={24}
         >
           {/* ⚙️ 右上角設定齒輪：開啟全功能 HeaderDrawer */}
           <View
@@ -243,25 +244,46 @@ export function PersonalHubScreen(props: any) {
             >
               <Ionicons name="person" size={32} color={theme.colors.onAccent} />
             </LinearGradient>
-            <View style={{ gap: theme.space.sm }}>
-              <Text
-                style={{
-                  color: isDark ? 'rgba(255,255,255,0.6)' : theme.colors.textSecondary,
-                  fontSize: 13,
-                }}
-              >
-                我的
-              </Text>
-              <Text
-                style={{
-                  color: theme.colors.text,
-                  fontSize: 28,
-                  fontWeight: '800',
-                  letterSpacing: -0.5,
-                }}
-              >
-                {identity}
-              </Text>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'flex-start',
+                gap: theme.space.md,
+              }}
+            >
+              <View style={{ flex: 1, gap: theme.space.sm }}>
+                <Text
+                  style={{
+                    color: isDark ? 'rgba(255,255,255,0.6)' : theme.colors.textSecondary,
+                    fontSize: 13,
+                  }}
+                >
+                  我的
+                </Text>
+                <Text
+                  style={{
+                    color: theme.colors.text,
+                    fontSize: 28,
+                    fontWeight: '800',
+                    letterSpacing: -0.5,
+                  }}
+                >
+                  {identity}
+                </Text>
+              </View>
+              {!auth.user ? (
+                <Image
+                  accessibilityIgnoresInvertColors
+                  source={generatedUiAssets.emptyRelaxed}
+                  style={{
+                    width: 96,
+                    height: 72,
+                    borderRadius: theme.radius.md,
+                    marginTop: theme.space.sm,
+                  }}
+                  resizeMode="cover"
+                />
+              ) : null}
             </View>
             {auth.user ? (
               <View
@@ -292,7 +314,7 @@ export function PersonalHubScreen(props: any) {
               </View>
             ) : null}
           </View>
-        </LinearGradient>
+        </BrandFluxImageHeader>
 
         {!auth.user ? (
           <Pressable

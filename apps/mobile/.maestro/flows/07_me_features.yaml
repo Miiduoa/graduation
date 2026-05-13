@@ -1,7 +1,7 @@
 # 07_me_features.yaml
-# 「我的」已改為隱藏 Tab：由左上角頭像開啟 HeaderDrawer，再進入各功能
+# 「我的」已改為隱藏 Tab：由左上角頭像開啟 HeaderDrawer
 
-appId: com.campus.app
+appId: ${APP_ID}
 name: Me Features (Header Drawer)
 tags:
   - smoke
@@ -12,35 +12,39 @@ tags:
 - launchApp
 
 - extendedWaitUntil:
-    visible: '公告'
-    timeout: 10000
+    visible:
+      id: 'tab-Today'
+    timeout: 45000
 
+- waitForAnimationToEnd:
+    timeout: 2500
 
-# 開啟頭像抽屜
 - tapOn:
     id: 'header-avatar-button'
 
 - extendedWaitUntil:
     visible: '個人'
-    timeout: 5000
-
+    timeout: 8000
 
 - takeScreenshot: drawer_open
 
-# QR 碼
+- scrollUntilVisible:
+    element:
+      text: '我的 QR Code'
+    direction: DOWN
+    timeout: 20000
+
 - tapOn:
     text: '我的 QR Code'
 
 - extendedWaitUntil:
     visible: 'QR 碼'
-    timeout: 5000
-
+    timeout: 8000
 
 - takeScreenshot: qr_code_screen
 
 - back
 
-# 返回抽屜或直接回 today：再開抽屜較穩
 - tapOn:
     id: 'header-avatar-button'
     optional: true
@@ -50,8 +54,7 @@ tags:
 
 - extendedWaitUntil:
     visible: '成就與積分'
-    timeout: 5000
-
+    timeout: 8000
 
 - takeScreenshot: achievements_screen
 

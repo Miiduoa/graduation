@@ -54,6 +54,16 @@ export type UserPreferences = {
 
   // Experimental
   enableBetaFeatures: boolean;
+
+  /** 智慧儀表板：依天氣微調頂部視覺（維持白底基調） */
+  dashboardWeatherEffects: boolean;
+  /** 今日可能降雨時提示攜帶雨具（每日最多一次） */
+  dashboardRainReminders: boolean;
+  /** 為天氣查詢使用裝置 GPS（僅在前述功能開啟時請求） */
+  weatherUseDeviceLocation: boolean;
+  /** 未使用 GPS 時的自訂緯度（搭配經度）；無效時改用校園預設座標 */
+  weatherManualLatitude: number | null;
+  weatherManualLongitude: number | null;
 };
 
 type PreferencesContextType = {
@@ -130,6 +140,12 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   cacheSize: 'medium',
 
   enableBetaFeatures: false,
+
+  dashboardWeatherEffects: false,
+  dashboardRainReminders: false,
+  weatherUseDeviceLocation: false,
+  weatherManualLatitude: null,
+  weatherManualLongitude: null,
 };
 
 // ===== Context =====

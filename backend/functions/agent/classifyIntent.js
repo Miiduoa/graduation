@@ -10,6 +10,80 @@ const {
 const FALLBACK_CONFIDENCE_CAP = 0.58;
 
 /**
+ * 多語別名表：把英文 / 日文 / 台語 / 注音文等 → 對映回中文核心字。
+ * 在進 richIntentClassify 之前做一次正規化，可以提升命中率而不必改 INTENT_PATTERNS。
+ */
+const MULTILINGUAL_ALIASES = [
+  // 食物
+  { match: /\blunch\b/gi, replace: '午餐' },
+  { match: /\bdinner\b/gi, replace: '晚餐' },
+  { match: /\bbreakfast\b/gi, replace: '早餐' },
+  { match: /\b(order|ordering)\s+food\b/gi, replace: '訂餐' },
+  { match: /\b(eat|hungry|starving)\b/gi, replace: '吃' },
+  { match: /欲食/g, replace: '想吃' }, // 台語
+  { match: /欲呷|欲嗚/g, replace: '想吃' },
+  // 天氣
+  { match: /\bweather\b/gi, replace: '天氣' },
+  { match: /天気/g, replace: '天氣' }, // 日文
+  { match: /\b(rain|raining)\b/gi, replace: '下雨' },
+  { match: /會落雨/g, replace: '會下雨' }, // 台語
+  // 課程 / 課表
+  { match: /\b(class|classes|schedule)\b/gi, replace: '課' },
+  { match: /\b(homework|assignment|due)\b/gi, replace: '作業' },
+  // 宿舍
+  { match: /\bair\s*conditioner\b/gi, replace: '冷氣' },
+  { match: /\bac\s+(broken|not\s+working)\b/gi, replace: '冷氣壞了' },
+  { match: /冷氣寄掉了?/g, replace: '冷氣壞了' }, // 網路用語
+  { match: /\b(dorm|dormitory|room)\b/gi, replace: '宿舍' },
+  // 圖書館
+  { match: /\b(library|book|borrow)\b/gi, replace: '圖書館' },
+  // 健康 / 心理
+  { match: /\b(sick|ill|headache|fever)\b/gi, replace: '不舒服' },
+  { match: /\b(anxious|anxiety|stressed|depressed)\b/gi, replace: '焦慮' },
+  // 公告 / 活動
+  { match: /\b(announcement|notice)\b/gi, replace: '公告' },
+  { match: /\bevent\b/gi, replace: '活動' },
+  // 列印
+  { match: /\bprint(ing)?\b/gi, replace: '列印' },
+  // 失物
+  { match: /\b(lost|found)\b/gi, replace: '失物' },
+  // 請假
+  { match: /\b(leave|sick\s+leave|absence)\b/gi, replace: '請假' },
+];
+
+function normalizeMultilingualAliases(text) {
+  let out = String(text ?? '');
+  for (const { match, replace } of MULTILINGUAL_ALIASES) {
+    out = out.replace(match, replace);
+  }
+  return out;
+}
+
+/**
+ * 邊界輸入 guard：空字串 / 只剩標點 / 單 emoji / 單字 / 重複字 → 走澄清。
+ */
+function detectAmbiguousLowInfoInput(text) {
+  const s = String(text ?? '').trim();
+  if (!s) return { ambiguous: true, reason: 'empty' };
+  if (s.length <= 1) return { ambiguous: true, reason: 'single_char' };
+  // 只剩標點或符號
+  if (/^[\s\p{P}\p{S}]+$/u.test(s)) return { ambiguous: true, reason: 'punct_only' };
+  // 只剩 emoji
+  if (/^(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}|\s)+$/u.test(s)) {
+    return { ambiguous: true, reason: 'emoji_only' };
+  }
+  // 重複同一個字 ≥ 4 次（中文中文中文中文 / aaaaa）
+  if (/^(.)\1{3,}$/u.test(s.replace(/\s+/g, ''))) {
+    return { ambiguous: true, reason: 'repeated_char' };
+  }
+  // 超短且沒有任何中文/英文/數字（純空白與符號混雜）
+  if (s.length <= 2 && !/[\p{L}\p{N}]/u.test(s)) {
+    return { ambiguous: true, reason: 'too_short_no_word' };
+  }
+  return { ambiguous: false };
+}
+
+/**
  * 將豐富分類的 category 對應到 assistantFormat 的 intent 名稱（與 executeCampusAssistantCore 路由一致）。
  * @param {string} category
  * @param {string} rawMessage
@@ -97,11 +171,26 @@ function mapRichCategoryToAssistantIntent(category, rawMessage, richSubIntent) {
  * }}
  */
 function classifyIntent(text) {
-  const rich = classifyRichIntent(text);
+  // 1) 邊界輸入：直接走澄清，不要丟功能列表
+  const ambiguous = detectAmbiguousLowInfoInput(text);
+  if (ambiguous.ambiguous) {
+    return {
+      name: 'general',
+      confidence: 1,
+      source: 'low_info_guard',
+      askClarify: true,
+      lowInfoReason: ambiguous.reason,
+    };
+  }
+
+  // 2) 多語別名 → 中文正規化（不蓋掉原文，只用來分類）
+  const normalized = normalizeMultilingualAliases(text);
+
+  const rich = classifyRichIntent(normalized);
   const table = cases.intentConfidence || {};
 
   if (rich.rawScore > 0) {
-    const name = mapRichCategoryToAssistantIntent(rich.category, text, rich.subIntent);
+    const name = mapRichCategoryToAssistantIntent(rich.category, normalized, rich.subIntent);
     const confidence = richRawScoreToConfidence01(rich.rawScore);
     return {
       name,
@@ -110,10 +199,11 @@ function classifyIntent(text) {
       subIntent: rich.subIntent,
       rawScore: rich.rawScore,
       source: 'rich',
+      ...(normalized !== text && { normalizedFromAlias: true }),
     };
   }
 
-  const name = detectCampusAssistantIntent(text);
+  const name = detectCampusAssistantIntent(normalized);
   const base = typeof table[name] === 'number' ? table[name] : 0.55;
   const confidence = Math.min(FALLBACK_CONFIDENCE_CAP, base * 0.85);
 
@@ -121,7 +211,13 @@ function classifyIntent(text) {
     name,
     confidence,
     source: 'keyword_fallback',
+    ...(normalized !== text && { normalizedFromAlias: true }),
   };
 }
 
-module.exports = { classifyIntent, mapRichCategoryToAssistantIntent };
+module.exports = {
+  classifyIntent,
+  mapRichCategoryToAssistantIntent,
+  normalizeMultilingualAliases,
+  detectAmbiguousLowInfoInput,
+};

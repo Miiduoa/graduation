@@ -3,6 +3,8 @@
 Queue a Flux.1 Dev txt2img workflow on a running ComfyUI (default http://127.0.0.1:8188),
 poll /history, download the first PNG to --out.
 
+See also scripts/generate-flux-ui-asset-pack.py for multi-size dashboard / empty-state Flux art cached under apps/mobile/assets/generated-ui/.
+
 Requires local models (same layout as Comfy-Org Flux.1 Dev blueprint):
   models/diffusion_models/flux1-dev.safetensors
   models/text_encoders/clip_l.safetensors, t5xxl_fp16.safetensors

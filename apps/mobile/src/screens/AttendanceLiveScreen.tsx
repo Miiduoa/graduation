@@ -398,8 +398,8 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
                 <Text style={[s.statNum, { color: '#EF4444' }]}>{stats.absent}</Text>
                 <Text style={s.statLabel}>缺席</Text>
               </View>
-              <View style={[s.statCard, { backgroundColor: '#EEF2FF' }]}>
-                <Text style={[s.statNum, { color: '#6366F1' }]}>{stats.rate}%</Text>
+              <View style={[s.statCard, { backgroundColor: theme.colors.surface2 }]}>
+                <Text style={[s.statNum, { color: theme.colors.accent }]}>{stats.rate}%</Text>
                 <Text style={s.statLabel}>出席率</Text>
               </View>
             </View>

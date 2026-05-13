@@ -115,6 +115,27 @@ describe('AI 對話品質回歸', () => {
     );
   });
 
+  it('負數訂餐數量只追問，不執行下單', async () => {
+    const result = await autonomousQuery('幫我點 -3 份雞腿排', CTX);
+
+    expect(
+      result.failedActions.some((a) => a.tool === 'create_order' && /quantity|數量/.test(a.missingInfo)),
+    ).toBe(true);
+    expect(result.executedActions.some((a) => a.tool === 'create_order')).toBe(false);
+  });
+
+  it('使用者說吃素但指定葷食時，改提供素食選項而非送單', async () => {
+    const result = await autonomousQuery('幫我點雞腿排但我吃素', CTX);
+    const text = summaries(result);
+
+    expect(
+      result.executedActions.some((a) => a.tool === 'create_order' && a.result.success && a.result.isWrite),
+    ).toBe(false);
+    expect(text).toContain('吃素');
+    expect(text).toContain('素食');
+    expect(text).not.toContain('雞腿排但我');
+  });
+
   it('使用者說已經簽到時不重複簽到', async () => {
     const result = await autonomousQuery('我已經簽到了', CTX);
 

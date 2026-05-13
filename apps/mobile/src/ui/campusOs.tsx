@@ -168,9 +168,9 @@ export function HeroActionCard(props: {
               iconBg: '#FEE2E220',
             }
           : {
-              colors: ['#EDE9FE', '#DDD6FE'] as [string, string],
+              colors: ['#F3F4F6', '#E5E7EB'] as [string, string],
               fg: '#5B21B6',
-              iconBg: '#EDE9FE40',
+              iconBg: 'rgba(17,24,39,0.06)',
             };
 
   // Dark mode adjustments
@@ -239,7 +239,7 @@ export function HeroActionCard(props: {
         </Text>
         <Text
           style={{
-            color: isDark ? '#F5F3FF' : '#1A1333',
+            color: isDark ? '#F5F3FF' : theme.colors.text,
             fontSize: 20,
             fontWeight: '700',
             letterSpacing: -0.4,
@@ -251,7 +251,7 @@ export function HeroActionCard(props: {
         {props.description && (
           <Text
             style={{
-              color: isDark ? 'rgba(245,243,255,0.7)' : 'rgba(26,19,51,0.6)',
+              color: isDark ? 'rgba(245,243,255,0.7)' : theme.colors.textSecondary,
               fontSize: 14,
               lineHeight: 21,
               marginTop: 2,
@@ -605,7 +605,7 @@ export function RoleCtaCard(props: {
       ? { colors: ['#D1FAE5', '#A7F3D0'] as const, fg: '#059669' }
       : props.tone === 'admin'
         ? { colors: ['#FEF3C7', '#FDE68A'] as const, fg: '#D97706' }
-        : { colors: ['#EDE9FE', '#DDD6FE'] as const, fg: '#5B21B6' };
+        : { colors: ['#F3F4F6', '#E5E7EB'] as const, fg: '#5B21B6' };
 
   const isDark = theme.mode === 'dark';
   const gradColors = isDark
@@ -670,7 +670,7 @@ export function RoleCtaCard(props: {
             </Text>
             <Text
               style={{
-                color: isDark ? '#F5F3FF' : '#1A1333',
+                color: isDark ? '#F5F3FF' : theme.colors.text,
                 fontSize: 16,
                 fontWeight: '700',
                 marginTop: 3,
@@ -683,7 +683,7 @@ export function RoleCtaCard(props: {
         {props.description && (
           <Text
             style={{
-              color: isDark ? 'rgba(245,243,255,0.7)' : 'rgba(26,19,51,0.6)',
+              color: isDark ? 'rgba(245,243,255,0.7)' : theme.colors.textSecondary,
               lineHeight: 21,
               fontSize: 14,
             }}
@@ -735,7 +735,7 @@ export function CompletionState(props: {
       </View>
       <Text
         style={{
-          color: isDark ? '#F5F3FF' : '#1A1333',
+          color: isDark ? '#F5F3FF' : theme.colors.text,
           fontSize: 17,
           fontWeight: '700',
         }}
@@ -744,7 +744,7 @@ export function CompletionState(props: {
       </Text>
       <Text
         style={{
-          color: isDark ? 'rgba(245,243,255,0.7)' : 'rgba(26,19,51,0.6)',
+          color: isDark ? 'rgba(245,243,255,0.7)' : theme.colors.textSecondary,
           fontSize: 14,
           lineHeight: 21,
           textAlign: 'center',

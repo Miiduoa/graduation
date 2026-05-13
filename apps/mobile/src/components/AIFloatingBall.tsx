@@ -1,5 +1,6 @@
 /**
  * AIFloatingBall — 4+1 架構的中央 AI 球
+ * 若只改了球體樣式／漸層卻看不出差異：`pnpm run start:clean` 清 Metro cache 後再 Reload。
  * ═══════════════════════════════════════════════════════════════════════
  * 核心設計：
  * - 永遠存在於底部 Tab Bar 正中央，比兩側 Tab 略高、略大（Fitts's Law）
@@ -14,11 +15,12 @@
  * - Reciprocity：AI 主動發現問題 → 使用者願意回應
  */
 import React, { useEffect, useRef, useMemo } from 'react';
-import { Animated, Easing, Pressable, View, Text } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Animated, Easing, Image, Pressable, Text, View } from 'react-native';
 import { theme, softShadowStyle } from '../ui/theme';
 import { aiBrain, type BrainInsight } from '../services/aiBrain';
+
+/** brand asset for campus demo */
+const AI_ORB_LOGO = require('../../assets/providence_ai_orb_logo.png');
 
 export interface AIFloatingBallProps {
   size?: number;
@@ -189,39 +191,81 @@ export function AIFloatingBall({
           height: size,
           borderRadius: size / 2,
           ...softShadowStyle({
-            color: accentColor,
-            opacity: 0.45,
-            radius: 14,
-            offset: { width: 0, height: 6 },
-            elevation: 12,
+            color:
+              theme.mode === 'light' ? '#0F172A' : accentColor,
+            opacity: theme.mode === 'light' ? 0.34 : 0.45,
+            radius: theme.mode === 'light' ? 22 : 14,
+            offset: { width: 0, height: theme.mode === 'light' ? 9 : 6 },
+            elevation: theme.mode === 'light' ? 18 : 12,
           }),
         }}
       >
+        {/* 淺色底：外圈強調品牌色，避免與白色 TabBar 溶在一起 */}
+        {theme.mode === 'light' && !isUrgent ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              width: size + 4,
+              height: size + 4,
+              borderRadius: (size + 4) / 2,
+              left: -2,
+              top: -2,
+              borderWidth: 2,
+              borderColor: accentColor,
+            }}
+          />
+        ) : null}
+        {theme.mode === 'dark' ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              width: size + 4,
+              height: size + 4,
+              borderRadius: (size + 4) / 2,
+              left: -2,
+              top: -2,
+              borderWidth: 1.5,
+              borderColor: 'rgba(255,255,255,0.26)',
+            }}
+          />
+        ) : null}
         <Animated.View
           pointerEvents="none"
           style={{
             width: size,
             height: size,
             borderRadius: size / 2,
+            overflow: 'hidden',
             transform: [{ scale: Animated.multiply(breathScale, press) }],
+            backgroundColor: theme.mode === 'light' ? '#FFFFFF' : theme.colors.surfaceElevated,
+            borderWidth: theme.mode === 'light' ? 2.5 : 2,
+            borderColor:
+              theme.mode === 'light'
+                ? accentColor
+                : 'rgba(255,255,255,0.42)',
           }}
         >
-          <LinearGradient
-            colors={[...(isUrgent ? theme.gradients.aiOrbUrgent : theme.gradients.aiOrbNormal)]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          <View
+            pointerEvents="none"
             style={{
               width: size,
               height: size,
-              borderRadius: size / 2,
               alignItems: 'center',
               justifyContent: 'center',
-              borderWidth: 2,
-              borderColor: 'rgba(255,255,255,0.28)',
             }}
           >
-            <Ionicons name="sparkles" size={size * 0.42} color={theme.colors.onAccent} />
-          </LinearGradient>
+            <Image
+              source={AI_ORB_LOGO}
+              accessibilityIgnoresInvertColors
+              resizeMode="contain"
+              style={{
+                width: size * 0.76,
+                height: size * 0.76,
+              }}
+            />
+          </View>
         </Animated.View>
 
         {/* 紅點徽章 */}

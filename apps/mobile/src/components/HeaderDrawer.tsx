@@ -23,10 +23,12 @@ import {
   View,
   Alert,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppActionIcon } from '../ui/AppActionIcon';
+import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme, softShadowStyle } from '../ui/theme';
+import { BrandFluxImageHeader } from '../ui/BrandFluxImageHeader';
 import { useAuth } from '../state/auth';
 import { useNotifications } from '../state/notifications';
 import { usePermissions } from '../hooks/usePermissions';
@@ -161,8 +163,8 @@ export function HeaderDrawerHost() {
             backgroundColor: theme.colors.bg,
             transform: [{ translateX: slide }],
             ...softShadowStyle({
-              shadowColor: theme.mode === 'dark' ? '#050308' : '#2C2248',
-              shadowOpacity: theme.mode === 'dark' ? 0.5 : 0.12,
+              shadowColor: theme.mode === 'dark' ? '#050308' : '#000000',
+              shadowOpacity: theme.mode === 'dark' ? 0.5 : 0.1,
               shadowRadius: 22,
               shadowOffset: { width: 5, height: 0 },
               elevation: 16,
@@ -175,10 +177,11 @@ export function HeaderDrawerHost() {
             }}
           >
             {/* ─── 頭部：身分卡 ─── */}
-            <LinearGradient colors={[...theme.gradients.drawerHeader]}
+            <BrandFluxImageHeader
+              variant="drawer"
+              paddingTop={insets.top + theme.layout.cardPadding}
+              paddingBottom={theme.layout.sectionGapLarge}
               style={{
-                paddingTop: insets.top + theme.layout.cardPadding,
-                paddingBottom: theme.layout.sectionGapLarge,
                 paddingHorizontal: theme.layout.screenHorizontalPadding,
               }}
             >
@@ -204,7 +207,7 @@ export function HeaderDrawerHost() {
                       justifyContent: 'center',
                     }}
                   >
-                    <Ionicons name="person" size={26} color={theme.colors.onAccent} />
+                    <AppActionIcon name="ic_profile" size={26} />
                   </LinearGradient>
                 </Pressable>
                 <Pressable
@@ -215,7 +218,7 @@ export function HeaderDrawerHost() {
                     opacity: pressed ? 0.5 : 1,
                   })}
                 >
-                  <Ionicons name="close" size={22} color={theme.colors.text} />
+                  <AppActionIcon name="ic_close" size={22} />
                 </Pressable>
               </View>
 
@@ -275,12 +278,12 @@ export function HeaderDrawerHost() {
                   </Text>
                 </Pressable>
               )}
-            </LinearGradient>
+            </BrandFluxImageHeader>
 
             {/* ─── 校園連結（跨 Tab） ─── */}
             <DrawerSection title="校園連結">
               <DrawerRow
-                icon="planet-outline"
+                icon="ic_globe_social"
                 label="校園社群 · 動態／看板／即時／學伴"
                 tint={theme.colors.social}
                 onPress={() => {
@@ -295,23 +298,23 @@ export function HeaderDrawerHost() {
             {/* ─── 個人 ─── */}
             <DrawerSection title="個人">
               <DrawerRow
-                icon="person-outline"
+                icon="ic_profile"
                 label="個人資料"
                 onPress={() => go(auth.user ? 'ProfileEdit' : 'SSOLogin')}
               />
               <DrawerRow
-                icon="qr-code-outline"
+                icon="ic_qr_code"
                 label="我的 QR Code"
                 onPress={() => go('QRCode')}
               />
               <DrawerRow
-                icon="trophy-outline"
+                icon="ic_trophy"
                 label="成就與積分"
                 tint={theme.colors.achievement}
                 onPress={() => go('Achievements')}
               />
               <DrawerRow
-                icon="school-outline"
+                icon="ic_school"
                 label="學分與畢業規劃"
                 tint={theme.colors.roleTeacher}
                 onPress={() => go('CreditAuditStack')}
@@ -321,24 +324,24 @@ export function HeaderDrawerHost() {
             {/* ─── 通知與設定 ─── */}
             <DrawerSection title="通知與設定">
               <DrawerRow
-                icon="notifications-outline"
+                icon="ic_notifications"
                 label="通知中心"
                 badge={notifs.unreadCount > 0 ? `${notifs.unreadCount}` : undefined}
                 tint={theme.colors.warning}
                 onPress={() => go('Notifications')}
               />
               <DrawerRow
-                icon="options-outline"
+                icon="ic_options"
                 label="通知設定"
                 onPress={() => go('NotificationSettings')}
               />
               <DrawerRow
-                icon="settings-outline"
+                icon="ic_settings"
                 label="一般設定"
                 onPress={() => go('Settings')}
               />
               <DrawerRow
-                icon="accessibility-outline"
+                icon="ic_accessibility"
                 label="語言與無障礙"
                 onPress={() => go('AccessibilitySettings')}
               />
@@ -347,13 +350,13 @@ export function HeaderDrawerHost() {
             {/* ─── AI ─── */}
             <DrawerSection title="AI 與工具">
               <DrawerRow
-                icon="hardware-chip-outline"
+                icon="ic_ai_chip"
                 label="AI 模型管理"
                 tint={theme.colors.social}
                 onPress={() => go('AIModelManager')}
               />
               <DrawerRow
-                icon="grid-outline"
+                icon="ic_grid_widgets"
                 label="小工具預覽"
                 onPress={() => go('WidgetPreview')}
               />
@@ -364,7 +367,7 @@ export function HeaderDrawerHost() {
               <DrawerSection title="工作模式">
                 {isTeacher && (
                   <DrawerRow
-                    icon="school-outline"
+                    icon="ic_school"
                     label="我的教學課程"
                     tint={theme.colors.roleTeacher}
                     onPress={() => {
@@ -376,13 +379,13 @@ export function HeaderDrawerHost() {
                 {isAdmin && (
                   <>
                     <DrawerRow
-                      icon="shield-checkmark-outline"
+                      icon="ic_admin_shield"
                       label="管理員控制台"
                       tint={theme.colors.roleAdmin}
                       onPress={() => go('AdminDashboard')}
                     />
                     <DrawerRow
-                      icon="checkmark-done-outline"
+                      icon="ic_verify"
                       label="課程驗證管理"
                       tint={theme.colors.urgent}
                       onPress={() => go('AdminCourseVerify')}
@@ -391,7 +394,7 @@ export function HeaderDrawerHost() {
                 )}
                 {isDepartmentHead && (
                   <DrawerRow
-                    icon="stats-chart-outline"
+                    icon="ic_analytics_chart"
                     label="系所審核與數據"
                     tint={theme.colors.calm}
                     onPress={() => {
@@ -402,7 +405,7 @@ export function HeaderDrawerHost() {
                 )}
                 {isStaff && !isAdmin && (
                   <DrawerRow
-                    icon="construct-outline"
+                    icon="ic_facilities_wrench"
                     label="設施與工單（工作首頁）"
                     tint={theme.colors.warning}
                     onPress={() => {
@@ -415,7 +418,7 @@ export function HeaderDrawerHost() {
                   (a) => a.status === 'active',
                 ) && (
                   <DrawerRow
-                    icon="storefront-outline"
+                    icon="ic_store_merchant"
                     label="商家接單"
                     tint={theme.colors.accent}
                     onPress={() => go('MerchantHub')}
@@ -427,12 +430,12 @@ export function HeaderDrawerHost() {
             {/* ─── 隱私與帳號 ─── */}
             <DrawerSection title="隱私與帳號">
               <DrawerRow
-                icon="shield-outline"
+                icon="ic_privacy_export"
                 label="資料匯出"
                 onPress={() => go('DataExport')}
               />
               <DrawerRow
-                icon="trash-outline"
+                icon="ic_trash_delete"
                 label="刪除帳號"
                 tint={theme.colors.danger}
                 onPress={() => go('AccountDeletion')}
@@ -442,17 +445,17 @@ export function HeaderDrawerHost() {
             {/* ─── 幫助 ─── */}
             <DrawerSection title="幫助">
               <DrawerRow
-                icon="help-circle-outline"
+                icon="ic_help"
                 label="幫助中心"
                 onPress={() => go('Help')}
               />
               <DrawerRow
-                icon="chatbubble-ellipses-outline"
+                icon="ic_feedback_chat"
                 label="意見回饋"
                 onPress={() => go('Feedback')}
               />
               <DrawerRow
-                icon="bug-outline"
+                icon="ic_bug_report"
                 label="回報問題"
                 onPress={() => go('BugReport')}
               />
@@ -551,7 +554,7 @@ function DrawerRow({
   badge,
   onPress,
 }: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: GeneratedButtonIconId;
   label: string;
   tint?: string;
   badge?: string;
@@ -580,7 +583,7 @@ function DrawerRow({
           justifyContent: 'center',
         }}
       >
-        <Ionicons name={icon} size={16} color={color} />
+        <AppActionIcon name={icon} size={16} />
       </View>
       <Text
         style={{
@@ -610,7 +613,7 @@ function DrawerRow({
           </Text>
         </View>
       ) : null}
-      <Ionicons name="chevron-forward" size={14} color={theme.colors.muted} />
+      <AppActionIcon name="ic_chevron_forward" size={14} style={{ opacity: 0.7 }} />
     </Pressable>
   );
 }

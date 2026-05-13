@@ -272,6 +272,45 @@ export function InboxScreen(props: any) {
           </>
         ) : null}
 
+        <Pressable
+          testID="e2e-open-groups"
+          onPress={() => nav?.navigate?.('Groups')}
+          accessibilityRole="button"
+          accessibilityLabel="開啟課程群組"
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.space.md,
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+            borderRadius: theme.radius.lg,
+            backgroundColor: theme.colors.surface,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            opacity: pressed ? 0.88 : 1,
+          })}
+        >
+          <View
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 12,
+              backgroundColor: theme.colors.warning + '22',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="people-circle-outline" size={19} color={theme.colors.warning} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>課程群組</Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              加入碼、建立群組、查看課程討論
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+        </Pressable>
+
         {!auth.user ? (
           <CompletionState
             title="登入後才會出現可執行的收件匣"

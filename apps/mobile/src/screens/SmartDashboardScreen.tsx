@@ -27,6 +27,9 @@ import {
   LayoutAnimation,
   UIManager,
   Platform,
+  Image,
+  ImageBackground,
+  StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +40,15 @@ import { useDataSource } from '../hooks/useDataSource';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { theme } from '../ui/theme';
+import { BrandFluxImageHeader } from '../ui/BrandFluxImageHeader';
+import { usePreferences } from '../state/preferences';
+import { useWeatherForecast } from '../hooks/useWeatherForecast';
+import { shortWeatherLabelZh } from '../services/weather';
+import {
+  markRainReminderShownToday,
+  shouldShowRainReminderBannerToday,
+} from '../services/rainReminderDay';
+import { generatedUiAssets } from '../ui/generatedUiAssets';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import {
   buildNavigationTarget,
@@ -229,8 +241,18 @@ function XPProgressBar({ gamification }: { gamification: GamificationState }) {
         padding: theme.space.md,
         borderWidth: 1,
         borderColor: theme.colors.border,
+        overflow: 'hidden',
       }}
     >
+      <Image
+        source={generatedUiAssets.patternSoft}
+        resizeMode="repeat"
+        accessibilityIgnoresInvertColors
+        style={[
+          StyleSheet.absoluteFillObject,
+          { opacity: theme.mode === 'dark' ? 0.14 : 0.1, width: '100%', height: '100%' },
+        ]}
+      />
       <View
         style={{
           flexDirection: 'row',
@@ -837,9 +859,48 @@ function CampusPulseMini({
   );
 }
 
-/** 畢業進度條 */
+/** 畢業進度條（無資料時以 Flux empty-route 視覺安撫） */
 function GraduationProgressCard({ optimization }: { optimization: ScheduleOptimization | null }) {
-  if (!optimization) return null;
+  if (!optimization) {
+    return (
+      <View
+        style={{
+          marginHorizontal: theme.space.lg,
+          marginBottom: theme.space.lg,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          padding: theme.space.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.space.md,
+          overflow: 'hidden',
+        }}
+      >
+        <Image
+          source={generatedUiAssets.emptyRoute}
+          accessibilityIgnoresInvertColors
+          style={{
+            width: 88,
+            height: 64,
+            borderRadius: theme.radius.md,
+          }}
+          resizeMode="cover"
+        />
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
+            畢業路徑將就緒
+          </Text>
+          <Text
+            style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 6, lineHeight: 17 }}
+          >
+            接上選課與必修規範資料後，會顯示學分差額與建議時程。
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   const gaps = optimization.graduationGaps;
   const totalRequired = gaps.reduce((s, g) => s + g.required, 0);
@@ -1649,6 +1710,23 @@ function AgentOSHero(props: {
               backgroundColor: `${heroColor}12`,
             }}
           />
+          {!primary ? (
+            <Image
+              source={generatedUiAssets.emptySpark}
+              accessibilityIgnoresInvertColors
+              accessibilityLabel=""
+              style={{
+                position: 'absolute',
+                right: 8,
+                bottom: 76,
+                width: 96,
+                height: 72,
+                borderRadius: theme.radius.md,
+                opacity: 0.85,
+              }}
+              resizeMode="contain"
+            />
+          ) : null}
 
           <Text
             style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '800', lineHeight: 28 }}
@@ -2139,6 +2217,55 @@ function DataMoatPanel(props: {
   );
 }
 
+/** 智慧儀表板頂部：天氣資訊細列（維持淺底） */
+function DashboardWeatherStrip(props: {
+  tempC: number | null;
+  weatherCode: number | null;
+  minC: number | null;
+  maxC: number | null;
+  precipProb: number | null;
+}) {
+  const label = shortWeatherLabelZh(props.weatherCode);
+  const tempMain =
+    props.tempC != null && Number.isFinite(props.tempC)
+      ? `${Math.round(props.tempC)}°`
+      : props.minC != null && props.maxC != null
+        ? `${Math.round(props.minC)}°–${Math.round(props.maxC)}°`
+        : '';
+  const precip =
+    props.precipProb != null && props.precipProb >= 15 ? `降雨機率 ${Math.round(props.precipProb)}%` : '';
+
+  return (
+    <View
+      style={{
+        marginTop: theme.space.md,
+        marginHorizontal: theme.space.lg,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.space.sm,
+        alignSelf: 'flex-start',
+        backgroundColor:
+          theme.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.72)',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: theme.radius.full,
+        borderWidth: 1,
+        borderColor: theme.mode === 'dark' ? `${theme.colors.border}99` : `${theme.colors.border}55`,
+      }}
+    >
+      <Ionicons
+        name={'partly-sunny-outline' as any}
+        size={16}
+        color={theme.colors.accent}
+      />
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+        {[tempMain, label].filter(Boolean).join(' · ')}
+        {precip ? ` · ${precip}` : ''}
+      </Text>
+    </View>
+  );
+}
+
 // ─── Main Screen ────────────────────────────────────────
 
 export function SmartDashboardScreen(props: any) {
@@ -2147,6 +2274,31 @@ export function SmartDashboardScreen(props: any) {
   const auth = useAuth();
   const { school } = useSchool();
   const ds = useDataSource();
+  const { preferences, loading: prefsLoading } = usePreferences();
+
+  const weatherPrefsSlice = useMemo(
+    () => ({
+      weatherUseDeviceLocation: preferences.weatherUseDeviceLocation,
+      weatherManualLatitude: preferences.weatherManualLatitude,
+      weatherManualLongitude: preferences.weatherManualLongitude,
+    }),
+    [
+      preferences.weatherManualLatitude,
+      preferences.weatherManualLongitude,
+      preferences.weatherUseDeviceLocation,
+    ],
+  );
+
+  const weatherQueriesEnabled =
+    !prefsLoading &&
+    (preferences.dashboardWeatherEffects || preferences.dashboardRainReminders);
+
+  const { state: weatherForecastState, refresh: refreshWeatherForecast } = useWeatherForecast(
+    weatherQueriesEnabled,
+    weatherPrefsSlice,
+  );
+
+  const [rainReminderVisible, setRainReminderVisible] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -2377,13 +2529,35 @@ export function SmartDashboardScreen(props: any) {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!preferences.dashboardRainReminders) {
+        setRainReminderVisible(false);
+        return;
+      }
+      if (weatherForecastState.status !== 'ready' || !weatherForecastState.bundle.today.rainLikely) {
+        setRainReminderVisible(false);
+        return;
+      }
+      const show = await shouldShowRainReminderBannerToday();
+      if (cancelled || !show) return;
+      await markRainReminderShownToday();
+      if (!cancelled) setRainReminderVisible(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [preferences.dashboardRainReminders, weatherForecastState]);
+
+  useEffect(() => {
     loadData();
   }, [loadData]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
+    void refreshWeatherForecast();
     loadData();
-  }, [loadData]);
+  }, [loadData, refreshWeatherForecast]);
 
   const openAgentAction = useCallback(
     (action: NextBestAction) => {
@@ -2422,25 +2596,26 @@ export function SmartDashboardScreen(props: any) {
 
   if (loading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: theme.colors.bg,
-          justifyContent: 'center',
-          alignItems: 'center',
-        }}
+      <ImageBackground
+        source={generatedUiAssets.emptyRelaxed}
+        style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+        imageStyle={{ opacity: theme.mode === 'dark' ? 0.22 : 0.38 }}
+        resizeMode="cover"
+        accessibilityIgnoresInvertColors
       >
+        <View
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            backgroundColor: `${theme.colors.bg}${theme.mode === 'dark' ? 'CC' : 'AA'}`,
+          }}
+        />
         <ActivityIndicator size="large" color={theme.colors.accent} />
-        <Text
-          style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: theme.space.md }}
-        >
+        <Text style={{ color: theme.colors.textSecondary, fontSize: 13, marginTop: theme.space.md }}>
           分析學業數據中...
         </Text>
-      </View>
+      </ImageBackground>
     );
   }
-
-  const isDark = theme.mode === 'dark';
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
@@ -2456,17 +2631,17 @@ export function SmartDashboardScreen(props: any) {
           />
         }
       >
-        {/* Gradient Header Area */}
-        <LinearGradient
-          colors={
-            isDark
-              ? (['#1A0A3E', '#0F0820', theme.colors.bg] as [string, string, string])
-              : (['#EDE9FE', '#F0EBFF', theme.colors.bg] as [string, string, string])
+        {/* Flux 視覺主題 header（ComfyUI 生成 + 漸層疊字） */}
+        <BrandFluxImageHeader
+          variant="dashboard"
+          paddingTop={insets.top + theme.space.lg}
+          paddingBottom={20}
+          ambientTone={
+            preferences.dashboardWeatherEffects &&
+            weatherForecastState.status === 'ready'
+              ? weatherForecastState.bundle.today.ambientTone
+              : 'default'
           }
-          style={{
-            paddingTop: insets.top + theme.space.lg,
-            paddingBottom: 20,
-          }}
         >
           <AgentOSHero
             displayName={displayName}
@@ -2480,7 +2655,68 @@ export function SmartDashboardScreen(props: any) {
           />
 
           <AgentModeDock selected={agentMode} onSelect={setAgentMode} onStart={startAgentMode} />
-        </LinearGradient>
+
+          {preferences.dashboardWeatherEffects &&
+          weatherForecastState.status === 'ready' ? (
+            <DashboardWeatherStrip
+              tempC={weatherForecastState.bundle.currentTempC}
+              weatherCode={
+                weatherForecastState.bundle.currentWeatherCode ??
+                weatherForecastState.bundle.today.weatherCode
+              }
+              minC={weatherForecastState.bundle.today.tempMinC}
+              maxC={weatherForecastState.bundle.today.tempMaxC}
+              precipProb={weatherForecastState.bundle.today.precipitationProbabilityMax}
+            />
+          ) : null}
+
+          {preferences.dashboardWeatherEffects && weatherForecastState.status === 'loading' ? (
+            <View style={{ paddingHorizontal: theme.space.lg, marginTop: theme.space.sm }}>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 11 }}>
+                天氣載入中…
+              </Text>
+            </View>
+          ) : null}
+        </BrandFluxImageHeader>
+
+        {rainReminderVisible ? (
+          <View
+            style={{
+              marginHorizontal: theme.space.lg,
+              marginTop: theme.space.md,
+              marginBottom: theme.space.sm,
+              padding: theme.space.md,
+              borderRadius: theme.radius.lg,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: `${theme.colors.accent}44`,
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: theme.space.sm,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <Ionicons name={'umbrella-outline' as any} size={20} color={theme.colors.accent} />
+                <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
+                  今日可能會下雨
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 13, lineHeight: 19 }}>
+                記得攜帶雨具；資料來自 Open‑Meteo，僅供參考。
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setRainReminderVisible(false)}
+              accessibilityRole="button"
+              accessibilityLabel="關閉雨天提醒"
+              hitSlop={10}
+              style={{ padding: 4 }}
+            >
+              <Ionicons name={'close' as any} size={22} color={theme.colors.muted} />
+            </Pressable>
+          </View>
+        ) : null}
 
         <View
           style={{
@@ -2826,6 +3062,18 @@ export function SmartDashboardScreen(props: any) {
           <View style={{ flexDirection: 'row', gap: theme.space.sm, flexWrap: 'wrap' }}>
             {[
               {
+                icon: 'megaphone-outline',
+                label: '學校公告',
+                testID: 'e2e-open-announcements',
+                nav: () => nav?.navigate?.('公告總覽'),
+              },
+              {
+                icon: 'today-outline',
+                label: '校園活動',
+                testID: 'e2e-open-events',
+                nav: () => nav?.navigate?.('活動總覽'),
+              },
+              {
                 icon: 'chatbubbles-outline',
                 label: 'AI 助理',
                 nav: () => aiOverlay.open({ mode: 'chat', source: 'dashboard_shortcut' }),
@@ -2861,6 +3109,7 @@ export function SmartDashboardScreen(props: any) {
             ].map((item) => (
               <Pressable
                 key={item.label}
+                testID={(item as { testID?: string }).testID}
                 onPress={item.nav}
                 style={({ pressed }) => ({
                   width: '31%' as any,

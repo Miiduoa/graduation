@@ -13,12 +13,16 @@
  * - AI_TRAINING_SEED — 種子，預設 411211325。
  * - AI_TRAINING_MAX_FAILURES_PER_CHUNK — 單批次允許例外數後中止該批次，預設 2147483647。
  * - AI_TRAINING_VERBOSE_AGENT_LOGS — 設為 1 時輸出 aiLocalAgent 的詳細 console（預設會抑制以降低長時輸出量）。
+ * - AI_TRAINING_MULTI_ITER_PER_CHUNK — 每個「單輪大批次」後，額外跑幾則「多輪對話＋解題驗收」（預設 2）。設 0 關閉。
+ * - AI_TRAINING_STRICT_MULTI — 設為 0 時多輪驗收失敗不讓 Jest fail（預設 1＝失敗即整體失敗）。
+ * - AI_TRAINING_SKIP_LOCK — 設為 1 時略過單進程鎖（僅本機除錯；避免與另一長訓並跑）。
  *
  * 執行時請設定離線／快速模式（已由 npm script 帶入）：
  * EXPO_PUBLIC_AI_PROVIDER=offline EXPO_PUBLIC_AI_TEST_FAST=1
  *
  * package.json 的 ai:train:long 使用 NODE_OPTIONS=--max-old-space-size=8192 --expose-gc
  * 以降低長時壓測 OOM；每批結束後若 V8 有 expose-gc 則會 global.gc()。
+ * Jest --testTimeout（目前 8000000ms）須大於 AI_TRAINING_MS，否則長跑會被 Jest 截斷。
  */
 
 jest.mock('../src/firebase', () => ({
@@ -26,10 +30,69 @@ jest.mock('../src/firebase', () => ({
   hasUsableFirebaseConfig: jest.fn(() => false),
 }));
 
+import fs from 'fs';
+import path from 'path';
+
 import { runAISelfDialogEvaluation } from '../src/services/aiSelfDialog';
+import { runMultiTurnScenarioBatch } from '../src/services/aiSelfDialogMultiTurn';
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
+}
+
+/** 避免多個 `jest … jest.ai-training` 並跑造成日誌與鎖檔錯亂；過期程序會視為可覆寫鎖。 */
+function acquireLongTrainingLock(): { release: () => void } {
+  if (process.env.AI_TRAINING_SKIP_LOCK === '1') {
+    return { release: () => {} };
+  }
+  const lockPath = path.join(__dirname, '..', '.ai-training-long.lock');
+  const myPid = process.pid;
+
+  if (fs.existsSync(lockPath)) {
+    const raw = fs.readFileSync(lockPath, 'utf8').trim();
+    const oldPid = parseInt(raw, 10);
+    let alive = false;
+    if (Number.isFinite(oldPid) && oldPid > 0) {
+      try {
+        process.kill(oldPid, 0);
+        alive = true;
+      } catch (e: any) {
+        alive = e?.code !== 'ESRCH';
+      }
+    }
+    if (alive) {
+      throw new Error(
+        `[訓練] 偵測到另一個長訓程序仍存活（pid ${oldPid}，鎖：${lockPath}）。請先結束該 Jest，或確認為殘留鎖後再重試；除錯可設 AI_TRAINING_SKIP_LOCK=1。`,
+      );
+    }
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      /* 併發時由 wx 擋下 */
+    }
+  }
+
+  try {
+    fs.writeFileSync(lockPath, String(myPid), { flag: 'wx' });
+  } catch (e: any) {
+    if (e?.code === 'EEXIST') {
+      throw new Error(
+        `[訓練] 無法建立長訓鎖（${lockPath}）：可能與另一個長訓幾乎同時啟動。請確認無重複 jest ai-training 後重試。`,
+      );
+    }
+    throw e;
+  }
+  return {
+    release: () => {
+      try {
+        if (fs.existsSync(lockPath) && fs.readFileSync(lockPath, 'utf8').trim() === String(myPid)) {
+          fs.unlinkSync(lockPath);
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+  };
 }
 
 function parseEnvMs(): { mode: 'time'; ms: number } | { mode: 'rounds'; rounds: number } {
@@ -51,6 +114,8 @@ describe('AI long-run offline stress (manual)', () => {
     async () => {
       process.env.EXPO_PUBLIC_AI_PROVIDER = 'offline';
       process.env.EXPO_PUBLIC_AI_TEST_FAST = '1';
+
+      const lock = acquireLongTrainingLock();
 
       const verboseAgent = process.env.AI_TRAINING_VERBOSE_AGENT_LOGS === '1';
       const origLog = console.log.bind(console);
@@ -112,6 +177,14 @@ describe('AI long-run offline stress (manual)', () => {
       let cumulativeAttempts = 0;
       let cumulativePassed = 0;
       let cumulativeFailed = 0;
+      let multiTurnPassed = 0;
+      let multiTurnFailed = 0;
+      const multiTurnFailureHints: string[] = [];
+      const strictMulti = process.env.AI_TRAINING_STRICT_MULTI !== '0';
+      const multiIterPerChunk = Math.max(
+        0,
+        Math.floor(Number(process.env.AI_TRAINING_MULTI_ITER_PER_CHUNK ?? 2)),
+      );
       let chunkIdx = 0;
       let lastProgressAt = Date.now();
       const failureHints: string[] = [];
@@ -158,6 +231,27 @@ describe('AI long-run offline stress (manual)', () => {
           global.gc();
         }
 
+        if (multiIterPerChunk > 0) {
+          const multiReport = await runMultiTurnScenarioBatch({
+            iterations: multiIterPerChunk,
+            seed: (baseSeed + chunkIdx * 7919 + 7) >>> 0,
+            maxFailures: strictMulti ? multiIterPerChunk : 2147483647,
+          });
+          multiTurnPassed += multiReport.passed;
+          multiTurnFailed += multiReport.failed;
+          for (const f of multiReport.failures.slice(0, 4)) {
+            const line = `${f.scenarioId}: ${f.reason} — ${f.detail.slice(0, 100)}`;
+            if (multiTurnFailureHints.length < 20 && !multiTurnFailureHints.includes(line)) {
+              multiTurnFailureHints.push(line);
+            }
+          }
+          if (strictMulti && multiReport.failed > 0) {
+            throw new Error(
+              `[訓練] 多輪對話驗收失敗（本批 ${multiReport.failed} 則）。例：${multiTurnFailureHints[0] ?? ''}`,
+            );
+          }
+        }
+
         const now = Date.now();
         if (now - lastProgressAt >= progressMs) {
           const elapsedMin = (now - tGlobal) / 60000;
@@ -187,16 +281,27 @@ describe('AI long-run offline stress (manual)', () => {
       console.log('\n========== 訓練結束 ==========');
       console.log(`總時長：${(durationMs / 1000).toFixed(1)} 秒`);
       console.log(`總輪數：${cumulativeAttempts}（通過 ${cumulativePassed}／失敗 ${cumulativeFailed}）`);
+      console.log(
+        `多輪對話驗收：${multiTurnPassed + multiTurnFailed} 則（通過 ${multiTurnPassed}／失敗 ${multiTurnFailed}）`,
+      );
       console.log(`整體成功率：${pctAll}%`);
       console.log(`平均吞吐：約 ${rpmAll.toFixed(0)} 輪／分鐘`);
+      if (multiTurnFailureHints.length > 0 && multiTurnFailed > 0) {
+        console.log('多輪驗收失敗摘要：');
+        multiTurnFailureHints.forEach((l) => console.log(`  - ${l}`));
+      }
       if (failureHints.length > 0) {
         console.log('若干失敗摘要（最多 12 則）：');
         failureHints.forEach((l) => console.log(`  - ${l}`));
       }
 
       expect(cumulativeAttempts).toBeGreaterThan(0);
+      if (multiIterPerChunk > 0 && strictMulti) {
+        expect(multiTurnFailed).toBe(0);
+      }
       } finally {
         if (!verboseAgent) console.log = origLog;
+        lock.release();
       }
     },
     Math.min(

@@ -242,11 +242,14 @@ export function hasAllPermissions(role: AppRole, permissions: Permission[]): boo
   return permissions.every((p) => userPerms.includes(p));
 }
 
+import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
+
 // Tab configuration per role group
 export type TabConfig = {
   key: string;
   label: string;
-  icon: { active: string; inactive: string };
+  /** 單一語意資產；焦點狀態以透明度區分 */
+  icon: GeneratedButtonIconId;
 };
 
 /**
@@ -257,10 +260,10 @@ export type TabConfig = {
  * （AI 球以 placeholder 佔位，由 FloatingTabBar 在中央渲染懸浮 FAB）
  */
 export const UNIFIED_TABS: TabConfig[] = [
-  { key: 'Today', label: '今天', icon: { active: 'sunny', inactive: 'sunny-outline' } },
-  { key: '學習', label: '學習', icon: { active: 'book', inactive: 'book-outline' } },
-  { key: '校園', label: '校園', icon: { active: 'map', inactive: 'map-outline' } },
-  { key: '訊息', label: '訊息', icon: { active: 'chatbubbles', inactive: 'chatbubbles-outline' } },
+  { key: 'Today', label: '今天', icon: 'ic_tab_today' },
+  { key: '學習', label: '學習', icon: 'ic_tab_study' },
+  { key: '校園', label: '校園', icon: 'ic_tab_campus' },
+  { key: '訊息', label: '訊息', icon: 'ic_tab_messages' },
 ];
 
 export function getTabsForRole(_role: AppRole): TabConfig[] {

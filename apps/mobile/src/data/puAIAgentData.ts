@@ -2764,10 +2764,19 @@ function sanitizeArgsForSkillLearning(args: Record<string, string>): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(args)) {
     if (skipKey.test(k)) continue;
-    const sv = String(v ?? '').trim().slice(0, 160);
+    const sv = redactSensitiveUserTextForAI(String(v ?? '').trim()).slice(0, 160);
     if (sv) parts.push(`${k}=${sv}`);
   }
   return parts.slice(0, 10).join('；');
+}
+
+export function redactSensitiveUserTextForAI(text: string): string {
+  return String(text ?? '')
+    .replace(/\b[A-Z][12]\d{8}\b/g, '[身分證已遮蔽]')
+    .replace(/\b09\d{2}[-\s]?\d{3}[-\s]?\d{3}\b/g, '[電話已遮蔽]')
+    .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[卡號已遮蔽]')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[Email 已遮蔽]')
+    .replace(/((?:密碼|password|passcode|驗證碼|otp)\s*[：:=]?\s*)[^\s，。；;]{2,}/gi, '$1[已遮蔽]');
 }
 
 /**
@@ -2786,7 +2795,8 @@ export function distillLearnedSkillFromToolSuccess(
   const label =
     TOOL_SUCCESS_SKILL_LABELS[toolName] ?? `完成任務（工具：${toolName}）`;
   const argLine = sanitizeArgsForSkillLearning(args);
-  const userSnippet = raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+  const safeRaw = redactSensitiveUserTextForAI(raw);
+  const userSnippet = safeRaw.length > 200 ? `${safeRaw.slice(0, 200)}…` : safeRaw;
   const procedure = [
     `使用者意圖（原句摘要）：「${userSnippet}」`,
     `成功路徑：呼叫工具 ${toolName}。`,

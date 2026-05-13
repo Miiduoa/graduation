@@ -361,7 +361,7 @@ export function AttendanceScreen(props: any) {
           colors={
             theme.mode === 'dark'
               ? (['#1A0A3E', '#0D1B3E', theme.colors.bg] as [string, string, string])
-              : (['#EDE9FE', '#F5F3FF', theme.colors.bg] as [string, string, string])
+              : (['#F9FAFB', '#FFFFFF', theme.colors.bg] as [string, string, string])
           }
           style={{ paddingTop: insets.top + 12, paddingBottom: 24 }}
         >

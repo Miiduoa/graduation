@@ -70,6 +70,29 @@ function encodeDiningChoiceMenuId(m: { id?: string }, cafeterias: any[]): string
   return `${m.id}${DINING_CHOICE_ID_SEP}${v}`;
 }
 
+function hasInvalidDiningQuantityRequest(text: string): boolean {
+  return /(?:^|[^\d])(?:[-−－]\s*\d+|0)\s*[碗份個杯盤道]/.test(text) ||
+    /負\s*\d+\s*[碗份個杯盤道]/.test(text);
+}
+
+function hasInvalidDiningQuantityValue(value: unknown): boolean {
+  if (value == null || String(value).trim() === '') return false;
+  const n = Number(String(value).trim());
+  return !Number.isFinite(n) || n < 1;
+}
+
+function menuLooksVegetarian(m: any): boolean {
+  const text = [
+    m?.name,
+    m?.description,
+    m?.category,
+    Array.isArray(m?.tags) ? m.tags.join(' ') : '',
+  ].join(' ');
+  return m?.isVegetarian === true ||
+    m?.vegetarian === true ||
+    /素|蔬|沙拉|青菜|vegetarian|vegan/i.test(text);
+}
+
 // ─── 共用：從訊息中解析「第 N 個」/「最後一個」 ───
 function parseOrdinalFromMessage(msg: string): number | null {
   if (!msg) return null;
@@ -131,7 +154,10 @@ async function placeOrderWith(
   if (!vendorId) {
     return { success: false, isWrite: true, summary: '無法辨識店家 ID（vendorId），請確認菜單已同步或改選其他餐廳。' };
   }
-  const qty = Number.isFinite(quantity) && quantity > 0 ? Math.floor(quantity) : 1;
+  if (!Number.isFinite(quantity) || quantity < 1) {
+    return { success: false, isWrite: true, summary: '請提供有效的數量（quantity），至少為 1。' };
+  }
+  const qty = Math.floor(quantity);
   const price = matched.price ?? 0;
   if (typeof price !== 'number') {
     return { success: false, isWrite: true, summary: '此品項缺少可下單價格，無法建立訂單。' };
@@ -2592,6 +2618,14 @@ const TOOL_EXECUTORS: Record<
         lastChoiceMenu: ctx.lastChoiceMenu,
       });
 
+      if (hasInvalidDiningQuantityRequest(userMsg) || hasInvalidDiningQuantityValue(args.quantity)) {
+        return {
+          success: false,
+          isWrite: false,
+          summary: '數量看起來不合理。請改成至少 1 份，例如「雞排飯 1 份」或「第 2 個 2 份」。',
+        };
+      }
+
       // ── 1. 合併所有菜單來源（Firestore + 本地官方目錄）──
       let allMenus: any[] = [];
       if (hasDataSource()) {
@@ -2634,6 +2668,29 @@ const TOOL_EXECUTORS: Record<
         }
       }
 
+      const vegetarianConflictResult = (matched: any): ToolCallResult | null => {
+        if (!frame.constraints.vegetarian || menuLooksVegetarian(matched)) return null;
+        const vegPool = allMenus.filter(menuLooksVegetarian);
+        const ranked = rankMenuCandidates(vegPool, {
+          ...frame,
+          slots: { ...frame.slots, item: null },
+          constraints: { ...frame.constraints, vegetarian: true },
+        }).slice(0, 8);
+        const suggestions = ranked
+          .map((m: any, i: number) => `${i + 1}. ${m.name}${typeof m.price === 'number' ? ` $${m.price}` : ''}${m.cafeteria ? `（${m.cafeteria}）` : ''}`)
+          .join('\n');
+        return {
+          success: true,
+          isWrite: false,
+          summary: [
+            `你說你吃素，但「${matched.name}」看起來不是素食餐點，我先不替你送單。`,
+            suggestions ? `可改選這些素食選項：\n\n${suggestions}` : '目前沒有找到明確的素食餐點，請改到餐廳頁面篩選素食或告訴我其他條件。',
+            suggestions ? '回我「第 N 個」再幫你下單。' : '',
+          ].filter(Boolean).join('\n\n'),
+          choiceMenu: ranked.length > 0 ? buildDiningChoiceMenu(ranked, cafeteriasForMenus, frame) : undefined,
+        };
+      };
+
       // ── 2A. 位置引用：「第 N 個」或「對/就那個」直接從 lastChoiceMenu 解析 ──
       const refUsesLastMenu =
         (frame.reference?.type === 'ordinal' || frame.reference?.type === 'confirmation' || frame.reference?.type === 'demonstrative') &&
@@ -2658,6 +2715,8 @@ const TOOL_EXECUTORS: Record<
               source: 'inferred',
               confidence: 0.95,
             });
+            const conflict = vegetarianConflictResult(matchedByIdOrName);
+            if (conflict) return conflict;
             return await placeOrderWith(matchedByIdOrName, frame.slots.quantity ?? 1, cafeteriasForMenus, ctx, args);
           }
           // 找不到也不要報「找不到 第 N 個」，而是反問
@@ -2699,6 +2758,8 @@ const TOOL_EXECUTORS: Record<
         const top = pool.slice(0, Math.min(3, pool.length));
         const seed = (new Date().getDate() + (ctx.userId?.length ?? 0)) % top.length;
         const picked = top[seed];
+        const conflict = vegetarianConflictResult(picked);
+        if (conflict) return conflict;
         return await placeOrderWith(picked, frame.slots.quantity ?? 1, cafeteriasForMenus, ctx, args);
       }
 
@@ -2900,6 +2961,8 @@ const TOOL_EXECUTORS: Record<
 
       // ── 5. 唯一匹配 → 直接下單 ──
       const matched = matches[0];
+      const conflict = vegetarianConflictResult(matched);
+      if (conflict) return conflict;
       const cafeteriaId = matched.cafeteriaId ?? matched.cafeteria_id ?? '';
       const remoteCafeterias: any[] = hasDataSource()
         ? await getDataSource().listCafeterias(ctx.schoolId).catch(() => [])
