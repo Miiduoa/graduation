@@ -518,11 +518,13 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
  * - Affordance：球體會脈動（活的）vs Tab 是死的（被動）
  * - Mental Model：使用者學到「找東西點 Tab；要 AI 做點球」
  */
-/** 須與下方 AIFloatingBall size 一致；中央欄寬略大於球體，避免陰影／邊框被裁切 */
+/** 須與下方 AIFloatingBall size 一致 */
 const FAB_SIZE = 62;
-const FAB_CENTER_GAP = 72;
-/** 淺色模式：右上徽章拉動視覺重心，幾何置中後微幅左移（px） */
-const FAB_OPTICAL_NUDGE_LIGHT = 2;
+/** 整顆 FAB 相對 Tab 列的微調（像素；預設 0，避免與章面 nudge 疊加偏移） */
+const FAB_SHELL_NUDGE_X = 0;
+const FAB_SHELL_NUDGE_Y = 0;
+/** 與 TabBar pill `paddingVertical` 對齊，供 FAB overlay 垂直錨點 */
+const TAB_BAR_PILL_PADDING_V = 6;
 
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -532,7 +534,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const visibleTabKeys = permissions.tabs.map((t) => t.key);
   const visibleRoutes = state.routes.filter((r) => visibleTabKeys.includes(r.name));
 
-  // 將 4 個 Tab 分成左 2 / 右 2，中央留給 AI 球
+  // 將 4 個 Tab 分成左 2 / 右 2；AI 球由 pill 上層 overlay 置中，不佔 flex 欄位
   const leftRoutes = visibleRoutes.slice(0, 2);
   const rightRoutes = visibleRoutes.slice(2, 4);
 
@@ -609,15 +611,16 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       }}
       pointerEvents="box-none"
     >
-      {/* TabBar 本體 */}
+      {/* TabBar pill：左右僅四個 Tab；FAB 另層絕對 overlay 對齊 pill 寬度幾何置中 */}
       <View
         style={{
           flex: 1,
+          position: 'relative',
           flexDirection: 'row',
           alignItems: 'stretch',
           overflow: 'visible',
           borderRadius: theme.radius.xl,
-          paddingVertical: 6,
+          paddingVertical: TAB_BAR_PILL_PADDING_V,
           paddingHorizontal: 10,
           borderWidth: 1,
           borderColor: theme.colors.chromeTabBorder,
@@ -625,28 +628,48 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           ...softShadowStyle(theme.shadows.soft),
         }}
       >
-        {/* 左右群組對稱 flex:1，中央固定寬空隙；避免整列置中 FAB 與 flex 區塊數學中心出現微小偏差 */}
         <View
-          style={{ flex: 1, flexDirection: 'row', alignItems: 'stretch', minWidth: 0 }}
+          style={{
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'stretch',
+            minWidth: 0,
+            zIndex: 1,
+          }}
         >
           {leftRoutes.map(renderTab)}
         </View>
 
         <View
           style={{
-            width: FAB_CENTER_GAP,
-            alignSelf: 'stretch',
-            zIndex: 2,
-            overflow: 'visible',
-            alignItems: 'center',
-            justifyContent: 'flex-start',
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'stretch',
+            minWidth: 0,
+            zIndex: 1,
           }}
+        >
+          {rightRoutes.map(renderTab)}
+        </View>
+
+        <View
           pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: TAB_BAR_PILL_PADDING_V,
+            alignItems: 'center',
+            zIndex: 10,
+          }}
         >
           <View
             style={{
               marginTop: -theme.layout.fabOffset,
-              marginLeft: theme.mode === 'light' ? -FAB_OPTICAL_NUDGE_LIGHT : 0,
+              transform: [
+                { translateX: FAB_SHELL_NUDGE_X },
+                { translateY: FAB_SHELL_NUDGE_Y },
+              ],
             }}
             pointerEvents="box-none"
           >
@@ -656,12 +679,6 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               onLongPress={() => aiOverlay.open({ mode: 'quick', source: 'tabbar_long' })}
             />
           </View>
-        </View>
-
-        <View
-          style={{ flex: 1, flexDirection: 'row', alignItems: 'stretch', minWidth: 0 }}
-        >
-          {rightRoutes.map(renderTab)}
         </View>
       </View>
     </View>

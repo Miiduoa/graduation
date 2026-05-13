@@ -42,3 +42,4 @@ yarn-error.*
 # 長時 AI 訓練（手動）：單進程鎖與 tee 日誌
 .ai-training-long.lock
 ai-training-2h-multi.log
+ai-training-2h-batches.log

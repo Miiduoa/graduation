@@ -135,19 +135,23 @@ export function recommendLunchCandidates(
 
   // 優先順序：主食 → 蛋白 → 蔬菜（如果有的話）
   for (const cat of ['starch', 'protein', 'veggie'] as MealCategory[]) {
+    if (items.length >= maxItems) break;
     const next = buckets[cat].shift();
-    if (next && items.length < maxItems) {
-      if (FRIED_RE.test(String(next.name ?? '')) && fryCount() >= 1) {
-        // 已經有炸物，再從同類別找一個非炸物的
-        const alt = buckets[cat].find((r) => !FRIED_RE.test(String(r.name ?? '')));
-        if (alt) {
-          items.push(alt);
-          buckets[cat] = buckets[cat].filter((r) => r !== alt);
-          continue;
-        }
+    if (!next) continue;
+    if (FRIED_RE.test(String(next.name ?? '')) && fryCount() >= 1) {
+      // 已經有炸物 → 嘗試從同類別找非炸物替代
+      const alt = buckets[cat].find((r) => !FRIED_RE.test(String(r.name ?? '')));
+      if (alt) {
+        items.push(alt);
+        buckets[cat] = buckets[cat].filter((r) => r !== alt);
+        continue;
       }
-      items.push(next);
+      // 沒有替代品 → 跳過這個類別，不要再塞第二個炸物
+      // 把 next 放回去讓第二輪有機會（但仍受 fryCount 限制）
+      buckets[cat].unshift(next);
+      continue;
     }
+    items.push(next);
   }
 
   // 第二輪：補滿 maxItems，依分數，但維持「≤1 個炸物」

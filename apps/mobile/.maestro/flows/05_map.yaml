@@ -21,6 +21,10 @@ tags:
 - tapOn:
     id: 'tab-校園'
 
+- extendedWaitUntil:
+    visible: '搜尋服務、地點、功能'
+    timeout: 20000
+
 - scrollUntilVisible:
     element:
       id: 'e2e-campus-open-map'
