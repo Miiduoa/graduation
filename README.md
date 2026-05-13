@@ -18,26 +18,28 @@
 
 ## 快速連結
 
-| 資源           | 位置                                                                                             |
-| -------------- | ------------------------------------------------------------------------------------------------ |
-| 原始碼         | [github.com/Miiduoa/graduation](https://github.com/Miiduoa/graduation)                           |
-| GitHub Actions | [Actions](https://github.com/Miiduoa/graduation/actions)                                         |
-| CI workflow    | [`.github/workflows/ci.yml`](.github/workflows/ci.yml)                                           |
-| Release 流程   | [`docs/RELEASE.md`](docs/RELEASE.md)                                                             |
-| API 文件       | [`docs/API.md`](docs/API.md)                                                                     |
-| 安全說明       | [`docs/SECURITY.md`](docs/SECURITY.md)                                                           |
-| 角色與資料流   | [`docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md`](docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md)             |
-| 檔案整理索引   | [`docs/PROJECT_FILE_ORGANIZATION.md`](docs/PROJECT_FILE_ORGANIZATION.md)                         |
-| AI 架構        | [`docs/AI_ASSISTANT_ARCHITECTURE.md`](docs/AI_ASSISTANT_ARCHITECTURE.md)                         |
-| Firebase 邊界  | [`docs/architecture/firebase-data-boundaries.md`](docs/architecture/firebase-data-boundaries.md) |
+| 資源           | 位置                                                                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 原始碼         | [github.com/Miiduoa/graduation](https://github.com/Miiduoa/graduation)                                                                                  |
+| GitHub Actions | [Actions](https://github.com/Miiduoa/graduation/actions)                                                                                                |
+| CI workflow    | [`.github/workflows/ci.yml`](.github/workflows/ci.yml)                                                                                                  |
+| Release 流程   | [`docs/RELEASE.md`](docs/RELEASE.md)                                                                                                                    |
+| API 文件       | [`docs/API.md`](docs/API.md)                                                                                                                            |
+| 安全說明       | [`docs/SECURITY.md`](docs/SECURITY.md)                                                                                                                  |
+| 角色與資料流   | [`docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md`](docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md)                                                                    |
+| 檔案整理索引   | [`docs/PROJECT_FILE_ORGANIZATION.md`](docs/PROJECT_FILE_ORGANIZATION.md)                                                                                |
+| AI 架構        | [`docs/AI_ASSISTANT_ARCHITECTURE.md`](docs/AI_ASSISTANT_ARCHITECTURE.md)                                                                                |
+| Firebase 邊界  | [`docs/architecture/firebase-data-boundaries.md`](docs/architecture/firebase-data-boundaries.md)                                                        |
 | App 圖示產線   | [`apps/mobile/assets/ICON_REGENERATION.txt`](apps/mobile/assets/ICON_REGENERATION.txt)（ComfyUI / Flux、`scripts/generate-campus-app-icon-comfyui.py`） |
-| 法務文件       | [`docs/legal/`](docs/legal/)                                                                     |
+| AI 對話測試表  | repo 根目錄 [`AI助理對話測試與訓練套件.xlsx`](AI助理對話測試與訓練套件.xlsx)（對話情境／訓練用試算表資產；**勿**提交 LibreOffice 鎖檔 `.~lock.*`）      |
+| 法務文件       | [`docs/legal/`](docs/legal/)                                                                                                                            |
 
 ## 目錄
 
 - [這個專案是什麼](#這個專案是什麼)
 - [目前最重要的事實](#目前最重要的事實)
 - [專案快照](#專案快照)
+- [本期程式與 QA 對照摘要（2026-05-13）](#本期程式與-qa-對照摘要2026-05-13)
 - [Monorepo 結構](#monorepo-結構)
 - [技術棧](#技術棧)
 - [產品與功能地圖](#產品與功能地圖)
@@ -149,17 +151,33 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 
 下列數字為 **2026-05-13** 對目前 repo 的實際盤點（見上方「複核指令」備註）。後續功能增減時，請以程式碼與當下指令輸出為準。
 
-| 面向              | 盤點結果                                                                                                                                                                                                 |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Git tracked files | 約 `758` 個（複核：`git ls-files`，再 `wc -l`）；含 Expo / iOS 圖示、`assets/` 備份目錄與 ComfyUI 腳本時會隨資產增減                                                                              |
-| Mobile UI         | `101` 個 `*Screen.tsx`、`14` 個 `*Stack.tsx`                                                                                                                                                             |
-| Web routes        | `20` 個 `apps/web/**/page.tsx`、`4` 個 `apps/web/**/route.ts`                                                                                                                                            |
+| 面向              | 盤點結果                                                                                                                                                                                                                                                                                     |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Git tracked files | 約 `760` 個（複核：`git ls-files`，再 `wc -l`）；含 Expo / iOS 圖示、`assets/` 備份目錄與 ComfyUI 腳本時會隨資產增減                                                                                                                                                                         |
+| Mobile UI         | `101` 個 `*Screen.tsx`、`14` 個 `*Stack.tsx`                                                                                                                                                                                                                                                 |
+| Web routes        | `20` 個 `apps/web/**/page.tsx`、`4` 個 `apps/web/**/route.ts`                                                                                                                                                                                                                                |
 | Backend Functions | 約 `75` 個 `onCall` 匯出（`backend/functions/index.js` 約 `69` + `ordering/*` 等）、`14` 個 `onRequest`、`7` 個 `onSchedule`（`index.js` + `ordering/orderTimeout.js`、`ordering/queueNumber.js`）、`5` 個 Firestore `onDocument*`（`index.js` 四個 + `ordering/inspectionTrigger.js` 一個） |
-| 測試檔            | Mobile `38`（`apps/mobile/src/__tests__`；不含 `pnpm ai:train:long` 專用之 `apps/mobile/scripts/ai-training-long.test.ts`）、Web `5`（`apps/web/src/**/*.test.*`）、Backend Functions `21`（`backend/functions/**/*.test.js`）、Rules `1`（`backend/tests/security-rules.test.js`） |
-| GitHub workflows  | `5` 個：CI、Release、EAS Build、Preview Deploy、Maestro E2E                                                                                                                                            |
-| Maestro           | `.maestro` 底下 `11` 個 `*.yaml` flow 檔                                                                                                                                                                 |
-| `scripts/`        | `bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`、`ai-app-scenario-marathon.sh`、`flux-campus-icon-workflow.api.json`、`generate-campus-app-icon-comfyui.py`、`generate_app_icon_comfy.py`；對應 root `package.json` 尚有 `live-review:file`、`test:ai:marathon` 等 |
-| AI server         | `backend/ai-server/` 包含 FastAPI service、RAG、training、evaluation、self-training、web search                                                                                                        |
+| 測試檔            | Mobile `39`（`apps/mobile/src/__tests__`；不含 `pnpm ai:train:long` 專用之 `apps/mobile/scripts/ai-training-long.test.ts`）、Web `5`（`apps/web/src/**/*.test.*`）、Backend Functions `21`（`backend/functions/**/*.test.js`）、Rules `1`（`backend/tests/security-rules.test.js`）          |
+| GitHub workflows  | `5` 個：CI、Release、EAS Build、Preview Deploy、Maestro E2E                                                                                                                                                                                                                                  |
+| Maestro           | `.maestro` 底下 `11` 個 `*.yaml` flow（onboarding／AI 導覽等；執行見 `apps/mobile/package.json` 的 `e2e:maestro:*`）                                                                                                                                                                         |
+| `scripts/`        | `bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`、`ai-app-scenario-marathon.sh`、`flux-campus-icon-workflow.api.json`、`generate-campus-app-icon-comfyui.py`、`generate_app_icon_comfy.py`；對應 root `package.json` 尚有 `live-review:file`、`test:ai:marathon` 等            |
+| AI server         | `backend/ai-server/` 包含 FastAPI service、RAG、training、evaluation、self-training、web search                                                                                                                                                                                              |
+
+### 本期程式與 QA 對照摘要（2026-05-13）
+
+下列條目不取代完整 diff，而是用「接手的人可以立刻對上檔案與責任」的方式描述最近一次合入主線的工程重點。
+
+| 區塊                 | 重點                                                                                                                                                                                                                                                                                        | 主要程式位置                                                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 本地 AI 代理寫入安全 | 為多數寫入型工具維護 **必填參數表**（`GENERATED_WRITE_REQUIRED_ARGS`），並新增 **`resolvedRequiredArgs`**：這類欄位必須由前置讀取（例如列出對話、課程、借閱）解析，不能把使用者口述的人名／模糊詞直接當成 `peerId` 或其它 id 送入寫入路徑。                                                 | [`apps/mobile/src/services/aiLocalAgent.ts`](apps/mobile/src/services/aiLocalAgent.ts)                                                                                                                               |
+| 工具執行層護欄       | `query_conversations` 回傳的對話項目會 **補齊 `peerId`**（相容僅有 `memberIds` 的資料），`send_message`／續借／點名／作業繳交與批改／選退課等工具在 **缺參數時回傳可讀摘要** 且不標成已執行寫入，避免 silent failure。                                                                      | [`apps/mobile/src/services/aiAgentTools.ts`](apps/mobile/src/services/aiAgentTools.ts)                                                                                                                               |
+| 回歸測試             | 新增 **「缺少真實目標時不可執行寫入」** 的 Jest 案例集，涵蓋私訊、點名、作業、公告等路徑。                                                                                                                                                                                                  | [`apps/mobile/src/__tests__/services/aiAgentSafetyHardening.test.ts`](apps/mobile/src/__tests__/services/aiAgentSafetyHardening.test.ts)                                                                             |
+| Maestro E2E          | Onboarding flow 對齊 **冷啟動後主 shell**（註明 OnboardingScreen 為自動完成 stub），並驗證底部 **4+1 Tab（含中央 AI 球）**；導覽／AI 優先 flow 同步微調。                                                                                                                                   | [`apps/mobile/.maestro/flows/01_onboarding.yaml`](apps/mobile/.maestro/flows/01_onboarding.yaml)、[`apps/mobile/.maestro/flows/11_navigation_ai_first.yaml`](apps/mobile/.maestro/flows/11_navigation_ai_first.yaml) |
+| Mobile scripts       | 在 [`apps/mobile/package.json`](apps/mobile/package.json) 新增 Maestro **`e2e:maestro:*`** script；於 **repo 根目錄** 可：`pnpm --filter mobile e2e:maestro:onboarding`、`e2e:maestro:onboarding:dev`、`e2e:maestro:nav`、`e2e:maestro:nav:dev`（內嵌 `APP_ID=com.campus.app` 或 `.dev`）。 | [`apps/mobile/package.json`](apps/mobile/package.json)                                                                                                                                                               |
+| 資料來源／型別／UI   | Firebase 資料層、`demoData`／types 小幅擴充；`AIFloatingBall`、`CampusHubScreen`、`ARNavigationScreen`、推播 hook 視覺或行為微調（細節以 diff／本節對照為準）。                                                                                                                             | `apps/mobile/src/data/`、`apps/mobile/src/components/AIFloatingBall.tsx`、`apps/mobile/src/screens/`、`apps/mobile/src/app/usePushNotifications.ts`                                                                  |
+| 長跑壓力腳本         | `scripts/ai-app-scenario-marathon.sh`（根目錄 `pnpm test:ai:marathon`）細節更新，維持離線 AI／代理情境馬拉松用法不變。                                                                                                                                                                      | [`scripts/ai-app-scenario-marathon.sh`](scripts/ai-app-scenario-marathon.sh)                                                                                                                                         |
+
+專題用 **對話測試與訓練試算表**（離線協作標註用）：[`AI助理對話測試與訓練套件.xlsx`](AI助理對話測試與訓練套件.xlsx)。
 
 ## Monorepo 結構
 
@@ -204,6 +222,7 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 ├── pnpm-workspace.yaml          # workspace package boundaries
 ├── firebase.json                # Firebase emulator/deploy config
 ├── render.yaml                  # Render deployment blueprint
+├── AI助理對話測試與訓練套件.xlsx  # 專題：對話測試／訓練標註試算表（選用）
 └── README.md
 ```
 
@@ -215,17 +234,17 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 
 ## 技術棧
 
-| 區塊                | 主要技術                                                                                      |
-| ------------------- | --------------------------------------------------------------------------------------------- |
-| Root runtime        | Node `>=20 <21`、pnpm `10.28.2`                                                               |
-| Mobile              | Expo `~54.0.33`、React Native `0.81.5`、React `19.1.0`、React Navigation 7、Firebase `12.8.0` |
-| Mobile native       | iOS native project、iOS Widget、Android Widget、Expo modules                                  |
+| 區塊                | 主要技術                                                                                                                                                                                                                                                                         |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Root runtime        | Node `>=20 <21`、pnpm `10.28.2`                                                                                                                                                                                                                                                  |
+| Mobile              | Expo `~54.0.33`、React Native `0.81.5`、React `19.1.0`、React Navigation 7、Firebase `12.8.0`                                                                                                                                                                                    |
+| Mobile native       | iOS native project、iOS Widget、Android Widget、Expo modules                                                                                                                                                                                                                     |
 | Web                 | Next.js `16.2.3`、React **`19.1.0`**（root `pnpm.overrides` 將 `react` / `react-dom` **鎖在 19.1.0**；因此 `pnpm ls react --filter web` 會顯示 19.1.0，`apps/web/package.json` 內的版本欄位代表宣告區間但以 lock 解析為準）、Vitest `4.1.0`、Leaflet / react-leaflet、PWA assets |
-| Backend Functions   | `firebase-functions` `^6.0.0`、`firebase-admin` `^13.0.0`、Node 20、Jest                      |
-| Firestore / Storage | Firebase rules、indexes、emulator tests                                                       |
-| Shared package      | TypeScript ESM package `@campus/shared`                                                       |
-| AI server           | Python、FastAPI、Uvicorn、httpx、ChromaDB、sentence-transformers、MLX、Firebase Admin         |
-| Tooling             | ESLint 9、Prettier 3、Jest、Vitest、Maestro、EAS、firebase-tools                              |
+| Backend Functions   | `firebase-functions` `^6.0.0`、`firebase-admin` `^13.0.0`、Node 20、Jest                                                                                                                                                                                                         |
+| Firestore / Storage | Firebase rules、indexes、emulator tests                                                                                                                                                                                                                                          |
+| Shared package      | TypeScript ESM package `@campus/shared`                                                                                                                                                                                                                                          |
+| AI server           | Python、FastAPI、Uvicorn、httpx、ChromaDB、sentence-transformers、MLX、Firebase Admin                                                                                                                                                                                            |
+| Tooling             | ESLint 9、Prettier 3、Jest、Vitest、Maestro、EAS、firebase-tools                                                                                                                                                                                                                 |
 
 ## 產品與功能地圖
 
@@ -602,12 +621,12 @@ pnpm ai:grow
 
 若要重產 Expo / iOS launcher 所用 **PNG 資產**（例如 `apps/mobile/assets/icon*.png`、`splash-icon`、`favicon.png`，以及 [`ios/mobile/Images.xcassets/AppIcon.appiconset/`](apps/mobile/ios/mobile/Images.xcassets/AppIcon.appiconset/) 內 `App-Icon-1024x1024@1x.png`），請對照 **`apps/mobile/assets/ICON_REGENERATION.txt`**。概要如下：
 
-| 產物 / 輔助檔                                                                                                                                 | 說明 |
-| ------------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| [`scripts/generate-campus-app-icon-comfyui.py`](scripts/generate-campus-app-icon-comfyui.py)                                                | 呼叫本機 **ComfyUI HTTP API**（預設 `http://127.0.0.1:8188`）跑出 1024×1024 master，例：`apps/mobile/assets/icon_master_comfyui_1024.png`。說明檔內 Python / venv **路徑為作者機器範例**，請換成你自己的 ComfyUI 安裝路徑。 |
-| [`scripts/flux-campus-icon-workflow.api.json`](scripts/flux-campus-icon-workflow.api.json)                                                  | ComfyUI「Develop Mode → Save (API Format)」的 **工作流程備份**，便於對照／還原節點。 |
-| [`scripts/generate_app_icon_comfy.py`](scripts/generate_app_icon_comfy.py)                                                                  | 另一組 ComfyUI 相關產圖腳本，依檔內 CLI 使用。 |
-| `apps/mobile/assets/_backup_icons_<時間戳>/` 與 `AppIcon.appiconset/_backup_icons_<時間戳>/`                                               | **覆寫前備份**：避免一次替換回不去舊版圖示（詳見說明檔）。 |
+| 產物 / 輔助檔                                                                                | 說明                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`scripts/generate-campus-app-icon-comfyui.py`](scripts/generate-campus-app-icon-comfyui.py) | 呼叫本機 **ComfyUI HTTP API**（預設 `http://127.0.0.1:8188`）跑出 1024×1024 master，例：`apps/mobile/assets/icon_master_comfyui_1024.png`。說明檔內 Python / venv **路徑為作者機器範例**，請換成你自己的 ComfyUI 安裝路徑。 |
+| [`scripts/flux-campus-icon-workflow.api.json`](scripts/flux-campus-icon-workflow.api.json)   | ComfyUI「Develop Mode → Save (API Format)」的 **工作流程備份**，便於對照／還原節點。                                                                                                                                        |
+| [`scripts/generate_app_icon_comfy.py`](scripts/generate_app_icon_comfy.py)                   | 另一組 ComfyUI 相關產圖腳本，依檔內 CLI 使用。                                                                                                                                                                              |
+| `apps/mobile/assets/_backup_icons_<時間戳>/` 與 `AppIcon.appiconset/_backup_icons_<時間戳>/` | **覆寫前備份**：避免一次替換回不去舊版圖示（詳見說明檔）。                                                                                                                                                                  |
 
 主題色與 splash 視覺應持續與 [`apps/mobile/app.config.ts`](apps/mobile/app.config.ts) 對齊；說明檔備註例：靜宜紫 `#5B21B6`、金 `#D4A843`、深色底 `#1a1a2e`。
 
@@ -615,24 +634,24 @@ pnpm ai:grow
 
 ### Root
 
-| 指令                 | 用途                                     |
-| -------------------- | ---------------------------------------- |
-| `pnpm dev`           | 預設啟動 Web                             |
-| `pnpm dev:mobile`    | 啟動 Expo mobile                         |
-| `pnpm ios:sim`       | alias：`pnpm ios:mobile:sim`，啟動 iOS Simulator 流程（`apps/mobile` 的 `ios:sim`） |
-| `pnpm dev:web`       | 啟動 Next.js Web                         |
-| `pnpm dev:functions` | 僅印出說明（已停用本機 Functions emulator；請 deploy 到 Blaze 正式專案，見 `docs/firebase-blaze-production.md`） |
-| `pnpm dev:ai`        | 啟動 AI server                           |
-| `pnpm lint`          | mobile + web + functions + shared lint   |
-| `pnpm typecheck`     | mobile + web + shared typecheck          |
-| `pnpm format:check`  | Prettier check                           |
-| `pnpm format`        | Prettier write                           |
-| `pnpm test:rules`    | Firestore / Storage emulator rules tests |
-| `pnpm live-review:file` | 對單檔做 live review：`node scripts/live-file-review.mjs`（見 root script） |
+| 指令                    | 用途                                                                                                                                                                                                                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`              | 預設啟動 Web                                                                                                                                                                                                                       |
+| `pnpm dev:mobile`       | 啟動 Expo mobile                                                                                                                                                                                                                   |
+| `pnpm ios:sim`          | alias：`pnpm ios:mobile:sim`，啟動 iOS Simulator 流程（`apps/mobile` 的 `ios:sim`）                                                                                                                                                |
+| `pnpm dev:web`          | 啟動 Next.js Web                                                                                                                                                                                                                   |
+| `pnpm dev:functions`    | 僅印出說明（已停用本機 Functions emulator；請 deploy 到 Blaze 正式專案，見 `docs/firebase-blaze-production.md`）                                                                                                                   |
+| `pnpm dev:ai`           | 啟動 AI server                                                                                                                                                                                                                     |
+| `pnpm lint`             | mobile + web + functions + shared lint                                                                                                                                                                                             |
+| `pnpm typecheck`        | mobile + web + shared typecheck                                                                                                                                                                                                    |
+| `pnpm format:check`     | Prettier check                                                                                                                                                                                                                     |
+| `pnpm format`           | Prettier write                                                                                                                                                                                                                     |
+| `pnpm test:rules`       | Firestore / Storage emulator rules tests                                                                                                                                                                                           |
+| `pnpm live-review:file` | 對單檔做 live review：`node scripts/live-file-review.mjs`（見 root script）                                                                                                                                                        |
 | `pnpm test:ai:marathon` | 自根目錄重複跑離線 AI／代理 Jest 與後端 `agent/selfTrainingScenarios`（`scripts/ai-app-scenario-marathon.sh`；預設一小時，`DURATION_SECONDS` 或可傳秒數為第一引數）；log 預設 `tmp/ai-marathon.log`（可由 `AI_MARATHON_LOG` 覆寫） |
-| `pnpm version:patch` | bump patch version                       |
-| `pnpm version:minor` | bump minor version                       |
-| `pnpm version:major` | bump major version                       |
+| `pnpm version:patch`    | bump patch version                                                                                                                                                                                                                 |
+| `pnpm version:minor`    | bump minor version                                                                                                                                                                                                                 |
+| `pnpm version:major`    | bump major version                                                                                                                                                                                                                 |
 
 ### Mobile
 
@@ -649,7 +668,13 @@ pnpm --filter mobile ai:train:long
 pnpm --filter mobile test:ai:self
 pnpm --filter mobile test:ai:proactive
 pnpm --filter mobile test:ai:web
+pnpm --filter mobile e2e:maestro:onboarding
+pnpm --filter mobile e2e:maestro:onboarding:dev
+pnpm --filter mobile e2e:maestro:nav
+pnpm --filter mobile e2e:maestro:nav:dev
 ```
+
+`e2e:maestro:*`：需在已安裝 [Maestro](https://maestro.mobile.dev/) 並連接模擬器／實機的前提下執行；`*.dev` 變體使用 `com.campus.app.dev`。
 
 `ai:train:long`：使用 [`apps/mobile/jest.ai-training.config.js`](apps/mobile/jest.ai-training.config.js)，僅載入 [`apps/mobile/scripts/ai-training-long.test.ts`](apps/mobile/scripts/ai-training-long.test.ts)，與一般 `pnpm --filter mobile test` 分流；適合機器接上電源、`NODE_OPTIONS` 已拉高 heap 的情境。
 
@@ -688,14 +713,14 @@ pnpm submit:android
 
 ### 測試分布
 
-| 區塊      | 測試工具                      | 目前重點                                                                                                        |
-| --------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Mobile    | Jest / jest-expo              | 預設 `jest.config.js` 的 `testMatch` 僅跑 `src/__tests__/**/*.test.{ts,tsx}`；涵蓋 data source、**deep linking**（如 `architecture/linkingConfig`）、AI 對話品質／模擬、**馬拉松**（`aiConversationMarathon`）、**代理廣覆蓋**（`aiAgentWideCoverage`）、proactive / web search 等。長時間 heap 訓練：**`pnpm --filter mobile ai:train:long`**（`jest.ai-training.config.js` + `scripts/ai-training-long.test.ts`，不混入一般 `pnpm --filter mobile test`） |
+| 區塊   | 測試工具         | 目前重點                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mobile | Jest / jest-expo | 預設 `jest.config.js` 的 `testMatch` 僅跑 `src/__tests__/**/*.test.{ts,tsx}`；涵蓋 data source、**deep linking**（如 `architecture/linkingConfig`）、AI 對話品質／模擬、**馬拉松**（`aiConversationMarathon`）、**代理廣覆蓋**（`aiAgentWideCoverage`）、**代理安全加固**（`aiAgentSafetyHardening`，寫入前缺真實目標須受阻）、proactive / web search 等。長時間 heap 訓練：**`pnpm --filter mobile ai:train:long`**（`jest.ai-training.config.js` + `scripts/ai-training-long.test.ts`，不混入一般 `pnpm --filter mobile test`） |
 
-| Web       | Vitest / Testing Library      | navigation、SSO、runtime、Firestore path、page context                                                          |
-| Functions | Jest                          | authz、cafeteria、assistant agent、SSO、`agent/` 意圖與 tools、notifications、post-login、`tronClassScraper` 等（約 `21` 個 `*.test.js`） |
-| Rules     | Firebase emulator + node test | Firestore / Storage security boundary                                                                           |
-| E2E       | Maestro                       | mobile demo / regression flows                                                                                  |
+| Web | Vitest / Testing Library | navigation、SSO、runtime、Firestore path、page context |
+| Functions | Jest | authz、cafeteria、assistant agent、SSO、`agent/` 意圖與 tools、notifications、post-login、`tronClassScraper` 等（約 `21` 個 `*.test.js`） |
+| Rules | Firebase emulator + node test | Firestore / Storage security boundary |
+| E2E | Maestro | mobile demo / regression flows |
 
 ### 建議 PR 前檢查
 
@@ -732,18 +757,18 @@ pnpm format:check
 
 Jobs：
 
-| Job                  | 內容                                                                |
-| -------------------- | ------------------------------------------------------------------- |
-| `security-gates`     | checkout、pnpm install、production audit、gitleaks、audit artifact  |
-| `lint-and-typecheck` | root lint、root typecheck                                           |
-| `test-mobile`        | mobile Jest coverage、Codecov upload、test artifacts                |
-| `test-web`           | web Vitest                                                          |
-| `test-functions`     | functions Jest                                                      |
-| `test-rules`         | Java 21 + Firebase emulator rules tests                             |
-| `build-mobile`       | Expo Doctor、EAS config、preview Android/iOS build submission check |
-| `build-web`          | Next.js build、upload `.next` artifact                              |
+| Job                  | 內容                                                                                                                                                                                                                                                                                |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `security-gates`     | checkout、pnpm install、production audit、gitleaks、audit artifact                                                                                                                                                                                                                  |
+| `lint-and-typecheck` | root lint、root typecheck                                                                                                                                                                                                                                                           |
+| `test-mobile`        | mobile Jest coverage、Codecov upload、test artifacts                                                                                                                                                                                                                                |
+| `test-web`           | web Vitest                                                                                                                                                                                                                                                                          |
+| `test-functions`     | functions Jest                                                                                                                                                                                                                                                                      |
+| `test-rules`         | Java 21 + Firebase emulator rules tests                                                                                                                                                                                                                                             |
+| `build-mobile`       | Expo Doctor、EAS config、preview Android/iOS build submission check                                                                                                                                                                                                                 |
+| `build-web`          | Next.js build、upload `.next` artifact                                                                                                                                                                                                                                              |
 | `deploy-functions`   | **`main` 分支的 `push` 事件**；若 **`FIREBASE_TOKEN`** secret 為空則跳過。**注意：** 與程式碼品質 gates 對照時，此 job 在 CI 檔案中**僅相依** `security-gates` 與 `lint-and-typecheck`（**未**再等 `test-*` / `build-*` 完成），發版前請務必在本機或 PR 確認全套測試與 rules test。 |
-| `summary`            | CI 結果 summary                                                     |
+| `summary`            | CI 結果 summary                                                                                                                                                                                                                                                                     |
 
 ### 其他 workflows
 

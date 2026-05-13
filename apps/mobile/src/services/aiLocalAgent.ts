@@ -172,7 +172,64 @@ export type DetectedIntent = {
    * 不設定時 → 沿用舊行為（任何 empty arg 都算 missing）。
    */
   requiredArgs?: string[];
+  /** 這些欄位必須由前置讀取解析取得，不能只用使用者文字猜測。 */
+  resolvedRequiredArgs?: string[];
 };
+
+const GENERATED_WRITE_REQUIRED_ARGS: Record<string, string[]> = {
+  send_message: ['peerId', 'content'],
+  create_calendar_event: ['title', 'startAt'],
+  register_event: [],
+  reserve_library_seat: [],
+  borrow_book: [],
+  renew_book: ['loanId'],
+  mark_notifications_read: ['action'],
+  create_repair_request: ['room', 'description'],
+  submit_assignment: ['assignmentId', 'groupId', 'content'],
+  enroll_course: ['courseId', 'semester'],
+  drop_course: ['enrollmentId'],
+  cancel_seat_reservation: ['reservationId'],
+  return_book: ['loanId'],
+  unregister_event: ['eventId'],
+  check_in_attendance: [],
+  create_health_appointment: ['department', 'date', 'timeSlot'],
+  reserve_washing_machine: [],
+  create_lost_found: ['type', 'title', 'description'],
+  join_group: ['groupId'],
+  create_group_post: ['groupId', 'content'],
+  confirm_package_pickup: ['packageId'],
+  request_leave: ['reason'],
+  create_order: [],
+  cancel_order: [],
+  create_print_job: ['printerId', 'fileName'],
+  rate_menu_item: ['menuItemId', 'rating'],
+  update_calendar_event: ['eventId'],
+  delete_calendar_event: ['eventId'],
+  start_attendance: ['courseSpaceId'],
+  create_assignment: ['groupId', 'title'],
+  grade_submission: ['submissionId', 'grade'],
+  create_announcement: ['title', 'body'],
+};
+
+function isWriteToolName(toolName: string): boolean {
+  return toolName.startsWith('create_') || toolName.startsWith('send_')
+    || toolName.startsWith('submit_') || toolName.startsWith('register_')
+    || toolName.startsWith('reserve_') || toolName.startsWith('borrow_')
+    || toolName.startsWith('cancel_') || toolName.startsWith('drop_')
+    || toolName.startsWith('delete_') || toolName.startsWith('update_')
+    || toolName.startsWith('mark_') || toolName.startsWith('rate_')
+    || toolName === 'request_leave' || toolName.startsWith('check_in')
+    || toolName.startsWith('start_') || toolName.startsWith('return_')
+    || toolName.startsWith('renew_') || toolName.startsWith('confirm_')
+    || toolName.startsWith('join_') || toolName.startsWith('unregister_');
+}
+
+function requiredArgsForGeneratedWrite(toolName: string, declarationRequired: string[] = []): string[] {
+  if (Object.prototype.hasOwnProperty.call(GENERATED_WRITE_REQUIRED_ARGS, toolName)) {
+    return GENERATED_WRITE_REQUIRED_ARGS[toolName];
+  }
+  return declarationRequired;
+}
 
 /**
  * 從自然語言中萃取時間參數
@@ -337,6 +394,22 @@ function fuzzyMatchFromData(data: any, keyword: string, idField: string, nameFie
   // 如果只有一個結果，直接返回
   if (items.length === 1) return String(items[0][idField] ?? items[0].id ?? '');
   return null;
+}
+
+function extractRatedMenuItemName(message: string): string {
+  const cleaned = message
+    .replace(/[「『」』"]/g, '')
+    .replace(/^(?:幫我|請|麻煩|幫忙)\s*/, '')
+    .replace(/(?:這個|這份|這道|那個|那份|那道)\s*/g, '')
+    .trim();
+  const match =
+    cleaned.match(/(.{1,30}?)(?:給|打)\s*[一二兩三四五\d]\s*[星分]/) ??
+    cleaned.match(/(.{1,30}?)(?:評分|打分|幾星|好不好吃)/) ??
+    cleaned.match(/(?:評|評分|打分)\s*(.{1,30})/);
+  return (match?.[1] ?? '')
+    .replace(/^(?:餐點|菜色|菜|食物)\s*/, '')
+    .replace(/[，。！？!?、\s]+$/g, '')
+    .trim();
 }
 
 /**
@@ -662,12 +735,13 @@ export function analyzeIntents(message: string): DetectedIntent[] {
       notifyMatch ??
       origMsg.match(/(?:跟|傳給|(?<!分)發給|私訊|通知|(?<![分發])給)\s*([^\s,，。！的明今這那個說要把要請我]{1,4})/) ??
       origMsg.match(/^通知\s*([^\s,，。！的明今這那個說要把]{1,4})/);
-    const peerName = nameMatch?.[1] ?? '';
+    const peerName = (nameMatch?.[1] ?? '').replace(/(?:跟[他她它]?|和[他她它]?|叫[他她它]?)$/, '');
     const messageContent = notifyMatch?.[2]?.replace(/^的/, '').trim() || content || '你好';
     intents.push({
       tool: 'send_message', isWrite: true, priority: 12,
       args: { peerId: peerName, content: messageContent },
-      requiredArgs: [],
+      requiredArgs: ['peerId', 'content'],
+      resolvedRequiredArgs: ['peerId'],
       reason: `發送訊息給 ${peerName || '(待確認)'}`,
       prereqRead: { tool: 'query_conversations', args: {} },
       resolveFromRead: (res, m) => {
@@ -680,7 +754,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
           const members = c.memberIds ?? c.members ?? [];
           const pName = c.peerName ?? c.displayName ?? '';
           if (pName.toLowerCase().includes(name)) {
-            const peerId = members.find((id: string) => id !== '__self__') ?? c.peerId ?? '';
+            const peerId = c.peerId ?? members.find((id: string) => id !== '__self__') ?? '';
             if (peerId) return { peerId };
           }
         }
@@ -711,7 +785,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'unregister_event', isWrite: true, priority: 12,
       args: { eventId: '' },
-      requiredArgs: [],
+      requiredArgs: ['eventId'],
       reason: `取消報名「${eventName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_events', args: {} },
       resolveFromRead: (res) => {
@@ -747,7 +821,10 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 借書 ──
-  if (/幫我.*借.*[書本]|借.*這本|借閱.*[書本]|借.*一本|隨便.*借|借.*隨便|順便.*借|借本|借.*參考書/.test(msg)) {
+  if (
+    /幫我.*借.*[書本]|借.*這本|借閱.*[書本]|借.*一本|隨便.*借|借.*隨便|順便.*借|借本|借.*參考書/.test(msg) &&
+    !/續借/.test(msg)
+  ) {
     const bookName =
       origMsg.match(/借本\s*([^，。！？\s]{1,24})/)?.[1]?.trim() ??
       origMsg.match(/借\s*[「『"]?([^」』"\s]{2,20})/)?.[1] ??
@@ -771,7 +848,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'renew_book', isWrite: true, priority: 12,
       args: { loanId: '' },
-      requiredArgs: [],
+      requiredArgs: ['loanId'],
       reason: `續借「${bookName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_loans', args: {} },
       resolveFromRead: (res) => {
@@ -782,12 +859,15 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 還書 ──
-  if (/還書|歸還.*書/.test(msg)) {
+  if (
+    /還書|歸還.*書|(?:幫我|我要|請).*還.*書/.test(msg) &&
+    !/啥時|何時|什麼時候|幾時|到期|要還/.test(msg)
+  ) {
     const bookName = origMsg.match(/還\s*[「『"]?([^」』"\s]{2,20})/)?.[1] ?? '';
     intents.push({
       tool: 'return_book', isWrite: true, priority: 12,
       args: { loanId: '' },
-      requiredArgs: [],
+      requiredArgs: ['loanId'],
       reason: `歸還「${bookName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_loans', args: {} },
       resolveFromRead: (res) => {
@@ -821,7 +901,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'delete_calendar_event', isWrite: true, priority: 12,
       args: { eventId: '' },
-      requiredArgs: [],
+      requiredArgs: ['eventId'],
       reason: `刪除行程「${eventName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_calendar', args: {} },
       resolveFromRead: (res) => {
@@ -842,7 +922,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
         ...(timeArgs.startAt ? { startAt: timeArgs.startAt } : {}),
         ...(timeArgs.endAt ? { endAt: timeArgs.endAt } : {}),
       },
-      requiredArgs: [],
+      requiredArgs: ['eventId'],
       reason: `修改行程「${eventName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_calendar', args: {} },
       resolveFromRead: (res) => {
@@ -873,7 +953,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'submit_assignment', isWrite: true, priority: 12,
       args: { assignmentId: '', groupId: '', content: content || '已完成' },
-      requiredArgs: [],
+      requiredArgs: ['assignmentId', 'groupId', 'content'],
       reason: `繳交作業「${assignName || '(自動選擇)'}」`,
       prereqRead: { tool: 'query_assignments', args: { status: 'pending' } },
       resolveFromRead: (res) => {
@@ -916,7 +996,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'enroll_course', isWrite: true, priority: 12,
       args: { courseId: '', semester: '' },
-      requiredArgs: [],
+      requiredArgs: ['courseId', 'semester'],
       reason: `選課「${courseName || '(待確認)'}」`,
       prereqRead: { tool: 'query_courses', args: { filter: 'all' } },
       resolveFromRead: (res) => {
@@ -939,7 +1019,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'drop_course', isWrite: true, priority: 12,
       args: { enrollmentId: '' },
-      requiredArgs: [],
+      requiredArgs: ['enrollmentId'],
       reason: `退選「${courseName || '(待確認)'}」`,
       prereqRead: { tool: 'query_enrollments', args: {} },
       resolveFromRead: (res) => {
@@ -954,7 +1034,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'cancel_seat_reservation', isWrite: true, priority: 12,
       args: { reservationId: '' },
-      requiredArgs: [],
+      requiredArgs: ['reservationId'],
       reason: '取消座位預約',
       prereqRead: { tool: 'query_library', args: { action: 'seats', keyword: '' } },
       resolveFromRead: (res) => {
@@ -1070,6 +1150,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
       isWrite: true,
       priority: 11,
       args: { groupId },
+      requiredArgs: ['groupId'],
       reason: `加入群組${groupId ? ` ${groupId}` : ''}`,
     });
   }
@@ -1086,6 +1167,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
         content: contentMatch?.[1]?.trim() ?? '',
         type: /公告/.test(msg) ? 'announcement' : /問|問題/.test(msg) ? 'question' : 'discussion',
       },
+      requiredArgs: ['groupId', 'content'],
       reason: '發布群組貼文',
     });
   }
@@ -1224,7 +1306,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'confirm_package_pickup', isWrite: true, priority: 12,
       args: { packageId: '' },
-      requiredArgs: [],
+      requiredArgs: ['packageId'],
       reason: '確認領取包裹',
       prereqRead: { tool: 'query_dorm_info', args: {} },
       resolveFromRead: (res) => {
@@ -1244,7 +1326,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({
       tool: 'start_attendance', isWrite: true, priority: 12,
       args: { courseSpaceId: '' },
-      requiredArgs: [],
+      requiredArgs: ['courseSpaceId'],
       reason: '開始點名',
       prereqRead: { tool: 'query_courses', args: { filter: 'today' } },
       resolveFromRead: (res) => {
@@ -1269,6 +1351,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
         description: content || '',
         ...(timeArgs.startAt ? { dueAt: timeArgs.startAt } : {}),
       },
+      requiredArgs: ['groupId', 'title'],
       reason: '建立作業',
       prereqRead: { tool: 'query_courses', args: { filter: 'today' } },
       resolveFromRead: (res) => {
@@ -1300,6 +1383,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
         grade,
         feedback: content || '',
       },
+      requiredArgs: ['submissionId', 'grade'],
       reason: '批改學生作業',
     });
   }
@@ -1326,15 +1410,19 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   if (/評分|打分|幾星|好不好吃|給\s*[一二兩三四五\d]\s*[星分]/.test(msg) && /餐|菜|食|吃|飯|麵|飲料|便當|腿|排|蛋餅|奶茶/.test(msg)) {
     const ratingMatch = msg.match(/(\d|一|二|兩|三|四|五)\s*[星分]/);
     const ratingMap: Record<string, string> = { 一: '1', 二: '2', 兩: '2', 三: '3', 四: '4', 五: '5' };
+    const itemName = extractRatedMenuItemName(origMsg);
     intents.push({
       tool: 'rate_menu_item', isWrite: true, priority: 12,
       args: { menuItemId: '', rating: ratingMatch ? (ratingMap[ratingMatch[1]] ?? ratingMatch[1]) : '4' },
-      reason: '餐點評分',
+      requiredArgs: ['menuItemId', 'rating'],
+      reason: `餐點評分${itemName ? `「${itemName}」` : ''}`,
       prereqRead: { tool: 'query_menus', args: {} },
       resolveFromRead: (res) => {
         const data = res.data as any;
         const items = Array.isArray(data) ? data : (data?.menus ?? data?.items ?? []);
-        if (Array.isArray(items) && items.length > 0) {
+        const id = fuzzyMatchFromData(items, itemName, 'id', ['name', 'title', 'itemName']);
+        if (id) return { menuItemId: id };
+        if (!itemName && Array.isArray(items) && items.length === 1) {
           return { menuItemId: String(items[0].id ?? items[0].menuItemId ?? '') };
         }
         return {};
@@ -1661,11 +1749,11 @@ export async function autonomousQuery(
   //      就不要再硬塞 followUp，避免「取消最後一筆訂單」既觸發 cancel_order 又觸發 create_order
   const hasExistingWriteIntent = intents.some((i) => i.isWrite);
   if (followUpToolFromMenu && !intents.some((i) => i.tool === followUpToolFromMenu) && !hasExistingWriteIntent) {
-    const isWrite = /^(?:create_|send_|submit_|register_|reserve_|borrow_|renew_|return_|cancel_|drop_|delete_|update_|mark_|rate_|unregister_|confirm_|check_in|join_|start_)/.test(followUpToolFromMenu) || followUpToolFromMenu === 'request_leave';
+    const isWrite = isWriteToolName(followUpToolFromMenu);
     intents.unshift({
       tool: followUpToolFromMenu,
       args: {},
-      requiredArgs: [],
+      requiredArgs: isWrite ? requiredArgsForGeneratedWrite(followUpToolFromMenu) : [],
       priority: 20,
       reason: '上下文延續',
       isWrite,
@@ -1692,22 +1780,16 @@ export async function autonomousQuery(
         const tools = getToolDeclarations(ctx.role);
         const toolDecl = tools.find(t => t.name === selection.tool);
         if (toolDecl) {
-          const isWrite = selection.tool.startsWith('create_') || selection.tool.startsWith('send_')
-            || selection.tool.startsWith('submit_') || selection.tool.startsWith('register_')
-            || selection.tool.startsWith('reserve_') || selection.tool.startsWith('borrow_')
-            || selection.tool.startsWith('cancel_') || selection.tool.startsWith('drop_')
-            || selection.tool.startsWith('delete_') || selection.tool.startsWith('update_')
-            || selection.tool.startsWith('mark_') || selection.tool.startsWith('rate_')
-            || selection.tool === 'request_leave' || selection.tool.startsWith('check_in')
-            || selection.tool.startsWith('start_') || selection.tool.startsWith('return_')
-            || selection.tool.startsWith('renew_') || selection.tool.startsWith('confirm_')
-            || selection.tool.startsWith('join_') || selection.tool.startsWith('unregister_');
+          const isWrite = isWriteToolName(selection.tool);
           intents.push({
             tool: selection.tool,
             args: selection.args,
             priority: 13,
             reason: `(模型推理) ${toolDecl.description.slice(0, 20)}`,
             isWrite,
+            requiredArgs: isWrite
+              ? requiredArgsForGeneratedWrite(selection.tool, toolDecl.parameters.required ?? [])
+              : undefined,
           });
           console.log(`[AI Agent] 模型選擇: ${selection.tool}`, selection.args);
         }
@@ -1760,6 +1842,7 @@ export async function autonomousQuery(
 
   for (const wi of writeIntents) {
     let finalArgs = { ...wi.args };
+    const resolvedKeys = new Set<string>();
 
     // 如果有前置讀取需求，先執行前置讀取
     if (wi.prereqRead && wi.resolveFromRead) {
@@ -1782,6 +1865,11 @@ export async function autonomousQuery(
 
       if (prereqResult.success) {
         const resolved = wi.resolveFromRead(prereqResult, message);
+        for (const [key, value] of Object.entries(resolved)) {
+          if (value !== '' && value !== undefined && value !== null) {
+            resolvedKeys.add(key);
+          }
+        }
         finalArgs = { ...finalArgs, ...resolved };
       }
     }
@@ -1799,6 +1887,13 @@ export async function autonomousQuery(
       missingRequired = Object.entries(finalArgs)
         .filter(([_, v]) => v === '' || v === undefined || v === null)
         .map(([k]) => k);
+    }
+    if (Array.isArray(wi.resolvedRequiredArgs)) {
+      for (const key of wi.resolvedRequiredArgs) {
+        if (!resolvedKeys.has(key) && !missingRequired.includes(key)) {
+          missingRequired.push(key);
+        }
+      }
     }
 
     // 把空字串 args 清掉，避免 handler 看到空字串以為「有指定空值」
@@ -1998,16 +2093,7 @@ export function buildToolSelectionPrompt(
     const params = Object.entries(t.parameters.properties || {})
       .map(([k, v]) => `${k}(${v.description})`)
       .join(', ');
-    const isWrite = t.name.startsWith('create_') || t.name.startsWith('send_')
-      || t.name.startsWith('submit_') || t.name.startsWith('register_')
-      || t.name.startsWith('reserve_') || t.name.startsWith('borrow_')
-      || t.name.startsWith('cancel_') || t.name.startsWith('drop_')
-      || t.name.startsWith('delete_') || t.name.startsWith('update_')
-      || t.name.startsWith('mark_') || t.name.startsWith('rate_')
-      || t.name === 'request_leave' || t.name.startsWith('check_in')
-      || t.name.startsWith('start_') || t.name.startsWith('return_')
-      || t.name.startsWith('renew_') || t.name.startsWith('confirm_')
-      || t.name.startsWith('join_') || t.name.startsWith('unregister_');
+    const isWrite = isWriteToolName(t.name);
     return `- ${t.name}${isWrite ? ' [寫入]' : ' [查詢]'}: ${t.description} | 參數: ${params || '無'}`;
   }).join('\n');
 
@@ -2220,16 +2306,7 @@ export function inferIntentFromToolDescriptions(
     score += tokenSimilarity(msgTokens, paramTokens) * 0.3;
 
     // 讀寫意圖對齊加分
-    const isWrite = tool.name.startsWith('create_') || tool.name.startsWith('send_')
-      || tool.name.startsWith('submit_') || tool.name.startsWith('register_')
-      || tool.name.startsWith('reserve_') || tool.name.startsWith('borrow_')
-      || tool.name.startsWith('renew_') || tool.name.startsWith('return_')
-      || tool.name.startsWith('cancel_') || tool.name.startsWith('drop_')
-      || tool.name.startsWith('delete_') || tool.name.startsWith('update_')
-      || tool.name.startsWith('mark_') || tool.name.startsWith('rate_')
-      || tool.name.startsWith('unregister_') || tool.name.startsWith('confirm_')
-      || tool.name.startsWith('check_in') || tool.name.startsWith('join_')
-      || tool.name.startsWith('start_') || tool.name === 'request_leave';
+    const isWrite = isWriteToolName(tool.name);
 
     if (rwIntent === 'write' && isWrite) score *= 1.3;
     if (rwIntent === 'read' && !isWrite) score *= 1.2;
@@ -2319,6 +2396,9 @@ export function inferIntentFromToolDescriptions(
       priority: Math.round(10 + best.score * 5), // 動態優先級
       reason: `(語意推理 ${Math.round(s.score * 100)}%) ${s.tool.description.slice(0, 20)}`,
       isWrite: s.isWrite,
+      requiredArgs: s.isWrite
+        ? requiredArgsForGeneratedWrite(s.tool.name, s.tool.parameters.required ?? [])
+        : undefined,
       ...(prereqRead ? { prereqRead } : {}),
     });
   }

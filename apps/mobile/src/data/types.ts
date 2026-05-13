@@ -1064,6 +1064,8 @@ export type Comment = {
 export type Conversation = {
   id: string;
   memberIds: string[];
+  peerId?: string;
+  peerName?: string;
   participantUsers?: User[];
   schoolId?: string | null;
   lastMessage?: Message | null;
