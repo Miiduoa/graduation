@@ -328,6 +328,27 @@ function checkMissing(
   return missing;
 }
 
+function isValidDateString(value: string): boolean {
+  // 接受 YYYY-MM-DD 或 YYYY/MM/DD
+  const m = value.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (!m) {
+    // 也接受 ISO datetime
+    const d = new Date(value);
+    return !Number.isNaN(d.getTime());
+  }
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const da = Number(m[3]);
+  if (mo < 1 || mo > 12) return false;
+  if (da < 1 || da > 31) return false;
+  const dt = new Date(y, mo - 1, da);
+  return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === da;
+}
+
+function isValidTimeString(value: string): boolean {
+  return /^([01]?\d|2[0-3])[:：]([0-5]\d)$/.test(value);
+}
+
 function checkInvalid(
   spec: ToolSpec,
   args: Record<string, unknown>,
@@ -336,6 +357,8 @@ function checkInvalid(
   for (const field of spec.fields) {
     const value = args[field.name];
     if (!fieldHasValue(value)) continue;
+
+    // ── 整數 / 數值校驗 ──
     if (field.type === 'integer' || field.type === 'number') {
       const n = Number(asString(value));
       if (!Number.isFinite(n) || (field.type === 'integer' && !Number.isInteger(n))) {
@@ -347,16 +370,94 @@ function checkInvalid(
         });
         continue;
       }
-      if (field.name === 'quantity' && n < 1) {
+      // 數量、copies、份數類 → 必須 ≥ 1
+      if (/^(quantity|copies|count|num|數量|份數)$/i.test(field.name) && n < 1) {
         invalid.push({
           field: field.name,
-          prompt: '請提供有效的數量，至少為 1。',
+          prompt: `「${field.description}」必須 ≥ 1。`,
           type: field.type,
           example: field.example ?? '1',
+        });
+        continue;
+      }
+      // grade 分數合理範圍 0-100
+      if (field.name === 'grade' && (n < 0 || n > 100)) {
+        invalid.push({
+          field: field.name,
+          prompt: `分數應介於 0–100。`,
+          type: field.type,
+          example: '85',
+        });
+        continue;
+      }
+    }
+
+    // ── 日期校驗 ──
+    if (field.type === 'date') {
+      const raw = asString(value);
+      if (!isValidDateString(raw)) {
+        invalid.push({
+          field: field.name,
+          prompt: `「${field.description}」日期格式不正確，請給合法的 YYYY-MM-DD（例：2026-05-13）。`,
+          type: field.type,
+          example: field.example ?? '2026-05-13',
+        });
+        continue;
+      }
+    }
+
+    // ── 時間校驗 ──
+    if (field.type === 'time') {
+      const raw = asString(value);
+      if (!isValidTimeString(raw)) {
+        invalid.push({
+          field: field.name,
+          prompt: `「${field.description}」時間格式不正確，請用 HH:mm（例：14:30）。`,
+          type: field.type,
+          example: field.example ?? '14:30',
+        });
+        continue;
+      }
+    }
+
+    // ── datetime 校驗 ──
+    if (field.type === 'datetime') {
+      const d = new Date(asString(value));
+      if (Number.isNaN(d.getTime())) {
+        invalid.push({
+          field: field.name,
+          prompt: `「${field.description}」日期時間無效，請給 ISO 8601 或 YYYY-MM-DD HH:mm。`,
+          type: field.type,
+          example: field.example,
+        });
+        continue;
+      }
+    }
+  }
+
+  // ── 區間日期校驗：from <= to / startDate <= endDate ──
+  const datePairs: Array<[string, string]> = [
+    ['from', 'to'],
+    ['startDate', 'endDate'],
+    ['fromDate', 'toDate'],
+    ['begin', 'end'],
+  ];
+  for (const [fromKey, toKey] of datePairs) {
+    const f = asString(args[fromKey]);
+    const t = asString(args[toKey]);
+    if (f && t) {
+      const fd = new Date(f);
+      const td = new Date(t);
+      if (!Number.isNaN(fd.getTime()) && !Number.isNaN(td.getTime()) && fd.getTime() > td.getTime()) {
+        invalid.push({
+          field: toKey,
+          prompt: `結束日期（${toKey}）不能早於開始日期（${fromKey}）。`,
+          type: 'date',
         });
       }
     }
   }
+
   return invalid;
 }
 

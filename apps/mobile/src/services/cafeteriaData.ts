@@ -21,6 +21,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import type { CrowdLevel, PoiCrowdReport } from '../data/types';
 
 // ═══════════════════════════════════════════════════════
 // 型別定義
@@ -277,6 +278,13 @@ export const CAFETERIAS: Cafeteria[] = [
     features: ['便利商店', '滷味', '水果', '鬆餅'],
   },
 ];
+
+/** 餐廳人潮演算對應之校園 POI（與 puCampusData / Firestore `pois` id 一致） */
+export const CAFETERIA_CROWD_POI_IDS: Record<CafeteriaId, string> = {
+  jingyuan: 'pu-jingyuan',
+  yiyuan: 'pu-yiyuan',
+  zhishan: 'pu-zhishan',
+};
 
 /** 各餐廳店家（真實資料 + 合理推估；每店家含內嵌 menuItems） */
 export const VENDORS: Vendor[] = [
@@ -4032,6 +4040,108 @@ export async function addInspection(
   return newRecord;
 }
 
+function parseCrowdReportDate(createdAt?: string): Date | null {
+  if (!createdAt || typeof createdAt !== 'string') return null;
+  const d = new Date(createdAt);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const REPORT_LEVEL_SCORE: Record<CrowdLevel, number> = {
+  low: 1,
+  medium: 2,
+  high: 3,
+  very_high: 4,
+};
+
+/**
+ * 依使用者於 POI 的回報計算人潮（與點位詳情頁相同：優先 2 小時內，否則最多取 12 筆）。
+ * 僅使用真實回報，無資料時回傳 null。
+ */
+export function aggregateCrowdReportsToSimpleLevel(
+  reports: PoiCrowdReport[],
+): {
+  level: 'low' | 'medium' | 'high';
+  sampleSize: number;
+  lastUpdated: Date | null;
+} | null {
+  const withDate = reports
+    .map((r) => ({ raw: r, createdDate: parseCrowdReportDate(r.createdAt) }))
+    .filter((x): x is { raw: PoiCrowdReport; createdDate: Date } => x.createdDate !== null)
+    .sort((a, b) => b.createdDate.getTime() - a.createdDate.getTime());
+
+  if (withDate.length === 0) return null;
+
+  const now = Date.now();
+  const recentWindow = withDate.filter(
+    (x) => now - x.createdDate.getTime() <= 2 * 60 * 60 * 1000,
+  );
+  const effective = recentWindow.length > 0 ? recentWindow : withDate.slice(0, 12);
+
+  const averageScore =
+    effective.reduce((sum, x) => sum + REPORT_LEVEL_SCORE[x.raw.level], 0) / effective.length;
+
+  let coarse: CrowdLevel;
+  if (averageScore < 1.5) coarse = 'low';
+  else if (averageScore < 2.5) coarse = 'medium';
+  else if (averageScore < 3.5) coarse = 'high';
+  else coarse = 'very_high';
+
+  const level: 'low' | 'medium' | 'high' =
+    coarse === 'very_high' || coarse === 'high'
+      ? 'high'
+      : coarse === 'medium'
+        ? 'medium'
+        : 'low';
+
+  return {
+    level,
+    sampleSize: effective.length,
+    lastUpdated: withDate[0].createdDate,
+  };
+}
+
+/** 單一餐廳：自資料源拉取 POI 人潮回報並聚合 */
+export async function fetchCafeteriaCrowdSummary(
+  cafeteriaId: CafeteriaId,
+  listPoiCrowdReports: (poiId: string, schoolId?: string) => Promise<PoiCrowdReport[]>,
+  schoolId?: string,
+): Promise<
+  | { ok: true; level: 'low' | 'medium' | 'high'; sampleSize: number; lastUpdated: Date | null }
+  | { ok: false; reason: 'no_reports' }
+> {
+  const poiId = CAFETERIA_CROWD_POI_IDS[cafeteriaId];
+  const reports = await listPoiCrowdReports(poiId, schoolId);
+  const agg = aggregateCrowdReportsToSimpleLevel(reports);
+  if (!agg) return { ok: false, reason: 'no_reports' };
+  return {
+    ok: true,
+    level: agg.level,
+    sampleSize: agg.sampleSize,
+    lastUpdated: agg.lastUpdated,
+  };
+}
+
+/** 管理後台：合併三間餐廳 POI 回報後聚合（全校用餐區熱度） */
+export async function fetchCampusDiningCrowdSummary(
+  listPoiCrowdReports: (poiId: string, schoolId?: string) => Promise<PoiCrowdReport[]>,
+  schoolId?: string,
+): Promise<
+  | { ok: true; level: 'low' | 'medium' | 'high'; sampleSize: number; lastUpdated: Date | null }
+  | { ok: false; reason: 'no_reports' }
+> {
+  const ids = Object.values(CAFETERIA_CROWD_POI_IDS);
+  const batches = await Promise.all(ids.map((id) => listPoiCrowdReports(id, schoolId)));
+  const merged = batches.flat();
+  const agg = aggregateCrowdReportsToSimpleLevel(merged);
+  if (!agg) return { ok: false, reason: 'no_reports' };
+  return {
+    ok: true,
+    level: agg.level,
+    sampleSize: agg.sampleSize,
+    lastUpdated: agg.lastUpdated,
+  };
+}
+
 // ── 即時資訊估算 ──
 
 /** 估算目前等待時間（根據排隊訂單數量） */
@@ -4044,14 +4154,6 @@ export async function estimateWaitTime(vendorId: string): Promise<number> {
   );
   // 每單估計 5 分鐘
   return activeOrders.length * 5;
-}
-
-/** 估算目前人潮（根據時間） */
-export function estimateCrowdLevel(): 'low' | 'medium' | 'high' {
-  const hour = new Date().getHours();
-  if ((hour >= 11 && hour <= 13) || (hour >= 17 && hour <= 19)) return 'high';
-  if ((hour >= 10 && hour <= 14) || (hour >= 16 && hour <= 20)) return 'medium';
-  return 'low';
 }
 
 export const CROWD_LABELS = {

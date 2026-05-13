@@ -15,12 +15,31 @@
  * - Reciprocity：AI 主動發現問題 → 使用者願意回應
  */
 import React, { useEffect, useRef, useMemo } from 'react';
-import { Animated, Easing, Image, Pressable, Text, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  Image,
+  Platform,
+  Pressable,
+  Text,
+  View,
+} from 'react-native';
 import { theme, softShadowStyle } from '../ui/theme';
 import { aiBrain, type BrainInsight } from '../services/aiBrain';
 
 /** brand asset for campus demo */
 const AI_ORB_LOGO = require('../../assets/providence_ai_orb_logo.png');
+
+/** 淺色模式章面光學微調（左上 1～2px，抵消 PNG 視覺偏右下；不含 scale）。 */
+const ORB_SEAL_LIGHT_NUDGE_X = -3;
+const ORB_SEAL_LIGHT_NUDGE_Y = -3;
+
+/** 數字角標位置（勿過度上移，以免視覺上拖累章面置中感）。 */
+const BADGE_TOP = -3;
+/** -4 略往左，減緩與章面共視時的右下牽引感。 */
+const BADGE_RIGHT = -4;
+const BADGE_SIZE = 17;
+const BADGE_FONT_SIZE = 9.5;
 
 export interface AIFloatingBallProps {
   size?: number;
@@ -136,6 +155,8 @@ export function AIFloatingBall({
 
   const ringSize = size + 8;
   const accentColor = isUrgent ? theme.colors.danger : theme.colors.accent;
+  /** 章面用版面尺寸縮放，避免 Image transform scale 造成模糊；維持整數像素。 */
+  const sealPixelSize = Math.round(size * 0.76);
 
   return (
     <View
@@ -153,6 +174,9 @@ export function AIFloatingBall({
           pointerEvents="none"
           style={{
             position: 'absolute',
+            /** ring 比 Pressable 大，需明確置中；否則預設貼左上角會讓光暈看起來偏右下 */
+            left: (size - ringSize) / 2,
+            top: (size - ringSize) / 2,
             width: ringSize,
             height: ringSize,
             borderRadius: ringSize / 2,
@@ -260,10 +284,21 @@ export function AIFloatingBall({
               source={AI_ORB_LOGO}
               accessibilityIgnoresInvertColors
               resizeMode="contain"
-              style={{
-                width: size * 0.76,
-                height: size * 0.76,
-              }}
+              {...(Platform.OS === 'android' ? { resizeMethod: 'resize' as const } : {})}
+              style={[
+                {
+                  width: sealPixelSize,
+                  height: sealPixelSize,
+                },
+                theme.mode === 'light'
+                  ? {
+                      transform: [
+                        { translateX: ORB_SEAL_LIGHT_NUDGE_X },
+                        { translateY: ORB_SEAL_LIGHT_NUDGE_Y },
+                      ],
+                    }
+                  : null,
+              ]}
             />
           </View>
         </Animated.View>
@@ -273,12 +308,12 @@ export function AIFloatingBall({
           <View
             style={{
               position: 'absolute',
-              top: -2,
-              right: -2,
-              minWidth: 18,
-              height: 18,
+              top: BADGE_TOP,
+              right: BADGE_RIGHT,
+              minWidth: BADGE_SIZE,
+              height: BADGE_SIZE,
               paddingHorizontal: 4,
-              borderRadius: 9,
+              borderRadius: BADGE_SIZE / 2,
               backgroundColor: isUrgent ? theme.colors.danger : theme.colors.streak,
               alignItems: 'center',
               justifyContent: 'center',
@@ -286,7 +321,13 @@ export function AIFloatingBall({
               borderColor: theme.colors.chromeTabBar,
             }}
           >
-            <Text style={{ color: theme.colors.onAccent, fontSize: 10, fontWeight: '800' }}>
+            <Text
+              style={{
+                color: theme.colors.onAccent,
+                fontSize: BADGE_FONT_SIZE,
+                fontWeight: '800',
+              }}
+            >
               {displayCount > 9 ? '9+' : displayCount}
             </Text>
           </View>

@@ -18,6 +18,8 @@ import { Card, Screen, SectionTitle, Pill } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { useDataSource } from '../hooks/useDataSource';
+import { useSchool } from '../state/school';
 import {
   getCafeterias,
   getVendors,
@@ -35,7 +37,7 @@ import {
   ORDER_STATUS_COLORS,
   CROWD_LABELS,
   CROWD_COLORS,
-  estimateCrowdLevel,
+  fetchCampusDiningCrowdSummary,
   subscribeOrders,
   setOrderSchoolId,
   type Cafeteria,
@@ -218,7 +220,30 @@ function OverviewTab(props: {
 }) {
   const { orders, announcements, inspections } = props;
   const vendors = VENDORS;
-  const crowdLevel = estimateCrowdLevel();
+  const ds = useDataSource();
+  const { school } = useSchool();
+
+  const [campusCrowdStatus, setCampusCrowdStatus] = useState<
+    'loading' | 'none' | 'low' | 'medium' | 'high'
+  >('loading');
+  const [campusCrowdHint, setCampusCrowdHint] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCampusDiningCrowdSummary(ds.listPoiCrowdReports, school.id).then((r) => {
+      if (cancelled) return;
+      if (r.ok) {
+        setCampusCrowdStatus(r.level);
+        setCampusCrowdHint(`綜合三間餐廳 POI · ${r.sampleSize} 筆有效樣本`);
+      } else {
+        setCampusCrowdStatus('none');
+        setCampusCrowdHint('尚無餐廳 POI 使用者回報');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ds, school.id]);
 
   // 計算統計數據
   const stats = useMemo(() => {
@@ -333,7 +358,7 @@ function OverviewTab(props: {
         </View>
       </Card>
 
-      {/* 人潮狀況 */}
+      {/* 人潮狀況（Firestore POI 使用者回報聚合） */}
       <View
         style={{
           flexDirection: 'row',
@@ -341,15 +366,51 @@ function OverviewTab(props: {
           gap: 8,
           padding: 10,
           borderRadius: 10,
-          backgroundColor: `${CROWD_COLORS[crowdLevel]}10`,
+          backgroundColor:
+            campusCrowdStatus === 'loading'
+              ? theme.colors.surface2
+              : campusCrowdStatus === 'none'
+                ? theme.colors.surface2
+                : `${CROWD_COLORS[campusCrowdStatus]}10`,
           borderWidth: 1,
-          borderColor: `${CROWD_COLORS[crowdLevel]}30`,
+          borderColor:
+            campusCrowdStatus === 'loading' || campusCrowdStatus === 'none'
+              ? theme.colors.border
+              : `${CROWD_COLORS[campusCrowdStatus]}30`,
         }}
       >
-        <Ionicons name="people-outline" size={16} color={CROWD_COLORS[crowdLevel]} />
-        <Text style={{ color: CROWD_COLORS[crowdLevel], fontSize: 13, fontWeight: '600' }}>
-          目前人潮：{CROWD_LABELS[crowdLevel]}
-        </Text>
+        <Ionicons
+          name="people-outline"
+          size={16}
+          color={
+            campusCrowdStatus === 'loading' || campusCrowdStatus === 'none'
+              ? theme.colors.muted
+              : CROWD_COLORS[campusCrowdStatus]
+          }
+        />
+        <View style={{ flex: 1 }}>
+          <Text
+            style={{
+              color:
+                campusCrowdStatus === 'loading' || campusCrowdStatus === 'none'
+                  ? theme.colors.text
+                  : CROWD_COLORS[campusCrowdStatus],
+              fontSize: 13,
+              fontWeight: '600',
+            }}
+          >
+            {campusCrowdStatus === 'loading'
+              ? '載入人潮回報中…'
+              : campusCrowdStatus === 'none'
+                ? '目前人潮：尚無回報資料'
+                : `目前人潮：${CROWD_LABELS[campusCrowdStatus]}`}
+          </Text>
+          {campusCrowdHint ? (
+            <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+              {campusCrowdHint}
+            </Text>
+          ) : null}
+        </View>
       </View>
 
       {/* 系統警告 */}
