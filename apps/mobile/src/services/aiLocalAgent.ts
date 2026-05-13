@@ -506,6 +506,11 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'query_enrollments', args: {}, priority: 8, reason: '查詢選課' });
   }
 
+  if (/退選|退掉.*課/.test(msg) && /不確定|要不要|該不該|能不能|可不可以|考慮|想問|怎麼/.test(msg)) {
+    intents.push({ tool: 'query_enrollments', args: {}, priority: 10, reason: '退選前查詢已選課程' });
+    intents.push({ tool: 'analyze_credits', args: {}, priority: 9, reason: '退選前檢查學分影響' });
+  }
+
   // ── 綜合分析 ──
   if (/分析|報告|總結|全面|整體|狀態|怎麼樣|概況|overview|總覽|一鍵|懶得逐個查/.test(msg)) {
     intents.push({ tool: 'comprehensive_analysis', args: {}, priority: 10, reason: '綜合分析' });
