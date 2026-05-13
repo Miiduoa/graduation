@@ -431,7 +431,10 @@ export function analyzeIntents(message: string): DetectedIntent[] {
       priority: 14,
       reason: '午餐／正餐推薦',
     });
-  } else if (/吃|餐[廳點]|菜單|午餐|晚餐|早餐|便當|宵夜|消夜|手搖|奶茶|珍奶|價[格錢]|好吃|美食|飯/.test(msg) && !/評分|打分|幾星|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg)) {
+  } else if (
+    /吃|喝|餐[廳點]|菜單|午餐|晚餐|早餐|便當|宵夜|消夜|手搖|奶茶|珍奶|價[格錢]|好吃|美食|飯/.test(msg) &&
+    !/評分|打分|幾星|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]|不是.*(?:吃|飯)|想看成績/.test(msg)
+  ) {
     // 萃取食物關鍵字，例如「我想吃滷肉飯」→ keyword=「滷肉飯」
     const foodKw = origMsg.match(/(?:想吃|想喝|有沒有|有什麼|吃)\s*(.{1,10}?)(?:嗎|呢|的|吧|啊|？|$)/)?.[1]?.trim() ?? '';
     const menuArgs: Record<string, string> = {};
@@ -760,7 +763,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 繳交作業 ──
-  if (/繳交|交作業|提交.*作業/.test(msg)) {
+  if (/繳交|交作業|提交.*作業/.test(msg) && !/還沒|沒.*(?:動筆|寫|做|完成)|未完成|沒交/.test(msg)) {
     const assignName = origMsg.match(/(?:繳交|提交)\s*[「『"]?([^」』"\s]{2,20})/)?.[1] ?? '';
     intents.push({
       tool: 'submit_assignment', isWrite: true, priority: 12,
@@ -811,7 +814,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 退選 ──
-  if (/退選|退掉.*課/.test(msg)) {
+  if (/退選|退掉.*課/.test(msg) && !/不確定|要不要|該不該|能不能|可不可以|考慮|想問|怎麼/.test(msg)) {
     const courseName = origMsg.match(/退選?\s*[「『"]?([^」』"\s]{2,20})/)?.[1] ?? '';
     intents.push({
       tool: 'drop_course', isWrite: true, priority: 12,
@@ -942,11 +945,17 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     /(?:隨便|随便|你就).{0,14}處理|幫我處理一下|幫我搞定/.test(msg);
   const skipOrderForBriefingPack =
     /懶人包|今日重點/.test(msg) && !/吃飯|訂餐|點餐|想[吃喝]|便當|蛋餅|奶茶|飲料|宵夜|手搖/.test(msg);
+  const orderFoodContext =
+    /吃|喝|餓|餐|飯|麵|便當|午餐|晚餐|早餐|宵夜|消夜|飲料|手搖|奶茶|珍奶|菜單|點餐|訂餐|點|訂|買|來一|素|辣|炸|油|清淡|便宜/.test(msg);
+  const isMenuBrowseQuestion =
+    /不知道|哪家|哪間|哪裡|開著|開嗎|有沒有/.test(msg) &&
+    !/幫我[點訂]|我要[點訂]|點一[個份碗杯]|訂一[個份碗杯]|來一[個份碗杯]?|買一[個份碗杯]?/.test(msg);
   // 排除已被其他意圖處理的訊息（請假、報修、預約、取消、查詢等）
   if (
     !isVagueHelpRequest &&
     !skipOrderForBriefingPack &&
-    !/請.*假|報修|維修|預約.*座|預約.*看|掛號|借.*(?:書|本)|借閱|還書|選課|退選|報名.*活動|發.*訊|繳交|簽到|簽倒|签倒|打卡|點名|取消.*訂|不要.*訂|查看|查詢|看一下|看看|查.*訂單|我的訂單/.test(msg)
+    !isMenuBrowseQuestion &&
+    !/請.*假|報修|維修|預約.*座|預約.*看|掛號|借.*(?:書|本)|借閱|還書|選課|退選|報名.*活動|發.*訊|繳交|簽到|簽倒|签倒|打卡|點名|取消.*訂|不要.*訂|查看|查詢|看一下|看看|查.*訂單|我的訂單|未讀|通知|notification/.test(msg)
   ) {
     // 先用語意推理：訊息「幫我訂午餐」要解析成 intent=order_food + meal_time=lunch（item=null）
     // 而不是 itemName='午餐' 去字串匹配
@@ -984,6 +993,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     } else if (
       frame &&
       frame.intent === 'unknown' &&
+      orderFoodContext &&
       (frame.constraints.vegetarian ||
         frame.constraints.spicy != null ||
         frame.constraints.warm ||
