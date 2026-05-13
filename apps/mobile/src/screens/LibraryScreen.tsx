@@ -251,6 +251,9 @@ export function LibraryScreen(props: Record<string, unknown>) {
           text: '確認預約',
           onPress: () => {
             Alert.alert('預約成功', `已預約 ${room.name}\n請於 15 分鐘內到場簽到`);
+            void import('../services/companionEngine').then((m) =>
+              m.recordCompanionFeatureSignal('library_action'),
+            );
             setSelectedRoom(null);
           },
         },
@@ -1599,6 +1602,9 @@ export function LibraryScreen(props: Record<string, unknown>) {
                           Alert.alert(
                             '預約成功',
                             `已預約「${selectedBook.title}」，到書後將通知您`,
+                          );
+                          void import('../services/companionEngine').then((m) =>
+                            m.recordCompanionFeatureSignal('library_action'),
                           );
                           setSelectedBook(null);
                         }}

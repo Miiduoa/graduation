@@ -248,7 +248,8 @@ export async function recordCompanionFeatureSignal(
     | 'bus_view'
     | 'health_action'
     | 'vendor_hub'
-    | 'sso_login',
+    | 'sso_login'
+    | 'payment_completed',
 ): Promise<void> {
   if (await isCompanionHidden()) return;
   const s = await loadRaw();
@@ -300,6 +301,11 @@ export async function recordCompanionFeatureSignal(
       break;
     case 'sso_login':
       bumpDomain(s, 'today', 4);
+      break;
+    case 'payment_completed':
+      bumpDomain(s, 'life_services', 10);
+      bumpDomain(s, 'today', 3);
+      s.daily.touchedCampusLife = true;
       break;
     default:
       bumpDomain(s, 'default', 3);

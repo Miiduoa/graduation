@@ -23,11 +23,11 @@ export function buildLibraryOpacHomeUrl(): string {
  * 建構關鍵字檢索 URL。
  * 空字串時回傳首頁。
  */
-export function buildLibrarySearchUrl(query: string): string {
+export function buildLibrarySearchUrl(query: string, field = 'FullText'): string {
   const q = query.trim();
   if (!q) return buildLibraryOpacHomeUrl();
   const origin = getLibraryOpacBaseUrl().replace(/\/+$/, '');
-  return `${origin}/search?q=${encodeURIComponent(q)}`;
+  return `${origin}/search?searchField=${encodeURIComponent(field)}&searchInput=${encodeURIComponent(q)}`;
 }
 
 export type LibraryOpacHeadResult = {

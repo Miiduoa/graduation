@@ -25,6 +25,7 @@ import { theme } from '../ui/theme';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { SegmentedControl, Spinner } from '../ui/components';
 import { isTeachingRole } from '../utils/campusOs';
+import { deriveScheduleDisplayDays } from '../utils/scheduleDisplayDays';
 import { SmartCalendarPanel } from './unifiedCalendar/SmartCalendarPanel';
 import {
   getAnyCachedCourses,
@@ -529,7 +530,7 @@ function MiniScheduleView(props: {
 }) {
   const today = new Date().getDay();
   const currentPeriod = getCurrentPeriod();
-  const displayDays = [1, 2, 3, 4, 5];
+  const displayDays = deriveScheduleDisplayDays(props.courses);
   const displayPeriods = PERIODS.slice(0, 10);
 
   return (

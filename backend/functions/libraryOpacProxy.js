@@ -24,15 +24,29 @@ const ALLOWED_FIELDS = new Set([
 ]);
 
 const SEARCH_QUERY = `
-query campusAppSearch($searchForm: SearchForm!) {
+query search($searchForm: SearchForm) {
   search(Input: $searchForm) {
-    hyftdToken
-    bookList {
-      sid
-      marcTitle
-      author
-      publisher
-      publishYear
+    display {
+      field
+      name
+      type
+    }
+    list {
+      values {
+        ref {
+          key
+          value
+        }
+      }
+    }
+    info {
+      total
+      count
+      limit
+      pageNo
+      totalPage
+      hyftdToken
+      searchToken
     }
   }
 }
@@ -42,6 +56,30 @@ const COMMON_FETCH_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
   'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8',
+  'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"Windows"',
+};
+
+const SEC_FETCH_DOCUMENT = {
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-User': '?1',
+  'Sec-Fetch-Dest': 'document',
+  'Upgrade-Insecure-Requests': '1',
+};
+
+const SEC_FETCH_SAME_ORIGIN = {
+  'Sec-Fetch-Site': 'same-origin',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-User': '?1',
+  'Sec-Fetch-Dest': 'document',
+};
+
+const SEC_FETCH_CORS = {
+  'Sec-Fetch-Site': 'same-origin',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Dest': 'empty',
 };
 
 function extractCsrf(html) {
@@ -56,20 +94,19 @@ function buildSearchForm(keyword, field) {
     queryString: qs,
     searchInput: [q],
     searchField: [field],
-    searchCondition: ['and'],
-    boolSearchCondition: 'and',
-    keepSite: [],
-    keepRoom: [],
-    collection: [],
-    tableLan: [],
+    op: [],
   };
 }
 
 /** @param {Record<string, string>} jar */
 function mergeSetCookiesIntoJar(res, jar) {
   const headersAny = /** @type {any} */ (res.headers);
-  const lines =
+  let lines =
     typeof headersAny.getSetCookie === 'function' ? headersAny.getSetCookie() : [];
+  if (!lines.length) {
+    const one = res.headers.get('Set-Cookie');
+    if (one) lines = [one];
+  }
   for (const line of lines) {
     const pair = String(line).split(';')[0];
     const eq = pair.indexOf('=');
@@ -93,11 +130,13 @@ function cookieHeaderFromJar(jar) {
  */
 async function fetchOpacGraphqlJson(keyword, field) {
   const jar = {};
+  const kw = keyword.trim();
 
   let res = await fetch(OPAC_HOME, {
     redirect: 'follow',
     headers: {
       ...COMMON_FETCH_HEADERS,
+      ...SEC_FETCH_DOCUMENT,
       Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
       Referer: OPAC_HOME,
     },
@@ -105,14 +144,30 @@ async function fetchOpacGraphqlJson(keyword, field) {
   mergeSetCookiesIntoJar(res, jar);
   await res.text();
 
-  const searchEmptyUrl = `${OPAC_ORIGIN}/search?q=`;
+  const searchEmptyUrl = `${OPAC_ORIGIN}/search?searchField=${encodeURIComponent(field)}&searchInput=`;
   res = await fetch(searchEmptyUrl, {
     redirect: 'follow',
     headers: {
       ...COMMON_FETCH_HEADERS,
+      ...SEC_FETCH_SAME_ORIGIN,
       Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
       Referer: OPAC_HOME,
       ...(Object.keys(jar).length ? { Cookie: cookieHeaderFromJar(jar) } : {}),
+    },
+  });
+  mergeSetCookiesIntoJar(res, jar);
+  await res.text();
+
+  const searchKeywordUrl =
+    `${OPAC_ORIGIN}/search?searchField=${encodeURIComponent(field)}&searchInput=${encodeURIComponent(kw)}`;
+  res = await fetch(searchKeywordUrl, {
+    redirect: 'follow',
+    headers: {
+      ...COMMON_FETCH_HEADERS,
+      ...SEC_FETCH_SAME_ORIGIN,
+      Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+      Referer: searchEmptyUrl,
+      Cookie: cookieHeaderFromJar(jar),
     },
   });
   mergeSetCookiesIntoJar(res, jar);
@@ -127,9 +182,8 @@ async function fetchOpacGraphqlJson(keyword, field) {
     };
   }
 
-  const refererSearch = `${OPAC_ORIGIN}/search?searchField=${encodeURIComponent(field)}&searchInput=${encodeURIComponent(keyword.trim())}`;
   const payload = JSON.stringify({
-    operationName: 'campusAppSearch',
+    operationName: 'search',
     query: SEARCH_QUERY,
     variables: { searchForm: buildSearchForm(keyword, field) },
   });
@@ -139,12 +193,13 @@ async function fetchOpacGraphqlJson(keyword, field) {
     redirect: 'follow',
     headers: {
       ...COMMON_FETCH_HEADERS,
+      ...SEC_FETCH_CORS,
       'Content-Type': 'application/json',
       Accept: 'application/json',
       Origin: OPAC_ORIGIN,
-      Referer: refererSearch,
-      'csrf-token': csrf,
-      'x-apollo-operation-name': 'campusAppSearch',
+      Referer: searchKeywordUrl,
+      'X-CSRF-Token': csrf,
+      'x-apollo-operation-name': 'search',
       'X-Requested-With': 'XMLHttpRequest',
       Cookie: cookieHeaderFromJar(jar),
     },

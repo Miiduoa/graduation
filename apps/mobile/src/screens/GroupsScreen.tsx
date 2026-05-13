@@ -175,6 +175,17 @@ export function GroupsScreen(props: any) {
       >(functions, 'joinGroupByCode');
       const result = await joinGroupByCode({ joinCode: code, schoolId: school.id });
 
+      try {
+        const { emitGroupJoined } = await import('../services/campusEventBus');
+        emitGroupJoined({
+          userId: auth.user.uid,
+          groupId: result.data.groupId,
+          groupName: result.data.groupName ?? '',
+        });
+      } catch {
+        /* optional bus */
+      }
+
       setJoinCode('');
       reload();
       nav?.navigate?.('GroupDetail', { groupId: result.data.groupId });

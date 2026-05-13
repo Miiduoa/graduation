@@ -6,6 +6,7 @@
  * - TodayHome: SmartDashboard（統一儀表板）
  * - 公告/活動詳情
  * - 校園社群（唯一的社交入口）
+ * - CampusGame：校園漫步原型（`campus://home/campus-game`）
  * - 智慧行事曆
  *
  * AI 對話已改為全域 Overlay（App 層 AIOverlayHost），不再在此 Stack 註冊。
@@ -32,6 +33,7 @@ import { PostComposeScreen } from './social/PostComposeScreen';
 import { PostDetailScreen } from './social/PostDetailScreen';
 import { StoryComposeScreen } from './social/StoryComposeScreen';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
+import { CampusGameScreen } from './CampusGameScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import type { CampusActorRole } from '../data';
@@ -41,6 +43,7 @@ const Stack = createNativeStackNavigator<any, undefined>();
 const HOME_ROUTE_ROLE_REQUIREMENTS: Record<string, CampusActorRole[]> = {
   TodayHome: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
   CampusSocialScreen: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
+  CampusGame: ['student', 'teacher', 'staff', 'department', 'admin', 'school'],
 };
 
 export function getHomeRouteRoleRequirements(routeName: string): CampusActorRole[] {
@@ -83,6 +86,7 @@ export function HomeStack() {
         component={CommunityScreen}
         options={{ title: '校園社群', headerShown: false }}
       />
+      <Stack.Screen name="CampusGame" component={CampusGameScreen} options={{ title: '校園漫步' }} />
       <Stack.Screen name="BoardDetail" component={BoardDetailScreen} options={{ title: '看板' }} />
       <Stack.Screen name="PostCompose" component={PostComposeScreen} options={{ title: '發文' }} />
       <Stack.Screen name="StoryCompose" component={StoryComposeScreen} options={{ title: '發 Story' }} />

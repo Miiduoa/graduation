@@ -307,6 +307,9 @@ export function DormitoryScreen(props: any) {
                 console.warn('[Dormitory] brain.observe failed:', brainErr);
               }
               Alert.alert('報修成功 ✅', '維修人員將盡快處理');
+              void import('../services/companionEngine').then((m) =>
+                m.recordCompanionFeatureSignal('dorm_repair'),
+              );
             } catch (e: any) {
               try {
                 const { aiBrain } = await import('../services/aiBrain');
