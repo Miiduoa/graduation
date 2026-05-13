@@ -225,7 +225,7 @@ export function AnnouncementsScreen(props: Record<string, unknown>) {
           />
         </View>
       ) : (
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1 }} testID="e2e-announcements-screen">
           <View
             style={{
               paddingTop: insets.top + theme.space.md,

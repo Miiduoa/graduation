@@ -1,5 +1,5 @@
 # 03_announcements.yaml
-# 以 deep link 開啟公告總覽（不依賴儀表捲動／Metro 是否已載入新按鈕）
+# Today 儀表捲動至「學校公告」捷徑（需 Metro 載入目前 SmartDashboard；載入逾時 25s 會強制結束佔位畫面）
 
 appId: ${APP_ID}
 name: Announcements Flow
@@ -18,10 +18,18 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- openLink: campus://home/announcements
+- scrollUntilVisible:
+    element:
+      text: '學校公告'
+    direction: DOWN
+    timeout: 120000
+
+- tapOn:
+    text: '學校公告'
 
 - extendedWaitUntil:
-    visible: '公告'
+    visible:
+      id: 'e2e-announcements-screen'
     timeout: 20000
 
 - takeScreenshot: announcements_list
