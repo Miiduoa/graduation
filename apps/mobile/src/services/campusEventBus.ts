@@ -351,3 +351,10 @@ export const emitCafeteriaOrderPlaced = (p: PayloadOf<'cafeteria:order_placed'>)
 
 export const emitLostFoundPosted = (p: PayloadOf<'lostfound:posted'>) =>
   campusEventBus.emit('lostfound:posted', p);
+
+/** groupId 欄位語意：社群發文時為看板 boardId（與既有型別共用）。 */
+export const emitPostCreated = (p: PayloadOf<'post:created'>) =>
+  campusEventBus.emit('post:created', p);
+
+export const emitGroupJoined = (p: PayloadOf<'group:joined'>) =>
+  campusEventBus.emit('group:joined', p);

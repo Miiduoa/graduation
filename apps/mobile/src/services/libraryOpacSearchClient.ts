@@ -9,8 +9,7 @@
  *
  * 限制：
  * - Web 版 Expo：無可靠的第三方 Cookie，略過直連（與課綱查詢相同）。
- * - **已登入**且設定 **`EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL`**（Cloudflare Worker）時可嘗試代理；若館方阻擋資料中心 IP 仍會失敗。
- * - API 若 **HTTP 403**：請用館藏畫面「**App 內官方搜尋頁**」（WebView）或外部瀏覽器，與官網行為一致。
+ * - **已登入**且設定 **`EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL`**（Cloudflare Worker）時優先走 Worker（伺服端 Cookie／csrf）；失敗或未設定則裝置直連。
  */
 
 import Constants from 'expo-constants';
@@ -43,6 +42,15 @@ export type OpacSearchHit = {
   author: string;
   publisher: string;
   year: string;
+  coverUrl?: string;
+  dataType?: string;
+  availability?: string;
+  isAvailable?: boolean;
+  canReserve?: boolean;
+  lendCount?: string;
+  sourceName?: string;
+  externalUrl?: string;
+  raw?: Record<string, string>;
 };
 
 export type OpacSearchResult = {
@@ -50,6 +58,31 @@ export type OpacSearchResult = {
   rawTotalHint?: number;
   hyftdToken?: string | null;
   source: 'live' | 'skipped_web';
+  error?: string;
+};
+
+export type OpacBookDetailField = {
+  key: string;
+  label: string;
+  value: string;
+  url?: string;
+};
+
+export type OpacBookDetail = {
+  sid: string;
+  title: string;
+  author: string;
+  publisher: string;
+  year: string;
+  coverUrl?: string;
+  dataType?: string;
+  availability?: string;
+  isAvailable?: boolean;
+  canReserve?: boolean;
+  lendCount?: string;
+  sourceName?: string;
+  fields: OpacBookDetailField[];
+  marc?: string;
   error?: string;
 };
 
@@ -77,19 +110,123 @@ function extractCsrf(html: string): string | null {
 
 /** HyLib WebPac search GraphQL（欄位依官方 schema；若改版請對照網頁請求） */
 const SEARCH_QUERY = `
-query campusAppSearch($searchForm: SearchForm!) {
+query search($searchForm: SearchForm) {
   search(Input: $searchForm) {
-    hyftdToken
-    bookList {
-      sid
-      marcTitle
-      author
-      publisher
-      publishYear
+    display {
+      field
+      name
+      type
+    }
+    list {
+      values {
+        ref {
+          key
+          value
+        }
+      }
+    }
+    info {
+      total
+      count
+      limit
+      pageNo
+      totalPage
+      hyftdToken
+      searchToken
     }
   }
 }
 `;
+
+const BOOK_DETAIL_QUERY = `
+query bookdetail($marcId: Int) {
+  getBookDetail(id: $marcId) {
+    marc
+    view {
+      display {
+        field
+        name
+        position
+        type
+      }
+      list {
+        values {
+          ref {
+            key
+            value
+          }
+        }
+      }
+    }
+    values {
+      key
+      value
+    }
+  }
+}
+`;
+
+const OPAC_COMMON_LABELS: Record<string, string> = {
+  'common:webpac.dataType.book': '一般圖書',
+  'common:webpac.dataType.ebook': '電子書',
+  'common:webpac.dataType.journal': '期刊',
+  'common:webpac.dataType.thesis': '論文',
+  'common:webpac.dataType.audioVisual': '視聽資料',
+};
+
+const DETAIL_FIELD_LABELS: Record<string, string> = {
+  title: '題名',
+  title2pu: '題名',
+  author: '作者',
+  author2: '其他作者',
+  publisher: '出版者',
+  place: '出版地',
+  pubyear2: '出版年',
+  publishYear: '出版年',
+  isbn: 'ISBN／ISSN',
+  issn: 'ISBN／ISSN',
+  classno: '分類號',
+  shelfno: '架位',
+  subject2: '主題',
+  series: '叢書',
+  lang1: '語言',
+  gmd: '資料類型',
+  note: '附註',
+  url: '電子資源',
+  dataType: '資料類型',
+  bookImgSourceType: '封面來源',
+  lendcnt: '借閱次數',
+  isCanLend: '借閱狀態',
+  bookdesc: '內容簡介',
+  authordesc: '作者簡介',
+  recommdesc: '推薦說明',
+};
+
+const HIDDEN_DETAIL_KEYS = new Set([
+  'sid',
+  'bookImg',
+  'bookImgSource',
+  'bookImgSourceType',
+  'dataTypeImg',
+  'ExecCode1',
+  'ExecCode2',
+  'MarcKind',
+  'CLN',
+  'score',
+  'pointSum',
+  'pointCnt',
+  'EBookId',
+  'OPENURL_BTN',
+  'SEARCH_DOWNLOAD_BTN',
+  'SEARCH_RESERVE_BTN',
+  'SEARCH_BORROWINLIB_BTN',
+  'EBook_BORROW_BTN',
+  'EBook_RESERVE_BTN',
+  'MYEBook_BORROW_BTN',
+  'MYEBook_RESERVE_BTN',
+  'MYEBook_RESERVEArrived_BTN',
+  'isCollection',
+]);
 
 function pickStr(v: unknown): string {
   if (v == null) return '';
@@ -98,42 +235,263 @@ function pickStr(v: unknown): string {
   return String(v).trim();
 }
 
+function normalizeCommonLabel(value: unknown): string {
+  const s = pickStr(value);
+  if (!s) return '';
+  return OPAC_COMMON_LABELS[s] ?? s.replace(/^common:webpac\./, '');
+}
+
+function normalizeUrl(value: unknown): string {
+  const raw = pickStr(value)
+    .split('^')
+    .map((x) => x.trim())
+    .find((x) => /^https?:\/\//i.test(x));
+  if (!raw) return '';
+  return raw.replace(/^http:\/\//i, 'https://');
+}
+
+function normalizeRawMap(raw: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const str = pickStr(value);
+    if (str) out[key] = str;
+  }
+  return out;
+}
+
+function availabilityFromRaw(raw: Record<string, unknown>): {
+  availability: string;
+  isAvailable: boolean | undefined;
+  canReserve: boolean;
+} {
+  const canLend = pickStr(raw.isCanLend).toUpperCase();
+  const reserve = pickStr(raw.SEARCH_RESERVE_BTN).toUpperCase() === 'Y';
+  if (canLend === 'Y') {
+    return { availability: '可借閱', isAvailable: true, canReserve: reserve };
+  }
+  if (reserve) {
+    return { availability: '可預約', isAvailable: false, canReserve: reserve };
+  }
+  if (canLend === 'N') {
+    return { availability: '需查複本', isAvailable: false, canReserve: reserve };
+  }
+  return { availability: '', isAvailable: undefined, canReserve: reserve };
+}
+
 function normalizeHit(raw: Record<string, unknown>): OpacSearchHit | null {
   const sidRaw = raw.sid ?? raw.biblioId ?? raw.id;
   const sid = pickStr(sidRaw);
   if (!sid) return null;
-  const title = pickStr(raw.marcTitle ?? raw.title ?? raw.bookTitle ?? raw.mainTitle);
+  const title = pickStr(raw.title2pu ?? raw.marcTitle ?? raw.title ?? raw.bookTitle ?? raw.mainTitle);
+  const availability = availabilityFromRaw(raw);
   return {
     sid,
     title: title || '（無題名）',
     author: pickStr(raw.author ?? raw.marcAuthor),
     publisher: pickStr(raw.publisher),
-    year: pickStr(raw.publishYear ?? raw.year),
+    year: pickStr(raw.pubyear2 ?? raw.publishYear ?? raw.year),
+    coverUrl: normalizeUrl(raw.bookImg ?? raw.coverUrl ?? raw.imageUrl),
+    dataType: normalizeCommonLabel(raw.dataType),
+    availability: availability.availability,
+    isAvailable: availability.isAvailable,
+    canReserve: availability.canReserve,
+    lendCount: pickStr(raw.lendcnt),
+    sourceName: pickStr(raw.bookImgSourceType),
+    externalUrl: normalizeUrl(raw.openurl ?? raw.url),
+    raw: normalizeRawMap(raw),
   };
+}
+
+function objectFromLayoutRefs(refs: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!Array.isArray(refs)) return out;
+  for (const ref of refs) {
+    if (!ref || typeof ref !== 'object') continue;
+    const key = pickStr((ref as Record<string, unknown>).key);
+    if (!key) continue;
+    out[key] = (ref as Record<string, unknown>).value;
+  }
+  return out;
+}
+
+function normalizeLayoutRow(raw: Record<string, unknown>): OpacSearchHit | null {
+  const refMap = objectFromLayoutRefs(raw.ref ?? raw.values ?? raw.refs);
+  return normalizeHit({
+    sid: refMap.sid,
+    title: refMap.title2pu ?? refMap.title ?? refMap.marcTitle,
+    author: refMap.author,
+    publisher: refMap.publisher,
+    publishYear: refMap.pubyear2 ?? refMap.publishYear ?? refMap.year,
+  });
 }
 
 function normalizeSearchPayload(json: any): {
   hits: OpacSearchHit[];
   hyftdToken?: string | null;
+  rawTotalHint?: number;
   emptyConfirmed: boolean;
 } {
   const searchNode = json?.data?.search ?? json?.data?.Search;
-  const hyftdToken = searchNode?.hyftdToken ?? null;
+  const hyftdToken = searchNode?.hyftdToken ?? searchNode?.info?.hyftdToken ?? null;
   if (searchNode == null) {
     return { hits: [], hyftdToken, emptyConfirmed: false };
   }
-  const listRaw = searchNode?.bookList ?? searchNode?.books ?? searchNode?.items;
+  const legacyList = searchNode?.bookList ?? searchNode?.books ?? searchNode?.items;
+  const layoutList = searchNode?.list?.values;
+  const listRaw = Array.isArray(legacyList) ? legacyList : layoutList;
   if (!Array.isArray(listRaw)) {
-    return { hits: [], hyftdToken, emptyConfirmed: false };
+    return { hits: [], hyftdToken, rawTotalHint: Number(searchNode?.info?.total), emptyConfirmed: false };
   }
   const hits: OpacSearchHit[] = [];
   for (const row of listRaw) {
     if (row && typeof row === 'object') {
-      const h = normalizeHit(row as Record<string, unknown>);
+      const rowObj = row as Record<string, unknown>;
+      const h = Array.isArray(rowObj.ref)
+        ? normalizeLayoutRow(rowObj)
+        : normalizeHit(rowObj);
       if (h) hits.push(h);
     }
   }
-  return { hits, hyftdToken, emptyConfirmed: true };
+  return {
+    hits,
+    hyftdToken,
+    rawTotalHint: Number(searchNode?.info?.total),
+    emptyConfirmed: true,
+  };
+}
+
+type OpacDetailDisplay = {
+  field?: unknown;
+  name?: unknown;
+  position?: unknown;
+};
+
+function objectFromKeyValueArray(items: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!Array.isArray(items)) return out;
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const key = pickStr((item as Record<string, unknown>).key);
+    if (!key) continue;
+    out[key] = (item as Record<string, unknown>).value;
+  }
+  return out;
+}
+
+function isUsefulDetailValue(value: unknown): boolean {
+  const s = pickStr(value);
+  return Boolean(s && s !== '-' && s !== '—' && s !== 'N');
+}
+
+function labelForDetailField(key: string, officialName?: unknown): string {
+  if (DETAIL_FIELD_LABELS[key]) return DETAIL_FIELD_LABELS[key];
+  const name = pickStr(officialName);
+  if (!name) return key;
+  return name
+    .replace(/^common:/, '')
+    .replace(/^webpac\.book\./, '')
+    .replace(/^webpac\./, '');
+}
+
+function detailFieldValue(key: string, value: unknown): { value: string; url?: string } {
+  if (key === 'dataType') {
+    return { value: normalizeCommonLabel(value) };
+  }
+  if (key === 'isCanLend') {
+    return { value: pickStr(value).toUpperCase() === 'Y' ? '可借閱' : '需查複本' };
+  }
+  if (key === 'url') {
+    const url = normalizeUrl(value);
+    return { value: url || pickStr(value).replace(/\^/g, '\n'), url: url || undefined };
+  }
+  return { value: pickStr(value).replace(/\^/g, '\n') };
+}
+
+function buildDetailFields(
+  merged: Record<string, unknown>,
+  display: OpacDetailDisplay[],
+): OpacBookDetailField[] {
+  const fields: OpacBookDetailField[] = [];
+  const used = new Set<string>();
+  const sortedDisplay = [...display].sort((a, b) => {
+    const ap = Number(a.position);
+    const bp = Number(b.position);
+    const aa = Number.isFinite(ap) && ap >= 0 ? ap : 999;
+    const bb = Number.isFinite(bp) && bp >= 0 ? bp : 999;
+    return aa - bb;
+  });
+
+  const pushField = (key: string, officialName?: unknown) => {
+    if (!key || used.has(key) || HIDDEN_DETAIL_KEYS.has(key)) return;
+    if (!isUsefulDetailValue(merged[key])) return;
+    const normalized = detailFieldValue(key, merged[key]);
+    if (!normalized.value) return;
+    fields.push({
+      key,
+      label: labelForDetailField(key, officialName),
+      value: normalized.value,
+      url: normalized.url,
+    });
+    used.add(key);
+  };
+
+  for (const item of sortedDisplay) {
+    pushField(pickStr(item.field), item.name);
+  }
+  for (const key of ['dataType', 'isCanLend', 'lendcnt', 'bookImgSourceType', 'bookdesc', 'authordesc', 'recommdesc']) {
+    pushField(key);
+  }
+
+  return fields;
+}
+
+function normalizeBookDetailPayload(json: any, fallback?: OpacSearchHit): OpacBookDetail {
+  const node = json?.data?.getBookDetail;
+  if (!node) {
+    return {
+      sid: fallback?.sid ?? '',
+      title: fallback?.title ?? '（無題名）',
+      author: fallback?.author ?? '',
+      publisher: fallback?.publisher ?? '',
+      year: fallback?.year ?? '',
+      coverUrl: fallback?.coverUrl,
+      dataType: fallback?.dataType,
+      availability: fallback?.availability,
+      isAvailable: fallback?.isAvailable,
+      canReserve: fallback?.canReserve,
+      lendCount: fallback?.lendCount,
+      sourceName: fallback?.sourceName,
+      fields: [],
+      error: '未取得書目詳細資料',
+    };
+  }
+
+  const viewValues = objectFromLayoutRefs(node?.view?.list?.values?.[0]?.ref);
+  const values = objectFromKeyValueArray(node?.values);
+  const merged = {
+    ...(fallback?.raw ?? {}),
+    ...values,
+    ...viewValues,
+  };
+  const normalized = normalizeHit(merged) ?? fallback;
+  const display = Array.isArray(node?.view?.display) ? node.view.display : [];
+
+  return {
+    sid: normalized?.sid ?? fallback?.sid ?? '',
+    title: normalized?.title ?? fallback?.title ?? '（無題名）',
+    author: normalized?.author ?? fallback?.author ?? '',
+    publisher: normalized?.publisher ?? fallback?.publisher ?? '',
+    year: normalized?.year ?? fallback?.year ?? '',
+    coverUrl: normalized?.coverUrl || fallback?.coverUrl,
+    dataType: normalized?.dataType || fallback?.dataType,
+    availability: normalized?.availability || fallback?.availability,
+    isAvailable: normalized?.isAvailable ?? fallback?.isAvailable,
+    canReserve: normalized?.canReserve ?? fallback?.canReserve,
+    lendCount: normalized?.lendCount || fallback?.lendCount,
+    sourceName: normalized?.sourceName || fallback?.sourceName,
+    fields: buildDetailFields(merged, display),
+    marc: pickStr(node?.marc),
+  };
 }
 
 export function buildSearchForm(keyword: string, field: OpacSearchFieldKey): Record<string, unknown> {
@@ -143,12 +501,7 @@ export function buildSearchForm(keyword: string, field: OpacSearchFieldKey): Rec
     queryString: qs,
     searchInput: [q],
     searchField: [field],
-    searchCondition: ['and'],
-    boolSearchCondition: 'and',
-    keepSite: [],
-    keepRoom: [],
-    collection: [],
-    tableLan: [],
+    op: [],
   };
 }
 
@@ -158,12 +511,17 @@ export function buildLibraryBookDetailUrl(sid: string): string {
 }
 
 /**
- * 先 GET 首頁再 GET 搜尋頁，讓原生 Cookie Jar 建立連線；
- * 回傳 HTML 內 csrf-token。
+ * 先 GET 首頁 → GET 空白搜尋頁 → GET `/search?searchField=...&searchInput=...`，
+ * 讓原生 Cookie Jar 建立連線並從**最後一頁** HTML 取 csrf-token。
  */
-async function fetchCsrfAfterCookieWarmup(signal?: AbortSignal): Promise<string | null> {
+async function fetchCsrfAfterCookieWarmup(
+  keyword: string,
+  field: OpacSearchFieldKey,
+  signal?: AbortSignal,
+): Promise<string | null> {
   const base = getLibraryOpacBaseUrl();
   const origin = base.replace(/\/+$/, '');
+  const q = keyword.trim();
 
   const hHome = { ...COMMON_HEADERS, Referer: base };
 
@@ -176,15 +534,28 @@ async function fetchCsrfAfterCookieWarmup(signal?: AbortSignal): Promise<string 
   });
   await res.text().catch(() => '');
 
-  const searchUrl = `${origin}/search?q=`;
-  res = await fetch(searchUrl, {
+  const searchEmptyUrl = `${origin}/search?searchField=${encodeURIComponent(field)}&searchInput=`;
+  res = await fetch(searchEmptyUrl, {
     method: 'GET',
     headers: { ...COMMON_HEADERS, Referer: base },
     credentials: 'include',
     redirect: 'follow',
     signal,
   });
-  const html = await res.text();
+  let html = await res.text();
+
+  if (q) {
+    const searchKwUrl = buildLibrarySearchUrl(q, field);
+    res = await fetch(searchKwUrl, {
+      method: 'GET',
+      headers: { ...COMMON_HEADERS, Referer: searchEmptyUrl },
+      credentials: 'include',
+      redirect: 'follow',
+      signal,
+    });
+    html = await res.text();
+  }
+
   return extractCsrf(html);
 }
 
@@ -196,7 +567,7 @@ async function postGraphqlSearch(
 ): Promise<Response> {
   const variables = { searchForm: buildSearchForm(keyword.trim(), field) };
   const body = JSON.stringify({
-    operationName: 'campusAppSearch',
+    operationName: 'search',
     query: SEARCH_QUERY,
     variables,
   });
@@ -207,9 +578,9 @@ async function postGraphqlSearch(
     headers: {
       ...COMMON_HEADERS,
       'Content-Type': 'application/json',
-      Referer: buildLibrarySearchUrl(keyword.trim()),
-      'csrf-token': csrf,
-      'x-apollo-operation-name': 'campusAppSearch',
+      Referer: buildLibrarySearchUrl(keyword.trim(), field),
+      'X-CSRF-Token': csrf,
+      'x-apollo-operation-name': 'search',
     },
     body,
     credentials: 'include',
@@ -228,7 +599,7 @@ function graphqlPayloadToResult(json: any): OpacSearchResult {
     };
   }
 
-  const { hits, hyftdToken, emptyConfirmed } = normalizeSearchPayload(json);
+  const { hits, hyftdToken, rawTotalHint, emptyConfirmed } = normalizeSearchPayload(json);
   let hint: string | undefined;
   if (hits.length === 0) {
     hint = emptyConfirmed
@@ -237,6 +608,7 @@ function graphqlPayloadToResult(json: any): OpacSearchResult {
   }
   return {
     hits,
+    rawTotalHint: Number.isFinite(rawTotalHint) ? rawTotalHint : undefined,
     hyftdToken,
     source: 'live',
     error: hint,
@@ -346,7 +718,7 @@ export async function searchOpacBiblios(
     }
 
     const runOnce = async (): Promise<Response> => {
-      const csrf = await fetchCsrfAfterCookieWarmup(options?.signal);
+      const csrf = await fetchCsrfAfterCookieWarmup(q, field, options?.signal);
       if (!csrf) {
         throw new Error('csrf_missing');
       }
@@ -363,7 +735,7 @@ export async function searchOpacBiblios(
         hits: [],
         source: 'live',
         error:
-          '館藏 API 回傳 HTTP 403：圖書館端常阻擋「非網頁」程式呼叫（與是否付費代理無關）。請在下方點「App 內官方搜尋頁」或「瀏覽器開啟」；原生列表需館方開放介面才可能恢復。',
+          '館藏伺服器仍回傳 HTTP 403。若你已登入，請確認已設定並部署 OPAC Worker（EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL）；否則請使用「瀏覽器開啟」。',
       };
     }
 
@@ -390,6 +762,139 @@ export async function searchOpacBiblios(
       source: 'live',
       error: e?.message ? String(e.message) : '連線失敗',
     };
+  }
+}
+
+function fallbackBookDetail(hit: OpacSearchHit | undefined, sid: string, error: string): OpacBookDetail {
+  const merged = hit?.raw ?? {};
+  return {
+    sid: hit?.sid ?? sid,
+    title: hit?.title ?? '（無題名）',
+    author: hit?.author ?? '',
+    publisher: hit?.publisher ?? '',
+    year: hit?.year ?? '',
+    coverUrl: hit?.coverUrl,
+    dataType: hit?.dataType,
+    availability: hit?.availability,
+    isAvailable: hit?.isAvailable,
+    canReserve: hit?.canReserve,
+    lendCount: hit?.lendCount,
+    sourceName: hit?.sourceName,
+    fields: buildDetailFields(merged, []),
+    error,
+  };
+}
+
+async function fetchCsrfForBookDetail(sid: string, signal?: AbortSignal): Promise<string | null> {
+  const base = getLibraryOpacBaseUrl();
+  const detailUrl = buildLibraryBookDetailUrl(sid);
+
+  let res = await fetch(base, {
+    method: 'GET',
+    headers: { ...COMMON_HEADERS, Referer: base },
+    credentials: 'include',
+    redirect: 'follow',
+    signal,
+  });
+  await res.text().catch(() => '');
+
+  res = await fetch(detailUrl, {
+    method: 'GET',
+    headers: { ...COMMON_HEADERS, Referer: base },
+    credentials: 'include',
+    redirect: 'follow',
+    signal,
+  });
+  const html = await res.text();
+  return extractCsrf(html);
+}
+
+async function postGraphqlBookDetail(
+  sid: string,
+  csrf: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const marcId = Number(sid);
+  const body = JSON.stringify({
+    operationName: 'bookdetail',
+    query: BOOK_DETAIL_QUERY,
+    variables: { marcId },
+  });
+
+  const url = new URL(GRAPHQL_PATH, getLibraryOpacBaseUrl()).toString();
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      ...COMMON_HEADERS,
+      'Content-Type': 'application/json',
+      Referer: buildLibraryBookDetailUrl(sid),
+      'X-CSRF-Token': csrf,
+      'x-apollo-operation-name': 'bookdetail',
+    },
+    body,
+    credentials: 'include',
+    redirect: 'follow',
+    signal,
+  });
+}
+
+export async function fetchOpacBookDetail(
+  input: OpacSearchHit | string,
+  options?: { signal?: AbortSignal },
+): Promise<OpacBookDetail> {
+  const fallback = typeof input === 'string' ? undefined : input;
+  const sid = typeof input === 'string' ? input.trim() : input.sid.trim();
+  if (!sid || !Number.isFinite(Number(sid))) {
+    return fallbackBookDetail(fallback, sid, '書目代碼不正確');
+  }
+
+  if (shouldSkipDirectOpacFetch()) {
+    return fallbackBookDetail(
+      fallback,
+      sid,
+      '網頁版無法直接讀取圖書館詳細 API。可先查看搜尋摘要，或用瀏覽器開啟官方書目。',
+    );
+  }
+
+  try {
+    const runOnce = async (): Promise<Response> => {
+      const csrf = await fetchCsrfForBookDetail(sid, options?.signal);
+      if (!csrf) throw new Error('csrf_missing');
+      return postGraphqlBookDetail(sid, csrf, options?.signal);
+    };
+
+    let res = await runOnce();
+    if (res.status === 403) {
+      res = await runOnce();
+    }
+    if (res.status === 403) {
+      return fallbackBookDetail(fallback, sid, '館藏詳細資料 API 仍回傳 HTTP 403，已先顯示搜尋摘要。');
+    }
+
+    const text = await res.text();
+    if (!res.ok) {
+      return fallbackBookDetail(fallback, sid, `館藏詳細資料讀取失敗（HTTP ${res.status}）。`);
+    }
+
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      return fallbackBookDetail(fallback, sid, '館藏詳細資料回應非 JSON。');
+    }
+    if (json.errors?.length) {
+      const msg = json.errors.map((e: any) => e?.message).filter(Boolean).join('；');
+      return fallbackBookDetail(fallback, sid, msg || 'GraphQL 詳細資料查詢被拒絕');
+    }
+    return normalizeBookDetailPayload(json, fallback);
+  } catch (e: any) {
+    const msg =
+      e?.message === 'csrf_missing'
+        ? '無法取得館藏系統安全憑證（csrf）。'
+        : e?.message
+          ? String(e.message)
+          : '館藏詳細資料連線失敗';
+    return fallbackBookDetail(fallback, sid, msg);
   }
 }
 

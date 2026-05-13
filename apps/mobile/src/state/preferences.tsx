@@ -64,6 +64,9 @@ export type UserPreferences = {
   /** 未使用 GPS 時的自訂緯度（搭配經度）；無效時改用校園預設座標 */
   weatherManualLatitude: number | null;
   weatherManualLongitude: number | null;
+
+  /** 開啟時：校園漫步會向 Firebase 發送 lb presence，並可查「同 POI 好友」（需連線）；關閉則完全不送、不拉 */
+  gameShareCampusPresence: boolean;
 };
 
 type PreferencesContextType = {
@@ -146,6 +149,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   weatherUseDeviceLocation: false,
   weatherManualLatitude: null,
   weatherManualLongitude: null,
+
+  gameShareCampusPresence: false,
 };
 
 // ===== Context =====

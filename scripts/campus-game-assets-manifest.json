@@ -1,0 +1,37 @@
+{
+  "notes": "Comfy Flux.1-dev 批次出圖；離線時由 generate-campus-game-flux.py 寫 PIL 占位。Flux 授權請見腳本註記。",
+  "items": [
+    {
+      "id": "game_avatar_f1",
+      "filename": "game-avatar-f1.png",
+      "width": 384,
+      "height": 384,
+      "seed_offset": 0,
+      "prompt": "Tiny cute chibi mascot student character pastel purple and teal outfit, Providence university campus vibe abstract, soft cel shading front view big eyes, minimalist clean silhouette for mobile game HUD icon, LOTS OF NEGATIVE SPACE around character, pastel gradient background lilac sage white, cheerful game asset no text no watermark"
+    },
+    {
+      "id": "game_avatar_f2",
+      "filename": "game-avatar-f2.png",
+      "width": 384,
+      "height": 384,
+      "seed_offset": 1,
+      "prompt": "Same cute chibi student mascot slightly different pose arms up happy, pastel purple teal gold accents, soft minimal game sprite large margins empty background, flat cute style no text"
+    },
+    {
+      "id": "game_avatar_f3",
+      "filename": "game-avatar-f3.png",
+      "width": 384,
+      "height": 384,
+      "seed_offset": 2,
+      "prompt": "Same chibi student mascot walking motion hint side view soft minimal game frame, pastel purple library books hint abstract shapes only, lots of whitespace background no text"
+    },
+    {
+      "id": "game_scene_campus",
+      "filename": "game-scene-campus.png",
+      "width": 960,
+      "height": 520,
+      "seed_offset": 3,
+      "prompt": "Wide soft illustration abstract university campus aerial gentle hills trees buildings as simple geometric blocks lavender mint cream palette, calm exploration game map background very light detail hazy morning light, no readable text no logos no watermark huge sky negative space"
+    }
+  ]
+}

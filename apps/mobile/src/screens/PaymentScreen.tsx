@@ -595,6 +595,9 @@ export function PaymentScreen(props: any) {
               paymentMethod: selectedPayment,
             });
             Alert.alert('轉帳成功', `已轉帳 $${amount} 給 ${target.name}`);
+            void import('../services/companionEngine').then((m) =>
+              m.recordCompanionFeatureSignal('payment_completed'),
+            );
           } catch (error: any) {
             Alert.alert('轉帳失敗', error?.message ?? '請稍後再試。');
           } finally {
@@ -669,6 +672,9 @@ export function PaymentScreen(props: any) {
                 (topupResult.newBalance !== undefined
                   ? `，目前餘額 $${topupResult.newBalance}`
                   : ''),
+            );
+            void import('../services/companionEngine').then((m) =>
+              m.recordCompanionFeatureSignal('payment_completed'),
             );
           } catch (error: any) {
             console.error('Topup failed:', error);

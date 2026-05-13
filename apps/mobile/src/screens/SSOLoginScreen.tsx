@@ -91,7 +91,15 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
       const deptLabel = result.department ? `（${result.department}）` : '';
       setTimeout(() => {
         Alert.alert('登入成功', `歡迎，${result.displayName}${deptLabel}`, [
-          { text: '確定', onPress: () => nav?.goBack?.() },
+          {
+            text: '確定',
+            onPress: () => {
+              void import('../services/companionEngine').then((m) =>
+                m.recordCompanionFeatureSignal('sso_login'),
+              );
+              nav?.goBack?.();
+            },
+          },
         ]);
       }, 250);
     } catch (loginError) {

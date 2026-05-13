@@ -391,6 +391,33 @@ export function SettingsScreen(props: any) {
           </View>
         </AnimatedCard>
 
+        <AnimatedCard title="校園漫步（遊戲）" subtitle="" delay={280}>
+          <View style={{ gap: 0 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: theme.layout.listItemVertical,
+                paddingHorizontal: theme.layout.screenPadding,
+                gap: theme.space.md,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 15 }}>
+                  在遊戲中展示我的所在校園節點
+                </Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                  開啟後會向 Firebase 寫入短期位置心跳（約 15 分鐘），好友若同開此選項可查「同一節點」同框；關閉時不發送、也不讀取同節點好友列表。
+                </Text>
+              </View>
+              <ToggleSwitch
+                value={preferences.gameShareCampusPresence}
+                onToggle={(v) => updatePreferences({ gameShareCampusPresence: v })}
+              />
+            </View>
+          </View>
+        </AnimatedCard>
+
         <AnimatedCard title="帳號與隱私" subtitle="" delay={300}>
           <View style={{ gap: 0 }}>
             <ListItem

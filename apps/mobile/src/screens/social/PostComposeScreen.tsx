@@ -86,7 +86,7 @@ export function PostComposeScreen(props: any) {
 
     setSending(true);
     try {
-      await createCampusPost({
+      const postRef = await createCampusPost({
         schoolId: sid,
         boardId: bid,
         title: title.trim(),
@@ -94,6 +94,12 @@ export function PostComposeScreen(props: any) {
         anonymous,
         ...(anonymous ? { aliasSnapshot: aliasSnap } : { authorUid: uid }),
       });
+      try {
+        const { emitPostCreated } = await import('../../services/campusEventBus');
+        emitPostCreated({ userId: uid, groupId: bid, postId: postRef.id });
+      } catch {
+        /* optional bus */
+      }
       Alert.alert('已發佈', '貼文已送出', [
         {
           text: '好的',

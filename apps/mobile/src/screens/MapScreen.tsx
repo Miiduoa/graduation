@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useDebounce } from '../hooks/useDebounce';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { SearchBar, EmptyState } from '../ui/components';
@@ -657,6 +657,24 @@ export function MapScreen(props: Record<string, unknown>) {
     if (!selectedPoi || uLat === null || uLng === null) return null;
     return haverDist(uLat, uLng, selectedPoi.lat, selectedPoi.lng);
   }, [selectedPoi, uLat, uLng]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        try {
+          const { companionThrottleOncePerCalendarDay } = await import(
+            '../utils/companionSignalThrottle'
+          );
+          const ok = await companionThrottleOncePerCalendarDay('map_open');
+          if (!ok) return;
+          const { recordCompanionFeatureSignal } = await import('../services/companionEngine');
+          await recordCompanionFeatureSignal('map_open');
+        } catch {
+          /* optional */
+        }
+      })();
+    }, []),
+  );
 
   // ── Handlers ──
   const goToPoi = useCallback((poi: CampusPoi) => {

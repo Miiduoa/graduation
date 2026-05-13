@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ScrollView,
   Text,
@@ -21,8 +21,7 @@ import {
 } from '../ui/components';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
-import { getDb } from '../firebase';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { submitProductFeedback } from '../services/productFeedback';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 
@@ -46,7 +45,6 @@ export function FeedbackScreen(props: any) {
   const nav = props?.navigation;
   const auth = useAuth();
   const { school } = useSchool();
-  const db = getDb();
 
   const [feedbackType, setFeedbackType] = useState<FeedbackType>('feature');
   const [title, setTitle] = useState('');
@@ -55,6 +53,19 @@ export function FeedbackScreen(props: any) {
   const [contactEmail, setContactEmail] = useState(auth.user?.email ?? '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    const p = props?.route?.params?.prefill as
+      | { title?: string; description?: string; feedbackType?: FeedbackType; source?: string }
+      | undefined;
+    if (!p) return;
+    if (typeof p.title === 'string' && p.title.trim()) setTitle(p.title.trim());
+    if (typeof p.description === 'string' && p.description.trim())
+      setDescription(p.description.trim());
+    if (p.feedbackType && FEEDBACK_TYPES.some((t) => t.key === p.feedbackType)) {
+      setFeedbackType(p.feedbackType as FeedbackType);
+    }
+  }, [props?.route?.params?.prefill]);
 
   const canSubmit = title.trim().length > 0 && description.trim().length > 0;
 
@@ -66,19 +77,18 @@ export function FeedbackScreen(props: any) {
 
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'feedback'), {
-        type: feedbackType,
+      await submitProductFeedback({
+        kind: 'general',
+        feedbackType,
         title: title.trim(),
         description: description.trim(),
         rating,
         contactEmail: contactEmail.trim() || null,
         submittedBy: auth.user?.uid ?? null,
         schoolId: school.id,
-        createdAt: serverTimestamp(),
       });
     } catch (e) {
-      console.warn('[FeedbackScreen] Failed to submit feedback to Firestore:', e);
-      // 即使寫入失敗，仍顯示成功訊息（用戶體驗優先）
+      console.warn('[FeedbackScreen] Submit feedback failed:', e);
     }
     setIsSubmitting(false);
     setSubmitted(true);
@@ -157,6 +167,11 @@ export function FeedbackScreen(props: any) {
             <Text style={{ color: theme.colors.muted, lineHeight: 20 }}>
               你的每一則回饋對我們都很重要！無論是 Bug 回報、功能建議或任何想法，都歡迎告訴我們。
             </Text>
+            {props?.route?.params?.prefill?.source ? (
+              <Text style={{ color: theme.colors.accent, fontSize: 12, marginTop: 8 }}>
+                來源：{String(props.route.params.prefill.source)}
+              </Text>
+            ) : null}
           </AnimatedCard>
 
           <AnimatedCard title="回饋類型" subtitle="選擇你的回饋類型" delay={100}>

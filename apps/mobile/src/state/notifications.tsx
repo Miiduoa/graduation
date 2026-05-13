@@ -220,6 +220,11 @@ export function NotificationsProvider(props: { children: React.ReactNode }) {
         undefined,
         `使用者在通知中心將 ${unreadIds.length} 則通知全部標為已讀`,
       );
+      if (unreadIds.length >= 3) {
+        void import('../services/companionEngine').then((m) =>
+          m.recordCompanionFeatureSignal('notification_batch'),
+        );
+      }
     } catch (e: any) {
       console.warn('Failed to mark all notifications as read:', e);
       const errMsg = e?.message != null ? String(e.message) : String(e);

@@ -1,5 +1,6 @@
 /* eslint-disable */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { ScrollView, Text, View, Pressable, RefreshControl, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
@@ -373,6 +374,24 @@ export function BusScheduleScreen(props: any) {
   useEffect(() => {
     setReminders(storedReminders ?? []);
   }, [storedReminders]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        try {
+          const { companionThrottleOncePerCalendarDay } = await import(
+            '../utils/companionSignalThrottle'
+          );
+          const ok = await companionThrottleOncePerCalendarDay('bus_view');
+          if (!ok) return;
+          const { recordCompanionFeatureSignal } = await import('../services/companionEngine');
+          await recordCompanionFeatureSignal('bus_view');
+        } catch {
+          /* optional */
+        }
+      })();
+    }, []),
+  );
 
   const loadArrivals = useCallback(
     async (stopIds: string[]) => {

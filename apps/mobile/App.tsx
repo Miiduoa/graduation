@@ -105,6 +105,7 @@ const linking: LinkingOptions<RootTabParamList> = {
           StoryCompose: 'story/new',
           PostDetail: 'post/:postId',
           SmartCalendarScreen: 'calendar',
+          CampusGame: 'home/campus-game',
         },
       },
       學習: {
@@ -488,6 +489,9 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
         import('./src/services/companionEngine')
           .then(({ applyForegroundCompanionTick }) => applyForegroundCompanionTick())
           .catch(() => void 0);
+        import('./src/services/productFeedback')
+          .then(({ flushFeedbackQueue }) => flushFeedbackQueue())
+          .catch(() => void 0);
       }
       appState.current = nextAppState;
     };
@@ -818,6 +822,10 @@ function AppInner() {
 
     initCrossModuleConnections();
     registerCompanionCampusBusBridge();
+
+    import('./src/services/productFeedback')
+      .then(({ flushFeedbackQueue }) => flushFeedbackQueue())
+      .catch(() => void 0);
 
     return () => {
       networkCleanup?.();

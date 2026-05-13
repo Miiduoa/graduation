@@ -135,6 +135,9 @@ export function MerchantHubScreen() {
         status: nextStatus,
       });
       await refresh();
+      void import('../services/companionEngine').then((m) =>
+        m.recordCompanionFeatureSignal('vendor_hub'),
+      );
     } catch (error: any) {
       Alert.alert('更新失敗', error?.message ?? '請稍後再試。');
     } finally {

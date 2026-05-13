@@ -72,6 +72,44 @@ export function CommunityScreen(props: Record<string, unknown>) {
         >
           校園社群
         </Text>
+        <Pressable
+          onPress={() => stackNav?.navigate?.('CampusGame')}
+          accessibilityRole="button"
+          accessibilityLabel="開啟校園漫步小遊戲原型"
+          style={({ pressed }) => ({
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.space.md,
+            paddingHorizontal: theme.space.md,
+            paddingVertical: theme.space.md,
+            borderRadius: theme.radius.lg,
+            backgroundColor: theme.colors.card,
+            borderWidth: 1,
+            borderColor: theme.colors.accent + '40',
+            marginBottom: theme.space.md,
+            opacity: pressed ? 0.9 : 1,
+          })}
+        >
+          <View
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              backgroundColor: theme.colors.accent + '22',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="game-controller-outline" size={20} color={theme.colors.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>校園漫步</Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+              本地素材／好友挑戰 stub · 連結 today stack
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+        </Pressable>
         <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
           {TABS.map((tab) => {
             const active = activeTab === tab.key;

@@ -171,4 +171,49 @@ describe('aiAppContext', () => {
     expect(data.calendarEvents).toHaveLength(1);
     expect(data.washingReservations).toHaveLength(1);
   });
+
+  it('derives pending assignments from inbox tasks and quizzes when the direct list is empty', () => {
+    const now = new Date('2026-05-05T08:00:00+08:00');
+    const context = buildAIAppContext({
+      schoolId: 'tw-pu',
+      userId: 'u1',
+      role: 'student',
+      now,
+      pendingAssignments: [],
+      runtimeData: {
+        ...emptyAIAppRuntimeData(),
+        inboxTasks: [
+          {
+            id: 'task-1',
+            kind: 'assignment',
+            groupId: 'grp-1',
+            groupName: '統計學',
+            title: '迴歸分析作業',
+            subtitle: '48 小時內截止',
+            priority: 1,
+            dueAt: new Date('2026-05-06T20:00:00+08:00'),
+          },
+        ],
+        quizzes: [
+          {
+            id: 'quiz-1',
+            assignmentId: 'quiz-assignment-1',
+            groupId: 'grp-2',
+            groupName: '英文',
+            title: 'Unit 5 Quiz',
+            dueAt: new Date('2026-05-07T12:00:00+08:00'),
+            type: 'quiz',
+            source: 'quiz',
+          },
+        ],
+      },
+    });
+
+    expect(context.pendingAssignments?.map((assignment) => assignment.title)).toEqual([
+      '迴歸分析作業',
+      '測驗：Unit 5 Quiz',
+    ]);
+    expect(context.appPulseSummary).toContain('72 小時內截止');
+    expect(context.appDataCoverage?.find((row) => row.key === 'assignments')?.count).toBe(2);
+  });
 });

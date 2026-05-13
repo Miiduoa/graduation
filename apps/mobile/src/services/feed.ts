@@ -14,6 +14,7 @@ import {
   arrayRemove,
   doc,
   type Timestamp,
+  type DocumentReference,
 } from 'firebase/firestore';
 import { getDb } from '../firebase';
 
@@ -125,7 +126,7 @@ export async function createCampusPost(input: {
   authorUid?: string;
   tags?: string[];
   kind?: 'standard' | 'thread';
-}) {
+}): Promise<DocumentReference> {
   const db = getDb();
   const ref = postsCol(db, input.schoolId);
   const base: Record<string, unknown> = {

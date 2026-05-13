@@ -239,6 +239,56 @@ function runtime(input?: Partial<AIAppRuntimeData>): AIAppRuntimeData {
   return { ...emptyAIAppRuntimeData(), ...(input ?? {}) };
 }
 
+function isPastDue(value: unknown, now: Date): boolean {
+  const due = toDate(value);
+  return Boolean(due && due.getTime() < now.getTime());
+}
+
+function derivePendingAssignmentsFromRuntime(
+  input: AIAppContextInput,
+  data: AIAppRuntimeData,
+): AnyAssignment[] {
+  const explicit = input.pendingAssignments ?? [];
+  if (explicit.length > 0) return explicit;
+
+  const now = input.now ?? new Date();
+  const rows: AnyAssignment[] = [];
+  const seen = new Set<string>();
+  const push = (assignment: AnyAssignment) => {
+    const id = String(assignment.id || assignment.title || '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    rows.push(assignment);
+  };
+
+  for (const task of data.inboxTasks) {
+    if (task.kind !== 'assignment' && task.kind !== 'quiz') continue;
+    push({
+      id: task.assignmentId ?? task.id,
+      title: task.title,
+      groupName: task.groupName,
+      dueAt: task.dueAt,
+      isLate: isPastDue(task.dueAt, now),
+    });
+  }
+
+  for (const quiz of data.quizzes) {
+    push({
+      id: quiz.assignmentId ?? quiz.id,
+      title: `${quiz.type === 'exam' ? '考試' : '測驗'}：${quiz.title}`,
+      groupName: quiz.groupName,
+      dueAt: quiz.dueAt,
+      isLate: isPastDue(quiz.dueAt, now),
+    });
+  }
+
+  return rows.sort((a, b) => {
+    const left = toDate(a.dueAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+    const right = toDate(b.dueAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+    return left - right;
+  });
+}
+
 function getErrorCode(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined;
   const record = error as { code?: unknown; originalError?: unknown };
@@ -691,7 +741,12 @@ function mergeWithPostLoginContext(raw: AIAppContextInput): AIAppContextInput {
 export function buildAIAppContext(raw: AIAppContextInput): AIContext {
   const input = mergeWithPostLoginContext(raw);
   const data = runtime(input.runtimeData);
-  const appPulseSummary = buildAIAppPulseSummary(input);
+  const pendingAssignments = derivePendingAssignmentsFromRuntime(input, data);
+  const contextInput =
+    pendingAssignments === input.pendingAssignments
+      ? input
+      : { ...input, pendingAssignments };
+  const appPulseSummary = buildAIAppPulseSummary(contextInput);
   const dialogSummary = [input.dialogContextSummary, input.conversationSummary]
     .filter(Boolean)
     .join(' ');
@@ -745,7 +800,7 @@ export function buildAIAppContext(raw: AIAppContextInput): AIContext {
         location: schedule.location,
       })),
     })),
-    pendingAssignments: (input.pendingAssignments ?? []).map((assignment) => ({
+    pendingAssignments: pendingAssignments.map((assignment) => ({
       id: assignment.id,
       title: assignment.title,
       groupName: assignment.groupName ?? '',
@@ -861,8 +916,8 @@ export function buildAIAppContext(raw: AIAppContextInput): AIContext {
       ? exportTrainingInsights(input.trainingDB, input.lastUserMessage)
       : undefined,
     appPulseSummary,
-    appDataCoverage: buildCoverage(input, data),
-    appDataRecords: buildAppDataRecords(input, data),
+    appDataCoverage: buildCoverage(contextInput, data),
+    appDataRecords: buildAppDataRecords(contextInput, data),
     contextSummary: dialogSummary,
   };
 }

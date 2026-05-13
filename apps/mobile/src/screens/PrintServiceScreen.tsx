@@ -255,6 +255,9 @@ export function PrintServiceScreen(props: any) {
                 '已送出 ✅',
                 `列印工作已送至 ${selectedStation.name}\n${duplex ? '🌿 獲得 2 環保積分！' : ''}`,
               );
+              void import('../services/companionEngine').then((m) =>
+                m.recordCompanionFeatureSignal('print_job'),
+              );
             } catch (err: any) {
               try {
                 const { aiBrain } = await import('../services/aiBrain');

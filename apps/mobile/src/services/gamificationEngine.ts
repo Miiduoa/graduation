@@ -653,6 +653,17 @@ const ALL_ACHIEVEMENTS: Omit<Achievement, 'unlockedAt' | 'progress'>[] = [
     rarity: 'epic',
     condition: '學分 90%',
   },
+  {
+    id: 'feedback_voice',
+    title: '發聲有功',
+    description: '提交意見或完成滿意度回饋',
+    icon: 'chatbubble-ellipses-outline',
+    category: 'special',
+    xpReward: 25,
+    rarity: 'common',
+    condition: '累積 3 次有效回饋',
+    maxProgress: 3,
+  },
 ];
 
 // ─── Storage ────────────────────────────────────────────
@@ -663,6 +674,10 @@ type StoredState = {
   unlockedAchievements: Record<string, number>; // id → unlockedAt
   achievementProgress: Record<string, number>; // id → progress count
   challengeState: Record<string, number>; // challengeId → current progress
+  /** 每週 epoch（與 generateWeeklyChallenges 的 id 週對齊） */
+  weeklyChallengeEpoch?: number;
+  /** 本週已由「每週挑戰完成」加上的 XP 總和（上限避免刷分） */
+  weeklyChallengeBonusXpGiven?: number;
   xpLog: { action: string; xp: number; timestamp: number }[];
 };
 
@@ -670,7 +685,9 @@ async function loadState(): Promise<StoredState> {
   try {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultState();
-    return JSON.parse(raw);
+    const s = JSON.parse(raw) as StoredState;
+    if (normalizeGamificationState(s)) await saveState(s);
+    return s;
   } catch {
     return defaultState();
   }
@@ -691,6 +708,8 @@ function defaultState(): StoredState {
     unlockedAchievements: {},
     achievementProgress: {},
     challengeState: {},
+    weeklyChallengeEpoch: Math.floor(Date.now() / 604800000),
+    weeklyChallengeBonusXpGiven: 0,
     xpLog: [],
   };
 }
@@ -750,6 +769,8 @@ export async function earnXP(action: XPAction): Promise<{
     state.totalXP += ach.xpReward;
     state.unlockedAchievements[ach.id] = Date.now();
   }
+
+  bumpWeeklyChallengesFromXpAction(state, action);
 
   await saveState(state);
 
@@ -939,6 +960,90 @@ function generateWeeklyChallenges(): WeeklyChallenge[] {
   ];
 }
 
+function currentWeeklyEpoch(): number {
+  return Math.floor(Date.now() / 604800000);
+}
+
+export function normalizeGamificationState(state: StoredState): boolean {
+  if (!state.challengeState) state.challengeState = {};
+  const epoch = currentWeeklyEpoch();
+  let dirty = false;
+  if (state.weeklyChallengeEpoch === undefined) {
+    state.weeklyChallengeEpoch = epoch;
+    state.weeklyChallengeBonusXpGiven = 0;
+    dirty = true;
+  }
+  if (state.weeklyChallengeBonusXpGiven === undefined) {
+    state.weeklyChallengeBonusXpGiven = 0;
+    dirty = true;
+  }
+  if (state.weeklyChallengeEpoch !== epoch) {
+    state.weeklyChallengeEpoch = epoch;
+    state.weeklyChallengeBonusXpGiven = 0;
+    const valid = new Set(generateWeeklyChallenges().map((c) => c.id));
+    for (const k of Object.keys(state.challengeState)) {
+      if (k.startsWith('wc_') && !valid.has(k)) delete state.challengeState[k];
+    }
+    dirty = true;
+  }
+  return dirty;
+}
+
+const WEEKLY_CHALLENGE_BONUS_CAP = 200;
+
+function awardWeeklyCompletionXp(state: StoredState, ch: WeeklyChallenge): void {
+  const room = WEEKLY_CHALLENGE_BONUS_CAP - (state.weeklyChallengeBonusXpGiven ?? 0);
+  if (room <= 0) return;
+  const grant = Math.min(ch.xpReward, room);
+  state.totalXP += grant;
+  state.weeklyChallengeBonusXpGiven = (state.weeklyChallengeBonusXpGiven ?? 0) + grant;
+  state.xpLog.push({ action: `weekly_complete:${ch.id}`, xp: grant, timestamp: Date.now() });
+  if (state.xpLog.length > 100) state.xpLog = state.xpLog.slice(-100);
+}
+
+function incrementWeeklyChallengeByTemplatePrefix(
+  state: StoredState,
+  prefix: 'wc_study_' | 'wc_social_' | 'wc_explore_',
+  delta: number,
+): void {
+  if (delta <= 0) return;
+  const templates = generateWeeklyChallenges();
+  const ch = templates.find((t) => t.id.startsWith(prefix));
+  if (!ch) return;
+  const prev = state.challengeState[ch.id] ?? 0;
+  const next = Math.min(prev + delta, ch.target);
+  state.challengeState[ch.id] = next;
+  if (prev < ch.target && next >= ch.target) {
+    awardWeeklyCompletionXp(state, ch);
+  }
+}
+
+function bumpWeeklyChallengesFromXpAction(state: StoredState, action: XPAction): void {
+  const study = new Set<XPAction>([
+    'attend_class',
+    'submit_assignment',
+    'complete_quiz',
+    'study_session',
+    'check_grades',
+    'plan_schedule',
+  ]);
+  const social = new Set<XPAction>(['help_peer', 'join_study_group', 'write_review']);
+  if (study.has(action)) incrementWeeklyChallengeByTemplatePrefix(state, 'wc_study_', 1);
+  if (social.has(action)) incrementWeeklyChallengeByTemplatePrefix(state, 'wc_social_', 1);
+  if (action === 'report_crowd') incrementWeeklyChallengeByTemplatePrefix(state, 'wc_explore_', 1);
+}
+
+function buildWeeklyChallengesView(state: StoredState): WeeklyChallenge[] {
+  return generateWeeklyChallenges().map((ch) => {
+    const cur = state.challengeState[ch.id] ?? 0;
+    return {
+      ...ch,
+      current: Math.min(cur, ch.target),
+      completed: cur >= ch.target,
+    };
+  });
+}
+
 // ─── Mock Leaderboard ───────────────────────────────────
 
 function generateLeaderboard(myXP: number, myName: string, myDept: string): LeaderboardEntry[] {
@@ -1076,7 +1181,7 @@ export async function getGamificationState(
     achievements,
     unlockedCount,
     totalCount: ALL_ACHIEVEMENTS.length,
-    weeklyChallenges: generateWeeklyChallenges(),
+    weeklyChallenges: buildWeeklyChallengesView(state),
     recentXPGains: state.xpLog.slice(-10).reverse(),
     leaderboard: generateLeaderboard(state.totalXP, displayName, department),
   };
@@ -1088,4 +1193,27 @@ export async function getGamificationState(
 export async function resetGamification(): Promise<void> {
   await AsyncStorage.removeItem(STORAGE_KEY);
   console.log('[Gamification] State reset');
+}
+
+/** 回饋／CSAT／NPS 送出成功後呼叫（成就進度見 ALL_ACHIEVEMENTS `feedback_voice`）。 */
+export async function recordFeedbackParticipation(
+  _kind: 'general' | 'csat' | 'nps',
+): Promise<void> {
+  const state = await loadState();
+  incrementWeeklyChallengeByTemplatePrefix(state, 'wc_social_', 1);
+  const apId = 'feedback_voice';
+  const current = (state.achievementProgress[apId] ?? 0) + 1;
+  state.achievementProgress[apId] = current;
+  const ach = ALL_ACHIEVEMENTS.find((a) => a.id === apId);
+  if (
+    ach &&
+    ach.maxProgress &&
+    current >= ach.maxProgress &&
+    !state.unlockedAchievements[apId]
+  ) {
+    state.unlockedAchievements[apId] = Date.now();
+    state.totalXP += ach.xpReward;
+    state.xpLog.push({ action: 'feedback_voice', xp: ach.xpReward, timestamp: Date.now() });
+  }
+  await saveState(state);
 }

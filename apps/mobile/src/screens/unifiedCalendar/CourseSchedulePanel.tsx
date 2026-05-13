@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { ScrollView, Text, View, Pressable, Alert, RefreshControl, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import { theme } from '../../ui/theme';
 import { analytics } from '../../services/analytics';
 import { useDataSource } from '../../hooks/useDataSource';
 import { useAsyncList } from '../../hooks/useAsyncList';
+import { deriveScheduleDisplayDays } from '../../utils/scheduleDisplayDays';
 
 type ViewMode = 'week' | 'day' | 'list';
 
@@ -244,7 +245,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
   );
 
   const [viewMode, setViewMode] = useState<ViewMode>('week');
-  const [selectedDay, setSelectedDay] = useState(new Date().getDay() || 1);
+  const [selectedDay, setSelectedDay] = useState(() => new Date().getDay());
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
@@ -272,6 +273,17 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
     });
   }, [schedule.courses]);
 
+  const scheduleDisplayDays = useMemo(() => deriveScheduleDisplayDays(courses), [courses]);
+
+  useEffect(() => {
+    setSelectedDay((prev) => {
+      if (scheduleDisplayDays.includes(prev)) return prev;
+      const todayDow = new Date().getDay();
+      if (scheduleDisplayDays.includes(todayDow)) return todayDow;
+      return scheduleDisplayDays[0] ?? 1;
+    });
+  }, [scheduleDisplayDays]);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -295,7 +307,6 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
   }, [courses, today]);
 
   const nextCourse = useMemo(() => {
-    if (today === 0 || today === 6) return null;
     return todayCourses.find((c) => c.startPeriod > currentPeriod) ?? null;
   }, [todayCourses, currentPeriod]);
 
@@ -364,7 +375,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
   };
 
   const renderWeekView = () => {
-    const displayDays = [1, 2, 3, 4, 5];
+    const displayDays = scheduleDisplayDays;
     const displayPeriods = PERIODS.slice(0, 10);
 
     return (
@@ -498,7 +509,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ gap: 8 }}
         >
-          {[1, 2, 3, 4, 5].map((day) => (
+          {scheduleDisplayDays.map((day) => (
             <Pressable
               key={day}
               onPress={() => setSelectedDay(day)}
@@ -619,7 +630,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
 
     return (
       <View style={{ gap: 16 }}>
-        {[1, 2, 3, 4, 5].map((day) => {
+        {scheduleDisplayDays.map((day) => {
           const dayCourses = groupedCourses[day] ?? [];
           if (dayCourses.length === 0) return null;
 
@@ -758,7 +769,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
           />
         }
       >
-        {nextCourse && today !== 0 && today !== 6 && (
+        {nextCourse ? (
           <AnimatedCard title="下一堂課" subtitle={`第 ${nextCourse.startPeriod} 節開始`}>
             <Pressable
               onPress={() => handleCoursePress(nextCourse)}
@@ -803,7 +814,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
               </View>
             </Pressable>
           </AnimatedCard>
-        )}
+        ) : null}
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 8 }}>
           <View style={{ alignItems: 'center' }}>
