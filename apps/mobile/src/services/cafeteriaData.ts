@@ -286,6 +286,13 @@ export const CAFETERIA_CROWD_POI_IDS: Record<CafeteriaId, string> = {
   zhishan: 'pu-zhishan',
 };
 
+export function cafeteriaIdFromCrowdPoiId(poiId: string): CafeteriaId | null {
+  const hit = (Object.entries(CAFETERIA_CROWD_POI_IDS) as [CafeteriaId, string][]).find(
+    ([, v]) => v === poiId,
+  );
+  return hit ? hit[0] : null;
+}
+
 /** 各餐廳店家（真實資料 + 合理推估；每店家含內嵌 menuItems） */
 export const VENDORS: Vendor[] = [
   // ── 靜園餐廳 ──
@@ -4100,46 +4107,207 @@ export function aggregateCrowdReportsToSimpleLevel(
   };
 }
 
-/** 單一餐廳：自資料源拉取 POI 人潮回報並聚合 */
+/** 訂單取餐時段加權：sum 約 0～ORDER_PRESSURE_SCALE 對應低到高的現場壓力 proxy（不代表實際人數） */
+const ORDER_PRESSURE_SCALE = 12;
+const CROWD_MERGE_W_REPORTS = 0.55;
+const CROWD_MERGE_W_ORDERS = 0.45;
+
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return a.toDateString() === b.toDateString();
+}
+
+function orderEligibleForPressure(order: Order, now: Date): boolean {
+  if (order.status === 'cancelled' || order.status === 'completed') return false;
+  const created = new Date(order.createdAt);
+  if (Number.isNaN(created.getTime())) return false;
+  return isSameLocalDay(created, now);
+}
+
+/** 無 estimatedPickup 時依狀態推估預期取餐（相對於下单時間的分鐘數） */
+function inferredPickupMinutesAfterCreated(status: OrderStatus): number {
+  switch (status) {
+    case 'ready':
+      return 8;
+    case 'preparing':
+      return 14;
+    case 'confirmed':
+      return 22;
+    case 'pending':
+    default:
+      return 28;
+  }
+}
+
+function inferPickupAt(order: Order): Date {
+  if (order.estimatedPickup) {
+    const t = new Date(order.estimatedPickup);
+    if (!Number.isNaN(t.getTime())) return t;
+  }
+  const created = new Date(order.createdAt);
+  return new Date(created.getTime() + inferredPickupMinutesAfterCreated(order.status) * 60 * 1000);
+}
+
+function statusWeightMultiplier(status: OrderStatus): number {
+  switch (status) {
+    case 'ready':
+      return 1.25;
+    case 'preparing':
+      return 1.08;
+    case 'confirmed':
+      return 0.92;
+    case 'pending':
+      return 0.78;
+    default:
+      return 0.5;
+  }
+}
+
+export function computeOrderPickupPressure(order: Order, nowMs: number): number {
+  const now = new Date(nowMs);
+  if (!orderEligibleForPressure(order, now)) return 0;
+
+  const pickupAt = inferPickupAt(order);
+  const deltaMin = (pickupAt.getTime() - nowMs) / 60000;
+  const sm = statusWeightMultiplier(order.status);
+
+  let windowW = 0;
+  if (deltaMin < -90) windowW = 0.06;
+  else if (deltaMin < -25) windowW = 0.35;
+  else if (deltaMin <= 45) windowW = 1;
+  else if (deltaMin <= 120) windowW = 0.45;
+  else windowW = 0.12;
+
+  return windowW * sm;
+}
+
+export function aggregateOrderPickupPressure(
+  orders: Order[],
+  cafeteriaId: CafeteriaId,
+  nowMs: number,
+): { sumWeight: number; ordersConsidered: number } {
+  let sumWeight = 0;
+  let ordersConsidered = 0;
+  for (const o of orders) {
+    if (o.cafeteriaId !== cafeteriaId) continue;
+    const w = computeOrderPickupPressure(o, nowMs);
+    if (w <= 0) continue;
+    sumWeight += w;
+    ordersConsidered += 1;
+  }
+  return { sumWeight, ordersConsidered };
+}
+
+function numericPressureFromOrders(sumWeight: number): number {
+  return 1 + 3 * Math.min(1, sumWeight / ORDER_PRESSURE_SCALE);
+}
+
+function simpleCrowdLevelToNumeric(level: 'low' | 'medium' | 'high'): number {
+  if (level === 'low') return 1.55;
+  if (level === 'medium') return 2.45;
+  return 3.45;
+}
+
+function numericToSimpleCrowdLevel(n: number): 'low' | 'medium' | 'high' {
+  if (n < 2.15) return 'low';
+  if (n < 2.85) return 'medium';
+  return 'high';
+}
+
+export type CafeteriaCrowdSummaryOk = {
+  ok: true;
+  level: 'low' | 'medium' | 'high';
+  source: 'merged' | 'reports_only' | 'orders_only';
+  reportSampleSize: number;
+  orderWeightedSum: number;
+  ordersInPressureModel: number;
+  lastReportAt: Date | null;
+};
+
+export type CafeteriaCrowdSummaryResult = CafeteriaCrowdSummaryOk | { ok: false; reason: 'no_signal' };
+
+function mergeReportAndOrderSignals(
+  reportAgg: ReturnType<typeof aggregateCrowdReportsToSimpleLevel>,
+  sumWeight: number,
+  ordersConsidered: number,
+  options?: { minOrderSignal?: number },
+): CafeteriaCrowdSummaryResult {
+  const orderNumeric = numericPressureFromOrders(sumWeight);
+  const hasReports = !!reportAgg;
+  const minSig = options?.minOrderSignal ?? 0.2;
+  const hasOrders = sumWeight >= minSig;
+
+  if (!hasReports && !hasOrders) {
+    return { ok: false, reason: 'no_signal' };
+  }
+
+  const pack = (
+    source: CafeteriaCrowdSummaryOk['source'],
+    level: 'low' | 'medium' | 'high',
+  ): CafeteriaCrowdSummaryOk => ({
+    ok: true,
+    source,
+    level,
+    reportSampleSize: reportAgg?.sampleSize ?? 0,
+    orderWeightedSum: Math.round(sumWeight * 100) / 100,
+    ordersInPressureModel: ordersConsidered,
+    lastReportAt: reportAgg?.lastUpdated ?? null,
+  });
+
+  if (hasReports && hasOrders) {
+    const merged =
+      CROWD_MERGE_W_REPORTS * simpleCrowdLevelToNumeric(reportAgg!.level) +
+      CROWD_MERGE_W_ORDERS * orderNumeric;
+    return pack('merged', numericToSimpleCrowdLevel(merged));
+  }
+
+  if (hasReports) return pack('reports_only', reportAgg!.level);
+
+  return pack('orders_only', numericToSimpleCrowdLevel(orderNumeric));
+}
+
+/** 單一餐廳：人潮回報（Firestore POI）＋ 今日訂單取餐時段加權 */
 export async function fetchCafeteriaCrowdSummary(
   cafeteriaId: CafeteriaId,
   listPoiCrowdReports: (poiId: string, schoolId?: string) => Promise<PoiCrowdReport[]>,
   schoolId?: string,
-): Promise<
-  | { ok: true; level: 'low' | 'medium' | 'high'; sampleSize: number; lastUpdated: Date | null }
-  | { ok: false; reason: 'no_reports' }
-> {
+): Promise<CafeteriaCrowdSummaryResult> {
   const poiId = CAFETERIA_CROWD_POI_IDS[cafeteriaId];
-  const reports = await listPoiCrowdReports(poiId, schoolId);
-  const agg = aggregateCrowdReportsToSimpleLevel(reports);
-  if (!agg) return { ok: false, reason: 'no_reports' };
-  return {
-    ok: true,
-    level: agg.level,
-    sampleSize: agg.sampleSize,
-    lastUpdated: agg.lastUpdated,
-  };
+  const nowMs = Date.now();
+  const [reports, orders] = await Promise.all([
+    listPoiCrowdReports(poiId, schoolId),
+    getOrders(),
+  ]);
+  const reportAgg = aggregateCrowdReportsToSimpleLevel(reports);
+  const { sumWeight, ordersConsidered } = aggregateOrderPickupPressure(orders, cafeteriaId, nowMs);
+  return mergeReportAndOrderSignals(reportAgg, sumWeight, ordersConsidered);
 }
 
-/** 管理後台：合併三間餐廳 POI 回報後聚合（全校用餐區熱度） */
+/** 全校用餐區：三間餐廳 POI 回報合併 + 三間訂單加總加權 */
 export async function fetchCampusDiningCrowdSummary(
   listPoiCrowdReports: (poiId: string, schoolId?: string) => Promise<PoiCrowdReport[]>,
   schoolId?: string,
-): Promise<
-  | { ok: true; level: 'low' | 'medium' | 'high'; sampleSize: number; lastUpdated: Date | null }
-  | { ok: false; reason: 'no_reports' }
-> {
+): Promise<CafeteriaCrowdSummaryResult> {
+  const nowMs = Date.now();
   const ids = Object.values(CAFETERIA_CROWD_POI_IDS);
-  const batches = await Promise.all(ids.map((id) => listPoiCrowdReports(id, schoolId)));
-  const merged = batches.flat();
-  const agg = aggregateCrowdReportsToSimpleLevel(merged);
-  if (!agg) return { ok: false, reason: 'no_reports' };
-  return {
-    ok: true,
-    level: agg.level,
-    sampleSize: agg.sampleSize,
-    lastUpdated: agg.lastUpdated,
-  };
+  const [batches, orders] = await Promise.all([
+    Promise.all(ids.map((id) => listPoiCrowdReports(id, schoolId))),
+    getOrders(),
+  ]);
+  const mergedReports = batches.flat();
+  const reportAgg = aggregateCrowdReportsToSimpleLevel(mergedReports);
+
+  const cafeteriaIds: CafeteriaId[] = ['jingyuan', 'yiyuan', 'zhishan'];
+  let sumAll = 0;
+  let ordersConsidered = 0;
+  for (const cid of cafeteriaIds) {
+    const r = aggregateOrderPickupPressure(orders, cid, nowMs);
+    sumAll += r.sumWeight;
+    ordersConsidered += r.ordersConsidered;
+  }
+
+  return mergeReportAndOrderSignals(reportAgg, sumAll, ordersConsidered, {
+    minOrderSignal: 0.45,
+  });
 }
 
 // ── 即時資訊估算 ──
