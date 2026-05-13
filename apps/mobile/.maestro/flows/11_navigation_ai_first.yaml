@@ -37,6 +37,13 @@ tags:
       id: 'tab-訊息'
     timeout: 20000
 
+- extendedWaitUntil:
+    visible: '快速入口'
+    timeout: 120000
+
+- waitForAnimationToEnd:
+    timeout: 2500
+
 - takeScreenshot: ai_first_tabs
 
 - waitForAnimationToEnd:

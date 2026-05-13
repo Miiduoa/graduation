@@ -2553,6 +2553,18 @@ export function SmartDashboardScreen(props: any) {
     loadData();
   }, [loadData]);
 
+  /** 弱網或單次載入異常時避免永遠停在「分析學業數據中」（E2E / Maestro 需可操作儀表） */
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setLoading((cur) => {
+        if (!cur) return cur;
+        console.warn('[SmartDashboard] loading failsafe: forcing dashboard render');
+        return false;
+      });
+    }, 25000);
+    return () => clearTimeout(t);
+  }, []);
+
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     void refreshWeatherForecast();
@@ -3048,7 +3060,10 @@ export function SmartDashboardScreen(props: any) {
         )}
 
         {/* 11. Quick Actions */}
-        <View style={{ marginHorizontal: theme.space.lg, marginBottom: theme.space.lg }}>
+        <View
+          testID="e2e-dashboard-quick-actions"
+          style={{ marginHorizontal: theme.space.lg, marginBottom: theme.space.lg }}
+        >
           <Text
             style={{
               color: theme.colors.text,

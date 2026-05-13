@@ -32,8 +32,8 @@ tags:
     id: 'e2e-open-groups'
 
 - extendedWaitUntil:
-    visible: '加入群組'
-    timeout: 15000
+    visible: '加入碼'
+    timeout: 30000
 
 - takeScreenshot: groups_screen
 

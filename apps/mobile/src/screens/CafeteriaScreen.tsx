@@ -25,6 +25,8 @@ import { Card, ErrorState, LoadingState, Pill, Screen, SectionTitle } from '../u
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { useDataSource } from '../hooks/useDataSource';
+import { useSchool } from '../state/school';
 import {
   getCafeterias,
   getVendors,
@@ -39,10 +41,9 @@ import {
   setOrderSchoolId,
   getFavoriteVendors,
   toggleFavoriteVendor,
-  estimateCrowdLevel,
   isVendorCurrentlyOpen,
   searchVendors,
-  predictCrowdBySchedule,
+  fetchCafeteriaCrowdSummary,
   getMonthlyBudget,
   setMonthlyBudgetLimit,
   trackSpending,
@@ -82,6 +83,8 @@ export function CafeteriaScreen(props: any) {
   const nav = props?.navigation;
   const auth = useAuth();
   const role = auth.profile?.role ?? 'student';
+  const ds = useDataSource();
+  const { school } = useSchool();
 
   const [selectedCafeteria, setSelectedCafeteria] = useState<CafeteriaId | null>(null);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
@@ -90,7 +93,6 @@ export function CafeteriaScreen(props: any) {
   const [searchQuery, setSearchQuery] = useState('');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'browse' | 'orders' | 'manage'>('browse');
-  const crowdLevel = estimateCrowdLevel();
 
   // 創新功能狀態
   const [budget, setBudget] = useState<MonthlyBudget | null>(null);
@@ -103,6 +105,20 @@ export function CafeteriaScreen(props: any) {
   const [groupVendorId, setGroupVendorId] = useState('');
   const [groupMaxMembers, setGroupMaxMembers] = useState('5');
   const [groupDeadlineHours, setGroupDeadlineHours] = useState('2');
+
+  const focusCafeteriaId = selectedCafeteria ?? 'jingyuan';
+
+  type CafeteriaCrowdCard =
+    | { status: 'loading' }
+    | {
+        status: 'data';
+        level: 'low' | 'medium' | 'high';
+        sampleSize: number;
+        lastUpdated: Date | null;
+      }
+    | { status: 'empty' };
+
+  const [cafeteriaCrowd, setCafeteriaCrowd] = useState<CafeteriaCrowdCard>({ status: 'loading' });
 
   // 載入收藏 + 創新功能資料
   useEffect(() => {
@@ -123,6 +139,29 @@ export function CafeteriaScreen(props: any) {
       .then(setGroupOrders)
       .catch(() => {});
   }, [auth.user?.uid]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCafeteriaCrowd({ status: 'loading' });
+    void fetchCafeteriaCrowdSummary(focusCafeteriaId, ds.listPoiCrowdReports, school.id).then(
+      (r) => {
+        if (cancelled) return;
+        if (r.ok) {
+          setCafeteriaCrowd({
+            status: 'data',
+            level: r.level,
+            sampleSize: r.sampleSize,
+            lastUpdated: r.lastUpdated,
+          });
+        } else {
+          setCafeteriaCrowd({ status: 'empty' });
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [focusCafeteriaId, ds, school.id]);
 
   const handleToggleFav = useCallback(async (vendorId: string) => {
     const isFav = await toggleFavoriteVendor(vendorId);
@@ -235,54 +274,96 @@ export function CafeteriaScreen(props: any) {
           </View>
         </View>
 
-        {/* 智慧人潮預測（創新：結合課表） */}
+        {/* 即時人潮（Firestore POI 使用者回報聚合，無資料時不臆測） */}
         {(() => {
-          const prediction = predictCrowdBySchedule(selectedCafeteria ?? 'jingyuan');
+          if (cafeteriaCrowd.status === 'loading') {
+            return (
+              <View
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.surface2,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                }}
+              >
+                <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
+                  載入即時人潮回報中…
+                </Text>
+              </View>
+            );
+          }
+
+          if (cafeteriaCrowd.status === 'empty') {
+            return (
+              <View
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  backgroundColor: theme.colors.surface2,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                }}
+              >
+                <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>
+                  即時人潮
+                </Text>
+                <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+                  尚無此餐廳最近的使用者回報，無法推算擁擠度。請至校園地圖開啟對應餐廳（靜園／宜園／至善）並使用「回報目前人潮」。
+                </Text>
+              </View>
+            );
+          }
+
+          const { level, sampleSize, lastUpdated } = cafeteriaCrowd;
+          const cafeteriaLabel =
+            focusCafeteriaId === 'jingyuan'
+              ? '靜園餐廳'
+              : focusCafeteriaId === 'yiyuan'
+                ? '宜園餐廳'
+                : '至善美食廣場';
+
           return (
             <View
               style={{
                 padding: 12,
                 borderRadius: 12,
-                backgroundColor: `${CROWD_COLORS[prediction.level]}08`,
+                backgroundColor: `${CROWD_COLORS[level]}08`,
                 borderWidth: 1,
-                borderColor: `${CROWD_COLORS[prediction.level]}30`,
+                borderColor: `${CROWD_COLORS[level]}30`,
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <Ionicons
-                  name="analytics-outline"
-                  size={16}
-                  color={CROWD_COLORS[prediction.level]}
-                />
-                <Text
-                  style={{ color: CROWD_COLORS[prediction.level], fontSize: 13, fontWeight: '700' }}
-                >
-                  智慧人潮預測
+                <Ionicons name="people-outline" size={16} color={CROWD_COLORS[level]} />
+                <Text style={{ color: CROWD_COLORS[level], fontSize: 13, fontWeight: '700' }}>
+                  即時人潮 · {cafeteriaLabel}
                 </Text>
                 <View
                   style={{
                     paddingHorizontal: 8,
                     paddingVertical: 2,
                     borderRadius: 6,
-                    backgroundColor: `${CROWD_COLORS[prediction.level]}20`,
+                    backgroundColor: `${CROWD_COLORS[level]}20`,
                   }}
                 >
                   <Text
                     style={{
-                      color: CROWD_COLORS[prediction.level],
+                      color: CROWD_COLORS[level],
                       fontSize: 10,
                       fontWeight: '700',
                     }}
                   >
-                    {CROWD_LABELS[prediction.level]}
+                    {CROWD_LABELS[level]}
                   </Text>
                 </View>
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 12, marginBottom: 2 }}>
-                {prediction.prediction}
+                依據校園地圖餐廳 POI 的使用者回報加權計算（有效樣本 {sampleSize} 筆）。
               </Text>
               <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
-                {prediction.nextQuietTime}
+                {lastUpdated
+                  ? `最近更新：${lastUpdated.toLocaleString()}`
+                  : '時間資訊將隨回報寫入後顯示'}
               </Text>
             </View>
           );

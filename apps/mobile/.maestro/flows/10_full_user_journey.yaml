@@ -18,6 +18,13 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
+- extendedWaitUntil:
+    visible: '快速入口'
+    timeout: 120000
+
+- waitForAnimationToEnd:
+    timeout: 1500
+
 # 公告
 - scrollUntilVisible:
     element:

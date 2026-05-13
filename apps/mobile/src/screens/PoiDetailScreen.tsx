@@ -124,6 +124,12 @@ function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: numbe
   return R * c;
 }
 
+/** 學生餐廳等據點：人潮僅能來自已回報／Firestore，不可用時間隨機模擬 */
+function isDiningPoiCategory(category: string | undefined): boolean {
+  if (!category) return false;
+  return ['cafeteria', 'food', '餐廳', '美食'].includes(category);
+}
+
 function generateMockCrowdInfo(category: string): CrowdInfo {
   const hour = new Date().getHours();
   const isLunchTime = hour >= 11 && hour <= 13;
@@ -295,7 +301,8 @@ export function PoiDetailScreen(props: any) {
     [ds, id, school.id],
   );
 
-  const { items: crowdReports, reload: reloadCrowdReports } = useAsyncList<PoiCrowdReport>(
+  const { items: crowdReports, reload: reloadCrowdReports, loading: crowdReportsLoading } =
+    useAsyncList<PoiCrowdReport>(
     () => (id ? ds.listPoiCrowdReports(id, school.id) : Promise.resolve([])),
     [ds, id, school.id],
   );
@@ -388,22 +395,27 @@ export function PoiDetailScreen(props: any) {
   }, [raw, item]);
 
   useEffect(() => {
-    if (item) {
-      const derived = deriveCrowdInfoFromReports(crowdReports);
-      if (derived) {
-        setCrowdInfo(derived);
-        return;
-      }
+    if (!item) return;
 
-      const info = generateMockCrowdInfo(item.category);
-      setCrowdInfo(info);
-
-      const interval = setInterval(() => {
-        setCrowdInfo(generateMockCrowdInfo(item.category));
-      }, 60000);
-
-      return () => clearInterval(interval);
+    const derived = deriveCrowdInfoFromReports(crowdReports);
+    if (derived) {
+      setCrowdInfo(derived);
+      return;
     }
+
+    if (isDiningPoiCategory(item.category)) {
+      setCrowdInfo(null);
+      return;
+    }
+
+    const info = generateMockCrowdInfo(item.category);
+    setCrowdInfo(info);
+
+    const interval = setInterval(() => {
+      setCrowdInfo(generateMockCrowdInfo(item.category));
+    }, 60000);
+
+    return () => clearInterval(interval);
   }, [item?.id, item?.category, crowdReports]);
 
   const handleShare = async () => {
@@ -882,13 +894,21 @@ export function PoiDetailScreen(props: any) {
           )}
         </AnimatedCard>
 
-        {crowdInfo && (
+        {crowdReportsLoading && item && isDiningPoiCategory(item.category) ? (
+          <AnimatedCard title="即時人潮" subtitle="讀取使用者回報中…" delay={100}>
+            <Text style={{ color: theme.colors.muted, fontSize: 13, padding: 16 }}>
+              正在連線取得 Firebase 人潮回報。
+            </Text>
+          </AnimatedCard>
+        ) : crowdInfo ? (
           <AnimatedCard
             title="即時人潮"
             subtitle={
               crowdReports.length > 0
-                ? `依據最近 ${crowdReports.length} 筆使用者回報`
-                : '根據使用者回報與 AI 預測'
+                ? `依據最近 ${crowdReports.length} 筆使用者回報加權演算`
+                : isDiningPoiCategory(item.category)
+                  ? '尚無回報資料'
+                  : '示意參考（非即時現場回報）'
             }
             delay={100}
           >
@@ -982,7 +1002,23 @@ export function PoiDetailScreen(props: any) {
               最後更新：{crowdInfo.lastUpdated.toLocaleTimeString()}
             </Text>
           </AnimatedCard>
-        )}
+        ) : item && isDiningPoiCategory(item.category) ? (
+          <AnimatedCard
+            title="即時人潮"
+            subtitle="尚無足夠使用者回報，無法推算擁擠度"
+            delay={100}
+          >
+            <Text style={{ color: theme.colors.muted, fontSize: 13, paddingHorizontal: 16 }}>
+              學生餐廳人潮僅依真實回報計算。請登入後使用下方按鈕回報現場狀況。
+            </Text>
+            <View style={{ marginTop: 16, paddingHorizontal: 16, paddingBottom: 16 }}>
+              <Button
+                text={auth.user ? '回報目前人潮' : '登入後可回報人潮'}
+                onPress={handleReportCrowd}
+              />
+            </View>
+          </AnimatedCard>
+        ) : null}
 
         <AnimatedCard title="導航選項" subtitle="選擇你偏好的導航方式" delay={200}>
           <View style={{ gap: 10 }}>

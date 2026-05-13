@@ -22,11 +22,33 @@ describe('classifyIntent', () => {
     expect(r.confidence).toBeLessThanOrEqual(1);
   });
 
-  test('keyword_fallback: general has capped confidence', () => {
+  test('low_info_guard: 單字輸入應觸發澄清，而非走 keyword_fallback 列功能', () => {
     const r = classifyIntent('嗯');
     expect(r.name).toBe('general');
-    expect(r.source).toBe('keyword_fallback');
-    expect(r.confidence).toBeLessThan(0.62);
+    expect(r.source).toBe('low_info_guard');
+    expect(r.askClarify).toBe(true);
+    expect(r.lowInfoReason).toBe('single_char');
+  });
+
+  test('low_info_guard: 空字串 / 純標點 / 純 emoji / 重複字 → askClarify', () => {
+    expect(classifyIntent('').askClarify).toBe(true);
+    expect(classifyIntent('   ').askClarify).toBe(true);
+    expect(classifyIntent('?').askClarify).toBe(true);
+    expect(classifyIntent('???').askClarify).toBe(true);
+    expect(classifyIntent('🍔').askClarify).toBe(true);
+    expect(classifyIntent('中中中中中').askClarify).toBe(true);
+  });
+
+  test('multilingual_alias: 英文 lunch 應正規化到午餐 → 命中 food', () => {
+    const r = classifyIntent('help me 訂 lunch');
+    expect(['food_order', 'menus']).toContain(r.name);
+    expect(r.normalizedFromAlias).toBe(true);
+  });
+
+  test('multilingual_alias: AC broken 應正規化到冷氣壞了 → submit_repair_request', () => {
+    const r = classifyIntent('A棟302 AC broken');
+    expect(r.name).toBe('submit_repair_request');
+    expect(r.normalizedFromAlias).toBe(true);
   });
 
   test('richRaw linear cap: max score maps to 1', () => {
