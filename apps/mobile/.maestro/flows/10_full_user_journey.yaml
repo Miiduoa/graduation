@@ -21,7 +21,8 @@ tags:
 - openLink: campus://home/announcements
 
 - extendedWaitUntil:
-    visible: '公告'
+    visible:
+      id: 'e2e-announcements-screen'
     timeout: 20000
 
 - takeScreenshot: journey_01_announcements
