@@ -66,11 +66,44 @@ target 'mobile' do
 
     llama_target = installer.pods_project.targets.find { |target| target.name == 'llama-rn' }
     if llama_target
-      llama_target.headers_build_phase.files.each do |build_file|
-        file_ref = build_file.file_ref
-        next unless file_ref&.path == 'common.h' && file_ref&.parent&.display_name == 'amx'
+      # cpp/common.h + cpp/amx/common.h → both flatten to Headers/common.h (static framework → duplicate-output error).
+      headers_phase = llama_target.headers_build_phase
+      common_header_build_files = headers_phase.files.select do |bf|
+        ref = bf.file_ref
+        ref&.path == 'common.h'
+      end
+      if common_header_build_files.length > 1
+        keep = common_header_build_files.find do |bf|
+          pr = bf.file_ref.parent
+          pr && (pr.path == 'cpp' || pr.name == 'cpp')
+        end || common_header_build_files.first
+        (common_header_build_files - [keep]).each do |bf|
+          headers_phase.remove_build_file(bf)
+        end
+      end
 
-        llama_target.headers_build_phase.remove_build_file(build_file)
+      umbrella_path = File.join(
+        installer.sandbox.root.to_s,
+        'Target Support Files',
+        'llama-rn',
+        'llama-rn-umbrella.h'
+      )
+      if File.exist?(umbrella_path)
+        lines = File.readlines(umbrella_path)
+        seen_common = false
+        fixed_lines = lines.reject do |line|
+          if line.strip == '#import "common.h"'
+            if seen_common
+              true
+            else
+              seen_common = true
+              false
+            end
+          else
+            false
+          end
+        end
+        File.write(umbrella_path, fixed_lines.join)
       end
 
       llama_target.build_configurations.each do |configuration|
@@ -92,6 +125,26 @@ target 'mobile' do
       target.build_configurations.each do |configuration|
         configuration.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
         configuration.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+      end
+    end
+
+    team_id = (ENV['IOS_DEVELOPMENT_TEAM'] || ENV['APPLE_TEAM_ID'] || '').strip
+    unless team_id.empty?
+      # Sign in with Apple + Associated Domains → Expo CLI still invokes code signing even for Simulator.
+      # Without DEVELOPMENT_TEAM in the Xcode project, it falls back to keychain certs and fails on fresh Macs.
+      require 'xcodeproj'
+      app_project_path = File.join(__dir__, 'mobile.xcodeproj')
+      if File.directory?(app_project_path)
+        app_project = Xcodeproj::Project.open(app_project_path)
+        app_project.targets.each do |target|
+          next unless target.name == 'mobile'
+
+          target.build_configurations.each do |cfg|
+            cfg.build_settings['DEVELOPMENT_TEAM'] = team_id
+            cfg.build_settings['CODE_SIGN_STYLE'] = 'Automatic'
+          end
+        end
+        app_project.save
       end
     end
   end

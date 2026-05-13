@@ -14,18 +14,20 @@ tags:
 - launchApp
 
 # 等待主畫面載入
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 導航到訊息頁面
 - tapOn:
     text: '訊息'
 
 # 等待訊息頁面載入
-- assertVisible:
-    text: '訊息'
+- extendedWaitUntil:
+    visible: '訊息'
     timeout: 5000
+
 
 # 截圖 - 訊息首頁
 - takeScreenshot: messages_home
@@ -44,10 +46,11 @@ tags:
     optional: true
 
 # 等待建立群組對話框
-- assertVisible:
-    text: '建立群組'
+- extendedWaitUntil:
+    visible: '建立群組'
     timeout: 5000
     optional: true
+
 
 # 截圖 - 建立群組
 - takeScreenshot: create_group
@@ -63,10 +66,11 @@ tags:
     optional: true
 
 # 等待加入群組對話框
-- assertVisible:
-    text: '加入碼'
+- extendedWaitUntil:
+    visible: '加入碼'
     timeout: 5000
     optional: true
+
 
 # 截圖 - 加入群組
 - takeScreenshot: join_group

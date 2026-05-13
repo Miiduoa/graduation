@@ -13,9 +13,10 @@ tags:
 - launchApp
 
 # 等待主畫面載入（公告頁面是預設頁面）
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 截圖 - 公告列表
 - takeScreenshot: announcements_list

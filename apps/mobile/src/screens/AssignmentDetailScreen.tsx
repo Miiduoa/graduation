@@ -517,8 +517,44 @@ export function AssignmentDetailScreen(props: any) {
       setSelectedFiles([]);
       reloadMySubmission();
       if (canManageCourse) reloadSubmissions();
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        const preview = text.trim().slice(0, 500);
+        aiBrain.reportToolOutcome(
+          'submit_assignment',
+          {
+            assignmentId,
+            groupId,
+            content: preview || '(僅連結或附件)',
+            isLate,
+            linkCount: links.length,
+            fileCount: filesMeta.length,
+          },
+          'success',
+          undefined,
+          `繳交作業「${assignment?.title ?? assignmentId}」`,
+        );
+      } catch (brainErr) {
+        console.warn('[AssignmentDetail] brain.observe submit failed:', brainErr);
+      }
     } catch (e: any) {
       setErr(e?.message ?? '繳交失敗');
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'submit_assignment',
+          {
+            assignmentId,
+            groupId,
+            content: text.trim().slice(0, 200),
+          },
+          'failure',
+          e?.message != null ? String(e.message) : String(e),
+          `繳交作業「${assignment?.title ?? assignmentId}」失敗`,
+        );
+      } catch (brainErr) {
+        console.warn('[AssignmentDetail] brain.observe submit failure failed:', brainErr);
+      }
     } finally {
       setSubmitting(false);
     }

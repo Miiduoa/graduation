@@ -13,18 +13,20 @@ tags:
 - launchApp
 
 # 等待主畫面載入
-- assertVisible:
-    text: '公告'
+- extendedWaitUntil:
+    visible: '公告'
     timeout: 10000
+
 
 # 導航到「我的」頁面
 - tapOn:
     text: '我的'
 
 # 等待頁面載入
-- assertVisible:
-    text: '登入'
+- extendedWaitUntil:
+    visible: '登入'
     timeout: 5000
+
 
 # 截圖 - 未登入狀態
 - takeScreenshot: me_screen_logged_out
@@ -40,10 +42,11 @@ tags:
     text: '登入'
 
 # 等待錯誤提示
-- assertVisible:
-    text: '電子郵件格式不正確'
-    optional: true
+- extendedWaitUntil:
+    visible: '電子郵件格式不正確'
     timeout: 3000
+    optional: true
+
 
 # 清除並輸入正確的 Email
 - clearText

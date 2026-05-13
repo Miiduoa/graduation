@@ -262,8 +262,32 @@ export function EventDetailScreen(props: any) {
             await ds.unregisterEvent(id, auth.user!.uid, school.id);
             reloadRegistrations();
             setSuccessMsg('已取消報名');
+            try {
+              const { aiBrain } = await import('../services/aiBrain');
+              aiBrain.reportToolOutcome(
+                'unregister_event',
+                { eventId: id, eventTitle: item?.title },
+                'success',
+                undefined,
+                `取消報名活動「${item?.title ?? ''}」`,
+              );
+            } catch (brainErr) {
+              console.warn('[EventDetail] brain.observe unregister failed:', brainErr);
+            }
           } catch (e: any) {
             setErr(e?.message ?? '取消報名失敗');
+            try {
+              const { aiBrain } = await import('../services/aiBrain');
+              aiBrain.reportToolOutcome(
+                'unregister_event',
+                { eventId: id, eventTitle: item?.title },
+                'failure',
+                e?.message != null ? String(e.message) : String(e),
+                `取消報名活動「${item?.title ?? ''}」失敗`,
+              );
+            } catch (brainErr) {
+              console.warn('[EventDetail] brain.observe unregister failure failed:', brainErr);
+            }
           } finally {
             setActionLoading(false);
           }
@@ -310,8 +334,50 @@ export function EventDetailScreen(props: any) {
       });
 
       setSuccessMsg('已加入行事曆');
+      try {
+        const { aiBrain } = await import('../services/aiBrain');
+        aiBrain.reportToolOutcome(
+          'create_calendar_event',
+          {
+            title: item.title,
+            startAt: startDate.toISOString(),
+            endAt: endDate.toISOString(),
+            location: item.location || undefined,
+            description: item.description ? String(item.description).slice(0, 300) : undefined,
+            campusEventId: id,
+            via: 'expo_device_calendar',
+          },
+          'success',
+          undefined,
+          `將活動「${item.title}」加入裝置行事曆`,
+        );
+      } catch (brainErr) {
+        console.warn('[EventDetail] brain.observe calendar failed:', brainErr);
+      }
     } catch (e: any) {
       setErr(e?.message ?? '加入行事曆失敗');
+      if (id && item) {
+        try {
+          const { aiBrain } = await import('../services/aiBrain');
+          const startDate = toDate(item.startsAt);
+          const endDate = toDate(item.endsAt) || startDate;
+          aiBrain.reportToolOutcome(
+            'create_calendar_event',
+            {
+              title: item.title,
+              campusEventId: id,
+              via: 'expo_device_calendar',
+              ...(startDate ? { startAt: startDate.toISOString() } : {}),
+              ...(endDate ? { endAt: endDate.toISOString() } : {}),
+            },
+            'failure',
+            e?.message != null ? String(e.message) : String(e),
+            `將活動「${item.title}」加入裝置行事曆失敗`,
+          );
+        } catch (brainErr) {
+          console.warn('[EventDetail] brain.observe calendar failure failed:', brainErr);
+        }
+      }
     }
   };
 

@@ -5671,8 +5671,11 @@ export function AIChatScreen(props: any) {
         }
         return undefined;
       })();
-      // 檢查是否為指代訊息（「第一個」「那個」「就剛剛那個」）
-      const isReferenceMessage = /第[一二三四五六七八九十\d]+個|就?(?:剛剛?|上面|前面)?那[一個]?個?|就[是]?[那這它]|^(?:對|好[的啊]?|可以|沒問題|ok|OK|嗯|恩|是[的啊]?)\s*$/.test(userMsg.content.trim());
+      // 檢查是否為指代訊息（「第一個／第一个」「那個」「就剛剛那個」）
+      const isReferenceMessage =
+        /第\s*[一二两三四五六七八九十百千\d]+\s*[個个]?|就?(?:剛剛?|上面|前面)?那[一個]?個?|就[是]?[那這它]|^(?:對|好[的啊]?|可以|沒問題|ok|OK|嗯|恩|是[的啊]?)\s*$/.test(
+          userMsg.content.trim(),
+        );
       const isWriteIntent = toolLayerResult.intent === 'order_action'
         || /幫我|我要|請.*假|報修|維修|預約|借.*書|續借|還書|取消|退選|發.*訊|繳交|報名|下單|加.*行程|新增|刪除|修改|幫.*做|幫.*處理|幫.*安排|幫.*設定|開始.*點名|訂.*[碗份個杯]|點.*[碗份個杯]|買.*[碗份個杯]|簽到|打卡|掛號|看診|評分|列印|投票|領.*包裹|洗衣|失物|遺失|撿到/.test(userMsg.content);
       // 額外的 catch-all：指代訊息、寫入意圖、或 old tool layer 沒有明確結果
@@ -6217,10 +6220,21 @@ export function AIChatScreen(props: any) {
       trainEmbeddingOnSentence(aiBrain.embedding, understanding.tokens, 0.003);
 
       // ── 主動澄清：信心極低時先問清楚 ──
+      const assistantHasChoiceMenu = (messages ?? []).some(
+        (m) => m.role === 'assistant' && (m.choiceMenu?.options?.length ?? 0) > 0,
+      );
+      const trimmedFollow = userMsg.content.trim().replace(/[。？！!?…〜~]+$/g, '').trim();
+      const menuOrdinalOrConfirmFollowUp =
+        assistantHasChoiceMenu &&
+        (/^第\s*[一二两兩三四五六七八九十百千\d]+\s*[個个]?$/.test(trimmedFollow) ||
+          /^最(?:後|后)[一那]?[個个]?$/.test(trimmedFollow) ||
+          /^(?:對+|好[的啊]?|可以|沒問題|ok|OK|嗯+|恩+|是[的啊]?)$/.test(trimmedFollow));
+
       if (
         !isOfflineAI &&
         understanding.clarification.needed &&
-        understanding.clarification.suggestedQuestions.length > 0
+        understanding.clarification.suggestedQuestions.length > 0 &&
+        !menuOrdinalOrConfirmFollowUp
       ) {
         const clarifyMsg: Message = {
           id: genMsgId(),
