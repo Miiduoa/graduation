@@ -1146,6 +1146,9 @@ exports.askCampusAssistant = require('./agent/handlers/askCampusAssistant');
 exports.executeAgentWrite = require('./agent/handlers/executeAgentWrite');
 exports.aiOrderFood = require('./aiOrderFood');
 
+const libraryOpacProxy = require('./libraryOpacProxy');
+exports.proxyLibraryOpacSearch = libraryOpacProxy.proxyLibraryOpacSearch;
+
 // ──────────────────────────────────────────────────────
 // 訂餐強化模組 (ordering)
 // 完整的「真實訂餐流程」相關 Cloud Functions：

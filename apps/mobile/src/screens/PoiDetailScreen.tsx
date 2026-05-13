@@ -46,6 +46,9 @@ import { formatRelativeTime, toDate } from '../utils/format';
 import {
   cafeteriaIdFromCrowdPoiId,
   fetchCafeteriaCrowdSummary,
+  estimateCafeteriaPrepWaitFromOrders,
+  getOrders,
+  setOrderSchoolId,
   CROWD_LABELS,
   CROWD_COLORS,
   type CafeteriaCrowdSummaryOk,
@@ -280,6 +283,8 @@ export function PoiDetailScreen(props: any) {
 
   const [crowdInfo, setCrowdInfo] = useState<CrowdInfo | null>(null);
   const [cafeteriaBlend, setCafeteriaBlend] = useState<CafeteriaCrowdSummaryOk | null>(null);
+  /** 該餐廳館別：依近期完成訂單「下單→可取餐」統計 */
+  const [cafeteriaPrepLabelZh, setCafeteriaPrepLabelZh] = useState<string | null>(null);
   const [userRating, setUserRating] = useState(0);
   const [userComment, setUserComment] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -316,16 +321,30 @@ export function PoiDetailScreen(props: any) {
     );
 
   useEffect(() => {
+    setOrderSchoolId(school.id ?? 'pu');
+  }, [school.id]);
+
+  useEffect(() => {
     const cid = id ? cafeteriaIdFromCrowdPoiId(id) : null;
     if (!cid) {
       setCafeteriaBlend(null);
+      setCafeteriaPrepLabelZh(null);
       return;
     }
     let cancelled = false;
-    void fetchCafeteriaCrowdSummary(cid, ds.listPoiCrowdReports, school.id).then((r) => {
+    void (async () => {
+      let orders: Awaited<ReturnType<typeof getOrders>> = [];
+      try {
+        orders = await getOrders();
+      } catch {
+        orders = [];
+      }
+      if (cancelled) return;
+      setCafeteriaPrepLabelZh(estimateCafeteriaPrepWaitFromOrders(cid, orders).labelZh);
+      const r = await fetchCafeteriaCrowdSummary(cid, ds.listPoiCrowdReports, school.id, orders);
       if (cancelled) return;
       setCafeteriaBlend(r.ok ? r : null);
-    });
+    })();
     return () => {
       cancelled = true;
     };
@@ -543,10 +562,30 @@ export function PoiDetailScreen(props: any) {
       await reloadCrowdReports();
       const cid = cafeteriaIdFromCrowdPoiId(id);
       if (cid) {
-        const blend = await fetchCafeteriaCrowdSummary(cid, ds.listPoiCrowdReports, school.id);
+        let orders: Awaited<ReturnType<typeof getOrders>> = [];
+        try {
+          orders = await getOrders();
+        } catch {
+          orders = [];
+        }
+        setCafeteriaPrepLabelZh(estimateCafeteriaPrepWaitFromOrders(cid, orders).labelZh);
+        const blend = await fetchCafeteriaCrowdSummary(
+          cid,
+          ds.listPoiCrowdReports,
+          school.id,
+          orders,
+        );
         setCafeteriaBlend(blend.ok ? blend : null);
       }
       setSuccessMsg(`已收到你的「${crowdLevelConfig[level].label}」回報，感謝協助更新現場資訊`);
+      try {
+        const { emitCrowdReported } = await import('../services/campusEventBus');
+        const levelRank =
+          level === 'low' ? 1 : level === 'medium' ? 2 : level === 'high' ? 3 : 4;
+        emitCrowdReported({ userId: auth.user.uid, poiId: id, level: levelRank });
+      } catch {
+        /* optional bus */
+      }
     } catch (e: any) {
       setErr(e?.message ?? '送出人潮回報失敗');
     }
@@ -961,6 +1000,21 @@ export function PoiDetailScreen(props: any) {
                 單；訂單不代表人已到店）
               </Text>
             ) : null}
+            {cafeteriaPrepLabelZh && item && isDiningPoiCategory(item.category) ? (
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: theme.colors.muted,
+                  textAlign: 'center',
+                  paddingHorizontal: 16,
+                  paddingTop: cafeteriaBlend ? 6 : 10,
+                  paddingBottom: 2,
+                }}
+              >
+                {cafeteriaPrepLabelZh}
+                （依該館近期「下單→可取餐」完成訂單；尖峰可能延長）
+              </Text>
+            ) : null}
             <View style={{ alignItems: 'center', padding: 16 }}>
               <View
                 style={{
@@ -1083,6 +1137,20 @@ export function PoiDetailScreen(props: any) {
                     ? `主要依訂單取餐時段推估：加權 ${cafeteriaBlend.orderWeightedSum}（${cafeteriaBlend.ordersInPressureModel} 單）`
                     : `主要依現場回報（${cafeteriaBlend.reportSampleSize} 筆有效樣本）`}
               </Text>
+              {cafeteriaPrepLabelZh ? (
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    marginTop: 10,
+                    fontSize: 11,
+                    textAlign: 'center',
+                    paddingHorizontal: 12,
+                  }}
+                >
+                  {cafeteriaPrepLabelZh}
+                  （依該館近期「下單→可取餐」完成訂單；尖峰可能延長）
+                </Text>
+              ) : null}
             </View>
             <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
               <Button
@@ -1100,6 +1168,19 @@ export function PoiDetailScreen(props: any) {
             <Text style={{ color: theme.colors.muted, fontSize: 13, paddingHorizontal: 16 }}>
               學生餐廳繁忙度結合現場回報與今日訂單取餐時段。若仍無訊號，請登入後回報現場或改用線上訂餐以建立取餐時間資料。
             </Text>
+            {cafeteriaPrepLabelZh ? (
+              <Text
+                style={{
+                  color: theme.colors.muted,
+                  fontSize: 12,
+                  paddingHorizontal: 16,
+                  paddingTop: 10,
+                }}
+              >
+                {cafeteriaPrepLabelZh}
+                （依該館近期「下單→可取餐」完成訂單；尖峰可能延長）
+              </Text>
+            ) : null}
             <View style={{ marginTop: 16, paddingHorizontal: 16, paddingBottom: 16 }}>
               <Button
                 text={auth.user ? '回報目前人潮' : '登入後可回報人潮'}

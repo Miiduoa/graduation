@@ -345,3 +345,9 @@ export const emitDailyLogin = (p: PayloadOf<'user:daily_login'>) =>
 
 export const emitCrowdReported = (p: PayloadOf<'crowd:reported'>) =>
   campusEventBus.emit('crowd:reported', p);
+
+export const emitCafeteriaOrderPlaced = (p: PayloadOf<'cafeteria:order_placed'>) =>
+  campusEventBus.emit('cafeteria:order_placed', p);
+
+export const emitLostFoundPosted = (p: PayloadOf<'lostfound:posted'>) =>
+  campusEventBus.emit('lostfound:posted', p);

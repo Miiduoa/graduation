@@ -29,6 +29,8 @@
 | 角色與資料流    | [`docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md`](docs/APP_ROLE_DATA_FLOW_ARCHITECTURE.md)                                                                    |
 | 檔案整理索引    | [`docs/PROJECT_FILE_ORGANIZATION.md`](docs/PROJECT_FILE_ORGANIZATION.md)                                                                                |
 | AI 架構         | [`docs/AI_ASSISTANT_ARCHITECTURE.md`](docs/AI_ASSISTANT_ARCHITECTURE.md)                                                                                |
+| 校園學伴設計    | [`docs/CAMPUS_COMPANION_DESIGN.md`](docs/CAMPUS_COMPANION_DESIGN.md)                                                                                    |
+| TronClass 對齊  | [`docs/TRONCLASS_PARITY_INTEGRATION_MAP.md`](docs/TRONCLASS_PARITY_INTEGRATION_MAP.md)、[`docs/TRONCLASS_PARITY_ROADMAP.md`](docs/TRONCLASS_PARITY_ROADMAP.md) |
 | Firebase 邊界   | [`docs/architecture/firebase-data-boundaries.md`](docs/architecture/firebase-data-boundaries.md)                                                        |
 | App 圖示產線    | [`apps/mobile/assets/ICON_REGENERATION.txt`](apps/mobile/assets/ICON_REGENERATION.txt)（ComfyUI / Flux、`scripts/generate-campus-app-icon-comfyui.py`） |
 | AI 對話測試表   | repo 根目錄 [`AI助理對話測試與訓練套件.xlsx`](AI助理對話測試與訓練套件.xlsx)（對話情境／訓練用試算表資產；**勿**提交 LibreOffice 鎖檔 `.~lock.*`）      |
@@ -44,6 +46,7 @@
 - [Monorepo 結構](#monorepo-結構)
 - [技術棧](#技術棧)
 - [產品與功能地圖](#產品與功能地圖)
+- [校園學伴／館藏 OPAC／LMS](#companion-opac-lms)
 - [Campus Agent OS 與 AI 架構](#campus-agent-os-與-ai-架構)
 - [資料流與權限邊界](#資料流與權限邊界)
 - [本機開發](#本機開發)
@@ -64,8 +67,9 @@ Campus One 是一個以 `pnpm workspace` 管理的校園平台 monorepo，核心
 - `backend/functions`：Firebase Cloud Functions v2，處理認證、校務代理、權限、通知、支付、AI agent 與資料同步。
 - `packages/shared`：跨 Mobile、Web、Functions 共用的 TypeScript 契約、學校設定、PU auth、通知與畢業學分資料。
 
-另外還有獨立的 AI server 線：
+另外還有 **Cloudflare Workers** 與獨立的 AI server 線：
 
+- `workers/opac-proxy`：可選的 **館藏 WebPac GraphQL 邊緣代理**（`jose` + Wrangler），與 Mobile `EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL`、Firebase Callable `proxyLibraryOpacSearch` 搭配，處理校方站台對 App 直連可能 403 的情境。
 - `backend/ai-server`：Python / FastAPI AI service，包含 provider gateway、RAG、training、evaluation、self-training 與 web search 輔助能力。
 
 這個 repo 不是單頁 demo，也不是只有 mock UI。它已經具備：
@@ -106,18 +110,13 @@ Campus One 是一個以 `pnpm workspace` 管理的校園平台 monorepo，核心
 
 > **產品先把 PU 做深，平台底層保留多校與校務系統擴充能力。**
 
-### 3. Mobile runtime mode 需要看 env 與 fallback
+### 3. Mobile data source mode 以 `hybrid` 為範本預設
 
-`apps/mobile/src/config/runtime.ts` 與 `.env.example` 之間有一個容易誤判的差異：
+`apps/mobile/.env.example` 已將 `EXPO_PUBLIC_DATA_SOURCE_MODE` 預設為 **`hybrid`**，與 `apps/mobile/src/config/runtime.ts` 在開發環境的取向一致：Firebase 優先、必要時可 fallback（並受 `EXPO_PUBLIC_HYBRID_*` 相關變數影響）。
 
-- 程式設計目標與 development fallback 偏向 `hybrid`。
-- `apps/mobile/.env.example` 目前範例值是 `EXPO_PUBLIC_DATA_SOURCE_MODE=mock`。
+若要 **純離線 UI demo**（不接 Firebase），請在 `apps/mobile/.env` 改為 `mock` 並搭配 `EXPO_PUBLIC_AI_PROVIDER=offline`（見下方「最小可跑設定」）。要接 **PU / TronClass / 真實 Functions**，仍須補齊 Firebase 與雲端 endpoint 相關變數。
 
-也就是說：
-
-- 沒設 env 時，開發環境多半會嘗試 `hybrid`。
-- 直接複製 mobile env 範本時，會走 `mock`。
-- 要接 Firebase / Functions / PU 真實流程，需要明確設定 Firebase 與 backend endpoint。
+**館藏搜尋：** 可選設定 `EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL` 指向已部署的 `workers/opac-proxy`；留空時由裝置端依 `libraryOpacClient` / `libraryOpacSearchClient` 嘗試直連，必要時亦會走 Cloud Function `proxyLibraryOpacSearch`（見 [`backend/functions/libraryOpacProxy.js`](backend/functions/libraryOpacProxy.js)）。
 
 ### 4. CI 已把 rules test 納入 workflow
 
@@ -154,11 +153,11 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 
 | 面向              | 盤點結果                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Git tracked files | 約 `855` 個（**複核**：`git ls-files \| wc -l`；隨資產與 flow 增減而變動）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Mobile UI         | `101` 個 `*Screen.tsx`、`14` 個 `*Stack.tsx`（複核：`git ls-files 'apps/mobile/**/*Screen.tsx' \| wc -l`）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Web routes        | `20` 個 `apps/web/**/page.tsx`、`4` 個 `apps/web/**/route.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Git tracked files | **`888`** 個（**複核**：`git ls-files \| wc -l`；本批次合併日 **2026-05-13**）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Mobile UI         | `103` 個 `apps/mobile/**/*Screen.tsx`、`14` 個 `*Stack.tsx`（複核：`find apps/mobile/src/screens -name '*Screen.tsx' \| wc -l`，Stack 請用 `grep` `Stack.tsx`）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Web routes        | `24` 個 `apps/web/**/page.tsx`、`4` 個 `apps/web/**/route.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Backend Functions | 約 `75` 個 `onCall` 匯出（`backend/functions/index.js` 約 `69` + `ordering/*` 等）、`14` 個 `onRequest`、`7` 個 `onSchedule`（`index.js` + `ordering/orderTimeout.js`、`ordering/queueNumber.js`）、`5` 個 Firestore `onDocument*`（`index.js` 四個 + `ordering/inspectionTrigger.js` 一個）                                                                                                                                                                                                                                                                                                                   |
-| 測試檔            | Mobile `41`（`apps/mobile/src/__tests__/**/*.test.{ts,tsx}`；**不含** `pnpm ai:train:long` 專用之 `apps/mobile/scripts/ai-training-long.test.ts`）、Web `5`、Backend Functions `22`（`backend/functions/**/*.test.js`，含 `agent/safety.test.js`、`agent/classifyIntent.test.js`）、Rules `1`（`backend/tests/security-rules.test.js`）                                                                                                                                                                                                                                                                        |
+| 測試檔            | Mobile `44`（`apps/mobile/src/__tests__/**/*.test.{ts,tsx}`；**不含** `pnpm ai:train:long` 專用之 `apps/mobile/scripts/ai-training-long.test.ts`）、Web `5`、Backend Functions `23`（`backend/functions/**/*.test.js`，含 **`agent/runtime.safety.test.js`**、`agent/safety.test.js`、`agent/classifyIntent.test.js`）、Rules `1`（`backend/tests/security-rules.test.js`）                                                                                                                                                                                                                                                                        |
 | GitHub workflows  | `5` 個：CI、Release、EAS Build、Preview Deploy、Maestro E2E                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Maestro           | `.maestro/flows` 底下 `12` 個 `*.yaml` flow（含 onboarding、全站導覽、AI 優先、Campus Hub／社交等；執行見 `apps/mobile/package.json` 的 `e2e:maestro:*`）                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `scripts/`        | Root 既有：`bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`、`ai-app-scenario-marathon.sh`、`flux-campus-icon-workflow.api.json`、`generate-campus-app-icon-comfyui.py`、`generate_app_icon_comfy.py`；Icon／UI：`generate-button-icons-comfyui.py`、`generate-flux-ui-asset-pack.py`、`seed-button-icon-placeholders.py`、`button-icons-manifest.json`、`workflows/`（ComfyUI API workflow 備份）；Mobile：`apps/mobile/scripts/ai-training-long.test.ts`（`pnpm ai:train:long`）、`apps/mobile/scripts/ai-training-2h-5min-batches.sh`（`pnpm ai:train:long:2h:5m`，預設 24×5min≈2h 分批長訓） |
@@ -171,7 +170,10 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 
 | 區塊               | 重點                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 主要程式位置                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 雲端 Agent 安全層  | Functions `agent` 路徑補上 **輸入／輸出安全檢查**（與 [`backend/functions/agent/prompts/system.md`](backend/functions/agent/prompts/system.md)、[`runtime.js`](backend/functions/agent/runtime.js) 搭配），並以 Jest 鎖定行為。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | [`backend/functions/agent/safety.js`](backend/functions/agent/safety.js)、[`backend/functions/agent/safety.test.js`](backend/functions/agent/safety.test.js)；相關：`classifyIntent.js`                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Campus Companion   | Mobile：`CompanionStrip`（`SmartDashboard`）、`CampusGardenScreen`、`companionEngine`、`companionBusBridge`；`@campus/shared`：`gardenEngine`、`spriteEngine`；Jest：`gardenEngine.test`、`spriteEngine.test`；雲端工具 **`computeCompanionState`**。設計見 [`CAMPUS_COMPANION_DESIGN.md`](docs/CAMPUS_COMPANION_DESIGN.md)。 | [`CompanionStrip.tsx`](apps/mobile/src/components/CompanionStrip.tsx)、[`companionEngine.ts`](apps/mobile/src/services/companionEngine.ts)、[`packages/shared/src/companion/`](packages/shared/src/companion/)、[`computeCompanionState.js`](backend/functions/agent/tools/computeCompanionState.js) |
+| LMS／教師 Web      | `@campus/shared`：`quizScoring`、`gradebookCompute`；Next 教師子路由 `attendance`／`gradebook`／`modules`／`quizzes`；雲端工具 **`submitQuizAttempt`**、**`computeGradebook`**。對照 [`TRONCLASS_PARITY_INTEGRATION_MAP.md`](docs/TRONCLASS_PARITY_INTEGRATION_MAP.md)。 | [`packages/shared/src/lms/`](packages/shared/src/lms/)、[`apps/web/src/app/teacher/course/[courseId]/`](apps/web/src/app/teacher/course/[courseId]/)、[`submitQuizAttempt.js`](backend/functions/agent/tools/submitQuizAttempt.js)、[`computeGradebook.js`](backend/functions/agent/tools/computeGradebook.js) |
+| 館藏 OPAC 搜尋     | Callable **`proxyLibraryOpacSearch`**；可選 Worker **`workers/opac-proxy`**（`pnpm --filter @campus/opac-proxy-worker dev` 或 `deploy`）。Mobile：`libraryOpacSearchClient`、`LibraryCatalogScreen`、`LibraryOpacPanel`；環境變數 `EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL`。 | [`libraryOpacProxy.js`](backend/functions/libraryOpacProxy.js)、[`workers/opac-proxy/`](workers/opac-proxy/)、[`libraryOpacClient.ts`](apps/mobile/src/services/libraryOpacClient.ts) |
+| 雲端 Agent 安全層  | Functions `agent` **輸入／輸出安全檢查**（[`system.md`](backend/functions/agent/prompts/system.md)、[`runtime.js`](backend/functions/agent/runtime.js)）；Jest：[**`safety.test.js`**](backend/functions/agent/safety.test.js)、[**`runtime.safety.test.js`**](backend/functions/agent/runtime.safety.test.js)；相關 `classifyIntent`。 | [`safety.js`](backend/functions/agent/safety.js)、[`safety.test.js`](backend/functions/agent/safety.test.js)、[`runtime.safety.test.js`](backend/functions/agent/runtime.safety.test.js) |
 | 意圖與執行鏈       | `classifyIntent`、ordering 取餐碼等後端行為與前版對齊迭代（細節以 diff 為準）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | [`backend/functions/agent/classifyIntent.js`](backend/functions/agent/classifyIntent.js)、[`backend/functions/ordering/pickupCode.js`](backend/functions/ordering/pickupCode.js)                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 天氣與情境提醒     | Mobile 新增 **天氣查詢** 與 **降雨／裝備提醒** 輔助（供儀表板、個人化建議等使用）。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | [`apps/mobile/src/services/weather.ts`](apps/mobile/src/services/weather.ts)、[`apps/mobile/src/hooks/useWeatherForecast.ts`](apps/mobile/src/hooks/useWeatherForecast.ts)、[`apps/mobile/src/services/rainReminderDay.ts`](apps/mobile/src/services/rainReminderDay.ts)                                                                                                                                                                                                                                                                                                                         |
 | 多輪自對話測試     | 延伸離線 AI **多輪自對話** 測試覆蓋，與既有 `aiSelfDialog` 互補。                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | [`apps/mobile/src/services/aiSelfDialogMultiTurn.ts`](apps/mobile/src/services/aiSelfDialogMultiTurn.ts)、[`apps/mobile/src/__tests__/services/aiSelfDialogMultiTurn.test.ts`](apps/mobile/src/__tests__/services/aiSelfDialogMultiTurn.test.ts)                                                                                                                                                                                                                                                                                                                                                 |
@@ -222,6 +224,8 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 ├── packages/
 │   └── shared/                  # shared TS contracts, school config, auth, release, notification
 ├── docs/                        # architecture, API, security, release, legal, product docs
+├── workers/
+│   └── opac-proxy/             # Cloudflare Worker：館藏 GraphQL／JWT（可選，`@campus/opac-proxy-worker`）
 ├── scripts/                     # repo-level utility scripts
 ├── .github/workflows/           # CI, release, EAS, preview, E2E workflows
 ├── package.json                 # root scripts and workspace tooling
@@ -237,6 +241,7 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 - `apps/*`
 - `packages/*`
 - `backend/*`
+- `workers/*`
 
 ## 技術棧
 
@@ -248,11 +253,18 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 | Web                 | Next.js `16.2.3`、React **`19.1.0`**（root `pnpm.overrides` 將 `react` / `react-dom` **鎖在 19.1.0**；因此 `pnpm ls react --filter web` 會顯示 19.1.0，`apps/web/package.json` 內的版本欄位代表宣告區間但以 lock 解析為準）、Vitest `4.1.0`、Leaflet / react-leaflet、PWA assets |
 | Backend Functions   | `firebase-functions` `^6.0.0`、`firebase-admin` `^13.0.0`、Node 20、Jest                                                                                                                                                                                                         |
 | Firestore / Storage | Firebase rules、indexes、emulator tests                                                                                                                                                                                                                                          |
-| Shared package      | TypeScript ESM package `@campus/shared`                                                                                                                                                                                                                                          |
+| Shared package      | TypeScript ESM package `@campus/shared`（含 **LMS**：`quizScoring`、`gradebookCompute`；**Campus Companion**：`spriteEngine`、`gardenEngine`，並由 Functions `build:cjs` 輸出供 Node agent 引用）                                                                                                                                                     |
+| Edge / Workers       | Cloudflare Workers（`workers/opac-proxy`：Wrangler、TypeScript、`jose`）                                                                                                                                                                                                              |
 | AI server           | Python、FastAPI、Uvicorn、httpx、ChromaDB、sentence-transformers、MLX、Firebase Admin                                                                                                                                                                                            |
 | Tooling             | ESLint 9、Prettier 3、Jest、Vitest、Maestro、EAS、firebase-tools                                                                                                                                                                                                                 |
 
 ## 產品與功能地圖
+
+<h3 id="companion-opac-lms">校園學伴／館藏 OPAC／LMS（TronClass 對齊）</h3>
+
+- **校園學伴（Campus Companion）**：產品敘事與機制詳 **[`docs/CAMPUS_COMPANION_DESIGN.md`](docs/CAMPUS_COMPANION_DESIGN.md)**。程式上將 **狀態與規則** 收斂在 `@campus/shared`（`spriteEngine`、`gardenEngine`）與 Mobile `companionEngine`；UI 上以 **`CompanionStrip`** 進入 **`CampusGardenScreen`**（`campus-garden` deep link）。
+- **館藏 OPAC**：靜宜 **HyLib WebPac GraphQL**。Mobile 見 **`libraryOpacSearchClient`**；伺服器側 **Firebase Callable `proxyLibraryOpacSearch`**（[`libraryOpacProxy.js`](backend/functions/libraryOpacProxy.js)）；可選邊緣代理 **`workers/opac-proxy`**（`pnpm --filter @campus/opac-proxy-worker <dev|deploy>`）。
+- **LMS／TronClass 對齊**：共用規則在 **`packages/shared/src/lms/`**（`quizScoring`、`gradebookCompute`）；教師瀏覽器端路由 **`/teacher/course/[courseId]/(attendance|gradebook|modules|quizzes)`**；對照 **`docs/TRONCLASS_PARITY_*.md`**；雲端 agent 工具 **`submitQuizAttempt`**、**`computeGradebook`**、**`computeCompanionState`**（[`backend/functions/agent/tools/registry.js`](backend/functions/agent/tools/registry.js)）。
 
 ### Mobile 主心理模型
 
@@ -289,6 +301,7 @@ Today -> 角色入口 -> 校園 -> 收件匣 -> 我的
 | AI 選課 / 課程建議 | `AICourseAdvisorScreen`、`CourseAdvisorScreen`、`courseRecommendationEngine.ts`                        | 依成績、學分、興趣與需求提供選課建議                   |
 | 學伴與社群         | `StudyBuddyScreen`、`CampusSocialScreen`、`campusSocialEngine.ts`                                      | 讀書夥伴、校園貼文、課程/興趣連結                      |
 | 遊戲化             | `GamificationScreen`、`gamificationEngine.ts`                                                          | XP、等級、成就、streak、週挑戰                         |
+| Campus Companion   | `CampusGardenScreen`、`CompanionStrip`、`companionEngine.ts`、`companionBusBridge.ts`                  | 與日常使用掛勾的輕互動／成長線（細節見 [`CAMPUS_COMPANION_DESIGN.md`](docs/CAMPUS_COMPANION_DESIGN.md)） |
 | 智慧行事曆         | `SmartCalendarScreen`、`smartCalendarEngine.ts`、`ical.ts`                                             | 課表、截止日、提醒、iCal 訂閱                          |
 | 校園地圖           | `CampusHubScreen`、`MapScreen`、`MapStack`、`PoiDetailScreen`                                          | POI、地圖、地點詳情、校園導覽                          |
 | AR / 無障礙        | `ARNavigationScreen`、`AccessibleRouteScreen`                                                          | AR 導航、無障礙路線與路徑輔助                          |
@@ -296,7 +309,7 @@ Today -> 角色入口 -> 校園 -> 收件匣 -> 我的
 | 交通               | `TransportHubScreen`、`BusScheduleScreen`、`tdxApi.ts`                                                 | 校車、公車、TDX 資料與提醒                             |
 | 餐飲               | `CafeteriaScreen`、`MenuDetailScreen`、`OrderingScreen`、`MenuSubscriptionScreen`                      | 餐廳、菜單、訂餐、菜單訂閱                             |
 | 支付 / 店家        | `PaymentScreen`、`MerchantHubScreen`、`VendorManagementScreen`                                         | 錢包、交易、店家訂單、營運管理                         |
-| 圖書館             | `LibraryScreen`                                                                                        | 查書、借閱、續借、座位與圖書服務                       |
+| 圖書館             | `LibraryScreen`、`LibraryCatalogScreen`、`LibraryOpacPanel`、`libraryOpacClient`、`libraryOpacSearchClient` | PU 適配館藏：**WebPac／GraphQL**、可選 **Worker** 或 **Callable** 代理                        |
 | 宿舍               | `DormitoryScreen`                                                                                      | 宿舍資訊、報修、包裹、洗衣機預約                       |
 | 健康               | `HealthScreen`                                                                                         | 健康中心、預約、紀錄、校園健康資源                     |
 | 列印               | `PrintServiceScreen`                                                                                   | 列印工作、費用、狀態追蹤                               |
@@ -333,7 +346,10 @@ Web 端是 Next.js App Router / PWA shell，不是預設模板。它補足桌面
 | `/terms`                      | 服務條款                               |
 | `/sso-callback`               | SSO callback page                      |
 | `/course/[courseId]`          | 課程詳情                               |
-| `/teacher/course/[courseId]`  | 教師課程頁                             |
+| `/teacher/course/[courseId]/attendance` | 課堂點名（教師 LMS 面）            |
+| `/teacher/course/[courseId]/gradebook` | 成績簿試算／權重邏輯（共用 `gradebookCompute`） |
+| `/teacher/course/[courseId]/modules`   | 課程模組入口                       |
+| `/teacher/course/[courseId]/quizzes`    | 測驗與作答流程（對齊 `quizScoring`） |
 | `/sso/acs`                    | SAML ACS route handler                 |
 | `/apple-app-site-association` | Apple associated domains route handler |
 
@@ -342,7 +358,8 @@ Web 端是 Next.js App Router / PWA shell，不是預設模板。它補足桌面
 `backend/functions/index.js` 是主要 serverless 後端入口，包含：
 
 - 公告、活動、群組、作業、成績、訊息、失物媒合的 Firestore triggers。
-- `askCampusAssistant`：server-side AI agent 入口。
+- `askCampusAssistant`：server-side AI agent 入口（工具含 **`computeCompanionState`**、**`computeGradebook`**、**`submitQuizAttempt`** 等，見 `backend/functions/agent/tools/registry.js`）。
+- `proxyLibraryOpacSearch`：館藏 **HyLib WebPac GraphQL** 代理（`libraryOpacProxy.js`，處理 `Set-Cookie`／csrf）。
 - `submitPulseReport`、`listPulseAggregates`：校園脈動回報與彙整。
 - `getStudentRiskSnapshots`、`enqueueAssistantAction`：學習風險與 AI action queue。
 - 推播與通知：`sendTestNotification`、`sendCustomNotification`、排程提醒、成績發布通知。
@@ -374,6 +391,8 @@ Web 端是 Next.js App Router / PWA shell，不是預設模板。它補足桌面
 - mock data / sample usage。
 - PU 畢業學分規則。
 - credit audit 與 dev universal accounts。
+- **LMS 演算法契約：** `quizScoring`、`gradebookCompute`（見 `packages/shared/src/lms/`）。
+- **Campus Companion 純計算：** `spriteEngine`、`gardenEngine`（見 `packages/shared/src/companion/`，並由 Functions `pnpm --filter @campus/shared run build:cjs` 產出 CJS 供後端載入）。
 
 ## Campus Agent OS 與 AI 架構
 
@@ -411,7 +430,7 @@ flowchart LR
 
 `backend/functions/assistantAgent.js` 負責把 AI 放在後端安全邊界內：
 
-- **Agent I/O 安全**：[`backend/functions/agent/safety.js`](backend/functions/agent/safety.js) 與 prompts／runtime 搭配，遮蔽或拒答高風險輸入、過濾不當輸出；行為以 [`safety.test.js`](backend/functions/agent/safety.test.js) 鎖定。
+- **Agent I/O 安全**：[`backend/functions/agent/safety.js`](backend/functions/agent/safety.js) 與 prompts／runtime 搭配，遮蔽或拒答高風險輸入、過濾不當輸出；行為以 [`safety.test.js`](backend/functions/agent/safety.test.js)、[`runtime.safety.test.js`](backend/functions/agent/runtime.safety.test.js) 鎖定。
 - model provider order 預設偏向 server env。
 - model keys 不應暴露成 `EXPO_PUBLIC_*`。
 - personal intents 不走公開 web search。
@@ -719,6 +738,13 @@ pnpm --filter functions logs
 pnpm --filter functions backfill:canonical
 ```
 
+### Workers（Cloudflare，`@campus/opac-proxy-worker`）
+
+```bash
+pnpm --filter @campus/opac-proxy-worker dev
+pnpm --filter @campus/opac-proxy-worker deploy
+```
+
 ### Release / build
 
 ```bash
@@ -734,10 +760,11 @@ pnpm submit:android
 
 | 區塊   | 測試工具         | 目前重點                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Mobile | Jest / jest-expo | 預設 `jest.config.js` 的 `testMatch` 僅跑 `src/__tests__/**/*.test.{ts,tsx}`；涵蓋 data source、**deep linking**（如 `architecture/linkingConfig`）、AI 對話品質／模擬、**馬拉松**（`aiConversationMarathon`）、**代理廣覆蓋**（`aiAgentWideCoverage`）、**代理安全加固**（`aiAgentSafetyHardening`，寫入前缺真實目標須受阻）、proactive / web search、**午餐推薦**（`recommendLunch.test.ts`）等。長時間 heap 訓練：**`pnpm --filter mobile ai:train:long`**（`jest.ai-training.config.js` + `scripts/ai-training-long.test.ts`，不混入一般 `pnpm --filter mobile test`）；**分批長訓**：**`pnpm --filter mobile ai:train:long:2h:5m`**（`scripts/ai-training-2h-5min-batches.sh`） |
+| Mobile | Jest / jest-expo | 預設 `jest.config.js` 的 `testMatch` 僅跑 `src/__tests__/**/*.test.{ts,tsx}`（目前 **44** 個檔；**不含**長訓專用之 `scripts/ai-training-long.test.ts`）。涵蓋 data source、**deep linking**、AI 對話／代理護欄、`recommendLunch`、以及 **`gardenEngine`／`spriteEngine`／`gradebookCompute`／`quizScoring`** 等共用規則測試。長時訓練見 **`pnpm --filter mobile ai:train:long`** 與 **`ai:train:long:2h:5m`**。 |
 
 | Web | Vitest / Testing Library | navigation、SSO、runtime、Firestore path、page context |
-| Functions | Jest | authz、cafeteria、assistant agent、SSO、`agent/`（含 **`classifyIntent`**、tools、safety、`selfTrainingScenarios`）、notifications、post-login、`tronClassScraper` 等（`22` 個 `backend/functions/**/*.test.js`） |
+
+| Functions | Jest | authz、cafeteria、assistant agent、SSO、`agent/`（含 **`classifyIntent`**、tools、safety、**`runtime.safety`**、`selfTrainingScenarios`）、notifications、post-login、`tronClassScraper` 等（**`23`** 個 `backend/functions/**/*.test.js`） |
 | Rules | Firebase emulator + node test | Firestore / Storage security boundary |
 | E2E | Maestro | `apps/mobile/.maestro/flows` **12** 條；多數功能 flow 已改以 **`openLink`** 走 **`campus://…`** deep link（與 mobile **linking** 設定一致），降低儀表捲動 flake；細節見 [`apps/mobile/.maestro/README.md`](apps/mobile/.maestro/README.md) |
 
@@ -856,6 +883,17 @@ pnpm -w firebase deploy --only functions
 - server-side secrets 已設好。
 - rules tests 通過。
 - payment / AI / TDX / SSO 等敏感設定不在 client env。
+
+### Cloudflare Workers（館藏 OPAC，可選）
+
+`workers/opac-proxy` **非** Firebase 發佈路徑的一部分；需另以 Wrangler 綁定 Cloudflare 帳號：
+
+```bash
+cd workers/opac-proxy && pnpm install
+pnpm --filter @campus/opac-proxy-worker deploy
+```
+
+部署完成後將 **HTTPS 基底網址**（無結尾斜線）填入 Mobile：`EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL`（並確保校方允許來自 Worker／Functions 的出口流量）。若未部署 Worker，仍可依賴 **`proxyLibraryOpacSearch`** Callable。
 
 ### Mobile
 
@@ -1093,6 +1131,9 @@ git rm -r --cached .playwright-cli
 | -------------------------------------------------------------------------------------- | ------------------------- |
 | [`apps/mobile/DEMO.md`](apps/mobile/DEMO.md)                                           | 口試 / 展示腳本           |
 | [`docs/TRONCLASS_PLUS_PRODUCT_BLUEPRINT.md`](docs/TRONCLASS_PLUS_PRODUCT_BLUEPRINT.md) | TronClass Plus / 產品藍圖 |
+| [`docs/TRONCLASS_PARITY_INTEGRATION_MAP.md`](docs/TRONCLASS_PARITY_INTEGRATION_MAP.md) | LMS／TronClass 能力對照整合圖 |
+| [`docs/TRONCLASS_PARITY_ROADMAP.md`](docs/TRONCLASS_PARITY_ROADMAP.md)               | TronClass parity 路線圖   |
+| [`docs/CAMPUS_COMPANION_DESIGN.md`](docs/CAMPUS_COMPANION_DESIGN.md)                  | 校園學伴互動與敘事設計     |
 | [`docs/角色畫面邏輯與使用情境設計.md`](docs/角色畫面邏輯與使用情境設計.md)             | 角色畫面邏輯與使用情境    |
 
 ## 第一次接手建議閱讀順序

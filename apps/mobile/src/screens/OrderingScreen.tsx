@@ -653,6 +653,17 @@ export function OrderingScreen(props: any) {
             });
 
             try {
+              const { emitCafeteriaOrderPlaced } = await import('../services/campusEventBus');
+              emitCafeteriaOrderPlaced({
+                userId: auth.user!.uid,
+                vendorId: selectedCafeteria.merchantId ?? selectedCafeteria.id,
+                total: cartTotal,
+              });
+            } catch {
+              /* optional bus */
+            }
+
+            try {
               aiBrain.reportToolOutcome(
                 'order_meal',
                 {

@@ -19,8 +19,14 @@ const getDormRepairStatus = require('./getDormRepairStatus');
 const reserveWashingMachine = require('./reserveWashingMachine');
 const createOrder = require('./createOrder');
 const cancelOrder = require('./cancelOrder');
+const submitQuizAttempt = require('./submitQuizAttempt');
+const computeGradebook = require('./computeGradebook');
+const computeCompanionState = require('./computeCompanionState');
 
 const tools = [
+  submitQuizAttempt,
+  computeGradebook,
+  computeCompanionState,
   getTodaySchedule,
   getAssignments,
   getAnnouncements,
