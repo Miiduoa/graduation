@@ -234,10 +234,18 @@ function OverviewTab(props: {
       if (cancelled) return;
       if (r.ok) {
         setCampusCrowdStatus(r.level);
-        setCampusCrowdHint(`綜合三間餐廳 POI · ${r.sampleSize} 筆有效樣本`);
+        const src =
+          r.source === 'merged'
+            ? '現場回報＋訂單取餐時段'
+            : r.source === 'reports_only'
+              ? '現場回報'
+              : '訂單取餐時段推估';
+        setCampusCrowdHint(
+          `${src} · 有效回報 ${r.reportSampleSize} 筆 · 訂單加權 ${r.orderWeightedSum}（${r.ordersInPressureModel} 單）`,
+        );
       } else {
         setCampusCrowdStatus('none');
-        setCampusCrowdHint('尚無餐廳 POI 使用者回報');
+        setCampusCrowdHint('尚無現場回報且無有效今日訂單時段訊號');
       }
     });
     return () => {
@@ -358,7 +366,7 @@ function OverviewTab(props: {
         </View>
       </Card>
 
-      {/* 人潮狀況（Firestore POI 使用者回報聚合） */}
+      {/* 人潮狀況（現場回報 + 訂單取餐時段推估） */}
       <View
         style={{
           flexDirection: 'row',
