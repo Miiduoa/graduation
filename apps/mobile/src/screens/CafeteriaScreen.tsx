@@ -36,6 +36,7 @@ import {
   getReviews,
   addReview,
   getOrders,
+  estimateVendorPrepWaitFromOrders,
   createOrder,
   subscribeOrders,
   setOrderSchoolId,
@@ -122,6 +123,8 @@ export function CafeteriaScreen(props: any) {
     | { status: 'empty' };
 
   const [cafeteriaCrowd, setCafeteriaCrowd] = useState<CafeteriaCrowdCard>({ status: 'loading' });
+  /** 與人潮推算共用之全校近期訂單（供製作時間估算） */
+  const [prepEstimateOrders, setPrepEstimateOrders] = useState<Order[]>([]);
 
   // 載入收藏 + 創新功能資料
   useEffect(() => {
@@ -146,28 +149,54 @@ export function CafeteriaScreen(props: any) {
   useEffect(() => {
     let cancelled = false;
     setCafeteriaCrowd({ status: 'loading' });
-    void fetchCafeteriaCrowdSummary(focusCafeteriaId, ds.listPoiCrowdReports, school.id).then(
-      (r) => {
-        if (cancelled) return;
-        if (r.ok) {
-          setCafeteriaCrowd({
-            status: 'data',
-            level: r.level,
-            source: r.source,
-            reportSampleSize: r.reportSampleSize,
-            orderWeightedSum: r.orderWeightedSum,
-            ordersInPressureModel: r.ordersInPressureModel,
-            lastUpdated: r.lastReportAt,
-          });
-        } else {
-          setCafeteriaCrowd({ status: 'empty' });
-        }
-      },
-    );
+    void (async () => {
+      let orders: Order[] = [];
+      try {
+        orders = await getOrders();
+      } catch {
+        orders = [];
+      }
+      if (cancelled) return;
+      setPrepEstimateOrders(orders);
+      const r = await fetchCafeteriaCrowdSummary(
+        focusCafeteriaId,
+        ds.listPoiCrowdReports,
+        school.id,
+        orders,
+      );
+      if (cancelled) return;
+      if (r.ok) {
+        setCafeteriaCrowd({
+          status: 'data',
+          level: r.level,
+          source: r.source,
+          reportSampleSize: r.reportSampleSize,
+          orderWeightedSum: r.orderWeightedSum,
+          ordersInPressureModel: r.ordersInPressureModel,
+          lastUpdated: r.lastReportAt,
+        });
+      } else {
+        setCafeteriaCrowd({ status: 'empty' });
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, [focusCafeteriaId, ds, school.id]);
+
+  const prepLabelByVendorId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const v of getVendors()) {
+      map.set(v.id, estimateVendorPrepWaitFromOrders(v.id, prepEstimateOrders).labelZh);
+    }
+    return map;
+  }, [prepEstimateOrders]);
+
+  const refreshPrepEstimateOrders = useCallback(() => {
+    void getOrders()
+      .then(setPrepEstimateOrders)
+      .catch(() => {});
+  }, []);
 
   const handleToggleFav = useCallback(async (vendorId: string) => {
     const isFav = await toggleFavoriteVendor(vendorId);
@@ -192,12 +221,14 @@ export function CafeteriaScreen(props: any) {
     return (
       <VendorDetailView
         vendor={selectedVendor}
+        prepWaitLabelZh={prepLabelByVendorId.get(selectedVendor.id) ?? null}
         isFavorite={favorites.includes(selectedVendor.id)}
         onToggleFav={() => handleToggleFav(selectedVendor.id)}
         onBack={() => setSelectedVendor(null)}
         userUid={auth.user?.uid ?? 'anon'}
         userName={auth.user?.displayName ?? '匿名'}
         role={role}
+        onOrderPlaced={refreshPrepEstimateOrders}
       />
     );
   }
@@ -756,6 +787,7 @@ export function CafeteriaScreen(props: any) {
               <VendorCard
                 key={v.id}
                 vendor={v}
+                prepWaitLabelZh={prepLabelByVendorId.get(v.id) ?? null}
                 isFavorite={favorites.includes(v.id)}
                 onPress={() => setSelectedVendor(v)}
                 onToggleFav={() => handleToggleFav(v.id)}
@@ -800,6 +832,7 @@ export function CafeteriaScreen(props: any) {
                   <VendorCard
                     key={v.id}
                     vendor={v}
+                    prepWaitLabelZh={prepLabelByVendorId.get(v.id) ?? null}
                     isFavorite={favorites.includes(v.id)}
                     onPress={() => setSelectedVendor(v)}
                     onToggleFav={() => handleToggleFav(v.id)}
@@ -819,6 +852,7 @@ export function CafeteriaScreen(props: any) {
                     <VendorCard
                       key={v.id}
                       vendor={v}
+                      prepWaitLabelZh={prepLabelByVendorId.get(v.id) ?? null}
                       isFavorite
                       onPress={() => setSelectedVendor(v)}
                       onToggleFav={() => handleToggleFav(v.id)}
@@ -839,6 +873,7 @@ export function CafeteriaScreen(props: any) {
                     <VendorCard
                       key={v.id}
                       vendor={v}
+                      prepWaitLabelZh={prepLabelByVendorId.get(v.id) ?? null}
                       isFavorite={favorites.includes(v.id)}
                       onPress={() => setSelectedVendor(v)}
                       onToggleFav={() => handleToggleFav(v.id)}
@@ -1249,11 +1284,12 @@ function CafeteriaCard(props: {
 
 function VendorCard(props: {
   vendor: Vendor;
+  prepWaitLabelZh?: string | null;
   isFavorite: boolean;
   onPress: () => void;
   onToggleFav: () => void;
 }) {
-  const { vendor: v, isFavorite, onPress, onToggleFav } = props;
+  const { vendor: v, prepWaitLabelZh, isFavorite, onPress, onToggleFav } = props;
   const isOpen = isVendorCurrentlyOpen(v);
   const iconName = (CATEGORY_ICONS[v.category] ??
     'restaurant-outline') as keyof typeof Ionicons.glyphMap;
@@ -1307,6 +1343,11 @@ function VendorCard(props: {
         <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }}>
           {cafName} {v.floor} · {CATEGORY_LABELS[v.category]} · ${v.avgPrice}起
         </Text>
+        {prepWaitLabelZh ? (
+          <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
+            {prepWaitLabelZh}
+          </Text>
+        ) : null}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
           <Ionicons name="star" size={12} color="#F59E0B" />
           <Text style={{ color: '#F59E0B', fontSize: 12, fontWeight: '700' }}>
@@ -1336,14 +1377,26 @@ function VendorCard(props: {
 
 function VendorDetailView(props: {
   vendor: Vendor;
+  prepWaitLabelZh?: string | null;
   isFavorite: boolean;
   onToggleFav: () => void;
   onBack: () => void;
   userUid: string;
   userName: string;
   role: string;
+  onOrderPlaced?: () => void;
 }) {
-  const { vendor: v, isFavorite, onToggleFav, onBack, userUid, userName, role } = props;
+  const {
+    vendor: v,
+    prepWaitLabelZh,
+    isFavorite,
+    onToggleFav,
+    onBack,
+    userUid,
+    userName,
+    role,
+    onOrderPlaced,
+  } = props;
   const [tab, setTab] = useState<'menu' | 'reviews' | 'info'>('menu');
   const [reviews, setReviews] = useState<Review[]>([]);
   const [cart, setCart] = useState<OrderItem[]>([]);
@@ -1421,10 +1474,11 @@ function VendorDetailView(props: {
       Alert.alert('下單成功', `訂單已送出，請到 ${cafName} ${v.floor} ${v.name} 取餐${budgetMsg}`);
       setCart([]);
       setShowCart(false);
+      onOrderPlaced?.();
     } catch {
       Alert.alert('下單失敗', '請稍後再試');
     }
-  }, [cart, cartTotal, v, userUid, cafName, menuItems]);
+  }, [cart, cartTotal, v, userUid, cafName, menuItems, onOrderPlaced]);
 
   const handleReview = useCallback(async () => {
     if (!reviewText.trim()) return;
@@ -1492,6 +1546,11 @@ function VendorDetailView(props: {
               <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
                 {cafName} · {v.floor} {v.stallNumber} · {CATEGORY_LABELS[v.category]}
               </Text>
+              {prepWaitLabelZh ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}>
+                  {prepWaitLabelZh}
+                </Text>
+              ) : null}
             </View>
             <Pressable onPress={onToggleFav} style={{ padding: 4 }}>
               <Ionicons

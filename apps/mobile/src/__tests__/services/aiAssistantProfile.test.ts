@@ -69,6 +69,46 @@ describe('AI assistant capability profile', () => {
     expect(response.content).toContain('DataSource');
   });
 
+  it('puts wellbeing calls to action before general advice in offline chat', async () => {
+    const response = await chatWithCampusAssistant(
+      [{ role: 'user', content: '我頭痛想掛號' }],
+      { schoolId: 'tw-pu', userId: 'u1', userName: '測試同學' },
+    );
+    const paragraphs = response.content.split('\n\n');
+
+    expect(paragraphs[0]).toContain('身體不太舒服');
+    expect(paragraphs[1]).toContain('下一步');
+    expect(response.content).toContain('我不能替代醫師診斷');
+    expect(response.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'navigate',
+          params: expect.objectContaining({ screen: '校園', nested: 'Health' }),
+        }),
+      ]),
+    );
+  });
+
+  it('routes offline mood distress to campus health action', async () => {
+    const response = await chatWithCampusAssistant(
+      [{ role: 'user', content: '我最近壓力很大快撐不住' }],
+      { schoolId: 'tw-pu', userId: 'u1', userName: '測試同學' },
+    );
+    const paragraphs = response.content.split('\n\n');
+
+    expect(paragraphs[0]).toContain('壓力');
+    expect(paragraphs[1]).toContain('下一步');
+    expect(response.content).toContain('1925');
+    expect(response.actions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'navigate',
+          params: expect.objectContaining({ screen: '校園', nested: 'Health' }),
+        }),
+      ]),
+    );
+  });
+
   it('exposes the same identity policy for non-offline providers', () => {
     const answer = getAssistantIdentityAnswer('gemini');
     expect(answer).toContain('不能把 App 端模型參數量');

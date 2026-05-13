@@ -149,6 +149,8 @@ export type Order = {
   note: string;
   createdAt: string; // ISO
   estimatedPickup: string | null;
+  /** 可取餐時間（Firestore：readyAt；本地更新 ready 狀態時寫入） */
+  readyAt?: string | null;
   completedAt: string | null;
   cancelledAt: string | null;
   cancelReason: string | null;
@@ -3720,6 +3722,7 @@ function _mapFirestoreToLocalOrder(id: string, data: Record<string, any>): Order
     note: data.note ?? '',
     createdAt: toIso(data.createdAt) ?? new Date().toISOString(),
     estimatedPickup: toIso(data.pickupTime) ?? data.estimatedPickup ?? null,
+    readyAt: toIso(data.readyAt) ?? null,
     completedAt: toIso(data.completedAt) ?? null,
     cancelledAt: toIso(data.cancelledAt) ?? null,
     cancelReason: data.cancelReason ?? null,
@@ -3796,7 +3799,14 @@ export async function getOrders(studentUid?: string, vendorId?: string): Promise
 export async function createOrder(
   order: Omit<
     Order,
-    'id' | 'createdAt' | 'status' | 'completedAt' | 'cancelledAt' | 'cancelReason' | 'queueNumber'
+    | 'id'
+    | 'createdAt'
+    | 'status'
+    | 'readyAt'
+    | 'completedAt'
+    | 'cancelledAt'
+    | 'cancelReason'
+    | 'queueNumber'
   >,
 ): Promise<Order> {
   const schoolId = _getSchoolId();
@@ -3844,6 +3854,7 @@ export async function createOrder(
           id: orderId,
           status: 'pending',
           createdAt: new Date().toISOString(),
+          readyAt: null,
           completedAt: null,
           cancelledAt: null,
           cancelReason: null,
@@ -3871,6 +3882,7 @@ export async function createOrder(
     id: `ord-${Date.now()}`,
     status: 'pending',
     createdAt: new Date().toISOString(),
+    readyAt: null,
     completedAt: null,
     cancelledAt: null,
     cancelReason: null,
@@ -3927,6 +3939,7 @@ export async function updateOrderStatus(
   orders[idx] = {
     ...orders[idx],
     status,
+    ...(status === 'ready' ? { readyAt: new Date().toISOString() } : {}),
     ...(status === 'completed' ? { completedAt: new Date().toISOString() } : {}),
     ...(status === 'cancelled' ? { cancelledAt: new Date().toISOString() } : {}),
     ...extra,
@@ -4107,8 +4120,10 @@ export function aggregateCrowdReportsToSimpleLevel(
   };
 }
 
-/** 訂單取餐時段加權：sum 約 0～ORDER_PRESSURE_SCALE 對應低到高的現場壓力 proxy（不代表實際人數） */
+/** 單一餐廳：訂單加權 sum 約 0～此值對應由低到高的壓力 proxy（不代表實際人數） */
 const ORDER_PRESSURE_SCALE = 12;
+/** 全校三館加總：加權疊加後量級較大，分母單獨調整避免過早壓滿「人多」 */
+const ORDER_PRESSURE_SCALE_CAMPUS = 28;
 const CROWD_MERGE_W_REPORTS = 0.55;
 const CROWD_MERGE_W_ORDERS = 0.45;
 
@@ -4197,8 +4212,8 @@ export function aggregateOrderPickupPressure(
   return { sumWeight, ordersConsidered };
 }
 
-function numericPressureFromOrders(sumWeight: number): number {
-  return 1 + 3 * Math.min(1, sumWeight / ORDER_PRESSURE_SCALE);
+function numericPressureFromOrders(sumWeight: number, scale: number = ORDER_PRESSURE_SCALE): number {
+  return 1 + 3 * Math.min(1, sumWeight / scale);
 }
 
 function simpleCrowdLevelToNumeric(level: 'low' | 'medium' | 'high'): number {
@@ -4229,9 +4244,10 @@ function mergeReportAndOrderSignals(
   reportAgg: ReturnType<typeof aggregateCrowdReportsToSimpleLevel>,
   sumWeight: number,
   ordersConsidered: number,
-  options?: { minOrderSignal?: number },
+  options?: { minOrderSignal?: number; orderPressureScale?: number },
 ): CafeteriaCrowdSummaryResult {
-  const orderNumeric = numericPressureFromOrders(sumWeight);
+  const scale = options?.orderPressureScale ?? ORDER_PRESSURE_SCALE;
+  const orderNumeric = numericPressureFromOrders(sumWeight, scale);
   const hasReports = !!reportAgg;
   const minSig = options?.minOrderSignal ?? 0.2;
   const hasOrders = sumWeight >= minSig;
@@ -4270,12 +4286,14 @@ export async function fetchCafeteriaCrowdSummary(
   cafeteriaId: CafeteriaId,
   listPoiCrowdReports: (poiId: string, schoolId?: string) => Promise<PoiCrowdReport[]>,
   schoolId?: string,
+  /** 若已由呼叫端載入（例如與製作時間估算共用），可避免重複查詢 */
+  recentOrders?: Order[],
 ): Promise<CafeteriaCrowdSummaryResult> {
   const poiId = CAFETERIA_CROWD_POI_IDS[cafeteriaId];
   const nowMs = Date.now();
   const [reports, orders] = await Promise.all([
     listPoiCrowdReports(poiId, schoolId),
-    getOrders(),
+    recentOrders !== undefined ? Promise.resolve(recentOrders) : getOrders(),
   ]);
   const reportAgg = aggregateCrowdReportsToSimpleLevel(reports);
   const { sumWeight, ordersConsidered } = aggregateOrderPickupPressure(orders, cafeteriaId, nowMs);
@@ -4286,12 +4304,13 @@ export async function fetchCafeteriaCrowdSummary(
 export async function fetchCampusDiningCrowdSummary(
   listPoiCrowdReports: (poiId: string, schoolId?: string) => Promise<PoiCrowdReport[]>,
   schoolId?: string,
+  recentOrders?: Order[],
 ): Promise<CafeteriaCrowdSummaryResult> {
   const nowMs = Date.now();
   const ids = Object.values(CAFETERIA_CROWD_POI_IDS);
   const [batches, orders] = await Promise.all([
     Promise.all(ids.map((id) => listPoiCrowdReports(id, schoolId))),
-    getOrders(),
+    recentOrders !== undefined ? Promise.resolve(recentOrders) : getOrders(),
   ]);
   const mergedReports = batches.flat();
   const reportAgg = aggregateCrowdReportsToSimpleLevel(mergedReports);
@@ -4307,10 +4326,134 @@ export async function fetchCampusDiningCrowdSummary(
 
   return mergeReportAndOrderSignals(reportAgg, sumAll, ordersConsidered, {
     minOrderSignal: 0.45,
+    orderPressureScale: ORDER_PRESSURE_SCALE_CAMPUS,
   });
 }
 
 // ── 即時資訊估算 ──
+
+/** 最近 N 筆訂單取樣上限（Firestore getOrders 無篩選時亦約 50） */
+const PREP_ESTIMATE_MAX_SAMPLES = 45;
+
+/** 原始製作分鐘數合理區間（過濾離群／錯誤時間戳） */
+const PREP_RAW_MIN_MINUTES = 0.75;
+const PREP_RAW_MAX_MINUTES = 120;
+
+/** 顯示用上下限（分鐘） */
+const PREP_DISPLAY_MIN = 3;
+const PREP_DISPLAY_MAX = 45;
+
+/** 樣本數低於此時改顯示區間（最小～最大） */
+const PREP_RANGE_LABEL_THRESHOLD = 8;
+
+function medianSorted(sorted: number[]): number {
+  const n = sorted.length;
+  if (n === 0) return NaN;
+  const mid = Math.floor(n / 2);
+  return n % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/** 去掉約上下各 10% 後取中位數，樣本過少時退回一般中位數 */
+function trimmedMedianMinutes(samples: number[]): number | null {
+  if (samples.length === 0) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  if (sorted.length <= 4) return medianSorted(sorted);
+  const trim = Math.max(1, Math.floor(sorted.length * 0.1));
+  const trimmed = sorted.slice(trim, sorted.length - trim);
+  return trimmed.length > 0 ? medianSorted(trimmed) : medianSorted(sorted);
+}
+
+function clampPrepDisplayMinutes(m: number): number {
+  return Math.round(Math.min(PREP_DISPLAY_MAX, Math.max(PREP_DISPLAY_MIN, m)));
+}
+
+/**
+ * 單筆訂單：建立時間 → 可取餐／完成時間的分鐘數。
+ * 結束時間優先使用 Firestore `readyAt`，否則 `completedAt`。
+ */
+export function orderPrepElapsedMinutes(order: Order): number | null {
+  if (order.status === 'cancelled') return null;
+  const startMs = new Date(order.createdAt).getTime();
+  if (Number.isNaN(startMs)) return null;
+  const endIso = order.readyAt ?? order.completedAt;
+  if (!endIso) return null;
+  const endMs = new Date(endIso).getTime();
+  if (Number.isNaN(endMs) || endMs <= startMs) return null;
+  const mins = (endMs - startMs) / 60000;
+  if (mins < PREP_RAW_MIN_MINUTES || mins > PREP_RAW_MAX_MINUTES) return null;
+  return mins;
+}
+
+export type VendorPrepWaitEstimate = {
+  sampleSize: number;
+  /** 截尾後中位數（未截顯示上下限） */
+  medianMinutesRaw: number | null;
+  labelZh: string | null;
+};
+
+function buildPrepLabelZh(sampleSize: number, sliceMins: number[]): string | null {
+  if (sampleSize === 0 || sliceMins.length === 0) return null;
+
+  if (sampleSize < PREP_RANGE_LABEL_THRESHOLD) {
+    const low = clampPrepDisplayMinutes(Math.min(...sliceMins));
+    const high = clampPrepDisplayMinutes(Math.max(...sliceMins));
+    return low === high ? `預估製作約 ${low} 分鐘` : `預估製作約 ${low}～${high} 分鐘`;
+  }
+
+  const robust = trimmedMedianMinutes(sliceMins);
+  if (robust == null || Number.isNaN(robust)) return null;
+  const mid = clampPrepDisplayMinutes(robust);
+  return `預估製作約 ${mid} 分鐘`;
+}
+
+function prepDurationsForOrders(
+  orders: Order[],
+  pred: (o: Order) => boolean,
+): Array<{ mins: number; createdMs: number }> {
+  const out: Array<{ mins: number; createdMs: number }> = [];
+  for (const o of orders) {
+    if (!pred(o)) continue;
+    const mins = orderPrepElapsedMinutes(o);
+    if (mins == null) continue;
+    const createdMs = new Date(o.createdAt).getTime();
+    if (Number.isNaN(createdMs)) continue;
+    out.push({ mins, createdMs });
+  }
+  out.sort((a, b) => b.createdMs - a.createdMs);
+  return out.slice(0, PREP_ESTIMATE_MAX_SAMPLES);
+}
+
+/** 依近期已完成／可取餐訂單推算單一店家製作耗時（顯示文案為繁中） */
+export function estimateVendorPrepWaitFromOrders(
+  vendorId: string,
+  orders: Order[],
+): VendorPrepWaitEstimate {
+  const rows = prepDurationsForOrders(orders, (o) => o.vendorId === vendorId);
+  const sliceMins = rows.map((r) => r.mins);
+  const sampleSize = sliceMins.length;
+  const medianMinutesRaw = trimmedMedianMinutes(sliceMins);
+  return {
+    sampleSize,
+    medianMinutesRaw,
+    labelZh: buildPrepLabelZh(sampleSize, sliceMins),
+  };
+}
+
+/** 同一餐廳館別內全部店家訂單合併推算（POI 餐廳頁用） */
+export function estimateCafeteriaPrepWaitFromOrders(
+  cafeteriaId: CafeteriaId,
+  orders: Order[],
+): VendorPrepWaitEstimate {
+  const rows = prepDurationsForOrders(orders, (o) => o.cafeteriaId === cafeteriaId);
+  const sliceMins = rows.map((r) => r.mins);
+  const sampleSize = sliceMins.length;
+  const medianMinutesRaw = trimmedMedianMinutes(sliceMins);
+  return {
+    sampleSize,
+    medianMinutesRaw,
+    labelZh: buildPrepLabelZh(sampleSize, sliceMins),
+  };
+}
 
 /** 估算目前等待時間（根據排隊訂單數量） */
 export async function estimateWaitTime(vendorId: string): Promise<number> {

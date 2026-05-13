@@ -66,3 +66,7 @@ export * from './puGradRequirements';
 export * from './tenant';
 export * from './puAuth';
 export * from './postLoginRoles';
+export * from './lms/quizScoring';
+export * from './lms/gradebookCompute';
+export * from './companion/spriteEngine';
+export * from './companion/gardenEngine';

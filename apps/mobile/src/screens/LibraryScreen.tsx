@@ -50,6 +50,8 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { analytics } from '../services/analytics';
+import * as WebBrowser from 'expo-web-browser';
+import { buildLibrarySearchUrl } from '../services/libraryOpacClient';
 
 import {
   GAESIA_LIBRARY_INFO,
@@ -82,8 +84,10 @@ import {
   STAFF_PICKS,
   getBookById,
 } from '../data/puLibraryData';
+import { LibraryOpacPanel } from './LibraryOpacPanel';
 
 type LibTab = 'home' | 'search' | 'floors' | 'rooms' | 'timer';
+type SearchChannel = 'app' | 'opac';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -96,6 +100,9 @@ export function LibraryScreen(props: Record<string, unknown>) {
   const auth = useAuth();
 
   const [tab, setTab] = useState<LibTab>('home');
+  /** 「找書」預設官方館藏；本地為書架／樓層導覽示意 */
+  const [searchChannel, setSearchChannel] = useState<SearchChannel>('opac');
+  const [opacQuery, setOpacQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -292,6 +299,54 @@ export function LibraryScreen(props: Record<string, unknown>) {
           selected={tab}
           onChange={(k) => setTab(k as LibTab)}
         />
+
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 8,
+            paddingVertical: 4,
+          }}
+        >
+          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>快速：</Text>
+          <Pressable
+            onPress={() => {
+              setTab('search');
+              setSearchChannel('app');
+            }}
+            style={({ pressed }) => ({
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 999,
+              backgroundColor: pressed ? theme.colors.accentSoft : theme.colors.surface2,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            })}
+          >
+            <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>
+              館內位置導覽
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setTab('search');
+              setSearchChannel('opac');
+            }}
+            style={({ pressed }) => ({
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: 999,
+              backgroundColor: pressed ? theme.colors.accentSoft : theme.colors.surface2,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            })}
+          >
+            <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '700' }}>
+              官方館藏查詢
+            </Text>
+          </Pressable>
+        </View>
 
         {/* ═══════════ HOME TAB ═══════════ */}
         {tab === 'home' && (
@@ -514,7 +569,11 @@ export function LibraryScreen(props: Record<string, unknown>) {
             </AnimatedCard>
 
             {/* Staff picks */}
-            <AnimatedCard title="館員推薦" subtitle="本月精選好書" delay={300}>
+            <AnimatedCard
+              title="館員推薦"
+              subtitle="書名為展示用；是否在館以 WebPac 官方館藏為準"
+              delay={300}
+            >
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -669,6 +728,47 @@ export function LibraryScreen(props: Record<string, unknown>) {
         {/* ═══════════ SEARCH TAB ═══════════ */}
         {tab === 'search' && (
           <>
+            <SegmentedControl
+              options={[
+                { key: 'opac', label: '官方館藏（準）' },
+                { key: 'app', label: '館內位置（示意）' },
+              ]}
+              selected={searchChannel}
+              onChange={(k) => setSearchChannel(k as SearchChannel)}
+            />
+
+            {searchChannel === 'opac' ? (
+              <LibraryOpacPanel
+                variant="embedded"
+                query={opacQuery}
+                onQueryChange={setOpacQuery}
+                onRequestFullscreen={(kw) =>
+                  nav?.navigate?.('LibraryCatalog', { initialQuery: kw })
+                }
+              />
+            ) : (
+              <>
+            <View
+              style={{
+                paddingVertical: 8,
+                paddingHorizontal: 12,
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.surface2,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+                以下為 App 內建書架／樓層導覽示意，可當「去哪找類書」參考；是否在館請改選「官方館藏」
+                （官方館藏（準））。
+              </Text>
+              <Pressable onPress={() => setSearchChannel('opac')} style={{ marginTop: 6 }}>
+                <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>
+                  → 切換到官方館藏查詢
+                </Text>
+              </Pressable>
+            </View>
+
             <SearchBar
               value={searchQuery}
               onChange={setSearchQuery}
@@ -713,11 +813,33 @@ export function LibraryScreen(props: Record<string, unknown>) {
                       <BookCard
                         key={book.id}
                         book={book}
+                        illustrative
                         onPress={() => setSelectedBook(book)}
                         onNavigate={() => handleBookARNav(book)}
                       />
                     ))}
                   </View>
+                </AnimatedCard>
+
+                <AnimatedCard
+                  title="改查官方館藏"
+                  subtitle="是否在館、複本與預約以 WebPac 為準"
+                  delay={80}
+                >
+                  <Button
+                    text={`用「${searchQuery.trim()}」查官方館藏`}
+                    kind="primary"
+                    onPress={() => {
+                      setOpacQuery(searchQuery.trim());
+                      setSearchChannel('opac');
+                    }}
+                  />
+                  <Button
+                    text="改在外部瀏覽器開啟"
+                    onPress={() =>
+                      void WebBrowser.openBrowserAsync(buildLibrarySearchUrl(searchQuery.trim()))
+                    }
+                  />
                 </AnimatedCard>
               </>
             ) : searchQuery && !isSearching ? (
@@ -793,6 +915,8 @@ export function LibraryScreen(props: Record<string, unknown>) {
                     ))}
                   </View>
                 </AnimatedCard>
+              </>
+            )}
               </>
             )}
           </>
@@ -1324,7 +1448,19 @@ export function LibraryScreen(props: Record<string, unknown>) {
                   {selectedBook.author}
                 </Text>
 
-                {/* Availability */}
+                <Text
+                  style={{
+                    color: theme.colors.muted,
+                    fontSize: 12,
+                    textAlign: 'center',
+                    marginTop: 10,
+                    lineHeight: 18,
+                  }}
+                >
+                  「可借／冊數」為 App 示意；實際請以 WebPac 官方館藏為準。
+                </Text>
+
+                {/* Availability (示意) */}
                 <View
                   style={{
                     flexDirection: 'row',
@@ -1355,8 +1491,8 @@ export function LibraryScreen(props: Record<string, unknown>) {
                       }}
                     >
                       {selectedBook.availableCopies > 0
-                        ? `可借 ${selectedBook.availableCopies}/${selectedBook.totalCopies}`
-                        : '全數借出'}
+                        ? `示意：可借 ${selectedBook.availableCopies}/${selectedBook.totalCopies}`
+                        : '示意：全數借出'}
                     </Text>
                   </View>
                   <View
@@ -1444,7 +1580,7 @@ export function LibraryScreen(props: Record<string, unknown>) {
                 </View>
 
                 {/* Actions */}
-                <View style={{ flexDirection: 'row', gap: 12, marginTop: 24, marginBottom: 20 }}>
+                <View style={{ flexDirection: 'row', gap: 12, marginTop: 24, marginBottom: 12 }}>
                   <View style={{ flex: 1 }}>
                     <Button
                       text="AR 帶我去書架"
@@ -1470,6 +1606,20 @@ export function LibraryScreen(props: Record<string, unknown>) {
                     </View>
                   )}
                 </View>
+
+                <Button
+                  text="校方館藏（WebPac）查這本"
+                  onPress={() =>
+                    void WebBrowser.openBrowserAsync(
+                      buildLibrarySearchUrl(
+                        (() => {
+                          const raw = selectedBook.isbn.replace(/-/g, '').trim();
+                          return raw.length >= 10 ? raw : selectedBook.title;
+                        })(),
+                      ),
+                    )
+                  }
+                />
 
                 <Button text="關閉" onPress={() => setSelectedBook(null)} />
               </ScrollView>
@@ -1666,10 +1816,12 @@ function StatMini({
 
 function BookCard({
   book,
+  illustrative,
   onPress,
   onNavigate,
 }: {
   book: LibraryBookEntry;
+  illustrative?: boolean;
   onPress: () => void;
   onNavigate: () => void;
 }) {
@@ -1708,7 +1860,21 @@ function BookCard({
         <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
           {book.author.split(',')[0]}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+          {illustrative ? (
+            <View
+              style={{
+                paddingHorizontal: 6,
+                paddingVertical: 2,
+                borderRadius: 4,
+                backgroundColor: theme.colors.border,
+              }}
+            >
+              <Text style={{ color: theme.colors.muted, fontSize: 10, fontWeight: '700' }}>
+                導覽示意
+              </Text>
+            </View>
+          ) : null}
           <View
             style={{
               paddingHorizontal: 6,

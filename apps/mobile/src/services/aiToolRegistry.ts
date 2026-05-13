@@ -1500,6 +1500,145 @@ const TOOL_SPECS: readonly ToolSpec[] = [
     ],
     handler: makeLegacyHandler('query_library', 'read'),
   },
+
+  // ════════════════════════════════════════════════════════════
+  // TronClass parity 新增 LMS 代理工具
+  // ════════════════════════════════════════════════════════════
+
+  {
+    name: 'query_modules',
+    description: '查詢某課程的單元與教材列表。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'courseSpaceId', description: '課程空間 ID', type: 'string', required: true, promptIfMissing: '請告訴我哪一門課？' },
+      { name: 'includeMaterials', description: '是否一併回傳教材列表', type: 'boolean', default: true },
+    ],
+    handler: makeLegacyHandler('query_modules', 'read'),
+  },
+  {
+    name: 'query_quizzes',
+    description: '查詢使用者待答 / 已交測驗。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'courseSpaceId', description: '課程空間 ID', type: 'string' },
+      { name: 'status', description: 'pending/submitted/all', type: 'enum', enum: ['pending', 'submitted', 'all'], default: 'pending' },
+    ],
+    handler: makeLegacyHandler('query_quizzes', 'read'),
+  },
+  {
+    name: 'submit_quiz',
+    description: '提交測驗作答（先建立草稿，需使用者於 QuizTakingScreen 按送出）。',
+    kind: 'write',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'quizId', description: '測驗 ID', type: 'string', required: true, promptIfMissing: '哪一份測驗？' },
+      { name: 'courseSpaceId', description: '課程空間 ID', type: 'string', required: true, promptIfMissing: '哪一門課？' },
+      { name: 'answers', description: '作答（JSON 陣列）', type: 'string_list', required: true, promptIfMissing: '我還沒看到你的作答。' },
+    ],
+    handler: makeLegacyHandler('submit_quiz', 'write'),
+  },
+  {
+    name: 'list_gradebook',
+    description: '查看自己（學生）或全班（教師）的成績簿。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'courseSpaceId', description: '課程空間 ID', type: 'string', required: true, promptIfMissing: '哪一門課？' },
+    ],
+    handler: makeLegacyHandler('list_gradebook', 'read'),
+  },
+  {
+    name: 'post_discussion',
+    description: '在課程討論串發文（標題、內容）。',
+    kind: 'write',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'courseSpaceId', description: '課程空間 ID', type: 'string', required: true, promptIfMissing: '哪一門課？' },
+      { name: 'title', description: '討論標題', type: 'string', required: true, promptIfMissing: '請給我討論的標題。' },
+      { name: 'body', description: '討論內容', type: 'string', required: true, promptIfMissing: '請告訴我想討論什麼？' },
+      { name: 'threadId', description: '若回覆既有討論串，請提供', type: 'string' },
+    ],
+    handler: makeLegacyHandler('post_discussion', 'write'),
+  },
+  {
+    name: 'build_study_plan',
+    description: 'AI 切分作業 + 安排讀書時間表，會結合 query_assignments / query_calendar 結果。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'horizonDays', description: '規劃天數（預設 7）', type: 'integer', default: 7 },
+      { name: 'dailyStudyMinutes', description: '每日讀書分鐘數（預設 90）', type: 'integer', default: 90 },
+    ],
+    handler: makeLegacyHandler('build_study_plan', 'read'),
+  },
+  {
+    name: 'risk_radar',
+    description: '學習風險雷達：依出席率、作業逾期、低分測驗計算風險等級。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'courseSpaceId', description: '若只看單一課程，提供 ID', type: 'string' },
+    ],
+    handler: makeLegacyHandler('risk_radar', 'read'),
+  },
+
+  // ════════════════════════════════════════════════════════════
+  // Campus Companion（校園精靈 + 學習花園 + 同儕共生）
+  // ════════════════════════════════════════════════════════════
+
+  {
+    name: 'query_companion',
+    description: '查詢使用者目前的校園精靈與學習花園狀態（季節、氣象、care hint、植物階段）。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'days', description: '聚合最近 N 天的活動（預設 7）', type: 'integer', default: 7 },
+    ],
+    handler: makeLegacyHandler('query_companion', 'read'),
+  },
+  {
+    name: 'pet_companion',
+    description: '與精靈互動：撫摸 / 餵食（用之前採收的知識點）/ 換裝。',
+    kind: 'write',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'action', description: 'pat / feed / dress', type: 'enum', enum: ['pat', 'feed', 'dress'], required: true, promptIfMissing: '想對精靈做什麼？撫摸 / 餵食 / 換裝？' },
+      { name: 'itemId', description: 'feed/dress 用：道具 ID', type: 'string' },
+    ],
+    handler: makeLegacyHandler('pet_companion', 'write'),
+  },
+  {
+    name: 'harvest_plant',
+    description: '採收已結果且通過的課程植物，換成知識點。',
+    kind: 'write',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'courseId', description: '要採收的課程 ID', type: 'string', required: true, promptIfMissing: '要採收哪一門課？' },
+    ],
+    handler: makeLegacyHandler('harvest_plant', 'write'),
+  },
+  {
+    name: 'send_encouragement',
+    description: '向同學寄出一句「鼓勵雲」（匿名或具名，僅顯示一句話 + emoji）。',
+    kind: 'cross_role_write',
+    allowedRoles: ALL_ROLES,
+    fields: [
+      { name: 'recipientUid', description: '收件人 uid', type: 'string', required: true, promptIfMissing: '要鼓勵哪位同學？' },
+      { name: 'text', description: '鼓勵語（≤ 30 字）', type: 'string', required: true, promptIfMissing: '你想說什麼？' },
+      { name: 'anonymous', description: '是否匿名', type: 'boolean', default: true },
+    ],
+    handler: makeLegacyHandler('send_encouragement', 'cross_role_write'),
+  },
+  {
+    name: 'explore_constellation',
+    description: '查看校園星圖：去過的地點、點亮的星座、本月限定星座。',
+    kind: 'read',
+    allowedRoles: ALL_ROLES,
+    fields: [],
+    handler: makeLegacyHandler('explore_constellation', 'read'),
+  },
 ];
 
 // 建立 name + alias 索引

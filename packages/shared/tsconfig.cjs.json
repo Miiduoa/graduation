@@ -10,5 +10,5 @@
     "outDir": "dist-cjs",
     "rootDir": "src"
   },
-  "include": ["src/postLoginRoles.ts"]
+  "include": ["src/postLoginRoles.ts", "src/lms/**/*.ts", "src/companion/**/*.ts"]
 }

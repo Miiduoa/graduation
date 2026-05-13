@@ -247,7 +247,7 @@ export async function submitQuiz(input: {
   content?: string;
   answers?: Record<string, string | string[]>;
   attachments?: Submission['attachments'];
-}): Promise<Submission> {
+}): Promise<Submission & { autoScore?: { earned: number; total: number; percentage: number | null; needsManualGrading: boolean } }> {
   const db = getDb();
   const now = new Date().toISOString();
   const status: Submission['status'] = 'submitted';
@@ -261,6 +261,48 @@ export async function submitQuiz(input: {
     input.userId,
   );
 
+  // ── 自動計分（TronClass parity 測驗引擎，packages/shared/src/lms/quizScoring）──
+  let autoScore:
+    | { earned: number; total: number; percentage: number | null; needsManualGrading: boolean }
+    | undefined;
+  try {
+    const { scoreQuizAttempt } = await import('@campus/shared');
+    const quiz = await getQuiz(input.quizId, input.userId, input.courseSpaceId);
+    const questions = Array.isArray(quiz?.questions) ? quiz!.questions! : [];
+    if (questions.length > 0 && input.answers) {
+      const userAnswers = Object.entries(input.answers).map(([qid, val]) => ({
+        questionId: qid,
+        value: val,
+      }));
+      const attempt = scoreQuizAttempt(
+        questions.map((q) => ({
+          id: q.id,
+          type: q.type,
+          prompt: q.prompt,
+          points: q.points ?? 1,
+          options: q.options?.map((o) => ({
+            id: o.id,
+            label: o.label,
+            value: o.value,
+            // 由 Firestore questions 直接帶 isCorrect 旗標
+            isCorrect: (o as unknown as { isCorrect?: boolean }).isCorrect === true,
+          })),
+        })),
+        userAnswers,
+        { submittedAt: now },
+      );
+      autoScore = {
+        earned: attempt.earnedPoints,
+        total: attempt.totalPoints,
+        percentage: attempt.percentage,
+        needsManualGrading: attempt.needsManualGrading,
+      };
+    }
+  } catch (e) {
+    // 計分失敗仍應允許提交（人工評分 fallback）
+    console.warn('[submitQuiz] auto-score failed', e);
+  }
+
   await setDoc(
     ref,
     {
@@ -273,6 +315,7 @@ export async function submitQuiz(input: {
       submittedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       source: 'quiz_center',
+      ...(autoScore && { autoScore }),
     },
     { merge: true },
   );
@@ -285,6 +328,7 @@ export async function submitQuiz(input: {
     attachments: input.attachments,
     submittedAt: now,
     status,
+    ...(autoScore && { autoScore, grade: autoScore.percentage ?? undefined }),
   };
 }
 

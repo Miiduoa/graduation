@@ -11,6 +11,7 @@ import { QRCodeScreen } from './QRCodeScreen';
 import { GlobalSearchScreen } from './GlobalSearchScreen';
 import { WidgetPreviewScreen } from './WidgetPreviewScreen';
 import { AchievementsScreen } from './AchievementsScreen';
+import { CampusGardenScreen } from './CampusGardenScreen';
 import { AdminDashboardScreen } from './AdminDashboardScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
@@ -91,6 +92,11 @@ export function MeStack() {
         name="Achievements"
         component={AchievementsScreen}
         options={{ title: '成就與積分' }}
+      />
+      <Stack.Screen
+        name="CampusGarden"
+        component={CampusGardenScreen}
+        options={{ title: '校園園地' }}
       />
       <Stack.Screen
         name="GlobalSearch"
