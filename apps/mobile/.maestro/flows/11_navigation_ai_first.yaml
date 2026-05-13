@@ -2,7 +2,7 @@
 # 4+1 AI-First：底部四 Tab、頭像抽屜、中央 AI 球
 # 需在已通過 Onboarding 的情境下執行（或接在 01 之後）。
 
-appId: com.campus.app
+appId: ${APP_ID}
 name: Navigation AI-First Shell
 tags:
   - smoke
@@ -13,21 +13,26 @@ tags:
 
 - launchApp
 
-# 主儀表／今天
+- tapOn:
+    text: 'Reload'
+    optional: true
+
+# 主儀表／今天 Tab（以 testID 斷言，避免字型過小導致無障礙樹不含字面）
 - extendedWaitUntil:
-    visible: '公告'
-    timeout: 12000
+    visible:
+      id: 'tab-Today'
+    timeout: 45000
 
 
-# 底部情境 Tab（標籤為 permissions.ts 的 UNIFIED_TABS.label）
+# 底部情境 Tab（FloatingTabBar testID tab-<路由名>）
 - assertVisible:
-    text: '今天'
+    id: 'tab-Today'
 - assertVisible:
-    text: '學習'
+    id: 'tab-學習'
 - assertVisible:
-    text: '校園'
+    id: 'tab-校園'
 - assertVisible:
-    text: '訊息'
+    id: 'tab-訊息'
 
 - takeScreenshot: ai_first_tabs
 

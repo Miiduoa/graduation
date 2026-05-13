@@ -1720,7 +1720,11 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource() || !ctx.userId) return { success: true, data: [], summary: '無法查詢對話。' };
     try {
       const ds = getDataSource();
-      const convos = await ds.listConversations(ctx.userId, undefined, ctx.schoolId);
+      const convos = (await ds.listConversations(ctx.userId, undefined, ctx.schoolId)).map((c: any) => {
+        const members = Array.isArray(c.memberIds) ? c.memberIds : [];
+        const peerId = c.peerId ?? members.find((id: string) => id !== ctx.userId);
+        return { ...c, peerId };
+      });
       if (convos.length === 0) return { success: true, data: [], summary: '目前沒有對話。' };
       const summary = convos.slice(0, 5).map((c, i) =>
         `${i + 1}. 對話 ${c.id.slice(0, 8)}… (${(c as any).memberIds?.length ?? '?'} 人)${(c as any).lastMessageText ? ` — ${(c as any).lastMessageText.slice(0, 30)}` : ''}`
@@ -1820,6 +1824,9 @@ const TOOL_EXECUTORS: Record<
 
   send_message: async (args, ctx) => {
     if (!hasDataSource() || !ctx.userId) return { success: false, error: '未登入', summary: '需要登入才能發送訊息。', isWrite: true };
+    if (!args.peerId || !args.content) {
+      return { success: false, isWrite: false, summary: '請告訴我要傳給誰，以及要傳什麼內容。' };
+    }
     try {
       const ds = getDataSource();
       const convoId = `dm_${ctx.schoolId}_${[ctx.userId, args.peerId].sort().join('_')}`;
@@ -2045,6 +2052,9 @@ const TOOL_EXECUTORS: Record<
 
   renew_book: async (args, ctx) => {
     if (!hasDataSource() || !ctx.userId) return { success: false, error: '未登入', summary: '需要登入才能續借。', isWrite: true };
+    if (!args.loanId) {
+      return { success: false, isWrite: false, summary: '請指定要續借哪一本書，或先查借閱紀錄後選一本。' };
+    }
     try {
       const ds = getDataSource();
       const loan = await ds.renewBook(args.loanId, ctx.userId, ctx.schoolId);
@@ -2105,6 +2115,9 @@ const TOOL_EXECUTORS: Record<
 
   start_attendance: async (args, ctx) => {
     if (!hasDataSource()) return { success: false, summary: '無法啟動點名。', isWrite: true };
+    if (!args.courseSpaceId) {
+      return { success: false, isWrite: false, summary: '請指定要啟動點名的課程。' };
+    }
     try {
       const ds = getDataSource();
       const result = await ds.startAttendanceSession({ courseSpaceId: args.courseSpaceId });
@@ -2121,6 +2134,9 @@ const TOOL_EXECUTORS: Record<
 
   create_assignment: async (args, ctx) => {
     if (!hasDataSource()) return { success: false, summary: '無法建立作業。', isWrite: true };
+    if (!args.groupId || !args.title) {
+      return { success: false, isWrite: false, summary: '請指定要在哪門課建立作業，以及作業標題。' };
+    }
     try {
       const ds = getDataSource();
       const assignment = await ds.createAssignment({
@@ -2139,6 +2155,9 @@ const TOOL_EXECUTORS: Record<
 
   grade_submission: async (args, ctx) => {
     if (!hasDataSource()) return { success: false, summary: '無法批改。', isWrite: true };
+    if (!args.submissionId || !args.grade) {
+      return { success: false, isWrite: false, summary: '請指定要批改的繳交紀錄與分數。' };
+    }
     try {
       const ds = getDataSource();
       const result = await ds.gradeSubmission(args.submissionId, parseInt(args.grade), args.feedback);
@@ -2163,6 +2182,9 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource() || !ctx.userId) {
       return { success: false, isWrite: true, summary: '無法提交作業：資料來源或使用者未登入。' };
     }
+    if (!args.assignmentId || !args.groupId || !args.content) {
+      return { success: false, isWrite: false, summary: '請指定要繳交哪份作業，並提供繳交內容。' };
+    }
     try {
       const ds = getDataSource();
       const result = await ds.submitAssignment({
@@ -2181,6 +2203,9 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource() || !ctx.userId) {
       return { success: false, isWrite: true, summary: '無法選課：資料來源或使用者未登入。' };
     }
+    if (!args.courseId || !args.semester) {
+      return { success: false, isWrite: false, summary: '請指定要加選的課程與學期。' };
+    }
     try {
       const ds = getDataSource();
       const enrollment = await ds.enrollCourse(ctx.userId, args.courseId, args.semester, ctx.schoolId);
@@ -2193,6 +2218,9 @@ const TOOL_EXECUTORS: Record<
   drop_course: async (args, ctx) => {
     if (!hasDataSource()) {
       return { success: false, isWrite: true, summary: '無法退選：資料來源未連接。' };
+    }
+    if (!args.enrollmentId) {
+      return { success: false, isWrite: false, summary: '請指定要退選哪一門課，或先查目前選課紀錄後選一筆。' };
     }
     try {
       const ds = getDataSource();
@@ -2207,6 +2235,9 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource()) {
       return { success: false, isWrite: true, summary: '無法取消預約：資料來源未連接。' };
     }
+    if (!args.reservationId) {
+      return { success: false, isWrite: false, summary: '請指定要取消哪一筆座位預約。' };
+    }
     try {
       const ds = getDataSource();
       await ds.cancelSeatReservation(args.reservationId, ctx.userId, ctx.schoolId);
@@ -2220,6 +2251,9 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource()) {
       return { success: false, isWrite: true, summary: '無法還書：資料來源未連接。' };
     }
+    if (!args.loanId) {
+      return { success: false, isWrite: false, summary: '請指定要歸還哪一本書，或先查借閱紀錄後選一本。' };
+    }
     try {
       const ds = getDataSource();
       await ds.returnBook(args.loanId, ctx.userId, ctx.schoolId);
@@ -2232,6 +2266,9 @@ const TOOL_EXECUTORS: Record<
   unregister_event: async (args, ctx) => {
     if (!hasDataSource() || !ctx.userId) {
       return { success: false, isWrite: true, summary: '無法取消報名：資料來源或使用者未登入。' };
+    }
+    if (!args.eventId) {
+      return { success: false, isWrite: false, summary: '請指定要取消報名的活動。' };
     }
     try {
       const ds = getDataSource();
@@ -2366,6 +2403,9 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource() || !ctx.userId) {
       return { success: false, isWrite: true, summary: '無法加入群組：資料來源或使用者未登入。' };
     }
+    if (!args.groupId) {
+      return { success: false, isWrite: false, summary: '請提供群組代碼或群組 ID。' };
+    }
     try {
       const ds = getDataSource();
       const member = await ds.joinGroup(args.groupId, ctx.userId, args.joinCode);
@@ -2378,6 +2418,9 @@ const TOOL_EXECUTORS: Record<
   create_group_post: async (args, ctx) => {
     if (!hasDataSource() || !ctx.userId) {
       return { success: false, isWrite: true, summary: '無法發布貼文：資料來源或使用者未登入。' };
+    }
+    if (!args.groupId || !args.content) {
+      return { success: false, isWrite: false, summary: '請指定要發到哪個群組，以及貼文內容。' };
     }
     try {
       const ds = getDataSource();
@@ -2396,6 +2439,9 @@ const TOOL_EXECUTORS: Record<
   confirm_package_pickup: async (args, ctx) => {
     if (!hasDataSource()) {
       return { success: false, isWrite: true, summary: '無法確認領取：資料來源未連接。' };
+    }
+    if (!args.packageId) {
+      return { success: false, isWrite: false, summary: '請指定要確認領取哪一件包裹。' };
     }
     try {
       const ds = getDataSource();
@@ -3037,6 +3083,9 @@ const TOOL_EXECUTORS: Record<
     if (!hasDataSource() || !ctx.userId) {
       return { success: false, isWrite: true, summary: '無法評分：資料來源或使用者未登入。' };
     }
+    if (!args.menuItemId || !args.rating) {
+      return { success: false, isWrite: false, summary: '請指定要評分的餐點與分數。' };
+    }
     try {
       const ds = getDataSource();
       const rating = parseInt(args.rating, 10);
@@ -3051,6 +3100,9 @@ const TOOL_EXECUTORS: Record<
   update_calendar_event: async (args, ctx) => {
     if (!hasDataSource()) {
       return { success: false, isWrite: true, summary: '無法修改事件：資料來源未連接。' };
+    }
+    if (!args.eventId) {
+      return { success: false, isWrite: false, summary: '請指定要修改哪一個行事曆事件。' };
     }
     try {
       const ds = getDataSource();
@@ -3069,6 +3121,9 @@ const TOOL_EXECUTORS: Record<
   delete_calendar_event: async (args, ctx) => {
     if (!hasDataSource()) {
       return { success: false, isWrite: true, summary: '無法刪除事件：資料來源未連接。' };
+    }
+    if (!args.eventId) {
+      return { success: false, isWrite: false, summary: '請指定要刪除哪一個行事曆事件。' };
     }
     try {
       const ds = getDataSource();

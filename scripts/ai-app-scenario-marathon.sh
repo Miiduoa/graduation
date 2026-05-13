@@ -29,6 +29,7 @@ JEST_MOBILE=(
   "src/__tests__/services/aiConversationSim.test.ts"
   "src/__tests__/services/aiConversationQuality.test.ts"
   "src/__tests__/services/aiAgentWideCoverage.test.ts"
+  "src/__tests__/services/aiAgentSafetyHardening.test.ts"
   "src/__tests__/services/aiSelfDialog.test.ts"
   "src/__tests__/services/aiAssistantProfile.test.ts"
   "src/__tests__/services/aiAgentRouting.test.ts"

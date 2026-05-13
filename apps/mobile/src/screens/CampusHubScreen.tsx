@@ -28,6 +28,7 @@ import { EmptyState } from '../ui/components';
 import { navigateToCourseScreen, migrateTabName } from '../utils/courseNavigation';
 import { aiOverlay } from '../app/useAIOverlay';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
+import { getCampusPoi } from '../data/puCampusData';
 
 // Enable LayoutAnimation on Android
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -573,7 +574,15 @@ export function CampusHubScreen(props: Record<string, unknown>) {
         {!searchQuery ? (
           <CompactMapCard
             onPress={() => nav?.navigate?.('Map')}
-            onARPress={() => nav?.navigate?.('ARNavigation', { destinationId: 'entrance' })}
+            onARPress={() => {
+              const gate = getCampusPoi('pu-gate-main');
+              nav?.navigate?.('ARNavigation', {
+                destination: gate?.name ?? '正門（臺灣大道）',
+                destinationId: 'pu-gate-main',
+                destinationLat: gate?.lat,
+                destinationLng: gate?.lng,
+              });
+            }}
           />
         ) : null}
 

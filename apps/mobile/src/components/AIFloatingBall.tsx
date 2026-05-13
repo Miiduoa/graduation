@@ -162,44 +162,48 @@ export function AIFloatingBall({
       ) : null}
 
       {/* 主球體 */}
-      <Animated.View
+      <Pressable
+        testID={testID}
+        onPress={() => {
+          Animated.sequence([
+            Animated.timing(press, {
+              toValue: 0.9,
+              duration: 80,
+              useNativeDriver: true,
+            }),
+            Animated.spring(press, {
+              toValue: 1,
+              friction: 4,
+              useNativeDriver: true,
+            }),
+          ]).start();
+          onPress();
+        }}
+        onLongPress={onLongPress}
+        delayLongPress={350}
+        accessibilityRole="button"
+        accessibilityLabel="AI 助理"
+        accessibilityHint="點擊開啟對話、長按開啟快速命令"
         style={{
-          transform: [{ scale: Animated.multiply(breathScale, press) }],
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          ...softShadowStyle({
+            color: accentColor,
+            opacity: 0.45,
+            radius: 14,
+            offset: { width: 0, height: 6 },
+            elevation: 12,
+          }),
         }}
       >
-        <Pressable
-          testID={testID}
-          onPress={() => {
-            Animated.sequence([
-              Animated.timing(press, {
-                toValue: 0.9,
-                duration: 80,
-                useNativeDriver: true,
-              }),
-              Animated.spring(press, {
-                toValue: 1,
-                friction: 4,
-                useNativeDriver: true,
-              }),
-            ]).start();
-            onPress();
-          }}
-          onLongPress={onLongPress}
-          delayLongPress={350}
-          accessibilityRole="button"
-          accessibilityLabel="AI 助理"
-          accessibilityHint="點擊開啟對話、長按開啟快速命令"
+        <Animated.View
+          pointerEvents="none"
           style={{
             width: size,
             height: size,
             borderRadius: size / 2,
-            ...softShadowStyle({
-              color: accentColor,
-              opacity: 0.45,
-              radius: 14,
-              offset: { width: 0, height: 6 },
-              elevation: 12,
-            }),
+            transform: [{ scale: Animated.multiply(breathScale, press) }],
           }}
         >
           <LinearGradient
@@ -218,32 +222,32 @@ export function AIFloatingBall({
           >
             <Ionicons name="sparkles" size={size * 0.42} color={theme.colors.onAccent} />
           </LinearGradient>
+        </Animated.View>
 
-          {/* 紅點徽章 */}
-          {displayCount > 0 ? (
-            <View
-              style={{
-                position: 'absolute',
-                top: -2,
-                right: -2,
-                minWidth: 18,
-                height: 18,
-                paddingHorizontal: 4,
-                borderRadius: 9,
-                backgroundColor: isUrgent ? theme.colors.danger : theme.colors.streak,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 2,
-                borderColor: theme.colors.chromeTabBar,
-              }}
-            >
-              <Text style={{ color: theme.colors.onAccent, fontSize: 10, fontWeight: '800' }}>
-                {displayCount > 9 ? '9+' : displayCount}
-              </Text>
-            </View>
-          ) : null}
-        </Pressable>
-      </Animated.View>
+        {/* 紅點徽章 */}
+        {displayCount > 0 ? (
+          <View
+            style={{
+              position: 'absolute',
+              top: -2,
+              right: -2,
+              minWidth: 18,
+              height: 18,
+              paddingHorizontal: 4,
+              borderRadius: 9,
+              backgroundColor: isUrgent ? theme.colors.danger : theme.colors.streak,
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderWidth: 2,
+              borderColor: theme.colors.chromeTabBar,
+            }}
+          >
+            <Text style={{ color: theme.colors.onAccent, fontSize: 10, fontWeight: '800' }}>
+              {displayCount > 9 ? '9+' : displayCount}
+            </Text>
+          </View>
+        ) : null}
+      </Pressable>
     </View>
   );
 }

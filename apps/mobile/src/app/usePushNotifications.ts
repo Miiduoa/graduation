@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import {
   addNotificationResponseReceivedListener,
   clearLastNotificationResponseAsync,
@@ -98,7 +99,7 @@ export function usePushNotifications(_navigationRef: NavigationLike, uid: string
 
   useEffect(() => {
     let cancelled = false;
-    if (!uid) return;
+    if (Platform.OS === 'web' || !uid) return;
 
     (async () => {
       try {
@@ -120,6 +121,7 @@ export function usePushNotifications(_navigationRef: NavigationLike, uid: string
 
   useEffect(() => {
     let cancelled = false;
+    if (Platform.OS === 'web') return;
 
     const handleResponse = async (
       response: NotificationResponseLike,

@@ -336,10 +336,46 @@ function applyQueryOptions(
     result.push(orderBy(options.sortBy, options.sortOrder ?? 'desc'));
   }
 
-  const pageSize = options?.pageSize ?? DEFAULT_PAGE_SIZE;
+  const pageSize = options?.limit ?? options?.pageSize ?? DEFAULT_PAGE_SIZE;
   result.push(firestoreLimit(pageSize));
 
   return result;
+}
+
+function readSortableTime(value: unknown): number {
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+  if (
+    value &&
+    typeof value === 'object' &&
+    'toMillis' in value &&
+    typeof (value as { toMillis?: unknown }).toMillis === 'function'
+  ) {
+    const millis = (value as { toMillis: () => number }).toMillis();
+    return Number.isFinite(millis) ? millis : 0;
+  }
+  return 0;
+}
+
+function sortByCreatedAtDesc<T extends { createdAt?: unknown }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => readSortableTime(b.createdAt) - readSortableTime(a.createdAt));
+}
+
+function limitRows<T>(rows: T[], options?: QueryOptions): T[] {
+  const limit = options?.limit ?? options?.pageSize;
+  return typeof limit === 'number' && limit > 0 ? rows.slice(0, limit) : rows;
+}
+
+function optionsWithoutFirestoreSort(options?: QueryOptions): QueryOptions | undefined {
+  if (!options) return undefined;
+  const { sortBy: _sortBy, sortOrder: _sortOrder, orderBy: _orderBy, orderDirection: _orderDirection, ...rest } =
+    options;
+  return rest;
 }
 
 async function fetchCollection<T extends { id: string }>(
@@ -2062,14 +2098,28 @@ export const firebaseSource: DataSource = {
 
   // ===== 失物招領 =====
   async listLostFoundItems(schoolId, options) {
-    return fetchCanonicalSchoolCollection<LostFoundItem>({
-      schoolId,
-      canonicalCollections: ['lostFound'],
-      schoolConstraints: [orderBy('createdAt', 'desc')],
-      fallbackCollection: 'lostFoundItems',
-      fallbackConstraints: [bySchool(schoolId), orderBy('createdAt', 'desc')],
-      options,
-    });
+    const resolvedSchoolId = schoolId || DEFAULT_SCHOOL_ID;
+
+    if (schoolId) {
+      try {
+        const canonicalRows = await fetchCollectionAtPath<LostFoundItem>(
+          buildSchoolCollectionPath(schoolId, 'lostFound'),
+          [orderBy('createdAt', 'desc')],
+          options,
+        );
+        if (canonicalRows.length > 0) return canonicalRows;
+      } catch (error) {
+        logFirebaseReadFailure(`schools/${schoolId}/lostFound`, error);
+      }
+    }
+
+    const fallbackRows = await fetchCollection<LostFoundItem>(
+      'lostFoundItems',
+      [bySchool(resolvedSchoolId)],
+      resolvedSchoolId,
+      optionsWithoutFirestoreSort(options),
+    );
+    return limitRows(sortByCreatedAtDesc(fallbackRows), options);
   },
 
   async getLostFoundItem(id) {

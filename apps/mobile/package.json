@@ -21,7 +21,9 @@
     "test:coverage": "NODE_OPTIONS='--max-old-space-size=4096' jest --coverage --runInBand",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "e2e:maestro:nav": "maestro test .maestro/flows/11_navigation_ai_first.yaml --env APP_ID=com.campus.app",
-    "e2e:maestro:onboarding": "maestro test .maestro/flows/01_onboarding.yaml --env APP_ID=com.campus.app"
+    "e2e:maestro:nav:dev": "maestro test .maestro/flows/11_navigation_ai_first.yaml --env APP_ID=com.campus.app.dev",
+    "e2e:maestro:onboarding": "maestro test .maestro/flows/01_onboarding.yaml --env APP_ID=com.campus.app",
+    "e2e:maestro:onboarding:dev": "maestro test .maestro/flows/01_onboarding.yaml --env APP_ID=com.campus.app.dev"
   },
   "dependencies": {
     "@campus/shared": "workspace:*",

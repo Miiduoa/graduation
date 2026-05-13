@@ -18,6 +18,9 @@ firestore-debug.log*
 # OS
 .DS_Store
 
+# LibreOffice（開啟 .xlsx 時產生的鎖檔，勿提交）
+.~lock.*
+
 # Local agent / IDE tooling (do not commit)
 .claude/
 .cursor/

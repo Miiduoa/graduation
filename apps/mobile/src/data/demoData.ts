@@ -5037,6 +5037,7 @@ export function getDemoConversations(schoolId: string, userId: string): Conversa
       id: createId(schoolId, 'conv', 1),
       schoolId,
       memberIds: [userId, createId(schoolId, 'user', 2)],
+      peerName: '小敏',
       lastMessage: {
         id: `${createId(schoolId, 'conv', 1)}-msg-1`,
         conversationId: createId(schoolId, 'conv', 1),
@@ -5053,6 +5054,7 @@ export function getDemoConversations(schoolId: string, userId: string): Conversa
       id: createId(schoolId, 'conv', 2),
       schoolId,
       memberIds: [userId, createId(schoolId, 'user', 3), createId(schoolId, 'user', 4)],
+      peerName: '阿銘 / 系學會長',
       lastMessage: {
         id: `${createId(schoolId, 'conv', 2)}-msg-1`,
         conversationId: createId(schoolId, 'conv', 2),
@@ -5069,6 +5071,7 @@ export function getDemoConversations(schoolId: string, userId: string): Conversa
       id: createId(schoolId, 'conv', 3),
       schoolId,
       memberIds: [userId, createId(schoolId, 'user', 5)],
+      peerName: '系學會長',
       lastMessage: {
         id: `${createId(schoolId, 'conv', 3)}-msg-1`,
         conversationId: createId(schoolId, 'conv', 3),
