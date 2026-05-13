@@ -123,4 +123,49 @@ describe('AI 對話品質回歸', () => {
     expect(summaries(result)).toContain('校園 App');
     expect(result.intents.some((i) => i.tool === 'daily_briefing')).toBe(false);
   });
+
+  it('查未讀通知即使語氣很急，也不能誤判成點餐', async () => {
+    const result = await autonomousQuery('欸你很急先幫我看通知未讀有哪些', CTX);
+
+    expect(result.results.some((r) => r.tool === 'query_notifications')).toBe(true);
+    expect(result.executedActions.some((a) => a.tool === 'create_order')).toBe(false);
+  });
+
+  it('還沒動筆的作業只查詢或提醒，不可直接繳交', async () => {
+    const result = await autonomousQuery('幹嘛又要交作業了我還沒動筆', CTX);
+
+    expect(result.results.some((r) => r.tool === 'query_assignments')).toBe(true);
+    expect(result.executedActions.some((a) => a.tool === 'submit_assignment')).toBe(false);
+  });
+
+  it('猶豫是否退選時不可直接執行退選', async () => {
+    const result = await autonomousQuery('其實我也不確定要不要退選', CTX);
+
+    expect(result.results.some((r) => r.tool === 'query_enrollments')).toBe(true);
+    expect(result.results.some((r) => r.tool === 'analyze_credits')).toBe(true);
+    expect(result.executedActions.some((a) => a.tool === 'drop_course')).toBe(false);
+  });
+
+  it('詢問哪家手搖還開著只查菜單，不直接下單', async () => {
+    const result = await autonomousQuery('想喝手搖可是不知道哪家開著', CTX);
+
+    expect(result.results.some((r) => r.tool === 'query_menus')).toBe(true);
+    expect(result.executedActions.some((a) => a.tool === 'create_order')).toBe(false);
+  });
+
+  it('明確否定吃飯並要求看成績時，不查菜單也不點餐', async () => {
+    const result = await autonomousQuery('我不是要吃飯我是想看成績好嗎', CTX);
+
+    expect(result.results.some((r) => r.tool === 'query_grades')).toBe(true);
+    expect(result.results.some((r) => r.tool === 'query_menus')).toBe(false);
+    expect(result.executedActions.some((a) => a.tool === 'create_order')).toBe(false);
+  });
+
+  it('英文 book 圖書館座位要走座位預約，不是借書或點餐', async () => {
+    const result = await autonomousQuery('幫我 book 一下圖書館位子啦拜託', CTX);
+
+    expect(result.choiceMenu?.producedByTool).toBe('reserve_library_seat');
+    expect(result.intents.some((i) => i.tool === 'borrow_book')).toBe(false);
+    expect(result.executedActions.some((a) => a.tool === 'create_order')).toBe(false);
+  });
 });
