@@ -1,84 +1,36 @@
 # 01_onboarding.yaml
-# Onboarding Flow Test
-# 測試首次使用者的引導流程
+# 冷啟動／首次狀態（OnboardingScreen 目前為自動完成的 stub，無多頁引導 UI）
+# 執行請用 package.json：`pnpm e2e:maestro:onboarding` 或 `e2e:maestro:onboarding:dev`（傳入 APP_ID）
 
-appId: com.campus.app
+appId: ${APP_ID}
 name: Onboarding Flow
 tags:
   - smoke
   - onboarding
 
 ---
-# 清除 App 資料以模擬首次使用
-- clearState
-
-# 啟動 App
+# 注意：勿在此對 Expo development client 使用 clearState — Maestro 會 reinstall，會清空 JS bundle URL，出現「No script URL provided」（需 Metro：`pnpm dev`）。
+# 啟動 App（Metro 需已執行；若先前曾 reinstall，可能需先跑一次 Reload）
 - launchApp
 
-# 等待 Onboarding 畫面載入
-- extendedWaitUntil:
-    visible: '歡迎使用校園助手'
-    timeout: 10000
-
-
-# 截圖 - Onboarding 第一頁
-- takeScreenshot: onboarding_page_1
-
-# 滑動到下一頁
-- swipe:
-    direction: LEFT
-    duration: 300
-
-# 驗證第二頁內容
-- assertVisible:
-    text: '探索校園'
-
-# 截圖 - Onboarding 第二頁
-- takeScreenshot: onboarding_page_2
-
-# 滑動到下一頁
-- swipe:
-    direction: LEFT
-    duration: 300
-
-# 驗證第三頁內容
-- assertVisible:
-    text: '即時資訊'
-
-# 截圖 - Onboarding 第三頁
-- takeScreenshot: onboarding_page_3
-
-# 滑動到下一頁
-- swipe:
-    direction: LEFT
-    duration: 300
-
-# 驗證第四頁（最後一頁）
-- assertVisible:
-    text: '開始使用'
-
-# 截圖 - Onboarding 第四頁
-- takeScreenshot: onboarding_page_4
-
-# 點擊開始使用按鈕
 - tapOn:
-    text: '開始使用'
+    text: 'Reload'
+    optional: true
 
-# 等待主畫面載入
+# 等待進入主 shell（底部 Tab「今天」來自 permissions UNIFIED_TABS）
 - extendedWaitUntil:
-    visible: '公告'
-    timeout: 10000
+    visible:
+      id: 'tab-Today'
+    timeout: 45000
 
+- takeScreenshot: main_screen_after_cold_start
 
-# 截圖 - 主畫面
-- takeScreenshot: main_screen_after_onboarding
-
-# 驗證底部導覽列（4+1：四 Tab + 中央 AI 球）
+# 驗證底部導覽列（4+1：四 Tab + 中央 AI 球；RN testID tab-<路由名>）
 - assertVisible:
-    text: '今天'
+    id: 'tab-Today'
 - assertVisible:
-    text: '學習'
+    id: 'tab-學習'
 - assertVisible:
-    text: '校園'
+    id: 'tab-校園'
 - assertVisible:
-    text: '訊息'
+    id: 'tab-訊息'

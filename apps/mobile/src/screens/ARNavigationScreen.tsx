@@ -654,7 +654,13 @@ export function ARNavigationScreen(props: any) {
           </Text>
           <View style={{ marginTop: 32, gap: 12, width: '100%' }}>
             <Button text="完成" kind="primary" onPress={() => nav?.goBack?.()} />
-            <Button text="再導航一次" onPress={() => setMode('preview')} />
+            <Button
+              text="再導航一次"
+              onPress={() => {
+                setFootNavigationSteps(null);
+                setMode('preview');
+              }}
+            />
           </View>
         </View>
       </Screen>
