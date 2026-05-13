@@ -21,6 +21,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import {
   CATALOG_DEFAULT_FILTER,
   PERIOD_INDEX,
@@ -38,6 +39,12 @@ const TOKEN_CACHE: { token: string | null; warmedAt: number } = {
   token: null,
   warmedAt: 0,
 };
+
+function shouldSkipDirectCatalogFetch(): boolean {
+  // The official PU catalog does not allow browser-origin API calls. Native can query it directly;
+  // Web should rely on cache/empty state until a server-side proxy is available.
+  return Platform.OS === 'web';
+}
 
 const COMMON_HEADERS: Record<string, string> = {
   'User-Agent':
@@ -351,6 +358,18 @@ export async function queryCatalog(
     if (cached) return cached;
   }
 
+  if (shouldSkipDirectCatalogFetch()) {
+    return {
+      filter: merged,
+      courses: [],
+      totalCount: 0,
+      source: 'sample',
+      fetchedAt: Date.now(),
+      showRemain: false,
+      error: 'Web 版無法直接連線課綱查詢系統，請使用行動裝置或後端代理同步。',
+    };
+  }
+
   try {
     const live = await queryLive(merged, options);
     if (live.courses.length > 0) {
@@ -548,6 +567,7 @@ function mapDepartmentToCode(input: string): string {
 // ─── 取開課單位／開課班級 ─────────────────────────────────
 
 export async function fetchOfferUnit(semester: string): Promise<string[]> {
+  if (shouldSkipDirectCatalogFetch()) return [];
   try {
     const res = await postForm('fetchOfferUnit', { fullYearsem: semester });
     return Array.isArray(res) ? res : [];
@@ -557,6 +577,7 @@ export async function fetchOfferUnit(semester: string): Promise<string[]> {
 }
 
 export async function fetchOfferClass(semester: string, offerUnit: string): Promise<string[]> {
+  if (shouldSkipDirectCatalogFetch()) return [];
   try {
     const res = await postForm('fetchOfferClass', {
       fullYearsem: semester,

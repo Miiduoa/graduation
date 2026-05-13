@@ -54,9 +54,9 @@ export function CommunityScreen(props: Record<string, unknown>) {
       {/* ─── Top Segment Tabs ─── */}
       <View
         style={{
-          paddingTop: insets.top + 4,
-          paddingBottom: 10,
-          paddingHorizontal: 16,
+          paddingTop: insets.top + theme.space.sm,
+          paddingBottom: theme.space.md,
+          paddingHorizontal: theme.layout.screenPadding,
           backgroundColor: theme.colors.bg,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
@@ -67,12 +67,12 @@ export function CommunityScreen(props: Record<string, unknown>) {
             fontSize: 22,
             fontWeight: '800',
             color: theme.colors.text,
-            marginBottom: 10,
+            marginBottom: theme.space.md,
           }}
         >
           校園社群
         </Text>
-        <View style={{ flexDirection: 'row', gap: 6 }}>
+        <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
           {TABS.map((tab) => {
             const active = activeTab === tab.key;
             return (
@@ -85,9 +85,9 @@ export function CommunityScreen(props: Record<string, unknown>) {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 5,
-                  paddingVertical: 9,
+                  paddingVertical: theme.space.sm,
                   borderRadius: theme.radius.md,
-                  backgroundColor: active ? theme.colors.accent : theme.colors.surface,
+                  backgroundColor: active ? theme.colors.accent : theme.colors.card,
                   borderWidth: active ? 0 : 1,
                   borderColor: theme.colors.border,
                 }}
@@ -95,13 +95,13 @@ export function CommunityScreen(props: Record<string, unknown>) {
                 <Ionicons
                   name={tab.icon as any}
                   size={15}
-                  color={active ? '#fff' : theme.colors.textSecondary}
+                  color={active ? theme.colors.onAccent : theme.colors.textSecondary}
                 />
                 <Text
                   style={{
                     fontSize: 13,
                     fontWeight: active ? '700' : '500',
-                    color: active ? '#fff' : theme.colors.textSecondary,
+                    color: active ? theme.colors.onAccent : theme.colors.textSecondary,
                   }}
                 >
                   {tab.label}

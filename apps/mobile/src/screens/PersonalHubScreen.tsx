@@ -43,9 +43,9 @@ function ListRow({ icon, title, meta, tint, onPress, isLast }: ListRowProps) {
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 14,
-        paddingVertical: 14,
-        paddingHorizontal: 16,
+        gap: theme.space.md,
+        paddingVertical: theme.layout.listItemVertical,
+        paddingHorizontal: theme.space.md,
         borderBottomWidth: isLast ? 0 : 1,
         borderBottomColor: theme.colors.border,
         opacity: pressed ? 0.6 : 1,
@@ -61,7 +61,7 @@ function ListRow({ icon, title, meta, tint, onPress, isLast }: ListRowProps) {
         style={{
           width: 34,
           height: 34,
-          borderRadius: 10,
+          borderRadius: theme.radius.md,
           justifyContent: 'center',
           alignItems: 'center',
         }}
@@ -86,9 +86,9 @@ function GroupedCard({ children }: { children: React.ReactNode }) {
   return (
     <View
       style={{
-        marginHorizontal: theme.space.lg,
-        borderRadius: 16,
-        backgroundColor: theme.colors.surface,
+        marginHorizontal: theme.layout.screenPadding,
+        borderRadius: theme.radius.lg,
+        backgroundColor: theme.colors.card,
         overflow: 'hidden',
       }}
     >
@@ -110,9 +110,9 @@ function SectionHeader({ title }: SectionHeaderProps) {
         fontWeight: '600',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
-        marginTop: 28,
-        marginBottom: 10,
-        paddingHorizontal: theme.space.lg,
+        marginTop: theme.space.xl,
+        marginBottom: theme.space.sm,
+        paddingHorizontal: theme.layout.screenPadding,
       }}
     >
       {title}
@@ -185,11 +185,7 @@ export function PersonalHubScreen(props: any) {
         }}
       >
         <LinearGradient
-          colors={
-            isDark
-              ? (['#2E1065', '#1A0A3E', theme.colors.bg] as [string, string, string])
-              : (['#EDE9FE', '#F5F3FF', theme.colors.bg] as [string, string, string])
-          }
+          colors={[...theme.gradients.profileHero]}
           style={{
             paddingTop: insets.top + theme.space.lg,
             paddingBottom: 24,
@@ -232,10 +228,10 @@ export function PersonalHubScreen(props: any) {
             </Pressable>
           </View>
 
-          <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.xl }}>
+          <View style={{ paddingHorizontal: theme.layout.screenHorizontalPadding, marginBottom: theme.layout.sectionGapLarge }}>
             {/* Avatar circle */}
             <LinearGradient
-              colors={[theme.colors.accent, '#7C3AED'] as [string, string]}
+              colors={[...theme.gradients.avatar]}
               style={{
                 width: 72,
                 height: 72,
@@ -245,7 +241,7 @@ export function PersonalHubScreen(props: any) {
                 marginBottom: theme.space.md,
               }}
             >
-              <Ionicons name="person" size={32} color="#FFFFFF" />
+              <Ionicons name="person" size={32} color={theme.colors.onAccent} />
             </LinearGradient>
             <View style={{ gap: theme.space.sm }}>
               <Text
@@ -302,7 +298,7 @@ export function PersonalHubScreen(props: any) {
           <Pressable
             onPress={() => nav?.navigate?.('SSOLogin')}
             style={({ pressed }) => ({
-              marginHorizontal: theme.space.lg,
+              marginHorizontal: theme.layout.screenPadding,
               marginBottom: theme.space.xl,
               borderRadius: theme.radius.lg,
               overflow: 'hidden',
@@ -329,7 +325,7 @@ export function PersonalHubScreen(props: any) {
         ) : null}
 
         <SectionHeader title="AI 與工具" />
-        <View style={{ marginHorizontal: theme.space.lg, marginBottom: 12 }}>
+        <View style={{ marginHorizontal: theme.layout.screenPadding, marginBottom: theme.space.md }}>
           <AIBrainOverviewCard
             onPress={() =>
               aiOverlay.open({
@@ -364,7 +360,7 @@ export function PersonalHubScreen(props: any) {
           />
         </GroupedCard>
 
-        <View style={{ marginHorizontal: theme.space.lg, marginTop: 16 }}>
+        <View style={{ marginHorizontal: theme.layout.screenPadding, marginTop: theme.space.md }}>
           <Pressable
             onPress={() => {
               try {
@@ -375,14 +371,14 @@ export function PersonalHubScreen(props: any) {
               }
             }}
             style={({ pressed }) => ({
-              padding: 14,
-              borderRadius: 14,
+              padding: theme.layout.cardPadding,
+              borderRadius: theme.radius.md,
               borderWidth: 1,
               borderColor: theme.colors.border,
               backgroundColor: theme.colors.surface,
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 12,
+              gap: theme.space.md,
               opacity: pressed ? 0.85 : 1,
             })}
           >
@@ -489,9 +485,9 @@ export function PersonalHubScreen(props: any) {
                 style={({ pressed }) => ({
                   flexDirection: 'row',
                   alignItems: 'center',
-                  gap: 14,
-                  paddingVertical: 14,
-                  paddingHorizontal: 16,
+                  gap: theme.space.md,
+                  paddingVertical: theme.layout.listItemVertical,
+                  paddingHorizontal: theme.space.md,
                   opacity: pressed || isLoggingOut ? 0.7 : 1,
                 })}
               >

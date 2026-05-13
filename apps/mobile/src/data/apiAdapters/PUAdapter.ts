@@ -16,7 +16,7 @@ import type {
   AttendanceSession,
   AttendanceSummary,
 } from '../types';
-import { CAMPUS_POIS, type CampusPoiCategory } from '../puCampusData';
+import { CAMPUS_POIS, getCampusPoi, type CampusPoi, type CampusPoiCategory } from '../puCampusData';
 import { puLogin, type PUSession } from '../../services/puDirectScraper';
 import {
   getCachedCourses,
@@ -51,6 +51,10 @@ function toValidDate(value: string | null | undefined): Date | null {
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isExpectedWebBackendSessionMiss(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('Web 版需要後端 TronClass session');
 }
 
 /**
@@ -229,11 +233,13 @@ export class PUAdapter extends BaseApiAdapter {
       return (await refreshTCCourses()) ?? stale ?? [];
     } catch (error) {
       if (stale) {
-        console.warn('[PUAdapter] Falling back to stale TronClass courses:', error);
+        const logger = isExpectedWebBackendSessionMiss(error) ? console.debug : console.warn;
+        logger('[PUAdapter] Falling back to stale TronClass courses:', error);
         return stale;
       }
       // TronClass 完全不可用 → 嘗試用 E校園 課表資料
-      console.warn('[PUAdapter] TronClass unavailable, trying E-campus courses fallback:', error);
+      const logger = isExpectedWebBackendSessionMiss(error) ? console.debug : console.warn;
+      logger('[PUAdapter] TronClass unavailable, trying E-campus courses fallback:', error);
       try {
         const puData = (await getCachedCourses()) ?? (await getAnyCachedCourses());
         if (puData?.courses?.length) {
@@ -658,7 +664,7 @@ export class PUAdapter extends BaseApiAdapter {
   // POIs — 使用 puCampusData.ts 完整校園 POI 資料庫（50+ 地點 / 精準 GPS）
   // ---------------------------------------------------------------------------
 
-  async listPois(): Promise<Poi[]> {
+  private mapCampusPoiToPoi(p: CampusPoi): Poi {
     const categoryMap: Record<CampusPoiCategory, Poi['category']> = {
       academic: 'building',
       admin: 'office',
@@ -675,20 +681,27 @@ export class PUAdapter extends BaseApiAdapter {
       other: 'other',
     };
 
-    return CAMPUS_POIS.map(
-      (p): Poi => ({
-        id: p.id,
-        name: `${p.name} ${p.nameEn}`,
-        category: categoryMap[p.category] ?? 'other',
-        lat: p.lat,
-        lng: p.lng,
-        description: p.description,
-        building: p.code,
-        facilities: p.facilities,
-        accessible: p.accessible,
-        imageUrl: p.imageUrl ?? undefined,
-      }),
-    );
+    return {
+      id: p.id,
+      name: `${p.name} ${p.nameEn}`,
+      category: categoryMap[p.category] ?? 'other',
+      lat: p.lat,
+      lng: p.lng,
+      description: p.description,
+      building: p.code,
+      facilities: p.facilities,
+      accessible: p.accessible,
+      imageUrl: p.imageUrl ?? undefined,
+    };
+  }
+
+  async listPois(): Promise<Poi[]> {
+    return CAMPUS_POIS.map((p) => this.mapCampusPoiToPoi(p));
+  }
+
+  async getPoi(id: string): Promise<Poi | null> {
+    const row = getCampusPoi(id);
+    return row ? this.mapCampusPoiToPoi(row) : null;
   }
 
   // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   Platform,
   Dimensions,
   StyleSheet,
+  Image,
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
@@ -24,6 +25,9 @@ function useSafeInsetsOrDefault() {
   return value ?? { top: 0, right: 0, bottom: 0, left: 0 };
 }
 import { theme, shadowStyle, softShadowStyle } from './theme';
+
+/** 本地 ComfyUI／Flux 極簡留白 master，供 EmptyState 等復用（單檔、不重複匯入多圖） */
+const CALM_WHITESPACE_HERO = require('../../assets/empty_whitespace_hero.png');
 import { formatCountdown } from '../utils/format';
 export { LoadingOverlay } from './feedback/LoadingOverlay';
 export { ToggleSwitch } from './interactive/ToggleSwitch';
@@ -56,9 +60,9 @@ export function Screen(props: {
             flexDirection: 'row',
             alignItems: 'flex-end',
             justifyContent: 'space-between',
-            paddingHorizontal: theme.space.lg,
-            paddingTop: Math.max(insets.top, 8) + theme.space.xs,
-            paddingBottom: theme.space.sm,
+            paddingHorizontal: theme.layout.screenHorizontalPadding,
+            paddingTop: Math.max(insets.top, 8) + theme.space.sm,
+            paddingBottom: theme.space.lg,
           }}
         >
           <View style={{ flex: 1 }}>
@@ -79,7 +83,7 @@ export function Screen(props: {
                 style={{
                   fontSize: theme.typography.bodySmall.fontSize,
                   color: theme.colors.textSecondary,
-                  marginTop: theme.space.xxs,
+                  marginTop: theme.space.sm,
                 }}
               >
                 {props.subtitle}
@@ -92,8 +96,8 @@ export function Screen(props: {
       <View
         style={{
           flex: 1,
-          paddingHorizontal: props.noPadding ? 0 : theme.space.lg,
-          paddingTop: props.noPadding ? 0 : theme.space.sm,
+          paddingHorizontal: props.noPadding ? 0 : theme.layout.screenHorizontalPadding,
+          paddingTop: props.noPadding ? 0 : theme.layout.contentPaddingTop,
           paddingBottom: props.noPadding ? 0 : TAB_BAR_CONTENT_BOTTOM_PADDING,
         }}
       >
@@ -117,7 +121,7 @@ export function Card(props: {
 
   const variantStyles = {
     default: {
-      shell: shadowStyle(theme.shadows.sm),
+      shell: shadowStyle(theme.mode === 'light' ? theme.shadows.md : theme.shadows.sm),
       surface: {
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
@@ -170,9 +174,9 @@ export function Card(props: {
         accessibilityRole={props.title ? 'header' : undefined}
         accessibilityLabel={accessibilityLabel}
         style={{
-          padding: theme.space.lg,
+          padding: theme.layout.cardPadding,
           borderRadius: theme.radius.xl,
-          gap: theme.space.sm,
+          gap: theme.space.md,
           overflow: 'hidden',
           ...style.surface,
         }}
@@ -469,6 +473,8 @@ export function EmptyState(props: {
   onAction?: () => void;
   icon?: string;
   variant?: 'default' | 'search' | 'filter' | 'error';
+  /** 於「一般」空狀態顯示極簡留白插畫（不適用 error／搜尋／篩選 variant） */
+  showCalmHero?: boolean;
 }) {
   const getIconAndColor = () => {
     switch (props.variant) {
@@ -484,29 +490,50 @@ export function EmptyState(props: {
   };
 
   const { icon, color } = getIconAndColor();
+  const useHero =
+    props.showCalmHero === true && props.variant !== 'search' && props.variant !== 'filter' && props.variant !== 'error';
+  const heroMaxW = Math.min(300, SCREEN_WIDTH - theme.layout.screenHorizontalPadding * 2);
+  const heroH = Math.round((heroMaxW * 576) / 1024);
 
   return (
     <View
       style={{
         gap: theme.space.md,
         alignItems: 'center',
-        paddingVertical: theme.space.xxxl,
-        paddingHorizontal: theme.space.xl,
+        paddingVertical: theme.space.xxxl + theme.space.sm,
+        paddingHorizontal: theme.layout.screenHorizontalPadding,
       }}
     >
-      <View
-        style={{
-          width: 88,
-          height: 88,
-          borderRadius: 44,
-          backgroundColor: `${color}10`,
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: theme.space.md,
-        }}
-      >
-        <Ionicons name={icon as any} size={36} color={color} />
-      </View>
+      {useHero ? (
+        <Image
+          source={CALM_WHITESPACE_HERO}
+          accessibilityRole="image"
+          accessibilityLabel="插畫：寧靜留白氛圍"
+          accessibilityIgnoresInvertColors
+          resizeMode="cover"
+          style={{
+            width: heroMaxW,
+            height: heroH,
+            borderRadius: theme.radius.lg,
+            marginBottom: theme.space.sm,
+            opacity: theme.mode === 'dark' ? 0.88 : 1,
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            width: 88,
+            height: 88,
+            borderRadius: 44,
+            backgroundColor: `${color}10`,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: theme.space.md,
+          }}
+        >
+          <Ionicons name={icon as any} size={36} color={color} />
+        </View>
+      )}
       <Text
         style={{
           color: theme.colors.text,
@@ -523,8 +550,8 @@ export function EmptyState(props: {
           color: theme.colors.muted,
           fontSize: 14,
           textAlign: 'center',
-          lineHeight: 21,
-          maxWidth: 280,
+          lineHeight: 22,
+          maxWidth: 300,
         }}
       >
         {props.subtitle ?? '你可以稍後再試，或重新整理頁面。'}
@@ -727,7 +754,7 @@ export function SearchBar(props: {
         borderRadius: theme.radius.xl,
         backgroundColor: theme.colors.surface2,
         paddingHorizontal: theme.space.md,
-        paddingVertical: 10,
+        paddingVertical: 12,
         flexDirection: 'row',
         alignItems: 'center',
         gap: theme.space.sm,
@@ -1039,7 +1066,7 @@ export function AnimatedCard(props: {
       style={{
         opacity: fadeAnim,
         transform: [{ translateY }],
-        padding: theme.space.lg,
+        padding: theme.layout.cardPadding,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         gap: theme.space.md,
@@ -1194,7 +1221,7 @@ export function Skeleton(props: {
 }
 
 export function Divider(props: { text?: string; spacing?: number }) {
-  const spacing = props.spacing ?? theme.space.md;
+  const spacing = props.spacing ?? theme.layout.listSeparatorGap;
 
   if (props.text) {
     return (
@@ -1712,11 +1739,11 @@ export function ListItem(props: {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: theme.space.sm,
-        paddingHorizontal: theme.space.xs,
+        paddingVertical: theme.layout.listItemVertical,
+        paddingHorizontal: theme.space.sm,
         gap: theme.space.md,
         opacity: props.disabled ? 0.4 : 1,
-        minHeight: 50,
+        minHeight: 52,
       }}
     >
       {props.icon && (
@@ -1793,7 +1820,7 @@ export function SectionHeader(props: { title: string; action?: string; onAction?
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: theme.space.md,
+        marginBottom: theme.space.lg,
       }}
     >
       <Text
