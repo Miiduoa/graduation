@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/License-MIT-22c55e" alt="License MIT" />
   <img src="https://img.shields.io/badge/Monorepo-pnpm%20workspace-0f766e" alt="pnpm workspace" />
   <img src="https://img.shields.io/badge/Mobile-Expo%2054%20%2B%20React%20Native%200.81-2563eb" alt="Expo 54 + React Native 0.81" />
-  <img src="https://img.shields.io/badge/Web-Next.js%2016%20%2B%20React%2019-111827" alt="Next.js 16 + React 19" />
+  <img src="https://img.shields.io/badge/Web-Next.js%2016.2%20%2B%20React%2019.x-111827" alt="Next.js 16.2 + React 19.x" />
   <img src="https://img.shields.io/badge/Backend-Firebase%20Functions%20v2%20%2B%20Firestore-ef6c00" alt="Firebase Functions v2 + Firestore" />
   <img src="https://img.shields.io/badge/Runtime-Node%2020%20%2F%20pnpm%2010-7c3aed" alt="Node 20 / pnpm 10" />
 </p>
@@ -14,7 +14,7 @@
 > **產品定位：** Campus One 不是一般校園整合 App，而是 **Campus Agent OS（校園行動代理系統）**。它把課程、TronClass、校務資料、地圖、餐飲、交通、收件匣、學習風險、主動提醒與 AI 行動建議串成「今天下一步」的閉環，讓使用者不用先找功能，而是直接處理最重要的校園行動。
 
 > **官方倉庫：** [github.com/Miiduoa/graduation](https://github.com/Miiduoa/graduation)  
-> 本 README 依據 **2026-05-06** 對目前 repo 的實際檔案、workspace 設定、`package.json`、GitHub workflow、env 範本、Functions 匯出、AI/Agent 模組、測試配置與文件目錄進行盤點。若其他文件與此處衝突，請先以 **本 README 與程式碼本身** 為準。
+> 本 README 依據 **2026-05-13** 對目前 repo 的實際檔案、workspace 設定、`package.json`、`pnpm-lock.yaml` 解析結果、GitHub workflow、env 範本、Functions 匯出、AI/Agent 模組、測試配置與文件目錄進行盤點。若其他文件與此處衝突，請先以 **本 README 與程式碼本身** 為準；數字快照可用下列指令複核：`git ls-files | wc -l`、`git ls-files 'apps/mobile/**/*Screen.tsx' | wc -l`、`rg "exports\\.\\w+\\s*=\\s*onCall\\("` 等。
 
 ## 快速連結
 
@@ -146,19 +146,19 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 
 ## 專案快照
 
-下列數字為 2026-05-06 對目前 repo 的實際盤點。後續功能增減時，請以程式碼與當下指令輸出為準。
+下列數字為 **2026-05-13** 對目前 repo 的實際盤點（見上方「複核指令」備註）。後續功能增減時，請以程式碼與當下指令輸出為準。
 
-| 面向              | 盤點結果                                                                                            |
-| ----------------- | --------------------------------------------------------------------------------------------------- |
-| Git tracked files | 約 `511` 個                                                                                         |
-| Mobile UI         | `96` 個 `*Screen.tsx`、`13` 個 `*Stack.tsx`                                                         |
-| Web routes        | `20` 個 `page.tsx`、`2` 個 `route.ts`                                                               |
-| Backend Functions | `68` 個 `onCall`、`14` 個 `onRequest`、`5` 個 `onSchedule`、`11` 個 Firestore `onDocument*` trigger |
-| 測試檔            | Mobile `30`、Web `5`、Backend Functions `4`、Rules `1`                                              |
-| GitHub workflows  | `5` 個：CI、Release、EAS Build、Preview Deploy、Maestro E2E                                         |
-| Maestro E2E       | `12` 個 mobile E2E 相關檔案                                                                         |
-| Root scripts      | `3` 個：`bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`                              |
-| AI server         | `backend/ai-server/` 包含 FastAPI service、RAG、training、evaluation、self-training、web search     |
+| 面向              | 盤點結果                                                                                                                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Git tracked files | 約 `743` 個                                                                                                                                                                                              |
+| Mobile UI         | `101` 個 `*Screen.tsx`、`14` 個 `*Stack.tsx`                                                                                                                                                             |
+| Web routes        | `20` 個 `apps/web/**/page.tsx`、`4` 個 `apps/web/**/route.ts`                                                                                                                                            |
+| Backend Functions | 約 `75` 個 `onCall` 匯出（`backend/functions/index.js` 約 `69` + `ordering/*` 等）、`14` 個 `onRequest`、`7` 個 `onSchedule`（`index.js` + `ordering/orderTimeout.js`、`ordering/queueNumber.js`）、`5` 個 Firestore `onDocument*`（`index.js` 四個 + `ordering/inspectionTrigger.js` 一個） |
+| 測試檔            | Mobile `35`（`apps/mobile/src/__tests__`）、Web `5`（`apps/web/src/**/*.test.*`）、Backend Functions `21`（`backend/functions/**/*.test.js`）、Rules `1`（`backend/tests/security-rules.test.js`）           |
+| GitHub workflows  | `5` 個：CI、Release、EAS Build、Preview Deploy、Maestro E2E                                                                                                                                            |
+| Maestro           | `.maestro` 底下 `11` 個 `*.yaml` flow 檔                                                                                                                                                                 |
+| `scripts/`        | `bump-version.mjs`、`live-file-review.mjs`、`seedFirestore.ts`、`ai-app-scenario-marathon.sh`；對應 root `package.json` 尚有 `live-review:file`、`test:ai:marathon` 等                                  |
+| AI server         | `backend/ai-server/` 包含 FastAPI service、RAG、training、evaluation、self-training、web search                                                                                                        |
 
 ## Monorepo 結構
 
@@ -218,7 +218,7 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 | Root runtime        | Node `>=20 <21`、pnpm `10.28.2`                                                               |
 | Mobile              | Expo `~54.0.33`、React Native `0.81.5`、React `19.1.0`、React Navigation 7、Firebase `12.8.0` |
 | Mobile native       | iOS native project、iOS Widget、Android Widget、Expo modules                                  |
-| Web                 | Next.js `16.1.7`、React `19.2.3`、Vitest `4.1.0`、Leaflet / react-leaflet、PWA assets         |
+| Web                 | Next.js `16.2.3`、React **`19.1.0`**（root `pnpm.overrides` 將 `react` / `react-dom` **鎖在 19.1.0**；因此 `pnpm ls react --filter web` 會顯示 19.1.0，`apps/web/package.json` 內的版本欄位代表宣告區間但以 lock 解析為準）、Vitest `4.1.0`、Leaflet / react-leaflet、PWA assets |
 | Backend Functions   | `firebase-functions` `^6.0.0`、`firebase-admin` `^13.0.0`、Node 20、Jest                      |
 | Firestore / Storage | Firebase rules、indexes、emulator tests                                                       |
 | Shared package      | TypeScript ESM package `@campus/shared`                                                       |
@@ -604,6 +604,7 @@ pnpm ai:grow
 | -------------------- | ---------------------------------------- |
 | `pnpm dev`           | 預設啟動 Web                             |
 | `pnpm dev:mobile`    | 啟動 Expo mobile                         |
+| `pnpm ios:sim`       | alias：`pnpm ios:mobile:sim`，啟動 iOS Simulator 流程（`apps/mobile` 的 `ios:sim`） |
 | `pnpm dev:web`       | 啟動 Next.js Web                         |
 | `pnpm dev:functions` | 僅印出說明（已停用本機 Functions emulator；請 deploy 到 Blaze 正式專案，見 `docs/firebase-blaze-production.md`） |
 | `pnpm dev:ai`        | 啟動 AI server                           |
@@ -612,6 +613,8 @@ pnpm ai:grow
 | `pnpm format:check`  | Prettier check                           |
 | `pnpm format`        | Prettier write                           |
 | `pnpm test:rules`    | Firestore / Storage emulator rules tests |
+| `pnpm live-review:file` | 對單檔做 live review：`node scripts/live-file-review.mjs`（見 root script） |
+| `pnpm test:ai:marathon` | AI 長程情境壓力腳本（`scripts/ai-app-scenario-marathon.sh`）                 |
 | `pnpm version:patch` | bump patch version                       |
 | `pnpm version:minor` | bump minor version                       |
 | `pnpm version:major` | bump major version                       |
@@ -671,7 +674,7 @@ pnpm submit:android
 | --------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | Mobile    | Jest / jest-expo              | config、data source、AI、notifications、storage、web search、proactive AI、course navigation、components、hooks |
 | Web       | Vitest / Testing Library      | navigation、SSO、runtime、Firestore path、page context                                                          |
-| Functions | Jest                          | authz、cafeteria、assistant agent、notification service                                                         |
+| Functions | Jest                          | authz、cafeteria、assistant agent、SSO、`agent/` 意圖與 tools、notifications、post-login、`tronClassScraper` 等（約 `21` 個 `*.test.js`） |
 | Rules     | Firebase emulator + node test | Firestore / Storage security boundary                                                                           |
 | E2E       | Maestro                       | mobile demo / regression flows                                                                                  |
 
@@ -720,7 +723,7 @@ Jobs：
 | `test-rules`         | Java 21 + Firebase emulator rules tests                             |
 | `build-mobile`       | Expo Doctor、EAS config、preview Android/iOS build submission check |
 | `build-web`          | Next.js build、upload `.next` artifact                              |
-| `deploy-functions`   | main push 時，如果 `FIREBASE_TOKEN` 存在則 deploy Functions         |
+| `deploy-functions`   | **`main` 分支的 `push` 事件**；若 **`FIREBASE_TOKEN`** secret 為空則跳過。**注意：** 與程式碼品質 gates 對照時，此 job 在 CI 檔案中**僅相依** `security-gates` 與 `lint-and-typecheck`（**未**再等 `test-*` / `build-*` 完成），發版前請務必在本機或 PR 確認全套測試與 rules test。 |
 | `summary`            | CI 結果 summary                                                     |
 
 ### 其他 workflows
