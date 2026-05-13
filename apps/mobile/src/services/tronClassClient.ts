@@ -340,8 +340,17 @@ async function ensureBackendSessionLoaded(): Promise<void> {
   _tcBackendSessionLoaded = true;
 
   try {
-    await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
-    const raw = await secureGetItem(TC_BACKEND_SESSION_KEY);
+    // 優先從 secureStorage 讀取，fallback 到 AsyncStorage（遷移期間）
+    let raw = await secureGetItem(TC_BACKEND_SESSION_KEY);
+    if (!raw) {
+      // 遷移：從舊的 AsyncStorage 讀取
+      raw = await AsyncStorage.getItem(TC_BACKEND_SESSION_KEY).catch(() => null);
+      if (raw) {
+        // 寫入 secureStorage 並清理舊資料
+        await secureSetItem(TC_BACKEND_SESSION_KEY, raw).catch(() => undefined);
+        await AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined);
+      }
+    }
     if (!raw) return;
 
     const parsed = JSON.parse(raw) as {
@@ -435,7 +444,7 @@ export async function refreshTCBackendSession(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const controller = new AbortController();
-    const abortTimer = setTimeout(() => controller.abort(), 2000); // 2 秒逾時，Cloud Functions 未部署時快速失敗
+    const abortTimer = setTimeout(() => controller.abort(), 20000); // 20 秒逾時（Cloud Functions cold-start 需要時間）
 
     let response: Response;
     try {
@@ -514,7 +523,7 @@ async function fetchTronClassBackend<T>(
   }
 
   const controller = new AbortController();
-  const abortTimer = setTimeout(() => controller.abort(), 5000); // 5 秒逾時
+  const abortTimer = setTimeout(() => controller.abort(), 20000); // 20 秒逾時（含 cold-start）
 
   let response: Response;
   try {
@@ -852,7 +861,7 @@ async function ensureUserId(): Promise<number | null> {
   return _tcUserId;
 }
 
-// ─── 帳密只保留在記憶體，避免校園密碼落地保存 ──
+// ─── 帳密保存在 secureStorage，供 auto-refresh 使用 ──
 const TC_CRED_KEY = '@pu_tc_cred';
 const TC_CRED_ASYNC_KEY = '@pu_tc_cred_fb';
 let _savedCredentials: { studentId: string; password: string } | null = null;
@@ -861,20 +870,22 @@ let _savedCredentialsLoaded = false;
 export async function setTCSavedCredentials(studentId: string, password: string): Promise<void> {
   _savedCredentials = { studentId, password };
   _savedCredentialsLoaded = true;
-  await secureDeleteMany([TC_CRED_KEY]).catch(() => undefined);
+  const payload = JSON.stringify({ studentId, password });
+  // 寫入 secureStorage（Keychain），清理舊的 AsyncStorage fallback
+  await secureSetItem(TC_CRED_KEY, payload).catch(() => undefined);
   await AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined);
 }
 
 export async function clearTCSavedCredentials(): Promise<void> {
   _savedCredentials = null;
   _savedCredentialsLoaded = true;
-  await secureDeleteMany([TC_CRED_KEY]).catch(() => undefined);
+  await secureDeleteItem(TC_CRED_KEY).catch(() => undefined);
   await AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined);
 }
 
 export async function purgeLegacyTCSensitiveStorage(): Promise<void> {
   await Promise.all([
-    secureDeleteMany([TC_CRED_KEY]).catch(() => undefined),
+    secureDeleteItem(TC_CRED_KEY).catch(() => undefined),
     AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined),
     AsyncStorage.removeItem(TC_BACKEND_SESSION_KEY).catch(() => undefined),
   ]);
@@ -883,8 +894,33 @@ export async function purgeLegacyTCSensitiveStorage(): Promise<void> {
 async function loadSavedCredentials(): Promise<{ studentId: string; password: string } | null> {
   if (_savedCredentialsLoaded) return _savedCredentials;
   _savedCredentialsLoaded = true;
-  await secureDeleteMany([TC_CRED_KEY]).catch(() => undefined);
-  await AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined);
+
+  // 從 secureStorage 讀取
+  try {
+    const raw = await secureGetItem(TC_CRED_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { studentId?: string; password?: string };
+      if (parsed.studentId && parsed.password) {
+        _savedCredentials = { studentId: parsed.studentId, password: parsed.password };
+        return _savedCredentials;
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Fallback: 從舊 AsyncStorage 遷移
+  try {
+    const raw = await AsyncStorage.getItem(TC_CRED_ASYNC_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { studentId?: string; password?: string };
+      if (parsed.studentId && parsed.password) {
+        _savedCredentials = { studentId: parsed.studentId, password: parsed.password };
+        // 遷移到 secureStorage
+        await secureSetItem(TC_CRED_KEY, raw).catch(() => undefined);
+        await AsyncStorage.removeItem(TC_CRED_ASYNC_KEY).catch(() => undefined);
+      }
+    }
+  } catch { /* ignore */ }
+
   return _savedCredentials;
 }
 
