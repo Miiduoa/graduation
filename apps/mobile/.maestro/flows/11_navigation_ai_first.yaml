@@ -11,43 +11,46 @@ tags:
 
 ---
 
+# Development client 需 Metro（`pnpm dev`）；勿搭配會 reinstall 的 clearState，否則失去 bundle URL。
 - launchApp
 
-- tapOn:
-    text: 'Reload'
-    optional: true
-
-# 主儀表／今天 Tab（以 testID 斷言，避免字型過小導致無障礙樹不含字面）
 - extendedWaitUntil:
     visible:
       id: 'tab-Today'
     timeout: 45000
 
+- waitForAnimationToEnd:
+    timeout: 3000
 
-# 底部情境 Tab（FloatingTabBar testID tab-<路由名>）
-- assertVisible:
-    id: 'tab-Today'
-- assertVisible:
-    id: 'tab-學習'
-- assertVisible:
-    id: 'tab-校園'
-- assertVisible:
-    id: 'tab-訊息'
+- extendedWaitUntil:
+    visible:
+      id: 'tab-學習'
+    timeout: 20000
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-校園'
+    timeout: 20000
+
+- extendedWaitUntil:
+    visible:
+      id: 'tab-訊息'
+    timeout: 20000
 
 - takeScreenshot: ai_first_tabs
 
-# Maestro id 對應 RN testID
+- waitForAnimationToEnd:
+    timeout: 2500
+
 - tapOn:
     id: 'header-avatar-button'
 
 - extendedWaitUntil:
     visible: '個人'
-    timeout: 5000
-
+    timeout: 8000
 
 - takeScreenshot: header_drawer_open
 
-# 關閉抽屜（點遮罩）
 - tapOn:
     text: '關閉抽屜'
     optional: true
@@ -56,10 +59,13 @@ tags:
     id: 'ai-floating-ball'
     optional: true
 
+- waitForAnimationToEnd:
+    timeout: 2000
+    optional: true
+
 - extendedWaitUntil:
     visible: 'AI 校園助理'
     timeout: 8000
     optional: true
 
 - takeScreenshot: ai_overlay_optional
-

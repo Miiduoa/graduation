@@ -2,7 +2,7 @@
 # https://maestro.mobile.dev/
 
 # Global configuration
-appId: com.campus.app
+appId: ${APP_ID}
 name: Campus App E2E Tests
 
 # Environment variables

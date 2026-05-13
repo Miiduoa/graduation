@@ -7,7 +7,7 @@ import {
   type LinkingOptions,
 } from '@react-navigation/native';
 import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { Ionicons } from '@expo/vector-icons';
+import { AppActionIcon } from './src/ui/AppActionIcon';
 import {
   ActivityIndicator,
   View,
@@ -346,7 +346,7 @@ function TokenExpiredModal() {
               marginBottom: 16,
             }}
           >
-            <Ionicons name="time-outline" size={32} color={theme.colors.danger} />
+            <AppActionIcon name="ic_session_expired_clock" size={32} />
           </View>
 
           <Text
@@ -518,6 +518,12 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
  * - Affordance：球體會脈動（活的）vs Tab 是死的（被動）
  * - Mental Model：使用者學到「找東西點 Tab；要 AI 做點球」
  */
+/** 須與下方 AIFloatingBall size 一致；中央欄寬略大於球體，避免陰影／邊框被裁切 */
+const FAB_SIZE = 62;
+const FAB_CENTER_GAP = 72;
+/** 淺色模式：右上徽章拉動視覺重心，幾何置中後微幅左移（px） */
+const FAB_OPTICAL_NUDGE_LIGHT = 2;
+
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const permissions = usePermissions();
@@ -535,13 +541,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     const { options } = descriptors[route.key];
     const focused = state.index === originalIndex;
     const config = permissions.tabs.find((t) => t.key === route.name);
-    const iconName: keyof typeof Ionicons.glyphMap = config
-      ? focused
-        ? (config.icon.active as keyof typeof Ionicons.glyphMap)
-        : (config.icon.inactive as keyof typeof Ionicons.glyphMap)
-      : focused
-        ? 'ellipse'
-        : 'ellipse-outline';
+    const iconName = config?.icon ?? 'ic_tab_today';
 
     return (
       <Pressable
@@ -560,6 +560,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         }}
         style={({ pressed }) => ({
           flex: 1,
+          justifyContent: 'center',
           transform: [{ scale: pressed ? 0.94 : 1 }],
         })}
       >
@@ -575,10 +576,12 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             minHeight: 52,
           }}
         >
-          <Ionicons
+          <AppActionIcon
             name={iconName}
             size={focused ? 22 : 20}
+            fallback="ionicon"
             color={focused ? theme.colors.accent : theme.colors.muted}
+            style={{ opacity: focused ? 1 : 0.55 }}
           />
           <Text
             style={{
@@ -611,7 +614,8 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         style={{
           flex: 1,
           flexDirection: 'row',
-          alignItems: 'center',
+          alignItems: 'stretch',
+          overflow: 'visible',
           borderRadius: theme.radius.xl,
           paddingVertical: 6,
           paddingHorizontal: 10,
@@ -621,38 +625,44 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           ...softShadowStyle(theme.shadows.soft),
         }}
       >
-        {leftRoutes.map(renderTab)}
+        {/* 左右群組對稱 flex:1，中央固定寬空隙；避免整列置中 FAB 與 flex 區塊數學中心出現微小偏差 */}
+        <View
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'stretch', minWidth: 0 }}
+        >
+          {leftRoutes.map(renderTab)}
+        </View>
 
-        {/* 中央留白給 AI 球（球本身 absolute 定位於上方） */}
         <View
           style={{
-            width: 72,
+            width: FAB_CENTER_GAP,
+            alignSelf: 'stretch',
+            zIndex: 2,
+            overflow: 'visible',
             alignItems: 'center',
-            justifyContent: 'center',
+            justifyContent: 'flex-start',
           }}
-          pointerEvents="none"
-        />
+          pointerEvents="box-none"
+        >
+          <View
+            style={{
+              marginTop: -theme.layout.fabOffset,
+              marginLeft: theme.mode === 'light' ? -FAB_OPTICAL_NUDGE_LIGHT : 0,
+            }}
+            pointerEvents="box-none"
+          >
+            <AIFloatingBall
+              size={FAB_SIZE}
+              onPress={() => aiOverlay.open({ mode: 'chat', source: 'tabbar' })}
+              onLongPress={() => aiOverlay.open({ mode: 'quick', source: 'tabbar_long' })}
+            />
+          </View>
+        </View>
 
-        {rightRoutes.map(renderTab)}
-      </View>
-
-      {/* 中央懸浮 AI 球 */}
-      <View
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          top: -theme.layout.fabOffset,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-        pointerEvents="box-none"
-      >
-        <AIFloatingBall
-          size={62}
-          onPress={() => aiOverlay.open({ mode: 'chat', source: 'tabbar' })}
-          onLongPress={() => aiOverlay.open({ mode: 'quick', source: 'tabbar_long' })}
-        />
+        <View
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'stretch', minWidth: 0 }}
+        >
+          {rightRoutes.map(renderTab)}
+        </View>
       </View>
     </View>
   );
@@ -872,7 +882,7 @@ class AppErrorBoundary extends React.Component<
               marginBottom: 20,
             }}
           >
-            <Ionicons name="warning-outline" size={36} color={theme.colors.danger} />
+            <AppActionIcon name="ic_warning_triangle" size={36} />
           </View>
           <Text
             style={{

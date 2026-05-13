@@ -61,22 +61,107 @@ export type RecommendLunchOptions = {
   /** 預留：午／晚等，目前僅影響文案可擴充 */
   timeSlot?: 'lunch' | 'dinner' | 'breakfast';
   maxItems?: number;
+  /** 飲食偏好：素食 / 低卡 / 不要再吃炸物等 */
+  dietaryPreference?: 'vegetarian' | 'low_calorie' | 'no_fried' | 'high_protein' | null;
 };
 
+// ── 均衡飲食：把候選分成三類（主食、蛋白質、蔬菜），三選一輪流挑 ──
+const PROTEIN_RE = /(雞|豬|牛|魚|蝦|海鮮|蛋|豆|tofu|chicken|beef|pork|fish|egg)/i;
+const VEGGIE_RE = /(蔬|菜|沙拉|青菜|salad|veg|燙青菜|涼拌|花椰|高麗|地瓜葉)/;
+const STARCH_RE = /(飯|麵|麵食|燴飯|炒飯|拉麵|義大利麵|pasta|rice|noodle|烏龍|河粉|湯麵|湯飯|蓋飯|便當)/i;
+const FRIED_RE = /(炸|酥|tempura|fried|crispy)/i;
+
+type MealCategory = 'starch' | 'protein' | 'veggie' | 'other';
+
+function classifyMeal(row: LunchMenuRow): MealCategory {
+  const name = String(row.name ?? '');
+  if (VEGGIE_RE.test(name)) return 'veggie';
+  if (STARCH_RE.test(name)) return 'starch';
+  if (PROTEIN_RE.test(name)) return 'protein';
+  return 'other';
+}
+
+function applyDietaryFilter(
+  menus: LunchMenuRow[],
+  pref: RecommendLunchOptions['dietaryPreference'],
+): LunchMenuRow[] {
+  if (!pref) return menus;
+  return menus.filter((m) => {
+    const name = String(m.name ?? '');
+    const cat = String(m.category ?? '');
+    if (pref === 'vegetarian') {
+      if (/(素|蔬食|vegetarian|vegan|tofu|豆)/i.test(name) || /素|蔬食/.test(cat)) return true;
+      if (/(雞|豬|牛|魚|蝦|海鮮|肉)/.test(name)) return false;
+      return false;
+    }
+    if (pref === 'no_fried') return !FRIED_RE.test(name);
+    if (pref === 'low_calorie') return !FRIED_RE.test(name) && !/起司|奶油|焗烤|cream/i.test(name);
+    if (pref === 'high_protein') return PROTEIN_RE.test(name);
+    return true;
+  });
+}
+
 /**
- * 從菜單中挑出適合當正餐的候選並排序。
+ * 從菜單中挑出適合當正餐的候選並排序，並強制涵蓋「主食 + 蛋白質 + 蔬菜」三類。
+ *
+ * 規則（對應 wellbeing/recommend_lunch 守則）：
+ * - 不要全炸：≤1 個炸物候選
+ * - 三類盡量配齊：每個 category 至少各推 1 樣（若菜單裡有）
+ * - 遵循使用者飲食偏好（素食 / 不要再推炸物 / 低卡 / 高蛋白）
  */
 export function recommendLunchCandidates(
   menus: LunchMenuRow[],
   opts: RecommendLunchOptions = {},
-): { items: LunchMenuRow[]; topPick: LunchMenuRow | undefined } {
+): { items: LunchMenuRow[]; topPick: LunchMenuRow | undefined; coverage: Record<MealCategory, number> } {
   const maxItems = Math.min(Math.max(opts.maxItems ?? 3, 1), 8);
-  const pool = filterMainMealCandidates(menus);
+  const filtered = applyDietaryFilter(menus, opts.dietaryPreference);
+  const pool = filterMainMealCandidates(filtered.length > 0 ? filtered : menus);
+
   const sorted = [...pool].sort(
     (a, b) => mainMealSortScore(b, opts.budgetCap) - mainMealSortScore(a, opts.budgetCap),
   );
-  const items = sorted.slice(0, maxItems);
-  return { items, topPick: items[0] };
+
+  // 第一輪：依分類各取一個 → 確保配齊
+  const buckets: Record<MealCategory, LunchMenuRow[]> = {
+    starch: [],
+    protein: [],
+    veggie: [],
+    other: [],
+  };
+  for (const r of sorted) buckets[classifyMeal(r)].push(r);
+
+  const items: LunchMenuRow[] = [];
+  const fryCount = () => items.filter((it) => FRIED_RE.test(String(it.name ?? ''))).length;
+
+  // 優先順序：主食 → 蛋白 → 蔬菜（如果有的話）
+  for (const cat of ['starch', 'protein', 'veggie'] as MealCategory[]) {
+    const next = buckets[cat].shift();
+    if (next && items.length < maxItems) {
+      if (FRIED_RE.test(String(next.name ?? '')) && fryCount() >= 1) {
+        // 已經有炸物，再從同類別找一個非炸物的
+        const alt = buckets[cat].find((r) => !FRIED_RE.test(String(r.name ?? '')));
+        if (alt) {
+          items.push(alt);
+          buckets[cat] = buckets[cat].filter((r) => r !== alt);
+          continue;
+        }
+      }
+      items.push(next);
+    }
+  }
+
+  // 第二輪：補滿 maxItems，依分數，但維持「≤1 個炸物」
+  const remaining = [...buckets.starch, ...buckets.protein, ...buckets.veggie, ...buckets.other];
+  for (const r of remaining) {
+    if (items.length >= maxItems) break;
+    if (FRIED_RE.test(String(r.name ?? '')) && fryCount() >= 1) continue;
+    if (!items.includes(r)) items.push(r);
+  }
+
+  const coverage: Record<MealCategory, number> = { starch: 0, protein: 0, veggie: 0, other: 0 };
+  for (const it of items) coverage[classifyMeal(it)] += 1;
+
+  return { items, topPick: items[0], coverage };
 }
 
 const BUDGET_RE = /預算\s*(\d{2,4})|(\d{2,4})\s*元(?:以內|以下)?|便宜.*(\d{2,4})/;

@@ -1,6 +1,6 @@
 /* eslint-disable */
-import React, { useMemo, useState, useEffect } from 'react';
-import { ScrollView, Text, View, Alert, Linking } from 'react-native';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { ScrollView, Text, View, Alert, Linking, TextInput } from 'react-native';
 import Constants from 'expo-constants';
 import { PROVIDENCE_UNIVERSITY_SCHOOL_CODE } from '@campus/shared/src';
 import {
@@ -14,6 +14,12 @@ import {
 } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, softShadowStyle } from '../ui/theme';
+import { ToggleSwitch } from '../ui/interactive/ToggleSwitch';
+import { usePreferences } from '../state/preferences';
+import {
+  PROVIDENCE_CAMPUS_LATITUDE,
+  PROVIDENCE_CAMPUS_LONGITUDE,
+} from '../services/weather';
 import { useDemo, type DemoMode } from '../state/demo';
 import { useThemeMode } from '../state/theme';
 import { useSchool } from '../state/school';
@@ -24,6 +30,13 @@ import { formatFileSize } from '../utils/format';
 import { getLegalUrl, getReleaseConfig } from '../services/release';
 
 const APP_VERSION = Constants.expoConfig?.version ?? Constants.manifest?.version ?? '1.0.0';
+
+function parseManualGeo(text: string): number | null {
+  const t = text.trim().replace(',', '.');
+  if (!t) return null;
+  const n = Number.parseFloat(t);
+  return Number.isFinite(n) ? n : null;
+}
 
 const modes: Array<{ key: DemoMode; label: string; hint: string }> = [
   { key: 'normal', label: '正常', hint: '顯示 mock 列表' },
@@ -37,6 +50,42 @@ export function SettingsScreen(props: any) {
   const demo = useDemo();
   const themeMode = useThemeMode();
   const { school } = useSchool();
+  const { preferences, updatePreferences } = usePreferences();
+  const [latDraft, setLatDraft] = useState('');
+  const [lonDraft, setLonDraft] = useState('');
+
+  useEffect(() => {
+    setLatDraft(
+      preferences.weatherManualLatitude != null ? String(preferences.weatherManualLatitude) : '',
+    );
+    setLonDraft(
+      preferences.weatherManualLongitude != null ? String(preferences.weatherManualLongitude) : '',
+    );
+  }, [preferences.weatherManualLatitude, preferences.weatherManualLongitude]);
+
+  const commitManualCoords = useCallback(async () => {
+    const lat = parseManualGeo(latDraft);
+    const lon = parseManualGeo(lonDraft);
+    if (lat == null && lon == null) {
+      await updatePreferences({
+        weatherManualLatitude: null,
+        weatherManualLongitude: null,
+      });
+      return;
+    }
+    if (lat == null || lon == null) {
+      Alert.alert('座標不完整', '請同時填寫緯度與經度，或將兩者清空以使用校園預設座標。');
+      return;
+    }
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      Alert.alert('座標超出範圍', '緯度需在 -90〜90，經度需在 -180〜180。');
+      return;
+    }
+    await updatePreferences({
+      weatherManualLatitude: lat,
+      weatherManualLongitude: lon,
+    });
+  }, [latDraft, lonDraft, updatePreferences]);
   const release = getReleaseConfig();
   const [cacheInfo, setCacheInfo] = useState<{ count: number; approximateBytes: number } | null>(
     null,
@@ -211,6 +260,134 @@ export function SettingsScreen(props: any) {
                 onPress={handleClearCache}
               />
             </View>
+          </View>
+        </AnimatedCard>
+
+        <AnimatedCard title="天氣與儀表板" subtitle="" delay={250}>
+          <View style={{ gap: 0 }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: theme.layout.listItemVertical,
+                paddingHorizontal: theme.layout.screenPadding,
+                gap: theme.space.md,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 15 }}>
+                  儀表板天氣效果
+                </Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                  依天氣微調頂部視覺與一小列天氣資訊；維持白／淺色基底。
+                </Text>
+              </View>
+              <ToggleSwitch
+                value={preferences.dashboardWeatherEffects}
+                onToggle={(v) => updatePreferences({ dashboardWeatherEffects: v })}
+              />
+            </View>
+            <Divider spacing={0} />
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: theme.layout.listItemVertical,
+                paddingHorizontal: theme.layout.screenPadding,
+                gap: theme.space.md,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 15 }}>
+                  雨天帶傘提醒
+                </Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                  預報顯示今日可能降雨時主動提示；同一日最多顯示一次。
+                </Text>
+              </View>
+              <ToggleSwitch
+                value={preferences.dashboardRainReminders}
+                onToggle={(v) => updatePreferences({ dashboardRainReminders: v })}
+              />
+            </View>
+            <Divider spacing={0} />
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingVertical: theme.layout.listItemVertical,
+                paddingHorizontal: theme.layout.screenPadding,
+                gap: theme.space.md,
+              }}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 15 }}>
+                  使用裝置定位查天氣
+                </Text>
+                <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 4 }}>
+                  僅在您開啟上述任一項時才會請求定位權限；位置只用於向 Open‑Meteo 查詢鄰近預報，不會經由我們的伺服器中繼。
+                </Text>
+              </View>
+              <ToggleSwitch
+                value={preferences.weatherUseDeviceLocation}
+                onToggle={(v) => updatePreferences({ weatherUseDeviceLocation: v })}
+              />
+            </View>
+
+            {!preferences.weatherUseDeviceLocation &&
+            (preferences.dashboardWeatherEffects || preferences.dashboardRainReminders) ? (
+              <>
+                <Divider spacing={0} />
+                <View style={{ paddingHorizontal: theme.layout.screenPadding, paddingVertical: 12 }}>
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginBottom: 10 }}>
+                    未開啟定位時，可使用下方座標；留白則使用校園預設（約{' '}
+                    {PROVIDENCE_CAMPUS_LATITUDE.toFixed(4)}, {PROVIDENCE_CAMPUS_LONGITUDE.toFixed(4)}
+                    ）。
+                  </Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
+                    緯度（°）
+                  </Text>
+                  <TextInput
+                    value={latDraft}
+                    onChangeText={setLatDraft}
+                    onBlur={() => void commitManualCoords()}
+                    keyboardType="numbers-and-punctuation"
+                    placeholder={`例如 ${PROVIDENCE_CAMPUS_LATITUDE.toFixed(4)}`}
+                    placeholderTextColor={theme.colors.muted}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      borderRadius: theme.radius.md,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      color: theme.colors.text,
+                      backgroundColor: theme.colors.surface,
+                      marginBottom: 12,
+                    }}
+                  />
+                  <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
+                    經度（°）
+                  </Text>
+                  <TextInput
+                    value={lonDraft}
+                    onChangeText={setLonDraft}
+                    onBlur={() => void commitManualCoords()}
+                    keyboardType="numbers-and-punctuation"
+                    placeholder={`例如 ${PROVIDENCE_CAMPUS_LONGITUDE.toFixed(4)}`}
+                    placeholderTextColor={theme.colors.muted}
+                    style={{
+                      borderWidth: 1,
+                      borderColor: theme.colors.border,
+                      borderRadius: theme.radius.md,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      color: theme.colors.text,
+                      backgroundColor: theme.colors.surface,
+                    }}
+                  />
+                </View>
+              </>
+            ) : null}
           </View>
         </AnimatedCard>
 

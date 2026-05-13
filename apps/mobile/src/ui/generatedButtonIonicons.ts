@@ -1,0 +1,55 @@
+import { Ionicons } from '@expo/vector-icons';
+import type { GeneratedButtonIconId } from './generatedButtonIcons';
+
+/**
+ * 每個 generated 圖示 id 對應的 Ionicons 名稱（辨識度優先，用於 Hub／Tab 等高密度區塊）。
+ */
+export const GENERATED_ICON_IONICON: Record<
+  GeneratedButtonIconId,
+  keyof typeof Ionicons.glyphMap
+> = {
+  ic_tab_today: 'calendar-outline',
+  ic_tab_study: 'school-outline',
+  ic_tab_campus: 'map-outline',
+  ic_tab_messages: 'chatbubbles-outline',
+  ic_profile: 'person-circle-outline',
+  ic_close: 'close',
+  ic_chevron_forward: 'chevron-forward',
+  ic_session_expired_clock: 'time-outline',
+  ic_warning_triangle: 'warning-outline',
+  ic_search: 'search-outline',
+  ic_clear_circle: 'close-circle-outline',
+  ic_ai_sparkles: 'sparkles-outline',
+  ic_navigate_pin: 'location-outline',
+  ic_ar_glasses: 'scan-outline',
+  ic_people_community: 'people-outline',
+  ic_restaurant: 'restaurant-outline',
+  ic_library: 'library-outline',
+  ic_dorm: 'home-outline',
+  ic_bus: 'bus-outline',
+  ic_print: 'print-outline',
+  ic_health_heart: 'medkit-outline',
+  ic_lost_found: 'bag-outline',
+  ic_accessibility: 'accessibility-outline',
+  ic_payment_card: 'card-outline',
+  ic_ar_nav_badge: 'navigate-circle-outline',
+  ic_globe_social: 'globe-outline',
+  ic_qr_code: 'qr-code-outline',
+  ic_trophy: 'trophy-outline',
+  ic_school: 'business-outline',
+  ic_notifications: 'notifications-outline',
+  ic_options: 'ellipsis-horizontal-circle-outline',
+  ic_settings: 'settings-outline',
+  ic_ai_chip: 'hardware-chip-outline',
+  ic_grid_widgets: 'grid-outline',
+  ic_admin_shield: 'shield-checkmark-outline',
+  ic_verify: 'checkmark-done-outline',
+  ic_analytics_chart: 'bar-chart-outline',
+  ic_facilities_wrench: 'construct-outline',
+  ic_store_merchant: 'storefront-outline',
+  ic_privacy_export: 'document-lock-outline',
+  ic_trash_delete: 'trash-outline',
+  ic_help: 'help-circle-outline',
+  ic_feedback_chat: 'chatbubble-ellipses-outline',
+  ic_bug_report: 'bug-outline',
+};

@@ -11,7 +11,8 @@ import {
   Platform,
   UIManager,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { AppActionIcon } from '../ui/AppActionIcon';
+import type { GeneratedButtonIconId } from '../ui/generatedButtonIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { BusRoute, MenuItem, Poi } from '../data';
@@ -40,8 +41,10 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 // ═══════════════════════════════════════════════════════════
 
 interface ServiceItem {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: GeneratedButtonIconId;
   label: string;
+  /** 語意輔助（高密度網格內較抽象的項目） */
+  subtitle?: string;
   tint: string;
   /** Same-stack screen name, OR cross-tab navigation config */
   screen?: string;
@@ -62,14 +65,17 @@ interface ServiceSection {
 // ═══════════════════════════════════════════════════════════
 
 function ServiceTile(props: {
-  icon: keyof typeof Ionicons.glyphMap;
+  icon: GeneratedButtonIconId;
   label: string;
+  subtitle?: string;
   tint: string;
   highlight?: boolean;
+  testID?: string;
   onPress: () => void;
 }) {
   return (
     <Pressable
+      testID={props.testID}
       onPress={props.onPress}
       style={({ pressed }) => ({
         flex: 1,
@@ -80,7 +86,7 @@ function ServiceTile(props: {
         borderWidth: 1,
         borderColor: props.highlight ? `${props.tint}30` : theme.colors.border,
         alignItems: 'center',
-        gap: theme.space.sm,
+        gap: props.subtitle ? theme.space.xs : theme.space.sm,
         minWidth: 72,
         opacity: pressed ? 0.82 : 1,
         transform: [{ scale: pressed ? 0.96 : 1 }],
@@ -97,7 +103,7 @@ function ServiceTile(props: {
           justifyContent: 'center',
         }}
       >
-        <Ionicons name={props.icon} size={20} color={props.tint} />
+        <AppActionIcon name={props.icon} size={22} fallback="ionicon" color={props.tint} />
       </View>
       <Text
         style={{
@@ -110,6 +116,20 @@ function ServiceTile(props: {
       >
         {props.label}
       </Text>
+      {props.subtitle ? (
+        <Text
+          style={{
+            color: theme.colors.muted,
+            fontSize: 10,
+            fontWeight: '500',
+            textAlign: 'center',
+            lineHeight: 13,
+          }}
+          numberOfLines={2}
+        >
+          {props.subtitle}
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
@@ -168,7 +188,7 @@ function SearchBar(props: {
           gap: theme.space.sm,
         }}
       >
-        <Ionicons name="search" size={17} color={theme.colors.muted} />
+        <AppActionIcon name="ic_search" size={18} fallback="ionicon" color={theme.colors.muted} />
         <TextInput
           value={props.value}
           onChangeText={props.onChangeText}
@@ -184,7 +204,7 @@ function SearchBar(props: {
         />
         {props.value.length > 0 && (
           <Pressable onPress={() => props.onChangeText('')}>
-            <Ionicons name="close-circle" size={17} color={theme.colors.muted} />
+            <AppActionIcon name="ic_clear_circle" size={18} fallback="ionicon" color={theme.colors.muted} />
           </Pressable>
         )}
       </View>
@@ -202,7 +222,7 @@ function SearchBar(props: {
           ...shadowStyle(theme.shadows.md),
         })}
       >
-        <Ionicons name="sparkles" size={20} color={theme.colors.onAccent} />
+        <AppActionIcon name="ic_ai_sparkles" size={22} fallback="ionicon" color={theme.colors.onAccent} />
       </Pressable>
     </View>
   );
@@ -215,6 +235,7 @@ function SearchBar(props: {
 function CompactMapCard(props: { onPress: () => void; onARPress: () => void }) {
   return (
     <Pressable
+      testID="e2e-campus-open-map"
       onPress={props.onPress}
       style={({ pressed }) => ({
         borderRadius: theme.radius.xl,
@@ -261,7 +282,12 @@ function CompactMapCard(props: { onPress: () => void; onARPress: () => void }) {
               justifyContent: 'center',
             }}
           >
-            <Ionicons name="navigate" size={18} color={theme.colors.onAccent} />
+            <AppActionIcon
+              name="ic_navigate_pin"
+              size={20}
+              fallback="ionicon"
+              color={theme.colors.onAccent}
+            />
           </View>
           <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>
             校園地圖
@@ -288,7 +314,7 @@ function CompactMapCard(props: { onPress: () => void; onARPress: () => void }) {
           ...shadowStyle(theme.shadows.sm),
         })}
       >
-        <Ionicons name="glasses-outline" size={14} color={theme.colors.accent} />
+        <AppActionIcon name="ic_ar_glasses" size={16} fallback="ionicon" color={theme.colors.accent} />
         <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: '700' }}>AR</Text>
       </Pressable>
     </Pressable>
@@ -343,15 +369,34 @@ export function CampusHubScreen(props: Record<string, unknown>) {
   // 設計原則：只放「實體位置/物理服務」；抽象功能交給 AI 球
   // ═══════════════════════════════════════════════════════
 
-  const serviceSections: ServiceSection[] = useMemo(
-    () => [
+  const serviceSections: ServiceSection[] = useMemo(() => {
+    const paymentOrAr: ServiceItem = paymentsEnabled
+      ? {
+          icon: 'ic_payment_card',
+          label: '校園支付',
+          subtitle: '付款與繳費',
+          tint: theme.colors.streak,
+          screen: 'Payment',
+          keywords: ['付款', '支付', '繳費', '儲值'],
+        }
+      : {
+          icon: 'ic_ar_nav_badge',
+          label: 'AR 導航',
+          subtitle: '實景路徑',
+          tint: theme.colors.accent,
+          screen: 'ARNavigation',
+          keywords: ['ar', '導航', '擴增實境'],
+        };
+
+    return [
       {
         title: '師生連結',
         emoji: '💬',
         items: [
           {
-            icon: 'people-circle-outline',
+            icon: 'ic_people_community',
             label: '校園社群',
+            subtitle: '看板・動態',
             tint: theme.colors.social,
             crossTab: { tab: 'Today', screen: 'CampusSocialScreen' },
             keywords: ['社群', '看板', '動態', '匿名', '學伴', '即時', 'story', '發文'],
@@ -363,85 +408,67 @@ export function CampusHubScreen(props: Record<string, unknown>) {
         emoji: '🏫',
         items: [
           {
-            icon: 'restaurant-outline',
+            icon: 'ic_restaurant',
             label: '餐廳',
             tint: theme.colors.achievement,
             screen: '餐廳總覽',
             keywords: ['餐廳', '吃', '食堂', '餐飲', '菜單', '點餐'],
           },
           {
-            icon: 'library-outline',
+            icon: 'ic_library',
             label: '圖書館',
             tint: theme.colors.calm,
             screen: 'Library',
             keywords: ['圖書館', '借書', '還書', '自習', '蓋夏'],
           },
           {
-            icon: 'home-outline',
+            icon: 'ic_dorm',
             label: '宿舍',
             tint: theme.colors.growth,
             screen: 'Dormitory',
             keywords: ['宿舍', '住宿', '寢室', '報修'],
           },
           {
-            icon: 'bus-outline',
+            icon: 'ic_bus',
             label: '交通',
             tint: theme.colors.info,
             screen: 'TransportHub',
             keywords: ['交通', '公車', '搭車', '車站', '高鐵'],
           },
           {
-            icon: 'print-outline',
+            icon: 'ic_print',
             label: '列印',
             tint: theme.colors.social,
             screen: 'PrintService',
             keywords: ['列印', '印表機', '影印', '掃描'],
           },
           {
-            icon: 'heart-outline',
+            icon: 'ic_health_heart',
             label: '健康',
             tint: theme.colors.danger,
             screen: 'Health',
             keywords: ['健康', '醫療', '診所', '保健'],
           },
           {
-            icon: 'search-circle-outline',
+            icon: 'ic_lost_found',
             label: '失物招領',
             tint: theme.colors.warning,
             screen: 'LostFound',
             keywords: ['失物', '招領', '撿到', '遺失'],
           },
           {
-            icon: 'accessibility-outline',
+            icon: 'ic_accessibility',
             label: '無障礙路線',
+            subtitle: '電梯・坡道',
             tint: theme.colors.fresh,
             screen: 'AccessibleRoute',
             keywords: ['無障礙', '輪椅', '電梯', '坡道'],
           },
-          ...(paymentsEnabled
-            ? [
-                {
-                  icon: 'card-outline' as keyof typeof Ionicons.glyphMap,
-                  label: '校園支付',
-                  tint: theme.colors.streak,
-                  screen: 'Payment',
-                  keywords: ['付款', '支付', '繳費', '儲值'],
-                },
-              ]
-            : [
-                {
-                  icon: 'navigate-circle-outline' as keyof typeof Ionicons.glyphMap,
-                  label: 'AR 導航',
-                  tint: theme.colors.accent,
-                  screen: 'ARNavigation',
-                  keywords: ['ar', '導航', '擴增實境'],
-                },
-              ]),
+          paymentOrAr,
         ],
       },
-    ],
-    [paymentsEnabled],
-  );
+    ];
+  }, [paymentsEnabled]);
 
   // ═══════════════════════════════════════════════════════
   // Search filter
@@ -455,7 +482,9 @@ export function CampusHubScreen(props: Record<string, unknown>) {
     for (const section of serviceSections) {
       const matchedItems = section.items.filter(
         (item) =>
-          item.label.toLowerCase().includes(q) || (item.keywords ?? []).some((k) => k.includes(q)),
+          item.label.toLowerCase().includes(q) ||
+          (item.subtitle?.toLowerCase().includes(q) ?? false) ||
+          (item.keywords ?? []).some((k) => k.includes(q)),
       );
       if (matchedItems.length > 0) {
         result.push({ ...section, items: matchedItems });
@@ -602,7 +631,9 @@ export function CampusHubScreen(props: Record<string, unknown>) {
                       key={item.label}
                       icon={item.icon}
                       label={item.label}
+                      subtitle={item.subtitle}
                       tint={item.tint}
+                      testID={item.label === '餐廳' ? 'e2e-campus-open-cafeteria' : undefined}
                       highlight={section.title === '快捷入口' && item.label === 'AI 助理'}
                       onPress={() => handleServicePress(item)}
                     />
