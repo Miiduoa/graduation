@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   StyleSheet,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { Screen } from '../ui/components';
@@ -56,6 +57,7 @@ import {
 import { isEffectivelyOnline } from '../services/offline';
 import { executeAgentToolAction, type AIActionExecutionResult } from '../services/aiActionExecutor';
 import { AgentCardList, type AgentCard } from '../components/AgentCards';
+import { FeedbackPromptModal } from '../components/FeedbackPromptModal';
 import {
   buildAIAppContext,
   emptyAIAppRuntimeData,
@@ -1667,6 +1669,9 @@ function MessageBubble(props: {
 // Main Screen
 // ═══════════════════════════════════════════════════
 
+const AI_THUMB_DOWN_STORAGE_KEY = '@aiFeedback:thumbDownTs:v1';
+const AI_THUMB_DOWN_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export function AIChatScreen(props: any) {
   const nav = props?.navigation;
   const { school } = useSchool();
@@ -1721,6 +1726,7 @@ export function AIChatScreen(props: any) {
   const [trainingDB, setTrainingDB] = useState<LocalTrainingDB>(() => getDefaultTrainingDB());
   /** 校園助理雲端多輪對話（Firestore 與後端 tool 歷史） */
   const [campusAssistantSessionId, setCampusAssistantSessionId] = useState<string | undefined>();
+  const [csatAiVisible, setCsatAiVisible] = useState(false);
   const lastQAPairIdRef = useRef<string | null>(null); // 追蹤最近的 QA pair，用於回饋評分
   // ── GPT 級本地 AI 大腦 ──
   const [aiBrain, setAiBrain] = useState<LocalAIBrain>(() => createAIBrain());
@@ -6746,6 +6752,22 @@ export function AIChatScreen(props: any) {
           });
           trainNgramOnResponse(aiBrain.ngramModel, finalContent, lastIntentRef.current);
         }
+
+        if (
+          !aiResponse.error &&
+          Array.isArray(aiResponse.assistantToolsUsed) &&
+          aiResponse.assistantToolsUsed.length > 0 &&
+          school?.id
+        ) {
+          void (async () => {
+            try {
+              const { shouldOfferMicroCsat } = await import('../services/productFeedback');
+              if (await shouldOfferMicroCsat('ai_tool_success', 7)) setCsatAiVisible(true);
+            } catch {
+              /* ignore */
+            }
+          })();
+        }
       } catch (e: any) {
         if (e.name !== 'AbortError') {
           // 外部模型/補強流程失敗 → 用本地 AI 作為最後防線（不管信心多低）
@@ -7326,8 +7348,45 @@ export function AIChatScreen(props: any) {
           ),
         );
       }
+
+      if (rating === 'thumbs_down') {
+        void (async () => {
+          try {
+            const raw = await AsyncStorage.getItem(AI_THUMB_DOWN_STORAGE_KEY);
+            const prevTs = raw ? (JSON.parse(raw) as number[]) : [];
+            const now = Date.now();
+            const recent = [...prevTs.filter((t) => now - t < AI_THUMB_DOWN_WINDOW_MS), now];
+            await AsyncStorage.setItem(
+              AI_THUMB_DOWN_STORAGE_KEY,
+              JSON.stringify(recent.slice(-12)),
+            );
+            if (recent.length >= 2) {
+              Alert.alert('需要協助嗎？', '若連續遇到不佳回覆，歡迎告訴我們詳細狀況。', [
+                { text: '先不用', style: 'cancel' },
+                {
+                  text: '前往意見箱',
+                  onPress: () =>
+                    nav?.navigate?.('我的', {
+                      screen: 'Feedback',
+                      params: {
+                        prefill: {
+                          title: 'AI 回覆不如預期',
+                          description: '',
+                          feedbackType: 'improvement',
+                          source: 'ai_chat_thumbs_down',
+                        },
+                      },
+                    }),
+                },
+              ]);
+            }
+          } catch {
+            /* ignore */
+          }
+        })();
+      }
     },
-    [messages, auth.user?.uid, trainingDB.pairs],
+    [messages, auth.user?.uid, trainingDB.pairs, nav],
   );
 
   const handleClearHistory = useCallback(() => {
@@ -7641,6 +7700,13 @@ export function AIChatScreen(props: any) {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <FeedbackPromptModal
+        visible={csatAiVisible}
+        context="ai_tool_success"
+        schoolId={school.id}
+        uid={auth.user?.uid ?? null}
+        onClose={() => setCsatAiVisible(false)}
+      />
     </Screen>
   );
 }

@@ -232,6 +232,45 @@ function formatMeetingTime(meeting: NormalizedMeetingItem): string {
   return '時間未提供';
 }
 
+function sortAssignmentsByUrgency(assignments: NonNullable<AIContext['pendingAssignments']>) {
+  return [...assignments].sort((a, b) => {
+    if (a.isLate !== b.isLate) return a.isLate ? -1 : 1;
+    const left = toDate(a.dueAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+    const right = toDate(b.dueAt)?.getTime() ?? Number.POSITIVE_INFINITY;
+    return left - right;
+  });
+}
+
+function formatAssignmentSprintReply(
+  assignments: NonNullable<AIContext['pendingAssignments']>,
+  context?: AIContext,
+): string {
+  const sorted = sortAssignmentsByUrgency(assignments);
+  const top = sorted[0];
+  const due = toDate(top.dueAt);
+  const dueLabel = due ? formatDate(due) : '截止時間未提供';
+  const gradeHint =
+    context?.gradesSummary?.courses
+      ?.filter((course) => typeof course.grade === 'number')
+      .sort((a, b) => (a.grade ?? 100) - (b.grade ?? 100))
+      .slice(0, 2)
+      .map((course) => `${course.name} ${course.grade} 分`)
+      .join('、') || '目前沒有可驗證的成績趨勢';
+
+  return [
+    `我會先處理「${top.title}」（${top.groupName || '課程未標明'}，${dueLabel}${top.isLate ? '，已逾期' : ''}）。`,
+    '',
+    '今天可執行步驟：',
+    '1. 10 分鐘：打開題目與繳交規格，列出必交項目和格式。',
+    '2. 25 分鐘：完成最核心的一段內容或第一題，不先追求完美。',
+    '3. 5 分鐘：比對 rubric / 教師要求，標出缺口。',
+    '4. 25 分鐘：補齊缺口，整理可提交版本。',
+    '5. 10 分鐘：檢查檔名、附件、引用與上傳狀態。',
+    '',
+    `排序依據：${assignments.length} 項待處理作業/測驗、截止時間、逾期狀態與成績線索（${gradeHint}）。`,
+  ].join('\n');
+}
+
 function detectIntent(message: string): { intent: AIToolLayerIntent; confidence: number; toolName: string } {
   const msg = message.toLowerCase();
   const rules: Array<[AIToolLayerIntent, RegExp, number, string]> = [
@@ -800,10 +839,31 @@ export function runAIToolLayer(params: {
 
     case 'assignment_lookup': {
       const assignments = context?.pendingAssignments ?? [];
+      const wantsSprintPlan = /拆|步驟|衝刺|今天最重要|最重要|可執行|可用時間|讀書節奏|安排/.test(message);
       if (assignments.length === 0) {
-        return { ...detected, handled: true, steps, insights, crossRoleEffects, answer: '目前沒有查到待繳作業。若你確定有作業，可能是課程平台資料尚未同步或權限不足。' };
+        return {
+          ...detected,
+          handled: true,
+          steps,
+          insights,
+          crossRoleEffects,
+          answer:
+            '我目前沒有拿到可驗證的作業/測驗清單，所以不能判定「沒有作業」。請先同步課程平台或打開學習/Inbox 資料；同步後我會依截止時間、測驗與成績趨勢幫你排優先順序。',
+          actions: [{ label: '開啟學習資料', action: 'navigate', params: { screen: '學習' } }],
+        };
       }
-      const sorted = [...assignments].sort((a, b) => Number(Boolean(b.isLate)) - Number(Boolean(a.isLate)));
+      if (wantsSprintPlan) {
+        return {
+          ...detected,
+          handled: true,
+          steps,
+          insights,
+          crossRoleEffects,
+          answer: formatAssignmentSprintReply(assignments, context),
+          actions: [{ label: '開啟學習資料', action: 'navigate', params: { screen: '學習' } }],
+        };
+      }
+      const sorted = sortAssignmentsByUrgency(assignments);
       const list = sorted
         .slice(0, 8)
         .map((assignment, i) => `${i + 1}. ${assignment.isLate ? '逾期 ' : ''}${assignment.title}（${assignment.groupName}）${assignment.dueAt ? ` 截止：${assignment.dueAt}` : ''}`)

@@ -369,6 +369,17 @@ export function ChatScreen(props: any) {
         console.warn('[ChatScreen] brain.observe failed:', brainErr);
       }
       setText('');
+      void (async () => {
+        try {
+          const { companionThrottleMinInterval } = await import('../utils/companionSignalThrottle');
+          const ok = await companionThrottleMinInterval('chat_sent', 60_000);
+          if (!ok) return;
+          const { recordCompanionFeatureSignal } = await import('../services/companionEngine');
+          await recordCompanionFeatureSignal('chat_sent');
+        } catch {
+          /* optional */
+        }
+      })();
     } catch (e: any) {
       try {
         const { aiBrain } = await import('../services/aiBrain');

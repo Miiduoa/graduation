@@ -53,6 +53,7 @@ import {
   CROWD_COLORS,
   type CafeteriaCrowdSummaryOk,
 } from '../services/cafeteriaData';
+import { FeedbackPromptModal } from '../components/FeedbackPromptModal';
 
 type CrowdInfo = {
   level: CrowdLevel;
@@ -292,6 +293,7 @@ export function PoiDetailScreen(props: any) {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [csatCrowdVisible, setCsatCrowdVisible] = useState(false);
   const [showReportForm, setShowReportForm] = useState(false);
   const [reportType, setReportType] = useState<PoiReportType>('wrong_info');
   const [reportDescription, setReportDescription] = useState('');
@@ -586,6 +588,14 @@ export function PoiDetailScreen(props: any) {
       } catch {
         /* optional bus */
       }
+      void (async () => {
+        try {
+          const { shouldOfferMicroCsat } = await import('../services/productFeedback');
+          if (await shouldOfferMicroCsat('crowd_report', 7)) setCsatCrowdVisible(true);
+        } catch {
+          /* ignore */
+        }
+      })();
     } catch (e: any) {
       setErr(e?.message ?? '送出人潮回報失敗');
     }
@@ -1697,6 +1707,13 @@ export function PoiDetailScreen(props: any) {
           )}
         </AnimatedCard>
       </ScrollView>
+      <FeedbackPromptModal
+        visible={csatCrowdVisible}
+        context="crowd_report"
+        schoolId={school.id}
+        uid={auth.user?.uid ?? null}
+        onClose={() => setCsatCrowdVisible(false)}
+      />
     </Screen>
   );
 }

@@ -96,6 +96,7 @@ import { getDeadlines, type Deadline } from '../services/smartCalendarEngine';
 import { getAnyCachedTCTodos, seedCachedTCCourses, seedCachedTCAttendance } from '../services/puDataCache';
 import { BrainInsightCards } from '../components/BrainInsightCards';
 import { CompanionStrip } from '../components/CompanionStrip';
+import { NpsPromptModal } from '../components/NpsPromptModal';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 import { aiOverlay } from '../app/useAIOverlay';
 import type { BrainInsight } from '../services/aiBrain';
@@ -2311,6 +2312,7 @@ export function SmartDashboardScreen(props: any) {
   const [pulseAggregates, setPulseAggregates] = useState<PulseAggregate[]>([]);
   const [gamification, setGamification] = useState<GamificationState | null>(null);
   const [companionSnapshot, setCompanionSnapshot] = useState<CompanionPublicSnapshot | null>(null);
+  const [npsVisible, setNpsVisible] = useState(false);
   const [optimization, setOptimization] = useState<ScheduleOptimization | null>(null);
   const [agentMode, setAgentMode] = useState<AgentModeKey>('route');
   const [tcCourses, setTcCourses] = useState<TCCourse[]>([]);
@@ -2321,6 +2323,7 @@ export function SmartDashboardScreen(props: any) {
   const [pendingTodos, setPendingTodos] = useState(0);
   const [aiBriefing, setAiBriefing] = useState<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const npsOfferedRef = useRef(false);
 
   const displayName = useMemo(
     () => auth.profile?.displayName ?? auth.user?.email?.split('@')[0] ?? '同學',
@@ -2505,6 +2508,17 @@ export function SmartDashboardScreen(props: any) {
     } catch (err) {
       console.error('[SmartDashboard] loadData error:', err);
     } finally {
+      void (async () => {
+        if (!auth.user || npsOfferedRef.current) return;
+        try {
+          const { shouldOfferNps } = await import('../services/productFeedback');
+          if (!(await shouldOfferNps(90))) return;
+          npsOfferedRef.current = true;
+          setNpsVisible(true);
+        } catch {
+          /* ignore */
+        }
+      })();
       setLoading(false);
       setRefreshing(false);
     }
@@ -3170,6 +3184,12 @@ export function SmartDashboardScreen(props: any) {
         </View>
         </View>
       </ScrollView>
+      <NpsPromptModal
+        visible={npsVisible}
+        schoolId={school.id}
+        uid={auth.user?.uid ?? null}
+        onClose={() => setNpsVisible(false)}
+      />
     </View>
   );
 }
