@@ -38,7 +38,8 @@ tags:
     timeout: 20000
 
 - extendedWaitUntil:
-    visible: '快速入口'
+    visible:
+      id: 'header-avatar-button'
     timeout: 120000
 
 - waitForAnimationToEnd:

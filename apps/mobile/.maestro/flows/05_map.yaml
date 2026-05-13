@@ -1,5 +1,5 @@
 # 05_map.yaml
-# 校園 Tab → 校園地圖
+# campus://campus/map → 校園地圖
 
 appId: ${APP_ID}
 name: Map Flow
@@ -18,25 +18,11 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- tapOn:
-    id: 'tab-校園'
-
-- extendedWaitUntil:
-    visible: '搜尋服務、地點、功能'
-    timeout: 20000
-
-- scrollUntilVisible:
-    element:
-      id: 'e2e-campus-open-map'
-    direction: DOWN
-    timeout: 30000
-
-- tapOn:
-    id: 'e2e-campus-open-map'
+- openLink: campus://campus/map
 
 - extendedWaitUntil:
     visible: '校園地圖'
-    timeout: 15000
+    timeout: 20000
 
 - takeScreenshot: map_screen
 

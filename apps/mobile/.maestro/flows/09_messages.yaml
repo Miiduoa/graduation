@@ -1,5 +1,5 @@
 # 09_messages.yaml
-# 訊息 Tab 收件匣 → 課程群組
+# campus://inbox/groups → 課程群組（Inbox 為訊息 Tab 初始畫面）
 
 appId: ${APP_ID}
 name: Messages & Groups Flow
@@ -19,17 +19,7 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- tapOn:
-    id: 'tab-訊息'
-
-- extendedWaitUntil:
-    visible: '任務'
-    timeout: 15000
-
-- takeScreenshot: messages_inbox
-
-- tapOn:
-    id: 'e2e-open-groups'
+- openLink: campus://inbox/groups
 
 - extendedWaitUntil:
     visible: '加入碼'

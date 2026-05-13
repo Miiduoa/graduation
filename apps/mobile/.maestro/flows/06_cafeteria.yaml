@@ -1,5 +1,5 @@
 # 06_cafeteria.yaml
-# 校園 Tab → 餐廳
+# campus://campus/cafeteria → 餐廳
 
 appId: ${APP_ID}
 name: Cafeteria Flow
@@ -18,25 +18,11 @@ tags:
 - waitForAnimationToEnd:
     timeout: 2500
 
-- tapOn:
-    id: 'tab-校園'
-
-- extendedWaitUntil:
-    visible: '搜尋服務、地點、功能'
-    timeout: 20000
-
-- scrollUntilVisible:
-    element:
-      id: 'e2e-campus-open-cafeteria'
-    direction: DOWN
-    timeout: 30000
-
-- tapOn:
-    id: 'e2e-campus-open-cafeteria'
+- openLink: campus://campus/cafeteria
 
 - extendedWaitUntil:
     visible: '餐廳'
-    timeout: 15000
+    timeout: 20000
 
 - takeScreenshot: cafeteria_menu_list
 

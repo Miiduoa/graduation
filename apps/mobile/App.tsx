@@ -525,6 +525,8 @@ const FAB_SHELL_NUDGE_X = 0;
 const FAB_SHELL_NUDGE_Y = 0;
 /** 與 TabBar pill `paddingVertical` 對齊，供 FAB overlay 垂直錨點 */
 const TAB_BAR_PILL_PADDING_V = 6;
+/** 中央為 AI 球保留的淨空；若拿掉會讓左右各兩個 Tab 往中線擠、視覺與點擊區「跑掉」 */
+const FAB_CENTER_GAP = Math.max(72, FAB_SIZE + 10);
 
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -534,7 +536,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const visibleTabKeys = permissions.tabs.map((t) => t.key);
   const visibleRoutes = state.routes.filter((r) => visibleTabKeys.includes(r.name));
 
-  // 將 4 個 Tab 分成左 2 / 右 2；AI 球由 pill 上層 overlay 置中，不佔 flex 欄位
+  // 左 2／右 2 之間保留 FAB_CENTER_GAP，避免 Tab 標籤與中央球在版面與心理上重疊
   const leftRoutes = visibleRoutes.slice(0, 2);
   const rightRoutes = visibleRoutes.slice(2, 4);
 
@@ -607,7 +609,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         bottom: Math.max(insets.bottom, 8) + 8,
         left: 12,
         right: 12,
-        height: 64,
+        minHeight: 72,
       }}
       pointerEvents="box-none"
     >
@@ -639,6 +641,15 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         >
           {leftRoutes.map(renderTab)}
         </View>
+
+        <View
+          style={{
+            width: FAB_CENTER_GAP,
+            alignSelf: 'stretch',
+            zIndex: 1,
+          }}
+          pointerEvents="none"
+        />
 
         <View
           style={{
