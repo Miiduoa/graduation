@@ -99,6 +99,10 @@ function shouldSkipDirectOpacFetch(): boolean {
   return Platform.OS === 'web';
 }
 
+function isTransientOpacStatus(status: number): boolean {
+  return status === 500 || status === 502 || status === 503 || status === 504;
+}
+
 export function clearOpacSession(): void {
   /* 預留：原生 Cookie 無法由 JS 清除；重新暖機即可換 csrf。 */
 }
@@ -106,6 +110,27 @@ export function clearOpacSession(): void {
 function extractCsrf(html: string): string | null {
   const m = html.match(/csrf-token["\s]*content="([^"]+)"/i);
   return m?.[1]?.trim() ?? null;
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function errorMessage(error: unknown): string | undefined {
+  if (error instanceof Error) return error.message;
+  const obj = asObject(error);
+  const msg = obj?.message;
+  return msg == null ? undefined : String(msg);
+}
+
+function graphqlErrorsMessage(errors: unknown): string {
+  if (!Array.isArray(errors)) return '';
+  return errors
+    .map((item) => pickStr(asObject(item)?.message))
+    .filter(Boolean)
+    .join('；');
 }
 
 /** HyLib WebPac search GraphQL（欄位依官方 schema；若改版請對照網頁請求） */
@@ -250,6 +275,19 @@ function normalizeUrl(value: unknown): string {
   return raw.replace(/^http:\/\//i, 'https://');
 }
 
+function normalizeCoverUrl(value: unknown): string {
+  const raw = pickStr(value)
+    .split('^')
+    .map((x) => x.trim())
+    .find((x) => /^https?:\/\//i.test(x));
+  if (!raw) return '';
+  if (/^https?:\/\/(?:www\.)?books\.com\.tw\/img\//i.test(raw)) {
+    const original = raw.replace(/^https:\/\//i, 'http://');
+    return `https://im1.book.com.tw/image/getImage?i=${encodeURIComponent(original)}&v=00000000&w=348&h=348`;
+  }
+  return raw.replace(/^http:\/\//i, 'https://');
+}
+
 function normalizeRawMap(raw: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw)) {
@@ -282,7 +320,9 @@ function normalizeHit(raw: Record<string, unknown>): OpacSearchHit | null {
   const sidRaw = raw.sid ?? raw.biblioId ?? raw.id;
   const sid = pickStr(sidRaw);
   if (!sid) return null;
-  const title = pickStr(raw.title2pu ?? raw.marcTitle ?? raw.title ?? raw.bookTitle ?? raw.mainTitle);
+  const title = pickStr(
+    raw.title2pu ?? raw.marcTitle ?? raw.title ?? raw.bookTitle ?? raw.mainTitle,
+  );
   const availability = availabilityFromRaw(raw);
   return {
     sid,
@@ -290,7 +330,7 @@ function normalizeHit(raw: Record<string, unknown>): OpacSearchHit | null {
     author: pickStr(raw.author ?? raw.marcAuthor),
     publisher: pickStr(raw.publisher),
     year: pickStr(raw.pubyear2 ?? raw.publishYear ?? raw.year),
-    coverUrl: normalizeUrl(raw.bookImg ?? raw.coverUrl ?? raw.imageUrl),
+    coverUrl: normalizeCoverUrl(raw.bookImg ?? raw.coverUrl ?? raw.imageUrl),
     dataType: normalizeCommonLabel(raw.dataType),
     availability: availability.availability,
     isAvailable: availability.isAvailable,
@@ -325,37 +365,37 @@ function normalizeLayoutRow(raw: Record<string, unknown>): OpacSearchHit | null 
   });
 }
 
-function normalizeSearchPayload(json: any): {
+function normalizeSearchPayload(json: unknown): {
   hits: OpacSearchHit[];
   hyftdToken?: string | null;
   rawTotalHint?: number;
   emptyConfirmed: boolean;
 } {
-  const searchNode = json?.data?.search ?? json?.data?.Search;
-  const hyftdToken = searchNode?.hyftdToken ?? searchNode?.info?.hyftdToken ?? null;
+  const data = asObject(asObject(json)?.data);
+  const searchNode = asObject(data?.search ?? data?.Search);
+  const info = asObject(searchNode?.info);
+  const hyftdToken = pickStr(searchNode?.hyftdToken ?? info?.hyftdToken) || null;
   if (searchNode == null) {
     return { hits: [], hyftdToken, emptyConfirmed: false };
   }
-  const legacyList = searchNode?.bookList ?? searchNode?.books ?? searchNode?.items;
-  const layoutList = searchNode?.list?.values;
+  const legacyList = searchNode.bookList ?? searchNode.books ?? searchNode.items;
+  const layoutList = asObject(searchNode.list)?.values;
   const listRaw = Array.isArray(legacyList) ? legacyList : layoutList;
   if (!Array.isArray(listRaw)) {
-    return { hits: [], hyftdToken, rawTotalHint: Number(searchNode?.info?.total), emptyConfirmed: false };
+    return { hits: [], hyftdToken, rawTotalHint: Number(info?.total), emptyConfirmed: false };
   }
   const hits: OpacSearchHit[] = [];
   for (const row of listRaw) {
     if (row && typeof row === 'object') {
       const rowObj = row as Record<string, unknown>;
-      const h = Array.isArray(rowObj.ref)
-        ? normalizeLayoutRow(rowObj)
-        : normalizeHit(rowObj);
+      const h = Array.isArray(rowObj.ref) ? normalizeLayoutRow(rowObj) : normalizeHit(rowObj);
       if (h) hits.push(h);
     }
   }
   return {
     hits,
     hyftdToken,
-    rawTotalHint: Number(searchNode?.info?.total),
+    rawTotalHint: Number(info?.total),
     emptyConfirmed: true,
   };
 }
@@ -438,15 +478,24 @@ function buildDetailFields(
   for (const item of sortedDisplay) {
     pushField(pickStr(item.field), item.name);
   }
-  for (const key of ['dataType', 'isCanLend', 'lendcnt', 'bookImgSourceType', 'bookdesc', 'authordesc', 'recommdesc']) {
+  for (const key of [
+    'dataType',
+    'isCanLend',
+    'lendcnt',
+    'bookImgSourceType',
+    'bookdesc',
+    'authordesc',
+    'recommdesc',
+  ]) {
     pushField(key);
   }
 
   return fields;
 }
 
-function normalizeBookDetailPayload(json: any, fallback?: OpacSearchHit): OpacBookDetail {
-  const node = json?.data?.getBookDetail;
+function normalizeBookDetailPayload(json: unknown, fallback?: OpacSearchHit): OpacBookDetail {
+  const data = asObject(asObject(json)?.data);
+  const node = asObject(data?.getBookDetail);
   if (!node) {
     return {
       sid: fallback?.sid ?? '',
@@ -466,15 +515,21 @@ function normalizeBookDetailPayload(json: any, fallback?: OpacSearchHit): OpacBo
     };
   }
 
-  const viewValues = objectFromLayoutRefs(node?.view?.list?.values?.[0]?.ref);
-  const values = objectFromKeyValueArray(node?.values);
+  const view = asObject(node.view);
+  const viewList = asObject(view?.list);
+  const viewListValues = Array.isArray(viewList?.values) ? viewList.values : [];
+  const firstViewValue = asObject(viewListValues[0]);
+  const viewValues = objectFromLayoutRefs(firstViewValue?.ref);
+  const values = objectFromKeyValueArray(node.values);
   const merged = {
     ...(fallback?.raw ?? {}),
     ...values,
     ...viewValues,
   };
   const normalized = normalizeHit(merged) ?? fallback;
-  const display = Array.isArray(node?.view?.display) ? node.view.display : [];
+  const display = Array.isArray(view?.display)
+    ? view.display.filter((item): item is OpacDetailDisplay => asObject(item) !== null)
+    : [];
 
   return {
     sid: normalized?.sid ?? fallback?.sid ?? '',
@@ -490,11 +545,14 @@ function normalizeBookDetailPayload(json: any, fallback?: OpacSearchHit): OpacBo
     lendCount: normalized?.lendCount || fallback?.lendCount,
     sourceName: normalized?.sourceName || fallback?.sourceName,
     fields: buildDetailFields(merged, display),
-    marc: pickStr(node?.marc),
+    marc: pickStr(node.marc),
   };
 }
 
-export function buildSearchForm(keyword: string, field: OpacSearchFieldKey): Record<string, unknown> {
+export function buildSearchForm(
+  keyword: string,
+  field: OpacSearchFieldKey,
+): Record<string, unknown> {
   const q = keyword.trim();
   const qs = `searchField=${encodeURIComponent(field)}&searchInput=${encodeURIComponent(q)}`;
   return {
@@ -589,9 +647,11 @@ async function postGraphqlSearch(
   });
 }
 
-function graphqlPayloadToResult(json: any): OpacSearchResult {
-  if (json.errors?.length) {
-    const msg = json.errors.map((e: any) => e?.message).filter(Boolean).join('；');
+function graphqlPayloadToResult(json: unknown): OpacSearchResult {
+  const root = asObject(json);
+  const errors = root?.errors;
+  if (Array.isArray(errors) && errors.length) {
+    const msg = graphqlErrorsMessage(errors);
     return {
       hits: [],
       source: 'live',
@@ -616,7 +676,7 @@ function graphqlPayloadToResult(json: any): OpacSearchResult {
 }
 
 function parseFetchJsonResponse(_res: Response, text: string): OpacSearchResult {
-  let json: any;
+  let json: unknown;
   try {
     json = JSON.parse(text);
   } catch {
@@ -683,7 +743,7 @@ async function tryWorkerProxy(
     if (!d || typeof d !== 'object') return { used: false };
     if (d.graphql == null || typeof d.graphql !== 'object') return { used: false };
 
-    const parsed = graphqlPayloadToResult(d.graphql as any);
+    const parsed = graphqlPayloadToResult(d.graphql);
     if (d.ok) return { used: true, result: parsed };
     if (d.httpStatus === 403 || d.reason === 'csrf_missing') return { used: false };
     return { used: true, result: parsed };
@@ -726,7 +786,7 @@ export async function searchOpacBiblios(
     };
 
     let res = await runOnce();
-    if (res.status === 403) {
+    if (res.status === 403 || isTransientOpacStatus(res.status)) {
       res = await runOnce();
     }
 
@@ -749,8 +809,9 @@ export async function searchOpacBiblios(
     }
 
     return parseFetchJsonResponse(res, text);
-  } catch (e: any) {
-    if (e?.message === 'csrf_missing') {
+  } catch (e) {
+    const msg = errorMessage(e);
+    if (msg === 'csrf_missing') {
       return {
         hits: [],
         source: 'live',
@@ -760,12 +821,16 @@ export async function searchOpacBiblios(
     return {
       hits: [],
       source: 'live',
-      error: e?.message ? String(e.message) : '連線失敗',
+      error: msg ?? '連線失敗',
     };
   }
 }
 
-function fallbackBookDetail(hit: OpacSearchHit | undefined, sid: string, error: string): OpacBookDetail {
+function fallbackBookDetail(
+  hit: OpacSearchHit | undefined,
+  sid: string,
+  error: string,
+): OpacBookDetail {
   const merged = hit?.raw ?? {};
   return {
     sid: hit?.sid ?? sid,
@@ -868,7 +933,11 @@ export async function fetchOpacBookDetail(
       res = await runOnce();
     }
     if (res.status === 403) {
-      return fallbackBookDetail(fallback, sid, '館藏詳細資料 API 仍回傳 HTTP 403，已先顯示搜尋摘要。');
+      return fallbackBookDetail(
+        fallback,
+        sid,
+        '館藏詳細資料 API 仍回傳 HTTP 403，已先顯示搜尋摘要。',
+      );
     }
 
     const text = await res.text();
@@ -876,23 +945,25 @@ export async function fetchOpacBookDetail(
       return fallbackBookDetail(fallback, sid, `館藏詳細資料讀取失敗（HTTP ${res.status}）。`);
     }
 
-    let json: any;
+    let json: unknown;
     try {
       json = JSON.parse(text);
     } catch {
       return fallbackBookDetail(fallback, sid, '館藏詳細資料回應非 JSON。');
     }
-    if (json.errors?.length) {
-      const msg = json.errors.map((e: any) => e?.message).filter(Boolean).join('；');
+    const errors = asObject(json)?.errors;
+    if (Array.isArray(errors) && errors.length) {
+      const msg = graphqlErrorsMessage(errors);
       return fallbackBookDetail(fallback, sid, msg || 'GraphQL 詳細資料查詢被拒絕');
     }
     return normalizeBookDetailPayload(json, fallback);
-  } catch (e: any) {
+  } catch (e) {
+    const errMsg = errorMessage(e);
     const msg =
-      e?.message === 'csrf_missing'
+      errMsg === 'csrf_missing'
         ? '無法取得館藏系統安全憑證（csrf）。'
-        : e?.message
-          ? String(e.message)
+        : errMsg
+          ? errMsg
           : '館藏詳細資料連線失敗';
     return fallbackBookDetail(fallback, sid, msg);
   }

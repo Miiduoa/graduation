@@ -22,11 +22,17 @@ const cancelOrder = require('./cancelOrder');
 const submitQuizAttempt = require('./submitQuizAttempt');
 const computeGradebook = require('./computeGradebook');
 const computeCompanionState = require('./computeCompanionState');
+const upsertQuestionBank = require('./upsertQuestionBank');
+const draftQuizFromBank = require('./draftQuizFromBank');
+const upsertRubric = require('./upsertRubric');
 
 const tools = [
   submitQuizAttempt,
   computeGradebook,
   computeCompanionState,
+  upsertQuestionBank,
+  draftQuizFromBank,
+  upsertRubric,
   getTodaySchedule,
   getAssignments,
   getAnnouncements,

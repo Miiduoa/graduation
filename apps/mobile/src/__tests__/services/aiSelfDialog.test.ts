@@ -13,12 +13,13 @@ describe('AI self-dialog evaluation', () => {
 
   it('keeps the offline assistant stable across generated student prompts', async () => {
     const rounds = Number(process.env.AI_SELF_TEST_ROUNDS ?? 500);
+    const seed = Number(process.env.AI_SELF_TEST_SEED ?? 411211325);
     jest.setTimeout(Math.max(30000, rounds * 20));
 
     const report = await runAISelfDialogEvaluation({
       rounds,
       batchSize: 100,
-      seed: 411211325,
+      seed,
       maxFailures: 10,
     });
 

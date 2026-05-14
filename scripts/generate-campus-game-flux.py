@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-# Flux.1-dev 權重受 Black Forest Labs 授權條款拘束，商業發布請先確認許可。
-"""Batch game assets (character frames + campus scene) via ComfyUI or PIL fallback.
+#
+# 【預設免費】僅輸出 PIL 向量風占位圖（Pillow，開源）；不需 API、不需 Comfy。
+# 【選配】加上 --comfy 才會呼叫本機 http://127.0.0.1:8188；若工作流程使用
+# Flux 等商用或受限模型，費用與授權請自行評估（與本腳本預設無關）。
+"""Batch campus game PNGs — default FREE (Pillow), optional local ComfyUI.
 
 Reads: scripts/campus-game-assets-manifest.json
 Writes: apps/mobile/assets/generated-game/*.png (default)
 
-  python3 scripts/generate-campus-game-flux.py [--out-dir PATH] [--steps N]
+  # 預設：免費占位（離線亦可）
+  python3 scripts/generate-campus-game-flux.py [--out-dir PATH]
 
-Reuses queue/history PNG download from scripts/generate-flux-ui-asset-pack.py."""
+  # 選配：先啟 ComfyUI，再嘗試以既有 Flux 工作流程出圖
+  python3 scripts/generate-campus-game-flux.py --comfy [--steps N]
+
+Reuses queue/history PNG download from scripts/generate-flux-ui-asset-pack.py
+only when --comfy is passed."""
 
 from __future__ import annotations
 
@@ -82,7 +90,7 @@ def pil_game_scene(w: int, h: int, *, seed: int) -> "Image.Image":
 
 def main() -> int:
     gfp = _load_ui_pack_module()
-    p = argparse.ArgumentParser(description="Generate campus game Flux / PIL assets.")
+    p = argparse.ArgumentParser(description="Campus game PNGs: default free Pillow placeholders; optional --comfy.")
     p.add_argument(
         "--manifest",
         type=Path,
@@ -97,7 +105,16 @@ def main() -> int:
     p.add_argument("--port", type=int, default=8188)
     p.add_argument("--steps", type=int, default=10)
     p.add_argument("--seed-base", type=int, default=20260315)
-    p.add_argument("--force-placeholders", action="store_true")
+    p.add_argument(
+        "--comfy",
+        action="store_true",
+        help="Try local ComfyUI (Flux workflow); default is Pillow-only (free).",
+    )
+    p.add_argument(
+        "--force-placeholders",
+        action="store_true",
+        help="Skip ComfyUI even when --comfy was passed.",
+    )
     args = p.parse_args()
 
     data = json.loads(args.manifest.read_text(encoding="utf-8"))
@@ -107,8 +124,22 @@ def main() -> int:
         return 1
 
     base = f"http://{args.host}:{args.port}"
-    comfy_ok = gfp.comfy_ping(base) and not args.force_placeholders
-    print("ComfyUI:", base, "online" if comfy_ok else "offline -> PIL placeholders", flush=True)
+    comfy_ok = (
+        bool(args.comfy)
+        and not args.force_placeholders
+        and gfp.comfy_ping(base)
+    )
+    if comfy_ok:
+        print("Mode: local ComfyUI", base, flush=True)
+    else:
+        mode = []
+        if not args.comfy:
+            mode.append("default Pillow (free)")
+        elif args.force_placeholders:
+            mode.append("--force-placeholders")
+        else:
+            mode.append("Comfy unreachable")
+        print("Mode:", " / ".join(mode), flush=True)
 
     seed_base = args.seed_base if args.seed_base >= 0 else random.randint(0, 2**31)
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -140,7 +171,13 @@ def main() -> int:
                 print("Flux failed for", fid, e, "- PIL fallback", file=sys.stderr, flush=True)
 
         if not gfp.HAS_PIL:
-            print("Install Pillow or start ComfyUI.", file=sys.stderr)
+            print(
+                "缺少 Pillow（免費占位需要）。請在專題根目錄執行：\n"
+                "  python3 -m venv .venv-game-assets && "
+                ".venv-game-assets/bin/python -m pip install pillow\n"
+                "然後：  .venv-game-assets/bin/python scripts/generate-campus-game-flux.py",
+                file=sys.stderr,
+            )
             return 1
         if "scene" in fid:
             pil_game_scene(w, h, seed=seed).save(dest, format="PNG", optimize=True)

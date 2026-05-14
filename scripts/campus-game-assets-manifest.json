@@ -1,5 +1,5 @@
 {
-  "notes": "Comfy Flux.1-dev 批次出圖；離線時由 generate-campus-game-flux.py 寫 PIL 占位。Flux 授權請見腳本註記。",
+  "notes": "manifest 中的 prompt 僅在指令加上 --comfy 且連上本機 ComfyUI 時使用；預設由 generate-campus-game-flux.py 以免費 PIL 占位出圖。",
   "items": [
     {
       "id": "game_avatar_f1",

@@ -380,6 +380,27 @@ export function PersonalHubScreen(props: any) {
             onPress={() => nav?.navigate?.('CampusGarden')}
           />
           <ListRow
+            icon="paw-outline"
+            title="校園精靈"
+            meta="與你一起長大"
+            tint="#F59E0B"
+            onPress={() => nav?.navigate?.('Companion')}
+          />
+          <ListRow
+            icon="star-outline"
+            title="我的收藏"
+            meta="解鎖成就"
+            tint="#3B82F6"
+            onPress={() => nav?.navigate?.('CompanionCollection')}
+          />
+          <ListRow
+            icon="planet-outline"
+            title="校園星圖"
+            meta="走訪足跡"
+            tint="#8B5CF6"
+            onPress={() => nav?.navigate?.('Constellation')}
+          />
+          <ListRow
             icon="school-outline"
             title="學分與畢業規劃"
             meta="規劃"
