@@ -1,6 +1,6 @@
 /**
- * 離線 Comfy／Flux 批次產出：`python3 scripts/generate-campus-game-flux.py`
- *（建議使用 `AI圖像本地引擎/.venv/bin/python`；見 [scripts/campus-game-assets-manifest.json](../../../../scripts/campus-game-assets-manifest.json)）
+ * `assets/generated-game`：開發側預設以 Pillow 免費組圖：`python3 scripts/generate-campus-game-flux.py`
+ *（可加 `--comfy` 試本機 ComfyUI；manifest 見 [scripts/campus-game-assets-manifest.json](../../../../scripts/campus-game-assets-manifest.json)）
  */
 export const generatedGameAssets = {
   avatarF1: require('../../assets/generated-game/game-avatar-f1.png'),

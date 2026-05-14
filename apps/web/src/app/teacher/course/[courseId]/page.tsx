@@ -196,6 +196,32 @@ export default function TeacherCoursePage(props: {
               </Link>
             </div>
 
+            {/* ── TronClass parity 教師工具區 ── */}
+            <nav
+              className="toolbarPanel"
+              aria-label="教師工具"
+              style={{ flexWrap: 'wrap', gap: 8 }}
+            >
+              <Link href={`/teacher/course/${props.params.courseId}/modules`} className="btn">
+                📚 教材單元
+              </Link>
+              <Link href={`/teacher/course/${props.params.courseId}/quizzes`} className="btn">
+                📝 測驗 / 考試
+              </Link>
+              <Link href={`/teacher/course/${props.params.courseId}/question-banks`} className="btn">
+                🗂️ 題庫
+              </Link>
+              <Link href={`/teacher/course/${props.params.courseId}/rubrics`} className="btn">
+                📐 Rubric
+              </Link>
+              <Link href={`/teacher/course/${props.params.courseId}/attendance`} className="btn">
+                ✅ 點名
+              </Link>
+              <Link href={`/teacher/course/${props.params.courseId}/gradebook`} className="btn">
+                📊 成績簿
+              </Link>
+            </nav>
+
             <div className="pageGrid" style={{ gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div className="sectionCard">
                 <div className="homeSectionHeader">

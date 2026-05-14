@@ -199,7 +199,37 @@ export const DEFAULT_SELF_DIALOG_PROMPTS: string[] = [
   "把這週行程sync到我的brain裡啦（行事曆）",
   "今天有啥活動我就廢不想動腦",
   "餐廳老闆：今天便當線上單幫我對一下有沒有漏單",
-  "行政端：麻煩發全校公告飲水機清洗那種口吻正式一點"
+  "行政端：麻煩發全校公告飲水機清洗那種口吻正式一點",
+  "我想跟主管談加薪，幫我整理一個不尷尬的開場白",
+  "這段英文 email 聽起來太硬，幫我改得自然一點",
+  "我想買筆電但預算有限，怎麼比較規格才不會被話術帶走",
+  "租屋合約看起來怪怪的，先提醒我可能要注意什麼",
+  "明天要面試，幫我模擬三題追問",
+  "我想寫一個 JS 小遊戲，先幫我拆功能",
+  "如果朋友一直已讀不回，我要怎麼講才不尷尬？",
+  "今天晚餐想自己煮，冰箱只有蛋跟青菜，幫我想一下怎麼配",
+  "我想練英文口說，但不知道每天要怎麼安排",
+  "幫我把這段抱怨改成比較成熟的說法",
+  "我跟室友溝通清潔分工一直卡住，怎麼開口比較好",
+  "家裡長輩一直催我找工作，我要怎麼回比較不吵架",
+  "我想開始運動但很容易放棄，幫我設計低門檻版本",
+  "我想整理房間但完全不知道從哪裡開始",
+  "幫我想一個週末小旅行的大概規劃，不用訂票",
+  "我要準備作品集，先幫我排優先順序",
+  "我想學投資但怕被騙，先告訴我怎麼辨識風險",
+  "手機照片太亂了，怎麼分類比較不痛苦",
+  "我想把日記寫得自然一點，不要像作文",
+  "我最近拖延很嚴重，幫我拆一個今天就能做的版本",
+  "我想學做菜，冰箱常備食材應該怎麼買",
+  "朋友生日快到但我預算不高，禮物怎麼挑",
+  "想做個簡單網站放作品，先幫我想頁面架構",
+  "我想把履歷第一段改得比較有重點",
+  "我要向客服反映問題，但不想語氣太兇",
+  "我想跟朋友道歉，但不知道怎麼說比較真誠",
+  "我覺得最近壓力很大，只想先把事情排出先後",
+  "我想戒掉睡前滑手機，幫我想一個不痛苦的方法",
+  "我想買二手相機，檢查時要注意哪些坑",
+  "幫我把一個模糊的創業點子拆成可驗證假設"
 ];
 
 export const AI_SELF_DIALOG_SCENARIOS: AISelfDialogScenario[] = [];
@@ -250,6 +280,25 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+function shufflePrompts(prompts: string[], rand: () => number): string[] {
+  const shuffled = [...prompts];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+function varyPrompt(prompt: string, rand: () => number): string {
+  if (prompt.trim().length <= 6 || /^[😊👍👌✅.。…\s]+$/.test(prompt)) return prompt;
+
+  const prefixes = ['', '', '欸，', '我說得有些亂：', 'quick question，', '先用自然語言理解一下：'];
+  const suffixes = ['', '', '，有些急', '，但不要亂執行', '，先抓重心', ' thanks'];
+  const prefix = prefixes[Math.floor(rand() * prefixes.length)] ?? '';
+  const suffix = suffixes[Math.floor(rand() * suffixes.length)] ?? '';
+  return `${prefix}${prompt}${suffix}`;
+}
+
 export async function runAISelfDialogEvaluation(options?: {
   scenarios?: AISelfDialogScenario[];
   concurrency?: number;
@@ -297,9 +346,14 @@ export async function runAISelfDialogEvaluation(options?: {
   let passed = 0;
   let failed = 0;
   const rand = mulberry32(seed >>> 0);
+  let shuffledPrompts = shufflePrompts(promptsPool, rand);
 
   for (let i = 0; i < rounds; i++) {
-    const msg = promptsPool[Math.floor(rand() * promptsPool.length)]!;
+    if (i > 0 && i % promptsPool.length === 0) {
+      shuffledPrompts = shufflePrompts(promptsPool, rand);
+    }
+    const baseMsg = shuffledPrompts[i % promptsPool.length]!;
+    const msg = varyPrompt(baseMsg, rand);
     try {
       await autonomousQuery(msg, ctx, undefined, []);
       passed += 1;

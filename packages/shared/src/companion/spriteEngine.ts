@@ -18,21 +18,57 @@ export type SpriteNeedKey = 'study' | 'move' | 'nourish' | 'social';
 export interface DailyActivitySignal {
   /** ISO date YYYY-MM-DD */
   date: string;
-  /** 學：出席、教材閱讀、作業繳交、測驗作答 */
+  // ── 學 Study：對應 LMS 主幹 ──
   studyMinutes: number;
   assignmentsSubmitted: number;
   materialsRead: number;
   quizAttempts: number;
   attendanceCheckins: number;
-  /** 動：地圖步數估計、公車打卡、健康中心 */
+  /** 圖書館：借書、續借、座位預約、自習打卡 */
+  libraryActions: number;
+  /** AI 學習對話次數（AICourseAdvisor / AIChat 學習相關） */
+  aiTutorTurns: number;
+  /** 列印行為（複習講義） */
+  printJobs: number;
+  // ── 動 Move：對應校園服務 ──
   campusStepsEstimate: number;
   campusVisitsCount: number;
-  /** 食：點餐、不同店家數、健康偏好 */
+  /** 公車 / 校車打卡 */
+  busCheckins: number;
+  /** AR 導航完成次數 */
+  arNavigationCompleted: number;
+  /** 健康中心、運動場館 */
+  healthCenterVisits: number;
+  // ── 食 Nourish ──
   mealsOrdered: number;
   distinctVendors: number;
-  /** 友：群組訊息、揪團、互評 */
+  /** 訂閱菜單、查看人潮預測 */
+  cafeteriaInteractions: number;
+  /** 預算追蹤頁面查看次數（培養理財感） */
+  budgetChecks: number;
+  // ── 友 Social ──
   socialInteractions: number;
   groupOrderJoined: number;
+  /** 互評：交出 / 收到 */
+  peerReviewsGiven: number;
+  peerReviewsReceived: number;
+  /** 討論串發文 / 回覆 / 標 useful */
+  discussionPosts: number;
+  /** 鼓勵雲收發 */
+  encouragementsSent: number;
+  encouragementsReceived: number;
+  // ── 校園生活 Life ──
+  /** 失物招領：發布 / 認領 */
+  lostFoundActions: number;
+  /** 宿舍報修：發單 */
+  dormRepairCreated: number;
+  /** 活動報名 / 簽到 */
+  eventAttendance: number;
+  /** 學分試算頁打開 */
+  creditAuditChecks: number;
+  /** 通知執行（從 inbox 直接完成任務） */
+  inboxActionsTaken: number;
+  // ── 控制 ──
   /** 是否標記為 hibernate（病假 / 期考週 / 寒暑假） */
   hibernated?: boolean;
 }
@@ -101,32 +137,54 @@ function clamp01(n: number): number {
 }
 
 function studyScoreOf(d: DailyActivitySignal): number {
-  // 每日上限 100：學習分鐘 40 + 教材閱讀 20 + 作業/測驗 20 + 出席 20
-  const minutes = Math.min(d.studyMinutes / 60, 4) * 10; // 0-40
-  const materials = Math.min(d.materialsRead, 4) * 5; // 0-20
-  const tasks = Math.min(d.assignmentsSubmitted + d.quizAttempts, 4) * 5; // 0-20
-  const attend = Math.min(d.attendanceCheckins, 2) * 10; // 0-20
-  return clamp01(minutes + materials + tasks + attend);
+  // 上限 100
+  const minutes = Math.min(d.studyMinutes / 60, 4) * 8; // 0-32
+  const materials = Math.min(d.materialsRead, 4) * 4; // 0-16
+  const tasks = Math.min(d.assignmentsSubmitted + d.quizAttempts, 4) * 4; // 0-16
+  const attend = Math.min(d.attendanceCheckins, 2) * 8; // 0-16
+  const library = Math.min(d.libraryActions, 3) * 4; // 0-12
+  const aiTutor = Math.min(d.aiTutorTurns, 5) * 0.8; // 0-4
+  const printing = Math.min(d.printJobs, 2) * 2; // 0-4
+  return clamp01(minutes + materials + tasks + attend + library + aiTutor + printing);
 }
 
 function moveScoreOf(d: DailyActivitySignal): number {
-  // 步數 60 + 校內服務造訪 40
-  const steps = Math.min(d.campusStepsEstimate / 3000, 1) * 60;
-  const visits = Math.min(d.campusVisitsCount, 4) * 10;
-  return clamp01(steps + visits);
+  const steps = Math.min(d.campusStepsEstimate / 3000, 1) * 40;
+  const visits = Math.min(d.campusVisitsCount, 4) * 7;
+  const bus = Math.min(d.busCheckins, 3) * 4; // 0-12
+  const ar = Math.min(d.arNavigationCompleted, 2) * 5; // 0-10
+  const health = Math.min(d.healthCenterVisits, 1) * 10; // 0-10
+  return clamp01(steps + visits + bus + ar + health);
 }
 
 function nourishScoreOf(d: DailyActivitySignal): number {
-  // 一天至少一餐有紀錄 50 + 不同店家多樣 50
-  const ordered = Math.min(d.mealsOrdered, 3) * 16.6;
-  const variety = Math.min(d.distinctVendors, 3) * 16.6;
-  return clamp01(ordered + variety);
+  const ordered = Math.min(d.mealsOrdered, 3) * 14; // 0-42
+  const variety = Math.min(d.distinctVendors, 3) * 14; // 0-42
+  const interactions = Math.min(d.cafeteriaInteractions, 2) * 5; // 0-10
+  const budget = Math.min(d.budgetChecks, 1) * 6; // 0-6
+  return clamp01(ordered + variety + interactions + budget);
 }
 
 function socialScoreOf(d: DailyActivitySignal): number {
-  const inter = Math.min(d.socialInteractions, 5) * 10;
-  const group = Math.min(d.groupOrderJoined, 2) * 25;
-  return clamp01(inter + group);
+  const inter = Math.min(d.socialInteractions, 5) * 6; // 0-30
+  const group = Math.min(d.groupOrderJoined, 2) * 12; // 0-24
+  const peerG = Math.min(d.peerReviewsGiven, 2) * 6; // 0-12
+  const peerR = Math.min(d.peerReviewsReceived, 2) * 4; // 0-8
+  const discussion = Math.min(d.discussionPosts, 3) * 4; // 0-12
+  const enc = Math.min(d.encouragementsSent + d.encouragementsReceived, 4) * 3.5; // 0-14
+  return clamp01(inter + group + peerG + peerR + discussion + enc);
+}
+
+/**
+ * 校園生活分數（life）：副指標，不直接進四象限，但影響星圖與成就。
+ */
+export function lifeScoreOf(d: DailyActivitySignal): number {
+  const lost = Math.min(d.lostFoundActions, 1) * 20;
+  const dorm = Math.min(d.dormRepairCreated, 1) * 20;
+  const event = Math.min(d.eventAttendance, 2) * 15;
+  const credit = Math.min(d.creditAuditChecks, 1) * 15;
+  const inbox = Math.min(d.inboxActionsTaken, 4) * 7.5;
+  return clamp01(lost + dorm + event + credit + inbox);
 }
 
 // ─────────────────────────────────────────────────────────
@@ -159,7 +217,8 @@ export function detectBurnoutSignal(signals: DailyActivitySignal[]): boolean {
     const mov = moveScoreOf(d);
     const nou = nourishScoreOf(d);
     const soc = socialScoreOf(d);
-    return stu >= 60 && (mov < 25 || nou < 25 || soc < 20);
+    // 學習得分高（≥ 50，新引擎多維後門檻略降），其他至少一項極低 → burnout
+    return stu >= 50 && (mov < 25 || nou < 25 || soc < 20);
   });
 }
 

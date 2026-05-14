@@ -1,6 +1,10 @@
 const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/AccountDeletionScreen.tsx',
   'apps/mobile/src/screens/AdminCourseVerifyScreen.tsx',
+  'apps/mobile/src/screens/CampusGameScreen.tsx',
+  'apps/mobile/src/screens/CompanionScreen.tsx',
+  'apps/mobile/src/screens/CompanionCollectionScreen.tsx',
+  'apps/mobile/src/screens/ConstellationScreen.tsx',
   'apps/mobile/src/screens/AdminDashboardScreen.tsx',
   'apps/mobile/src/screens/AssignmentDetailScreen.tsx',
   'apps/mobile/src/screens/BugReportScreen.tsx',
@@ -8,7 +12,6 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/ClassroomScreen.tsx',
   'apps/mobile/src/screens/DepartmentHubScreen.tsx',
   'apps/mobile/src/screens/DmsScreen.tsx',
-  'apps/mobile/src/screens/FeedbackScreen.tsx',
   'apps/mobile/src/screens/FollowingListsScreen.tsx',
   'apps/mobile/src/screens/FriendSearchScreen.tsx',
   'apps/mobile/src/screens/FriendsManageScreen.tsx',

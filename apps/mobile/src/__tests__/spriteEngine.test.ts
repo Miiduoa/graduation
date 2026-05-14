@@ -24,12 +24,30 @@ function day(date: string, partial: Partial<DailyActivitySignal> = {}): DailyAct
     materialsRead: 0,
     quizAttempts: 0,
     attendanceCheckins: 0,
+    libraryActions: 0,
+    aiTutorTurns: 0,
+    printJobs: 0,
     campusStepsEstimate: 0,
     campusVisitsCount: 0,
+    busCheckins: 0,
+    arNavigationCompleted: 0,
+    healthCenterVisits: 0,
     mealsOrdered: 0,
     distinctVendors: 0,
+    cafeteriaInteractions: 0,
+    budgetChecks: 0,
     socialInteractions: 0,
     groupOrderJoined: 0,
+    peerReviewsGiven: 0,
+    peerReviewsReceived: 0,
+    discussionPosts: 0,
+    encouragementsSent: 0,
+    encouragementsReceived: 0,
+    lostFoundActions: 0,
+    dormRepairCreated: 0,
+    eventAttendance: 0,
+    creditAuditChecks: 0,
+    inboxActionsTaken: 0,
     ...partial,
   };
 }
@@ -37,25 +55,36 @@ function day(date: string, partial: Partial<DailyActivitySignal> = {}): DailyAct
 const PROFILE: SpriteProfile = { createdAt: '2025-09-01', studyYear: 2, currentMonth: 5 };
 
 describe('computeSpriteState', () => {
-  test('完全平衡的學生 → energetic + 高 vitality', () => {
+  test('完全平衡且善用 APP 全功能的學生 → energetic + 高 vitality', () => {
     const signals = Array.from({ length: 14 }, (_, i) =>
       day(`2026-05-${String(i + 1).padStart(2, '0')}`, {
         studyMinutes: 90,
         materialsRead: 3,
         assignmentsSubmitted: 1,
         attendanceCheckins: 1,
+        libraryActions: 1,
+        aiTutorTurns: 2,
         campusStepsEstimate: 5000,
         campusVisitsCount: 2,
+        busCheckins: 1,
+        arNavigationCompleted: 1,
         mealsOrdered: 2,
         distinctVendors: 2,
+        cafeteriaInteractions: 1,
         socialInteractions: 3,
         groupOrderJoined: 1,
+        peerReviewsGiven: 1,
+        discussionPosts: 1,
+        encouragementsSent: 1,
       }),
     );
     const r = computeSpriteState({ signals, profile: PROFILE });
     expect(r.mood).toBe('energetic');
-    expect(r.vitality).toBeGreaterThan(50);
+    expect(r.vitality).toBeGreaterThan(45);
     expect(r.needs.study).toBeGreaterThan(40);
+    expect(r.needs.move).toBeGreaterThan(40);
+    expect(r.needs.nourish).toBeGreaterThan(40);
+    expect(r.needs.social).toBeGreaterThan(40);
   });
 
   test('只讀書沒社交 → lonely 或 focused', () => {

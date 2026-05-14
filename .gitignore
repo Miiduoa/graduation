@@ -49,6 +49,8 @@ packages/shared/dist-cjs/
 __pycache__/
 *.pyc
 *.pyo
+# Pillow-only campus game asset script (scripts/generate-campus-game-flux.py)
+/.venv-game-assets/
 
 # AI Server
 backend/ai-server/.venv/

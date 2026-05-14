@@ -3,7 +3,7 @@
  * =============================================================================
  * Campus Game — 本地 AI 美術資產 + 校園節點模擬 + 同 POI 好友輕即時
  * =============================================================================
- * 資產：`apps/mobile/assets/generated-game/*`（`scripts/generate-campus-game-flux.py`）
+ * 資產：`apps/mobile/assets/generated-game/*`（預設 `scripts/generate-campus-game-flux.py` 為免費 PIL；可加 `--comfy` 換本機出圖）
  * 深連結：`campus://home/campus-game`（需在設定開啟「在遊戲中展示我的所在校園節點」才會向 Firebase LBS heartbeat）
  * =============================================================================
  */
@@ -110,7 +110,7 @@ function AnimatedGameAvatar({
       source={gameAvatarFrames[reduceMotion ? 0 : idx]}
       style={{ width: size, height: size, borderRadius: theme.radius.md }}
       resizeMode="cover"
-      accessibilityLabel="遊戲角色（離線 Flux／PIL 或 ComfyUI 資產）"
+      accessibilityLabel="遊戲角色（預設免費程序化圖；可選換本機 Comfy）"
     />
   );
 }
@@ -389,8 +389,7 @@ export function CampusGameScreen() {
     >
       <Text style={{ fontSize: 22, fontWeight: '800', color: theme.colors.text }}>校園漫步</Text>
       <Text style={{ fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20 }}>
-        本地 AI（Comfy／Flux）角色與場景圖請見 assets/generated-game；請在設定開啟「在遊戲中展示我的所在校園節點」以啟動同 POI
-        好友列表與 Firebase 短期心跳。
+        角色與場景圖由 `assets/generated-game` 打包進 App；開發机上預設以 Pillow 免費產圖（不需 API）。請在設定開啟「在遊戲中展示我的所在校園節點」以啟動同 POI 好友列表與 Firebase 短期心跳。
       </Text>
 
       {!prefsShare ? (

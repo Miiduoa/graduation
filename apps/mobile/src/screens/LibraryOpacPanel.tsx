@@ -7,7 +7,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   FlatList,
   Image,
   Modal,
@@ -35,32 +34,55 @@ import {
   buildExternalFallbackUrl,
   buildLibraryBookDetailUrl,
 } from '../services/libraryOpacSearchClient';
-import { validateLibraryOpacReachable, buildLibraryOpacHomeUrl } from '../services/libraryOpacClient';
+import {
+  validateLibraryOpacReachable,
+  buildLibraryOpacHomeUrl,
+} from '../services/libraryOpacClient';
+
+function BookCoverPlaceholder(props: { width: number; height: number }) {
+  const { width, height } = props;
+  return (
+    <View
+      style={{
+        width,
+        height,
+        borderRadius: 10,
+        backgroundColor: theme.colors.surface3,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Ionicons
+        name="book-outline"
+        size={Math.min(width, height) * 0.34}
+        color={theme.colors.muted}
+      />
+    </View>
+  );
+}
 
 function BookCover(props: { uri?: string; width?: number; height?: number }) {
   const { uri, width = 74, height = 104 } = props;
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  useEffect(() => {
+    setFailedUri(null);
+  }, [uri]);
+
   if (!uri) {
-    return (
-      <View
-        style={{
-          width,
-          height,
-          borderRadius: 10,
-          backgroundColor: theme.colors.surface3,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Ionicons name="book-outline" size={Math.min(width, height) * 0.34} color={theme.colors.muted} />
-      </View>
-    );
+    return <BookCoverPlaceholder width={width} height={height} />;
   }
+
+  if (failedUri === uri) {
+    return <BookCoverPlaceholder width={width} height={height} />;
+  }
+
   return (
     <Image
       source={{ uri }}
       resizeMode="cover"
+      onError={() => setFailedUri(uri)}
       style={{
         width,
         height,
@@ -99,24 +121,32 @@ function InfoPill(props: { text?: string; tone?: 'default' | 'success' | 'warnin
   );
 }
 
-function HitRow(props: { item: OpacSearchHit; onOpen: () => void }) {
-  const { item, onOpen } = props;
+function HitRow(props: {
+  item: OpacSearchHit;
+  onOpen: () => void;
+  onBorrow?: () => void;
+  borrowed?: boolean;
+  borrowDisabled?: boolean;
+}) {
+  const { item, onOpen, onBorrow, borrowed, borrowDisabled } = props;
   const availabilityTone = item.isAvailable ? 'success' : item.canReserve ? 'warning' : 'default';
   return (
-    <Pressable
-      onPress={onOpen}
-      style={({ pressed }) => ({
+    <View
+      style={{
         padding: 14,
         borderRadius: 14,
-        backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
+        backgroundColor: theme.colors.surface2,
         borderWidth: 1,
         borderColor: theme.colors.border,
-      })}
+      }}
     >
       <View style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
         <BookCover uri={item.coverUrl} />
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }} numberOfLines={3}>
+          <Text
+            style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}
+            numberOfLines={3}
+          >
             {item.title}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }} numberOfLines={2}>
@@ -128,19 +158,35 @@ function HitRow(props: { item: OpacSearchHit; onOpen: () => void }) {
             {item.lendCount ? <InfoPill text={`借閱 ${item.lendCount} 次`} /> : null}
           </View>
           {item.sourceName ? (
-            <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 8 }} numberOfLines={1}>
+            <Text
+              style={{ color: theme.colors.muted, fontSize: 11, marginTop: 8 }}
+              numberOfLines={1}
+            >
               封面來源：{item.sourceName}
             </Text>
           ) : null}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 4 }}>
-            <Ionicons name="reader-outline" size={15} color={theme.colors.accent} />
-            <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
-              查看 App 內書目與更多資料
-            </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+            {onBorrow ? (
+              <Button
+                text={borrowed ? '已加入借閱' : '借書'}
+                icon={borrowed ? 'checkmark-outline' : 'add-outline'}
+                kind={borrowed ? 'secondary' : 'primary'}
+                size="small"
+                disabled={borrowed || borrowDisabled}
+                onPress={onBorrow}
+              />
+            ) : null}
+            <Button
+              text="更多資料"
+              icon="reader-outline"
+              kind="secondary"
+              size="small"
+              onPress={onOpen}
+            />
           </View>
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -158,14 +204,22 @@ function DetailFieldRow(props: { field: OpacBookDetailField }) {
       <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '700' }}>
         {field.label}
       </Text>
-      <Text style={{ color: field.url ? theme.colors.accent : theme.colors.text, fontSize: 14, lineHeight: 20 }}>
+      <Text
+        style={{
+          color: field.url ? theme.colors.accent : theme.colors.text,
+          fontSize: 14,
+          lineHeight: 20,
+        }}
+      >
         {field.value}
       </Text>
     </View>
   );
 
   if (!field.url) return content;
-  return <Pressable onPress={() => void WebBrowser.openBrowserAsync(field.url!)}>{content}</Pressable>;
+  return (
+    <Pressable onPress={() => void WebBrowser.openBrowserAsync(field.url!)}>{content}</Pressable>
+  );
 }
 
 function DetailModal(props: {
@@ -174,9 +228,14 @@ function DetailModal(props: {
   loading: boolean;
   onClose: () => void;
   onOpenOfficial: (sid: string) => void;
+  onBorrow?: (item: OpacSearchHit) => void;
+  isBorrowed?: (item: OpacSearchHit) => boolean;
+  borrowDisabled?: boolean;
 }) {
-  const { item, detail, loading, onClose, onOpenOfficial } = props;
+  const { item, detail, loading, onClose, onOpenOfficial, onBorrow, isBorrowed, borrowDisabled } =
+    props;
   const current = detail ?? item;
+  const borrowed = item && isBorrowed ? isBorrowed(item) : false;
   return (
     <Modal
       visible={!!item}
@@ -210,17 +269,29 @@ function DetailModal(props: {
             <View style={{ flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
               <BookCover uri={current.coverUrl} width={96} height={136} />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800', lineHeight: 24 }}>
+                <Text
+                  style={{
+                    color: theme.colors.text,
+                    fontSize: 18,
+                    fontWeight: '800',
+                    lineHeight: 24,
+                  }}
+                >
                   {current.title}
                 </Text>
-                <Text style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 19, marginTop: 8 }}>
-                  {[current.author, current.publisher, current.year].filter(Boolean).join(' · ') || '—'}
+                <Text
+                  style={{ color: theme.colors.muted, fontSize: 13, lineHeight: 19, marginTop: 8 }}
+                >
+                  {[current.author, current.publisher, current.year].filter(Boolean).join(' · ') ||
+                    '—'}
                 </Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
                   <InfoPill text={current.dataType} />
                   <InfoPill
                     text={current.availability}
-                    tone={current.isAvailable ? 'success' : current.canReserve ? 'warning' : 'default'}
+                    tone={
+                      current.isAvailable ? 'success' : current.canReserve ? 'warning' : 'default'
+                    }
                   />
                 </View>
                 {current.sourceName ? (
@@ -248,7 +319,9 @@ function DetailModal(props: {
                   backgroundColor: '#F59E0B18',
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18 }}>{detail.error}</Text>
+                <Text style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18 }}>
+                  {detail.error}
+                </Text>
               </View>
             ) : null}
 
@@ -282,17 +355,31 @@ function DetailModal(props: {
                 <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 13 }}>
                   MARC 編目資料
                 </Text>
-                <Text selectable style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 16 }}>
+                <Text
+                  selectable
+                  style={{ color: theme.colors.muted, fontSize: 11, lineHeight: 16 }}
+                >
                   {detail.marc}
                 </Text>
               </View>
             ) : null}
 
-            <Button
-              text="官方頁面／複本與預約"
-              kind="primary"
-              onPress={() => onOpenOfficial(current.sid)}
-            />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {item && onBorrow ? (
+                <Button
+                  text={borrowed ? '已加入借閱' : '借書'}
+                  icon={borrowed ? 'checkmark-outline' : 'add-outline'}
+                  kind={borrowed ? 'secondary' : 'primary'}
+                  disabled={borrowed || borrowDisabled}
+                  onPress={() => onBorrow(item)}
+                />
+              ) : null}
+              <Button
+                text="官方頁面／複本與預約"
+                kind={onBorrow ? 'secondary' : 'primary'}
+                onPress={() => onOpenOfficial(current.sid)}
+              />
+            </View>
           </ScrollView>
         ) : null}
       </View>
@@ -310,6 +397,10 @@ export type LibraryOpacPanelProps = {
   bottomInset?: number;
   /** 內嵌「放大」全螢幕查詢 */
   onRequestFullscreen?: (keyword: string) => void;
+  /** 將官方查詢結果加入本地借書流程 */
+  onBorrowHit?: (item: OpacSearchHit) => void;
+  borrowedSids?: Set<string> | string[];
+  borrowDisabled?: boolean;
 };
 
 export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
@@ -320,6 +411,9 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
     onQueryChange,
     bottomInset = 0,
     onRequestFullscreen,
+    onBorrowHit,
+    borrowedSids,
+    borrowDisabled,
   } = props;
 
   const [internalQuery, setInternalQuery] = useState(initialQuery);
@@ -344,6 +438,14 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
   const detailRequestId = React.useRef(0);
   /** API 遭校方防火牆 403 時改載入官方搜尋頁（WebView 指紋等同瀏覽器） */
   const [webFallbackUri, setWebFallbackUri] = useState<string | null>(null);
+  const borrowedSidSet = useMemo(() => {
+    if (!borrowedSids) return new Set<string>();
+    return borrowedSids instanceof Set ? borrowedSids : new Set(borrowedSids);
+  }, [borrowedSids]);
+  const isBorrowed = useCallback(
+    (item: OpacSearchHit) => borrowedSidSet.has(item.sid),
+    [borrowedSidSet],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -366,11 +468,17 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
       setHits(res.hits);
       const msg = res.error ?? null;
       const blocked =
-        typeof msg === 'string' && (msg.includes('403') || msg.includes('HTTP 403'));
+        typeof msg === 'string' &&
+        (msg.includes('403') ||
+          msg.includes('HTTP 403') ||
+          msg.includes('500') ||
+          msg.includes('502') ||
+          msg.includes('503') ||
+          msg.includes('504'));
       if (blocked && keyword.trim()) {
         setWebFallbackUri(buildExternalFallbackUrl(keyword, field));
         setHint(
-          '館藏 API 被校方防火牆擋下（HTTP 403）。已於下方載入官方 WebPac 搜尋頁，請在頁面內查看結果（與 Safari／Chrome 相同）。',
+          '館藏 API 暫時無法回應，已於下方載入官方 WebPac 搜尋頁。請先在站內頁面查看結果；App 會在 API 恢復後顯示可借書的原生結果。',
         );
       } else {
         setHint(msg);
@@ -416,7 +524,7 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
   };
 
   return (
-    <View style={{ flex: variant === 'fullscreen' ? 1 : undefined, gap: 12 }}>
+    <View style={{ flex: variant === 'fullscreen' ? 1 : undefined, gap: 8 }}>
       <DetailModal
         item={selectedHit}
         detail={selectedDetail}
@@ -428,6 +536,9 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
           setDetailLoading(false);
         }}
         onOpenOfficial={openOfficialDetail}
+        onBorrow={onBorrowHit}
+        isBorrowed={isBorrowed}
+        borrowDisabled={borrowDisabled}
       />
 
       {reachable === false ? (
@@ -446,123 +557,160 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
         </View>
       ) : null}
 
-      <View style={{ gap: 6 }}>
-        <Text style={{ fontWeight: '700', fontSize: 13, color: theme.colors.text }}>搜尋欄位</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 2 }}>
-            {OPAC_SEARCH_FIELDS.map((f) => {
-              const active = field === f.key;
-              return (
-                <Pressable
-                  key={f.key}
-                  onPress={() => setField(f.key)}
-                  style={{
-                    paddingHorizontal: 14,
-                    paddingVertical: 8,
-                    borderRadius: 18,
-                    borderWidth: 1,
-                    borderColor: active ? theme.colors.accent : theme.colors.border,
-                    backgroundColor: active ? theme.colors.accent + '22' : theme.colors.surface,
-                  }}
-                >
-                  <Text style={{ color: theme.colors.text, fontSize: 13 }}>{f.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </ScrollView>
-      </View>
-
-      <View style={{ gap: 6 }}>
-        <Text style={{ fontWeight: '700', fontSize: 13, color: theme.colors.text }}>關鍵字</Text>
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
         <TextInput
           value={keyword}
           onChangeText={setKeyword}
-          placeholder={`於「${fieldLabel}」搜尋…`}
+          placeholder={`${fieldLabel}搜尋`}
           placeholderTextColor={theme.colors.muted}
           returnKeyType="search"
           onSubmitEditing={() => void runSearch()}
           style={{
+            flex: 1,
+            height: 44,
             borderWidth: 1,
             borderColor: theme.colors.border,
-            borderRadius: 12,
+            borderRadius: 11,
             paddingHorizontal: 14,
-            paddingVertical: 12,
             color: theme.colors.text,
             backgroundColor: theme.colors.surface,
             fontSize: 15,
           }}
         />
-      </View>
-
-      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-        <View style={{ flex: 1, minWidth: 120 }}>
-          <Button
-            text="查詢館藏"
-            kind="primary"
-            loading={loading}
-            onPress={() => void runSearch()}
-          />
-        </View>
+        <Pressable
+          disabled={loading}
+          onPress={() => void runSearch()}
+          accessibilityRole="button"
+          accessibilityLabel="查詢館藏"
+          style={({ pressed }) => ({
+            width: 44,
+            height: 44,
+            borderRadius: 11,
+            backgroundColor: loading ? theme.colors.disabledBg : theme.colors.accent,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: pressed && !loading ? 0.86 : 1,
+          })}
+        >
+          {loading ? (
+            <ActivityIndicator size="small" color={theme.colors.muted} />
+          ) : (
+            <Ionicons name="search" size={20} color="#FFFFFF" />
+          )}
+        </Pressable>
         {variant === 'embedded' && onRequestFullscreen ? (
-          <View style={{ flex: 1, minWidth: 120 }}>
-            <Button
-              text="全螢幕查詢"
-              onPress={() => onRequestFullscreen(keyword.trim())}
-            />
-          </View>
+          <Pressable
+            onPress={() => onRequestFullscreen(keyword.trim())}
+            accessibilityRole="button"
+            accessibilityLabel="全螢幕查詢"
+            style={({ pressed }) => ({
+              width: 44,
+              height: 44,
+              borderRadius: 11,
+              backgroundColor: theme.colors.surface2,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: pressed ? 0.86 : 1,
+            })}
+          >
+            <Ionicons name="expand-outline" size={19} color={theme.colors.accent} />
+          </Pressable>
         ) : null}
       </View>
 
-      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-        <Pressable
-          onPress={() =>
-            keyword.trim()
-              ? setWebFallbackUri(buildExternalFallbackUrl(keyword, field))
-              : openHome()
-          }
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            paddingVertical: 8,
-            paddingHorizontal: 10,
-          }}
-        >
-          <Ionicons name="phone-portrait-outline" size={18} color={theme.colors.accent} />
-          <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 13 }}>
-            站內 WebPac（繞過 API）
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={openFallbackSearch}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            paddingVertical: 8,
-            paddingHorizontal: 10,
-          }}
-        >
-          <Ionicons name="open-outline" size={18} color={theme.colors.accent} />
-          <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 13 }}>
-            瀏覽器開啟（同條件）
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={openHome}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 6,
-            paddingVertical: 8,
-            paddingHorizontal: 10,
-          }}
-        >
-          <Ionicons name="home-outline" size={18} color={theme.colors.muted} />
-          <Text style={{ color: theme.colors.muted, fontWeight: '600', fontSize: 13 }}>WebPac 首頁</Text>
-        </Pressable>
-      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 34 }}>
+        <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 2 }}>
+          {OPAC_SEARCH_FIELDS.map((f) => {
+            const active = field === f.key;
+            return (
+              <Pressable
+                key={f.key}
+                onPress={() => setField(f.key)}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: active ? theme.colors.accent : theme.colors.border,
+                  backgroundColor: active ? theme.colors.accent + '18' : theme.colors.surface,
+                }}
+              >
+                <Text
+                  style={{
+                    color: active ? theme.colors.accent : theme.colors.textSecondary,
+                    fontSize: 12,
+                    fontWeight: active ? '700' : '600',
+                  }}
+                >
+                  {f.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </ScrollView>
+
+      {variant === 'embedded' || hint || webFallbackUri ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 36 }}>
+          <View style={{ flexDirection: 'row', gap: 8, paddingVertical: 2 }}>
+            <Pressable
+              onPress={() =>
+                keyword.trim()
+                  ? setWebFallbackUri(buildExternalFallbackUrl(keyword, field))
+                  : openHome()
+              }
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingVertical: 8,
+                paddingHorizontal: 10,
+                borderRadius: theme.radius.full,
+                backgroundColor: theme.colors.surface2,
+              }}
+            >
+              <Ionicons name="phone-portrait-outline" size={16} color={theme.colors.accent} />
+              <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 12 }}>
+                站內 WebPac
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={openFallbackSearch}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingVertical: 8,
+                paddingHorizontal: 10,
+                borderRadius: theme.radius.full,
+                backgroundColor: theme.colors.surface2,
+              }}
+            >
+              <Ionicons name="open-outline" size={16} color={theme.colors.accent} />
+              <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 12 }}>
+                瀏覽器
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={openHome}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingVertical: 8,
+                paddingHorizontal: 10,
+                borderRadius: theme.radius.full,
+                backgroundColor: theme.colors.surface2,
+              }}
+            >
+              <Ionicons name="home-outline" size={16} color={theme.colors.muted} />
+              <Text style={{ color: theme.colors.muted, fontWeight: '600', fontSize: 12 }}>
+                首頁
+              </Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      ) : null}
 
       {hint ? (
         <View
@@ -586,10 +734,9 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
             overflow: 'hidden',
             borderWidth: 1,
             borderColor: theme.colors.border,
-            height:
-              variant === 'fullscreen'
-                ? Math.min(Dimensions.get('window').height * 0.58, 520)
-                : 400,
+            flex: variant === 'fullscreen' ? 1 : undefined,
+            minHeight: variant === 'fullscreen' ? 260 : undefined,
+            height: variant === 'fullscreen' ? undefined : 400,
           }}
         >
           <WebView
@@ -603,9 +750,16 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
       ) : null}
 
       {!loading && hits.length > 0 ? (
-        <View style={{ flex: variant === 'fullscreen' ? 1 : undefined, minHeight: variant === 'embedded' ? 120 : undefined }}>
-          <Text style={{ fontWeight: '700', fontSize: 13, color: theme.colors.text, marginBottom: 8 }}>
-            結果（{hits.length} 筆，點選查看 App 內書目）
+        <View
+          style={{
+            flex: variant === 'fullscreen' ? 1 : undefined,
+            minHeight: variant === 'embedded' ? 120 : undefined,
+          }}
+        >
+          <Text
+            style={{ fontWeight: '700', fontSize: 13, color: theme.colors.text, marginBottom: 8 }}
+          >
+            結果（{hits.length} 筆）
           </Text>
           {variant === 'fullscreen' ? (
             <FlatList
@@ -615,13 +769,26 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
               contentContainerStyle={{ paddingBottom: bottomInset + 8, gap: 10 }}
               keyboardShouldPersistTaps="handled"
               renderItem={({ item }) => (
-                <HitRow item={item} onOpen={() => void openInAppDetail(item)} />
+                <HitRow
+                  item={item}
+                  onOpen={() => void openInAppDetail(item)}
+                  onBorrow={onBorrowHit ? () => onBorrowHit(item) : undefined}
+                  borrowed={isBorrowed(item)}
+                  borrowDisabled={borrowDisabled}
+                />
               )}
             />
           ) : (
             <View style={{ gap: 10, paddingBottom: 8 }}>
               {hits.map((item) => (
-                <HitRow key={item.sid} item={item} onOpen={() => void openInAppDetail(item)} />
+                <HitRow
+                  key={item.sid}
+                  item={item}
+                  onOpen={() => void openInAppDetail(item)}
+                  onBorrow={onBorrowHit ? () => onBorrowHit(item) : undefined}
+                  borrowed={isBorrowed(item)}
+                  borrowDisabled={borrowDisabled}
+                />
               ))}
             </View>
           )}
