@@ -320,6 +320,19 @@ export async function submitQuiz(input: {
     { merge: true },
   );
 
+  // ── Campus Companion 信號 ──
+  try {
+    const { onQuizAttempt } = await import('../services/companionHooks');
+    onQuizAttempt({
+      uid: input.userId,
+      quizId: input.quizId,
+      percentage: autoScore?.percentage ?? null,
+      isPerfect: autoScore?.percentage === 100,
+    });
+  } catch {
+    /* swallow */
+  }
+
   return {
     id: input.userId,
     assignmentId: input.quizId,
@@ -360,6 +373,7 @@ export async function checkInAttendance(input: {
   courseSpaceId: string;
   sessionId: string;
   qrToken?: string;
+  uid?: string;
 }): Promise<{ success: boolean }> {
   const joinLiveSession = httpsCallable<
     { groupId: string; sessionId: string; qrToken?: string },
@@ -371,6 +385,20 @@ export async function checkInAttendance(input: {
     sessionId: input.sessionId,
     qrToken: input.qrToken,
   });
+
+  // ── Campus Companion 信號：成功簽到 → onAttendanceCheckin ──
+  if (result.data?.success) {
+    try {
+      const { onAttendanceCheckin } = await import('../services/companionHooks');
+      onAttendanceCheckin({
+        uid: input.uid,
+        sessionId: input.sessionId,
+        courseSpaceId: input.courseSpaceId,
+      });
+    } catch {
+      /* swallow — 不影響主流程 */
+    }
+  }
 
   return result.data;
 }

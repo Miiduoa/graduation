@@ -12,6 +12,9 @@ import { GlobalSearchScreen } from './GlobalSearchScreen';
 import { WidgetPreviewScreen } from './WidgetPreviewScreen';
 import { AchievementsScreen } from './AchievementsScreen';
 import { CampusGardenScreen } from './CampusGardenScreen';
+import CompanionScreen from './CompanionScreen';
+import CompanionCollectionScreen from './CompanionCollectionScreen';
+import ConstellationScreen from './ConstellationScreen';
 import { AdminDashboardScreen } from './AdminDashboardScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
@@ -97,6 +100,21 @@ export function MeStack() {
         name="CampusGarden"
         component={CampusGardenScreen}
         options={{ title: '校園園地' }}
+      />
+      <Stack.Screen
+        name="Companion"
+        component={CompanionScreen}
+        options={{ title: '校園精靈' }}
+      />
+      <Stack.Screen
+        name="CompanionCollection"
+        component={CompanionCollectionScreen}
+        options={{ title: '我的收藏' }}
+      />
+      <Stack.Screen
+        name="Constellation"
+        component={ConstellationScreen}
+        options={{ title: '校園星圖' }}
       />
       <Stack.Screen
         name="GlobalSearch"

@@ -24,14 +24,20 @@ export EXPO_PUBLIC_AI_TEST_FAST="${EXPO_PUBLIC_AI_TEST_FAST:-1}"
 
 # 每輪大量口語種子回放（可自行調整）
 export AI_SELF_TEST_ROUNDS="${AI_SELF_TEST_ROUNDS:-2500}"
+AI_SELF_TEST_BASE_SEED="${AI_SELF_TEST_BASE_SEED:-411211325}"
 
 JEST_MOBILE=(
   "src/__tests__/services/aiConversationSim.test.ts"
+  "src/__tests__/services/aiConversationMarathon.test.ts"
+  "src/__tests__/services/aiOpenEndedNaturalLanguage.test.ts"
+  "src/__tests__/services/aiSelfDialogMultiTurn.test.ts"
   "src/__tests__/services/aiConversationQuality.test.ts"
   "src/__tests__/services/aiAgentWideCoverage.test.ts"
   "src/__tests__/services/aiAgentSafetyHardening.test.ts"
   "src/__tests__/services/aiSelfDialog.test.ts"
   "src/__tests__/services/aiAssistantProfile.test.ts"
+  "src/__tests__/services/aiAppContext.test.ts"
+  "src/__tests__/services/aiToolLayer.test.ts"
   "src/__tests__/services/aiAgentRouting.test.ts"
   "src/__tests__/services/aiActionExecutor.test.ts"
   "src/__tests__/services/aiToolRegistry.test.ts"
@@ -66,11 +72,14 @@ iter=0
 
 while (( $(date +%s) < END_TS )); do
   iter=$((iter + 1))
+  export AI_SELF_TEST_SEED="$(( AI_SELF_TEST_BASE_SEED + iter * 7919 ))"
   rem=$(( END_TS - $(date +%s) ))
   echo "" | tee -a "$LOG"
-  echo "════ Iteration #$iter ▶ remaining ~${rem}s ($(date -Iseconds)) ════" | tee -a "$LOG"
+  echo "════ Iteration #$iter ▶ remaining ~${rem}s seed=${AI_SELF_TEST_SEED} ($(date -Iseconds)) ════" | tee -a "$LOG"
 
-  for path in "${JEST_MOBILE[@]}"; do
+  suite_count="${#JEST_MOBILE[@]}"
+  for ((offset = 0; offset < suite_count; offset++)); do
+    path="${JEST_MOBILE[$(((offset + iter - 1) % suite_count))]}"
     run_one "$path"
   done
 

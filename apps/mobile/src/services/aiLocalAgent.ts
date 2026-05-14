@@ -544,12 +544,17 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     intents.push({ tool: 'query_events', args: {}, priority: 8, reason: '查詢活動' });
   }
 
+  const homeCookingAdvice =
+    /自己煮|在家煮|下廚|料理|食譜|菜譜|冰箱|食材|煮飯|做菜|炒菜|煎蛋|煮麵|煮菜/.test(msg) &&
+    !/學餐|餐廳|菜單|外帶|外送|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg);
+
   if (
     (/推薦.*(午餐|午飯|正餐)|午餐.*(推薦|吃什麼|要吃)|今天中午吃什麼|中午吃什麼|吃午飯|午飯吃什麼|幫我.*午餐|今天.*午餐|正餐.*吃什麼/.test(
       msg,
     ) ||
       (/中午|午餐|晚餐|早餐|菜色|便當/.test(msg) &&
         /推(?:薦)?(?:哪|什麼|啥)?(?:幾)?道|推.{0,6}菜|冷熱|葷素/.test(msg))) &&
+    !homeCookingAdvice &&
     !/幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg)
   ) {
     const timeSlot = /晚餐|晚飯|今晚/.test(msg) ? 'dinner' : /早餐|早飯/.test(msg) ? 'breakfast' : 'lunch';
@@ -563,6 +568,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     });
   } else if (
     /吃|喝|餐[廳點]|菜單|午餐|晚餐|早餐|便當|宵夜|消夜|手搖|奶茶|珍奶|價[格錢]|好吃|美食|飯|清淡|素食|不要太油|少油/.test(msg) &&
+    !homeCookingAdvice &&
     !/評分|打分|幾星|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]|不是.*(?:吃|飯)|想看成績/.test(msg)
   ) {
     // 萃取食物關鍵字，例如「我想吃滷肉飯」→ keyword=「滷肉飯」
@@ -616,7 +622,11 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     /私訊|訊息|對話|聊天|dm|message|有人找|誰找過我|誰傳給我|密我|一直密|狂密|敲我|已讀不回|不回我|誰密我/.test(
       msg,
     ) &&
-    !/幫我.*[發送傳]/.test(msg)
+    !/幫我.*[發送傳]/.test(msg) &&
+    !(
+      /朋友|同事|主管|家人|室友|對方|男友|女友|伴侶|曖昧|曖昧對象/.test(msg) &&
+      /怎麼(?:講|說|回|聊|開口)|如何(?:講|說|回|聊)|不尷尬|話術|回覆|建議|溝通|安慰/.test(msg)
+    )
   ) {
     intents.push({ tool: 'query_conversations', args: {}, priority: 7, reason: '查詢訊息' });
   }
@@ -1178,8 +1188,14 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     /(?:隨便|随便|你就).{0,14}處理|幫我處理一下|幫我搞定/.test(msg);
   const skipOrderForBriefingPack =
     /懶人包|今日重點/.test(msg) && !/吃飯|訂餐|點餐|想[吃喝]|便當|蛋餅|奶茶|飲料|宵夜|手搖/.test(msg);
-  const orderFoodContext =
-    /吃|喝|餓|餐|飯|麵|便當|午餐|晚餐|早餐|宵夜|消夜|飲料|手搖|奶茶|珍奶|菜單|點餐|訂餐|點|訂|買|來一|素|辣|炸|油|清淡|便宜/.test(msg);
+  const homeCookingOrderAdvice =
+    /自己煮|在家煮|下廚|料理|食譜|菜譜|冰箱|食材|煮飯|做菜|炒菜|煎蛋|煮麵|煮菜/.test(msg) &&
+    !/學餐|餐廳|菜單|外帶|外送|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg);
+  const explicitOrderCue =
+    /點餐|訂餐|外帶|外送|學餐|餐廳|菜單|幫我[點訂]|我要[點訂]|點一[個份碗杯]|訂一[個份碗杯]|來一[個份碗杯]?|買一[個份碗杯]?/.test(msg);
+  const foodDomainCue =
+    /吃|喝|餓|餐點|食物|美食|飯|麵|便當|午餐|晚餐|早餐|宵夜|消夜|飲料|手搖|奶茶|珍奶|咖啡|滷肉|雞腿|蛋餅|素食|辣|炸|油|清淡|便宜/.test(msg);
+  const orderFoodContext = (explicitOrderCue || foodDomainCue) && !homeCookingOrderAdvice;
   const hasInvalidOrderQuantity =
     /(?:^|[^\d])(?:[-−－]\s*\d+|0)\s*[碗份個杯盤道]/.test(msg) ||
     /負\s*\d+\s*[碗份個杯盤道]/.test(msg);
@@ -1193,6 +1209,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     !skipOrderForBriefingPack &&
     !isMenuBrowseQuestion &&
     !gradeQueryCue &&
+    orderFoodContext &&
     !/請.*假|報修|維修|預約.*座|預約.*看|掛號|借.*(?:書|本)|借閱|還書|選課|退選|報名.*活動|發.*訊|作業|功課|deadline|待辦|未交|還沒交|繳交|簽到|簽倒|签倒|打卡|點名|取消.*訂|不要.*訂|先不要|先別(?:要|點|訂)?|等等再說|暫時不用|先不用|不點了|查看|查詢|看一下|看看|查.*訂單|我的訂單|未讀|通知|notification/.test(msg)
   ) {
     // 先用語意推理：訊息「幫我訂午餐」要解析成 intent=order_food + meal_time=lunch（item=null）
@@ -2252,6 +2269,27 @@ function inferReadWrite(msg: string): 'read' | 'write' | 'unknown' {
   return 'unknown';
 }
 
+function hasSemanticDomainCue(toolName: string, msg: string): boolean {
+  const foodCue =
+    /學餐|餐廳|菜單|訂餐|點餐|外帶|外送|便當|午餐|晚餐|早餐|宵夜|消夜|手搖|奶茶|珍奶|咖啡|滷肉飯|雞腿|蛋餅|素食|餐點|菜色|吃|喝|餓|食物|美食/.test(
+      msg,
+    );
+  const homeCookingAdvice =
+    /自己煮|在家煮|下廚|料理|食譜|菜譜|冰箱|食材|煮飯|做菜|炒菜|煎蛋|煮麵|煮菜/.test(msg) &&
+    !/學餐|餐廳|菜單|外帶|外送|幫我[點訂]|我要[點訂]|點一[個份碗]|訂一[個份碗]/.test(msg);
+  if (['create_order', 'recommend_lunch', 'query_menus', 'rate_menu_item'].includes(toolName)) {
+    return foodCue && !homeCookingAdvice;
+  }
+
+  if (toolName === 'send_message') {
+    return /(?:幫我)?[發送傳].*訊息|(?:幫我)?私訊(?!誰)|^通知\s*[\u4e00-\u9fa5A-Za-z]{1,8}|(?:幫我)?(?:傳給|(?<!分)發給)|(?:幫我|請你|請)跟\s*[\u4e00-\u9fa5A-Za-z]{1,12}(?:講|說|：|︰)/.test(
+      msg,
+    );
+  }
+
+  return true;
+}
+
 /**
  * 自適應意圖推理：當 analyzeIntents 的 regex 全部 miss 時，
  * 用工具描述的語意匹配來推理最可能的工具。
@@ -2306,6 +2344,8 @@ export function inferIntentFromToolDescriptions(
   const scored: ScoredTool[] = [];
 
   for (const tool of tools) {
+    if (!hasSemanticDomainCue(tool.name, msg)) continue;
+
     const descTokens = tokenize(tool.description);
     // 也加入工具名的語意（把 snake_case 轉中文 token）
     const nameTokens = tokenize(tool.name.replace(/_/g, ' '));
