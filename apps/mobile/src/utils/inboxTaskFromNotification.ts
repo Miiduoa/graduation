@@ -5,7 +5,6 @@ import type { Notification } from '../state/notifications';
  * 從「作業／測驗」推播 payload 還原 InboxTask，供 navigateFromInboxTask 與 Today／訊息一致。
  * 後端可在 data 帶 groupName、isQuiz、kind、type 以提高辨識。
  */
-/** 原生推播 `data`（與 Notifications 資料列盡量對齊） */
 export function inboxTaskFromAssignmentPushData(data: Record<string, unknown>): InboxTask | null {
   const gid = data.groupId;
   const aid = data.assignmentId;

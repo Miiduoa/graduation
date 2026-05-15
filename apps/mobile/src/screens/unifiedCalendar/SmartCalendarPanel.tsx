@@ -19,8 +19,13 @@ import {
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../ui/theme';
+import { useAuth } from '../../state/auth';
+import { navigateFromInboxTask } from '../../services/inboxActions';
+import { isTeachingRole } from '../../utils/campusOs';
+import type { InboxTask } from '../../data/types';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useThemeMode } from '../../state/theme';
 import {
@@ -59,6 +64,8 @@ export function SmartCalendarPanel({
 } = {}) {
   useThemeMode();
   const insets = useSafeAreaInsets();
+  const nav = useNavigation<any>();
+  const auth = useAuth();
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
   const [studyPlans, setStudyPlans] = useState<StudyPlan[]>([]);
   const [pomodoroStats, setPomodoroStats] = useState<PomodoroStats | null>(null);
@@ -95,6 +102,30 @@ export function SmartCalendarPanel({
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
+
+  const openDeadlineInLearn = useCallback(
+    (d: Deadline) => {
+      if (!d.groupId || !d.assignmentId) return;
+      const kind: InboxTask['kind'] =
+        d.type === 'quiz' || d.type === 'exam' ? 'quiz' : 'assignment';
+      const task: InboxTask = {
+        id: d.id,
+        kind,
+        groupId: d.groupId,
+        groupName: d.courseName ?? '課程',
+        title: d.title,
+        subtitle: d.courseCode ? `課號 ${d.courseCode}` : '',
+        assignmentId: d.assignmentId,
+        priority: 50,
+        dueAt: new Date(d.dueAt),
+      };
+      navigateFromInboxTask(nav, task, {
+        role: auth.profile?.role,
+        isTeachingRole: isTeachingRole(auth.profile?.role),
+      });
+    },
+    [nav, auth.profile?.role],
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -296,7 +327,11 @@ export function SmartCalendarPanel({
 
         {/* Tab Content */}
         {activeTab === 'deadlines' && (
-          <DeadlineSection deadlines={deadlines} onComplete={handleCompleteDeadline} />
+          <DeadlineSection
+            deadlines={deadlines}
+            onComplete={handleCompleteDeadline}
+            onOpenDeadline={openDeadlineInLearn}
+          />
         )}
         {activeTab === 'plan' && (
           <StudyPlanSection
@@ -419,9 +454,11 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
 function DeadlineSection({
   deadlines,
   onComplete,
+  onOpenDeadline,
 }: {
   deadlines: Deadline[];
   onComplete: (id: string) => void;
+  onOpenDeadline?: (d: Deadline) => void;
 }) {
   if (deadlines.length === 0) {
     return (
@@ -454,6 +491,11 @@ function DeadlineSection({
         const hoursLeft = Math.max(0, Math.round(d.remainingHours));
         const timeLabel = hoursLeft < 24 ? `${hoursLeft} 小時` : `${Math.round(hoursLeft / 24)} 天`;
 
+        const hasLmsNav = !!(d.groupId && d.assignmentId);
+        const openRow = () => {
+          if (hasLmsNav) onOpenDeadline?.(d);
+        };
+
         return (
           <View
             key={d.id}
@@ -475,16 +517,28 @@ function DeadlineSection({
                 justifyContent: 'space-between',
               }}
             >
-              <View style={{ flex: 1 }}>
+              <Pressable
+                onPress={openRow}
+                disabled={!hasLmsNav}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  opacity: !hasLmsNav ? 0.85 : pressed ? 0.92 : 1,
+                })}
+              >
                 <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
                   {d.title}
                 </Text>
-                {d.courseName && (
+                {d.courseName ? (
                   <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
                     {d.courseName}
                   </Text>
-                )}
-              </View>
+                ) : null}
+                {hasLmsNav ? (
+                  <Text style={{ color: theme.colors.accent, fontSize: 11, marginTop: 4 }}>
+                    點一下開啟繳交／測驗
+                  </Text>
+                ) : null}
+              </Pressable>
               <Pressable
                 onPress={() => onComplete(d.id)}
                 style={({ pressed }) => ({
@@ -502,43 +556,45 @@ function DeadlineSection({
               </Pressable>
             </View>
 
-            <View style={{ flexDirection: 'row', gap: theme.space.md, marginTop: theme.space.sm }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons
-                  name="time-outline"
-                  size={14}
-                  color={urgent ? d.color : theme.colors.textSecondary}
-                />
-                <Text
-                  style={{
-                    color: urgent ? d.color : theme.colors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: urgent ? '700' : '400',
-                  }}
-                >
-                  剩 {timeLabel}
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="hourglass-outline" size={14} color={theme.colors.textSecondary} />
-                <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
-                  預估 {d.estimatedHours}h
-                </Text>
-              </View>
-              {/* Urgency bar */}
-              <View style={{ flex: 1, justifyContent: 'center' }}>
-                <View style={{ height: 4, backgroundColor: theme.colors.border, borderRadius: 2 }}>
-                  <View
-                    style={{
-                      height: 4,
-                      width: `${d.urgencyScore * 10}%` as any,
-                      backgroundColor: d.color,
-                      borderRadius: 2,
-                    }}
+            <Pressable onPress={openRow} disabled={!hasLmsNav}>
+              <View style={{ flexDirection: 'row', gap: theme.space.md, marginTop: theme.space.sm }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons
+                    name="time-outline"
+                    size={14}
+                    color={urgent ? d.color : theme.colors.textSecondary}
                   />
+                  <Text
+                    style={{
+                      color: urgent ? d.color : theme.colors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: urgent ? '700' : '400',
+                    }}
+                  >
+                    剩 {timeLabel}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="hourglass-outline" size={14} color={theme.colors.textSecondary} />
+                  <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>
+                    預估 {d.estimatedHours}h
+                  </Text>
+                </View>
+                {/* Urgency bar */}
+                <View style={{ flex: 1, justifyContent: 'center' }}>
+                  <View style={{ height: 4, backgroundColor: theme.colors.border, borderRadius: 2 }}>
+                    <View
+                      style={{
+                        height: 4,
+                        width: `${d.urgencyScore * 10}%` as any,
+                        backgroundColor: d.color,
+                        borderRadius: 2,
+                      }}
+                    />
+                  </View>
                 </View>
               </View>
-            </View>
+            </Pressable>
           </View>
         );
       })}

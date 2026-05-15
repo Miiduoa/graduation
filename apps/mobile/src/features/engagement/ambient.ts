@@ -238,8 +238,8 @@ function buildStudentLearningCues(
         body: '這和你現在最可能被延後的課務一致。先完成這一步，後面的壓力會明顯小很多。',
         ctaLabel: '前往處理',
         target: {
-          tab: surface === 'inbox' ? '訊息' : '學習',
-          screen: surface === 'inbox' ? 'GroupAssignments' : 'CourseHub',
+          tab: '學習',
+          screen: 'CourseHub',
           params: { groupId: completionSpace.groupId },
         },
       }),

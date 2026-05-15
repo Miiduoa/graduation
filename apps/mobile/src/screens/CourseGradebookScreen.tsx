@@ -11,6 +11,7 @@ import { useSchool } from '../state/school';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useDataSource } from '../hooks/useDataSource';
 import { canManageCourse, formatDateTime } from '../services/courseWorkspace';
+import { navigateToCourseScreen } from '../utils/courseNavigation';
 
 export function CourseGradebookScreen(props: any) {
   const nav = props?.navigation;
@@ -177,9 +178,9 @@ export function CourseGradebookScreen(props: any) {
                 text="前往作業與期末發布"
                 kind="primary"
                 onPress={() =>
-                  nav?.navigate?.('訊息', {
-                    screen: 'GroupAssignments',
-                    params: { groupId: routeGroupId },
+                  navigateToCourseScreen(nav, auth.profile?.role, 'CourseHub', {
+                    groupId: routeGroupId,
+                    groupName: selectedCourseName,
                   })
                 }
               />

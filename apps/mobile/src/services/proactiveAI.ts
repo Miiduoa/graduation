@@ -367,6 +367,8 @@ function buildAssignmentReports(input: ProactiveAIReportInput, now: Date): Proac
                     nested: 'AssignmentDetail',
                     groupId: assignment.groupId,
                     assignmentId: assignment.id,
+                    groupName: assignment.groupName,
+                    title: assignment.title,
                   },
                 },
               ]
@@ -413,6 +415,8 @@ function buildAssignmentReports(input: ProactiveAIReportInput, now: Date): Proac
                   nested: 'AssignmentDetail',
                   groupId: assignment.groupId,
                   assignmentId: assignment.id,
+                  groupName: assignment.groupName,
+                  title: assignment.title,
                 },
               },
             ]

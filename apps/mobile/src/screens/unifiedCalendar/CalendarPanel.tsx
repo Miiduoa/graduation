@@ -19,6 +19,9 @@ import { useAuth } from '../../state/auth';
 import { useDataSource } from '../../hooks/useDataSource';
 import { useAsyncList } from '../../hooks/useAsyncList';
 import { formatDateTime } from '../../utils/format';
+import { navigateFromInboxTask } from '../../services/inboxActions';
+import { isTeachingRole } from '../../utils/campusOs';
+import type { InboxTask } from '../../data/types';
 import {
   pickAndParseICalFile,
   exportAndShareICalFile,
@@ -610,10 +613,26 @@ export function CalendarPanel(props: any) {
                         nav?.navigate?.('Today', { screen: '活動詳情', params: { id: eventId } });
                       } else if (e.type === 'assignment' && e.groupId) {
                         const assignmentId = e.id.replace('assignment-', '');
-                        nav?.navigate?.('訊息', {
-                          screen: 'AssignmentDetail',
-                          params: { groupId: e.groupId, assignmentId },
+                        const task: InboxTask = {
+                          id: `cal-${assignmentId}`,
+                          kind: 'assignment',
+                          groupId: e.groupId,
+                          groupName: e.groupName ?? '課程',
+                          title: e.title,
+                          subtitle: '',
+                          assignmentId,
+                          priority: 50,
+                        };
+                        const navigated = navigateFromInboxTask(nav, task, {
+                          role: auth.profile?.role,
+                          isTeachingRole: isTeachingRole(auth.profile?.role),
                         });
+                        if (!navigated) {
+                          nav?.navigate?.('訊息', {
+                            screen: 'AssignmentDetail',
+                            params: { groupId: e.groupId, assignmentId },
+                          });
+                        }
                       }
                     }}
                     style={({ pressed }) => ({
