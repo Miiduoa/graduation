@@ -18,9 +18,9 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
-import { WebView } from 'react-native-webview';
+import { PuWebView } from '../ui/PuWebView';
 
+import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { Button } from '../ui/components';
 import { theme } from '../ui/theme';
 import {
@@ -218,7 +218,7 @@ function DetailFieldRow(props: { field: OpacBookDetailField }) {
 
   if (!field.url) return content;
   return (
-    <Pressable onPress={() => void WebBrowser.openBrowserAsync(field.url!)}>{content}</Pressable>
+    <Pressable onPress={() => void webBrowserOpenWithPuTronClassGate(field.url!)}>{content}</Pressable>
   );
 }
 
@@ -494,7 +494,7 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
   );
 
   const openOfficialDetail = (sid: string) => {
-    void WebBrowser.openBrowserAsync(buildLibraryBookDetailUrl(sid));
+    void webBrowserOpenWithPuTronClassGate(buildLibraryBookDetailUrl(sid));
   };
 
   const openInAppDetail = useCallback(async (item: OpacSearchHit) => {
@@ -516,11 +516,11 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
   }, []);
 
   const openFallbackSearch = () => {
-    void WebBrowser.openBrowserAsync(buildExternalFallbackUrl(keyword, field));
+    void webBrowserOpenWithPuTronClassGate(buildExternalFallbackUrl(keyword, field));
   };
 
   const openHome = () => {
-    void WebBrowser.openBrowserAsync(buildLibraryOpacHomeUrl());
+    void webBrowserOpenWithPuTronClassGate(buildLibraryOpacHomeUrl());
   };
 
   return (
@@ -739,12 +739,11 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
             height: variant === 'fullscreen' ? undefined : 400,
           }}
         >
-          <WebView
+          <PuWebView
             source={{ uri: webFallbackUri }}
             style={{ flex: 1, backgroundColor: theme.colors.surface }}
             sharedCookiesEnabled
             {...(Platform.OS === 'android' ? { thirdPartyCookiesEnabled: true } : {})}
-            setSupportMultipleWindows={false}
           />
         </View>
       ) : null}

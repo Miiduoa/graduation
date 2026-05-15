@@ -4,7 +4,6 @@ import {
   ScrollView,
   Text,
   View,
-  Linking,
   Platform,
   Pressable,
   Alert,
@@ -54,6 +53,7 @@ import {
   type CafeteriaCrowdSummaryOk,
 } from '../services/cafeteriaData';
 import { FeedbackPromptModal } from '../components/FeedbackPromptModal';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 type CrowdInfo = {
   level: CrowdLevel;
@@ -105,18 +105,14 @@ const REVIEW_TAGS = [
 
 function openInMaps(lat: number, lng: number, name: string) {
   const label = encodeURIComponent(name);
-  let url: string;
+  const fallback = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+  let primary: string;
+  if (Platform.OS === 'ios') primary = `maps:0,0?q=${label}@${lat},${lng}`;
+  else if (Platform.OS === 'android') primary = `geo:${lat},${lng}?q=${lat},${lng}(${label})`;
+  else primary = fallback;
 
-  if (Platform.OS === 'ios') {
-    url = `maps:0,0?q=${label}@${lat},${lng}`;
-  } else if (Platform.OS === 'android') {
-    url = `geo:${lat},${lng}?q=${lat},${lng}(${label})`;
-  } else {
-    url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-  }
-
-  Linking.openURL(url).catch(() => {
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
+  void linkingOpenWithPuTronClassGate(primary).then((ok) => {
+    if (!ok && primary !== fallback) void linkingOpenWithPuTronClassGate(fallback);
   });
 }
 
@@ -1698,7 +1694,7 @@ export function PoiDetailScreen(props: any) {
               <Button
                 text="在 Google Maps 開啟"
                 onPress={() =>
-                  Linking.openURL(
+                  void linkingOpenWithPuTronClassGate(
                     `https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`,
                   )
                 }

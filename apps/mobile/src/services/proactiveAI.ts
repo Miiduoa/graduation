@@ -3,6 +3,7 @@ import * as Notifications from 'expo-notifications';
 
 import type { Announcement, Course } from '../data/types';
 import type { PendingGroupAssignment } from '../features/groups';
+import { planNotifications, type NotificationContext, type NotificationItem } from '@campus/shared';
 import { getScopedStorageKey } from './scopedStorage';
 import {
   cancelNotification,
@@ -194,6 +195,65 @@ function normalizeAssignmentDueAt(
   assignment: ProactiveAIReportInput['pendingAssignments'][number],
 ): Date | null {
   return toDate((assignment as { dueAt?: unknown }).dueAt);
+}
+
+function buildNotificationContextForPlanner(
+  input: ProactiveAIReportInput,
+  now: Date,
+): NotificationContext {
+  return {
+    now: now.toISOString(),
+    homeworks: (input.pendingAssignments ?? [])
+      .map((a) => {
+        const id = String((a as { id?: unknown }).id ?? '');
+        const courseId = String((a as { groupId?: unknown }).groupId ?? '');
+        const courseName = String((a as { groupName?: unknown }).groupName ?? '課程');
+        const title = String((a as { title?: unknown }).title ?? '作業');
+        const due = normalizeAssignmentDueAt(a);
+        return {
+          id,
+          courseId,
+          courseName,
+          title,
+          dueAt: due ? due.toISOString() : null,
+          submitted: false,
+        };
+      })
+      .filter((h) => h.id.length > 0),
+  };
+}
+
+function pushDataFromPlannerItem(item: NotificationItem): Record<string, unknown> {
+  const qs = item.deepLink?.includes('?') ? item.deepLink.split('?')[1] ?? '' : '';
+  const params = new URLSearchParams(qs);
+  const base: Record<string, unknown> = {
+    type: 'assignment',
+    title: item.title,
+    body: item.body,
+    plannerId: item.id,
+    plannerKind: item.kind,
+  };
+
+  if (item.kind === 'exam_today' || item.kind === 'exam_tomorrow') {
+    const groupId = params.get('groupId');
+    const assignmentId = params.get('assignmentId');
+    if (groupId && assignmentId) {
+      return { ...base, groupId, assignmentId, kind: 'quiz', isQuiz: true };
+    }
+  }
+  if (item.kind === 'hw_due_soon' || item.kind === 'hw_overdue') {
+    const groupId = params.get('courseId');
+    const assignmentId = params.get('hwId');
+    if (groupId && assignmentId) return { ...base, groupId, assignmentId };
+  }
+  return {
+    type: 'planner',
+    plannerId: item.id,
+    kind: item.kind,
+    deepLink: item.deepLink ?? '',
+    title: item.title,
+    body: item.body,
+  };
 }
 
 function reportSort(left: ProactiveAIReport, right: ProactiveAIReport): number {
@@ -685,7 +745,10 @@ function weeklyReminderTrigger(
   };
 }
 
-function buildScheduledNotificationPlans(input: ProactiveAIReportInput): NotificationPlan[] {
+function buildScheduledNotificationPlans(
+  input: ProactiveAIReportInput,
+  at: Date = new Date(),
+): NotificationPlan[] {
   const plans: NotificationPlan[] = [
     {
       title: 'AI 每日主動回報',
@@ -725,7 +788,7 @@ function buildScheduledNotificationPlans(input: ProactiveAIReportInput): Notific
     const reminderPoints = [24 * 60, 2 * 60];
     reminderPoints.forEach((leadMinutes) => {
       const notifyAt = addMinutes(dueAt, -leadMinutes);
-      if (notifyAt.getTime() <= Date.now() + 60_000) return;
+      if (notifyAt.getTime() <= at.getTime() + 60_000) return;
       plans.push({
         title: leadMinutes >= 24 * 60 ? '作業明天截止' : '作業快截止',
         body: `${assignment.title}（${assignment.groupName ?? '課程'}）截止：${formatDateTime(dueAt)}。`,
@@ -744,12 +807,35 @@ function buildScheduledNotificationPlans(input: ProactiveAIReportInput): Notific
     });
   });
 
+  const plannerCtx = buildNotificationContextForPlanner(input, at);
+  const planned = planNotifications(plannerCtx, { cooldownHours: 12 });
+  const usedPlannerScheduleKeys = new Set<string>();
+
+  for (const item of planned) {
+    if (!item.scheduledAt) continue;
+    const when = new Date(item.scheduledAt);
+    if (!Number.isFinite(when.getTime()) || when.getTime() <= at.getTime() + 60_000) continue;
+    if (usedPlannerScheduleKeys.has(item.id)) continue;
+    usedPlannerScheduleKeys.add(item.id);
+    plans.push({
+      title: item.title,
+      body: item.body,
+      data: pushDataFromPlannerItem(item),
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: when,
+        channelId: AI_NOTIFICATION_CHANNEL,
+      },
+    });
+  }
+
   return plans.slice(0, 64);
 }
 
 async function syncProactiveAINotificationSchedules(
   input: ProactiveAIReportInput,
   state: ProactiveAIState,
+  at: Date,
 ): Promise<ProactiveAIState> {
   const permission = await checkPushPermission().catch(() => ({ granted: false }));
   if (!permission.granted) return state;
@@ -764,7 +850,7 @@ async function syncProactiveAINotificationSchedules(
   );
 
   const scheduledNotificationIds: string[] = [];
-  for (const plan of buildScheduledNotificationPlans(input)) {
+  for (const plan of buildScheduledNotificationPlans(input, at)) {
     const id = await scheduleLocalNotification(
       plan.title,
       plan.body,
@@ -821,7 +907,7 @@ export async function syncProactiveAIReports(
   }
 
   if (options.scheduleFutureNotifications !== false) {
-    state = await syncProactiveAINotificationSchedules(input, state);
+    state = await syncProactiveAINotificationSchedules(input, state, now);
   }
   state.lastSyncAt = now.toISOString();
 

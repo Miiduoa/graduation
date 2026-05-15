@@ -19,9 +19,9 @@ import {
   RefreshControl,
   Alert,
   Dimensions,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import {
   Screen,
   AnimatedCard,
@@ -173,7 +173,7 @@ export function HealthScreen(props: any) {
   }, [loadData]);
 
   const handleCall = (phone: string) => {
-    Linking.openURL(`tel:${phone.replace(/[^0-9#*]/g, '')}`);
+    void linkingOpenWithPuTronClassGate(`tel:${phone.replace(/[^0-9#*]/g, '')}`);
   };
 
   const handleTriageSymptom = (symptom: SymptomOption) => {

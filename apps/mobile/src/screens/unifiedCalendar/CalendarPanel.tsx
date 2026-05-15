@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useMemo, useState, useCallback } from 'react';
-import { ScrollView, Text, View, Pressable, Alert, Share, Linking, Clipboard } from 'react-native';
+import { ScrollView, Text, View, Pressable, Alert, Share, Clipboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Screen,
@@ -20,6 +20,7 @@ import { useDataSource } from '../../hooks/useDataSource';
 import { useAsyncList } from '../../hooks/useAsyncList';
 import { formatDateTime } from '../../utils/format';
 import { navigateFromInboxTask } from '../../services/inboxActions';
+import { linkingOpenWithPuTronClassGate } from '../../services/tronClassWebUiGate';
 import { isTeachingRole } from '../../utils/campusOs';
 import type { InboxTask } from '../../data/types';
 import {
@@ -109,10 +110,8 @@ function SubscribeButton({ icon, label, description, subscribeUrl }: SubscribeBu
 
   const handleSubscribe = async () => {
     try {
-      const canOpen = await Linking.canOpenURL(webcalUrl);
-      if (canOpen) {
-        await Linking.openURL(webcalUrl);
-      } else {
+      const ok = await linkingOpenWithPuTronClassGate(webcalUrl);
+      if (!ok) {
         Alert.alert('無法開啟日曆', '請複製連結後手動新增訂閱', [
           { text: '取消', style: 'cancel' },
           {

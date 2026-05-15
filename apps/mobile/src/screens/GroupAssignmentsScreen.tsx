@@ -2,8 +2,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
-
 import { Screen, Card, Pill, LoadingState, ErrorState, SectionTitle } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -11,7 +9,7 @@ import { useAuth } from '../state/auth';
 import { getAnyCachedTCCourses, refreshTCCourses } from '../services/puDataCache';
 import { tcFetchHomeworkActivities } from '../services/tronClassClient';
 import type { TCCourse } from '../services/tronClassClient';
-import { guardTronClassWebAccessOrAlert } from '../services/tronClassWebUiGate';
+import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 // ── TronClass 作業型別 ─────────────────────────
 type TCHomework = {
@@ -73,9 +71,8 @@ function HomeworkCard(props: { hw: TCHomework }) {
   }
 
   const onPress = () => {
-    if (!guardTronClassWebAccessOrAlert()) return;
     const url = `https://tronclass.pu.edu.tw/course/${hw.courseId}/content#/homework/${hw.id}`;
-    WebBrowser.openBrowserAsync(url).catch(() => {});
+    void webBrowserOpenWithPuTronClassGate(url);
   };
 
   return (

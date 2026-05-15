@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Image, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
-
 import {
   AnimatedCard,
   Button,
@@ -27,6 +25,7 @@ import {
   getLibraryOpenStatus,
   type StudyRoom,
 } from '../data/puLibraryData';
+import { webBrowserOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { LibraryOpacPanel } from './LibraryOpacPanel';
 
 type LibraryTab = 'search' | 'loans' | 'reservations' | 'info';
@@ -105,7 +104,7 @@ export function LibraryScreen() {
   }, []);
 
   const openUrl = useCallback((url: string) => {
-    void WebBrowser.openBrowserAsync(url);
+    void webBrowserOpenWithPuTronClassGate(url);
   }, []);
 
   const borrowFromHit = useCallback(

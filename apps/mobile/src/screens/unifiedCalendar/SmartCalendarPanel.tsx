@@ -119,10 +119,16 @@ export function SmartCalendarPanel({
         priority: 50,
         dueAt: new Date(d.dueAt),
       };
-      navigateFromInboxTask(nav, task, {
+      const navigated = navigateFromInboxTask(nav, task, {
         role: auth.profile?.role,
         isTeachingRole: isTeachingRole(auth.profile?.role),
       });
+      if (!navigated) {
+        nav?.navigate?.('訊息', {
+          screen: 'AssignmentDetail',
+          params: { groupId: d.groupId, assignmentId: d.assignmentId },
+        });
+      }
     },
     [nav, auth.profile?.role],
   );

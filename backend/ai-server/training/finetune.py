@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from config import TRAINING_DIR, LORA_OUTPUT_DIR, MODEL_NAME
+from config import TRAINING_DIR, LORA_OUTPUT_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,30 @@ def _normalize_chat_messages(raw: list) -> list[dict[str, str]] | None:
         else:
             out.append({"role": str(role), "content": str(content)})
     return out if len(out) >= 2 else None
+
+
+def _fingerprint_mlx_messages(messages: list[dict]) -> str:
+    """穩定指紋：避免同一對話被拆成多行重複訓練。"""
+    norm = [{"role": str(m.get("role", "")), "content": str(m.get("content", ""))} for m in messages]
+    return json.dumps(norm, ensure_ascii=False)
+
+
+def _dedupe_mlx_chat_rows(mlx_data: list[dict]) -> list[dict]:
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for row in mlx_data:
+        msgs = row.get("messages")
+        if not isinstance(msgs, list):
+            continue
+        fp = _fingerprint_mlx_messages(msgs)
+        if fp in seen:
+            continue
+        seen.add(fp)
+        unique.append(row)
+    dropped = len(mlx_data) - len(unique)
+    if dropped:
+        logger.info("MLX 轉檔：移除 %d 筆重複對話（保留 %d 筆）", dropped, len(unique))
+    return unique
 
 
 def _convert_jsonl_to_mlx_format(input_path: Path, output_dir: Path) -> tuple[Path, Path, Path]:
@@ -72,6 +96,8 @@ def _convert_jsonl_to_mlx_format(input_path: Path, output_dir: Path) -> tuple[Pa
             ]
         })
 
+    mlx_data = _dedupe_mlx_chat_rows(mlx_data)
+
     total = len(mlx_data)
     split_train = int(total * 0.85)
     split_valid = int(total * 0.95)
@@ -94,16 +120,35 @@ def _convert_jsonl_to_mlx_format(input_path: Path, output_dir: Path) -> tuple[Pa
     return paths["train"], paths["valid"], paths["test"]
 
 
+_THIS_DIR = Path(__file__).resolve().parent
+
+
+def _write_mlx_lora_yaml(rank: int) -> Path:
+    """mlx_lm>=0.21 以 YAML 設定 LoRA rank（CLI 已無 --lora-rank）。"""
+    path = _THIS_DIR / "_mlx_lora_runtime.yaml"
+    path.write_text(
+        "lora_parameters:\n"
+        f"  rank: {int(rank)}\n"
+        "  dropout: 0.0\n"
+        "  scale: 20.0\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def run_finetune(
     *,
     model: str = DEFAULT_HF_MODEL,
     data_path: str | Path | None = None,
     output_dir: str | Path | None = None,
     epochs: int = 3,
+    iters: int | None = None,
     batch_size: int = 1,
     lora_rank: int = 16,
     learning_rate: float = 2e-5,
     max_seq_length: int = 2048,
+    save_every: int | None = None,
+    steps_per_eval: int | None = None,
 ) -> Path:
     """Launch MLX-LM LoRA fine-tuning."""
     data_path = Path(data_path) if data_path else TRAINING_DIR / "campus_instruct.jsonl"
@@ -114,22 +159,51 @@ def run_finetune(
     logger.info("Converting training data to MLX format...")
     _convert_jsonl_to_mlx_format(data_path, mlx_data_dir)
 
+    _write_mlx_lora_yaml(lora_rank)
+    lora_cfg = _THIS_DIR / "_mlx_lora_runtime.yaml"
+
+    train_iters = int(iters) if iters is not None else int(epochs) * 1000
+
     cmd = [
-        sys.executable, "-m", "mlx_lm.lora",
-        "--model", model,
-        "--data", str(mlx_data_dir),
-        "--adapter-path", str(output_path),
+        sys.executable,
+        "-m",
+        "mlx_lm",
+        "lora",
+        "--model",
+        model,
+        "--data",
+        str(mlx_data_dir),
+        "--adapter-path",
+        str(output_path),
         "--train",
-        "--iters", str(epochs * 1000),
-        "--batch-size", str(batch_size),
-        "--lora-rank", str(lora_rank),
-        "--learning-rate", str(learning_rate),
-        "--max-seq-length", str(max_seq_length),
-        "--num-layers", "8",
+        "--fine-tune-type",
+        "lora",
+        "--iters",
+        str(train_iters),
+        "--batch-size",
+        str(batch_size),
+        "--learning-rate",
+        str(learning_rate),
+        "--max-seq-length",
+        str(max_seq_length),
+        "--num-layers",
+        "8",
+        "-c",
+        str(lora_cfg),
     ]
+    if save_every is not None:
+        cmd.extend(["--save-every", str(int(save_every))])
+    if steps_per_eval is not None:
+        cmd.extend(["--steps-per-eval", str(int(steps_per_eval))])
 
     logger.info("Starting MLX-LM LoRA training:\n  %s", " ".join(cmd))
-    logger.info("Model: %s | Epochs: %d | Rank: %d | LR: %s", model, epochs, lora_rank, learning_rate)
+    logger.info(
+        "Model: %s | Iters: %d | Rank: %d | LR: %s",
+        model,
+        train_iters,
+        lora_rank,
+        learning_rate,
+    )
 
     result = subprocess.run(cmd, capture_output=False, text=True)
 
@@ -150,10 +224,16 @@ def create_merged_model(
     fused_dir = LORA_OUTPUT_DIR / "campus_fused"
 
     cmd = [
-        sys.executable, "-m", "mlx_lm.fuse",
-        "--model", base_model,
-        "--adapter-path", str(adapter_path),
-        "--save-path", str(fused_dir),
+        sys.executable,
+        "-m",
+        "mlx_lm",
+        "fuse",
+        "--model",
+        base_model,
+        "--adapter-path",
+        str(adapter_path),
+        "--save-path",
+        str(fused_dir),
     ]
 
     logger.info("Fusing LoRA adapters: %s", " ".join(cmd))
@@ -168,10 +248,28 @@ if __name__ == "__main__":
     parser.add_argument("--model", default=DEFAULT_HF_MODEL)
     parser.add_argument("--data", default=None)
     parser.add_argument("--output", default=None)
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=3,
+        help="若未指定 --iters，則訓練步數 = epochs × 1000（舊版相容參數名）",
+    )
+    parser.add_argument(
+        "--iters",
+        type=int,
+        default=None,
+        help="覆寫訓練迭代次數（優先於 --epochs）",
+    )
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--rank", type=int, default=16)
     parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--save-every", type=int, default=None, help="每 N 步儲存 adapter（mlx_lm 預設 100）")
+    parser.add_argument(
+        "--steps-per-eval",
+        type=int,
+        default=None,
+        help="每 N 步做一次驗證（拉長可省時間）",
+    )
     parser.add_argument("--fuse", action="store_true", help="Fuse adapters after training")
     args = parser.parse_args()
 
@@ -180,9 +278,12 @@ if __name__ == "__main__":
         data_path=args.data,
         output_dir=args.output,
         epochs=args.epochs,
+        iters=args.iters,
         batch_size=args.batch_size,
         lora_rank=args.rank,
         learning_rate=args.lr,
+        save_every=args.save_every,
+        steps_per_eval=args.steps_per_eval,
     )
 
     if args.fuse:

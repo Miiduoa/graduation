@@ -100,7 +100,13 @@ describe('parseGroupCourseHubDeepLink', () => {
     });
   });
 
-  test('裸 group/id 不攔截', () => {
-    expect(parseGroupCourseHubDeepLink('campus://group/club-only')).toBeNull();
+  test('query hub=1 允許 groupId 與 ? 之間的尾隨斜線', () => {
+    expect(parseGroupCourseHubDeepLink('campus://group/mygid/?hub=1')).toEqual({
+      groupId: 'mygid',
+    });
+  });
+
+  test('?hub=1 不得誤判含 /post/ 的連結', () => {
+    expect(parseGroupCourseHubDeepLink('campus://group/g1/post/p1?hub=1')).toBeNull();
   });
 });

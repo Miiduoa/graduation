@@ -6,6 +6,7 @@
 #   ./run.sh              # 啟動 AI 伺服器
 #   ./run.sh --prepare    # 準備訓練資料
 #   ./run.sh --train      # 執行 LoRA 微調
+#   ./run.sh --train-hours [小時]   # 依時長跑 LoRA（預設 24；會先 prepare + MLX 去重）
 #   ./run.sh --eval       # 評估模型
 #   ./run.sh --grow       # 手動觸發自我訓練循環
 
@@ -59,6 +60,16 @@ case "${1:-serve}" in
         shift
         python -m training.finetune "$@"
         ;;
+    --train-hours)
+        HOURS="${2:-24}"
+        echo "⏱️ LoRA 微調約 ${HOURS} 小時（prepare → MLX 轉檔去重 → mlx_lm；時間到送 SIGINT）"
+        if [ -n "${2:-}" ]; then
+            shift 2
+        else
+            shift 1
+        fi
+        python -m training.train_timed --hours "$HOURS" -- "$@"
+        ;;
     --eval)
         echo "📊 評估模型品質..."
         python -m training.eval
@@ -81,7 +92,7 @@ case "${1:-serve}" in
         python -m self_training.cloud_sync --server-url "$2"
         ;;
     *)
-        echo "用法: $0 [serve|--prepare|--index|--train|--eval|--grow|--self-instruct|--sync <url>]"
+        echo "用法: $0 [serve|--prepare|--index|--train|--train-hours [小時]|--eval|--grow|--self-instruct|--sync <url>]"
         exit 1
         ;;
 esac

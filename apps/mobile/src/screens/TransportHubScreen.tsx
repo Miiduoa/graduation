@@ -21,10 +21,9 @@ import {
   Dimensions,
   KeyboardAvoidingView,
   Platform,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { WebView } from 'react-native-webview';
+import { PuWebView } from '../ui/PuWebView';
 import { Screen, Card, Pill, Button } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -41,6 +40,7 @@ import {
   type RouteOption,
   type LatLng,
 } from '../services/routingService';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import {
   searchBusRoutes,
   getBusStopsOfRoute,
@@ -178,11 +178,9 @@ function openExternalMap(from: LatLng, to: LatLng, destName: string, mode: strin
     ios: `maps://app?saddr=${from.lat},${from.lng}&daddr=${to.lat},${to.lng}&dirflg=${mode === 'transit' ? 'r' : mode === 'cycling' ? 'b' : 'w'}`,
     default: `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=${mode === 'cycling' ? 'bicycling' : mode}`,
   });
-  Linking.openURL(scheme).catch(() => {
-    // fallback to Google Maps web
-    Linking.openURL(
-      `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=${mode === 'cycling' ? 'bicycling' : mode}`,
-    );
+  const fallback = `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=${mode === 'cycling' ? 'bicycling' : mode}`;
+  void linkingOpenWithPuTronClassGate(scheme).then((ok) => {
+    if (!ok && scheme !== fallback) void linkingOpenWithPuTronClassGate(fallback);
   });
 }
 
@@ -420,7 +418,7 @@ export function TransportHubScreen(props: any) {
   }, []);
 
   // WebView ref — 用於發送訊息更新地圖
-  const webRef = useRef<WebView>(null);
+  const webRef = useRef<React.ComponentRef<typeof PuWebView>>(null);
 
   // 路線顏色
   const routeColor = useMemo(() => {
@@ -492,7 +490,7 @@ export function TransportHubScreen(props: any) {
         <View style={{ flex: 1 }}>
           {/* ═══ 互動式地圖（Leaflet via WebView） ═══ */}
           <View style={{ height: MAP_HEIGHT, backgroundColor: theme.colors.surface2 }}>
-            <WebView
+            <PuWebView
               ref={webRef}
               originWhitelist={['*']}
               source={{ html: mapHtml }}

@@ -131,8 +131,21 @@ export function parseGroupAssignmentsListDeepLink(
 }
 
 /**
- * 可選進入課程工作區：需明確 `…/group/:id/hub` 或 `…/group/:id?hub=1`（及 courseHub、learn），
- * 裸 `group/:id` 仍交給 React Navigation → GroupDetail，避免社團誤入 CourseHub。
+ * query 帶 hub 時，只允許「單一 id」路徑（例如 …/group/g1?hub=1），
+ * 不可與 /post/、/assignment/、/assignments 並存，避免誤判。
+ */
+function matchGroupIdForHubQueryParam(url: string): string | null {
+  if (/\/post\//i.test(url)) return null;
+  if (/\/assignment\//i.test(url)) return null;
+  if (/\/assignments(?:\?|$|#|\/)/i.test(url)) return null;
+  const m = url.match(/group\/([^/?#]+)\/?(?=\?|#|$)/i);
+  if (!m) return null;
+  return m[1];
+}
+
+/**
+ * 可選進入課程工作區：`…/group/:id/hub` 或 `…/group/:id?hub=1`（及 courseHub、learn）。
+ * 裸 `group/:id` 仍交給 React Navigation → GroupDetail。
  */
 export function parseGroupCourseHubDeepLink(
   url: string | null | undefined,
@@ -191,12 +204,12 @@ export function parseGroupCourseHubDeepLink(
     } catch {
       /* fall through */
     }
-    m = candidate.match(/group\/([^/?#]+)/i) ?? url.match(/group\/([^/?#]+)/i);
-    if (m) {
+    const fromQuery = matchGroupIdForHubQueryParam(url);
+    if (fromQuery) {
       try {
-        return { groupId: decodeURIComponent(m[1]) };
+        return { groupId: decodeURIComponent(fromQuery) };
       } catch {
-        return { groupId: m[1] };
+        return { groupId: fromQuery };
       }
     }
   }

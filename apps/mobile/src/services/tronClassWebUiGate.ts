@@ -1,3 +1,4 @@
+import * as WebBrowser from 'expo-web-browser';
 import { Alert, Linking } from 'react-native';
 
 import {
@@ -16,6 +17,17 @@ export function guardTronClassWebAccessOrAlert(): boolean {
   if (isTronClassDataFetchEnabled()) return true;
   Alert.alert('LMS（TronClass）已關閉', TRONCLASS_DATA_DISABLED_MESSAGE);
   return false;
+}
+
+/**
+ * WebView `onShouldStartLoadWithRequest`：LMS 關閉時阻擋載入 PU 玩課雲網址（重新導向、子框架等）。
+ * 不會自動 `Alert`，由呼叫端決定是否在首次擋截時提示。
+ */
+export function webViewShouldAllowRequestUrl(rawUrl: string | undefined | null): boolean {
+  if (rawUrl == null || typeof rawUrl !== 'string') return true;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return true;
+  return !(isTronClassPuHostedUrl(trimmed) && !isTronClassDataFetchEnabled());
 }
 
 function shouldSkipLinkingCanOpenUrl(trimmed: string): boolean {
@@ -37,14 +49,31 @@ function shouldSkipLinkingCanOpenUrl(trimmed: string): boolean {
  */
 export async function linkingOpenWithPuTronClassGate(url: string): Promise<boolean> {
   if (!url || typeof url !== 'string') return false;
-  if (isTronClassPuHostedUrl(url) && !guardTronClassWebAccessOrAlert()) return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (isTronClassPuHostedUrl(trimmed) && !guardTronClassWebAccessOrAlert()) return false;
   try {
-    const trimmed = url.trim();
     if (!shouldSkipLinkingCanOpenUrl(trimmed)) {
       const canOpen = await Linking.canOpenURL(trimmed);
       if (!canOpen) return false;
     }
     await Linking.openURL(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `expo-web-browser` in-app／SFSafari／Chrome Custom Tab；TronClass 站台與 `linkingOpenWithPuTronClassGate` 同一套 LMS 開關。
+ */
+export async function webBrowserOpenWithPuTronClassGate(url: string): Promise<boolean> {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (isTronClassPuHostedUrl(trimmed) && !guardTronClassWebAccessOrAlert()) return false;
+  try {
+    await WebBrowser.openBrowserAsync(trimmed);
     return true;
   } catch {
     return false;
