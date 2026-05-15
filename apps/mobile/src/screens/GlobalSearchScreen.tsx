@@ -352,8 +352,8 @@ export function GlobalSearchScreen(props: any) {
           });
           if (!ok) {
             nav?.navigate?.('訊息', {
-              screen: 'GroupAssignments',
-              params: { groupId: result.groupId },
+              screen: 'AssignmentDetail',
+              params: { groupId: result.groupId, assignmentId: result.id },
             });
           }
         }

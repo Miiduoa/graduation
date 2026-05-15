@@ -139,7 +139,11 @@ export function usePushNotifications(
 
   useEffect(() => {
     let cancelled = false;
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web' || !uid) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const handleResponse = async (
       response: NotificationResponseLike,
@@ -214,5 +218,5 @@ export function usePushNotifications(
         responseListener.current = null;
       }
     };
-  }, []);
+  }, [uid]);
 }

@@ -807,8 +807,20 @@ export async function getAnyCachedTCSyllabus(): Promise<Record<number, unknown> 
 
 // ─── TronClass 刷新 ─────────────────────────────────────
 
+/** TronClass 全關時不可寫入空陣列覆蓋既有快取（登入種子／離線 demo 會被洗掉）。 */
+async function preservedTcCacheUnlessFetchEnabled<T>(
+  readAny: () => Promise<T | null>,
+): Promise<T | null | undefined> {
+  if (isTronClassDataFetchEnabled()) return undefined;
+  const preserved = await readAny();
+  console.log('[puDataCache] TronClass fetch disabled — skip network refresh, preserve cache');
+  return preserved ?? null;
+}
+
 export async function refreshTCCourses(): Promise<TCCourse[] | null> {
   console.log('[puDataCache] refreshing TronClass courses…');
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCCourses);
+  if (skipped !== undefined) return skipped;
   await ensureTronClassSession();
   const courses = await tcFetchCourses('ongoing');
   await writeCache(KEYS.tcCourses, courses);
@@ -819,6 +831,8 @@ export async function refreshTCActivitiesForCourses(
   courseIds: number[],
 ): Promise<Record<number, TCActivity[]>> {
   console.log(`[puDataCache] refreshing TronClass activities for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCActivities);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, TCActivity[]> = {};
 
@@ -837,6 +851,8 @@ export async function refreshTCModulesForCourses(
   courseIds: number[],
 ): Promise<Record<number, TCModule[]>> {
   console.log(`[puDataCache] refreshing TronClass modules for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCModules);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, TCModule[]> = {};
 
@@ -853,6 +869,8 @@ export async function refreshTCModulesForCourses(
 
 export async function refreshTCAttendance(): Promise<TCAttendance[] | null> {
   console.log('[puDataCache] refreshing TronClass attendance…');
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCAttendance);
+  if (skipped !== undefined) return skipped;
   await ensureTronClassSession();
   const data = await tcFetchAttendance();
   await writeCache(KEYS.tcAttendance, data);
@@ -861,6 +879,8 @@ export async function refreshTCAttendance(): Promise<TCAttendance[] | null> {
 
 export async function refreshTCTodos(): Promise<TCActivity[] | null> {
   console.log('[puDataCache] refreshing TronClass todos…');
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCTodos);
+  if (skipped !== undefined) return skipped;
   await ensureTronClassSession();
   const data = await tcFetchTodos();
   await writeCache(KEYS.tcTodos, data);
@@ -869,6 +889,8 @@ export async function refreshTCTodos(): Promise<TCActivity[] | null> {
 
 export async function refreshTCAnnouncements(): Promise<TCAnnouncementItem[] | null> {
   console.log('[puDataCache] refreshing TronClass announcements…');
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCAnnouncements);
+  if (skipped !== undefined) return skipped;
   await ensureTronClassSession();
   const data = await tcFetchAnnouncements();
   await writeCache(KEYS.tcAnnouncements, data);
@@ -879,6 +901,8 @@ export async function refreshTCExamsForCourses(
   courseIds: number[],
 ): Promise<Record<number, TCExam[]>> {
   console.log(`[puDataCache] refreshing TronClass exams for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCExams);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, TCExam[]> = {};
   await Promise.allSettled(
@@ -894,6 +918,8 @@ export async function refreshTCScoreItemsForCourses(
   courseIds: number[],
 ): Promise<Record<number, TCScoreItem[]>> {
   console.log(`[puDataCache] refreshing TronClass score items for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCScoreItems);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, TCScoreItem[]> = {};
   await Promise.allSettled(
@@ -909,6 +935,8 @@ export async function refreshTCHomeworkActivitiesForCourses(
   courseIds: number[],
 ): Promise<Record<number, unknown[]>> {
   console.log(`[puDataCache] refreshing TronClass homework activities for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCHomeworkActivities);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, unknown[]> = {};
   await Promise.allSettled(
@@ -924,6 +952,8 @@ export async function refreshTCDiscussionsForCourses(
   courseIds: number[],
 ): Promise<Record<number, TCDiscussion[]>> {
   console.log(`[puDataCache] refreshing TronClass discussions for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCDiscussions);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, TCDiscussion[]> = {};
   await Promise.allSettled(
@@ -939,6 +969,8 @@ export async function refreshTCMaterialsForCourses(
   courseIds: number[],
 ): Promise<Record<number, TCMaterial[]>> {
   console.log(`[puDataCache] refreshing TronClass materials for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCMaterials);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, TCMaterial[]> = {};
   await Promise.allSettled(
@@ -954,6 +986,8 @@ export async function refreshTCCourseMembersForCourses(
   courseIds: number[],
 ): Promise<Record<number, TCCourseMember[]>> {
   console.log(`[puDataCache] refreshing TronClass course members for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCCourseMembers);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, TCCourseMember[]> = {};
   await Promise.allSettled(
@@ -969,6 +1003,8 @@ export async function refreshTCCourseAnnouncementsForCourses(
   courseIds: number[],
 ): Promise<Record<number, TCAnnouncementItem[]>> {
   console.log(`[puDataCache] refreshing TronClass course announcements for ${courseIds.length} courses…`);
+  const skipped = await preservedTcCacheUnlessFetchEnabled(getAnyCachedTCCourseAnnouncements);
+  if (skipped !== undefined) return skipped ?? {};
   await ensureTronClassSession();
   const result: Record<number, TCAnnouncementItem[]> = {};
   await Promise.allSettled(
@@ -1224,33 +1260,37 @@ export async function refreshStaleData(session: PUSession): Promise<void> {
   const studentEntry = await readCache<PUStudentInfo>(KEYS.studentInfo);
   if (isExpired(studentEntry, TTL.studentInfo)) tasks.push(refreshStudentInfo(session));
 
-  // TronClass stale data
-  const tcCoursesEntry = await readCache<TCCourse[]>(KEYS.tcCourses);
-  if (isExpired(tcCoursesEntry, TTL.tcCourses)) tasks.push(refreshTCCourses());
+  if (isTronClassDataFetchEnabled()) {
+    // TronClass stale data（關閉 TRONCLASS_DATA 時不重算過期、不觸發 refresh，避免覆寫快取）
+    const tcCoursesEntry = await readCache<TCCourse[]>(KEYS.tcCourses);
+    if (isExpired(tcCoursesEntry, TTL.tcCourses)) tasks.push(refreshTCCourses());
 
-  const tcTodosEntry = await readCache<TCActivity[]>(KEYS.tcTodos);
-  if (isExpired(tcTodosEntry, TTL.tcTodos)) tasks.push(refreshTCTodos());
+    const tcTodosEntry = await readCache<TCActivity[]>(KEYS.tcTodos);
+    if (isExpired(tcTodosEntry, TTL.tcTodos)) tasks.push(refreshTCTodos());
 
-  const tcAttEntry = await readCache<TCAttendance[]>(KEYS.tcAttendance);
-  if (isExpired(tcAttEntry, TTL.tcAttendance)) tasks.push(refreshTCAttendance());
+    const tcAttEntry = await readCache<TCAttendance[]>(KEYS.tcAttendance);
+    if (isExpired(tcAttEntry, TTL.tcAttendance)) tasks.push(refreshTCAttendance());
 
-  const tcAnnEntry = await readCache<TCAnnouncementItem[]>(KEYS.tcAnnouncements);
-  if (isExpired(tcAnnEntry, TTL.tcAnnouncements)) tasks.push(refreshTCAnnouncements());
+    const tcAnnEntry = await readCache<TCAnnouncementItem[]>(KEYS.tcAnnouncements);
+    if (isExpired(tcAnnEntry, TTL.tcAnnouncements)) tasks.push(refreshTCAnnouncements());
 
-  // 詳細資料在背景刷新（需要 courseIds）
-  const cachedTCCourses = (await readCache<TCCourse[]>(KEYS.tcCourses))?.data;
-  if (cachedTCCourses && cachedTCCourses.length > 0) {
-    const ids = cachedTCCourses.map((c) => c.id);
-    const examsEntry = await readCache(KEYS.tcExams);
-    if (isExpired(examsEntry, TTL.tcExams)) tasks.push(refreshTCExamsForCourses(ids));
-    const hwEntry = await readCache(KEYS.tcHomeworkActivities);
-    if (isExpired(hwEntry, TTL.tcHomeworkActivities)) tasks.push(refreshTCHomeworkActivitiesForCourses(ids));
-    const matEntry = await readCache(KEYS.tcMaterials);
-    if (isExpired(matEntry, TTL.tcMaterials)) tasks.push(refreshTCMaterialsForCourses(ids));
-    const discEntry = await readCache(KEYS.tcDiscussions);
-    if (isExpired(discEntry, TTL.tcDiscussions)) tasks.push(refreshTCDiscussionsForCourses(ids));
-    const caEntry = await readCache(KEYS.tcCourseAnnouncements);
-    if (isExpired(caEntry, TTL.tcCourseAnnouncements)) tasks.push(refreshTCCourseAnnouncementsForCourses(ids));
+    // 詳細資料在背景刷新（需要 courseIds）
+    const cachedTCCourses = (await readCache<TCCourse[]>(KEYS.tcCourses))?.data;
+    if (cachedTCCourses && cachedTCCourses.length > 0) {
+      const ids = cachedTCCourses.map((c) => c.id);
+      const examsEntry = await readCache(KEYS.tcExams);
+      if (isExpired(examsEntry, TTL.tcExams)) tasks.push(refreshTCExamsForCourses(ids));
+      const hwEntry = await readCache(KEYS.tcHomeworkActivities);
+      if (isExpired(hwEntry, TTL.tcHomeworkActivities))
+        tasks.push(refreshTCHomeworkActivitiesForCourses(ids));
+      const matEntry = await readCache(KEYS.tcMaterials);
+      if (isExpired(matEntry, TTL.tcMaterials)) tasks.push(refreshTCMaterialsForCourses(ids));
+      const discEntry = await readCache(KEYS.tcDiscussions);
+      if (isExpired(discEntry, TTL.tcDiscussions)) tasks.push(refreshTCDiscussionsForCourses(ids));
+      const caEntry = await readCache(KEYS.tcCourseAnnouncements);
+      if (isExpired(caEntry, TTL.tcCourseAnnouncements))
+        tasks.push(refreshTCCourseAnnouncementsForCourses(ids));
+    }
   }
 
   if (tasks.length > 0) {
