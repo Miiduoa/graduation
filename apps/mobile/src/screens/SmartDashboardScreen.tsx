@@ -2760,6 +2760,53 @@ export function SmartDashboardScreen(props: any) {
           </View>
         ) : null}
 
+        {/* 口試 Golden Path：下一個學習動作 → demo 課教材 */}
+        <Pressable
+          onPress={() =>
+            navigateToCourseScreen(nav, auth.profile?.role, 'CourseModules', {
+              groupId: '71378',
+              groupName: '機器學習',
+            })
+          }
+          accessibilityRole="button"
+          accessibilityLabel="開啟示範課程機器學習教材"
+          style={{
+            marginHorizontal: theme.space.lg,
+            marginTop: theme.space.sm,
+            marginBottom: theme.space.xs,
+            padding: theme.space.md,
+            borderRadius: theme.radius.lg,
+            backgroundColor: theme.colors.surface,
+            borderWidth: 1,
+            borderColor: `${theme.colors.accent}55`,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.space.sm,
+          }}
+        >
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: theme.colors.accentSoft,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name={'rocket-outline' as any} size={22} color={theme.colors.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
+              下一個學習動作（Demo）
+            </Text>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 4, lineHeight: 17 }}>
+              機器學習 · 查看本週教材與作業截止 · 與 TronClass App「跳出瀏覽器」相比，在此可直接走完 LMS 動線
+            </Text>
+          </View>
+          <Ionicons name={'chevron-forward' as any} size={20} color={theme.colors.muted} />
+        </Pressable>
+
         <View
           style={{
             backgroundColor: theme.colors.surfaceMuted,

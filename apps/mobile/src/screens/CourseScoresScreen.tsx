@@ -12,12 +12,8 @@ import {
   View,
   Text,
   ScrollView,
-  ActivityIndicator,
-  Pressable,
   RefreshControl,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
 
 import {
   tcFetchSelfScore,
@@ -40,6 +36,7 @@ import {
   CourseChipErrorBanner,
   CourseChipHeader,
   CourseChipLoading,
+  CourseDemoDataRibbon,
   courseChipScrollContentStyle,
 } from '../ui/courseChipShell';
 
@@ -64,7 +61,6 @@ interface ScoreRow {
 }
 
 export default function CourseScoresScreen(props: RouteProps) {
-  const navigation = useNavigation<any>();
   const groupName = props.route?.params?.groupName ?? '課內成績';
   const groupIdStr = props.route?.params?.groupId ?? props.route?.params?.courseSpaceId ?? '';
   const courseId = Number(groupIdStr.replace(/^tc:/, '')) || 0;
@@ -194,11 +190,13 @@ export default function CourseScoresScreen(props: RouteProps) {
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
       contentContainerStyle={courseChipScrollContentStyle(true)}
+      accessibilityLabel="課內成績列表"
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
           title="重新整理"
           tintColor={theme.colors.primary}
+          accessibilityLabel="重新整理課內成績"
           onRefresh={() => {
             setRefreshing(true);
             load();
@@ -206,6 +204,11 @@ export default function CourseScoresScreen(props: RouteProps) {
         />
       }
     >
+      {isDemoCourseId(courseId) ? (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
+          <CourseDemoDataRibbon />
+        </View>
+      ) : null}
       <CourseChipHeader
         emoji="📊"
         eyebrow="課內成績"

@@ -43,6 +43,7 @@ import AttendanceAnalyticsScreen from './AttendanceAnalyticsScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { MerchantHubScreen } from './MerchantHubScreen';
 import CourseDiscussionScreen from './CourseDiscussionScreen';
+import DiscussionThreadDetailScreen from './DiscussionThreadDetailScreen';
 import CourseMaterialViewerScreen from './CourseMaterialViewerScreen';
 import HomeworkSubmitScreen from './HomeworkSubmitScreen';
 import VideoMaterialScreen from './VideoMaterialScreen';
@@ -281,6 +282,11 @@ export function LearnStack() {
         name="CourseDiscussion"
         component={CourseDiscussionScreen}
         options={{ title: '課程討論' }}
+      />
+      <Stack.Screen
+        name="DiscussionThreadDetail"
+        component={DiscussionThreadDetailScreen}
+        options={{ title: '討論串' }}
       />
       <Stack.Screen
         name="CourseMaterialViewer"

@@ -49,7 +49,14 @@ const DAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
 
 // ─── Main Screen ─────────────────────────────────────────
 
-export function SmartCalendarPanel({ embedded }: { embedded?: boolean } = {}) {
+export function SmartCalendarPanel({
+  embedded,
+  onJumpToScheduleTab,
+}: {
+  embedded?: boolean;
+  /** 嵌入於「課程→行事曆」時：引導使用者回到「課表」分頁開啟教室／校園地圖動線 */
+  onJumpToScheduleTab?: () => void;
+} = {}) {
   useThemeMode();
   const insets = useSafeAreaInsets();
   const [deadlines, setDeadlines] = useState<Deadline[]>([]);
@@ -177,6 +184,36 @@ export function SmartCalendarPanel({ embedded }: { embedded?: boolean } = {}) {
             </Text>
           </View>
         )}
+
+        {embedded && onJumpToScheduleTab ? (
+          <Pressable
+            onPress={onJumpToScheduleTab}
+            style={{
+              marginHorizontal: theme.space.lg,
+              marginBottom: theme.space.md,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              paddingVertical: 12,
+              paddingHorizontal: 14,
+              borderRadius: theme.radius.md,
+              backgroundColor: theme.colors.surface,
+              borderWidth: 1,
+              borderColor: theme.colors.border,
+            }}
+          >
+            <Ionicons name="map-outline" size={22} color={theme.colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.text, fontSize: 14, fontWeight: '700' }}>
+                要看教室在哪？前往「課表」分頁
+              </Text>
+              <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
+                點課程後可開啟校園地圖導航（口試 Golden Path）
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={theme.colors.muted} />
+          </Pressable>
+        ) : null}
 
         {/* Week Summary */}
         {weekView && <WeekSummaryCard weekView={weekView} />}

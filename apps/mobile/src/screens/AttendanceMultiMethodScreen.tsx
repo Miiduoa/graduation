@@ -19,14 +19,13 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import {
   verifyAttendance,
-  analyzeAttendancePattern,
-  type AttendanceMethod,
   type AttendanceSessionConfig,
   type AttendanceClaim,
 } from '@campus/shared';
@@ -39,7 +38,7 @@ import {
 } from '../data/demoCoursesAdapter';
 import { theme } from '../ui/theme';
 import { Skeleton } from '../ui/components';
-import { CourseChipHeader, courseChipScrollContentStyle } from '../ui/courseChipShell';
+import { CourseChipHeader, CourseDemoDataRibbon, courseChipScrollContentStyle } from '../ui/courseChipShell';
 
 function attendanceStatusLabel(
   s: 'present' | 'late' | 'absent' | 'excused' | null | undefined,
@@ -79,7 +78,7 @@ const DEMO_CFG: AttendanceSessionConfig = {
 };
 
 export default function AttendanceMultiMethodScreen(props: RouteProps) {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const cfg = props.route?.params?.sessionConfig ?? DEMO_CFG;
   const courseId = props.route?.params?.courseId ?? cfg.courseId;
   const sessionId = props.route?.params?.sessionId ?? cfg.sessionId;
@@ -95,6 +94,7 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
 
   // 課程歷史出席記錄
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyRefreshing, setHistoryRefreshing] = useState(false);
   const [history, setHistory] = useState<
     Array<{
       id: string;
@@ -106,41 +106,60 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
     }>
   >([]);
 
+  const fetchHistoryData = useCallback(async () => {
+    const demoId = toDemoCourseId(courseId);
+    if (isDemoCourseId(demoId)) {
+      const demoSessions = demoListAttendanceSessions(demoId);
+      setHistory(
+        demoSessions.map((s) => ({
+          id: s.id,
+          startedAt: s.startedAt,
+          active: s.active,
+          attendeeCount: s.attendeeCount,
+          totalCount: s.totalCount,
+          myStatus: s.myStatus,
+        })),
+      );
+    } else {
+      const sessions = await listAttendanceSessions(courseId);
+      setHistory(
+        sessions.map((s) => ({
+          id: s.id,
+          startedAt: s.startedAt,
+          active: s.active,
+          attendeeCount: s.attendeeCount,
+        })),
+      );
+    }
+  }, [courseId]);
+
   useEffect(() => {
+    let cancelled = false;
     (async () => {
+      setHistoryLoading(true);
       try {
-        const demoId = toDemoCourseId(courseId);
-        if (isDemoCourseId(demoId)) {
-          // demo course → 直接用 mock attendance
-          const demoSessions = demoListAttendanceSessions(demoId);
-          setHistory(
-            demoSessions.map((s) => ({
-              id: s.id,
-              startedAt: s.startedAt,
-              active: s.active,
-              attendeeCount: s.attendeeCount,
-              totalCount: s.totalCount,
-              myStatus: s.myStatus,
-            })),
-          );
-        } else {
-          const sessions = await listAttendanceSessions(courseId);
-          setHistory(
-            sessions.map((s) => ({
-              id: s.id,
-              startedAt: s.startedAt,
-              active: s.active,
-              attendeeCount: s.attendeeCount,
-            })),
-          );
-        }
+        await fetchHistoryData();
       } catch {
         /* swallow */
       } finally {
-        setHistoryLoading(false);
+        if (!cancelled) setHistoryLoading(false);
       }
     })();
-  }, [courseId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchHistoryData]);
+
+  const onRefreshHistory = useCallback(async () => {
+    setHistoryRefreshing(true);
+    try {
+      await fetchHistoryData();
+    } catch {
+      /* swallow */
+    } finally {
+      setHistoryRefreshing(false);
+    }
+  }, [fetchHistoryData]);
 
   const hasActiveSession = history.some((h) => h.active);
 
@@ -270,11 +289,28 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
     }
   }, [cfg.method, token, code, location, selfieSimilarity]);
 
+  const demoCourse = isDemoCourseId(toDemoCourseId(courseId));
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
       contentContainerStyle={courseChipScrollContentStyle(true)}
+      accessibilityLabel="智慧簽到與出席紀錄"
+      refreshControl={
+        <RefreshControl
+          refreshing={historyRefreshing}
+          title="重新整理"
+          tintColor={theme.colors.primary}
+          accessibilityLabel="重新整理出席紀錄"
+          onRefresh={onRefreshHistory}
+        />
+      }
     >
+      {demoCourse ? (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
+          <CourseDemoDataRibbon />
+        </View>
+      ) : null}
       <CourseChipHeader
         emoji="✅"
         eyebrow="智慧簽到"
@@ -401,35 +437,42 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
       <View style={{ marginTop: 20, gap: 12 }}>
         {(cfg.method === 'rotating_qr' || cfg.method === 'multi_factor') && (
           <View>
-            <Text style={{ fontSize: 14, fontWeight: '600' }}>📱 QR token</Text>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>📱 QR token</Text>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
               <TextInput
                 value={token}
                 onChangeText={setToken}
                 placeholder="輸入 6 位 token"
+                placeholderTextColor={theme.colors.muted}
                 autoCapitalize="characters"
                 maxLength={6}
+                accessibilityLabel="QR 簽到 token"
                 style={{
                   flex: 1,
                   padding: 10,
-                  borderRadius: 8,
-                  backgroundColor: '#fff',
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.surface,
                   borderWidth: 1,
-                  borderColor: '#e5e7eb',
+                  borderColor: theme.colors.border,
                   fontSize: 16,
+                  color: theme.colors.text,
                 }}
               />
               <Pressable
                 onPress={handleScanQr}
+                accessibilityRole="button"
+                accessibilityLabel="掃描 QR"
                 style={{
+                  minWidth: 48,
+                  minHeight: 48,
                   paddingHorizontal: 14,
-                  borderRadius: 8,
-                  backgroundColor: '#1F4E78',
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.primary,
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="scan-outline" size={20} color="#fff" />
+                <Ionicons name="scan-outline" size={20} color={theme.colors.onAccent} />
               </Pressable>
             </View>
           </View>
@@ -437,23 +480,26 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
 
         {cfg.method === 'number_code' && (
           <View>
-            <Text style={{ fontSize: 14, fontWeight: '600' }}>🔢 數字密碼</Text>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>🔢 數字密碼</Text>
             <TextInput
               value={code}
               onChangeText={setCode}
               placeholder="輸入老師唸的數字"
+              placeholderTextColor={theme.colors.muted}
               keyboardType="number-pad"
               maxLength={6}
+              accessibilityLabel="數字簽到密碼"
               style={{
                 marginTop: 6,
                 padding: 10,
-                borderRadius: 8,
-                backgroundColor: '#fff',
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.surface,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: theme.colors.border,
                 fontSize: 18,
                 textAlign: 'center',
                 letterSpacing: 8,
+                color: theme.colors.text,
               }}
             />
           </View>
@@ -461,18 +507,25 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
 
         {(cfg.method === 'geofence' || cfg.method === 'multi_factor') && (
           <View>
-            <Text style={{ fontSize: 14, fontWeight: '600' }}>📍 GPS 位置</Text>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>📍 GPS 位置</Text>
             <Pressable
               onPress={handleGetLocation}
               style={{
                 marginTop: 6,
                 padding: 12,
-                borderRadius: 8,
-                backgroundColor: location ? '#dcfce7' : '#1F4E78',
+                borderRadius: theme.radius.md,
+                backgroundColor: location ? theme.colors.successSoft : theme.colors.primary,
                 alignItems: 'center',
+                minHeight: 48,
+                justifyContent: 'center',
               }}
             >
-              <Text style={{ color: location ? '#15803d' : '#fff', fontWeight: '600' }}>
+              <Text
+                style={{
+                  color: location ? theme.colors.success : theme.colors.onAccent,
+                  fontWeight: '600',
+                }}
+              >
                 {location
                   ? `✓ 已取得位置 (精度 ${Math.round(location.accuracyMeters ?? 0)}m)`
                   : '點此取得目前位置'}
@@ -483,20 +536,22 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
 
         {cfg.method === 'selfie_liveness' && (
           <View>
-            <Text style={{ fontSize: 14, fontWeight: '600' }}>🤳 自拍驗證</Text>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>🤳 自拍驗證</Text>
             <Pressable
               onPress={handleTakeSelfie}
               style={{
                 marginTop: 6,
                 padding: 12,
-                borderRadius: 8,
-                backgroundColor: selfieSimilarity !== null ? '#dcfce7' : '#1F4E78',
+                borderRadius: theme.radius.md,
+                backgroundColor: selfieSimilarity !== null ? theme.colors.successSoft : theme.colors.primary,
                 alignItems: 'center',
+                minHeight: 48,
+                justifyContent: 'center',
               }}
             >
               <Text
                 style={{
-                  color: selfieSimilarity !== null ? '#15803d' : '#fff',
+                  color: selfieSimilarity !== null ? theme.colors.success : theme.colors.onAccent,
                   fontWeight: '600',
                 }}
               >
@@ -511,19 +566,29 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
         <Pressable
           onPress={submitAttendance}
           disabled={!ready || submitting}
+          accessibilityRole="button"
+          accessibilityLabel={ready ? '送出簽到' : '請先完成簽到所需輸入'}
           style={{
             marginTop: 20,
             padding: 14,
-            borderRadius: 12,
-            backgroundColor: ready ? '#16a34a' : '#9ca3af',
+            borderRadius: theme.radius.lg,
+            backgroundColor: ready ? theme.colors.success : theme.colors.disabledBg,
             alignItems: 'center',
             opacity: submitting ? 0.7 : 1,
+            minHeight: 52,
+            justifyContent: 'center',
           }}
         >
           {submitting ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={theme.colors.onAccent} />
           ) : (
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+            <Text
+              style={{
+                color: ready ? theme.colors.onAccent : theme.colors.disabledText,
+                fontSize: 16,
+                fontWeight: '700',
+              }}
+            >
               {ready ? '送出簽到' : '請完成上方輸入'}
             </Text>
           )}
@@ -535,11 +600,19 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
           style={{
             marginTop: 16,
             padding: 12,
-            borderRadius: 8,
-            backgroundColor: result.valid ? '#dcfce7' : '#fee2e2',
+            borderRadius: theme.radius.md,
+            backgroundColor: result.valid ? theme.colors.successSoft : theme.colors.dangerSoft,
+            borderWidth: 1,
+            borderColor: result.valid ? `${theme.colors.success}44` : `${theme.colors.danger}44`,
           }}
         >
-          <Text style={{ fontSize: 13, color: result.valid ? '#15803d' : '#991b1b' }}>
+          <Text
+            style={{
+              fontSize: 13,
+              color: result.valid ? theme.colors.success : theme.colors.danger,
+              fontWeight: '500',
+            }}
+          >
             結果：{result.status}
             {result.flags.length > 0 ? ` ・ 旗標：${result.flags.join(', ')}` : ''}
           </Text>
