@@ -57,7 +57,7 @@ import {
   navigateToTarget,
 } from '../utils/courseNavigation';
 import { isTeachingRole } from '../utils/campusOs';
-import { navigateFromInboxTask } from '../services/inboxActions';
+import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
 
 // Engines
 import {
@@ -2332,6 +2332,17 @@ export function SmartDashboardScreen(props: any) {
     [auth.profile?.displayName, auth.user?.email],
   );
 
+  /** 與訊息工作台一致：收件匣衍生的 CTA 用 resolveInboxAction（師生文案分離） */
+  const nextActionsForUi = useMemo(() => {
+    const teaching = isTeachingRole(auth.profile?.role);
+    return nextActions.map((a) => {
+      if (!a.inboxTask) return a;
+      const r = resolveInboxAction(a.inboxTask, { isTeachingRole: teaching });
+      if (!r?.label || r.label === a.actionLabel) return a;
+      return { ...a, actionLabel: r.label };
+    });
+  }, [nextActions, auth.profile?.role]);
+
   /** AI 分析使用者資料，生成個人化每日簡報 */
   const generateAIBriefing = useCallback(
     (
@@ -2698,7 +2709,7 @@ export function SmartDashboardScreen(props: any) {
           <AgentOSHero
             displayName={displayName}
             gamification={gamification}
-            actions={nextActions}
+            actions={nextActionsForUi}
             risk={riskSnapshots[0] ?? null}
             aggregates={pulseAggregates}
             onOpenAction={openAgentAction}
@@ -3069,7 +3080,7 @@ export function SmartDashboardScreen(props: any) {
 
         {/* Quick Actions — 簡潔任務區 */}
         <AutopilotMissionRail
-          actions={nextActions}
+          actions={nextActionsForUi}
           risk={riskSnapshots[0] ?? null}
           aggregates={pulseAggregates}
           onOpenAction={openAgentAction}
