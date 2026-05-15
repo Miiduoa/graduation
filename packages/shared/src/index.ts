@@ -78,3 +78,4 @@ export * from './lms/discussionEngine';
 export * from './lms/questionBank';
 export * from './lms/tronclassAdapter';
 export * from './lms/actionGraph';
+export * from './lms/attendanceEngine';

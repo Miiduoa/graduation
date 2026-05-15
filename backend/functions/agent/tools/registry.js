@@ -25,6 +25,7 @@ const computeCompanionState = require('./computeCompanionState');
 const upsertQuestionBank = require('./upsertQuestionBank');
 const draftQuizFromBank = require('./draftQuizFromBank');
 const upsertRubric = require('./upsertRubric');
+const verifyAttendanceClaim = require('./verifyAttendanceClaim');
 
 const tools = [
   submitQuizAttempt,
@@ -33,6 +34,7 @@ const tools = [
   upsertQuestionBank,
   draftQuizFromBank,
   upsertRubric,
+  verifyAttendanceClaim,
   getTodaySchedule,
   getAssignments,
   getAnnouncements,

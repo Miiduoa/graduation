@@ -5,7 +5,7 @@
  * 對應引擎：packages/shared/src/lms/rubricScoring
  * 對應端點：POST /courses/{id}/peer_reviews/{rid}/submissions
  */
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   ScrollView,
   View,
@@ -21,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
 import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
+import { tcFetchPeerReviews } from '../services/tronClassClient';
 
 type RouteProps = {
   route?: {
@@ -75,20 +76,60 @@ const SAMPLE_RUBRIC: Rubric = {
 
 export default function PeerReviewSubmitScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
-  const assignmentTitle = props.route?.params?.assignmentTitle ?? '同儕互評';
-  const anonymousAuthor = props.route?.params?.anonymousAuthor ?? '匿名同學 A';
+  const passedAssignmentTitle = props.route?.params?.assignmentTitle ?? '同儕互評';
+  const courseId = Number(String(props.route?.params?.courseId ?? '').replace(/^tc:/, '')) || 0;
+
+  const [loading, setLoading] = useState(true);
+  const [availableReviews, setAvailableReviews] = useState<
+    Awaited<ReturnType<typeof tcFetchPeerReviews>>
+  >([]);
+  const [activeReviewIdx, setActiveReviewIdx] = useState(0);
+
+  // 拉該課程的互評任務
+  useEffect(() => {
+    (async () => {
+      if (!courseId) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const list = await tcFetchPeerReviews(courseId);
+        setAvailableReviews(list);
+      } catch {
+        /* swallow */
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [courseId]);
+
+  // 當前要評的：優先看 route param > 線上拉的第一個
+  const onlineReview = availableReviews[activeReviewIdx];
+  const assignmentTitle = onlineReview?.assignment_title ?? passedAssignmentTitle;
+  const anonymousAuthor = onlineReview?.target_anonymous_name ?? props.route?.params?.anonymousAuthor ?? '匿名同學';
   const submissionContent =
     props.route?.params?.submissionContent ??
-    '（這裡會顯示對方繳交的內容、文字、附件預覽）\n\n本範例為示範用，實際接 TronClass 端點後會看到對方的完整繳交。';
+    '（線上拉到的對方繳交內容會顯示在這裡）';
   const submissionAttachments = props.route?.params?.submissionAttachments ?? [];
-  const rubric = props.route?.params?.rubric ?? SAMPLE_RUBRIC;
-  const reviewId = props.route?.params?.reviewId ?? '';
+  const rubric =
+    (onlineReview?.rubric as Rubric | null) ??
+    props.route?.params?.rubric ??
+    SAMPLE_RUBRIC;
+  const reviewId = String(onlineReview?.id ?? props.route?.params?.reviewId ?? '');
 
   const [scores, setScores] = useState<Record<string, string>>({});
   const [comments, setComments] = useState<Record<string, string>>({});
   const [overallFeedback, setOverallFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+
+  // 切換不同 review 時清空輸入
+  useEffect(() => {
+    setScores({});
+    setComments({});
+    setOverallFeedback('');
+    setSubmitted(false);
+  }, [activeReviewIdx]);
 
   const evaluation = useMemo(() => {
     const rs: RubricScore[] = Object.entries(scores)
@@ -110,7 +151,24 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
     }
     setSubmitting(true);
     try {
-      await new Promise((r) => setTimeout(r, 500));
+      const courseId = Number(String(props.route?.params?.courseId ?? '').replace(/^tc:/, '')) || 0;
+      const reviewIdNum = Number(String(reviewId).replace(/^tc:/, '')) || 0;
+      const usingSample = !props.route?.params?.rubric || !reviewIdNum || !courseId;
+      if (!usingSample) {
+        const { tcSubmitPeerReview } = await import('../services/tronClassClient');
+        const result = await tcSubmitPeerReview(courseId, reviewIdNum, {
+          scores,
+          comments,
+          overallFeedback,
+          totalScore: evaluation.totalScore,
+        });
+        if (!result.success) {
+          Alert.alert('送出失敗', result.error ?? '請稍後再試。');
+          return;
+        }
+      } else {
+        await new Promise((r) => setTimeout(r, 400));
+      }
       // 記錄 companion signal
       try {
         const { onPeerReviewGiven } = await import('../services/companionHooks');
@@ -131,12 +189,79 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
     }
   };
 
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+        <Text style={{ marginTop: 8, color: '#6b7280' }}>正在載入本課互評任務⋯⋯</Text>
+      </View>
+    );
+  }
+
+  // 沒有線上互評任務 + 沒有傳入 reviewId → 顯示空狀態
+  if (availableReviews.length === 0 && !props.route?.params?.rubric) {
+    return (
+      <View style={{ flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 48 }}>💯</Text>
+        <Text style={{ marginTop: 12, fontSize: 16, fontWeight: '700', color: '#111827' }}>
+          本課程目前沒有同儕互評任務
+        </Text>
+        <Text style={{ marginTop: 6, fontSize: 13, color: '#6b7280', textAlign: 'center' }}>
+          老師發布互評任務後，這裡就會出現你要評的同學作業。
+        </Text>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          style={{
+            marginTop: 24,
+            paddingHorizontal: 24,
+            paddingVertical: 10,
+            backgroundColor: '#1F4E78',
+            borderRadius: 8,
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '600' }}>返回</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: '#f9fafb' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
+        {/* 多份互評切換 */}
+        {availableReviews.length > 1 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            {availableReviews.map((r, i) => (
+              <Pressable
+                key={r.id}
+                onPress={() => setActiveReviewIdx(i)}
+                style={{
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                  backgroundColor: i === activeReviewIdx ? '#1F4E78' : '#fff',
+                  borderWidth: 1,
+                  borderColor: i === activeReviewIdx ? '#1F4E78' : '#e5e7eb',
+                  marginRight: 8,
+                }}
+              >
+                <Text
+                  style={{
+                    color: i === activeReviewIdx ? '#fff' : '#111827',
+                    fontSize: 12,
+                  }}
+                >
+                  {i + 1}. {r.target_anonymous_name}
+                  {r.submitted ? ' ✓' : ''}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        )}
+
         {/* 頂部 */}
         <View
           style={{

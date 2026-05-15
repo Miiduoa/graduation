@@ -981,16 +981,21 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                   icon="stats-chart-outline"
                   label="成績"
                   color="#0EA5E9"
-                  onPress={() => props.nav?.navigate?.('Grades')}
+                  onPress={() =>
+                    props.nav?.navigate?.('CourseScores', {
+                      groupId: String(course.id),
+                      groupName: course.name,
+                    })
+                  }
                 />
                 <CourseChip
                   icon="checkmark-circle-outline"
                   label="點名"
                   color="#10B981"
                   onPress={() =>
-                    props.nav?.navigate?.('Attendance', {
-                      groupId: String(course.id),
-                      groupName: course.name,
+                    props.nav?.navigate?.('AttendanceMultiMethod', {
+                      courseId: String(course.id),
+                      sessionId: `demo-${course.id}`,
                     })
                   }
                 />

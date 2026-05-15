@@ -130,6 +130,10 @@ export function AICourseAdvisorScreen(props: any) {
   const scrollRef = useRef<ScrollView>(null);
   const aiChatRef = useRef(createCancellableChat());
 
+  // 從 CoursesHomeScreen chip 傳進來：限縮 AI 對話到該課程
+  const focusedGroupId = props?.route?.params?.groupId as string | undefined;
+  const focusedGroupName = props?.route?.params?.groupName as string | undefined;
+
   const [selectedTab, setSelectedTab] = useState(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showResults, setShowResults] = useState(false);
@@ -293,7 +297,12 @@ export function AICourseAdvisorScreen(props: any) {
     schoolId: school.id,
     userId: auth.user?.uid,
     userName: auth.profile?.displayName,
-  };
+    // 從 chip 進入時：把 AI 對話限縮到該課程
+    ...(focusedGroupId && {
+      focusedCourseId: focusedGroupId,
+      focusedCourseName: focusedGroupName,
+    }),
+  } as AIContext;
 
   /**
    * 把 CatalogRecommendation 映射成既有 UI 的 RecommendedCourse

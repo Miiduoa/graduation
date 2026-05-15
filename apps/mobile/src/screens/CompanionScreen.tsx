@@ -11,19 +11,16 @@
  *
  * 資料來源：後端 callable `computeCompanionState` + 本機 cache。
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, Text, View, RefreshControl, Pressable, ActivityIndicator } from 'react-native';
-import { httpsCallable } from 'firebase/functions';
-import { getFirestore, doc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
-
-import { getCloudFunctionRegion, getFirebaseApp } from '../firebase';
-import { getFunctions } from 'firebase/functions';
 import type {
   SpriteState,
   GardenSummary,
   Plant,
   Unlockable,
 } from '@campus/shared';
+
+import { computeLocalCompanion } from '../services/companionLocalStore';
 
 type CompanionPayload = {
   sprite: SpriteState;
@@ -35,34 +32,34 @@ export default function CompanionScreen({ navigation }: { navigation?: { navigat
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<CompanionPayload | null>(null);
   const [recentUnlocks, setRecentUnlocks] = useState<Unlockable[]>([]);
-  const [error, setError] = useState<string | null>(null);
 
   const fetch = useCallback(async () => {
-    setError(null);
     try {
-      const app = getFirebaseApp();
-      const functions = getFunctions(app, getCloudFunctionRegion());
-      const callable = httpsCallable<{ days?: number }, CompanionPayload & { success: boolean }>(
-        functions,
-        'computeCompanionState',
-      );
-      const res = await callable({ days: 7 });
-      if ((res.data as { success?: boolean })?.success) {
-        setData({ sprite: res.data.sprite, garden: res.data.garden });
-      }
+      // ── 本地優先：用 spriteEngine + gardenEngine 純函式直接算 ──
+      // 任何時候打開都會有畫面，不依賴後端
+      const local = await computeLocalCompanion();
+      setData({ sprite: local.sprite, garden: local.garden });
+      setRecentUnlocks(local.unlocks.slice(-3).reverse());
 
-      // 拉最近解鎖
-      const db = getFirestore(app);
-      const auth = app.options.projectId ? null : null;
-      const uid = (app as unknown as { auth?: { currentUser?: { uid?: string } } }).auth?.currentUser?.uid;
-      if (uid) {
-        const ref = doc(db, 'users', uid, 'companion', 'unlocks');
-        const snap = await getDoc(ref);
-        const latest = (snap.data()?.latest as Unlockable[] | undefined) ?? [];
-        setRecentUnlocks(latest.slice(0, 3));
-      }
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      // ── 後端可用時，背景補上更精準的雲端狀態（不阻塞 UI）──
+      void (async () => {
+        try {
+          const { httpsCallable, getFunctions } = await import('firebase/functions');
+          const { getFirebaseApp, getCloudFunctionRegion } = await import('../firebase');
+          const app = getFirebaseApp();
+          const functions = getFunctions(app, getCloudFunctionRegion());
+          const callable = httpsCallable<{ days?: number }, CompanionPayload & { success: boolean }>(
+            functions,
+            'computeCompanionState',
+          );
+          const res = await callable({ days: 7 });
+          if ((res.data as { success?: boolean })?.success) {
+            setData({ sprite: res.data.sprite, garden: res.data.garden });
+          }
+        } catch {
+          // 雲端拿不到也沒關係，本地畫面已經顯示
+        }
+      })();
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -73,29 +70,11 @@ export default function CompanionScreen({ navigation }: { navigation?: { navigat
     fetch();
   }, [fetch]);
 
-  if (loading) {
+  if (loading || !data) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
         <Text style={{ marginTop: 12, color: '#6b7280' }}>正在喚醒你的校園精靈⋯⋯</Text>
-      </View>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <View style={{ flex: 1, padding: 24, justifyContent: 'center' }}>
-        <Text style={{ fontSize: 16, color: '#dc2626' }}>無法載入精靈狀態</Text>
-        {error && <Text style={{ marginTop: 8, color: '#6b7280' }}>{error}</Text>}
-        <Pressable
-          onPress={() => {
-            setLoading(true);
-            fetch();
-          }}
-          style={{ marginTop: 16, padding: 12, backgroundColor: '#1F4E78', borderRadius: 8 }}
-        >
-          <Text style={{ color: '#fff', textAlign: 'center' }}>重試</Text>
-        </Pressable>
       </View>
     );
   }

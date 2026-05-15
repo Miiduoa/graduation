@@ -34,16 +34,30 @@ export default function CompanionCollectionScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const app = getFirebaseApp();
-        const db = getFirestore(app);
-        const uid = (app as unknown as { auth?: { currentUser?: { uid?: string } } }).auth?.currentUser?.uid;
-        if (uid) {
-          const [lifetimeSnap, unlocksSnap] = await Promise.all([
-            getDoc(doc(db, 'users', uid, 'companion', 'lifetime')),
-            getDoc(doc(db, 'users', uid, 'companion', 'unlocks')),
-          ]);
-          setProgress((lifetimeSnap.data() as Record<string, number>) ?? {});
-          setUnlocked(new Set(unlocksSnap.data()?.ids ?? []));
+        // 本地優先：避免雲端拿不到時整頁壞掉
+        const { getLocalState } = await import('../services/companionLocalStore');
+        const local = await getLocalState();
+        setProgress(local.lifetime);
+        setUnlocked(new Set(local.unlocks));
+
+        // 背景嘗試雲端覆蓋
+        try {
+          const app = getFirebaseApp();
+          const db = getFirestore(app);
+          const uid = (app as unknown as { auth?: { currentUser?: { uid?: string } } }).auth?.currentUser?.uid;
+          if (uid) {
+            const [lifetimeSnap, unlocksSnap] = await Promise.all([
+              getDoc(doc(db, 'users', uid, 'companion', 'lifetime')),
+              getDoc(doc(db, 'users', uid, 'companion', 'unlocks')),
+            ]);
+            const cloudLifetime = lifetimeSnap.data() as Record<string, number> | undefined;
+            const cloudUnlocks = unlocksSnap.data()?.ids;
+            if (cloudLifetime) setProgress((p) => ({ ...p, ...cloudLifetime }));
+            if (Array.isArray(cloudUnlocks))
+              setUnlocked((u) => new Set([...Array.from(u), ...cloudUnlocks]));
+          }
+        } catch {
+          /* 雲端失敗就用本地，沒事 */
         }
       } finally {
         setLoading(false);
