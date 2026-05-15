@@ -42,6 +42,14 @@ import AttendanceLiveScreen from './AttendanceLiveScreen';
 import AttendanceAnalyticsScreen from './AttendanceAnalyticsScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { MerchantHubScreen } from './MerchantHubScreen';
+import CourseDiscussionScreen from './CourseDiscussionScreen';
+import CourseMaterialViewerScreen from './CourseMaterialViewerScreen';
+import HomeworkSubmitScreen from './HomeworkSubmitScreen';
+import VideoMaterialScreen from './VideoMaterialScreen';
+import SurveyScreen from './SurveyScreen';
+import PeerReviewSubmitScreen from './PeerReviewSubmitScreen';
+import TeacherGradingScreen from './TeacherGradingScreen';
+import CourseNotesScreen from './CourseNotesScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
@@ -260,6 +268,42 @@ export function LearnStack() {
         name="AdminCourseVerify"
         component={AdminCourseVerifyScreen}
         options={{ title: '課程認證' }}
+      />
+      <Stack.Screen
+        name="CourseDiscussion"
+        component={CourseDiscussionScreen}
+        options={{ title: '課程討論' }}
+      />
+      <Stack.Screen
+        name="CourseMaterialViewer"
+        component={CourseMaterialViewerScreen}
+        options={{ title: '在 APP 內查看', headerShown: false }}
+      />
+      <Stack.Screen
+        name="HomeworkSubmit"
+        component={HomeworkSubmitScreen}
+        options={{ title: '繳交作業' }}
+      />
+      <Stack.Screen
+        name="VideoMaterial"
+        component={VideoMaterialScreen}
+        options={{ title: '影片教材', headerShown: false }}
+      />
+      <Stack.Screen name="Survey" component={SurveyScreen} options={{ title: '課程問卷' }} />
+      <Stack.Screen
+        name="PeerReviewSubmit"
+        component={PeerReviewSubmitScreen}
+        options={{ title: '同儕互評' }}
+      />
+      <Stack.Screen
+        name="TeacherGrading"
+        component={TeacherGradingScreen}
+        options={{ title: '批改作業' }}
+      />
+      <Stack.Screen
+        name="CourseNotes"
+        component={CourseNotesScreen}
+        options={{ title: '課程筆記', headerShown: false }}
       />
     </Stack.Navigator>
   );

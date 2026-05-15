@@ -310,7 +310,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
           style={{ opacity: 0.5 }}
         />
         <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text }}>
-          尚未連線 TronClass
+          尚未連線校園系統
         </Text>
         <Text
           style={{ color: theme.colors.muted, textAlign: 'center', lineHeight: 20, fontSize: 13 }}
@@ -327,7 +327,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
             opacity: pressed ? 0.8 : 1,
           })}
         >
-          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>連線 TronClass</Text>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>連線校園系統</Text>
         </Pressable>
       </View>
     );
@@ -345,7 +345,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
       }}
     >
       <Text style={{ fontWeight: '700', fontSize: 15, color: theme.colors.text }}>
-        連線 TronClass
+        連線校園系統
       </Text>
       <Text style={{ color: theme.colors.muted, fontSize: 12 }}>請輸入 E校園 帳號密碼</Text>
       <TextInput
@@ -737,6 +737,128 @@ function MiniScheduleView(props: {
   );
 }
 
+// ─── Shared: 課程卡 chip ────────────────────────────────
+
+function CourseChip(props: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  color: string;
+  onPress?: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={props.onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: `${props.color}14`,
+        borderWidth: 1,
+        borderColor: `${props.color}22`,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      <Ionicons name={props.icon} size={12} color={props.color} />
+      <Text style={{ color: props.color, fontSize: 11, fontWeight: '700' }}>{props.label}</Text>
+    </Pressable>
+  );
+}
+
+// ─── 本週需注意（Risk + 待繳 + 待測驗）橫條 ────────────────
+
+function WeeklyFocusBanner(props: {
+  courses: TCCourse[];
+  todos: TCActivity[];
+  nav: any;
+}) {
+  const todoByCourse = new Map<number, TCActivity[]>();
+  for (const t of props.todos) {
+    const arr = todoByCourse.get(t.course_id) ?? [];
+    arr.push(t);
+    todoByCourse.set(t.course_id, arr);
+  }
+  // 找出待辦最多的課（如果有）
+  let mostUrgentCourse: TCCourse | null = null;
+  let maxTodos = 0;
+  for (const c of props.courses) {
+    const n = todoByCourse.get(c.id)?.length ?? 0;
+    if (n > maxTodos) {
+      maxTodos = n;
+      mostUrgentCourse = c;
+    }
+  }
+
+  if (!mostUrgentCourse && props.todos.length === 0) {
+    return (
+      <Pressable
+        onPress={() => props.nav?.navigate?.('Companion')}
+        style={{
+          marginHorizontal: 16,
+          marginVertical: 12,
+          padding: 14,
+          borderRadius: 14,
+          backgroundColor: '#1F4E7814',
+          borderWidth: 1,
+          borderColor: '#1F4E7822',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+        }}
+      >
+        <Text style={{ fontSize: 28 }}>🌱</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: '#1F4E78', fontSize: 14, fontWeight: '700' }}>
+            這週課業很平穩 ✨
+          </Text>
+          <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+            點開校園精靈，看牠長到哪了
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color="#1F4E78" />
+      </Pressable>
+    );
+  }
+
+  const totalUrgent = props.todos.length;
+  return (
+    <Pressable
+      onPress={() => props.nav?.navigate?.('LearningAnalytics')}
+      style={{
+        marginHorizontal: 16,
+        marginVertical: 12,
+        padding: 14,
+        borderRadius: 14,
+        backgroundColor: totalUrgent > 3 ? '#DC262614' : '#F59E0B14',
+        borderWidth: 1,
+        borderColor: totalUrgent > 3 ? '#DC262622' : '#F59E0B22',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <Text style={{ fontSize: 28 }}>{totalUrgent > 3 ? '🔥' : '⚠️'}</Text>
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            color: totalUrgent > 3 ? '#991B1B' : '#92400E',
+            fontSize: 14,
+            fontWeight: '700',
+          }}
+        >
+          本週需注意：{totalUrgent} 件待辦
+        </Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }} numberOfLines={1}>
+          壓力最大的是「{mostUrgentCourse?.name ?? props.todos[0]?.title}」• 點開學習風險雷達
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={totalUrgent > 3 ? '#991B1B' : '#92400E'} />
+    </Pressable>
+  );
+}
+
 // ─── Course List Tab ─────────────────────────────────────
 
 function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () => void }) {
@@ -833,69 +955,89 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
             </View>
             {fromTronClass ? (
               <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                <Pressable
+                <CourseChip
+                  icon="albums-outline"
+                  label="教材"
+                  color="#2563EB"
                   onPress={() =>
                     props.nav?.navigate?.('CourseModules', {
                       groupId: String(course.id),
                       groupName: course.name,
                     })
                   }
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: 999,
-                    backgroundColor: '#2563EB14',
-                    borderWidth: 1,
-                    borderColor: '#2563EB22',
-                  }}
-                >
-                  <Ionicons name="albums-outline" size={12} color="#2563EB" />
-                  <Text style={{ color: '#2563EB', fontSize: 11, fontWeight: '700' }}>教材</Text>
-                </Pressable>
-                <Pressable
+                />
+                <CourseChip
+                  icon="help-circle-outline"
+                  label="測驗"
+                  color={theme.colors.info}
                   onPress={() =>
                     props.nav?.navigate?.('QuizCenter', {
                       groupId: String(course.id),
                       groupName: course.name,
                     })
                   }
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: 999,
-                    backgroundColor: `${theme.colors.info}14`,
-                    borderWidth: 1,
-                    borderColor: `${theme.colors.info}22`,
-                  }}
-                >
-                  <Ionicons name="help-circle-outline" size={12} color={theme.colors.info} />
-                  <Text style={{ color: theme.colors.info, fontSize: 11, fontWeight: '700' }}>
-                    測驗
-                  </Text>
-                </Pressable>
-                <Pressable
+                />
+                <CourseChip
+                  icon="stats-chart-outline"
+                  label="成績"
+                  color="#0EA5E9"
                   onPress={() => props.nav?.navigate?.('Grades')}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 4,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: 999,
-                    backgroundColor: '#0EA5E914',
-                    borderWidth: 1,
-                    borderColor: '#0EA5E922',
-                  }}
-                >
-                  <Ionicons name="stats-chart-outline" size={12} color="#0EA5E9" />
-                  <Text style={{ color: '#0EA5E9', fontSize: 11, fontWeight: '700' }}>成績</Text>
-                </Pressable>
+                />
+                <CourseChip
+                  icon="checkmark-circle-outline"
+                  label="點名"
+                  color="#10B981"
+                  onPress={() =>
+                    props.nav?.navigate?.('Attendance', {
+                      groupId: String(course.id),
+                      groupName: course.name,
+                    })
+                  }
+                />
+                <CourseChip
+                  icon="chatbubbles-outline"
+                  label="討論"
+                  color="#8B5CF6"
+                  onPress={() =>
+                    props.nav?.navigate?.('CourseDiscussion', {
+                      groupId: String(course.id),
+                      groupName: course.name,
+                    })
+                  }
+                />
+                <CourseChip
+                  icon="sparkles-outline"
+                  label="AI 學伴"
+                  color="#F59E0B"
+                  onPress={() =>
+                    props.nav?.navigate?.('AICourseAdvisor', {
+                      groupId: String(course.id),
+                      groupName: course.name,
+                    })
+                  }
+                />
+                <CourseChip
+                  icon="create-outline"
+                  label="筆記"
+                  color="#06B6D4"
+                  onPress={() =>
+                    props.nav?.navigate?.('CourseNotes', {
+                      courseId: String(course.id),
+                      courseName: course.name,
+                    })
+                  }
+                />
+                <CourseChip
+                  icon="people-outline"
+                  label="互評"
+                  color="#EC4899"
+                  onPress={() =>
+                    props.nav?.navigate?.('PeerReviewSubmit', {
+                      courseId: String(course.id),
+                      assignmentTitle: `${course.name} 同儕互評`,
+                    })
+                  }
+                />
               </View>
             ) : scheduleText ? (
               <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }} numberOfLines={2}>
@@ -1017,10 +1159,18 @@ function HomeworkView(props: {
       <Pressable
         key={`${item.course_id}-${item.id}`}
         onPress={() =>
-          props.nav?.navigate?.('CourseModules', {
-            groupId: String(item.course_id),
-            groupName: item.courseName,
-          })
+          isSubmitted
+            ? props.nav?.navigate?.('CourseModules', {
+                groupId: String(item.course_id),
+                groupName: item.courseName,
+              })
+            : props.nav?.navigate?.('HomeworkSubmit', {
+                courseId: String(item.course_id),
+                hwId: String(item.id),
+                hwTitle: item.title,
+                dueAt: item.end_time ?? undefined,
+                description: item.description,
+              })
         }
         style={({ pressed }) => ({
           padding: 14,
@@ -1883,7 +2033,7 @@ export function CoursesHomeScreen(props: any) {
                 />
                 <Text style={{ color: theme.colors.muted, fontSize: 14 }}>尚無課表資料</Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
-                  請先連線 TronClass 或手動新增課程
+                  請先連線校園系統 或手動新增課程
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                   <Pressable
@@ -1908,7 +2058,10 @@ export function CoursesHomeScreen(props: any) {
         {tab === 'courses' &&
           !dataLoading &&
           (hasCourseData ? (
-            <CourseListView courses={tcCourses} nav={nav} onRefresh={handleRefresh} />
+            <>
+              <WeeklyFocusBanner courses={tcCourses} todos={tcTodos} nav={nav} />
+              <CourseListView courses={tcCourses} nav={nav} onRefresh={handleRefresh} />
+            </>
           ) : (
             <TCLoginSection onSuccess={handleLoginSuccess} profile={auth.profile} />
           ))}

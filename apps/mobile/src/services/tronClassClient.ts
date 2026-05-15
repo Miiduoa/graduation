@@ -510,7 +510,14 @@ async function fetchTronClassBackend<T>(
     | 'courseMembers'
     | 'learningActivities'
     | 'syllabus'
-    | 'courseFullData',
+    | 'courseFullData'
+    | 'postDiscussion'
+    | 'postDiscussionReply'
+    | 'submitHomework'
+    | 'surveys'
+    | 'submitSurvey'
+    | 'peerReviews'
+    | 'submitPeerReview',
   extra: Record<string, unknown> = {},
 ): Promise<T> {
   await ensureBackendSessionLoaded();
@@ -2265,6 +2272,275 @@ export async function tcFetchExamSubmissions(examId: number): Promise<TCExamSubm
         }))
       : [],
   };
+}
+
+// ─────────────────────────────────────────────────────────
+// Write endpoints — 寫入 TronClass（學生發討論 / 繳作業 / 答問卷 / 同儕互評）
+// ─────────────────────────────────────────────────────────
+
+export type TCWriteResult = {
+  success: boolean;
+  id?: number | string;
+  error?: string;
+};
+
+/** 在課程討論區建立新討論串 */
+export async function tcPostDiscussion(
+  courseId: number,
+  input: { title: string; content?: string },
+): Promise<TCWriteResult> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('postDiscussion', { courseId, input });
+  }
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/discussions`,
+    `${TC_BASE}/api/courses/${courseId}/forums`,
+  ];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: input.title, content: input.content ?? '' }),
+      });
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        return { success: true, id: (data.id as number | string | undefined) };
+      }
+    } catch {
+      /* try next endpoint */
+    }
+  }
+  return { success: false, error: '無法建立討論（連線或權限失敗）' };
+}
+
+/** 在討論串底下回覆 */
+export async function tcPostDiscussionReply(
+  courseId: number,
+  discussionId: number,
+  content: string,
+): Promise<TCWriteResult> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('postDiscussionReply', {
+      courseId,
+      discussionId,
+      content,
+    });
+  }
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/discussions/${discussionId}/posts`,
+    `${TC_BASE}/api/courses/${courseId}/forums/${discussionId}/posts`,
+  ];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        return { success: true, id: (data.id as number | string | undefined) };
+      }
+    } catch {
+      /* try next */
+    }
+  }
+  return { success: false, error: '回覆失敗' };
+}
+
+/** 繳交作業 */
+export async function tcSubmitHomework(
+  courseId: number,
+  hwId: number,
+  input: {
+    content?: string;
+    /** 附件 URI 列表，會分別上傳 */
+    attachments?: Array<{ uri: string; name: string; type?: string }>;
+  },
+): Promise<TCWriteResult> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('submitHomework', {
+      courseId,
+      hwId,
+      input,
+    });
+  }
+  try {
+    // 1. 先把附件上傳（multipart）
+    const uploadedKeys: string[] = [];
+    for (const att of input.attachments ?? []) {
+      const form = new FormData();
+      form.append('file', {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        uri: att.uri,
+        name: att.name,
+        type: att.type ?? 'application/octet-stream',
+      } as any);
+      const upRes = await fetch(`${TC_BASE}/api/uploads`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form as unknown as BodyInit,
+      });
+      if (upRes.ok) {
+        const upData = (await upRes.json().catch(() => ({}))) as Record<string, unknown>;
+        const key = String(upData.key ?? upData.id ?? '');
+        if (key) uploadedKeys.push(key);
+      }
+    }
+    // 2. 建立繳交紀錄
+    const res = await fetch(
+      `${TC_BASE}/api/courses/${courseId}/homework/${hwId}/submissions`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: input.content ?? '',
+          upload_keys: uploadedKeys,
+        }),
+      },
+    );
+    if (res.ok) {
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      return { success: true, id: (data.id as number | string | undefined) };
+    }
+    return { success: false, error: `送出失敗 (${res.status})` };
+  } catch (e) {
+    return { success: false, error: String((e as Error)?.message ?? e) };
+  }
+}
+
+/** 取得課程問卷列表（TronClass survey endpoint，可能未公開；回傳空陣列代表沒有） */
+export async function tcFetchSurveys(courseId: number): Promise<
+  Array<{ id: number; title: string; questions: unknown[] }>
+> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend('surveys', { courseId });
+  }
+  const endpoints = [
+    `${TC_BASE}/api/courses/${courseId}/surveys`,
+    `${TC_BASE}/api/courses/${courseId}/questionnaires`,
+  ];
+  for (const url of endpoints) {
+    const data = await tcFetchJSON<Record<string, unknown>>(url);
+    if (data) {
+      const items = (data.surveys ?? data.questionnaires ?? (Array.isArray(data) ? data : null)) as
+        | Record<string, unknown>[]
+        | null;
+      if (Array.isArray(items)) {
+        return items.map((s) => ({
+          id: Number(s.id ?? 0),
+          title: String(s.title ?? s.name ?? ''),
+          questions: Array.isArray(s.questions) ? (s.questions as unknown[]) : [],
+        }));
+      }
+    }
+  }
+  return [];
+}
+
+/** 送出問卷答案 */
+export async function tcSubmitSurvey(
+  courseId: number,
+  surveyId: number,
+  answers: Record<string, unknown>,
+): Promise<TCWriteResult> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('submitSurvey', {
+      courseId,
+      surveyId,
+      answers,
+    });
+  }
+  try {
+    const res = await fetch(
+      `${TC_BASE}/api/courses/${courseId}/surveys/${surveyId}/responses`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers }),
+      },
+    );
+    return { success: res.ok };
+  } catch (e) {
+    return { success: false, error: String((e as Error)?.message ?? e) };
+  }
+}
+
+/** 取得同儕互評任務 */
+export async function tcFetchPeerReviews(courseId: number): Promise<
+  Array<{
+    id: number;
+    assignment_title: string;
+    target_submission_id: number;
+    target_anonymous_name: string;
+    rubric: unknown;
+    submitted: boolean;
+  }>
+> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend('peerReviews', { courseId });
+  }
+  const data = await tcFetchJSON<Record<string, unknown>>(
+    `${TC_BASE}/api/courses/${courseId}/peer_reviews`,
+  );
+  const items = (data?.reviews ?? data?.assignments ?? (Array.isArray(data) ? data : null)) as
+    | Record<string, unknown>[]
+    | null;
+  if (!Array.isArray(items)) return [];
+  return items.map((r) => ({
+    id: Number(r.id ?? 0),
+    assignment_title: String(r.assignment_title ?? r.title ?? ''),
+    target_submission_id: Number(r.target_submission_id ?? r.submission_id ?? 0),
+    target_anonymous_name: String(r.anonymous_name ?? '匿名同學'),
+    rubric: r.rubric ?? null,
+    submitted: Boolean(r.submitted ?? false),
+  }));
+}
+
+/** 送出同儕互評 */
+export async function tcSubmitPeerReview(
+  courseId: number,
+  reviewId: number,
+  payload: {
+    scores: Record<string, string>;
+    comments?: Record<string, string>;
+    overallFeedback?: string;
+    totalScore?: number;
+  },
+): Promise<TCWriteResult> {
+  await ensureBackendSessionLoaded();
+  if (shouldUseBackendSession()) {
+    return await fetchTronClassBackend<TCWriteResult>('submitPeerReview', {
+      courseId,
+      reviewId,
+      payload,
+    });
+  }
+  try {
+    const res = await fetch(
+      `${TC_BASE}/api/courses/${courseId}/peer_reviews/${reviewId}/submissions`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      },
+    );
+    return { success: res.ok };
+  } catch (e) {
+    return { success: false, error: String((e as Error)?.message ?? e) };
+  }
 }
 
 /** 構建教材檔案的下載/檢視 URL */

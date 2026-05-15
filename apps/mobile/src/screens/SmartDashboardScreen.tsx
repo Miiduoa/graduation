@@ -2768,11 +2768,68 @@ export function SmartDashboardScreen(props: any) {
         >
         {/* 2. XP Progress */}
         {gamification && <XPProgressBar gamification={gamification} />}
+
+        {/* ── 新功能快速入口（醒目顯示，避免使用者找不到） ── */}
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: 10,
+            marginHorizontal: theme.space.lg,
+            marginBottom: theme.space.lg,
+          }}
+        >
+          <Pressable
+            onPress={() => props?.navigation?.navigate?.('我的', { screen: 'Companion' })}
+            style={{
+              flex: 1,
+              padding: 14,
+              borderRadius: 14,
+              backgroundColor: '#F59E0B',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Text style={{ fontSize: 28 }}>🦊</Text>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>校園精靈</Text>
+            <Text style={{ color: '#fff', fontSize: 10, opacity: 0.85 }}>跟你一起長大</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => props?.navigation?.navigate?.('學習', { screen: 'LearningAnalytics' })}
+            style={{
+              flex: 1,
+              padding: 14,
+              borderRadius: 14,
+              backgroundColor: '#DC2626',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Text style={{ fontSize: 28 }}>⚠️</Text>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>學習風險</Text>
+            <Text style={{ color: '#fff', fontSize: 10, opacity: 0.85 }}>本週需注意</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => props?.navigation?.navigate?.('學習', { screen: 'AICourseAdvisor' })}
+            style={{
+              flex: 1,
+              padding: 14,
+              borderRadius: 14,
+              backgroundColor: '#1F4E78',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <Text style={{ fontSize: 28 }}>✨</Text>
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>AI 學伴</Text>
+            <Text style={{ color: '#fff', fontSize: 10, opacity: 0.85 }}>問我任何事</Text>
+          </Pressable>
+        </View>
+
         {companionSnapshot ? (
           <CompanionStrip
             snapshot={companionSnapshot}
             onPressExpand={() =>
-              props?.navigation?.navigate?.('我的', { screen: 'CampusGarden' })
+              props?.navigation?.navigate?.('我的', { screen: 'Companion' })
             }
           />
         ) : null}
