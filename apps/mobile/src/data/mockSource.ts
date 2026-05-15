@@ -467,6 +467,7 @@ export const mockSource: DataSource = {
       consequence: task.consequence ?? '延後處理可能增加後續壓力。',
       nextStep: task.nextStep ?? '先打開項目確認細節。',
       actionLabel: task.actionLabel ?? '前往處理',
+      inboxTask: task,
       actionTarget: {
         tab:
           task.kind === 'live'
