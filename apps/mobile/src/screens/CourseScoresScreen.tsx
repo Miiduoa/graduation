@@ -15,6 +15,7 @@ import {
   RefreshControl,
 } from 'react-native';
 
+import { predictCurrent, commonTargets } from '@campus/shared';
 import {
   tcFetchSelfScore,
   tcFetchScoreItems,
@@ -22,6 +23,7 @@ import {
   tcFetchExamSubmissions,
   tcFetchHomeworkActivities,
 } from '../services/tronClassClient';
+import { scoreRowsToPredictorItems } from '../services/gradePredictionFromScoreRows';
 import {
   isDemoCourseId,
   demoFetchSelfScore,
@@ -174,6 +176,15 @@ export default function CourseScoresScreen(props: RouteProps) {
     };
   }, [rows]);
 
+  const gradeOutlook = useMemo(() => {
+    if (rows.length === 0 || error) return null;
+    const items = scoreRowsToPredictorItems(rows);
+    if (items.length === 0) return null;
+    const snapshot = predictCurrent(items);
+    if (snapshot.totalWeight <= 0) return null;
+    return { snapshot, targets: commonTargets(items) };
+  }, [rows, error]);
+
   if (loading) {
     return (
       <CourseChipLoading
@@ -257,6 +268,75 @@ export default function CourseScoresScreen(props: RouteProps) {
           </View>
         </View>
       </View>
+
+      {gradeOutlook ? (
+        <View
+          style={{
+            marginTop: theme.space.md,
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radius.lg,
+            padding: theme.space.lg,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            gap: 10,
+          }}
+          accessibilityRole="summary"
+          accessibilityLabel="依加權試算的可能成績、樂觀與悲觀範圍"
+        >
+          <Text style={{ fontSize: 13, fontWeight: '800', color: theme.colors.text }}>
+            加權成績預估（試算）
+          </Text>
+          <Text style={{ fontSize: 12, color: theme.colors.muted, lineHeight: 18 }}>
+            以目前同步到的權重與批改狀態推估總成績範圍，協助規劃剩餘評量；與 TronClass
+            正式欄位不同步時，以校方系統為準。
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+            <View style={{ minWidth: '45%', flex: 1 }}>
+              <Text style={{ fontSize: 11, color: theme.colors.muted }}>可能情境</Text>
+              <Text style={{ fontSize: 22, fontWeight: '800', color: theme.colors.primary }}>
+                {gradeOutlook.snapshot.likelyCase !== null
+                  ? `${gradeOutlook.snapshot.likelyCase}%`
+                  : '—'}
+              </Text>
+              {gradeOutlook.snapshot.letterGrade ? (
+                <Text style={{ fontSize: 12, color: theme.colors.muted }}>
+                  參考等第 {gradeOutlook.snapshot.letterGrade}
+                </Text>
+              ) : null}
+            </View>
+            <View style={{ minWidth: '45%', flex: 1 }}>
+              <Text style={{ fontSize: 11, color: theme.colors.muted }}>成績區間（加權）</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: theme.colors.text }}>
+                {gradeOutlook.snapshot.worstCase}% — {gradeOutlook.snapshot.bestCase}%
+              </Text>
+              <Text style={{ fontSize: 11, color: theme.colors.muted }}>悲觀 · 樂觀</Text>
+            </View>
+          </View>
+          <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.text, marginTop: 4 }}>
+            常見目標門檻（未批改項目平均需）
+          </Text>
+          {gradeOutlook.targets.map(({ target, result }) => (
+            <View
+              key={target}
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                paddingVertical: 6,
+                borderTopWidth: 1,
+                borderTopColor: theme.colors.border,
+              }}
+            >
+              <Text style={{ fontSize: 12, color: theme.colors.text }}>總成績 {target}%</Text>
+              <Text style={{ fontSize: 12, color: theme.colors.muted, flex: 1, textAlign: 'right' }}>
+                {result.requiredAveragePercent !== null
+                  ? `均標 ${result.requiredAveragePercent}% · ${feasibilityLabelZh(result.feasibility)}`
+                  : result.explanation}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       {error ? <CourseChipErrorBanner message={error} onRetry={() => load()} /> : null}
 
@@ -361,4 +441,19 @@ export default function CourseScoresScreen(props: RouteProps) {
       )}
     </ScrollView>
   );
+}
+
+function feasibilityLabelZh(f: 'easy' | 'doable' | 'hard' | 'impossible'): string {
+  switch (f) {
+    case 'easy':
+      return '壓力低';
+    case 'doable':
+      return '合理';
+    case 'hard':
+      return '偏高';
+    case 'impossible':
+      return '不可達';
+    default:
+      return f;
+  }
 }
