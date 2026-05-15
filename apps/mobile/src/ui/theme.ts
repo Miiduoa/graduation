@@ -268,8 +268,18 @@ const sharedLayout: ThemeLayout = {
   scrollBottomInset: 130,
 };
 
-/** 與浮動 Tab Bar 對齊的捲動底部留白（供 navigationTheme 轉匯） */
-export const TAB_BAR_SCROLL_BOTTOM_PADDING = sharedLayout.scrollBottomInset;
+/**
+ * Tab Bar 留白：source of truth 在 `./navigationTheme.ts`。
+ * 這裡保留 re-export shim 給可能還在使用舊路徑的 bundle / stale Metro cache，
+ * 避免 _theme.tabBarExtraScrollPadding undefined 的 runtime crash。
+ *
+ * 用普通 const + 普通 function（不再用 sharedLayout）確保不會 circular。
+ */
+export const TAB_BAR_SCROLL_BOTTOM_PADDING = 130;
+
+export function tabBarExtraScrollPadding(insetsBottom: number): number {
+  return Math.max(0, insetsBottom - 8);
+}
 
 const sharedTypography: ThemeTypography = {
   hero: {

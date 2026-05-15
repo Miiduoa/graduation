@@ -748,11 +748,13 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       if (hasUsableFirebaseConfig()) {
         const auth = getAuthInstance();
         await signOut(auth);
-      } else {
-        await clearMockAuthSession();
-        setUser(null);
-        setProfile(null);
       }
+      // 即使 Firebase 已 signOut，若使用者原本是 mockAuth 登入，
+      // onAuthStateChanged 不會 fire（沒有 Firebase user 變化），
+      // 所以這裡必須**主動清空 React state**，否則 App.tsx 不會跳回 LoginLanding。
+      await clearMockAuthSession();
+      setUser(null);
+      setProfile(null);
 
       // 清除靜宜大學快取和 session
       clearPUSession();

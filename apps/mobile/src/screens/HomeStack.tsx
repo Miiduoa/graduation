@@ -23,6 +23,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { SmartDashboardScreen } from './SmartDashboardScreen';
+import RoleAwareTodayScreen from './RoleAwareTodayScreen';
 import { AnnouncementsScreen } from './AnnouncementsScreen';
 import { AnnouncementDetailScreen } from './AnnouncementDetailScreen';
 import { EventsScreen } from './EventsScreen';
@@ -70,8 +71,13 @@ export function HomeStack() {
     >
       <Stack.Screen
         name="TodayHome"
-        component={SmartDashboardScreen}
+        component={RoleAwareTodayScreen}
         options={{ title: 'Today', headerShown: false }}
+      />
+      <Stack.Screen
+        name="SmartDashboard"
+        component={SmartDashboardScreen}
+        options={{ title: '智慧儀表板（學生）', headerShown: false }}
       />
       <Stack.Screen name="公告總覽" component={AnnouncementsScreen} options={{ title: '公告' }} />
       <Stack.Screen

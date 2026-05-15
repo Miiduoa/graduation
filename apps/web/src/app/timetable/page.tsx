@@ -2,9 +2,11 @@
 
 import { SiteShell } from '@/components/SiteShell';
 import { useState, useMemo, useEffect, type CSSProperties } from 'react';
+import Link from 'next/link';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { getAuth, fetchUserCourses, isFirebaseConfigured, type UserCourse } from '@/lib/firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+import { DEMO_COURSES } from '@/lib/demoData';
 
 type ViewMode = 'week' | 'day' | 'list';
 
@@ -35,96 +37,18 @@ const PERIODS = [
   { period: 12, start: '20:30', end: '21:20' },
 ];
 
-const MOCK_COURSES: CourseSlot[] = [
-  {
-    id: 'c1',
-    name: '資料結構',
-    instructor: '王大明',
-    room: '工程館 302',
-    dayOfWeek: 1,
-    startPeriod: 1,
-    endPeriod: 2,
-    color: '#5E6AD2',
-    credits: 3,
-  },
-  {
-    id: 'c2',
-    name: '線性代數',
-    instructor: '陳小華',
-    room: '理學院 201',
-    dayOfWeek: 1,
-    startPeriod: 5,
-    endPeriod: 6,
-    color: '#34C759',
-    credits: 3,
-  },
-  {
-    id: 'c3',
-    name: '作業系統',
-    instructor: '李志明',
-    room: '資工大樓 405',
-    dayOfWeek: 2,
-    startPeriod: 3,
-    endPeriod: 4,
-    color: '#FF9500',
-    credits: 3,
-  },
-  {
-    id: 'c4',
-    name: '計算機網路',
-    instructor: '張美玲',
-    room: '工程館 105',
-    dayOfWeek: 2,
-    startPeriod: 7,
-    endPeriod: 8,
-    color: '#007AFF',
-    credits: 3,
-  },
-  {
-    id: 'c5',
-    name: '微積分',
-    instructor: '吳俊傑',
-    room: '理學院 101',
-    dayOfWeek: 3,
-    startPeriod: 1,
-    endPeriod: 3,
-    color: '#FF3B30',
-    credits: 4,
-  },
-  {
-    id: 'c6',
-    name: '英文寫作',
-    instructor: 'Smith, J.',
-    room: '語言中心 202',
-    dayOfWeek: 4,
-    startPeriod: 2,
-    endPeriod: 3,
-    color: '#BF5AF2',
-    credits: 2,
-  },
-  {
-    id: 'c7',
-    name: '資料庫系統',
-    instructor: '劉建宏',
-    room: '資工大樓 301',
-    dayOfWeek: 4,
-    startPeriod: 6,
-    endPeriod: 7,
-    color: '#32ADE6',
-    credits: 3,
-  },
-  {
-    id: 'c8',
-    name: '軟體工程',
-    instructor: '林宜珊',
-    room: '工程館 204',
-    dayOfWeek: 5,
-    startPeriod: 4,
-    endPeriod: 5,
-    color: '#FF6B35',
-    credits: 3,
-  },
-];
+// 從 demoData 衍生課表，保持單一資料源（DEMO_COURSES 是 canonical）
+const MOCK_COURSES: CourseSlot[] = DEMO_COURSES.map((c) => ({
+  id: c.id,
+  name: c.name,
+  instructor: c.instructor,
+  room: c.room,
+  dayOfWeek: c.dayOfWeek,
+  startPeriod: c.startPeriod,
+  endPeriod: c.endPeriod,
+  color: c.color,
+  credits: c.credits,
+}));
 
 const DAYS = ['一', '二', '三', '四', '五'];
 const COURSE_COLORS = [
@@ -202,7 +126,7 @@ function getNowLineTopPx(now: Date): number | null {
 export default function TimetablePage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [selectedDay, setSelectedDay] = useState<number>(
     Math.min(Math.max(new Date().getDay() || 5, 1), 5),
@@ -540,14 +464,20 @@ export default function TimetablePage(props: {
                             }}
                           >
                             {course && (
-                              <div
+                              <Link
+                                href={`/course/${course.id}${q}`}
                                 style={{
                                   background: `${course.color}12`,
                                   borderLeft: `3px solid ${course.color}`,
                                   borderRadius: 'var(--radius-xs)',
                                   padding: '6px 8px',
                                   height: '100%',
+                                  display: 'block',
+                                  textDecoration: 'none',
+                                  color: 'inherit',
+                                  cursor: 'pointer',
                                 }}
+                                title={`${course.name} · ${course.instructor} · ${course.room}`}
                               >
                                 <div
                                   style={{
@@ -562,7 +492,7 @@ export default function TimetablePage(props: {
                                 <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
                                   {course.room}
                                 </div>
-                              </div>
+                              </Link>
                             )}
                           </div>
                         );
@@ -636,12 +566,16 @@ export default function TimetablePage(props: {
                   const startP = PERIODS.find((p) => p.period === c.startPeriod);
                   const endP = PERIODS.find((p) => p.period === c.endPeriod);
                   return (
-                    <div
+                    <Link
                       key={c.id}
+                      href={`/course/${c.id}${q}`}
                       className="card"
                       style={{
                         borderLeft: `4px solid ${c.color}`,
                         padding: '18px 20px',
+                        textDecoration: 'none',
+                        color: 'inherit',
+                        display: 'block',
                       }}
                     >
                       <div
@@ -690,7 +624,7 @@ export default function TimetablePage(props: {
                           {c.credits} 學分
                         </span>
                       </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
@@ -734,10 +668,16 @@ export default function TimetablePage(props: {
                       const startP = PERIODS.find((p) => p.period === c.startPeriod);
                       const endP = PERIODS.find((p) => p.period === c.endPeriod);
                       return (
-                        <div
+                        <Link
                           key={c.id}
+                          href={`/course/${c.id}${q}`}
                           className="insetGroupRow"
-                          style={{ borderTop: ci === 0 ? 'none' : undefined }}
+                          style={{
+                            borderTop: ci === 0 ? 'none' : undefined,
+                            color: 'inherit',
+                            textDecoration: 'none',
+                            cursor: 'pointer',
+                          }}
                         >
                           <div
                             className="insetGroupRowIcon"
@@ -760,7 +700,7 @@ export default function TimetablePage(props: {
                           >
                             {c.credits}學分
                           </span>
-                        </div>
+                        </Link>
                       );
                     })}
                   </div>

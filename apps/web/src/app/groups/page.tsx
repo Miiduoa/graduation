@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { DEMO_COURSES, DEMO_CLUBS } from '@/lib/demoData';
 
 interface Group {
   id: string;
@@ -14,89 +16,50 @@ interface Group {
   lastTime: string;
   color: string;
   icon: string;
+  href: string;
 }
-
-const MOCK_GROUPS: Group[] = [
-  {
-    id: '1',
-    name: '資料結構 – 王大明班',
-    type: 'course',
-    members: 48,
-    unread: 2,
-    lastMessage: '下週考試範圍確認到第七章',
-    lastTime: '5 分鐘前',
-    color: '#5E6AD2',
-    icon: '📘',
-  },
-  {
-    id: '2',
-    name: '作業系統討論區',
-    type: 'course',
-    members: 76,
-    unread: 0,
-    lastMessage: '第三次作業延期到週五',
-    lastTime: '1 小時前',
-    color: '#007AFF',
-    icon: '💻',
-  },
-  {
-    id: '3',
-    name: '程式設計社',
-    type: 'club',
-    members: 120,
-    unread: 5,
-    lastMessage: '本週五舉辦黑客松活動！',
-    lastTime: '3 小時前',
-    color: '#34C759',
-    icon: '👨‍💻',
-  },
-  {
-    id: '4',
-    name: '計算機網路 A班',
-    type: 'course',
-    members: 35,
-    unread: 0,
-    lastMessage: '期末專題分組截止日 5/1',
-    lastTime: '昨天',
-    color: '#FF9500',
-    icon: '🌐',
-  },
-  {
-    id: '5',
-    name: '攝影社',
-    type: 'club',
-    members: 88,
-    unread: 1,
-    lastMessage: '三月份外拍活動照片上傳啦',
-    lastTime: '昨天',
-    color: '#BF5AF2',
-    icon: '📷',
-  },
-  {
-    id: '6',
-    name: '微積分 – 吳俊傑班',
-    type: 'course',
-    members: 95,
-    unread: 0,
-    lastMessage: '補充教材已上傳至平台',
-    lastTime: '2 天前',
-    color: '#FF3B30',
-    icon: '📐',
-  },
-];
 
 export default function GroupsPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [filter, setFilter] = useState<'all' | 'course' | 'club'>('all');
   const [search, setSearch] = useState('');
 
-  const filtered = MOCK_GROUPS.filter(
+  // 從統一 demoData 合併課程與社團
+  const groups: Group[] = useMemo(() => {
+    const courses: Group[] = DEMO_COURSES.map((c) => ({
+      id: c.id,
+      name: c.name,
+      type: 'course',
+      members: c.members,
+      unread: c.unread,
+      lastMessage: c.lastMessage,
+      lastTime: c.lastTime,
+      color: c.color,
+      icon: c.icon,
+      href: `/course/${c.id}${q}`,
+    }));
+    const clubs: Group[] = DEMO_CLUBS.map((c) => ({
+      id: c.id,
+      name: c.name,
+      type: 'club',
+      members: c.members,
+      unread: c.unread,
+      lastMessage: c.lastMessage,
+      lastTime: c.lastTime,
+      color: c.color,
+      icon: c.icon,
+      href: `/clubs${q}`,
+    }));
+    return [...courses, ...clubs];
+  }, [q]);
+
+  const filtered = groups.filter(
     (g) => (filter === 'all' || g.type === filter) && (!search || g.name.includes(search)),
   );
 
-  const totalUnread = MOCK_GROUPS.reduce((s, g) => s + g.unread, 0);
+  const totalUnread = groups.reduce((s, g) => s + g.unread, 0);
 
   return (
     <SiteShell title="群組" subtitle="課程討論與社團交流" schoolName={schoolName}>
@@ -105,7 +68,7 @@ export default function GroupsPage(props: {
         <div className="metricGrid">
           <div className="metricCard" style={{ '--tone': 'var(--brand)' } as React.CSSProperties}>
             <div className="metricIcon">💬</div>
-            <div className="metricValue">{MOCK_GROUPS.length}</div>
+            <div className="metricValue">{groups.length}</div>
             <div className="metricLabel">已加入群組</div>
           </div>
           <div
@@ -119,7 +82,7 @@ export default function GroupsPage(props: {
           <div className="metricCard" style={{ '--tone': '#007AFF' } as React.CSSProperties}>
             <div className="metricIcon">📚</div>
             <div className="metricValue">
-              {MOCK_GROUPS.filter((g) => g.type === 'course').length}
+              {groups.filter((g) => g.type === 'course').length}
             </div>
             <div className="metricLabel">課程群組</div>
           </div>
@@ -156,13 +119,16 @@ export default function GroupsPage(props: {
         {/* ── Group List ── */}
         <div className="insetGroup">
           {filtered.map((g, i) => (
-            <div
+            <Link
               key={g.id}
+              href={g.href}
               className="insetGroupRow"
               style={{
                 borderTop: i === 0 ? 'none' : undefined,
                 cursor: 'pointer',
                 position: 'relative',
+                color: 'inherit',
+                textDecoration: 'none',
               }}
             >
               <div
@@ -228,7 +194,7 @@ export default function GroupsPage(props: {
                   </span>
                 )}
               </div>
-            </div>
+            </Link>
           ))}
         </div>
 

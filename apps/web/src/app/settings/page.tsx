@@ -3,6 +3,9 @@
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useState, useCallback, type CSSProperties, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { signOut } from 'firebase/auth';
+import { getAuth } from '@/lib/firebase';
 
 type Section = 'general' | 'notifications' | 'appearance' | 'privacy' | 'account';
 
@@ -84,8 +87,26 @@ function SettingRow({
 export default function SettingsPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const router = useRouter();
   const [activeSection, setActiveSection] = useState<Section>('general');
+  const [signingOut, setSigningOut] = useState(false);
+
+  const handleSignOut = useCallback(async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      const auth = getAuth();
+      if (auth) {
+        await signOut(auth);
+      }
+    } catch (err) {
+      console.error('[settings] signOut failed', err);
+    } finally {
+      // 不管成功失敗，demo 體驗都應該帶回登入頁
+      router.replace(`/login${q}`);
+    }
+  }, [signingOut, router, q]);
 
   // Settings state
   const [darkMode, setDarkMode] = useState(false);
@@ -468,10 +489,11 @@ export default function SettingsPage(props: {
             <SettingRow
               icon="🚪"
               iconBg="var(--danger-soft)"
-              title="登出"
+              title={signingOut ? '正在登出…' : '登出'}
+              subtitle="結束本次連線並回到登入頁"
               danger
               right={null}
-              onClick={() => {}}
+              onClick={handleSignOut}
             />
           </div>
         </div>

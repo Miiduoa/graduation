@@ -45,6 +45,7 @@ import {
   ConflictInfo,
 } from './src/services/offline';
 import { ToastProvider, useToast } from './src/ui/Toast';
+import { FullScreenLoader } from './src/ui/components';
 import { NetworkStatusBanner } from './src/ui/OfflineBanner';
 import { ConflictResolutionModal } from './src/ui/ConflictResolutionModal';
 
@@ -54,6 +55,7 @@ import { MapStack } from './src/screens/MapStack';
 import { MessagesStack } from './src/screens/MessagesStack';
 import { MeStack } from './src/screens/MeStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
+import { PreAuthStack } from './src/screens/PreAuthStack';
 import { usePushNotifications } from './src/app/usePushNotifications';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useAIBrainLifecycle } from './src/app/useAIBrain';
@@ -63,6 +65,7 @@ import { aiOverlay } from './src/app/useAIOverlay';
 import { HeaderDrawerHost } from './src/components/HeaderDrawer';
 import { AIFloatingBall } from './src/components/AIFloatingBall';
 import { useProactiveAIReporter } from './src/app/useProactiveAIReporter';
+import { useProactiveAIAgentLoop } from './src/app/useProactiveAIAgentLoop';
 import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
@@ -441,9 +444,11 @@ function TokenExpiredModal() {
               })}
             >
               {isLoggingOut ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size="small" color={theme.colors.onAccent} />
               ) : (
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>重新登入</Text>
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>
+                  重新登入
+                </Text>
               )}
             </Pressable>
           </View>
@@ -634,9 +639,10 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           <Text
             style={{
               fontSize: 10,
-              fontWeight: focused ? '700' : '500',
+              lineHeight: 13,
+              fontWeight: focused ? '700' : '600',
               color: focused ? theme.colors.accent : theme.colors.muted,
-              letterSpacing: focused ? 0 : 0.1,
+              letterSpacing: focused ? 0.15 : 0.25,
             }}
           >
             {config?.label ?? route.name}
@@ -783,6 +789,7 @@ function AppNavigation() {
   useAIAmbientAwareness();
   useAIBrainLifecycle();
   useProactiveAIReporter();
+  useProactiveAIAgentLoop();
   useWebLearningSync();
 
   const flushPendingMessagingDeepLink = useCallback(() => {
@@ -904,17 +911,17 @@ function AppNavigation() {
   };
 
   if (auth.loading || auth.profileLoading) {
+    return <FullScreenLoader />;
+  }
+
+  // 沒有登入 session → Landing + 可進入正式學校登入（SSOLoginScreen）
+  if (!auth.user && !auth.profile) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: theme.colors.bg,
-        }}
-      >
-        <ActivityIndicator size="large" color={theme.colors.accent} />
-      </View>
+      <NavigationContainer ref={rootNavigationRef} theme={navTheme}>
+        <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+          <PreAuthStack />
+        </View>
+      </NavigationContainer>
     );
   }
 
@@ -924,18 +931,7 @@ function AppNavigation() {
       theme={navTheme}
       linking={linkingConfig}
       onReady={flushPendingMessagingDeepLink}
-      fallback={
-        <View
-          style={{
-            flex: 1,
-            justifyContent: 'center',
-            alignItems: 'center',
-            backgroundColor: theme.colors.bg,
-          }}
-        >
-          <ActivityIndicator size="large" color={theme.colors.accent} />
-        </View>
-      }
+      fallback={<FullScreenLoader />}
     >
       <View style={{ flex: 1 }}>
         <NetworkStatusBanner />
@@ -999,18 +995,7 @@ function AppInner() {
   useThemeMode();
 
   if (isCheckingOnboarding) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: theme.colors.bg,
-          justifyContent: 'center',
-          alignItems: 'center',
-        }}
-      >
-        <ActivityIndicator size="large" color={theme.colors.accent} />
-      </View>
-    );
+    return <FullScreenLoader message="準備你的校園體驗…" />;
   }
 
   if (showOnboarding) {
@@ -1108,7 +1093,9 @@ class AppErrorBoundary extends React.Component<
               opacity: pressed ? 0.85 : 1,
             })}
           >
-            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>重新嘗試</Text>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 15, fontWeight: '700' }}>
+              重新嘗試
+            </Text>
           </Pressable>
         </View>
       );

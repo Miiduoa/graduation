@@ -30,6 +30,8 @@ import {
 import { isDemoCourseId, demoFetchDiscussions } from '../data/demoCoursesAdapter';
 import { theme } from '../ui/theme';
 import { EmptyState } from '../ui/components';
+import { useAuth } from '../state/auth';
+import { emitDiscussionPosted, emitHelpRequested } from '../services/roleEventBus';
 import {
   CourseChipErrorBanner,
   CourseChipHeader,
@@ -131,6 +133,39 @@ export default function CourseDiscussionScreen(props: RouteProps) {
         try {
           const { onDiscussionPosted } = await import('../services/companionHooks');
           onDiscussionPosted({ threadId: String(newId) });
+        } catch {
+          /* swallow */
+        }
+        // ─ Demo：emit discussion_posted 給 TA + 老師 ─
+        try {
+          await emitDiscussionPosted({
+            actorUid: auth.user?.uid ?? 'demo_student_kuchih',
+            actorName: auth.profile?.displayName ?? '顧晉瑋',
+            targetUids: ['demo_teacher_chang', 'demo_ta_lin'],
+            courseId,
+            courseName: groupName ?? '課程',
+            payload: {
+              threadId: String(newId),
+              threadTitle: newTitle.trim(),
+              preview: (newBody.trim() || '').slice(0, 80),
+            },
+          });
+          // 標題含問號 / 「為什麼」/「怎麼」/ HELP 標記 → 升級為 help_requested
+          const looksLikeHelp = /[?？]|為什麼|怎麼|不會|不懂|help|HELP/i.test(newTitle + ' ' + newBody);
+          if (looksLikeHelp) {
+            await emitHelpRequested({
+              actorUid: auth.user?.uid ?? 'demo_student_kuchih',
+              actorName: auth.profile?.displayName ?? '顧晉瑋',
+              targetUids: ['demo_ta_lin', 'demo_teacher_chang'],
+              courseId,
+              courseName: groupName ?? '課程',
+              payload: {
+                topic: newTitle.trim().slice(0, 40),
+                preview: (newBody.trim() || newTitle.trim()).slice(0, 120),
+                urgency: /緊急|急|要交|今天/i.test(newTitle + ' ' + newBody) ? 'high' : 'medium',
+              },
+            });
+          }
         } catch {
           /* swallow */
         }
