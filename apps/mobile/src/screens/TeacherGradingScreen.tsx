@@ -50,7 +50,7 @@ const SAMPLE_SUBMISSIONS: Submission[] = [
   {
     id: 's1',
     studentName: '阿明',
-    studentId: 'ku-001',
+    studentId: 'U11401001',
     submittedAt: '2026-05-12T22:30:00+08:00',
     isLate: false,
     content: '這是阿明繳交的內容範例⋯⋯',
@@ -60,7 +60,7 @@ const SAMPLE_SUBMISSIONS: Submission[] = [
   {
     id: 's2',
     studentName: '小華',
-    studentId: 'ku-002',
+    studentId: 'U11401023',
     submittedAt: '2026-05-13T09:00:00+08:00',
     isLate: true,
     content: '這是小華繳交的內容範例⋯⋯',
@@ -70,7 +70,7 @@ const SAMPLE_SUBMISSIONS: Submission[] = [
   {
     id: 's3',
     studentName: '小芳',
-    studentId: 'ku-003',
+    studentId: 'U11408102',
     submittedAt: '2026-05-11T18:00:00+08:00',
     isLate: false,
     content: '這是小芳繳交的內容範例⋯⋯',
