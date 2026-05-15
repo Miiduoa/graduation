@@ -280,7 +280,8 @@ const PROTECTED_SCREENS: Record<ScreenName, Permission[]> = {
   AddCourse: ['courses.create'],
   /** 與 LearnStack GuardedAcademicOverview 對齊：需能檢視課程工作區才視為學業總覽對象 */
   AcademicOverview: ['courses.view'],
-  CourseGradebook: ['courses.grade'],
+  /** 與 LearnStack「學業總覽 / 課內成績簿」一致：學生需 courses.view；教師端另依 courses.grade 解鎖編修 */
+  CourseGradebook: ['courses.view'],
   /** 課程工作區（與 LearnStack guardCourseView 對齊） */
   CourseHub: ['courses.view'],
   CourseModules: ['courses.view'],
@@ -288,6 +289,8 @@ const PROTECTED_SCREENS: Record<ScreenName, Permission[]> = {
   /** 學生簽到／檢視出缺勤需 courses.view；教師操作點名需 courses.attendance */
   Attendance: ['courses.view', 'courses.attendance'],
   LearningAnalytics: ['admin.analytics', 'courses.manage'],
+  /** 與 LearnStack GuardedTeacherGrading 對齊 */
+  TeacherGrading: ['courses.grade', 'courses.manage'],
 };
 
 export function canAccessScreen(role: AppRole, screenName: ScreenName): boolean {

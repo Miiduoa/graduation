@@ -164,17 +164,23 @@ export function TeachingHubScreen(props: any) {
     setRefreshing(false);
   }, [loadCoursesData]);
 
+  const openFirstCourseGradebook = () => {
+    const first = courseStats[0];
+    if (first) {
+      nav?.navigate?.('CourseGradebook', {
+        groupId: String(first.course.id),
+        groupName: first.course.name,
+      });
+      return;
+    }
+    nav?.navigate?.('CourseGradebook');
+  };
+
   const quickActions = [
     {
       label: '評分',
       icon: 'checkmark-circle-outline' as const,
-      onPress: () => {
-        if (courseStats.length > 0) {
-          nav?.navigate?.('CourseGradebook', { courseId: courseStats[0].course.id });
-        } else {
-          nav?.navigate?.('CourseGradebook');
-        }
-      },
+      onPress: openFirstCourseGradebook,
       color: theme.colors.success,
     },
     {
@@ -281,6 +287,68 @@ export function TeachingHubScreen(props: any) {
             }}
           />
         ) : null}
+
+        {/* 示範閉環：將 Rubric 批改與正式 gradebook 串在同一路径；資料為離線示範 */}
+        <View
+          style={{
+            borderRadius: 14,
+            padding: 16,
+            gap: 10,
+            borderWidth: 1,
+            borderColor: `${theme.colors.accent}44`,
+            backgroundColor: theme.colors.surface,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="flash-outline" size={22} color={theme.colors.accent} />
+            <Text style={{ fontSize: 16, fontWeight: '800', color: theme.colors.text, flex: 1 }}>
+              示範：教到評一條龍（本機資料）
+            </Text>
+          </View>
+          <Text style={{ fontSize: 13, color: theme.colors.textSecondary, lineHeight: 20 }}>
+            先用 Rubric 批次試批改，再回到課程內{' '}
+            <Text style={{ fontWeight: '700', color: theme.colors.text }}>正式 gradebook</Text>{' '}
+            對齊全班加權。以下為離線示範，非即時寫回 TronClass／各校正式 LMS；正式發布請以校方系統為準。
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Pressable
+              onPress={() => {
+                const c = courseStats[0]?.course;
+                nav?.navigate?.('TeacherGrading', {
+                  assignmentTitle: c ? `${c.code}｜期中學習單（示範）` : '期中學習單（示範）',
+                  courseName: c?.name ?? '示範課程',
+                  courseId: c?.id,
+                });
+              }}
+              style={({ pressed }) => ({
+                flex: 1,
+                paddingVertical: 12,
+                borderRadius: 10,
+                alignItems: 'center',
+                backgroundColor: theme.colors.accent,
+                opacity: pressed ? 0.9 : 1,
+              })}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Rubric 批改示範</Text>
+            </Pressable>
+            <Pressable
+              onPress={openFirstCourseGradebook}
+              style={({ pressed }) => ({
+                flex: 1,
+                paddingVertical: 12,
+                borderRadius: 10,
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+              })}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.accent }}>
+                課程成績簿
+              </Text>
+            </Pressable>
+          </View>
+        </View>
 
         {/* Today's Classes */}
         {todayClasses.length > 0 ? (
@@ -391,13 +459,7 @@ export function TeachingHubScreen(props: any) {
               gap: 12,
               opacity: pressed ? 0.8 : 1,
             })}
-            onPress={() => {
-              if (courseStats.length > 0) {
-                nav?.navigate?.('CourseGradebook', { courseId: courseStats[0].course.id });
-              } else {
-                nav?.navigate?.('CourseGradebook');
-              }
-            }}
+            onPress={openFirstCourseGradebook}
           >
             <Ionicons name="list-outline" size={16} color={theme.colors.warning} />
             <View style={{ flex: 1 }}>
