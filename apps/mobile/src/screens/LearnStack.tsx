@@ -88,8 +88,16 @@ function GuardedAddCourse(props: any) {
 
 function GuardedAttendance(props: any) {
   return (
-    <RouteGuard requires="courses.attendance">
+    <RouteGuard requires={['courses.view', 'courses.attendance']}>
       <AttendanceScreen {...props} />
+    </RouteGuard>
+  );
+}
+
+function GuardLearnAdminCourseVerify(props: any) {
+  return (
+    <RouteGuard requires="admin.course_verify">
+      <AdminCourseVerifyScreen {...props} />
     </RouteGuard>
   );
 }
@@ -209,7 +217,7 @@ export function LearnStack() {
       <Stack.Screen name="QuizCenter" component={QuizCenterScreen} options={{ title: '測驗中心' }} />
       <Stack.Screen
         name="Attendance"
-        component={AttendanceScreen}
+        component={GuardedAttendance}
         options={{ title: '智慧點名', headerShown: false }}
       />
       <Stack.Screen
@@ -275,7 +283,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="AdminCourseVerify"
-        component={AdminCourseVerifyScreen}
+        component={GuardLearnAdminCourseVerify}
         options={{ title: '課程認證' }}
       />
       <Stack.Screen

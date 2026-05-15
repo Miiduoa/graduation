@@ -156,7 +156,7 @@ export async function submitProductFeedback(input: {
 
 /** App 前景或啟動時重試佇列。 */
 export async function flushFeedbackQueue(): Promise<void> {
-  let q = await loadQueue();
+  const q = await loadQueue();
   if (q.length === 0) return;
 
   const remaining: QueuedFeedbackDoc[] = [];
