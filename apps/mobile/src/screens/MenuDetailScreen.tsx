@@ -9,7 +9,6 @@ import {
   Alert,
   TextInput,
   Image,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -28,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import * as ImagePicker from 'expo-image-picker';
 import { buildSchoolCollectionPath } from '@campus/shared/src';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { findById } from '../data';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useDataSource } from '../hooks/useDataSource';
@@ -677,8 +677,8 @@ export function MenuDetailScreen(props: any) {
               {item.sourceUrl ? (
                 <Pressable
                   onPress={() => {
-                    Linking.openURL(item.sourceUrl).catch(() => {
-                      Alert.alert('無法開啟', '目前無法打開資料來源連結');
+                    void linkingOpenWithPuTronClassGate(item.sourceUrl).then((ok) => {
+                      if (!ok) Alert.alert('無法開啟', '目前無法打開資料來源連結');
                     });
                   }}
                   style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}

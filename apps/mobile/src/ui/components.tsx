@@ -30,6 +30,7 @@ import { theme, shadowStyle, softShadowStyle } from './theme';
 const CALM_WHITESPACE_HERO = require('../../assets/empty_whitespace_hero.png');
 import { formatCountdown } from '../utils/format';
 export { LoadingOverlay } from './feedback/LoadingOverlay';
+export { PuWebView, type PuWebViewProps } from './PuWebView';
 export { ToggleSwitch } from './interactive/ToggleSwitch';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');

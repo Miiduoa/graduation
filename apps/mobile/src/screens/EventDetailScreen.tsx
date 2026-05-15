@@ -8,7 +8,6 @@ import {
   Share,
   Alert,
   TextInput,
-  Linking,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,6 +48,7 @@ import { useSchool } from '../state/school';
 import { formatDateTime, toDate, formatRelativeTime } from '../utils/format';
 import type { ClubEvent } from '../data/types';
 import { earnXP } from '../services/gamificationEngine';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 export function EventDetailScreen(props: any) {
   const { school } = useSchool();
@@ -435,7 +435,7 @@ export function EventDetailScreen(props: any) {
       ios: `maps:0,0?q=${encodeURIComponent(item.location)}`,
       android: `geo:0,0?q=${encodeURIComponent(item.location)}`,
     });
-    if (url) Linking.openURL(url);
+    if (url) void linkingOpenWithPuTronClassGate(url);
   };
 
   const startsAtDate = useMemo(() => toDate(item?.startsAt), [item?.startsAt]);
