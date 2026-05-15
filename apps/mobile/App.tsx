@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   NavigationContainer,
@@ -67,6 +67,10 @@ import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
 import { rootNavigationRef, type RootTabParamList } from './src/app/rootNavigation';
+import { parseGroupAssignmentDeepLink } from './src/app/assignmentDeepLink';
+import { navigateFromInboxTask } from './src/services/inboxActions';
+import { isTeachingRole } from './src/utils/campusOs';
+import type { InboxTask } from './src/data/types';
 import { initCrossModuleConnections } from './src/services/crossModuleConnector';
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
 
@@ -88,7 +92,20 @@ const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
 type TabKey = keyof RootTabParamList;
 
-const linking: LinkingOptions<RootTabParamList> = {
+function assignmentTaskFromDeepLink(parsed: { groupId: string; assignmentId: string }): InboxTask {
+  return {
+    id: `deeplink-${parsed.assignmentId}`,
+    kind: 'assignment',
+    groupId: parsed.groupId,
+    groupName: '課程',
+    title: '作業',
+    subtitle: '',
+    assignmentId: parsed.assignmentId,
+    priority: 50,
+  };
+}
+
+const linkingBase: LinkingOptions<RootTabParamList> = {
   prefixes: [Linking.createURL('/'), 'campus://'],
   config: {
     screens: {
@@ -741,11 +758,64 @@ function AppTabNavigator() {
 
 function AppNavigation() {
   const auth = useAuth();
-  usePushNotifications(rootNavigationRef, auth.user?.uid);
+  const pendingAssignmentUrlRef = useRef<string | null>(null);
+  const authRoleRef = useRef(auth.profile?.role);
+  const authTeachingRef = useRef(isTeachingRole(auth.profile?.role));
+  authRoleRef.current = auth.profile?.role;
+  authTeachingRef.current = isTeachingRole(auth.profile?.role);
+
+  usePushNotifications(rootNavigationRef, auth.user?.uid, auth.profile?.role);
   useAIAmbientAwareness();
   useAIBrainLifecycle();
   useProactiveAIReporter();
   useWebLearningSync();
+
+  const flushPendingAssignmentDeepLink = useCallback(() => {
+    if (!rootNavigationRef.isReady()) return;
+    const url = pendingAssignmentUrlRef.current;
+    if (!url) return;
+    const parsed = parseGroupAssignmentDeepLink(url);
+    pendingAssignmentUrlRef.current = null;
+    if (!parsed) return;
+    navigateFromInboxTask(rootNavigationRef, assignmentTaskFromDeepLink(parsed), {
+      role: authRoleRef.current,
+      isTeachingRole: authTeachingRef.current,
+    });
+  }, []);
+
+  const linkingConfig = useMemo(
+    () => ({
+      ...linkingBase,
+      async getInitialURL() {
+        const url = await Linking.getInitialURL();
+        if (url && parseGroupAssignmentDeepLink(url)) {
+          pendingAssignmentUrlRef.current = url;
+          return null;
+        }
+        return url;
+      },
+      subscribe(listener: (url: string) => void) {
+        const subscription = Linking.addEventListener('url', ({ url }) => {
+          const parsed = parseGroupAssignmentDeepLink(url);
+          if (parsed) {
+            if (rootNavigationRef.isReady()) {
+              pendingAssignmentUrlRef.current = null;
+              navigateFromInboxTask(rootNavigationRef, assignmentTaskFromDeepLink(parsed), {
+                role: authRoleRef.current,
+                isTeachingRole: authTeachingRef.current,
+              });
+            } else {
+              pendingAssignmentUrlRef.current = url;
+            }
+            return;
+          }
+          listener(url);
+        });
+        return () => subscription.remove();
+      },
+    }),
+    [],
+  );
 
   const navTheme = {
     ...DefaultTheme,
@@ -778,7 +848,8 @@ function AppNavigation() {
     <NavigationContainer
       ref={rootNavigationRef}
       theme={navTheme}
-      linking={linking}
+      linking={linkingConfig}
+      onReady={flushPendingAssignmentDeepLink}
       fallback={
         <View
           style={{

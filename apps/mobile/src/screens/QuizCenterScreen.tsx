@@ -6,6 +6,9 @@ import type { CourseSpace, Quiz } from '../data';
 import { Button, Card, ErrorState, LoadingState, Pill, Screen } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { navigateFromInboxTask } from '../services/inboxActions';
+import { isTeachingRole } from '../utils/campusOs';
+import type { InboxTask } from '../data/types';
 import { useSchool } from '../state/school';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useDataSource } from '../hooks/useDataSource';
@@ -467,12 +470,28 @@ export function QuizCenterScreen(props: any) {
               upcoming.map((item) => (
                 <Pressable
                   key={`${item.groupId}-${item.id}`}
-                  onPress={() =>
-                    nav?.navigate?.('訊息', {
-                      screen: 'AssignmentDetail',
-                      params: { groupId: item.groupId, assignmentId: item.assignmentId },
-                    })
-                  }
+                  onPress={() => {
+                    const task: InboxTask = {
+                      id: `quiz-center-${item.assignmentId}`,
+                      kind: 'quiz',
+                      groupId: item.groupId,
+                      groupName: item.groupName ?? '課程',
+                      title: item.title,
+                      subtitle: '',
+                      assignmentId: item.assignmentId,
+                      priority: 50,
+                    };
+                    const navigated = navigateFromInboxTask(nav, task, {
+                      role: auth.profile?.role,
+                      isTeachingRole: isTeachingRole(auth.profile?.role),
+                    });
+                    if (!navigated) {
+                      nav?.navigate?.('訊息', {
+                        screen: 'AssignmentDetail',
+                        params: { groupId: item.groupId, assignmentId: item.assignmentId },
+                      });
+                    }
+                  }}
                   style={({ pressed }) => ({
                     borderRadius: theme.radius.lg,
                     backgroundColor: theme.colors.surface2,
