@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { ScrollView, Text, View, Pressable, Alert, Share, Linking, Clipboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -401,6 +401,40 @@ export function CalendarPanel(props: any) {
     };
   };
 
+  const openCalendarEvent = useCallback(
+    (e: CalendarEvent) => {
+      if (e.type === 'event') {
+        const eventId = e.id.replace(/^event-/, '');
+        nav?.navigate?.('Today', { screen: '活動詳情', params: { id: eventId } });
+        return;
+      }
+      if (e.type === 'assignment' && e.groupId) {
+        const assignmentId = e.id.replace(/^assignment-/, '');
+        const task: InboxTask = {
+          id: `cal-${assignmentId}`,
+          kind: 'assignment',
+          groupId: e.groupId,
+          groupName: e.groupName ?? '課程',
+          title: e.title,
+          subtitle: '',
+          assignmentId,
+          priority: 50,
+        };
+        const navigated = navigateFromInboxTask(nav, task, {
+          role: auth.profile?.role,
+          isTeachingRole: isTeachingRole(auth.profile?.role),
+        });
+        if (!navigated) {
+          nav?.navigate?.('訊息', {
+            screen: 'AssignmentDetail',
+            params: { groupId: e.groupId, assignmentId },
+          });
+        }
+      }
+    },
+    [nav, auth.profile?.role],
+  );
+
   const goToPrevMonth = () => {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
   };
@@ -607,34 +641,7 @@ export function CalendarPanel(props: any) {
                 {eventsOnSelectedDate.map((e) => (
                   <Pressable
                     key={e.id}
-                    onPress={() => {
-                      if (e.type === 'event') {
-                        const eventId = e.id.replace('event-', '');
-                        nav?.navigate?.('Today', { screen: '活動詳情', params: { id: eventId } });
-                      } else if (e.type === 'assignment' && e.groupId) {
-                        const assignmentId = e.id.replace('assignment-', '');
-                        const task: InboxTask = {
-                          id: `cal-${assignmentId}`,
-                          kind: 'assignment',
-                          groupId: e.groupId,
-                          groupName: e.groupName ?? '課程',
-                          title: e.title,
-                          subtitle: '',
-                          assignmentId,
-                          priority: 50,
-                        };
-                        const navigated = navigateFromInboxTask(nav, task, {
-                          role: auth.profile?.role,
-                          isTeachingRole: isTeachingRole(auth.profile?.role),
-                        });
-                        if (!navigated) {
-                          nav?.navigate?.('訊息', {
-                            screen: 'AssignmentDetail',
-                            params: { groupId: e.groupId, assignmentId },
-                          });
-                        }
-                      }
-                    }}
+                    onPress={() => openCalendarEvent(e)}
                     style={({ pressed }) => ({
                       padding: 14,
                       borderRadius: theme.radius.md,
@@ -704,9 +711,10 @@ export function CalendarPanel(props: any) {
             return (
               <View style={{ gap: 10 }}>
                 {upcoming.slice(0, 5).map((e) => (
-                  <View
+                  <Pressable
                     key={e.id}
-                    style={{
+                    onPress={() => openCalendarEvent(e)}
+                    style={({ pressed }) => ({
                       flexDirection: 'row',
                       alignItems: 'center',
                       gap: 12,
@@ -714,7 +722,8 @@ export function CalendarPanel(props: any) {
                       paddingHorizontal: 10,
                       borderRadius: theme.radius.sm,
                       backgroundColor: theme.colors.surface,
-                    }}
+                      opacity: pressed ? 0.9 : 1,
+                    })}
                   >
                     <View
                       style={{
@@ -736,7 +745,7 @@ export function CalendarPanel(props: any) {
                       size="sm"
                       kind="muted"
                     />
-                  </View>
+                  </Pressable>
                 ))}
                 {upcoming.length > 5 ? (
                   <Text

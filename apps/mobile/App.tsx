@@ -66,7 +66,11 @@ import { useProactiveAIReporter } from './src/app/useProactiveAIReporter';
 import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
-import { rootNavigationRef, type RootTabParamList } from './src/app/rootNavigation';
+import {
+  rootNavigateNested,
+  rootNavigationRef,
+  type RootTabParamList,
+} from './src/app/rootNavigation';
 import { parseGroupAssignmentDeepLink } from './src/app/assignmentDeepLink';
 import { navigateFromInboxTask } from './src/services/inboxActions';
 import { isTeachingRole } from './src/utils/campusOs';
@@ -92,13 +96,18 @@ const Tab = createBottomTabNavigator<RootTabParamList, undefined>();
 
 type TabKey = keyof RootTabParamList;
 
-function assignmentTaskFromDeepLink(parsed: { groupId: string; assignmentId: string }): InboxTask {
+function assignmentTaskFromDeepLink(parsed: {
+  groupId: string;
+  assignmentId: string;
+  isQuiz?: boolean;
+}): InboxTask {
+  const isQuiz = !!parsed.isQuiz;
   return {
     id: `deeplink-${parsed.assignmentId}`,
-    kind: 'assignment',
+    kind: isQuiz ? 'quiz' : 'assignment',
     groupId: parsed.groupId,
     groupName: '課程',
-    title: '作業',
+    title: isQuiz ? '測驗' : '作業',
     subtitle: '',
     assignmentId: parsed.assignmentId,
     priority: 50,
@@ -777,10 +786,17 @@ function AppNavigation() {
     const parsed = parseGroupAssignmentDeepLink(url);
     pendingAssignmentUrlRef.current = null;
     if (!parsed) return;
-    navigateFromInboxTask(rootNavigationRef, assignmentTaskFromDeepLink(parsed), {
+    const task = assignmentTaskFromDeepLink(parsed);
+    const ok = navigateFromInboxTask(rootNavigationRef, task, {
       role: authRoleRef.current,
       isTeachingRole: authTeachingRef.current,
     });
+    if (!ok) {
+      rootNavigateNested('訊息', 'AssignmentDetail', {
+        groupId: parsed.groupId,
+        assignmentId: parsed.assignmentId,
+      });
+    }
   }, []);
 
   const linkingConfig = useMemo(
@@ -800,10 +816,17 @@ function AppNavigation() {
           if (parsed) {
             if (rootNavigationRef.isReady()) {
               pendingAssignmentUrlRef.current = null;
-              navigateFromInboxTask(rootNavigationRef, assignmentTaskFromDeepLink(parsed), {
+              const task = assignmentTaskFromDeepLink(parsed);
+              const ok = navigateFromInboxTask(rootNavigationRef, task, {
                 role: authRoleRef.current,
                 isTeachingRole: authTeachingRef.current,
               });
+              if (!ok) {
+                rootNavigateNested('訊息', 'AssignmentDetail', {
+                  groupId: parsed.groupId,
+                  assignmentId: parsed.assignmentId,
+                });
+              }
             } else {
               pendingAssignmentUrlRef.current = url;
             }
