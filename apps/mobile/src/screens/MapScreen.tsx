@@ -34,6 +34,7 @@ import {
   type CampusPoi,
   type CampusPoiCategory,
 } from '../data/puCampusData';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 // ─── Helpers ─────────────────────────────────────────
 function haverDist(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -288,22 +289,25 @@ async function openExtMap(lat: number, lng: number, name: string) {
   if (Platform.OS === 'ios') {
     try {
       if (await Linking.canOpenURL('maps://')) {
-        await Linking.openURL(`maps:0,0?q=${encodeURIComponent(name)}@${lat},${lng}`);
-        return;
+        if (
+          await linkingOpenWithPuTronClassGate(
+            `maps:0,0?q=${encodeURIComponent(name)}@${lat},${lng}`,
+          )
+        )
+          return;
       }
     } catch {}
   }
   if (Platform.OS === 'android') {
-    try {
-      await Linking.openURL(`geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(name)})`);
+    if (
+      await linkingOpenWithPuTronClassGate(
+        `geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(name)})`,
+      )
+    )
       return;
-    } catch {}
   }
-  try {
-    await Linking.openURL(web);
-  } catch {
-    Alert.alert('無法開啟地圖');
-  }
+  if (await linkingOpenWithPuTronClassGate(web)) return;
+  Alert.alert('無法開啟地圖');
 }
 
 // ─── Mini Map View ───────────────────────────────────

@@ -6,6 +6,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Linking, Platform } from 'react-native';
 
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
+
 export interface DeepLinkRoute {
   path: string;
   params: Record<string, string>;
@@ -162,17 +164,7 @@ export function useDeepLink(options: DeepLinkOptions = {}): DeepLinkResult {
   }, [handleUrl]);
 
   const openUrl = useCallback(async (url: string): Promise<boolean> => {
-    try {
-      const canOpen = await Linking.canOpenURL(url);
-      if (canOpen) {
-        await Linking.openURL(url);
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('[DeepLink] Failed to open URL:', error);
-      return false;
-    }
+    return linkingOpenWithPuTronClassGate(url);
   }, []);
 
   const canOpenUrl = useCallback(async (url: string): Promise<boolean> => {
@@ -237,12 +229,7 @@ export function useUniversalLink(domain: string): {
   const openInApp = useCallback(
     async (path: string): Promise<boolean> => {
       const url = `https://${domain}/${path}`;
-      try {
-        await Linking.openURL(url);
-        return true;
-      } catch {
-        return false;
-      }
+      return linkingOpenWithPuTronClassGate(url);
     },
     [domain],
   );
@@ -280,35 +267,24 @@ export function useExternalApps(): {
   const openMaps = useCallback(
     async (lat: number, lng: number, label?: string): Promise<boolean> => {
       const encodedLabel = label ? encodeURIComponent(label) : '';
-      const url = Platform.select({
+      const nativeUrl = Platform.select({
         ios: `maps:0,0?q=${lat},${lng}${encodedLabel ? `(${encodedLabel})` : ''}`,
         android: `geo:${lat},${lng}?q=${lat},${lng}${encodedLabel ? `(${encodedLabel})` : ''}`,
-        default: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
+        default: '',
       });
+      const httpsFallback = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
 
-      try {
-        const canOpen = await Linking.canOpenURL(url);
-        if (canOpen) {
-          await Linking.openURL(url);
-          return true;
-        }
-        await Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`);
-        return true;
-      } catch {
-        return false;
+      if (nativeUrl) {
+        const ok = await linkingOpenWithPuTronClassGate(nativeUrl);
+        if (ok) return true;
       }
+      return linkingOpenWithPuTronClassGate(httpsFallback);
     },
     [],
   );
 
   const openPhone = useCallback(async (phoneNumber: string): Promise<boolean> => {
-    const url = `tel:${phoneNumber.replace(/\s/g, '')}`;
-    try {
-      await Linking.openURL(url);
-      return true;
-    } catch {
-      return false;
-    }
+    return linkingOpenWithPuTronClassGate(`tel:${phoneNumber.replace(/\s/g, '')}`);
   }, []);
 
   const openEmail = useCallback(
@@ -323,12 +299,7 @@ export function useExternalApps(): {
         url += `?${params.join('&')}`;
       }
 
-      try {
-        await Linking.openURL(url);
-        return true;
-      } catch {
-        return false;
-      }
+      return linkingOpenWithPuTronClassGate(url);
     },
     [],
   );
@@ -340,29 +311,21 @@ export function useExternalApps(): {
       default: `https://play.google.com/store/apps/details?id=${appId}`,
     });
 
-    try {
-      const canOpen = await Linking.canOpenURL(url);
-      if (canOpen) {
-        await Linking.openURL(url);
-        return true;
-      }
-      if (Platform.OS === 'android') {
-        await Linking.openURL(`https://play.google.com/store/apps/details?id=${appId}`);
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
+    let ok = await linkingOpenWithPuTronClassGate(url);
+    if (!ok && Platform.OS === 'android') {
+      ok = await linkingOpenWithPuTronClassGate(
+        `https://play.google.com/store/apps/details?id=${appId}`,
+      );
     }
+    return ok;
   }, []);
 
   const openSettings = useCallback(async (): Promise<boolean> => {
     try {
       if (Platform.OS === 'ios') {
-        await Linking.openURL('app-settings:');
-      } else {
-        await Linking.openSettings();
+        return linkingOpenWithPuTronClassGate('app-settings:');
       }
+      await Linking.openSettings();
       return true;
     } catch {
       return false;

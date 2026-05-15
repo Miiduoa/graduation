@@ -3,7 +3,6 @@ import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -69,6 +68,7 @@ import {
 } from '../services/tronClassClient';
 import type { PUCourse, PUCourseResult, PUGrade, PUGradeResult } from '../services/puDirectScraper';
 import { mergeDemoTronClassCoursesIfEmpty } from '../data/demoCoursesAdapter';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -1527,7 +1527,9 @@ function GradesView(props: {
                     {cs.courseName}
                   </Text>
                   <Pressable
-                    onPress={() => Linking.openURL(tcBuildScoreUrl(cs.courseId)).catch(() => {})}
+                    onPress={() =>
+                      void linkingOpenWithPuTronClassGate(tcBuildScoreUrl(cs.courseId))
+                    }
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
                     <Ionicons name="open-outline" size={14} color={theme.colors.accent} />

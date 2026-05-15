@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -48,6 +47,8 @@ import {
 } from '../services/courseCatalogClient';
 import { getCatalogRoleConfig, type ExtendedRole } from '../services/courseCatalogRoleMapping';
 import { analytics } from '../services/analytics';
+import { isTronClassPuHostedUrl } from '../services/tronClassDataEnabled';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 // ─── 子元件：橫向 chip 列 ─────────────────────────────────
 
@@ -795,11 +796,13 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
               conflict={conflictText}
               onAdd={() => handleAddToSchedule(item)}
               onSyllabus={() => {
-                if (item.syllabusUrl) {
-                  Linking.openURL(item.syllabusUrl).catch(() =>
-                    Alert.alert('無法開啟連結', item.syllabusUrl ?? ''),
-                  );
-                }
+                const u = item.syllabusUrl;
+                if (!u) return;
+                void linkingOpenWithPuTronClassGate(u).then((ok) => {
+                  if (!ok && !isTronClassPuHostedUrl(u)) {
+                    Alert.alert('無法開啟連結', u);
+                  }
+                });
               }}
             />
           );

@@ -71,10 +71,16 @@ import {
   rootNavigationRef,
   type RootTabParamList,
 } from './src/app/rootNavigation';
-import { parseGroupAssignmentDeepLink } from './src/app/assignmentDeepLink';
-import { navigateFromInboxTask } from './src/services/inboxActions';
+import {
+  parseGroupAssignmentDeepLink,
+  parseGroupAssignmentsListDeepLink,
+  parseGroupCourseHubDeepLink,
+  isInterceptedMessagingDeepLink,
+} from './src/app/assignmentDeepLink';
+import { navigateFromInboxTask, inboxTaskFromLegacyAssignmentActionTarget } from './src/services/inboxActions';
 import { isTeachingRole } from './src/utils/campusOs';
 import type { InboxTask } from './src/data/types';
+import { navigateToCourseScreen } from './src/utils/courseNavigation';
 import { initCrossModuleConnections } from './src/services/crossModuleConnector';
 import { registerCompanionCampusBusBridge } from './src/services/companionBusBridge';
 
@@ -783,18 +789,36 @@ function AppNavigation() {
     if (!rootNavigationRef.isReady()) return;
     const url = pendingAssignmentUrlRef.current;
     if (!url) return;
-    const parsed = parseGroupAssignmentDeepLink(url);
     pendingAssignmentUrlRef.current = null;
-    if (!parsed) return;
-    const task = assignmentTaskFromDeepLink(parsed);
-    const ok = navigateFromInboxTask(rootNavigationRef, task, {
-      role: authRoleRef.current,
-      isTeachingRole: authTeachingRef.current,
-    });
-    if (!ok) {
-      rootNavigateNested('訊息', 'AssignmentDetail', {
-        groupId: parsed.groupId,
-        assignmentId: parsed.assignmentId,
+
+    const parsedAssignment = parseGroupAssignmentDeepLink(url);
+    if (parsedAssignment) {
+      const task = assignmentTaskFromDeepLink(parsedAssignment);
+      const ok = navigateFromInboxTask(rootNavigationRef, task, {
+        role: authRoleRef.current,
+        isTeachingRole: authTeachingRef.current,
+      });
+      if (!ok) {
+        rootNavigateNested('訊息', 'AssignmentDetail', {
+          groupId: parsedAssignment.groupId,
+          assignmentId: parsedAssignment.assignmentId,
+        });
+      }
+      return;
+    }
+
+    const list = parseGroupAssignmentsListDeepLink(url);
+    if (list) {
+      navigateToCourseScreen(rootNavigationRef, authRoleRef.current, 'CourseHub', {
+        groupId: list.groupId,
+      });
+      return;
+    }
+
+    const hub = parseGroupCourseHubDeepLink(url);
+    if (hub) {
+      navigateToCourseScreen(rootNavigationRef, authRoleRef.current, 'CourseHub', {
+        groupId: hub.groupId,
       });
     }
   }, []);
@@ -804,7 +828,7 @@ function AppNavigation() {
       ...linkingBase,
       async getInitialURL() {
         const url = await Linking.getInitialURL();
-        if (url && parseGroupAssignmentDeepLink(url)) {
+        if (url && isInterceptedMessagingDeepLink(url)) {
           pendingAssignmentUrlRef.current = url;
           return null;
         }
@@ -812,19 +836,19 @@ function AppNavigation() {
       },
       subscribe(listener: (url: string) => void) {
         const subscription = Linking.addEventListener('url', ({ url }) => {
-          const parsed = parseGroupAssignmentDeepLink(url);
-          if (parsed) {
+          const parsedAssignment = parseGroupAssignmentDeepLink(url);
+          if (parsedAssignment) {
             if (rootNavigationRef.isReady()) {
               pendingAssignmentUrlRef.current = null;
-              const task = assignmentTaskFromDeepLink(parsed);
+              const task = assignmentTaskFromDeepLink(parsedAssignment);
               const ok = navigateFromInboxTask(rootNavigationRef, task, {
                 role: authRoleRef.current,
                 isTeachingRole: authTeachingRef.current,
               });
               if (!ok) {
                 rootNavigateNested('訊息', 'AssignmentDetail', {
-                  groupId: parsed.groupId,
-                  assignmentId: parsed.assignmentId,
+                  groupId: parsedAssignment.groupId,
+                  assignmentId: parsedAssignment.assignmentId,
                 });
               }
             } else {
@@ -832,6 +856,33 @@ function AppNavigation() {
             }
             return;
           }
+
+          const list = parseGroupAssignmentsListDeepLink(url);
+          if (list) {
+            if (rootNavigationRef.isReady()) {
+              pendingAssignmentUrlRef.current = null;
+              navigateToCourseScreen(rootNavigationRef, authRoleRef.current, 'CourseHub', {
+                groupId: list.groupId,
+              });
+            } else {
+              pendingAssignmentUrlRef.current = url;
+            }
+            return;
+          }
+
+          const hub = parseGroupCourseHubDeepLink(url);
+          if (hub) {
+            if (rootNavigationRef.isReady()) {
+              pendingAssignmentUrlRef.current = null;
+              navigateToCourseScreen(rootNavigationRef, authRoleRef.current, 'CourseHub', {
+                groupId: hub.groupId,
+              });
+            } else {
+              pendingAssignmentUrlRef.current = url;
+            }
+            return;
+          }
+
           listener(url);
         });
         return () => subscription.remove();

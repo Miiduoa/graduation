@@ -220,7 +220,14 @@ export default ({ config }: any) => {
     ...(featureAvailability.widgets ? ['./src/widgets/expo-widget-plugin.js'] : []),
   ];
   const configuredAiProvider = process.env.EXPO_PUBLIC_AI_PROVIDER ?? 'gemini';
-  const releaseAiProvider = isReleaseLike ? 'cloud' : configuredAiProvider;
+  const releaseAiProviderOverride = process.env.EXPO_PUBLIC_RELEASE_AI_PROVIDER?.trim();
+  const releaseAiProvider =
+    isReleaseLike && releaseAiProviderOverride
+      ? releaseAiProviderOverride
+      : isReleaseLike
+        ? 'cloud'
+        : configuredAiProvider;
+  const aiOfflineFirstBuild = parseBoolean(process.env.EXPO_PUBLIC_AI_OFFLINE_FIRST, false);
 
   const androidIntentFilters = [
     {
@@ -322,8 +329,16 @@ export default ({ config }: any) => {
       /** Cloudflare Worker OPAC proxy base URL (no trailing slash); empty → device direct fetch only */
       libraryOpacProxyUrl: process.env.EXPO_PUBLIC_LIBRARY_OPAC_PROXY_URL ?? '',
       geminiApiKey: process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? '',
-      aiWebSearchEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, true),
-      aiWebLearningEnabled: parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, true),
+      /** 預設 GGUF：`qwen2.5-7b`（與 MLX 微調基底對齊）；可改 `qwen2.5-3b` 等 `MODEL_REGISTRY` 鍵 */
+      localLlmDefaultModelId: process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? 'qwen2.5-7b',
+      /** true：預設關閉網搜／預抓學習（完全離線優先）；仍可用對應 EXPO_PUBLIC_AI_* =true 強制開啟 */
+      aiOfflineFirst: aiOfflineFirstBuild,
+      aiWebSearchEnabled: aiOfflineFirstBuild
+        ? parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, false)
+        : parseBoolean(process.env.EXPO_PUBLIC_AI_ENABLE_WEB_SEARCH, true),
+      aiWebLearningEnabled: aiOfflineFirstBuild
+        ? parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, false)
+        : parseBoolean(process.env.EXPO_PUBLIC_AI_WEB_LEARNING_ENABLED, true),
       devPreferCloudAssistant: parseBoolean(
         process.env.EXPO_PUBLIC_DEV_PREFER_CLOUD_ASSISTANT,
         false,

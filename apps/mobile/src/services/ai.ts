@@ -1445,8 +1445,11 @@ async function tryChatWithOnDeviceAssistant(
   signal?: AbortSignal,
   onToken?: StreamingCallback,
 ): Promise<AIResponse | null> {
-  /** 僅在離線／裝置內建 provider 使用本地助理，不作為線上主路徑 */
-  if (!isDeviceOnlyProvider(getConfig().aiProvider)) {
+  const cfg = getConfig();
+  /** `offline`／`mock` 永遠可走裝置端；`local-llm` 在有下載 GGUF 時優先於 FastAPI（離線最強路徑）。 */
+  const allowOnDevice =
+    isDeviceOnlyProvider(cfg.aiProvider) || cfg.aiProvider === 'local-llm';
+  if (!allowOnDevice) {
     return null;
   }
   if (process.env.NODE_ENV === 'test' && process.env.EXPO_PUBLIC_AI_TEST_FAST === '1') {
@@ -1546,9 +1549,26 @@ async function tryChatWithOnDeviceAssistant(
     // 建構包含查詢結果 + 執行結果的訊息
     const agentMessages = buildOnDeviceAgentMessages(messages, context, agentResult, contextLength, reflexionHint);
 
+    let patchedMessages = agentMessages;
+    try {
+      const { formatLocalDocRagAppendix } = await import('./localDocRAG');
+      const rag = await formatLocalDocRagAppendix(lastMsg);
+      if (rag.trim().length > 0 && patchedMessages[0]?.role === 'system') {
+        patchedMessages = [
+          {
+            ...patchedMessages[0],
+            content: `${patchedMessages[0].content}\n\n${rag}`,
+          },
+          ...patchedMessages.slice(1),
+        ];
+      }
+    } catch (e) {
+      console.warn('[AI] Local doc RAG appendix skipped:', e);
+    }
+
     let partial = '';
     const result = await localLLM.generate({
-      messages: agentMessages,
+      messages: patchedMessages,
       signal,
       maxTokens,
       onToken: onToken

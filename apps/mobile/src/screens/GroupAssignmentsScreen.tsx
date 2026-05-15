@@ -11,6 +11,7 @@ import { useAuth } from '../state/auth';
 import { getAnyCachedTCCourses, refreshTCCourses } from '../services/puDataCache';
 import { tcFetchHomeworkActivities } from '../services/tronClassClient';
 import type { TCCourse } from '../services/tronClassClient';
+import { guardTronClassWebAccessOrAlert } from '../services/tronClassWebUiGate';
 
 // ── TronClass 作業型別 ─────────────────────────
 type TCHomework = {
@@ -72,6 +73,7 @@ function HomeworkCard(props: { hw: TCHomework }) {
   }
 
   const onPress = () => {
+    if (!guardTronClassWebAccessOrAlert()) return;
     const url = `https://tronclass.pu.edu.tw/course/${hw.courseId}/content#/homework/${hw.id}`;
     WebBrowser.openBrowserAsync(url).catch(() => {});
   };

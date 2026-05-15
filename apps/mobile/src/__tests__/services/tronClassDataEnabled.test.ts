@@ -17,6 +17,7 @@ jest.mock('expo-constants', () => {
 import {
   isTronClassBackendMutation,
   isTronClassDataFetchEnabled,
+  isTronClassPuHostedUrl,
   tronClassBackendReadWhenDisabled,
 } from '../../services/tronClassDataEnabled';
 
@@ -52,5 +53,13 @@ describe('tronClassDataEnabled', () => {
   test('isTronClassBackendMutation recognizes write operations', () => {
     expect(isTronClassBackendMutation('postDiscussion')).toBe(true);
     expect(isTronClassBackendMutation('courses')).toBe(false);
+  });
+
+  test('isTronClassPuHostedUrl detects PU TronClass host', () => {
+    expect(isTronClassPuHostedUrl('')).toBe(false);
+    expect(isTronClassPuHostedUrl('https://example.com')).toBe(false);
+    expect(isTronClassPuHostedUrl('https://tronclass.pu.edu.tw/course/1')).toBe(true);
+    expect(isTronClassPuHostedUrl('HTTPS://TRONCLASS.PU.EDU.TW/x')).toBe(true);
+    expect(isTronClassPuHostedUrl('file:///tronclass.pu.edu.tw')).toBe(true);
   });
 });

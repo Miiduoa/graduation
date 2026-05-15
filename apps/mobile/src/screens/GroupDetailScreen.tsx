@@ -34,6 +34,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { chatWithAI } from '../services/ai';
+import { navigateToCourseScreen } from '../utils/courseNavigation';
 
 type Group = {
   id: string;
@@ -515,7 +516,13 @@ export function GroupDetailScreen(props: any) {
             {group?.type === 'course' ? (
               <Button
                 text="作業 / 成績"
-                onPress={() => nav?.navigate?.('GroupAssignments', { groupId })}
+                onPress={() => {
+                  if (!groupId) return;
+                  navigateToCourseScreen(nav, auth.profile?.role, 'CourseHub', {
+                    groupId,
+                    groupName: group?.name,
+                  });
+                }}
               />
             ) : null}
           </View>

@@ -17,6 +17,7 @@ cd "$ROOT/apps/mobile"
 DURATION="${1:-${DURATION_SECONDS:-3600}}"
 LOG="${AI_MARATHON_LOG:-$ROOT/tmp/ai-marathon.log}"
 mkdir -p "$(dirname "$LOG")"
+FAIL_FAST="${AI_MARATHON_FAIL_FAST:-1}"
 
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
 export EXPO_PUBLIC_AI_PROVIDER="${EXPO_PUBLIC_AI_PROVIDER:-offline}"
@@ -79,6 +80,10 @@ run_backend_intent_matrix() {
   echo "──────── $(date -Iseconds) backend agent selfTrainingScenarios (jest) ────────" | tee -a "$LOG"
   if ! ( cd "$ROOT/backend/functions" && pnpm exec jest agent/selfTrainingScenarios.test.js --runInBand >>"$LOG" 2>&1 ); then
     echo "!!! FAIL $(date -Iseconds) selfTrainingScenarios (jest) !!!" | tee -a "$LOG"
+    if [[ "$FAIL_FAST" != "0" && "$FAIL_FAST" != "false" ]]; then
+      echo "AI marathon stopped after first failure $(date -Iseconds) log=$LOG" | tee -a "$LOG"
+      exit 1
+    fi
   fi
 }
 
@@ -88,6 +93,10 @@ run_one() {
   echo "──────── $(date -Iseconds)  $path ────────" | tee -a "$LOG"
   if ! npx jest "$path" --runInBand >>"$LOG" 2>&1; then
     echo "!!! FAIL $(date -Iseconds) $path !!!" | tee -a "$LOG"
+    if [[ "$FAIL_FAST" != "0" && "$FAIL_FAST" != "false" ]]; then
+      echo "AI marathon stopped after first failure $(date -Iseconds) log=$LOG" | tee -a "$LOG"
+      exit 1
+    fi
   fi
 }
 
@@ -98,6 +107,7 @@ iter=0
   echo "AI marathon start $(date -Iseconds) duration=${DURATION}s log=$LOG"
   echo "PWD=$(pwd)"
   echo "AI_SELF_TEST_BASE_SEED=${AI_SELF_TEST_BASE_SEED} source=${AI_SELF_TEST_SEED_SOURCE} step=${AI_SELF_TEST_SEED_STEP} seed_history=${SEED_HISTORY}"
+  echo "AI_MARATHON_FAIL_FAST=${FAIL_FAST}"
 } | tee -a "$LOG"
 
 while (( $(date +%s) < END_TS )); do

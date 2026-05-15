@@ -18,11 +18,35 @@ from config import TRAINING_DIR, LORA_OUTPUT_DIR, MODEL_NAME
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_HF_MODEL = "Qwen/Qwen3-32B"
+DEFAULT_HF_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+
+_ALLOWED_ROLES = frozenset({"system", "user", "assistant"})
+
+
+def _normalize_chat_messages(raw: list) -> list[dict[str, str]] | None:
+    """將資料集中的 messages 轉成 MLX 可吃的對話（tool 角色改為 user 承載結果）。"""
+    out: list[dict[str, str]] = []
+    for m in raw:
+        if not isinstance(m, dict):
+            return None
+        role = m.get("role")
+        content = m.get("content")
+        if role not in _ALLOWED_ROLES | {"tool"} or content is None:
+            return None
+        if role == "tool":
+            out.append({"role": "user", "content": str(content)})
+        else:
+            out.append({"role": str(role), "content": str(content)})
+    return out if len(out) >= 2 else None
 
 
 def _convert_jsonl_to_mlx_format(input_path: Path, output_dir: Path) -> tuple[Path, Path, Path]:
-    """Convert Alpaca-format JSONL into MLX-LM chat format (train/valid/test splits)."""
+    """Convert JSONL into MLX-LM chat format (train/valid/test splits).
+
+    支援兩種列格式：
+    - Alpaca：{instruction, input?, output} → 單輪 user/assistant
+    - 代理軌跡：{messages:[{role,content}, ...]} → 多輪（含工具往返模擬）
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     with open(input_path, encoding="utf-8") as f:
@@ -30,6 +54,13 @@ def _convert_jsonl_to_mlx_format(input_path: Path, output_dir: Path) -> tuple[Pa
 
     mlx_data: list[dict] = []
     for item in data:
+        raw_msgs = item.get("messages")
+        if isinstance(raw_msgs, list):
+            normalized = _normalize_chat_messages(raw_msgs)
+            if normalized:
+                mlx_data.append({"messages": normalized})
+            continue
+
         user_msg = item["instruction"]
         if item.get("input"):
             user_msg += f"\n\n{item['input']}"
