@@ -126,9 +126,18 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
   const doSubmit = useCallback(async () => {
     setSubmitting(true);
     try {
-      // 真實實作：呼叫 cloud function 或 tronClassClient.tcSubmitHomework(...)
-      // 這裡先做本地 mock
-      await new Promise((r) => setTimeout(r, 800));
+      const { tcSubmitHomework } = await import('../services/tronClassClient');
+      const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
+      const numericHwId = Number(String(hwId).replace(/^tc:/, '')) || 0;
+      const result = await tcSubmitHomework(numericCourseId, numericHwId, {
+        content: answer.trim(),
+        attachments: attachments.map((a) => ({ uri: a.uri, name: a.name, type: a.type })),
+      });
+
+      if (!result.success) {
+        Alert.alert('送出失敗', result.error ?? '請檢查網路後再試一次。');
+        return;
+      }
 
       // 紀錄 companion signal
       try {
@@ -139,17 +148,15 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
       }
 
       setSubmitted(true);
-      Alert.alert(
-        '✅ 已送出',
-        `${hwTitle} 已成功繳交，系統會同步到 TronClass。`,
-        [{ text: '回課程', onPress: () => navigation.goBack() }],
-      );
+      Alert.alert('✅ 已送出', `${hwTitle} 已成功繳交。`, [
+        { text: '回課程', onPress: () => navigation.goBack() },
+      ]);
     } catch (e) {
       Alert.alert('送出失敗', String((e as Error)?.message ?? e));
     } finally {
       setSubmitting(false);
     }
-  }, [answer, attachments, hwId, hwTitle, navigation]);
+  }, [answer, attachments, courseId, hwId, hwTitle, navigation]);
 
   return (
     <KeyboardAvoidingView

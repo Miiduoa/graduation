@@ -2,7 +2,6 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/AccountDeletionScreen.tsx',
   'apps/mobile/src/screens/AdminCourseVerifyScreen.tsx',
   'apps/mobile/src/screens/CampusGameScreen.tsx',
-  'apps/mobile/src/screens/CompanionScreen.tsx',
   'apps/mobile/src/screens/CompanionCollectionScreen.tsx',
   'apps/mobile/src/screens/ConstellationScreen.tsx',
   'apps/mobile/src/screens/AdminDashboardScreen.tsx',

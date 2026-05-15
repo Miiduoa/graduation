@@ -50,6 +50,10 @@ import SurveyScreen from './SurveyScreen';
 import PeerReviewSubmitScreen from './PeerReviewSubmitScreen';
 import TeacherGradingScreen from './TeacherGradingScreen';
 import CourseNotesScreen from './CourseNotesScreen';
+import AttendanceMultiMethodScreen from './AttendanceMultiMethodScreen';
+import MyQuizScoresScreen from './MyQuizScoresScreen';
+import MyAttendanceHistoryScreen from './MyAttendanceHistoryScreen';
+import CourseScoresScreen from './CourseScoresScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
@@ -90,12 +94,16 @@ function GuardedAttendance(props: any) {
 }
 
 function GuardedGradebook(props: any) {
-  const mergedParams = { ...(props.route?.params ?? {}), initialTab: 'gradebook' as const };
-  return (
-    <RouteGuard requires="courses.grade">
-      <AcademicScreen {...props} route={{ ...props.route, params: mergedParams }} />
-    </RouteGuard>
-  );
+  // 學生：看到自己這門課的成績總覽（initialTab=grades 顯示個人加權）
+  // 教師：看到全班 gradebook（initialTab=gradebook）
+  // 這裡不再用 RouteGuard 擋學生；改成依角色顯示不同預設 tab，
+  // AcademicScreen 內已會依角色決定可看到哪些 row。
+  const isTeacher = (props.route?.params?.role ?? '') === 'teacher';
+  const mergedParams = {
+    ...(props.route?.params ?? {}),
+    initialTab: (isTeacher ? 'gradebook' : 'grades') as 'gradebook' | 'grades',
+  };
+  return <AcademicScreen {...props} route={{ ...props.route, params: mergedParams }} />;
 }
 
 function GuardedLearningAnalytics(props: any) {
@@ -304,6 +312,26 @@ export function LearnStack() {
         name="CourseNotes"
         component={CourseNotesScreen}
         options={{ title: '課程筆記', headerShown: false }}
+      />
+      <Stack.Screen
+        name="AttendanceMultiMethod"
+        component={AttendanceMultiMethodScreen}
+        options={{ title: '智慧簽到' }}
+      />
+      <Stack.Screen
+        name="MyQuizScores"
+        component={MyQuizScoresScreen}
+        options={{ title: '我的測驗成績' }}
+      />
+      <Stack.Screen
+        name="MyAttendanceHistory"
+        component={MyAttendanceHistoryScreen}
+        options={{ title: '我的點名紀錄' }}
+      />
+      <Stack.Screen
+        name="CourseScores"
+        component={CourseScoresScreen}
+        options={{ title: '課內成績' }}
       />
     </Stack.Navigator>
   );

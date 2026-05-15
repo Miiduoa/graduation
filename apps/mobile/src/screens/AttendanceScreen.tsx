@@ -399,6 +399,32 @@ export function AttendanceScreen(props: any) {
             </View>
           </View>
 
+          {/* ── 智慧簽到入口 ── */}
+          <Pressable
+            onPress={() =>
+              nav?.navigate?.('AttendanceMultiMethod', {
+                courseId: myCourses[0]?.id ?? 'demo',
+                sessionId: `demo-${Date.now()}`,
+              })
+            }
+            style={{
+              marginHorizontal: theme.space.lg,
+              marginBottom: 12,
+              padding: 14,
+              borderRadius: 12,
+              backgroundColor: '#16a34a',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="shield-checkmark-outline" size={20} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>
+              智慧簽到（5 種方式）
+            </Text>
+          </Pressable>
+
           {/* Stats Row */}
           <View
             style={{

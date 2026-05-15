@@ -401,6 +401,31 @@ export function PersonalHubScreen(props: any) {
             onPress={() => nav?.navigate?.('Constellation')}
           />
           <ListRow
+            icon="document-text-outline"
+            title="我的測驗成績"
+            meta="跨課程"
+            tint="#0EA5E9"
+            onPress={() =>
+              nav?.navigate?.('學習', { screen: 'MyQuizScores' })
+            }
+          />
+          <ListRow
+            icon="checkmark-done-outline"
+            title="我的點名紀錄"
+            meta="跨課程 + 智慧分析"
+            tint="#16A34A"
+            onPress={() =>
+              nav?.navigate?.('學習', { screen: 'MyAttendanceHistory' })
+            }
+          />
+          <ListRow
+            icon="bug-outline"
+            title="🔍 資料流診斷"
+            meta="DEV 工具"
+            tint="#0EA5E9"
+            onPress={() => nav?.navigate?.('DataFlowDebug')}
+          />
+          <ListRow
             icon="school-outline"
             title="學分與畢業規劃"
             meta="規劃"

@@ -1204,7 +1204,21 @@ export function CourseModulesScreen(props: any) {
       tcFetchHomeworkActivities(courseId).catch(() => [] as any[]),
     ]);
 
-    if (modules.length === 0) return [];
+    // 即使 modules 為空，只要有 activities/exams/homework 仍要顯示
+    // 用一個「未分類章節」collect 所有沒有 module_id 的內容
+    if (modules.length === 0 && activities.length === 0 && exams.length === 0 && rawHomeworks.length === 0) {
+      return [];
+    }
+    if (modules.length === 0) {
+      modules.push({
+        id: 0,
+        course_id: courseId,
+        name: '課程內容',
+        sort: 0,
+        is_hidden: false,
+        syllabuses: [],
+      } as TCModule);
+    }
 
     // 批量取得考試分數 + 詳細資訊 + 作答紀錄
     const examWithDetails = await Promise.all(
@@ -1245,12 +1259,23 @@ export function CourseModulesScreen(props: any) {
     return modules
       .filter((m) => !m.is_hidden)
       .sort((a, b) => a.sort - b.sort)
-      .map((mod) => ({
-        module: mod,
-        materials: activities.filter((a) => a.module_id === mod.id && a.type === 'material'),
-        exams: examWithDetails.filter((e) => e.module_id === mod.id),
-        homeworks: homeworkItems.filter((h) => h.module_id === mod.id),
-      }));
+      .map((mod) => {
+        // mod.id === 0 是我們合成的「課程內容」分類，收所有教材/考試/作業
+        const isCatchAll = mod.id === 0;
+        return {
+          module: mod,
+          // 不再限定 type === 'material'：所有 TronClass 教材類型都顯示
+          // （video / online_video / audio / web_link / page / material / page 等）
+          materials: activities.filter((a) =>
+            isCatchAll ? true : a.module_id === mod.id,
+          ),
+          exams: examWithDetails.filter((e) => (isCatchAll ? true : e.module_id === mod.id)),
+          homeworks: homeworkItems.filter((h) =>
+            isCatchAll ? true : h.module_id === mod.id,
+          ),
+        };
+      })
+      .filter((d) => d.materials.length > 0 || d.exams.length > 0 || d.homeworks.length > 0);
   }, [auth.user?.uid, courseId]);
 
   // 所有考試（跨 module）
