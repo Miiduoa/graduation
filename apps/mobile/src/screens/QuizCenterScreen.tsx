@@ -16,6 +16,7 @@ import {
   parseDateTimeInput,
   toDate,
 } from '../services/courseWorkspace';
+import { isDemoCourseId } from '../data/demoCoursesAdapter';
 
 function Field(props: {
   label: string;
@@ -84,6 +85,43 @@ export function QuizCenterScreen(props: any) {
     error: quizzesError,
     reload: reloadQuizzes,
   } = useAsyncList<Quiz>(async () => {
+    const courseIdNum = routeGroupId ? Number(routeGroupId.replace(/^tc:/, '')) || 0 : 0;
+
+    // Demo course short-circuit — 不需登入也能看
+    try {
+      const { demoFetchCourseExams, demoFetchExamSubmissions } = await import(
+        '../data/demoCoursesAdapter'
+      );
+      if (courseIdNum && isDemoCourseId(courseIdNum)) {
+        const exams = demoFetchCourseExams(courseIdNum);
+        return exams.map((e) => {
+          const sub = demoFetchExamSubmissions(e.id);
+          return {
+            id: `demo-${e.id}`,
+            assignmentId: String(e.id),
+            groupId: routeGroupId ?? `tc:${courseIdNum}`,
+            groupName: routeGroupName ?? '',
+            title: e.title,
+            description: undefined,
+            dueAt: e.end_time ? new Date(e.end_time) : null,
+            type: e.type === 'exam' ? 'exam' : 'quiz',
+            gradesPublished: e.is_closed,
+            questionCount: undefined,
+            durationMinutes: undefined,
+            points: e.total_score ?? undefined,
+            weight: undefined,
+            source: 'quiz' as const,
+            // @ts-ignore — extension fields for UI
+            studentScore: sub?.exam_final_score ?? sub?.exam_score ?? null,
+            // @ts-ignore
+            isSubmitted: e.submitted_times > 0,
+          } as Quiz;
+        });
+      }
+    } catch {
+      /* fallthrough */
+    }
+
     if (!auth.user) return [];
     // 先試 dataSource（含 Firestore cache）；若有 routeGroupId 且回空，再直接打 TronClass
     const fromDs = await ds.listQuizzes(auth.user.uid, routeGroupId, school.id);
@@ -94,7 +132,6 @@ export function QuizCenterScreen(props: any) {
       const { tcFetchCourseExams, tcFetchExamSubmissions } = await import(
         '../services/tronClassClient'
       );
-      const courseIdNum = Number(routeGroupId.replace(/^tc:/, '')) || 0;
       if (!courseIdNum) return [];
       const tcExams = await tcFetchCourseExams(courseIdNum);
       // 個人分數
@@ -222,7 +259,10 @@ export function QuizCenterScreen(props: any) {
     }
   };
 
-  if (!auth.user) {
+  // Demo courses 不需要登入 — 直接看 quizzes
+  const routeCourseIdNum = routeGroupId ? Number(routeGroupId.replace(/^tc:/, '')) || 0 : 0;
+
+  if (!auth.user && !(routeCourseIdNum && isDemoCourseId(routeCourseIdNum))) {
     return (
       <Screen>
         <Card title="測驗中心" subtitle="登入後即可查看測驗與考試">

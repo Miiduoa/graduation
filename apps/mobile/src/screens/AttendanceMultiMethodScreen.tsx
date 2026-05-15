@@ -32,6 +32,31 @@ import {
 } from '@campus/shared';
 import AttendanceMethodPicker from '../components/AttendanceMethodPicker';
 import { listAttendanceSessions } from '../data/courseSpaceSource';
+import {
+  isDemoCourseId,
+  demoListAttendanceSessions,
+  toDemoCourseId,
+} from '../data/demoCoursesAdapter';
+import { theme } from '../ui/theme';
+import { Skeleton } from '../ui/components';
+import { CourseChipHeader, courseChipScrollContentStyle } from '../ui/courseChipShell';
+
+function attendanceStatusLabel(
+  s: 'present' | 'late' | 'absent' | 'excused' | null | undefined,
+): { text: string; color: string } {
+  switch (s) {
+    case 'present':
+      return { text: '出席', color: theme.colors.success };
+    case 'late':
+      return { text: '遲到', color: theme.colors.warning };
+    case 'absent':
+      return { text: '缺席', color: theme.colors.danger };
+    case 'excused':
+      return { text: '核准假', color: theme.colors.info };
+    default:
+      return { text: '—', color: theme.colors.muted };
+  }
+}
 
 type RouteProps = {
   route?: {
@@ -70,20 +95,45 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
 
   // 課程歷史出席記錄
   const [historyLoading, setHistoryLoading] = useState(true);
-  const [history, setHistory] = useState<Array<{ id: string; startedAt: Date | null; active: boolean; attendeeCount?: number }>>([]);
+  const [history, setHistory] = useState<
+    Array<{
+      id: string;
+      startedAt: Date | null;
+      active: boolean;
+      attendeeCount?: number;
+      myStatus?: 'present' | 'late' | 'absent' | 'excused' | null;
+      totalCount?: number;
+    }>
+  >([]);
 
   useEffect(() => {
     (async () => {
       try {
-        const sessions = await listAttendanceSessions(courseId);
-        setHistory(
-          sessions.map((s) => ({
-            id: s.id,
-            startedAt: s.startedAt,
-            active: s.active,
-            attendeeCount: s.attendeeCount,
-          })),
-        );
+        const demoId = toDemoCourseId(courseId);
+        if (isDemoCourseId(demoId)) {
+          // demo course → 直接用 mock attendance
+          const demoSessions = demoListAttendanceSessions(demoId);
+          setHistory(
+            demoSessions.map((s) => ({
+              id: s.id,
+              startedAt: s.startedAt,
+              active: s.active,
+              attendeeCount: s.attendeeCount,
+              totalCount: s.totalCount,
+              myStatus: s.myStatus,
+            })),
+          );
+        } else {
+          const sessions = await listAttendanceSessions(courseId);
+          setHistory(
+            sessions.map((s) => ({
+              id: s.id,
+              startedAt: s.startedAt,
+              active: s.active,
+              attendeeCount: s.attendeeCount,
+            })),
+          );
+        }
       } catch {
         /* swallow */
       } finally {
@@ -221,43 +271,91 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
   }, [cfg.method, token, code, location, selfieSimilarity]);
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#f9fafb' }} contentContainerStyle={{ padding: 16, paddingBottom: 64 }}>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
+      contentContainerStyle={courseChipScrollContentStyle(true)}
+    >
+      <CourseChipHeader
+        emoji="✅"
+        eyebrow="智慧簽到"
+        title="課堂簽到"
+        meta={courseId ? `課程 ${String(courseId)}` : undefined}
+      />
+
       {/* ── 課程歷史出席（最上方） ── */}
+      {historyLoading ? (
+        <View
+          style={{
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radius.lg,
+            padding: theme.space.md,
+            marginBottom: theme.space.lg,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+          }}
+          accessibilityLabel="載入出席紀錄"
+        >
+          <Skeleton height={14} width={140} />
+          {[0, 1, 2].map((i) => (
+            <View key={`h-sk-${i}`} style={{ marginTop: theme.space.md }}>
+              <Skeleton height={40} />
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {!historyLoading && history.length > 0 && (
         <View
           style={{
-            backgroundColor: '#fff',
-            borderRadius: 12,
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radius.lg,
             padding: 12,
             marginBottom: 16,
             borderWidth: 1,
-            borderColor: '#e5e7eb',
+            borderColor: theme.colors.border,
           }}
         >
-          <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 8 }}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: theme.colors.text, marginBottom: 8 }}>
             📊 本課程出席紀錄
           </Text>
-          {history.slice(0, 5).map((h) => (
-            <View
-              key={h.id}
-              style={{
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                paddingVertical: 6,
-                borderTopWidth: 1,
-                borderTopColor: '#f3f4f6',
-              }}
-            >
-              <Text style={{ fontSize: 12, color: '#374151' }}>
-                {h.startedAt ? h.startedAt.toLocaleString('zh-TW') : '—'}
-              </Text>
-              <Text style={{ fontSize: 12, color: h.active ? '#dc2626' : '#16a34a' }}>
-                {h.active ? '🔴 進行中' : `✓ ${h.attendeeCount ?? '—'} 人簽到`}
-              </Text>
-            </View>
-          ))}
+          {history.slice(0, 5).map((h) => {
+            const mine = attendanceStatusLabel(h.myStatus);
+            return (
+              <View
+                key={h.id}
+                style={{
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  paddingVertical: 8,
+                  borderTopWidth: 1,
+                  borderTopColor: theme.colors.separator,
+                  gap: 8,
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 12, color: theme.colors.textSecondary }}>
+                    {h.startedAt ? h.startedAt.toLocaleString('zh-TW') : '—'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: mine.color, fontWeight: '600', marginTop: 4 }}>
+                    我的狀態 · {mine.text}
+                  </Text>
+                </View>
+                <Text
+                  style={{
+                    fontSize: 12,
+                    color: h.active ? theme.colors.danger : theme.colors.success,
+                    fontWeight: '600',
+                    textAlign: 'right',
+                  }}
+                >
+                  {h.active ? '進行中' : `✓ ${h.attendeeCount ?? '—'} 人`}
+                </Text>
+              </View>
+            );
+          })}
           {history.length > 5 && (
-            <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 4 }}>
+            <Text style={{ fontSize: 11, color: theme.colors.muted, marginTop: 4 }}>
               共 {history.length} 次點名，僅顯示最近 5 次
             </Text>
           )}
@@ -267,14 +365,16 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
       {!historyLoading && history.length === 0 && (
         <View
           style={{
-            backgroundColor: '#fef3c7',
-            borderRadius: 12,
+            backgroundColor: theme.colors.gentleWarnSoft,
+            borderRadius: theme.radius.lg,
             padding: 12,
             marginBottom: 16,
+            borderWidth: 1,
+            borderColor: `${theme.colors.gentleWarn}44`,
           }}
         >
-          <Text style={{ fontSize: 13, color: '#92400e' }}>
-            ℹ️ 本課程目前還沒有任何點名紀錄。可以等老師開啟點名 session。
+          <Text style={{ fontSize: 13, color: theme.colors.text, lineHeight: 20 }}>
+            本課程目前尚無點名紀錄。老師開啟 Session 後，此處會顯示週次與你的出席狀態摘要。
           </Text>
         </View>
       )}
@@ -282,14 +382,16 @@ export default function AttendanceMultiMethodScreen(props: RouteProps) {
       {!hasActiveSession && history.length > 0 && (
         <View
           style={{
-            backgroundColor: '#fef3c7',
-            borderRadius: 12,
+            backgroundColor: theme.colors.calmSoft,
+            borderRadius: theme.radius.lg,
             padding: 12,
             marginBottom: 16,
+            borderWidth: 1,
+            borderColor: `${theme.colors.calm}44`,
           }}
         >
-          <Text style={{ fontSize: 13, color: '#92400e' }}>
-            ⏳ 本課程目前沒有進行中的點名。下方僅作為簽到方式預覽。
+          <Text style={{ fontSize: 13, color: theme.colors.text, lineHeight: 20 }}>
+            目前沒有進行中的點名。下方仍可依教師設定預覽簽到方式；正式簽到請在開課時操作。
           </Text>
         </View>
       )}
