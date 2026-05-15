@@ -365,13 +365,15 @@ export function PersonalHubScreen(props: any) {
             tint="#8B5CF6"
             onPress={() => nav?.navigate?.('AIModelManager')}
           />
-          <ListRow
-            icon="trophy-outline"
-            title="成就與積分"
-            meta="成長"
-            tint={theme.colors.achievement}
-            onPress={() => nav?.navigate?.('Achievements')}
-          />
+          {can('achievements.view') ? (
+            <ListRow
+              icon="trophy-outline"
+              title="成就與積分"
+              meta="成長"
+              tint={theme.colors.achievement}
+              onPress={() => nav?.navigate?.('Achievements')}
+            />
+          ) : null}
           <ListRow
             icon="leaf-outline"
             title="校園園地"
@@ -399,38 +401,48 @@ export function PersonalHubScreen(props: any) {
             meta="走訪足跡"
             tint="#8B5CF6"
             onPress={() => nav?.navigate?.('Constellation')}
+            isLast={!can('courses.view')}
           />
-          <ListRow
-            icon="document-text-outline"
-            title="我的測驗成績"
-            meta="跨課程"
-            tint="#0EA5E9"
-            onPress={() =>
-              nav?.navigate?.('學習', { screen: 'MyQuizScores' })
-            }
-          />
-          <ListRow
-            icon="checkmark-done-outline"
-            title="我的點名紀錄"
-            meta="跨課程 + 智慧分析"
-            tint="#16A34A"
-            onPress={() =>
-              nav?.navigate?.('學習', { screen: 'MyAttendanceHistory' })
-            }
-          />
+        </GroupedCard>
+
+        {can('courses.view') ? (
+          <>
+            <SectionHeader title="課程與學業紀錄" />
+            <GroupedCard>
+              <ListRow
+                icon="document-text-outline"
+                title="我的測驗成績"
+                meta="跨課程"
+                tint="#0EA5E9"
+                onPress={() => nav?.navigate?.('學習', { screen: 'MyQuizScores' })}
+              />
+              <ListRow
+                icon="checkmark-done-outline"
+                title="我的點名紀錄"
+                meta="跨課程 + 智慧分析"
+                tint="#16A34A"
+                onPress={() => nav?.navigate?.('學習', { screen: 'MyAttendanceHistory' })}
+              />
+              <ListRow
+                icon="school-outline"
+                title="學分與畢業規劃"
+                meta="規劃"
+                tint={theme.colors.roleTeacher}
+                onPress={() => nav?.navigate?.('CreditAuditStack')}
+                isLast
+              />
+            </GroupedCard>
+          </>
+        ) : null}
+
+        <SectionHeader title="開發／診斷" />
+        <GroupedCard>
           <ListRow
             icon="bug-outline"
             title="🔍 資料流診斷"
             meta="DEV 工具"
             tint="#0EA5E9"
             onPress={() => nav?.navigate?.('DataFlowDebug')}
-          />
-          <ListRow
-            icon="school-outline"
-            title="學分與畢業規劃"
-            meta="規劃"
-            tint={theme.colors.roleTeacher}
-            onPress={() => nav?.navigate?.('CreditAuditStack')}
             isLast
           />
         </GroupedCard>

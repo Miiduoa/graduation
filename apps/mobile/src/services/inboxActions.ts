@@ -1,18 +1,19 @@
 /**
  * Inbox Actions — TronClass parity P1-4
  *
- * 把 InboxTask 對應到「使用者可立即執行的動作」。
- * 純函式 + 副作用包在 caller 端執行：
- *   resolveInboxAction(task) → { label, target, params, requires? }
- *
- * 之後 InboxScreen 卡片直接渲染 action button。
+ * 把 InboxTask 對應到「使用者可立即執行的動作」，並導向 LearnStack 真實畫面
+ * （繳交作業、測驗中心、智慧簽到、討論、教師批改等），而非只開群組頁。
  */
 
 import type { InboxTask } from '../data/types';
+import type { CourseNavigationRole, NavigationLike } from '../utils/courseNavigation';
+import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { aiOverlay } from '../app/useAIOverlay';
 import { recordCompanionEvent } from './companionSignalRecorder';
 
 export type InboxActionTarget =
   | 'submit_assignment'
+  | 'grade_assignment'
   | 'start_quiz'
   | 'attendance_checkin'
   | 'open_discussion'
@@ -22,26 +23,47 @@ export type InboxActionTarget =
   | 'review_peer'
   | 'pay_balance'
   | 'view_grade'
-  | 'go_to_screen';
+  | 'go_to_screen'
+  | 'assistant_continue';
 
 export interface ResolvedInboxAction {
   label: string;
-  /** 用於 navigator.navigate(target, params) 或 deep link */
   target: InboxActionTarget;
-  /** Navigation 用的參數 */
   params?: Record<string, unknown>;
-  /** UI 強調樣式 */
   emphasis?: 'primary' | 'secondary' | 'danger';
-  /** 完成後該記錄哪個 companion event */
   recordEventOnComplete?: {
     kind: Parameters<typeof recordCompanionEvent>[0];
     payload?: Record<string, unknown>;
   };
 }
 
-export function resolveInboxAction(task: InboxTask): ResolvedInboxAction | null {
+export type ResolveInboxContext = {
+  isTeachingRole?: boolean;
+};
+
+export function resolveInboxAction(
+  task: InboxTask,
+  ctx?: ResolveInboxContext,
+): ResolvedInboxAction | null {
+  const teaching = !!ctx?.isTeachingRole;
+
   switch (task.kind) {
     case 'assignment':
+      if (teaching) {
+        return {
+          label: '去批改',
+          target: 'grade_assignment',
+          params: {
+            assignmentId: task.assignmentId,
+            courseSpaceId: task.groupId,
+          },
+          emphasis: 'primary',
+          recordEventOnComplete: {
+            kind: 'inbox_action_taken',
+            payload: { source: 'inbox_assignment_grade' },
+          },
+        };
+      }
       return {
         label: '去繳交',
         target: 'submit_assignment',
@@ -57,7 +79,7 @@ export function resolveInboxAction(task: InboxTask): ResolvedInboxAction | null 
       };
     case 'quiz':
       return {
-        label: '去作答',
+        label: teaching ? '檢視測驗' : '去作答',
         target: 'start_quiz',
         params: {
           quizId: task.assignmentId,
@@ -66,12 +88,12 @@ export function resolveInboxAction(task: InboxTask): ResolvedInboxAction | null 
         emphasis: 'primary',
         recordEventOnComplete: {
           kind: 'inbox_action_taken',
-          payload: { source: 'inbox_quiz' },
+          payload: { source: teaching ? 'inbox_quiz_teacher' : 'inbox_quiz' },
         },
       };
     case 'live':
       return {
-        label: '去簽到',
+        label: teaching ? '進入課堂' : '去簽到',
         target: 'attendance_checkin',
         params: {
           sessionId: task.sessionId,
@@ -80,12 +102,12 @@ export function resolveInboxAction(task: InboxTask): ResolvedInboxAction | null 
         emphasis: 'primary',
         recordEventOnComplete: {
           kind: 'inbox_action_taken',
-          payload: { source: 'inbox_live' },
+          payload: { source: teaching ? 'inbox_live_teacher' : 'inbox_live' },
         },
       };
     case 'group':
       return {
-        label: '查看討論',
+        label: teaching ? '開啟課程討論' : '查看討論',
         target: 'open_discussion',
         params: { groupId: task.groupId },
         emphasis: 'secondary',
@@ -97,8 +119,8 @@ export function resolveInboxAction(task: InboxTask): ResolvedInboxAction | null 
     case 'assistant_queue':
       return {
         label: '確認 AI 建議',
-        target: 'go_to_screen',
-        params: { screen: 'AssistantQueue', queueId: (task as unknown as { queueId?: string }).queueId },
+        target: 'assistant_continue',
+        params: { sourceRunId: task.sourceRunId },
         emphasis: 'secondary',
         recordEventOnComplete: {
           kind: 'inbox_action_taken',
@@ -110,12 +132,131 @@ export function resolveInboxAction(task: InboxTask): ResolvedInboxAction | null 
   }
 }
 
+export type InboxNavigationContext = {
+  role: CourseNavigationRole;
+  isTeachingRole: boolean;
+};
+
+function emitInboxNavigationSignal(resolved: ResolvedInboxAction) {
+  const rec = resolved.recordEventOnComplete;
+  if (!rec) return;
+  void recordCompanionEvent(rec.kind, { payload: rec.payload });
+}
+
+/**
+ * 從訊息工作台導向「學習」分頁內的實作畫面；成功導向回 true。
+ */
+export function navigateFromInboxTask(
+  navigation: NavigationLike | null | undefined,
+  task: InboxTask,
+  navCtx: InboxNavigationContext,
+): boolean {
+  const resolved = resolveInboxAction(task, { isTeachingRole: navCtx.isTeachingRole });
+  if (!resolved) return false;
+
+  const courseId = String(resolved.params?.courseSpaceId ?? task.groupId);
+  const role = navCtx.role;
+
+  const fallBackToCourseHub = () => {
+    navigateToCourseScreen(navigation, role, 'CourseHub', {
+      groupId: task.groupId,
+      groupName: task.groupName,
+    });
+    emitInboxNavigationSignal(resolved);
+    return true;
+  };
+
+  switch (resolved.target) {
+    case 'submit_assignment': {
+      const hwId = resolved.params?.assignmentId;
+      if (typeof hwId !== 'string' || !hwId) {
+        return fallBackToCourseHub();
+      }
+      navigateToCourseScreen(navigation, role, 'HomeworkSubmit', {
+        courseId,
+        hwId,
+        hwTitle: task.title,
+      });
+      emitInboxNavigationSignal(resolved);
+      return true;
+    }
+    case 'grade_assignment': {
+      navigateToCourseScreen(navigation, role, 'TeacherGrading', {
+        courseId: task.groupId,
+        courseName: task.groupName,
+        assignmentId: task.assignmentId,
+        assignmentTitle: task.title,
+      });
+      emitInboxNavigationSignal(resolved);
+      return true;
+    }
+    case 'start_quiz':
+      navigateToCourseScreen(navigation, role, 'QuizCenter', {
+        groupId: courseId,
+        groupName: task.groupName,
+      });
+      emitInboxNavigationSignal(resolved);
+      return true;
+
+    case 'attendance_checkin': {
+      const sessionId = resolved.params?.sessionId;
+      if (navCtx.isTeachingRole) {
+        navigateToCourseScreen(navigation, role, 'Classroom', {
+          groupId: task.groupId,
+          sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+          isTeacher: true,
+        });
+      } else if (typeof sessionId === 'string' && sessionId) {
+        navigateToCourseScreen(navigation, role, 'AttendanceMultiMethod', {
+          courseId,
+          sessionId,
+        });
+      } else {
+        navigateToCourseScreen(navigation, role, 'Classroom', {
+          groupId: task.groupId,
+          isTeacher: false,
+        });
+      }
+      emitInboxNavigationSignal(resolved);
+      return true;
+    }
+
+    case 'open_discussion':
+      navigateToCourseScreen(navigation, role, 'CourseDiscussion', {
+        groupId: task.groupId,
+        groupName: task.groupName,
+      });
+      emitInboxNavigationSignal(resolved);
+      return true;
+
+    case 'assistant_continue': {
+      const runId = resolved.params?.sourceRunId;
+      aiOverlay.open({
+        mode: 'chat',
+        prompt:
+          typeof runId === 'string' && runId
+            ? `這是助理任務 ${runId}，幫我繼續處理。`
+            : '幫我繼續處理收件匣裡的助理建議。',
+        source: 'inbox_assistant',
+      });
+      emitInboxNavigationSignal(resolved);
+      return true;
+    }
+
+    default:
+      return false;
+  }
+}
+
 /**
  * 給 InboxScreen 用：批次解析一組 tasks。
  */
-export function resolveInboxActions(tasks: InboxTask[]): Array<{
+export function resolveInboxActions(
+  tasks: InboxTask[],
+  ctx?: ResolveInboxContext,
+): Array<{
   task: InboxTask;
   action: ResolvedInboxAction | null;
 }> {
-  return tasks.map((task) => ({ task, action: resolveInboxAction(task) }));
+  return tasks.map((task) => ({ task, action: resolveInboxAction(task, ctx) }));
 }

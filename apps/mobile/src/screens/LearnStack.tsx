@@ -131,6 +131,41 @@ function GuardedAcademicOverview(props: any) {
   );
 }
 
+/** 成績／學業 AI 分頁與學業總覽相同：須具備課程工作區檢視權（與職員僅 catalog 區隔）。 */
+function GuardedAcademicGrades(props: any) {
+  return (
+    <RouteGuard requires="courses.view">
+      <AcademicGradesRoute {...props} />
+    </RouteGuard>
+  );
+}
+
+function GuardedAcademicInsights(props: any) {
+  return (
+    <RouteGuard requires="courses.view">
+      <AcademicInsightsRoute {...props} />
+    </RouteGuard>
+  );
+}
+
+/** 畢業學分試算屬個人修課脈絡；與 courses.view 對齊（校方職員請走課綱查詢等其他入口）。 */
+function GuardedCreditAuditLearn(props: any) {
+  return (
+    <RouteGuard requires="courses.view">
+      <CreditAuditStack {...props} />
+    </RouteGuard>
+  );
+}
+
+/** 選課助理：學生／教師用課程工作區；職員僅限課綱查詢語意時保留 catalog 唯讀。 */
+function GuardedAICourseAdvisor(props: any) {
+  return (
+    <RouteGuard requires={['courses.view', 'courses.catalog']}>
+      <AICourseAdvisorScreen {...props} />
+    </RouteGuard>
+  );
+}
+
 /** 職員／店家／通知 deeplink 進入課程 chip 流時，需具備 courses.view；否則由 RouteGuard 引導至課綱查詢等 fallback */
 function guardCourseView(Component: React.ComponentType<any>) {
   return function GuardedCourseWorkspace(props: any) {
@@ -267,12 +302,12 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="Grades"
-        component={AcademicGradesRoute}
+        component={GuardedAcademicGrades}
         options={{ title: '成績查詢', headerShown: false }}
       />
       <Stack.Screen
         name="AcademicInsights"
-        component={AcademicInsightsRoute}
+        component={GuardedAcademicInsights}
         options={{ title: '學業 AI 分析', headerShown: false }}
       />
       <Stack.Screen
@@ -282,7 +317,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CreditAuditStack"
-        component={CreditAuditStack}
+        component={GuardedCreditAuditLearn}
         options={{ headerShown: false }}
       />
       <Stack.Screen
@@ -292,7 +327,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="AICourseAdvisor"
-        component={AICourseAdvisorScreen}
+        component={GuardedAICourseAdvisor}
         options={{ title: 'AI 選課助理' }}
       />
       <Stack.Screen

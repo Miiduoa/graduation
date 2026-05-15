@@ -54,6 +54,24 @@ function GuardedAdminCourseVerify(props: any) {
   );
 }
 
+/** 學分／畢業試算與個人修課資料綁定；職員身分僅 catalog 時不應進入。 */
+function GuardedCreditAuditStack(props: any) {
+  return (
+    <RouteGuard requires="courses.view">
+      <CreditAuditStack {...props} />
+    </RouteGuard>
+  );
+}
+
+/** 成就與 gamification：student/teacher 等有 achievements.view；若無權限則不透過 deep link 進入。 */
+function GuardedAchievements(props: any) {
+  return (
+    <RouteGuard requires="achievements.view">
+      <AchievementsScreen {...props} />
+    </RouteGuard>
+  );
+}
+
 export function MeStack() {
   useThemeMode();
 
@@ -94,7 +112,7 @@ export function MeStack() {
 
       <Stack.Screen
         name="Achievements"
-        component={AchievementsScreen}
+        component={GuardedAchievements}
         options={{ title: '成就與積分' }}
       />
       <Stack.Screen
@@ -134,7 +152,7 @@ export function MeStack() {
       />
       <Stack.Screen
         name="CreditAuditStack"
-        component={CreditAuditStack}
+        component={GuardedCreditAuditStack}
         options={{ headerShown: false }}
       />
 
