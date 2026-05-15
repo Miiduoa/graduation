@@ -40,6 +40,10 @@ export interface StudentBuddyProfile {
   preferredStudyWindow?: 'morning' | 'afternoon' | 'evening' | 'night';
   /** 自我介紹 */
   bio?: string;
+  /** 即時求助用：是否目前線上（demo 中為 mock，正式環境接 presence） */
+  isOnlineNow?: boolean;
+  /** 即時求助用：過去 30 天回應求助的平均分鐘數（越低越積極） */
+  averageResponseMinutes?: number;
 }
 
 export interface BuddyMatchResult {
