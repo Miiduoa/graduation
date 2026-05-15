@@ -67,6 +67,7 @@ describe('campusAgentSource', () => {
       requiresConfirmation: false,
       source: 'inbox',
     });
+    expect(actions[0].inboxTask?.id).toBe('urgent');
     expect(actions[0].evidenceRefs[0]).toMatchObject({
       type: 'course',
       id: 'assignment-1',
