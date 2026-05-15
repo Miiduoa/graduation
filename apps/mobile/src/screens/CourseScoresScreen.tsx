@@ -174,7 +174,11 @@ export default function CourseScoresScreen(props: RouteProps) {
 
   if (loading) {
     return (
-      <CourseChipLoading title="正在載入課程成績" subtitle="同步作業、測驗與評分項目…" />
+      <CourseChipLoading
+        title="正在載入課程成績"
+        subtitle="同步作業、測驗與評分項目…"
+        accessibilityHint="載入完成即可瀏覽加權與項目分數"
+      />
     );
   }
 

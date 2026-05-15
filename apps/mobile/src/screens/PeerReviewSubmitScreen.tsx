@@ -241,6 +241,11 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           paddingBottom: theme.space.xxl,
         }}
       >
+        {isDemoCourseId(courseId) ? (
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
+            <CourseDemoDataRibbon />
+          </View>
+        ) : null}
         <CourseChipHeader
           emoji="💯"
           eyebrow="同儕互評"
