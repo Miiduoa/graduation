@@ -5,7 +5,7 @@
   <a href="https://github.com/Miiduoa/graduation/actions"><img src="https://img.shields.io/github/actions/workflow/status/Miiduoa/graduation/ci.yml?branch=main&label=CI&logo=githubactions" alt="CI status" /></a>
   <img src="https://img.shields.io/badge/License-MIT-22c55e" alt="License MIT" />
   <img src="https://img.shields.io/badge/Monorepo-pnpm%20workspace-0f766e" alt="pnpm workspace" />
-  <img src="https://img.shields.io/badge/Mobile-Expo%2054%20%2B%20React%20Native%200.81-2563eb" alt="Expo 54 + React Native 0.81" />
+  <img src="https://img.shields.io/badge/Mobile-Expo%2054%20%2B%20RN%200.81.5-2563eb" alt="Expo 54 + React Native 0.81.5" />
   <img src="https://img.shields.io/badge/Web-Next.js%2016.2%20%2B%20React%2019.x-111827" alt="Next.js 16.2 + React 19.x" />
   <img src="https://img.shields.io/badge/Backend-Firebase%20Functions%20v2%20%2B%20Firestore-ef6c00" alt="Firebase Functions v2 + Firestore" />
   <img src="https://img.shields.io/badge/Runtime-Node%2020%20%2F%20pnpm%2010-7c3aed" alt="Node 20 / pnpm 10" />
@@ -45,8 +45,37 @@
 | AI 測試訓練報告 | repo 根目錄 [`AI助理測試訓練報告.md`](AI助理測試訓練報告.md)（依 xlsx 案例整理之結論、缺口清單與口試參考）                                                                              |
 | 法務文件        | [`docs/legal/`](docs/legal/)                                                                                                                                                            |
 
+<h2 id="readme-8-chips">課程卡 8 chip 速覽（Mobile LearnStack）</h2>
+
+學習 Tab → **我的課程** → 課程分頁 → 任一課程卡上的八枚捷徑，全部掛在 **[`LearnStack.tsx`](apps/mobile/src/screens/LearnStack.tsx)**。2026-05-13 起主線做法是 **各 chip 依課程 id 直接對 TronClass 取數**（繞過會回空的抽象層／避免學生成績誤跳教師權限頁）；細部 endpoint、修法前後對照與重啟驗證步驟見 **[`docs/8_CHIPS_FINAL_AUDIT.md`](docs/8_CHIPS_FINAL_AUDIT.md)**。
+
+| chip | 路由名（`navigation`） | 畫面 | 進入時主要參數 | 資料要點 |
+| --- | --- | --- | --- | --- |
+| 📚 教材 | `CourseModules` | `CourseModulesScreen` | `groupId`、`groupName` | 並行 `tcFetchModules`／activities／exams／homework；modules 空時合成 catch-all 章節；**不再** `type==='material'` 過濾 |
+| ❓ 測驗 | `QuizCenter` | `QuizCenterScreen` | `groupId`、`groupName` | `dataSource` 空且有 `routeGroupId` 時 fallback **`tcFetchCourseExams` + `tcFetchExamSubmissions`** |
+| 📊 成績 | **`CourseScores`** | **`CourseScoresScreen`** | `groupId`、`groupName` | **獨立新屏**：bypass `AcademicScreen`／`RouteGuard`；`tcFetchSelfScore`、`tcFetchScoreItems`、exams／homework 整合加權與平均 |
+| ✅ 點名 | `AttendanceMultiMethod` | `AttendanceMultiMethodScreen` | `courseId`、`sessionId` | `listAttendanceSessions(courseId)` 歷史＋依教師方法簽到 UI |
+| 💬 討論 | `CourseDiscussion` | `CourseDiscussionScreen` | `groupId`、`groupName` | `tcFetchDiscussions(courseId)` |
+| ✨ AI 學伴 | `AICourseAdvisor` | `AICourseAdvisorScreen` | `groupId`、`groupName` | route `focusedCourseId` → `aiContext`，對話限該課 |
+| 📝 筆記 | `CourseNotes` | `CourseNotesScreen` | `courseId`、`courseName` | **AsyncStorage** 每課獨立 |
+| 💯 互評 | `PeerReviewSubmit` | `PeerReviewSubmitScreen` | `courseId`、`assignmentTitle` | `tcFetchPeerReviews(courseId)` |
+
+**本機 smoke（清 Metro cache）**：`cd apps/mobile && npx expo start --clear`。
+
+<h2 id="readme-git-github">Git／GitHub 工作流程（簡述）</h2>
+
+| 項目 | 說明 |
+| --- | --- |
+| **官方遠端** | `origin` → [https://github.com/Miiduoa/graduation.git](https://github.com/Miiduoa/graduation.git) |
+| **預設分支** | `main`（與 `origin/main` 對齊開發時，先 `git pull` 再推） |
+| **推送前** | `git status` 為乾淨工作樹＝變更都已 commit；新檔需先 `git add` 再 `git commit` |
+| **推送** | `git push origin main`（已設 `upstream` 時可簡寫 `git push`） |
+| **CI** | push 至 `main` 會跑 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（lint、測試、rules、build 等；細節見下文「GitHub CI 與 Release」） |
+
 ## 目錄
 
+- [課程卡 8 chip 速覽（Mobile LearnStack）](#readme-8-chips)
+- [Git／GitHub 工作流程（簡述）](#readme-git-github)
 - [這個專案是什麼](#這個專案是什麼)
 - [目前最重要的事實](#目前最重要的事實)
 - [專案快照](#專案快照)
@@ -162,7 +191,7 @@ README 會提供足夠完整的全局視角，但不會把每個 schema、每個
 | 面向              | 盤點結果                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Git tracked files | **`964`** 個（**複核**：`git ls-files \| wc -l`；基準日 **2026-05-15**，含智慧點名共用引擎、`8_CHIPS_FINAL_AUDIT`、驗證 tool、Companion 本地快取、除錯畫面／文件與 TronClass 行動 LMS 調整）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Mobile UI         | **`119`** 個 `apps/mobile/**/*Screen.tsx`、`14` 個 `*Stack.tsx`（複核：`find apps/mobile/src/screens -name '*Screen.tsx' \| wc -l`，Stack 請用 `find … '*Stack.tsx'`）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Mobile UI         | **`120`** 個 `apps/mobile/**/*Screen.tsx`、`14` 個 `*Stack.tsx`（複核：`find apps/mobile/src/screens -name '*Screen.tsx' \| wc -l`，Stack 請用 `find … '*Stack.tsx'`；**2026-05-15** 複核）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Web routes        | **`26`** 個 `apps/web/**/page.tsx`、`4` 個 `apps/web/**/route.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Backend Functions | 約 `75` 個 `onCall` 匯出（`backend/functions/index.js` 約 `69` + `ordering/*` 等）、`14` 個 `onRequest`、`7` 個 `onSchedule`（`index.js` + `ordering/orderTimeout.js`、`ordering/queueNumber.js`）、`5` 個 Firestore `onDocument*`（`index.js` 四個 + `ordering/inspectionTrigger.js` 一個）                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 測試檔            | Mobile **`55`**（`apps/mobile/src/__tests__/**/*.test.{ts,tsx}`；**不含** `pnpm ai:train:long` 專用之 `apps/mobile/scripts/ai-training-long.test.ts`；新增 **`attendanceEngine.test.ts`**）、Web **`5`**（**複核**：`git ls-files 'apps/web/**/*.test.ts' 'apps/web/**/*.test.tsx' \| wc -l`）、Backend Functions **`24`**（**複核**：`git ls-files 'backend/**/*.test.js' \| wc -l`；目錄：`backend/functions/**/*.test.js`，含 **`agent/runtime.safety.test.js`**、`agent/safety.test.js`、`agent/classifyIntent.test.js`）、Rules `1`（`backend/tests/security-rules.test.js`）                                                                                                                                                                                                                                               |
