@@ -2,6 +2,8 @@ import {
   listNextBestActions,
   listPulseAggregates,
   listRiskSnapshots,
+  parseInboxTaskSnapshot,
+  parseNextBestAction,
   submitPulseReport,
 } from '../../data/campusAgentSource';
 import { listCourseSpaces, listInboxTasks } from '../../data/courseSpaceSource';
@@ -114,5 +116,83 @@ describe('campusAgentSource', () => {
     });
 
     expect(mockedSubmitCrowdReport).toHaveBeenCalledWith('lib_main', 4);
+  });
+});
+
+describe('parseNextBestAction (Firestore 列)', () => {
+  it('還原嵌套 inboxTask', () => {
+    const action = parseNextBestAction(
+      {
+        title: '交作業',
+        description: '今晚截止',
+        source: 'inbox',
+        priority: 1,
+        reason: '',
+        actionLabel: '前往',
+        inboxTask: {
+          id: 't42',
+          kind: 'assignment',
+          groupId: 'g1',
+          groupName: '程式設計',
+          title: '交作業',
+          subtitle: '今晚截止',
+          priority: 1,
+          assignmentId: 'hw9',
+        },
+      },
+      'doc-1',
+    );
+    expect(action.inboxTask).toMatchObject({
+      id: 't42',
+      kind: 'assignment',
+      groupId: 'g1',
+      assignmentId: 'hw9',
+    });
+  });
+
+  it('從舊版 actionTarget + inboxKind=quiz 推回 quiz', () => {
+    const action = parseNextBestAction(
+      {
+        title: '期末考',
+        description: '線上測驗',
+        source: 'inbox',
+        priority: 2,
+        inboxKind: 'quiz',
+        actionTarget: {
+          tab: '訊息',
+          screen: 'AssignmentDetail',
+          params: { groupId: 'c99', assignmentId: 'exam-1' },
+        },
+      },
+      'stored-xyz',
+    );
+    expect(action.inboxTask?.kind).toBe('quiz');
+    expect(action.inboxTask?.groupId).toBe('c99');
+    expect(action.inboxTask?.assignmentId).toBe('exam-1');
+  });
+
+  it('從舊版 Classroom actionTarget 推回 live', () => {
+    const action = parseNextBestAction(
+      {
+        title: '第 8 週',
+        source: 'inbox',
+        priority: 0,
+        actionTarget: {
+          tab: '學習',
+          screen: 'Classroom',
+          params: { groupId: 'c1', sessionId: 'sess-a' },
+        },
+      },
+      'inbox:live-1',
+    );
+    expect(action.inboxTask?.kind).toBe('live');
+    expect(action.inboxTask?.sessionId).toBe('sess-a');
+    expect(action.inboxTask?.id).toBe('live-1');
+  });
+});
+
+describe('parseInboxTaskSnapshot', () => {
+  it('無效 kind → undefined', () => {
+    expect(parseInboxTaskSnapshot({ kind: 'spam', groupId: 'g', title: '' }, 'f')).toBeUndefined();
   });
 });
