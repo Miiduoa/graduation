@@ -2596,7 +2596,10 @@ const TOOL_EXECUTORS: Record<
       if (targetCourses.length === 0 && todayCourses.length === 0) {
         return {
           success: true, isWrite: false,
-          summary: `${dateStr}（${dayNames[dayOfWeek]}）沒有找到任何課程，不需要請假哦！如果是其他日期，請告訴我日期。`,
+          summary: [
+            `假別：${leaveTypeLabel}`,
+            `${dateStr}（${dayNames[dayOfWeek]}）沒有找到任何課程，不需要請假哦！如果是其他日期，請告訴我日期。`,
+          ].join('\n'),
         };
       }
 

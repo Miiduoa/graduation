@@ -8,6 +8,7 @@ import { mockSource } from '../data/mockSource';
 import type { CampusActorRole } from '../data/types';
 import { setDataSource } from '../data/source';
 import { autonomousQuery, type AgentQueryResult } from './aiLocalAgent';
+import { generateDynamicNaturalLanguagePrompt } from './aiDynamicTraining';
 
 export type AISelfDialogScenario = {
   id: string;
@@ -316,6 +317,7 @@ export async function runAISelfDialogEvaluation(options?: {
       sc.messages.filter((m) => m.role === 'user').map((m) => m.content),
     ) ?? [];
 
+  const useDynamicPrompts = fromScenarios.length === 0;
   const promptsPool = fromScenarios.length > 0 ? fromScenarios : DEFAULT_SELF_DIALOG_PROMPTS;
 
   const t0 = Date.now();
@@ -352,7 +354,10 @@ export async function runAISelfDialogEvaluation(options?: {
     if (i > 0 && i % promptsPool.length === 0) {
       shuffledPrompts = shufflePrompts(promptsPool, rand);
     }
-    const baseMsg = shuffledPrompts[i % promptsPool.length]!;
+    const baseMsg =
+      useDynamicPrompts && i % 2 === 0
+        ? generateDynamicNaturalLanguagePrompt(seed, i)
+        : shuffledPrompts[i % promptsPool.length]!;
     const msg = varyPrompt(baseMsg, rand);
     try {
       await autonomousQuery(msg, ctx, undefined, []);
