@@ -14,6 +14,26 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import * as Sharing from 'expo-sharing';
+import { useNavigation } from '@react-navigation/native';
+
+// ── 本地 in-app viewer 跳轉（取代 WebBrowser 把使用者踢回 TronClass）──
+function openInApp(
+  navigation: any,
+  url: string,
+  opts: { title?: string; kind?: 'material' | 'quiz' | 'score' | 'homework' | 'attempt'; courseName?: string } = {},
+): void {
+  if (navigation?.navigate) {
+    navigation.navigate('CourseMaterialViewer', {
+      url,
+      title: opts.title ?? '在 APP 內查看',
+      kind: opts.kind ?? 'material',
+      courseName: opts.courseName,
+    });
+    return;
+  }
+  // navigation 不可用時才 fallback 跳系統瀏覽
+  WebBrowser.openBrowserAsync(url).catch(() => {});
+}
 
 import { Card, ErrorState, LoadingState, Pill, Screen, SectionTitle } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
@@ -192,57 +212,36 @@ function MaterialCard(props: {
   const icon = upload ? getFileIcon(upload.name) : 'document-outline';
   const color = upload ? getFileColor(upload.name) : theme.colors.accent;
   const [downloading, setDownloading] = useState(false);
+  const navigation = useNavigation<any>();
 
   const handlePress = useCallback(async () => {
+    // 沒有附件 → 仍在 APP 內 webview 開課程活動頁
     if (!upload) {
-      // 沒有附件，開網頁
-      WebBrowser.openBrowserAsync(tcBuildFileViewUrl(courseId, activity.id)).catch(() => {});
+      openInApp(navigation, tcBuildFileViewUrl(courseId, activity.id), {
+        title: activity.title,
+        kind: 'material',
+      });
       return;
     }
 
-    // 圖片：直接預覽
+    // 圖片：直接預覽 (本機 Image)
     if (isImageFile(upload.name)) {
       const imageUrl = tcBuildFileDownloadUrl(upload.key);
       onPreviewImage(imageUrl, upload.name);
       return;
     }
 
-    // 其他檔案：嘗試下載後用系統分享開啟，失敗則退回網頁
+    // 其他檔案：先嘗試本地 in-app webview / PDF 查看
+    setDownloading(true);
     try {
-      setDownloading(true);
-      const downloadUrl = tcBuildFileDownloadUrl(upload.key);
-
-      // 使用 fetch 下載到 blob，再透過 Sharing 分享
-      const resp = await fetch(downloadUrl);
-      if (resp.ok) {
-        // 取得 blob 並建立本地 URI
-        const blob = await resp.blob();
-        const reader = new FileReader();
-        const base64 = await new Promise<string>((resolve, reject) => {
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-
-        // 建立臨時檔案用 sharing
-        const canShare = await Sharing.isAvailableAsync();
-        if (canShare) {
-          // 如果可以分享，用 WebBrowser 開啟（因為 fetch blob sharing 需要 native 模組）
-          // 直接用 WebBrowser 打開下載 URL 讓系統處理
-          await WebBrowser.openBrowserAsync(downloadUrl);
-        } else {
-          WebBrowser.openBrowserAsync(tcBuildFileViewUrl(courseId, activity.id)).catch(() => {});
-        }
-      } else {
-        WebBrowser.openBrowserAsync(tcBuildFileViewUrl(courseId, activity.id)).catch(() => {});
-      }
-    } catch (err) {
-      console.warn('Download failed, fallback to web:', err);
-      WebBrowser.openBrowserAsync(tcBuildFileViewUrl(courseId, activity.id)).catch(() => {});
+      openInApp(navigation, tcBuildFileDownloadUrl(upload.key), {
+        title: upload.name,
+        kind: 'material',
+      });
     } finally {
       setDownloading(false);
     }
-  }, [upload, courseId, activity.id, onPreviewImage]);
+  }, [upload, courseId, activity.id, activity.title, onPreviewImage, navigation]);
 
   return (
     <Pressable
@@ -311,6 +310,7 @@ function MaterialCard(props: {
 // ── 考試成績卡片（可展開看作答紀錄）─────────────────
 
 function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
+  const navigation = useNavigation<any>();
   const { exam, courseId } = props;
   const [expanded, setExpanded] = useState(false);
 
@@ -649,10 +649,13 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
             </View>
           )}
 
-          {/* 在 TronClass 開啟 */}
+          {/* 在 APP 內查看完整測驗 */}
           <Pressable
             onPress={() =>
-              WebBrowser.openBrowserAsync(tcBuildExamViewUrl(courseId, exam.id)).catch(() => {})
+              openInApp(navigation, tcBuildExamViewUrl(courseId, exam.id), {
+                title: exam.title ?? '測驗',
+                kind: 'quiz',
+              })
             }
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -667,7 +670,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
           >
             <Ionicons name="open-outline" size={12} color={theme.colors.accent} />
             <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
-              在 TronClass 開啟
+              在 APP 內查看
             </Text>
           </Pressable>
         </View>
@@ -679,6 +682,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
 // ── 作業卡片（可展開看繳交紀錄）────────────────────
 
 function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
+  const navigation = useNavigation<any>();
   const { hw, courseId } = props;
   const [expanded, setExpanded] = useState(false);
 
@@ -815,7 +819,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                     <Pressable
                       key={att.id}
                       onPress={() => {
-                        if (att.url) WebBrowser.openBrowserAsync(att.url).catch(() => {});
+                        if (att.url) openInApp(navigation, att.url, { title: att.name ?? '附件', kind: 'homework' });
                       }}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
                     >
@@ -877,12 +881,13 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
             </View>
           )}
 
-          {/* 在 TronClass 開啟 */}
+          {/* 在 APP 內查看 */}
           <Pressable
             onPress={() =>
-              WebBrowser.openBrowserAsync(
-                `https://tronclass.pu.edu.tw/course/${courseId}/content#/homework/${hw.id}`,
-              ).catch(() => {})
+              openInApp(navigation, `https://tronclass.pu.edu.tw/course/${courseId}/content#/homework/${hw.id}`, {
+                title: hw.title ?? '作業',
+                kind: 'homework',
+              })
             }
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -897,7 +902,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
           >
             <Ionicons name="open-outline" size={12} color={theme.colors.accent} />
             <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
-              在 TronClass 開啟
+              在 APP 內查看
             </Text>
           </Pressable>
         </View>
@@ -922,6 +927,7 @@ function InfoRow(props: { label: string; value: string }) {
 // ── 成績總覽卡片 ──────────────────────────────────
 
 function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
+  const navigation = useNavigation<any>();
   const { exams, courseId } = props;
   const scoredExams = exams.filter((e) => typeof e.submission?.exam_score === 'number');
 
@@ -1001,7 +1007,12 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
         ))}
 
         <Pressable
-          onPress={() => WebBrowser.openBrowserAsync(tcBuildScoreUrl(courseId)).catch(() => {})}
+          onPress={() =>
+            openInApp(navigation, tcBuildScoreUrl(courseId), {
+              title: '完整成績',
+              kind: 'score',
+            })
+          }
           style={({ pressed }) => ({
             flexDirection: 'row',
             alignItems: 'center',
@@ -1018,7 +1029,7 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
         >
           <Ionicons name="stats-chart-outline" size={14} color={theme.colors.accent} />
           <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 13 }}>
-            在 TronClass 查看完整成績
+            在 APP 內查看完整成績
           </Text>
         </Pressable>
       </View>
@@ -1300,15 +1311,16 @@ export function CourseModulesScreen(props: any) {
   if (moduleData.length === 0) {
     return (
       <Screen>
-        <Card title={courseName} subtitle="此課程目前沒有教材模組">
+        <Card title={courseName} subtitle="此課程還沒上傳教材">
           <Text style={{ color: theme.colors.muted, lineHeight: 22 }}>
-            老師尚未在 TronClass 上建立章節內容。
+            老師尚未發布章節內容。你可以先看看課程公告或討論串。
           </Text>
           <Pressable
             onPress={() =>
-              WebBrowser.openBrowserAsync(
-                `https://tronclass.pu.edu.tw/course/${courseId}/content#/`,
-              ).catch(() => {})
+              nav?.navigate?.('CourseDiscussion', {
+                groupId: String(courseId),
+                groupName: courseName,
+              })
             }
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -1324,9 +1336,9 @@ export function CourseModulesScreen(props: any) {
               opacity: pressed ? 0.8 : 1,
             })}
           >
-            <Ionicons name="open-outline" size={14} color={theme.colors.accent} />
+            <Ionicons name="chatbubbles-outline" size={14} color={theme.colors.accent} />
             <Text style={{ color: theme.colors.accent, fontWeight: '600', fontSize: 13 }}>
-              在 TronClass 網頁開啟
+              到課程討論看看
             </Text>
           </Pressable>
         </Card>
@@ -1355,7 +1367,7 @@ export function CourseModulesScreen(props: any) {
         }}
       >
         {/* 課程標題 */}
-        <Card title={courseName} subtitle="TronClass 課程內容">
+        <Card title={courseName} subtitle="課程內容">
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
             <Pill text={`${moduleData.length} 個章節`} kind="accent" />
             <Pill text={`${totalMaterials} 份教材`} kind="default" />

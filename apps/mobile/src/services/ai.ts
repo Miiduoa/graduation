@@ -76,6 +76,9 @@ import {
   type AgentQueryResult,
 } from './aiLocalAgent';
 import {
+  buildBroadNaturalLanguageRuntimeGuide,
+} from './aiDynamicTraining';
+import {
   buildReflectorUserPayloadForTools,
   composeQuickLocalReflection,
   evaluateLocalAgentForReflexion,
@@ -728,6 +731,8 @@ function buildSystemPrompt(context: AIContext): string {
       hasSignedInUser: Boolean(context.userId),
       hasSchoolId: Boolean(context.schoolId),
     }),
+    '',
+    buildBroadNaturalLanguageRuntimeGuide(),
     '',
     '## 人格特質',
     '- 像學長姐一樣親切，但知識淵博得像教授',

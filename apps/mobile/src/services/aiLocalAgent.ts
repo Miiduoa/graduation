@@ -27,12 +27,67 @@ import {
 import type { AssistantChoiceMenu, CampusActorRole } from '../data';
 import { understand as semanticUnderstand } from './aiSemanticReasoner';
 import { linkConceptToMeaning } from './aiActiveLearning';
+import { detectCapabilityGap, recordAgentProcessTraining } from './aiDynamicTraining';
 
 // ════════════════════════════════════════════════════════════
 // 0. 對話上下文指代解析 (Anaphora Resolution)
 // ════════════════════════════════════════════════════════════
 
 export type ConversationTurn = { role: 'user' | 'assistant'; content: string };
+
+function isOrderBoundaryMetaMessage(message: string): boolean {
+  const msg = message.replace(/[\u200B-\u200D\uFEFF]/g, '').normalize('NFKC').toLowerCase().trim();
+  return /(?:不要|別|不能|不該).{0,12}(?:直接|亂)?(?:下單|點餐|訂餐|查學餐|查菜單)|沒有(?:明確|確認|指定).{0,16}(?:餐點|數量|品項|菜色).{0,12}(?:下單|點餐|訂餐)|只是(?:買東西建議|晚餐靈感|朋友聊天|提到通知).{0,18}(?:不要|別|不能|不該).{0,12}(?:訂餐|點餐|查學餐|下單|標成已讀)|(?:誤判|當成).{0,12}(?:訂餐|點餐|下單|學餐)/.test(msg);
+}
+
+function isMessageBoundaryMetaMessage(message: string): boolean {
+  const msg = message.replace(/[\u200B-\u200D\uFEFF]/g, '').normalize('NFKC').toLowerCase().trim();
+  return /(?:不要|別|不能|不該).{0,12}(?:直接|亂|真的)?(?:送出|發送|私訊|傳訊息|站內訊息)|只是(?:朋友聊天|社交建議|草稿).{0,18}(?:不要|別|不能|不該).{0,12}(?:送出|發送|私訊|站內訊息)|(?:誤判|當成).{0,12}(?:私訊|站內訊息|發訊息|send_message)/.test(msg);
+}
+
+function isNotificationBoundaryMetaMessage(message: string): boolean {
+  const msg = message.replace(/[\u200B-\u200D\uFEFF]/g, '').normalize('NFKC').toLowerCase().trim();
+  return /(?:不要|別|不能|不該).{0,12}(?:直接|亂)?(?:標成已讀|已讀|讀通知)|只是(?:提到通知|通知這個詞).{0,18}(?:不要|別|不能|不該).{0,12}(?:標成已讀|已讀)|(?:誤判|當成).{0,12}(?:通知|已讀|mark_notifications_read)/.test(msg);
+}
+
+function filterCapabilityGapMisfires(message: string, intents: DetectedIntent[]): DetectedIntent[] {
+  const gap = detectCapabilityGap(message);
+  if (!gap) return intents;
+
+  const blockedTools = new Set<string>();
+  const explicitlyRequestsReminder =
+    /提醒我|設(?:個)?提醒|建立.*(?:行事曆|日曆)|加到(?:行事曆|日曆)|排(?:進|到).*(?:行程|行事曆|日曆)|remind|calendar/i.test(
+      message,
+    );
+
+  if (!explicitlyRequestsReminder) {
+    ['create_calendar_event', 'update_calendar_event', 'delete_calendar_event'].forEach((tool) =>
+      blockedTools.add(tool),
+    );
+  }
+
+  if (gap === 'external_booking_or_account_action' || gap === 'financial_or_purchase_action') {
+    ['create_order', 'cancel_order', 'query_menus', 'recommend_lunch', 'rate_menu_item'].forEach((tool) =>
+      blockedTools.add(tool),
+    );
+  }
+
+  if (gap === 'external_app_or_account' || gap === 'financial_or_purchase_action') {
+    ['send_message', 'query_conversations', 'mark_notifications_read', 'query_notifications'].forEach((tool) =>
+      blockedTools.add(tool),
+    );
+  }
+
+  if (gap === 'phone_call') {
+    ['send_message', 'query_conversations'].forEach((tool) => blockedTools.add(tool));
+  }
+
+  if (gap === 'explicit_capability_gap') {
+    ['send_message', 'create_order', 'mark_notifications_read'].forEach((tool) => blockedTools.add(tool));
+  }
+
+  return intents.filter((intent) => !blockedTools.has(intent.tool));
+}
 
 /**
  * 從 AI 回覆中提取列表項目。支援三種列表格式：
@@ -423,6 +478,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   const intents: DetectedIntent[] = [];
   const timeArgs = extractTime(msg);
   const content = extractContent(origMsg);
+  const capabilityGapCue = detectCapabilityGap(origMsg);
 
   const trimmedLead = origMsg.trim();
   if (
@@ -1195,6 +1251,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
     /點餐|訂餐|外帶|外送|學餐|餐廳|菜單|幫我[點訂]|我要[點訂]|點一[個份碗杯]|訂一[個份碗杯]|來一[個份碗杯]?|買一[個份碗杯]?/.test(msg);
   const foodDomainCue =
     /吃|喝|餓|餐點|食物|美食|飯|麵|便當|午餐|晚餐|早餐|宵夜|消夜|飲料|手搖|奶茶|珍奶|咖啡|滷肉|雞腿|蛋餅|素食|辣|炸|油|清淡|便宜/.test(msg);
+  const orderBoundaryMetaCue = isOrderBoundaryMetaMessage(msg);
   const orderFoodContext = (explicitOrderCue || foodDomainCue) && !homeCookingOrderAdvice;
   const hasInvalidOrderQuantity =
     /(?:^|[^\d])(?:[-−－]\s*\d+|0)\s*[碗份個杯盤道]/.test(msg) ||
@@ -1207,6 +1264,8 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   if (
     !isVagueHelpRequest &&
     !skipOrderForBriefingPack &&
+    !orderBoundaryMetaCue &&
+    !capabilityGapCue &&
     !isMenuBrowseQuestion &&
     !gradeQueryCue &&
     orderFoodContext &&
@@ -1281,7 +1340,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
       const orderMatch2 = origMsg.match(/^(?:點|訂)\s*(.{2,15})$/);
       const orderMatch3 = origMsg.match(/(?:我想[吃喝]|想[吃喝]|好想[吃喝])\s*(.{1,15}?)(?:吧|啊|呀|喔|哦|！|!|$)/);
       const foodName = orderMatch?.[1]?.trim() ?? orderMatch2?.[1]?.trim() ?? orderMatch3?.[1]?.trim() ?? '';
-      const isNotFood = /假|修|預約|借|還|選|退|報名|發|繳|簽|打卡|點名|課|訊息/.test(foodName);
+      const isNotFood = /假|修|預約|借|還|選|退|報名|發|繳|簽|打卡|點名|課|訊息|機票|車票|高鐵|火車|叫車|飯店|旅館|酒店|門票|演唱會票|股票|基金|銀行|轉帳|匯款|付款|刷卡|外部|網站|ig|instagram|line/.test(foodName.toLowerCase());
       if (foodName && !isNotFood && /點|訂|幫我|我要|我想吃|想吃|來[一個份碗]|買/.test(msg)) {
         const qtyMatch = origMsg.match(/(\d+)\s*[碗份個杯盤]/);
         const quantity = qtyMatch?.[1] ?? '1';
@@ -1296,7 +1355,7 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // ── 取消訂單 ──
-  if (/取消.*訂單|不要.*訂/.test(msg)) {
+  if ((/取消.*訂單|不要.*訂/.test(msg)) && !orderBoundaryMetaCue) {
     intents.push({
       tool: 'cancel_order', isWrite: true, priority: 12,
       args: { orderId: '' },
@@ -1500,8 +1559,9 @@ export function analyzeIntents(message: string): DetectedIntent[] {
   }
 
   // 排序：高優先級先執行
-  intents.sort((a, b) => b.priority - a.priority);
-  return intents.slice(0, 12);
+  const filteredIntents = filterCapabilityGapMisfires(origMsg, intents);
+  filteredIntents.sort((a, b) => b.priority - a.priority);
+  return filteredIntents.slice(0, 12);
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1704,6 +1764,10 @@ export async function autonomousQuery(
     lastChoiceMenu: effectiveLastChoiceMenu,
   };
   const allowedToolNames = new Set(getToolDeclarations(ctx.role).map((t) => t.name));
+  const finishAgentResult = (agentResult: AgentQueryResult): AgentQueryResult => {
+    recordAgentProcessTraining(message, agentResult);
+    return agentResult;
+  };
 
   // ── Step 0.4: 上下文延續 — 如果上一輪的 choiceMenu 標示了 producedByTool
   //    而使用者只回了「第 N 個 / 對 / 好啊 / 第一個就好」這種 short follow-up，
@@ -1745,13 +1809,13 @@ export async function autonomousQuery(
     try {
       const skillResult = await executeLearnedSkill(cachedSkill, toolCtx);
       if (skillResult.success) {
-        return {
+        return finishAgentResult({
           intents: [{ tool: cachedSkill.tool, args: cachedSkill.args, priority: 20, reason: `(已學技能) ${cachedSkill.description.slice(0, 20)}`, isWrite: true }],
           results: [], totalTimeMs: Date.now() - start,
           contextText: '', executedActions: [{ tool: cachedSkill.tool, result: skillResult, reason: cachedSkill.description }],
           failedActions: [], pendingWriteActions: [],
           choiceMenu: skillResult.choiceMenu,
-        };
+        });
       }
     } catch { /* 技能執行失敗，繼續正常流程 */ }
   }
@@ -1832,11 +1896,28 @@ export async function autonomousQuery(
 
   intents = intents.filter((intent) => allowedToolNames.has(intent.tool));
 
+  if (isOrderBoundaryMetaMessage(resolvedMessage)) {
+    intents = intents.filter((intent) =>
+      !['create_order', 'cancel_order', 'query_menus', 'recommend_lunch', 'rate_menu_item'].includes(intent.tool),
+    );
+  }
+  if (isMessageBoundaryMetaMessage(resolvedMessage)) {
+    intents = intents.filter((intent) =>
+      !['send_message', 'query_conversations'].includes(intent.tool),
+    );
+  }
+  if (isNotificationBoundaryMetaMessage(resolvedMessage)) {
+    intents = intents.filter((intent) =>
+      !['mark_notifications_read', 'query_notifications'].includes(intent.tool),
+    );
+  }
+  intents = filterCapabilityGapMisfires(resolvedMessage, intents);
+
   if (intents.length === 0) {
-    return {
+    return finishAgentResult({
       intents: [], results: [], totalTimeMs: Date.now() - start,
       contextText: '', executedActions: [], failedActions: [], pendingWriteActions: [],
-    };
+    });
   }
 
   const readIntents = intents.filter(i => !i.isWrite);
@@ -1991,7 +2072,7 @@ export async function autonomousQuery(
     ? `以下是我自主查詢和代理執行的結果（${new Date().toLocaleTimeString('zh-TW')}）：\n\n${contextParts.join('\n\n')}`
     : '';
 
-  return {
+  const agentResult: AgentQueryResult = {
     intents,
     results: readResults,
     totalTimeMs: Date.now() - start,
@@ -2004,6 +2085,8 @@ export async function autonomousQuery(
     ),
     pendingWriteActions: [], // v2 不再有 "pending"，全部自動執行或報告失敗
   };
+
+  return finishAgentResult(agentResult);
 }
 
 // ════════════════════════════════════════════════════════════
