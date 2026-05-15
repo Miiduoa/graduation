@@ -47,6 +47,36 @@
 | AI 測試訓練報告 | repo 根目錄 [`AI助理測試訓練報告.md`](AI助理測試訓練報告.md)（依 xlsx 案例整理之結論、缺口清單與口試參考）                                                                              |
 | 法務文件        | [`docs/legal/`](docs/legal/)                                                                                                                                                            |
 
+<h3 id="readme-maintainers-cheatsheet">README 維護者速查（遠端／workspace／盤點複核）</h3>
+
+- **預設分支**：`main`。**官方遠端**：`origin` → `https://github.com/Miiduoa/graduation.git`（與根目錄「Git／GitHub 工作流程」一致）。
+- **確認與 GitHub 是否同步**：在 repo 根目錄執行 `git fetch origin && git status -sb`。若僅顯示 `## main...origin/main`（無 `[ahead N]`／`[behind N]`），表示 **已與遠端對齊**；此時 `git push origin main` 會回報 `Everything up-to-date` 屬正常（代表沒有未推送的 commit）。
+- **pnpm workspace 成員**（定義於 [`pnpm-workspace.yaml`](pnpm-workspace.yaml)：`apps/*`、`packages/*`、`backend/*`、`workers/*`；根目錄另以 `nodeLinker: hoisted` 統一依賴佈局）：
+
+| 路徑 | `package.json` 的 `name` | 角色 |
+| --- | --- | --- |
+| `/` | `graduation-campus-app` | Root：跨套件 script、工具版本與 `pnpm.overrides` |
+| `apps/mobile/` | `mobile` | Expo 54 / React Native 行動端 |
+| `apps/web/` | `web` | Next.js App Router / PWA |
+| `backend/functions/` | `functions` | Firebase Cloud Functions v2（deploy 前會 `pnpm --filter @campus/shared run build:cjs`，見 [`firebase.json`](firebase.json)） |
+| `packages/shared/` | `@campus/shared` | 跨端 TypeScript 契約、LMS 純函式、學伴引擎等 |
+| `workers/opac-proxy/` | `@campus/opac-proxy-worker` | 可選：HyLib WebPac GraphQL 邊緣代理（Wrangler） |
+
+- **重算「專案快照」表格中的計數**（與本 README **基準日 2026-05-15** 之表一致時，下列指令應得到：974／121／14／56／5／24／26／4／5／12；日後若數字漂移，請以指令輸出為準並更新表格）：
+
+```bash
+git ls-files | wc -l
+find apps/mobile/src/screens -name '*Screen.tsx' | wc -l
+find apps/mobile/src/screens -name '*Stack.tsx' | wc -l
+find apps/mobile/src/__tests__ -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) | wc -l
+git ls-files 'apps/web/**/*.test.ts' 'apps/web/**/*.test.tsx' | wc -l
+git ls-files 'backend/**/*.test.js' | wc -l
+find apps/web -name 'page.tsx' | wc -l
+find apps/web -name 'route.ts' | wc -l
+ls -1 .github/workflows/*.yml | wc -l
+ls -1 apps/mobile/.maestro/flows/*.yaml | wc -l
+```
+
 <h2 id="readme-8-chips">課程卡 8 chip 速覽（Mobile LearnStack）</h2>
 
 底層 **Tab 鍵名**（見 [`apps/mobile/App.tsx`](apps/mobile/App.tsx) `AppTabNavigator`）：**`Today`、`學習`、`校園`、`訊息`**，另 **`我的`** 掛在同一 `Tab.Navigator` 但 **`tabBarButton: () => null`**（多半由 **`HeaderDrawer`** 等方式進入，不占用浮動 TabBar 四格）。請以程式內字面為準：**`收件匣`、`課程`、`教學`** 等舊字面若仍散落在文件，請視為已由 **`訊息`／`學習`** 取代。
@@ -75,11 +105,12 @@
 | **官方遠端** | `origin` → [https://github.com/Miiduoa/graduation.git](https://github.com/Miiduoa/graduation.git) |
 | **預設分支** | `main`（與 `origin/main` 對齊開發時，先 `git pull` 再推） |
 | **推送前** | `git status` 為乾淨工作樹＝變更都已 commit；新檔需先 `git add` 再 `git commit` |
-| **推送** | `git push origin main`（已設 `upstream` 時可簡寫 `git push`） |
+| **推送** | 有未推送的 commit 時：`git push origin main`（已設 `upstream` 時可 `git push`）。若 **工作樹乾淨且與 `origin/main` 無差異**，`git push` 會顯示 **`Everything up-to-date`**，代表遠端已含目前所有變更。 |
 | **CI** | push 至 `main` 會跑 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)（lint、測試、rules、build 等；細節見下文「GitHub CI 與 Release」） |
 
 ## 目錄
 
+- [README 維護者速查（遠端／workspace／盤點複核）](#readme-maintainers-cheatsheet)
 - [課程卡 8 chip 速覽（Mobile LearnStack）](#readme-8-chips)
 - [Git／GitHub 工作流程（簡述）](#readme-git-github)
 - [這個專案是什麼](#這個專案是什麼)
