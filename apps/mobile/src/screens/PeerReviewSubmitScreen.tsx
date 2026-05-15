@@ -5,7 +5,7 @@
  * 對應引擎：packages/shared/src/lms/rubricScoring
  * 對應端點：POST /courses/{id}/peer_reviews/{rid}/submissions
  */
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   ScrollView,
   View,
@@ -22,6 +22,14 @@ import { useNavigation } from '@react-navigation/native';
 
 import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
 import { tcFetchPeerReviews } from '../services/tronClassClient';
+import { isDemoCourseId, demoFetchPeerReviews } from '../data/demoCoursesAdapter';
+import { theme } from '../ui/theme';
+import { EmptyState } from '../ui/components';
+import {
+  CourseChipHeader,
+  CourseChipLoading,
+  courseChipScrollContentStyle,
+} from '../ui/courseChipShell';
 
 type RouteProps = {
   route?: {
@@ -93,8 +101,14 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
         return;
       }
       try {
-        const list = await tcFetchPeerReviews(courseId);
-        setAvailableReviews(list);
+        if (isDemoCourseId(courseId)) {
+          setAvailableReviews(
+            demoFetchPeerReviews(courseId) as Awaited<ReturnType<typeof tcFetchPeerReviews>>,
+          );
+        } else {
+          const list = await tcFetchPeerReviews(courseId);
+          setAvailableReviews(list);
+        }
       } catch {
         /* swallow */
       } finally {
@@ -190,67 +204,73 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
   };
 
   if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8, color: '#6b7280' }}>正在載入本課互評任務⋯⋯</Text>
-      </View>
-    );
+    return <CourseChipLoading title="正在載入互評任務" subtitle="抓取分配名單與 Rubric…" />;
   }
 
   // 沒有線上互評任務 + 沒有傳入 reviewId → 顯示空狀態
   if (availableReviews.length === 0 && !props.route?.params?.rubric) {
     return (
-      <View style={{ flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ fontSize: 48 }}>💯</Text>
-        <Text style={{ marginTop: 12, fontSize: 16, fontWeight: '700', color: '#111827' }}>
-          本課程目前沒有同儕互評任務
-        </Text>
-        <Text style={{ marginTop: 6, fontSize: 13, color: '#6b7280', textAlign: 'center' }}>
-          老師發布互評任務後，這裡就會出現你要評的同學作業。
-        </Text>
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={{
-            marginTop: 24,
-            paddingHorizontal: 24,
-            paddingVertical: 10,
-            backgroundColor: '#1F4E78',
-            borderRadius: 8,
-          }}
-        >
-          <Text style={{ color: '#fff', fontWeight: '600' }}>返回</Text>
-        </Pressable>
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme.colors.surfaceMuted,
+          paddingHorizontal: theme.layout.screenHorizontalPadding,
+          justifyContent: 'center',
+          paddingBottom: theme.space.xxl,
+        }}
+      >
+        <CourseChipHeader
+          emoji="💯"
+          eyebrow="同儕互評"
+          title={passedAssignmentTitle}
+          meta={courseId ? `課程 ID ${courseId}` : undefined}
+        />
+        <EmptyState
+          icon="ribbon-outline"
+          title="尚未有互評任務"
+          subtitle="老師在 TronClass 發布並分配互評後，你評分的對象會出現在這裡。"
+          hint="可先從課程卡重新進入，或請教師確認互評時程。"
+          showCalmHero
+          actionText="返回上一頁"
+          onAction={() => navigation.goBack()}
+        />
       </View>
     );
   }
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
-        {/* 多份互評切換 */}
+      <ScrollView contentContainerStyle={courseChipScrollContentStyle(true)}>
+        <CourseChipHeader
+          emoji="💯"
+          eyebrow="同儕互評"
+          title={assignmentTitle}
+          meta={`對象 · ${anonymousAuthor}`}
+        />
         {availableReviews.length > 1 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
             {availableReviews.map((r, i) => (
               <Pressable
-                key={r.id}
+                key={String(r.id)}
                 onPress={() => setActiveReviewIdx(i)}
                 style={{
                   paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                  backgroundColor: i === activeReviewIdx ? '#1F4E78' : '#fff',
+                  paddingVertical: 10,
+                  borderRadius: theme.radius.full,
+                  backgroundColor: i === activeReviewIdx ? theme.colors.primary : theme.colors.surface,
                   borderWidth: 1,
-                  borderColor: i === activeReviewIdx ? '#1F4E78' : '#e5e7eb',
+                  borderColor: i === activeReviewIdx ? theme.colors.primary : theme.colors.border,
                   marginRight: 8,
+                  minHeight: 40,
+                  justifyContent: 'center',
                 }}
               >
                 <Text
                   style={{
-                    color: i === activeReviewIdx ? '#fff' : '#111827',
+                    color: i === activeReviewIdx ? theme.colors.onAccent : theme.colors.text,
                     fontSize: 12,
                   }}
                 >
@@ -262,22 +282,18 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           </ScrollView>
         )}
 
-        {/* 頂部 */}
         <View
           style={{
-            backgroundColor: '#1F4E78',
-            borderRadius: 12,
-            padding: 16,
+            marginTop: theme.space.sm,
+            backgroundColor: theme.colors.infoSoft,
+            borderRadius: theme.radius.lg,
+            padding: theme.space.md,
+            borderWidth: 1,
+            borderColor: `${theme.colors.info}44`,
           }}
         >
-          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700' }}>
-            {assignmentTitle}
-          </Text>
-          <Text style={{ color: '#dbeafe', fontSize: 13, marginTop: 4 }}>
-            互評對象：{anonymousAuthor}
-          </Text>
-          <Text style={{ color: '#dbeafe', fontSize: 12, marginTop: 8, fontStyle: 'italic' }}>
-            提示：對方看不到你是誰，請給有建設性的回饋。
+          <Text style={{ color: theme.colors.text, fontSize: 13, lineHeight: 20 }}>
+            提示：對方看不到你是誰，請給有建設性的匿名回饋。
           </Text>
         </View>
 
@@ -285,30 +301,33 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
         <View
           style={{
             marginTop: 16,
-            backgroundColor: '#fff',
-            borderRadius: 12,
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radius.lg,
             padding: 14,
             borderWidth: 1,
-            borderColor: '#e5e7eb',
+            borderColor: theme.colors.border,
           }}
         >
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 8 }}>
+          <Text
+            style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text, marginBottom: 8 }}
+          >
             📄 對方的作業
           </Text>
-          <Text style={{ fontSize: 13, color: '#374151', lineHeight: 20 }}>
+          <Text style={{ fontSize: 13, color: theme.colors.textSecondary, lineHeight: 20 }}>
             {submissionContent}
           </Text>
           {submissionAttachments.map((att, i) => (
             <Pressable
-              key={i}
+              key={`att-${i}-${att.name}`}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 6,
                 padding: 8,
                 marginTop: 6,
-                backgroundColor: '#f3f4f6',
-                borderRadius: 6,
+                backgroundColor: theme.colors.surface2,
+                borderRadius: theme.radius.md,
+                minHeight: 44,
               }}
               onPress={() =>
                 navigation.navigate('CourseMaterialViewer', {
@@ -318,14 +337,14 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
                 })
               }
             >
-              <Ionicons name="document-outline" size={16} color="#6b7280" />
-              <Text style={{ fontSize: 13, color: '#1F4E78' }}>{att.name}</Text>
+              <Ionicons name="document-outline" size={16} color={theme.colors.muted} />
+              <Text style={{ fontSize: 13, color: theme.colors.primary }}>{att.name}</Text>
             </Pressable>
           ))}
         </View>
 
         {/* Rubric 評分 */}
-        <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '700', color: '#111827' }}>
+        <Text style={{ marginTop: 20, fontSize: 16, fontWeight: '700', color: theme.colors.text }}>
           🎯 依 Rubric 打分
         </Text>
         {rubric.criteria.map((c) => (
@@ -333,11 +352,11 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
             key={c.id}
             style={{
               marginTop: 12,
-              backgroundColor: '#fff',
-              borderRadius: 12,
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radius.lg,
               padding: 14,
               borderWidth: 1,
-              borderColor: '#e5e7eb',
+              borderColor: theme.colors.border,
             }}
           >
             <View
@@ -347,8 +366,10 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
                 alignItems: 'center',
               }}
             >
-              <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>{c.title}</Text>
-              <Text style={{ fontSize: 12, color: '#6b7280' }}>權重 {c.weight}%</Text>
+              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}>
+                {c.title}
+              </Text>
+              <Text style={{ fontSize: 12, color: theme.colors.muted }}>權重 {c.weight}%</Text>
             </View>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
               {c.levels.map((l) => (
@@ -360,14 +381,16 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
                   style={{
                     flex: 1,
                     padding: 10,
-                    borderRadius: 8,
-                    backgroundColor: scores[c.id] === l.id ? '#1F4E78' : '#f3f4f6',
+                    borderRadius: theme.radius.md,
+                    backgroundColor: scores[c.id] === l.id ? theme.colors.primary : theme.colors.surface2,
                     alignItems: 'center',
+                    minHeight: 44,
+                    justifyContent: 'center',
                   }}
                 >
                   <Text
                     style={{
-                      color: scores[c.id] === l.id ? '#fff' : '#111827',
+                      color: scores[c.id] === l.id ? theme.colors.onAccent : theme.colors.text,
                       fontWeight: '600',
                     }}
                   >
@@ -375,7 +398,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
                   </Text>
                   <Text
                     style={{
-                      color: scores[c.id] === l.id ? '#fff' : '#6b7280',
+                      color: scores[c.id] === l.id ? theme.colors.onAccent : theme.colors.muted,
                       fontSize: 11,
                       marginTop: 2,
                     }}
@@ -390,16 +413,18 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
               onChangeText={(t) => setComments((cs) => ({ ...cs, [c.id]: t }))}
               editable={!submitted}
               placeholder="這一項的具體回饋（選填）"
+              placeholderTextColor={theme.colors.muted}
               style={{
                 marginTop: 10,
-                backgroundColor: '#f9fafb',
-                borderRadius: 8,
+                backgroundColor: theme.colors.surfaceMuted,
+                borderRadius: theme.radius.md,
                 padding: 8,
                 fontSize: 13,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: theme.colors.border,
                 minHeight: 50,
                 textAlignVertical: 'top',
+                color: theme.colors.text,
               }}
               multiline
             />
@@ -412,19 +437,21 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
             style={{
               marginTop: 16,
               padding: 14,
-              backgroundColor: '#dcfce7',
-              borderRadius: 12,
+              backgroundColor: theme.colors.successSoft,
+              borderRadius: theme.radius.lg,
+              borderWidth: 1,
+              borderColor: `${theme.colors.success}33`,
             }}
           >
-            <Text style={{ fontSize: 13, color: '#15803d' }}>即時計算總分</Text>
-            <Text style={{ fontSize: 28, fontWeight: '700', color: '#14532d', marginTop: 2 }}>
+            <Text style={{ fontSize: 13, color: theme.colors.success }}>即時計算總分</Text>
+            <Text style={{ fontSize: 28, fontWeight: '700', color: theme.colors.text, marginTop: 2 }}>
               {evaluation.totalScore} / 100
             </Text>
           </View>
         )}
 
         {/* 整體回饋 */}
-        <Text style={{ marginTop: 16, fontSize: 14, fontWeight: '600', color: '#111827' }}>
+        <Text style={{ marginTop: 16, fontSize: 14, fontWeight: '600', color: theme.colors.text }}>
           💬 整體回饋（會匿名給對方）
         </Text>
         <TextInput
@@ -432,17 +459,19 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           onChangeText={setOverallFeedback}
           editable={!submitted}
           placeholder="例如：你的論述很清晰，但建議補一個反例會更有說服力。"
+          placeholderTextColor={theme.colors.muted}
           multiline
           style={{
             marginTop: 6,
-            backgroundColor: '#fff',
-            borderRadius: 8,
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radius.md,
             padding: 10,
             fontSize: 13,
             borderWidth: 1,
-            borderColor: '#e5e7eb',
+            borderColor: theme.colors.border,
             minHeight: 80,
             textAlignVertical: 'top',
+            color: theme.colors.text,
           }}
         />
 
@@ -453,16 +482,24 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
             style={{
               marginTop: 24,
               padding: 14,
-              borderRadius: 12,
-              backgroundColor: complete ? '#1F4E78' : '#9ca3af',
+              borderRadius: theme.radius.lg,
+              backgroundColor: complete ? theme.colors.primary : theme.colors.disabledBg,
               alignItems: 'center',
               opacity: submitting ? 0.6 : 1,
+              minHeight: 52,
+              justifyContent: 'center',
             }}
           >
             {submitting ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={theme.colors.onAccent} />
             ) : (
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>
+              <Text
+                style={{
+                  color: complete ? theme.colors.onAccent : theme.colors.disabledText,
+                  fontSize: 16,
+                  fontWeight: '700',
+                }}
+              >
                 {complete ? '送出互評' : '請先完成所有評分項'}
               </Text>
             )}

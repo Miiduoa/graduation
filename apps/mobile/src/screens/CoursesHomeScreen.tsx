@@ -1768,6 +1768,14 @@ export function CoursesHomeScreen(props: any) {
         setTcCourses(courses);
       } else if (puFallback.courses.length > 0) {
         setTcCourses(puFallback.courses);
+      } else {
+        // 完全沒任何快取 → 顯示 5 門 demo 課程，所有 chip 都可操作
+        try {
+          const { demoFetchCourses } = await import('../data/demoCoursesAdapter');
+          setTcCourses(demoFetchCourses() as any);
+        } catch {
+          /* swallow */
+        }
       }
       if (activities) setTcActivities(activities);
       if (attendance) setTcAttendance(attendance);

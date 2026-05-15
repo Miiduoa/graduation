@@ -26,6 +26,22 @@ import {
   tcFetchExamSubmissions,
   tcFetchHomeworkActivities,
 } from '../services/tronClassClient';
+import {
+  isDemoCourseId,
+  demoFetchSelfScore,
+  demoFetchScoreItems,
+  demoFetchCourseExams,
+  demoFetchExamSubmissions,
+  demoFetchHomeworkActivities,
+} from '../data/demoCoursesAdapter';
+import { theme } from '../ui/theme';
+import { EmptyState } from '../ui/components';
+import {
+  CourseChipErrorBanner,
+  CourseChipHeader,
+  CourseChipLoading,
+  courseChipScrollContentStyle,
+} from '../ui/courseChipShell';
 
 type RouteProps = {
   route?: {
@@ -69,12 +85,20 @@ export default function CourseScoresScreen(props: RouteProps) {
     }
 
     try {
-      const [self, items, exams, homeworks] = await Promise.all([
-        tcFetchSelfScore(courseId).catch(() => null),
-        tcFetchScoreItems(courseId).catch(() => []),
-        tcFetchCourseExams(courseId).catch(() => []),
-        tcFetchHomeworkActivities(courseId).catch(() => []),
-      ]);
+      const useDemo = isDemoCourseId(courseId);
+      const [self, items, exams, homeworks] = useDemo
+        ? [
+            demoFetchSelfScore(courseId),
+            demoFetchScoreItems(courseId),
+            demoFetchCourseExams(courseId),
+            demoFetchHomeworkActivities(courseId),
+          ]
+        : await Promise.all([
+            tcFetchSelfScore(courseId).catch(() => null),
+            tcFetchScoreItems(courseId).catch(() => []),
+            tcFetchCourseExams(courseId).catch(() => []),
+            tcFetchHomeworkActivities(courseId).catch(() => []),
+          ]);
 
       setSelfScore(self);
 
@@ -96,7 +120,9 @@ export default function CourseScoresScreen(props: RouteProps) {
 
       // 測驗分數
       for (const e of exams) {
-        const sub = await tcFetchExamSubmissions(e.id).catch(() => null);
+        const sub = useDemo
+          ? demoFetchExamSubmissions(e.id)
+          : await tcFetchExamSubmissions(e.id).catch(() => null);
         const score = sub?.exam_final_score ?? sub?.exam_score ?? null;
         out.push({
           id: `exam-${e.id}`,
@@ -152,20 +178,27 @@ export default function CourseScoresScreen(props: RouteProps) {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8, color: '#6b7280' }}>正在載入課程成績⋯⋯</Text>
-      </View>
+      <CourseChipLoading title="正在載入課程成績" subtitle="同步作業、測驗與評分項目…" />
     );
   }
 
+  const weightedSelf =
+    selfScore &&
+    typeof selfScore === 'object' &&
+    selfScore !== null &&
+    typeof (selfScore as { final_score?: unknown }).final_score === 'number'
+      ? `${(selfScore as { final_score: number }).final_score}`
+      : null;
+
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
-      contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
+      style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
+      contentContainerStyle={courseChipScrollContentStyle(true)}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
+          title="重新整理"
+          tintColor={theme.colors.primary}
           onRefresh={() => {
             setRefreshing(true);
             load();
@@ -173,50 +206,70 @@ export default function CourseScoresScreen(props: RouteProps) {
         />
       }
     >
+      <CourseChipHeader
+        emoji="📊"
+        eyebrow="課內成績"
+        title={groupName}
+        meta={
+          weightedSelf !== null
+            ? `系統試算總分 ${weightedSelf}（僅供參考） · 評分項目 ${stats.count}`
+            : `評分項目 ${stats.count}`
+        }
+      />
+
       {/* 頂部統計 */}
-      <View style={{ backgroundColor: '#1F4E78', borderRadius: 12, padding: 16 }}>
-        <Text style={{ color: '#dbeafe', fontSize: 12 }}>📊 {groupName}</Text>
+      <View
+        style={{
+          backgroundColor: theme.colors.primary,
+          borderRadius: theme.radius.lg,
+          padding: theme.space.lg,
+        }}
+      >
+        <Text style={{ color: theme.colors.onAccent, fontSize: 12, opacity: 0.92 }}>
+          已批改表現快照
+        </Text>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
           <View>
-            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 28, fontWeight: '800' }}>
               {stats.avgPct ?? '—'}
               {stats.avgPct !== null && <Text style={{ fontSize: 14 }}>%</Text>}
             </Text>
-            <Text style={{ color: '#cbd5e1', fontSize: 11 }}>已批改項目平均</Text>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 11, opacity: 0.88 }}>
+              已批改項目平均
+            </Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 24, fontWeight: '800' }}>
               {stats.gradedCount} / {stats.count}
             </Text>
-            <Text style={{ color: '#cbd5e1', fontSize: 11 }}>已批改 / 總項</Text>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 11, opacity: 0.88 }}>
+              已批改 / 總項
+            </Text>
           </View>
         </View>
       </View>
 
-      {error && (
-        <View style={{ marginTop: 12, padding: 12, backgroundColor: '#fee2e2', borderRadius: 8 }}>
-          <Text style={{ color: '#991b1b' }}>⚠️ {error}</Text>
-        </View>
-      )}
+      {error ? <CourseChipErrorBanner message={error} onRetry={() => load()} /> : null}
 
       {rows.length === 0 && !error ? (
-        <View style={{ alignItems: 'center', padding: 32 }}>
-          <Text style={{ fontSize: 48 }}>📊</Text>
-          <Text style={{ color: '#6b7280', marginTop: 12, textAlign: 'center' }}>
-            這門課目前還沒有任何評分項目。{'\n'}有的話會自動出現在這裡。
-          </Text>
-        </View>
+        <EmptyState
+          icon="stats-chart-outline"
+          title="尚無可顯示的成績"
+          subtitle="當教師發布作業、測驗或評分項目後，分數會自動匯總到此頁。"
+          hint="請確認已登入課務帳號，或稍後下拉重新整理。"
+          showCalmHero
+        />
       ) : (
         rows.map((r) => {
           const pct = r.score !== null && r.totalScore ? (r.score / r.totalScore) * 100 : null;
           const tone =
             r.status === 'graded'
               ? pct !== null && pct >= 60
-                ? '#16a34a'
-                : '#dc2626'
+                ? theme.colors.success
+                : theme.colors.danger
               : r.status === 'pending'
-              ? '#6b7280'
-              : '#dc2626';
+              ? theme.colors.muted
+              : theme.colors.danger;
           const catLabel =
             r.category === 'homework'
               ? '作業'
@@ -230,24 +283,27 @@ export default function CourseScoresScreen(props: RouteProps) {
               key={r.id}
               style={{
                 marginTop: 8,
-                backgroundColor: '#fff',
-                borderRadius: 12,
+                backgroundColor: theme.colors.surface,
+                borderRadius: theme.radius.lg,
                 padding: 14,
                 borderLeftWidth: 4,
                 borderLeftColor: tone,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: theme.colors.border,
               }}
             >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }} numberOfLines={1}>
+                  <Text
+                    style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text }}
+                    numberOfLines={1}
+                  >
                     {r.title}
                   </Text>
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
-                    <Text style={{ fontSize: 11, color: '#6b7280' }}>{catLabel}</Text>
+                    <Text style={{ fontSize: 11, color: theme.colors.muted }}>{catLabel}</Text>
                     {r.weight !== null && (
-                      <Text style={{ fontSize: 11, color: '#6b7280' }}>權重 {r.weight}%</Text>
+                      <Text style={{ fontSize: 11, color: theme.colors.muted }}>權重 {r.weight}%</Text>
                     )}
                   </View>
                 </View>
@@ -256,14 +312,16 @@ export default function CourseScoresScreen(props: RouteProps) {
                     <>
                       <Text style={{ fontSize: 22, fontWeight: '800', color: tone }}>
                         {r.score}
-                        {r.totalScore ? <Text style={{ fontSize: 12 }}> / {r.totalScore}</Text> : null}
+                        {r.totalScore ? (
+                          <Text style={{ fontSize: 12 }}> / {r.totalScore}</Text>
+                        ) : null}
                       </Text>
                       {pct !== null && (
                         <Text style={{ fontSize: 11, color: tone }}>{Math.round(pct)}%</Text>
                       )}
                     </>
                   ) : (
-                    <Text style={{ fontSize: 12, color: '#9ca3af' }}>
+                    <Text style={{ fontSize: 12, color: theme.colors.muted }}>
                       {r.status === 'pending' ? '待批改' : '未繳交'}
                     </Text>
                   )}
@@ -274,7 +332,7 @@ export default function CourseScoresScreen(props: RouteProps) {
                   style={{
                     marginTop: 6,
                     height: 4,
-                    backgroundColor: '#e5e7eb',
+                    backgroundColor: theme.colors.border,
                     borderRadius: 2,
                     overflow: 'hidden',
                   }}

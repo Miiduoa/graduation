@@ -63,6 +63,18 @@ import {
   type TCHomeworkDetail,
   type TCHomeworkSubmission as TCHWSubmission,
 } from '../services/tronClassClient';
+import {
+  isDemoCourseId,
+  demoFetchModules,
+  demoFetchCourseActivities,
+  demoFetchCourseExams,
+  demoFetchExamSubmissions,
+  demoFetchExamDetail,
+  demoFetchExamAttempts,
+  demoFetchHomeworkActivities,
+  demoFetchHomeworkDetail,
+  demoFetchHomeworkSubmissions,
+} from '../data/demoCoursesAdapter';
 
 // ── 型別定義 ──────────────────────────────────────
 
@@ -1179,6 +1191,7 @@ export function CourseModulesScreen(props: any) {
   const courseId = Number(props?.route?.params?.groupId ?? 0);
   const courseName = String(props?.route?.params?.groupName ?? '課程');
   const auth = useAuth();
+  const demoMode = isDemoCourseId(courseId);
 
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; title: string } | null>(null);
@@ -1194,15 +1207,27 @@ export function CourseModulesScreen(props: any) {
     error,
     reload,
   } = useAsyncList<ModuleWithContent>(async () => {
-    if (!auth.user || !courseId || isNaN(courseId)) return [];
+    if (!courseId || isNaN(courseId)) return [];
+
+    // Demo course short-circuit — 不依賴 TronClass session
+    const useDemo = isDemoCourseId(courseId);
 
     // 同時抓取：模組、活動（教材）、考試、作業
-    const [modules, activities, exams, rawHomeworks] = await Promise.all([
-      tcFetchModules(courseId).catch(() => [] as TCModule[]),
-      tcFetchCourseActivities(courseId).catch(() => [] as TCCourseActivity[]),
-      tcFetchCourseExams(courseId).catch(() => [] as TCExamInfo[]),
-      tcFetchHomeworkActivities(courseId).catch(() => [] as any[]),
-    ]);
+    const [modules, activities, exams, rawHomeworks] = useDemo
+      ? await Promise.all([
+          Promise.resolve(demoFetchModules(courseId) as TCModule[]),
+          Promise.resolve(demoFetchCourseActivities(courseId) as TCCourseActivity[]),
+          Promise.resolve(demoFetchCourseExams(courseId) as TCExamInfo[]),
+          Promise.resolve(demoFetchHomeworkActivities(courseId) as any[]),
+        ])
+      : !auth.user
+        ? [[] as TCModule[], [] as TCCourseActivity[], [] as TCExamInfo[], [] as any[]]
+        : await Promise.all([
+            tcFetchModules(courseId).catch(() => [] as TCModule[]),
+            tcFetchCourseActivities(courseId).catch(() => [] as TCCourseActivity[]),
+            tcFetchCourseExams(courseId).catch(() => [] as TCExamInfo[]),
+            tcFetchHomeworkActivities(courseId).catch(() => [] as any[]),
+          ]);
 
     // 即使 modules 為空，只要有 activities/exams/homework 仍要顯示
     // 用一個「未分類章節」collect 所有沒有 module_id 的內容
@@ -1223,11 +1248,17 @@ export function CourseModulesScreen(props: any) {
     // 批量取得考試分數 + 詳細資訊 + 作答紀錄
     const examWithDetails = await Promise.all(
       exams.map(async (exam): Promise<ExamWithDetails> => {
-        const [submission, detail, attempts] = await Promise.all([
-          tcFetchExamSubmissions(exam.id).catch(() => null),
-          tcFetchExamDetail(courseId, exam.id).catch(() => null),
-          tcFetchExamAttempts(courseId, exam.id).catch(() => [] as TCExamAttempt[]),
-        ]);
+        const [submission, detail, attempts] = useDemo
+          ? [
+              demoFetchExamSubmissions(exam.id) as TCExamSubmission | null,
+              demoFetchExamDetail(courseId, exam.id) as TCExamDetail | null,
+              demoFetchExamAttempts(courseId, exam.id) as TCExamAttempt[],
+            ]
+          : await Promise.all([
+              tcFetchExamSubmissions(exam.id).catch(() => null),
+              tcFetchExamDetail(courseId, exam.id).catch(() => null),
+              tcFetchExamAttempts(courseId, exam.id).catch(() => [] as TCExamAttempt[]),
+            ]);
         return { ...exam, submission, detail, attempts };
       }),
     );
@@ -1236,10 +1267,15 @@ export function CourseModulesScreen(props: any) {
     const homeworkItems: HomeworkItem[] = await Promise.all(
       rawHomeworks.map(async (hw: any): Promise<HomeworkItem> => {
         const hwId = Number(hw.id ?? 0);
-        const [detail, submissions] = await Promise.all([
-          tcFetchHomeworkDetail(courseId, hwId).catch(() => null),
-          tcFetchHomeworkSubmissions(courseId, hwId).catch(() => [] as TCHWSubmission[]),
-        ]);
+        const [detail, submissions] = useDemo
+          ? [
+              demoFetchHomeworkDetail(courseId, hwId) as TCHomeworkDetail | null,
+              demoFetchHomeworkSubmissions(courseId, hwId) as TCHWSubmission[],
+            ]
+          : await Promise.all([
+              tcFetchHomeworkDetail(courseId, hwId).catch(() => null),
+              tcFetchHomeworkSubmissions(courseId, hwId).catch(() => [] as TCHWSubmission[]),
+            ]);
         return {
           id: hwId,
           title: String(hw.title ?? ''),
@@ -1292,7 +1328,8 @@ export function CourseModulesScreen(props: any) {
     [moduleData],
   );
 
-  if (!auth.user) {
+  // Demo 課程不需登入；非 demo 課程才需登入
+  if (!auth.user && !demoMode) {
     return (
       <Screen>
         <Card title="教材單元" subtitle="請先登入以查看課程教材">

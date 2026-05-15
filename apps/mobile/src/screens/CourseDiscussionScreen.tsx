@@ -7,7 +7,7 @@
  *
  * 使用真實資料；空資料時顯示空狀態而非 mock。
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ScrollView,
   View,
@@ -27,6 +27,15 @@ import {
   tcPostDiscussion,
   type TCDiscussion,
 } from '../services/tronClassClient';
+import { isDemoCourseId, demoFetchDiscussions } from '../data/demoCoursesAdapter';
+import { theme } from '../ui/theme';
+import { EmptyState } from '../ui/components';
+import {
+  CourseChipErrorBanner,
+  CourseChipHeader,
+  CourseChipLoading,
+  courseChipScrollContentStyle,
+} from '../ui/courseChipShell';
 
 type RouteProps = {
   route?: {
@@ -51,6 +60,16 @@ export default function CourseDiscussionScreen(props: RouteProps) {
   const [newBody, setNewBody] = useState('');
   const [posting, setPosting] = useState(false);
 
+  /** Demo 模式下使用者在本機新增的討論串（依 courseId 分桶）；下拉重新整理時與 mock 合併，避免貼文被刷掉 */
+  const demoUserThreadsByCourseRef = useRef<Map<number, TCDiscussion[]>>(new Map());
+
+  const mergeDemoThreads = useCallback((cid: number, base: TCDiscussion[]) => {
+    const userAdded = demoUserThreadsByCourseRef.current.get(cid) ?? [];
+    const baseIds = new Set(base.map((b) => b.id));
+    const extras = userAdded.filter((t) => !baseIds.has(t.id));
+    return [...extras, ...base];
+  }, []);
+
   const load = useCallback(async () => {
     setError(null);
     if (!courseId) {
@@ -60,15 +79,21 @@ export default function CourseDiscussionScreen(props: RouteProps) {
       return;
     }
     try {
-      const data = await tcFetchDiscussions(courseId);
-      setThreads(data);
+      if (isDemoCourseId(courseId)) {
+        // demo course → 直接用 mock data，不打 TronClass
+        const base = demoFetchDiscussions(courseId) as TCDiscussion[];
+        setThreads(mergeDemoThreads(courseId, base));
+      } else {
+        const data = await tcFetchDiscussions(courseId);
+        setThreads(data);
+      }
     } catch (e) {
       setError((e as Error)?.message ?? '載入失敗');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [courseId]);
+  }, [courseId, mergeDemoThreads]);
 
   useEffect(() => {
     load();
@@ -82,6 +107,36 @@ export default function CourseDiscussionScreen(props: RouteProps) {
     if (!courseId) return;
     setPosting(true);
     try {
+      if (isDemoCourseId(courseId)) {
+        // demo course → 本地新增、不打後端
+        const newId = Date.now();
+        const newThread: TCDiscussion = {
+          id: newId,
+          course_id: courseId,
+          title: newTitle.trim(),
+          description: newBody.trim() || '剛剛建立的討論',
+          post_count: 0,
+          created_at: new Date().toISOString(),
+          last_post_at: new Date().toISOString(),
+          is_locked: false,
+        };
+        const prevUser = demoUserThreadsByCourseRef.current.get(courseId) ?? [];
+        demoUserThreadsByCourseRef.current.set(courseId, [newThread, ...prevUser]);
+        setThreads(
+          mergeDemoThreads(courseId, demoFetchDiscussions(courseId) as TCDiscussion[]),
+        );
+        try {
+          const { onDiscussionPosted } = await import('../services/companionHooks');
+          onDiscussionPosted({ threadId: String(newId) });
+        } catch {
+          /* swallow */
+        }
+        setNewTitle('');
+        setNewBody('');
+        setComposing(false);
+        return;
+      }
+
       const result = await tcPostDiscussion(courseId, {
         title: newTitle.trim(),
         content: newBody.trim(),
@@ -105,27 +160,31 @@ export default function CourseDiscussionScreen(props: RouteProps) {
     } finally {
       setPosting(false);
     }
-  }, [newTitle, newBody, courseId, load]);
+  }, [newTitle, newBody, courseId, load, mergeDemoThreads]);
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator />
-        <Text style={{ marginTop: 8, color: '#6b7280' }}>正在載入課程討論⋯⋯</Text>
-      </View>
+      <CourseChipLoading
+        title="正在載入課程討論"
+        subtitle="整理討論串與回覆資訊…"
+        accessibilityHint="載入完成後即可瀏覽與發起討論"
+      />
     );
   }
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
-        contentContainerStyle={{ padding: 16, paddingBottom: 80 }}
+        contentContainerStyle={courseChipScrollContentStyle(true)}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
+            title="重新整理"
+            tintColor={theme.colors.primary}
+            accessibilityLabel="重新整理討論列表"
             onRefresh={() => {
               setRefreshing(true);
               load();
@@ -133,23 +192,16 @@ export default function CourseDiscussionScreen(props: RouteProps) {
           />
         }
       >
-        <Text style={{ fontSize: 24, fontWeight: '700', color: '#111827' }}>{groupName}</Text>
-        <Text style={{ color: '#6b7280', marginTop: 4 }}>
-          討論串 {threads.length} 則
-        </Text>
+        <CourseChipHeader
+          emoji="💬"
+          eyebrow="課程討論"
+          title={groupName}
+          meta={`討論串 ${threads.length} 則`}
+        />
 
-        {error && (
-          <View
-            style={{
-              marginTop: 12,
-              padding: 12,
-              backgroundColor: '#fee2e2',
-              borderRadius: 8,
-            }}
-          >
-            <Text style={{ color: '#991b1b', fontSize: 13 }}>⚠️ {error}</Text>
-          </View>
-        )}
+        {error ? (
+          <CourseChipErrorBanner message={error} onRetry={() => load()} />
+        ) : null}
 
         {/* 新發文 */}
         {composing ? (
@@ -157,14 +209,17 @@ export default function CourseDiscussionScreen(props: RouteProps) {
             style={{
               marginTop: 16,
               padding: 12,
-              backgroundColor: '#fff',
-              borderRadius: 12,
+              backgroundColor: theme.colors.surface,
+              borderRadius: theme.radius.lg,
               borderWidth: 1,
-              borderColor: '#e5e7eb',
+              borderColor: theme.colors.border,
             }}
           >
             <TextInput
               placeholder="想討論的問題（限 60 字）"
+              placeholderTextColor={theme.colors.muted}
+              accessibilityLabel="討論標題"
+              accessibilityHint="限 60 字"
               maxLength={60}
               value={newTitle}
               onChangeText={setNewTitle}
@@ -173,11 +228,14 @@ export default function CourseDiscussionScreen(props: RouteProps) {
                 fontWeight: '600',
                 padding: 8,
                 borderBottomWidth: 1,
-                borderBottomColor: '#e5e7eb',
+                borderBottomColor: theme.colors.border,
+                color: theme.colors.text,
               }}
             />
             <TextInput
               placeholder="補充內容（選填）"
+              placeholderTextColor={theme.colors.muted}
+              accessibilityLabel="討論內容"
               value={newBody}
               onChangeText={setNewBody}
               multiline
@@ -185,13 +243,15 @@ export default function CourseDiscussionScreen(props: RouteProps) {
               style={{
                 fontSize: 14,
                 padding: 8,
-                color: '#374151',
+                color: theme.colors.textSecondary,
                 minHeight: 80,
                 textAlignVertical: 'top',
               }}
             />
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="取消發文"
                 onPress={() => {
                   if (!posting) {
                     setComposing(false);
@@ -202,94 +262,110 @@ export default function CourseDiscussionScreen(props: RouteProps) {
                 style={{
                   flex: 1,
                   padding: 10,
-                  borderRadius: 8,
+                  borderRadius: theme.radius.md,
                   borderWidth: 1,
-                  borderColor: '#e5e7eb',
+                  borderColor: theme.colors.border,
                   alignItems: 'center',
+                  minHeight: 44,
+                  justifyContent: 'center',
                 }}
               >
-                <Text style={{ color: '#6b7280' }}>取消</Text>
+                <Text style={{ color: theme.colors.muted }}>取消</Text>
               </Pressable>
               <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="送出討論"
                 onPress={handlePost}
                 disabled={posting}
                 style={{
                   flex: 1,
                   padding: 10,
-                  borderRadius: 8,
-                  backgroundColor: '#1F4E78',
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.primary,
                   alignItems: 'center',
                   opacity: posting ? 0.5 : 1,
+                  minHeight: 44,
+                  justifyContent: 'center',
                 }}
               >
                 {posting ? (
-                  <ActivityIndicator color="#fff" size="small" />
+                  <ActivityIndicator color={theme.colors.onAccent} size="small" />
                 ) : (
-                  <Text style={{ color: '#fff', fontWeight: '700' }}>送出討論</Text>
+                  <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>送出討論</Text>
                 )}
               </Pressable>
             </View>
           </View>
         ) : (
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="發起新討論"
             onPress={() => setComposing(true)}
             style={{
               marginTop: 16,
               padding: 14,
-              backgroundColor: '#1F4E78',
-              borderRadius: 12,
+              backgroundColor: theme.colors.primary,
+              borderRadius: theme.radius.lg,
               flexDirection: 'row',
               alignItems: 'center',
               gap: 8,
               justifyContent: 'center',
+              minHeight: 48,
             }}
           >
-            <Ionicons name="add-circle-outline" size={18} color="#fff" />
-            <Text style={{ color: '#fff', fontWeight: '700' }}>發起新討論</Text>
+            <Ionicons name="add-circle-outline" size={18} color={theme.colors.onAccent} />
+            <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>發起新討論</Text>
           </Pressable>
         )}
 
         {/* 討論串列表 */}
         {threads.length === 0 && !error ? (
-          <View style={{ alignItems: 'center', padding: 32, gap: 8 }}>
-            <Text style={{ fontSize: 48 }}>💬</Text>
-            <Text style={{ color: '#6b7280', fontSize: 14, textAlign: 'center' }}>
-              這門課還沒有任何討論。{'\n'}你可以是第一個發問的人！
-            </Text>
-          </View>
+          <EmptyState
+            icon="chatbubbles-outline"
+            title="還沒有討論串"
+            subtitle="你可以是第一個提問的人，老師或同學回覆後會出現在這裡。"
+            hint="發起短標題問題，並在教材頁對照章節，回覆會更快。"
+            showCalmHero
+          />
         ) : (
           threads.map((t) => (
             <Pressable
-              key={t.id}
-              style={{
-                marginTop: 12,
-                backgroundColor: '#fff',
-                borderRadius: 12,
+              key={String(t.id)}
+              accessibilityRole="button"
+              accessibilityLabel={`討論：${t.title || '未命名'}`}
+              style={({ pressed }) => ({
+                marginTop: theme.space.md,
+                backgroundColor: theme.colors.surface,
+                borderRadius: theme.radius.lg,
                 padding: 14,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
-              }}
+                borderColor: theme.colors.border,
+                opacity: pressed ? 0.92 : 1,
+              })}
               onPress={() => {
                 /* TODO: open thread detail screen */
               }}
             >
-              <Text style={{ fontSize: 15, fontWeight: '600', color: '#111827' }}>
+              <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text }}>
                 {t.title || '(未命名)'}
               </Text>
               {t.description ? (
-                <Text style={{ color: '#6b7280', fontSize: 13, marginTop: 6 }} numberOfLines={2}>
+                <Text
+                  style={{ color: theme.colors.muted, fontSize: 13, marginTop: 6 }}
+                  numberOfLines={2}
+                >
                   {t.description}
                 </Text>
               ) : null}
-              <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
-                <Text style={{ fontSize: 12, color: '#6b7280' }}>💬 {t.post_count} 則</Text>
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+                <Text style={{ fontSize: 12, color: theme.colors.muted }}>💬 {t.post_count} 則</Text>
                 {t.last_post_at && (
-                  <Text style={{ fontSize: 12, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 12, color: theme.colors.muted }}>
                     最後回覆 {new Date(t.last_post_at).toLocaleString('zh-TW')}
                   </Text>
                 )}
                 {t.is_locked && (
-                  <Text style={{ fontSize: 12, color: '#dc2626' }}>🔒 已鎖定</Text>
+                  <Text style={{ fontSize: 12, color: theme.colors.danger }}>🔒 已鎖定</Text>
                 )}
               </View>
             </Pressable>
