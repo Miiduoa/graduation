@@ -279,7 +279,8 @@ const PROTECTED_SCREENS: Record<ScreenName, Permission[]> = {
   AdminCourseVerify: ['admin.course_verify'],
   AddCourse: ['courses.create'],
   CourseGradebook: ['courses.grade'],
-  Attendance: ['courses.attendance'],
+  /** 學生簽到／檢視出缺勤需 courses.view；教師操作點名需 courses.attendance */
+  Attendance: ['courses.view', 'courses.attendance'],
   LearningAnalytics: ['admin.analytics', 'courses.manage'],
 };
 

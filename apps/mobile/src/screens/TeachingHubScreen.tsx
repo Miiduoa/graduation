@@ -1,6 +1,14 @@
 /* eslint-disable */
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshControl, ScrollView, Text, View, Pressable, ActivityIndicator } from 'react-native';
+import {
+  RefreshControl,
+  ScrollView,
+  Text,
+  View,
+  Pressable,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
@@ -170,9 +178,22 @@ export function TeachingHubScreen(props: any) {
       color: theme.colors.success,
     },
     {
-      label: '發公告',
-      icon: 'megaphone-outline' as const,
-      onPress: () => nav?.navigate?.('CourseHub'),
+      label: '課程中控台',
+      icon: 'grid-outline' as const,
+      onPress: () => {
+        const first = courseStats[0];
+        if (first) {
+          nav?.navigate?.('CourseHub', {
+            groupId: String(first.course.id),
+            groupName: first.course.name,
+          });
+          return;
+        }
+        Alert.alert(
+          '尚無課程可開啟中控台',
+          '請確認已登入學校帳號並完成 TronClass 同步；列表仍為空時，請下拉重整或至「設定」檢查課程來源。',
+        );
+      },
       color: theme.colors.accent,
     },
     {

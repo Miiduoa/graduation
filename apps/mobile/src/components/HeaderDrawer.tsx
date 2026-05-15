@@ -260,7 +260,22 @@ export function HeaderDrawerHost() {
                     </Text>
                   ) : null}
                 </View>
-              ) : (
+              ) : null}
+              {auth.user && auth.profile?.postLoginRoles && auth.profile.postLoginRoles.length > 0 ? (
+                <Text
+                  style={{
+                    color: theme.colors.textSecondary,
+                    fontSize: 11,
+                    lineHeight: 16,
+                    marginTop: 8,
+                    paddingRight: theme.space.sm,
+                  }}
+                >
+                  權限以主身分「{roleDisplayName}」為準；另紀錄關聯身分：
+                  {auth.profile.postLoginRoles.join('、')}。若要改用副身分須後端／帳號系統支援切換 Claims。
+                </Text>
+              ) : null}
+              {!auth.user ? (
                 <Pressable
                   onPress={() => go('SSOLogin')}
                   style={({ pressed }) => ({
@@ -277,7 +292,7 @@ export function HeaderDrawerHost() {
                     學校帳號登入
                   </Text>
                 </Pressable>
-              )}
+              ) : null}
             </BrandFluxImageHeader>
 
             {/* ─── 校園連結（跨 Tab） ─── */}
