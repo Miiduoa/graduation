@@ -1529,16 +1529,71 @@ export async function tcFetchHomeworkScores(courseId: number): Promise<TCActivit
   );
 }
 
-/** 取得課程作業列表（含提交狀態） */
+/** 取得課程作業列表（含提交狀態）
+ *
+ * 修正：TronClass 回應的繳交狀態欄位有多種命名（is_submitted / submission_status / student_homework_status / submission），
+ * 統一解析後 caller 端看 `submitted` boolean。
+ */
 export async function tcFetchHomeworkActivities(courseId: number): Promise<any[]> {
   await ensureBackendSessionLoaded();
-  const url = `${TC_BASE}/api/courses/${courseId}/homework-activities?page_size=50`;
-  try {
-    const data = await tcFetchJSON<{ homework_activities?: any[] }>(url);
-    return data?.homework_activities ?? [];
-  } catch {
-    return [];
+  // 並行嘗試兩個 endpoint：homework-activities 與一般 activities?type=homework
+  const urls = [
+    `${TC_BASE}/api/courses/${courseId}/homework-activities?page_size=100`,
+    `${TC_BASE}/api/courses/${courseId}/activities?type=homework&page_size=100`,
+  ];
+  const seen = new Set<number>();
+  const result: any[] = [];
+
+  for (const url of urls) {
+    try {
+      const data = await tcFetchJSON<{ homework_activities?: any[]; activities?: any[] }>(url);
+      const list = data?.homework_activities ?? data?.activities ?? [];
+      for (const hw of list) {
+        const id = Number(hw.id ?? 0);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+
+        // 解析提交狀態：多種 schema 兼容
+        const sub = hw.submission ?? hw.student_submission ?? null;
+        const submitted =
+          hw.is_submitted === true ||
+          hw.submission_status === 'submitted' ||
+          hw.submission_status === 'graded' ||
+          hw.status === 'submitted' ||
+          hw.status === 'graded' ||
+          !!sub?.submitted_at ||
+          !!hw.submitted_at;
+
+        const graded =
+          hw.is_graded === true ||
+          hw.submission_status === 'graded' ||
+          hw.status === 'graded' ||
+          !!hw.score ||
+          !!sub?.score;
+
+        result.push({
+          ...hw,
+          submitted,
+          graded,
+          submission: sub,
+          // 標準化 grade 欄位給 UI 用
+          student_score:
+            typeof hw.score === 'number'
+              ? hw.score
+              : typeof sub?.score === 'number'
+              ? sub.score
+              : null,
+          student_submitted_at: hw.submitted_at ?? sub?.submitted_at ?? null,
+          student_is_late: hw.is_late === true || sub?.is_late === true,
+          student_feedback: hw.feedback ?? sub?.feedback ?? null,
+        });
+      }
+    } catch {
+      /* try next */
+    }
   }
+
+  return result;
 }
 
 /** 取得考試狀態 */
@@ -2198,32 +2253,89 @@ export type TCExamInfo = {
   score_percentage: string;
 };
 
-/** 取得課程教材活動列表（含 uploads）— 用 /api/courses/{id}/activities?type=courseware_activity */
+/** 取得課程教材活動列表（含 uploads）
+ *
+ * 修正：TronClass 教材有多種 type（material / video / online_video / audio / web_link / page / courseware_activity），
+ * 不能只抓 `courseware_activity` 一種。改成抓全部 activities 再過濾「非作業非考試」。
+ */
 export async function tcFetchCourseActivities(courseId: number): Promise<TCCourseActivity[]> {
-  const url = `${TC_BASE}/api/courses/${courseId}/activities?type=courseware_activity`;
-  const data = await tcFetchJSON<{ activities?: Record<string, unknown>[] }>(url);
-  if (!data?.activities) return [];
+  // 排除作業 / 考試類型；其他都算教材
+  const HOMEWORK_OR_EXAM = new Set([
+    'homework',
+    'exam',
+    'quiz',
+    'classroom',
+    'live',
+    'attendance',
+    'survey',
+  ]);
 
-  return data.activities.map(
-    (a): TCCourseActivity => ({
-      id: Number(a.id ?? 0),
-      title: String(a.title ?? ''),
-      type: String(a.type ?? ''),
-      module_id: Number(a.module_id ?? 0),
-      start_time: readOptionalString(a.start_time) ?? null,
-      end_time: readOptionalString(a.end_time) ?? null,
-      uploads: Array.isArray(a.uploads)
-        ? (a.uploads as Record<string, unknown>[]).map((u) => ({
-            id: Number(u.id ?? 0),
-            name: String(u.name ?? ''),
-            key: String(u.key ?? ''),
-            type: String(u.type ?? ''),
-            size: Number(u.size ?? 0),
-            allow_download: u.allow_download === true,
-          }))
-        : [],
-    }),
+  // 抓全部 activities（不加 type filter）
+  const urls = [
+    `${TC_BASE}/api/courses/${courseId}/activities`,
+    `${TC_BASE}/api/courses/${courseId}/activities?sub_course_id=0`,
+  ];
+
+  const allActivities: Record<string, unknown>[] = [];
+  const seen = new Set<number>();
+
+  for (const url of urls) {
+    const data = await tcFetchJSON<{ activities?: Record<string, unknown>[] }>(url);
+    if (!data?.activities) continue;
+    for (const a of data.activities) {
+      const id = Number(a.id ?? 0);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        allActivities.push(a);
+      }
+    }
+  }
+
+  // 同時抓 courseware_activity（有些回應只在這支才有 uploads）
+  const cwData = await tcFetchJSON<{ activities?: Record<string, unknown>[] }>(
+    `${TC_BASE}/api/courses/${courseId}/activities?type=courseware_activity`,
   );
+  if (cwData?.activities) {
+    for (const a of cwData.activities) {
+      const id = Number(a.id ?? 0);
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        allActivities.push(a);
+      }
+    }
+  }
+
+  return allActivities
+    .filter((a) => !HOMEWORK_OR_EXAM.has(String(a.type ?? '').toLowerCase()))
+    .map(
+      (a): TCCourseActivity => ({
+        id: Number(a.id ?? 0),
+        title: String(a.title ?? a.name ?? ''),
+        type: String(a.type ?? 'material'),
+        module_id: Number(a.module_id ?? a.parent_id ?? 0),
+        start_time: readOptionalString(a.start_time) ?? null,
+        end_time: readOptionalString(a.end_time) ?? null,
+        uploads: Array.isArray(a.uploads)
+          ? (a.uploads as Record<string, unknown>[]).map((u) => ({
+              id: Number(u.id ?? 0),
+              name: String(u.name ?? ''),
+              key: String(u.key ?? u.file_key ?? ''),
+              type: String(u.type ?? u.mime_type ?? ''),
+              size: Number(u.size ?? 0),
+              allow_download: u.allow_download !== false,
+            }))
+          : Array.isArray(a.attachments)
+          ? (a.attachments as Record<string, unknown>[]).map((u) => ({
+              id: Number(u.id ?? 0),
+              name: String(u.name ?? u.filename ?? ''),
+              key: String(u.key ?? u.upload_id ?? ''),
+              type: String(u.type ?? u.mime_type ?? ''),
+              size: Number(u.size ?? 0),
+              allow_download: u.allow_download !== false,
+            }))
+          : [],
+      }),
+    );
 }
 
 /** 取得課程考試列表 — 用 /api/courses/{id}/exams */

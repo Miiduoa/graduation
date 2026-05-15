@@ -15,6 +15,7 @@ import { CampusGardenScreen } from './CampusGardenScreen';
 import CompanionScreen from './CompanionScreen';
 import CompanionCollectionScreen from './CompanionCollectionScreen';
 import ConstellationScreen from './ConstellationScreen';
+import DataFlowDebugScreen from './DataFlowDebugScreen';
 import { AdminDashboardScreen } from './AdminDashboardScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
 import { SSOLoginScreen } from './SSOLoginScreen';
@@ -115,6 +116,11 @@ export function MeStack() {
         name="Constellation"
         component={ConstellationScreen}
         options={{ title: '校園星圖' }}
+      />
+      <Stack.Screen
+        name="DataFlowDebug"
+        component={DataFlowDebugScreen}
+        options={{ title: '🔍 資料流診斷' }}
       />
       <Stack.Screen
         name="GlobalSearch"

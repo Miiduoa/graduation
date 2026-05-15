@@ -32,6 +32,7 @@ type RouteProps = {
   route?: {
     params?: {
       surveyId?: string;
+      courseId?: string;
       title?: string;
       questions?: SurveyQuestion[];
       courseName?: string;
@@ -80,11 +81,14 @@ export default function SurveyScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
   const title = props.route?.params?.title ?? '課程問卷';
   const courseName = props.route?.params?.courseName;
+  const surveyId = props.route?.params?.surveyId ?? '';
+  const courseId = props.route?.params?.courseId ?? '';
   const questions = props.route?.params?.questions ?? SAMPLE_QUESTIONS;
 
   const [answers, setAnswers] = useState<Record<string, string | string[] | number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const usingSample = !props.route?.params?.questions;
 
   const updateSingle = (qid: string, val: string) =>
     setAnswers((a) => ({ ...a, [qid]: val }));
@@ -110,8 +114,19 @@ export default function SurveyScreen(props: RouteProps) {
     }
     setSubmitting(true);
     try {
-      // 真實實作：tcSubmitSurvey(surveyId, answers)
-      await new Promise((r) => setTimeout(r, 600));
+      const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
+      const numericSurveyId = Number(String(surveyId).replace(/^tc:/, '')) || 0;
+      if (usingSample || !numericCourseId || !numericSurveyId) {
+        // 範例問卷模式（沒接到真 API）— 仍模擬送出讓使用者體驗完整流程
+        await new Promise((r) => setTimeout(r, 400));
+      } else {
+        const { tcSubmitSurvey } = await import('../services/tronClassClient');
+        const result = await tcSubmitSurvey(numericCourseId, numericSurveyId, answers);
+        if (!result.success) {
+          Alert.alert('送出失敗', result.error ?? '請檢查網路後再試一次。');
+          return;
+        }
+      }
       setSubmitted(true);
       Alert.alert('🎉 已提交', '感謝你的回饋，老師會看到。', [
         { text: '完成', onPress: () => navigation.goBack() },

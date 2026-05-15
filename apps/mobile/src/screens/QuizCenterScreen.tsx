@@ -85,11 +85,54 @@ export function QuizCenterScreen(props: any) {
     reload: reloadQuizzes,
   } = useAsyncList<Quiz>(async () => {
     if (!auth.user) return [];
-    return ds.listQuizzes(auth.user.uid, routeGroupId, school.id);
+    // 先試 dataSource（含 Firestore cache）；若有 routeGroupId 且回空，再直接打 TronClass
+    const fromDs = await ds.listQuizzes(auth.user.uid, routeGroupId, school.id);
+    if (fromDs.length > 0 || !routeGroupId) return fromDs;
+
+    // Fallback：直接從 TronClass 抓該課程的考試
+    try {
+      const { tcFetchCourseExams, tcFetchExamSubmissions } = await import(
+        '../services/tronClassClient'
+      );
+      const courseIdNum = Number(routeGroupId.replace(/^tc:/, '')) || 0;
+      if (!courseIdNum) return [];
+      const tcExams = await tcFetchCourseExams(courseIdNum);
+      // 個人分數
+      const withScores = await Promise.all(
+        tcExams.map(async (e) => {
+          const sub = await tcFetchExamSubmissions(e.id).catch(() => null);
+          return {
+            id: `tc-${e.id}`,
+            assignmentId: String(e.id),
+            groupId: routeGroupId,
+            groupName: routeGroupName ?? '',
+            title: e.title,
+            description: undefined,
+            dueAt: e.end_time ? new Date(e.end_time) : null,
+            type: e.type === 'exam' ? 'exam' : 'quiz',
+            gradesPublished: e.is_closed,
+            questionCount: undefined,
+            durationMinutes: undefined,
+            points: e.total_score ?? undefined,
+            weight: undefined,
+            source: 'quiz' as const,
+            // 額外資訊塞進 description 以便顯示
+            // @ts-ignore — extension fields for UI
+            studentScore: sub?.exam_final_score ?? sub?.exam_score ?? null,
+            // @ts-ignore
+            isSubmitted: e.submitted_times > 0,
+          } as Quiz;
+        }),
+      );
+      return withScores;
+    } catch {
+      return [];
+    }
   }, [
     ds,
     auth.user?.uid,
     routeGroupId,
+    routeGroupName,
     school.id,
     memberships.map((membership) => membership.groupId).join('|'),
   ]);
