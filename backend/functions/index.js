@@ -54,6 +54,11 @@ const {
   fetchAssistantPendingAssignments,
   fetchAssistantUserProfile,
 } = require('./lib/assistantFetchers');
+const {
+  buildNextBestActionFieldsFromInboxTask,
+  assertValidInboxTaskPayload,
+  sanitizeDocKey,
+} = require('./lib/nextBestActionDoc');
 const { resolveAssistantActorRole } = require('./lib/assistantActions');
 const {
   puLogin,
@@ -1421,32 +1426,91 @@ exports.getStudentRiskSnapshots = onCall(
         ],
         createdAt: generatedAt,
       })),
-      recommendedActions: pendingAssignments.slice(0, 3).map((assignment, index) => ({
-        id: `risk-action-${assignment.id}`,
-        title: assignment.title || '作業',
-        description: `先處理 ${assignment.groupName || assignment.groupId} 的近期作業。`,
-        priority: index,
-        urgency: index === 0 ? 'high' : 'medium',
-        reason: '這是目前最接近截止或最容易累積壓力的課務。',
-        nextStep: '查看作業內容並拆成小步驟。',
-        actionLabel: '查看作業',
-        actionTarget: {
-          tab: '收件匣',
-          screen: 'AssignmentDetail',
-          params: { groupId: assignment.groupId, assignmentId: assignment.id },
-        },
-        evidenceRefs: [
-          { type: 'assignment', id: assignment.id, label: assignment.title || '作業' },
-        ],
-        requiresConfirmation: false,
-        source: 'risk',
-        dueAt: assignment.dueAt || null,
-      })),
+      recommendedActions: pendingAssignments.slice(0, 3).map((assignment, index) => {
+        const inboxTask = {
+          id: `risk-${assignment.id}`,
+          kind: 'assignment',
+          groupId: assignment.groupId,
+          groupName: assignment.groupName || assignment.groupId,
+          title: assignment.title || '作業',
+          subtitle: `先處理 ${assignment.groupName || assignment.groupId} 的近期作業。`,
+          priority: index === 0 ? 2 : 4,
+          assignmentId: assignment.id,
+          dueAt: assignment.dueAt || null,
+          reason: '這是目前最接近截止或最容易累積壓力的課務。',
+          nextStep: '查看作業內容並拆成小步驟。',
+          actionLabel: '查看作業',
+        };
+        const fields = buildNextBestActionFieldsFromInboxTask(inboxTask, { source: 'risk' });
+        return {
+          id: `risk-action-${assignment.id}`,
+          ...fields,
+          createdAt: generatedAt,
+        };
+      }),
       generatedAt,
     };
 
     await snapshotRef.set(snapshot);
     return { snapshots: [snapshot] };
+  },
+);
+
+exports.upsertUserNextBestActions = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    const uid = request.auth?.uid;
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Must be logged in');
+    }
+
+    const schoolId = String(request.data?.schoolId || '').trim();
+    const inboxTasks = request.data?.inboxTasks;
+    if (!Array.isArray(inboxTasks) || inboxTasks.length === 0) {
+      throw new HttpsError('invalid-argument', 'inboxTasks must be a non-empty array');
+    }
+    if (inboxTasks.length > 8) {
+      throw new HttpsError('invalid-argument', 'At most 8 inboxTasks');
+    }
+
+    if (schoolId) {
+      await assertActiveSchoolMember(schoolId, uid);
+    }
+
+    enforceRateLimit({
+      scope: 'upsert-next-best-actions',
+      key: `${schoolId || 'root'}:${uid}`,
+      limit: 40,
+      windowMs: 60 * 60 * 1000,
+    });
+
+    const baseRef = schoolId
+      ? db
+          .collection('users')
+          .doc(uid)
+          .collection('schools')
+          .doc(schoolId)
+          .collection('nextBestActions')
+      : db.collection('users').doc(uid).collection('nextBestActions');
+
+    const batch = db.batch();
+    const written = [];
+    for (const raw of inboxTasks) {
+      try {
+        assertValidInboxTaskPayload(raw);
+      } catch (err) {
+        throw new HttpsError('invalid-argument', err.message || 'Invalid inboxTasks item');
+      }
+      const docId = `inbox:${sanitizeDocKey(raw.id)}`;
+      const ref = baseRef.doc(docId);
+      const payload = buildNextBestActionFieldsFromInboxTask(raw, { source: 'inbox' });
+      batch.set(ref, payload, { merge: true });
+      written.push(docId);
+    }
+    await batch.commit();
+    return { success: true, docIds: written };
   },
 );
 

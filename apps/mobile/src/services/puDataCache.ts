@@ -21,6 +21,7 @@ import {
   type PUAnnouncement,
   type PUStudentInfo,
 } from './puDirectScraper';
+import { isTronClassDataFetchEnabled } from './tronClassDataEnabled';
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from './cloudFunctions';
 import {
   tcFetchCourses,
@@ -385,6 +386,8 @@ function normalizeStudentInfo(
 }
 
 async function ensureTronClassSession(): Promise<void> {
+  if (!isTronClassDataFetchEnabled()) return;
+
   if (Platform.OS === 'web' && !(await hasTCSession())) {
     throw new Error('Web 版需要後端 TronClass session，略過直接連線以避免 CORS 錯誤');
   }

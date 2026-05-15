@@ -27,6 +27,136 @@ import type {
   StudentRiskSnapshot,
 } from './types';
 
+function isInboxTaskKind(value: string): value is InboxTask['kind'] {
+  return (
+    value === 'live' ||
+    value === 'assignment' ||
+    value === 'quiz' ||
+    value === 'group' ||
+    value === 'assistant_queue'
+  );
+}
+
+/**
+ * 從 Firestore 嵌套物件還原 InboxTask（雲端同步／後台寫入用）。
+ */
+export function parseInboxTaskSnapshot(raw: Record<string, unknown>, fallbackId: string): InboxTask | undefined {
+  const kindRaw = raw.kind;
+  if (typeof kindRaw !== 'string' || !isInboxTaskKind(kindRaw)) return undefined;
+  const groupId = typeof raw.groupId === 'string' ? raw.groupId : '';
+  if (!groupId) return undefined;
+  const groupName = typeof raw.groupName === 'string' ? raw.groupName : '課程';
+  const title = typeof raw.title === 'string' ? raw.title : '';
+  const subtitle =
+    typeof raw.subtitle === 'string'
+      ? raw.subtitle
+      : typeof raw.description === 'string'
+        ? raw.description
+        : '';
+  const id = typeof raw.id === 'string' && raw.id.length > 0 ? raw.id : fallbackId;
+  const priority = typeof raw.priority === 'number' ? raw.priority : 5;
+  const assignmentId = typeof raw.assignmentId === 'string' ? raw.assignmentId : undefined;
+  const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId : undefined;
+  const sourceRunId = typeof raw.sourceRunId === 'string' ? raw.sourceRunId : undefined;
+  const actionQueueId = typeof raw.actionQueueId === 'string' ? raw.actionQueueId : undefined;
+  const queueAction = typeof raw.queueAction === 'string' ? raw.queueAction : undefined;
+
+  return {
+    id,
+    kind: kindRaw,
+    groupId,
+    groupName,
+    title,
+    subtitle,
+    priority,
+    dueAt: toDate(raw.dueAt),
+    unreadCount: typeof raw.unreadCount === 'number' ? raw.unreadCount : undefined,
+    actionLabel: typeof raw.actionLabel === 'string' ? raw.actionLabel : undefined,
+    reason: typeof raw.reason === 'string' ? raw.reason : undefined,
+    consequence: typeof raw.consequence === 'string' ? raw.consequence : undefined,
+    nextStep: typeof raw.nextStep === 'string' ? raw.nextStep : undefined,
+    assignmentId,
+    sessionId,
+    sourceRunId,
+    actionQueueId,
+    queueAction,
+  };
+}
+
+/**
+ * 舊版 nextBestAction 只存 actionTarget（訊息分頁 AssignmentDetail 等）時，推回最小 InboxTask 供 navigateFromInboxTask。
+ */
+function inferInboxTaskFromLegacyNextBestRow(docId: string, row: Record<string, unknown>): InboxTask | undefined {
+  if (row.source !== 'inbox') return undefined;
+  if (row.inboxTask && typeof row.inboxTask === 'object') return undefined;
+
+  const target = row.actionTarget as NextBestAction['actionTarget'] | undefined;
+  const p = target?.params;
+  if (!p || typeof p !== 'object') return undefined;
+  const groupId = typeof (p as { groupId?: unknown }).groupId === 'string' ? (p as { groupId: string }).groupId : '';
+  if (!groupId) return undefined;
+
+  const groupName =
+    typeof (p as { groupName?: unknown }).groupName === 'string'
+      ? (p as { groupName: string }).groupName
+      : typeof row.groupName === 'string'
+        ? row.groupName
+        : '課程';
+  const title = String(row.title ?? '待辦');
+  const subtitle = String(row.description ?? row.subtitle ?? '');
+  const priority = typeof row.priority === 'number' ? row.priority : 5;
+  const baseId = docId.startsWith('inbox:') ? docId.slice('inbox:'.length) : docId;
+
+  const inboxKindRaw = row.inboxKind ?? row.taskKind;
+  const kindFromMeta: InboxTask['kind'] | undefined =
+    typeof inboxKindRaw === 'string' && isInboxTaskKind(inboxKindRaw) ? inboxKindRaw : undefined;
+
+  const screen = target?.screen;
+  if (screen === 'Classroom' && typeof (p as { sessionId?: unknown }).sessionId === 'string') {
+    return {
+      id: baseId,
+      kind: 'live',
+      groupId,
+      groupName,
+      title,
+      subtitle,
+      priority,
+      sessionId: (p as { sessionId: string }).sessionId,
+      dueAt: toDate(row.dueAt),
+    };
+  }
+
+  if (screen === 'AssignmentDetail' && typeof (p as { assignmentId?: unknown }).assignmentId === 'string') {
+    const kind: InboxTask['kind'] = kindFromMeta === 'quiz' ? 'quiz' : 'assignment';
+    return {
+      id: baseId,
+      kind,
+      groupId,
+      groupName,
+      title,
+      subtitle,
+      priority,
+      assignmentId: (p as { assignmentId: string }).assignmentId,
+      dueAt: toDate(row.dueAt),
+    };
+  }
+
+  if (screen === 'GroupDetail') {
+    return {
+      id: baseId,
+      kind: 'group',
+      groupId,
+      groupName,
+      title,
+      subtitle,
+      priority,
+      dueAt: toDate(row.dueAt),
+    };
+  }
+
+  return undefined;
+}
+
 function toDate(value: unknown): Date | null {
   if (!value) return null;
   if (value instanceof Date) return value;
@@ -113,7 +243,17 @@ function actionFromInboxTask(task: InboxTask): NextBestAction {
   };
 }
 
-function parseNextBestAction(row: Record<string, unknown>, id: string): NextBestAction {
+export function parseNextBestAction(row: Record<string, unknown>, id: string): NextBestAction {
+  const source = (row.source as NextBestAction['source']) ?? 'system';
+
+  let inboxTask: InboxTask | undefined;
+  if (row.inboxTask && typeof row.inboxTask === 'object' && !Array.isArray(row.inboxTask)) {
+    inboxTask = parseInboxTaskSnapshot(row.inboxTask as Record<string, unknown>, `${id}-inbox`);
+  }
+  if (!inboxTask && source === 'inbox') {
+    inboxTask = inferInboxTaskFromLegacyNextBestRow(id, row);
+  }
+
   return {
     id,
     title: String(row.title ?? '下一步'),
@@ -125,12 +265,13 @@ function parseNextBestAction(row: Record<string, unknown>, id: string): NextBest
     consequence: typeof row.consequence === 'string' ? row.consequence : undefined,
     nextStep: String(row.nextStep ?? row.actionLabel ?? '前往處理'),
     actionLabel: String(row.actionLabel ?? '前往處理'),
+    inboxTask,
     actionTarget: (row.actionTarget as NextBestAction['actionTarget']) ?? undefined,
     evidenceRefs: Array.isArray(row.evidenceRefs)
       ? (row.evidenceRefs as NextBestAction['evidenceRefs'])
       : [],
     requiresConfirmation: Boolean(row.requiresConfirmation),
-    source: (row.source as NextBestAction['source']) ?? 'system',
+    source,
     dueAt: toDate(row.dueAt),
     createdAt: toDate(row.createdAt),
   };

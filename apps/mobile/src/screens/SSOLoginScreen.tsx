@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
+import * as WebBrowser from 'expo-web-browser';
+import { useIdTokenAuthRequest } from 'expo-auth-session/providers/google';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
 
 import {
   PROVIDENCE_UNIVERSITY_SCHOOL_CODE,
@@ -10,9 +14,12 @@ import {
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { signInWithStudentId, type LoginProgress } from '../services/studentIdAuth';
+import { getAuthInstance } from '../firebase';
 import { Screen, Button, AnimatedCard, Card, Pill } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+
+WebBrowser.maybeCompleteAuthSession();
 
 type LoginStep =
   | 'idle'
@@ -40,6 +47,23 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
   const [stageDetail, setStageDetail] = useState('驗證靜宜帳密');
   const [error, setError] = useState<string | null>(null);
   const [isRetryable, setIsRetryable] = useState(false);
+  const [googleBusy, setGoogleBusy] = useState(false);
+
+  const googleIds = useMemo(() => {
+    const extra = (Constants.expoConfig?.extra ?? {}) as Record<string, unknown>;
+    return {
+      web: typeof extra.googleWebClientId === 'string' ? extra.googleWebClientId.trim() : '',
+      ios: typeof extra.googleIosClientId === 'string' ? extra.googleIosClientId.trim() : '',
+      android:
+        typeof extra.googleAndroidClientId === 'string' ? extra.googleAndroidClientId.trim() : '',
+    };
+  }, []);
+
+  const [, , googlePromptAsync] = useIdTokenAuthRequest({
+    webClientId: googleIds.web || '000000000000-not-configured.apps.googleusercontent.com',
+    iosClientId: googleIds.ios || undefined,
+    androidClientId: googleIds.android || undefined,
+  });
 
   const schoolName = useMemo(
     () => (school.id === PROVIDENCE_UNIVERSITY_SCHOOL_ID ? school.name : '靜宜大學'),
@@ -117,11 +141,65 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
     setIsRetryable(false);
   };
 
+  const handleGoogleLogin = async () => {
+    if (!googleIds.web) {
+      Alert.alert(
+        '無法使用 Google 登入',
+        '請在環境變數設定 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID（Firebase Console「專案設定」→ 一般 → Web 應用程式用戶端 ID），並確定已啟用 Google 登入提供者。',
+      );
+      return;
+    }
+
+    setError(null);
+    setIsRetryable(false);
+    setGoogleBusy(true);
+
+    try {
+      const result = await googlePromptAsync();
+      if (result.type === 'dismiss' || result.type === 'cancel') return;
+      if (result.type !== 'success') {
+        throw new Error('Google 登入未完成');
+      }
+      const idToken = result.params.id_token;
+      if (!idToken || typeof idToken !== 'string') {
+        throw new Error('未取得 id_token');
+      }
+
+      const cred = GoogleAuthProvider.credential(idToken);
+      await signInWithCredential(getAuthInstance(), cred);
+      await auth.refreshProfile();
+      void import('../services/companionEngine').then((m) =>
+        m.recordCompanionFeatureSignal('sso_login'),
+      );
+      setStep('success');
+
+      setTimeout(() => {
+        Alert.alert('登入成功', '已使用 Google 帳號登入', [
+          {
+            text: '確定',
+            onPress: () => {
+              nav?.goBack?.();
+            },
+          },
+        ]);
+      }, 250);
+    } catch (loginError) {
+      console.warn('Google login error:', loginError);
+      setError(loginError instanceof Error ? loginError.message : 'Google 登入失敗');
+      setIsRetryable(true);
+      setStep('error');
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
+
   const isBusy =
     step === 'authenticating' ||
     step === 'syncingCampus' ||
     step === 'syncingTronClass' ||
     step === 'linking';
+
+  const formLocked = isBusy || googleBusy;
 
   return (
     <Screen>
@@ -166,13 +244,35 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
               <Pill text={PROVIDENCE_UNIVERSITY_SCHOOL_CODE} kind="accent" />
             </View>
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              目前產品已鎖定為 PU-only，登入後會同步課表、成績、TronClass 與校園資料。
+              建議優先使用 Google 登入；校方 E 校園帳號為進階選項。若已關閉 LMS，仍可使用下方 Demo／校園流程。
             </Text>
           </View>
         </AnimatedCard>
 
-        {/* ── 學號登入表單 ── */}
-        <AnimatedCard title="學號登入" subtitle="使用 E 校園帳號密碼">
+        {/* ── Google 登入（主路） ── */}
+        <AnimatedCard title="Google 登入" subtitle="Gmail／Google 帳號（Firebase）">
+          <View style={{ gap: 14 }}>
+            <Button
+              text={
+                googleBusy
+                  ? 'Google 登入處理中…'
+                  : googleIds.web
+                    ? '使用 Google 繼續'
+                    : '使用 Google 繼續（尚未設定 Client ID）'
+              }
+              kind="primary"
+              onPress={() => void handleGoogleLogin()}
+              disabled={googleBusy || !googleIds.web}
+            />
+            <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
+              以 Google 身分註冊或登入後，將與 Firebase Auth 連動；Firestore 無 `users` 文件時仍會暫時以 Firebase
+              顯示名稱與頭像顯示。正式上線請在 Firebase／Google Cloud 設定 OAuth 與 iOS/Android 反向 URL。
+            </Text>
+          </View>
+        </AnimatedCard>
+
+        {/* ── 校方帳號（進階） ── */}
+        <AnimatedCard title="校方進階登入" subtitle="靜宜 E 校園帳號與密碼（選用）">
           <View style={{ gap: 14 }}>
             <View
               style={{
@@ -196,7 +296,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                 placeholderTextColor={theme.colors.muted}
                 autoCapitalize="none"
                 autoCorrect={false}
-                editable={!isBusy}
+                editable={!formLocked}
                 style={{ color: theme.colors.text, fontSize: 16, paddingVertical: 0 }}
               />
             </View>
@@ -224,7 +324,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
-                editable={!isBusy}
+                editable={!formLocked}
                 style={{ color: theme.colors.text, fontSize: 16, paddingVertical: 0 }}
               />
             </View>
@@ -233,11 +333,11 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
               text={isBusy ? '登入中...' : '使用學號登入'}
               kind="primary"
               onPress={handleStudentIdLogin}
-              disabled={isBusy || !studentIdInput.trim() || !studentPwInput.trim()}
+              disabled={formLocked || !studentIdInput.trim() || !studentPwInput.trim()}
             />
 
             <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
-              請使用靜宜大學 E 校園帳號與密碼登入。登入後會自動同步課表、成績與 TronClass 資料。
+              需同步課表／成績時使用。若建置開關關閉 TronClass，登入仍可略過 LMS 並走 Demo／E 校園可及資料。
             </Text>
           </View>
         </AnimatedCard>

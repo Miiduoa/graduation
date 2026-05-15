@@ -20,6 +20,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { getCloudFunctionUrl, getFirebaseAuthHeaders } from './cloudFunctions';
 import { secureDeleteItem, secureDeleteMany, secureGetItem, secureSetItem } from './secureStorage';
+import {
+  TRONCLASS_DATA_DISABLED_MESSAGE,
+  isTronClassBackendMutation,
+  isTronClassDataFetchEnabled,
+  tronClassBackendReadWhenDisabled,
+} from './tronClassDataEnabled';
 
 // ─── Constants ───────────────────────────────────────────
 
@@ -419,6 +425,7 @@ export async function getTCBackendSessionId(): Promise<string | null> {
  * 回傳 true 表示有效，false 表示已過期或不存在。
  */
 export async function validateTCSession(): Promise<boolean> {
+  if (!isTronClassDataFetchEnabled()) return false;
   await ensureBackendSessionLoaded();
   if (!_tcBackendSessionId) return false;
 
@@ -439,6 +446,9 @@ export async function refreshTCBackendSession(
   password: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    if (!isTronClassDataFetchEnabled()) {
+      return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+    }
     const controller = new AbortController();
     const abortTimer = setTimeout(() => controller.abort(), 20000); // 20 秒逾時（Cloud Functions cold-start 需要時間）
 
@@ -520,6 +530,13 @@ async function fetchTronClassBackend<T>(
     | 'submitPeerReview',
   extra: Record<string, unknown> = {},
 ): Promise<T> {
+  if (!isTronClassDataFetchEnabled()) {
+    if (isTronClassBackendMutation(dataType)) {
+      return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE } as T;
+    }
+    return tronClassBackendReadWhenDisabled(dataType) as T;
+  }
+
   await ensureBackendSessionLoaded();
   if (!shouldUseBackendSession()) {
     throw new Error('No TronClass backend session');
@@ -624,6 +641,10 @@ async function tcFetch(
     timeoutMs?: number;
   } = {},
 ): Promise<{ body: string; status: number; url: string }> {
+  if (!isTronClassDataFetchEnabled()) {
+    return { body: '', status: 503, url };
+  }
+
   const headers: Record<string, string> = { ...COMMON_HEADERS };
   if (options.contentType) headers['Content-Type'] = options.contentType;
   if (options.accept) headers.Accept = options.accept;
@@ -696,6 +717,10 @@ export async function tcLogin(
   password: string,
 ): Promise<{ success: boolean; session: TCSession | null; error?: string }> {
   if (!uid || !password) return { success: false, session: null, error: '請輸入帳號密碼' };
+
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, session: null, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
 
   // ── 策略 1: 後端代理（Cloud Functions 可以穩定連 identity.pu.edu.tw）──
   try {
@@ -940,6 +965,8 @@ function readOptionalString(value: unknown): string | null {
  * 若沒有儲存的帳密，回傳 false（需要使用者重新登入）。
  */
 export async function autoRefreshTCSession(): Promise<boolean> {
+  if (!isTronClassDataFetchEnabled()) return false;
+
   const creds = await loadSavedCredentials();
   if (!creds) {
     console.log('[TronClass] auto-refresh: no saved credentials');
@@ -997,6 +1024,8 @@ async function tcFetchAllPages<T>(
 export async function tcFetchCourses(
   status: 'ongoing' | 'ended' | 'upcoming' = 'ongoing',
 ): Promise<TCCourse[]> {
+  if (!isTronClassDataFetchEnabled()) return [];
+
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
     return await fetchTronClassBackend<TCCourse[]>('courses', { status });
@@ -1218,6 +1247,8 @@ export async function tcFetchGrades(): Promise<TCGradeItem[]> {
 
 /** 取得使用者 Profile — 使用 /api/profile（玩課雲版本） */
 export async function tcFetchProfile(): Promise<TCUserProfile | null> {
+  if (!isTronClassDataFetchEnabled()) return null;
+
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
     return await fetchTronClassBackend<TCUserProfile>('profile');
@@ -2400,6 +2431,9 @@ export async function tcPostDiscussion(
   courseId: number,
   input: { title: string; content?: string },
 ): Promise<TCWriteResult> {
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
     return await fetchTronClassBackend<TCWriteResult>('postDiscussion', { courseId, input });
@@ -2433,6 +2467,9 @@ export async function tcPostDiscussionReply(
   discussionId: number,
   content: string,
 ): Promise<TCWriteResult> {
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
     return await fetchTronClassBackend<TCWriteResult>('postDiscussionReply', {
@@ -2474,6 +2511,9 @@ export async function tcSubmitHomework(
     attachments?: Array<{ uri: string; name: string; type?: string }>;
   },
 ): Promise<TCWriteResult> {
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
     return await fetchTronClassBackend<TCWriteResult>('submitHomework', {
@@ -2563,6 +2603,9 @@ export async function tcSubmitSurvey(
   surveyId: number,
   answers: Record<string, unknown>,
 ): Promise<TCWriteResult> {
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
     return await fetchTronClassBackend<TCWriteResult>('submitSurvey', {
@@ -2630,6 +2673,9 @@ export async function tcSubmitPeerReview(
     totalScore?: number;
   },
 ): Promise<TCWriteResult> {
+  if (!isTronClassDataFetchEnabled()) {
+    return { success: false, error: TRONCLASS_DATA_DISABLED_MESSAGE };
+  }
   await ensureBackendSessionLoaded();
   if (shouldUseBackendSession()) {
     return await fetchTronClassBackend<TCWriteResult>('submitPeerReview', {
