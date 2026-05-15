@@ -3,7 +3,11 @@
  *
  * Inbox actions 純函式測試。
  */
-import { resolveInboxAction, resolveInboxActions } from '../services/inboxActions';
+import {
+  resolveInboxAction,
+  resolveInboxActions,
+  inboxTaskFromLegacyAssignmentActionTarget,
+} from '../services/inboxActions';
 import type { InboxTask } from '../data/types';
 
 const baseTask = (overrides: Partial<InboxTask>): InboxTask =>
@@ -91,5 +95,37 @@ describe('resolveInboxAction', () => {
     r.forEach(({ action }) => {
       expect(action?.recordEventOnComplete?.kind).toBe('inbox_action_taken');
     });
+  });
+});
+
+describe('inboxTaskFromLegacyAssignmentActionTarget', () => {
+  test('從 actionTarget AssignmentDetail 還原', () => {
+    const t = inboxTaskFromLegacyAssignmentActionTarget({
+      id: 'nba-1',
+      title: '交作業',
+      description: '今晚截止',
+      priority: 2,
+      dueAt: null,
+      actionTarget: {
+        tab: '訊息',
+        screen: 'AssignmentDetail',
+        params: { groupId: 'g1', assignmentId: 'a1', groupName: '資料庫' },
+      },
+    });
+    expect(t?.kind).toBe('assignment');
+    expect(t?.groupId).toBe('g1');
+    expect(t?.assignmentId).toBe('a1');
+  });
+
+  test('screen 不是 AssignmentDetail → null', () => {
+    expect(
+      inboxTaskFromLegacyAssignmentActionTarget({
+        id: 'x',
+        title: 't',
+        description: '',
+        priority: 1,
+        actionTarget: { tab: '學習', screen: 'CourseHub', params: { groupId: 'g1' } },
+      }),
+    ).toBeNull();
   });
 });

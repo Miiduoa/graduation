@@ -17,25 +17,6 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Sharing from 'expo-sharing';
 import { useNavigation } from '@react-navigation/native';
 
-// ── 本地 in-app viewer 跳轉（取代 WebBrowser 把使用者踢回 TronClass）──
-function openInApp(
-  navigation: any,
-  url: string,
-  opts: { title?: string; kind?: 'material' | 'quiz' | 'score' | 'homework' | 'attempt'; courseName?: string } = {},
-): void {
-  if (navigation?.navigate) {
-    navigation.navigate('CourseMaterialViewer', {
-      url,
-      title: opts.title ?? '在 APP 內查看',
-      kind: opts.kind ?? 'material',
-      courseName: opts.courseName,
-    });
-    return;
-  }
-  // navigation 不可用時才 fallback 跳系統瀏覽
-  WebBrowser.openBrowserAsync(url).catch(() => {});
-}
-
 import { Card, ErrorState, LoadingState, Pill, Screen, SectionTitle } from '../ui/components';
 import { theme } from '../ui/theme';
 import { CourseDemoDataRibbon, courseChipScrollContentStyle } from '../ui/courseChipShell';
@@ -64,6 +45,8 @@ import {
   type TCHomeworkDetail,
   type TCHomeworkSubmission as TCHWSubmission,
 } from '../services/tronClassClient';
+import { isTronClassPuHostedUrl } from '../services/tronClassDataEnabled';
+import { guardTronClassWebAccessOrAlert } from '../services/tronClassWebUiGate';
 import {
   isDemoCourseId,
   demoFetchModules,
@@ -76,6 +59,58 @@ import {
   demoFetchHomeworkDetail,
   demoFetchHomeworkSubmissions,
 } from '../data/demoCoursesAdapter';
+
+// ── 本地 in-app viewer 跳轉（取代 WebBrowser 把使用者踢回 TronClass）──
+function openInApp(
+  navigation: any,
+  url: string,
+  opts: {
+    title?: string;
+    kind?: 'material' | 'quiz' | 'score' | 'homework' | 'attempt';
+    courseName?: string;
+  } = {},
+): void {
+  if (navigation?.navigate) {
+    navigation.navigate('CourseMaterialViewer', {
+      url,
+      title: opts.title ?? '在 APP 內查看',
+      kind: opts.kind ?? 'material',
+      courseName: opts.courseName,
+    });
+    return;
+  }
+  // navigation 不可用時才 fallback 跳系統瀏覽
+  WebBrowser.openBrowserAsync(url).catch(() => {});
+}
+
+function openPuTronClassMaterialInApp(
+  navigation: any,
+  url: string,
+  opts: {
+    title?: string;
+    kind?: 'material' | 'quiz' | 'score' | 'homework' | 'attempt';
+    courseName?: string;
+  } = {},
+): void {
+  if (!guardTronClassWebAccessOrAlert()) return;
+  openInApp(navigation, url, opts);
+}
+
+/** 外部附件網址若為玩課雲站台，套用與 LMS 相同的關閉開關。 */
+function openAttachmentOrTronClassInApp(
+  navigation: any,
+  url: string,
+  opts: {
+    title?: string;
+    kind?: 'material' | 'quiz' | 'score' | 'homework' | 'attempt';
+    courseName?: string;
+  } = {},
+): void {
+  if (isTronClassPuHostedUrl(url)) {
+    if (!guardTronClassWebAccessOrAlert()) return;
+  }
+  openInApp(navigation, url, opts);
+}
 
 // ── 型別定義 ──────────────────────────────────────
 
@@ -230,7 +265,7 @@ function MaterialCard(props: {
   const handlePress = useCallback(async () => {
     // 沒有附件 → 仍在 APP 內 webview 開課程活動頁
     if (!upload) {
-      openInApp(navigation, tcBuildFileViewUrl(courseId, activity.id), {
+      openPuTronClassMaterialInApp(navigation, tcBuildFileViewUrl(courseId, activity.id), {
         title: activity.title,
         kind: 'material',
       });
@@ -239,6 +274,7 @@ function MaterialCard(props: {
 
     // 圖片：直接預覽 (本機 Image)
     if (isImageFile(upload.name)) {
+      if (!guardTronClassWebAccessOrAlert()) return;
       const imageUrl = tcBuildFileDownloadUrl(upload.key);
       onPreviewImage(imageUrl, upload.name);
       return;
@@ -247,7 +283,7 @@ function MaterialCard(props: {
     // 其他檔案：先嘗試本地 in-app webview / PDF 查看
     setDownloading(true);
     try {
-      openInApp(navigation, tcBuildFileDownloadUrl(upload.key), {
+      openPuTronClassMaterialInApp(navigation, tcBuildFileDownloadUrl(upload.key), {
         title: upload.name,
         kind: 'material',
       });
@@ -665,7 +701,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
           {/* 在 APP 內查看完整測驗 */}
           <Pressable
             onPress={() =>
-              openInApp(navigation, tcBuildExamViewUrl(courseId, exam.id), {
+              openPuTronClassMaterialInApp(navigation, tcBuildExamViewUrl(courseId, exam.id), {
                 title: exam.title ?? '測驗',
                 kind: 'quiz',
               })
@@ -832,7 +868,12 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                     <Pressable
                       key={att.id}
                       onPress={() => {
-                        if (att.url) openInApp(navigation, att.url, { title: att.name ?? '附件', kind: 'homework' });
+                        if (att.url) {
+                          openAttachmentOrTronClassInApp(navigation, att.url, {
+                            title: att.name ?? '附件',
+                            kind: 'homework',
+                          });
+                        }
                       }}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
                     >
@@ -897,10 +938,14 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
           {/* 在 APP 內查看 */}
           <Pressable
             onPress={() =>
-              openInApp(navigation, `https://tronclass.pu.edu.tw/course/${courseId}/content#/homework/${hw.id}`, {
-                title: hw.title ?? '作業',
-                kind: 'homework',
-              })
+              openPuTronClassMaterialInApp(
+                navigation,
+                `https://tronclass.pu.edu.tw/course/${courseId}/content#/homework/${hw.id}`,
+                {
+                  title: hw.title ?? '作業',
+                  kind: 'homework',
+                },
+              )
             }
             style={({ pressed }) => ({
               flexDirection: 'row',
@@ -1021,7 +1066,7 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
 
         <Pressable
           onPress={() =>
-            openInApp(navigation, tcBuildScoreUrl(courseId), {
+            openPuTronClassMaterialInApp(navigation, tcBuildScoreUrl(courseId), {
               title: '完整成績',
               kind: 'score',
             })

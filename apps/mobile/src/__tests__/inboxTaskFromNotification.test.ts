@@ -5,7 +5,12 @@ import {
   inboxTaskFromAssignmentNotification,
   inboxTaskFromAssignmentPushData,
 } from '../utils/inboxTaskFromNotification';
-import { parseGroupAssignmentDeepLink } from '../app/assignmentDeepLink';
+import {
+  parseGroupAssignmentDeepLink,
+  parseGroupAssignmentsListDeepLink,
+  parseGroupCourseHubDeepLink,
+  isInterceptedMessagingDeepLink,
+} from '../app/assignmentDeepLink';
 import type { Notification } from '../state/notifications';
 
 describe('inboxTaskFromAssignmentNotification', () => {
@@ -65,15 +70,37 @@ describe('parseGroupAssignmentDeepLink', () => {
     });
   });
 
-  test('query kind=quiz → isQuiz', () => {
-    expect(
-      parseGroupAssignmentDeepLink(
-        'campus://group/g1/assignment/a1?kind=quiz',
-      ),
-    ).toEqual({
+  test('group/.../assignments → groupId（不與單筆 assignment 混淆）', () => {
+    expect(parseGroupAssignmentsListDeepLink('campus://group/g1/assignments')).toEqual({
       groupId: 'g1',
-      assignmentId: 'a1',
-      isQuiz: true,
     });
+    expect(parseGroupAssignmentsListDeepLink('campus://group/g1/assignment/hw1')).toBeNull();
+  });
+
+  test('isInterceptedMessagingDeepLink', () => {
+    expect(isInterceptedMessagingDeepLink('campus://group/g1/assignments')).toBe(true);
+    expect(isInterceptedMessagingDeepLink('campus://group/g/assignment/a')).toBe(true);
+    expect(isInterceptedMessagingDeepLink('campus://group/g1/hub')).toBe(true);
+    expect(isInterceptedMessagingDeepLink('campus://group/g1?hub=1')).toBe(true);
+    expect(isInterceptedMessagingDeepLink('campus://group/g1')).toBe(false);
+    expect(isInterceptedMessagingDeepLink('campus://inbox')).toBe(false);
+  });
+});
+
+describe('parseGroupCourseHubDeepLink', () => {
+  test('path …/group/id/hub', () => {
+    expect(parseGroupCourseHubDeepLink('campus://group/course-1/hub')).toEqual({
+      groupId: 'course-1',
+    });
+  });
+
+  test('query hub=1（host=group）', () => {
+    expect(parseGroupCourseHubDeepLink('campus://group/mygid?hub=1')).toEqual({
+      groupId: 'mygid',
+    });
+  });
+
+  test('裸 group/id 不攔截', () => {
+    expect(parseGroupCourseHubDeepLink('campus://group/club-only')).toBeNull();
   });
 });

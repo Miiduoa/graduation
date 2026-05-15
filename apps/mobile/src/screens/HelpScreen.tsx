@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useState } from 'react';
-import { ScrollView, Text, View, Pressable, Linking, Alert } from 'react-native';
+import { ScrollView, Text, View, Pressable, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Screen,
@@ -13,6 +13,8 @@ import {
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { getLegalUrl } from '../services/release';
+import { isTronClassPuHostedUrl } from '../services/tronClassDataEnabled';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 type FAQItem = {
   id: string;
@@ -200,7 +202,7 @@ export function HelpScreen(props: any) {
   };
 
   const handleContact = () => {
-    Linking.openURL('mailto:support@campus-app.com?subject=校園App問題諮詢');
+    void linkingOpenWithPuTronClassGate('mailto:support@campus-app.com?subject=校園App問題諮詢');
   };
 
   const openLegalDocument = (type: 'privacy' | 'terms') => {
@@ -210,8 +212,10 @@ export function HelpScreen(props: any) {
       return;
     }
 
-    Linking.openURL(url).catch(() => {
-      Alert.alert('無法開啟', '請稍後再試');
+    void linkingOpenWithPuTronClassGate(url).then((ok) => {
+      if (!ok && !isTronClassPuHostedUrl(url)) {
+        Alert.alert('無法開啟', '請稍後再試');
+      }
     });
   };
 

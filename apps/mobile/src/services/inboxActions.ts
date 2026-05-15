@@ -5,7 +5,7 @@
  * （繳交作業、測驗中心、智慧簽到、討論、教師批改等），而非只開群組頁。
  */
 
-import type { InboxTask } from '../data/types';
+import type { InboxTask, NextBestAction } from '../data/types';
 import type { CourseNavigationRole, NavigationLike } from '../utils/courseNavigation';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
 import { aiOverlay } from '../app/useAIOverlay';
@@ -246,6 +246,39 @@ export function navigateFromInboxTask(
     default:
       return false;
   }
+}
+
+/**
+ * 舊版 Today／Agent 只存 actionTarget（訊息 AssignmentDetail）而沒有 inboxTask 時，還原成 InboxTask 再走 navigateFromInboxTask。
+ */
+export function inboxTaskFromLegacyAssignmentActionTarget(
+  action: Pick<NextBestAction, 'id' | 'title' | 'description' | 'priority' | 'actionTarget' | 'dueAt'>,
+): InboxTask | null {
+  const target = action.actionTarget;
+  if (!target || target.screen !== 'AssignmentDetail') return null;
+  const p = target.params;
+  if (!p || typeof p !== 'object') return null;
+  const groupId = typeof p.groupId === 'string' ? p.groupId : null;
+  const assignmentId = typeof p.assignmentId === 'string' ? p.assignmentId : null;
+  if (!groupId || !assignmentId) return null;
+
+  const isQuiz =
+    p.isQuiz === true ||
+    p.kind === 'quiz' ||
+    p.type === 'quiz' ||
+    p.category === 'exam';
+
+  return {
+    id: action.id,
+    kind: isQuiz ? 'quiz' : 'assignment',
+    groupId,
+    groupName: typeof p.groupName === 'string' ? p.groupName : '課程',
+    title: action.title,
+    subtitle: typeof action.description === 'string' ? action.description : '',
+    assignmentId,
+    priority: action.priority,
+    dueAt: action.dueAt ?? undefined,
+  };
 }
 
 /**

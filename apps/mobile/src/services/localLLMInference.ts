@@ -21,6 +21,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
 import { NativeModules, Platform, TurboModuleRegistry } from 'react-native';
 import type { LlamaContext, TokenData } from 'llama.rn';
@@ -183,8 +184,22 @@ export const MODEL_REGISTRY: Record<string, LLMConfig> = {
   },
 };
 
-// 預設模型
-const DEFAULT_MODEL_ID = 'qwen2.5-3b';
+function readExpoExtra(): Record<string, unknown> {
+  const ex =
+    (Constants.expoConfig as { extra?: Record<string, unknown> } | undefined)?.extra ??
+    (Constants as unknown as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra;
+  return ex ?? {};
+}
+
+/** 預設本機 GGUF（對齊「最強離線」建議：Qwen2.5-7B Q4）；可用 EXPO_PUBLIC_LOCAL_LLM_MODEL覆寫。 */
+export function getDefaultLocalLlmModelId(): string {
+  const extra = readExpoExtra();
+  const fromExtra = String(extra.localLlmDefaultModelId ?? '').trim();
+  if (fromExtra && MODEL_REGISTRY[fromExtra]) return fromExtra;
+  const fromEnv = String(process.env.EXPO_PUBLIC_LOCAL_LLM_MODEL ?? '').trim();
+  if (fromEnv && MODEL_REGISTRY[fromEnv]) return fromEnv;
+  return 'qwen2.5-7b';
+}
 
 // Storage keys
 const STORAGE_KEYS = {
@@ -380,7 +395,7 @@ class LocalLLMEngine {
    * 檢查模型是否已下載
    */
   async isModelDownloaded(modelId?: string): Promise<boolean> {
-    const cfg = MODEL_REGISTRY[modelId ?? DEFAULT_MODEL_ID];
+    const cfg = MODEL_REGISTRY[modelId ?? getDefaultLocalLlmModelId()];
     if (!cfg) return false;
     const path = this.getModelPath(cfg);
     try {
@@ -398,7 +413,7 @@ class LocalLLMEngine {
     modelId?: string,
     onProgress?: (progress: ModelDownloadProgress) => void,
   ): Promise<boolean> {
-    const cfg = MODEL_REGISTRY[modelId ?? DEFAULT_MODEL_ID];
+    const cfg = MODEL_REGISTRY[modelId ?? getDefaultLocalLlmModelId()];
     if (!cfg) {
       this.setState({ status: 'error', error: `Unknown model: ${modelId}` });
       return false;
@@ -499,7 +514,7 @@ class LocalLLMEngine {
    * 載入模型到記憶體（初始化 llama context）
    */
   async loadModel(modelId?: string): Promise<boolean> {
-    const cfg = MODEL_REGISTRY[modelId ?? DEFAULT_MODEL_ID];
+    const cfg = MODEL_REGISTRY[modelId ?? getDefaultLocalLlmModelId()];
     if (!cfg) {
       this.setState({ status: 'error', error: `Unknown model: ${modelId}` });
       return false;
@@ -577,7 +592,7 @@ class LocalLLMEngine {
     modelId?: string,
     onProgress?: (progress: ModelDownloadProgress) => void,
   ): Promise<boolean> {
-    const mid = modelId ?? (await this.getSavedModelId()) ?? DEFAULT_MODEL_ID;
+    const mid = modelId ?? (await this.getSavedModelId()) ?? getDefaultLocalLlmModelId();
 
     if (this.state.status === 'ready' && this.config?.modelId === mid) {
       return true;
@@ -875,7 +890,7 @@ class LocalLLMEngine {
    * 刪除已下載的模型檔案
    */
   async deleteModel(modelId?: string): Promise<void> {
-    const cfg = MODEL_REGISTRY[modelId ?? DEFAULT_MODEL_ID];
+    const cfg = MODEL_REGISTRY[modelId ?? getDefaultLocalLlmModelId()];
     if (!cfg) return;
 
     if (this.config?.modelId === cfg.modelId) {

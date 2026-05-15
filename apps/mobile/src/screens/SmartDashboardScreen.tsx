@@ -57,7 +57,7 @@ import {
   navigateToTarget,
 } from '../utils/courseNavigation';
 import { isTeachingRole } from '../utils/campusOs';
-import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
+import { navigateFromInboxTask, resolveInboxAction, inboxTaskFromLegacyAssignmentActionTarget } from '../services/inboxActions';
 
 // Engines
 import {
@@ -2622,6 +2622,29 @@ export function SmartDashboardScreen(props: any) {
           isTeachingRole: isTeachingRole(auth.profile?.role),
         });
         if (navigated) return;
+      }
+
+      const legacyAssignmentTask = inboxTaskFromLegacyAssignmentActionTarget(action);
+      if (legacyAssignmentTask) {
+        const navigated = navigateFromInboxTask(nav, legacyAssignmentTask, {
+          role: auth.profile?.role,
+          isTeachingRole: isTeachingRole(auth.profile?.role),
+        });
+        if (navigated) return;
+      }
+
+      const legacyGroupAssignments = action.actionTarget;
+      if (
+        legacyGroupAssignments?.screen === 'GroupAssignments' &&
+        legacyGroupAssignments.params &&
+        typeof (legacyGroupAssignments.params as { groupId?: unknown }).groupId === 'string'
+      ) {
+        const p = legacyGroupAssignments.params as { groupId: string; groupName?: string };
+        navigateToCourseScreen(nav, auth.profile?.role, 'CourseHub', {
+          groupId: p.groupId,
+          groupName: typeof p.groupName === 'string' ? p.groupName : undefined,
+        });
+        return;
       }
 
       const target = action.actionTarget;

@@ -21,6 +21,7 @@ import {
   type LLMState,
   type ModelDownloadProgress,
   MODEL_REGISTRY,
+  getDefaultLocalLlmModelId,
 } from './localLLMInference';
 import {
   agentReason,
@@ -31,6 +32,8 @@ import {
 } from './agentReasoningEngine';
 import './agentToolkit'; // 自動註冊工具
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import { formatLocalDocRagAppendix } from './localDocRAG';
 
 // ═══════════════════════════════════════════════════
 // Types
@@ -80,14 +83,29 @@ export type OnStatusCallback = (status: AssistantStatus) => void;
 // Configuration
 // ═══════════════════════════════════════════════════
 
-const DEFAULT_ASSISTANT_CONFIG: AssistantConfig = {
-  modelId: 'qwen2.5-3b',
-  enableAgent: true,
-  enableWebSearch: true,
-  showThinking: true,
-  autoFallback: true,
-  language: 'zh-TW',
-};
+function readExpoExtra(): Record<string, unknown> {
+  const ex =
+    (Constants.expoConfig as { extra?: Record<string, unknown> } | undefined)?.extra ??
+    (Constants as unknown as { manifest?: { extra?: Record<string, unknown> } }).manifest?.extra;
+  return ex ?? {};
+}
+
+function buildDefaultAssistantConfig(): AssistantConfig {
+  const extra = readExpoExtra();
+  const offlineFirst =
+    extra.aiOfflineFirst === true ||
+    String(extra.aiOfflineFirst ?? '').toLowerCase() === 'true' ||
+    String(process.env.EXPO_PUBLIC_AI_OFFLINE_FIRST ?? '').toLowerCase() === 'true';
+
+  return {
+    modelId: getDefaultLocalLlmModelId(),
+    enableAgent: true,
+    enableWebSearch: !offlineFirst,
+    showThinking: true,
+    autoFallback: true,
+    language: 'zh-TW',
+  };
+}
 
 const CONFIG_KEY = '@assistant:config';
 const HISTORY_KEY = '@assistant:history';
@@ -189,7 +207,7 @@ async function localNLPResponse(message: string): Promise<string> {
 // ════════��══════════════════════════════════════════
 
 class LocalAssistant {
-  private config: AssistantConfig = DEFAULT_ASSISTANT_CONFIG;
+  private config: AssistantConfig = buildDefaultAssistantConfig();
   private history: AssistantMessage[] = [];
   private statusListeners: Set<OnStatusCallback> = new Set();
   private initialized = false;
@@ -209,7 +227,8 @@ class LocalAssistant {
     // 載入配置
     try {
       const raw = await AsyncStorage.getItem(CONFIG_KEY);
-      if (raw) this.config = { ...DEFAULT_ASSISTANT_CONFIG, ...JSON.parse(raw) };
+      if (raw) this.config = { ...buildDefaultAssistantConfig(), ...JSON.parse(raw) };
+      else this.config = buildDefaultAssistantConfig();
     } catch {}
 
     // 如果 LLM 引擎已有啟用模型紀錄，以 LLM 的選用模型為準。
@@ -398,6 +417,11 @@ class LocalAssistant {
 
         if (relevantMemory.length > 0) {
           systemPrompt += `\n\n你之前回答過類似的問題：\n${relevantMemory.map((m) => `Q: ${m.question}\nA: ${m.answer}`).join('\n')}`;
+        }
+
+        const ragAppendix = await formatLocalDocRagAppendix(message);
+        if (ragAppendix) {
+          systemPrompt += `\n\n${ragAppendix}`;
         }
 
         const result = await localLLM.chat(message, systemPrompt, onToken, signal);
