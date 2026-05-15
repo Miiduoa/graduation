@@ -8,6 +8,12 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, ActivityIndicator, Pressable, ScrollView, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import {
+  TRONCLASS_DATA_DISABLED_MESSAGE,
+  isTronClassPuHostedUrl,
+  isTronClassDataFetchEnabled,
+} from '../services/tronClassDataEnabled';
+
 type RouteProps = {
   route?: {
     params?: {
@@ -67,6 +73,27 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
         <Pressable
           onPress={() => props.navigation?.goBack()}
           style={{ marginTop: 16, padding: 12, backgroundColor: '#1F4E78', borderRadius: 8 }}
+        >
+          <Text style={{ color: '#fff' }}>返回</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  if (isTronClassPuHostedUrl(url) && !isTronClassDataFetchEnabled()) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Text
+          style={{ color: '#1F4E78', fontSize: 17, fontWeight: '700', textAlign: 'center' }}
+        >
+          LMS（TronClass）已關閉
+        </Text>
+        <Text style={{ color: '#374151', fontSize: 14, marginTop: 12, textAlign: 'center' }}>
+          {TRONCLASS_DATA_DISABLED_MESSAGE}
+        </Text>
+        <Pressable
+          onPress={() => props.navigation?.goBack()}
+          style={{ marginTop: 20, padding: 12, backgroundColor: '#1F4E78', borderRadius: 8 }}
         >
           <Text style={{ color: '#fff' }}>返回</Text>
         </Pressable>

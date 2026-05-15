@@ -4,7 +4,7 @@
 
 啟動建議：`cd apps/mobile && npx expo start --clear`  
 離線 AI：`EXPO_PUBLIC_AI_PROVIDER=offline`（若專案有該變數）。  
-關閉 TronClass 全網路：`EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=false`（仍可依 demo 課與離線資料跑 Golden Path）。  
+關閉 TronClass 全網路：`EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=false`（仍可依 demo 課與離線資料跑 Golden Path）；此時 App 亦不會對 `tronclass.pu.edu.tw` 開 WebView／外開瀏覽器（課程內「在 APP 內查看」會以對話框說明）。  
 Firebase + Google 登入：請在 `apps/mobile/.env` 設定 `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`、`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`、`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`（與 Firebase Console OAuth 客戶端一致）。
 
 ---

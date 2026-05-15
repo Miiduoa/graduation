@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { ScrollView, Text, View, Alert, Linking, TextInput } from 'react-native';
+import { ScrollView, Text, View, Alert, TextInput } from 'react-native';
 import Constants from 'expo-constants';
 import { PROVIDENCE_UNIVERSITY_SCHOOL_CODE } from '@campus/shared/src';
 import {
@@ -28,6 +28,8 @@ import { getHybridSourceStatus } from '../data/hybridSource';
 import { getRuntimeDataSourcePolicy } from '../config/runtime';
 import { formatFileSize } from '../utils/format';
 import { getLegalUrl, getReleaseConfig } from '../services/release';
+import { isTronClassPuHostedUrl } from '../services/tronClassDataEnabled';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 const APP_VERSION = Constants.expoConfig?.version ?? Constants.manifest?.version ?? '1.0.0';
 
@@ -465,10 +467,8 @@ export function SettingsScreen(props: any) {
                   Alert.alert('尚未設定', '尚未設定正式隱私政策連結');
                   return;
                 }
-                Linking.canOpenURL(url).then((supported) => {
-                  if (supported) {
-                    Linking.openURL(url);
-                  } else {
+                void linkingOpenWithPuTronClassGate(url).then((ok) => {
+                  if (!ok && !isTronClassPuHostedUrl(url)) {
                     Alert.alert('無法開啟', '請稍後再試或聯繫開發團隊');
                   }
                 });
@@ -483,10 +483,8 @@ export function SettingsScreen(props: any) {
                   Alert.alert('尚未設定', '尚未設定正式使用條款連結');
                   return;
                 }
-                Linking.canOpenURL(url).then((supported) => {
-                  if (supported) {
-                    Linking.openURL(url);
-                  } else {
+                void linkingOpenWithPuTronClassGate(url).then((ok) => {
+                  if (!ok && !isTronClassPuHostedUrl(url)) {
                     Alert.alert('無法開啟', '請稍後再試或聯繫開發團隊');
                   }
                 });

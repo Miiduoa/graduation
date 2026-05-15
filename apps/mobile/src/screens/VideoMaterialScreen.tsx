@@ -10,6 +10,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { theme } from '../ui/theme';
 import { CourseChipEmpty, CourseChipHeader, courseChipScrollContentStyle } from '../ui/courseChipShell';
+import {
+  TRONCLASS_DATA_DISABLED_MESSAGE,
+  isTronClassDataFetchEnabled,
+  isTronClassPuHostedUrl,
+} from '../services/tronClassDataEnabled';
 
 type RouteProps = {
   route?: {
@@ -94,6 +99,26 @@ export default function VideoMaterialScreen(props: RouteProps) {
         <CourseChipEmpty
           title="無法解析影片連結"
           body="若從通知或外部連結進入，請回到課程教材清單重新開啟。教師端請確認教材是否已發布。"
+          primaryLabel="離開此頁"
+          onPrimary={goLeave}
+        />
+      </ScrollView>
+    );
+  }
+
+  if (isTronClassPuHostedUrl(url) && !isTronClassDataFetchEnabled()) {
+    return (
+      <ScrollView
+        style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
+        contentContainerStyle={[
+          courseChipScrollContentStyle(),
+          { flexGrow: 1, paddingTop: theme.space.xl },
+        ]}
+      >
+        <CourseChipHeader emoji="🔗" eyebrow="LMS" title="連線已關閉" meta={courseName} />
+        <CourseChipEmpty
+          title={TRONCLASS_DATA_DISABLED_MESSAGE}
+          body="已停用對 TronClass 站台的連線；無法由此播放託管於玩課雲的影片。請使用本機／demo 教材，或於建置設定重新啟用 EXPO_PUBLIC_TRONCLASS_DATA_ENABLED。"
           primaryLabel="離開此頁"
           onPrimary={goLeave}
         />

@@ -27,6 +27,8 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { useAsyncStorage } from '../hooks/useStorage';
 import { analytics } from '../services/analytics';
+import { isTronClassPuHostedUrl } from '../services/tronClassDataEnabled';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { PureQRCode } from '../ui/PureQRCode';
@@ -440,8 +442,10 @@ export function QRCodeScreen(props: any) {
         {
           text: '開啟',
           onPress: async () => {
-            const { Linking } = require('react-native');
-            await Linking.openURL(data);
+            const ok = await linkingOpenWithPuTronClassGate(data);
+            if (!ok && !isTronClassPuHostedUrl(data)) {
+              Alert.alert('無法開啟', '此連結無法在裝置上開啟。');
+            }
           },
         },
       ]);

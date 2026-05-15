@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useMemo, useState } from 'react';
-import { ScrollView, Text, TextInput, View, Pressable, Alert, Linking } from 'react-native';
+import { ScrollView, Text, TextInput, View, Pressable, Alert } from 'react-native';
 import {
   collection,
   doc,
@@ -36,6 +36,7 @@ import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 type Group = {
   id: string;
@@ -1428,7 +1429,10 @@ export function AssignmentDetailScreen(props: any) {
                               附加連結：
                             </Text>
                             {s.links.map((l, i) => (
-                              <Pressable key={i} onPress={() => Linking.openURL(l)}>
+                              <Pressable
+                                key={i}
+                                onPress={() => void linkingOpenWithPuTronClassGate(l)}
+                              >
                                 <View
                                   style={{
                                     flexDirection: 'row',

@@ -15,6 +15,14 @@ export function isTronClassDataFetchEnabled(): boolean {
   return true;
 }
 
+const TRONCLASS_PU_HOST = 'tronclass.pu.edu.tw';
+
+/** 判斷連結是否為靜宜 TronClass（玩課雲）站台，用於 WebView／系統瀏覽器與 API 同一套開關。 */
+export function isTronClassPuHostedUrl(rawUrl: string | null | undefined): boolean {
+  if (rawUrl == null || typeof rawUrl !== 'string') return false;
+  return rawUrl.toLowerCase().includes(TRONCLASS_PU_HOST);
+}
+
 const TRONCLASS_BACKEND_MUTATIONS = new Set([
   'postDiscussion',
   'postDiscussionReply',
