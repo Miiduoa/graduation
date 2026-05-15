@@ -7,6 +7,7 @@ import {
   Image,
   Modal,
   Pressable,
+  RefreshControl,
   ScrollView,
   Text,
   View,
@@ -38,6 +39,7 @@ function openInApp(
 import { Card, ErrorState, LoadingState, Pill, Screen, SectionTitle } from '../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
+import { CourseDemoDataRibbon } from '../ui/courseChipShell';
 import { useAuth } from '../state/auth';
 import { useAsyncList } from '../hooks/useAsyncList';
 import {
@@ -1206,6 +1208,8 @@ export function CourseModulesScreen(props: any) {
     loading,
     error,
     reload,
+    refresh,
+    refreshing,
   } = useAsyncList<ModuleWithContent>(async () => {
     if (!courseId || isNaN(courseId)) return [];
 
@@ -1422,12 +1426,29 @@ export function CourseModulesScreen(props: any) {
 
       <ScrollView
         style={{ flex: 1 }}
+        accessibilityLabel="課程章節與教材列表"
         contentContainerStyle={{
           gap: 14,
           padding: 16,
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
         }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            title="重新整理"
+            tintColor={theme.colors.primary}
+            accessibilityLabel="重新整理課程內容"
+            onRefresh={() => {
+              void refresh();
+            }}
+          />
+        }
       >
+        {demoMode ? (
+          <View style={{ alignItems: 'flex-end' }}>
+            <CourseDemoDataRibbon />
+          </View>
+        ) : null}
         {/* 課程標題 */}
         <Card title={courseName} subtitle="課程內容">
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
