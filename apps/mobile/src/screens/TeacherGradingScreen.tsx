@@ -20,6 +20,10 @@ import { useNavigation } from '@react-navigation/native';
 
 import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
 
+import { useAuth } from '../state/auth';
+import { simulateTeacherGrade } from '../services/demoActionSimulator';
+import { emitFeedbackDrafted } from '../services/roleEventBus';
+
 interface Submission {
   id: string;
   studentName: string;
@@ -117,7 +121,10 @@ const SAMPLE_RUBRIC: Rubric = {
 
 export default function TeacherGradingScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
+  const auth = useAuth();
   const assignmentTitle = props.route?.params?.assignmentTitle ?? '作業批改';
+  const assignmentId = props.route?.params?.assignmentId ?? '1';
+  const courseId = props.route?.params?.courseId ?? '101';
   const courseName = props.route?.params?.courseName ?? '';
   const passingScore = props.route?.params?.passingScore ?? 60;
   const rubric = props.route?.params?.rubric ?? SAMPLE_RUBRIC;
@@ -153,7 +160,40 @@ export default function TeacherGradingScreen(props: RouteProps) {
     }
     setSaving(true);
     try {
-      await new Promise((r) => setTimeout(r, 400));
+      // ── Demo：emit cross-role events 給該學生 ──
+      const numericCourseId = Number(courseId) || 0;
+      const numericHwId = Number(assignmentId) || 1;
+      // demo 學生 mapping：阿明/小華/小芳 一律 emit 給 demo_student_kuchih（讓 demo 角色看得到）
+      const studentTargetUid = sub.studentName === '顧晉瑋'
+        ? 'demo_student_kuchih'
+        : 'demo_student_kuchih';
+      await simulateTeacherGrade({
+        teacherUid: auth.user?.uid ?? 'demo_teacher_chang',
+        teacherName: auth.profile?.displayName ?? '張怡君',
+        studentUid: studentTargetUid,
+        studentName: sub.studentName,
+        courseId: numericCourseId,
+        courseName: courseName || assignmentTitle.split(' ')[0],
+        homeworkId: numericHwId,
+        homeworkTitle: assignmentTitle,
+        score: evaluation.totalScore,
+        totalScore: 100,
+      });
+      if (feedback.trim()) {
+        await emitFeedbackDrafted({
+          actorUid: auth.user?.uid ?? 'demo_teacher_chang',
+          actorName: auth.profile?.displayName ?? '張怡君',
+          targetUids: [studentTargetUid],
+          courseId: numericCourseId,
+          courseName: courseName || assignmentTitle.split(' ')[0],
+          payload: {
+            studentName: sub.studentName,
+            homeworkTitle: assignmentTitle,
+            draftPreview: feedback.trim(),
+          },
+        });
+      }
+
       // 更新本機 state（真實實作會 PATCH /submissions/{id}）
       setSubmissions((ss) =>
         ss.map((s, i) =>

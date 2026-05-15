@@ -138,10 +138,14 @@ describe('bulkReminders', () => {
     const r = bulkReminders({
       students: [{ uid: 'u1', displayName: '阿明' }],
       homeworkTitle: 'HW1',
+      courseId: 71378,
+      homeworkId: 465001,
       courseName: 'ML',
       dueAt: new Date().toISOString(),
     });
     expect(r[0].deepLink).toMatch(/HomeworkSubmit/);
     expect(r[0].deepLink).toContain('HW1');
+    expect(r[0].deepLink).toContain('courseId=71378');
+    expect(r[0].deepLink).toContain('hwId=465001');
   });
 });

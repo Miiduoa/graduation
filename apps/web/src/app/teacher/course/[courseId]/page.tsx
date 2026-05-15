@@ -13,6 +13,7 @@ import {
   type CourseWorkspace,
 } from '@/lib/firebase';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { getDemoCourseWorkspace } from '@/lib/demoData';
 
 const EMPTY_WORKSPACE: CourseWorkspace = {
   course: null,
@@ -89,6 +90,14 @@ export default function TeacherCoursePage(props: {
       try {
         const next = await fetchCourseWorkspace(props.params.courseId);
         if (!active) return;
+        // demo fallback：Firebase 抓不到時用 demoData，讓教師端 demo 一定有畫面
+        if (!next.course) {
+          const demo = getDemoCourseWorkspace(props.params.courseId);
+          if (demo) {
+            setWorkspace(demo);
+            return;
+          }
+        }
         setWorkspace(next);
       } finally {
         if (active) {
