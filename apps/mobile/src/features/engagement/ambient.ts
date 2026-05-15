@@ -338,9 +338,9 @@ function buildAchievementCue(params: {
         params.totalPoints > 0
           ? '成就頁不是另外一條路，它反映的是你平常怎麼跟上節奏。回到主流程，分數通常會更自然地累積。'
           : '先讓今天的主流程跑起來，成就與積分會比單純刷頁面更容易往上走。',
-      ctaLabel: completionSpace ? '回到課程' : '回到 Today',
+      ctaLabel: completionSpace ? '回到學習' : '回到 Today',
       target: completionSpace
-        ? { tab: '課程', screen: 'CourseHub', params: { groupId: completionSpace.groupId } }
+        ? { tab: '學習', screen: 'CourseHub', params: { groupId: completionSpace.groupId } }
         : { tab: 'Today', screen: 'TodayHome' },
       metric: `${distinctUserCount} 人近期先完成主流程`,
       distinctUserCount,

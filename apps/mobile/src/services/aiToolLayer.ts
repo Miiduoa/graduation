@@ -779,7 +779,7 @@ export function runAIToolLayer(params: {
           insights,
           crossRoleEffects,
           answer: '目前沒有載入課程資料，所以不能判斷課表。請先同步課表；同步後我會用結構化課表演算，不會用模型猜。',
-          actions: [{ label: '前往課表同步', action: 'navigate', params: { screen: '課程', nested: 'CourseSchedule' } }],
+          actions: [{ label: '前往課表同步', action: 'navigate', params: { screen: '學習', nested: 'CourseSchedule' } }],
         };
       }
       if (rows.length === 0) {
@@ -805,7 +805,7 @@ export function runAIToolLayer(params: {
         insights,
         crossRoleEffects,
         answer: `${label}有 ${rows.length} 堂課：\n\n${list}`,
-        actions: [{ label: '開啟課表', action: 'navigate', params: { screen: '課程', nested: 'CourseSchedule' } }],
+        actions: [{ label: '開啟課表', action: 'navigate', params: { screen: '學習', nested: 'CourseSchedule' } }],
       };
     }
 

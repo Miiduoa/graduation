@@ -358,12 +358,12 @@ function defaultActionsForTool(tool: AgentTool): AssistantActionProposal[] {
     case 'set_reminder':
       return [navAction('開啟智慧行事曆', { screen: 'Today', nested: 'SmartCalendarScreen' })];
     case 'send_message':
-      return [navAction('開啟訊息', { screen: '收件匣', nested: 'MessagesHome' }, 'medium')];
+      return [navAction('開啟訊息', { screen: '訊息', nested: 'MessagesHome' }, 'medium')];
     case 'assignment_publish':
     case 'peer_review_assign':
     case 'attendance_alert':
     case 'learning_insight':
-      return [navAction('開啟教學管理功能', { screen: '教學', nested: 'CourseHub' }, 'high')];
+      return [navAction('開啟教學管理功能', { screen: '學習', nested: 'CourseHub' }, 'high')];
     default:
       return [];
   }

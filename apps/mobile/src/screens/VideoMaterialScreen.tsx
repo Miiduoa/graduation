@@ -4,10 +4,12 @@
  * 取代 webview 看影片的體驗。記錄播放進度 → 寫回 TronClass。
  * 用 expo-av Video（已隨 Expo SDK 包含）；若不可用 fallback webview。
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, Pressable } from 'react-native';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { View, Text, ActivityIndicator, Pressable, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { theme } from '../ui/theme';
+import { CourseChipEmpty, CourseChipHeader, courseChipScrollContentStyle } from '../ui/courseChipShell';
 
 type RouteProps = {
   route?: {
@@ -40,6 +42,19 @@ export default function VideoMaterialScreen(props: RouteProps) {
   const materialId = props.route?.params?.materialId;
   const expectedDuration = props.route?.params?.durationSeconds ?? 0;
 
+  const goLeave = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    const tabNav = navigation.getParent();
+    if (tabNav) {
+      (tabNav as { navigate: (a: string, b?: object) => void }).navigate('學習', {
+        screen: 'LearnHome',
+      });
+    }
+  }, [navigation]);
+
   const playerRef = useRef<any>(null);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -68,15 +83,21 @@ export default function VideoMaterialScreen(props: RouteProps) {
 
   if (!url) {
     return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-        <Text style={{ color: '#dc2626' }}>沒有提供影片連結。</Text>
-        <Pressable
-          onPress={() => navigation.goBack()}
-          style={{ marginTop: 16, padding: 12, backgroundColor: '#1F4E78', borderRadius: 8 }}
-        >
-          <Text style={{ color: '#fff' }}>返回</Text>
-        </Pressable>
-      </View>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
+        contentContainerStyle={[
+          courseChipScrollContentStyle(),
+          { flexGrow: 1, paddingTop: theme.space.xl },
+        ]}
+      >
+        <CourseChipHeader emoji="🎬" eyebrow="影片教材" title="尚無有效播放網址" meta={courseName} />
+        <CourseChipEmpty
+          title="無法解析影片連結"
+          body="若從通知或外部連結進入，請回到課程教材清單重新開啟。教師端請確認教材是否已發布。"
+          primaryLabel="離開此頁"
+          onPrimary={goLeave}
+        />
+      </ScrollView>
     );
   }
 

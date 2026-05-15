@@ -468,7 +468,10 @@ export const mockSource: DataSource = {
       nextStep: task.nextStep ?? '先打開項目確認細節。',
       actionLabel: task.actionLabel ?? '前往處理',
       actionTarget: {
-        tab: task.kind === 'group' ? '收件匣' : '課程',
+        tab:
+          task.kind === 'live'
+            ? '學習'
+            : '訊息',
         screen:
           task.kind === 'live'
             ? 'Classroom'

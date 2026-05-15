@@ -21,11 +21,37 @@ type RouteGuardProps = {
  * shows an access denied screen instead.
  */
 export function RouteGuard({ requires, fallback, children }: RouteGuardProps) {
-  const { can, canAny, displayName, role } = usePermissions();
+  const { can, canAny, displayName } = usePermissions();
   const navigation = useNavigation();
 
   const permissions = Array.isArray(requires) ? requires : [requires];
   const hasAccess = permissions.length === 1 ? can(permissions[0]) : canAny(permissions);
+
+  const requiredList = permissions as Permission[];
+  const offerCatalogFallback =
+    !hasAccess && requiredList.includes('courses.view') && can('courses.catalog');
+
+  const leaveToLearnHome = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    const tabNav = navigation.getParent();
+    if (tabNav) {
+      (tabNav as { navigate: (a: string, b?: object) => void }).navigate('學習', {
+        screen: 'LearnHome',
+      });
+    }
+  };
+
+  const openCourseCatalog = () => {
+    const tabNav = navigation.getParent();
+    if (tabNav) {
+      (tabNav as { navigate: (a: string, b?: object) => void }).navigate('學習', {
+        screen: 'CourseCatalog',
+      });
+    }
+  };
 
   if (hasAccess) {
     return <>{children}</>;
@@ -45,18 +71,23 @@ export function RouteGuard({ requires, fallback, children }: RouteGuardProps) {
         <Text style={styles.subtitle}>
           您目前的身份是「{displayName}」，此功能不在您的權限範圍內。
         </Text>
-        <Text style={styles.hint}>如果您認為這是錯誤，請聯繫學校管理員調整您的帳號權限。</Text>
-        <Pressable
-          style={styles.backButton}
-          onPress={() => {
-            if (navigation.canGoBack()) {
-              navigation.goBack();
-            }
-          }}
-        >
-          <Ionicons name="arrow-back" size={20} color="#fff" />
-          <Text style={styles.backButtonText}>返回上一頁</Text>
+        <Text style={styles.hint}>
+          {offerCatalogFallback
+            ? '您仍可透過課綱查詢瀏覽公開開課資訊（唯讀）。課程通知若與授課無關，可能是系統誤推，請以學務端為準。'
+            : '如果您認為這是錯誤，請聯繫學校管理員調整您的帳號權限。'}
+        </Text>
+        <Pressable style={styles.backButton} onPress={leaveToLearnHome}>
+          <Ionicons name="arrow-back" size={20} color={theme.colors.onAccent} />
+          <Text style={styles.backButtonText}>
+            {navigation.canGoBack() ? '返回上一頁' : '回到學習首頁'}
+          </Text>
         </Pressable>
+        {offerCatalogFallback ? (
+          <Pressable style={styles.secondaryButton} onPress={openCourseCatalog}>
+            <Ionicons name="book-outline" size={20} color={theme.colors.accent} />
+            <Text style={styles.secondaryButtonText}>前往課綱查詢</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -140,7 +171,24 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   backButtonText: {
-    color: '#fff',
+    color: theme.colors.onAccent,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface,
+  },
+  secondaryButtonText: {
+    color: theme.colors.accent,
     fontSize: 15,
     fontWeight: '600',
   },
