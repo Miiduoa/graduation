@@ -935,7 +935,7 @@ export function CourseHubScreen(props: any) {
                 completionRate={membership.completionRate}
                 updatedAt={membership.socialProofUpdatedAt}
                 onOpenGroup={() =>
-                  nav?.navigate?.('收件匣', {
+                  nav?.navigate?.('訊息', {
                     screen: 'GroupDetail',
                     params: { groupId: membership.groupId },
                   })
@@ -948,7 +948,7 @@ export function CourseHubScreen(props: any) {
                   label="課程動態"
                   tint={theme.colors.accent}
                   onPress={() =>
-                    nav?.navigate?.('收件匣', {
+                    nav?.navigate?.('訊息', {
                       screen: 'GroupDetail',
                       params: { groupId: membership.groupId },
                     })

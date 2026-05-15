@@ -1,7 +1,7 @@
 /**
  * Course Scores Screen — 學生看「某一門課」的成績清單（直接走 TronClass）
  *
- * 不經過 AcademicScreen 也不被 RouteGuard 擋。從 TronClass 真實拉：
+ * 不經過 AcademicScreen；LearnStack 外層以 courses.view 保護（職員仍可走課綱查詢等路徑）。從 TronClass 真實拉：
  *   - tcFetchSelfScore(courseId)：個人整體成績
  *   - tcFetchScoreItems(courseId)：每個評量項與加權
  *   - tcFetchHomeworkScores(courseId)：作業分數
@@ -150,6 +150,8 @@ export default function CourseScoresScreen(props: RouteProps) {
 
       setRows(out);
     } catch (e) {
+      setSelfScore(null);
+      setRows([]);
       setError((e as Error)?.message ?? '載入失敗');
     } finally {
       setLoading(false);

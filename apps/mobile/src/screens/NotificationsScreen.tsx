@@ -45,7 +45,7 @@ const NotificationItem = memo(function NotificationItem(props: NotificationItemP
         padding: 14,
         borderRadius: theme.radius.lg,
         borderWidth: 1,
-        borderColor: read ? theme.colors.border : 'rgba(124,92,255,0.45)',
+        borderColor: read ? theme.colors.border : `${theme.colors.accent}73`,
         backgroundColor: read ? theme.colors.surface : theme.colors.accentSoft,
       }}
     >
@@ -60,7 +60,11 @@ const NotificationItem = memo(function NotificationItem(props: NotificationItemP
             justifyContent: 'center',
           }}
         >
-          <Ionicons name={iconName} size={20} color={read ? theme.colors.muted : '#fff'} />
+          <Ionicons
+            name={iconName}
+            size={20}
+            color={read ? theme.colors.muted : theme.colors.onAccent}
+          />
         </View>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -129,18 +133,18 @@ export function NotificationsScreen(props: any) {
           break;
         case 'group_post':
           if (n.data?.groupId && n.data?.postId) {
-            nav?.navigate?.('收件匣', {
+            nav?.navigate?.('訊息', {
               screen: 'GroupPost',
               params: { groupId: n.data.groupId, postId: n.data.postId },
             });
           }
           break;
         case 'group_invite':
-          nav?.navigate?.('收件匣', { screen: 'Groups' });
+          nav?.navigate?.('訊息', { screen: 'Groups' });
           break;
         case 'assignment':
           if (n.data?.groupId && n.data?.assignmentId) {
-            nav?.navigate?.('收件匣', {
+            nav?.navigate?.('訊息', {
               screen: 'AssignmentDetail',
               params: { groupId: n.data.groupId, assignmentId: n.data.assignmentId },
             });
@@ -148,7 +152,7 @@ export function NotificationsScreen(props: any) {
           break;
         case 'grade':
           if (n.data?.groupId) {
-            nav?.navigate?.('收件匣', {
+            nav?.navigate?.('訊息', {
               screen: 'GroupAssignments',
               params: { groupId: n.data.groupId },
             });
@@ -156,12 +160,34 @@ export function NotificationsScreen(props: any) {
           break;
         case 'message':
           if (n.data?.peerId) {
-            nav?.navigate?.('收件匣', {
+            nav?.navigate?.('訊息', {
               screen: 'Chat',
               params: { kind: 'dm', peerId: n.data.peerId },
             });
           }
           break;
+        case 'system': {
+          const learnTarget = n.data?.learnTarget as string | undefined;
+          const groupId =
+            typeof n.data?.groupId === 'string'
+              ? n.data.groupId
+              : typeof n.data?.groupId === 'number'
+                ? String(n.data.groupId)
+                : undefined;
+
+          if (learnTarget === 'catalog') {
+            nav?.navigate?.('學習', { screen: 'CourseCatalog' });
+            break;
+          }
+          if (learnTarget === 'courseHub' && groupId) {
+            nav?.navigate?.('學習', {
+              screen: 'CourseHub',
+              params: { groupId },
+            });
+            break;
+          }
+          break;
+        }
         default:
           break;
       }

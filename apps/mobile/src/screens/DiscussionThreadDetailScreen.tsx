@@ -109,9 +109,11 @@ export default function DiscussionThreadDetailScreen(props: RouteProps) {
         />
       }
     >
-      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
-        {demoRibbon ? <CourseDemoDataRibbon /> : null}
-      </View>
+      {demoRibbon ? (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
+          <CourseDemoDataRibbon />
+        </View>
+      ) : null}
 
       <CourseChipHeader
         emoji="💬"

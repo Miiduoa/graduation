@@ -278,7 +278,13 @@ const PROTECTED_SCREENS: Record<ScreenName, Permission[]> = {
   AdminDashboard: ['admin.dashboard'],
   AdminCourseVerify: ['admin.course_verify'],
   AddCourse: ['courses.create'],
+  /** 與 LearnStack GuardedAcademicOverview 對齊：需能檢視課程工作區才視為學業總覽對象 */
+  AcademicOverview: ['courses.view'],
   CourseGradebook: ['courses.grade'],
+  /** 課程工作區（與 LearnStack guardCourseView 對齊） */
+  CourseHub: ['courses.view'],
+  CourseModules: ['courses.view'],
+  QuizCenter: ['courses.view'],
   /** 學生簽到／檢視出缺勤需 courses.view；教師操作點名需 courses.attendance */
   Attendance: ['courses.view', 'courses.attendance'],
   LearningAnalytics: ['admin.analytics', 'courses.manage'],

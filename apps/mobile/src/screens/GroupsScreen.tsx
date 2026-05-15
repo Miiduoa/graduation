@@ -427,7 +427,7 @@ export function GroupsScreen(props: any) {
                     <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
                       <Pill text="公告" kind="accent" />
                       <Pill text="Q&A" kind="accent" />
-                      <Pressable onPress={() => nav?.navigate?.('收件匣', { screen: 'Dms' })}>
+                      <Pressable onPress={() => nav?.navigate?.('Dms')}>
                         <Pill text="私訊" kind="accent" />
                       </Pressable>
                     </View>
