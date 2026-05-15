@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { SiteShell } from '@/components/SiteShell';
+import { useToast } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   getAuth,
@@ -13,6 +14,7 @@ import {
   type Group,
 } from '@/lib/firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 
 interface Club {
   id: string;
@@ -138,6 +140,9 @@ export default function ClubsPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
   const { schoolId, schoolName } = resolveSchoolPageContext(props.searchParams);
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
+  const { success, info } = useToast();
   const [category, setCategory] = useState('全部');
   const [clubs, setClubs] = useState<Club[]>(MOCK_CLUBS);
   const [search, setSearch] = useState('');

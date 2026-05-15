@@ -6,6 +6,7 @@ import { Suspense } from 'react';
 import { PWAInstallBanner } from './PWAInstallBanner';
 import { OfflineBanner } from './OfflineBanner';
 import { UpdateBanner } from './UpdateBanner';
+import { DemoRolePill } from './DemoRolePill';
 
 const NAV_ICONS: Record<string, string> = {
   '/': '☀️',
@@ -96,7 +97,8 @@ function SiteShellInner(props: {
                 </div>
               </div>
 
-              <div className="topbarRight">
+              <div className="topbarRight" style={{ alignItems: 'center', gap: 10 }}>
+                <DemoRolePill />
                 <Link href={`/search${q}`} className="iconBtn" title="搜尋">
                   🔍 搜尋
                 </Link>
