@@ -617,6 +617,11 @@ export type NextBestAction = {
   consequence?: string;
   nextStep: string;
   actionLabel: string;
+  /**
+   * 若由收件匣衍生，保留完整 InboxTask，讓 Today／儀表板與訊息工作台共用
+   * inboxActions.navigateFromInboxTask（HomeworkSubmit、QuizCenter、簽到等）。
+   */
+  inboxTask?: InboxTask;
   actionTarget?: {
     tab?: string;
     screen?: string;

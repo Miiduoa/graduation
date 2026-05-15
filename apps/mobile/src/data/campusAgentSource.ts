@@ -97,6 +97,7 @@ function actionFromInboxTask(task: InboxTask): NextBestAction {
     consequence: task.consequence,
     nextStep: task.nextStep ?? actionLabel,
     actionLabel,
+    inboxTask: task,
     actionTarget: actionTargetFromTask(task),
     evidenceRefs: [
       {
