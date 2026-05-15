@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 
 import type { CourseSpace, Quiz } from '../data';
 import { Button, Card, ErrorState, LoadingState, Pill, Screen } from '../ui/components';
@@ -17,6 +17,7 @@ import {
   toDate,
 } from '../services/courseWorkspace';
 import { isDemoCourseId } from '../data/demoCoursesAdapter';
+import { CourseDemoDataRibbon } from '../ui/courseChipShell';
 
 function Field(props: {
   label: string;
@@ -84,6 +85,8 @@ export function QuizCenterScreen(props: any) {
     loading: quizzesLoading,
     error: quizzesError,
     reload: reloadQuizzes,
+    refresh: refreshQuizzes,
+    refreshing: quizzesRefreshing,
   } = useAsyncList<Quiz>(async () => {
     const courseIdNum = routeGroupId ? Number(routeGroupId.replace(/^tc:/, '')) || 0 : 0;
 
@@ -287,12 +290,29 @@ export function QuizCenterScreen(props: any) {
     <Screen noPadding>
       <ScrollView
         style={{ flex: 1 }}
+        accessibilityLabel="測驗中心列表"
         contentContainerStyle={{
           gap: 14,
           padding: 16,
           paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
         }}
+        refreshControl={
+          <RefreshControl
+            refreshing={quizzesRefreshing}
+            title="重新整理"
+            tintColor={theme.colors.primary}
+            accessibilityLabel="重新整理測驗列表"
+            onRefresh={() => {
+              void refreshQuizzes();
+            }}
+          />
+        }
       >
+        {routeCourseIdNum && isDemoCourseId(routeCourseIdNum) ? (
+          <View style={{ alignItems: 'flex-end' }}>
+            <CourseDemoDataRibbon />
+          </View>
+        ) : null}
         <Card
           title={routeGroupId ? `${selectedCourseName} 測驗中心` : '測驗中心'}
           subtitle="把 quiz / exam 提升成正式評量入口"

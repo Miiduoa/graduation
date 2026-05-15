@@ -68,6 +68,7 @@ import {
   type TCScoreItem,
 } from '../services/tronClassClient';
 import type { PUCourse, PUCourseResult, PUGrade, PUGradeResult } from '../services/puDirectScraper';
+import { mergeDemoTronClassCoursesIfEmpty } from '../data/demoCoursesAdapter';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -1739,11 +1740,10 @@ export function CoursesHomeScreen(props: any) {
 
   const applyPUFallback = useCallback(async () => {
     const fallback = await refreshPUFallbackData();
-    if (fallback.courses.length > 0) {
-      setTcCourses((current) =>
-        current.some(isTronClassCourse) ? current : fallback.courses,
-      );
-    }
+    setTcCourses((current) => {
+      const base = current.some(isTronClassCourse) ? current : fallback.courses;
+      return mergeDemoTronClassCoursesIfEmpty(base);
+    });
     if (fallback.grades.length > 0) {
       setTcGrades((current) =>
         current.some((grade) => grade.course_id > 0) ? current : fallback.grades,
@@ -1764,19 +1764,9 @@ export function CoursesHomeScreen(props: any) {
         getAnyCachedTCGrades(),
         readCachedPUFallbackData().catch(() => ({ courses: [], grades: [] })),
       ]);
-      if (courses?.length) {
-        setTcCourses(courses);
-      } else if (puFallback.courses.length > 0) {
-        setTcCourses(puFallback.courses);
-      } else {
-        // 完全沒任何快取 → 顯示 5 門 demo 課程，所有 chip 都可操作
-        try {
-          const { demoFetchCourses } = await import('../data/demoCoursesAdapter');
-          setTcCourses(demoFetchCourses() as any);
-        } catch {
-          /* swallow */
-        }
-      }
+      const rawCourses =
+        courses?.length ? courses : puFallback.courses.length > 0 ? puFallback.courses : [];
+      setTcCourses(mergeDemoTronClassCoursesIfEmpty(rawCourses));
       if (activities) setTcActivities(activities);
       if (attendance) setTcAttendance(attendance);
       if (todos) setTcTodos(todos);
@@ -1798,7 +1788,7 @@ export function CoursesHomeScreen(props: any) {
       if (!freshCourses || !freshActivities || !freshAttendance || !freshTodos) {
         refreshTCCourses().then((rc) => {
           if (rc?.length) {
-            setTcCourses(rc);
+            setTcCourses(mergeDemoTronClassCoursesIfEmpty(rc));
             const ids = rc.map((c) => c.id);
             Promise.allSettled([
               !freshActivities ? refreshTCActivitiesForCourses(ids).then((a) => setTcActivities(a)) : Promise.resolve(),
@@ -1843,7 +1833,7 @@ export function CoursesHomeScreen(props: any) {
     try {
       const courses = await refreshTCCourses();
       if (courses?.length) {
-        setTcCourses(courses);
+        setTcCourses(mergeDemoTronClassCoursesIfEmpty(courses));
         const courseIds = courses.map((c) => c.id);
         const [activities, attendance, todos] = await Promise.all([
           refreshTCActivitiesForCourses(courseIds),
@@ -1895,13 +1885,25 @@ export function CoursesHomeScreen(props: any) {
     );
   }, [schedule.courses]);
 
-  const handleCoursePress = useCallback((course: CourseSlot) => {
-    Alert.alert(
-      course.name,
-      `教師：${course.teacher}\n地點：${course.location}\n時間：${WEEKDAYS_SHORT[course.dayOfWeek]} 第 ${course.startPeriod}-${course.endPeriod} 節\n學分：${course.credits ?? '-'}`,
-      [{ text: '關閉' }],
-    );
-  }, []);
+  const handleCoursePress = useCallback(
+    (course: CourseSlot) => {
+      const rootNav = nav?.getParent?.();
+      Alert.alert(
+        course.name,
+        `教師：${course.teacher}\n地點：${course.location}\n時間：${WEEKDAYS_SHORT[course.dayOfWeek]} 第 ${course.startPeriod}-${course.endPeriod} 節\n學分：${course.credits ?? '-'}`,
+        [
+          { text: '關閉', style: 'cancel' },
+          {
+            text: '校園地圖',
+            onPress: () => {
+              rootNav?.navigate?.('校園', { screen: 'Map' });
+            },
+          },
+        ],
+      );
+    },
+    [nav],
+  );
 
   const handleLoginSuccess = useCallback(() => {
     loadAllData();
@@ -1938,7 +1940,7 @@ export function CoursesHomeScreen(props: any) {
           <SegmentedControl options={TAB_OPTIONS} selected={tab} onChange={(k: any) => setTab(k as TabKey)} />
         </View>
         {/* SmartCalendarPanel 佔滿剩餘空間（嵌入模式隱藏標題） */}
-        <SmartCalendarPanel embedded />
+        <SmartCalendarPanel embedded onJumpToScheduleTab={() => setTab('schedule')} />
       </View>
     );
   }

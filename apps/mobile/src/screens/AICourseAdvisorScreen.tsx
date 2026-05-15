@@ -36,6 +36,12 @@ import {
   type CatalogRecommendation,
 } from '../services/courseRecommendationEngine';
 import { getAnyCachedGrades, getAnyCachedCourses } from '../services/puDataCache';
+import {
+  getDemoCourseDisplay,
+  isDemoCourseId,
+  toDemoCourseId,
+} from '../data/demoCoursesAdapter';
+import { getDemoHomeworksByCourse, getDemoModulesByCourse } from '../data/demoCoursesMock';
 
 type CourseCategory = 'required' | 'elective' | 'general' | 'free';
 type CourseDifficulty = 'easy' | 'medium' | 'hard';
@@ -65,6 +71,31 @@ type UserPreference = {
   targetCredits: number;
   avoidEarly: boolean;
 };
+
+function buildInitialAdvisorChat(routeParams?: {
+  groupId?: string;
+  groupName?: string;
+}): { role: 'user' | 'ai'; message: string }[] {
+  const gid = routeParams?.groupId;
+  const gnameParam = routeParams?.groupName;
+  if (!gid) {
+    return [
+      {
+        role: 'ai',
+        message:
+          '你好！我是 AI 選課助理。我可以根據你的興趣、時間安排和畢業需求，為你推薦最適合的課程。有什麼問題都可以問我！',
+      },
+    ];
+  }
+  const idNum = toDemoCourseId(gid);
+  const name = gnameParam ?? getDemoCourseDisplay(idNum)?.name ?? `課程（${gid}）`;
+  return [
+    {
+      role: 'ai',
+      message: `你好！我是「${name}」的 AI 學伴。你可以問：作業截止日、模組重點摘要、或複習節奏建議。離線／demo 模式下我會用課程範例資料回答。`,
+    },
+  ];
+}
 
 function getCategoryLabel(category: CourseCategory): string {
   switch (category) {
@@ -132,21 +163,12 @@ export function AICourseAdvisorScreen(props: any) {
 
   // 從 CoursesHomeScreen chip 傳進來：限縮 AI 對話到該課程
   const focusedGroupId = props?.route?.params?.groupId as string | undefined;
-  // 課程名稱沒帶時：用 demo course 表中的名稱補上
   const focusedGroupName = useMemo(() => {
     const fromRoute = props?.route?.params?.groupName as string | undefined;
     if (fromRoute) return fromRoute;
     if (!focusedGroupId) return undefined;
-    try {
-      // sync require — 不打到網路，純查 mock
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { getDemoCourseDisplay, toDemoCourseId } = require('../data/demoCoursesAdapter');
-      const id = toDemoCourseId(focusedGroupId);
-      const c = getDemoCourseDisplay(id);
-      return c?.name;
-    } catch {
-      return undefined;
-    }
+    const id = toDemoCourseId(focusedGroupId);
+    return getDemoCourseDisplay(id)?.name;
   }, [focusedGroupId, props?.route?.params?.groupName]);
 
   const [selectedTab, setSelectedTab] = useState(0);
@@ -163,13 +185,9 @@ export function AICourseAdvisorScreen(props: any) {
   } | null>(null);
   const [aiStatus] = useState(() => getAIStatus());
   const schedule = useSchedule();
-  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'ai'; message: string }[]>([
-    {
-      role: 'ai',
-      message:
-        '你好！我是 AI 選課助理。我可以根據你的興趣、時間安排和畢業需求，為你推薦最適合的課程。有什麼問題都可以問我！',
-    },
-  ]);
+  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'ai'; message: string }[]>(() =>
+    buildInitialAdvisorChat(props?.route?.params),
+  );
 
   const [preferences, setPreferences] = useState<UserPreference>({
     interests: ['AI', '程式設計'],
@@ -193,11 +211,16 @@ export function AICourseAdvisorScreen(props: any) {
   );
   const chatHistoryStorageKey = useMemo(
     () =>
-      getScopedStorageKey('ai-course-advisor-chat-history', {
-        uid: auth.user?.uid ?? null,
-        schoolId: school.id,
-      }),
-    [auth.user?.uid, school.id],
+      getScopedStorageKey(
+        focusedGroupId
+          ? `ai-course-advisor-chat-course-${focusedGroupId}`
+          : 'ai-course-advisor-chat-history',
+        {
+          uid: auth.user?.uid ?? null,
+          schoolId: school.id,
+        },
+      ),
+    [auth.user?.uid, school.id, focusedGroupId],
   );
 
   const TABS = ['AI 推薦', '對話諮詢', '偏好設定'];
@@ -273,10 +296,13 @@ export function AICourseAdvisorScreen(props: any) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setChatHistory(parsed);
+          return;
         }
       }
+      setChatHistory(buildInitialAdvisorChat(props?.route?.params));
     } catch (error) {
       console.error('Failed to load chat history:', error);
+      setChatHistory(buildInitialAdvisorChat(props?.route?.params));
     }
   };
 
@@ -316,6 +342,20 @@ export function AICourseAdvisorScreen(props: any) {
     ...(focusedGroupId && {
       focusedCourseId: focusedGroupId,
       focusedCourseName: focusedGroupName,
+    }),
+    // demo 課程：給 AI 該課的章節 / 作業現況做為對話 context
+    ...(focusedGroupId && isDemoCourseId(toDemoCourseId(focusedGroupId)) && {
+      courseContext: {
+        modules: getDemoModulesByCourse(toDemoCourseId(focusedGroupId)).map((m) => m.name),
+        homeworks: getDemoHomeworksByCourse(toDemoCourseId(focusedGroupId)).map((h) => ({
+          title: h.title,
+          dueAt: h.dueAt,
+          submitted: h.submitted,
+          graded: h.graded,
+          score: h.score,
+          totalScore: h.totalScore,
+        })),
+      },
     }),
   } as AIContext;
 
@@ -640,7 +680,10 @@ ${top
 
     try {
       if (aiStatus.provider !== 'mock' && aiStatus.configured) {
-        const systemContext = `你是一個校園選課助理。學生的興趣是：${preferences.interests.join('、')}。
+        const systemContext = focusedGroupId
+          ? `你是「${focusedGroupName ?? focusedGroupId}」這門課的學習助理。請用繁體中文、簡潔具體地協助學生掌握作業截止、複習重點與時間規劃；若問題超出課程範圍請委婉提醒。
+（選課偏好僅供參考：興趣 ${preferences.interests.join('、')}，目標學分 ${preferences.targetCredits}。）`
+          : `你是一個校園選課助理。學生的興趣是：${preferences.interests.join('、')}。
 目標學分：${preferences.targetCredits}。避開早八：${preferences.avoidEarly ? '是' : '否'}。
 請根據這些資訊回答學生的選課問題。`;
 
@@ -687,6 +730,61 @@ ${top
 
   const generateLocalResponse = (message: string): string => {
     const lowerMsg = message.toLowerCase();
+
+    if (focusedGroupId) {
+      const cid = toDemoCourseId(focusedGroupId);
+      const courseLabel = focusedGroupName ?? getDemoCourseDisplay(cid)?.name ?? '本課程';
+
+      if (isDemoCourseId(cid)) {
+        const hws = getDemoHomeworksByCourse(cid);
+        const mods = getDemoModulesByCourse(cid);
+
+        if (
+          lowerMsg.includes('作業') ||
+          lowerMsg.includes('繳交') ||
+          lowerMsg.includes('截止') ||
+          lowerMsg.includes('deadline')
+        ) {
+          if (!hws.length) {
+            return `「${courseLabel}」目前 demo 資料中沒有作業項目；口試線上環境可從教材頁查看實際 TronClass 作業。`;
+          }
+          const lines = hws
+            .slice(0, 5)
+            .map((h) => {
+              const st = h.submitted ? '已繳交' : '未繳交';
+              const due = h.dueAt?.slice(0, 10) ?? '';
+              return `• ${h.title}（截止 ${due}，${st}${h.graded ? '，已批改' : ''}）`;
+            })
+            .join('\n');
+          return `以下是「${courseLabel}」範例作業狀態（demo 資料）：\n${lines}`;
+        }
+
+        if (
+          lowerMsg.includes('摘要') ||
+          lowerMsg.includes('模組') ||
+          lowerMsg.includes('進度') ||
+          lowerMsg.includes('單元')
+        ) {
+          if (!mods.length) {
+            return `「${courseLabel}」在 demo 中尚未列出模組，請到教材分頁瀏覽完整結構。`;
+          }
+          const top = mods
+            .slice(0, 6)
+            .map((m) => `• ${m.name}`)
+            .join('\n');
+          return `「${courseLabel}」前幾個教學模組（demo）：\n${top}\n建議依週次搭配習題與作業循序複習。`;
+        }
+      }
+
+      if (
+        lowerMsg.includes('這門') ||
+        lowerMsg.includes('本課') ||
+        lowerMsg.includes('老師') ||
+        lowerMsg.includes('課程')
+      ) {
+        return `我們正在聊「${courseLabel}」。建議先到「教材」看本週單元，再到「作業／測驗」確認截止；你也可以直接問「作業截止」或「模組摘要」。`;
+      }
+    }
 
     if (lowerMsg.includes('推薦') || lowerMsg.includes('建議')) {
       return `根據你的興趣（${preferences.interests.join('、')}）和目標學分（${preferences.targetCredits}），我建議你這學期可以選修「人工智慧概論」和「資料庫系統」。這兩門課都是評價很高的課程，對你未來發展很有幫助！`;

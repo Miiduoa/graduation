@@ -112,6 +112,27 @@ export function CourseChipHeader(props: {
   );
 }
 
+/** Demo 課程專用標章 — 置於課程 chip 進階頁頂部一隅 */
+export function CourseDemoDataRibbon() {
+  return (
+    <View
+      style={{
+        alignSelf: 'flex-end',
+        backgroundColor: theme.colors.accentSoft,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: theme.radius.md,
+        borderWidth: 1,
+        borderColor: `${theme.colors.primary}44`,
+      }}
+      accessibilityRole="text"
+      accessibilityLabel="Demo 資料"
+    >
+      <Text style={{ fontSize: 12, fontWeight: '800', color: theme.colors.primary }}>Demo 資料</Text>
+    </View>
+  );
+}
+
 export function CourseChipErrorBanner(props: { message: string; onRetry?: () => void }) {
   return (
     <View
@@ -158,17 +179,4 @@ export function CourseChipErrorBanner(props: { message: string; onRetry?: () => 
       ) : null}
     </View>
   );
-}
-
-export function courseChipPrimaryButtonStyle(disabled?: boolean) {
-  return {
-    paddingVertical: 14,
-    paddingHorizontal: theme.space.md,
-    borderRadius: theme.radius.lg,
-    backgroundColor: theme.colors.primary,
-    alignItems: 'center' as const,
-    justifyContent: 'center' as const,
-    minHeight: 48,
-    opacity: disabled ? 0.52 : 1,
-  };
 }

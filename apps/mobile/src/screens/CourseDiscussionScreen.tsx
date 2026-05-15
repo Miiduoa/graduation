@@ -34,8 +34,10 @@ import {
   CourseChipErrorBanner,
   CourseChipHeader,
   CourseChipLoading,
+  CourseDemoDataRibbon,
   courseChipScrollContentStyle,
 } from '../ui/courseChipShell';
+import { useNavigation } from '@react-navigation/native';
 
 type RouteProps = {
   route?: {
@@ -47,6 +49,7 @@ type RouteProps = {
 };
 
 export default function CourseDiscussionScreen(props: RouteProps) {
+  const navigation = useNavigation<any>();
   const groupName = props.route?.params?.groupName ?? '課程討論';
   const groupIdStr = props.route?.params?.groupId ?? '';
   const courseId = Number(groupIdStr.replace(/^tc:/, '')) || 0;
@@ -179,6 +182,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
     >
       <ScrollView
         contentContainerStyle={courseChipScrollContentStyle(true)}
+        accessibilityLabel="課程討論列表"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -192,6 +196,11 @@ export default function CourseDiscussionScreen(props: RouteProps) {
           />
         }
       >
+        {isDemoCourseId(courseId) ? (
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
+            <CourseDemoDataRibbon />
+          </View>
+        ) : null}
         <CourseChipHeader
           emoji="💬"
           eyebrow="課程討論"
@@ -343,7 +352,12 @@ export default function CourseDiscussionScreen(props: RouteProps) {
                 opacity: pressed ? 0.92 : 1,
               })}
               onPress={() => {
-                /* TODO: open thread detail screen */
+                navigation.navigate('DiscussionThreadDetail', {
+                  groupId: groupIdStr || `tc:${courseId}`,
+                  groupName,
+                  discussionId: t.id,
+                  threadTitle: t.title || '討論串',
+                });
               }}
             >
               <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text }}>

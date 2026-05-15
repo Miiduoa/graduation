@@ -5,7 +5,7 @@
  * 對應引擎：packages/shared/src/lms/rubricScoring
  * 對應端點：POST /courses/{id}/peer_reviews/{rid}/submissions
  */
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   ScrollView,
   View,
@@ -16,6 +16,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -28,6 +29,7 @@ import { EmptyState } from '../ui/components';
 import {
   CourseChipHeader,
   CourseChipLoading,
+  CourseDemoDataRibbon,
   courseChipScrollContentStyle,
 } from '../ui/courseChipShell';
 
@@ -88,34 +90,54 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
   const courseId = Number(String(props.route?.params?.courseId ?? '').replace(/^tc:/, '')) || 0;
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [availableReviews, setAvailableReviews] = useState<
     Awaited<ReturnType<typeof tcFetchPeerReviews>>
   >([]);
   const [activeReviewIdx, setActiveReviewIdx] = useState(0);
 
+  const fetchReviewsData = useCallback(async () => {
+    if (!courseId) return [] as Awaited<ReturnType<typeof tcFetchPeerReviews>>;
+    if (isDemoCourseId(courseId)) {
+      return demoFetchPeerReviews(courseId) as Awaited<ReturnType<typeof tcFetchPeerReviews>>;
+    }
+    return await tcFetchPeerReviews(courseId);
+  }, [courseId]);
+
   // 拉該課程的互評任務
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       if (!courseId) {
         setLoading(false);
         return;
       }
       try {
-        if (isDemoCourseId(courseId)) {
-          setAvailableReviews(
-            demoFetchPeerReviews(courseId) as Awaited<ReturnType<typeof tcFetchPeerReviews>>,
-          );
-        } else {
-          const list = await tcFetchPeerReviews(courseId);
-          setAvailableReviews(list);
-        }
+        const list = await fetchReviewsData();
+        if (!cancelled) setAvailableReviews(list);
       } catch {
         /* swallow */
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [courseId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId, fetchReviewsData]);
+
+  const onRefresh = useCallback(async () => {
+    if (!courseId) return;
+    setRefreshing(true);
+    try {
+      const list = await fetchReviewsData();
+      setAvailableReviews(list);
+    } catch {
+      /* swallow */
+    } finally {
+      setRefreshing(false);
+    }
+  }, [courseId, fetchReviewsData]);
 
   // 當前要評的：優先看 route param > 線上拉的第一個
   const onlineReview = availableReviews[activeReviewIdx];
@@ -243,7 +265,24 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
       style={{ flex: 1, backgroundColor: theme.colors.surfaceMuted }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={courseChipScrollContentStyle(true)}>
+      <ScrollView
+        contentContainerStyle={courseChipScrollContentStyle(true)}
+        accessibilityLabel="同儕互評表單"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            title="重新整理"
+            tintColor={theme.colors.primary}
+            accessibilityLabel="重新整理同儕互評任務"
+            onRefresh={onRefresh}
+          />
+        }
+      >
+        {isDemoCourseId(courseId) ? (
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: theme.space.sm }}>
+            <CourseDemoDataRibbon />
+          </View>
+        ) : null}
         <CourseChipHeader
           emoji="💯"
           eyebrow="同儕互評"
@@ -256,6 +295,8 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
               <Pressable
                 key={String(r.id)}
                 onPress={() => setActiveReviewIdx(i)}
+                accessibilityRole="button"
+                accessibilityLabel={`互評第 ${i + 1} 份，${r.target_anonymous_name}${r.submitted ? '，已送出' : ''}`}
                 style={{
                   paddingHorizontal: 12,
                   paddingVertical: 10,
@@ -319,6 +360,8 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           {submissionAttachments.map((att, i) => (
             <Pressable
               key={`att-${i}-${att.name}`}
+              accessibilityRole="button"
+              accessibilityLabel={`開啟附件 ${att.name}`}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',
@@ -378,6 +421,9 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
                   onPress={() =>
                     !submitted && setScores((s) => ({ ...s, [c.id]: l.id }))
                   }
+                  accessibilityRole="button"
+                  accessibilityLabel={`${c.title}：${l.label}，${l.points} 分`}
+                  accessibilityState={{ selected: scores[c.id] === l.id, disabled: submitted }}
                   style={{
                     flex: 1,
                     padding: 10,
@@ -412,6 +458,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
               value={comments[c.id] ?? ''}
               onChangeText={(t) => setComments((cs) => ({ ...cs, [c.id]: t }))}
               editable={!submitted}
+              accessibilityLabel={`${c.title}的逐項回饋`}
               placeholder="這一項的具體回饋（選填）"
               placeholderTextColor={theme.colors.muted}
               style={{
@@ -458,6 +505,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           value={overallFeedback}
           onChangeText={setOverallFeedback}
           editable={!submitted}
+          accessibilityLabel="整體匿名回饋"
           placeholder="例如：你的論述很清晰，但建議補一個反例會更有說服力。"
           placeholderTextColor={theme.colors.muted}
           multiline
@@ -479,6 +527,9 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           <Pressable
             onPress={handleSubmit}
             disabled={submitting || !complete}
+            accessibilityRole="button"
+            accessibilityLabel={complete ? '送出互評' : '送出互評（尚未完成評分）'}
+            accessibilityState={{ disabled: submitting || !complete }}
             style={{
               marginTop: 24,
               padding: 14,

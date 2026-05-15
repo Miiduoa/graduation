@@ -9,7 +9,7 @@
  * - 回傳形狀盡量對齊 TC，但只填 screen 真的會用的欄位
  * - 任何「找不到」一律回空陣列/null，避免 throw 讓 screen 處理空狀態
  */
-import type { TCCourse } from '../services/tronClassClient';
+import type { TCCourse, TCDiscussionPost } from '../services/tronClassClient';
 
 import {
   DEMO_COURSES,
