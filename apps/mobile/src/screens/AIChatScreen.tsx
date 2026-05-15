@@ -3422,12 +3422,12 @@ export function AIChatScreen(props: any) {
             {
               label: '查看作業截止',
               action: 'navigate',
-              params: { screen: 'Today', nested: '作業列表' },
+              params: { screen: '學習', nested: 'CoursesHome' },
             },
             {
               label: '查看成績',
               action: 'navigate',
-              params: { screen: '我的', nested: 'GradesStack' },
+              params: { screen: '學習', nested: 'Grades' },
             },
           ],
           suggestions: ['哪些作業快截止', '幫我請假', '設定作業提醒'],
@@ -3468,7 +3468,11 @@ export function AIChatScreen(props: any) {
           timestamp: new Date(),
           agentType: 'text',
           actions: [
-            { label: '前往課表', action: 'navigate', params: { screen: 'Today', nested: '課表' } },
+            {
+              label: '前往課表',
+              action: 'navigate',
+              params: { screen: '學習', nested: 'CourseSchedule' },
+            },
           ],
           suggestions: ['今天有什麼課', '查成績', '哪些課可能被當'],
         };
@@ -3549,7 +3553,7 @@ export function AIChatScreen(props: any) {
             {
               label: '前往成績查詢',
               action: 'navigate',
-              params: { screen: '我的', nested: 'GradesStack' },
+              params: { screen: '學習', nested: 'Grades' },
             },
           ],
           suggestions: ['哪些課可能被當', '查學分', '查作業'],
@@ -4254,9 +4258,9 @@ export function AIChatScreen(props: any) {
       case 'check_assignments':
         return [
           {
-            label: '開啟課程/作業功能',
+            label: '開啟學習／作業',
             action: 'navigate',
-            params: { screen: '課程', nested: 'CoursesHome' },
+            params: { screen: '學習', nested: 'LearnHome' },
             sensitivity: 'medium',
           },
         ];
@@ -4265,7 +4269,7 @@ export function AIChatScreen(props: any) {
           {
             label: '開啟成績查詢',
             action: 'navigate',
-            params: { screen: '課程', nested: 'Grades' },
+            params: { screen: '學習', nested: 'Grades' },
             sensitivity: 'sensitive',
           },
         ];
@@ -4281,9 +4285,9 @@ export function AIChatScreen(props: any) {
       case 'send_message':
         return [
           {
-            label: '開啟收件匣/訊息',
+            label: '開啟訊息工作台',
             action: 'navigate',
-            params: { screen: '收件匣', nested: 'MessagesHome' },
+            params: { screen: '訊息', nested: 'Inbox' },
             sensitivity: 'medium',
           },
         ];
@@ -4304,7 +4308,7 @@ export function AIChatScreen(props: any) {
           {
             label: '開啟教學管理功能',
             action: 'navigate',
-            params: { screen: '教學', nested: 'CourseHub' },
+            params: { screen: '學習', nested: 'CourseHub' },
             sensitivity: 'high',
           },
         ];

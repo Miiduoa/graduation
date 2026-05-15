@@ -59,8 +59,8 @@ try {
 const QR_TYPES = [
   { key: 'checkin', label: '活動簽到', icon: 'calendar-outline', color: theme.colors.accent },
   { key: 'group', label: '加入群組', icon: 'people-outline', color: theme.colors.success },
-  { key: 'profile', label: '個人名片', icon: 'person-outline', color: '#F59E0B' },
-  { key: 'custom', label: '自訂內容', icon: 'create-outline', color: '#8B5CF6' },
+  { key: 'profile', label: '個人名片', icon: 'person-outline', color: theme.colors.warning },
+  { key: 'custom', label: '自訂內容', icon: 'create-outline', color: theme.colors.social },
 ];
 
 function generateSecureHash(data: string): string {
@@ -412,7 +412,7 @@ export function QRCodeScreen(props: any) {
               onPress: () => {
                 analytics.logEvent('qr_action', { action: 'join_group' });
                 Alert.alert('成功', '已成功加入群組！');
-                nav?.navigate?.('收件匣');
+                nav?.navigate?.('訊息');
               },
             },
           ]);

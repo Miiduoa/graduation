@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ScrollView,
   Text,
@@ -14,6 +14,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, AnimatedCard, Button, SegmentedControl } from '../ui/components';
 import { theme } from '../ui/theme';
+import {
+  CourseChipHeader,
+  CourseChipEmpty,
+  CourseDemoDataRibbon,
+  courseChipScrollContentStyle,
+} from '../ui/courseChipShell';
 
 // Types
 type ReviewTab = 'assigned' | 'received';
@@ -137,6 +143,19 @@ export function PeerReviewScreen(props: any) {
   const route = props?.route;
   const { assignmentId, groupId, title } = route?.params ?? {};
 
+  useEffect(() => {
+    if (!nav?.replace) return;
+    const raw = route?.params?.courseId ?? route?.params?.tcCourseId;
+    if (raw == null || raw === '') return;
+    const sid = String(raw).replace(/^tc:/, '');
+    const n = Number(sid);
+    if (!Number.isFinite(n) || n <= 0) return;
+    nav.replace('PeerReviewSubmit', {
+      courseId: sid,
+      assignmentTitle: String(title ?? route?.params?.assignmentTitle ?? '同儕互評'),
+    });
+  }, [nav, route?.params, title]);
+
   const [activeTab, setActiveTab] = useState<ReviewTab>('assigned');
   const [selectedSubmission, setSelectedSubmission] = useState<PeerSubmission | null>(null);
   const [reviewForm, setReviewForm] = useState<ReviewFormState | null>(null);
@@ -189,15 +208,19 @@ export function PeerReviewScreen(props: any) {
   // Confirm and finalize submission
   const confirmSubmit = async () => {
     setShowConfirmDialog(false);
-    Alert.alert('提交成功', '你的評論已提交給系統', [
-      {
-        text: '確認',
-        onPress: () => {
-          setSelectedSubmission(null);
-          setReviewForm(null);
+    Alert.alert(
+      '已記錄（示範模式）',
+      '此頁為靜態示範，不會寫回真實 LMS。正式同儕互評請從「學習」分頁的課程卡進入「互評」提交流程。',
+      [
+        {
+          text: '確認',
+          onPress: () => {
+            setSelectedSubmission(null);
+            setReviewForm(null);
+          },
         },
-      },
-    ]);
+      ],
+    );
   };
 
   // Calculate average score
@@ -481,12 +504,37 @@ export function PeerReviewScreen(props: any) {
   // Main screen - Assigned or Received reviews
   return (
     <Screen>
-      {/* Header */}
-      <View style={{ marginBottom: theme.space.lg }}>
-        <Text style={{ fontSize: 28, fontWeight: '700', color: theme.colors.text }}>同儕互評</Text>
-        {title && (
-          <Text style={{ fontSize: 15, color: theme.colors.muted, marginTop: 4 }}>{title}</Text>
-        )}
+      <View style={{ marginBottom: theme.space.md }}>
+        <View
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: theme.space.sm,
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <CourseChipHeader
+              emoji="🤝"
+              eyebrow="課程功能"
+              title={title ? `同儕互評 · ${title}` : '同儕互評'}
+              meta={
+                assignmentId && groupId
+                  ? `作業 ${assignmentId} · 群組 ${groupId}`
+                  : assignmentId
+                    ? `作業 ${assignmentId}`
+                    : undefined
+              }
+            />
+          </View>
+          <CourseDemoDataRibbon />
+        </View>
+        <CourseChipEmpty
+          title="舊版示範畫面"
+          body="此路由保留相容；與校務串接的互評請改走「學習」分頁課程卡上的「互評」。下方為靜態 Demo，評分送出僅為示範、不會同步到 TronClass。"
+          primaryLabel="回到學習首頁"
+          onPrimary={() => nav?.navigate?.('LearnHome')}
+        />
       </View>
 
       {/* Tab Control */}
@@ -501,7 +549,10 @@ export function PeerReviewScreen(props: any) {
         />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={courseChipScrollContentStyle()}
+      >
         {activeTab === 'assigned' ? (
           <View style={{ gap: theme.space.md, paddingBottom: theme.space.xl }}>
             {/* Progress Summary */}

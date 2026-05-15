@@ -291,9 +291,9 @@ function buildDailyBrief(input: ProactiveAIReportInput, now: Date): ProactiveAIR
       {
         label: '查看課表',
         action: 'navigate',
-        params: { screen: '課程', nested: 'CourseSchedule' },
+        params: { screen: '學習', nested: 'CourseSchedule' },
       },
-      { label: '查看收件匣', action: 'navigate', params: { screen: '收件匣', nested: 'Inbox' } },
+      { label: '開啟訊息工作台', action: 'navigate', params: { screen: '訊息', nested: 'Inbox' } },
     ],
   });
 }
@@ -328,7 +328,7 @@ function buildClassSoonReports(input: ProactiveAIReportInput, now: Date): Proact
           {
             label: '打開課表',
             action: 'navigate',
-            params: { screen: '課程', nested: 'CourseSchedule' },
+            params: { screen: '學習', nested: 'CourseSchedule' },
           },
         ],
       }),
@@ -363,7 +363,7 @@ function buildAssignmentReports(input: ProactiveAIReportInput, now: Date): Proac
                   label: '查看作業',
                   action: 'navigate',
                   params: {
-                    screen: '收件匣',
+                    screen: '訊息',
                     nested: 'AssignmentDetail',
                     groupId: assignment.groupId,
                     assignmentId: assignment.id,
@@ -372,9 +372,9 @@ function buildAssignmentReports(input: ProactiveAIReportInput, now: Date): Proac
               ]
             : [
                 {
-                  label: '查看收件匣',
+                  label: '開啟訊息工作台',
                   action: 'navigate',
-                  params: { screen: '收件匣', nested: 'Inbox' },
+                  params: { screen: '訊息', nested: 'Inbox' },
                 },
               ],
         }),
@@ -409,7 +409,7 @@ function buildAssignmentReports(input: ProactiveAIReportInput, now: Date): Proac
                 label: '查看作業',
                 action: 'navigate',
                 params: {
-                  screen: '收件匣',
+                  screen: '訊息',
                   nested: 'AssignmentDetail',
                   groupId: assignment.groupId,
                   assignmentId: assignment.id,
@@ -418,9 +418,9 @@ function buildAssignmentReports(input: ProactiveAIReportInput, now: Date): Proac
             ]
           : [
               {
-                label: '查看收件匣',
+                label: '開啟訊息工作台',
                 action: 'navigate',
-                params: { screen: '收件匣', nested: 'Inbox' },
+                params: { screen: '訊息', nested: 'Inbox' },
               },
             ],
       }),

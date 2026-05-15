@@ -4,7 +4,6 @@ import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 're
 
 import type { CourseSpace, Quiz } from '../data';
 import { Button, Card, ErrorState, LoadingState, Pill, Screen } from '../ui/components';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
@@ -17,7 +16,7 @@ import {
   toDate,
 } from '../services/courseWorkspace';
 import { isDemoCourseId } from '../data/demoCoursesAdapter';
-import { CourseDemoDataRibbon } from '../ui/courseChipShell';
+import { CourseDemoDataRibbon, courseChipScrollContentStyle } from '../ui/courseChipShell';
 
 function Field(props: {
   label: string;
@@ -292,9 +291,8 @@ export function QuizCenterScreen(props: any) {
         style={{ flex: 1 }}
         accessibilityLabel="測驗中心列表"
         contentContainerStyle={{
+          ...courseChipScrollContentStyle(true),
           gap: 14,
-          padding: 16,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
         }}
         refreshControl={
           <RefreshControl
@@ -470,7 +468,7 @@ export function QuizCenterScreen(props: any) {
                 <Pressable
                   key={`${item.groupId}-${item.id}`}
                   onPress={() =>
-                    nav?.navigate?.('收件匣', {
+                    nav?.navigate?.('訊息', {
                       screen: 'AssignmentDetail',
                       params: { groupId: item.groupId, assignmentId: item.assignmentId },
                     })

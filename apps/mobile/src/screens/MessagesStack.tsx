@@ -17,8 +17,17 @@ import { FriendsManageScreen } from './FriendsManageScreen';
 import { FollowingListsScreen } from './FollowingListsScreen';
 import { ChatScreen } from './ChatScreen';
 import { AdminCourseVerifyScreen } from './AdminCourseVerifyScreen';
+import { RouteGuard } from '../ui/RouteGuard';
 
 const Stack = createNativeStackNavigator<any, undefined>();
+
+function GuardedMessagesAdminCourseVerify(props: any) {
+  return (
+    <RouteGuard requires="admin.course_verify">
+      <AdminCourseVerifyScreen {...props} />
+    </RouteGuard>
+  );
+}
 
 export function MessagesStack() {
   useThemeMode();
@@ -32,7 +41,7 @@ export function MessagesStack() {
       <Stack.Screen
         name="Inbox"
         component={InboxScreen}
-        options={{ title: '收件匣', headerShown: false }}
+        options={{ title: '訊息工作台', headerShown: false }}
       />
       <Stack.Screen
         name="MessagesHome"
@@ -59,7 +68,7 @@ export function MessagesStack() {
       />
       <Stack.Screen
         name="AdminCourseVerify"
-        component={AdminCourseVerifyScreen}
+        component={GuardedMessagesAdminCourseVerify}
         options={{ title: '課程認證' }}
       />
       <Stack.Screen name="Dms" component={DmsScreen} options={{ title: '私訊' }} />

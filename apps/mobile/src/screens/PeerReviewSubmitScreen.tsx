@@ -25,6 +25,7 @@ import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
 import { tcFetchPeerReviews } from '../services/tronClassClient';
 import { isDemoCourseId, demoFetchPeerReviews } from '../data/demoCoursesAdapter';
 import { theme } from '../ui/theme';
+import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { EmptyState } from '../ui/components';
 import {
   CourseChipHeader,
@@ -238,7 +239,7 @@ export default function PeerReviewSubmitScreen(props: RouteProps) {
           backgroundColor: theme.colors.surfaceMuted,
           paddingHorizontal: theme.layout.screenHorizontalPadding,
           justifyContent: 'center',
-          paddingBottom: theme.space.xxl,
+          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
         }}
       >
         {isDemoCourseId(courseId) ? (

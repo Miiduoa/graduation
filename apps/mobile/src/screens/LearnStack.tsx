@@ -124,6 +124,26 @@ function GuardedLearningAnalytics(props: any) {
   );
 }
 
+/** 僅 catalog 權限的職員／店家不應視為選課學生而進入個人「學業總覽」工作區；與 courses.view gate 對齊。 */
+function GuardedAcademicOverview(props: any) {
+  return (
+    <RouteGuard requires="courses.view">
+      <AcademicScreen {...props} />
+    </RouteGuard>
+  );
+}
+
+/** 職員／店家／通知 deeplink 進入課程 chip 流時，需具備 courses.view；否則由 RouteGuard 引導至課綱查詢等 fallback */
+function guardCourseView(Component: React.ComponentType<any>) {
+  return function GuardedCourseWorkspace(props: any) {
+    return (
+      <RouteGuard requires="courses.view">
+        <Component {...props} />
+      </RouteGuard>
+    );
+  };
+}
+
 /**
  * 根據角色選擇主畫面。內部用 alias，所有角色都映射到 'LearnHome' 路由。
  */
@@ -203,7 +223,7 @@ export function LearnStack() {
         options={{ title: '行事曆', headerShown: false }}
       />
       <Stack.Screen name="AddCourse" component={GuardedAddCourse} options={{ title: '新增課程' }} />
-      <Stack.Screen name="CourseHub" component={CourseHubScreen} options={{ title: '課程中樞' }} />
+      <Stack.Screen name="CourseHub" component={guardCourseView(CourseHubScreen)} options={{ title: '課程中樞' }} />
       <Stack.Screen
         name="CourseCatalog"
         component={CourseCatalogScreen}
@@ -211,10 +231,14 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseModules"
-        component={CourseModulesScreen}
+        component={guardCourseView(CourseModulesScreen)}
         options={{ title: '教材單元' }}
       />
-      <Stack.Screen name="QuizCenter" component={QuizCenterScreen} options={{ title: '測驗中心' }} />
+      <Stack.Screen
+        name="QuizCenter"
+        component={guardCourseView(QuizCenterScreen)}
+        options={{ title: '測驗中心' }}
+      />
       <Stack.Screen
         name="Attendance"
         component={GuardedAttendance}
@@ -222,7 +246,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="AcademicOverview"
-        component={AcademicScreen}
+        component={GuardedAcademicOverview}
         options={{ title: '學業總覽', headerShown: false }}
       />
       <Stack.Screen
@@ -230,7 +254,11 @@ export function LearnStack() {
         component={GuardedGradebook}
         options={{ title: '課內成績簿' }}
       />
-      <Stack.Screen name="Classroom" component={ClassroomScreen} options={{ title: '課堂互動' }} />
+      <Stack.Screen
+        name="Classroom"
+        component={guardCourseView(ClassroomScreen)}
+        options={{ title: '課堂互動' }}
+      />
       <Stack.Screen
         name="Grades"
         component={AcademicGradesRoute}
@@ -263,22 +291,22 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="QuizTaking"
-        component={QuizTakingScreen}
+        component={guardCourseView(QuizTakingScreen)}
         options={{ title: '作答中', headerShown: false }}
       />
       <Stack.Screen
         name="PeerReview"
-        component={PeerReviewScreen}
+        component={guardCourseView(PeerReviewScreen)}
         options={{ title: '同儕互評' }}
       />
       <Stack.Screen
         name="AttendanceLive"
-        component={AttendanceLiveScreen}
+        component={guardCourseView(AttendanceLiveScreen)}
         options={{ title: '即時點名', headerShown: false }}
       />
       <Stack.Screen
         name="AttendanceAnalytics"
-        component={AttendanceAnalyticsScreen}
+        component={guardCourseView(AttendanceAnalyticsScreen)}
         options={{ title: '出席分析', headerShown: false }}
       />
       <Stack.Screen
@@ -288,63 +316,67 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseDiscussion"
-        component={CourseDiscussionScreen}
+        component={guardCourseView(CourseDiscussionScreen)}
         options={{ title: '課程討論' }}
       />
       <Stack.Screen
         name="DiscussionThreadDetail"
-        component={DiscussionThreadDetailScreen}
+        component={guardCourseView(DiscussionThreadDetailScreen)}
         options={{ title: '討論串' }}
       />
       <Stack.Screen
         name="CourseMaterialViewer"
-        component={CourseMaterialViewerScreen}
+        component={guardCourseView(CourseMaterialViewerScreen)}
         options={{ title: '在 APP 內查看', headerShown: false }}
       />
       <Stack.Screen
         name="HomeworkSubmit"
-        component={HomeworkSubmitScreen}
+        component={guardCourseView(HomeworkSubmitScreen)}
         options={{ title: '繳交作業' }}
       />
       <Stack.Screen
         name="VideoMaterial"
-        component={VideoMaterialScreen}
+        component={guardCourseView(VideoMaterialScreen)}
         options={{ title: '影片教材', headerShown: false }}
       />
-      <Stack.Screen name="Survey" component={SurveyScreen} options={{ title: '課程問卷' }} />
+      <Stack.Screen
+        name="Survey"
+        component={guardCourseView(SurveyScreen)}
+        options={{ title: '課程問卷' }}
+      />
       <Stack.Screen
         name="PeerReviewSubmit"
-        component={PeerReviewSubmitScreen}
+        component={guardCourseView(PeerReviewSubmitScreen)}
         options={{ title: '同儕互評' }}
       />
       <Stack.Screen
         name="TeacherGrading"
-        component={TeacherGradingScreen}
+        component={guardCourseView(TeacherGradingScreen)}
         options={{ title: '批改作業' }}
       />
       <Stack.Screen
         name="CourseNotes"
-        component={CourseNotesScreen}
+        component={guardCourseView(CourseNotesScreen)}
         options={{ title: '課程筆記', headerShown: false }}
       />
       <Stack.Screen
         name="AttendanceMultiMethod"
-        component={AttendanceMultiMethodScreen}
+        component={guardCourseView(AttendanceMultiMethodScreen)}
         options={{ title: '智慧簽到' }}
       />
       <Stack.Screen
         name="MyQuizScores"
-        component={MyQuizScoresScreen}
+        component={guardCourseView(MyQuizScoresScreen)}
         options={{ title: '我的測驗成績' }}
       />
       <Stack.Screen
         name="MyAttendanceHistory"
-        component={MyAttendanceHistoryScreen}
+        component={guardCourseView(MyAttendanceHistoryScreen)}
         options={{ title: '我的點名紀錄' }}
       />
       <Stack.Screen
         name="CourseScores"
-        component={CourseScoresScreen}
+        component={guardCourseView(CourseScoresScreen)}
         options={{ title: '課內成績' }}
       />
     </Stack.Navigator>

@@ -33,7 +33,7 @@ const FAQ_DATA: FAQItem[] = [
     id: '2',
     question: '如何加入群組？',
     answer:
-      '在「收件匣」頁面點擊「群組」，輸入 8 碼加入碼即可加入。你也可以請群組管理員分享 QR 碼給你掃描加入。',
+      '在「訊息」分頁的工作台點擊「群組」，輸入 8 碼加入碼即可加入。你也可以請群組管理員分享 QR 碼給你掃描加入。',
     category: '群組功能',
   },
   {
@@ -137,14 +137,14 @@ const GUIDES = [
     title: '行事曆同步',
     description: '將活動和作業同步到手機行事曆',
     icon: 'calendar-outline',
-    color: '#F59E0B',
+    color: theme.colors.warning,
   },
   {
     id: 'achievements',
     title: '成就系統介紹',
     description: '了解如何獲得成就徽章',
     icon: 'trophy-outline',
-    color: '#8B5CF6',
+    color: theme.colors.social,
   },
 ];
 
@@ -186,10 +186,10 @@ export function HelpScreen(props: any) {
         );
         return;
       case 'groups':
-        navigateToTab('收件匣', 'Groups');
+        navigateToTab('訊息', 'Groups');
         return;
       case 'calendar':
-        navigateToTab('課程', 'Calendar');
+        navigateToTab('學習', 'Calendar');
         return;
       case 'achievements':
         nav?.navigate?.('Achievements');

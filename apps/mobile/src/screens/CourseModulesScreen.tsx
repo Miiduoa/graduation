@@ -37,9 +37,8 @@ function openInApp(
 }
 
 import { Card, ErrorState, LoadingState, Pill, Screen, SectionTitle } from '../ui/components';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
-import { CourseDemoDataRibbon } from '../ui/courseChipShell';
+import { CourseDemoDataRibbon, courseChipScrollContentStyle } from '../ui/courseChipShell';
 import { useAuth } from '../state/auth';
 import { useAsyncList } from '../hooks/useAsyncList';
 import {
@@ -1428,9 +1427,8 @@ export function CourseModulesScreen(props: any) {
         style={{ flex: 1 }}
         accessibilityLabel="課程章節與教材列表"
         contentContainerStyle={{
+          ...courseChipScrollContentStyle(true),
           gap: 14,
-          padding: 16,
-          paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING,
         }}
         refreshControl={
           <RefreshControl

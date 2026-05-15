@@ -4599,6 +4599,26 @@ export function getDemoNotifications(schoolId: string, userId: string): Notifica
   schoolId = normalizeDemoSchoolId(schoolId);
   const baseNotifications: Notification[] = [
     {
+      id: createId(schoolId, 'notif', 9),
+      userId,
+      type: 'system' as const,
+      title: '開課目錄已更新',
+      body: '新學期選課資料已同步，可前往「學習」開課目錄查閱。',
+      read: false,
+      createdAt: getDateOffset(-0.08),
+      data: { learnTarget: 'catalog' },
+    },
+    {
+      id: createId(schoolId, 'notif', 10),
+      userId,
+      type: 'system' as const,
+      title: '課程中樞提醒',
+      body: '示範：點此依 groupId 進入課程中樞（示範資料可能不存在於你的帳號）。',
+      read: true,
+      createdAt: getDateOffset(-0.07),
+      data: { learnTarget: 'courseHub', groupId: createId(schoolId, 'grp', 1) },
+    },
+    {
       id: createId(schoolId, 'notif', 1),
       userId,
       type: 'assignment' as const,

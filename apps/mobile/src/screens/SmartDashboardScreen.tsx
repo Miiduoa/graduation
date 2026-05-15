@@ -2045,7 +2045,7 @@ function AutopilotMissionRail(props: {
       : {
           id: 'action',
           title: '生成今日任務',
-          detail: '依課程、地點與收件匣建立路線',
+          detail: '依課程、地點與訊息待辦建立路線',
           icon: 'sparkles-outline' as const,
           color: theme.colors.accent,
           onPress: props.onOpenAI,

@@ -274,12 +274,12 @@ export function GlobalSearchScreen(props: any) {
         break;
       case 'post':
         if (result.groupId) {
-          nav?.navigate?.('收件匣', { screen: 'GroupDetail', params: { groupId: result.groupId } });
+          nav?.navigate?.('訊息', { screen: 'GroupDetail', params: { groupId: result.groupId } });
         }
         break;
       case 'assignment':
         if (result.groupId) {
-          nav?.navigate?.('收件匣', {
+          nav?.navigate?.('訊息', {
             screen: 'GroupAssignments',
             params: { groupId: result.groupId },
           });

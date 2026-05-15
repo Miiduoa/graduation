@@ -133,6 +133,51 @@ export function CourseDemoDataRibbon() {
   );
 }
 
+/** 列表／參數缺漏時的空狀態，與 CourseChipLoading 同背景的層次感 */
+export function CourseChipEmpty(props: {
+  title: string;
+  body: string;
+  primaryLabel?: string;
+  onPrimary?: () => void;
+}) {
+  return (
+    <View
+      style={{
+        marginTop: theme.space.lg,
+        padding: theme.space.lg,
+        borderRadius: theme.radius.lg,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        gap: theme.space.md,
+      }}
+      accessibilityRole="summary"
+    >
+      <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>{props.title}</Text>
+      <Text style={{ color: theme.colors.textSecondary, fontSize: 14, lineHeight: 21 }}>{props.body}</Text>
+      {props.primaryLabel && props.onPrimary ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={props.primaryLabel}
+          onPress={props.onPrimary}
+          style={({ pressed }) => ({
+            alignSelf: 'flex-start',
+            minHeight: 44,
+            justifyContent: 'center',
+            paddingVertical: theme.space.sm,
+            paddingHorizontal: theme.space.md,
+            borderRadius: theme.radius.md,
+            backgroundColor: theme.colors.accent,
+            opacity: pressed ? 0.85 : 1,
+          })}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>{props.primaryLabel}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 export function CourseChipErrorBanner(props: { message: string; onRetry?: () => void }) {
   return (
     <View

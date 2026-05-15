@@ -313,8 +313,8 @@ export function InboxScreen(props: any) {
 
         {!auth.user ? (
           <CompletionState
-            title="登入後才會出現可執行的收件匣"
-            description="收件匣會把課程更新、作業、評量、課堂與訊息整合成單一工作台。"
+            title="登入後才會出現可執行的訊息工作台"
+            description="訊息分頁會把課程更新、作業、評量、課堂與私訊整合成單一工作台。"
             actionLabel="前往登入"
             onPress={() => nav?.navigate?.('我的', { screen: 'SSOLogin' })}
           />
