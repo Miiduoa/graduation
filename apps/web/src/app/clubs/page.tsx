@@ -211,6 +211,17 @@ export default function ClubsPage(props: {
   );
 
   const toggleJoin = async (id: string) => {
+    // 沒有加入社團權限的角色（校友、訪客、系主任）：給友善提示
+    if (!caps.canJoinClubs) {
+      info(
+        demoRole === 'alumni'
+          ? '校友身份僅可瀏覽，無法加入社團'
+          : demoRole === 'guest'
+            ? '請先登入後才能加入社團'
+            : `${demoRole} 身份無法直接加入社團`,
+      );
+      return;
+    }
     if (!user || usingDemo) {
       // Demo 模式：只更新本地狀態
       setClubs((prev) => prev.map((c) => (c.id === id ? { ...c, isJoined: !c.isJoined } : c)));
@@ -243,6 +254,63 @@ export default function ClubsPage(props: {
   return (
     <SiteShell title="社團活動" subtitle="探索校園活動與社團" schoolName={schoolName}>
       <div className="pageStack">
+        {/* 社團幹部管理區（只有 club_officer / admin 看得到） */}
+        {caps.canPublishClubEvents ? (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'rgba(52,199,89,0.10)',
+              border: '1px solid #34C759',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#1F7A2E', marginBottom: 4 }}>
+                  🎯 社團幹部管理區
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5 }}>
+                  你目前的身份可以發布社團活動、管理成員與審核入社申請。
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => success('已開啟「發布社團活動」表單（demo）')}
+                  className="btn primary"
+                  style={{ fontSize: 13 }}
+                >
+                  ＋ 發布社團活動
+                </button>
+                <button
+                  type="button"
+                  onClick={() => success('已開啟「成員管理」面板（demo）')}
+                  className="btn"
+                  style={{ fontSize: 13 }}
+                >
+                  👥 管理成員
+                </button>
+                <button
+                  type="button"
+                  onClick={() => success('已開啟「入社申請審核」（demo）')}
+                  className="btn"
+                  style={{ fontSize: 13 }}
+                >
+                  📝 審核申請
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {usingDemo && (
           <div
             className="card"

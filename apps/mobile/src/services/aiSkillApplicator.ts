@@ -33,6 +33,10 @@ import {
   type InteractionEvent,
   type DiscoveredPattern,
 } from './aiLearning';
+import {
+  isInDynamicQuietHours,
+  type DynamicQuietHoursContext,
+} from './dynamicQuietHours';
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -73,6 +77,11 @@ export interface SkillApplyInput {
   recentPushes: Array<{ id: string; pushedAt: string; kind: SuggestionKind }>;
   /** 互動歷史（從 aiLearning 來） */
   history: InteractionEvent[];
+  /**
+   * 動態 quiet hours context（可選）。提供時會額外考量課表/用餐尖峰/自訂窗口；
+   * critical severity 不受此影響（與 G5 行為一致）。
+   */
+  dynamicQuietContext?: Omit<DynamicQuietHoursContext, 'now' | 'isCritical'>;
 }
 
 export interface AppliedSkill {
@@ -176,9 +185,18 @@ export function evaluateGuardrails(input: SkillApplyInput): GuardrailVerdict {
     failed.push('dedupe_window');
   }
 
-  // G5: quiet hours
-  const inQuietHours = hour >= QUIET_HOURS_START || hour < QUIET_HOURS_END;
-  if (inQuietHours && input.suggestion.severity !== 'critical') {
+  // G5: quiet hours — 靜態 22-08 + 動態（課表 / 用餐尖峰 / 自訂窗口）
+  const inStaticQuiet = hour >= QUIET_HOURS_START || hour < QUIET_HOURS_END;
+  let inDynamicQuiet = false;
+  if (input.dynamicQuietContext) {
+    const verdict = isInDynamicQuietHours({
+      ...input.dynamicQuietContext,
+      now: nowDate,
+      isCritical: input.suggestion.severity === 'critical',
+    });
+    inDynamicQuiet = verdict.isQuiet;
+  }
+  if ((inStaticQuiet || inDynamicQuiet) && input.suggestion.severity !== 'critical') {
     failed.push('quiet_hours');
   }
 
