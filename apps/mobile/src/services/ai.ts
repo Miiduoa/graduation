@@ -76,6 +76,11 @@ import {
   type AgentQueryResult,
 } from './aiLocalAgent';
 import {
+  buildSupervisorRetryMessages,
+  evaluateAssistantReplyQuality,
+} from './assistantReplySupervisor';
+import type { LLMMessage } from './localLLMInference';
+import {
   buildBroadNaturalLanguageRuntimeGuide,
 } from './aiDynamicTraining';
 import {
@@ -1285,6 +1290,7 @@ function buildOnDeviceAppPrompt(
     '如果資料狀態是 blocked/missing/empty，要明確說明目前缺權限、未同步或沒有資料；不要編造不存在的借閱、列印、宿舍、訂單或行事曆資料。',
     '使用者要求代理操作時，先說明你能協助整理資料與交給 App 確認卡/按鈕執行；真正會寫入、下單、預約、送訊息、報修、請假或發布的操作必須經 App 確認流程，不要宣稱已經完成。',
     '若無工具可呼叫、查詢失敗或寫入被拒：仍須交付代理產物（分步計畫、表格式草稿、建議導頁／畫面）；誠實說明技術邊界，但禁止只用一句話要使用者自己去處理就結束。',
+    '使用者用「那個／這門／剛才／同上／為什麼」追問時，先對齊上文指涉的對象再回答；若不確定就簡短確認一句。',
     '回答使用繁體中文，直接、具體、可執行。能引用 APP 內資料時要列出重點；資料不足時給下一步。',
     `使用者資料：姓名=${context?.userName ?? '未命名'}；uid=${context?.userId ?? 'unknown'}；學校=${context?.schoolId ?? 'unknown'}；角色=${context?.role ?? 'student'}`,
     context?.appPulseSummary ? `App 脈動：${limitText(context.appPulseSummary, 320)}` : '',
@@ -1299,21 +1305,41 @@ function buildOnDeviceAppPrompt(
   return joinWithinBudget(sections, promptBudget);
 }
 
+/** 依 context token 上限與 system 長度，動態保留足夠多輪 user/assistant（追問、指涉詞）。 */
+function computeOnDeviceRecentMessages(
+  messages: AIMessage[],
+  contextLength: number,
+  systemPromptChars: number,
+): Pick<AIMessage, 'role' | 'content'>[] {
+  const filtered = messages.filter((m) => m.role === 'user' || m.role === 'assistant');
+  const maxMsgLen = contextLength <= 2048 ? 300 : 460;
+  const systemTokenEstimate = Math.ceil(systemPromptChars / 2);
+  const generationReserveTokens = contextLength <= 2048 ? 320 : 400;
+  const historyTokens = Math.max(
+    96,
+    contextLength - systemTokenEstimate - generationReserveTokens,
+  );
+  const charBudget = Math.max(720, historyTokens * 2);
+  const approxCharsPerMsg = maxMsgLen + 28;
+  let maxMsgs = Math.floor(charBudget / approxCharsPerMsg);
+  maxMsgs = Math.min(22, Math.max(6, maxMsgs));
+
+  return filtered.slice(-maxMsgs).map((m) => ({
+    role: m.role,
+    content: limitText(m.content, maxMsgLen),
+  }));
+}
+
 function buildOnDeviceMessages(messages: AIMessage[], context?: AIContext, contextLength = 4096) {
   const lastUserText =
     [...messages].reverse().find((message) => message.role === 'user')?.content ?? '';
-  const recent = messages
-    .filter((message) => message.role === 'user' || message.role === 'assistant')
-    .slice(contextLength <= 2048 ? -2 : -4)
-    .map((message) => ({
-      role: message.role,
-      content: limitText(message.content, contextLength <= 2048 ? 220 : 420),
-    }));
+  const sysContent = buildOnDeviceAppPrompt(context, contextLength, lastUserText);
+  const recent = computeOnDeviceRecentMessages(messages, contextLength, sysContent.length);
 
   return [
     {
       role: 'system' as const,
-      content: buildOnDeviceAppPrompt(context, contextLength, lastUserText),
+      content: sysContent,
     },
     ...recent,
   ];
@@ -1419,19 +1445,7 @@ function buildOnDeviceAgentMessages(
       (appendix.length > tailBudget ? '\n…（附錄過長已截斷）' : '');
   }
 
-  // ── 預算：system prompt 佔約 60%，留 40% 給對話歷史 ──
-  const systemTokenEstimate = Math.ceil(systemPrompt.length / 2); // 粗估中文 1 字 ≈ 2 token
-  const historyBudget = contextLength - systemTokenEstimate - 256; // 256 buffer for generation
-  const maxHistory = contextLength <= 2048 ? 2 : historyBudget > 1500 ? 6 : 4;
-  const maxMsgLen = contextLength <= 2048 ? 200 : 400;
-
-  const recent = messages
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .slice(-maxHistory)
-    .map((m) => ({
-      role: m.role,
-      content: limitText(m.content, maxMsgLen),
-    }));
+  const recent = computeOnDeviceRecentMessages(messages, contextLength, systemPrompt.length);
 
   return [
     { role: 'system' as const, content: systemPrompt },
@@ -1567,16 +1581,20 @@ async function tryChatWithOnDeviceAssistant(
     }
 
     let partial = '';
-    const result = await localLLM.generate({
-      messages: patchedMessages,
+    const streamOn =
+      onToken &&
+      ((chunk: string) => {
+        partial += chunk;
+        onToken(partial, false);
+      });
+
+    const llmMsgs = patchedMessages as LLMMessage[];
+
+    let result = await localLLM.generate({
+      messages: llmMsgs,
       signal,
       maxTokens,
-      onToken: onToken
-        ? (token) => {
-            partial += token;
-            onToken(partial, false);
-          }
-        : undefined,
+      onToken: streamOn ? (token) => streamOn(token) : undefined,
     });
 
     if (!result.content) {
@@ -1619,6 +1637,7 @@ async function tryChatWithOnDeviceAssistant(
     const executeCommands = parseExecuteCommands(finalContent);
     let execLearnedDrafts: LearnedSkill[] = [];
     let execChoiceMenu: AssistantChoiceMenu | undefined;
+    let supplementalSuccessfulWrite = false;
     if (executeCommands.length > 0 && context) {
       console.log(`[AI Agent v2] 模型額外產生 ${executeCommands.length} 個執行指令（備用路徑）`);
       const execResults = await executeAgentActions(executeCommands, {
@@ -1629,6 +1648,7 @@ async function tryChatWithOnDeviceAssistant(
         lastChoiceMenu: context.lastChoiceMenu,
         isOnline: context.isOnline,
       });
+      supplementalSuccessfulWrite = execResults.some((r) => r.result.success && r.result.isWrite);
       execChoiceMenu = lastChoiceMenuFromToolResults(execResults.map((r) => ({ result: r.result })));
       execLearnedDrafts = collectLearnedSkillsFromToolRound(
         execResults.map((r) => ({ result: r.result })),
@@ -1638,6 +1658,29 @@ async function tryChatWithOnDeviceAssistant(
         .join('\n');
       finalContent = finalContent.replace(/\[EXECUTE:\w+:\{[^}]*\}]/g, '').trim();
       if (execSummary) finalContent += '\n\n' + execSummary;
+    }
+
+    const quality = evaluateAssistantReplyQuality({
+      reply: finalContent,
+      userQuestion: lastMsg,
+      agentResult,
+      supplementalSuccessfulWrite,
+    });
+    if (!quality.ok && lastMsg.trim().length >= 6 && !signal?.aborted) {
+      console.warn('[AssistantSupervisor] 草稿未過監督，重試一輪:', quality.reasons.join('；'));
+      partial = '';
+      const retryMsgs = buildSupervisorRetryMessages(llmMsgs, finalContent, quality.reasons, lastMsg.trim());
+      const retry = await localLLM.generate({
+        messages: retryMsgs,
+        signal,
+        maxTokens,
+        temperature: 0.35,
+        topP: 0.88,
+        onToken: streamOn ? (token) => streamOn(token) : undefined,
+      });
+      if (retry.content.trim()) {
+        finalContent = retry.content.trim();
+      }
     }
 
     onToken?.(finalContent, true);

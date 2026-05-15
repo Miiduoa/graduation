@@ -23,7 +23,6 @@ import {
   Alert,
   Modal,
   Dimensions,
-  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -91,6 +90,7 @@ import {
   simulateLotteryStats,
   simulateMyApplication,
 } from '../data/puDormData';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -2381,7 +2381,11 @@ export function DormitoryScreen(props: any) {
             {EMERGENCY_CONTACTS.map((contact, i) => (
               <Pressable
                 key={i}
-                onPress={() => Linking.openURL(`tel:${contact.phone.replace(/[^0-9+#]/g, '')}`)}
+                onPress={() =>
+                  void linkingOpenWithPuTronClassGate(
+                    `tel:${contact.phone.replace(/[^0-9+#]/g, '')}`,
+                  )
+                }
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',

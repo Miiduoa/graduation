@@ -773,7 +773,7 @@ function AppTabNavigator() {
 
 function AppNavigation() {
   const auth = useAuth();
-  const pendingAssignmentUrlRef = useRef<string | null>(null);
+  const pendingMessagingDeepLinkRef = useRef<string | null>(null);
   const authRoleRef = useRef(auth.profile?.role);
   const authTeachingRef = useRef(isTeachingRole(auth.profile?.role));
   authRoleRef.current = auth.profile?.role;
@@ -785,11 +785,11 @@ function AppNavigation() {
   useProactiveAIReporter();
   useWebLearningSync();
 
-  const flushPendingAssignmentDeepLink = useCallback(() => {
+  const flushPendingMessagingDeepLink = useCallback(() => {
     if (!rootNavigationRef.isReady()) return;
-    const url = pendingAssignmentUrlRef.current;
+    const url = pendingMessagingDeepLinkRef.current;
     if (!url) return;
-    pendingAssignmentUrlRef.current = null;
+    pendingMessagingDeepLinkRef.current = null;
 
     const parsedAssignment = parseGroupAssignmentDeepLink(url);
     if (parsedAssignment) {
@@ -829,7 +829,7 @@ function AppNavigation() {
       async getInitialURL() {
         const url = await Linking.getInitialURL();
         if (url && isInterceptedMessagingDeepLink(url)) {
-          pendingAssignmentUrlRef.current = url;
+          pendingMessagingDeepLinkRef.current = url;
           return null;
         }
         return url;
@@ -839,7 +839,7 @@ function AppNavigation() {
           const parsedAssignment = parseGroupAssignmentDeepLink(url);
           if (parsedAssignment) {
             if (rootNavigationRef.isReady()) {
-              pendingAssignmentUrlRef.current = null;
+              pendingMessagingDeepLinkRef.current = null;
               const task = assignmentTaskFromDeepLink(parsedAssignment);
               const ok = navigateFromInboxTask(rootNavigationRef, task, {
                 role: authRoleRef.current,
@@ -852,7 +852,7 @@ function AppNavigation() {
                 });
               }
             } else {
-              pendingAssignmentUrlRef.current = url;
+              pendingMessagingDeepLinkRef.current = url;
             }
             return;
           }
@@ -860,12 +860,12 @@ function AppNavigation() {
           const list = parseGroupAssignmentsListDeepLink(url);
           if (list) {
             if (rootNavigationRef.isReady()) {
-              pendingAssignmentUrlRef.current = null;
+              pendingMessagingDeepLinkRef.current = null;
               navigateToCourseScreen(rootNavigationRef, authRoleRef.current, 'CourseHub', {
                 groupId: list.groupId,
               });
             } else {
-              pendingAssignmentUrlRef.current = url;
+              pendingMessagingDeepLinkRef.current = url;
             }
             return;
           }
@@ -873,12 +873,12 @@ function AppNavigation() {
           const hub = parseGroupCourseHubDeepLink(url);
           if (hub) {
             if (rootNavigationRef.isReady()) {
-              pendingAssignmentUrlRef.current = null;
+              pendingMessagingDeepLinkRef.current = null;
               navigateToCourseScreen(rootNavigationRef, authRoleRef.current, 'CourseHub', {
                 groupId: hub.groupId,
               });
             } else {
-              pendingAssignmentUrlRef.current = url;
+              pendingMessagingDeepLinkRef.current = url;
             }
             return;
           }
@@ -923,7 +923,7 @@ function AppNavigation() {
       ref={rootNavigationRef}
       theme={navTheme}
       linking={linkingConfig}
-      onReady={flushPendingAssignmentDeepLink}
+      onReady={flushPendingMessagingDeepLink}
       fallback={
         <View
           style={{

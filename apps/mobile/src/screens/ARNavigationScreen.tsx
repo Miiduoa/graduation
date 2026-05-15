@@ -7,7 +7,6 @@ import {
   Alert,
   Animated,
   StyleSheet,
-  Linking,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +15,7 @@ import * as Haptics from 'expo-haptics';
 import { Magnetometer, Accelerometer } from 'expo-sensors';
 import { Screen, Button, Pill, AnimatedCard } from '../ui/components';
 import { theme } from '../ui/theme';
+import { linkingOpenWithPuTronClassGate } from '../services/tronClassWebUiGate';
 import {
   buildOutdoorRoute,
   calculateBearing,
@@ -940,7 +940,8 @@ export function ARNavigationScreen(props: any) {
                       ? `geo:${target.lat},${target.lng}?q=${target.lat},${target.lng}(${encodeURIComponent(target.name)})`
                       : `https://www.google.com/maps/search/?api=1&query=${target.lat},${target.lng}`;
                   try {
-                    await Linking.openURL(url);
+                    const ok = await linkingOpenWithPuTronClassGate(url);
+                    if (!ok) Alert.alert('無法開啟地圖', '請稍後再試。');
                   } catch {
                     Alert.alert('無法開啟地圖', '請稍後再試。');
                   }

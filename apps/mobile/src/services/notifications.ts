@@ -13,6 +13,7 @@ import {
 import { getDb } from '../firebase';
 import { withRetry } from '../utils/retry';
 import { trackEvent } from './analytics';
+import { linkingOpenWithPuTronClassGate } from './tronClassWebUiGate';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -96,10 +97,10 @@ export async function checkPushPermission(): Promise<PermissionResult> {
  */
 export function openNotificationSettings(): void {
   if (Platform.OS === 'ios') {
-    Linking.openURL('app-settings:');
-  } else {
-    Linking.openSettings();
+    void linkingOpenWithPuTronClassGate('app-settings:');
+    return;
   }
+  Linking.openSettings().catch(() => undefined);
 }
 
 /**

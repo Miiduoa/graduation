@@ -13,7 +13,6 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
 import * as Sharing from 'expo-sharing';
 import { useNavigation } from '@react-navigation/native';
 
@@ -46,7 +45,10 @@ import {
   type TCHomeworkSubmission as TCHWSubmission,
 } from '../services/tronClassClient';
 import { isTronClassPuHostedUrl } from '../services/tronClassDataEnabled';
-import { guardTronClassWebAccessOrAlert } from '../services/tronClassWebUiGate';
+import {
+  guardTronClassWebAccessOrAlert,
+  webBrowserOpenWithPuTronClassGate,
+} from '../services/tronClassWebUiGate';
 import {
   isDemoCourseId,
   demoFetchModules,
@@ -80,7 +82,7 @@ function openInApp(
     return;
   }
   // navigation 不可用時才 fallback 跳系統瀏覽
-  WebBrowser.openBrowserAsync(url).catch(() => {});
+  void webBrowserOpenWithPuTronClassGate(url);
 }
 
 function openPuTronClassMaterialInApp(

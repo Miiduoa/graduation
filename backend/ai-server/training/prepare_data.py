@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 from pathlib import Path
 
 from config import TRAINING_DIR, APP_SRC_ROOT
@@ -23,8 +24,90 @@ logger = logging.getLogger(__name__)
 OUTPUT_PATH = TRAINING_DIR / "campus_instruct.jsonl"
 
 
+def _fingerprint_training_record(record: dict) -> str:
+    """完全相同內容的樣本視為重複（Alpaca 與 messages 分開規範化）。"""
+    raw_msgs = record.get("messages")
+    if isinstance(raw_msgs, list):
+        normalized = [
+            {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+            for m in raw_msgs
+            if isinstance(m, dict)
+        ]
+        return json.dumps({"messages": normalized}, ensure_ascii=False)
+
+    return json.dumps(
+        {
+            "instruction": str(record.get("instruction", "")).strip(),
+            "input": str(record.get("input", "") or "").strip(),
+            "output": str(record.get("output", "")).strip(),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def dedupe_training_records(records: list[dict]) -> list[dict]:
+    """保留首次出現順序，移除指紋相同的列。"""
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for row in records:
+        fp = _fingerprint_training_record(row)
+        if fp in seen:
+            continue
+        seen.add(fp)
+        unique.append(row)
+    return unique
+
+
+def _instruction_bucket_key(text: str, prefix_chars: int = 14) -> str:
+    """移除標點與空白後取字首，用於稀疏化「開頭很像」的問句。"""
+    collapsed = re.sub(
+        r'[\s？?！!,，.。、；;：“”「」『』（）()\[\]<>《》]',
+        "",
+        text.casefold(),
+    )
+    if not collapsed:
+        return text[:prefix_chars]
+    return collapsed[:prefix_chars] if len(collapsed) >= prefix_chars else collapsed
+
+
+def thin_similar_alpaca_instructions(
+    records: list[dict],
+    *,
+    max_per_bucket: int = 5,
+    bucket_chars: int = 14,
+) -> list[dict]:
+    """Alpaca 列：同一『句首桶』最多保留 max_per_bucket 條，避免語料過度集中於相似問法。"""
+    agent_rows = [r for r in records if isinstance(r.get("messages"), list)]
+    alpaca_rows = [r for r in records if not isinstance(r.get("messages"), list)]
+    random.shuffle(alpaca_rows)
+    counts: dict[str, int] = {}
+    kept_alpaca: list[dict] = []
+    for r in alpaca_rows:
+        ins = str(r.get("instruction", "")).strip()
+        bk = _instruction_bucket_key(ins, bucket_chars)
+        if counts.get(bk, 0) >= max_per_bucket:
+            continue
+        counts[bk] = counts.get(bk, 0) + 1
+        kept_alpaca.append(r)
+    dropped = len(alpaca_rows) - len(kept_alpaca)
+    if dropped:
+        logger.info(
+            "Thinned %d Alpaca rows in similar instruction buckets (kept %d)",
+            dropped,
+            len(kept_alpaca),
+        )
+    return agent_rows + kept_alpaca
+
+
+# 每個畫面最多收錄幾條（避免同一類 navigation QA 塞滿資料集）
+SCREEN_QA_MAX_PAIRS_PER_SCREEN = 12
+# 同一個 action 最多抽幾種問法模板（其餘模板不放進該 action）
+SCREEN_QA_TEMPLATE_SAMPLES_PER_ACTION = 2
+
+
 def _screen_qa_pairs() -> list[dict]:
-    """Generate QA pairs from screen knowledge."""
+    """從 SCREEN_KNOWLEDGE 採樣：句型多元、每畫面有上限，降低『相似問句』比重。"""
     pairs: list[dict] = []
 
     question_templates = [
@@ -32,6 +115,10 @@ def _screen_qa_pairs() -> list[dict]:
         ("{name_zh}在哪裡？", "「{name_zh}」位於「{path}」。\n\n{desc}\n\n建議選項：{suggest}"),
         ("APP 有什麼功能可以{action}？", "你可以使用「{path}」的功能。\n\n{desc}\n\n除了{action}之外，還可以：{other_actions}"),
         ("教我怎麼使用{name_zh}", "好的！{name_zh}的使用方式如下：\n\n📍 位置：{path}\n📝 功能：{desc}\n\n你可以進行以下操作：\n{numbered_actions}\n\n建議選項：試試看、更多功能"),
+        ("「{action}」要去哪個頁面？", "可以到「{path}」（{name}）。\n\n{desc}\n\n這裡預設能做的操作：{all_actions}"),
+        ("找不到{name_zh}，入口在哪？", "你可以從「{path}」進入「{name_zh}」。\n\n{desc}\n\n建議先試：{suggest}"),
+        ("想用{name_zh}做{action}可以嗎？", "可以。{name_zh}在「{path}」，描述如下：\n\n{desc}\n\n相關操作：{all_actions}"),
+        ("說明一下{name_zh}是做什麼的", "「{name_zh}」的路徑是「{path}」。\n\n{desc}\n\n可用操作：{numbered_actions}"),
     ]
 
     for screen_name, info in SCREEN_KNOWLEDGE.items():
@@ -40,26 +127,43 @@ def _screen_qa_pairs() -> list[dict]:
         desc = info["description"]
         path = info["path"]
 
+        candidates: list[dict] = []
+
         for action in actions:
             other = [a for a in actions if a != action]
             numbered = "\n".join(f"{i}. {a}" for i, a in enumerate(actions, 1))
             suggest = "、".join(actions[:3])
 
-            for q_template, a_template in question_templates:
+            tpl_list = list(question_templates)
+            random.shuffle(tpl_list)
+            chosen_tpls = tpl_list[: min(SCREEN_QA_TEMPLATE_SAMPLES_PER_ACTION, len(tpl_list))]
+
+            for q_template, a_template in chosen_tpls:
                 try:
                     question = q_template.format(
-                        action=action, name=screen_name, name_zh=name_zh,
-                        path=path, desc=desc,
+                        action=action,
+                        name=screen_name,
+                        name_zh=name_zh,
+                        path=path,
+                        desc=desc,
                     )
                     answer = a_template.format(
-                        action=action, name=screen_name, name_zh=name_zh,
-                        path=path, desc=desc, all_actions="、".join(actions),
+                        action=action,
+                        name=screen_name,
+                        name_zh=name_zh,
+                        path=path,
+                        desc=desc,
+                        all_actions="、".join(actions),
                         other_actions="、".join(other) if other else "這已經是全部操作",
-                        numbered_actions=numbered, suggest=suggest,
+                        numbered_actions=numbered,
+                        suggest=suggest,
                     )
-                    pairs.append({"instruction": question, "input": "", "output": answer})
+                    candidates.append({"instruction": question, "input": "", "output": answer})
                 except KeyError:
                     continue
+
+        random.shuffle(candidates)
+        pairs.extend(candidates[:SCREEN_QA_MAX_PAIRS_PER_SCREEN])
 
     return pairs
 
@@ -118,11 +222,171 @@ def _campus_scenario_pairs() -> list[dict]:
             "output": "好的，幫你規劃今天的行程：\n\n📅 **今日行程建議**\n\n⏰ **09:00-09:50** 早餐 + 複習資料結構\n📚 **10:00-11:50** 資料結構（資訊大樓 302）\n🍽️ **12:00-13:00** 午餐時間（可以去學生餐廳或素食餐廳）\n✏️ **13:00-13:50** 趕工「演算法報告」（明天截止⚠️）\n📚 **14:00-15:50** 英文課（人文大樓 201）\n📝 **16:00-18:00** 繼續完成演算法報告\n🏃 **18:00-19:00** 晚餐 + 休息\n📖 **19:00-21:00** 演算法報告最終檢查和提交\n\n⚠️ **最重要**：演算法報告明天截止，建議今天完成並提交！\n\n建議選項：設定提醒、查看課表、開始寫作業",
         },
     ]
-    return scenarios
+    return scenarios + _diverse_topic_scenario_pairs()
+
+
+def _diverse_topic_scenario_pairs() -> list[dict]:
+    """補充與課表／餐廳／成績不同維度的短情境，拉開主題覆蓋。"""
+    return [
+        {
+            "instruction": "宿舍浴室燈不亮可以報修嗎？",
+            "input": "",
+            "output": (
+                "可以，請走宿舍／設備報修流程。\n\n"
+                "1. 開啟「校園」相關頁面找到報修或宿舍入口\n"
+                "2. 選類型（例如電力／設備）、填地點與問題描述\n"
+                "3. 送出後留意處理進度\n\n"
+                "⚠️ 若有立即危險（漏水觸電），請先聯絡舍監或警衛。\n\n"
+                "建議選項：建立報修、拍照備註、查看進度"
+            ),
+        },
+        {
+            "instruction": "學校哪裡可以影印或列印？",
+            "input": "",
+            "output": (
+                "常見作法是用 APP 內的列印／影印相關功能（若貴校有綁定）。\n\n"
+                "大致步驟：\n"
+                "1. 到「校園」或服務入口找到列印／印表機\n"
+                "2. 選檔案與印表機，確認黑白／彩色與份數\n"
+                "3. 若需現場繳費，依頁面指示完成\n\n"
+                "若 APP 未顯示任何印表機，代表該校區可能尚未開通線上列印。\n\n"
+                "建議選項：查看印表機列表、列印教學、改問圖書館服務台"
+            ),
+        },
+        {
+            "instruction": "校園 Wi‑Fi 連不上怎麼辦？",
+            "input": "",
+            "output": (
+                "可先快速自查：\n\n"
+                "1. 確認已連到正確 SSID（教室／宿舍可能不同）\n"
+                "2. 重新登入校園帳號或忘記網路後重連\n"
+                "3. 換個時段或座位排除基地台過載\n\n"
+                "若仍失敗：記下時間、地點與錯誤訊息，向電算中心或總務／資訊窗口反映。\n\n"
+                "建議選項：查看公告、聯絡電算中心、改用手機熱點應急"
+            ),
+        },
+        {
+            "instruction": "心理諮商要怎麼預約？會很麻煩嗎？",
+            "input": "",
+            "output": (
+                "通常不麻煩，重點是先踏出第一步。\n\n"
+                "你可以：\n"
+                "1. 到「校園」或健康／諮商相關頁面查看預約方式\n"
+                "2. 依規定選時段與填寫基本資料\n"
+                "3. 依照約時間準時前往（線上／實體依學校規定）\n\n"
+                "諮商屬專業資源，**不必覺得不好意思**；若想匿名需求也可先看 FAQ。\n\n"
+                "建議選項：預約諮商、查看心理健康資源、先看自助文章"
+            ),
+        },
+        {
+            "instruction": "機車停哪裡會被拖吊？",
+            "input": "",
+            "output": (
+                "各校區規定不同，請以學校總務／交通安全公告為準。\n\n"
+                "通用原則：\n"
+                "- 停在**劃線格內**並依箭头／编号停放\n"
+                "- **紅線、人行道、消防通道、出入口**不要停\n"
+                "- 留意「禁止停車」告示與時段管制\n\n"
+                "建議到 APP「校園／地圖或公告」交叉確認最新規定。\n\n"
+                "建議選項：查看公告、開啟校園地圖、聯絡總務"
+            ),
+        },
+        {
+            "instruction": "我想加入魔術社要問誰？",
+            "input": "",
+            "output": (
+                "社團資訊通常在「活動／社群／公告」類入口可查。\n\n"
+                "你可以：\n"
+                "1. 搜尋社團名稱或到活動列表找招新資訊\n"
+                "2. 透過公告上的聯絡方式（Line、IG、Email）私訊幹部\n"
+                "3. 留意說明會／迎新時間地點\n\n"
+                "我不會替你代為報名，但可以幫你整理問題清單。\n\n"
+                "建議選項：搜尋社團、查看活動、私訊聯絡人"
+            ),
+        },
+        {
+            "instruction": "英文履歷第一段怎麼寫比較自然？",
+            "input": "",
+            "output": (
+                "這題偏一般寫作，可用「目標＋科系／年級＋一項強項」三段式開頭。\n\n"
+                "範例骨架：\n"
+                "- I am a junior majoring in ___.\n"
+                "- I am passionate about ___ because ___.\n"
+                "- I hope to contribute ___ through ___.\n\n"
+                "請你自己替換具體名詞；我可以再依你的草稿逐句修。\n\n"
+                "建議選項：給我草稿、改成申請研究所版、改成工讀版"
+            ),
+        },
+        {
+            "instruction": "今晚想早睡但報告寫不完，怎麼取捨？",
+            "input": "",
+            "output": (
+                "先把「後果最大」的事排到前面。\n\n"
+                "務實作法：\n"
+                "1. 列出截止時間與占总成绩比重\n"
+                "2. **先做最小可提交版本**（大纲＋核心段落）\n"
+                "3. 設定 25 分鐘番茄鐘，時間到先睡 7 小時再補\n\n"
+                "長期睡眠不足會拖累隔天效率；必要時向助教／老師誠實溝通。\n\n"
+                "建議選項：拆任務清單、設明日闹钟、请假／延期問答模板"
+            ),
+        },
+        {
+            "instruction": "Apple Wallet 學生證載入失敗",
+            "input": "",
+            "output": (
+                "這類問題多半是設備或發卡平台設定。\n\n"
+                "可試：\n"
+                "1. iOS 更新到相容版本、重開機\n"
+                "2. 重新登入校園身分／信箱驗證連結\n"
+                "3. 確認貴校是否仍支援該載具（有些僅限 Android）\n\n"
+                "若錯誤碼固定出現，請截圖給電算／註冊組。\n\n"
+                "建議選項：查看 FAQ、聯絡電算中心、改用實體學生證"
+            ),
+        },
+        {
+            "instruction": "我想捐二手書給學校活動可以嗎？",
+            "input": "",
+            "output": (
+                "通常可以，但要依活動主辦單位規定。\n\n"
+                "建議流程：\n"
+                "1. 到公告／活動頁確認收件時間與地點\n"
+                "2. 檢查書況（缺頁、個資涂銷）\n"
+                "3. 現場交付並索取簽收或志工時數證明（若有）\n\n"
+                "我不會代替你聯絡主辦，但可以幫你列確認問句。\n\n"
+                "建議選項：搜尋捐書活動、查看失物／二手平台規範、私訊主辦"
+            ),
+        },
+        {
+            "instruction": "明天的气温會冷嗎？要怎麼穿衣服",
+            "input": "",
+            "output": (
+                "我無法取得即時天氣（離線／無外部資料時請勿猜测）。\n\n"
+                "你可自行：\n"
+                "1. 開啟中央氣象署或手機天氣 App\n"
+                "2. 查最低温與降雨機率\n"
+                "3. 洋葱式穿法：薄长袖＋外套\n\n"
+                "若你需要，我可改幫你整理「雨天備援路線」在校園內怎么走。\n\n"
+                "建議選項：查天氣、查看校園地圖避雨點、帶摺傘提醒"
+            ),
+        },
+        {
+            "instruction": "和同組的同學吵架了不想一起做專題怎麼辦？",
+            "input": "",
+            "output": (
+                "先照顧安全與完成度：有情緒很正常。\n\n"
+                "建議策略：\n"
+                "1. **冷靜 24 小時**，用文字列出分工與截止點（留紀錄）\n"
+                "2. 找助教／老師協調角色或調組（依課程規定）\n"
+                "3. 若涉及騷擾或威脅，請向性平／諮商／學務求助\n\n"
+                "我可以幫你起草一封中性禮貌的溝通訊息。\n\n"
+                "建議選項：起草訊息、拆解交付里程碑、預約諮商"
+            ),
+        },
+    ]
 
 
 def _credit_audit_pairs() -> list[dict]:
-    """Generate pairs about credit auditing and course selection."""
+    """學分試算與選課情境。"""
     return [
         {
             "instruction": "我還差多少學分才能畢業？",
@@ -449,6 +713,128 @@ def _general_conversation_pairs() -> list[dict]:
     ]
 
 
+def _follow_up_context_message_pairs() -> list[dict]:
+    """多輪承接上文：代詞、簡稱、追問（強化對話連貫）。"""
+    sys = (
+        "你是校園 App 的本機助理。「那個／這門／剛才／同上／為什麼／再講一次」必須對齊上文提到的對象；"
+        "若不確定就先一句話確認，不要臆測。"
+    )
+    return [
+        {
+            "messages": [
+                {"role": "system", "content": sys},
+                {"role": "user", "content": "資料結構這門課的期中考範圍到哪一章？"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "範圍要以該課程在 APP／iLMS 的公告為準；我這裡沒看到你的課程細節時無法代為認定章節。\n\n"
+                        "你可以：課程中樞 → 該門課 → 公告／教材區查看最新說明。\n\n"
+                        "建議選項：開啟課程公告、問助教信箱"
+                    ),
+                },
+                {"role": "user", "content": "那繳交方式是交 PDF 還是紙本？"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "你前一則問的是「資料結構」期中考範圍；這題問繳交方式——若指的是同一門課的考試或報告，"
+                        "同樣以該作業／考試公告為準（有些課只收線上 PDF，有些要現場紙本）。\n\n"
+                        "請到該門課「作業／考試」頁面確認格式與截止時間。\n\n"
+                        "建議選項：開啟作業詳情、下載範本"
+                    ),
+                },
+            ]
+        },
+        {
+            "messages": [
+                {"role": "system", "content": sys},
+                {"role": "user", "content": "學生餐廳現在有什麼推薦？"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "若 APP 已載入今日菜單，可到「校園／餐廳」查看；離線時我只能給選餐思路（均衡蛋白＋蔬菜）。\n\n"
+                        "建議選項：開啟今日菜單、查看過敏標示"
+                    ),
+                },
+                {"role": "user", "content": "那個紅燒的會太鹹嗎？"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "「那個紅燒的」若是指你上一句情境裡提到的紅燒類餐點：口味因人而異，我無法替你試吃。\n\n"
+                        "可看菜單備註（鈉含量／辣度）、問現場阿姨能否少鹹，或改選清燙／烤肉類。\n\n"
+                        "建議選項：查看營養標示、換一道菜"
+                    ),
+                },
+            ]
+        },
+        {
+            "messages": [
+                {"role": "system", "content": sys},
+                {"role": "user", "content": "演算法作業明天幾點截止？"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "請到「課程 → 作業」查看該筆作業的截止時間（時區以學校系統為準）。若頁面只顯示日期，通常指當日 23:59。\n\n"
+                        "建議選項：設定提醒、提前上傳"
+                    ),
+                },
+                {"role": "user", "content": "同上，遲交扣分嗎？"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "「同上」承接的是你前一則問的「演算法作業」：是否扣分依該課程規定（syllabus／公告），每門課不同。\n\n"
+                        "請在作業說明找「遲交 policy」；找不到就 Email 助教確認並留存紀錄。\n\n"
+                        "建議選項：查看課程大綱、寄信給助教"
+                    ),
+                },
+            ]
+        },
+        {
+            "messages": [
+                {"role": "system", "content": sys},
+                {"role": "user", "content": "我想預約明天的諮商。"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "請到 APP「校園／健康或諮商」入口依頁面選時段；若滿額可改選其他時段或電話詢問。\n\n"
+                        "建議選項：開啟預約、查看取消規定"
+                    ),
+                },
+                {"role": "user", "content": "剛才說明天若滿額呢？"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "承接上文：若明天諮商時段已滿，通常可以往後幾天換時段，或依學校規定加入候補／現場詢問。\n\n"
+                        "仍以預約頁顯示為準。\n\n"
+                        "建議選項：換日期、改電話預約"
+                    ),
+                },
+            ]
+        },
+        {
+            "messages": [
+                {"role": "system", "content": sys},
+                {"role": "user", "content": "這學期英文要退選。"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "退選前請確認截止日期與學分試算；流程多在「課程詳情」或選課系統內操作。\n\n"
+                        "建議選項：學分試算、查看退選截止日"
+                    ),
+                },
+                {"role": "user", "content": "這門會影響畢業英文門檻嗎？"},
+                {
+                    "role": "assistant",
+                    "content": (
+                        "「這門」承接你上一句想退選的「英文」課：是否影響畢業門檻要看你的系所規定與你是否已有替代修習。\n\n"
+                        "請到「學分試算／畢業檢核」頁面對照英文（或其他語言）門檻。\n\n"
+                        "建議選項：開啟學分試算、問系辦"
+                    ),
+                },
+            ]
+        },
+    ]
+
+
 def generate_all() -> Path:
     """Generate all training data and write to JSONL."""
     all_pairs: list[dict] = []
@@ -457,8 +843,16 @@ def generate_all() -> Path:
     all_pairs.extend(_campus_scenario_pairs())
     all_pairs.extend(_credit_audit_pairs())
     all_pairs.extend(_general_conversation_pairs())
+    all_pairs.extend(_follow_up_context_message_pairs())
     # 代理多輪軌跡：維持題型分散但勿過度打散 system 連貫（仍與其它列一併 shuffle）
     all_pairs.extend(_agent_process_trajectories())
+
+    all_pairs = thin_similar_alpaca_instructions(all_pairs)
+    before_dedupe = len(all_pairs)
+    all_pairs = dedupe_training_records(all_pairs)
+    dropped = before_dedupe - len(all_pairs)
+    if dropped:
+        logger.info("Removed %d duplicate training rows (%d unique)", dropped, len(all_pairs))
 
     random.shuffle(all_pairs)
 
