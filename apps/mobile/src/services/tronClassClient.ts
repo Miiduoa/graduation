@@ -1116,7 +1116,8 @@ export async function tcFetchModules(courseId: number): Promise<TCModule[]> {
         course_id: courseId,
         name: m.name ?? `Module ${m.sort ?? 0}`,
         sort: m.sort ?? 0,
-        is_hidden: m.is_hidden ?? false,
+        // 注意：真實 schema 中 is_hidden 是 number (0/1) 不是 boolean
+        is_hidden: Boolean(m.is_hidden ?? false),
         syllabuses: m.syllabuses ?? [],
       }),
     );
@@ -1531,68 +1532,51 @@ export async function tcFetchHomeworkScores(courseId: number): Promise<TCActivit
 
 /** 取得課程作業列表（含提交狀態）
  *
- * 修正：TronClass 回應的繳交狀態欄位有多種命名（is_submitted / submission_status / student_homework_status / submission），
- * 統一解析後 caller 端看 `submitted` boolean。
+ * 已對齊靜宜 TronClass 真實 schema（2026-05-13 抓取）：
+ *   - `submitted: boolean` ← 直接這欄
+ *   - `submitted_status: string`（空字串 / 'submitted' / ...）
+ *   - `score_percentage: string`（'85.00'）
+ *   - `score_published: boolean`
+ *   - `deadline / end_time`
+ *   - `is_closed / is_in_progress`
+ *   - `uploads[]`
  */
 export async function tcFetchHomeworkActivities(courseId: number): Promise<any[]> {
   await ensureBackendSessionLoaded();
-  // 並行嘗試兩個 endpoint：homework-activities 與一般 activities?type=homework
-  const urls = [
-    `${TC_BASE}/api/courses/${courseId}/homework-activities?page_size=100`,
-    `${TC_BASE}/api/courses/${courseId}/activities?type=homework&page_size=100`,
-  ];
   const seen = new Set<number>();
   const result: any[] = [];
-
-  for (const url of urls) {
+  let page = 1;
+  // 真實 schema：response 是 { homework_activities, total, page, page_size, ... }
+  while (true) {
+    const url = `${TC_BASE}/api/courses/${courseId}/homework-activities?page=${page}&page_size=50`;
+    let data: { homework_activities?: any[]; total?: number } | null = null;
     try {
-      const data = await tcFetchJSON<{ homework_activities?: any[]; activities?: any[] }>(url);
-      const list = data?.homework_activities ?? data?.activities ?? [];
-      for (const hw of list) {
-        const id = Number(hw.id ?? 0);
-        if (!id || seen.has(id)) continue;
-        seen.add(id);
-
-        // 解析提交狀態：多種 schema 兼容
-        const sub = hw.submission ?? hw.student_submission ?? null;
-        const submitted =
-          hw.is_submitted === true ||
-          hw.submission_status === 'submitted' ||
-          hw.submission_status === 'graded' ||
-          hw.status === 'submitted' ||
-          hw.status === 'graded' ||
-          !!sub?.submitted_at ||
-          !!hw.submitted_at;
-
-        const graded =
-          hw.is_graded === true ||
-          hw.submission_status === 'graded' ||
-          hw.status === 'graded' ||
-          !!hw.score ||
-          !!sub?.score;
-
-        result.push({
-          ...hw,
-          submitted,
-          graded,
-          submission: sub,
-          // 標準化 grade 欄位給 UI 用
-          student_score:
-            typeof hw.score === 'number'
-              ? hw.score
-              : typeof sub?.score === 'number'
-              ? sub.score
-              : null,
-          student_submitted_at: hw.submitted_at ?? sub?.submitted_at ?? null,
-          student_is_late: hw.is_late === true || sub?.is_late === true,
-          student_feedback: hw.feedback ?? sub?.feedback ?? null,
-        });
-      }
+      data = await tcFetchJSON<{ homework_activities?: any[]; total?: number }>(url);
     } catch {
-      /* try next */
+      break;
     }
+    const list = data?.homework_activities ?? [];
+    if (list.length === 0) break;
+    for (const hw of list) {
+      const id = Number(hw.id ?? 0);
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const scorePct = parseFloat(hw.score_percentage ?? '0');
+      result.push({
+        ...hw,
+        // 標準化欄位給 UI 用
+        submitted: hw.submitted === true,
+        graded: hw.score_published === true && Number.isFinite(scorePct) && scorePct > 0,
+        student_score_percentage: scorePct,
+        student_submitted_at: hw.updated_at ?? null,
+        student_is_late: hw.is_closed === true && hw.submitted !== true,
+        student_feedback: null, // 須呼 homework-activities/{id}/submissions 才有
+      });
+    }
+    if (result.length >= (data?.total ?? 0)) break;
+    page += 1;
+    if (page > 20) break; // safety
   }
-
   return result;
 }
 
@@ -2338,25 +2322,40 @@ export async function tcFetchCourseActivities(courseId: number): Promise<TCCours
     );
 }
 
-/** 取得課程考試列表 — 用 /api/courses/{id}/exams */
+/** 取得課程考試列表 — 用 /api/courses/{id}/exams
+ *
+ * 真實 schema（2026-05-13 驗證）：
+ *   - `exam_submissions: number[]` ← 學生已提交的 submission IDs；length > 0 = 已交
+ *   - `submit_times: number`（已交次數）
+ *   - `score_rule: 'highest' | 'latest'`
+ *   - `score_type: 'percentage' | 'point'`
+ *   - `score_percentage: string`（'85.00'，課程整體 weight）
+ *   - `is_practice_mode: boolean`（true = 練習；false = 正式考試）
+ *   - `is_closed / is_in_progress / is_started`
+ *   - `module_id / end_time / start_time / publish_time`
+ */
 export async function tcFetchCourseExams(courseId: number): Promise<TCExamInfo[]> {
   const url = `${TC_BASE}/api/courses/${courseId}/exams`;
   const data = await tcFetchJSON<{ exams?: Record<string, unknown>[] }>(url);
   if (!data?.exams) return [];
 
   return data.exams.map((e): TCExamInfo => {
-    // exam_submissions 是一個陣列（包含提交 ID），用它的長度判斷是否已提交
     const examSubmissions = Array.isArray(e.exam_submissions) ? e.exam_submissions : [];
     return {
       id: Number(e.id ?? 0),
       title: String(e.title ?? ''),
-      type: String(e.type ?? 'exam'),
+      // type 在 TronClass 回應裡是 'exam'（包含小考考試）— 用 is_practice_mode 區分
+      type: e.is_practice_mode === true ? 'quiz' : 'exam',
       module_id: Number(e.module_id ?? 0),
       start_time: readOptionalString(e.start_time) ?? null,
       end_time: readOptionalString(e.end_time) ?? null,
       total_score: typeof e.total_score === 'number' ? e.total_score : null,
       submit_times: Number(e.submit_times ?? 0),
-      submitted_times: examSubmissions.length,
+      // 已交 = exam_submissions 陣列有值，或 submit_times > 0
+      submitted_times:
+        examSubmissions.length > 0
+          ? examSubmissions.length
+          : Number(e.submit_times ?? 0),
       is_closed: e.is_closed === true,
       score_percentage: String(e.score_percentage ?? '0'),
     };
