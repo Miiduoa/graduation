@@ -2,11 +2,14 @@
 
 import { SiteShell } from '@/components/SiteShell';
 import { useState, useMemo, useEffect, type CSSProperties } from 'react';
+import Link from 'next/link';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { getAuth, fetchGrades, fetchGPA, isFirebaseConfigured, type Grade } from '@/lib/firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+import { DEMO_GRADES } from '@/lib/demoData';
 
 interface GradeDisplay {
+  courseId?: string;
   code: string;
   name: string;
   credits: number;
@@ -17,58 +20,18 @@ interface GradeDisplay {
   rank?: string;
 }
 
-const DEFAULT_GRADES: GradeDisplay[] = [
-  {
-    code: 'CS301',
-    name: '資料結構',
-    credits: 3,
-    grade: 'A+',
-    score: 96,
-    gpa: 4.3,
-    instructor: '王大明',
-    rank: '3/87',
-  },
-  {
-    code: 'MATH201',
-    name: '線性代數',
-    credits: 3,
-    grade: 'A',
-    score: 91,
-    gpa: 4.0,
-    instructor: '陳小華',
-    rank: '8/102',
-  },
-  {
-    code: 'CS302',
-    name: '作業系統',
-    credits: 3,
-    grade: 'A-',
-    score: 88,
-    gpa: 3.7,
-    instructor: '李志明',
-    rank: '12/76',
-  },
-  {
-    code: 'CS401',
-    name: '計算機網路',
-    credits: 3,
-    grade: 'B+',
-    score: 84,
-    gpa: 3.3,
-    instructor: '張美玲',
-    rank: '22/68',
-  },
-  {
-    code: 'MATH101',
-    name: '微積分',
-    credits: 4,
-    grade: 'B',
-    score: 79,
-    gpa: 3.0,
-    instructor: '吳俊傑',
-    rank: '35/120',
-  },
-];
+// 從 demoData 衍生成績清單，跟課表 courseId 一致
+const DEFAULT_GRADES: GradeDisplay[] = DEMO_GRADES.map((g) => ({
+  courseId: g.courseId,
+  code: g.code,
+  name: g.name,
+  credits: g.credits,
+  grade: g.grade,
+  score: g.score,
+  gpa: g.gpa,
+  instructor: g.instructor,
+  rank: g.rank,
+}));
 
 const DEFAULT_GPA_HISTORY = [
   { semester: '112-1', gpa: 3.52 },
@@ -116,6 +79,7 @@ function gradeToGpa(grade: string): number {
 
 function mapFirebaseGrade(g: Grade): GradeDisplay {
   return {
+    courseId: g.courseId,
     code: g.courseCode ?? g.id,
     name: g.courseName,
     credits: g.credits,
@@ -147,7 +111,7 @@ const SEMESTERS = generateSemesters();
 export default function GradesPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
   const [sortBy, setSortBy] = useState<'name' | 'score' | 'gpa'>('score');
   const [user, setUser] = useState<User | null>(null);
@@ -431,49 +395,70 @@ export default function GradesPage(props: {
             {selectedSemester} 學期成績 · {grades.length} 門課程{loading ? ' · 載入中...' : ''}
           </div>
           <div className="insetGroup">
-            {sorted.map((g, i) => (
-              <div
-                key={g.code}
-                className="insetGroupRow"
-                style={{ borderTop: i === 0 ? 'none' : undefined }}
-              >
-                <div
-                  className="insetGroupRowIcon"
-                  style={{
-                    background: gradeBackground(g.grade),
-                    fontSize: 15,
-                    fontWeight: 800,
-                    color: gradeColor(g.grade),
-                    width: 38,
-                    height: 38,
-                    borderRadius: 10,
-                  }}
-                >
-                  {g.grade}
-                </div>
-                <div className="insetGroupRowContent">
-                  <div className="insetGroupRowTitle">{g.name}</div>
-                  <div className="insetGroupRowMeta">
-                    {g.code} · {g.instructor} · {g.credits} 學分{g.rank ? ` · 排名 ${g.rank}` : ''}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            {sorted.map((g, i) => {
+              const rowStyle: CSSProperties = {
+                borderTop: i === 0 ? 'none' : undefined,
+                color: 'inherit',
+                textDecoration: 'none',
+                cursor: g.courseId ? 'pointer' : 'default',
+              };
+              const rowInner = (
+                <>
                   <div
+                    className="insetGroupRowIcon"
                     style={{
-                      fontSize: 18,
+                      background: gradeBackground(g.grade),
+                      fontSize: 15,
                       fontWeight: 800,
                       color: gradeColor(g.grade),
-                      letterSpacing: '-0.04em',
+                      width: 38,
+                      height: 38,
+                      borderRadius: 10,
                     }}
                   >
-                    {g.score}
+                    {g.grade}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
-                    GPA {g.gpa.toFixed(1)}
+                  <div className="insetGroupRowContent">
+                    <div className="insetGroupRowTitle">{g.name}</div>
+                    <div className="insetGroupRowMeta">
+                      {g.code} · {g.instructor} · {g.credits} 學分
+                      {g.rank ? ` · 排名 ${g.rank}` : ''}
+                    </div>
                   </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 800,
+                        color: gradeColor(g.grade),
+                        letterSpacing: '-0.04em',
+                      }}
+                    >
+                      {g.score}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+                      GPA {g.gpa.toFixed(1)}
+                    </div>
+                  </div>
+                </>
+              );
+
+              return g.courseId ? (
+                <Link
+                  key={g.code}
+                  href={`/course/${g.courseId}${q}`}
+                  className="insetGroupRow"
+                  title={`查看 ${g.name} 課程詳情`}
+                  style={rowStyle}
+                >
+                  {rowInner}
+                </Link>
+              ) : (
+                <div key={g.code} className="insetGroupRow" style={rowStyle}>
+                  {rowInner}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

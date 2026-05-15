@@ -10,11 +10,12 @@ import {
 import { appendSchoolContext, sanitizeInternalPath } from '@/lib/navigation';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function LoginPage(props: {
   searchParams?: { school?: string; schoolId?: string; redirect?: string; returnUrl?: string };
 }) {
-  const { schoolContext, schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolContext, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const router = useRouter();
 
   const [studentId, setStudentId] = useState('');
@@ -194,6 +195,55 @@ export default function LoginPage(props: {
             </p>
           </div>
         </form>
+
+        {/* Demo 快速登入：示範模式，使用內建資料，不需 Firebase */}
+        <div
+          className="card"
+          style={{
+            padding: '18px 20px',
+            background: 'var(--info-soft)',
+            border: '1px solid var(--info)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: 'var(--info)',
+              marginBottom: 6,
+            }}
+          >
+            Demo / 示範模式
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, marginBottom: 12 }}>
+            畢業專題口試 / 教學示範用 — 直接以對應身份進入，使用內建示範資料，免登入。
+          </div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            <Link
+              href={`/timetable${q}`}
+              className="btn primary"
+              style={{ width: '100%', minHeight: 44, justifyContent: 'flex-start' }}
+            >
+              👩‍🎓 以學生身份瀏覽（從課表開始）
+            </Link>
+            <Link
+              href={`/teacher/course/c1${q}`}
+              className="btn"
+              style={{ width: '100%', minHeight: 44, justifyContent: 'flex-start' }}
+            >
+              🧑‍🏫 以教師身份瀏覽（資料結構班）
+            </Link>
+            <Link
+              href={`/${q}`}
+              className="btn"
+              style={{ width: '100%', minHeight: 44, justifyContent: 'flex-start' }}
+            >
+              👀 訪客瀏覽（先看首頁）
+            </Link>
+          </div>
+        </div>
       </div>
     </SiteShell>
   );

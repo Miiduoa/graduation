@@ -347,6 +347,10 @@ export type Announcement = {
   category?: string;
   pinned?: boolean;
   schoolId?: string;
+  /** 若公告綁定到某課程，可從這裡跳到 /course/[id] */
+  relatedCourseId?: string;
+  /** 若公告綁定到某社團，可從這裡跳到 /clubs */
+  relatedClubId?: string;
 };
 
 export type ClubEvent = {

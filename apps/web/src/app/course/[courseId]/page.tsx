@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { fetchCourseWorkspace, isFirebaseConfigured, type CourseWorkspace } from '@/lib/firebase';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { getDemoCourseById, getDemoCourseWorkspace } from '@/lib/demoData';
 
 const EMPTY_WORKSPACE: CourseWorkspace = {
   course: null,
@@ -46,6 +47,15 @@ export default function CoursePage(props: {
       try {
         const next = await fetchCourseWorkspace(props.params.courseId);
         if (!active) return;
+        // 若 Firebase 沒有這門課，就 fallback 到 demoData（讓 demo 一定有畫面）
+        if (!next.course) {
+          const demo = getDemoCourseWorkspace(props.params.courseId);
+          if (demo) {
+            setWorkspace(demo);
+            setUsingDemo(true);
+            return;
+          }
+        }
         setWorkspace(next);
         setUsingDemo(!isFirebaseConfigured() || !next.course);
       } finally {
@@ -84,14 +94,30 @@ export default function CoursePage(props: {
           <div
             className="card"
             style={{
-              padding: '10px 16px',
-              background: 'var(--warning-soft)',
-              borderColor: 'var(--warning)',
+              padding: '12px 16px',
+              background: 'var(--info-soft)',
+              borderColor: 'var(--info)',
               fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
             }}
           >
-            ⚠️ 目前顯示最低可用課程頁。若 Firebase 內已有這門課程的 `groups/{props.params.courseId}`
-            資料，畫面會直接切換成真實資料。
+            <div>
+              📚 <strong>示範模式</strong> ·{' '}
+              {getDemoCourseById(props.params.courseId)?.instructor ?? '—'} 老師 ·{' '}
+              {getDemoCourseById(props.params.courseId)?.room ?? '—'}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Link href={`/timetable${q}`} className="btn" style={{ fontSize: 12 }}>
+                回課表
+              </Link>
+              <Link href={`/grades${q}`} className="btn" style={{ fontSize: 12 }}>
+                看成績
+              </Link>
+            </div>
           </div>
         ) : null}
 
@@ -131,8 +157,13 @@ export default function CoursePage(props: {
             <span className="pill subtle">{workspace.course?.memberCount ?? 0} 位成員</span>
             <span className="pill subtle">{summary.publishedGrades} 筆已發布成績</span>
           </div>
-          <Link href={`/teacher/course/${props.params.courseId}${q}`} className="btn">
-            教師視角
+          <Link
+            href={`/teacher/course/${props.params.courseId}${q}`}
+            className="btn primary"
+            title="切換到教師端，可管理教材、點名、成績冊與題庫"
+            style={{ fontWeight: 700 }}
+          >
+            🧑‍🏫 以教師身份檢視
           </Link>
         </div>
 

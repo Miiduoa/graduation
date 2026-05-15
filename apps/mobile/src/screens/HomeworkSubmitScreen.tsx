@@ -19,6 +19,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
+import { useAuth } from '../state/auth';
+import { simulateStudentSubmit } from '../services/demoActionSimulator';
+
 type RouteProps = {
   route?: {
     params?: {
@@ -43,6 +46,7 @@ interface Attachment {
 
 export default function HomeworkSubmitScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
+  const auth = useAuth();
   const courseId = props.route?.params?.courseId ?? '';
   const hwId = props.route?.params?.hwId ?? '';
   const hwTitle = props.route?.params?.hwTitle ?? '作業繳交';
@@ -126,18 +130,19 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
   const doSubmit = useCallback(async () => {
     setSubmitting(true);
     try {
-      const { tcSubmitHomework } = await import('../services/tronClassClient');
+      // ─ Demo 模式：emit cross-role event 給老師（取代 TronClass 提交）─
       const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
       const numericHwId = Number(String(hwId).replace(/^tc:/, '')) || 0;
-      const result = await tcSubmitHomework(numericCourseId, numericHwId, {
-        content: answer.trim(),
-        attachments: attachments.map((a) => ({ uri: a.uri, name: a.name, type: a.type })),
+      await simulateStudentSubmit({
+        studentUid: auth.user?.uid ?? 'demo_student_kuchih',
+        studentName: auth.profile?.displayName ?? '顧晉瑋',
+        teacherUid: 'demo_teacher_chang',
+        courseId: numericCourseId,
+        courseName: hwTitle.split(' ')[0] ?? '課程',
+        homeworkId: numericHwId,
+        homeworkTitle: hwTitle,
+        isLate: !!overdue,
       });
-
-      if (!result.success) {
-        Alert.alert('送出失敗', result.error ?? '請檢查網路後再試一次。');
-        return;
-      }
 
       // 紀錄 companion signal
       try {
@@ -148,15 +153,17 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
       }
 
       setSubmitted(true);
-      Alert.alert('✅ 已送出', `${hwTitle} 已成功繳交。`, [
-        { text: '回課程', onPress: () => navigation.goBack() },
-      ]);
+      Alert.alert(
+        '✅ 已送出',
+        `${hwTitle} 已成功繳交${overdue ? '（標記為遲交）' : ''}。\n老師端會收到即時通知。`,
+        [{ text: '回課程', onPress: () => navigation.goBack() }],
+      );
     } catch (e) {
       Alert.alert('送出失敗', String((e as Error)?.message ?? e));
     } finally {
       setSubmitting(false);
     }
-  }, [answer, attachments, courseId, hwId, hwTitle, navigation]);
+  }, [answer, attachments, courseId, hwId, hwTitle, navigation, overdue, auth.user?.uid, auth.profile?.displayName]);
 
   return (
     <KeyboardAvoidingView

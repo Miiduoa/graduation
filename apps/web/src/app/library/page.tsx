@@ -2,6 +2,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import { SiteShell } from '@/components/SiteShell';
+import { useToast } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 
 interface BorrowedBook {
@@ -62,6 +63,8 @@ export default function LibraryPage(props: {
   const { schoolName } = resolveSchoolPageContext(props.searchParams);
   const [activeTab, setActiveTab] = useState<Tab>('borrow');
   const [searchQuery, setSearchQuery] = useState('');
+  const [renewedIds, setRenewedIds] = useState<Set<string>>(new Set());
+  const { success } = useToast();
 
   const totalAvailable = DEFAULT_ZONES.reduce((sum, z) => sum + (z.total - z.occupied), 0);
   const urgentBooks = DEFAULT_BORROWED.filter((b) => b.daysLeft <= 3).length;
@@ -184,18 +187,29 @@ export default function LibraryPage(props: {
                       </div>
                       {book.renewCount < 3 && (
                         <button
+                          type="button"
+                          onClick={() => {
+                            if (renewedIds.has(book.id)) return;
+                            setRenewedIds((prev) => {
+                              const next = new Set(prev);
+                              next.add(book.id);
+                              return next;
+                            });
+                            success(`已送出續借：${book.title}`);
+                          }}
+                          disabled={renewedIds.has(book.id)}
                           style={{
                             fontSize: 11,
-                            color: 'var(--brand)',
+                            color: renewedIds.has(book.id) ? 'var(--success)' : 'var(--brand)',
                             fontWeight: 600,
                             background: 'none',
                             border: 'none',
-                            cursor: 'pointer',
+                            cursor: renewedIds.has(book.id) ? 'default' : 'pointer',
                             padding: 0,
                             marginTop: 2,
                           }}
                         >
-                          續借
+                          {renewedIds.has(book.id) ? '✓ 已續借' : '續借'}
                         </button>
                       )}
                     </div>

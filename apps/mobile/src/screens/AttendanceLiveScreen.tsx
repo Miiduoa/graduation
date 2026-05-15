@@ -42,6 +42,7 @@ import {
   getStatusColor,
   getStatusLabel,
 } from '../services/smartAttendanceEngine';
+import { simulateStudentCheckIn } from '../services/demoActionSimulator';
 
 // ============================================================================
 // TYPES
@@ -254,6 +255,20 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
         setCheckInMessage(result.message);
         Vibration.vibrate([0, 200, 100, 200]);
         await loadSession();
+        // ── Demo：emit cross-role event 給老師 ──
+        try {
+          const sess = await getSessionById(sessionId);
+          await simulateStudentCheckIn({
+            studentUid: studentId,
+            studentName,
+            teacherUid: 'demo_teacher_chang',
+            courseId: Number(sess?.courseId ?? 0) || 0,
+            courseName: sess?.courseName ?? '課程',
+            sessionId,
+            method: (sess?.method ?? 'rotating_qr') as 'rotating_qr' | 'number_code' | 'geofence' | 'selfie_liveness' | 'multi_factor',
+            status: result.message.includes('遲') ? 'late' : 'present',
+          });
+        } catch { /* swallow demo emit failures */ }
       } else {
         Alert.alert('簽到失敗', result.message);
       }

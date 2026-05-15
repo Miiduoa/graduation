@@ -1,12 +1,19 @@
 'use client';
 
 import { useMemo, useState, type MouseEvent } from 'react';
+import Link from 'next/link';
 import { resolveSchool } from '@campus/shared/src/schools';
-import { mockAnnouncements } from '@campus/shared/src/mockData';
 import { SiteShell } from '@/components/SiteShell';
 import { useToast } from '@/components/ui';
 import { fetchAnnouncements, type Announcement } from '@/lib/firebase';
 import { useSchoolCollectionData } from '@/lib/useSchoolCollectionData';
+import {
+  DEMO_ANNOUNCEMENTS,
+  getDemoCourseById,
+  getDemoClubById,
+  type DemoAnnouncement,
+} from '@/lib/demoData';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
 
 type FilterCategory = 'all' | 'academic' | 'event' | 'general';
 type AnnouncementView = 'all' | 'important' | 'today';
@@ -23,6 +30,21 @@ function isImportantAnnouncement(a: Announcement, index: number): boolean {
   );
 }
 
+// 把 DemoAnnouncement 轉成 Announcement 型別（兩者形狀已對齊）
+const DEMO_FALLBACK: Announcement[] = DEMO_ANNOUNCEMENTS.map(
+  (a: DemoAnnouncement): Announcement => ({
+    id: a.id,
+    title: a.title,
+    body: a.body,
+    publishedAt: a.publishedAt,
+    source: a.source,
+    category: a.category,
+    pinned: a.pinned,
+    relatedCourseId: a.relatedCourseId,
+    relatedClubId: a.relatedClubId,
+  }),
+);
+
 export default function AnnouncementsPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
@@ -30,6 +52,7 @@ export default function AnnouncementsPage(props: {
     school: props.searchParams?.school,
     schoolId: props.searchParams?.schoolId,
   });
+  const { schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<FilterCategory>('all');
   const [activeView, setActiveView] = useState<AnnouncementView>('all');
@@ -40,7 +63,7 @@ export default function AnnouncementsPage(props: {
     data: announcements,
     loading,
     sourceMode,
-  } = useSchoolCollectionData<Announcement>(school.id, fetchAnnouncements, mockAnnouncements);
+  } = useSchoolCollectionData<Announcement>(school.id, fetchAnnouncements, DEMO_FALLBACK);
 
   const usingDemo = sourceMode === 'demo';
 
@@ -320,6 +343,33 @@ export default function AnnouncementsPage(props: {
 
                       {isExpanded && (
                         <div className="annCardActions">
+                          {/* 下一步：跳轉到關聯的課程 / 社團 */}
+                          {a.relatedCourseId && getDemoCourseById(a.relatedCourseId) && (
+                            <Link
+                              href={`/course/${a.relatedCourseId}${q}`}
+                              onClick={(event) => event.stopPropagation()}
+                              style={{
+                                background: 'var(--brand)',
+                                color: '#fff',
+                                fontWeight: 700,
+                              }}
+                            >
+                              📚 前往：{getDemoCourseById(a.relatedCourseId)?.name}
+                            </Link>
+                          )}
+                          {a.relatedClubId && getDemoClubById(a.relatedClubId) && (
+                            <Link
+                              href={`/clubs${q}`}
+                              onClick={(event) => event.stopPropagation()}
+                              style={{
+                                background: 'var(--success)',
+                                color: '#fff',
+                                fontWeight: 700,
+                              }}
+                            >
+                              🎯 前往：{getDemoClubById(a.relatedClubId)?.name}
+                            </Link>
+                          )}
                           <button type="button" onClick={(event) => handleShare(event, a)}>
                             🔗 分享
                           </button>

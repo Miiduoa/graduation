@@ -187,7 +187,10 @@ export interface BulkReminderInput {
   /** 沒交作業的學生 */
   students: Array<{ uid: string; displayName: string; email?: string }>;
   homeworkTitle: string;
+  courseId?: string | number;
   courseName: string;
+  /** 作業 id（用於 deepLink） */
+  homeworkId?: string | number;
   /** ISO */
   dueAt: string;
   tone?: FeedbackTone;
@@ -240,12 +243,14 @@ export function bulkReminders(input: BulkReminderInput): BulkReminderItem[] {
       '',
       closer,
     ].join('\n');
+    const courseIdParam = input.courseId !== undefined ? `&courseId=${encodeURIComponent(String(input.courseId))}` : '';
+    const hwIdParam = input.homeworkId !== undefined ? `&hwId=${encodeURIComponent(String(input.homeworkId))}` : '';
     return {
       uid: s.uid,
       email: s.email,
       title,
       body,
-      deepLink: `HomeworkSubmit?courseId=${input.courseName}&hwTitle=${encodeURIComponent(input.homeworkTitle)}`,
+      deepLink: `HomeworkSubmit?hwTitle=${encodeURIComponent(input.homeworkTitle)}${courseIdParam}${hwIdParam}`,
     };
   });
 }

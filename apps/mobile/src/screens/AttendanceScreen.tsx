@@ -249,6 +249,19 @@ export function AttendanceScreen(props: any) {
         location: locationInput || undefined,
       });
       setShowCreateModal(false);
+      // ── Demo：emit critical 推播給該課所有學生 ──
+      try {
+        const { simulateTeacherOpenAttendance } = await import('../services/demoActionSimulator');
+        await simulateTeacherOpenAttendance({
+          teacherUid: auth.user?.uid || 'T001',
+          teacherName: auth.profile?.displayName || '教師',
+          courseId: Number(selectedCourse.id) || 0,
+          courseName: selectedCourse.name,
+          method: (selectedMode === 'rotating_qr' || selectedMode === 'number_code') ? selectedMode : 'rotating_qr',
+          classroomLocation: locationInput,
+          studentUids: ['demo_student_kuchih'],
+        });
+      } catch { /* swallow demo emit failures */ }
       nav?.navigate?.('AttendanceLive', { sessionId: session.id, isTeacher: true });
       earnXP('attend_class');
     } catch (e) {

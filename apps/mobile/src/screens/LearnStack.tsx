@@ -55,11 +55,24 @@ import AttendanceMultiMethodScreen from './AttendanceMultiMethodScreen';
 import MyQuizScoresScreen from './MyQuizScoresScreen';
 import MyAttendanceHistoryScreen from './MyAttendanceHistoryScreen';
 import CourseScoresScreen from './CourseScoresScreen';
+import TodayCockpitScreen from './TodayCockpitScreen';
+import GradeWhatIfScreen from './GradeWhatIfScreen';
+import MistakeRepertoireScreen from './MistakeRepertoireScreen';
+import PomodoroSessionScreen from './PomodoroSessionScreen';
+import AIAgentObservatoryScreen from './AIAgentObservatoryScreen';
+import StudentInboxScreen from './StudentInboxScreen';
+import MonthlySummaryScreen from './MonthlySummaryScreen';
+import StudentOrdersScreen from './StudentOrdersScreen';
+import TeacherCockpitScreen from './TeacherCockpitScreen';
+import TADashboardScreen from './TADashboardScreen';
+import DepartmentDashboardScreen from './DepartmentDashboardScreen';
+import VendorDashboardScreen from './VendorDashboardScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
 import { usePermissions } from '../hooks/usePermissions';
 import { useAuth } from '../state/auth';
+import { resolveDashboardRole } from './RoleAwareTodayScreen';
 
 const Stack = createNativeStackNavigator<any, undefined>();
 
@@ -198,6 +211,20 @@ function LearnHomeDispatcher(props: any) {
     [auth.profile?.merchantAssignments],
   );
 
+  // 1. demo 帳號 uid 優先判斷（最精準）
+  const demoResolved = resolveDashboardRole({
+    uid: auth.user?.uid ?? null,
+    roleGroup: auth.profile?.roleGroup ?? null,
+    role: auth.profile?.role ?? null,
+  });
+  if (demoResolved === 'vendor') {
+    return <VendorDashboardScreen {...props} />;
+  }
+  if (demoResolved === 'ta') {
+    return <TADashboardScreen {...props} />;
+  }
+
+  // 2. 一般 roleGroup 判斷
   if (isAdmin) {
     return <AdminDashboardScreen {...props} />;
   }
@@ -419,6 +446,51 @@ export function LearnStack() {
         name="CourseScores"
         component={guardCourseView(CourseScoresScreen)}
         options={{ title: '課內成績' }}
+      />
+      <Stack.Screen
+        name="TodayCockpit"
+        component={TodayCockpitScreen}
+        options={{ title: '🚀 今日駕駛艙' }}
+      />
+      <Stack.Screen
+        name="GradeWhatIf"
+        component={GradeWhatIfScreen}
+        options={{ title: '📊 成績試算' }}
+      />
+      <Stack.Screen
+        name="MistakeRepertoire"
+        component={MistakeRepertoireScreen}
+        options={{ title: '🧠 錯題本' }}
+      />
+      <Stack.Screen
+        name="TeacherCockpit"
+        component={TeacherCockpitScreen}
+        options={{ title: '👨‍🏫 教師駕駛艙' }}
+      />
+      <Stack.Screen
+        name="PomodoroSession"
+        component={PomodoroSessionScreen}
+        options={{ title: '🍅 番茄專注' }}
+      />
+      <Stack.Screen
+        name="AIAgentObservatory"
+        component={AIAgentObservatoryScreen}
+        options={{ title: '🤖 AI 觀察台' }}
+      />
+      <Stack.Screen
+        name="StudentInbox"
+        component={StudentInboxScreen}
+        options={{ title: '📥 我的 Inbox' }}
+      />
+      <Stack.Screen
+        name="MonthlySummary"
+        component={MonthlySummaryScreen}
+        options={{ title: '📅 本月學習回顧' }}
+      />
+      <Stack.Screen
+        name="StudentOrders"
+        component={StudentOrdersScreen}
+        options={{ title: '🛒 我的訂單' }}
       />
     </Stack.Navigator>
   );

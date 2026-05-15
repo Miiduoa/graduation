@@ -770,6 +770,54 @@ function CourseChip(props: {
 
 // ─── 本週需注意（Risk + 待繳 + 待測驗）橫條 ────────────────
 
+// ── 駕駛艙 + What-if + 錯題本 一排捷徑（差異化亮點，TronClass 沒有） ──
+function CockpitQuickRow(props: { nav: any; roleGroup?: string | null }) {
+  const studentItems = [
+    { route: 'TodayCockpit', emoji: '🚀', label: '今日駕駛艙', color: '#1F4E78' },
+    { route: 'GradeWhatIf', emoji: '📊', label: '成績試算', color: '#7C3AED' },
+    { route: 'MistakeRepertoire', emoji: '🧠', label: '錯題本', color: '#EC4899' },
+  ];
+  const teacherItems = [
+    { route: 'TodayCockpit', emoji: '🚀', label: '今日總覽', color: '#1F4E78' },
+    { route: 'TeacherCockpit', emoji: '👨‍🏫', label: '教師駕駛艙', color: '#0EA5E9' },
+    { route: 'GradeWhatIf', emoji: '📊', label: '成績試算', color: '#7C3AED' },
+  ];
+  const isTeacher = props.roleGroup === 'teacher' || props.roleGroup === 'staff' || props.roleGroup === 'admin';
+  const items = isTeacher ? teacherItems : studentItems;
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        gap: 8,
+        marginHorizontal: 16,
+        marginTop: 12,
+      }}
+    >
+      {items.map((it) => (
+        <Pressable
+          key={it.route}
+          onPress={() => props.nav?.navigate?.(it.route)}
+          style={({ pressed }) => ({
+            flex: 1,
+            paddingVertical: 14,
+            borderRadius: 14,
+            alignItems: 'center',
+            backgroundColor: `${it.color}14`,
+            borderWidth: 1,
+            borderColor: `${it.color}33`,
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          <Text style={{ fontSize: 24 }}>{it.emoji}</Text>
+          <Text style={{ color: it.color, fontSize: 11, fontWeight: '700', marginTop: 4 }}>
+            {it.label}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 function WeeklyFocusBanner(props: {
   courses: TCCourse[];
   todos: TCActivity[];
@@ -2076,6 +2124,7 @@ export function CoursesHomeScreen(props: any) {
           !dataLoading &&
           (hasCourseData ? (
             <>
+              <CockpitQuickRow nav={nav} roleGroup={auth.profile?.roleGroup ?? null} />
               <WeeklyFocusBanner courses={tcCourses} todos={tcTodos} nav={nav} />
               <CourseListView courses={tcCourses} nav={nav} onRefresh={handleRefresh} />
             </>

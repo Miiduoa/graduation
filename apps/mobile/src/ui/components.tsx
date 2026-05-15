@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
-import { TAB_BAR_CONTENT_BOTTOM_PADDING } from './navigationTheme';
+import { useTabBarContentBottomPadding } from './navigationTheme';
 
 function useSafeInsetsOrDefault() {
   const value = React.useContext(SafeAreaInsetsContext);
@@ -45,6 +45,39 @@ export function Spinner({
   return <ActivityIndicator size={size} color={color} />;
 }
 
+/** 全螢幕載入（App 根層、導覽 fallback 等共用，維持品牌色與字型階梯一致） */
+export function FullScreenLoader(props: { message?: string }) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: theme.colors.bg,
+        paddingHorizontal: theme.layout.screenHorizontalPadding,
+      }}
+      accessibilityRole="progressbar"
+      accessibilityLabel={props.message ?? '載入中'}
+    >
+      <ActivityIndicator size="large" color={theme.colors.accent} />
+      {props.message ? (
+        <Text
+          style={{
+            marginTop: theme.space.md,
+            fontSize: theme.typography.bodySmall.fontSize,
+            lineHeight: theme.typography.bodySmall.lineHeight,
+            letterSpacing: theme.typography.bodySmall.letterSpacing,
+            color: theme.colors.muted,
+            textAlign: 'center',
+          }}
+        >
+          {props.message}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
 export function Screen(props: {
   title?: string;
   subtitle?: string;
@@ -53,6 +86,7 @@ export function Screen(props: {
   headerRight?: React.ReactNode;
 }) {
   const insets = useSafeInsetsOrDefault();
+  const tabBarBottomPad = useTabBarContentBottomPadding();
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
       {(props.title || props.headerRight) && (
@@ -99,7 +133,7 @@ export function Screen(props: {
           flex: 1,
           paddingHorizontal: props.noPadding ? 0 : theme.layout.screenHorizontalPadding,
           paddingTop: props.noPadding ? 0 : theme.layout.contentPaddingTop,
-          paddingBottom: props.noPadding ? 0 : TAB_BAR_CONTENT_BOTTOM_PADDING,
+          paddingBottom: props.noPadding ? 0 : tabBarBottomPad,
         }}
       >
         {props.children}
@@ -340,9 +374,9 @@ export function Button(props: {
     outline: 'transparent',
   };
   const textColors: Record<string, string> = {
-    primary: '#FFFFFF',
+    primary: theme.colors.onAccent,
     secondary: theme.colors.text,
-    danger: '#FFFFFF',
+    danger: theme.colors.onAccent,
     ghost: theme.colors.text,
     'accent-ghost': theme.colors.accent,
     outline: theme.colors.text,
