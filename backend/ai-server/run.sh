@@ -56,6 +56,7 @@ case "${1:-serve}" in
         ;;
     --train)
         echo "🧠 執行 LoRA 微調..."
+        shift
         python -m training.finetune "$@"
         ;;
     --eval)
