@@ -250,12 +250,20 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       role: userRole,
       postLoginRoles: postLoginRoles?.length ? postLoginRoles : null,
       schoolMembershipRole,
-      displayName: (data.displayName as string) ?? null,
+      displayName:
+        (typeof data.displayName === 'string' && data.displayName.trim()
+          ? data.displayName
+          : null) ??
+        u.displayName ??
+        null,
       department: (data.department as string) ?? null,
       studentId: (data.studentId as string) ?? null,
       bio: (data.bio as string) ?? null,
       phone: (data.phone as string) ?? null,
-      avatarUrl: (data.avatarUrl as string) ?? null,
+      avatarUrl:
+        (typeof data.avatarUrl === 'string' && data.avatarUrl.trim() ? data.avatarUrl : null) ??
+        u.photoURL ??
+        null,
       isPublicProfile: (data.isPublicProfile as boolean) ?? null,
       roleGroup,
       serviceRoles,
@@ -271,12 +279,12 @@ async function loadProfile(u: User | null): Promise<UserProfile | null> {
       role: 'student',
       postLoginRoles: null,
       schoolMembershipRole: null,
-      displayName: null,
+      displayName: u.displayName ?? null,
       department: null,
       studentId: null,
       bio: null,
       phone: null,
-      avatarUrl: null,
+      avatarUrl: u.photoURL ?? null,
       isPublicProfile: null,
       roleGroup: 'student',
       serviceRoles: [],

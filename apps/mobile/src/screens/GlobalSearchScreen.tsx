@@ -19,6 +19,9 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, softShadowStyle } from '../ui/theme';
 import { formatDateTime } from '../utils/format';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { navigateFromInboxTask } from '../services/inboxActions';
+import { isTeachingRole } from '../utils/campusOs';
+import type { InboxTask } from '../data/types';
 import { getDb } from '../firebase';
 import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 
@@ -318,18 +321,44 @@ export function GlobalSearchScreen(props: any) {
         nav?.navigate?.('校園', { screen: 'MenuDetail', params: { id: result.id } });
         break;
       case 'post':
-        if (result.groupId) {
-          nav?.navigate?.('訊息', { screen: 'GroupDetail', params: { groupId: result.groupId } });
-        }
-        break;
-      case 'assignment':
-        if (result.groupId) {
+        if (result.groupId && result.id) {
           nav?.navigate?.('訊息', {
-            screen: 'GroupAssignments',
-            params: { groupId: result.groupId },
+            screen: 'GroupPost',
+            params: { groupId: result.groupId, postId: result.id },
           });
         }
         break;
+      case 'assignment': {
+        const raw = result.data;
+        const isQuiz =
+          raw?.type === 'quiz' ||
+          raw?.kind === 'quiz' ||
+          raw?.category === 'exam' ||
+          raw?.isExam === true;
+        if (result.groupId && result.id) {
+          const task: InboxTask = {
+            id: `search-${result.id}`,
+            kind: isQuiz ? 'quiz' : 'assignment',
+            groupId: result.groupId,
+            groupName: typeof raw?.groupName === 'string' ? raw.groupName : '課程',
+            title: result.title,
+            subtitle: result.subtitle,
+            priority: 3,
+            assignmentId: result.id,
+          };
+          const ok = navigateFromInboxTask(nav, task, {
+            role: auth.profile?.role,
+            isTeachingRole: isTeachingRole(auth.profile?.role),
+          });
+          if (!ok) {
+            nav?.navigate?.('訊息', {
+              screen: 'GroupAssignments',
+              params: { groupId: result.groupId },
+            });
+          }
+        }
+        break;
+      }
     }
   };
 

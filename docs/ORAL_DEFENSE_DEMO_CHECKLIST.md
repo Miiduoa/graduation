@@ -3,7 +3,9 @@
 固定 **五門 demo 課 id**：`71378`、`71282`、`71240`、`71393`、`77418`（離線／無 TronClass 時會自動出現在「學習 → 我的課程 → 課程」分頁）。
 
 啟動建議：`cd apps/mobile && npx expo start --clear`  
-離線 AI：`EXPO_PUBLIC_AI_PROVIDER=offline`（若專案有該變數）。
+離線 AI：`EXPO_PUBLIC_AI_PROVIDER=offline`（若專案有該變數）。  
+關閉 TronClass 全網路：`EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=false`（仍可依 demo 課與離線資料跑 Golden Path）。  
+Firebase + Google 登入：請在 `apps/mobile/.env` 設定 `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`、`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`、`EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`（與 Firebase Console OAuth 客戶端一致）。
 
 ---
 

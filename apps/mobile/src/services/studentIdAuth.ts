@@ -36,6 +36,7 @@ import {
   clearTCSavedCredentials,
   clearTCSession,
 } from './tronClassClient';
+import { isTronClassDataFetchEnabled } from './tronClassDataEnabled';
 import {
   syncAllData,
   refreshCourses,
@@ -425,8 +426,12 @@ export async function signInWithStudentId(params: {
     return testResult;
   }
 
-  // 帳密只暫存在記憶體，用於本次 app 執行期間自動刷新 TronClass session。
-  await setTCSavedCredentials(studentId, params.password);
+  if (isTronClassDataFetchEnabled()) {
+    await setTCSavedCredentials(studentId, params.password);
+  } else {
+    await clearTCSavedCredentials().catch(() => undefined);
+    await clearTCSession().catch(() => undefined);
+  }
 
   progress('authenticating', '驗證靜宜帳密');
 
@@ -545,30 +550,34 @@ async function handleBackendLoginSuccess(
     session,
   };
 
-  // ── TronClass 登入 + 資料同步（必須等待完成）──
-  progress('syncingTronClass', '登入 TronClass');
+  const tcAllowed = isTronClassDataFetchEnabled();
+
+  // ── TronClass 登入 + 資料同步（建置開關可跳過）──
   const userAccount = params.studentId;
+  if (!tcAllowed) {
+    progress('syncingTronClass', '已略過 LMS（TronClass）連線');
+  } else {
+    progress('syncingTronClass', '登入 TronClass');
 
-  try {
-    // 儲存 TronClass 後端 session（可能為 null）
-    if (tronClassSessionId) {
-      await setTCBackendSession(tronClassSessionId, tronClassUserId);
-      console.log('[studentIdAuth] TronClass session stored, userId:', tronClassUserId);
+    try {
+      if (tronClassSessionId) {
+        await setTCBackendSession(tronClassSessionId, tronClassUserId);
+        console.log('[studentIdAuth] TronClass session stored, userId:', tronClassUserId);
+      }
+
+      if (!tronClassSessionId) {
+        console.log('[studentIdAuth] TronClass session missing, retrying…');
+        const { tcLogin } = await import('./tronClassClient');
+        const tcRetry = await tcLogin(userAccount, params.password);
+        console.log('[studentIdAuth] TronClass retry', tcRetry.success ? 'OK' : 'FAILED');
+      }
+    } catch (err) {
+      console.warn('[studentIdAuth] TronClass login error (continuing):', err);
     }
 
-    // 如果後端統一登入時 TronClass 沒成功，用 tcLogin 重試
-    if (!tronClassSessionId) {
-      console.log('[studentIdAuth] TronClass session missing, retrying…');
-      const { tcLogin } = await import('./tronClassClient');
-      const tcRetry = await tcLogin(userAccount, params.password);
-      console.log('[studentIdAuth] TronClass retry', tcRetry.success ? 'OK' : 'FAILED');
-    }
-  } catch (err) {
-    console.warn('[studentIdAuth] TronClass login error (continuing):', err);
+    progress('syncingTronClass', '同步 TronClass 課程資料');
   }
 
-  // 同步所有資料（含 TronClass 課程）
-  progress('syncingTronClass', '同步 TronClass 課程資料');
   try {
     await syncAllData(session, { includeEssential: true });
     console.log('[studentIdAuth] syncAllData completed');
@@ -616,30 +625,33 @@ async function handleHybridLogin(
 ): Promise<StudentIdLoginResult> {
   const password = params.password;
 
-  // ── Step 1: 同時嘗試 E校園 + TronClass 登入（平行化加速） ──
+  // ── Step 1: E 校園 +（可選）TronClass 並行 ──
   progress('authenticating', '連線校園系統');
 
-  // 先嘗試 TronClass 原生 API（快速、可靠）
   let tcLoginOk = false;
   let tcSession: { userId: number | null; userName: string | null } | null = null;
-  const tcLoginPromise = (async () => {
-    try {
-      console.log('[studentIdAuth] Hybrid: TronClass login (parallel)…');
-      const { tcLogin } = await import('./tronClassClient');
-      const tcResult = await tcLogin(userAccount, password);
-      if (tcResult.success && tcResult.session) {
-        tcLoginOk = true;
-        tcSession = { userId: tcResult.session.userId, userName: tcResult.session.userName };
-        console.log('[studentIdAuth] Hybrid: TronClass login OK, user:', tcResult.session.userName);
-      } else {
-        console.warn('[studentIdAuth] Hybrid: TronClass login failed:', tcResult.error);
-      }
-      return tcResult;
-    } catch (err) {
-      console.warn('[studentIdAuth] Hybrid: TronClass login error:', err);
-      return null;
-    }
-  })();
+  const tcAllowed = isTronClassDataFetchEnabled();
+
+  const tcLoginPromise = tcAllowed
+    ? (async () => {
+        try {
+          console.log('[studentIdAuth] Hybrid: TronClass login (parallel)…');
+          const { tcLogin } = await import('./tronClassClient');
+          const tcResult = await tcLogin(userAccount, password);
+          if (tcResult.success && tcResult.session) {
+            tcLoginOk = true;
+            tcSession = { userId: tcResult.session.userId, userName: tcResult.session.userName };
+            console.log('[studentIdAuth] Hybrid: TronClass login OK, user:', tcResult.session.userName);
+          } else {
+            console.warn('[studentIdAuth] Hybrid: TronClass login failed:', tcResult.error);
+          }
+          return tcResult;
+        } catch (err) {
+          console.warn('[studentIdAuth] Hybrid: TronClass login error:', err);
+          return null;
+        }
+      })()
+    : Promise.resolve(null);
 
   // 同時嘗試 E校園 直連
   let puLoginOk = false;
@@ -665,14 +677,17 @@ async function handleHybridLogin(
   // 等待兩者完成（最多等 15 秒，避免 IPv6 DNS 問題卡太久）
   const loginTimeout = new Promise<void>((resolve) => setTimeout(resolve, 15000));
   await Promise.race([
-    Promise.allSettled([tcLoginPromise, puLoginPromise]),
+    Promise.allSettled(tcAllowed ? [tcLoginPromise, puLoginPromise] : [puLoginPromise]),
     loginTimeout,
   ]);
 
   // ── 判斷登入結果 ──
   if (!puLoginOk && !tcLoginOk) {
-    // 兩邊都失敗 → 可能是真的帳密錯誤
-    throw new Error('帳號或密碼錯誤，請確認後再試（E校園和 TronClass 均無法登入）');
+    throw new Error(
+      tcAllowed
+        ? '帳號或密碼錯誤，請確認後再試（E校園和 TronClass 均無法登入）'
+        : '帳號或密碼錯誤，請確認後再試（E校園無法登入）',
+    );
   }
 
   // 如果 E校園 成功，使用它的 session
@@ -760,7 +775,11 @@ async function handleHybridLogin(
     loginAccount: userAccount,
   };
   await saveMockAuthSession(mockSession);
-  await setTCSavedCredentials(userAccount, password);
+  if (isTronClassDataFetchEnabled()) {
+    await setTCSavedCredentials(userAccount, password);
+  } else {
+    await clearTCSavedCredentials().catch(() => undefined);
+  }
 
   const result: StudentIdLoginResult = {
     uid,
@@ -773,7 +792,7 @@ async function handleHybridLogin(
     session: session!,
   };
 
-  // ── Step 4: TronClass 資料同步（如果 TronClass 已登入就同步資料）──
+  // ── Step 4: TronClass 資料同步（建置關閉或登入失敗時僅同步 E 校園可及資料）──
   if (tcLoginOk) {
     progress('syncingTronClass', '同步 TronClass 課程資料');
     try {
@@ -782,15 +801,17 @@ async function handleHybridLogin(
     } catch (err) {
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
     }
-  } else if (!tcLoginOk && puLoginOk) {
-    // E校園 成功但 TronClass 失敗 → 不重試（避免再等 20+ 秒）
-    console.log('[studentIdAuth] Hybrid: TronClass failed, skipping retry to avoid long wait');
-    progress('syncingTronClass', 'TronClass 暫時無法連線');
+  } else if (puLoginOk) {
+    if (tcAllowed) {
+      console.log('[studentIdAuth] Hybrid: TronClass failed, skipping retry to avoid long wait');
+      progress('syncingTronClass', 'TronClass 暫時無法連線');
+    } else {
+      progress('syncingTronClass', '已略過 LMS（TronClass）連線');
+    }
 
-    // 仍然嘗試用 E校園 session 同步可用的資料
     try {
       await syncAllData(session!, { includeEssential: true });
-      console.log('[studentIdAuth] Hybrid: syncAllData completed (E-campus only)');
+      console.log('[studentIdAuth] Hybrid: syncAllData completed (E-campus / 無 TronClass)');
     } catch (err) {
       console.warn('[studentIdAuth] Hybrid: syncAllData failed (continuing):', err);
     }

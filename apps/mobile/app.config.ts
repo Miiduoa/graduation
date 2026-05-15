@@ -331,6 +331,11 @@ export default ({ config }: any) => {
       enableMockSSO: !isReleaseLike && process.env.EXPO_PUBLIC_ENABLE_MOCK_SSO === 'true',
       enableUniversalDevAccounts,
       allowLocalMockAuth,
+      /** `false` 時不對 TronClass 發網路請求；口試／離線 Demo：`EXPO_PUBLIC_TRONCLASS_DATA_ENABLED=false` */
+      tronClassDataEnabled: parseBoolean(process.env.EXPO_PUBLIC_TRONCLASS_DATA_ENABLED, true),
+      googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
+      googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
+      googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',
       eas: {
         projectId: easProjectId,
       },

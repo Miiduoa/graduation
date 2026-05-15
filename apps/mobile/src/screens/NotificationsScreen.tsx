@@ -22,6 +22,10 @@ import { useAuth } from '../state/auth';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { formatDateTime } from '../utils/format';
+import { navigateToCourseScreen } from '../utils/courseNavigation';
+import { navigateFromInboxTask } from '../services/inboxActions';
+import { isTeachingRole } from '../utils/campusOs';
+import { inboxTaskFromAssignmentNotification } from '../utils/inboxTaskFromNotification';
 
 type NotificationItemProps = {
   id: string;
@@ -142,19 +146,32 @@ export function NotificationsScreen(props: any) {
         case 'group_invite':
           nav?.navigate?.('訊息', { screen: 'Groups' });
           break;
-        case 'assignment':
-          if (n.data?.groupId && n.data?.assignmentId) {
+        case 'assignment': {
+          const task = inboxTaskFromAssignmentNotification(n);
+          const navigated =
+            task &&
+            navigateFromInboxTask(nav, task, {
+              role: auth.profile?.role,
+              isTeachingRole: isTeachingRole(auth.profile?.role),
+            });
+          if (!navigated && n.data?.groupId && n.data?.assignmentId) {
             nav?.navigate?.('訊息', {
               screen: 'AssignmentDetail',
               params: { groupId: n.data.groupId, assignmentId: n.data.assignmentId },
             });
           }
           break;
+        }
         case 'grade':
           if (n.data?.groupId) {
-            nav?.navigate?.('訊息', {
-              screen: 'GroupAssignments',
-              params: { groupId: n.data.groupId },
+            navigateToCourseScreen(nav, auth.profile?.role, 'CourseScores', {
+              groupId: String(n.data.groupId),
+              groupName:
+                typeof n.data?.groupName === 'string'
+                  ? n.data.groupName
+                  : typeof n.title === 'string'
+                    ? n.title
+                    : '課內成績',
             });
           }
           break;
@@ -192,7 +209,7 @@ export function NotificationsScreen(props: any) {
           break;
       }
     },
-    [nav, notifs],
+    [nav, notifs, auth.profile?.role],
   );
 
   const renderNotification = useCallback(
