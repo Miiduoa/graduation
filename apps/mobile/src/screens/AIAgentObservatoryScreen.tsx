@@ -165,25 +165,35 @@ export default function AIAgentObservatoryScreen() {
     setObservations(obs);
     setConcerns(con);
 
-    // 排序動作候選
-    const tradeoffs = detectTradeoffs([
-      { goal: '完成作業', urgencyScore: 90, alignedWithUser: true },
-      { goal: '休息', urgencyScore: 30, alignedWithUser: true },
-      { goal: '參加社團', urgencyScore: 20, alignedWithUser: false },
-    ]);
+    // 候選 action 對齊 CandidateAction 介面
     const candidates = [
-      { action: '立刻補交逾期作業', expectedImpact: 80, effortMinutes: 60, riskOfRegret: 10 },
-      { action: '先短休 + 番茄專注', expectedImpact: 55, effortMinutes: 30, riskOfRegret: 20 },
-      { action: '推遲 / 接受 0 分', expectedImpact: 0, effortMinutes: 0, riskOfRegret: 95 },
+      {
+        id: 'submit_overdue',
+        description: '立刻補交逾期作業',
+        benefit: 80,
+        cost: 60,
+        urgency: 90,
+        domain: 'homework',
+      },
+      {
+        id: 'short_break_then_focus',
+        description: '先短休 + 番茄專注',
+        benefit: 55,
+        cost: 30,
+        urgency: 50,
+        domain: 'self_care',
+      },
+      {
+        id: 'defer_or_accept_zero',
+        description: '推遲 / 接受 0 分',
+        benefit: 0,
+        cost: 0,
+        urgency: 10,
+        domain: 'homework',
+      },
     ];
-    const ranked = rankActions(candidates);
-    const chain = explainChain({
-      observations: obs,
-      concerns: con,
-      tradeoffs,
-      rankedActions: ranked,
-    });
-    setExplanation(chain.narrative);
+    const chain = explainChain({ signals, candidates });
+    setExplanation(chain.narrative.join('\n\n'));
   }, []);
 
   // ── proactive scan ──
@@ -239,26 +249,26 @@ export default function AIAgentObservatoryScreen() {
     if (!uid) return;
     try {
       switch (s.kind) {
-        case 'overdue_homework':
-        case 'due_soon_homework':
-          // 跳到課程清單，讓學生繳交
-          safeNavigate(navigation, 'CoursesHome', undefined, {
-            fallbackMessage: '即將跳到課程列表',
-          });
+        case 'urgent_action':
+          // 緊急動作可能是繳交作業 / 開點名 / 期限近 — 依 deepLink 或 fallback
+          if (s.deepLink?.includes('Attendance')) {
+            safeNavigate(navigation, 'AttendanceMultiMethod', undefined, {
+              fallbackMessage: '即將跳到智慧簽到',
+            });
+          } else {
+            safeNavigate(navigation, 'CoursesHome', undefined, {
+              fallbackMessage: '即將跳到課程列表',
+            });
+          }
           break;
-        case 'mistake_due':
+        case 'mistake_practice':
           safeNavigate(navigation, 'MistakeRepertoire', undefined, {
             fallbackMessage: '即將跳到錯題本',
           });
           break;
-        case 'low_grade_risk':
+        case 'grade_alert':
           safeNavigate(navigation, 'GradeWhatIf', undefined, {
             fallbackMessage: '即將跳到成績試算',
-          });
-          break;
-        case 'attendance_open':
-          safeNavigate(navigation, 'AttendanceMultiMethod', undefined, {
-            fallbackMessage: '即將跳到智慧簽到',
           });
           break;
         case 'teacher_action':
@@ -271,11 +281,23 @@ export default function AIAgentObservatoryScreen() {
             fallbackMessage: '即將跳到 vendor 駕駛艙',
           });
           break;
-        case 'focus_session':
+        case 'department_action':
+          safeNavigate(navigation, 'DepartmentDashboard', undefined, {
+            fallbackMessage: '即將跳到系所儀表板',
+          });
+          break;
+        case 'study_plan':
           safeNavigate(navigation, 'PomodoroSession', undefined, {
             fallbackMessage: '番茄專注即將推出',
           });
           break;
+        case 'inbox_followup':
+          safeNavigate(navigation, 'Inbox', undefined, {
+            fallbackMessage: '即將跳到 inbox',
+          });
+          break;
+        case 'companion_check':
+        case 'celebrate':
         default:
           Alert.alert(s.title, s.body);
       }

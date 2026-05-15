@@ -14,6 +14,7 @@ import {
 } from '@/lib/firebase';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { getDemoCourseWorkspace } from '@/lib/demoData';
+import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 
 const EMPTY_WORKSPACE: CourseWorkspace = {
   course: null,
@@ -35,6 +36,9 @@ export default function TeacherCoursePage(props: {
   const [authReady, setAuthReady] = useState(false);
   const [canManage, setCanManage] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
+  const isTaView = demoRole === 'ta';
 
   useEffect(() => {
     if (!isFirebaseConfigured()) {
@@ -163,6 +167,24 @@ export default function TeacherCoursePage(props: {
 
         {!accessDenied ? (
           <>
+            {/* TA 角色提示 */}
+            {isTaView ? (
+              <div
+                className="card"
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(124,58,237,0.10)',
+                  border: '1px solid #7C3AED',
+                  fontSize: 13,
+                  color: '#5B21B6',
+                }}
+              >
+                🧑‍💻 <strong>助教 TA 視角</strong> ·
+                你可以批改作業、查看出席與成績，但教材結構、題庫編輯、成績發布
+                屬於授課教師的權限，下方相關按鈕會以灰色顯示。
+              </div>
+            ) : null}
+
             <div className="metricGrid">
               <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
                 <div className="metricIcon">📦</div>
@@ -211,15 +233,41 @@ export default function TeacherCoursePage(props: {
               aria-label="教師工具"
               style={{ flexWrap: 'wrap', gap: 8 }}
             >
-              <Link href={`/teacher/course/${props.params.courseId}/modules`} className="btn">
-                📚 教材單元
-              </Link>
+              {/* 教材單元：TA 不能編輯結構，只能看 */}
+              {caps.canEditModules ? (
+                <Link href={`/teacher/course/${props.params.courseId}/modules`} className="btn">
+                  📚 教材單元
+                </Link>
+              ) : (
+                <span
+                  className="btn"
+                  title="TA 無法編輯教材結構（僅授課教師可用）"
+                  style={{ opacity: 0.5, cursor: 'not-allowed' }}
+                >
+                  📚 教材單元（教師專用）
+                </span>
+              )}
+              {/* 測驗：TA 可看，不可建 */}
               <Link href={`/teacher/course/${props.params.courseId}/quizzes`} className="btn">
-                📝 測驗 / 考試
+                📝 測驗 / 考試{isTaView ? '（檢視）' : ''}
               </Link>
-              <Link href={`/teacher/course/${props.params.courseId}/question-banks`} className="btn">
-                🗂️ 題庫
-              </Link>
+              {/* 題庫：教師專用 */}
+              {caps.canEditQuestionBank ? (
+                <Link
+                  href={`/teacher/course/${props.params.courseId}/question-banks`}
+                  className="btn"
+                >
+                  🗂️ 題庫
+                </Link>
+              ) : (
+                <span
+                  className="btn"
+                  title="題庫編輯為授課教師專用"
+                  style={{ opacity: 0.5, cursor: 'not-allowed' }}
+                >
+                  🗂️ 題庫（教師專用）
+                </span>
+              )}
               <Link href={`/teacher/course/${props.params.courseId}/rubrics`} className="btn">
                 📐 Rubric
               </Link>
@@ -227,7 +275,7 @@ export default function TeacherCoursePage(props: {
                 ✅ 點名
               </Link>
               <Link href={`/teacher/course/${props.params.courseId}/gradebook`} className="btn">
-                📊 成績簿
+                📊 成績簿{isTaView ? '（批改）' : ''}
               </Link>
             </nav>
 
