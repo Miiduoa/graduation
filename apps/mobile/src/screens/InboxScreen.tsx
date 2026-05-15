@@ -21,8 +21,8 @@ import {
   TimelineCard,
 } from '../ui/campusOs';
 import { formatDueWindow, isTeachingRole, resolveRoleMode, toInboxItem } from '../utils/campusOs';
-import { navigateToCourseHome, navigateToCourseScreen } from '../utils/courseNavigation';
-import { aiOverlay } from '../app/useAIOverlay';
+import { navigateToCourseHome } from '../utils/courseNavigation';
+import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
 export function InboxScreen(props: any) {
@@ -57,8 +57,15 @@ export function InboxScreen(props: any) {
   }, [auth.user?.uid, ds, school.id]);
 
   const inboxItems = useMemo(
-    () => inboxTasks.map(toInboxItem).sort((a, b) => a.priority - b.priority),
-    [inboxTasks],
+    () =>
+      inboxTasks
+        .map((task) => {
+          const item = toInboxItem(task);
+          const action = resolveInboxAction(task, { isTeachingRole: teachingMode });
+          return action ? { ...item, actionLabel: action.label } : item;
+        })
+        .sort((a, b) => a.priority - b.priority),
+    [inboxTasks, teachingMode],
   );
 
   const emptyInbox = useMemo(() => {
@@ -128,29 +135,12 @@ export function InboxScreen(props: any) {
   );
 
   const openItem = (item: (typeof inboxItems)[number]) => {
-    if (item.kind === 'live' && item.sessionId) {
-      navigateToCourseScreen(nav, auth.profile?.role, 'Classroom', {
-        groupId: item.groupId,
-        sessionId: item.sessionId,
-        isTeacher: teachingMode,
-      });
-      return;
-    }
-
-    if (item.kind === 'assistant_queue' && item.sourceRunId) {
-      aiOverlay.open({
-        mode: 'chat',
-        prompt: `這是助理任務 ${item.sourceRunId}，幫我繼續處理。`,
-        source: 'inbox_assistant',
-      });
-      return;
-    }
-
-    if ((item.kind === 'assignment' || item.kind === 'quiz') && item.assignmentId) {
-      nav?.navigate?.('訊息', {
-        screen: 'AssignmentDetail',
-        params: { groupId: item.groupId, assignmentId: item.assignmentId },
-      });
+    if (
+      navigateFromInboxTask(nav, item, {
+        role: auth.profile?.role,
+        isTeachingRole: teachingMode,
+      })
+    ) {
       return;
     }
 

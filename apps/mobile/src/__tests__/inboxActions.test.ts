@@ -19,22 +19,48 @@ const baseTask = (overrides: Partial<InboxTask>): InboxTask =>
   } as InboxTask);
 
 describe('resolveInboxAction', () => {
-  test('assignment → 去繳交', () => {
+  test('assignment → 去繳交（學生）', () => {
     const r = resolveInboxAction(baseTask({ kind: 'assignment', assignmentId: 'a1' }));
     expect(r?.target).toBe('submit_assignment');
     expect(r?.params).toMatchObject({ assignmentId: 'a1', courseSpaceId: 'cs1' });
     expect(r?.emphasis).toBe('primary');
   });
 
-  test('quiz → 去作答', () => {
-    const r = resolveInboxAction(baseTask({ kind: 'quiz', assignmentId: 'qz1' }));
-    expect(r?.target).toBe('start_quiz');
+  test('assignment → 去批改（教師）', () => {
+    const r = resolveInboxAction(baseTask({ kind: 'assignment', assignmentId: 'a1' }), {
+      isTeachingRole: true,
+    });
+    expect(r?.target).toBe('grade_assignment');
+    expect(r?.label).toBe('去批改');
   });
 
-  test('live → 去簽到', () => {
+  test('quiz → 去作答（學生）', () => {
+    const r = resolveInboxAction(baseTask({ kind: 'quiz', assignmentId: 'qz1' }));
+    expect(r?.target).toBe('start_quiz');
+    expect(r?.label).toBe('去作答');
+  });
+
+  test('quiz → 檢視測驗（教師）', () => {
+    const r = resolveInboxAction(baseTask({ kind: 'quiz', assignmentId: 'qz1' }), {
+      isTeachingRole: true,
+    });
+    expect(r?.target).toBe('start_quiz');
+    expect(r?.label).toBe('檢視測驗');
+  });
+
+  test('live → 去簽到（學生）', () => {
     const r = resolveInboxAction(baseTask({ kind: 'live', sessionId: 's1' }));
     expect(r?.target).toBe('attendance_checkin');
+    expect(r?.label).toBe('去簽到');
     expect(r?.params).toMatchObject({ sessionId: 's1' });
+  });
+
+  test('live → 進入課堂（教師）', () => {
+    const r = resolveInboxAction(baseTask({ kind: 'live', sessionId: 's1' }), {
+      isTeachingRole: true,
+    });
+    expect(r?.target).toBe('attendance_checkin');
+    expect(r?.label).toBe('進入課堂');
   });
 
   test('group → 查看討論', () => {
@@ -43,10 +69,10 @@ describe('resolveInboxAction', () => {
     expect(r?.emphasis).toBe('secondary');
   });
 
-  test('assistant_queue → 確認 AI', () => {
+  test('assistant_queue → assistant_continue', () => {
     const r = resolveInboxAction(baseTask({ kind: 'assistant_queue' }));
-    expect(r?.target).toBe('go_to_screen');
-    expect(r?.params).toMatchObject({ screen: 'AssistantQueue' });
+    expect(r?.target).toBe('assistant_continue');
+    expect(r?.params).toMatchObject({ sourceRunId: undefined });
   });
 
   test('未知 kind → null', () => {

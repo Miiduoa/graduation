@@ -79,6 +79,7 @@ export function HeaderDrawerHost() {
   const {
     displayName: roleDisplayName,
     badgeColor,
+    can,
     isTeacher,
     isStaff,
     isDepartmentHead,
@@ -322,18 +323,22 @@ export function HeaderDrawerHost() {
                 label="我的 QR Code"
                 onPress={() => go('QRCode')}
               />
-              <DrawerRow
-                icon="ic_trophy"
-                label="成就與積分"
-                tint={theme.colors.achievement}
-                onPress={() => go('Achievements')}
-              />
-              <DrawerRow
-                icon="ic_school"
-                label="學分與畢業規劃"
-                tint={theme.colors.roleTeacher}
-                onPress={() => go('CreditAuditStack')}
-              />
+              {can('achievements.view') ? (
+                <DrawerRow
+                  icon="ic_trophy"
+                  label="成就與積分"
+                  tint={theme.colors.achievement}
+                  onPress={() => go('Achievements')}
+                />
+              ) : null}
+              {can('courses.view') ? (
+                <DrawerRow
+                  icon="ic_school"
+                  label="學分與畢業規劃"
+                  tint={theme.colors.roleTeacher}
+                  onPress={() => go('CreditAuditStack')}
+                />
+              ) : null}
             </DrawerSection>
 
             {/* ─── 通知與設定 ─── */}

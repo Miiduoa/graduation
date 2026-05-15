@@ -278,8 +278,13 @@ const PROTECTED_SCREENS: Record<ScreenName, Permission[]> = {
   AdminDashboard: ['admin.dashboard'],
   AdminCourseVerify: ['admin.course_verify'],
   AddCourse: ['courses.create'],
-  /** 與 LearnStack GuardedAcademicOverview 對齊：需能檢視課程工作區才視為學業總覽對象 */
+  /** 與 LearnStack GuardedAcademicOverview／成績／學業 AI 分頁對齊：需課程工作區 */
   AcademicOverview: ['courses.view'],
+  Grades: ['courses.view'],
+  AcademicInsights: ['courses.view'],
+  CreditAuditStack: ['courses.view'],
+  /** 選課助理：學生／教師為主；職員可走 AICourseAdvisor 僅在具 courses.catalog 時由畫面另行守門 */
+  AICourseAdvisor: ['courses.catalog'],
   /** 與 LearnStack「學業總覽 / 課內成績簿」一致：學生需 courses.view；教師端另依 courses.grade 解鎖編修 */
   CourseGradebook: ['courses.view'],
   /** 課程工作區（與 LearnStack guardCourseView 對齊） */
