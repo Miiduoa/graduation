@@ -9,6 +9,10 @@ import {
 
 import { rootNavigateNested, rootNavigationRef } from './rootNavigation';
 import { aiOverlay } from './useAIOverlay';
+import { navigateFromInboxTask } from '../services/inboxActions';
+import { isTeachingRole } from '../utils/campusOs';
+import { inboxTaskFromAssignmentPushData } from '../utils/inboxTaskFromNotification';
+import type { UserRole } from '../data/types';
 
 type NavigationLike = {
   current: {
@@ -35,7 +39,7 @@ function getNotificationResponseKey(response: {
   return `${identifier ?? 'unknown'}:${actionIdentifier}:${JSON.stringify(data ?? {})}`;
 }
 
-function navigateFromNotificationData(rawData: unknown) {
+function navigateFromNotificationData(rawData: unknown, profileRole?: UserRole | null) {
   const data = rawData && typeof rawData === 'object' ? (rawData as Record<string, unknown>) : {};
 
   switch (data.type) {
@@ -64,14 +68,22 @@ function navigateFromNotificationData(rawData: unknown) {
         });
       }
       break;
-    case 'assignment':
-      if (typeof data.groupId === 'string' && typeof data.assignmentId === 'string') {
+    case 'assignment': {
+      const task = inboxTaskFromAssignmentPushData(data);
+      const navigated =
+        task &&
+        navigateFromInboxTask(rootNavigationRef, task, {
+          role: profileRole,
+          isTeachingRole: isTeachingRole(profileRole),
+        });
+      if (!navigated && typeof data.groupId === 'string' && typeof data.assignmentId === 'string') {
         rootNavigateNested('訊息', 'AssignmentDetail', {
           groupId: data.groupId,
           assignmentId: data.assignmentId,
         });
       }
       break;
+    }
     case 'friend_request':
     case 'friend_invite':
       rootNavigateNested('訊息', 'FriendsManage');
@@ -93,7 +105,13 @@ function navigateFromNotificationData(rawData: unknown) {
 /**
  * navigationRef 保留與 App.tsx 的相容簽章；實際導頁一律走 rootNavigationRef + aiOverlay。
  */
-export function usePushNotifications(_navigationRef: NavigationLike, uid: string | undefined) {
+export function usePushNotifications(
+  _navigationRef: NavigationLike,
+  uid: string | undefined,
+  profileRole?: UserRole | null,
+) {
+  const roleRef = useRef<UserRole | null | undefined>(profileRole);
+  roleRef.current = profileRole;
   const responseListener = useRef<RemovableSubscription | null>(null);
   const lastHandledResponseKeyRef = useRef<string | null>(null);
 
@@ -144,7 +162,7 @@ export function usePushNotifications(_navigationRef: NavigationLike, uid: string
       if (!isAiProactive && !rootNavigationRef.isReady()) return;
 
       lastHandledResponseKeyRef.current = responseKey;
-      navigateFromNotificationData(rawPayload);
+      navigateFromNotificationData(rawPayload, roleRef.current);
 
       if (options?.clearLastResponse) {
         await clearLastNotificationResponseAsync().catch((error) => {

@@ -1,7 +1,11 @@
 /**
  * @jest-environment node
  */
-import { inboxTaskFromAssignmentNotification } from '../utils/inboxTaskFromNotification';
+import {
+  inboxTaskFromAssignmentNotification,
+  inboxTaskFromAssignmentPushData,
+} from '../utils/inboxTaskFromNotification';
+import { parseGroupAssignmentDeepLink } from '../app/assignmentDeepLink';
 import type { Notification } from '../state/notifications';
 
 describe('inboxTaskFromAssignmentNotification', () => {
@@ -36,5 +40,28 @@ describe('inboxTaskFromAssignmentNotification', () => {
         data: { groupId: 'g1' },
       }),
     ).toBeNull();
+  });
+});
+
+describe('inboxTaskFromAssignmentPushData', () => {
+  test('對齊推播 data', () => {
+    const t = inboxTaskFromAssignmentPushData({
+      groupId: 'g1',
+      assignmentId: 'a1',
+      groupName: '課程甲',
+      title: 'HW1',
+    });
+    expect(t?.kind).toBe('assignment');
+    expect(t?.groupId).toBe('g1');
+    expect(t?.title).toBe('HW1');
+  });
+});
+
+describe('parseGroupAssignmentDeepLink', () => {
+  test('解析 campus:// 路徑', () => {
+    expect(parseGroupAssignmentDeepLink('campus://group/tc-1/assignment/tc-activity-2')).toEqual({
+      groupId: 'tc-1',
+      assignmentId: 'tc-activity-2',
+    });
   });
 });

@@ -73,6 +73,9 @@ import { formatAIToolLayerForPrompt, runAIToolLayer } from '../services/aiToolLa
 import { shouldUseWebSearch } from '../services/webSearch';
 import { executeAgentWrite } from '../services/agentWrite';
 import { buildNavigationTarget, navigateToTarget } from '../utils/courseNavigation';
+import { navigateFromInboxTask } from '../services/inboxActions';
+import { isTeachingRole } from '../utils/campusOs';
+import type { InboxTask } from '../data/types';
 import {
   getPuDiningCafeterias,
   getPuDiningMenuItems,
@@ -7273,8 +7276,37 @@ export function AIChatScreen(props: any) {
     }
 
     if ((action === 'navigate' || action === 'start_navigation') && params) {
-      const screen = typeof params.screen === 'string' ? params.screen : null;
-      const nested = typeof params.nested === 'string' ? params.nested : null;
+      const p = params as Record<string, unknown>;
+      const screen = typeof p.screen === 'string' ? p.screen : null;
+      const nested = typeof p.nested === 'string' ? p.nested : null;
+      const gid = typeof p.groupId === 'string' ? p.groupId : null;
+      const aid = typeof p.assignmentId === 'string' ? p.assignmentId : null;
+      if (screen === '訊息' && nested === 'AssignmentDetail' && gid && aid) {
+        const isQuiz =
+          p.isQuiz === true ||
+          p.kind === 'quiz' ||
+          p.type === 'quiz' ||
+          p.category === 'exam';
+        const task: InboxTask = {
+          id: `ai-action-${aid}`,
+          kind: isQuiz ? 'quiz' : 'assignment',
+          groupId: gid,
+          groupName: typeof p.groupName === 'string' ? p.groupName : '課程',
+          title: typeof p.title === 'string' ? p.title : isQuiz ? '測驗' : '作業',
+          subtitle: '',
+          assignmentId: aid,
+          priority: 50,
+        };
+        if (
+          navigateFromInboxTask(nav, task, {
+            role: auth.profile?.role,
+            isTeachingRole: isTeachingRole(auth.profile?.role),
+          })
+        ) {
+          return;
+        }
+      }
+
       const nestedParams = { ...params };
       delete nestedParams.screen;
       delete nestedParams.nested;
