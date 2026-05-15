@@ -265,7 +265,7 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
             courseId: Number(sess?.courseId ?? 0) || 0,
             courseName: sess?.courseName ?? '課程',
             sessionId,
-            method: (sess?.method ?? 'rotating_qr') as 'rotating_qr' | 'number_code' | 'geofence' | 'selfie_liveness' | 'multi_factor',
+            method: (((sess as any)?.method ?? 'rotating_qr')) as 'rotating_qr' | 'number_code' | 'geofence' | 'selfie_liveness' | 'multi_factor',
             status: result.message.includes('遲') ? 'late' : 'present',
           });
         } catch { /* swallow demo emit failures */ }
