@@ -132,7 +132,22 @@ export function AICourseAdvisorScreen(props: any) {
 
   // 從 CoursesHomeScreen chip 傳進來：限縮 AI 對話到該課程
   const focusedGroupId = props?.route?.params?.groupId as string | undefined;
-  const focusedGroupName = props?.route?.params?.groupName as string | undefined;
+  // 課程名稱沒帶時：用 demo course 表中的名稱補上
+  const focusedGroupName = useMemo(() => {
+    const fromRoute = props?.route?.params?.groupName as string | undefined;
+    if (fromRoute) return fromRoute;
+    if (!focusedGroupId) return undefined;
+    try {
+      // sync require — 不打到網路，純查 mock
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { getDemoCourseDisplay, toDemoCourseId } = require('../data/demoCoursesAdapter');
+      const id = toDemoCourseId(focusedGroupId);
+      const c = getDemoCourseDisplay(id);
+      return c?.name;
+    } catch {
+      return undefined;
+    }
+  }, [focusedGroupId, props?.route?.params?.groupName]);
 
   const [selectedTab, setSelectedTab] = useState(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);

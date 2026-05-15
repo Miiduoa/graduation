@@ -22,6 +22,11 @@ import {
 } from '@campus/shared';
 import { tcFetchCourses } from '../services/tronClassClient';
 import { listAttendanceSessions } from '../data/courseSpaceSource';
+import {
+  demoFetchCourses,
+  demoListAttendanceSessions,
+  isDemoCourseId,
+} from '../data/demoCoursesAdapter';
 
 interface CourseAttendance {
   courseId: number;
@@ -41,17 +46,43 @@ export default function MyAttendanceHistoryScreen() {
 
   const load = useCallback(async () => {
     try {
-      const courses = await tcFetchCourses();
+      // 先試 TronClass；若沒有任何課程，fallback 到 5 門 demo
+      let courses: Array<{ id: number; name: string }> = [];
+      try {
+        const tcCourses = await tcFetchCourses();
+        courses = tcCourses.map((c) => ({ id: c.id, name: c.name }));
+      } catch {
+        /* fall through to demo */
+      }
+      if (courses.length === 0) {
+        courses = demoFetchCourses().map((c) => ({ id: c.id, name: c.name }));
+      }
+
       const all: CourseAttendance[] = [];
       for (const c of courses) {
         try {
-          const sessions = await listAttendanceSessions(String(c.id));
-          // sessions 沒有個人 status，這裡先簡化：假設每個 session 都有「present」記錄
-          // 真實實作需呼 attendanceSession.records.where(uid=...)
+          // demo course → 用 mock attendance；否則打 TronClass workspace
+          const useDemo = isDemoCourseId(c.id);
+          const sessions = useDemo
+            ? demoListAttendanceSessions(c.id).map((s) => ({
+                id: s.id,
+                startedAt: s.startedAt,
+                active: s.active,
+                attendeeCount: s.attendeeCount,
+                myStatus: s.myStatus,
+              }))
+            : (await listAttendanceSessions(String(c.id))).map((s) => ({
+                id: s.id,
+                startedAt: s.startedAt,
+                active: s.active,
+                attendeeCount: s.attendeeCount,
+                myStatus: null,
+              }));
+
           const records: AttendancePatternSnapshot[] = sessions.map((s) => ({
             sessionId: s.id,
             classStartAt: s.startedAt?.toISOString() ?? new Date().toISOString(),
-            status: 'present', // TODO: 接真資料時改成依個人 record
+            status: (s.myStatus as 'present' | 'late' | 'absent' | 'excused' | null) ?? 'present',
           }));
           const pattern = analyzeAttendancePattern(records);
           all.push({
