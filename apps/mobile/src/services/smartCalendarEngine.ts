@@ -65,6 +65,9 @@ export type Deadline = {
   title: string;
   courseName?: string;
   courseCode?: string;
+  /** 與 InboxTask / listAssignments 一致時，點選可導到 HomeworkSubmit／QuizCenter 等 */
+  groupId?: string;
+  assignmentId?: string;
   dueAt: number; // epoch ms
   type: 'assignment' | 'exam' | 'project' | 'quiz' | 'other';
   completed: boolean;
@@ -377,6 +380,8 @@ async function syncDeadlinesFromTronClass(): Promise<Deadline[]> {
       title: act.title || `${courseName} ${act.type}`,
       courseName,
       courseCode,
+      groupId: `tc-${act.course_id}`,
+      assignmentId: `tc-activity-${act.id}`,
       dueAt,
       type: deadlineType,
       completed: isCompleted,
