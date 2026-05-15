@@ -56,6 +56,8 @@ import {
   navigateToCourseScreen,
   navigateToTarget,
 } from '../utils/courseNavigation';
+import { isTeachingRole } from '../utils/campusOs';
+import { navigateFromInboxTask } from '../services/inboxActions';
 
 // Engines
 import {
@@ -2603,6 +2605,14 @@ export function SmartDashboardScreen(props: any) {
 
   const openAgentAction = useCallback(
     (action: NextBestAction) => {
+      if (action.inboxTask) {
+        const navigated = navigateFromInboxTask(nav, action.inboxTask, {
+          role: auth.profile?.role,
+          isTeachingRole: isTeachingRole(auth.profile?.role),
+        });
+        if (navigated) return;
+      }
+
       const target = action.actionTarget;
       if (!target) {
         aiOverlay.open({ mode: 'chat', prompt: action.title, source: 'smart_dashboard' });
