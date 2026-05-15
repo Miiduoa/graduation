@@ -64,4 +64,16 @@ describe('parseGroupAssignmentDeepLink', () => {
       assignmentId: 'tc-activity-2',
     });
   });
+
+  test('query kind=quiz → isQuiz', () => {
+    expect(
+      parseGroupAssignmentDeepLink(
+        'campus://group/g1/assignment/a1?kind=quiz',
+      ),
+    ).toEqual({
+      groupId: 'g1',
+      assignmentId: 'a1',
+      isQuiz: true,
+    });
+  });
 });
