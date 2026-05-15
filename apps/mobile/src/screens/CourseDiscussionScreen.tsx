@@ -52,6 +52,7 @@ type RouteProps = {
 
 export default function CourseDiscussionScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
+  const auth = useAuth();
   const groupName = props.route?.params?.groupName ?? '課程討論';
   const groupIdStr = props.route?.params?.groupId ?? '';
   const courseId = Number(groupIdStr.replace(/^tc:/, '')) || 0;
@@ -147,6 +148,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
             payload: {
               threadId: String(newId),
               threadTitle: newTitle.trim(),
+              authorName: auth.profile?.displayName ?? '顧晉瑋',
               preview: (newBody.trim() || '').slice(0, 80),
             },
           });

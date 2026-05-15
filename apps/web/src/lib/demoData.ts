@@ -25,12 +25,25 @@ import type {
 // ──────────────────────────────────────────────────────────────
 // 角色（demo 用，提供登入頁與課程權限用）
 // ──────────────────────────────────────────────────────────────
+export type DemoUserRole =
+  | 'student'
+  | 'teacher'
+  | 'ta'
+  | 'club_officer'
+  | 'department_head'
+  | 'admin'
+  | 'alumni'
+  | 'guest';
+
 export interface DemoUser {
   uid: string;
   studentId?: string;
   email: string;
   displayName: string;
-  role: 'student' | 'instructor' | 'admin';
+  role: DemoUserRole;
+  department?: string;
+  /** 額外資訊：例如教師所屬課程、社團幹部所屬社團 */
+  affiliation?: string;
   password: string; // demo 用，正式環境不會這樣寫
 }
 
@@ -39,15 +52,47 @@ export const DEMO_USERS: DemoUser[] = [
     uid: 'demo-student-1',
     studentId: 'M11302001',
     email: 'm11302001@pu.edu.tw',
-    displayName: '示範學生',
+    displayName: '王小明',
     role: 'student',
+    department: '資管系三年級',
     password: 'demo1234',
   },
   {
     uid: 'demo-teacher-1',
-    email: 'teacher.wang@pu.edu.tw',
+    email: 'wang@pu.edu.tw',
     displayName: '王大明 老師',
-    role: 'instructor',
+    role: 'teacher',
+    department: '資訊管理系',
+    affiliation: '資料結構 (c1) 課程教師',
+    password: 'demo1234',
+  },
+  {
+    uid: 'demo-ta-1',
+    studentId: 'M11102008',
+    email: 'ta.lin@pu.edu.tw',
+    displayName: '林助教',
+    role: 'ta',
+    department: '資管系碩二',
+    affiliation: '資料結構 (c1) 課程助教',
+    password: 'demo1234',
+  },
+  {
+    uid: 'demo-club-1',
+    studentId: 'B11203015',
+    email: 'club.chen@pu.edu.tw',
+    displayName: '陳社長',
+    role: 'club_officer',
+    department: '資工系三年級',
+    affiliation: '程式設計社 (club-1) 社長',
+    password: 'demo1234',
+  },
+  {
+    uid: 'demo-dept-1',
+    email: 'dept.huang@pu.edu.tw',
+    displayName: '黃主任',
+    role: 'department_head',
+    department: '資訊管理系系主任',
+    affiliation: '資管系',
     password: 'demo1234',
   },
   {
@@ -55,12 +100,27 @@ export const DEMO_USERS: DemoUser[] = [
     email: 'admin@pu.edu.tw',
     displayName: '系統管理員',
     role: 'admin',
+    department: '電子計算機中心',
+    password: 'demo1234',
+  },
+  {
+    uid: 'demo-alumni-1',
+    studentId: 'B09203001',
+    email: 'alumni.zhang@gmail.com',
+    displayName: '張學長',
+    role: 'alumni',
+    department: '資管系 109 屆',
+    affiliation: '已畢業，現為軟體工程師',
     password: 'demo1234',
   },
 ];
 
-export function getDemoUser(role: DemoUser['role']): DemoUser | undefined {
+export function getDemoUser(role: DemoUserRole): DemoUser | undefined {
   return DEMO_USERS.find((u) => u.role === role);
+}
+
+export function getDemoUserByUid(uid: string): DemoUser | undefined {
+  return DEMO_USERS.find((u) => u.uid === uid);
 }
 
 // ──────────────────────────────────────────────────────────────

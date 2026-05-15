@@ -280,6 +280,64 @@ export default function TodayCockpitScreen() {
           <CockpitMetricChip label="錯題複習" value={mistakesDue.length} />
         </CockpitMetricRow>
 
+        {/* 校園生活速覽 — 整合宿舍/圖書/印表/餐廳餘額/運動/社團 */}
+        {(() => {
+          const facts = auth.user?.uid ? getStudentLifeQuickFacts(auth.user.uid) : [];
+          if (facts.length === 0) return null;
+          return (
+            <View
+              style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: theme.space.xs + 2,
+                marginTop: theme.space.sm + 2,
+                marginBottom: theme.space.sm,
+              }}
+            >
+              {facts.map((f, i) => (
+                <View
+                  key={i}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: theme.space.sm + 2,
+                    paddingVertical: theme.space.xs + 2,
+                    borderRadius: theme.radius.full,
+                    backgroundColor: theme.colors.surface,
+                    borderWidth: 1,
+                    borderColor: f.tone === 'warn'
+                      ? theme.colors.warning
+                      : f.tone === 'danger'
+                        ? theme.colors.danger
+                        : theme.colors.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 13 }}>{f.icon}</Text>
+                  <Text style={{
+                    fontSize: 11,
+                    color: theme.colors.muted,
+                    fontWeight: '500',
+                  }}>
+                    {f.label}
+                  </Text>
+                  <Text style={{
+                    fontSize: 12,
+                    color: f.tone === 'warn'
+                      ? theme.colors.warning
+                      : f.tone === 'danger'
+                        ? theme.colors.danger
+                        : theme.colors.text,
+                    fontWeight: '700',
+                  }}>
+                    {f.value}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          );
+        })()}
+
         {/* 摺疊 sections */}
         <View style={{ marginTop: theme.space.sm }}>
           <CockpitSection

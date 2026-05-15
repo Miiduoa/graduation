@@ -320,9 +320,32 @@ export default function TeacherCockpitScreen() {
         showsVerticalScrollIndicator={false}
       >
         <CockpitHero
-          eyebrow={`午安，${auth.profile?.displayName?.split('（')[0] ?? '老師'}`}
+          eyebrow={(() => {
+            try {
+              // 動態載入避免循環依賴
+              const { getDemoUserStory } = require('../data/demoUserStories');
+              const story = auth.user?.uid ? getDemoUserStory(auth.user.uid) : null;
+              if (story?.office) {
+                return `${auth.profile?.displayName?.split('（')[0] ?? '老師'} · ${story.office.building} ${story.office.room}`;
+              }
+            } catch { /* swallow */ }
+            return `午安，${auth.profile?.displayName?.split('（')[0] ?? '老師'}`;
+          })()}
           title="今天教學一覽"
-          summary={`${flagged.length} 位需關注、${totalMissing} 人次缺繳`}
+          summary={(() => {
+            try {
+              const { getDemoUserStory } = require('../data/demoUserStories');
+              const story = auth.user?.uid ? getDemoUserStory(auth.user.uid) : null;
+              const oh = story?.office?.officeHours
+                ?.map((h: any) => `${h.day} ${h.from}-${h.to}`)
+                .join('、');
+              const base = `${flagged.length} 位需關注、${totalMissing} 人次缺繳`;
+              if (oh) return `${base}\nOffice Hour：${oh}`;
+              return base;
+            } catch {
+              return `${flagged.length} 位需關注、${totalMissing} 人次缺繳`;
+            }
+          })()}
         />
 
         {/* 一鍵跨角色 demo */}

@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>校園公車 + 地圖 V2 · 極致版預覽</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #0B1014;
+    --surface: #141B22;
+    --surface2: #1B232C;
+    --border: #2A3540;
+    --text: #F1F5F9;
+    --muted: #8B98A8;
+    --accent: #6F86FF;
+    --accent-soft: #6F86FF22;
+    --success: #34D399;
+    --warning: #F59E0B;
+    --danger: #F87171;
+    --pu-blue: #2D6BD8;
+    --pu-gold: #E8B547;
+    --bus-300: #DC2626;
+    --bus-301: #2563EB;
+    --bus-304: #16A34A;
+    --bus-campus: #7C3AED;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", sans-serif;
+    background: #060A0F; color: var(--text);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  .stage {
+    max-width: 1480px; margin: 0 auto; padding: 32px 24px 80px;
+  }
+  .stage-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  .brand {
+    display: flex; gap: 12px; align-items: center;
+  }
+  .brand-mark {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--pu-blue), var(--accent));
+    display: grid; place-items: center; color: white; font-weight: 900;
+    box-shadow: 0 8px 24px rgba(45,107,216,0.4);
+  }
+  .brand h1 {
+    font-size: 22px; font-weight: 800; letter-spacing: 0.3px;
+  }
+  .brand .tag {
+    color: var(--muted); font-size: 12px; margin-top: 2px;
+  }
+  .filter-chips {
+    display: flex; gap: 8px;
+  }
+  .chip {
+    padding: 8px 14px; border-radius: 999px; font-size: 13px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--muted); cursor: pointer; transition: all 0.15s;
+  }
+  .chip.active {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
+  }
+  /* Phone grid */
+  .phone-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 28px;
+    align-items: start;
+  }
+  .phone-card {
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .phone-label {
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  .phone-label .num {
+    width: 24px; height: 24px; border-radius: 6px;
+    background: var(--accent); color: white;
+    display: grid; place-items: center; font-size: 12px; font-weight: 800;
+  }
+  .phone-label h2 {
+    font-size: 16px; font-weight: 700;
+  }
+  .phone-label .sub {
+    color: var(--muted); font-size: 12px; margin-left: auto;
+  }
+  .phone {
+    width: 100%; aspect-ratio: 9 / 19.5;
+    border-radius: 36px; overflow: hidden;
+    background: var(--bg); position: relative;
+    border: 1px solid #1F2A36;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.55), 0 4px 16px rgba(45,107,216,0.18);
+  }
+  .phone::before {
+    content: ""; position: absolute; top: 8px; left: 50%;
+    transform: translateX(-50%);
+    width: 110px; height: 28px; border-radius: 99px;
+    background: #000; z-index: 200;
+  }
+  .phone-content {
+    width: 100%; height: 100%; position: relative; overflow: hidden;
+  }
+  /* Status bar */
+  .statusbar {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 44px; display: flex; justify-content: space-between; align-items: center;
+    padding: 0 22px; font-size: 13px; font-weight: 600; color: var(--text);
+    z-index: 100;
+  }
+  .statusbar .right { display: flex; gap: 6px; align-items: center; }
+  /* App chrome */
+  .app-header {
+    position: absolute; top: 44px; left: 0; right: 0;
+    padding: 12px 16px; background: rgba(11,16,20,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    z-index: 60;
+  }
+  .app-header-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .app-back {
+    width: 32px; height: 32px; border-radius: 10px;
+    background: var(--surface); display: grid; place-items: center;
+    color: var(--accent); font-size: 18px;
+  }
+  .app-title {
+    font-size: 17px; font-weight: 800; flex: 1;
+  }
+  .app-actions { display: flex; gap: 8px; }
+  .app-action {
+    width: 32px; height: 32px; border-radius: 10px;
+    background: var(--surface); display: grid; place-items: center;
+    color: var(--muted);
+  }
+  /* search bar inside header */
+  .searchbar {
+    margin-top: 10px; background: var(--surface); border-radius: 14px;
+    padding: 10px 14px; display: flex; gap: 10px; align-items: center;
+    border: 1px solid var(--border);
+  }
+  .searchbar input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 14px;
+  }
+  .searchbar .voice {
+    color: var(--accent); font-size: 16px;
+  }
+  /* tab segment */
+  .tab-segment {
+    margin-top: 10px; display: flex;
+    background: var(--surface); border-radius: 12px; padding: 4px;
+    border: 1px solid var(--border);
+  }
+  .tab-segment > div {
+    flex: 1; text-align: center; padding: 8px 0; font-size: 13px; font-weight: 600;
+    color: var(--muted); border-radius: 9px; cursor: pointer;
+  }
+  .tab-segment .on {
+    background: var(--accent); color: white;
+    box-shadow: 0 2px 8px rgba(111,134,255,0.35);
+  }
+  /* generic card */
+  .card {
+    background: var(--surface); border-radius: 16px; padding: 14px;
+    border: 1px solid var(--border);
+  }
+  .card h3 {
+    font-size: 14px; font-weight: 700; margin-bottom: 4px;
+  }
+  .card .h-sub { color: var(--muted); font-size: 12px; }
+  /* main scrolling content area */
+  .app-scroll {
+    position: absolute; left: 0; right: 0; top: 0; bottom: 0;
+    overflow-y: auto;
+    padding-bottom: 16px;
+  }
+  .map-container {
+    width: 100%; height: 100%; position: relative;
+  }
+  /* Bus screen specific */
+  .bus-mini-stat {
+    display: flex; gap: 8px; padding: 12px 16px 4px;
+  }
+  .bus-mini-stat .pill {
+    flex: 1; background: var(--surface); border-radius: 12px;
+    padding: 10px 12px; border: 1px solid var(--border);
+  }
+  .bus-mini-stat .pill .lbl {
+    font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px;
+  }
+  .bus-mini-stat .pill .v {
+    font-size: 18px; font-weight: 800; margin-top: 2px;
+  }
+  .bus-mini-stat .pill .v.danger { color: var(--danger); }
+  .bus-mini-stat .pill .v.success { color: var(--success); }
+  /* AI recommend card */
+  .ai-card {
+    margin: 12px 16px; padding: 14px;
+    background: linear-gradient(135deg, rgba(111,134,255,0.18), rgba(124,58,237,0.15));
+    border-radius: 18px;
+    border: 1px solid rgba(111,134,255,0.35);
+    position: relative; overflow: hidden;
+  }
+  .ai-card::before {
+    content: "✨"; position: absolute; top: -10px; right: -8px;
+    font-size: 60px; opacity: 0.1;
+  }
+  .ai-card .ai-tag {
+    display: inline-flex; gap: 4px; align-items: center;
+    background: var(--accent); color: white;
+    padding: 3px 9px; border-radius: 99px; font-size: 10px; font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .ai-card h4 {
+    font-size: 16px; font-weight: 800; line-height: 1.35;
+  }
+  .ai-card .reason {
+    font-size: 12px; color: var(--muted); margin-top: 6px;
+  }
+  .ai-card .cta {
+    margin-top: 12px; display: flex; gap: 8px;
+  }
+  .ai-card .cta button {
+    flex: 1; padding: 10px; border-radius: 12px; font-size: 13px; font-weight: 700;
+    border: none; cursor: pointer; transition: all 0.15s;
+  }
+  .ai-card .cta .primary {
+    background: var(--accent); color: white;
+  }
+  .ai-card .cta .ghost {
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  }
+  /* Route list */
+  .routes-wrap {
+    padding: 0 16px;
+  }
+  .route-row {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--surface); border-radius: 14px;
+    padding: 12px; border: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .route-mark {
+    width: 36px; height: 36px; border-radius: 10px;
+    display: grid; place-items: center; color: white; font-size: 11px; font-weight: 800;
+  }
+  .route-name {
+    font-size: 14px; font-weight: 700;
+  }
+  .route-meta {
+    font-size: 11px; color: var(--muted); margin-top: 2px;
+  }
+  .route-eta {
+    text-align: right;
+  }
+  .route-eta .min {
+    font-size: 22px; font-weight: 900; color: var(--accent); line-height: 1;
+  }
+  .route-eta .lbl {
+    font-size: 10px; color: var(--muted); margin-top: 2px;
+  }
+  /* Big stop card on map */
+  .floating-stop {
+    position: absolute; left: 16px; right: 16px; bottom: 24px;
+    background: var(--surface); border-radius: 22px;
+    padding: 16px; border: 1px solid var(--border);
+    z-index: 50; box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  }
+  /* On bus mode */
+  .onbus-bg {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at top, rgba(124,58,237,0.32), transparent 60%),
+                radial-gradient(ellipse at bottom, rgba(45,107,216,0.28), transparent 70%),
+                linear-gradient(180deg, #0F0820, #0B1014);
+  }
+  .onbus-hero {
+    position: relative; padding: 88px 22px 0;
+    text-align: center;
+  }
+  .onbus-hero .eyebrow {
+    color: rgba(255,255,255,0.55); font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+  }
+  .onbus-hero .vehicle {
+    font-size: 22px; font-weight: 900; margin-top: 4px;
+  }
+  .onbus-hero .vehicle .plate {
+    color: var(--pu-gold);
+  }
+  .onbus-stop-card {
+    margin: 22px 22px 0; padding: 22px;
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(16px);
+    border-radius: 24px; border: 1px solid rgba(255,255,255,0.12);
+    text-align: center;
+  }
+  .onbus-stop-card .next-label {
+    color: rgba(255,255,255,0.6); font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
+  }
+  .onbus-stop-card .next-name {
+    font-size: 30px; font-weight: 900; margin-top: 6px;
+    background: linear-gradient(180deg, white, rgba(255,255,255,0.7));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .onbus-stop-card .next-eta {
+    font-size: 13px; color: var(--success); margin-top: 4px; font-weight: 700;
+  }
+  .onbus-progress {
+    margin: 22px 22px 0;
+    height: 4px; background: rgba(255,255,255,0.1); border-radius: 99px;
+    position: relative; overflow: hidden;
+  }
+  .onbus-progress::after {
+    content: ""; position: absolute; top:0; left:0; bottom:0;
+    width: 62%; border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent), var(--pu-gold));
+  }
+  .onbus-progress-labels {
+    margin: 8px 22px 0; display: flex; justify-content: space-between;
+    color: rgba(255,255,255,0.6); font-size: 11px;
+  }
+  /* Step list inline */
+  .onbus-steps {
+    margin: 20px 22px 0; display: flex; flex-direction: column; gap: 8px;
+  }
+  .onbus-step {
+    display: flex; gap: 12px; align-items: center;
+    padding: 10px 12px; border-radius: 14px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    font-size: 13px;
+  }
+  .onbus-step .dot {
+    width: 10px; height: 10px; border-radius: 5px;
+    background: rgba(255,255,255,0.3); flex-shrink: 0;
+  }
+  .onbus-step.done .dot { background: var(--success); }
+  .onbus-step.now .dot { background: var(--pu-gold); box-shadow: 0 0 0 4px rgba(232,181,71,0.25); }
+  .onbus-step.now { background: rgba(232,181,71,0.12); border-color: rgba(232,181,71,0.32); }
+  .onbus-step .name { flex: 1; font-weight: 600; }
+  .onbus-step .time { color: rgba(255,255,255,0.5); font-size: 11px; }
+  /* CTA bottom */
+  .onbus-cta {
+    position: absolute; left: 22px; right: 22px; bottom: 28px;
+    display: flex; gap: 10px;
+  }
+  .onbus-cta button {
+    flex: 1; padding: 16px; border-radius: 18px;
+    border: none; font-weight: 800; font-size: 15px; cursor: pointer;
+  }
+  .btn-share {
+    background: rgba(255,255,255,0.1); color: white;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.2) !important;
+  }
+  .btn-getoff {
+    background: var(--danger); color: white;
+    box-shadow: 0 12px 32px rgba(248,113,113,0.45);
+  }
+  /* Turn-by-turn nav header */
+  .tbt-header {
+    position: absolute; top: 44px; left: 16px; right: 16px;
+    background: var(--accent); color: white;
+    border-radius: 18px; padding: 16px; z-index: 60;
+    box-shadow: 0 12px 28px rgba(111,134,255,0.4);
+  }
+  .tbt-row {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .tbt-arrow {
+    width: 56px; height: 56px; border-radius: 16px;
+    background: rgba(255,255,255,0.18); display: grid; place-items: center;
+    font-size: 26px;
+  }
+  .tbt-dist {
+    font-size: 28px; font-weight: 900; line-height: 1;
+  }
+  .tbt-instr {
+    font-size: 14px; opacity: 0.95; margin-top: 4px; font-weight: 600;
+  }
+  .tbt-after {
+    margin-top: 12px; display: flex; gap: 8px; align-items: center;
+    background: rgba(255,255,255,0.12); padding: 8px 12px; border-radius: 10px;
+    font-size: 12px; opacity: 0.92;
+  }
+  /* Floating POI card */
+  .poi-card {
+    position: absolute; left: 16px; right: 16px; bottom: 22px;
+    background: var(--surface); border-radius: 22px;
+    padding: 0; border: 1px solid var(--border);
+    z-index: 50;
+    overflow: hidden;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.55);
+  }
+  .poi-hero {
+    height: 124px; background: linear-gradient(135deg, #DC2626, #F59E0B);
+    position: relative; padding: 14px;
+    display: flex; align-items: flex-end;
+  }
+  .poi-hero .cat-tag {
+    position: absolute; top: 12px; left: 14px;
+    background: rgba(0,0,0,0.45); padding: 4px 10px; border-radius: 99px;
+    font-size: 11px; font-weight: 700;
+  }
+  .poi-hero .crowd {
+    position: absolute; top: 12px; right: 14px;
+    display: flex; gap: 6px; align-items: center;
+    background: rgba(0,0,0,0.45); padding: 4px 10px; border-radius: 99px;
+    font-size: 11px; font-weight: 600;
+  }
+  .poi-hero h2 {
+    font-size: 22px; font-weight: 900;
+  }
+  .poi-hero .sub {
+    font-size: 12px; opacity: 0.92; margin-top: 2px;
+  }
+  .poi-body { padding: 14px 16px; }
+  .poi-meta-row {
+    display: flex; gap: 12px; font-size: 12px;
+  }
+  .poi-meta-row .item {
+    display: flex; gap: 4px; align-items: center; color: var(--muted);
+  }
+  .poi-meta-row .item.open { color: var(--success); }
+  .poi-tags {
+    display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;
+  }
+  .poi-tags span {
+    padding: 3px 8px; border-radius: 99px; font-size: 11px;
+    background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+  }
+  .poi-cta {
+    margin-top: 14px; display: flex; gap: 8px;
+  }
+  .poi-cta .btn-primary {
+    flex: 2; padding: 12px; border-radius: 14px; background: var(--accent);
+    color: white; font-weight: 700; font-size: 14px; border: none;
+    display: flex; gap: 6px; align-items: center; justify-content: center;
+  }
+  .poi-cta .btn-icon {
+    width: 44px; padding: 12px; border-radius: 14px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--muted);
+    display: grid; place-items: center; cursor: pointer;
+  }
+  /* Map layers selector */
+  .layer-fab {
+    position: absolute; right: 14px; top: 200px; z-index: 60;
+    background: var(--surface); border-radius: 12px;
+    padding: 6px; border: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .layer-fab button {
+    width: 36px; height: 36px; border-radius: 8px;
+    background: transparent; border: none; color: var(--muted);
+    cursor: pointer; font-size: 18px;
+  }
+  .layer-fab button.on {
+    background: var(--accent-soft); color: var(--accent);
+  }
+  /* Live bus markers on map */
+  .leaflet-tile-pane { filter: invert(0.92) hue-rotate(180deg) brightness(0.95) contrast(0.95); }
+  .bus-marker {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: white; border: 3px solid var(--bus-300);
+    display: grid; place-items: center;
+    color: var(--bus-300); font-weight: 900; font-size: 14px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .bus-marker.r301 { border-color: var(--bus-301); color: var(--bus-301); }
+  .bus-marker.r304 { border-color: var(--bus-304); color: var(--bus-304); }
+  .bus-marker.rc { border-color: var(--bus-campus); color: var(--bus-campus); }
+  .bus-marker::after {
+    content: ""; position: absolute; bottom: -8px; left: 50%;
+    transform: translateX(-50%); width: 0; height: 0;
+    border-left: 6px solid transparent; border-right: 6px solid transparent;
+    border-top: 8px solid white;
+  }
+  .stop-pin {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--bus-300); border: 3px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+  }
+  .stop-pin.major { width: 22px; height: 22px; }
+  .user-pin {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: #2563EB; border: 4px solid white;
+    box-shadow: 0 0 0 6px rgba(37,99,235,0.25), 0 4px 8px rgba(0,0,0,0.4);
+    animation: pulse 2s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 6px rgba(37,99,235,0.25), 0 4px 8px rgba(0,0,0,0.4); }
+    50% { box-shadow: 0 0 0 14px rgba(37,99,235,0.06), 0 4px 8px rgba(0,0,0,0.4); }
+  }
+  /* Real-time map quick filter pills */
+  .map-filter-pills {
+    position: absolute; left: 14px; right: 14px; top: 168px;
+    z-index: 55;
+    display: flex; gap: 6px; overflow-x: auto;
+  }
+  .map-filter-pills::-webkit-scrollbar { display: none; }
+  .map-filter-pills .p {
+    padding: 8px 12px; border-radius: 99px;
+    background: rgba(11,16,20,0.85); backdrop-filter: blur(10px);
+    border: 1px solid var(--border); color: var(--muted);
+    font-size: 12px; font-weight: 600;
+    white-space: nowrap; cursor: pointer;
+  }
+  .map-filter-pills .p.on {
+    background: var(--accent); color: white; border-color: var(--accent);
+  }
+  /* footer caption under each phone */
+  .caption {
+    color: var(--muted); font-size: 12px; line-height: 1.6;
+    padding: 0 6px;
+  }
+  .caption b { color: var(--text); }
+  .caption ul { padding-left: 18px; margin-top: 4px; }
+  .caption li { margin-top: 2px; }
+  /* Section heading */
+  .section-h {
+    grid-column: 1 / -1;
+    margin: 20px 0 4px;
+    padding: 14px 18px;
+    border-radius: 16px;
+    background: linear-gradient(90deg, rgba(111,134,255,0.16), transparent);
+    border-left: 4px solid var(--accent);
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  .section-h h2 { font-size: 18px; font-weight: 800; }
+  .section-h span { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="stage-header">
+    <div class="brand">
+      <div class="brand-mark">PU</div>
+      <div>
+        <h1>校園公車 + 地圖 V2</h1>
+        <div class="tag">極致版預覽 · 媲美 Google Maps 等級體驗</div>
+      </div>
+    </div>
+    <div class="filter-chips">
+      <div class="chip active" onclick="document.body.scrollTop=0">全部</div>
+      <div class="chip">公車</div>
+      <div class="chip">地圖</div>
+      <div class="chip">AI 體驗</div>
+    </div>
+  </div>
+
+  <div class="phone-grid">
+
+    <!-- Section: Campus Bus -->
+    <div class="section-h">
+      <h2>🚌 校園公車 ｜ 即時 · AI · 搭車中</h2>
+      <span>從查公車、AI 推薦、上車、下車一條龍體驗</span>
+    </div>
+
+    <!-- Phone 1: Bus realtime map -->
+    <div class="phone-card">
+      <div class="phone-label">
+        <span class="num">1</span>
+        <h2>公車主畫面 · 即時軌跡地圖</h2>
+        <span class="sub">每 10 秒更新</span>
+      </div>
+      <div class="phone">
+        <div class="phone-content">
+          <div class="statusbar">
+            <div>9:41</div>
+            <div class="right">● ● ● ●  100%</div>
+          </div>
+          <div class="app-scroll">
+            <div style="height: 60px;"></div>
+            <div class="app-header">
+              <div class="app-header-row">
+                <div class="app-back">‹</div>
+                <div class="app-title">校園公車</div>
+                <div class="app-actions">
+                  <div class="app-action">⭐</div>
+                  <div class="app-action">⋯</div>
+                </div>
+              </div>
+              <div class="tab-segment">
+                <div class="on">即時地圖</div>
+                <div>路線表</div>
+                <div>時刻表</div>
+                <div>我的常用</div>
+              </div>
+            </div>
+
+            <!-- Map area replacing tabs -->
+            <div id="bus-map-1" style="height: 360px; margin-top: 152px;"></div>
+
+            <!-- mini stats -->
+            <div class="bus-mini-stat">
+              <div class="pill">
+                <div class="lbl">在線車輛</div>
+                <div class="v success">12 台</div>
+              </div>
+              <div class="pill">
+                <div class="lbl">最近班次</div>
+                <div class="v">2 分</div>
+              </div>
+              <div class="pill">
+                <div class="lbl">人潮</div>
+                <div class="v">適中</div>
+              </div>
+            </div>
+
+            <!-- AI recommend -->
+            <div class="ai-card">
+              <div class="ai-tag">✨ AI 為你建議</div>
+              <h4>下節 13:10 課在任垣樓，建議搭<br>校園 A 線 12:48 班 → 任垣樓站</h4>
+              <div class="reason">天氣有雨 · 步行需 14 分 · 搭車只要 5 分 · 班車人潮適中</div>
+              <div class="cta">
+                <button class="primary">設定到站提醒</button>
+                <button class="ghost">看其他路線</button>
+              </div>
+            </div>
+
+            <div class="routes-wrap" style="margin-top: 16px;">
+              <h3 style="font-size: 14px; margin-bottom: 8px; padding-left: 4px;">即將到站</h3>
+              <div class="route-row">
+                <div class="route-mark" style="background: var(--bus-300);">300</div>
+                <div style="flex:1">
+                  <div class="route-name">300 台灣大道幹線</div>
+                  <div class="route-meta">下一站：東海大學 · 適中</div>
+                </div>
+                <div class="route-eta">
+                  <div class="min" style="color: var(--bus-300)">5</div>
+                  <div class="lbl">分鐘</div>
+                </div>
+              </div>
+              <div class="route-row">
+                <div class="route-mark" style="background: var(--bus-campus);">A</div>
+                <div style="flex:1">
+                  <div class="route-name">校園 A 線 巡迴</div>
+                  <div class="route-meta">下一站：靜園餐廳 · 少</div>
+                </div>
+                <div class="route-eta">
+                  <div class="min" style="color: var(--bus-campus)">3</div>
+                  <div class="lbl">分鐘</div>
+                </div>
+              </div>
+              <div class="route-row">
+                <div class="route-mark" style="background: var(--bus-301);">301</div>
+                <div style="flex:1">
+                  <div class="route-name">301 新民→靜宜</div>
+                  <div class="route-meta">下一站：靜宜大學 · 擁擠</div>
+                </div>
+                <div class="route-eta">
+                  <div class="min" style="color: var(--bus-301)">8</div>
+                  <div class="lbl">分鐘</div>
+                </div>
+              </div>
+            </div>
+            <div style="height: 24px"></div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">
+        <b>核心亮點：</b>
+        <ul>
+          <li>地圖上 <b>即時顯示每台公車</b>（mock 用動畫模擬位置移動）</li>
+          <li><b>AI 主動推薦</b>：結合你的下節課地點、天氣、人潮，告訴你該搭哪班</li>
+          <li>分頁切換「即時地圖 / 路線表 / 時刻表 / 我的常用」一鍵切換</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phone 2: On Bus mode -->
+    <div class="phone-card">
+      <div class="phone-label">
+        <span class="num">2</span>
+        <h2>搭車中模式 · 全螢幕沉浸</h2>
+        <span class="sub">震動提醒 · 自動下車</span>
+      </div>
+      <div class="phone">
+        <div class="phone-content">
+          <div class="onbus-bg"></div>
+          <div class="statusbar" style="color: white;">
+            <div>9:41</div>
+            <div class="right">● ● ● ●  100%</div>
+          </div>
+          <div class="onbus-hero">
+            <div class="eyebrow">你正在搭乘</div>
+            <div class="vehicle">校園 A 線 · <span class="plate">KAA-6312</span></div>
+          </div>
+          <div class="onbus-stop-card">
+            <div class="next-label">下一站</div>
+            <div class="next-name">任垣樓</div>
+            <div class="next-eta">約 1 分鐘抵達 · 即將到站</div>
+          </div>
+          <div class="onbus-progress"></div>
+          <div class="onbus-progress-labels">
+            <span>正門</span>
+            <span>5 站｜下車前 3 站</span>
+            <span>仁愛宿舍</span>
+          </div>
+          <div class="onbus-steps">
+            <div class="onbus-step done"><div class="dot"></div><div class="name">正門（臺灣大道）</div><div class="time">12:48</div></div>
+            <div class="onbus-step done"><div class="dot"></div><div class="name">靜園餐廳</div><div class="time">12:50</div></div>
+            <div class="onbus-step done"><div class="dot"></div><div class="name">主顧樓</div><div class="time">12:52</div></div>
+            <div class="onbus-step now"><div class="dot"></div><div class="name">任垣樓 · <b>下一站</b></div><div class="time">12:53</div></div>
+            <div class="onbus-step"><div class="dot"></div><div class="name">蓋夏圖書館</div><div class="time">12:54</div></div>
+            <div class="onbus-step"><div class="dot"></div><div class="name">伯鐸樓 · <b style="color: var(--warning)">下車</b></div><div class="time">12:56</div></div>
+          </div>
+          <div class="onbus-cta">
+            <button class="btn-share">📍 分享位置</button>
+            <button class="btn-getoff">提前下車</button>
+          </div>
+        </div>
+      </div>
+      <div class="caption">
+        <b>核心亮點：</b>
+        <ul>
+          <li>掃 NFC 或上車自動偵測進入此模式，<b>類似 Google Maps 搭車中</b></li>
+          <li>下一站、剩餘站數、進度條一目了然</li>
+          <li>下車前 1 站<b>自動震動提醒</b>，避免坐過站</li>
+          <li>「分享位置」可以讓朋友看到你現在在哪台車</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Section: Map -->
+    <div class="section-h">
+      <h2>🗺️ 校園地圖 ｜ Google Maps 級體驗</h2>
+      <span>多圖層 · POI 商業資料 · Turn-by-turn 導航</span>
+    </div>
+
+    <!-- Phone 3: POI Card -->
+    <div class="phone-card">
+      <div class="phone-label">
+        <span class="num">3</span>
+        <h2>POI 卡片 · 完整商業資料</h2>
+        <span class="sub">營業時間 · 人潮 · 評論</span>
+      </div>
+      <div class="phone">
+        <div class="phone-content">
+          <div id="poi-map-3" class="map-container" style="height: 100%"></div>
+          <div class="statusbar" style="color: white; text-shadow: 0 1px 4px rgba(0,0,0,0.6);">
+            <div>9:41</div>
+            <div class="right">● ● ● ●  100%</div>
+          </div>
+          <div class="app-header" style="background: rgba(11,16,20,0.78);">
+            <div class="app-header-row">
+              <div class="app-back">‹</div>
+              <div class="searchbar" style="margin-top: 0; flex:1;">
+                <span>🔍</span>
+                <input value="靜園餐廳" readonly>
+                <span class="voice">🎙️</span>
+              </div>
+            </div>
+          </div>
+          <div class="map-filter-pills">
+            <div class="p on">🍱 餐廳</div>
+            <div class="p">📚 圖書館</div>
+            <div class="p">🏫 教學</div>
+            <div class="p">🏠 宿舍</div>
+            <div class="p">🚌 公車</div>
+            <div class="p">🅿️ 停車</div>
+          </div>
+          <div class="layer-fab">
+            <button class="on" title="標準">🗺️</button>
+            <button title="衛星">🛰️</button>
+            <button title="3D">🏛️</button>
+            <button title="暗色">🌙</button>
+          </div>
+
+          <div class="poi-card">
+            <div class="poi-hero" style="background: linear-gradient(135deg, #DC2626, #F59E0B);">
+              <div class="cat-tag">🍱 學生餐廳</div>
+              <div class="crowd">🟡 適中 · 約 12 分</div>
+              <div>
+                <h2>靜園餐廳</h2>
+                <div class="sub">Jing Yuan Cafeteria · 1F · 距離 180m</div>
+              </div>
+            </div>
+            <div class="poi-body">
+              <div class="poi-meta-row">
+                <div class="item open">🟢 營業中 · 至 19:00</div>
+                <div class="item">⭐ 4.2</div>
+                <div class="item">👥 318 則評論</div>
+              </div>
+              <div class="poi-tags">
+                <span>♿ 無障礙</span>
+                <span>🪙 學生悠遊卡</span>
+                <span>🍜 自助餐</span>
+                <span>📱 線上點餐</span>
+                <span>💳 電子支付</span>
+              </div>
+              <div class="poi-cta">
+                <button class="btn-primary">📷 AR 帶我去 · 步行 3 分</button>
+                <button class="btn-icon">📋</button>
+                <button class="btn-icon">📞</button>
+                <button class="btn-icon">⭐</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">
+        <b>核心亮點：</b>
+        <ul>
+          <li>POI 卡片含 <b>封面照、人潮熱度、評論星等、即時營業狀態</b></li>
+          <li>標籤顯示「無障礙 / 接受悠遊卡 / 線上點餐 / 電子支付」等服務</li>
+          <li>4 種圖層切換（標準 / 衛星 / 3D / 暗色），跟 Google Maps 一致</li>
+          <li>類別 chips 快速過濾「餐廳 / 圖書館 / 教學 / 宿舍 ...」</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phone 4: Turn-by-turn -->
+    <div class="phone-card">
+      <div class="phone-label">
+        <span class="num">4</span>
+        <h2>Turn-by-turn 導航 · 跟 Google 一樣</h2>
+        <span class="sub">語音播報 · 自動重規劃</span>
+      </div>
+      <div class="phone">
+        <div class="phone-content">
+          <div id="nav-map-4" class="map-container" style="height: 100%"></div>
+          <div class="statusbar" style="color: white; text-shadow: 0 1px 4px rgba(0,0,0,0.6);">
+            <div>9:41</div>
+            <div class="right">● ● ● ●  100%</div>
+          </div>
+          <div class="tbt-header">
+            <div class="tbt-row">
+              <div class="tbt-arrow">↰</div>
+              <div style="flex:1">
+                <div class="tbt-dist">120 m</div>
+                <div class="tbt-instr">於 <b>主顧樓口</b> 左轉</div>
+              </div>
+              <div style="text-align: right;">
+                <div style="font-size: 18px; font-weight: 900;">🔊</div>
+                <div style="font-size: 10px; opacity: 0.8;">語音</div>
+              </div>
+            </div>
+            <div class="tbt-after">
+              <span>之後</span>
+              <span>→</span>
+              <span><b>右轉</b> 進入 蓋夏圖書館 250m</span>
+            </div>
+          </div>
+
+          <!-- Bottom bar -->
+          <div style="position: absolute; left:16px; right:16px; bottom: 22px;
+                      background: var(--surface); border-radius: 22px; padding: 16px;
+                      border: 1px solid var(--border);
+                      display: flex; align-items: center; gap: 14px;">
+            <div style="flex:1">
+              <div style="font-size: 22px; font-weight: 900; color: var(--success);">4 分</div>
+              <div style="font-size: 12px; color: var(--muted);">320m · 抵達 09:45</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button style="width:44px; height:44px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 18px;">🎙️</button>
+              <button style="padding: 0 18px; height: 44px; border-radius: 12px; border:none; background: var(--danger); color: white; font-weight:700;">結束</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">
+        <b>核心亮點：</b>
+        <ul>
+          <li><b>大型箭頭+剩餘距離</b> 一眼看清楚下一步</li>
+          <li>「之後」預告下一個動作，跟 Google Maps 一致</li>
+          <li>偏離路線自動<b>重新規劃</b>，並透過<b>語音播報</b>下一步</li>
+          <li>底部顯示 ETA / 剩餘距離，跟 Google Maps 一樣的下拉式詳情</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // Center: Providence University
+  const PU_CENTER = [24.2275, 120.5647];
+
+  // Bus map 1 — campus realtime
+  const map1 = L.map('bus-map-1', { zoomControl: false, attributionControl: false }).setView(PU_CENTER, 16);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map1);
+
+  // Stops (mock campus shuttle stops)
+  const STOPS_CAMPUS = [
+    [24.22495, 120.56535, '正門'],
+    [24.22580, 120.56480, '靜園餐廳'],
+    [24.22712, 120.56517, '主顧樓'],
+    [24.22765, 120.56453, '任垣樓'],
+    [24.22760, 120.56350, '蓋夏圖書館'],
+    [24.22695, 120.56398, '伯鐸樓'],
+    [24.22600, 120.56300, '仁愛宿舍'],
+  ];
+  STOPS_CAMPUS.forEach(([lat, lng, name], i) => {
+    L.marker([lat, lng], {
+      icon: L.divIcon({
+        className: '',
+        html: `<div class="stop-pin ${i===0||i===4?'major':''}"></div>`,
+        iconSize: [16,16], iconAnchor: [8,8]
+      })
+    }).bindTooltip(name, { permanent: false, direction: 'top' }).addTo(map1);
+  });
+
+  // Bus path
+  const campusPath = STOPS_CAMPUS.map(s => [s[0], s[1]]);
+  L.polyline(campusPath.concat([campusPath[0]]), { color: '#7C3AED', weight: 5, opacity: 0.85 }).addTo(map1);
+  L.polyline(campusPath.concat([campusPath[0]]), { color: 'white', weight: 1.5, opacity: 0.5, dashArray: '4 6' }).addTo(map1);
+
+  // Active buses on map 1
+  const bus1 = L.marker([24.22720, 120.56480], {
+    icon: L.divIcon({ className: '', html: '<div class="bus-marker rc">A</div>', iconSize: [40,46], iconAnchor: [20,46] })
+  }).bindTooltip('校園A · KAA-6312', { permanent: false, direction: 'top' }).addTo(map1);
+  const bus2 = L.marker([24.22630, 120.56400], {
+    icon: L.divIcon({ className: '', html: '<div class="bus-marker rc">A</div>', iconSize: [40,46], iconAnchor: [20,46] })
+  }).addTo(map1);
+  // 300 bus on map edge
+  const bus300 = L.marker([24.22550, 120.56600], {
+    icon: L.divIcon({ className: '', html: '<div class="bus-marker">300</div>', iconSize: [40,46], iconAnchor: [20,46] })
+  }).addTo(map1);
+
+  // User pin
+  L.marker([24.22612, 120.56450], {
+    icon: L.divIcon({ className: '', html: '<div class="user-pin"></div>', iconSize: [22,22], iconAnchor: [11,11] })
+  }).addTo(map1);
+
+  // Animate bus1 along the campus path
+  let segIdx = 1; let segT = 0;
+  function tickBus() {
+    const A = campusPath[segIdx-1], B = campusPath[segIdx];
+    const lat = A[0] + (B[0]-A[0]) * segT;
+    const lng = A[1] + (B[1]-A[1]) * segT;
+    bus1.setLatLng([lat, lng]);
+    segT += 0.012;
+    if (segT >= 1) { segT = 0; segIdx = (segIdx % campusPath.length) + 1; if (segIdx>=campusPath.length) segIdx = 1; }
+  }
+  setInterval(tickBus, 80);
+
+  // POI map 3
+  const map3 = L.map('poi-map-3', { zoomControl: false, attributionControl: false }).setView([24.22580, 120.56480], 17);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map3);
+  STOPS_CAMPUS.forEach(([lat, lng, name], i) => {
+    if (i===1) { // Jing Yuan
+      L.marker([lat, lng], {
+        icon: L.divIcon({ className: '', html: '<div style="font-size: 32px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6))">🍱</div>', iconSize: [32,32], iconAnchor: [16,32] })
+      }).addTo(map3);
+    } else {
+      L.marker([lat, lng], {
+        icon: L.divIcon({ className: '', html: '<div class="stop-pin"></div>', iconSize: [12,12], iconAnchor: [6,6] })
+      }).addTo(map3);
+    }
+  });
+  L.marker([24.22612, 120.56450], {
+    icon: L.divIcon({ className: '', html: '<div class="user-pin"></div>', iconSize: [22,22], iconAnchor: [11,11] })
+  }).addTo(map3);
+
+  // Nav map 4 — turn-by-turn
+  const map4 = L.map('nav-map-4', { zoomControl: false, attributionControl: false }).setView([24.22650, 120.56480], 18);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map4);
+  // route geometry
+  const navRoute = [
+    [24.22612, 120.56450],
+    [24.22680, 120.56480],
+    [24.22712, 120.56517],
+    [24.22730, 120.56480],
+    [24.22760, 120.56430],
+    [24.22760, 120.56350]
+  ];
+  L.polyline(navRoute, { color: 'white', weight: 10, opacity: 1, lineCap: 'round' }).addTo(map4);
+  L.polyline(navRoute, { color: '#6F86FF', weight: 6, opacity: 0.95, lineCap: 'round' }).addTo(map4);
+  L.marker(navRoute[0], {
+    icon: L.divIcon({ className: '', html: '<div class="user-pin"></div>', iconSize: [22,22], iconAnchor: [11,11] })
+  }).addTo(map4);
+  L.marker(navRoute[navRoute.length-1], {
+    icon: L.divIcon({ className: '', html: '<div style="font-size: 30px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5))">📍</div>', iconSize: [30,30], iconAnchor: [15,30] })
+  }).addTo(map4);
+
+  // Animate user moving along route in map 4
+  let navT = 0;
+  function tickNav() {
+    navT += 0.0008;
+    if (navT > 0.45) navT = 0;
+    // Linear-interp along whole route
+    const total = navRoute.length - 1;
+    const idx = navT * total;
+    const i = Math.floor(idx);
+    const t = idx - i;
+    const A = navRoute[i], B = navRoute[Math.min(i+1, total)];
+    // animate
+  }
+  setInterval(tickNav, 50);
+</script>
+</body>
+</html>

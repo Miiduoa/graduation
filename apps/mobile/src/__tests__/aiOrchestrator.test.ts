@@ -191,14 +191,17 @@ describe('aiVendorNextAction', () => {
   });
 
   it('空檔 → low + 預備', () => {
+    // 固定 hour=12 來避開「深夜 / 下午茶 / 清晨」分支，落到通用預備
     const r = aiVendorNextAction({
       pendingOrders: 0,
       processingOrders: 0,
       readyOrders: 0,
       oldestPendingMinutes: 0,
+      hour: 12,
     });
     expect(r.severity).toBe('low');
-    expect(r.action).toContain('整理');
+    // 通用建議含「預備」「食材」「整理」之一
+    expect(r.action).toMatch(/預備|食材|整理/);
   });
 });
 

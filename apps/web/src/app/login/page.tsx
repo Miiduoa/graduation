@@ -10,7 +10,8 @@ import {
 import { appendSchoolContext, sanitizeInternalPath } from '@/lib/navigation';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { DEMO_ROLES, writeDemoRole } from '@/lib/demoRole';
+import { getDemoUser } from '@/lib/demoData';
 
 export default function LoginPage(props: {
   searchParams?: { school?: string; schoolId?: string; redirect?: string; returnUrl?: string };
@@ -215,33 +216,78 @@ export default function LoginPage(props: {
               marginBottom: 6,
             }}
           >
-            Demo / 示範模式
+            Demo / 示範模式 · 8 種角色
           </div>
           <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, marginBottom: 12 }}>
-            畢業專題口試 / 教學示範用 — 直接以對應身份進入，使用內建示範資料，免登入。
+            畢業專題口試 / 教學示範用 — 點選任一身份直接進入，使用內建示範資料、免登入。
+            進站後可從右上角「身份膠囊」一鍵切換。
           </div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            <Link
-              href={`/timetable${q}`}
-              className="btn primary"
-              style={{ width: '100%', minHeight: 44, justifyContent: 'flex-start' }}
-            >
-              👩‍🎓 以學生身份瀏覽（從課表開始）
-            </Link>
-            <Link
-              href={`/teacher/course/c1${q}`}
-              className="btn"
-              style={{ width: '100%', minHeight: 44, justifyContent: 'flex-start' }}
-            >
-              🧑‍🏫 以教師身份瀏覽（資料結構班）
-            </Link>
-            <Link
-              href={`/${q}`}
-              className="btn"
-              style={{ width: '100%', minHeight: 44, justifyContent: 'flex-start' }}
-            >
-              👀 訪客瀏覽（先看首頁）
-            </Link>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: 8,
+            }}
+          >
+            {DEMO_ROLES.map((r) => {
+              const user = r.demoUserUid ? getDemoUser(r.role === 'guest' ? 'student' : r.role) : null;
+              return (
+                <button
+                  key={r.role}
+                  type="button"
+                  onClick={() => {
+                    writeDemoRole(r.role);
+                    router.push(`${r.entryHref}${q}`);
+                  }}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '36px 1fr',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '12px 12px',
+                    background: 'var(--surface)',
+                    border: `1px solid ${r.tone}40`,
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                    color: 'var(--text)',
+                    transition: 'transform 0.1s ease, box-shadow 0.1s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.boxShadow = `0 4px 12px ${r.tone}30`;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = '';
+                    e.currentTarget.style.boxShadow = '';
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 11,
+                      background: r.toneSoft,
+                      color: r.tone,
+                      display: 'grid',
+                      placeItems: 'center',
+                      fontSize: 18,
+                    }}
+                  >
+                    {r.icon}
+                  </span>
+                  <span style={{ display: 'grid', gap: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{r.label}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.4 }}>
+                      {user ? user.displayName : '訪客'} · {r.description.slice(0, 18)}
+                      {r.description.length > 18 ? '…' : ''}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
