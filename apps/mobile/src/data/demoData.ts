@@ -3874,8 +3874,8 @@ export function getDemoUsers(schoolId: string): User[] {
     {
       id: createId(schoolId, 'user', 7),
       schoolId,
-      email: 'prof.lin.jiayong@nchu.edu.tw',
-      displayName: '林佳蓉',
+      email: 'prof.lin.chiaying@nchu.edu.tw',
+      displayName: '林珈瑩',
       department: '資訊工程學系',
       role: 'teacher',
       createdAt: '2024-09-01T00:00:00Z',
@@ -3930,6 +3930,69 @@ export function getDemoUsers(schoolId: string): User[] {
       createdAt: '2024-09-01T00:00:00Z',
     },
   ];
+
+  if (schoolId === 'tw-pu') {
+    return [
+      {
+        id: createId(schoolId, 'user', 1),
+        schoolId,
+        email: 'u11401001@mail.pu.edu.tw',
+        displayName: '蔡宜伶',
+        studentId: 'U11401001',
+        department: '資訊工程學系',
+        year: 2,
+        role: 'student',
+        createdAt: '2024-09-01T00:00:00Z',
+      },
+      {
+        id: createId(schoolId, 'user', 2),
+        schoolId,
+        email: 'u11409033@mail.pu.edu.tw',
+        displayName: '李冠廷',
+        studentId: 'U11409033',
+        department: '西班牙語文學系',
+        year: 3,
+        role: 'student',
+        createdAt: '2024-09-01T00:00:00Z',
+      },
+      {
+        id: createId(schoolId, 'user', 3),
+        schoolId,
+        email: 'cs.wangan@staff.pu.edu.tw',
+        displayName: '王安世',
+        department: '資訊工程學系',
+        role: 'professor',
+        createdAt: '2024-09-01T00:00:00Z',
+      },
+      {
+        id: createId(schoolId, 'user', 4),
+        schoolId,
+        email: 'cs.chair@staff.pu.edu.tw',
+        displayName: '張維書',
+        department: '資訊工程學系',
+        role: 'department_head',
+        createdAt: '2024-09-01T00:00:00Z',
+      },
+      {
+        id: createId(schoolId, 'user', 5),
+        schoolId,
+        email: 'itc.helpdesk@mail.pu.edu.tw',
+        displayName: '電算中心／系統組（示範管理員）',
+        department: '電子計算機中心',
+        role: 'admin',
+        createdAt: '2024-09-01T00:00:00Z',
+      },
+      {
+        id: createId(schoolId, 'user', 6),
+        schoolId,
+        email: 'ga.ops@staff.pu.edu.tw',
+        displayName: '林怡君',
+        department: '總務處行政組',
+        role: 'staff',
+        createdAt: '2024-09-01T00:00:00Z',
+      },
+    ];
+  }
 
   if (schoolId === 'tw-nchu') {
     return baseUsers;
@@ -6288,9 +6351,23 @@ export function getDemoAttendanceSessions(
 
 // ===== Inbox Tasks =====
 
-export function getDemoInboxTasks(userId: string, schoolId = 'tw-nchu'): InboxTask[] {
-  schoolId = normalizeDemoSchoolId(schoolId);
-  const tasks: InboxTask[] = [
+/** 與測試帳號 uid `test-<UserRole>` 對齊，讓各角色 demo 待辦不共用同一套學生視角。 */
+type DemoInboxPersona = 'student' | 'teacher' | 'staff' | 'department' | 'admin';
+
+function resolveDemoInboxPersona(userId: string): DemoInboxPersona {
+  if (!userId.startsWith('test-')) return 'student';
+  const r = userId.slice(5);
+  if (r === 'teacher' || r === 'professor') return 'teacher';
+  if (r === 'staff' || r === 'vendor') return 'staff';
+  if (r === 'admin') return 'admin';
+  if (r === 'department' || r === 'department_head' || r === 'principal' || r === 'school') {
+    return 'department';
+  }
+  return 'student';
+}
+
+function buildStudentDemoInboxTasks(schoolId: string): InboxTask[] {
+  return [
     {
       id: createId(schoolId, 'task', 1),
       kind: 'assignment',
@@ -6401,8 +6478,263 @@ export function getDemoInboxTasks(userId: string, schoolId = 'tw-nchu'): InboxTa
       nextStep: '點擊練習題開始作答',
     },
   ];
+}
 
-  return tasks;
+function buildTeacherDemoInboxTasks(schoolId: string): InboxTask[] {
+  return [
+    {
+      id: createId(schoolId, 'task-t', 1),
+      kind: 'assignment',
+      groupId: createId(schoolId, 'grp', 1),
+      groupName: '程式設計(一)',
+      title: '待批改：作業二（42 份未評分）',
+      subtitle: '建議今日完成第一輪回饋',
+      priority: 0,
+      dueAt: getDateOffset(0, { hours: 18 }) as unknown as Date,
+      unreadCount: 0,
+      preferredIntent: 'review',
+      actionLabel: '開啟批改',
+      reason: '逾期回饋會累積學生焦慮與申訴風險',
+      consequence: '學生可能無法即時修正方向',
+      nextStep: '到批改畫面依序給分與留言',
+    },
+    {
+      id: createId(schoolId, 'task-t', 2),
+      kind: 'quiz',
+      groupId: createId(schoolId, 'grp', 3),
+      groupName: '演算法',
+      title: '小考成績尚未公開',
+      subtitle: '3 天前已截止作答',
+      priority: 1,
+      dueAt: getDateOffset(0, { hours: 12 }) as unknown as Date,
+      unreadCount: 0,
+      preferredIntent: 'submit',
+      actionLabel: '公布成績',
+      reason: '成績未公開會影響後續調補考與教學節奏',
+      consequence: '教務抽查可能列為延宕項目',
+      nextStep: '確認試卷與配分後公開',
+    },
+    {
+      id: createId(schoolId, 'task-t', 3),
+      kind: 'group',
+      groupId: createId(schoolId, 'grp', 2),
+      groupName: '資料結構',
+      title: '討論區：需教師回覆的問題 5 則',
+      subtitle: '關於期中考範圍與考古題',
+      priority: 2,
+      unreadCount: 5,
+      preferredIntent: 'reply',
+      actionLabel: '檢視討論',
+      reason: '教師回覆可降低重複提問與誤解',
+      consequence: '',
+      nextStep: '挑選常見問題整理成公告',
+    },
+    {
+      id: createId(schoolId, 'task-t', 4),
+      kind: 'live',
+      groupId: createId(schoolId, 'grp', 4),
+      groupName: '計算機組織',
+      title: '本堂課互動進行中',
+      subtitle: '已開啟簽到與即時題',
+      sessionId: createId(schoolId, 'ses', 8),
+      priority: 0,
+      unreadCount: 0,
+      preferredIntent: 'join',
+      actionLabel: '進入課堂',
+      reason: '您有一堂課正在進行',
+      consequence: '',
+      nextStep: '開啟課堂控制台與簽到狀態',
+    },
+    {
+      id: createId(schoolId, 'task-t', 5),
+      kind: 'assistant_queue',
+      groupId: createId(schoolId, 'grp', 1),
+      groupName: '教學助理',
+      title: 'AI：本週缺課高風險名單建議',
+      subtitle: '已由學習分析產出草稿',
+      priority: 3,
+      unreadCount: 0,
+      preferredIntent: 'navigate',
+      actionLabel: '檢視建議',
+      sourceRunId: `demo-teacher-risk-${schoolId}`,
+      reason: '可及早關懷可能落後的學生',
+      consequence: '',
+      nextStep: '在助理對話中確認後再聯絡導師／學生',
+    },
+  ];
+}
+
+function buildStaffDemoInboxTasks(schoolId: string): InboxTask[] {
+  return [
+    {
+      id: createId(schoolId, 'task-s', 1),
+      kind: 'group',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '總務工單',
+      title: '盤點／修缮：電機大樓 3F 飲水機',
+      subtitle: '承辦：總務處 · SLA 2 日',
+      priority: 0,
+      dueAt: getDateOffset(1) as unknown as Date,
+      unreadCount: 1,
+      preferredIntent: 'read',
+      actionLabel: '派工',
+      reason: '逾時未結案會影響校園滿意度調查',
+      consequence: '',
+      nextStep: '確認廠商排程並更新工單狀態',
+    },
+    {
+      id: createId(schoolId, 'task-s', 2),
+      kind: 'assignment',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '採購簽核',
+      title: '耗材請購單 #PO-2026-0412',
+      subtitle: '金額 NT$48,200 · 待二級簽核',
+      priority: 1,
+      dueAt: getDateOffset(2) as unknown as Date,
+      unreadCount: 0,
+      preferredIntent: 'verify',
+      actionLabel: '開啟簽核',
+      reason: '採購延宕會卡住教學實驗室備品',
+      consequence: '',
+      nextStep: '檢視附件與預算科目後簽核',
+    },
+    {
+      id: createId(schoolId, 'task-s', 3),
+      kind: 'quiz',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '場地預約',
+      title: '審議：體育館主場地週末租借申請',
+      subtitle: '活動部門已提交平面圖',
+      priority: 2,
+      unreadCount: 0,
+      preferredIntent: 'read',
+      actionLabel: '查看申請',
+      reason: '需確認與校慶綵排時段不衝突',
+      consequence: '',
+      nextStep: '在行事曆上核對後回覆准駁',
+    },
+  ];
+}
+
+function buildDepartmentDemoInboxTasks(schoolId: string): InboxTask[] {
+  return [
+    {
+      id: createId(schoolId, 'task-d', 1),
+      kind: 'assignment',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '系所簽核',
+      title: '課程大綱異動：演算法增加 2 實習時數',
+      subtitle: '教師：王大偉 · 待系所同意',
+      priority: 0,
+      dueAt: getDateOffset(3) as unknown as Date,
+      unreadCount: 0,
+      preferredIntent: 'verify',
+      actionLabel: '審核',
+      reason: '需比對院級規定與教室容量',
+      consequence: '未核准將無法在教務系統開放選課',
+      nextStep: '確認實習助教與教室後簽核',
+    },
+    {
+      id: createId(schoolId, 'task-d', 2),
+      kind: 'group',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '獎助學金',
+      title: '研究生助學金名單覆核（四月批次）',
+      subtitle: '全系 37 筆 · 3 筆資料待補件',
+      priority: 1,
+      unreadCount: 3,
+      preferredIntent: 'read',
+      actionLabel: '開啟名單',
+      reason: '截止日期前須送出至學務處',
+      consequence: '延誤影響撥款時程',
+      nextStep: '聯絡導師補齊缺件並鎖定最終名單',
+    },
+    {
+      id: createId(schoolId, 'task-d', 3),
+      kind: 'assistant_queue',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '校務儀表板',
+      title: 'AI：選課熱門課程負載預警',
+      subtitle: '資料來源：本學期選課即時流量',
+      priority: 2,
+      unreadCount: 0,
+      preferredIntent: 'navigate',
+      actionLabel: '檢視摘要',
+      sourceRunId: `demo-dept-enroll-${schoolId}`,
+      reason: '可提前與教務協調加開班或分流',
+      consequence: '',
+      nextStep: '在助理對話檢視建議並轉寄相關單位',
+    },
+  ];
+}
+
+function buildAdminDemoInboxTasks(schoolId: string): InboxTask[] {
+  return [
+    {
+      id: createId(schoolId, 'task-a', 1),
+      kind: 'group',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '全校治理',
+      title: '身分匯入批次失敗（LDAP 同步）',
+      subtitle: '影響約 18 筆新進帳號',
+      priority: 0,
+      unreadCount: 1,
+      preferredIntent: 'read',
+      actionLabel: '查看錯誤日誌',
+      reason: '新進師生可能無法登入 SSO',
+      consequence: 'Help desk 工單量可能在今日上升',
+      nextStep: '排程重跑並手動修復例外帳號',
+    },
+    {
+      id: createId(schoolId, 'task-a', 2),
+      kind: 'assignment',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '課程認證',
+      title: '待審：開課計畫與教材版權附件',
+      subtitle: '6 門課排隊中 · 本週截止',
+      priority: 1,
+      dueAt: getDateOffset(4) as unknown as Date,
+      unreadCount: 0,
+      preferredIntent: 'verify',
+      actionLabel: '前往審驗',
+      reason: '未認證課程無法在次階段開放給學生端',
+      consequence: '',
+      nextStep: '於「學習」→ 課程認證完成抽查',
+    },
+    {
+      id: createId(schoolId, 'task-a', 3),
+      kind: 'assistant_queue',
+      groupId: createId(schoolId, 'grp', 0),
+      groupName: '資安與合規',
+      title: 'AI：異常登入與 API 流量摘要',
+      subtitle: '示範：可與實際監控服務對接',
+      priority: 2,
+      unreadCount: 0,
+      preferredIntent: 'navigate',
+      actionLabel: '檢視報告',
+      sourceRunId: `demo-admin-sec-${schoolId}`,
+      reason: '及早發現帳號盜用或爬蟲行為',
+      consequence: '',
+      nextStep: '在助理對話確認後再建立工單給資訊處',
+    },
+  ];
+}
+
+export function getDemoInboxTasks(userId: string, schoolId = 'tw-nchu'): InboxTask[] {
+  schoolId = normalizeDemoSchoolId(schoolId);
+  const persona = resolveDemoInboxPersona(userId);
+  switch (persona) {
+    case 'teacher':
+      return buildTeacherDemoInboxTasks(schoolId);
+    case 'staff':
+      return buildStaffDemoInboxTasks(schoolId);
+    case 'department':
+      return buildDepartmentDemoInboxTasks(schoolId);
+    case 'admin':
+      return buildAdminDemoInboxTasks(schoolId);
+    default:
+      return buildStudentDemoInboxTasks(schoolId);
+  }
 }
 
 // ===== Enrollments =====

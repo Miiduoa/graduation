@@ -68,6 +68,7 @@ export * from './puAuth';
 export * from './postLoginRoles';
 export * from './lms/quizScoring';
 export * from './lms/gradebookCompute';
+export * from './lms/gradePredictor';
 export * from './companion/spriteEngine';
 export * from './companion/gardenEngine';
 export * from './companion/achievements';
