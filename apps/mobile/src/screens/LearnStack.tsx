@@ -103,14 +103,12 @@ function GuardLearnAdminCourseVerify(props: any) {
 }
 
 function GuardedGradebook(props: any) {
-  // 學生：看到自己這門課的成績總覽（initialTab=grades 顯示個人加權）
-  // 教師：看到全班 gradebook（initialTab=gradebook）
-  // 這裡不再用 RouteGuard 擋學生；改成依角色顯示不同預設 tab，
-  // AcademicScreen 內已會依角色決定可看到哪些 row。
-  const isTeacher = (props.route?.params?.role ?? '') === 'teacher';
+  // 學生：預設成績分頁；授課身分（教師／系所／管理）預設進成績簿，與路由參數 role 脫鉤以免教授、系主管被誤判
+  const { isTeacher, isDepartmentHead, isAdmin } = usePermissions();
+  const openAsInstructor = isTeacher || isDepartmentHead || isAdmin;
   const mergedParams = {
     ...(props.route?.params ?? {}),
-    initialTab: (isTeacher ? 'gradebook' : 'grades') as 'gradebook' | 'grades',
+    initialTab: (openAsInstructor ? 'gradebook' : 'grades') as 'gradebook' | 'grades',
   };
   return <AcademicScreen {...props} route={{ ...props.route, params: mergedParams }} />;
 }
@@ -142,6 +140,14 @@ function guardCourseView(Component: React.ComponentType<any>) {
       </RouteGuard>
     );
   };
+}
+
+function GuardedTeacherGrading(props: any) {
+  return (
+    <RouteGuard requires={['courses.grade', 'courses.manage']}>
+      <TeacherGradingScreen {...props} />
+    </RouteGuard>
+  );
 }
 
 /**
@@ -351,7 +357,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="TeacherGrading"
-        component={guardCourseView(TeacherGradingScreen)}
+        component={GuardedTeacherGrading}
         options={{ title: '批改作業' }}
       />
       <Stack.Screen

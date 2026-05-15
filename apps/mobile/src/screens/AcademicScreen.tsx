@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
-import { useAuth } from '../state/auth';
+import { usePermissions } from '../hooks/usePermissions';
 
 import { GradesScreen } from './GradesScreen';
 import { CourseGradebookScreen } from './CourseGradebookScreen';
@@ -24,36 +24,72 @@ interface TabDef {
   key: TabKey;
   label: string;
   icon: string;
-  roles: string[];
 }
 
 const ALL_TABS: TabDef[] = [
-  { key: 'grades', label: '成績', icon: 'school-outline', roles: ['student', 'teacher', 'admin', 'staff', 'department', 'school'] },
-  { key: 'insights', label: 'AI 分析', icon: 'sparkles-outline', roles: ['student', 'teacher', 'admin', 'department', 'school'] },
-  { key: 'gradebook', label: '成績簿', icon: 'clipboard-outline', roles: ['teacher', 'admin', 'department', 'school'] },
-  { key: 'analytics', label: '學習分析', icon: 'analytics-outline', roles: ['teacher', 'admin', 'department', 'school'] },
+  { key: 'grades', label: '成績', icon: 'school-outline' },
+  { key: 'insights', label: 'AI 分析', icon: 'sparkles-outline' },
+  { key: 'gradebook', label: '成績簿', icon: 'clipboard-outline' },
+  { key: 'analytics', label: '學習分析', icon: 'analytics-outline' },
 ];
 
 export function AcademicScreen(props: Record<string, unknown>) {
   useThemeMode();
   const insets = useSafeAreaInsets();
-  const { profile } = useAuth();
-  const userRole = profile?.role ?? 'student';
+  const { can } = usePermissions();
 
-  const tabs = useMemo(
-    () => ALL_TABS.filter((t) => t.roles.includes(userRole)),
-    [userRole],
-  );
+  const tabs = useMemo(() => {
+    const out: TabDef[] = [];
+    if (can('courses.view')) {
+      out.push(ALL_TABS[0]);
+      out.push(ALL_TABS[1]);
+    }
+    if (can('courses.grade')) {
+      out.push(ALL_TABS[2]);
+    }
+    if (can('admin.analytics') || can('courses.manage')) {
+      out.push(ALL_TABS[3]);
+    }
+    return out;
+  }, [can]);
 
   const [activeTab, setActiveTab] = useState<TabKey>('grades');
 
   const route = (props as any)?.route;
   const initialTab = route?.params?.initialTab as TabKey | undefined;
   useEffect(() => {
+    if (tabs.length === 0) return;
+    if (!tabs.some((t) => t.key === activeTab)) {
+      setActiveTab(tabs[0].key);
+    }
+  }, [tabs, activeTab]);
+
+  useEffect(() => {
     if (initialTab && tabs.some((t) => t.key === initialTab)) {
       setActiveTab(initialTab);
     }
   }, [initialTab, tabs]);
+
+  if (tabs.length === 0) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.colors.bg, justifyContent: 'center', padding: 24 }}>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: theme.colors.text, textAlign: 'center' }}>
+          此身分無法開啟學業總覽
+        </Text>
+        <Text
+          style={{
+            marginTop: 10,
+            fontSize: 14,
+            color: theme.colors.textSecondary,
+            textAlign: 'center',
+            lineHeight: 21,
+          }}
+        >
+          需要「檢視課程工作區」（courses.view）等權限。若您是職員，請改用課綱查詢或校園服務入口。
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>

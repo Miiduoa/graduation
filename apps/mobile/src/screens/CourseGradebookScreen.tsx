@@ -14,7 +14,9 @@ import { canManageCourse, formatDateTime } from '../services/courseWorkspace';
 
 export function CourseGradebookScreen(props: any) {
   const nav = props?.navigation;
-  const routeGroupId = props?.route?.params?.groupId as string | undefined;
+  const routeGroupId = (props?.route?.params?.groupId ?? props?.route?.params?.courseId) as
+    | string
+    | undefined;
   const routeGroupName = props?.route?.params?.groupName as string | undefined;
   const auth = useAuth();
   const { school } = useSchool();

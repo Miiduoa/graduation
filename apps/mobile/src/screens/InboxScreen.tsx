@@ -9,6 +9,7 @@ import { useAsyncList } from '../hooks/useAsyncList';
 import { useDataSource } from '../hooks/useDataSource';
 import { useAuth } from '../state/auth';
 import { useSchool } from '../state/school';
+import { usePermissions } from '../hooks/usePermissions';
 import { useAmbientCues } from '../features/engagement';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
@@ -29,6 +30,7 @@ export function InboxScreen(props: any) {
   const insets = useSafeAreaInsets();
   const auth = useAuth();
   const { school } = useSchool();
+  const permissions = usePermissions();
   const ds = useDataSource();
   const roleMode = resolveRoleMode(auth.profile?.role, !!auth.user);
   const teachingMode = isTeachingRole(auth.profile?.role);
@@ -58,6 +60,52 @@ export function InboxScreen(props: any) {
     () => inboxTasks.map(toInboxItem).sort((a, b) => a.priority - b.priority),
     [inboxTasks],
   );
+
+  const emptyInbox = useMemo(() => {
+    const role = auth.profile?.role;
+    if (permissions.isAdmin) {
+      return {
+        title: '目前沒有全校治理待辦',
+        description:
+          '帳號同步、課程認證與合規項目會出現在此。您仍可從「學習」分頁開啟管理儀表板與認證佇列。',
+        actionLabel: '開啟學習／管理首頁',
+        onPress: () => navigateToCourseHome(nav, role),
+      };
+    }
+    if (permissions.isDepartmentHead) {
+      return {
+        title: '目前沒有系所簽核待辦',
+        description:
+          '課綱異動、獎助名單與院級表單會集中顯示。教學面的待批改項目也會一併出現在同一張清單。',
+        actionLabel: '回到審核／教學首頁',
+        onPress: () => navigateToCourseHome(nav, role),
+      };
+    }
+    if (permissions.isTeacher) {
+      return {
+        title: '目前沒有教學待辦',
+        description:
+          '待批改、測驗成績公開、討論區待回覆與課堂 LIVE 會出現在這裡。暫時清空代表本輪工作已完成。',
+        actionLabel: '回到教學首頁',
+        onPress: () => navigateToCourseHome(nav, role),
+      };
+    }
+    if (permissions.isStaff) {
+      return {
+        title: '目前沒有服務／工單待辦',
+        description:
+          '總務、場務、採購簽核與場地審議會出現在此工作台。可改從「學習」進入職員服務中樞。',
+        actionLabel: '開啟職員首頁',
+        onPress: () => navigateToCourseHome(nav, role),
+      };
+    }
+    return {
+      title: '目前沒有待辦項目',
+      description: '一切就緒，你可以回到課程或探索其他功能。',
+      actionLabel: '打開課程',
+      onPress: () => navigateToCourseHome(nav, role),
+    };
+  }, [auth.profile?.role, nav, permissions.isAdmin, permissions.isDepartmentHead, permissions.isStaff, permissions.isTeacher]);
   const {
     cue: ambientCue,
     dismissCue: dismissAmbientCue,
@@ -322,10 +370,10 @@ export function InboxScreen(props: any) {
 
         {auth.user && inboxItems.length === 0 ? (
           <CompletionState
-            title="目前沒有待辦項目"
-            description="一切就緒，你可以回到課程或探索其他功能。"
-            actionLabel="打開課程"
-            onPress={() => navigateToCourseHome(nav, auth.profile?.role)}
+            title={emptyInbox.title}
+            description={emptyInbox.description}
+            actionLabel={emptyInbox.actionLabel}
+            onPress={emptyInbox.onPress}
           />
         ) : null}
 

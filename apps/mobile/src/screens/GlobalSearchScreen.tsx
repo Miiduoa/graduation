@@ -14,18 +14,21 @@ import { useAuth } from '../state/auth';
 import { useSearchHistory, POPULAR_SEARCHES } from '../state/searchHistory';
 import { useDataSource } from '../hooks/useDataSource';
 import { useAsyncList } from '../hooks/useAsyncList';
+import { usePermissions } from '../hooks/usePermissions';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme, softShadowStyle } from '../ui/theme';
 import { formatDateTime } from '../utils/format';
+import { navigateToCourseScreen } from '../utils/courseNavigation';
 import { getDb } from '../firebase';
 import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 
-type SearchCategory = 'all' | 'announcements' | 'events' | 'pois' | 'menus' | 'groups';
+type SearchCategory = 'all' | 'announcements' | 'events' | 'courses' | 'pois' | 'menus' | 'groups';
 
 const CATEGORY_OPTIONS = [
   { key: 'all', label: '全部' },
   { key: 'announcements', label: '公告' },
   { key: 'events', label: '活動' },
+  { key: 'courses', label: '課程' },
   { key: 'pois', label: '地點' },
   { key: 'menus', label: '餐點' },
   { key: 'groups', label: '群組貼文' },
@@ -33,7 +36,7 @@ const CATEGORY_OPTIONS = [
 
 type SearchResult = {
   id: string;
-  type: 'announcement' | 'event' | 'poi' | 'menu' | 'post' | 'assignment';
+  type: 'announcement' | 'event' | 'course' | 'poi' | 'menu' | 'post' | 'assignment';
   title: string;
   subtitle: string;
   highlight?: string;
@@ -41,10 +44,17 @@ type SearchResult = {
   groupId?: string;
 };
 
+/** 示範／本地課程 id 尾碼 `-crs-N` 對應課程工作區 `－grp-N`，供 CourseHub 導向。 */
+function demoCourseIdToGroupId(courseId: string): string | null {
+  if (!/-crs-\d+$/.test(courseId)) return null;
+  return courseId.replace(/-crs-(\d+)$/, '-grp-$1');
+}
+
 export function GlobalSearchScreen(props: any) {
   const nav = props?.navigation;
   const { school } = useSchool();
   const auth = useAuth();
+  const { can } = usePermissions();
   const searchHistory = useSearchHistory();
   const ds = useDataSource();
   const db = getDb();
@@ -69,6 +79,10 @@ export function GlobalSearchScreen(props: any) {
   );
   const { items: menus } = useAsyncList<any>(
     () => ds.listMenus(school.id),
+    [auth.user?.uid, ds, school.id],
+  );
+  const { items: courses } = useAsyncList<any>(
+    () => ds.listCourses(school.id),
     [auth.user?.uid, ds, school.id],
   );
 
@@ -177,6 +191,25 @@ export function GlobalSearchScreen(props: any) {
       });
     }
 
+    if (category === 'all' || category === 'courses') {
+      courses.forEach((c) => {
+        const text =
+          `${c.code ?? ''} ${c.name ?? ''} ${c.instructor ?? ''} ${c.teacher ?? ''} ${c.department ?? ''} ${c.description ?? ''}`.toLowerCase();
+        if (text.includes(q)) {
+          const loc = c.schedule?.[0]?.location ?? c.location ?? '';
+          allResults.push({
+            id: c.id,
+            type: 'course',
+            title: c.code ? `${c.code} · ${c.name ?? '課程'}` : (c.name ?? '(無課名)'),
+            subtitle: [c.instructor ?? c.teacher, c.semester, loc].filter(Boolean).join(' · '),
+            highlight: c.description?.substring(0, 100),
+            data: c,
+            groupId: demoCourseIdToGroupId(String(c.id)) ?? undefined,
+          });
+        }
+      });
+    }
+
     if (category === 'all' || category === 'pois') {
       pois.forEach((p) => {
         const text = `${p.name ?? ''} ${p.description ?? ''} ${p.category ?? ''}`.toLowerCase();
@@ -242,7 +275,7 @@ export function GlobalSearchScreen(props: any) {
     }
 
     return allResults.slice(0, 60);
-  }, [queryText, category, announcements, events, pois, menus, groupPosts, groupAssignments]);
+  }, [queryText, category, announcements, events, courses, pois, menus, groupPosts, groupAssignments]);
 
   const handleSearch = useCallback(
     (q: string) => {
@@ -266,6 +299,18 @@ export function GlobalSearchScreen(props: any) {
       case 'event':
         nav?.navigate?.('Today', { screen: '活動詳情', params: { id: result.id } });
         break;
+      case 'course': {
+        const gId = result.groupId ?? demoCourseIdToGroupId(String(result.data?.id ?? ''));
+        if (can('courses.view') && gId) {
+          navigateToCourseScreen(nav, auth.profile?.role, 'CourseHub', {
+            groupId: gId,
+            courseName: result.data?.name,
+          });
+        } else {
+          nav?.navigate?.('學習', { screen: 'CourseCatalog' });
+        }
+        break;
+      }
       case 'poi':
         nav?.navigate?.('校園', { screen: 'PoiDetail', params: { id: result.id } });
         break;
@@ -299,6 +344,8 @@ export function GlobalSearchScreen(props: any) {
         return 'megaphone-outline';
       case 'event':
         return 'calendar-outline';
+      case 'course':
+        return 'school-outline';
       case 'poi':
         return 'location-outline';
       case 'menu':
@@ -318,6 +365,8 @@ export function GlobalSearchScreen(props: any) {
         return theme.colors.accent;
       case 'event':
         return theme.colors.success;
+      case 'course':
+        return '#6366F1';
       case 'poi':
         return '#F59E0B';
       case 'menu':
@@ -337,6 +386,8 @@ export function GlobalSearchScreen(props: any) {
         return '公告';
       case 'event':
         return '活動';
+      case 'course':
+        return '課程';
       case 'poi':
         return '地點';
       case 'menu':
@@ -377,7 +428,7 @@ export function GlobalSearchScreen(props: any) {
           <TextInput
             value={queryText}
             onChangeText={setQueryText}
-            placeholder="搜尋公告、活動、地點、餐點、群組..."
+            placeholder="搜尋公告、活動、課程、地點、餐點、群組…"
             placeholderTextColor={theme.colors.muted}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
@@ -516,7 +567,7 @@ export function GlobalSearchScreen(props: any) {
               <EmptyListPlaceholder
                 icon="search-outline"
                 title="找不到結果"
-                subtitle={`沒有符合「${queryText}」的內容`}
+                subtitle={`沒有符合「${queryText}」的內容。可切換上方「課程」或試試課名、教師姓名、課號。`}
               />
             ) : (
               results.map((result) => (
