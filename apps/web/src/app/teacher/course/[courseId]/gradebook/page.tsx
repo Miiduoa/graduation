@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
+import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 import {
   computeGradebook,
   type GradeItem,
@@ -28,6 +29,9 @@ const STUDENTS: StudentGradeInput[] = [
 ];
 
 export default function TeacherGradebookPage({ params }: { params: { courseId: string } }) {
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
+  const isTaView = demoRole === 'ta';
   const [published, setPublished] = useState(false);
   const computed = useMemo(() => computeGradebook(ITEMS, STUDENTS, { published }), [published]);
 
@@ -37,25 +41,61 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
         <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
           <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
         </nav>
-        <h1 style={{ fontSize: 28, fontWeight: 700 }}>成績簿</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 700 }}>成績簿{isTaView ? '（批改視角）' : ''}</h1>
         <p style={{ color: '#6b7280', marginBottom: 16 }}>
           班級平均 {computed.classAverage ?? '—'} 分・通過率 {computed.passRate ?? '—'}%
         </p>
 
-        <button
-          style={{
-            padding: '10px 16px',
-            borderRadius: 8,
-            background: published ? '#dc2626' : '#16a34a',
-            color: '#fff',
-            border: 'none',
-            cursor: 'pointer',
-            marginBottom: 16,
-          }}
-          onClick={() => setPublished((p) => !p)}
-        >
-          {published ? '撤回發布' : '🚀 發布最終成績'}
-        </button>
+        {/* TA 提示 */}
+        {isTaView && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: 8,
+              background: 'rgba(124,58,237,0.10)',
+              border: '1px solid #7C3AED',
+              fontSize: 13,
+              color: '#5B21B6',
+              marginBottom: 16,
+            }}
+          >
+            🧑‍💻 <strong>助教 TA 視角</strong>：可查看成績明細、協助批改，但<strong>無法發布或撤回成績</strong>（授課教師專用）。
+          </div>
+        )}
+
+        {/* 發布按鈕：TA 不可用 */}
+        {caps.canPublishGrades ? (
+          <button
+            style={{
+              padding: '10px 16px',
+              borderRadius: 8,
+              background: published ? '#dc2626' : '#16a34a',
+              color: '#fff',
+              border: 'none',
+              cursor: 'pointer',
+              marginBottom: 16,
+            }}
+            onClick={() => setPublished((p) => !p)}
+          >
+            {published ? '撤回發布' : '🚀 發布最終成績'}
+          </button>
+        ) : (
+          <button
+            disabled
+            title="發布成績為授課教師專用"
+            style={{
+              padding: '10px 16px',
+              borderRadius: 8,
+              background: '#e5e7eb',
+              color: '#9ca3af',
+              border: 'none',
+              cursor: 'not-allowed',
+              marginBottom: 16,
+            }}
+          >
+            🔒 發布最終成績（教師專用）
+          </button>
+        )}
 
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>

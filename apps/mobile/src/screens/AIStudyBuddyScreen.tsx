@@ -24,9 +24,13 @@ import {
 
 import {
   matchStudyBuddies,
+  findInstantHelp,
+  suggestStudyTeam,
   DEMO_BUDDY_CANDIDATES,
   DEMO_ME_PROFILE,
   type BuddyMatchResult,
+  type InstantHelpMatch,
+  type StudyTeamSuggestion,
 } from '../services/aiStudyBuddyMatcher';
 import { DEMO_COURSES } from '../data/demoCoursesMock';
 import { useAuth } from '../state/auth';
@@ -36,11 +40,18 @@ const courseNameById = (id: number): string => {
   return found?.name ?? `課程 #${id}`;
 };
 
+type BuddyMode = 'semester' | 'instant' | 'team';
+
 export default function AIStudyBuddyScreen() {
   const auth = useAuth();
   const bottomPad = useTabBarContentBottomPadding();
+  const [mode, setMode] = useState<BuddyMode>('semester');
   const [strictMode, setStrictMode] = useState<boolean>(false);
   const [invitedSet, setInvitedSet] = useState<Set<string>>(new Set());
+  // 即時求助：選一門目前卡關的課（預設第一門共修課）
+  const [helpCourseId, setHelpCourseId] = useState<number>(
+    DEMO_ME_PROFILE.enrolledCourseIds[0] ?? 71378,
+  );
 
   const matches = useMemo(() => {
     return matchStudyBuddies(DEMO_ME_PROFILE, DEMO_BUDDY_CANDIDATES, {
@@ -49,6 +60,22 @@ export default function AIStudyBuddyScreen() {
       requireScheduleOverlap: strictMode,
     });
   }, [strictMode]);
+
+  const instantMatches: InstantHelpMatch[] = useMemo(() => {
+    return findInstantHelp({
+      courseId: helpCourseId,
+      myStrength: DEMO_ME_PROFILE.courseStrength[helpCourseId],
+      candidates: DEMO_BUDDY_CANDIDATES,
+      topN: 3,
+    });
+  }, [helpCourseId]);
+
+  const teamSuggestion: StudyTeamSuggestion = useMemo(() => {
+    return suggestStudyTeam(DEMO_ME_PROFILE, DEMO_BUDDY_CANDIDATES, {
+      teamSize: 3,
+      forCourseId: helpCourseId,
+    });
+  }, [helpCourseId]);
 
   const avgScore = useMemo(() => {
     if (matches.length === 0) return 0;
@@ -79,6 +106,52 @@ export default function AIStudyBuddyScreen() {
           summary="同班同學 ≠ 合適學伴。AI 從修課、強弱、空堂、學習風格四維給你 ranked 推薦，並告訴你為什麼。"
         />
 
+        {/* 3 模式切換 */}
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: theme.space.xs,
+            marginBottom: theme.space.md,
+          }}
+        >
+          {(
+            [
+              { key: 'semester', emoji: '📅', label: '學期長期' },
+              { key: 'instant', emoji: '🆘', label: '即時求助' },
+              { key: 'team', emoji: '👥', label: '組讀書會' },
+            ] as Array<{ key: BuddyMode; emoji: string; label: string }>
+          ).map((opt) => {
+            const active = mode === opt.key;
+            return (
+              <Pressable
+                key={opt.key}
+                onPress={() => setMode(opt.key)}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  paddingVertical: theme.space.sm,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: active ? theme.colors.text : theme.colors.surface,
+                  borderWidth: StyleSheet.hairlineWidth,
+                  borderColor: active ? theme.colors.text : theme.colors.border,
+                  alignItems: 'center',
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Text
+                  style={{
+                    color: active ? theme.colors.bg : theme.colors.text,
+                    fontWeight: '700',
+                    fontSize: 12,
+                  }}
+                >
+                  {opt.emoji} {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {mode === 'semester' && (
         <CockpitMetricRow>
           <CockpitMetricChip label="候選人" value={DEMO_BUDDY_CANDIDATES.length} />
           <CockpitMetricChip
@@ -96,8 +169,10 @@ export default function AIStudyBuddyScreen() {
             value={strictMode ? '開' : '關'}
           />
         </CockpitMetricRow>
+        )}
 
-        {/* 嚴格 toggle */}
+        {/* 嚴格 toggle — 只在 semester mode 顯示 */}
+        {mode === 'semester' && (
         <Pressable
           onPress={() => setStrictMode((v) => !v)}
           style={({ pressed }) => ({
@@ -117,8 +192,10 @@ export default function AIStudyBuddyScreen() {
             點一下切換。開了嚴格 → 沒空堂重疊的人會被過濾。
           </Text>
         </Pressable>
+        )}
 
-        {/* 4 維評分說明卡 */}
+        {/* 4 維評分說明卡 — 只在 semester mode 顯示 */}
+        {mode === 'semester' && (
         <View
           style={{
             padding: theme.space.md,
@@ -134,7 +211,233 @@ export default function AIStudyBuddyScreen() {
             🎯 共同修課 30% · 🔄 強弱互補 35% · ⏰ 空堂重疊 20% · 🧠 學習風格 15%
           </Text>
         </View>
+        )}
 
+        {/* ── INSTANT 模式 UI ── */}
+        {mode === 'instant' && (
+          <>
+            {/* 課程選擇 */}
+            <View
+              style={{
+                marginBottom: theme.space.md,
+                padding: theme.space.md,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.surface,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: theme.colors.border,
+              }}
+            >
+              <Text style={{ fontSize: 12, color: theme.colors.muted, marginBottom: theme.space.xs }}>
+                我卡關的課程
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.space.xs }}>
+                {DEMO_ME_PROFILE.enrolledCourseIds.map((cid) => {
+                  const active = cid === helpCourseId;
+                  return (
+                    <Pressable
+                      key={cid}
+                      onPress={() => setHelpCourseId(cid)}
+                      style={({ pressed }) => ({
+                        paddingHorizontal: theme.space.sm + 2,
+                        paddingVertical: theme.space.xs + 2,
+                        borderRadius: theme.radius.full,
+                        backgroundColor: active ? theme.colors.text : theme.colors.surfaceMuted,
+                        opacity: pressed ? 0.8 : 1,
+                      })}
+                    >
+                      <Text style={{ color: active ? theme.colors.bg : theme.colors.text, fontSize: 12, fontWeight: '600' }}>
+                        {courseNameById(cid)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <CockpitSection
+              label={`🆘 線上能幫你的人（${courseNameById(helpCourseId)}）`}
+              count={instantMatches.length}
+              open
+              onToggle={() => undefined}
+            >
+              {instantMatches.length === 0 ? (
+                <View style={{ padding: theme.space.md }}>
+                  <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
+                    目前沒有「線上 + 該科比你強」的學伴。
+                  </Text>
+                  <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
+                    建議：發到「跨校匿名問答」或先 self study 30 分鐘再求助。
+                  </Text>
+                </View>
+              ) : (
+                instantMatches.map((h) => (
+                  <View
+                    key={h.buddyUid}
+                    style={{
+                      marginBottom: theme.space.sm,
+                      padding: theme.space.md,
+                      borderRadius: theme.radius.lg,
+                      backgroundColor: theme.colors.surface,
+                      borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: theme.colors.border,
+                      borderLeftWidth: 4,
+                      borderLeftColor: theme.colors.success,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text }}>
+                          🟢 {h.buddyName}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: theme.colors.muted, marginTop: 2 }}>
+                          約 {h.expectedResponseMinutes} 分鐘內回 · 該科強度 {h.theirStrength}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => {
+                          Alert.alert(
+                            '求助已送出',
+                            `已送訊息給 ${h.buddyName}：\n\n「${courseNameById(helpCourseId)} 卡關，可以問你嗎？」`,
+                          );
+                        }}
+                        style={({ pressed }) => ({
+                          paddingHorizontal: theme.space.md,
+                          paddingVertical: theme.space.xs + 2,
+                          borderRadius: theme.radius.full,
+                          backgroundColor: theme.colors.success,
+                          opacity: pressed ? 0.85 : 1,
+                        })}
+                      >
+                        <Text style={{ color: theme.colors.onAccent ?? '#fff', fontSize: 12, fontWeight: '700' }}>
+                          🆘 求助
+                        </Text>
+                      </Pressable>
+                    </View>
+                    {h.reasons.map((r, i) => (
+                      <Text key={i} style={{ fontSize: 12, color: theme.colors.text, marginTop: 2 }}>
+                        ✓ {r}
+                      </Text>
+                    ))}
+                  </View>
+                ))
+              )}
+            </CockpitSection>
+          </>
+        )}
+
+        {/* ── TEAM 模式 UI ── */}
+        {mode === 'team' && (
+          <>
+            <View
+              style={{
+                marginBottom: theme.space.md,
+                padding: theme.space.md,
+                borderRadius: theme.radius.lg,
+                backgroundColor: theme.colors.accentSoft,
+              }}
+            >
+              <Text style={{ fontSize: 12, color: theme.colors.muted, marginBottom: 4 }}>
+                AI 建議的 3 人讀書會（含角色分配）
+              </Text>
+              <Text style={{ fontSize: 13, color: theme.colors.text, lineHeight: 18 }}>
+                配 1 解題王 + 1 筆記王 + 1 督促者 / 主持人 = 不會散
+              </Text>
+              <View style={{ marginTop: theme.space.sm, flexDirection: 'row', alignItems: 'center', gap: theme.space.xs }}>
+                <View
+                  style={{
+                    paddingHorizontal: theme.space.sm,
+                    paddingVertical: theme.space.xs,
+                    borderRadius: theme.radius.full,
+                    backgroundColor: theme.colors.success + '22',
+                  }}
+                >
+                  <Text style={{ color: theme.colors.success, fontSize: 12, fontWeight: '700' }}>
+                    Synergy {teamSuggestion.synergyScore}
+                  </Text>
+                </View>
+                {teamSuggestion.synergyReasons.map((r, i) => (
+                  <Text key={i} style={{ color: theme.colors.text, fontSize: 11 }}>
+                    · {r}
+                  </Text>
+                ))}
+              </View>
+            </View>
+
+            <CockpitSection
+              label={`👥 建議組合（${teamSuggestion.members.length} 人）`}
+              count={teamSuggestion.members.length}
+              open
+              onToggle={() => undefined}
+            >
+              {teamSuggestion.members.length === 0 ? (
+                <Text style={{ color: theme.colors.muted, fontSize: 13, padding: theme.space.md }}>
+                  目前候選人不足以組成讀書會。
+                </Text>
+              ) : (
+                teamSuggestion.members.map((m) => (
+                  <View
+                    key={m.buddyUid}
+                    style={{
+                      marginBottom: theme.space.sm,
+                      padding: theme.space.md,
+                      borderRadius: theme.radius.lg,
+                      backgroundColor: theme.colors.surface,
+                      borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: theme.colors.border,
+                      borderLeftWidth: 4,
+                      borderLeftColor: theme.colors.accent,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text }}>
+                          {m.buddyName}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: theme.colors.muted, marginTop: 2 }}>
+                          {m.reasoning}
+                        </Text>
+                      </View>
+                      <View
+                        style={{
+                          paddingHorizontal: theme.space.sm,
+                          paddingVertical: theme.space.xs + 2,
+                          borderRadius: theme.radius.full,
+                          backgroundColor: theme.colors.accent + '22',
+                        }}
+                      >
+                        <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>
+                          {m.role}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                ))
+              )}
+              <Pressable
+                onPress={() => {
+                  Alert.alert(
+                    '邀請組讀書會',
+                    `將同時邀請 ${teamSuggestion.members.map((m) => m.buddyName).join('、')} 一起組讀書會。\n\n（demo 模式：實際版會建群 + 同步到行事曆）`,
+                  );
+                }}
+                style={({ pressed }) => ({
+                  marginTop: theme.space.sm,
+                  paddingVertical: theme.space.sm,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.text,
+                  alignItems: 'center',
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Text style={{ color: theme.colors.bg, fontWeight: '700', fontSize: 13 }}>
+                  📩 邀請整組
+                </Text>
+              </Pressable>
+            </CockpitSection>
+          </>
+        )}
+
+        {mode === 'semester' && (
         <CockpitSection label="🏆 配對結果（依分數排序）" count={matches.length} open onToggle={() => undefined}>
           {matches.length === 0 ? (
             <Text style={{ color: theme.colors.muted, fontSize: 13, padding: theme.space.md }}>
@@ -304,6 +607,7 @@ export default function AIStudyBuddyScreen() {
             })
           )}
         </CockpitSection>
+        )}
 
         <Text
           style={{

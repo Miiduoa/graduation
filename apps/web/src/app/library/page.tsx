@@ -4,6 +4,7 @@ import { useState, type CSSProperties } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { useToast } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 
 interface BorrowedBook {
   id: string;
@@ -64,7 +65,9 @@ export default function LibraryPage(props: {
   const [activeTab, setActiveTab] = useState<Tab>('borrow');
   const [searchQuery, setSearchQuery] = useState('');
   const [renewedIds, setRenewedIds] = useState<Set<string>>(new Set());
-  const { success } = useToast();
+  const { success, info } = useToast();
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
 
   const totalAvailable = DEFAULT_ZONES.reduce((sum, z) => sum + (z.total - z.occupied), 0);
   const urgentBooks = DEFAULT_BORROWED.filter((b) => b.daysLeft <= 3).length;
@@ -189,6 +192,16 @@ export default function LibraryPage(props: {
                         <button
                           type="button"
                           onClick={() => {
+                            if (!caps.canBorrowBooks) {
+                              info(
+                                demoRole === 'alumni'
+                                  ? '校友身份僅可瀏覽，無法續借書籍'
+                                  : demoRole === 'guest'
+                                    ? '請先登入後才能續借'
+                                    : '你的身份無法執行此動作',
+                              );
+                              return;
+                            }
                             if (renewedIds.has(book.id)) return;
                             setRenewedIds((prev) => {
                               const next = new Set(prev);
@@ -198,18 +211,32 @@ export default function LibraryPage(props: {
                             success(`已送出續借：${book.title}`);
                           }}
                           disabled={renewedIds.has(book.id)}
+                          title={
+                            !caps.canBorrowBooks
+                              ? '此身份無法續借'
+                              : undefined
+                          }
                           style={{
                             fontSize: 11,
-                            color: renewedIds.has(book.id) ? 'var(--success)' : 'var(--brand)',
+                            color: !caps.canBorrowBooks
+                              ? 'var(--muted)'
+                              : renewedIds.has(book.id)
+                                ? 'var(--success)'
+                                : 'var(--brand)',
                             fontWeight: 600,
                             background: 'none',
                             border: 'none',
                             cursor: renewedIds.has(book.id) ? 'default' : 'pointer',
                             padding: 0,
                             marginTop: 2,
+                            opacity: !caps.canBorrowBooks ? 0.6 : 1,
                           }}
                         >
-                          {renewedIds.has(book.id) ? '✓ 已續借' : '續借'}
+                          {!caps.canBorrowBooks
+                            ? '🔒 無法續借'
+                            : renewedIds.has(book.id)
+                              ? '✓ 已續借'
+                              : '續借'}
                         </button>
                       )}
                     </div>

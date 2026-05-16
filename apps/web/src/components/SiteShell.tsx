@@ -20,6 +20,8 @@ const NAV_ICONS: Record<string, string> = {
   '/library': '📚',
   '/search': '🔍',
   '/settings': '⚙',
+  '/credit-planner': '📊',
+  '/ai-assistant': '🤖',
 };
 
 function SiteShellInner(props: {
@@ -45,6 +47,8 @@ function SiteShellInner(props: {
     { href: '/announcements', label: '收件匣', group: 'primary' as const },
     { href: '/profile', label: '我的', group: 'primary' as const },
     { href: '/timetable', label: '課表', group: 'secondary' as const },
+    { href: '/credit-planner', label: '學分試算', group: 'secondary' as const },
+    { href: '/ai-assistant', label: 'AI 助理', group: 'secondary' as const },
     { href: '/cafeteria', label: '餐廳', group: 'secondary' as const },
     { href: '/bus', label: '公車', group: 'secondary' as const },
     { href: '/library', label: '圖書館', group: 'secondary' as const },
@@ -57,8 +61,8 @@ function SiteShellInner(props: {
   const mobileNav = [
     { href: '/', label: 'Today', icon: '☀️' },
     { href: '/groups', label: '課程', icon: '🎓' },
-    { href: '/map', label: '校園', icon: '🗺️' },
-    { href: '/announcements', label: '收件匣', icon: '📥' },
+    { href: '/credit-planner', label: '學分', icon: '📊' },
+    { href: '/ai-assistant', label: 'AI', icon: '🤖' },
     { href: '/profile', label: '我的', icon: '👤' },
   ];
 

@@ -23,7 +23,11 @@ export function DemoRolePill() {
   const searchParams = useSearchParams();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    // 標記 client 端已掛載，避免 SSR / hydration mismatch
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   // 點外面關閉
   useEffect(() => {

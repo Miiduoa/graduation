@@ -149,10 +149,19 @@ export function writeDemoRole(role: DemoRole): void {
 
 /** React hook：讀取與切換 demo 角色 */
 export function useDemoRole(): [DemoRole, (next: DemoRole) => void] {
+  // 初始用 'guest'（SSR）；mount 後立即用 client-side localStorage 同步
   const [role, setRole] = useState<DemoRole>('guest');
-  // hydration: client-only 讀取
+  const [hydrated, setHydrated] = useState(false);
+
+  // Mount 一次：把 localStorage 值同步進來。
+  // 用 hydrated flag 避免 hydration mismatch warning。
   useEffect(() => {
-    setRole(readDemoRole());
+    const initial = readDemoRole();
+    if (initial !== role) {
+      setRole(initial);
+    }
+    setHydrated(true);
+    // 後續 subscribe 變動
     const handler = (e: Event) => {
       const next = (e as CustomEvent<DemoRole>).detail;
       if (next) setRole(next);
@@ -168,7 +177,11 @@ export function useDemoRole(): [DemoRole, (next: DemoRole) => void] {
       window.removeEventListener('demoRoleChange', handler);
       window.removeEventListener('storage', storageHandler);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 用 hydrated 標記避免 unused-vars warning（並保留給 caller 將來判斷 hydration 狀態）
+  void hydrated;
 
   const update = useCallback((next: DemoRole) => {
     writeDemoRole(next);

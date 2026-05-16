@@ -7,6 +7,7 @@ import { SiteShell } from '@/components/SiteShell';
 import { fetchCourseWorkspace, isFirebaseConfigured, type CourseWorkspace } from '@/lib/firebase';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { getDemoCourseById, getDemoCourseWorkspace } from '@/lib/demoData';
+import { useDemoRole } from '@/lib/demoRole';
 
 const EMPTY_WORKSPACE: CourseWorkspace = {
   course: null,
@@ -35,6 +36,8 @@ export default function CoursePage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const [demoRole] = useDemoRole();
+  const isReadOnlyRole = demoRole === 'alumni' || demoRole === 'guest';
   const [workspace, setWorkspace] = useState<CourseWorkspace>(EMPTY_WORKSPACE);
   const [loading, setLoading] = useState(true);
   const [usingDemo, setUsingDemo] = useState(!isFirebaseConfigured());
@@ -90,6 +93,23 @@ export default function CoursePage(props: {
       schoolName={schoolName}
     >
       <div className="pageStack">
+        {/* 校友 / 訪客：課程為選課學生專屬，唯讀提示 */}
+        {isReadOnlyRole && (
+          <div
+            className="card"
+            style={{
+              padding: '12px 16px',
+              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(0,122,255,0.08)',
+              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#007AFF'}`,
+              fontSize: 13,
+            }}
+          >
+            {demoRole === 'alumni' ? '🎓' : '👀'}{' '}
+            <strong>{demoRole === 'alumni' ? '校友身份' : '訪客身份'}</strong>
+            {' '}· 課程空間僅供選課學生使用，{demoRole === 'alumni' ? '校友' : '訪客'}以唯讀方式瀏覽示範內容，無法提交作業或參加測驗。
+          </div>
+        )}
+
         {usingDemo ? (
           <div
             className="card"
@@ -157,14 +177,24 @@ export default function CoursePage(props: {
             <span className="pill subtle">{workspace.course?.memberCount ?? 0} 位成員</span>
             <span className="pill subtle">{summary.publishedGrades} 筆已發布成績</span>
           </div>
-          <Link
-            href={`/teacher/course/${props.params.courseId}${q}`}
-            className="btn primary"
-            title="切換到教師端，可管理教材、點名、成績冊與題庫"
-            style={{ fontWeight: 700 }}
-          >
-            🧑‍🏫 以教師身份檢視
-          </Link>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`幫我分析「${workspace.course?.name ?? getDemoCourseById(props.params.courseId)?.name ?? '這門課'}」這門課：我目前的學分缺口適合選修嗎？有哪些注意事項？`)}`}
+              className="btn"
+              title="請 AI 助理分析這門課的選修建議"
+              style={{ fontWeight: 600 }}
+            >
+              🤖 詢問 AI
+            </Link>
+            <Link
+              href={`/teacher/course/${props.params.courseId}${q}`}
+              className="btn primary"
+              title="切換到教師端，可管理教材、點名、成績冊與題庫"
+              style={{ fontWeight: 700 }}
+            >
+              🧑‍🏫 以教師身份檢視
+            </Link>
+          </div>
         </div>
 
         <div className="pageGrid" style={{ gridTemplateColumns: '1.2fr 0.8fr', gap: 16 }}>
