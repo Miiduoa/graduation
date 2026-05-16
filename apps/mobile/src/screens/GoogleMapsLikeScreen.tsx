@@ -26,7 +26,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { WebView } from 'react-native-webview';
-import * as Speech from 'expo-speech';
 import { PuWebView } from '../ui/PuWebView';
 import { theme } from '../ui/theme';
 import { analytics } from '../services/analytics';
@@ -444,7 +443,7 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
   const endNavigation = useCallback(() => {
     setNavMode(null);
     postCmd({ type: 'setRoute', coords: [] });
-    Speech.stop();
+    stopSpeech();
   }, [postCmd]);
 
   // ═══════════════════════════════════════════════════
@@ -1132,14 +1131,23 @@ function iconForInstruction(instr: string): any {
   return 'arrow-up-outline';
 }
 
+// 語音播報（軟相依 expo-speech；模組不存在時靜默退化）
 function speak(text: string) {
   try {
-    Speech.stop();
-    Speech.speak(text, {
-      language: 'zh-TW',
-      pitch: 1.0,
-      rate: 1.0,
-    });
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Speech = require('expo-speech');
+    Speech.stop?.();
+    Speech.speak?.(text, { language: 'zh-TW', pitch: 1.0, rate: 1.0 });
+  } catch {
+    // expo-speech 不可用 — 視為無語音裝置，跳過播報
+  }
+}
+
+function stopSpeech() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Speech = require('expo-speech');
+    Speech.stop?.();
   } catch {}
 }
 

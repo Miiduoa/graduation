@@ -14,6 +14,7 @@ import {
   type DemoAnnouncement,
 } from '@/lib/demoData';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
+import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 
 type FilterCategory = 'all' | 'academic' | 'event' | 'general';
 type AnnouncementView = 'all' | 'important' | 'today';
@@ -53,6 +54,8 @@ export default function AnnouncementsPage(props: {
     schoolId: props.searchParams?.schoolId,
   });
   const { schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<FilterCategory>('all');
   const [activeView, setActiveView] = useState<AnnouncementView>('all');
@@ -256,6 +259,49 @@ export default function AnnouncementsPage(props: {
               </button>
             </div>
           </div>
+
+          {/* 發布權限：教師 / 系主任 / 管理員可以發布；系主任 / 管理員可審核 */}
+          {(caps.canPublishAnnouncements || caps.canApproveAnnouncements) && (
+            <div
+              style={{
+                marginTop: 14,
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                paddingTop: 14,
+                borderTop: '1px solid var(--border)',
+              }}
+            >
+              {caps.canPublishAnnouncements && (
+                <button
+                  type="button"
+                  className="btn primary"
+                  onClick={() =>
+                    success(
+                      demoRole === 'teacher'
+                        ? '已開啟「發布課程公告」表單（demo）'
+                        : demoRole === 'department_head'
+                          ? '已開啟「發布系所公告」表單（demo）'
+                          : '已開啟「發布全校公告」表單（demo）',
+                    )
+                  }
+                  style={{ fontSize: 13 }}
+                >
+                  ＋{' '}
+                  {demoRole === 'teacher'
+                    ? '發布課程公告'
+                    : demoRole === 'department_head'
+                      ? '發布系所公告'
+                      : '發布公告'}
+                </button>
+              )}
+              {caps.canApproveAnnouncements && (
+                <a href={`/admin${q}`} className="btn" style={{ fontSize: 13 }}>
+                  📥 公告審核佇列
+                </a>
+              )}
+            </div>
+          )}
         </div>
 
         {loading && (

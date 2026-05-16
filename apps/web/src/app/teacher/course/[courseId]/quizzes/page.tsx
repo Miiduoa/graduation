@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
+import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 
 type QuizRow = {
   id: string;
@@ -25,9 +26,14 @@ const MOCK: QuizRow[] = [
 ];
 
 export default function TeacherQuizzesPage({ params }: { params: { courseId: string } }) {
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
+  const isTaView = demoRole === 'ta';
   const [rows, setRows] = useState<QuizRow[]>(MOCK);
-  const publish = (id: string) =>
+  const publish = (id: string) => {
+    if (!caps.canPublishGrades) return;
     setRows((r) => r.map((q) => (q.id === id ? { ...q, gradesPublished: true } : q)));
+  };
 
   return (
     <SiteShell>
@@ -35,12 +41,42 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
         <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
           <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
         </nav>
-        <h1 style={{ fontSize: 28, fontWeight: 700 }}>測驗 / 考試管理</h1>
-        <p style={{ color: '#6b7280', marginBottom: 24 }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700 }}>
+          測驗 / 考試管理{isTaView ? '（檢視）' : ''}
+        </h1>
+        <p style={{ color: '#6b7280', marginBottom: isTaView ? 12 : 24 }}>
           設計題目、設定截止、發布成績。送出後 mobile 端 QuizTakingScreen 即可作答。
         </p>
 
-        <button style={primaryBtn}>+ 新增測驗</button>
+        {/* TA 提示 */}
+        {isTaView && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: 8,
+              background: 'rgba(124,58,237,0.10)',
+              border: '1px solid #7C3AED',
+              fontSize: 13,
+              color: '#5B21B6',
+              marginBottom: 20,
+            }}
+          >
+            🧑‍💻 <strong>助教 TA 視角</strong>：可查看作答情況，但<strong>無法新增測驗或發布成績</strong>（授課教師專用）。
+          </div>
+        )}
+
+        {/* 新增按鈕：TA 不可用 */}
+        {caps.canEditModules ? (
+          <button style={primaryBtn}>+ 新增測驗</button>
+        ) : (
+          <button
+            disabled
+            title="新增測驗為授課教師專用"
+            style={{ ...primaryBtn, background: '#e5e7eb', color: '#9ca3af', cursor: 'not-allowed' }}
+          >
+            🔒 新增測驗（教師專用）
+          </button>
+        )}
 
         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 16 }}>
           <thead>
@@ -64,12 +100,19 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
                 </td>
                 <td style={td}>{q.gradesPublished ? '🟢 已發布' : '⚪ 待發布'}</td>
                 <td style={td}>
-                  <button style={linkBtn}>編輯題目</button>
+                  {/* 編輯題目：TA 不可用 */}
+                  {caps.canEditModules ? (
+                    <button style={linkBtn}>編輯題目</button>
+                  ) : null}
                   <button style={linkBtn}>看答案</button>
-                  {!q.gradesPublished && (
+                  {/* 發布成績：TA 不可用 */}
+                  {!q.gradesPublished && caps.canPublishGrades && (
                     <button style={linkBtn} onClick={() => publish(q.id)}>
                       發布成績
                     </button>
+                  )}
+                  {!q.gradesPublished && !caps.canPublishGrades && (
+                    <span style={{ fontSize: 12, color: '#9ca3af' }}>🔒 教師發布</span>
                   )}
                 </td>
               </tr>

@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
+import { useDemoRole } from '@/lib/demoRole';
 
 type SessionRow = {
   id: string;
@@ -24,6 +25,8 @@ const MOCK: SessionRow[] = [
 ];
 
 export default function TeacherAttendancePage({ params }: { params: { courseId: string } }) {
+  const [demoRole] = useDemoRole();
+  const isTaView = demoRole === 'ta';
   const [running, setRunning] = useState(false);
 
   return (
@@ -33,9 +36,26 @@ export default function TeacherAttendancePage({ params }: { params: { courseId: 
           <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
         </nav>
         <h1 style={{ fontSize: 28, fontWeight: 700 }}>點名管理</h1>
-        <p style={{ color: '#6b7280', marginBottom: 24 }}>
+        <p style={{ color: '#6b7280', marginBottom: isTaView ? 12 : 24 }}>
           開啟 QR 點名後，學生用 mobile App 的 AttendanceLiveScreen 掃描即可簽到。
         </p>
+
+        {/* TA 提示 */}
+        {isTaView && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: 8,
+              background: 'rgba(124,58,237,0.10)',
+              border: '1px solid #7C3AED',
+              fontSize: 13,
+              color: '#5B21B6',
+              marginBottom: 20,
+            }}
+          >
+            🧑‍💻 <strong>助教 TA 視角</strong>：可查看出席記錄，但<strong>無法開啟或結束 QR 點名 session</strong>（授課教師專用）。
+          </div>
+        )}
 
         <div
           style={{
@@ -54,20 +74,38 @@ export default function TeacherAttendancePage({ params }: { params: { courseId: 
               {running ? '🟢 點名進行中（QR）' : '⚪ 尚未開啟'}
             </div>
           </div>
-          <button
-            style={{
-              padding: '10px 20px',
-              borderRadius: 8,
-              background: running ? '#dc2626' : '#16a34a',
-              color: '#fff',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 16,
-            }}
-            onClick={() => setRunning((s) => !s)}
-          >
-            {running ? '結束點名' : '開啟 QR 點名'}
-          </button>
+          {isTaView ? (
+            <button
+              disabled
+              title="開啟 QR 點名為授課教師專用"
+              style={{
+                padding: '10px 20px',
+                borderRadius: 8,
+                background: '#e5e7eb',
+                color: '#9ca3af',
+                border: 'none',
+                cursor: 'not-allowed',
+                fontSize: 16,
+              }}
+            >
+              🔒 開啟 QR 點名（教師專用）
+            </button>
+          ) : (
+            <button
+              style={{
+                padding: '10px 20px',
+                borderRadius: 8,
+                background: running ? '#dc2626' : '#16a34a',
+                color: '#fff',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 16,
+              }}
+              onClick={() => setRunning((s) => !s)}
+            >
+              {running ? '結束點名' : '開啟 QR 點名'}
+            </button>
+          )}
         </div>
 
         <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>歷史 sessions</h2>

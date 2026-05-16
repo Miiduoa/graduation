@@ -7,6 +7,7 @@ import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { getAuth, fetchGrades, fetchGPA, isFirebaseConfigured, type Grade } from '@/lib/firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { DEMO_GRADES } from '@/lib/demoData';
+import { useDemoRole } from '@/lib/demoRole';
 
 interface GradeDisplay {
   courseId?: string;
@@ -112,6 +113,8 @@ export default function GradesPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const [demoRole] = useDemoRole();
+  const isRestrictedRole = demoRole === 'alumni' || demoRole === 'guest';
   const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
   const [sortBy, setSortBy] = useState<'name' | 'score' | 'gpa'>('score');
   const [user, setUser] = useState<User | null>(null);
@@ -202,6 +205,24 @@ export default function GradesPage(props: {
       schoolCode={selectedSemester}
     >
       <div className="pageStack">
+        {/* 校友 / 訪客：無法查看個人成績 */}
+        {isRestrictedRole && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 16px',
+              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(0,122,255,0.08)',
+              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#007AFF'}`,
+              fontSize: 13,
+            }}
+          >
+            {demoRole === 'alumni' ? '🎓' : '👀'}{' '}
+            <strong>{demoRole === 'alumni' ? '校友身份' : '訪客身份'}</strong>
+            {' '}· 成績為個人隱私資料，{demoRole === 'alumni' ? '校友' : '訪客'}無法查看在校學生成績。
+            以下顯示的是示範用公開資料。
+          </div>
+        )}
+
         {usingDemo && (
           <div
             className="card"

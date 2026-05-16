@@ -199,10 +199,10 @@ export default function DepartmentDashboardScreen() {
                     subtitle={`授課 ${cs.course.instructor} · 班級預估 ${cs.likely}%`}
                     tone="danger"
                     onPress={() =>
-                      navigation.navigate('CourseScores', {
+                      safeNavigate(navigation, 'CourseScores', {
                         groupId: String(cs.course.id),
                         groupName: cs.course.name,
-                      })
+                      }, { fallbackMessage: '即將跳到課程成績' })
                     }
                   />
                 ))}

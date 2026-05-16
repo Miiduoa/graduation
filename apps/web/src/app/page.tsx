@@ -14,6 +14,7 @@ import {
   type Announcement,
 } from '@/lib/firebase';
 import { mockAnnouncements } from '@campus/shared/src/mockData';
+import { useDemoRole, getDemoRoleDefinition } from '@/lib/demoRole';
 
 function formatGreeting() {
   const hour = new Date().getHours();
@@ -33,6 +34,9 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [gpa, setGpa] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [demoRole] = useDemoRole();
+  const demoRoleDef = getDemoRoleDefinition(demoRole);
+  const isAlumniOrGuest = demoRole === 'alumni' || demoRole === 'guest';
 
   useEffect(() => {
     const auth = getAuth();
@@ -117,7 +121,8 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
     },
   ];
 
-  if (!user) {
+  // demo 模式：除了 guest 以外的角色都進 dashboard 視圖
+  if (!user && demoRole === 'guest') {
     return (
       <SiteShell schoolName={schoolName} schoolCode={schoolCode}>
         <div className="pageStack">
@@ -180,14 +185,38 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
     );
   }
 
+  // 用 demoRole 對應的示範姓名取代 userLabel（如果沒真實登入）
+  const displayLabel = user ? userLabel : demoRoleDef.shortLabel;
+
   return (
     <SiteShell
       schoolName={schoolName}
       schoolCode={schoolCode}
-      title={`${formatGreeting()}，${userLabel}`}
-      subtitle="Today 只保留下一步、課程節奏與校園情境，不再把首頁做成功能總表。"
+      title={`${formatGreeting()}，${displayLabel}`}
+      subtitle={
+        isAlumniOrGuest
+          ? `${demoRoleDef.label}視角 · 校園資訊瀏覽（read-only）`
+          : 'Today 只保留下一步、課程節奏與校園情境，不再把首頁做成功能總表。'
+      }
     >
       <div className="pageStack">
+        {/* Alumni read-only 提示 */}
+        {demoRole === 'alumni' ? (
+          <div
+            className="card"
+            style={{
+              padding: '12px 16px',
+              background: 'rgba(142,142,147,0.10)',
+              border: '1px solid #8E8E93',
+              fontSize: 13,
+              color: 'var(--text)',
+            }}
+          >
+            🎓 <strong>校友身份</strong> · 你可以查看校園公告、活動、地圖等公開資訊，
+            但無法加入社團、借書、選課或修改個人資料。如需更多功能請聯絡系所辦公室。
+          </div>
+        ) : null}
+
         <div
           className="card"
           style={{
@@ -248,7 +277,11 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
               tone: 'var(--warning)',
             },
             { label: '累計 GPA', value: gpa != null ? gpa.toFixed(2) : '—', tone: 'var(--brand)' },
-            { label: '登入身份', value: user.email ? '已登入' : '訪客', tone: 'var(--growth)' },
+            {
+              label: '登入身份',
+              value: user?.email ? '已登入' : demoRoleDef.shortLabel,
+              tone: 'var(--growth)',
+            },
           ].map((item) => (
             <div key={item.label} className="card" style={{ '--tone': item.tone } as CSSProperties}>
               <div style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 700 }}>
