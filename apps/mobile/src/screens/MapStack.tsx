@@ -7,6 +7,11 @@ import { PoiDetailScreen } from './PoiDetailScreen';
 import { ARNavigationScreen } from './ARNavigationScreen';
 import { AccessibleRouteScreen } from './AccessibleRouteScreen';
 import { BusScheduleScreen } from './BusScheduleScreen';
+import { BusV2Screen } from './BusV2Screen';
+import { OnBusModeScreen } from './OnBusModeScreen';
+import { GoogleMapsLikeScreen } from './GoogleMapsLikeScreen';
+import { BusStopDetailScreen } from './BusStopDetailScreen';
+import { TripPlannerScreen } from './TripPlannerScreen';
 import { TransportHubScreen } from './TransportHubScreen';
 import { CafeteriaScreen } from './CafeteriaScreen';
 import { MenuDetailScreen } from './MenuDetailScreen';
@@ -41,6 +46,11 @@ export function MapStack() {
         options={{ title: '校園', headerShown: false }}
       />
       <Stack.Screen name="Map" component={MapScreen} options={{ title: '校園地圖' }} />
+      <Stack.Screen
+        name="MapV2"
+        component={GoogleMapsLikeScreen}
+        options={{ title: '校園地圖（V2）', headerShown: false }}
+      />
       <Stack.Screen name="PoiDetail" component={PoiDetailScreen} options={{ title: '點位詳情' }} />
       <Stack.Screen
         name="ARNavigation"
@@ -55,7 +65,17 @@ export function MapStack() {
       <Stack.Screen
         name="BusSchedule"
         component={BusScheduleScreen}
+        options={{ title: '校園公車（舊版）' }}
+      />
+      <Stack.Screen
+        name="BusV2"
+        component={BusV2Screen}
         options={{ title: '校園公車' }}
+      />
+      <Stack.Screen
+        name="OnBusMode"
+        component={OnBusModeScreen}
+        options={{ title: '搭車中', headerShown: false }}
       />
       <Stack.Screen
         name="TransportHub"

@@ -7,6 +7,7 @@ import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { getAuth, fetchUserCourses, isFirebaseConfigured, type UserCourse } from '@/lib/firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { DEMO_COURSES } from '@/lib/demoData';
+import { useDemoRole } from '@/lib/demoRole';
 
 type ViewMode = 'week' | 'day' | 'list';
 
@@ -127,6 +128,8 @@ export default function TimetablePage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const [demoRole] = useDemoRole();
+  const isRestrictedRole = demoRole === 'alumni' || demoRole === 'guest';
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [selectedDay, setSelectedDay] = useState<number>(
     Math.min(Math.max(new Date().getDay() || 5, 1), 5),
@@ -238,6 +241,24 @@ export default function TimetablePage(props: {
       schoolCode={selectedSemester}
     >
       <div className="pageStack">
+        {/* 校友 / 訪客：課表為個人資料 */}
+        {isRestrictedRole && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 16px',
+              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(0,122,255,0.08)',
+              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#007AFF'}`,
+              fontSize: 13,
+            }}
+          >
+            {demoRole === 'alumni' ? '🎓' : '👀'}{' '}
+            <strong>{demoRole === 'alumni' ? '校友身份' : '訪客身份'}</strong>
+            {' '}· 課表屬於個人選課資料，{demoRole === 'alumni' ? '校友' : '訪客'}無法查看在校學生課表。
+            以下為示範展示用資料。
+          </div>
+        )}
+
         {usingDemo && (
           <div
             className="card"

@@ -761,3 +761,291 @@ export function getDemoCourseWorkspace(courseId: string): CourseWorkspace | null
   if (!course) return null;
   return buildDemoCourseWorkspace(course);
 }
+
+// ──────────────────────────────────────────────────────────────
+// 歷史修課紀錄（大一上 ~ 大二下，每學期 5-6 門課）
+// ──────────────────────────────────────────────────────────────
+export type CreditCategory = 'required' | 'elective' | 'general' | 'pe' | 'other';
+
+export interface HistoryCourse {
+  code: string;
+  name: string;
+  credits: number;
+  grade: string;
+  score: number;
+  gpa: number;
+  category: CreditCategory;
+  instructor: string;
+}
+
+export interface SemesterHistory {
+  semester: string; // e.g. '111-1'
+  label: string;   // e.g. '大一上'
+  courses: HistoryCourse[];
+  semesterGpa: number;
+}
+
+export const CREDIT_CATEGORIES: Record<CreditCategory, string> = {
+  required: '必修',
+  elective: '選修',
+  general: '通識',
+  pe: '體育',
+  other: '其他',
+};
+
+export const DEMO_HISTORY_SEMESTERS: SemesterHistory[] = [
+  {
+    semester: '111-1',
+    label: '大一上',
+    semesterGpa: 3.42,
+    courses: [
+      { code: 'MATH001', name: '微積分（一）', credits: 4, grade: 'B+', score: 83, gpa: 3.3, category: 'required', instructor: '吳俊傑' },
+      { code: 'CS001',   name: '計算機概論', credits: 3, grade: 'A-', score: 88, gpa: 3.7, category: 'required', instructor: '陳志遠' },
+      { code: 'CS002',   name: '程式設計（一）', credits: 3, grade: 'A', score: 91, gpa: 4.0, category: 'required', instructor: '林宜珊' },
+      { code: 'GE001',   name: '大學國文', credits: 2, grade: 'B', score: 78, gpa: 3.0, category: 'general', instructor: '劉美玲' },
+      { code: 'GE002',   name: '英文（一）', credits: 2, grade: 'B+', score: 85, gpa: 3.3, category: 'general', instructor: 'Smith, J.' },
+      { code: 'PE001',   name: '體育（一）', credits: 1, grade: 'A', score: 92, gpa: 4.0, category: 'pe', instructor: '體育組' },
+    ],
+  },
+  {
+    semester: '111-2',
+    label: '大一下',
+    semesterGpa: 3.58,
+    courses: [
+      { code: 'MATH002', name: '微積分（二）', credits: 4, grade: 'B', score: 79, gpa: 3.0, category: 'required', instructor: '吳俊傑' },
+      { code: 'CS003',   name: '程式設計（二）', credits: 3, grade: 'A', score: 93, gpa: 4.0, category: 'required', instructor: '林宜珊' },
+      { code: 'CS004',   name: '離散數學', credits: 3, grade: 'A-', score: 87, gpa: 3.7, category: 'required', instructor: '黃志文' },
+      { code: 'GE003',   name: '英文（二）', credits: 2, grade: 'B+', score: 84, gpa: 3.3, category: 'general', instructor: 'Smith, J.' },
+      { code: 'GE004',   name: '哲學與生命', credits: 2, grade: 'A-', score: 89, gpa: 3.7, category: 'general', instructor: '方正誠' },
+      { code: 'PE002',   name: '體育（二）', credits: 1, grade: 'A', score: 94, gpa: 4.0, category: 'pe', instructor: '體育組' },
+    ],
+  },
+  {
+    semester: '112-1',
+    label: '大二上',
+    semesterGpa: 3.71,
+    courses: [
+      { code: 'CS101',   name: '資料結構', credits: 3, grade: 'A', score: 91, gpa: 4.0, category: 'required', instructor: '王大明' },
+      { code: 'CS102',   name: '演算法', credits: 3, grade: 'A-', score: 88, gpa: 3.7, category: 'required', instructor: '陳志遠' },
+      { code: 'MATH101', name: '線性代數', credits: 3, grade: 'B+', score: 84, gpa: 3.3, category: 'required', instructor: '陳小華' },
+      { code: 'CS103',   name: '數位邏輯', credits: 3, grade: 'A', score: 92, gpa: 4.0, category: 'required', instructor: '張明宏' },
+      { code: 'GE005',   name: '社會學概論', credits: 2, grade: 'A-', score: 87, gpa: 3.7, category: 'general', instructor: '趙瑋瑋' },
+    ],
+  },
+  {
+    semester: '112-2',
+    label: '大二下',
+    semesterGpa: 3.82,
+    courses: [
+      { code: 'CS201',   name: '作業系統', credits: 3, grade: 'A-', score: 88, gpa: 3.7, category: 'required', instructor: '李志明' },
+      { code: 'CS202',   name: '計算機組織', credits: 3, grade: 'B+', score: 85, gpa: 3.3, category: 'required', instructor: '周志豪' },
+      { code: 'CS203',   name: '物件導向程式設計', credits: 3, grade: 'A', score: 92, gpa: 4.0, category: 'required', instructor: '林宜珊' },
+      { code: 'CS204',   name: '網頁程式設計', credits: 3, grade: 'A+', score: 96, gpa: 4.3, category: 'elective', instructor: '吳家豪' },
+      { code: 'GE006',   name: '藝術鑑賞', credits: 2, grade: 'A', score: 90, gpa: 4.0, category: 'general', instructor: '葉子萱' },
+    ],
+  },
+];
+
+// 本學期（大三上）修課 — 對應 DEMO_COURSES
+export const CURRENT_SEMESTER: SemesterHistory = {
+  semester: '113-1',
+  label: '大三上（本學期）',
+  semesterGpa: 0, // 修習中，尚無成績
+  courses: [
+    { code: 'CS301', name: '資料結構', credits: 3, grade: '修習中', score: 0, gpa: 0, category: 'required', instructor: '王大明' },
+    { code: 'MATH201', name: '線性代數', credits: 3, grade: '修習中', score: 0, gpa: 0, category: 'required', instructor: '陳小華' },
+    { code: 'CS302', name: '作業系統', credits: 3, grade: '修習中', score: 0, gpa: 0, category: 'required', instructor: '李志明' },
+    { code: 'CS401', name: '計算機網路', credits: 3, grade: '修習中', score: 0, gpa: 0, category: 'required', instructor: '張美玲' },
+    { code: 'ENG201', name: '英文寫作', credits: 2, grade: '修習中', score: 0, gpa: 0, category: 'general', instructor: 'Smith, J.' },
+    { code: 'CS303', name: '資料庫系統', credits: 3, grade: '修習中', score: 0, gpa: 0, category: 'required', instructor: '劉建宏' },
+    { code: 'CS402', name: '軟體工程', credits: 3, grade: '修習中', score: 0, gpa: 0, category: 'required', instructor: '林宜珊' },
+  ],
+};
+
+// ──────────────────────────────────────────────────────────────
+// 下學期可選課程清單（含衝堂設計）
+// ──────────────────────────────────────────────────────────────
+export interface NextSemCourse {
+  id: string;
+  code: string;
+  name: string;
+  credits: number;
+  category: CreditCategory;
+  instructor: string;
+  room: string;
+  dayOfWeek: number; // 1=Mon..5=Fri
+  startPeriod: number;
+  endPeriod: number;
+  description: string;
+  /** 若與本學期某課衝堂，標注衝堂的 courseId */
+  conflictsWith?: string;
+  recommended?: boolean;
+}
+
+export const NEXT_SEM_COURSES: NextSemCourse[] = [
+  {
+    id: 'n1',
+    code: 'CS501',
+    name: '人工智慧導論',
+    credits: 3,
+    category: 'elective',
+    instructor: '陳志遠',
+    room: '工程館 403',
+    dayOfWeek: 1,
+    startPeriod: 3,
+    endPeriod: 4,
+    description: '機器學習、深度學習基礎與應用實例。',
+    recommended: true,
+  },
+  {
+    id: 'n2',
+    code: 'CS502',
+    name: '雲端運算與服務',
+    credits: 3,
+    category: 'elective',
+    instructor: '吳家豪',
+    room: '資工大樓 201',
+    dayOfWeek: 2,
+    startPeriod: 1,
+    endPeriod: 2,
+    description: 'AWS/GCP/Azure 架構、容器化與 DevOps 實務。',
+    recommended: true,
+  },
+  {
+    id: 'n3',
+    code: 'CS503',
+    name: '資訊安全',
+    credits: 3,
+    category: 'required',
+    instructor: '周志豪',
+    room: '工程館 205',
+    dayOfWeek: 3,
+    startPeriod: 5,
+    endPeriod: 6,
+    description: '密碼學、網路安全攻防、資安政策。',
+    recommended: true,
+  },
+  {
+    id: 'n4',
+    code: 'CS504',
+    name: '機器學習實務',
+    credits: 3,
+    category: 'elective',
+    instructor: '陳志遠',
+    room: '工程館 403',
+    // 與 n1 人工智慧導論同一時段 → 衝堂
+    dayOfWeek: 1,
+    startPeriod: 3,
+    endPeriod: 4,
+    description: 'Scikit-learn、PyTorch 實作，期末 Kaggle 競賽專題。',
+    conflictsWith: 'n1',
+  },
+  {
+    id: 'n5',
+    code: 'GE101',
+    name: '科技與社會',
+    credits: 2,
+    category: 'general',
+    instructor: '趙瑋瑋',
+    room: '人文館 101',
+    dayOfWeek: 4,
+    startPeriod: 1,
+    endPeriod: 2,
+    description: '探討科技發展對社會、倫理的影響。',
+    recommended: true,
+  },
+  {
+    id: 'n6',
+    code: 'CS505',
+    name: '專題研究（一）',
+    credits: 2,
+    category: 'required',
+    instructor: '王大明',
+    room: '工程館 302',
+    dayOfWeek: 5,
+    startPeriod: 1,
+    endPeriod: 2,
+    description: '大三必修專題，指導教授帶領研究計畫。',
+    recommended: true,
+  },
+  {
+    id: 'n7',
+    code: 'CS506',
+    name: '行動應用程式開發',
+    credits: 3,
+    category: 'elective',
+    instructor: '吳家豪',
+    room: '資工大樓 201',
+    // 與 n2 雲端運算同一時段 → 衝堂
+    dayOfWeek: 2,
+    startPeriod: 1,
+    endPeriod: 2,
+    description: 'React Native / Flutter 跨平台 App 開發實務。',
+    conflictsWith: 'n2',
+  },
+  {
+    id: 'n8',
+    code: 'GE102',
+    name: '環境永續與創新',
+    credits: 2,
+    category: 'general',
+    instructor: '方正誠',
+    room: '人文館 205',
+    dayOfWeek: 4,
+    startPeriod: 5,
+    endPeriod: 6,
+    description: '永續發展目標（SDGs）與綠色科技應用。',
+  },
+];
+
+// ──────────────────────────────────────────────────────────────
+// 畢業學分需求結構
+// ──────────────────────────────────────────────────────────────
+export interface GraduationRequirement {
+  department: string;
+  totalRequired: number;
+  breakdown: Record<CreditCategory, number>;
+}
+
+export const GRADUATION_REQUIREMENTS: GraduationRequirement = {
+  department: '資訊工程學系',
+  totalRequired: 128,
+  breakdown: {
+    required: 64,
+    elective: 32,
+    general: 20,
+    pe: 4,
+    other: 8,
+  },
+};
+
+/** 計算已修各類別學分（歷史 + 本學期修習中） */
+export function computeEarnedCredits(): {
+  total: number;
+  byCategory: Record<CreditCategory, number>;
+  historicalTotal: number;
+  currentSemesterTotal: number;
+} {
+  const byCategory: Record<CreditCategory, number> = {
+    required: 0,
+    elective: 0,
+    general: 0,
+    pe: 0,
+    other: 0,
+  };
+
+  let historicalTotal = 0;
+  for (const sem of DEMO_HISTORY_SEMESTERS) {
+    for (const c of sem.courses) {
+      byCategory[c.category] += c.credits;
+      historicalTotal += c.credits;
+    }
+  }
+
+  return {
+    total: historicalTotal,
+    byCategory,
+    historicalTotal,
+    currentSemesterTotal: CURRENT_SEMESTER.courses.reduce((s, c) => s + c.credits, 0),
+  };
+}

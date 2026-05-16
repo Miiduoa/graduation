@@ -4,6 +4,8 @@ import {
   scheduleOverlapScore,
   learningStyleScore,
   matchStudyBuddies,
+  findInstantHelp,
+  suggestStudyTeam,
   DEMO_BUDDY_CANDIDATES,
   DEMO_ME_PROFILE,
   type StudentBuddyProfile,
@@ -129,5 +131,91 @@ describe('matchStudyBuddies / 整合', () => {
       [...DEMO_BUDDY_CANDIDATES, DEMO_ME_PROFILE],
     );
     expect(result.find((r) => r.buddyUid === DEMO_ME_PROFILE.uid)).toBeUndefined();
+  });
+});
+
+describe('findInstantHelp / 即時求助', () => {
+  test('只回傳線上 + 該科比我強的人', () => {
+    const result = findInstantHelp({
+      courseId: 71378,
+      myStrength: 55,
+      candidates: DEMO_BUDDY_CANDIDATES,
+    });
+    expect(result.length).toBeGreaterThan(0);
+    for (const r of result) {
+      const profile = DEMO_BUDDY_CANDIDATES.find((c) => c.uid === r.buddyUid)!;
+      expect(profile.isOnlineNow).toBe(true);
+      expect(r.theirStrength).toBeGreaterThan(55);
+    }
+  });
+
+  test('按 helpScore 排序，速度快 + gap 大 = 排前面', () => {
+    const result = findInstantHelp({
+      courseId: 71378,
+      myStrength: 40,
+      candidates: DEMO_BUDDY_CANDIDATES,
+    });
+    for (let i = 1; i < result.length; i++) {
+      expect(result[i - 1].helpScore).toBeGreaterThanOrEqual(result[i].helpScore);
+    }
+  });
+
+  test('沒人線上 → 回空陣列', () => {
+    const allOffline = DEMO_BUDDY_CANDIDATES.map((c) => ({ ...c, isOnlineNow: false }));
+    const result = findInstantHelp({
+      courseId: 71378,
+      myStrength: 30,
+      candidates: allOffline,
+    });
+    expect(result).toEqual([]);
+  });
+
+  test('我比所有人強 → 沒有可以幫我的人', () => {
+    const result = findInstantHelp({
+      courseId: 71378,
+      myStrength: 99,
+      candidates: DEMO_BUDDY_CANDIDATES,
+    });
+    expect(result).toEqual([]);
+  });
+});
+
+describe('suggestStudyTeam / 多人組隊', () => {
+  test('預設組 3 人', () => {
+    const team = suggestStudyTeam(DEMO_ME_PROFILE, DEMO_BUDDY_CANDIDATES);
+    expect(team.members.length).toBeLessThanOrEqual(3);
+    expect(team.synergyScore).toBeGreaterThanOrEqual(0);
+    expect(team.synergyScore).toBeLessThanOrEqual(100);
+  });
+
+  test('teamSize 自訂', () => {
+    const team = suggestStudyTeam(DEMO_ME_PROFILE, DEMO_BUDDY_CANDIDATES, { teamSize: 4 });
+    expect(team.members.length).toBeLessThanOrEqual(4);
+  });
+
+  test('teamSize 上限 5', () => {
+    const team = suggestStudyTeam(DEMO_ME_PROFILE, DEMO_BUDDY_CANDIDATES, { teamSize: 99 });
+    expect(team.members.length).toBeLessThanOrEqual(5);
+  });
+
+  test('每位成員都有 role 與 individualScore', () => {
+    const team = suggestStudyTeam(DEMO_ME_PROFILE, DEMO_BUDDY_CANDIDATES, { teamSize: 3 });
+    for (const m of team.members) {
+      expect(m.role).toBeDefined();
+      expect(typeof m.individualScore).toBe('number');
+      expect(m.reasoning.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('成員不會重複', () => {
+    const team = suggestStudyTeam(DEMO_ME_PROFILE, DEMO_BUDDY_CANDIDATES, { teamSize: 4 });
+    const ids = team.members.map((m) => m.buddyUid);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test('多樣化：3 人組通常有不同 role', () => {
+    const team = suggestStudyTeam(DEMO_ME_PROFILE, DEMO_BUDDY_CANDIDATES, { teamSize: 3 });
+    const distinctRoles = new Set(team.members.map((m) => m.role)).size;
+    expect(distinctRoles).toBeGreaterThanOrEqual(2);
   });
 });

@@ -235,6 +235,247 @@ export function matchStudyBuddies(
 }
 
 // ─────────────────────────────────────────────────────────
+// 即時求助：找出「現在能即時幫我解這題」的人
+// ─────────────────────────────────────────────────────────
+
+export type StudyTeamRole = '解題王' | '筆記王' | '討論主持' | '進度督促' | '一般成員';
+
+export interface InstantHelpMatch {
+  buddyUid: string;
+  buddyName: string;
+  /** 該課程的對方強度 */
+  theirStrength: number;
+  /** 即時求助分數 0-100 */
+  helpScore: number;
+  /** 預估回應分鐘數 */
+  expectedResponseMinutes: number;
+  reasons: string[];
+}
+
+export interface InstantHelpInput {
+  /** 卡關的課程 id */
+  courseId: number;
+  /** 我的強度（用來算 gap） */
+  myStrength?: number;
+  /** 候選人 */
+  candidates: StudentBuddyProfile[];
+  /** topN，預設 3 */
+  topN?: number;
+}
+
+export function findInstantHelp(input: InstantHelpInput): InstantHelpMatch[] {
+  const { courseId, candidates, topN = 3 } = input;
+  const me = input.myStrength ?? 50;
+
+  const matches: InstantHelpMatch[] = [];
+  for (const c of candidates) {
+    if (!c.enrolledCourseIds.includes(courseId)) continue;
+    if (!c.isOnlineNow) continue;
+    const theirStrength = c.courseStrength[courseId] ?? 50;
+    if (theirStrength <= me) continue; // 對方必須比我強才能幫上忙
+
+    const gap = theirStrength - me;
+    const responseMin = c.averageResponseMinutes ?? 20;
+    // helpScore = gap * 0.5 + 速度分 * 0.5
+    //   速度分：response < 5 min → 100；< 15 min → 80；< 30 min → 60；其他 30
+    let speedScore = 30;
+    if (responseMin < 5) speedScore = 100;
+    else if (responseMin < 15) speedScore = 80;
+    else if (responseMin < 30) speedScore = 60;
+    const helpScore = Math.round(gap * 0.5 + speedScore * 0.5);
+
+    const reasons: string[] = [];
+    reasons.push(`對方在這科強 ${gap} 分`);
+    if (responseMin <= 10) reasons.push(`過往平均 ${responseMin} 分鐘內回覆`);
+    if (theirStrength >= 80) reasons.push('這科是對方的強項');
+
+    matches.push({
+      buddyUid: c.uid,
+      buddyName: c.displayName,
+      theirStrength,
+      helpScore,
+      expectedResponseMinutes: responseMin,
+      reasons,
+    });
+  }
+
+  return matches.sort((a, b) => b.helpScore - a.helpScore).slice(0, topN);
+}
+
+// ─────────────────────────────────────────────────────────
+// 多人動態組隊：建議 3-5 人讀書會 + 角色分配
+// ─────────────────────────────────────────────────────────
+
+export interface StudyTeamMember {
+  buddyUid: string;
+  buddyName: string;
+  role: StudyTeamRole;
+  reasoning: string;
+  /** 該成員的個人總分 */
+  individualScore: number;
+}
+
+export interface StudyTeamSuggestion {
+  /** 為哪門課（或 'general'） */
+  forCourseId?: number;
+  /** team 成員（不含 me） */
+  members: StudyTeamMember[];
+  /** 整體 team synergy 分 0-100 */
+  synergyScore: number;
+  /** 為什麼這組合好 */
+  synergyReasons: string[];
+}
+
+function assignTeamRoles(
+  me: StudentBuddyProfile,
+  picked: StudentBuddyProfile[],
+  courseId?: number,
+): StudyTeamMember[] {
+  const members: StudyTeamMember[] = [];
+
+  // 解題王：在 courseId（若有）或平均上最強的
+  const strongestAt = (cid: number | undefined, profile: StudentBuddyProfile): number => {
+    if (cid !== undefined) return profile.courseStrength[cid] ?? 50;
+    const values = Object.values(profile.courseStrength);
+    return values.length === 0 ? 50 : values.reduce((a, b) => a + b, 0) / values.length;
+  };
+
+  const sortedByStrength = [...picked].sort(
+    (a, b) => strongestAt(courseId, b) - strongestAt(courseId, a),
+  );
+
+  const used = new Set<string>();
+  const assign = (
+    uid: string | undefined,
+    role: StudyTeamRole,
+    reasoning: string,
+    individualScore: number,
+  ) => {
+    if (!uid || used.has(uid)) return;
+    used.add(uid);
+    const p = picked.find((x) => x.uid === uid)!;
+    members.push({ buddyUid: uid, buddyName: p.displayName, role, reasoning, individualScore });
+  };
+
+  // 解題王
+  const top = sortedByStrength[0];
+  if (top) {
+    assign(
+      top.uid,
+      '解題王',
+      `${courseId ? `課程 #${courseId}` : '整體'}強度 ${Math.round(strongestAt(courseId, top))}`,
+      Math.round(strongestAt(courseId, top)),
+    );
+  }
+
+  // 筆記王：reading 風格優先
+  const reader = picked.find((p) => p.primaryStyle === 'reading' && !used.has(p.uid));
+  if (reader) {
+    assign(reader.uid, '筆記王', '文字風格，擅長整理講義', strongestAt(courseId, reader));
+  }
+
+  // 討論主持：auditory 或 mixed
+  const moderator = picked.find(
+    (p) => (p.primaryStyle === 'auditory' || p.primaryStyle === 'mixed') && !used.has(p.uid),
+  );
+  if (moderator) {
+    assign(
+      moderator.uid,
+      '討論主持',
+      '聲音 / 混合風格，能帶動討論',
+      strongestAt(courseId, moderator),
+    );
+  }
+
+  // 進度督促：kinesthetic 或 morning preferred
+  const driver = picked.find(
+    (p) => (p.primaryStyle === 'kinesthetic' || p.preferredStudyWindow === 'morning')
+      && !used.has(p.uid),
+  );
+  if (driver) {
+    assign(
+      driver.uid,
+      '進度督促',
+      '習慣動手 / 早晨型，能 push 大家進度',
+      strongestAt(courseId, driver),
+    );
+  }
+
+  // 其餘掛「一般成員」
+  for (const p of picked) {
+    if (used.has(p.uid)) continue;
+    assign(p.uid, '一般成員', '互補組合', strongestAt(courseId, p));
+  }
+
+  return members;
+}
+
+export interface TeamSuggestionOptions {
+  teamSize?: number;
+  /** 為哪門課（影響成員強度評估） */
+  forCourseId?: number;
+}
+
+export function suggestStudyTeam(
+  me: StudentBuddyProfile,
+  candidates: StudentBuddyProfile[],
+  options: TeamSuggestionOptions = {},
+): StudyTeamSuggestion {
+  const teamSize = Math.max(2, Math.min(5, options.teamSize ?? 3));
+  // 先用 matchStudyBuddies 取前 N
+  const ranked = matchStudyBuddies(me, candidates, {
+    topN: teamSize * 2,
+    requireSharedCourse: true,
+  });
+  // 取前 teamSize，但保證學習風格多樣化
+  const picked: StudentBuddyProfile[] = [];
+  const usedStyles = new Set<LearningStyle>();
+  for (const r of ranked) {
+    if (picked.length >= teamSize) break;
+    const profile = candidates.find((c) => c.uid === r.buddyUid);
+    if (!profile) continue;
+    // 多樣性偏好：能不重複 style 先不重複
+    if (picked.length < teamSize - 1 && usedStyles.has(profile.primaryStyle)) {
+      continue;
+    }
+    picked.push(profile);
+    usedStyles.add(profile.primaryStyle);
+  }
+  // 若沒填滿（多樣性卡住）→ 再放寬撿
+  for (const r of ranked) {
+    if (picked.length >= teamSize) break;
+    const profile = candidates.find((c) => c.uid === r.buddyUid);
+    if (!profile || picked.includes(profile)) continue;
+    picked.push(profile);
+  }
+
+  const members = assignTeamRoles(me, picked, options.forCourseId);
+  const synergyReasons: string[] = [];
+  // synergy = 角色覆蓋度（不同 role 越多分越高） + 風格多樣性
+  const distinctRoles = new Set(members.map((m) => m.role)).size;
+  const distinctStyles = usedStyles.size;
+  const roleCoverage = Math.min(100, distinctRoles * 25);
+  const styleDiversity = Math.min(100, distinctStyles * 25);
+  const avgIndividual = members.length === 0
+    ? 0
+    : members.reduce((a, b) => a + b.individualScore, 0) / members.length;
+  const synergyScore = Math.round(
+    roleCoverage * 0.4 + styleDiversity * 0.3 + avgIndividual * 0.3,
+  );
+
+  if (distinctRoles >= 3) synergyReasons.push(`涵蓋 ${distinctRoles} 種讀書角色`);
+  if (distinctStyles >= 3) synergyReasons.push(`學習風格多樣（${distinctStyles} 種）`);
+  if (avgIndividual >= 70) synergyReasons.push('每位成員都有強項可貢獻');
+
+  return {
+    forCourseId: options.forCourseId,
+    members,
+    synergyScore,
+    synergyReasons,
+  };
+}
+
+// ─────────────────────────────────────────────────────────
 // Demo data — 用於 AIStudyBuddyScreen
 // ─────────────────────────────────────────────────────────
 
@@ -249,6 +490,8 @@ export const DEMO_BUDDY_CANDIDATES: StudentBuddyProfile[] = [
     primaryStyle: 'reading',
     preferredStudyWindow: 'afternoon',
     bio: '喜歡先把概念寫成筆記再做題',
+    isOnlineNow: true,
+    averageResponseMinutes: 8,
   },
   {
     uid: 'demo_buddy_chen',
@@ -260,6 +503,8 @@ export const DEMO_BUDDY_CANDIDATES: StudentBuddyProfile[] = [
     primaryStyle: 'visual',
     preferredStudyWindow: 'morning',
     bio: '只要有圖我就秒懂，但寫題比較慢',
+    isOnlineNow: false,
+    averageResponseMinutes: 25,
   },
   {
     uid: 'demo_buddy_huang',
@@ -271,6 +516,8 @@ export const DEMO_BUDDY_CANDIDATES: StudentBuddyProfile[] = [
     primaryStyle: 'auditory',
     preferredStudyWindow: 'evening',
     bio: '聊著聊著就理解了',
+    isOnlineNow: true,
+    averageResponseMinutes: 12,
   },
   {
     uid: 'demo_buddy_wu',
@@ -282,6 +529,8 @@ export const DEMO_BUDDY_CANDIDATES: StudentBuddyProfile[] = [
     primaryStyle: 'kinesthetic',
     preferredStudyWindow: 'afternoon',
     bio: '直接寫題、邊寫邊問',
+    isOnlineNow: true,
+    averageResponseMinutes: 4,
   },
   {
     uid: 'demo_buddy_lee',
@@ -292,6 +541,8 @@ export const DEMO_BUDDY_CANDIDATES: StudentBuddyProfile[] = [
     freeTimeSlots: [85, 86, 87],
     primaryStyle: 'mixed',
     bio: '只剩微學分，找個聊',
+    isOnlineNow: false,
+    averageResponseMinutes: 60,
   },
 ];
 
