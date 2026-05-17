@@ -24,6 +24,8 @@ import { formatDueWindow, isTeachingRole, resolveRoleMode, toInboxItem } from '.
 import { navigateToCourseHome } from '../utils/courseNavigation';
 import { navigateFromInboxTask, resolveInboxAction } from '../services/inboxActions';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
+import { AIMissionControl } from '../components/AIMissionControl';
+import { getPersona } from '../data/demoPersona';
 
 export function InboxScreen(props: any) {
   const nav = props?.navigation;
@@ -170,17 +172,33 @@ export function InboxScreen(props: any) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
           <HeaderAvatarButton />
           <View style={{ flex: 1, gap: theme.space.xs }}>
-            <Text
-              style={{
-                color: theme.colors.muted,
-                fontSize: theme.typography.overline.fontSize,
-                fontWeight: theme.typography.overline.fontWeight ?? '700',
-                letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
-                textTransform: 'uppercase',
-              }}
-            >
-              訊息
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text
+                style={{
+                  color: theme.colors.muted,
+                  fontSize: theme.typography.overline.fontSize,
+                  fontWeight: theme.typography.overline.fontWeight ?? '700',
+                  letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
+                  textTransform: 'uppercase',
+                }}
+              >
+                訊息
+              </Text>
+              {auth.user && getPersona(auth.user.uid) && (
+                <View
+                  style={{
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                    borderRadius: 999,
+                    backgroundColor: theme.colors.accentSoft,
+                  }}
+                >
+                  <Text style={{ color: theme.colors.accent, fontSize: 10, fontWeight: '700' }}>
+                    {getPersona(auth.user.uid)?.shortLabel}視角
+                  </Text>
+                </View>
+              )}
+            </View>
             <Text
               style={{
                 color: theme.colors.text,
@@ -193,6 +211,11 @@ export function InboxScreen(props: any) {
             </Text>
           </View>
         </View>
+
+        {/* AI 任務指揮中心 — 把 AI 排好的下一步放最上面 */}
+        {auth.user && getPersona(auth.user.uid) && (
+          <AIMissionControl uid={auth.user.uid} maxVisible={3} hideWhenEmpty />
+        )}
 
         {auth.user ? (
           <>

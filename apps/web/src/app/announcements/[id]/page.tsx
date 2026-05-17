@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
-import { useToast } from '@/components/ui';
+import { useToast, Modal } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   DEMO_ANNOUNCEMENTS,
@@ -11,27 +12,39 @@ import {
   getDemoClubById,
 } from '@/lib/demoData';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
+import { useDemoStore, takedownAnnouncement, isAnnouncementTakenDown, editAnnouncementDraft, getAnnouncementEdit } from '@/lib/demoStore';
 
 export default function AnnouncementDetailPage(props: {
   params: { id: string };
   searchParams?: { school?: string; schoolId?: string };
 }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const router = useRouter();
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const { success, info } = useToast();
+  const store = useDemoStore();
 
-  const announcement = useMemo(
+  const baseAnnouncement = useMemo(
     () => DEMO_ANNOUNCEMENTS.find((a) => a.id === props.params.id),
     [props.params.id],
   );
+  const edit = baseAnnouncement ? getAnnouncementEdit(baseAnnouncement.id, store) : undefined;
+  const announcement = baseAnnouncement ? {
+    ...baseAnnouncement,
+    title: edit?.title ?? baseAnnouncement.title,
+    body: edit?.body ?? baseAnnouncement.body,
+  } : undefined;
+  const takenDown = baseAnnouncement ? isAnnouncementTakenDown(baseAnnouncement.id, store) : false;
   const [saved, setSaved] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState({ title: '', body: '' });
 
   // 訪客 / 校友：若是課程公告 → 隱藏
   const isHidden =
     (demoRole === 'guest' || demoRole === 'alumni') && announcement?.relatedCourseId;
 
-  if (!announcement || isHidden) {
+  if (!announcement || isHidden || (takenDown && !caps.canApproveAnnouncements)) {
     return (
       <SiteShell title="公告詳情" schoolName={schoolName}>
         <div className="pageStack">
@@ -46,10 +59,12 @@ export default function AnnouncementDetailPage(props: {
           >
             <div style={{ fontSize: 56, marginBottom: 12 }}>📭</div>
             <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 800 }}>
-              {isHidden ? '此公告僅限該課程成員瀏覽' : '找不到此公告'}
+              {takenDown ? '此公告已被下架' : isHidden ? '此公告僅限該課程成員瀏覽' : '找不到此公告'}
             </h2>
             <p style={{ margin: '0 0 20px', color: 'var(--muted)', fontSize: 14 }}>
-              {isHidden
+              {takenDown
+                ? '公告已由審核者下架，無法繼續查看。'
+                : isHidden
                 ? `${demoRole === 'guest' ? '訪客' : '校友'}身份無法查看課程內部公告`
                 : '公告可能已被移除，或網址有誤'}
             </p>
@@ -196,26 +211,108 @@ export default function AnnouncementDetailPage(props: {
             {caps.canPublishAnnouncements && (
               <button
                 type="button"
-                onClick={() => info('已開啟「編輯公告」表單（demo）')}
+                onClick={() => {
+                  setEditDraft({ title: announcement.title, body: announcement.body });
+                  setEditing(true);
+                }}
                 className="btn"
                 style={{ fontSize: 13 }}
               >
                 ✏️ 編輯
               </button>
             )}
-            {caps.canApproveAnnouncements && (
+            {caps.canApproveAnnouncements && !takenDown && (
               <button
                 type="button"
-                onClick={() => info('已將公告下架（demo）')}
+                onClick={() => {
+                  if (typeof window === 'undefined') return;
+                  const ok = window.confirm(`確定要下架「${announcement.title}」？學生與課程成員將無法再看到此公告。`);
+                  if (!ok) return;
+                  takedownAnnouncement(announcement.id, '系主任');
+                  success('🗑️ 已將公告下架，原發布者已收到通知');
+                  router.push(`/announcements${q}`);
+                }}
                 className="btn"
                 style={{ fontSize: 13, color: 'var(--danger)' }}
               >
                 🗑️ 下架
               </button>
             )}
+            {caps.canPublishAnnouncements && (
+              <Link
+                href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`幫我改寫公告「${announcement.title}」，讓內容更清楚、語氣更友善，並補上 Call-to-Action`)}`}
+                className="btn"
+                style={{ fontSize: 13, background: 'var(--accent-soft)', color: 'var(--brand)' }}
+              >
+                🤖 AI 改寫
+              </Link>
+            )}
           </div>
+
+          {takenDown && caps.canApproveAnnouncements && (
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--danger-soft)', borderRadius: 8, fontSize: 13, color: 'var(--danger)' }}>
+              ⚠️ <strong>此公告已下架</strong>（其他角色無法看到，僅你以審核者身份能繼續閱讀）
+            </div>
+          )}
         </article>
       </div>
+
+      {/* 編輯 Modal */}
+      <Modal
+        isOpen={editing}
+        onClose={() => setEditing(false)}
+        title={`✏️ 編輯公告：${announcement.title}`}
+        size="lg"
+        footer={
+          <>
+            <button className="btn" onClick={() => setEditing(false)}>取消</button>
+            <button
+              className="btn primary"
+              onClick={() => {
+                if (!editDraft.title.trim() || !editDraft.body.trim()) {
+                  info('請填寫標題與內文');
+                  return;
+                }
+                editAnnouncementDraft({
+                  id: announcement.id,
+                  title: editDraft.title,
+                  body: editDraft.body,
+                  editedBy: caps.canApproveAnnouncements ? '系主任' : '教師',
+                });
+                setEditing(false);
+                success('✅ 公告已更新');
+              }}
+            >
+              儲存
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
+          <label>
+            <div style={{ marginBottom: 4, fontWeight: 600 }}>標題</div>
+            <input
+              className="input"
+              value={editDraft.title}
+              onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
+              style={{ width: '100%', padding: '8px 12px', fontSize: 13 }}
+            />
+          </label>
+          <label>
+            <div style={{ marginBottom: 4, fontWeight: 600 }}>內文</div>
+            <textarea
+              className="input"
+              value={editDraft.body}
+              onChange={(e) => setEditDraft({ ...editDraft, body: e.target.value })}
+              rows={10}
+              style={{ width: '100%', padding: '8px 12px', fontSize: 13, fontFamily: 'inherit' }}
+            />
+          </label>
+          <div style={{ padding: 10, background: 'var(--accent-soft)', borderRadius: 8, fontSize: 12, color: 'var(--brand)' }}>
+            🤖 <strong>AI 提示</strong>：可在儲存後讓 AI 助理校對。重大修改建議重新送審。
+          </div>
+        </div>
+      </Modal>
     </SiteShell>
   );
 }

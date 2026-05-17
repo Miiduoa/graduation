@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { useToast } from '@/components/ui';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
-import { DEMO_STUDENTS, getDemoCourseById } from '@/lib/demoData';
+import { getStudentsForCourse, getDemoCourseById } from '@/lib/demoData';
 import { publishGrades, getPendingSubmissions, useDemoStore } from '@/lib/demoStore';
 import {
   computeGradebook,
@@ -25,24 +25,28 @@ const ITEMS: GradeItem[] = [
   { id: 'final', title: '期末考',           weight: 40 },
 ];
 
-// 從 DEMO_STUDENTS 衍生，確保姓名與課表 / 點名頁一致
-const STUDENTS: StudentGradeInput[] = DEMO_STUDENTS.map((s) => ({
-  uid: s.uid,
-  displayName: `${s.displayName}（${s.studentId}）`,
-  scores: [
-    { gradeItemId: 'hw',    score: s.scores.hw    },
-    { gradeItemId: 'mid',   score: s.scores.mid   },
-    { gradeItemId: 'final', score: s.scores.final },
-  ],
-}));
-
 export default function TeacherGradebookPage({ params }: { params: { courseId: string } }) {
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const isTaView = demoRole === 'ta';
   const [published, setPublished] = useState(false);
   const course = getDemoCourseById(params.courseId);
-  const computed = useMemo(() => computeGradebook(ITEMS, STUDENTS, { published }), [published]);
+  // 依 courseId 取得該課程的學生名冊（c1: 12 位；其他課依 enrolledCourses 篩）
+  const courseStudents = useMemo(() => getStudentsForCourse(params.courseId), [params.courseId]);
+  const STUDENTS: StudentGradeInput[] = useMemo(
+    () =>
+      courseStudents.map((s) => ({
+        uid: s.uid,
+        displayName: `${s.displayName}（${s.studentId}）`,
+        scores: [
+          { gradeItemId: 'hw',    score: s.scores.hw    },
+          { gradeItemId: 'mid',   score: s.scores.mid   },
+          { gradeItemId: 'final', score: s.scores.final },
+        ],
+      })),
+    [courseStudents],
+  );
+  const computed = useMemo(() => computeGradebook(ITEMS, STUDENTS, { published }), [STUDENTS, published]);
   const store = useDemoStore();
   const { success } = useToast();
   const pendingSubmissions = getPendingSubmissions(params.courseId, store);
@@ -87,7 +91,7 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
         </h1>
         <p style={{ color: '#6b7280', marginBottom: 16 }}>
           班級平均 <strong>{classAvg}</strong> 分・通過率 <strong>{passRate}%</strong>・
-          共 {DEMO_STUDENTS.length} 位學生（示範名單）
+          共 {courseStudents.length} 位學生（示範名單）
         </p>
 
         {/* TA 提示 */}
@@ -111,7 +115,7 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
         {/* 快速統計卡 */}
         <div style={{ display: 'flex', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
           {[
-            { label: '學生總數', value: DEMO_STUDENTS.length,                                              color: '#5E6AD2' },
+            { label: '學生總數', value: courseStudents.length,                                            color: '#5E6AD2' },
             { label: '班級平均', value: classAvg,                                                          color: '#34C759' },
             { label: '通過率',   value: `${passRate}%`,                                                    color: '#FF9500' },
             { label: 'A 以上',   value: computed.rows.filter((r) => (r.finalScore ?? 0) >= 90).length,     color: '#0F8B8D' },
@@ -152,15 +156,37 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
               const next = !published;
               setPublished(next);
               if (next && course) {
-                // 計算王小明（stu-001）的成績
+                // 計算王小明（stu-001）的「展示用」成績（summary 帶到通知裡）
                 const demoRow = computed.rows.find((r) => r.uid === 'stu-001');
-                const score = demoRow?.finalScore ?? 96;
-                const grade =
-                  score >= 90 ? 'A+' : score >= 85 ? 'A' : score >= 80 ? 'A-' :
-                  score >= 75 ? 'B+' : score >= 70 ? 'B' : score >= 65 ? 'B-' :
-                  score >= 60 ? 'C' : 'F';
-                publishGrades({ courseId: params.courseId, courseName: course.name, score, grade });
-                success(`✅ 成績已發布！學生現在可以查看（${course.name}）`);
+                const summaryScore = demoRow?.finalScore ?? 96;
+                const summaryGrade =
+                  summaryScore >= 90 ? 'A+' : summaryScore >= 85 ? 'A' : summaryScore >= 80 ? 'A-' :
+                  summaryScore >= 75 ? 'B+' : summaryScore >= 70 ? 'B' : summaryScore >= 65 ? 'B-' :
+                  summaryScore >= 60 ? 'C' : 'F';
+                // 全班發布：把 computed.rows 轉成 studentScores（demoStore 端會逐筆寫入 publishedGrades）
+                // 過濾掉沒有 finalScore 的列（例如尚未繳交），並對 null 做 fallback
+                const studentScores = computed.rows
+                  .filter((r) => r.finalScore != null)
+                  .map((r) => {
+                    const s = r.finalScore as number;
+                    return {
+                      studentId: r.uid,
+                      score: s,
+                      grade:
+                        s >= 90 ? 'A' :
+                        s >= 80 ? 'B' :
+                        s >= 70 ? 'C' :
+                        s >= 60 ? 'D' : 'F',
+                    };
+                  });
+                publishGrades({
+                  courseId: params.courseId,
+                  courseName: course.name,
+                  studentScores,
+                  summaryScore,
+                  summaryGrade,
+                });
+                success(`✅ 已對全班 ${studentScores.length} 位學生發布成績（${course.name}）`);
               }
             }}
           >
@@ -254,9 +280,9 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
         </div>
 
         <p style={{ marginTop: 14, fontSize: 12, color: '#9ca3af' }}>
-          ＊ 示範名單顯示前 {DEMO_STUDENTS.length} 位學生（來自 demoData DEMO_STUDENTS）；
+          ＊ 示範名單顯示前 {courseStudents.length} 位學生（來自 demoData getStudentsForCourse）；
           {course
-            ? `實際班級共 ${course.members} 位，其餘 ${course.members - DEMO_STUDENTS.length} 位連接 Firebase 後可見。`
+            ? `實際班級共 ${course.members} 位，其餘 ${course.members - courseStudents.length} 位連接 Firebase 後可見。`
             : '連接 Firebase 後顯示完整名單。'}
         </p>
 

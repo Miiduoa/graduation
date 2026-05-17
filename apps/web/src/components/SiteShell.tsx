@@ -202,13 +202,13 @@ function SiteShellInner(props: {
         <footer className="footer">
           <div className="shellActions">
             <span>© 2026 Campus One</span>
-            <a href="#" className="footerLink">
-              關於我們
-            </a>
-            <a href="#" className="footerLink">
+            <Link href={`/terms${q}`} className="footerLink">
+              服務條款
+            </Link>
+            <Link href={`/privacy${q}`} className="footerLink">
               隱私政策
-            </a>
-            <a href="#" className="footerLink">
+            </Link>
+            <a href="mailto:contact@pu.edu.tw" className="footerLink">
               聯絡我們
             </a>
           </div>

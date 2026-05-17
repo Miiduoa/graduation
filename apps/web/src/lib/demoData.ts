@@ -1063,20 +1063,46 @@ export interface DemoStudent {
   scores: { hw: number; mid: number; final: number };
 }
 
-export const DEMO_STUDENTS: DemoStudent[] = [
-  { uid: 'stu-001', studentId: 'M11302001', displayName: '王小明', email: 'm11302001@pu.edu.tw', scores: { hw: 95, mid: 96, final: 97 } },
-  { uid: 'stu-002', studentId: 'M11302002', displayName: '陳雅婷', email: 'm11302002@pu.edu.tw', scores: { hw: 88, mid: 91, final: 89 } },
-  { uid: 'stu-003', studentId: 'M11302003', displayName: '林俊宏', email: 'm11302003@pu.edu.tw', scores: { hw: 72, mid: 68, final: 74 } },
-  { uid: 'stu-004', studentId: 'M11302004', displayName: '黃美珍', email: 'm11302004@pu.edu.tw', scores: { hw: 90, mid: 88, final: 92 } },
-  { uid: 'stu-005', studentId: 'M11302005', displayName: '張志偉', email: 'm11302005@pu.edu.tw', scores: { hw: 60, mid: 55, final: 58 } },
-  { uid: 'stu-006', studentId: 'M11302006', displayName: '吳怡君', email: 'm11302006@pu.edu.tw', scores: { hw: 85, mid: 84, final: 86 } },
-  { uid: 'stu-007', studentId: 'M11302007', displayName: '劉建宇', email: 'm11302007@pu.edu.tw', scores: { hw: 78, mid: 80, final: 76 } },
-  { uid: 'stu-008', studentId: 'M11302008', displayName: '蔡雅芳', email: 'm11302008@pu.edu.tw', scores: { hw: 93, mid: 90, final: 94 } },
-  { uid: 'stu-009', studentId: 'M11302009', displayName: '許志明', email: 'm11302009@pu.edu.tw', scores: { hw: 66, mid: 70, final: 65 } },
-  { uid: 'stu-010', studentId: 'M11302010', displayName: '周曉雯', email: 'm11302010@pu.edu.tw', scores: { hw: 82, mid: 85, final: 83 } },
-  { uid: 'stu-011', studentId: 'M11302011', displayName: '鄭國豪', email: 'm11302011@pu.edu.tw', scores: { hw: 75, mid: 72, final: 78 } },
-  { uid: 'stu-012', studentId: 'M11302012', displayName: '簡佩君', email: 'm11302012@pu.edu.tw', scores: { hw: 88, mid: 92, final: 91 } },
+export interface DemoStudentExtended extends DemoStudent {
+  /** 該學生本學期選修課程 id（c1~c8 子集）— 用來在學生檔案頁顯示不一樣的修課單 */
+  enrolledCourses: string[];
+  /** 在資料結構（c1）班上的座號／群組（影響助教批改分組） */
+  c1Group: 'first-half' | 'second-half';
+  /** 學生屬性：高、中、低風險 — 影響學生檔案頁的 AI 摘要文案 */
+  riskLevel: 'high' | 'mid' | 'low';
+}
+
+export const DEMO_STUDENTS: DemoStudentExtended[] = [
+  // 1-12：所有人都選 c1（資料結構），其他課每人不一樣
+  { uid: 'stu-001', studentId: 'M11302001', displayName: '王小明', email: 'm11302001@pu.edu.tw', scores: { hw: 95, mid: 96, final: 97 }, enrolledCourses: ['c1', 'c2', 'c3', 'c4', 'c6', 'c7', 'c8'], c1Group: 'first-half', riskLevel: 'low' },
+  { uid: 'stu-002', studentId: 'M11302002', displayName: '陳雅婷', email: 'm11302002@pu.edu.tw', scores: { hw: 88, mid: 91, final: 89 }, enrolledCourses: ['c1', 'c2', 'c3', 'c5'], c1Group: 'first-half', riskLevel: 'low' },
+  { uid: 'stu-003', studentId: 'M11302003', displayName: '林俊宏', email: 'm11302003@pu.edu.tw', scores: { hw: 72, mid: 68, final: 74 }, enrolledCourses: ['c1', 'c3', 'c4', 'c5'], c1Group: 'first-half', riskLevel: 'mid' },
+  { uid: 'stu-004', studentId: 'M11302004', displayName: '黃美珍', email: 'm11302004@pu.edu.tw', scores: { hw: 90, mid: 88, final: 92 }, enrolledCourses: ['c1', 'c2', 'c4', 'c6', 'c7'], c1Group: 'first-half', riskLevel: 'low' },
+  { uid: 'stu-005', studentId: 'M11302005', displayName: '張志偉', email: 'm11302005@pu.edu.tw', scores: { hw: 60, mid: 55, final: 58 }, enrolledCourses: ['c1', 'c3', 'c5'], c1Group: 'first-half', riskLevel: 'high' },
+  { uid: 'stu-006', studentId: 'M11302006', displayName: '吳怡君', email: 'm11302006@pu.edu.tw', scores: { hw: 85, mid: 84, final: 86 }, enrolledCourses: ['c1', 'c2', 'c4', 'c5', 'c6'], c1Group: 'first-half', riskLevel: 'low' },
+  { uid: 'stu-007', studentId: 'M11302007', displayName: '劉建宇', email: 'm11302007@pu.edu.tw', scores: { hw: 78, mid: 80, final: 76 }, enrolledCourses: ['c1', 'c3', 'c7', 'c8'], c1Group: 'second-half', riskLevel: 'mid' },
+  { uid: 'stu-008', studentId: 'M11302008', displayName: '蔡雅芳', email: 'm11302008@pu.edu.tw', scores: { hw: 93, mid: 90, final: 94 }, enrolledCourses: ['c1', 'c2', 'c5', 'c6', 'c7', 'c8'], c1Group: 'second-half', riskLevel: 'low' },
+  { uid: 'stu-009', studentId: 'M11302009', displayName: '許志明', email: 'm11302009@pu.edu.tw', scores: { hw: 66, mid: 70, final: 65 }, enrolledCourses: ['c1', 'c4', 'c5'], c1Group: 'second-half', riskLevel: 'mid' },
+  { uid: 'stu-010', studentId: 'M11302010', displayName: '周曉雯', email: 'm11302010@pu.edu.tw', scores: { hw: 82, mid: 85, final: 83 }, enrolledCourses: ['c1', 'c2', 'c3', 'c5', 'c6'], c1Group: 'second-half', riskLevel: 'low' },
+  { uid: 'stu-011', studentId: 'M11302011', displayName: '鄭國豪', email: 'm11302011@pu.edu.tw', scores: { hw: 75, mid: 72, final: 78 }, enrolledCourses: ['c1', 'c3', 'c4', 'c7'], c1Group: 'second-half', riskLevel: 'mid' },
+  { uid: 'stu-012', studentId: 'M11302012', displayName: '簡佩君', email: 'm11302012@pu.edu.tw', scores: { hw: 88, mid: 92, final: 91 }, enrolledCourses: ['c1', 'c2', 'c5', 'c6', 'c8'], c1Group: 'second-half', riskLevel: 'low' },
 ];
+
+/** 根據 courseId 取得該課程的學生名冊
+ *
+ *  注意：demo 場景只有 c1（資料結構）有完整 12 位學生；c2-c8 暫以 c1 學生
+ *  的 enrolledCourses 篩選來模擬「不同課程不同名冊」，避免任何一門課都顯示
+ *  相同 12 位學生的隱私問題。
+ */
+export function getStudentsForCourse(courseId: string): DemoStudentExtended[] {
+  if (courseId === 'c1') return DEMO_STUDENTS;
+  return DEMO_STUDENTS.filter((s) => s.enrolledCourses.includes(courseId));
+}
+
+/** 根據 studentId（M11302xxx）或 uid（stu-xxx）查詢 */
+export function getDemoStudent(idOrUid: string): DemoStudentExtended | undefined {
+  return DEMO_STUDENTS.find((s) => s.uid === idOrUid || s.studentId === idOrUid);
+}
 
 // ──────────────────────────────────────────────────────────────
 // 圖書館借閱（與 AI 助理開場白同步）
@@ -1405,12 +1431,12 @@ export const DEMO_MESSAGES: DemoMessage[] = [
     fromName: '課程系統',
     fromAvatar: '🔔',
     subject: '【資料結構】作業二已收到 5 份提交，待批改',
-    body: '資料結構（CS301）作業二「實作專題」共有 5 位學生完成提交：\n\n- 王小明（2026-05-14 14:22）\n- 陳雅婷（2026-05-14 16:05）\n- 林俊宏（2026-05-15 09:11）\n- 黃美珍（2026-05-15 11:47）\n- 張志偉（2026-05-15 23:58）\n\n請前往課程成績冊進行批改，建議於 5/30 前完成。',
+    body: '資料結構（CS301）作業二「實作專題」共有 5 位學生完成提交：\n\n- 王小明（2026-05-14 14:22）\n- 陳雅婷（2026-05-14 16:05）\n- 林俊宏（2026-05-15 09:11）\n- 黃美珍（2026-05-15 11:47）\n- 張志偉（2026-05-15 23:58）\n\n請前往課程成績冊進行批改，建議於 5/30 前完成。教師可分派部分批改任務給助教（林助教）。',
     sentAt: '30 分鐘前',
     isRead: false,
     type: 'action',
     relatedCourseId: 'c1',
-    recipientRoles: ['teacher'],
+    recipientRoles: ['teacher', 'ta'],
   },
   {
     id: 'msg-t3',
@@ -1481,7 +1507,7 @@ export const DEMO_MESSAGES: DemoMessage[] = [
     fromName: '課程系統',
     fromAvatar: '🔔',
     subject: '【程式設計社】3 位新成員申請入社',
-    body: '程式設計社最新入社申請（共 3 位）：\n\n1. 李宇欣（資管系大一，B11302088）\n2. 張博文（資工系大二，B11202044）\n3. 陳怡萱（電機系大一，B11305012）\n\n請前往「管理成員」頁面進行審核。',
+    body: '程式設計社最新入社申請（共 3 位）：\n\n1. 李宇欣（資管系大一，B11302088）\n2. 張博文（資工系大二，B11202044）\n3. 陳怡萱（電機系大一，B11305012）\n\n注意：上述為新申請者個資，請至「管理成員」頁面進行審核，並遵守學生個資保護原則（僅限社團幹部本人查看）。',
     sentAt: '1 小時前',
     isRead: false,
     type: 'action',
@@ -1523,7 +1549,6 @@ export const DEMO_MESSAGES: DemoMessage[] = [
     sentAt: '2 小時前',
     isRead: false,
     type: 'warning',
-    relatedAnnouncementId: 'ann-1',
     recipientRoles: ['department_head'],
   },
   {
@@ -1598,8 +1623,16 @@ export const DEMO_MESSAGES: DemoMessage[] = [
   },
 ];
 
-/** 根據角色取得對應收件匣訊息（按時間倒序） */
+/** 根據角色取得對應收件匣訊息（按時間倒序）
+ *
+ * 嚴格隱私規則：
+ *   1. 訪客（guest）一律拿不到任何訊息 — guest 應被 messages 頁直接攔截，
+ *      但這裡作為第二道防線。
+ *   2. 只有 recipientRoles 明確包含當前角色才回傳，避免 fall-through 顯示
+ *      不屬於自己的訊息（例如教師看到學生的「課程系統」內部通知）。
+ */
 export function getMessagesForRole(role: DemoUserRole): DemoMessage[] {
+  if (role === 'guest') return [];
   return DEMO_MESSAGES.filter((m) => m.recipientRoles.includes(role));
 }
 

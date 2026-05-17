@@ -34,6 +34,7 @@ import { useAuth } from '../state/auth';
 import { safeNavigate } from '../utils/safeNavigate';
 import { aiDepartmentHealthScore } from '../services/aiOrchestrator';
 import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
+import { AIMissionControl } from '../components/AIMissionControl';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -139,6 +140,11 @@ export default function DepartmentDashboardScreen() {
 
         {/* 🤖 AI Agent 摘要 */}
         <AgentSummaryBanner cockpitLabel="主任" />
+
+        {/* AI 任務指揮 — 系主任專屬下一步 */}
+        <View style={{ marginVertical: theme.space.md }}>
+          <AIMissionControl uid={auth.user?.uid ?? 'demo_admin_huang'} maxVisible={3} hideWhenEmpty />
+        </View>
 
         <CockpitMetricRow>
           <CockpitMetricChip label="風險課程" value={totalAtRisk} tone={totalAtRisk > 0 ? 'danger' : 'success'} />

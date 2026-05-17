@@ -252,8 +252,8 @@ export default function SettingsPage(props: {
           <div className="insetGroupHeader">關於</div>
           <div className="insetGroup">
             <SettingRow icon="ℹ️" iconBg="#E8F4FD" title="Campus One" subtitle="版本 2.0.0" />
-            <SettingRow icon="📄" iconBg="#F3F0FF" title="服務條款" />
-            <SettingRow icon="🔐" iconBg="#E8FFF2" title="隱私政策" />
+            <SettingRow icon="📄" iconBg="#F3F0FF" title="服務條款" onClick={() => router.push(`/terms${q}`)} />
+            <SettingRow icon="🔐" iconBg="#E8FFF2" title="隱私政策" onClick={() => router.push(`/privacy${q}`)} />
           </div>
         </div>
       </div>
@@ -416,6 +416,31 @@ export default function SettingsPage(props: {
               iconBg="var(--info-soft)"
               title="匯出個人資料"
               subtitle="下載你的所有資料"
+              onClick={() => {
+                // 生成 JSON 並下載
+                const data = {
+                  exportedAt: new Date().toISOString(),
+                  role: demoRole,
+                  user: demoUser ?? null,
+                  note: '此為 demo 匯出檔；正式版本會包含成績、選課、訊息、借閱等完整資料。',
+                };
+                try {
+                  const blob = new Blob([JSON.stringify(data, null, 2)], {
+                    type: 'application/json',
+                  });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `personal-data-${demoRole}-${Date.now()}.json`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  success('📤 已開始下載個人資料 JSON');
+                } catch {
+                  info('匯出失敗，請改用 Email 申請');
+                }
+              }}
             />
             <SettingRow
               icon="🗑"
@@ -423,6 +448,19 @@ export default function SettingsPage(props: {
               title="刪除帳號"
               subtitle="永久刪除帳號與所有資料"
               danger
+              onClick={() => {
+                if (typeof window === 'undefined') return;
+                const confirmed = window.confirm(
+                  '⚠️ 確定要刪除帳號嗎？\n\n本動作會清除所有 demo 資料（含訊息、繳交、社團申請等）。\n正式環境下，刪除帳號需要驗證並有 30 天緩衝期。',
+                );
+                if (confirmed) {
+                  try {
+                    window.localStorage.clear();
+                  } catch { /* ignore */ }
+                  info('🗑 帳號刪除流程已啟動（demo 已清除本機資料）');
+                  router.replace(`/login${q}`);
+                }
+              }}
             />
           </div>
         </div>
@@ -473,9 +511,21 @@ export default function SettingsPage(props: {
               學號登入 · {schoolName || '靜宜大學'}
             </div>
           </div>
-          <span style={{ fontSize: 13, color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' }}>
-            編輯
-          </span>
+          <button
+            type="button"
+            onClick={() => router.push(`/profile${q}`)}
+            style={{
+              fontSize: 13,
+              color: 'var(--brand)',
+              fontWeight: 600,
+              cursor: 'pointer',
+              background: 'none',
+              border: 'none',
+              padding: '4px 8px',
+            }}
+          >
+            編輯 →
+          </button>
         </div>
 
         <div>
@@ -559,81 +609,45 @@ export default function SettingsPage(props: {
   }
 
   function renderSystem() {
+    // 所有系統管理項目都導向 /admin（真正的後台），不再用 toast 假裝
+    const goAdmin = () => router.push(`/admin${q}`);
     return (
       <div className="pageStack">
+        <div
+          className="card"
+          style={{
+            padding: '12px 14px',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--brand)',
+            fontSize: 12,
+            color: 'var(--brand)',
+            marginBottom: 4,
+          }}
+        >
+          💡 系統管理項目集中在 <strong>/admin</strong>，點任一項即可跳轉至實際後台操作。
+        </div>
         <div>
           <div className="insetGroupHeader">使用者管理</div>
           <div className="insetGroup">
-            <SettingRow
-              icon="👥"
-              iconBg="#FFF0F5"
-              title="使用者列表"
-              subtitle="檢視 / 編輯所有帳號"
-              onClick={() => info('已開啟使用者管理面板（demo）')}
-            />
-            <SettingRow
-              icon="🎭"
-              iconBg="#F3F0FF"
-              title="角色與權限"
-              subtitle="11 種正式角色 + 衍生身份"
-              onClick={() => info('已開啟角色管理（demo）')}
-            />
-            <SettingRow
-              icon="🛡️"
-              iconBg="#FFF3E8"
-              title="登入安全策略"
-              subtitle="密碼複雜度、雙因素、SSO"
-              onClick={() => info('已開啟安全策略（demo）')}
-            />
+            <SettingRow icon="👥" iconBg="#FFF0F5" title="使用者列表" subtitle="檢視 / 編輯所有帳號" onClick={goAdmin} />
+            <SettingRow icon="🎭" iconBg="#F3F0FF" title="角色與權限" subtitle="8 種角色 + 衍生身份" onClick={goAdmin} />
+            <SettingRow icon="🛡️" iconBg="#FFF3E8" title="登入安全策略" subtitle="密碼複雜度、雙因素、SSO" onClick={goAdmin} />
           </div>
         </div>
         <div>
           <div className="insetGroupHeader">學校資訊</div>
           <div className="insetGroup">
-            <SettingRow
-              icon="🏫"
-              iconBg="#E8F4FD"
-              title="校徽 / 名稱"
-              onClick={() => info('已開啟學校設定（demo）')}
-            />
-            <SettingRow
-              icon="📅"
-              iconBg="#FFF8E8"
-              title="學期設定"
-              subtitle="目前學期：114-2"
-              onClick={() => info('已開啟學期設定（demo）')}
-            />
-            <SettingRow
-              icon="🌐"
-              iconBg="#E8FFF2"
-              title="網域 / API 設定"
-              onClick={() => info('已開啟整合設定（demo）')}
-            />
+            <SettingRow icon="🏫" iconBg="#E8F4FD" title="校徽 / 名稱" onClick={goAdmin} />
+            <SettingRow icon="📅" iconBg="#FFF8E8" title="學期設定" subtitle="目前學期：114-2" onClick={goAdmin} />
+            <SettingRow icon="🌐" iconBg="#E8FFF2" title="網域 / API 設定" onClick={goAdmin} />
           </div>
         </div>
         <div>
           <div className="insetGroupHeader">系統日誌</div>
           <div className="insetGroup">
-            <SettingRow
-              icon="📊"
-              iconBg="#E8F4FD"
-              title="登入紀錄"
-              subtitle="近 24 小時 1,247 次"
-              onClick={() => info('已開啟登入紀錄（demo）')}
-            />
-            <SettingRow
-              icon="⚠️"
-              iconBg="var(--warning-soft)"
-              title="錯誤日誌"
-              subtitle="近 24 小時 3 次"
-              onClick={() => info('已開啟錯誤日誌（demo）')}
-            />
-            <SettingRow
-              icon="📡"
-              iconBg="#F3F0FF"
-              title="API 監控"
-              onClick={() => info('已開啟 API 監控（demo）')}
-            />
+            <SettingRow icon="📊" iconBg="#E8F4FD" title="登入紀錄" subtitle="近 24 小時 1,247 次" onClick={goAdmin} />
+            <SettingRow icon="⚠️" iconBg="var(--warning-soft)" title="錯誤日誌" subtitle="近 24 小時 3 次" onClick={goAdmin} />
+            <SettingRow icon="📡" iconBg="#F3F0FF" title="API 監控" onClick={goAdmin} />
           </div>
         </div>
         <div>
@@ -643,14 +657,15 @@ export default function SettingsPage(props: {
               icon="💾"
               iconBg="#E8F4FD"
               title="資料備份"
-              onClick={() => success('已啟動備份（demo）')}
+              subtitle="立即啟動一次資料庫快照"
+              onClick={() => success('💾 已啟動全站資料備份（預估 12 分鐘完成，會 Email 結果）')}
             />
             <SettingRow
               icon="🚧"
               iconBg="var(--warning-soft)"
               title="維護模式"
-              subtitle="目前為正常運作"
-              right={<Toggle value={false} onChange={() => info('維護模式切換（demo）')} />}
+              subtitle="在 /admin 系統設定區進行切換並廣播"
+              onClick={goAdmin}
             />
           </div>
         </div>
@@ -661,6 +676,19 @@ export default function SettingsPage(props: {
   function renderDepartment() {
     return (
       <div className="pageStack">
+        <div
+          className="card"
+          style={{
+            padding: '12px 14px',
+            background: 'rgba(255,149,0,0.10)',
+            border: '1px solid rgba(255,149,0,0.30)',
+            fontSize: 12,
+            color: '#C17A00',
+            marginBottom: 4,
+          }}
+        >
+          💡 系所管理動作（廣播、公告審核、教師名冊）在 <strong>/admin</strong> 完成，這裡僅提供入口。
+        </div>
         <div>
           <div className="insetGroupHeader">系所資訊</div>
           <div className="insetGroup">
@@ -675,7 +703,7 @@ export default function SettingsPage(props: {
               iconBg="#E8F4FD"
               title="課程規劃"
               subtitle="畢業學分要求、必選修配置"
-              onClick={() => info('已開啟課程規劃（demo）')}
+              onClick={() => router.push(`/credit-planner${q}`)}
             />
             <SettingRow
               icon="🎯"
@@ -693,14 +721,15 @@ export default function SettingsPage(props: {
               icon="📥"
               iconBg="var(--warning-soft)"
               title="待審公告"
-              subtitle="目前 3 件待處理"
+              subtitle="到後台核准與退回"
               onClick={() => router.push(`/admin${q}`)}
             />
             <SettingRow
               icon="📢"
               iconBg="#E8FFF2"
               title="發布系所公告"
-              onClick={() => success('已開啟「發布系所公告」表單（demo）')}
+              subtitle="開啟新增公告表單"
+              onClick={() => router.push(`/announcements${q ? q + '&' : '?'}compose=1`)}
             />
           </div>
         </div>
@@ -719,7 +748,7 @@ export default function SettingsPage(props: {
               iconBg="#F3F0FF"
               title="助教指派"
               subtitle="管理 TA 與課程的對應"
-              onClick={() => info('已開啟助教指派（demo）')}
+              onClick={() => router.push(`/admin${q}`)}
             />
           </div>
         </div>

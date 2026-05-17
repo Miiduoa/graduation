@@ -12,6 +12,13 @@ import { useSchool } from '../state/school';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { formatRelativeTime, toDate } from '../utils/format';
+import {
+  getPersonaConversationSummaries,
+  getPersona,
+  isDemoPersonaUid,
+  type PersonaConversationSummary,
+} from '../data/demoPersona';
+import { AIMissionControl } from '../components/AIMissionControl';
 
 type GroupSummary = {
   id: string;
@@ -63,7 +70,25 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
   }, [recentDms, inboxFilter]);
 
   useEffect(() => {
-    if (isFirebaseMockMode()) {
+    // ──────────────────────────────────────────────────────────────
+    // Demo / Mock 模式 — 從 demoPersona 嚴格按身分隔離載入訊息
+    // 規則：viewer 只看得到自己作為 participant 的對話
+    // ──────────────────────────────────────────────────────────────
+    if (isFirebaseMockMode() || isDemoPersonaUid(auth.user?.uid)) {
+      const summaries: PersonaConversationSummary[] = getPersonaConversationSummaries(auth.user?.uid);
+      const mappedDms: ConversationSummary[] = summaries.map((s) => ({
+        id: s.id,
+        peerId: s.peerUid,
+        participantName: s.peerName,
+        lastMessage: s.lastMessage,
+        lastMessageAt: new Date(s.lastMessageAt),
+        unread: s.unread,
+      }));
+      setRecentDms(mappedDms.slice(0, 3));
+      setUnreadDmsCount(mappedDms.filter((d) => d.unread).length);
+      // demo 模式下群組保留簡化（demo persona 可看到的群組由 GroupDetail / Groups 自行篩）
+      setRecentGroups([]);
+      setUnreadGroupsCount(0);
       setLoading(false);
       return;
     }
@@ -199,17 +224,33 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
         showsVerticalScrollIndicator={false}
       >
         <View style={{ gap: theme.space.xs }}>
-          <Text
-            style={{
-              color: theme.colors.muted,
-              fontSize: theme.typography.overline.fontSize,
-              fontWeight: theme.typography.overline.fontWeight ?? '700',
-              letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
-              textTransform: 'uppercase',
-            }}
-          >
-            訊息
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text
+              style={{
+                color: theme.colors.muted,
+                fontSize: theme.typography.overline.fontSize,
+                fontWeight: theme.typography.overline.fontWeight ?? '700',
+                letterSpacing: theme.typography.overline.letterSpacing ?? 1.5,
+                textTransform: 'uppercase',
+              }}
+            >
+              訊息
+            </Text>
+            {auth.user && getPersona(auth.user.uid) && (
+              <View
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 2,
+                  borderRadius: 999,
+                  backgroundColor: theme.colors.accentSoft,
+                }}
+              >
+                <Text style={{ color: theme.colors.accent, fontSize: 10, fontWeight: '700' }}>
+                  {getPersona(auth.user.uid)?.fullName}（{getPersona(auth.user.uid)?.shortLabel}）
+                </Text>
+              </View>
+            )}
+          </View>
           <Text
             style={{
               color: theme.colors.text,
@@ -220,7 +261,22 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
           >
             對話
           </Text>
+          {auth.user && getPersona(auth.user.uid) && (
+            <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
+              你只會看到自己參與的對話 · 嚴格身分隔離
+            </Text>
+          )}
         </View>
+
+        {/* AI 任務指揮中心 — 訊息頁的「下一步要回誰」 */}
+        {auth.user && getPersona(auth.user.uid) && (
+          <AIMissionControl
+            uid={auth.user.uid}
+            maxVisible={2}
+            title="AI 替你排好的回覆順序"
+            hideWhenEmpty
+          />
+        )}
 
         <Pressable
           onPress={() => nav?.getParent()?.navigate?.('Today', { screen: 'CampusSocialScreen' })}

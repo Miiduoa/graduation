@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, type CSSProperties } from 'react';
+import Link from 'next/link';
 import { mockMenus } from '@campus/shared/src/mockData';
 import { SiteShell } from '@/components/SiteShell';
 import {
@@ -270,6 +271,33 @@ export default function CafeteriaPage(props: {
   return (
     <SiteShell title="餐廳" subtitle="即時同步目前校內餐廳與菜單" schoolName={schoolName}>
       <div className="pageStack">
+        {/* AI 推薦卡 */}
+        <Link
+          href={`/ai-assistant${schoolName ? '?' : '?'}q=${encodeURIComponent('今天午餐建議？要熱量低一點的')}`}
+          className="card"
+          style={{
+            padding: '14px 18px',
+            background: 'linear-gradient(135deg, rgba(15,139,141,0.10) 0%, rgba(52,199,89,0.06) 100%)',
+            border: '1px solid rgba(15,139,141,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            textDecoration: 'none',
+            color: 'inherit',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 3 }}>
+              🤖 AI 推薦 · 今日午餐
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+              不知道吃什麼？讓 AI 幫你推薦適合的菜色（含熱量、口味偏好）。
+            </div>
+          </div>
+          <span style={{ fontSize: 12, color: '#0F8B8D', fontWeight: 600 }}>問 AI →</span>
+        </Link>
+
         <div
           className="toolbarPanel"
           style={{ alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
