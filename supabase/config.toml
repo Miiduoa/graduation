@@ -1,0 +1,74 @@
+# Supabase local config for 畢業專題 (Campus Agent OS) — LMS v2
+# 由 LMS v2 整合計畫產生 (2026-05-17)
+# 用 `supabase init` 第一次跑時可覆寫此檔,或直接用此檔當基準。
+
+project_id = "campus-agent-lms-v2"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = false
+
+[realtime]
+enabled = true
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[storage.image_transformation]
+enabled = true
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = ["https://127.0.0.1:3000"]
+jwt_expiry = 3600
+enable_signup = true
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+
+# OAuth / SAML providers will be set up via Web Console; this section reserved.
+# [auth.external.google] enabled = true ...
+
+# Edge Functions
+[functions.ai-course-assistant]
+verify_jwt = true
+
+[functions.material-ai-pipeline]
+verify_jwt = true
+
+[functions.dispatch-notification-push]
+verify_jwt = false   # called by cron / service secret
+
+[functions.send-expo-push]
+verify_jwt = true
+
+[functions.sync-external-directory]
+verify_jwt = false
+
+[functions.course-export-worker]
+verify_jwt = false

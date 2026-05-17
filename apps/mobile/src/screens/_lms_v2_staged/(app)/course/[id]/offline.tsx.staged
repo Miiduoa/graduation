@@ -1,0 +1,151 @@
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator, Alert, FlatList, Pressable, RefreshControl,
+  StyleSheet, Text, View,
+} from 'react-native';
+
+import { supabase } from '@/lib/supabase';
+
+type Pack = {
+  id: string;
+  title: string;
+  zip_storage_path: string;
+  size_bytes: number;
+  checksum_sha256: string | null;
+  expires_at: string | null;
+  created_at: string;
+};
+
+/**
+ * 行動端離線教材包管理頁。
+ * - 列出 material_offline_packs（教師事先上傳並指向 zip_storage_path）
+ * - 下載：用 expo-file-system 直接拉簽名 URL 到本地 cacheDirectory
+ * - 「解壓」：呼叫 Sharing.shareAsync 把 zip 推給 OS（iOS Files、Android Files），
+ *   讓 OS 內建解壓器處理；不引入 jszip 等額外原生／JS 依賴。
+ * - 寫入 material_offline_downloads 紀錄
+ */
+export default function OfflinePacksScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const [packs, setPacks] = useState<Pack[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!courseId) return;
+    setLoading(true);
+    const { data } = await supabase
+      .from('material_offline_packs')
+      .select('id, title, zip_storage_path, size_bytes, checksum_sha256, expires_at, created_at')
+      .eq('course_id', courseId)
+      .order('created_at', { ascending: false });
+    setPacks((data ?? []) as Pack[]);
+    setLoading(false);
+  }, [courseId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function downloadAndShare(p: Pack) {
+    setBusyId(p.id);
+    try {
+      // 解析 storage_path → 取得簽名 URL（60 分鐘）
+      const segs = p.zip_storage_path.split('/');
+      const bucket = segs.shift() ?? 'offline-packs';
+      const path = segs.join('/');
+      const { data: signed, error: se } = await supabase
+        .storage.from(bucket).createSignedUrl(path, 3600);
+      if (se || !signed?.signedUrl) {
+        Alert.alert('無法產生下載連結', se?.message ?? 'unknown');
+        return;
+      }
+
+      const cacheDir = FileSystem.cacheDirectory ?? '';
+      const localUri = `${cacheDir}offline-${p.id}.zip`;
+      const dl = FileSystem.createDownloadResumable(signed.signedUrl, localUri);
+      const res = await dl.downloadAsync();
+      if (!res?.uri) {
+        Alert.alert('下載失敗');
+        return;
+      }
+
+      // 記錄下載
+      await supabase.from('material_offline_downloads').insert({
+        pack_id: p.id,
+        user_id: (await supabase.auth.getUser()).data.user?.id ?? null,
+      });
+
+      // 推到 OS 分享列；iOS Files、Android Files 都能識別 .zip 並開啟解壓
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(res.uri, {
+          mimeType: 'application/zip', dialogTitle: '儲存或解壓教材包',
+        });
+      } else {
+        Alert.alert('完成', `已下載至：${res.uri}\n請用裝置檔案管理員開啟解壓。`);
+      }
+    } catch (e) {
+      Alert.alert('錯誤', (e as Error)?.message ?? 'unknown');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <FlatList
+      data={packs}
+      keyExtractor={(p) => p.id}
+      contentContainerStyle={{ padding: 12 }}
+      refreshControl={<RefreshControl refreshing={false} onRefresh={() => void load()} />}
+      ListEmptyComponent={
+        <Text style={styles.empty}>此課程目前沒有離線教材包；請教師上傳。</Text>
+      }
+      renderItem={({ item }) => (
+        <View style={styles.card}>
+          <Text style={styles.title}>{item.title}</Text>
+          <Text style={styles.meta}>
+            大小：{(item.size_bytes / 1024 / 1024).toFixed(1)} MB
+            {item.expires_at ? `｜過期：${new Date(item.expires_at).toLocaleString()}` : ''}
+          </Text>
+          {item.checksum_sha256 ? (
+            <Text style={styles.checksum} numberOfLines={1}>
+              sha256：{item.checksum_sha256}
+            </Text>
+          ) : null}
+          <Pressable
+            style={[styles.btn, busyId === item.id && { opacity: 0.5 }]}
+            disabled={busyId === item.id}
+            onPress={() => void downloadAndShare(item)}>
+            <Text style={styles.btnText}>
+              {busyId === item.id ? '下載中…' : '下載 → OS 解壓'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  empty: { color: '#6b7280', textAlign: 'center', marginTop: 40 },
+  card: {
+    padding: 14, marginBottom: 10, borderRadius: 10,
+    borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#fff',
+  },
+  title: { fontSize: 15, fontWeight: '700' },
+  meta: { fontSize: 12, color: '#4b5563', marginTop: 4 },
+  checksum: { fontSize: 10, color: '#9ca3af', marginTop: 4, fontFamily: 'monospace' },
+  btn: { marginTop: 10, backgroundColor: '#2563eb', borderRadius: 8, padding: 10, alignItems: 'center' },
+  btnText: { color: '#fff', fontWeight: '700' },
+});

@@ -1,0 +1,1362 @@
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { canCourseModerateGradesForum, canTakeCourseQuizAsStudent, useCourseRole } from '@/hooks/useCourseRole';
+import { supabase } from '@/lib/supabase';
+
+type QuestionType = 'single' | 'multiple' | 'boolean' | 'short' | 'essay';
+
+type DbQuestion = {
+  id: string;
+  quiz_id: string;
+  question_type: QuestionType;
+  prompt: string;
+  choices: { id: string; label: string }[] | null;
+  points: number;
+  sort_order: number;
+};
+
+type DbAttempt = {
+  id: string;
+  quiz_id: string;
+  student_id: string;
+  attempt_no: number;
+  started_at: string;
+  submitted_at: string | null;
+  score: number | null;
+  drawn_question_ids?: string[] | null;
+};
+
+type QuizMeta = {
+  max_attempts: number;
+  time_limit_seconds: number | null;
+  enforce_time_limit: boolean;
+  shuffle_questions?: boolean;
+  pool_pick_count?: number | null;
+};
+
+type BankRow = {
+  id: string;
+  question_type: QuestionType;
+  prompt: string;
+  points: number;
+  sort_order: number;
+};
+
+function parseChoices(text: string) {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const out: { id: string; label: string }[] = [];
+  for (const line of lines) {
+    const idx = line.indexOf('|');
+    if (idx <= 0) continue;
+    const id = line.slice(0, idx).trim();
+    const label = line.slice(idx + 1).trim();
+    if (!id || !label) continue;
+    out.push({ id, label });
+  }
+  return out;
+}
+
+function seededShuffleQuestions<T>(seed: string, items: T[]): T[] {
+  const arr = [...items];
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  for (let i = arr.length - 1; i > 0; i--) {
+    h ^= h << 13;
+    h ^= h >>> 17;
+    h ^= h << 5;
+    const j = Math.abs(h) % (i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+export default function QuizDetailScreen() {
+  const { id: courseId, quizId } = useLocalSearchParams<{ id: string; quizId: string }>();
+  const { session } = useAuth();
+  const uid = session?.user.id;
+  const role = useCourseRole(courseId, uid);
+  const canAuthorQuiz = role === 'teacher';
+  const staffModerateQuiz = canCourseModerateGradesForum(role);
+  const learnerQuizTaking = canTakeCourseQuizAsStudent(role);
+
+  const [quizTitle, setQuizTitle] = useState('');
+  const [quizMeta, setQuizMeta] = useState<QuizMeta>({
+    max_attempts: 1,
+    time_limit_seconds: null,
+    enforce_time_limit: true,
+  });
+  const [metaMaxAttempts, setMetaMaxAttempts] = useState('1');
+  const [metaTimeLimit, setMetaTimeLimit] = useState('');
+  const [metaEnforce, setMetaEnforce] = useState(true);
+
+  const [questions, setQuestions] = useState<DbQuestion[]>([]);
+  const [attempts, setAttempts] = useState<DbAttempt[]>([]);
+  const [attempt, setAttempt] = useState<DbAttempt | null>(null);
+  const [answers, setAnswers] = useState<Record<string, unknown>>({});
+  const [timerTick, setTimerTick] = useState(0);
+
+  const [qType, setQType] = useState<QuestionType>('single');
+  const [prompt, setPrompt] = useState('');
+  const [points, setPoints] = useState('1');
+  const [choicesText, setChoicesText] = useState('a|選項 A\nb|選項 B\nc|選項 C');
+  const [singleCorrect, setSingleCorrect] = useState('a');
+  const [multiCorrect, setMultiCorrect] = useState('a,b');
+  const [boolCorrect, setBoolCorrect] = useState(true);
+  const [shortCorrect, setShortCorrect] = useState('');
+  const [metaShuffle, setMetaShuffle] = useState(false);
+  const [metaPoolPick, setMetaPoolPick] = useState('');
+  const [teacherAttempts, setTeacherAttempts] = useState<DbAttempt[]>([]);
+  const [gradingAttemptId, setGradingAttemptId] = useState<string | null>(null);
+  /** attemptId → questionId → 複閱分數草稿（essay），支援多作答批次／一次儲存。 */
+  const [essayScoreDrafts, setEssayScoreDrafts] = useState<Record<string, Record<string, string>>>({});
+  const [csvImportRaw, setCsvImportRaw] = useState('');
+  const [bankRows, setBankRows] = useState<BankRow[]>([]);
+  const [bankPick, setBankPick] = useState<Record<string, boolean>>({});
+  const [importAddsToPool, setImportAddsToPool] = useState(true);
+  const [poolIds, setPoolIds] = useState<Record<string, boolean>>({});
+
+  const editable = useMemo(() => canAuthorQuiz && !!quizId, [canAuthorQuiz, quizId]);
+
+  const essayQuestionIdsForGrading = useMemo(
+    () => questions.filter((q) => q.question_type === 'essay').map((q) => q.id),
+    [questions],
+  );
+
+  const loadQuestions = useCallback(async () => {
+    if (!quizId) return;
+    const { data, error } = await supabase
+      .from('quiz_questions')
+      .select('*')
+      .eq('quiz_id', quizId)
+      .order('sort_order', { ascending: true })
+      .order('id', { ascending: true });
+    if (error) {
+      console.warn(error.message);
+      setQuestions([]);
+      return;
+    }
+    setQuestions((data ?? []) as DbQuestion[]);
+  }, [quizId]);
+
+  const loadBankRows = useCallback(async () => {
+    if (!courseId || !canAuthorQuiz) {
+      setBankRows([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('course_question_bank')
+      .select('id, question_type, prompt, points, sort_order')
+      .eq('course_id', courseId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn(error.message);
+      setBankRows([]);
+      return;
+    }
+    setBankRows((data ?? []) as BankRow[]);
+  }, [courseId, canAuthorQuiz]);
+
+  const reloadPoolEntries = useCallback(async () => {
+    if (!quizId || !canAuthorQuiz) {
+      setPoolIds({});
+      return;
+    }
+    const { data, error } = await supabase.from('quiz_pool_entries').select('question_id').eq('quiz_id', quizId);
+    if (error) {
+      console.warn(error.message);
+      setPoolIds({});
+      return;
+    }
+    const m: Record<string, boolean> = {};
+    for (const row of data ?? []) {
+      const qid = (row as { question_id?: string }).question_id;
+      if (qid) m[qid] = true;
+    }
+    setPoolIds(m);
+  }, [quizId, canAuthorQuiz]);
+
+  const loadQuiz = useCallback(async () => {
+    if (!quizId) return;
+    const { data, error } = await supabase
+      .from('quizzes')
+      .select('title, max_attempts, time_limit_seconds, enforce_time_limit, shuffle_questions, pool_pick_count')
+      .eq('id', quizId)
+      .maybeSingle();
+    if (error) {
+      console.warn(error.message);
+      setQuizTitle('');
+      return;
+    }
+    setQuizTitle((data?.title as string | undefined) ?? '');
+    const maxA = typeof data?.max_attempts === 'number' ? data.max_attempts : 1;
+    const tl = typeof data?.time_limit_seconds === 'number' ? data.time_limit_seconds : null;
+    const enf = typeof data?.enforce_time_limit === 'boolean' ? data.enforce_time_limit : true;
+    setQuizMeta({
+      max_attempts: maxA,
+      time_limit_seconds: tl,
+      enforce_time_limit: enf,
+      shuffle_questions: data?.shuffle_questions === true,
+      pool_pick_count:
+        typeof data?.pool_pick_count === 'number' && data.pool_pick_count > 0 ? data.pool_pick_count : null,
+    });
+    setMetaMaxAttempts(String(maxA));
+    setMetaTimeLimit(tl != null ? String(tl) : '');
+    setMetaEnforce(enf);
+    setMetaShuffle(data?.shuffle_questions === true);
+    const ppc = typeof data?.pool_pick_count === 'number' && data.pool_pick_count > 0 ? data.pool_pick_count : null;
+    setMetaPoolPick(ppc != null ? String(ppc) : '');
+  }, [quizId]);
+
+  const refreshAttempts = useCallback(async (): Promise<DbAttempt[]> => {
+    if (!quizId || !uid || !learnerQuizTaking) {
+      setAttempts([]);
+      return [];
+    }
+
+    const { data, error } = await supabase
+      .from('quiz_attempts')
+      .select('*')
+      .eq('quiz_id', quizId)
+      .eq('student_id', uid)
+      .order('attempt_no', { ascending: true });
+
+    if (error) {
+      console.warn(error.message);
+      setAttempts([]);
+      return [];
+    }
+
+    const rows = (data ?? []) as DbAttempt[];
+    setAttempts(rows);
+    return rows;
+  }, [quizId, uid, learnerQuizTaking]);
+
+  const loadTeacherAttempts = useCallback(async () => {
+    if (!staffModerateQuiz || !quizId) {
+      setTeacherAttempts([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('quiz_attempts')
+      .select('*')
+      .eq('quiz_id', quizId)
+      .not('submitted_at', 'is', null)
+      .order('submitted_at', { ascending: false })
+      .limit(80);
+    if (error) {
+      console.warn(error.message);
+      setTeacherAttempts([]);
+      return;
+    }
+    setTeacherAttempts((data ?? []) as DbAttempt[]);
+  }, [quizId, staffModerateQuiz]);
+
+  const loadAnswers = useCallback(async () => {
+    if (!attempt?.id || !learnerQuizTaking) return;
+
+    const { data, error } = await supabase.from('quiz_answers').select('*').eq('attempt_id', attempt.id);
+    if (error) {
+      console.warn(error.message);
+      setAnswers({});
+      return;
+    }
+
+    const map: Record<string, unknown> = {};
+    for (const row of data ?? []) {
+      map[row.question_id as string] = row.answer as unknown;
+    }
+    setAnswers(map);
+  }, [attempt?.id, learnerQuizTaking]);
+
+  useEffect(() => {
+    loadQuiz();
+  }, [loadQuiz]);
+
+  useEffect(() => {
+    loadQuestions();
+  }, [loadQuestions]);
+
+  useEffect(() => {
+    void loadBankRows();
+  }, [loadBankRows]);
+
+  useEffect(() => {
+    void reloadPoolEntries();
+  }, [reloadPoolEntries]);
+
+  useEffect(() => {
+    void refreshAttempts();
+  }, [refreshAttempts]);
+
+  useEffect(() => {
+    void loadTeacherAttempts();
+  }, [loadTeacherAttempts]);
+
+  useEffect(() => {
+    if (!staffModerateQuiz || essayQuestionIdsForGrading.length === 0 || teacherAttempts.length === 0) {
+      return;
+    }
+    const aids = teacherAttempts.map((a) => a.id);
+    let cancelled = false;
+
+    void supabase
+      .from('quiz_answers')
+      .select('attempt_id, question_id, manual_score')
+      .in('attempt_id', aids)
+      .in('question_id', essayQuestionIdsForGrading)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.warn(error.message);
+          return;
+        }
+        setEssayScoreDrafts((prev) => {
+          const next: Record<string, Record<string, string>> = { ...prev };
+          for (const aid of aids) next[aid] = { ...(next[aid] ?? {}) };
+          for (const row of data ?? []) {
+            const aid = row.attempt_id as string;
+            const qid = row.question_id as string;
+            next[aid] = { ...(next[aid] ?? {}) };
+            if (next[aid][qid] === undefined) {
+              next[aid][qid] = row.manual_score != null ? String(row.manual_score) : '';
+            }
+          }
+          return next;
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [staffModerateQuiz, teacherAttempts, essayQuestionIdsForGrading]);
+
+  useEffect(() => {
+    if (!learnerQuizTaking) return;
+    setAttempt((prev) => {
+      if (prev && attempts.some((a) => a.id === prev.id)) return prev;
+      const draft = attempts.find((a) => !a.submitted_at);
+      return draft ?? attempts[attempts.length - 1] ?? null;
+    });
+  }, [attempts, learnerQuizTaking]);
+
+  useEffect(() => {
+    loadAnswers();
+  }, [loadAnswers]);
+
+  useEffect(() => {
+    if (!learnerQuizTaking || !attempt || attempt.submitted_at || !quizMeta.enforce_time_limit || !quizMeta.time_limit_seconds) {
+      return;
+    }
+    const t = setInterval(() => setTimerTick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, [learnerQuizTaking, attempt?.id, attempt?.submitted_at, quizMeta.enforce_time_limit, quizMeta.time_limit_seconds]);
+
+  const remainingSeconds = useMemo(() => {
+    void timerTick;
+    if (!attempt || attempt.submitted_at || !quizMeta.enforce_time_limit || quizMeta.time_limit_seconds == null) {
+      return null;
+    }
+    const limit = quizMeta.time_limit_seconds;
+    const elapsed = (Date.now() - new Date(attempt.started_at).getTime()) / 1000;
+    return Math.max(0, Math.floor(limit - elapsed));
+  }, [attempt, quizMeta.enforce_time_limit, quizMeta.time_limit_seconds, timerTick]);
+
+  const displayedQuestions = useMemo(() => {
+    if (!learnerQuizTaking) return questions;
+
+    let poolFiltered = questions;
+    const drawn = attempt?.drawn_question_ids;
+    if (Array.isArray(drawn) && drawn.length > 0) {
+      const allow = new Set(drawn);
+      poolFiltered = questions.filter((q) => allow.has(q.id));
+    }
+
+    if (!metaShuffle) return poolFiltered;
+    const seed = `${quizId}:${attempt?.id ?? 'none'}:${attempt?.attempt_no ?? 0}`;
+    return seededShuffleQuestions(seed, poolFiltered);
+  }, [learnerQuizTaking, metaShuffle, questions, quizId, attempt?.id, attempt?.attempt_no, attempt?.drawn_question_ids]);
+
+  const overTime = remainingSeconds === 0 && attempt && !attempt.submitted_at && quizMeta.enforce_time_limit && quizMeta.time_limit_seconds != null;
+
+  const currentEssayDraft = useMemo(() => {
+    if (!gradingAttemptId) return {};
+    return essayScoreDrafts[gradingAttemptId] ?? {};
+  }, [gradingAttemptId, essayScoreDrafts]);
+
+  async function saveQuizMeta() {
+    if (!quizId || !editable) return;
+    const maxA = Math.min(50, Math.max(1, Math.floor(Number(metaMaxAttempts))));
+    if (!Number.isFinite(maxA)) {
+      Alert.alert('可重考次數需為 1～50 的整數');
+      return;
+    }
+    const rawTl = metaTimeLimit.trim();
+    const tl = rawTl === '' ? null : Math.floor(Number(rawTl));
+    if (rawTl !== '' && (!Number.isFinite(tl!) || tl! <= 0)) {
+      Alert.alert('作答秒數需為正整數或留空');
+      return;
+    }
+
+    const rawPool = metaPoolPick.trim();
+    const poolPick =
+      rawPool === ''
+        ? null
+        : (() => {
+            const n = Math.floor(Number(rawPool));
+            return Number.isFinite(n) && n > 0 ? n : null;
+          })();
+
+    if (rawPool !== '' && poolPick == null) {
+      Alert.alert('抽題數錯誤', '請輸入正整數或留空（代表不使用隨機抽題）');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('quizzes')
+      .update({
+        max_attempts: maxA,
+        time_limit_seconds: tl,
+        enforce_time_limit: metaEnforce,
+        shuffle_questions: metaShuffle,
+        pool_pick_count: poolPick,
+      })
+      .eq('id', quizId);
+
+    if (error) {
+      Alert.alert('儲存失敗', error.message);
+      return;
+    }
+    await loadQuiz();
+    Alert.alert('已儲存', '測驗規則已更新');
+  }
+
+  async function startNewAttempt() {
+    if (!quizId || !learnerQuizTaking) return;
+    const draft = attempts.some((a) => !a.submitted_at);
+    if (draft) {
+      Alert.alert('已有進行中的作答', '請先繳交或切換至該次作答。');
+      return;
+    }
+    if (attempts.length >= quizMeta.max_attempts) {
+      Alert.alert('已達作答次數上限');
+      return;
+    }
+
+    const { data: newId, error } = await supabase.rpc('start_quiz_attempt', { p_quiz_id: quizId });
+    if (error) {
+      Alert.alert('開始作答失敗', error.message);
+      return;
+    }
+
+    const rows = await refreshAttempts();
+    const hit = rows.find((r) => r.id === newId);
+    setAttempt(hit ?? rows[rows.length - 1] ?? null);
+  }
+
+  async function persistAnswer(questionId: string, answer: unknown) {
+    if (!attempt?.id || !learnerQuizTaking) return;
+    if (attempt.submitted_at || overTime) return;
+
+    const drawn = attempt.drawn_question_ids;
+    if (Array.isArray(drawn) && drawn.length > 0 && !drawn.includes(questionId)) return;
+
+    setAnswers((prev) => ({ ...prev, [questionId]: answer }));
+
+    const { error } = await supabase.from('quiz_answers').upsert(
+      {
+        attempt_id: attempt.id,
+        question_id: questionId,
+        answer,
+      },
+      { onConflict: 'attempt_id,question_id' },
+    );
+
+    if (error) {
+      Alert.alert('儲存答案失敗', error.message);
+    }
+  }
+
+  async function submitAttempt() {
+    if (!attempt?.id || !learnerQuizTaking) return;
+    if (attempt.submitted_at) return;
+
+    const { data: score, error } = await supabase.rpc('submit_quiz_attempt', { p_attempt_id: attempt.id });
+    if (error) {
+      Alert.alert('繳交失敗', error.message);
+      return;
+    }
+
+    const { error: syncErr } = await supabase.rpc('sync_quiz_gradebook_from_attempt', {
+      p_attempt_id: attempt.id,
+    });
+    if (syncErr) {
+      console.warn(syncErr.message);
+    }
+
+    await refreshAttempts();
+
+    Alert.alert('已繳交', typeof score === 'number' ? `得分：${score}` : '得分已計算');
+  }
+
+  async function saveManualScores() {
+    if (!gradingAttemptId || !staffModerateQuiz) return;
+    const essayQs = questions.filter((q) => q.question_type === 'essay');
+    if (!essayQs.length) {
+      Alert.alert('無複閱題', '此試卷沒有 essay 題型');
+      return;
+    }
+    const slice = essayScoreDrafts[gradingAttemptId] ?? {};
+    for (const q of essayQs) {
+      const raw = (slice[q.id] ?? '').trim();
+      if (!raw) continue;
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num < 0) {
+        Alert.alert('配分錯誤', `「${q.prompt.slice(0, 28)}…」需為非負數字`);
+        return;
+      }
+      const { error } = await supabase.rpc('set_quiz_manual_score', {
+        p_attempt_id: gradingAttemptId,
+        p_question_id: q.id,
+        p_score: num,
+      });
+      if (error) {
+        Alert.alert('儲存失敗', error.message);
+        return;
+      }
+    }
+    Alert.alert('已儲存', '複閱題配分已寫入（僅處理已輸入分數的題目）');
+    await loadTeacherAttempts();
+  }
+
+  /** 對所有已繳交作答批次，批次寫入各 essay 題有填分之欄位。 */
+  async function saveManualScoresAllAttempts() {
+    if (!staffModerateQuiz || !quizId) return;
+    const essayQs = questions.filter((q) => q.question_type === 'essay');
+    if (!essayQs.length) {
+      Alert.alert('無複閱題');
+      return;
+    }
+    const targets = teacherAttempts.filter((a) => a.submitted_at);
+    if (!targets.length) {
+      Alert.alert('尚無已繳交作答');
+      return;
+    }
+
+    let written = 0;
+    outer: for (const att of targets) {
+      const slice = essayScoreDrafts[att.id] ?? {};
+      for (const q of essayQs) {
+        const raw = (slice[q.id] ?? '').trim();
+        if (!raw) continue;
+        const num = Number(raw);
+        if (!Number.isFinite(num) || num < 0) {
+          Alert.alert('配分錯誤', `第 ${att.attempt_no} 次「${q.prompt.slice(0, 20)}…」`);
+          break outer;
+        }
+        const { error } = await supabase.rpc('set_quiz_manual_score', {
+          p_attempt_id: att.id,
+          p_question_id: q.id,
+          p_score: num,
+        });
+        if (error) {
+          Alert.alert('批次儲存失敗', error.message);
+          return;
+        }
+        written += 1;
+      }
+    }
+    Alert.alert('批次完成', `已寫入 ${written} 筆複閱欄位（僅含非空白輸入）`);
+    await loadTeacherAttempts();
+  }
+
+  async function togglePoolEntry(questionId: string) {
+    if (!quizId || !canAuthorQuiz) return;
+    try {
+      if (poolIds[questionId]) {
+        const { error } = await supabase
+          .from('quiz_pool_entries')
+          .delete()
+          .eq('quiz_id', quizId)
+          .eq('question_id', questionId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('quiz_pool_entries').insert({
+          quiz_id: quizId,
+          question_id: questionId,
+        });
+        if (error) throw error;
+      }
+      await reloadPoolEntries();
+    } catch (e: unknown) {
+      Alert.alert('抽題池更新失敗', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  /** TAB 分隔：type | prompt | points | choices（選填，換行可用 \\n）| correct（選填） */
+  async function importQuizCsv() {
+    if (!quizId || !editable) return;
+    const raw = csvImportRaw.trim();
+    if (!raw) {
+      Alert.alert('請貼上資料');
+      return;
+    }
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    let start = 0;
+    const head = lines[0]?.toLowerCase() ?? '';
+    if (head.startsWith('type\t') || head.startsWith('question_type\t')) start = 1;
+
+    type RowPlan = {
+      qType: QuestionType;
+      prompt: string;
+      points: number;
+      choicesText?: string;
+      correct: unknown;
+    };
+    const plans: RowPlan[] = [];
+
+    for (let i = start; i < lines.length; i++) {
+      const cols = lines[i].split('\t');
+      const typeRaw = (cols[0] ?? '').trim().toLowerCase();
+      const promptCell = (cols[1] ?? '').trim();
+      const ptsCell = (cols[2] ?? '').trim();
+      const choicesCell = (cols[3] ?? '').replace(/\\n/g, '\n').trim();
+      const correctCell = (cols[4] ?? '').trim();
+
+      if (!typeRaw || !promptCell) continue;
+      const qType = typeRaw as QuestionType;
+      if (!['single', 'multiple', 'boolean', 'short', 'essay'].includes(qType)) {
+        Alert.alert('題型錯誤', `第 ${i + 1} 行：不支援的 type「${typeRaw}」`);
+        return;
+      }
+      const pts = Number(ptsCell);
+      if (!Number.isFinite(pts) || pts < 0) {
+        Alert.alert('配分錯誤', `第 ${i + 1} 行：points 需為非負數字`);
+        return;
+      }
+
+      let choicesText: string | undefined;
+      let correct: unknown = null;
+
+      if (qType === 'essay') {
+        correct = {};
+      } else if (qType === 'boolean') {
+        const v = correctCell.toLowerCase();
+        correct = { value: v === 'true' || v === '1' || v === 'yes' || v === '是' };
+      } else if (qType === 'short') {
+        correct = { text: correctCell };
+      } else if (qType === 'single') {
+        choicesText = choicesCell;
+        correct = { optionIds: [correctCell] };
+      } else if (qType === 'multiple') {
+        choicesText = choicesCell;
+        const ids = correctCell
+          .split(/[,，]/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .sort();
+        correct = { optionIds: ids };
+      }
+
+      if (qType === 'single' || qType === 'multiple') {
+        const parsed = parseChoices(choicesText ?? '');
+        if (parsed.length < 2) {
+          Alert.alert('選項不足', `第 ${i + 1} 行：選擇題至少需要兩個 id|選項（換行分隔，或用 \\n）`);
+          return;
+        }
+      }
+
+      plans.push({ qType, prompt: promptCell, points: pts, choicesText, correct });
+    }
+
+    if (!plans.length) {
+      Alert.alert('無有效列', '請確認為 TAB 分隔，且含題型／題幹／配分');
+      return;
+    }
+
+    let sortBase =
+      questions.reduce((max, q) => Math.max(max, typeof q.sort_order === 'number' ? q.sort_order : 0), 0) + 1;
+
+    for (let idx = 0; idx < plans.length; idx++) {
+      const p = plans[idx];
+      let choices: { id: string; label: string }[] | null = null;
+      if (p.qType === 'single' || p.qType === 'multiple') {
+        choices = parseChoices(p.choicesText ?? '');
+      }
+
+      const { data: qRow, error } = await supabase
+        .from('quiz_questions')
+        .insert({
+          quiz_id: quizId,
+          question_type: p.qType,
+          prompt: p.prompt,
+          choices,
+          points: p.points,
+          sort_order: sortBase + idx,
+        })
+        .select('*')
+        .single();
+
+      if (error || !qRow) {
+        Alert.alert('匯入失敗', error?.message ?? `第 ${idx + 1} 題`);
+        return;
+      }
+
+      const { error: solErr } = await supabase.from('quiz_question_solutions').insert({
+        question_id: qRow.id as string,
+        correct_answer: p.correct,
+      });
+
+      if (solErr) {
+        Alert.alert('標準答案寫入失敗', solErr.message);
+        return;
+      }
+    }
+
+    setCsvImportRaw('');
+    await Promise.all([loadQuestions(), reloadPoolEntries()]);
+    Alert.alert('匯入完成', `已新增 ${plans.length} 題`);
+  }
+
+  async function addQuestion() {
+    if (!quizId || !editable) return;
+
+    const pts = Number(points);
+    if (!Number.isFinite(pts) || pts < 0) {
+      Alert.alert('配分需為數字');
+      return;
+    }
+
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) {
+      Alert.alert('請輸入題幹');
+      return;
+    }
+
+    let choices: { id: string; label: string }[] | null = null;
+    if (qType === 'single' || qType === 'multiple') {
+      choices = parseChoices(choicesText);
+      if (choices.length < 2) {
+        Alert.alert('選擇題至少需要兩個選項（格式：id|文字，換行分隔）');
+        return;
+      }
+    }
+
+    let correct: unknown = null;
+    if (qType === 'essay') {
+      correct = {};
+    }
+    if (qType === 'boolean') correct = { value: boolCorrect };
+    if (qType === 'short') correct = { text: shortCorrect.trim() };
+    if (qType === 'single') correct = { optionIds: [singleCorrect.trim()] };
+    if (qType === 'multiple') {
+      const ids = multiCorrect
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .sort();
+      correct = { optionIds: ids };
+    }
+
+    const nextSort =
+      questions.reduce((max, q) => Math.max(max, typeof q.sort_order === 'number' ? q.sort_order : 0), 0) + 1;
+
+    const { data: qRow, error } = await supabase
+      .from('quiz_questions')
+      .insert({
+        quiz_id: quizId,
+        question_type: qType,
+        prompt: trimmedPrompt,
+        choices,
+        points: pts,
+        sort_order: nextSort,
+      })
+      .select('*')
+      .single();
+
+    if (error || !qRow) {
+      Alert.alert('新增題目失敗', error?.message ?? '');
+      return;
+    }
+
+    const { error: solErr } = await supabase.from('quiz_question_solutions').insert({
+      question_id: qRow.id as string,
+      correct_answer: correct,
+    });
+
+    if (solErr) {
+      Alert.alert('新增標準答案失敗', solErr.message);
+      return;
+    }
+
+    setPrompt('');
+    await Promise.all([loadQuestions(), reloadPoolEntries()]);
+  }
+
+  function renderStudentQuestion(q: DbQuestion) {
+    const locked = Boolean(attempt?.submitted_at || overTime);
+    const current = answers[q.id];
+
+    if (q.question_type === 'essay') {
+      const text =
+        typeof current === 'object' && current && 'text' in (current as Record<string, unknown>)
+          ? String((current as { text?: string }).text ?? '')
+          : typeof current === 'string'
+            ? current
+            : '';
+      return (
+        <View style={styles.qCard}>
+          <Text style={styles.qPrompt}>{q.prompt}</Text>
+          <Text style={styles.qMeta}>複閱題（繳交後由教師評分）</Text>
+          <TextInput
+            editable={!locked}
+            placeholder="請作答（可多行）"
+            style={[styles.input, styles.multiline]}
+            multiline
+            value={text}
+            onChangeText={(next) => persistAnswer(q.id, { text: next })}
+          />
+        </View>
+      );
+    }
+
+    if (q.question_type === 'boolean') {
+      const raw =
+        typeof current === 'object' && current && 'value' in (current as Record<string, unknown>)
+          ? (current as { value?: boolean | null }).value
+          : undefined;
+      const val = raw === true;
+      return (
+        <View style={styles.qCard}>
+          <Text style={styles.qPrompt}>{q.prompt}</Text>
+          <View style={styles.rowBetween}>
+            <Text>{val ? '是' : '否'}</Text>
+            <Switch disabled={locked} value={val} onValueChange={(next) => persistAnswer(q.id, { value: next })} />
+          </View>
+        </View>
+      );
+    }
+
+    if (q.question_type === 'short') {
+      const text =
+        typeof current === 'object' && current && 'text' in (current as Record<string, unknown>)
+          ? String((current as { text?: string }).text ?? '')
+          : '';
+      return (
+        <View style={styles.qCard}>
+          <Text style={styles.qPrompt}>{q.prompt}</Text>
+          <TextInput
+            editable={!locked}
+            placeholder="請輸入答案"
+            style={styles.input}
+            value={text}
+            onChangeText={(next) => persistAnswer(q.id, { text: next })}
+          />
+        </View>
+      );
+    }
+
+    const opts = Array.isArray(q.choices) ? q.choices : [];
+
+    if (q.question_type === 'single') {
+      const selected =
+        typeof current === 'object' && current && Array.isArray((current as { optionIds?: string[] }).optionIds)
+          ? String((current as { optionIds?: string[] }).optionIds?.[0] ?? '')
+          : '';
+
+      return (
+        <View style={styles.qCard}>
+          <Text style={styles.qPrompt}>{q.prompt}</Text>
+          {opts.map((opt) => (
+            <Pressable
+              key={opt.id}
+              disabled={locked}
+              style={[styles.option, selected === opt.id && styles.optionActive]}
+              onPress={() => persistAnswer(q.id, { optionIds: [opt.id] })}>
+              <Text style={styles.optionText}>
+                {opt.id}. {opt.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      );
+    }
+
+    const selectedSet = new Set<string>(
+      typeof current === 'object' && current && Array.isArray((current as { optionIds?: string[] }).optionIds)
+        ? ((current as { optionIds?: string[] }).optionIds as string[])
+        : [],
+    );
+
+    return (
+      <View style={styles.qCard}>
+        <Text style={styles.qPrompt}>{q.prompt}（複選）</Text>
+        {opts.map((opt) => {
+          const on = selectedSet.has(opt.id);
+          return (
+            <Pressable
+              key={opt.id}
+              disabled={locked}
+              style={[styles.option, on && styles.optionActive]}
+              onPress={() => {
+                const next = new Set(selectedSet);
+                if (next.has(opt.id)) next.delete(opt.id);
+                else next.add(opt.id);
+                persistAnswer(q.id, { optionIds: [...next].sort() });
+              }}>
+              <Text style={styles.optionText}>
+                {opt.id}. {opt.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    );
+  }
+
+  function renderTeacherQuestion(q: DbQuestion) {
+    const inPool = !!poolIds[q.id];
+    return (
+      <View style={styles.qCard}>
+        <Text style={styles.qPrompt}>
+          [{q.question_type}] {q.prompt}
+        </Text>
+        <Text style={styles.qMeta}>
+          配分：{q.points}
+          {inPool ? ' · 抽題池候選' : ''}
+        </Text>
+        {canAuthorQuiz ? (
+          <Pressable style={styles.secondaryBtn} onPress={() => void togglePoolEntry(q.id)}>
+            <Text style={styles.secondaryBtnText}>{inPool ? '移出抽題池' : '加入抽題池候選'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  }
+
+  const hasDraft = attempts.some((a) => !a.submitted_at);
+  const atCap = attempts.length >= quizMeta.max_attempts;
+
+  return (
+    <ScrollView contentContainerStyle={styles.screen}>
+      <Text style={styles.title}>{quizTitle || '測驗'}</Text>
+
+      {learnerQuizTaking && quizMeta.time_limit_seconds != null ? (
+        <Text style={styles.hintBanner}>
+          限時規則：{quizMeta.enforce_time_limit ? `強制 ${quizMeta.time_limit_seconds} 秒` : '記錄用（後端可不強制）'}
+        </Text>
+      ) : null}
+
+      {learnerQuizTaking && metaShuffle ? (
+        <Text style={styles.hintBanner}>題目順序已對您隨機排列（同一作答批次內固定）。</Text>
+      ) : null}
+
+      {learnerQuizTaking && attempt?.drawn_question_ids && attempt.drawn_question_ids.length > 0 ? (
+        <Text style={styles.hintBanner}>
+          本次作答為題組隨機抽題（共 {attempt.drawn_question_ids.length} 題）。
+        </Text>
+      ) : null}
+
+      {learnerQuizTaking && remainingSeconds != null && attempt && !attempt.submitted_at ? (
+        <Text style={[styles.banner, remainingSeconds <= 30 ? styles.bannerWarn : null]}>
+          剩餘時間：{remainingSeconds}s
+          {overTime ? '（已逾時，請繳交由伺服端判定）' : ''}
+        </Text>
+      ) : null}
+
+      {attempt?.submitted_at ? (
+        <Text style={styles.banner}>
+          目前檢視：第 {attempt.attempt_no} 次作答｜已繳交{attempt.score != null ? `｜得分：${attempt.score}` : ''}
+        </Text>
+      ) : null}
+
+      {learnerQuizTaking ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>作答紀錄（多次 attempt）</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {attempts.map((a) => (
+                <Pressable
+                  key={a.id}
+                  style={[styles.chip, attempt?.id === a.id && styles.chipActive]}
+                  onPress={() => setAttempt(a)}>
+                  <Text style={[styles.chipText, attempt?.id === a.id && styles.chipTextActive]}>
+                    第{a.attempt_no}次{a.submitted_at ? '✓' : '…'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+          <Text style={styles.metaLine}>
+            可作答次數上限：{quizMeta.max_attempts}｜已用：{attempts.length}
+          </Text>
+          <Pressable
+            style={[styles.secondaryBtn, (hasDraft || atCap) && styles.disabled]}
+            disabled={hasDraft || atCap}
+            onPress={startNewAttempt}>
+            <Text style={styles.secondaryBtnText}>{attempts.length === 0 ? '開始首次作答' : '開始新的作答'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {editable ? (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>測驗規則（限時／重考）</Text>
+            <Text style={styles.label}>最多作答次數（1～50）</Text>
+            <TextInput style={styles.input} value={metaMaxAttempts} onChangeText={setMetaMaxAttempts} keyboardType="number-pad" />
+            <Text style={styles.label}>作答時間上限（秒，留空＝不限）</Text>
+            <TextInput style={styles.input} value={metaTimeLimit} onChangeText={setMetaTimeLimit} keyboardType="number-pad" />
+            <View style={styles.rowBetween}>
+              <Text>強制限時（繳交時由 RPC 檢查）</Text>
+              <Switch value={metaEnforce} onValueChange={setMetaEnforce} />
+            </View>
+            <View style={styles.rowBetween}>
+              <Text>題序隨機（學生視角）</Text>
+              <Switch value={metaShuffle} onValueChange={setMetaShuffle} />
+            </View>
+            <Text style={styles.label}>每次作答隨機抽題數（留空＝抽全試卷）</Text>
+            <TextInput
+              placeholder="例如 5（至多不超過題庫題數）"
+              style={styles.input}
+              value={metaPoolPick}
+              onChangeText={setMetaPoolPick}
+              keyboardType="number-pad"
+            />
+            <Pressable style={styles.primaryBtn} onPress={saveQuizMeta}>
+              <Text style={styles.primaryBtnText}>儲存規則</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>新增題目（示範）</Text>
+
+            <Text style={styles.label}>題型</Text>
+            <View style={styles.typeRow}>
+              {(['single', 'multiple', 'boolean', 'short', 'essay'] as QuestionType[]).map((t) => (
+                <Pressable key={t} style={[styles.chip, qType === t && styles.chipActive]} onPress={() => setQType(t)}>
+                  <Text style={[styles.chipText, qType === t && styles.chipTextActive]}>{t}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <TextInput placeholder="題幹" style={styles.input} value={prompt} onChangeText={setPrompt} />
+            <TextInput placeholder="配分" style={styles.input} value={points} onChangeText={setPoints} keyboardType="decimal-pad" />
+
+            {qType === 'essay' ? (
+              <Text style={styles.hintBanner}>複閱題無自動批改；學生繳交後請於下方「複閱題評分」輸入配分。</Text>
+            ) : null}
+
+            {qType === 'single' || qType === 'multiple' ? (
+              <>
+                <Text style={styles.label}>選項（每行：id|文字）</Text>
+                <TextInput style={[styles.input, styles.multiline]} multiline value={choicesText} onChangeText={setChoicesText} />
+                {qType === 'single' ? (
+                  <TextInput
+                    placeholder="正確選項 id（例如 a）"
+                    style={styles.input}
+                    value={singleCorrect}
+                    onChangeText={setSingleCorrect}
+                  />
+                ) : (
+                  <TextInput
+                    placeholder="正確選項 ids（逗號分隔，例如 a,c）"
+                    style={styles.input}
+                    value={multiCorrect}
+                    onChangeText={setMultiCorrect}
+                  />
+                )}
+              </>
+            ) : null}
+
+            {qType === 'boolean' ? (
+              <View style={styles.rowBetween}>
+                <Text>正確答案（是 / 否）</Text>
+                <Switch value={boolCorrect} onValueChange={setBoolCorrect} />
+              </View>
+            ) : null}
+
+            {qType === 'short' ? (
+              <TextInput
+                placeholder="正確答案（不分大小寫、會 trim）"
+                style={styles.input}
+                value={shortCorrect}
+                onChangeText={setShortCorrect}
+              />
+            ) : null}
+
+            <Pressable style={styles.primaryBtn} onPress={addQuestion}>
+              <Text style={styles.primaryBtnText}>新增題目</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>CSV／試算表匯入（TAB 分隔）</Text>
+            <Text style={styles.metaLine}>
+              表頭可省略。欄位：type、prompt、points、[choices]、[correct]。choices 每行 id|文字，儲存格內換行請用 \n。
+              {'\n'}
+              essay：僅需前三欄；boolean：correct 為 true／false；short：correct 為參考答案；single／multiple：choices +
+              correct（複選逗號分隔 id）。
+            </Text>
+            <TextInput
+              placeholder={`例如：single\t二元一次方程式\t2\ta|Yes\\nb|No\ta`}
+              style={[styles.input, styles.multiline]}
+              multiline
+              value={csvImportRaw}
+              onChangeText={setCsvImportRaw}
+            />
+            <Pressable style={styles.secondaryBtn} onPress={importQuizCsv}>
+              <Text style={styles.secondaryBtnText}>匯入題目</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>課程題庫匯入本卷（選池）</Text>
+            <Text style={styles.metaLine}>
+              課程級題庫 table：course_question_bank。勾選後匯入會複製為本卷題目並可同步加入池中；若池中已有資料且設定每次抽題數，伺服端將「只在池中」抽簽。
+            </Text>
+            <View style={styles.rowBetween}>
+              <Text>匯入後加入抽題候選池</Text>
+              <Switch value={importAddsToPool} onValueChange={setImportAddsToPool} />
+            </View>
+            {bankRows.length === 0 ? (
+              <Text style={styles.metaLine}>題庫尚無資料。</Text>
+            ) : (
+              <View style={{ gap: 10 }}>
+                {bankRows.slice(0, 120).map((b) => {
+                  const picked = !!bankPick[b.id];
+                  return (
+                    <Pressable
+                      key={b.id}
+                      onPress={() => setBankPick((prev) => ({ ...prev, [b.id]: !picked }))}
+                      style={[styles.option, picked ? styles.optionActive : null]}>
+                      <Text style={styles.optionText}>
+                        [{b.question_type}] {b.prompt.slice(0, 140)}
+                        {b.prompt.length > 140 ? '…' : ''}（配分 {b.points}
+                        {picked ? ' · 已勾選' : ''}）
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+            <Pressable
+              style={styles.primaryBtn}
+              onPress={async () => {
+                if (!quizId) return;
+                const ids = Object.entries(bankPick)
+                  .filter(([, v]) => v)
+                  .map(([k]) => k);
+                if (!ids.length) {
+                  Alert.alert('請選擇題庫項目');
+                  return;
+                }
+                const { data, error } = await supabase.rpc('import_bank_questions_to_quiz', {
+                  p_quiz_id: quizId,
+                  p_bank_ids: ids,
+                  p_add_to_pool: importAddsToPool,
+                });
+                if (error) {
+                  Alert.alert('匯入失敗', error.message);
+                  return;
+                }
+                setBankPick({});
+                await Promise.all([loadQuestions(), reloadPoolEntries()]);
+                Alert.alert('已完成', typeof data === 'number' ? `成功匯入 ${data} 題` : '已複製題目');
+              }}>
+              <Text style={styles.primaryBtnText}>從題庫匯入勾選項目</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : null}
+
+      {staffModerateQuiz ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>複閱題評分（essay）</Text>
+          <Text style={styles.metaLine}>教師／課程仲裁可為已繳交批次輸入手動配分。</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {teacherAttempts.map((a) => (
+                <Pressable
+                  key={a.id}
+                  style={[styles.chip, gradingAttemptId === a.id && styles.chipActive]}
+                  onPress={() => setGradingAttemptId(a.id)}>
+                  <Text style={[styles.chipText, gradingAttemptId === a.id && styles.chipTextActive]}>
+                    第{a.attempt_no}次｜學生作答
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+          {gradingAttemptId && questions.some((q) => q.question_type === 'essay') ? (
+            <>
+              {questions
+                .filter((q) => q.question_type === 'essay')
+                .map((q) => (
+                  <View key={q.id} style={{ gap: 6 }}>
+                    <Text style={styles.label}>
+                      {q.prompt.slice(0, 120)}
+                      {q.prompt.length > 120 ? '…' : ''}
+                    </Text>
+                    <Text style={styles.qMeta}>配分上限：{q.points}</Text>
+                    <TextInput
+                      placeholder="給分（留空略過）"
+                      style={styles.input}
+                      keyboardType="decimal-pad"
+                      value={currentEssayDraft[q.id] ?? ''}
+                      onChangeText={(t) =>
+                        setEssayScoreDrafts((prev) => ({
+                          ...prev,
+                          [gradingAttemptId!]: { ...(prev[gradingAttemptId!] ?? {}), [q.id]: t },
+                        }))
+                      }
+                    />
+                  </View>
+                ))}
+              <Pressable style={styles.primaryBtn} onPress={() => void saveManualScores()}>
+                <Text style={styles.primaryBtnText}>儲存此份複閱配分</Text>
+              </Pressable>
+              {(teacherAttempts ?? []).length > 1 ? (
+                <Pressable
+                  style={styles.secondaryBtn}
+                  onPress={() => void saveManualScoresAllAttempts()}>
+                  <Text style={styles.secondaryBtnText}>批次儲存所有已繳交作答（essay）</Text>
+                </Pressable>
+              ) : null}
+            </>
+          ) : gradingAttemptId ? (
+            <Text style={styles.metaLine}>此試卷尚無 essay 題。</Text>
+          ) : (
+            <Text style={styles.metaLine}>尚無已繳交紀錄可評分。</Text>
+          )}
+        </View>
+      ) : null}
+
+      <Text style={styles.section}>題目列表</Text>
+      {canAuthorQuiz &&
+      quizMeta.pool_pick_count != null &&
+      Object.keys(poolIds).length > 0 ? (
+        <Text style={styles.hintBanner}>
+          池中已標記 {Object.keys(poolIds).length} 題；每次作答將從池中隨機抽至多 {quizMeta.pool_pick_count} 題。
+        </Text>
+      ) : null}
+      {canAuthorQuiz && quizMeta.pool_pick_count != null && Object.keys(poolIds).length === 0 ? (
+        <Text style={styles.hintBanner}>已設定每次抽題數，但池中尚無項目：將退回「從全試卷題目」抽題。</Text>
+      ) : null}
+      {displayedQuestions.map((q) => (
+        <View key={q.id}>
+          {learnerQuizTaking ? renderStudentQuestion(q) : renderTeacherQuestion(q)}
+        </View>
+      ))}
+
+      {learnerQuizTaking ? (
+        <Pressable
+          style={[styles.primaryBtn, (!attempt || attempt.submitted_at) && styles.disabled]}
+          disabled={!attempt || !!attempt.submitted_at}
+          onPress={submitAttempt}>
+          <Text style={styles.primaryBtnText}>
+            {!attempt ? '請先開始作答' : attempt.submitted_at ? '已繳交' : overTime ? '繳交（逾時將由伺服端拒絕）' : '繳交並自動批改'}
+          </Text>
+        </Pressable>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { padding: 16, gap: 12, paddingBottom: 48 },
+  title: { fontSize: 22, fontWeight: '900' },
+  hintBanner: { fontSize: 13, color: '#4b5563' },
+  banner: { backgroundColor: '#ecfdf5', borderRadius: 12, padding: 12, overflow: 'hidden', fontWeight: '700' },
+  bannerWarn: { backgroundColor: '#fef3c7' },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+  },
+  cardTitle: { fontWeight: '900' },
+  metaLine: { fontSize: 13, color: '#6b7280', fontWeight: '600' },
+  label: { fontWeight: '800', marginTop: 6 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  multiline: { minHeight: 110, textAlignVertical: 'top' },
+  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    backgroundColor: '#fafafa',
+  },
+  chipActive: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  chipText: { fontSize: 12, fontWeight: '700', color: '#111827' },
+  chipTextActive: { color: '#1d4ed8' },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '900' },
+  secondaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 6,
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '900' },
+  disabled: { opacity: 0.5 },
+  section: { marginTop: 10, fontWeight: '900', fontSize: 16 },
+  qCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#eee',
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+    marginBottom: 10,
+    backgroundColor: '#ffffff',
+  },
+  qPrompt: { fontSize: 16, fontWeight: '800', lineHeight: 22 },
+  qMeta: { color: '#6b7280', fontSize: 12 },
+  option: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#fafafa',
+  },
+  optionActive: { borderColor: '#2563eb', backgroundColor: '#eff6ff' },
+  optionText: { fontSize: 15, fontWeight: '600' },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+});
