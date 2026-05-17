@@ -220,6 +220,42 @@ export function isAnnouncementTakenDown(id: string, store: DemoStore): boolean {
   return (store.takendownAnnIds ?? []).includes(id);
 }
 
+/** 公告審核退回（含原因）+ 通知原提交者
+ *
+ * 取代原本 admin / announcements 兩處重複把「退回」當「核准」的爛邏輯。
+ * 退回會：（1）將公告移出待審佇列（呼叫 approvePendingAnn 標記已處理）
+ *         （2）發訊息給對應角色（依 submitterRole 路由）
+ */
+export function rejectAnnouncementWithReason(params: {
+  pendingId: string;
+  title: string;
+  reason: string;
+  submitterRole: DemoUserRole;
+  reviewedByLabel: string;
+}): void {
+  // 1. 移出佇列（重用既有 approvePendingAnn 把它標為「已處理」）
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = window.localStorage.getItem('demoApprovedAnn');
+      const approved: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+      if (!approved.includes(params.pendingId)) approved.push(params.pendingId);
+      window.localStorage.setItem('demoApprovedAnn', JSON.stringify(approved));
+      window.dispatchEvent(new CustomEvent('demoPendingAnnChange'));
+    } catch { /* ignore */ }
+  }
+  // 2. 通知原提交者
+  sendMessage({
+    fromName: '公告審核系統',
+    fromAvatar: '🔄',
+    subject: `你的公告被退回：${params.title}`,
+    body: `${params.reviewedByLabel} 已將公告退回，請補充後重新送審。\n\n退回原因：${params.reason}\n\n請至公告頁面修改後重新提交。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'warning',
+    recipientRoles: [params.submitterRole],
+  });
+}
+
 // ─────────────────────────────────────────────────────────────
 // 讀 / 寫
 // ─────────────────────────────────────────────────────────────
