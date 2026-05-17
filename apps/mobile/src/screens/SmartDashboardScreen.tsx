@@ -97,6 +97,7 @@ import { campusEventBus } from '../services/campusEventBus';
 import { getDeadlines, type Deadline } from '../services/smartCalendarEngine';
 import { getAnyCachedTCTodos, seedCachedTCCourses, seedCachedTCAttendance } from '../services/puDataCache';
 import { BrainInsightCards } from '../components/BrainInsightCards';
+import { AIMissionControl } from '../components/AIMissionControl';
 import { CompanionStrip } from '../components/CompanionStrip';
 import { NpsPromptModal } from '../components/NpsPromptModal';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
@@ -2976,6 +2977,11 @@ export function SmartDashboardScreen(props: any) {
             </Text>
           </View>
         )}
+
+        {/* ── AI 任務指揮中心 — 學生身分專屬下一步 ── */}
+        <View style={{ marginBottom: theme.space.md }}>
+          <AIMissionControl uid={auth.user?.uid} maxVisible={3} hideWhenEmpty />
+        </View>
 
         {/* ── AI Brain 即時洞察卡片 ── */}
         <BrainInsightCards

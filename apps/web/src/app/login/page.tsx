@@ -230,7 +230,7 @@ export default function LoginPage(props: {
             }}
           >
             {DEMO_ROLES.map((r) => {
-              const user = r.demoUserUid ? getDemoUser(r.role === 'guest' ? 'student' : r.role) : null;
+              const user = r.role === 'guest' ? null : (r.demoUserUid ? getDemoUser(r.role) : null);
               return (
                 <button
                   key={r.role}
@@ -281,8 +281,8 @@ export default function LoginPage(props: {
                   <span style={{ display: 'grid', gap: 2 }}>
                     <span style={{ fontSize: 13, fontWeight: 700 }}>{r.label}</span>
                     <span style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.4 }}>
-                      {user ? user.displayName : '訪客'} · {r.description.slice(0, 18)}
-                      {r.description.length > 18 ? '…' : ''}
+                      {user ? user.displayName : '訪客'} · {user ? r.description.slice(0, 18) : '未登入身份'}
+                      {user && r.description.length > 18 ? '…' : ''}
                     </span>
                   </span>
                 </button>

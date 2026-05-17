@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
-import { useToast } from '@/components/ui';
+import { useToast, Modal } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   getAuth,
@@ -89,11 +90,13 @@ export default function ClubsPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
   const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const router = useRouter();
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const roleDef = getDemoRoleDefinition(demoRole);
   const { success, info } = useToast();
   const store = useDemoStore();
+  const [showManageMembersModal, setShowManageMembersModal] = useState(false);
   // 社長視角：讀取待審核成員
   const pendingClubMembers = getPendingClubMembers('club-1', store);
   const [category, setCategory] = useState('全部');
@@ -255,7 +258,7 @@ export default function ClubsPage(props: {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  onClick={() => success('已開啟「發布社團活動」表單（demo）')}
+                  onClick={() => router.push(`/announcements${q ? q + '&' : '?'}compose=1&club=club-1`)}
                   className="btn primary"
                   style={{ fontSize: 13 }}
                 >
@@ -263,20 +266,25 @@ export default function ClubsPage(props: {
                 </button>
                 <button
                   type="button"
-                  onClick={() => success('已開啟「成員管理」面板（demo）')}
+                  onClick={() => setShowManageMembersModal(true)}
                   className="btn"
                   style={{ fontSize: 13 }}
                 >
-                  👥 管理成員
+                  👥 管理成員（120）
                 </button>
-                <button
-                  type="button"
-                  onClick={() => success('已開啟「入社申請審核」面板')}
-                  className="btn"
-                  style={{ fontSize: 13 }}
-                >
-                  📝 審核申請{pendingClubMembers.length > 0 ? ` (${pendingClubMembers.length})` : ''}
-                </button>
+                {pendingClubMembers.length > 0 && (
+                  <a
+                    href="#pending-applicants"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      document.getElementById('pending-applicants')?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="btn"
+                    style={{ fontSize: 13, textDecoration: 'none' }}
+                  >
+                    📝 審核申請 ({pendingClubMembers.length})
+                  </a>
+                )}
               </div>
             </div>
           </div>
@@ -284,7 +292,7 @@ export default function ClubsPage(props: {
 
         {/* 社長：待審核成員列表（有申請時才顯示） */}
         {caps.canManageClubMembers && pendingClubMembers.length > 0 && (
-          <div className="card" style={{ padding: '14px 18px', border: '1px solid #FF9500', background: 'rgba(255,149,0,0.08)' }}>
+          <div id="pending-applicants" className="card" style={{ padding: '14px 18px', border: '1px solid #FF9500', background: 'rgba(255,149,0,0.08)' }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
               📥 待審核入社申請（{pendingClubMembers.length} 筆）
             </div>
@@ -334,19 +342,19 @@ export default function ClubsPage(props: {
           );
         })()}
 
-        {usingDemo && (
-          <div
-            className="card"
-            style={{
-              padding: '10px 16px',
-              background: 'var(--warning-soft)',
-              borderColor: 'var(--warning)',
-              fontSize: 13,
-              color: 'var(--text)',
-            }}
-          >
-            ⚠️ 目前顯示示範資料。{!user ? '請登入帳號' : 'Firebase 尚未設定或無社團資料'}。
-            {loading && '載入中...'}
+        {/* 訪客/校友：角色限制提示 */}
+        {(demoRole === 'guest' || demoRole === 'alumni') && (
+          <div className="card" style={{ padding: '12px 16px', background: 'var(--info-soft)', border: '1px solid var(--info)', fontSize: 13 }}>
+            {demoRole === 'guest'
+              ? <>🔒 <strong>訪客身份</strong>：請先 <Link href={`/login${q}`} style={{ color: 'var(--brand)', fontWeight: 600 }}>登入</Link> 後才能申請加入社團。</>
+              : <>🎓 <strong>校友身份</strong>：可瀏覽社團資訊，但無法申請加入在校社團。如需聯繫請透過系友會。</>}
+          </div>
+        )}
+        {/* 系主任/管理員：管理視角提示 */}
+        {(demoRole === 'department_head' || demoRole === 'admin') && (
+          <div className="card" style={{ padding: '12px 16px', background: roleDef.toneSoft, border: `1px solid ${roleDef.tone}`, fontSize: 13, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>{roleDef.icon}</span>
+            <span><strong>{roleDef.label}視角</strong>：查看全校社團概況，社團幹部申請的公告需經你審核後才能對外發布。</span>
           </div>
         )}
 
@@ -512,13 +520,18 @@ export default function ClubsPage(props: {
                 <button
                   onClick={() => toggleJoin(c.id)}
                   disabled={joiningId === c.id}
+                  title={
+                    !caps.canJoinClubs
+                      ? demoRole === 'guest' ? '請先登入' : demoRole === 'alumni' ? '校友無法加入' : `${roleDef.label}無法加入社團`
+                      : undefined
+                  }
                   style={{
                     padding: '6px 14px',
                     borderRadius: 'var(--radius-sm)',
                     border: '1px solid',
-                    borderColor: c.isJoined ? 'var(--border)' : c.color,
-                    background: c.isJoined ? 'var(--panel)' : `${c.color}14`,
-                    color: c.isJoined ? 'var(--muted)' : c.color,
+                    borderColor: !caps.canJoinClubs ? 'var(--border)' : c.isJoined ? 'var(--border)' : c.color,
+                    background: !caps.canJoinClubs ? 'var(--panel)' : c.isJoined ? 'var(--panel)' : `${c.color}14`,
+                    color: !caps.canJoinClubs ? 'var(--muted)' : c.isJoined ? 'var(--muted)' : c.color,
                     fontSize: 12,
                     fontWeight: 700,
                     cursor: joiningId === c.id ? 'wait' : 'pointer',
@@ -526,7 +539,9 @@ export default function ClubsPage(props: {
                     opacity: joiningId === c.id ? 0.6 : 1,
                   }}
                 >
-                  {joiningId === c.id ? '處理中...' : c.isJoined ? '已加入' : '加入'}
+                  {joiningId === c.id ? '處理中...'
+                    : !caps.canJoinClubs ? (demoRole === 'guest' ? '🔒 登入後加入' : '🔒 無法加入')
+                    : c.isJoined ? '已加入' : '申請加入'}
                 </button>
               </div>
             </div>
@@ -542,6 +557,64 @@ export default function ClubsPage(props: {
           </div>
         )}
       </div>
+
+      {/* 👥 管理成員 Modal（社長視角） */}
+      <Modal
+        isOpen={showManageMembersModal}
+        onClose={() => setShowManageMembersModal(false)}
+        title="👥 程式設計社 · 成員管理（120 人）"
+        size="lg"
+        footer={
+          <>
+            <button className="btn" onClick={() => setShowManageMembersModal(false)}>關閉</button>
+            <a
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我分析程式設計社的成員活躍度，找出 30 天未參與活動的成員，並起草召回信')}`}
+              className="btn primary"
+              onClick={() => setShowManageMembersModal(false)}
+              style={{ textDecoration: 'none' }}
+            >
+              🤖 AI 分析活躍度
+            </a>
+          </>
+        }
+      >
+        <div style={{ fontSize: 13 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <span className="pill brand">✨ 幹部 6 人</span>
+            <span className="pill subtle">🧑 一般成員 114 人</span>
+            <span className="pill warning">🌱 近 30 天新加入 8 人</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {[
+              { name: '陳社長', role: '社長', joined: '2024-09', active: true },
+              { name: '林副社長', role: '副社長', joined: '2024-09', active: true },
+              { name: '黃活動長', role: '活動長', joined: '2024-09', active: true },
+              { name: '王小明', role: '一般成員', joined: '2025-02', active: true },
+              { name: '張思源', role: '一般成員', joined: '2025-03', active: false },
+              { name: '李宇欣', role: '新申請', joined: '2026-05', active: false },
+            ].map((m) => (
+              <div key={m.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 10px', background: 'var(--panel)', borderRadius: 8 }}>
+                <div>
+                  <strong>{m.name}</strong>
+                  <span style={{ marginLeft: 8, color: 'var(--muted)' }}>{m.role}</span>
+                  <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted)' }}>加入 {m.joined}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {!m.active && (
+                    <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: 'var(--warning-soft)', color: '#C17A00' }}>需關心</span>
+                  )}
+                  {m.role !== '社長' && (
+                    <button className="btn" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => info(`已開啟「調整 ${m.name} 角色」面板`)}>調整</button>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--muted)', padding: 8 }}>
+              … 還有 114 位成員（捲動查看，或用搜尋找特定成員）
+            </div>
+          </div>
+        </div>
+      </Modal>
     </SiteShell>
   );
 }

@@ -14,6 +14,14 @@
  * 此檔提供「demo 帳號」專屬的可預測 mock，覆蓋舊資料。
  */
 
+/** 統一 demo 教師 uid。所有 screen / service 都從這裡讀，不要再寫死字串。 */
+export const DEMO_TEACHER_UID = 'demo_teacher_chang';
+
+/** 從 courseId 反查授課教師 uid（demo 化簡：暫時都回傳同一個老師）。 */
+export function getTeacherUidForCourse(_courseId?: string | number): string {
+  return DEMO_TEACHER_UID;
+}
+
 export type DemoUid =
   | 'demo_student_kuchih'
   | 'demo_teacher_chang'

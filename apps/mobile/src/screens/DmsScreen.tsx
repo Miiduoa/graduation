@@ -37,6 +37,11 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
+import {
+  getPersonaConversationSummaries,
+  isDemoPersonaUid,
+  getPersona,
+} from '../data/demoPersona';
 
 // ═══════ Types ═══════
 
@@ -92,9 +97,32 @@ export function DmsScreen(props: any) {
 
   const myUid = auth.user?.uid;
 
+  // ── Demo persona 模式：嚴格按身分隔離載入對話 ──
+  useEffect(() => {
+    if (!(isFirebaseMockMode() || isDemoPersonaUid(myUid)) || !myUid) return;
+    const summaries = getPersonaConversationSummaries(myUid);
+    const rows: Conversation[] = summaries.map((s) => ({
+      id: s.id,
+      type: 'dm',
+      memberIds: [myUid, s.peerUid],
+      lastMessageText: s.lastMessage,
+      lastMessageAt: { seconds: Math.floor(new Date(s.lastMessageAt).getTime() / 1000) },
+      unreadCount: s.unread ? 1 : 0,
+    }));
+    setConversations(rows);
+    const names: Record<string, string> = {};
+    summaries.forEach((s) => {
+      const p = getPersona(s.peerUid);
+      if (p) names[s.peerUid] = `${p.fullName}（${p.shortLabel}）`;
+    });
+    setPeerNames(names);
+    setLoading(false);
+    setRefreshing(false);
+  }, [myUid]);
+
   // ── 即時監聽對話列表 ──
   useEffect(() => {
-    if (!myUid || isFirebaseMockMode()) {
+    if (!myUid || isFirebaseMockMode() || isDemoPersonaUid(myUid)) {
       setLoading(false);
       return;
     }

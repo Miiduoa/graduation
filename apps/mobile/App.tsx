@@ -934,16 +934,66 @@ function AppNavigation() {
       fallback={<FullScreenLoader />}
       onUnhandledAction={(action) => {
         // demo 期間最後一道防線：若任何 navigate('X') 找不到 route
-        // （safeNavigate 漏網的）→ 跳明確 Alert 避免「按了沒反應」
+        // （safeNavigate 漏網的）→ 跳明確 Alert，並提供「回到主畫面」 fallback
         try {
           const payload = (action as any)?.payload;
           const targetName = payload?.name ?? '未知頁面';
-          // 動態 import 避免和 root-level Alert 衝突
+          // 已知子路由名 → 自動 fallback 到正確的 Tab + Stack
+          const TAB_HINTS: Record<string, string> = {
+            CourseGradebook: '學習',
+            CourseHub: '學習',
+            CourseDiscussion: '學習',
+            CourseModules: '學習',
+            Attendance: '學習',
+            QuizCenter: '學習',
+            AcademicInsights: '學習',
+            AcademicOverview: '學習',
+            LearningAnalytics: '學習',
+            GroupDetail: '訊息',
+            Groups: '訊息',
+            Chat: '訊息',
+            Inbox: '訊息',
+            FriendsManage: '訊息',
+            餐廳總覽: '校園',
+            MenuDetail: '校園',
+            Map: '校園',
+            BusSchedule: '校園',
+            公告總覽: 'Today',
+            活動總覽: 'Today',
+            SmartCalendarScreen: 'Today',
+          };
+          const hint = TAB_HINTS[targetName];
           // eslint-disable-next-line @typescript-eslint/no-var-requires
           const { Alert } = require('react-native');
           Alert.alert(
-            '無法開啟',
-            `「${targetName}」目前無法導航。\n\n（事件：${action.type}）\n\n請回到主畫面或聯絡管理員。`,
+            'AI 找不到該畫面的連結',
+            hint
+              ? `「${targetName}」需要從「${hint}」分頁進入。\n\n要我帶你過去嗎？`
+              : `「${targetName}」目前還沒接上路由。\n\n回到主畫面以繼續。`,
+            [
+              { text: '取消', style: 'cancel' },
+              hint
+                ? {
+                    text: `前往「${hint}」`,
+                    onPress: () => {
+                      try {
+                        rootNavigateNested(hint as any, targetName);
+                      } catch {
+                        /* swallow */
+                      }
+                    },
+                  }
+                : {
+                    text: '回主畫面',
+                    onPress: () => {
+                      try {
+                        rootNavigateNested('Today', 'TodayHome');
+                      } catch {
+                        /* swallow */
+                      }
+                    },
+                  },
+            ],
           );
         } catch {
           /* swallow */

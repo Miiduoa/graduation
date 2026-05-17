@@ -43,10 +43,10 @@ import {
   setUserDisabled,
   getOpenHelpRequests,
   postDiscussion,
-  decideLeave,
 } from '@/lib/demoStore';
-import { approvePendingAnn } from '@/lib/demoData';
+import { approvePendingAnn, addPendingAnn } from '@/lib/demoData';
 import { useToast, Modal } from '@/components/ui';
+import { notifyDeptHeadNewAnn, assignPeerReview } from '@/lib/demoStore';
 
 // ── 型別 ──────────────────────────────────────────────────────
 interface Message {
@@ -361,10 +361,10 @@ async function callAI(messages: { role: string; content: string }[], role?: Demo
 
 如需申請正式成績單，請至學校網站「學生服務」→「成績單申請」，或親至教務處辦理。`;
     }
-    return `你好，李校友！歡迎回到校友服務系統 🤖
+    return `你好，張學長！歡迎回到校友服務系統 🤖
 
 我可以協助你：
-- **整理在校成績摘要**
+- **整理在校成績摘要**（畢業 GPA 3.65，資管系 109 屆）
 - **說明校友活動與系友會資訊**
 - **解說成績單申請流程**
 - **了解母校近況**
@@ -943,7 +943,7 @@ export default function AIAssistantPage(props: {
             {[
               { label: '在學學生', val: 312, color: '#5E6AD2' },
               { label: '教師人數', val: 19, color: '#0F8B8D' },
-              { label: '待審公告', val: 3, color: '#FF9500' },
+              { label: '待審公告', val: readPendingAnns().length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
                 <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
@@ -970,7 +970,7 @@ export default function AIAssistantPage(props: {
         )}
 
         {/* ── 一鍵動作（AI 主軸 — 真的會改 demoStore） ── */}
-        {!isRestrictedRole && demoRole !== 'guest' ? (
+        {!isRestrictedRole ? (
           <AIActionBar
             role={demoRole}
             roleLabel={roleDef.label}
@@ -1178,7 +1178,15 @@ export default function AIAssistantPage(props: {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="問我任何選課問題，例如：下學期應該選哪些課？"
+                placeholder={
+                  demoRole === 'teacher' || demoRole === 'ta' ? '例如：哪些學生需要特別關注？幫我出期末考題…' :
+                  demoRole === 'club_officer' ? '例如：幫我寫招募文案、規劃黑客松流程…' :
+                  demoRole === 'department_head' ? '例如：本學期各課程平均分數？幫我起草系所公告…' :
+                  demoRole === 'admin' ? '例如：過去 7 天有異常登入嗎？系統使用狀況摘要…' :
+                  demoRole === 'alumni' ? '例如：整理我在校的成績摘要、如何申請成績單…' :
+                  demoRole === 'guest' ? '例如：這個 App 有什麼功能？如何申請帳號…' :
+                  '問我任何選課問題，例如：下學期應該選哪些課？'
+                }
                 disabled={isLoading}
                 rows={2}
                 style={{
@@ -1227,12 +1235,19 @@ export default function AIAssistantPage(props: {
                 textAlign: 'center',
               }}
             >
-              Enter 送出 · Shift+Enter 換行 · AI 已掌握你的完整學籍資料
+              {demoRole === 'teacher' || demoRole === 'ta' ? 'Enter 送出 · Shift+Enter 換行 · AI 已掌握課程與學生資料' :
+               demoRole === 'club_officer' ? 'Enter 送出 · Shift+Enter 換行 · AI 已掌握社團資料' :
+               demoRole === 'department_head' ? 'Enter 送出 · Shift+Enter 換行 · AI 已掌握系所統計資料' :
+               demoRole === 'admin' ? 'Enter 送出 · Shift+Enter 換行 · AI 已掌握系統狀態資料' :
+               demoRole === 'alumni' ? 'Enter 送出 · Shift+Enter 換行 · AI 已掌握你的在校記錄' :
+               demoRole === 'guest' ? 'Enter 送出 · Shift+Enter 換行 · 登入後可獲得個人化服務' :
+               'Enter 送出 · Shift+Enter 換行 · AI 已掌握你的完整學籍資料'}
             </div>
           </div>
         </div>
 
-        {/* ── 下學期課程快覽 ── */}
+        {/* ── 下學期課程快覽（僅學生 / TA / 校友顯示） ── */}
+        {(demoRole === 'student' || demoRole === 'ta' || demoRole === 'alumni') && (
         <div className="card" style={{ padding: '14px 16px' }}>
           <div
             style={{
@@ -1282,6 +1297,7 @@ export default function AIAssistantPage(props: {
             ))}
           </div>
         </div>
+        )}
       </div>
 
       <style>{`
@@ -1290,6 +1306,521 @@ export default function AIAssistantPage(props: {
           40% { transform: scale(1); opacity: 1; }
         }
       `}</style>
+
+      {/* AI 主軸通用動作 Modal */}
+      <Modal
+        isOpen={actionModal !== null}
+        onClose={() => setActionModal(null)}
+        title={actionModal?.title}
+        size="lg"
+        footer={actionModal?.footer ?? (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setActionModal(null)}
+          >
+            關閉
+          </button>
+        )}
+      >
+        {actionModal?.body}
+      </Modal>
     </SiteShell>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// AIActionBar — AI 主軸「一鍵動作」區塊
+// 每個角色 3~5 個按鈕，按下去會真的呼叫 demoStore 動作，
+// 並在訊息列、其他角色 dashboard 看到結果。
+// ─────────────────────────────────────────────────────────────
+
+type AIActionModal = {
+  title: string;
+  body: import('react').ReactNode;
+  footer?: import('react').ReactNode;
+};
+
+function AIActionBar({
+  role,
+  roleLabel,
+  store,
+  openModal,
+  onClose,
+  toastSuccess,
+  toastInfo,
+}: {
+  role: DemoRole;
+  roleLabel: string;
+  store: ReturnType<typeof useDemoStore>;
+  openModal: (m: AIActionModal) => void;
+  onClose: () => void;
+  toastSuccess: (msg: string) => void;
+  toastInfo: (msg: string) => void;
+}) {
+  // 各角色一鍵動作清單
+  const actions = buildActions({ role, roleLabel, store, openModal, onClose, toastSuccess, toastInfo });
+
+  if (actions.length === 0) return null;
+
+  return (
+    <div
+      className="card"
+      style={{
+        padding: '14px 16px',
+        background:
+          'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(124,58,237,0.06) 100%)',
+        border: '1px solid rgba(94,106,210,0.28)',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: 'var(--brand)',
+          fontWeight: 700,
+          marginBottom: 8,
+        }}
+      >
+        🤖 AI 一鍵動作（直接寫入系統，跨角色看得到）
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {actions.map((a) => (
+          <button
+            key={a.label}
+            type="button"
+            onClick={a.onClick}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--brand)',
+              background: 'var(--accent-soft)',
+              color: 'var(--brand)',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <span>{a.icon}</span>
+            <span>{a.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function buildActions(args: {
+  role: DemoRole;
+  roleLabel: string;
+  store: ReturnType<typeof useDemoStore>;
+  openModal: (m: AIActionModal) => void;
+  onClose: () => void;
+  toastSuccess: (msg: string) => void;
+  toastInfo: (msg: string) => void;
+}): { icon: string; label: string; onClick: () => void }[] {
+  const { role, roleLabel, store, openModal, onClose, toastSuccess, toastInfo } = args;
+
+  // ── student ──
+  if (role === 'student') {
+    return [
+      {
+        icon: '📚',
+        label: '一鍵續借快到期書',
+        onClick: () => {
+          // 找出 store + DEFAULT_BORROWED 中 7 天內到期的書（demo 化簡：直接全部 +14）
+          const ids = ['1', '2', '3'];
+          const today = new Date().toISOString().slice(0, 10);
+          ids.forEach((id) => {
+            const override = store.borrowingOverrides[id];
+            const cur = override?.dueDate ?? today;
+            const cnt = override?.renewCount ?? 0;
+            if (cnt < 3) renewBook(id, cur, cnt);
+          });
+          toastSuccess('✅ 已續借 3 本書，到期日皆 +14 天');
+        },
+      },
+      {
+        icon: '🙋',
+        label: '求助 TA',
+        onClick: () => {
+          requestHelp({
+            courseId: 'c1',
+            courseName: '資料結構',
+            topic: '鏈結串列遞迴實作卡關，能否安排答疑時間？',
+            urgency: 'normal',
+            studentId: 'stu-001',
+            studentName: roleLabel,
+          });
+          toastSuccess('🙋 已送出求助，TA 林助教會在 dashboard 看到並回覆');
+        },
+      },
+      {
+        icon: '📅',
+        label: '請假',
+        onClick: () => {
+          openModal({
+            title: '📅 請假申請',
+            body: <LeaveRequestForm onSubmit={(reason, from, to) => {
+              requestLeave({
+                courseId: 'c1',
+                courseName: '資料結構',
+                studentId: 'stu-001',
+                studentName: roleLabel,
+                reason,
+                dateFrom: from,
+                dateTo: to,
+              });
+              toastSuccess('📅 已送出請假申請，王老師會在訊息中看到');
+              onClose();
+            }} />,
+            footer: <></>,
+          });
+        },
+      },
+      {
+        icon: '🍱',
+        label: '訂餐',
+        onClick: () => {
+          placeOrder({
+            studentId: 'stu-001',
+            studentName: roleLabel,
+            vendorName: '校園小棧',
+            items: [
+              { name: '雞排便當', qty: 1, price: 90 },
+              { name: '紅茶', qty: 1, price: 25 },
+            ],
+          });
+          toastSuccess('🍱 訂單已成立，店家會收到並通知你準備進度');
+        },
+      },
+      {
+        icon: '💬',
+        label: '在資料結構討論區發問',
+        onClick: () => {
+          postDiscussion({
+            courseId: 'c1',
+            courseName: '資料結構',
+            authorId: 'stu-001',
+            authorName: roleLabel,
+            preview: '請問期末專題提案的格式可以用 LaTeX 嗎？',
+          });
+          toastSuccess('💬 已發布討論，老師 / TA / 同學會收到通知');
+        },
+      },
+    ];
+  }
+
+  // ── teacher ──
+  if (role === 'teacher') {
+    return [
+      {
+        icon: '✍️',
+        label: 'AI 起草評語給班上 3 位重點學生',
+        onClick: () => {
+          [
+            { studentId: 'stu-005', studentName: '張志偉', text: '你近期成績有下滑趨勢，建議加強樹與圖的基礎。老師可以協助安排額外輔導，請於下次上課前告知。' },
+            { studentId: 'stu-009', studentName: '許志明', text: '邊緣通過，建議多參與討論區提問，並善用 AI 助理整理重點。' },
+            { studentId: 'stu-003', studentName: '林俊宏', text: '進步空間還很大，期中比期末退步，建議系統性重做演算法練習題。' },
+          ].forEach((s) => {
+            submitFeedback({
+              courseId: 'c1',
+              courseName: '資料結構',
+              studentId: s.studentId,
+              studentName: s.studentName,
+              draftPreview: s.text,
+            });
+          });
+          toastSuccess('✍️ 已寄出 3 份個人化評語，學生會在訊息中看到');
+        },
+      },
+      {
+        icon: '⏰',
+        label: '批量提醒未繳作業的學生',
+        onClick: () => {
+          bulkRemind({
+            courseName: '資料結構',
+            homeworkTitle: '期末專題提案',
+            count: 5,
+            fromName: roleLabel,
+          });
+          toastSuccess('⏰ 已發送 5 則提醒，全班 student inbox 即時收到');
+        },
+      },
+      {
+        icon: '🎓',
+        label: '發布全班成績',
+        onClick: () => {
+          publishGrades({
+            courseId: 'c1',
+            courseName: '資料結構',
+          });
+          toastSuccess('🎓 已發布全班成績，每位學生收到對應分數');
+        },
+      },
+      {
+        icon: '📝',
+        label: '指派下次互評',
+        onClick: () => {
+          assignPeerReview({
+            courseId: 'c1',
+            courseName: '資料結構',
+            assignmentTitle: '期末專題提案',
+            pairs: [
+              { reviewerId: 'stu-001', reviewerName: '王小明', revieweeId: 'stu-002', revieweeName: '陳雅婷' },
+              { reviewerId: 'stu-002', reviewerName: '陳雅婷', revieweeId: 'stu-003', revieweeName: '林俊宏' },
+            ],
+            dueDate: new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10),
+          });
+          toastSuccess('📝 已指派 2 組同儕互評，學生收到通知');
+        },
+      },
+    ];
+  }
+
+  // ── ta ──
+  if (role === 'ta') {
+    return [
+      {
+        icon: '🧑‍💻',
+        label: `批量回覆求助佇列（${getOpenHelpRequests(store).length} 則）`,
+        onClick: () => {
+          const open = getOpenHelpRequests(store);
+          if (open.length === 0) {
+            toastInfo('目前佇列裡沒有求助訊息');
+            return;
+          }
+          open.forEach((h) => {
+            replyHelpRequest({
+              helpId: h.id,
+              reply: '已收到你的求助，下次答疑時間（週二 14:00 工程館 308）可一起討論。也可參考第 6 章課本 p. 158 的範例。',
+              replierName: roleLabel,
+            });
+          });
+          toastSuccess(`🧑‍💻 已回覆 ${open.length} 則求助`);
+        },
+      },
+      {
+        icon: '✍️',
+        label: '起草批改回饋（給張志偉）',
+        onClick: () => {
+          submitFeedback({
+            courseId: 'c1',
+            courseName: '資料結構',
+            studentId: 'stu-005',
+            studentName: '張志偉',
+            draftPreview: 'TA 林助教提醒：作業二的鏈結串列邊界條件未處理（最後一個節點刪除）。可以參考課本 p. 102 例題 4.3。',
+          });
+          toastSuccess('✍️ 已起草評語給張志偉');
+        },
+      },
+    ];
+  }
+
+  // ── club_officer ──
+  if (role === 'club_officer') {
+    const pending = (store.clubMemberships ?? []).filter((m) => m.status === 'pending');
+    return [
+      {
+        icon: '✅',
+        label: `一鍵核准所有待審入社（${pending.length}）`,
+        onClick: () => {
+          if (pending.length === 0) {
+            toastInfo('目前沒有待審申請');
+            return;
+          }
+          pending.forEach((m) => {
+            approveClubMember(m.id, { officerName: roleLabel });
+          });
+          toastSuccess(`✅ 已核准 ${pending.length} 位入社申請`);
+        },
+      },
+      {
+        icon: '📢',
+        label: '提交招募公告（送待審）',
+        onClick: () => {
+          const title = '【程式設計社】2026 黑客松招募中';
+          addPendingAnn({
+            title,
+            source: '程式設計社',
+            submittedAt: '剛剛',
+            submittedByRole: 'club_officer',
+          });
+          notifyDeptHeadNewAnn(title, '程式設計社');
+          toastSuccess('📢 已送待審，系主任會在 admin 看到');
+        },
+      },
+    ];
+  }
+
+  // ── department_head ──
+  if (role === 'department_head') {
+    const pendingAnns = readPendingAnns();
+    return [
+      {
+        icon: '✅',
+        label: `一鍵核准所有待審公告（${pendingAnns.length}）`,
+        onClick: () => {
+          if (pendingAnns.length === 0) {
+            toastInfo('目前沒有待審公告');
+            return;
+          }
+          pendingAnns.forEach((p) => {
+            approvePendingAnn(p.id);
+            notifyStudentsAnnApproved(p.title, p.source);
+            notifySubmitterAnnApproved({
+              title: p.title,
+              submitterRole: p.submittedByRole as DemoRole,
+              approvedBy: roleLabel,
+            });
+          });
+          toastSuccess(`✅ 已核准 ${pendingAnns.length} 則公告，並通知提交者與學生`);
+        },
+      },
+      {
+        icon: '📣',
+        label: '發系所廣播：期末考時程',
+        onClick: () => {
+          sendDeptBroadcast({
+            title: '114-2 期末考試時程公告',
+            body: '本學期期末考訂於 6/16~6/20 進行，請各授課教師於 5/30 前回報考場需求，學生請至 timetable 確認個人考程。',
+            audience: ['student', 'teacher', 'ta'],
+            fromName: roleLabel,
+          });
+          toastSuccess('📣 已發送系所廣播給全系師生');
+        },
+      },
+      {
+        icon: '🩺',
+        label: '對 5 位掛科風險學生發輔導通知',
+        onClick: () => {
+          sendDeptBroadcast({
+            title: '【期中關懷】學業預警',
+            body: '系所注意到你在本學期某些必修科目進度落後，請於本週前主動聯絡導師或至學習輔導中心預約諮詢（含義務協助）。',
+            audience: ['student'],
+            fromName: '系所學業輔導小組',
+          });
+          toastSuccess('🩺 已對掛科風險學生發出輔導通知');
+        },
+      },
+    ];
+  }
+
+  // ── admin ──
+  if (role === 'admin') {
+    const disabledCount = store.disabledUsers?.length ?? 0;
+    return [
+      {
+        icon: '🚧',
+        label: '廣播：今晚進入維護模式',
+        onClick: () => {
+          sendDeptBroadcast({
+            title: '系統將於今晚進入維護模式',
+            body: '系統將於今晚 23:00 進入例行維護，預計約 2 小時。請預先儲存進度。',
+            audience: ['student', 'teacher', 'ta'],
+            fromName: '系統管理員',
+          });
+          toastSuccess('🚧 已廣播全校：今晚維護');
+        },
+      },
+      {
+        icon: '🛡️',
+        label: '一鍵封鎖可疑帳號',
+        onClick: () => {
+          // 示範：把 demo-alumni-1 封鎖（境外登入失敗來源）
+          setUserDisabled('demo-alumni-1', true, 'AI 偵測：5 次境外登入失敗');
+          toastSuccess(`🛡️ 已封鎖 demo-alumni-1（目前共 ${disabledCount + 1} 個被停用帳號）`);
+        },
+      },
+      {
+        icon: '🔐',
+        label: '對所有教師發送密碼重設提醒',
+        onClick: () => {
+          sendDeptBroadcast({
+            title: '【安全提醒】請重設您的登入密碼',
+            body: '系統偵測到近期有多次密碼噴灑攻擊，為了您的帳號安全請於本週前重設密碼並啟用雙因素驗證。',
+            audience: ['teacher'],
+            fromName: '系統管理員',
+          });
+          toastSuccess('🔐 已對全校教師發送密碼重設提醒');
+        },
+      },
+    ];
+  }
+
+  // ── alumni ──
+  if (role === 'alumni') {
+    return [
+      {
+        icon: '📄',
+        label: '申請在校成績單',
+        onClick: () => {
+          sendDeptBroadcast({
+            title: `【校友申請】${roleLabel} 申請在校成績單`,
+            body: `校友 張學長（B09203001）申請在校成績單一份，請註冊組協助處理。`,
+            audience: ['admin'],
+            fromName: roleLabel,
+          });
+          toastSuccess('📄 申請已寄送至註冊組，3-5 個工作天內可至校友服務窗口領取');
+        },
+      },
+      {
+        icon: '🎉',
+        label: '報名校友回娘家活動',
+        onClick: () => {
+          toastSuccess('🎉 已成功報名，活動詳情會 Email 給你');
+        },
+      },
+    ];
+  }
+
+  return [];
+}
+
+// 請假表單元件（內部用）
+function LeaveRequestForm({
+  onSubmit,
+}: {
+  onSubmit: (reason: string, from: string, to: string) => void;
+}) {
+  // 用 lazy initializer 避免每次 render 都重新計算（並避免 react-hooks/purity 警告）
+  const [reason, setReason] = useState('家中有事');
+  const [from, setFrom] = useState(() => new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState(() => new Date(Date.now() + 86400_000).toISOString().slice(0, 10));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <label style={{ fontSize: 13, fontWeight: 600 }}>請假事由</label>
+      <input
+        className="input"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <label style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>請假起日</label>
+      <input
+        className="input"
+        type="date"
+        value={from}
+        onChange={(e) => setFrom(e.target.value)}
+      />
+      <label style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>請假迄日</label>
+      <input
+        className="input"
+        type="date"
+        value={to}
+        onChange={(e) => setTo(e.target.value)}
+      />
+      <button
+        type="button"
+        className="btn primary"
+        onClick={() => onSubmit(reason, from, to)}
+        style={{ marginTop: 6, alignSelf: 'flex-end' }}
+      >
+        送出請假申請
+      </button>
+    </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 
@@ -84,6 +85,33 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
   return (
     <SiteShell title="公車" subtitle="校園接駁即時資訊" schoolName={schoolName}>
       <div className="pageStack">
+        {/* AI 推薦卡 */}
+        <Link
+          href={`/ai-assistant?q=${encodeURIComponent('今天最近的公車到逢甲商圈幾點？')}`}
+          className="card"
+          style={{
+            padding: '14px 18px',
+            background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(0,122,255,0.06) 100%)',
+            border: '1px solid rgba(94,106,210,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            textDecoration: 'none',
+            color: 'inherit',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5E6AD2', marginBottom: 3 }}>
+              🤖 AI 助手 · 路線推薦
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+              想知道下一班幾點到哪裡？問 AI 規劃最快的接駁路線。
+            </div>
+          </div>
+          <span style={{ fontSize: 12, color: '#5E6AD2', fontWeight: 600 }}>問 AI →</span>
+        </Link>
+
         {/* ── Next Bus Hero ── */}
         <div
           className="card"

@@ -67,18 +67,27 @@ export default function AdminPage(props: {
     };
   }, []);
 
+  // 系主任只看自己系所內的角色（不應看到系統管理員與校友個資）
+  const visibleUsers = useMemo(() => {
+    if (role === 'department_head') {
+      const deptRoles = new Set(['student', 'teacher', 'ta', 'club_officer', 'department_head']);
+      return DEMO_USERS.filter((u) => deptRoles.has(u.role));
+    }
+    return DEMO_USERS;
+  }, [role]);
+
   const filteredUsers = useMemo(
-    () => DEMO_USERS.filter(
+    () => visibleUsers.filter(
       (u) => !userSearch || u.displayName.includes(userSearch) || u.email.toLowerCase().includes(userSearch.toLowerCase()),
     ),
-    [userSearch],
+    [userSearch, visibleUsers],
   );
 
   const SECURITY_LOG = [
     { time: '09:23', event: '5 次登入失敗嘗試（境外 IP：荷蘭 Tor 出口節點）', target: 'admin@pu.edu.tw', level: 'high' as const },
     { time: '08:45', event: 'API 請求速率達 83%（近峰值，建議監控）', target: '系統整體', level: 'medium' as const },
     { time: '07:30', event: '例行備份完成（1.2 GB）', target: '資料庫', level: 'ok' as const },
-    { time: '昨日 22:15', event: '使用者帳號密碼重設', target: 'B10203015@pu.edu.tw', level: 'info' as const },
+    { time: '昨日 22:15', event: '使用者帳號密碼重設', target: 'B11203015@pu.edu.tw', level: 'info' as const },
   ];
 
   const stats = useMemo(() => {
@@ -741,7 +750,8 @@ export default function AdminPage(props: {
             <div style={{ marginBottom: 10 }}>目前角色：<strong>{roleChangeUser.role}</strong></div>
             <div style={{ marginBottom: 10 }}>變更為：</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {(['student', 'teacher', 'ta', 'club_officer', 'department_head', 'admin', 'alumni'] as DemoRole[]).map((r) => (
+              {/* demo：角色變更僅寫 audit log，不會真改 DEMO_USERS（含 guest 訪客身份） */}
+              {(['student', 'teacher', 'ta', 'club_officer', 'department_head', 'admin', 'alumni', 'guest'] as DemoRole[]).map((r) => (
                 <button
                   key={r}
                   type="button"

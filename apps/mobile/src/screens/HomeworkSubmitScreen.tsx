@@ -21,6 +21,7 @@ import { useNavigation } from '@react-navigation/native';
 
 import { useAuth } from '../state/auth';
 import { simulateStudentSubmit } from '../services/demoActionSimulator';
+import { getTeacherUidForCourse } from '../data/demoUserStories';
 
 type RouteProps = {
   route?: {
@@ -136,7 +137,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
       await simulateStudentSubmit({
         studentUid: auth.user?.uid ?? 'demo_student_kuchih',
         studentName: auth.profile?.displayName ?? '顧晉瑋',
-        teacherUid: 'demo_teacher_chang',
+        teacherUid: getTeacherUidForCourse(courseId),
         courseId: numericCourseId,
         courseName: hwTitle.split(' ')[0] ?? '課程',
         homeworkId: numericHwId,

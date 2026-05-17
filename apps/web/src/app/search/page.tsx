@@ -36,9 +36,10 @@ const MOCK_RESULTS: SearchResult[] = [
   { id: '3', type: 'location', title: '圖書館', subtitle: '二樓安靜區有 15 席可用', href: '/library', icon: '📚' },
   { id: '4', type: 'club', title: '程式設計社', subtitle: '本週五黑客松活動', href: '/clubs', icon: '💻' },
   { id: '5', type: 'location', title: '第一餐廳', subtitle: '營業中 · 雞腿便當 $80', href: '/cafeteria', icon: '🍱' },
-  // 教師 / TA 可見
-  { id: 'st-1', type: 'student', title: '王小明 (M11302001)', subtitle: '資管系三年級 · 修課 6 門', href: '/admin/students/M11302001', icon: '👤', visibleRoles: ['teacher', 'ta', 'department_head', 'admin'] },
-  { id: 'st-2', type: 'student', title: '陳大同 (M11302014)', subtitle: '資管系三年級 · 修課 4 門', href: '/admin/students/M11302014', icon: '👤', visibleRoles: ['teacher', 'ta', 'department_head', 'admin'] },
+  // 教師 / TA 可見（學號需對應 DEMO_STUDENTS 真實存在的學生，避免點擊後 404）
+  { id: 'st-1', type: 'student', title: '王小明 (M11302001)', subtitle: '資管系三年級 · 修課 7 門', href: '/admin/students/M11302001', icon: '👤', visibleRoles: ['teacher', 'ta', 'department_head', 'admin'] },
+  { id: 'st-2', type: 'student', title: '張志偉 (M11302005)', subtitle: '⚠️ 資管系三年級 · 需關注', href: '/admin/students/M11302005', icon: '⚠️', visibleRoles: ['teacher', 'ta', 'department_head', 'admin'] },
+  { id: 'st-3', type: 'student', title: '蔡雅芳 (M11302008)', subtitle: '資管系三年級 · 成績優異', href: '/admin/students/M11302008', icon: '⭐', visibleRoles: ['teacher', 'ta', 'department_head', 'admin'] },
   // 系主任 / 管理員可見
   { id: 'tc-1', type: 'teacher', title: '王大明 老師', subtitle: '資管系 · 教授資料結構', href: '/teacher/course/c1', icon: '🧑‍🏫', visibleRoles: ['department_head', 'admin'] },
   { id: 'tc-2', type: 'teacher', title: '陳小華 老師', subtitle: '資管系 · 教授線性代數', href: '/teacher/course/c2', icon: '🧑‍🏫', visibleRoles: ['department_head', 'admin'] },

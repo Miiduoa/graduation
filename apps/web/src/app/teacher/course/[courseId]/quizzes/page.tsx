@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
+import { useToast, Modal } from '@/components/ui';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 
 type QuizRow = {
@@ -29,10 +30,28 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const isTaView = demoRole === 'ta';
+  const { success, info } = useToast();
   const [rows, setRows] = useState<QuizRow[]>(MOCK);
+  const [showNewQuizModal, setShowNewQuizModal] = useState(false);
+  const [newQuiz, setNewQuiz] = useState({ title: '', type: 'quiz' as 'quiz' | 'exam', dueAt: '' });
+  const [viewingAnswerOf, setViewingAnswerOf] = useState<QuizRow | null>(null);
+
   const publish = (id: string) => {
     if (!caps.canPublishGrades) return;
     setRows((r) => r.map((q) => (q.id === id ? { ...q, gradesPublished: true } : q)));
+    success('✅ 成績已發布給學生');
+  };
+
+  const createQuiz = () => {
+    if (!newQuiz.title.trim()) {
+      info('請輸入測驗標題');
+      return;
+    }
+    const id = `q-${Date.now()}`;
+    setRows((r) => [{ id, title: newQuiz.title, type: newQuiz.type, dueAt: newQuiz.dueAt || null, submitted: 0, total: 42, gradesPublished: false }, ...r]);
+    setNewQuiz({ title: '', type: 'quiz', dueAt: '' });
+    setShowNewQuizModal(false);
+    success(`✅ 已新增「${newQuiz.title}」`);
   };
 
   return (
@@ -77,7 +96,7 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
 
         {/* 新增按鈕：TA 不可用 */}
         {caps.canEditModules ? (
-          <button style={primaryBtn}>+ 新增測驗</button>
+          <button style={primaryBtn} onClick={() => setShowNewQuizModal(true)}>+ 新增測驗</button>
         ) : (
           <button
             disabled
@@ -112,9 +131,14 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
                 <td style={td}>
                   {/* 編輯題目：TA 不可用 */}
                   {caps.canEditModules ? (
-                    <button style={linkBtn}>編輯題目</button>
+                    <Link
+                      href={`/teacher/course/${params.courseId}/question-banks`}
+                      style={{ ...linkBtn, display: 'inline' }}
+                    >
+                      編輯題目
+                    </Link>
                   ) : null}
-                  <button style={linkBtn}>看答案</button>
+                  <button style={linkBtn} onClick={() => setViewingAnswerOf(q)}>看答案</button>
                   {/* 發布成績：TA 不可用 */}
                   {!q.gradesPublished && caps.canPublishGrades && (
                     <button style={linkBtn} onClick={() => publish(q.id)}>
@@ -161,6 +185,93 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
         </div>
         </>}
       </main>
+
+      {/* 新增測驗 Modal */}
+      <Modal
+        isOpen={showNewQuizModal}
+        onClose={() => setShowNewQuizModal(false)}
+        title="+ 新增測驗 / 考試"
+        size="sm"
+        footer={
+          <>
+            <button className="btn" onClick={() => setShowNewQuizModal(false)}>取消</button>
+            <button className="btn primary" onClick={createQuiz}>建立</button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
+          <label>
+            <div style={{ marginBottom: 4, fontWeight: 600 }}>標題</div>
+            <input
+              className="input"
+              value={newQuiz.title}
+              onChange={(e) => setNewQuiz({ ...newQuiz, title: e.target.value })}
+              placeholder="例：第六週小考"
+              style={{ width: '100%', padding: '8px 12px', fontSize: 13 }}
+            />
+          </label>
+          <label>
+            <div style={{ marginBottom: 4, fontWeight: 600 }}>類型</div>
+            <select
+              className="input"
+              value={newQuiz.type}
+              onChange={(e) => setNewQuiz({ ...newQuiz, type: e.target.value as 'quiz' | 'exam' })}
+              style={{ width: '100%', padding: '8px 12px', fontSize: 13 }}
+            >
+              <option value="quiz">小考</option>
+              <option value="exam">考試</option>
+            </select>
+          </label>
+          <label>
+            <div style={{ marginBottom: 4, fontWeight: 600 }}>截止日</div>
+            <input
+              type="date"
+              className="input"
+              value={newQuiz.dueAt}
+              onChange={(e) => setNewQuiz({ ...newQuiz, dueAt: e.target.value })}
+              style={{ width: '100%', padding: '8px 12px', fontSize: 13 }}
+            />
+          </label>
+          <div style={{ background: 'var(--accent-soft)', padding: 10, borderRadius: 8, fontSize: 12, color: 'var(--brand)' }}>
+            💡 也可以讓 <Link href={`/ai-assistant?q=${encodeURIComponent(`幫我為${newQuiz.title || '本週'}生成 5 道題目`)}`}>AI 起草題目</Link> 後再回到此處設定。
+          </div>
+        </div>
+      </Modal>
+
+      {/* 看答案 Modal */}
+      <Modal
+        isOpen={viewingAnswerOf !== null}
+        onClose={() => setViewingAnswerOf(null)}
+        title={viewingAnswerOf ? `📝 ${viewingAnswerOf.title} · 標準答案` : ''}
+        size="lg"
+        footer={<button className="btn" onClick={() => setViewingAnswerOf(null)}>關閉</button>}
+      >
+        {viewingAnswerOf ? (
+          <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+            <div style={{ marginBottom: 12, padding: 10, background: 'var(--panel)', borderRadius: 8 }}>
+              <strong>{viewingAnswerOf.title}</strong> · {viewingAnswerOf.type === 'quiz' ? '小考' : '考試'} · 共 10 題
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Q1：陣列與鏈結串列的時間複雜度差異？</div>
+                <div style={{ color: 'var(--muted)' }}>✅ 標準答案：陣列隨機存取 O(1)，鏈結串列 O(n)；鏈結串列插入刪除 O(1)，陣列 O(n)。</div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Q2：二元搜尋樹最壞情況時間複雜度？</div>
+                <div style={{ color: 'var(--muted)' }}>✅ 標準答案：O(n)，當樹完全傾斜時退化為鏈結串列。</div>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>Q3：Hash Table 衝突解決方法？</div>
+                <div style={{ color: 'var(--muted)' }}>✅ 標準答案：開放定址法（線性探測、二次探測）與鏈結法（chaining）。</div>
+              </div>
+              <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8 }}>… 其餘 7 題已收摺於題庫頁，可前往「編輯題目」查看完整答案。</div>
+            </div>
+            <div style={{ marginTop: 16, padding: 12, background: 'var(--accent-soft)', borderRadius: 8, fontSize: 12, color: 'var(--brand)' }}>
+              🤖 <strong>AI 提示</strong>：可請 AI 助理為「{viewingAnswerOf.title}」生成詳細解析與評分標準。
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </SiteShell>
   );
 }

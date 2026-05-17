@@ -47,6 +47,7 @@ import {
   type RoleEvent,
 } from '../services/roleEventBus';
 import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
+import { AIMissionControl } from '../components/AIMissionControl';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -309,6 +310,11 @@ export default function VendorDashboardScreen() {
 
         {/* 🤖 AI Agent 摘要 */}
         <AgentSummaryBanner cockpitLabel="餐廳" />
+
+        {/* AI 任務指揮 — 商家專屬下一步 */}
+        <View style={{ marginVertical: theme.space.md }}>
+          <AIMissionControl uid={auth.user?.uid ?? 'demo_cafeteria'} maxVisible={3} hideWhenEmpty />
+        </View>
 
         <CockpitMetricRow>
           <CockpitMetricChip label="新訂單" value={stats.pending} tone={stats.pending > 0 ? 'warn' : undefined} />

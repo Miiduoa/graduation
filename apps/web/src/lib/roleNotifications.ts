@@ -2,9 +2,14 @@
  * 角色感知的 demo notifications
  *
  * 每個角色看到不同類別的通知；hook 給 SiteShell / 通知中心使用。
+ *
+ * 重要：所有顯示的「件數」全部從 demoData / demoStore 動態計算，
+ * 不再硬編碼，避免和首頁 hero、AI 開場白數字打架。
  */
 
 import type { DemoRole } from './demoRole';
+import { TEACHER_PENDING_REVIEWS, readPendingAnns } from './demoData';
+import { getDemoStore } from './demoStore';
 
 export interface DemoNotification {
   id: string;
@@ -27,6 +32,24 @@ const COMMON_PUBLIC: DemoNotification[] = [
     type: 'warning',
   },
 ];
+
+/** 動態算出當前角色該看到的通知數字 */
+function getTeacherPendingCount(): number {
+  const store = getDemoStore();
+  const dyn = store.submissions?.filter((s) => !s.graded).length ?? 0;
+  return TEACHER_PENDING_REVIEWS.length + dyn;
+}
+function getTAAssignedCount(): number {
+  // 助教被指派批改後半段（第 11-20 號學生，但 demo 只有 12 位）
+  return Math.max(2, Math.floor(TEACHER_PENDING_REVIEWS.length / 2));
+}
+function getClubPendingApplicants(): number {
+  const store = getDemoStore();
+  return store.clubMemberships?.filter((m) => m.status === 'pending' && m.clubId === 'club-1').length ?? 0;
+}
+function getDeptPendingAnnCount(): number {
+  return readPendingAnns().length;
+}
 
 const ROLE_NOTIFICATIONS: Record<DemoRole, DemoNotification[]> = {
   student: [
@@ -63,7 +86,7 @@ const ROLE_NOTIFICATIONS: Record<DemoRole, DemoNotification[]> = {
     {
       id: 'n-tc-1',
       icon: '📝',
-      title: '8 件作業待批改',
+      title: `${getTeacherPendingCount()} 件作業待批改`,
       body: '【資料結構】作業二已收齊，請於 5/30 前批改完成',
       time: '1 小時前',
       href: '/teacher/course/c1/gradebook',
@@ -93,7 +116,7 @@ const ROLE_NOTIFICATIONS: Record<DemoRole, DemoNotification[]> = {
     {
       id: 'n-ta-1',
       icon: '📝',
-      title: '【資料結構】3 件待批改',
+      title: `【資料結構】${getTAAssignedCount()} 件待批改`,
       body: '王老師指派你批改作業二第 11-20 號學生',
       time: '30 分鐘前',
       href: '/teacher/course/c1/gradebook',
@@ -122,7 +145,7 @@ const ROLE_NOTIFICATIONS: Record<DemoRole, DemoNotification[]> = {
     {
       id: 'n-cl-2',
       icon: '📥',
-      title: '3 位新成員入社申請',
+      title: `${3 + getClubPendingApplicants()} 位新成員入社申請`,
       body: '請至「管理成員」面板審核',
       time: '今天',
       href: '/clubs',
@@ -134,7 +157,7 @@ const ROLE_NOTIFICATIONS: Record<DemoRole, DemoNotification[]> = {
     {
       id: 'n-dh-1',
       icon: '⏳',
-      title: '3 件公告待你審核',
+      title: `${getDeptPendingAnnCount()} 件公告待你審核`,
       body: '畢業專題評分標準、暑期實習說明會、系友回娘家',
       time: '2 小時前',
       href: '/admin',
