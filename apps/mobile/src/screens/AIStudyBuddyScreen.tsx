@@ -32,6 +32,10 @@ import {
   type InstantHelpMatch,
   type StudyTeamSuggestion,
 } from '../services/aiStudyBuddyMatcher';
+import {
+  emitHelpRequested,
+  emitAnnouncementPosted,
+} from '../services/roleEventBus';
 import { DEMO_COURSES } from '../data/demoCoursesMock';
 import { useAuth } from '../state/auth';
 
@@ -82,12 +86,25 @@ export default function AIStudyBuddyScreen() {
     return Math.round(matches.reduce((a, b) => a + b.overallScore, 0) / matches.length);
   }, [matches]);
 
-  const sendInvite = (m: BuddyMatchResult) => {
+  const sendInvite = async (m: BuddyMatchResult) => {
     setInvitedSet((s) => new Set([...s, m.buddyUid]));
-    Alert.alert(
-      '邀請已送出',
-      `已邀請 ${m.buddyName} 一起組讀書會。\n\n（demo 模式：實際版會 emit 事件到對方 inbox + 通知）`,
-    );
+    // emit 邀請事件到對方 inbox（用 announcement_posted 限定 audience）
+    try {
+      await emitAnnouncementPosted({
+        actorUid: auth.user?.uid ?? 'demo_student_kuchih',
+        actorName: auth.profile?.displayName ?? '同學',
+        targetUids: [m.buddyUid],
+        courseId: m.sharedCourseIds[0] ?? 'general',
+        courseName: '學伴邀請',
+        payload: {
+          title: '📨 學伴邀請',
+          content: `${auth.profile?.displayName ?? '同學'} 邀請你一起組讀書會。`,
+        },
+      });
+    } catch {
+      /* swallow */
+    }
+    Alert.alert('邀請已送出', `已邀請 ${m.buddyName} 一起組讀書會，訊息會出現在他的 inbox。`);
   };
 
   return (
@@ -294,10 +311,27 @@ export default function AIStudyBuddyScreen() {
                         </Text>
                       </View>
                       <Pressable
-                        onPress={() => {
+                        onPress={async () => {
+                          // 真的 emit help_requested → TA inbox + 學伴 inbox
+                          try {
+                            await emitHelpRequested({
+                              actorUid: auth.user?.uid ?? 'demo_student_kuchih',
+                              actorName: auth.profile?.displayName ?? '同學',
+                              targetUids: [h.buddyUid, 'demo_ta_lin'],
+                              courseId: helpCourseId,
+                              courseName: courseNameById(helpCourseId),
+                              payload: {
+                                topic: `${courseNameById(helpCourseId)} 卡關`,
+                                preview: `想請 ${h.buddyName} 協助解題`,
+                                urgency: 'medium',
+                              },
+                            });
+                          } catch {
+                            /* swallow */
+                          }
                           Alert.alert(
                             '求助已送出',
-                            `已送訊息給 ${h.buddyName}：\n\n「${courseNameById(helpCourseId)} 卡關，可以問你嗎？」`,
+                            `已送訊息給 ${h.buddyName} 與助教，預估 ${h.expectedResponseMinutes} 分鐘內回。`,
                           );
                         }}
                         style={({ pressed }) => ({

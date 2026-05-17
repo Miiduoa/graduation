@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import { resolveSchool } from '@campus/shared/src/schools';
 import { SiteShell } from '@/components/SiteShell';
@@ -11,13 +11,104 @@ import {
   DEMO_ANNOUNCEMENTS,
   getDemoCourseById,
   getDemoClubById,
+  readPendingAnns,
+  addPendingAnn,
+  approvePendingAnn,
   type DemoAnnouncement,
+  type DemoPendingAnn,
 } from '@/lib/demoData';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
+import { useRoleScopedState } from '@/lib/useRoleScopedState';
+import { notifyDeptHeadNewAnn, notifyStudentsAnnApproved } from '@/lib/demoStore';
 
 type FilterCategory = 'all' | 'academic' | 'event' | 'general';
-type AnnouncementView = 'all' | 'important' | 'today';
+type AnnouncementView = 'all' | 'important' | 'today' | 'mine' | 'pending';
+
+/** 「新增公告」Modal 表單 */
+function NewAnnModal({
+  onClose,
+  onSubmit,
+  role,
+}: {
+  onClose: () => void;
+  onSubmit: (title: string, body: string) => void;
+  role: string;
+}) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const sourceLabel =
+    role === 'teacher' ? '王大明老師' :
+    role === 'department_head' ? '黃主任（系所辦公室）' :
+    role === 'club_officer' ? '程式設計社' : '發布者';
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 999,
+        background: 'rgba(0,0,0,0.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 24,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: 'var(--bg, #fff)',
+          borderRadius: 16,
+          padding: 28,
+          width: '100%',
+          maxWidth: 520,
+          boxShadow: '0 24px 64px rgba(0,0,0,0.22)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 800 }}>
+          {role === 'teacher' ? '發布課程公告' : role === 'department_head' ? '發布系所公告' : '發布社團公告'}
+        </h2>
+        <p style={{ margin: '0 0 20px', fontSize: 13, color: '#6b7280' }}>
+          發布後將進入待審核佇列，由系主任核准後正式對外公開。
+        </p>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>公告標題 *</label>
+          <input
+            className="input"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="請輸入公告標題"
+            style={{ width: '100%', boxSizing: 'border-box' }}
+          />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>公告內容 *</label>
+          <textarea
+            className="input"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="請輸入公告詳細內容..."
+            rows={4}
+            style={{ width: '100%', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
+          />
+        </div>
+        <div style={{ marginBottom: 20, fontSize: 13, color: '#6b7280', background: 'var(--panel2, #f3f4f6)', padding: '10px 14px', borderRadius: 8 }}>
+          📌 發布來源：<strong>{sourceLabel}</strong>
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>取消</button>
+          <button
+            className="btn primary"
+            disabled={!title.trim() || !body.trim()}
+            onClick={() => {
+              if (title.trim() && body.trim()) onSubmit(title.trim(), body.trim());
+            }}
+          >
+            ✉️ 送出待審核
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function isImportantAnnouncement(a: Announcement, index: number): boolean {
   if (a.pinned) return true;
@@ -60,8 +151,28 @@ export default function AnnouncementsPage(props: {
   const [selectedCategory, setSelectedCategory] = useState<FilterCategory>('all');
   const [activeView, setActiveView] = useState<AnnouncementView>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  const [savedIdsArr, setSavedIdsArr] = useRoleScopedState<string[]>('saved-announcements', []);
+  const savedIds = useMemo(() => new Set(savedIdsArr), [savedIdsArr]);
+  const setSavedIds = (updater: (prev: Set<string>) => Set<string>) => {
+    setSavedIdsArr((prev) => Array.from(updater(new Set(prev))));
+  };
+  // 待審公告（共用 localStorage，與 admin 頁同步）
+  const [pendingQueue, setPendingQueue] = useState<DemoPendingAnn[]>([]);
+  // 新增公告 Modal
+  const [showModal, setShowModal] = useState(false);
   const { success, info } = useToast();
+
+  // Mount 後讀取 localStorage（SSR 安全）
+  useEffect(() => {
+    setPendingQueue(readPendingAnns());
+    const handler = () => setPendingQueue(readPendingAnns());
+    window.addEventListener('demoPendingAnnChange', handler);
+    window.addEventListener('storage', handler);
+    return () => {
+      window.removeEventListener('demoPendingAnnChange', handler);
+      window.removeEventListener('storage', handler);
+    };
+  }, []);
   const {
     data: announcements,
     loading,
@@ -77,8 +188,25 @@ export default function AnnouncementsPage(props: {
     { id: 'general' as const, label: '一般', icon: '📢' },
   ];
 
+  // 訪客 / 校友：過濾掉「課程公告」與「待審」之類的內部公告，只看校園級別
+  const visibleAnnouncements = useMemo(() => {
+    if (demoRole === 'guest' || demoRole === 'alumni') {
+      return announcements.filter((a) => !a.relatedCourseId); // 課程內部公告不給訪客看
+    }
+    return announcements;
+  }, [announcements, demoRole]);
+
+  // 對應「自己發的」的判斷：DemoData 來源（getCourseById.instructor 等）對應到角色
+  const mineSourceMatches = (source: string | undefined): boolean => {
+    if (!source) return false;
+    if (demoRole === 'teacher') return source.includes('王大明') || source.includes('老師');
+    if (demoRole === 'department_head') return source.includes('系所') || source.includes('系辦');
+    if (demoRole === 'club_officer') return source.includes('社');
+    return false;
+  };
+
   const filteredAnnouncements = useMemo(() => {
-    return announcements.filter((a, idx) => {
+    return visibleAnnouncements.filter((a, idx) => {
       const matchesSearch =
         !searchQuery ||
         a.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -89,19 +217,24 @@ export default function AnnouncementsPage(props: {
           ? true
           : activeView === 'important'
             ? isImportantAnnouncement(a, idx)
-            : (() => {
-                const published = new Date(a.publishedAt);
-                if (Number.isNaN(published.getTime())) return false;
-                const now = new Date();
-                return (
-                  published.getFullYear() === now.getFullYear() &&
-                  published.getMonth() === now.getMonth() &&
-                  published.getDate() === now.getDate()
-                );
-              })();
+            : activeView === 'mine'
+              ? mineSourceMatches(a.source)
+              : activeView === 'pending'
+                ? false // 待審核視圖用 pendingQueue 獨立渲染，不從 visibleAnnouncements 過濾
+                : (() => {
+                    const published = new Date(a.publishedAt);
+                    if (Number.isNaN(published.getTime())) return false;
+                    const now = new Date();
+                    return (
+                      published.getFullYear() === now.getFullYear() &&
+                      published.getMonth() === now.getMonth() &&
+                      published.getDate() === now.getDate()
+                    );
+                  })();
       return matchesSearch && matchesCategory && matchesView;
     });
-  }, [announcements, searchQuery, selectedCategory, activeView]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleAnnouncements, searchQuery, selectedCategory, activeView, demoRole]);
 
   const stats = useMemo(() => {
     const todayCount = announcements.filter((a) => {
@@ -119,8 +252,9 @@ export default function AnnouncementsPage(props: {
       total: announcements.length,
       today: todayCount,
       important: importantCount,
+      pending: pendingQueue.length,
     };
-  }, [announcements]);
+  }, [announcements, pendingQueue.length]);
 
   const formatDate = (dateStr: string) => {
     try {
@@ -233,6 +367,14 @@ export default function AnnouncementsPage(props: {
               <span className="statValue important">{stats.important}</span>
               <span className="statLabel">重要公告</span>
             </div>
+            {caps.canApproveAnnouncements && (
+              <div className="statItem">
+                <span className="statValue" style={{ color: stats.pending > 0 ? 'var(--warning)' : 'var(--success)' }}>
+                  {stats.pending}
+                </span>
+                <span className="statLabel">待審核</span>
+              </div>
+            )}
           </div>
           <div style={{ marginTop: 14 }}>
             <div className="viewTabs">
@@ -257,6 +399,26 @@ export default function AnnouncementsPage(props: {
               >
                 🆕 今日
               </button>
+              {caps.canPublishAnnouncements && (
+                <button
+                  type="button"
+                  className={activeView === 'mine' ? 'active' : ''}
+                  onClick={() => setActiveView('mine')}
+                  title="我自己發的公告"
+                >
+                  ✍️ 自己發的
+                </button>
+              )}
+              {caps.canApproveAnnouncements && (
+                <button
+                  type="button"
+                  className={activeView === 'pending' ? 'active' : ''}
+                  onClick={() => setActiveView('pending')}
+                  title="待我審核的公告"
+                >
+                  ⏳ 待審核
+                </button>
+              )}
             </div>
           </div>
 
@@ -276,15 +438,7 @@ export default function AnnouncementsPage(props: {
                 <button
                   type="button"
                   className="btn primary"
-                  onClick={() =>
-                    success(
-                      demoRole === 'teacher'
-                        ? '已開啟「發布課程公告」表單（demo）'
-                        : demoRole === 'department_head'
-                          ? '已開啟「發布系所公告」表單（demo）'
-                          : '已開啟「發布全校公告」表單（demo）',
-                    )
-                  }
+                  onClick={() => setShowModal(true)}
                   style={{ fontSize: 13 }}
                 >
                   ＋{' '}
@@ -292,7 +446,9 @@ export default function AnnouncementsPage(props: {
                     ? '發布課程公告'
                     : demoRole === 'department_head'
                       ? '發布系所公告'
-                      : '發布公告'}
+                      : demoRole === 'club_officer'
+                        ? '發布社團公告'
+                        : '發布公告'}
                 </button>
               )}
               {caps.canApproveAnnouncements && (
@@ -303,6 +459,35 @@ export default function AnnouncementsPage(props: {
             </div>
           )}
         </div>
+
+        {/* ── AI 公告摘要入口 ── */}
+        {!loading && demoRole === 'student' && filteredAnnouncements.length > 0 && (
+          <div
+            className="card"
+            style={{
+              padding: '12px 16px',
+              background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.07) 100%)',
+              border: '1px solid rgba(94,106,210,0.22)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text)' }}>
+              🤖 <strong>AI 摘要</strong>：今日共 {stats.today} 則新公告，{stats.important} 則重要。
+              要我幫你整理重點嗎？
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('請幫我整理今天最重要的幾則公告，我需要注意哪些截止日和活動？')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
+          </div>
+        )}
 
         {loading && (
           <div className="loadingCard">
@@ -343,7 +528,65 @@ export default function AnnouncementsPage(props: {
               </div>
             </div>
 
+            {/* 待審核視圖（系主任 / 管理員專用）*/}
+            {activeView === 'pending' && caps.canApproveAnnouncements && (
+              <div className="list">
+                {pendingQueue.length === 0 ? (
+                  <div className="emptyCard">
+                    <div className="emptyIcon" aria-hidden>🎉</div>
+                    <p className="emptyText">公告佇列已清空，沒有待審項目</p>
+                  </div>
+                ) : (
+                  pendingQueue.map((p) => (
+                    <article key={p.id} className="annCard">
+                      <div className="annCardHeader">
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div className="annCardTags">
+                            <span className="annTag important">待審核</span>
+                            <span className="annTag source">{p.source}</span>
+                          </div>
+                          <h2 className="annCardTitle">{p.title}</h2>
+                          <div className="annCardMeta">
+                            <span>📅</span>
+                            <span>提交於 {p.submittedAt}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="annCardActions" style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                        <button
+                          type="button"
+                          className="btn primary"
+                          style={{ fontSize: 13 }}
+                          onClick={() => {
+                            approvePendingAnn(p.id);
+                            setPendingQueue(readPendingAnns());
+                            notifyStudentsAnnApproved(p.title, p.source);
+                            success('✅ 已核准並發布公告，學生現在可以看到');
+                          }}
+                        >
+                          ✓ 核准發布
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{ fontSize: 13 }}
+                          onClick={() => {
+                            approvePendingAnn(p.id);
+                            setPendingQueue(readPendingAnns());
+                            info('🔄 已退回提交者修改');
+                          }}
+                        >
+                          退回修改
+                        </button>
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+            )}
+
             {/* Announcement List */}
+            {activeView !== 'pending' && (
             <div className="list">
               {filteredAnnouncements.length === 0 ? (
                 <div className="emptyCard">
@@ -389,6 +632,17 @@ export default function AnnouncementsPage(props: {
 
                       {isExpanded && (
                         <div className="annCardActions">
+                          <Link
+                            href={`/announcements/${a.id}${q}`}
+                            onClick={(event) => event.stopPropagation()}
+                            style={{
+                              background: 'var(--text)',
+                              color: '#fff',
+                              fontWeight: 700,
+                            }}
+                          >
+                            📖 查看完整公告 →
+                          </Link>
                           {/* 下一步：跳轉到關聯的課程 / 社團 */}
                           {a.relatedCourseId && getDemoCourseById(a.relatedCourseId) && (
                             <Link
@@ -432,9 +686,36 @@ export default function AnnouncementsPage(props: {
                 })
               )}
             </div>
+            )}
           </>
         )}
       </div>
+
+      {/* 新增公告 Modal */}
+      {showModal && caps.canPublishAnnouncements && (
+        <NewAnnModal
+          role={demoRole}
+          onClose={() => setShowModal(false)}
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          onSubmit={(title, _body) => {
+            const sourceLabel =
+              demoRole === 'teacher' ? '王大明老師' :
+              demoRole === 'department_head' ? '黃主任（系所辦公室）' :
+              demoRole === 'club_officer' ? '程式設計社' : '發布者';
+            addPendingAnn({
+              title,
+              source: sourceLabel,
+              submittedAt: '剛剛',
+              submittedByRole: demoRole,
+            });
+            setPendingQueue(readPendingAnns());
+            // 通知系主任有新公告待審核
+            notifyDeptHeadNewAnn(title, sourceLabel);
+            setShowModal(false);
+            success(`✅ 已送出「${title.slice(0, 20)}${title.length > 20 ? '…' : ''}」，待系主任審核後公開`);
+          }}
+        />
+      )}
     </SiteShell>
   );
 }

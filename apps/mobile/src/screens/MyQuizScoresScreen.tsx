@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { safeNavigate } from '../utils/safeNavigate';
 
 import {
   tcFetchCourses,
@@ -184,10 +185,10 @@ export default function MyQuizScoresScreen() {
             <Pressable
               key={`${r.courseId}-${r.exam.id}`}
               onPress={() =>
-                navigation.navigate('CourseModules', {
+                safeNavigate(navigation, 'CourseModules', {
                   groupId: String(r.courseId),
                   groupName: r.courseName,
-                })
+                }, { fallbackMessage: '即將跳到課程教材' })
               }
               style={{
                 marginTop: 10,

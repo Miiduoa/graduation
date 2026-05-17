@@ -932,6 +932,23 @@ function AppNavigation() {
       linking={linkingConfig}
       onReady={flushPendingMessagingDeepLink}
       fallback={<FullScreenLoader />}
+      onUnhandledAction={(action) => {
+        // demo 期間最後一道防線：若任何 navigate('X') 找不到 route
+        // （safeNavigate 漏網的）→ 跳明確 Alert 避免「按了沒反應」
+        try {
+          const payload = (action as any)?.payload;
+          const targetName = payload?.name ?? '未知頁面';
+          // 動態 import 避免和 root-level Alert 衝突
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { Alert } = require('react-native');
+          Alert.alert(
+            '無法開啟',
+            `「${targetName}」目前無法導航。\n\n（事件：${action.type}）\n\n請回到主畫面或聯絡管理員。`,
+          );
+        } catch {
+          /* swallow */
+        }
+      }}
     >
       <View style={{ flex: 1 }}>
         <NetworkStatusBanner />

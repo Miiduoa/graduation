@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { safeNavigate } from '../utils/safeNavigate';
 
 import {
   analyzeAttendancePattern,
@@ -231,10 +232,10 @@ export default function MyAttendanceHistoryScreen() {
             <Pressable
               key={c.courseId}
               onPress={() =>
-                navigation.navigate('AttendanceMultiMethod', {
+                safeNavigate(navigation, 'AttendanceMultiMethod', {
                   courseId: String(c.courseId),
                   sessionId: `demo-${c.courseId}`,
-                })
+                }, { fallbackMessage: '即將跳到簽到頁' })
               }
               style={{
                 marginTop: 8,

@@ -1,74 +1,30 @@
 /**
- * safeNavigate — 容錯 navigation 包裝
+ * safeNavigate — 容錯 navigation 包裝（含 cross-tab 自動處理）
  *
- * 直接 navigation.navigate('NotFoundRoute') 會 console.warn 但 **不會 throw**。
- * 結果是按鈕按下去看起來「沒反應」— demo 時最尷尬的情況。
- *
- * 本工具：
- *   1. 用 getState() 預先檢查 route 是否註冊（含嵌套 navigator）
- *   2. 找不到 → 直接顯示 fallback Alert 或 toast，不會 silent
- *   3. 找到 → 正常 navigate
- *   4. 找到但 navigate 本身炸 → 用 try/catch 接住
- *
- * 給 fallbackMessage = null 表示靜默（用在已知會 navigate 但有時不需要提示）
+ * 解決問題：
+ *   1. React Navigation 的 `navigate('NotFoundRoute')` 不會 throw，按鈕看起來「沒反應」
+ *   2. Cross-tab navigation：當前 navigator 沒有目標 route → 自動查 routeRegistry 找 tab，
+ *      用 `navigate(tabName, { screen, params })` 跨 tab 跳轉
+ *   3. 找不到 → 顯示明確 fallback Alert，不會 silent
  */
 import { Alert } from 'react-native';
+import { ROUTE_TO_TAB, isRouteRegistered, resolveTabForRoute } from './routeRegistry';
 
 export interface SafeNavigateOptions {
   fallbackRoute?: string;
   fallbackParams?: Record<string, unknown>;
   /** 找不到 route 時顯示的提示文字；給 null 表示靜默 */
   fallbackMessage?: string | null;
-  /** 改變 Alert 標題（預設「即將推出」） */
+  /** 改變 Alert 標題（預設「無法開啟」） */
   fallbackTitle?: string;
 }
 
-// 從 navigation state（含嵌套）扁平化所有 route name
-function collectRouteNames(state: unknown, out: Set<string>): void {
-  if (!state || typeof state !== 'object') return;
-  const s = state as { routeNames?: string[]; routes?: Array<{ state?: unknown }> };
-  if (Array.isArray(s.routeNames)) {
-    for (const r of s.routeNames) out.add(r);
-  }
-  if (Array.isArray(s.routes)) {
-    for (const r of s.routes) {
-      if (r?.state) collectRouteNames(r.state, out);
-    }
-  }
-}
-
-export function isRouteRegistered(
-  navigation: { getState?: () => unknown; getParent?: () => unknown } | null | undefined,
-  route: string,
-): boolean {
-  if (!navigation || typeof navigation.getState !== 'function') return false;
-  try {
-    const names = new Set<string>();
-    // 先收 root 端的 state — 從最頂層 navigator 開始往下走
-    let cursor: any = navigation;
-    let topMost: any = navigation;
-    let safety = 0;
-    while (cursor && typeof cursor.getParent === 'function' && safety < 10) {
-      const parent = cursor.getParent();
-      if (!parent) break;
-      topMost = parent;
-      cursor = parent;
-      safety++;
-    }
-    if (topMost && typeof topMost.getState === 'function') {
-      collectRouteNames(topMost.getState(), names);
-    } else {
-      collectRouteNames(navigation.getState!(), names);
-    }
-    return names.has(route);
-  } catch {
-    return false;
-  }
-}
+// Re-export 給其他模組使用
+export { isRouteRegistered, resolveTabForRoute, ROUTE_TO_TAB } from './routeRegistry';
 
 export function safeNavigate(
   navigation: {
-    navigate?: (route: string, params?: Record<string, unknown>) => void;
+    navigate?: (...args: any[]) => void;
     getState?: () => unknown;
     getParent?: () => unknown;
   } | null | undefined,
@@ -79,44 +35,53 @@ export function safeNavigate(
   const navigate = navigation?.navigate;
   const showFallback = (msg?: string) => {
     if (options.fallbackMessage === null) return;
-    const title = options.fallbackTitle ?? '即將推出';
-    Alert.alert(title, options.fallbackMessage ?? msg ?? `${route} 還沒準備好，敬請期待`);
+    const title = options.fallbackTitle ?? '無法開啟';
+    Alert.alert(title, options.fallbackMessage ?? msg ?? `「${route}」目前無法存取，請稍後再試或回到主畫面。`);
   };
 
   if (typeof navigate !== 'function') {
-    showFallback(`路由 ${route} 不可用`);
+    showFallback(`navigation 物件不可用`);
     return false;
   }
 
-  // 預先檢查 route 是否註冊（含 nested navigators）— 找不到就 fallback
-  const isRegistered = isRouteRegistered(navigation, route);
-  if (!isRegistered) {
-    // 嘗試 fallback route
-    if (options.fallbackRoute && isRouteRegistered(navigation, options.fallbackRoute)) {
-      try {
-        navigate(options.fallbackRoute, options.fallbackParams);
-        return true;
-      } catch {
-        /* swallow & 繼續 fallback Alert */
-      }
+  // Step 1: 試試當前 stack（最快）
+  if (isRouteRegistered(navigation, route)) {
+    try {
+      navigate(route, params);
+      return true;
+    } catch {
+      /* fall through to fallback handling */
     }
-    showFallback();
-    return false;
   }
 
-  try {
-    navigate(route, params);
-    return true;
-  } catch (e) {
-    if (options.fallbackRoute) {
-      try {
-        navigate(options.fallbackRoute, options.fallbackParams);
-        return true;
-      } catch {
-        /* swallow */
-      }
+  // Step 2: route 不在當前 navigator → 看 routeRegistry 找 tab
+  const targetTab = resolveTabForRoute(route);
+  if (targetTab) {
+    try {
+      // navigate('TabName', { screen: 'RouteName', params: {...} })
+      // 這個 pattern 會把目標 tab 切換到目標 screen
+      navigate(targetTab, { screen: route, params });
+      return true;
+    } catch (e) {
+      // fallback
     }
-    showFallback();
-    return false;
   }
+
+  // Step 3: fallbackRoute（caller 指定的）
+  if (options.fallbackRoute) {
+    const fbTab = resolveTabForRoute(options.fallbackRoute);
+    try {
+      if (fbTab) {
+        navigate(fbTab, { screen: options.fallbackRoute, params: options.fallbackParams });
+      } else {
+        navigate(options.fallbackRoute, options.fallbackParams);
+      }
+      return true;
+    } catch {
+      /* swallow */
+    }
+  }
+
+  showFallback();
+  return false;
 }

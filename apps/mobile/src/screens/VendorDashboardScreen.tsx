@@ -40,7 +40,13 @@ import {
   type DemoMerchantOrder,
 } from '../data/demoMerchants';
 import { simulateVendorAdvanceOrder } from '../services/demoActionSimulator';
-import { subscribeRoleEvent, type OrderPlacedPayload } from '../services/roleEventBus';
+import {
+  subscribeRoleEvent,
+  loadRoleEventInbox,
+  type OrderPlacedPayload,
+  type RoleEvent,
+} from '../services/roleEventBus';
+import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -64,12 +70,55 @@ export default function VendorDashboardScreen() {
   );
   const [orders, setOrders] = useState<DemoMerchantOrder[]>(initialOrders);
 
-  // 切換 merchant 時 reset 訂單
+  // 切換 merchant 時 reset 訂單 + 載入歷史事件 inbox
+  // ── 關鍵：學生在切換到 vendor demo 帳號之前下的單在 __all__ broadcast inbox 裡，
+  //   必須 mount 時讀進來，否則 vendor 看不到。
   useEffect(() => {
-    setOrders(initialOrders);
-  }, [initialOrders]);
+    const merchantId = merchantCtx.current?.merchant.id;
+    if (!merchantId) {
+      setOrders([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      // 1. 從 inbox 讀「之前」的 order_placed events（broadcast）
+      const vendorUid = auth.user?.uid ?? 'demo_cafeteria';
+      const inboxEvents = await loadRoleEventInbox(vendorUid).catch(() => [] as RoleEvent<unknown>[]);
+      const inboxOrders: DemoMerchantOrder[] = [];
+      for (const event of inboxEvents) {
+        if (event.kind !== 'order_placed') continue;
+        const payload = event.payload as OrderPlacedPayload;
+        if (payload.merchantId !== merchantId) continue;
+        inboxOrders.push({
+          id: payload.orderId,
+          merchantId: payload.merchantId,
+          studentUid: event.actorUid,
+          studentName: payload.studentName,
+          items: payload.items,
+          total: payload.total,
+          status: 'pending',
+          orderedAt: event.occurredAt,
+        });
+      }
+      if (cancelled) return;
+      // 2. merge with static mock orders（dedupe by id）
+      const seen = new Set(inboxOrders.map((o) => o.id));
+      const merged = [
+        ...inboxOrders,
+        ...initialOrders.filter((o) => !seen.has(o.id)),
+      ];
+      setOrders(merged);
+      if (inboxOrders.length > 0) {
+        // 有新訂單時自動展開 pending section 提醒老闆
+        setOpenSection('pending');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [merchantCtx.current?.merchant.id, initialOrders, auth.user?.uid]);
 
-  // 學生下單 → 即時 push 進訂單佇列
+  // 學生下單 → 即時 push 進訂單佇列（in-memory listener 給「同一 session 中」即時聯動）
   useEffect(() => {
     const merchantId = merchantCtx.current?.merchant.id;
     if (!merchantId) return;
@@ -258,6 +307,9 @@ export default function VendorDashboardScreen() {
           })()}
         />
 
+        {/* 🤖 AI Agent 摘要 */}
+        <AgentSummaryBanner cockpitLabel="餐廳" />
+
         <CockpitMetricRow>
           <CockpitMetricChip label="新訂單" value={stats.pending} tone={stats.pending > 0 ? 'warn' : undefined} />
           <CockpitMetricChip label="製作中" value={stats.processing} />
@@ -341,29 +393,25 @@ export default function VendorDashboardScreen() {
             <CockpitToolChip
               icon="restaurant-outline"
               label="管理菜單"
+              onPress={() => safeNavigate(navigation, 'VendorMenuManage')}
+            />
+          )}
+          {merchantCtx.current?.role.canSendLoyaltyPush && (
+            <CockpitToolChip
+              icon="megaphone-outline"
+              label="Loyalty 推播"
               onPress={() =>
-                safeNavigate(navigation, '餐廳總覽', undefined, {
-                  fallbackMessage: '菜單管理頁面即將推出',
+                safeNavigate(navigation, 'VendorLoyaltyPush', undefined, {
                 })
               }
             />
           )}
-          <CockpitToolChip
-            icon="megaphone-outline"
-            label="Loyalty 推播"
-            onPress={() =>
-              safeNavigate(navigation, 'Inbox', undefined, {
-                fallbackMessage: 'Loyalty 推播即將推出',
-              })
-            }
-          />
           {merchantCtx.current?.role.canViewReports && (
             <CockpitToolChip
               icon="stats-chart-outline"
               label="月度報表"
               onPress={() =>
-                safeNavigate(navigation, 'MenuSubscription', undefined, {
-                  fallbackMessage: '營收報表即將推出',
+                safeNavigate(navigation, 'VendorRevenueReport', undefined, {
                 })
               }
             />
@@ -374,7 +422,6 @@ export default function VendorDashboardScreen() {
               label="員工管理"
               onPress={() =>
                 safeNavigate(navigation, 'AdminCafeteria', undefined, {
-                  fallbackMessage: '員工管理即將推出',
                 })
               }
             />

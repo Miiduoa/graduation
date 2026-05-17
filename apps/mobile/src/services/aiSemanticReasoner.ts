@@ -282,10 +282,26 @@ function detectCategory(
 }
 
 function detectQuantity(msg: string): number {
-  const m = msg.match(/(\d+)\s*[碗份個杯盤道]/);
-  if (m) return Math.max(1, parseInt(m[1], 10));
-  const cn = msg.match(/([一兩二三四五六七八九十])\s*[碗份個杯盤道]/);
-  if (cn) return CHINESE_NUMBERS[cn[1]] ?? 1;
+  // 「點 3 份 / 兩碗」等：直接是數量
+  // 但「第 3 個 / 第八份」是 ordinal（位置引用），不是數量 — 用 negative lookbehind 排除
+  // RN/Hermes & Node 都支援 lookbehind。若環境不支援，下面的後處理也會保險。
+  const m = msg.match(/(?<!第\s*)(\d+)\s*[碗份個杯盤道]/);
+  if (m) {
+    // 額外保險：再次確認該數字前面沒有「第」
+    const idx = msg.indexOf(m[0]);
+    const before = msg.slice(Math.max(0, idx - 2), idx);
+    if (!/第\s*$/.test(before)) {
+      return Math.max(1, parseInt(m[1], 10));
+    }
+  }
+  const cn = msg.match(/(?<!第\s*)([一兩二三四五六七八九十])\s*[碗份個杯盤道]/);
+  if (cn) {
+    const idx = msg.indexOf(cn[0]);
+    const before = msg.slice(Math.max(0, idx - 2), idx);
+    if (!/第\s*$/.test(before)) {
+      return CHINESE_NUMBERS[cn[1]] ?? 1;
+    }
+  }
   return 1;
 }
 

@@ -4,14 +4,30 @@ import { SiteShell } from '@/components/SiteShell';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { useDemoRole, type DemoRole } from '@/lib/demoRole';
+import { useDemoRole, getDemoRoleDefinition, type DemoRole } from '@/lib/demoRole';
 import { buildAISystemContext, getCreditSummary } from '@/lib/aiContext';
 import {
   NEXT_SEM_COURSES,
   type CreditCategory,
   DEMO_ANNOUNCEMENTS,
   DEMO_CLUBS,
+  DEMO_LIBRARY_DUE_SOON_BOOK,
+  DEMO_LIBRARY_DUE_SOON_DAYS,
+  DEMO_LIBRARY_DUE_SOON_BOOK_ID,
+  TEACHER_PENDING_REVIEWS,
+  STUDENT_ASSIGNMENTS,
+  UPCOMING_EXAMS,
+  CLUB_ACTIVITIES,
+  readPendingAnns,
 } from '@/lib/demoData';
+import {
+  getDemoStore,
+  useDemoStore,
+  getAllMessagesForRole,
+  getUnreadCountDynamic,
+  getPendingClubMembers,
+  getPendingSubmissions,
+} from '@/lib/demoStore';
 
 // ── 型別 ──────────────────────────────────────────────────────
 interface Message {
@@ -27,39 +43,52 @@ type QuickPrompt = {
   prompt: string;
 };
 
-// ── 快速提示詞 ─────────────────────────────────────────────────
-const QUICK_PROMPTS: QuickPrompt[] = [
-  {
-    label: '下學期選什麼？',
-    icon: '📚',
-    prompt: '我下學期應該選哪幾門課？請根據我的學分缺口和成績幫我推薦最佳組合。',
-  },
-  {
-    label: '幾年可以畢業？',
-    icon: '🎓',
-    prompt: '按照我目前的修課進度，預計幾年可以畢業？有什麼需要加速的地方嗎？',
-  },
-  {
-    label: '衝堂檢查',
-    icon: '⚠️',
-    prompt: '如果我下學期同時選「人工智慧導論」和「機器學習實務」，會有衝堂問題嗎？',
-  },
-  {
-    label: '學期完整規劃',
-    icon: '📋',
-    prompt: '請幫我規劃大三下和大四的選課計畫，讓我能在大四下順利畢業。',
-  },
-  {
-    label: '成績弱項建議',
-    icon: '💡',
-    prompt: '根據我的歷史成績，有哪些科目我比較弱？選進階課前有什麼需要注意的？',
-  },
-  {
-    label: '通識學分補齊',
-    icon: '🌍',
-    prompt: '我的通識學分還差多少？下學期有哪些推薦的通識課可以選？',
-  },
-];
+// ── 角色感知快速提示詞 ────────────────────────────────────────
+const ROLE_QUICK_PROMPTS: Record<DemoRole, QuickPrompt[]> = {
+  student: [
+    { label: '幫我規劃下學期選課', icon: '📚', prompt: '我下學期應該選哪幾門課？請根據我的學分缺口和成績幫我推薦最佳組合。' },
+    { label: '分析我的成績趨勢', icon: '📊', prompt: '根據我的歷史成績，分析我的學習趨勢，哪些科目是強項、哪些需要補強？' },
+    { label: '哪些學分還差？', icon: '🎓', prompt: '我目前各類別學分還差多少？按時畢業的話大三下和大四各應選幾學分？' },
+    { label: '整理今日重要事項', icon: '📋', prompt: '整理一下我今天有什麼重要事項，包括作業截止、考試提醒、社團活動。' },
+    { label: '圖書館推薦', icon: '📖', prompt: '我在學資工，圖書館有哪些推薦書單？另外請提醒我借閱到期情況。' },
+    { label: '衝堂檢查', icon: '⚠️', prompt: '如果我下學期同時選「人工智慧導論」和「機器學習實務」，會有衝堂問題嗎？' },
+  ],
+  teacher: [
+    { label: '哪些學生需要關注？', icon: '🔍', prompt: '幫我分析資料結構班上成績偏低或出缺席異常的學生，列出需要關注的名單。' },
+    { label: '幫我出 5 題期末考題', icon: '📝', prompt: '幫我出資料結構期末考的 5 道題目，涵蓋樹、圖、排序演算法，難度中等偏難。' },
+    { label: '分析本學期出缺席趨勢', icon: '📅', prompt: '分析資料結構（CS301）本學期的出缺席趨勢，有沒有特別異常的情況？' },
+    { label: '批改回饋範本', icon: '✍️', prompt: '幫我寫一份資料結構作業二的批改回饋範本，分別針對優秀、普通、待改進的學生。' },
+  ],
+  ta: [
+    { label: '這份作業怎麼評分？', icon: '📋', prompt: '請問作業二（鏈結串列實作）的評分標準是什麼？特別是遞迴實作和迭代實作的差異要如何給分？' },
+    { label: '整理學生常見錯誤', icon: '🔍', prompt: '幫我整理資料結構作業二學生常見的錯誤，以及如何在評語中給予有效建議。' },
+    { label: '如何給有效回饋？', icon: '💡', prompt: '如何給學生有效且有建設性的批改回饋？請給我一些原則和範例。' },
+  ],
+  club_officer: [
+    { label: '幫我寫招募文案', icon: '✍️', prompt: '幫我寫程式設計社的新學年招募文案，目標是吸引大一和大二想學程式的學生加入。' },
+    { label: '幫我規劃黑客松流程', icon: '🏆', prompt: '幫我規劃 5/23 黑客松的詳細流程表，從早上 9 點到隔天 9 點，包含各個時段的活動安排。' },
+    { label: '分析社團活躍度', icon: '📊', prompt: '根據程式設計社的成員和活動情況，分析社團活躍度，並建議如何提升參與率。' },
+  ],
+  department_head: [
+    { label: '本學期各課程平均分數？', icon: '📊', prompt: '請幫我整理本學期各課程的平均分數分布，哪些課程分數偏低需要關注？' },
+    { label: '哪些課程選課人數最多？', icon: '📈', prompt: '本學期選課人數最多的前 5 門課程是什麼？有沒有熱門課程超額的情況？' },
+    { label: '幫我寫系所公告草稿', icon: '📄', prompt: '幫我起草一份關於本學期期末考試安排的系所公告，語氣正式、格式完整。' },
+  ],
+  admin: [
+    { label: '過去 7 天有異常登入嗎？', icon: '🛡️', prompt: '請幫我查看過去 7 天的系統安全事件，有沒有異常登入或可疑活動需要關注？' },
+    { label: '系統使用狀況摘要', icon: '📊', prompt: '幫我生成本週系統使用狀況摘要，包含活躍使用者數、API 用量、備份狀態等。' },
+    { label: '起草系統維護公告', icon: '📝', prompt: '幫我起草一份系統維護公告，說明本週日凌晨 2-4 點進行例行維護，服務可能中斷。' },
+  ],
+  alumni: [
+    { label: '整理我在校的成績摘要', icon: '🎓', prompt: '請幫我整理在校期間的成績摘要，包含 GPA 趨勢、強弱科目分析。' },
+    { label: '校友會有什麼活動？', icon: '🎉', prompt: '請告訴我最近有哪些校友相關的活動，以及如何報名參與。' },
+    { label: '如何申請成績單？', icon: '📄', prompt: '我需要申請在校成績單，請問流程是什麼？需要準備哪些文件？' },
+  ],
+  guest: [
+    { label: '這個 App 有什麼功能？', icon: '🏫', prompt: '這個校園 App 有哪些主要功能？不同身份的使用者各能使用什麼服務？' },
+    { label: '如何申請帳號？', icon: '📝', prompt: '如何申請這個校園 App 的帳號？需要哪些資格或文件？' },
+  ],
+};
 
 // ── 顏色 ──────────────────────────────────────────────────────
 const CATEGORY_COLORS: Record<CreditCategory, string> = {
@@ -71,7 +100,7 @@ const CATEGORY_COLORS: Record<CreditCategory, string> = {
 };
 
 // ── AI 回應（模擬 + Anthropic API） ──────────────────────────────
-async function callAI(messages: { role: string; content: string }[]): Promise<string> {
+async function callAI(messages: { role: string; content: string }[], role?: DemoRole): Promise<string> {
   // 嘗試呼叫 API route（若設定好就用真的 AI）
   try {
     const res = await fetch('/api/ai-chat', {
@@ -91,6 +120,260 @@ async function callAI(messages: { role: string; content: string }[]): Promise<st
   // Demo 回應（API 未設定時的 fallback）
   const summary = getCreditSummary();
   const lastUserMsg = messages[messages.length - 1]?.content ?? '';
+
+  // ── 教師 / TA 角色的 demo 回應 ──
+  if (role === 'teacher' || role === 'ta') {
+    if (lastUserMsg.includes('學生') || lastUserMsg.includes('關注') || lastUserMsg.includes('成績')) {
+      return `🔍 **班級成績分析（資料結構 CS301）**
+
+根據目前成績數據，以下學生需要特別關注：
+
+⚠️ **需要關注的學生（分數 < 70）：**
+- 張志偉（M11302005）：作業 60、期中 55、期末 58 → 建議約談輔導
+- 許志明（M11302009）：作業 66、期中 70、期末 65 → 邊緣通過，需加油
+
+📈 **表現優異：**
+- 王小明（M11302001）：作業 95、期中 96、期末 97 → 班級第一
+- 蔡雅芳（M11302008）：作業 93、期中 90、期末 94
+
+**建議行動：**
+1. 針對低分學生發送關懷訊息，了解學習困難
+2. 提供課後輔導時間（工程館 308，週二 14-17:00）
+3. 考慮在下次上課時加強講解常見錯誤`;
+    }
+    if (lastUserMsg.includes('考題') || lastUserMsg.includes('出題')) {
+      return `📝 **資料結構期末考題（5 道，中等偏難）**
+
+**第 1 題（20 分）** — 二元搜尋樹
+設計一個 BST，插入以下序列：{50, 30, 70, 20, 40, 60, 80}。
+(a) 繪出樹的結構（10 分）
+(b) 以中序走訪輸出節點，並說明結果特性（10 分）
+
+**第 2 題（20 分）** — 遞迴 vs 迭代
+比較遞迴與迭代實作 Fibonacci 數列的時間複雜度，並分析記憶體使用差異。
+
+**第 3 題（25 分）** — 圖論演算法
+給定加權無向圖（附圖），使用 Dijkstra 演算法求從頂點 A 到所有其他頂點的最短路徑。請列出每一步驟。
+
+**第 4 題（20 分）** — 排序演算法
+比較 Quick Sort 和 Merge Sort 在（a）最佳、（b）最差、（c）平均情況下的時間複雜度，並說明各自適用的場景。
+
+**第 5 題（15 分）** — 設計題
+設計一個「最近最少使用（LRU）快取」，說明使用哪種資料結構組合最有效率，並說明 get 和 put 操作的時間複雜度。`;
+    }
+    return `你好！我是你的課程 AI 助手 🤖
+
+我可以協助你：
+- **分析班級成績**：找出需要關注的學生
+- **出考題**：根據課程範圍生成考題
+- **批改回饋**：提供評語範本
+- **統計出缺席**：分析本學期出席趨勢
+
+有什麼需要幫忙的嗎？`;
+  }
+
+  // ── 社團幹部角色的 demo 回應 ──
+  if (role === 'club_officer') {
+    if (lastUserMsg.includes('招募') || lastUserMsg.includes('文案')) {
+      return `✍️ **程式設計社招募文案**
+
+---
+🚀 **2026 新學年 × 程式設計社 × 一起 Build 點什麼**
+
+你有想法，但不知道怎麼動手？
+你會寫 code，但想找同伴一起玩？
+你聽過黑客松，但還沒跳進去過？
+
+**這裡就是你的地方。**
+
+📍 程式設計社，120 位夥伴，從零到一都歡迎。
+
+我們有：
+• 每週技術分享（React、Python、AI 什麼都談）
+• 每學年黑客松（今年獎金 NT$30,000）
+• Side project 工作坊（有人帶，不孤單）
+• 業界人士訪談（真實職涯不包裝）
+
+**報名截止：9/15，名額有限，先搶先贏。**
+加入表單：[連結]
+
+來一起 Build 點什麼吧 💻
+
+---
+
+需要我調整語氣或加入特定活動資訊嗎？`;
+    }
+    if (lastUserMsg.includes('活躍') || lastUserMsg.includes('分析')) {
+      return `📊 **程式設計社活躍度分析**
+
+**成員概況**
+- 總成員：120 位
+- 估計活躍成員（每月參與活動）：約 45 位（37.5%）
+- 新成員申請：本月 3 位（李宇欣、張博文、陳怡萱）
+
+**活動參與率趨勢**
+- 黑客松（去年）：18 組 × 4 人 = 72 人參與 ✅ 高
+- 技術分享（平均）：30-40 人 / 次 📊 中等
+- 社課（每週）：15-25 人 / 次 📉 偏低
+
+**提升參與率建議：**
+1. 社課加入實作環節，從「聽講」改為「邊做邊學」
+2. 建立「入社後 30 天任務清單」，幫新生快速融入
+3. 舉辦小型組隊競賽，降低參與門檻
+4. 整合 LINE 群組通知，確保活動資訊觸達每位成員`;
+    }
+    return `你好！我是程式設計社 AI 助手 🤖
+
+我可以協助你：
+- **起草招募文案、活動文宣**
+- **規劃活動流程（黑客松、工作坊）**
+- **分析社團活躍度**
+- **起草公告審核申請**
+
+有什麼需要我幫你準備的嗎？`;
+  }
+
+  // ── 系主任角色的 demo 回應 ──
+  if (role === 'department_head') {
+    if (lastUserMsg.includes('課程') || lastUserMsg.includes('選課') || lastUserMsg.includes('趨勢')) {
+      return `📈 **本學期課程選課趨勢分析**
+
+**選課人數 Top 5：**
+| 課程 | 代碼 | 選課人數 | 狀態 |
+|------|------|---------|------|
+| 微積分 | MATH101 | 120 人 | 接近滿額 |
+| 線性代數 | MATH201 | 102 人 | 正常 |
+| 作業系統 | CS302 | 76 人 | 正常 |
+| 計算機網路 | CS401 | 68 人 | 正常 |
+| 資料庫系統 | CS303 | 54 人 | 正常 |
+
+**分析摘要：**
+- 數學類課程需求高，微積分接近滿額，建議下學期增開一班
+- 資料結構（CS301）48 人，班級規模適中
+- 英文寫作（ENG201）僅 32 人，可考慮是否調整必選修規定
+
+**班級平均分數警示：**
+- 資料結構班級平均約 82 分，正常範圍
+- 建議定期追蹤各課程期中考後的成績分布`;
+    }
+    if (lastUserMsg.includes('公告') || lastUserMsg.includes('草稿')) {
+      return `📄 **系所公告草稿**
+
+---
+【資訊管理系公告】2026 學年度第一學期期末考試安排
+
+各位師生同學，您好：
+
+本學期期末考試定於 **2026 年 6 月 15 日至 6 月 21 日** 舉行，相關事項說明如下：
+
+1. **考試時間**：依各科目課表公告時間進行
+2. **應考規定**：請攜帶學生證，禁止攜帶電子裝置入場
+3. **衝突處理**：如有考試時間衝突，請於 6 月 1 日前向各授課老師申請調整
+4. **補考申請**：病假缺考學生請於考試後 3 個工作日內提出補考申請
+
+如有任何問題，請洽系辦（行政大樓 5 樓，分機 5201）。
+
+資訊管理系系主任 黃○○ 敬上
+2026 年 5 月 17 日
+
+---
+
+需要我調整內容或格式嗎？`;
+    }
+    return `你好！我是系所行政 AI 助手 🤖
+
+我可以協助你：
+- **分析課程選課趨勢與成績統計**
+- **起草系所公告草稿**
+- **師資分配建議**
+- **生成系所統計報表摘要**
+
+有什麼需要分析或撰寫的嗎？`;
+  }
+
+  // ── 管理員角色的 demo 回應 ──
+  if (role === 'admin') {
+    if (lastUserMsg.includes('異常') || lastUserMsg.includes('登入') || lastUserMsg.includes('安全')) {
+      return `🛡️ **過去 7 天安全事件摘要（2026-05-11 ～ 2026-05-17）**
+
+**⚠️ 高優先事件（1 件）：**
+- **2026-05-17 09:23** — 5 次登入失敗（來自 185.220.101.xx，荷蘭 Tor 出口節點）
+  - 目標帳號：admin@pu.edu.tw
+  - 建議：立即確認密碼安全，考慮加入 IP 封鎖清單，並啟用雙因子驗證
+
+**一般事件（3 件）：**
+- 2026-05-14：使用者密碼重設 × 2（一般帳號）
+- 2026-05-15：異地登入偵測 × 1（台北 IP，已確認為師生出差）
+
+**整體評估：** 風險等級 🟡 中等
+→ 主要威脅來自 Tor 節點嘗試，建議今日處理 admin 帳號的 2FA 設定。`;
+    }
+    return `你好！我是系統管理 AI 助手 🤖
+
+我可以協助你：
+- **安全事件分析**：查詢異常登入、威脅評估
+- **系統狀況摘要**：API 用量、備份狀態
+- **起草系統維護公告**
+- **使用者帳號查詢**
+
+有什麼系統問題需要分析嗎？`;
+  }
+
+  // ── 校友角色的 demo 回應 ──
+  if (role === 'alumni') {
+    if (lastUserMsg.includes('成績') || lastUserMsg.includes('摘要')) {
+      return `🎓 **在校成績摘要（資管系 109 屆，學號 B09203001）**
+
+**畢業 GPA：3.65**（優良，全系前 20%）
+
+**學期 GPA 趨勢：**
+大一上 3.42 → 大一下 3.58 → 大二上 3.71 → 大二下 3.82 → ...（逐學期進步 ✅）
+
+**成績亮點：**
+- 程式設計相關科目全部 A 以上
+- 網頁程式設計：96 分（系所名列前茅）
+- 大四畢業專題：A+
+
+**各類學分完成：**
+- 必修 64 / 64 ✅
+- 選修 32 / 32 ✅
+- 通識 20 / 20 ✅
+- 總計 128 / 128 學分，符合畢業標準
+
+如需申請正式成績單，請至學校網站「學生服務」→「成績單申請」，或親至教務處辦理。`;
+    }
+    return `你好，李校友！歡迎回到校友服務系統 🤖
+
+我可以協助你：
+- **整理在校成績摘要**
+- **說明校友活動與系友會資訊**
+- **解說成績單申請流程**
+- **了解母校近況**
+
+有什麼想詢問的嗎？`;
+  }
+
+  // ── 訪客角色的 demo 回應 ──
+  if (role === 'guest') {
+    return `你好！歡迎使用校園 AI 助理 👋
+
+這個校園 App 整合了以下功能：
+- 🗓️ **課表**：查看個人課程時間表
+- 📚 **課程**：教材、作業、測驗、成績
+- 📊 **成績**：GPA 追蹤與學分進度
+- 📣 **公告**：課程與校園最新公告
+- 🎯 **社團**：探索並加入校園社團
+- 📖 **圖書館**：館藏搜尋與借閱管理
+- 🤖 **AI 助理**：選課規劃、學習建議
+
+**如何使用：**
+[前往登入](/login) 選擇身份後即可使用完整功能。
+我們提供 8 種身份（學生、教師、TA、社團幹部、系主任、管理員、校友、訪客）的完整 demo。
+
+有什麼想了解的嗎？`;
+  }
+
+  // ── 學生角色（預設）的 demo 回應 ──
 
   // 衝堂相關
   if (
@@ -143,26 +426,17 @@ async function callAI(messages: { role: string; content: string }[]): Promise<st
 
 | 類別 | 需求 | 已修+修習中 | 還差 |
 |------|------|------------|------|
-| 必修 | ${summary.categoryRequired.required} | ${summary.byCategory.required + summary.currentSemester} | ${Math.max(0, summary.categoryRequired.required - summary.byCategory.required - 19)} |
+| 必修 | ${summary.categoryRequired.required} | ${summary.byCategory.required + 19} | ${Math.max(0, summary.categoryRequired.required - summary.byCategory.required - 19)} |
 | 選修 | ${summary.categoryRequired.elective} | ${summary.byCategory.elective} | ${Math.max(0, summary.categoryRequired.elective - summary.byCategory.elective)} |
 | 通識 | ${summary.categoryRequired.general} | ${summary.byCategory.general + 2} | ${Math.max(0, summary.categoryRequired.general - summary.byCategory.general - 2)} |
 
 **AI 推薦下學期選課組合（共 13 學分）：**
 
 ⭐ **資訊安全（CS503）** — 3 學分，必修，週三第 5-6 節
-  → 你的必修還有缺口，這門是核心課，早修早好
-
 ⭐ **人工智慧導論（CS501）** — 3 學分，選修，週一第 3-4 節
-  → 你的程式設計底子不錯（大一下 93 分），適合進入 AI 領域
-
 ⭐ **雲端運算與服務（CS502）** — 3 學分，選修，週二第 1-2 節
-  → 補足選修學分，業界熱門技術
-
 ⭐ **科技與社會（GE101）** — 2 學分，通識，週四第 1-2 節
-  → 你的通識還差 4 學分，這門輕鬆好修
-
 ⭐ **專題研究（一）（CS505）** — 2 學分，必修，週五第 1-2 節
-  → 大三下必修，要提前規劃！
 
 **⚠️ 不建議同時選「機器學習實務（CS504）」**，因為與「人工智慧導論」時段衝突。`;
   }
@@ -171,63 +445,62 @@ async function callAI(messages: { role: string; content: string }[]): Promise<st
   if (lastUserMsg.includes('通識')) {
     const generalDone = summary.byCategory.general;
     const generalNeed = summary.categoryRequired.general;
-    const generalCurrent = 2; // ENG201
+    const generalCurrent = 2;
     const generalLeft = Math.max(0, generalNeed - generalDone - generalCurrent);
     return `📘 **通識學分分析**
 
-你的通識學分狀況：
-- 需求：${generalNeed} 學分
-- 已修（歷史）：${generalDone} 學分（大學國文、英文一二、哲學與生命、社會學概論、藝術鑑賞）
-- 本學期修習中：${generalCurrent} 學分（英文寫作）
-- **還差：${generalLeft} 學分**
+需求：${generalNeed} 學分
+已修：${generalDone} 學分 ｜ 修習中：${generalCurrent} 學分
+**還差：${generalLeft} 學分**
 
 下學期推薦通識課：
-1. **科技與社會（GE101）** — 2 學分，週四第 1-2 節，輕鬆有趣，補齊 2 學分
-2. **環境永續與創新（GE102）** — 2 學分，週四第 5-6 節，符合 SDGs 趨勢
+1. **科技與社會（GE101）** — 2 學分，週四第 1-2 節
+2. **環境永續與創新（GE102）** — 2 學分，週四第 5-6 節
 
-選上這兩門，通識學分就完全達標 ✅`;
+選這兩門通識學分就達標 ✅`;
   }
 
   // 成績弱項
-  if (
-    lastUserMsg.includes('弱') ||
-    lastUserMsg.includes('成績') ||
-    lastUserMsg.includes('補強')
-  ) {
+  if (lastUserMsg.includes('弱') || lastUserMsg.includes('成績') || lastUserMsg.includes('補強')) {
     return `💡 **成績分析與建議**
 
-根據你的歷史成績，以下幾點值得注意：
+📈 **表現優異：** 程式設計（91, 93 分）、網頁程式設計（96 分）
+⚠️ **相對偏弱：** 微積分（83, 79 分）、計算機網路（84 分）
 
-📈 **表現優異的科目：**
-- 程式設計（一）（二）：91, 93 分 → 程式設計底子很好
-- 網頁程式設計：96 分 → 資訊應用類強項
+**選課策略：**
+1. 數學底子較弱 → 修「機器學習實務」前先修完「人工智慧導論」
+2. 程式能力強 → 「行動應用程式開發」適合你
 
-⚠️ **相對偏弱的科目：**
-- 微積分（一）（二）：83, 79 分 → 數學偏弱，特別是微積分二
-- 計算機網路：84 分 → 尚可，但屬於資工必修核心
+整體 GPA 3.63，繼續保持！ 💪`;
+  }
 
-**選課策略建議：**
-1. 由於數學底子較弱，若要修「機器學習實務」，建議先把「人工智慧導論」修完，建立直覺後再進階
-2. 計算機網路還在修習中，可等確認成績後再決定要不要選進階的「資訊安全」
-3. 你的程式設計能力強，「行動應用程式開發（CS506）」應該會是你的強項課
+  // 作業 / 截止日
+  if (lastUserMsg.includes('作業') || lastUserMsg.includes('截止') || lastUserMsg.includes('今天')) {
+    return `📋 **今日重要待辦清單**
 
-整體而言你的成績相當不錯，GPA 3.63，繼續保持！ 💪`;
+⚠️ **作業截止（4 件）：**
+- 【作業系統】Lab 5 實作 → 截止 **2026-05-18**（明天！）
+- 【資料結構】期末專題提案 → 截止 **2026-05-20**
+- 【軟體工程】Sprint 3 Review 報告 → 截止 **2026-05-26**
+- 【計算機網路】期末專題分組報告 → 截止 **2026-05-30**
+
+📅 **近期考試：**
+- 線性代數 第二次小考 → **2026-05-22 13:10**，理學院 201
+
+📚 **圖書館：** 《${DEMO_LIBRARY_DUE_SOON_BOOK}》還有 **${DEMO_LIBRARY_DUE_SOON_DAYS} 天**到期，記得續借！
+
+建議優先完成 Lab 5（明天截止），加油！`;
   }
 
   // 預設回應
-  return `你好！我是你的 AI 選課助理 🤖
+  return `你好！我是你的 AI 校園助理 🤖
 
 我已掌握你的完整學籍資料：
 - 已修 **${summary.historicalEarned} 學分**，本學期修習中 **${summary.currentSemester} 學分**
 - 距離畢業還差 **${summary.remaining} 學分**
-- 下學期有 ${NEXT_SEM_COURSES.length} 門可選課程可供規劃
+- 下學期有 ${NEXT_SEM_COURSES.length} 門可選課程
 
-你可以問我：
-- 「下學期應該選哪些課？」
-- 「我同時選 A 和 B 會衝堂嗎？」
-- 「按我現在的速度，幾年可以畢業？」
-- 「我通識學分還差多少？怎麼補？」
-- 「幫我規劃大三下到大四的選課計畫」
+你可以問我：「下學期應該選哪些課？」「幾年可以畢業？」「今天有什麼要做的？」
 
 有什麼想問的，直接說吧！`;
 }
@@ -235,52 +508,103 @@ async function callAI(messages: { role: string; content: string }[]): Promise<st
 // ── 角色感知開場白 ───────────────────────────────────────────
 function buildOpeningMessage(role: DemoRole): string {
   const summary = getCreditSummary();
-  const pendingAnnouncements = DEMO_ANNOUNCEMENTS.filter(
-    (a) => a.category === 'academic' && a.pinned,
-  ).length;
+  const store = getDemoStore();   // 讀最新 demoStore（包含跨角色動作觸發的狀態）
+  const pendingAnnouncements = readPendingAnns().length;
   const joinedClubs = DEMO_CLUBS.filter((c) => c.isJoined);
+
+  // 學生相關：計算待繳作業
+  const pendingAssignments = STUDENT_ASSIGNMENTS.filter((a) => a.status === 'pending')
+    .sort((a, b) => a.due.localeCompare(b.due));
+  const soonestAssignment = pendingAssignments[0];
+  const nextExam = UPCOMING_EXAMS.sort((a, b) => a.date.localeCompare(b.date))[0];
+
+  // 圖書館：動態讀 demoStore，支援續借後更新到期日
+  const libOverride = store.borrowingOverrides[DEMO_LIBRARY_DUE_SOON_BOOK_ID];
+  const libDaysLeft = libOverride
+    ? Math.ceil((new Date(libOverride.dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : DEMO_LIBRARY_DUE_SOON_DAYS;
+  const libRenewed = !!libOverride;
+
+  // 教師相關：靜態 + 動態繳交數合計
+  const teacherPendingCount = TEACHER_PENDING_REVIEWS.filter((r) => r.status === 'submitted').length;
+  const teacherGradingCount = TEACHER_PENDING_REVIEWS.filter((r) => r.status === 'grading').length;
+  const dynSubmissions = getPendingSubmissions('c1', store);
+  const totalPendingReviews = teacherPendingCount + dynSubmissions.length;
+
+  // 社團近期活動
+  const clubActivities = CLUB_ACTIVITIES.filter((a) =>
+    joinedClubs.some((c) => c.id === a.clubId)
+  ).sort((a, b) => a.date.localeCompare(b.date));
+
+  // 社團幹部：動態待審申請數
+  const pendingClubMembers = getPendingClubMembers('club-1', store);
+
+  // 學生訊息相關（靜態 + 動態合併）
+  const studentMsgs = getAllMessagesForRole('student', store);
+  const studentUnread = getUnreadCountDynamic('student', store);
+  const urgentMsg = studentMsgs.find(
+    (m) => !m.isRead && !store.readMessageIds.includes(m.id) && (m.type === 'warning' || m.type === 'action'),
+  );
 
   switch (role) {
     case 'student':
-      return `王小明你好！我是你的 AI 選課助理 🤖
+      return `王小明你好！我是你的 AI 校園助理 🤖
 
-我已讀取你的完整學籍資料：
-- 已修 **${summary.historicalEarned} 學分**，本學期修習中 **${summary.currentSemester} 學分**
+📬 **訊息提醒**：你有 **${studentUnread} 則未讀訊息**${urgentMsg ? `，其中 1 則重要：「${urgentMsg.subject.slice(0, 25)}${urgentMsg.subject.length > 25 ? '…' : ''}」` : ''}
+[前往訊息收件匣 →](/messages)
+
+📊 **學分進度**
+- 已修 **${summary.historicalEarned} 學分**，本學期修習中 **${summary.currentSemester} 學分**（合計 ${summary.totalSoFar} / ${summary.totalRequired} 學分）
 - 距離畢業還差 **${summary.remaining} 學分**
-- 下學期有 **${NEXT_SEM_COURSES.length} 門可選課程**（含 2 組衝堂警告）
-- 已加入社團：${joinedClubs.map((c) => c.name).join('、') || '尚未加入'}
 
-💡 下學期有 **人工智慧導論** 與 **機器學習實務** 時段衝突，需要幫你規劃嗎？
+⚠️ **今日待辦（${pendingAssignments.length} 件作業 + ${UPCOMING_EXAMS.length} 個考試）**
+${soonestAssignment ? `- 最緊急：【${soonestAssignment.courseName}】${soonestAssignment.title}，截止 **${soonestAssignment.due}**` : '- 目前無待繳作業'}
+${nextExam ? `- 最近考試：【${nextExam.courseName}】${nextExam.title}，${nextExam.date} ${nextExam.time} 於 ${nextExam.location}` : ''}
 
-直接問我任何選課問題，或點下方快速問題！`;
+📚 **圖書館提醒**：《${DEMO_LIBRARY_DUE_SOON_BOOK}》還有 **${libDaysLeft} 天**到期${libRenewed ? '（已續借 ✅）' : '！[前往續借](/library)'}
+
+
+🎯 **社團活動**：${clubActivities.length > 0 ? `【${clubActivities[0].clubName}】${clubActivities[0].title}，${clubActivities[0].date}` : '暫無即將到來的活動'}
+
+💡 **選課提醒**：下學期「人工智慧導論」與「機器學習實務」時段衝突，需要我幫你規劃嗎？
+
+直接問我任何問題，或點下方快速問題！`;
 
     case 'teacher':
       return `王大明老師，你好！我是校園 AI 助手 🤖
 
-你目前負責的課程：
-- **資料結構（CS301）**：48 位學生，本週五期中考
-- 課程動態：下週考試範圍已發布，作業二截止日即將到來
+📊 **資料結構（CS301）課程摘要**
+- 修課學生：**48 位**，教室：工程館 302
+- **待批改作業：${totalPendingReviews} 份**（其中 ${teacherPendingCount} 份未批、${teacherGradingCount} 份批改中${dynSubmissions.length > 0 ? `、🆕 ${dynSubmissions.length} 份剛繳交` : ''}）
+- 待批改學生：${TEACHER_PENDING_REVIEWS.slice(0, 3).map((r) => r.studentName).join('、')}${dynSubmissions.length > 0 ? `、${dynSubmissions.map(s => s.studentName).join('、')}` : ''}
 
-我可以協助你：查詢課程資料、分析學生出缺席、規劃教材進度。
-有什麼我可以幫到你的嗎？`;
+📅 **近期排程**
+- 作業二（實作專題）提交截止：**2026-05-16**
+- 期末考試：**2026-06-15**，工學院 301
+
+我可以協助你：分析班級成績分布、查詢學生出缺席、規劃教材進度。
+有什麼需要我幫到你的嗎？`;
 
     case 'ta':
       return `林助教，你好！我是校園 AI 助手 🤖
 
-你目前協助的課程：
-- **資料結構（CS301）**：本週有 **1 份作業**尚未完成批改
-- 本學期已批改紀錄：作業一（已完成）
+📊 **資料結構（CS301）助教工作摘要**
+- 協助課程：**資料結構（CS301）**，授課教師：王大明
+- **待批改作業：${TEACHER_PENDING_REVIEWS.filter(r => r.status === 'submitted').length} 份**（${TEACHER_PENDING_REVIEWS.filter(r => r.status === 'submitted').map(r => r.studentName).slice(0, 3).join('、')} 等同學）
+- 你可以批改作業、查看成績，但「發布成績」按鈕由授課教師操作
 
-我可以幫助你了解課程進度、學生成績分佈，或協助規劃批改時程。
-請告訴我你需要什麼幫助！`;
+⚠️ **提醒**：作業二批改截止建議於 5/17 前完成（讓教師有時間審閱後發布）
+
+我可以幫助你了解批改進度、學生成績分佈。請告訴我你需要什麼！`;
 
     case 'department_head':
       return `黃主任，你好！我是行政 AI 助手 🤖
 
-目前系所狀況摘要：
-- 全系共 **312 位在學學生**，19 位教師
-- **${pendingAnnouncements > 0 ? pendingAnnouncements : 3} 則公告待審核**（請至管理後台處理）
+📊 **資管系系所摘要**
+- 全系在學學生：**312 位**，教師：**19 位**
+- **${pendingAnnouncements} 則公告待審核**${pendingAnnouncements > 0 ? '，請[前往管理後台](/admin)處理' : '（目前無待審公告）'}
 - 本學期開設課程：**${NEXT_SEM_COURSES.length + 8} 門**
+- 本週有 **2 堂課有點名紀錄**需確認
 
 我可以幫你查詢課程統計、學生選課分析、或協助規劃系所公告。
 有什麼需要我分析的嗎？`;
@@ -288,37 +612,46 @@ function buildOpeningMessage(role: DemoRole): string {
     case 'admin':
       return `管理員，你好！我是系統 AI 助手 🤖
 
-系統狀態摘要：
-- 目前使用者：**139 位**（學生 120、教師 19）
-- 本學期活躍課程：**8 門**，社團：**6 個**
-- 近期公告：**${DEMO_ANNOUNCEMENTS.length} 則**已發布
+⚙️ **系統狀態摘要**
+- 總使用者：**139 位**（學生 115、教師 19、管理員 5）
+- 本學期活躍課程：**${NEXT_SEM_COURSES.length + 8} 門**，社團：**6 個**
+- 已發布公告：**${DEMO_ANNOUNCEMENTS.length} 則**
+- 系統狀態：**正常運行** ✅
 
-我可以協助你查詢系統資料、使用者管理或公告審核作業。
+我可以協助你查詢系統資料、使用者管理、公告審核，或統計分析。
 請說明你需要什麼幫助！`;
 
-    case 'club_officer':
+    case 'club_officer': {
+      const officerUnread = getUnreadCountDynamic('club_officer', store);
       return `陳社長，你好！我是校園 AI 助手 🤖
 
-程式設計社目前狀況：
-- 成員：**120 位**，本週未讀訊息：5 則
-- 下次活動：**黑客松 (5/23 週六)**，距今僅剩 7 天
+🎯 **程式設計社狀況**
+- 成員：**120 位**，未讀訊息：**${officerUnread} 則**
+- **黑客松報名截止：2026-05-19**（距今還有 2 天！）
+- 黑客松活動：**2026-05-23 週六**，地點：工程館 B101
+${pendingClubMembers.length > 0 ? `\n📨 **${pendingClubMembers.length} 份新入社申請待審核**（${pendingClubMembers.map(m => m.studentName).join('、')}），請前往社團頁面處理。` : ''}
+⚠️ **建議馬上發公告**提醒成員報名截止日！
 
-我可以協助你規劃社團活動、發布公告或管理成員名單。
+我可以協助你規劃社團活動、起草公告或管理成員名單。
 有什麼需要我幫你準備的嗎？`;
+    }
 
     case 'alumni':
-      return `張學長，你好！歡迎回到校園 AI 系統 🤖
+      return `張學長，你好！歡迎回到校友服務系統 🤖
 
-你是資管系 109 屆校友，現任軟體工程師。
+🎓 你是**資管系 109 屆校友**，畢業已 3 年，現任軟體工程師。
+📊 **在校記錄**：畢業 GPA 3.65，已修 128 學分，順利畢業 ✅
 
-我可以協助你瀏覽校園最新公告、活動資訊、地圖導覽等公開資訊。
-有什麼想了解的校園近況嗎？`;
+我可以協助你瀏覽校園最新公告（${DEMO_ANNOUNCEMENTS.length} 則）、整理在校成績摘要、說明校友活動資訊。
+⚠️ 注意：校友身份無法加入社團、借書或修改在校資料。
+
+有什麼想了解的嗎？`;
 
     default:
       return `你好！歡迎使用校園 AI 助理 🤖
 
 我可以協助你了解校園資訊、課程、社團與活動。
-請先登入以獲取個人化服務，或直接問我公開資訊！`;
+請先[登入](/login)以獲取個人化服務，或直接問我公開資訊！`;
   }
 }
 
@@ -328,6 +661,7 @@ export default function AIAssistantPage(props: {
 }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [demoRole] = useDemoRole();
+  const store = useDemoStore();
 
   // 初始開場白（先用 student 預設，mount 後依角色更新）
   const [messages, setMessages] = useState<Message[]>([]);
@@ -380,7 +714,7 @@ export default function AIAssistantPage(props: {
     setInput('');
     setIsLoading(true);
 
-    const systemCtx = buildAISystemContext();
+    const systemCtx = buildAISystemContext(demoRole);
     const apiMessages = [
       { role: 'system', content: systemCtx },
       ...messagesRef.current.map((m) => ({ role: m.role, content: m.content })),
@@ -388,7 +722,7 @@ export default function AIAssistantPage(props: {
     ];
 
     try {
-      const reply = await callAI(apiMessages);
+      const reply = await callAI(apiMessages, demoRole);
       setMessages((prev) => [
         ...prev,
         { id: `a-${Date.now()}`, role: 'assistant', content: reply, timestamp: new Date() },
@@ -407,7 +741,7 @@ export default function AIAssistantPage(props: {
       setIsLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [isLoading]);
+  }, [isLoading, demoRole]);
 
   // 自動送出 ?q= 參數（從其他頁面跳轉帶入的問題）
   const autoQ = props.searchParams?.q;
@@ -452,13 +786,42 @@ export default function AIAssistantPage(props: {
 
   // 角色守衛
   const isRestrictedRole = demoRole === 'guest';
-
+  const isStudentLike = demoRole === 'student' || demoRole === 'ta' || demoRole === 'alumni';
+  const roleDef = getDemoRoleDefinition(demoRole);
   const summary = getCreditSummary();
+  const quickPrompts = ROLE_QUICK_PROMPTS[demoRole] ?? ROLE_QUICK_PROMPTS.student;
+
+  // 根據角色決定頁面標題與副標題
+  const pageTitle = (() => {
+    switch (demoRole) {
+      case 'teacher': return 'AI 教學助理';
+      case 'ta':      return 'AI 批改助理';
+      case 'club_officer': return 'AI 社團助理';
+      case 'department_head': return 'AI 行政助理';
+      case 'admin':   return 'AI 系統助理';
+      case 'alumni':  return 'AI 校友服務';
+      case 'guest':   return 'AI 校園助理';
+      default:        return 'AI 選課助理';
+    }
+  })();
+
+  const pageSubtitle = (() => {
+    switch (demoRole) {
+      case 'teacher': return '分析班級表現、出考題、生成批改回饋範本';
+      case 'ta':      return '批改建議、評分標準查詢、回覆學生問題';
+      case 'club_officer': return '活動規劃、招募文案、社團活躍度分析';
+      case 'department_head': return '課程統計分析、公告草稿、師資建議';
+      case 'admin':   return '系統安全監控、使用者管理、維護公告';
+      case 'alumni':  return '在校成績摘要、校友活動、申辦服務說明';
+      case 'guest':   return '了解校園功能、申請帳號說明';
+      default:        return '根據你的學分、成績、時間表，AI 幫你規劃最佳選課';
+    }
+  })();
 
   return (
     <SiteShell
-      title="AI 選課助理"
-      subtitle="根據你的學分、成績、時間表，AI 幫你規劃最佳選課"
+      title={pageTitle}
+      subtitle={pageSubtitle}
       schoolName={schoolName}
     >
       <div className="pageStack">
@@ -473,70 +836,113 @@ export default function AIAssistantPage(props: {
               fontSize: 13,
             }}
           >
-            👀 <strong>訪客身份</strong> · 以示範學生資料為你展示 AI 助理功能。
+            👀 <strong>訪客身份</strong> · 我可以介紹校園 App 功能，但無法提供個人化服務。
             <Link href={`/login${q}`} style={{ marginLeft: 8, color: 'var(--brand)' }}>
               登入查看個人化建議 →
             </Link>
           </div>
         )}
 
-        {/* ── 學分快照卡 ── */}
-        <div
-          className="card"
-          style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}
-        >
-          {[
-            {
-              label: '已修學分',
-              val: summary.historicalEarned,
-              total: summary.totalRequired,
-              color: '#5E6AD2',
-            },
-            {
-              label: '修習中',
-              val: summary.currentSemester,
-              total: summary.totalRequired,
-              color: '#34C759',
-            },
-            {
-              label: '還差',
-              val: summary.remaining,
-              total: summary.totalRequired,
-              color: '#FF9500',
-            },
-            {
-              label: '畢業需求',
-              val: summary.totalRequired,
-              total: summary.totalRequired,
-              color: '#8E8E93',
-            },
-          ].map((s) => (
-            <div
-              key={s.label}
-              style={{
-                flex: '1 1 80px',
-                textAlign: 'center',
-                padding: '8px 4px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--panel2)',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 24,
-                  fontWeight: 800,
-                  color: s.color,
-                  letterSpacing: '-0.04em',
-                }}
-              >
-                {s.val}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
+        {/* ── 學生 / TA / 校友：學分快照卡 ── */}
+        {isStudentLike && (
+          <div
+            className="card"
+            style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}
+          >
+            {demoRole === 'alumni' ? (
+              // 校友：顯示畢業資訊
+              [
+                { label: '已修學分', val: 128, color: '#5E6AD2' },
+                { label: '畢業年份', val: '109屆', color: '#34C759' },
+                { label: '畢業 GPA', val: '3.65', color: '#FF9500' },
+              ].map((s) => (
+                <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
+                </div>
+              ))
+            ) : (
+              // 學生 / TA：學分進度
+              [
+                { label: '已修學分', val: summary.historicalEarned, color: '#5E6AD2' },
+                { label: '修習中', val: summary.currentSemester, color: '#34C759' },
+                { label: '還差', val: summary.remaining, color: '#FF9500' },
+                { label: '畢業需求', val: summary.totalRequired, color: '#8E8E93' },
+              ].map((s) => (
+                <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
 
-        {/* ── 快速問題 ── */}
+        {/* ── 教師 / TA：課程摘要卡 ── */}
+        {(demoRole === 'teacher' || demoRole === 'ta') && (
+          <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            {[
+              { label: '課程', val: '資料結構', color: '#0F8B8D' },
+              { label: '修課人數', val: 48, color: '#5E6AD2' },
+              { label: '待批改', val: TEACHER_PENDING_REVIEWS.filter(r => r.status === 'submitted').length + getPendingSubmissions('course-1', store).length, color: '#FF9500' },
+            ].map((s) => (
+              <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── 社團幹部：社團摘要卡 ── */}
+        {demoRole === 'club_officer' && (
+          <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            {[
+              { label: '社團', val: '程式設計社', color: '#34C759' },
+              { label: '成員', val: 120, color: '#5E6AD2' },
+              { label: '待審申請', val: getPendingClubMembers('club-1', store).length, color: '#FF9500' },
+            ].map((s) => (
+              <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 14, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── 系主任：系所摘要卡 ── */}
+        {demoRole === 'department_head' && (
+          <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            {[
+              { label: '在學學生', val: 312, color: '#5E6AD2' },
+              { label: '教師人數', val: 19, color: '#0F8B8D' },
+              { label: '待審公告', val: 3, color: '#FF9500' },
+            ].map((s) => (
+              <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
+                <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── 管理員：系統摘要卡 ── */}
+        {demoRole === 'admin' && (
+          <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            {[
+              { label: '系統狀態', val: '✅ 正常', color: '#34C759' },
+              { label: '活躍使用者', val: 89, color: '#5E6AD2' },
+              { label: '安全事件', val: 1, color: '#FF3B30' },
+            ].map((s) => (
+              <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ── 快速問題（角色感知） ── */}
         <div>
           <div
             style={{
@@ -548,10 +954,10 @@ export default function AIAssistantPage(props: {
               marginBottom: 8,
             }}
           >
-            快速問題
+            {roleDef.icon} {roleDef.label}快速問題
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {QUICK_PROMPTS.map((qp) => (
+            {quickPrompts.map((qp) => (
               <button
                 key={qp.label}
                 onClick={() => void sendMessage(qp.prompt)}

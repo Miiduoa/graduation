@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   subscribeRoleEvent,
   emitFeedbackDrafted,
+  loadRoleEventInbox,
   type HelpRequestedPayload,
   type HomeworkSubmittedPayload,
   type DiscussionPostedPayload,
@@ -45,6 +46,7 @@ import {
 } from '../data/demoCoursesMock';
 import { theme } from '../ui/theme';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
+import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
 import {
   CockpitHero,
   CockpitMetricRow,
@@ -108,56 +110,123 @@ export default function TADashboardScreen() {
     setOpenSection(openSection === k ? null : k);
   };
 
-  // 即時訂閱：學生求助 + 學生發討論 + 學生繳交
+  // 載入歷史 inbox + 訂閱即時：學生求助 + 發討論 + 繳交
   useEffect(() => {
+    const taUid = auth.user?.uid ?? 'demo_ta_lin';
+    let cancelled = false;
+
+    // 1. 載入歷史 — 從 inbox 拉所有相關事件
+    (async () => {
+      const events = await loadRoleEventInbox(taUid).catch(() => []);
+      if (cancelled) return;
+      const helps: typeof liveHelp = [];
+      const discussions: typeof liveDiscussions = [];
+      const submits: typeof liveSubmits = [];
+      for (const event of events) {
+        if (event.kind === 'help_requested') {
+          const p = event.payload as HelpRequestedPayload;
+          helps.push({
+            id: event.id,
+            studentUid: event.actorUid,
+            studentName: event.actorName ?? '學生',
+            courseId: event.courseId,
+            courseName: event.courseName,
+            topic: p.topic,
+            preview: p.preview,
+            urgency: p.urgency,
+            at: event.occurredAt,
+          });
+        } else if (event.kind === 'discussion_posted') {
+          const p = event.payload as DiscussionPostedPayload;
+          discussions.push({
+            id: event.id,
+            studentName: p.authorName,
+            courseName: event.courseName,
+            courseId: event.courseId,
+            threadTitle: p.threadTitle,
+            preview: p.preview,
+            at: event.occurredAt,
+          });
+        } else if (event.kind === 'homework_submitted') {
+          const p = event.payload as HomeworkSubmittedPayload;
+          submits.push({
+            id: event.id,
+            studentName: event.actorName ?? '學生',
+            courseName: event.courseName,
+            hwTitle: p.homeworkTitle,
+            at: event.occurredAt,
+          });
+        }
+      }
+      setLiveHelp(helps.slice(0, 20));
+      setLiveDiscussions(discussions.slice(0, 20));
+      setLiveSubmits(submits.slice(0, 20));
+      if (helps.length > 0) setOpenSection('help');
+    })();
+
+    // 2. 訂閱即時（同 session 中其他動作）
     const unsubHelp = subscribeRoleEvent<HelpRequestedPayload>('help_requested', (event) => {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setLiveHelp((prev) => [
-        {
-          id: event.id,
-          studentUid: event.actorUid,
-          studentName: event.actorName ?? '學生',
-          courseId: event.courseId,
-          courseName: event.courseName,
-          topic: event.payload.topic,
-          preview: event.payload.preview,
-          urgency: event.payload.urgency,
-          at: event.occurredAt,
-        },
-        ...prev,
-      ].slice(0, 20));
+      setLiveHelp((prev) => {
+        if (prev.find((h) => h.id === event.id)) return prev;
+        return [
+          {
+            id: event.id,
+            studentUid: event.actorUid,
+            studentName: event.actorName ?? '學生',
+            courseId: event.courseId,
+            courseName: event.courseName,
+            topic: event.payload.topic,
+            preview: event.payload.preview,
+            urgency: event.payload.urgency,
+            at: event.occurredAt,
+          },
+          ...prev,
+        ].slice(0, 20);
+      });
       setOpenSection('help');
     });
     const unsubDiscussion = subscribeRoleEvent<DiscussionPostedPayload>('discussion_posted', (event) => {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setLiveDiscussions((prev) => [
-        {
-          id: event.id,
-          studentName: event.payload.authorName,
-          courseName: event.courseName,
-          courseId: event.courseId,
-          threadTitle: event.payload.threadTitle,
-          preview: event.payload.preview,
-          at: event.occurredAt,
-        },
-        ...prev,
-      ].slice(0, 20));
+      setLiveDiscussions((prev) => {
+        if (prev.find((d) => d.id === event.id)) return prev;
+        return [
+          {
+            id: event.id,
+            studentName: event.payload.authorName,
+            courseName: event.courseName,
+            courseId: event.courseId,
+            threadTitle: event.payload.threadTitle,
+            preview: event.payload.preview,
+            at: event.occurredAt,
+          },
+          ...prev,
+        ].slice(0, 20);
+      });
     });
     const unsubSubmit = subscribeRoleEvent<HomeworkSubmittedPayload>('homework_submitted', (event) => {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setLiveSubmits((prev) => [
-        {
-          id: event.id,
-          studentName: event.actorName ?? '學生',
-          courseName: event.courseName,
-          hwTitle: event.payload.homeworkTitle,
-          at: event.occurredAt,
-        },
-        ...prev,
-      ].slice(0, 20));
+      setLiveSubmits((prev) => {
+        if (prev.find((s) => s.id === event.id)) return prev;
+        return [
+          {
+            id: event.id,
+            studentName: event.actorName ?? '學生',
+            courseName: event.courseName,
+            hwTitle: event.payload.homeworkTitle,
+            at: event.occurredAt,
+          },
+          ...prev,
+        ].slice(0, 20);
+      });
     });
-    return () => { unsubHelp(); unsubDiscussion(); unsubSubmit(); };
-  }, []);
+    return () => {
+      cancelled = true;
+      unsubHelp();
+      unsubDiscussion();
+      unsubSubmit();
+    };
+  }, [auth.user?.uid]);
 
   const ta = useMemo(() => {
     const gradingTasks: Array<{ courseId: number; courseName: string; hwTitle: string; count: number }> = [];
@@ -225,6 +294,9 @@ export default function TADashboardScreen() {
           title="今日協助任務"
           summary={`🤖 ${aiAdvice.headline} · ${aiAdvice.suggestion}`}
         />
+
+        {/* 🤖 AI Agent 摘要 */}
+        <AgentSummaryBanner cockpitLabel="助教" />
 
         <CockpitMetricRow>
           <CockpitMetricChip
@@ -378,10 +450,10 @@ export default function TADashboardScreen() {
                   title={t.hwTitle}
                   subtitle={`${t.courseName} · 預估 ${t.count} 份待改`}
                   onPress={() =>
-                    navigation.navigate('CourseModules', {
+                    safeNavigate(navigation, 'CourseModules', {
                       groupId: String(t.courseId),
                       groupName: t.courseName,
-                    })
+                    }, { fallbackMessage: '即將跳到課程教材' })
                   }
                 />
               ))
@@ -403,10 +475,10 @@ export default function TADashboardScreen() {
                   title={d.title}
                   subtitle={d.courseName}
                   onPress={() =>
-                    navigation.navigate('CourseDiscussion', {
+                    safeNavigate(navigation, 'CourseDiscussion', {
                       groupId: String(d.courseId),
                       groupName: d.courseName,
-                    })
+                    }, { fallbackMessage: '即將跳到課程討論' })
                   }
                 />
               ))

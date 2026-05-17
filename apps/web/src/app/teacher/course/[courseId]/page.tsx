@@ -2,6 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useToast } from '@/components/ui';
+import { addAssignment, useDemoStore, getDynamicAssignmentsForCourse } from '@/lib/demoStore';
+import { getDemoCourseById as _getCourse } from '@/lib/demoData';
 
 import { SiteShell } from '@/components/SiteShell';
 import {
@@ -39,11 +42,24 @@ export default function TeacherCoursePage(props: {
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const isTaView = demoRole === 'ta';
+  const { success } = useToast();
+  const store = useDemoStore();
+  const dynAssignments = getDynamicAssignmentsForCourse(props.params.courseId, store);
+  const [showAddHw, setShowAddHw] = useState(false);
+  const [hwTitle, setHwTitle] = useState('');
+  const [hwDue, setHwDue] = useState('');
+  const [hwPoints, setHwPoints] = useState('100');
+  const courseInfo = _getCourse(props.params.courseId);
 
   useEffect(() => {
     if (!isFirebaseConfigured()) {
       setAuthReady(true);
-      setCanManage(true);
+      // Demo 模式：只允許教師 / TA / 管理員進入工作台；其他角色視為無管理權限
+      const allowedDemoRoles: string[] = ['teacher', 'ta', 'admin'];
+      setCanManage(allowedDemoRoles.includes(demoRole));
+      if (!allowedDemoRoles.includes(demoRole)) {
+        setAuthError(`目前以「${demoRole}」身份瀏覽，無教師課程管理權限。請從右上角切換為教師或 TA 角色。`);
+      }
       return;
     }
 
@@ -78,7 +94,8 @@ export default function TeacherCoursePage(props: {
     });
 
     return () => unsubscribe();
-  }, [props.params.courseId]);
+  // demoRole 加入 deps：角色切換時立即重新評估權限
+  }, [props.params.courseId, demoRole]);
 
   useEffect(() => {
     let active = true;
@@ -126,7 +143,8 @@ export default function TeacherCoursePage(props: {
     }),
     [workspace],
   );
-  const accessDenied = isFirebaseConfigured() && authReady && !canManage;
+  // Demo 模式（Firebase 未設定）也要檢查 canManage（角色 guard）
+  const accessDenied = authReady && !canManage;
 
   return (
     <SiteShell
@@ -135,7 +153,7 @@ export default function TeacherCoursePage(props: {
       schoolName={schoolName}
     >
       <div className="pageStack">
-        {!isFirebaseConfigured() ? (
+        {!isFirebaseConfigured() && !accessDenied ? (
           <div
             className="card"
             style={{
@@ -317,14 +335,100 @@ export default function TeacherCoursePage(props: {
               <div className="sectionCard">
                 <div className="homeSectionHeader">
                   <h2 className="homeSectionTitle">待批改與發布</h2>
-                  <span className="homeSectionNote">{workspace.assignments.length} 項</span>
+                  <span className="homeSectionNote">{workspace.assignments.length + dynAssignments.length} 項</span>
                 </div>
+                {/* 新增作業按鈕（教師專用，TA 不可） */}
+                {caps.canEditModules && (
+                  <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)' }}>
+                    {!showAddHw ? (
+                      <button
+                        type="button"
+                        className="btn primary"
+                        style={{ fontSize: 12 }}
+                        onClick={() => setShowAddHw(true)}
+                      >
+                        ＋ 新增作業
+                      </button>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <input
+                          className="input"
+                          placeholder="作業標題 *"
+                          value={hwTitle}
+                          onChange={(e) => setHwTitle(e.target.value)}
+                          style={{ fontSize: 13 }}
+                        />
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            className="input"
+                            type="date"
+                            value={hwDue}
+                            onChange={(e) => setHwDue(e.target.value)}
+                            style={{ fontSize: 13, flex: 1 }}
+                          />
+                          <input
+                            className="input"
+                            type="number"
+                            placeholder="配分"
+                            value={hwPoints}
+                            onChange={(e) => setHwPoints(e.target.value)}
+                            style={{ fontSize: 13, width: 80 }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn primary"
+                            style={{ fontSize: 12 }}
+                            disabled={!hwTitle.trim() || !hwDue}
+                            onClick={() => {
+                              if (!hwTitle.trim() || !hwDue) return;
+                              addAssignment({
+                                courseId: props.params.courseId,
+                                courseName: courseInfo?.name ?? '課程',
+                                title: hwTitle.trim(),
+                                due: hwDue,
+                                points: parseInt(hwPoints) || 100,
+                              });
+                              success(`✅ 已新增作業「${hwTitle.trim()}」，學生已收到通知！`);
+                              setHwTitle('');
+                              setHwDue('');
+                              setHwPoints('100');
+                              setShowAddHw(false);
+                            }}
+                          >
+                            ✓ 確認新增
+                          </button>
+                          <button type="button" className="btn" style={{ fontSize: 12 }} onClick={() => setShowAddHw(false)}>取消</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="insetGroup">
+                  {/* 動態新增的作業（教師剛建立的） */}
+                  {dynAssignments.map((assignment, index) => (
+                    <div
+                      key={assignment.id}
+                      className="insetGroupRow"
+                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'rgba(94,106,210,0.06)' }}
+                    >
+                      <div className="insetGroupRowContent">
+                        <div className="insetGroupRowTitle">
+                          🆕 {assignment.title}
+                        </div>
+                        <div className="insetGroupRowMeta">
+                          截止 {assignment.due} · {assignment.points} 分 · 學生已收到通知
+                        </div>
+                      </div>
+                      <span className="pill">新</span>
+                    </div>
+                  ))}
                   {workspace.assignments.map((assignment, index) => (
                     <div
                       key={assignment.id}
                       className="insetGroupRow"
-                      style={{ borderTop: index === 0 ? 'none' : undefined }}
+                      style={{ borderTop: (index === 0 && dynAssignments.length === 0) ? 'none' : undefined }}
                     >
                       <div className="insetGroupRowContent">
                         <div className="insetGroupRowTitle">{assignment.title}</div>
@@ -334,16 +438,16 @@ export default function TeacherCoursePage(props: {
                         </div>
                       </div>
                       <span className={`pill ${assignment.gradesPublished ? 'subtle' : ''}`}>
-                        {assignment.weight ?? 0}%
+                        {((assignment.weight ?? 0) * 100).toFixed(0)}%
                       </span>
                     </div>
                   ))}
-                  {workspace.assignments.length === 0 ? (
+                  {workspace.assignments.length === 0 && dynAssignments.length === 0 ? (
                     <div className="insetGroupRow" style={{ borderTop: 'none' }}>
                       <div className="insetGroupRowContent">
                         <div className="insetGroupRowTitle">尚無作業或評量</div>
                         <div className="insetGroupRowMeta">
-                          建立作業、quiz 或 exam 後，這裡會成為教師端待辦清單。
+                          點「＋ 新增作業」建立後，學生會自動收到通知。
                         </div>
                       </div>
                     </div>
@@ -416,6 +520,45 @@ export default function TeacherCoursePage(props: {
                 </div>
               </div>
             </div>
+
+            {/* ── AI 教學助理入口 ── */}
+            <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: isTaView
+                ? 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(167,139,250,0.06) 100%)'
+                : 'linear-gradient(135deg, rgba(15,139,141,0.10) 0%, rgba(0,200,200,0.06) 100%)',
+              border: `1px solid ${isTaView ? 'rgba(124,58,237,0.28)' : 'rgba(15,139,141,0.28)'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: isTaView ? '#7C3AED' : '#0F8B8D', marginBottom: 3 }}>
+                🤖 {isTaView ? 'AI 批改助理' : 'AI 教學助理'}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                {isTaView
+                  ? '讓 AI 幫你生成批改評語範本、評分說明，或草擬回覆學生問題的標準答案。'
+                  : '讓 AI 幫你分析班級成績分布、生成考題、或起草課程公告。'}
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(
+                isTaView
+                  ? `幫我針對「${workspace.course?.name ?? '資料結構'}」作業二生成評分說明和常見錯誤的批改評語範本`
+                  : `幫我分析「${workspace.course?.name ?? '資料結構'}」班級的成績分布，找出需要特別關注的學生，並給出教學建議`
+              )}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
+          </div>
           </>
         ) : (
           <div className="toolbarPanel" style={{ justifyContent: 'flex-end' }}>

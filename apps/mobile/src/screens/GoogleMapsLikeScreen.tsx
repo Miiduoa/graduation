@@ -48,6 +48,14 @@ import {
   type CampusBusRoute,
   type CampusBusVehicle,
 } from '../data/campusBusRoutes';
+import { useSavedPlaces } from '../services/savedPlaces';
+import { usePersonaContext } from '../services/personaContext';
+import { hasIndoorMap as hasIndoor } from '../data/indoorMaps';
+import {
+  useOfflinePack,
+  getPersonaExtraPoints,
+  formatBytes,
+} from '../services/offlineCache';
 
 type Layer = 'standard' | 'satellite' | 'dark' | 'campus3d';
 
@@ -277,6 +285,25 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
     return list;
   }, [q, cat]);
 
+  // ── Saved places ──
+  const { places: savedPlaces, useNow: recordPlaceUsageNow } = useSavedPlaces();
+
+  // ── Persona ──
+  const persona = usePersonaContext();
+
+  // ── Offline pack ──
+  const offline = useOfflinePack();
+  const handleDownloadOffline = useCallback(async () => {
+    const home = savedPlaces.find((p) => p.kind === 'home');
+    await offline.start({
+      extraPoints: getPersonaExtraPoints(home?.lat, home?.lng),
+      areaLabel: persona.isDemoPersona
+        ? `校園 + ${persona.displayName} 常用路線`
+        : '校園範圍',
+      personaUid: persona.uid,
+    });
+  }, [offline, savedPlaces, persona]);
+
   // ── Selected POI ──
   const selectedPoi: CampusPoi | null = useMemo(() => {
     return selectedPoiId ? getCampusPoi(selectedPoiId) ?? null : null;
@@ -372,7 +399,13 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'ready') {
-        postCmd({ type: 'centerOn', lat: 24.2275, lng: 120.5647, zoom: 16 });
+        // 進入時自動 center：優先 persona.nextClass → 其次 home → 最後校園中心
+        const home = savedPlaces.find((p) => p.kind === 'home');
+        const initLat = persona.nextClass?.poi.lat ?? home?.lat ?? 24.2275;
+        const initLng = persona.nextClass?.poi.lng ?? home?.lng ?? 120.5647;
+        const initZoom = persona.nextClass ? 18 : home ? 17 : 16;
+        postCmd({ type: 'centerOn', lat: initLat, lng: initLng, zoom: initZoom });
+        if (persona.nextClass) setSelectedPoiId(persona.nextClass.poi.id);
       } else if (data.type === 'poiTap') {
         setSelectedPoiId(data.id);
         analytics.logEvent('map_poi_tap', { id: data.id });
@@ -392,7 +425,7 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
     } catch (err) {
       // ignore
     }
-  }, [postCmd, activeVehicles, nav]);
+  }, [postCmd, activeVehicles, nav, savedPlaces, persona.nextClass]);
 
   // ── Plan route to selected POI ──
   const startNavigation = useCallback(
@@ -512,7 +545,69 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
           <Pressable onPress={() => speak('我是你的校園導航助理')} hitSlop={8}>
             <Ionicons name="mic" size={18} color={theme.colors.accent} />
           </Pressable>
+          <Pressable
+            onPress={() => nav.navigate('TripPlanner')}
+            hitSlop={8}
+            style={{ marginLeft: 4 }}
+          >
+            <Ionicons name="git-network-outline" size={18} color={theme.colors.accent} />
+          </Pressable>
         </View>
+
+        {/* Saved places shortcuts */}
+        {savedPlaces.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ marginTop: 8 }}
+            contentContainerStyle={{ gap: 6 }}
+          >
+            {savedPlaces.slice(0, 6).map((p) => (
+              <Pressable
+                key={p.id}
+                onPress={() => {
+                  void recordPlaceUsageNow(p.id);
+                  postCmd({ type: 'centerOn', lat: p.lat, lng: p.lng, zoom: 18 });
+                  if (p.poiId) setSelectedPoiId(p.poiId);
+                }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 5,
+                  paddingHorizontal: 11,
+                  paddingVertical: 7,
+                  borderRadius: 99,
+                  backgroundColor: theme.colors.surface,
+                  borderWidth: 1,
+                  borderColor: theme.colors.border,
+                  transform: [{ scale: pressed ? 0.96 : 1 }],
+                  ...softShadow(),
+                })}
+              >
+                <Text style={{ fontSize: 14 }}>{p.emoji}</Text>
+                <Text style={{ color: theme.colors.text, fontSize: 12, fontWeight: '700' }}>
+                  {p.label}
+                </Text>
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => nav.navigate('TripPlanner')}
+              style={({ pressed }) => ({
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                paddingHorizontal: 11,
+                paddingVertical: 7,
+                borderRadius: 99,
+                backgroundColor: theme.colors.accent,
+                transform: [{ scale: pressed ? 0.96 : 1 }],
+              })}
+            >
+              <Ionicons name="navigate" size={12} color="#fff" />
+              <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>路線規劃</Text>
+            </Pressable>
+          </ScrollView>
+        )}
 
         {/* category chips */}
         <ScrollView
@@ -560,6 +655,57 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
           })}
         </ScrollView>
       </View>
+
+      {/* ─── Offline pack badge ─── */}
+      <Pressable
+        onPress={handleDownloadOffline}
+        disabled={offline.progress.status === 'downloading'}
+        style={({ pressed }) => ({
+          position: 'absolute',
+          top: Platform.select({ ios: 170, default: 140 }) + 200,
+          right: 12,
+          paddingHorizontal: 9,
+          paddingVertical: 6,
+          borderRadius: 10,
+          backgroundColor: offline.info.exists
+            ? `${theme.colors.success}22`
+            : theme.colors.surface,
+          borderWidth: 1,
+          borderColor: offline.info.exists
+            ? `${theme.colors.success}55`
+            : theme.colors.border,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          ...softShadow(),
+          opacity: pressed ? 0.85 : 1,
+        })}
+      >
+        <Ionicons
+          name={
+            offline.progress.status === 'downloading'
+              ? 'cloud-download-outline'
+              : offline.info.exists
+                ? 'cloud-done-outline'
+                : 'cloud-offline-outline'
+          }
+          size={12}
+          color={offline.info.exists ? theme.colors.success : theme.colors.muted}
+        />
+        <Text
+          style={{
+            color: offline.info.exists ? theme.colors.success : theme.colors.muted,
+            fontSize: 10,
+            fontWeight: '800',
+          }}
+        >
+          {offline.progress.status === 'downloading'
+            ? `${Math.round(offline.progress.ratio * 100)}%`
+            : offline.info.exists
+              ? `離線 ${formatBytes(offline.info.bytes)}`
+              : '下載離線'}
+        </Text>
+      </Pressable>
 
       {/* ─── Right layer FAB ─── */}
       <View
@@ -643,12 +789,46 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
         <Ionicons name="locate" size={22} color={theme.colors.accent} />
       </Pressable>
 
+      {/* ─── 去下節課 FAB（依 persona.nextClass） ─── */}
+      {persona.nextClass && !navMode && (
+        <Pressable
+          onPress={() => {
+            const nc = persona.nextClass!;
+            setSelectedPoiId(nc.poi.id);
+            postCmd({ type: 'centerOn', lat: nc.poi.lat, lng: nc.poi.lng, zoom: 18 });
+          }}
+          style={({ pressed }) => ({
+            position: 'absolute',
+            right: 14,
+            bottom: (selectedPoi ? 220 : 100) + 58,
+            paddingHorizontal: 12,
+            height: 48,
+            borderRadius: 14,
+            backgroundColor: theme.colors.accent,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            ...softShadow(0.4),
+            transform: [{ scale: pressed ? 0.94 : 1 }],
+          })}
+        >
+          <Ionicons name="school" size={18} color="#fff" />
+          <View>
+            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>下節課</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 10 }}>
+              {persona.nextClass.startHHmm} · {persona.nextClass.roomCode}
+            </Text>
+          </View>
+        </Pressable>
+      )}
+
       {/* ─── Bottom Sheet: POI Card (when selected, no nav) ─── */}
       {selectedPoi && !navMode && (
         <PoiCard
           poi={selectedPoi}
           distanceM={selectedDist ?? 0}
           nearbyBus={nearbyBusInfo}
+          hasIndoor={hasIndoor(selectedPoi.id)}
           onStartNav={() => startNavigation(selectedPoi)}
           onClose={() => setSelectedPoiId(null)}
           onAr={() =>
@@ -657,6 +837,12 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
               destinationId: selectedPoi.id,
               destinationLat: selectedPoi.lat,
               destinationLng: selectedPoi.lng,
+            })
+          }
+          onOpenIndoor={() =>
+            nav.navigate('IndoorFloorMap', {
+              poiId: selectedPoi.id,
+              roomCode: persona.nextClass?.poi.id === selectedPoi.id ? persona.nextClass.roomCode : undefined,
             })
           }
         />
@@ -685,16 +871,20 @@ function PoiCard({
   poi,
   distanceM,
   nearbyBus,
+  hasIndoor,
   onStartNav,
   onClose,
   onAr,
+  onOpenIndoor,
 }: {
   poi: CampusPoi;
   distanceM: number;
   nearbyBus: { route: CampusBusRoute; vehicle: CampusBusVehicle; etaMin: number } | null;
+  hasIndoor: boolean;
   onStartNav: () => void;
   onClose: () => void;
   onAr: () => void;
+  onOpenIndoor: () => void;
 }) {
   const color = CATEGORY_COLORS[poi.category] ?? '#6F86FF';
   const open = isOpenNow(poi.openTime, poi.closeTime);
@@ -901,6 +1091,23 @@ function PoiCard({
           >
             <Ionicons name="camera-outline" size={18} color={theme.colors.text} />
           </Pressable>
+          {hasIndoor && (
+            <Pressable
+              onPress={onOpenIndoor}
+              style={({ pressed }) => ({
+                width: 50,
+                paddingVertical: 13,
+                borderRadius: 14,
+                backgroundColor: pressed ? theme.colors.surface2 : theme.colors.surface,
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+                alignItems: 'center',
+                justifyContent: 'center',
+              })}
+            >
+              <Ionicons name="business-outline" size={18} color={theme.colors.accent} />
+            </Pressable>
+          )}
           <Pressable
             style={({ pressed }) => ({
               width: 50,
