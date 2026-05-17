@@ -206,24 +206,42 @@ function SearchTab({
                       </span>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => isAvailable && onBorrow(book.title)}
-                    disabled={!isAvailable}
-                    style={{
-                      padding: '6px 12px',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      borderRadius: 8,
-                      border: `1px solid ${isAvailable ? 'var(--brand)' : 'var(--border)'}`,
-                      background: isAvailable ? 'var(--accent-soft)' : 'var(--panel)',
-                      color: isAvailable ? 'var(--brand)' : 'var(--muted)',
-                      cursor: isAvailable ? 'pointer' : 'not-allowed',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {isAvailable ? '預約借閱' : '已借完'}
-                  </button>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                    <Link
+                      href={`/ai-assistant?q=${encodeURIComponent(`幫我推薦類似《${book.title}》的書`)}`}
+                      title="問 AI 推薦類似書籍"
+                      style={{
+                        padding: '6px 8px',
+                        fontSize: 14,
+                        borderRadius: 8,
+                        border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                        color: 'var(--text)',
+                        cursor: 'pointer',
+                        textDecoration: 'none',
+                        lineHeight: 1,
+                      }}
+                    >
+                      🤖
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => isAvailable && onBorrow(book.title)}
+                      disabled={!isAvailable}
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        borderRadius: 8,
+                        border: `1px solid ${isAvailable ? 'var(--brand)' : 'var(--border)'}`,
+                        background: isAvailable ? 'var(--accent-soft)' : 'var(--panel)',
+                        color: isAvailable ? 'var(--brand)' : 'var(--muted)',
+                        cursor: isAvailable ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      {isAvailable ? '預約借閱' : '已借完'}
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -274,7 +292,7 @@ export default function LibraryPage(props: {
         <div className="metricGrid">
           <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
             <div className="metricIcon">📚</div>
-            <div className="metricValue">{borrowedBooks.length}</div>
+            <div className="metricValue">{caps.canBorrowBooks ? borrowedBooks.length : 0}</div>
             <div className="metricLabel">借閱中</div>
           </div>
           <div
@@ -284,7 +302,7 @@ export default function LibraryPage(props: {
             }
           >
             <div className="metricIcon">{urgentBooks > 0 ? '⚠️' : '✅'}</div>
-            <div className="metricValue">{urgentBooks}</div>
+            <div className="metricValue">{caps.canBorrowBooks ? urgentBooks : 0}</div>
             <div className="metricLabel">即將到期</div>
           </div>
           <div className="metricCard" style={{ '--tone': '#34C759' } as CSSProperties}>
@@ -300,7 +318,7 @@ export default function LibraryPage(props: {
         </div>
 
         {/* ── AI 圖書館提醒（學生：有緊急書到期） ── */}
-        {caps.canBorrowBooks && urgentBooks > 0 && (
+        {caps.canBorrowBooks && urgentBooks > 0 && borrowedBooks.length > 0 && (
           <div
             className="card"
             style={{
@@ -353,7 +371,41 @@ export default function LibraryPage(props: {
         </div>
 
         {/* ── Borrow Tab ── */}
-        {activeTab === 'borrow' && (
+        {activeTab === 'borrow' && !caps.canBorrowBooks && (
+          <div className="card" style={{ padding: '28px 24px', textAlign: 'center' }}>
+            {demoRole === 'guest' ? (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>需要登入才能借閱</div>
+                <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>訪客身份無法借閱書籍。請登入後使用完整圖書館服務。</div>
+                <a href={`/login${q}`} className="btn primary">前往登入 →</a>
+              </>
+            ) : demoRole === 'alumni' ? (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>🎓</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>校友借閱權限已停用</div>
+                <div style={{ color: 'var(--muted)', fontSize: 13 }}>張學長（B09203001）於畢業後圖書館借閱資格停用。如需資料，請洽圖書館服務台辦理校友借閱申請。</div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
+                  {demoRole === 'teacher' ? '教師借閱管理' : demoRole === 'ta' ? '助教借閱管理' : demoRole === 'department_head' ? '系主任借閱管理' : '管理員借閱管理'}
+                </div>
+                <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>
+                  {demoRole === 'teacher' ? '教師借閱帳號另設於圖書館系統。此處為學生借閱視角示範。' : demoRole === 'ta' ? '助教借閱帳號另設於圖書館系統。此處為學生借閱視角示範。' : '此頁為學生借閱管理，你的身份無個人借閱記錄。'}
+                </div>
+                <Link
+                  href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我推薦一份適合教學參考的書單')}`}
+                  className="btn"
+                >
+                  問 AI 推薦書單 →
+                </Link>
+              </>
+            )}
+          </div>
+        )}
+        {activeTab === 'borrow' && caps.canBorrowBooks && (
           <div className="pageStack">
             {urgentBooks > 0 && (
               <div
@@ -422,41 +474,23 @@ export default function LibraryPage(props: {
                         <button
                           type="button"
                           onClick={() => {
-                            if (!caps.canBorrowBooks) {
-                              info(
-                                demoRole === 'alumni'
-                                  ? '校友身份僅可瀏覽，無法續借書籍'
-                                  : demoRole === 'guest'
-                                    ? '請先登入後才能續借'
-                                    : '你的身份無法執行此動作',
-                              );
-                              return;
-                            }
                             // 寫入 demoStore → AI 開場白不再提醒這本書到期
                             renewBook(book.id, book.dueDate, book.renewCount);
                             success(`✅ 已續借「${book.title}」，到期日延長 14 天`);
                           }}
                           disabled={book.renewCount >= 3}
-                          title={
-                            !caps.canBorrowBooks
-                              ? '此身份無法續借'
-                              : undefined
-                          }
                           style={{
                             fontSize: 11,
-                            color: !caps.canBorrowBooks
-                              ? 'var(--muted)'
-                              : 'var(--brand)',
+                            color: 'var(--brand)',
                             fontWeight: 600,
                             background: 'none',
                             border: 'none',
                             cursor: 'pointer',
                             padding: 0,
                             marginTop: 2,
-                            opacity: !caps.canBorrowBooks ? 0.6 : 1,
                           }}
                         >
-                          {!caps.canBorrowBooks ? '🔒 無法續借' : '續借 +14 天'}
+                          續借 +14 天
                         </button>
                         {caps.canBorrowBooks ? (
                           <button

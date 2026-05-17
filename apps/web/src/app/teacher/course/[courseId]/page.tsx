@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useToast } from '@/components/ui';
 import { addAssignment, useDemoStore, getDynamicAssignmentsForCourse } from '@/lib/demoStore';
-import { getDemoCourseById as _getCourse } from '@/lib/demoData';
+import { getDemoCourseById as _getCourse, getDemoUser } from '@/lib/demoData';
 
 import { SiteShell } from '@/components/SiteShell';
 import {
@@ -42,7 +42,8 @@ export default function TeacherCoursePage(props: {
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const isTaView = demoRole === 'ta';
-  const { success } = useToast();
+  const isDeptHeadView = demoRole === 'department_head';
+  const { success, info } = useToast();
   const store = useDemoStore();
   const dynAssignments = getDynamicAssignmentsForCourse(props.params.courseId, store);
   const [showAddHw, setShowAddHw] = useState(false);
@@ -54,11 +55,11 @@ export default function TeacherCoursePage(props: {
   useEffect(() => {
     if (!isFirebaseConfigured()) {
       setAuthReady(true);
-      // Demo 模式：只允許教師 / TA / 管理員進入工作台；其他角色視為無管理權限
-      const allowedDemoRoles: string[] = ['teacher', 'ta', 'admin'];
+      // Demo 模式：教師 / TA / 管理員 → 完整操作；系主任 → 唯讀瀏覽
+      const allowedDemoRoles: string[] = ['teacher', 'ta', 'admin', 'department_head'];
       setCanManage(allowedDemoRoles.includes(demoRole));
       if (!allowedDemoRoles.includes(demoRole)) {
-        setAuthError(`目前以「${demoRole}」身份瀏覽，無教師課程管理權限。請從右上角切換為教師或 TA 角色。`);
+        setAuthError(`目前以「${demoRole}」身份瀏覽，無教師課程管理權限。請從右上角切換為「🧑‍🏫 教師」或「🧑‍💻 TA」角色。`);
       }
       return;
     }
@@ -187,19 +188,17 @@ export default function TeacherCoursePage(props: {
           <>
             {/* TA 角色提示 */}
             {isTaView ? (
-              <div
-                className="card"
-                style={{
-                  padding: '12px 16px',
-                  background: 'rgba(124,58,237,0.10)',
-                  border: '1px solid #7C3AED',
-                  fontSize: 13,
-                  color: '#5B21B6',
-                }}
-              >
+              <div className="card" style={{ padding: '12px 16px', background: 'rgba(124,58,237,0.10)', border: '1px solid #7C3AED', fontSize: 13, color: '#5B21B6' }}>
                 🧑‍💻 <strong>助教 TA 視角</strong> ·
-                你可以批改作業、查看出席與成績，但教材結構、題庫編輯、成績發布
-                屬於授課教師的權限，下方相關按鈕會以灰色顯示。
+                你可以批改作業、查看出席與成績，但教材結構、題庫編輯、成績發布屬於授課教師的權限，相關按鈕會以灰色顯示。
+              </div>
+            ) : null}
+
+            {/* 系主任唯讀提示 */}
+            {isDeptHeadView ? (
+              <div className="card" style={{ padding: '12px 16px', background: 'rgba(255,149,0,0.10)', border: '1px solid #FF9500', fontSize: 13, color: '#92400E' }}>
+                🏛️ <strong>系主任唯讀視角</strong> ·
+                你可以查看課程的教材、作業、出席與成績概況，但無法編輯教材、批改作業或發布成績。如需操作，請洽授課教師。
               </div>
             ) : null}
 
@@ -383,6 +382,13 @@ export default function TeacherCoursePage(props: {
                             disabled={!hwTitle.trim() || !hwDue}
                             onClick={() => {
                               if (!hwTitle.trim() || !hwDue) return;
+                              // Guard：教師只能在自己授課的課程發布作業（避免假冒其他教師）
+                              const course = _getCourse(props.params.courseId);
+                              const demoUser = getDemoUser(demoRole);
+                              if (course && course.instructorId !== demoUser?.uid && demoRole !== 'admin') {
+                                info('你不是這門課的授課教師，無法新增作業');
+                                return;
+                              }
                               addAssignment({
                                 courseId: props.params.courseId,
                                 courseName: courseInfo?.name ?? '課程',

@@ -304,6 +304,13 @@ export default function GradesPage(props: {
             </div>
           </div>
 
+          {/* TA 視角：顯示被指派批改的範圍說明 */}
+          {demoRole === 'ta' && (
+            <div className="card" style={{ padding: '12px 14px', background: 'var(--panel)', border: '1px dashed var(--border)', fontSize: 12, color: 'var(--muted)' }}>
+              ℹ️ TA 視角：僅顯示你被指派批改的學生（後半段 stu-007 ~ stu-012）。其他學生由王大明老師另指派 TA。
+            </div>
+          )}
+
           {/* 學生成績清單 */}
           <div className="sectionCard">
             <div className="homeSectionHeader">
@@ -316,7 +323,10 @@ export default function GradesPage(props: {
               )}
             </div>
             <div className="insetGroup">
-              {DEMO_STUDENTS.map((s, i) => {
+              {(demoRole === 'ta'
+                ? DEMO_STUDENTS.filter((s) => s.c1Group === 'second-half')
+                : DEMO_STUDENTS
+              ).map((s, i) => {
                 const finalScore = Math.round(s.scores.hw * 0.3 + s.scores.mid * 0.3 + s.scores.final * 0.4);
                 const isAtRisk = finalScore < 70;
                 return (
@@ -387,7 +397,7 @@ export default function GradesPage(props: {
             </div>
             <div className="insetGroup">
               {deptCourseStats.map((c, i) => (
-                <Link key={c.id} href={`/course/${c.id}${q}`} className="insetGroupRow" style={{ borderTop: i === 0 ? 'none' : undefined, color: 'inherit', textDecoration: 'none' }}>
+                <Link key={c.id} href={`/teacher/course/${c.id}${q}`} className="insetGroupRow" style={{ borderTop: i === 0 ? 'none' : undefined, color: 'inherit', textDecoration: 'none' }}>
                   <div className="insetGroupRowIcon" style={{ background: `${c.color}20`, fontSize: 18, width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{c.icon}</div>
                   <div className="insetGroupRowContent">
                     <div className="insetGroupRowTitle">{c.name}</div>
@@ -450,7 +460,7 @@ export default function GradesPage(props: {
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
               <a href={`/admin${q}`} className="btn primary">前往管理後台 →</a>
-              <a href={`/admin/students${q}`} className="btn">學生成績管理</a>
+              <a href={`/search?type=student${q ? '&' + q.slice(1) : ''}`} className="btn">學生成績管理</a>
             </div>
           </div>
         </div>
@@ -482,21 +492,7 @@ export default function GradesPage(props: {
           </div>
         )}
 
-        {usingDemo && !isAlumni && (
-          <div
-            className="card"
-            style={{
-              padding: '10px 16px',
-              background: 'var(--warning-soft)',
-              borderColor: 'var(--warning)',
-              fontSize: 13,
-              color: 'var(--text)',
-            }}
-          >
-            ⚠️ 目前顯示示範資料。{!user ? '請登入帳號' : 'Firebase 尚未設定或本學期無成績'}
-            以查看實際成績。
-          </div>
-        )}
+
 
         {/* ── GPA Hero Card ── */}
         <div

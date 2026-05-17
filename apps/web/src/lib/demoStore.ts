@@ -108,6 +108,15 @@ export interface StoreBorrowingOverride {
   renewCount: number;
 }
 
+/** 公告編輯草稿 / 下架紀錄 */
+export interface StoreAnnouncementEdit {
+  id: string;          // 對應 DEMO_ANNOUNCEMENTS.id
+  title?: string;
+  body?: string;
+  editedAt: string;    // ISO
+  editedBy: string;    // demoRole label
+}
+
 /** 整個 demo 共享狀態
  *
  *  新增欄位（2026-05-17 擴充）：feedbackDrafts / discussionPosts / helpRequests /
@@ -133,6 +142,10 @@ export interface DemoStore {
   peerReviews?: StorePeerReview[];
   disabledUsers?: StoreDisabledUser[];
   libraryReservations?: StoreLibraryReservation[];
+  /** 公告編輯草稿（id 對應 DEMO_ANNOUNCEMENTS.id；持久化） */
+  announcementEdits?: StoreAnnouncementEdit[];
+  /** 已下架的公告 id 列表（announcements 與 announcement detail 都會 filter 掉） */
+  takendownAnnIds?: string[];
 }
 
 const EMPTY_STORE: DemoStore = {
@@ -153,7 +166,59 @@ const EMPTY_STORE: DemoStore = {
   peerReviews: [],
   disabledUsers: [],
   libraryReservations: [],
+  announcementEdits: [],
+  takendownAnnIds: [],
 };
+
+// ─────────────────────────────────────────────────────────────
+// 公告編輯 / 下架 helpers
+// ─────────────────────────────────────────────────────────────
+export function editAnnouncementDraft(edit: Omit<StoreAnnouncementEdit, 'editedAt'> & { editedAt?: string }): void {
+  updateDemoStore((store) => {
+    const list = store.announcementEdits ?? [];
+    const filtered = list.filter((e) => e.id !== edit.id);
+    return {
+      ...store,
+      announcementEdits: [
+        { ...edit, editedAt: edit.editedAt ?? new Date().toISOString() },
+        ...filtered,
+      ],
+    };
+  });
+}
+
+export function getAnnouncementEdit(id: string, store: DemoStore): StoreAnnouncementEdit | undefined {
+  return (store.announcementEdits ?? []).find((e) => e.id === id);
+}
+
+export function takedownAnnouncement(id: string, by: string): void {
+  updateDemoStore((store) => ({
+    ...store,
+    takendownAnnIds: Array.from(new Set([...(store.takendownAnnIds ?? []), id])),
+  }));
+  // 通知原發布者
+  sendMessage({
+    fromName: by,
+    fromAvatar: '🛡️',
+    subject: `你的公告已被下架`,
+    body: `公告（id: ${id}）已被 ${by} 下架。若有疑問，請與審核者聯絡。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'warning',
+    recipientRoles: ['teacher', 'club_officer'],
+  });
+}
+
+export function restoreAnnouncement(id: string): void {
+  updateDemoStore((store) => ({
+    ...store,
+    takendownAnnIds: (store.takendownAnnIds ?? []).filter((x) => x !== id),
+  }));
+}
+
+export function isAnnouncementTakenDown(id: string, store: DemoStore): boolean {
+  return (store.takendownAnnIds ?? []).includes(id);
+}
 
 // ─────────────────────────────────────────────────────────────
 // 讀 / 寫
@@ -243,6 +308,8 @@ export function getAllMessagesForRole(
   role: DemoUserRole,
   store: DemoStore,
 ): AnyMessage[] {
+  // 訪客不應該收到任何訊息（隱私邊界）
+  if (role === 'guest') return [];
   const staticMsgs = DEMO_MESSAGES.filter((m) => m.recipientRoles.includes(role));
   const dynamicMsgs = store.dynamicMessages
     .filter((m) => m.recipientRoles.includes(role))

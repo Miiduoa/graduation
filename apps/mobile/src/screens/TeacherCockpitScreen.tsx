@@ -56,6 +56,7 @@ import {
   aiForecastBulkReminder,
   aiPreReviewGrade,
 } from '../services/aiOrchestrator';
+import { AIMissionControl } from '../components/AIMissionControl';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -476,6 +477,11 @@ export default function TeacherCockpitScreen() {
 
         {/* 🤖 AI Agent 摘要 — 點進 AIAgentConsole */}
         <AgentSummaryBanner cockpitLabel="老師" />
+
+        {/* AI 任務指揮 — 角色身分專屬下一步 */}
+        <View style={{ marginVertical: theme.space.md }}>
+          <AIMissionControl uid={auth.user?.uid} maxVisible={3} hideWhenEmpty />
+        </View>
 
         {/* 一鍵跨角色 demo */}
         <Pressable

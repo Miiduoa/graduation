@@ -47,6 +47,7 @@ import {
 import { theme } from '../ui/theme';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
+import { AIMissionControl } from '../components/AIMissionControl';
 import {
   CockpitHero,
   CockpitMetricRow,
@@ -297,6 +298,11 @@ export default function TADashboardScreen() {
 
         {/* 🤖 AI Agent 摘要 */}
         <AgentSummaryBanner cockpitLabel="助教" />
+
+        {/* AI 任務指揮 — 助教專屬下一步 */}
+        <View style={{ marginVertical: theme.space.md }}>
+          <AIMissionControl uid={auth.user?.uid} maxVisible={3} hideWhenEmpty />
+        </View>
 
         <CockpitMetricRow>
           <CockpitMetricChip

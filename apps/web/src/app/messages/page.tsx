@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { useToast } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { useDemoRole, getDemoRoleDefinition } from '@/lib/demoRole';
+import { useDemoRole, getDemoRoleDefinition, getCapabilities } from '@/lib/demoRole';
 import {
   getDemoCourseById,
   getDemoClubById,
@@ -42,6 +42,7 @@ export default function MessagesPage(props: {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [demoRole] = useDemoRole();
   const roleDef = getDemoRoleDefinition(demoRole);
+  const caps = getCapabilities(demoRole);
   const { success, info } = useToast();
   const store = useDemoStore();
 
@@ -446,11 +447,17 @@ export default function MessagesPage(props: {
                   )}
                   {'relatedAnnouncementId' in selected && selected.relatedAnnouncementId && (
                     <Link
-                      href={`/admin${q}`}
+                      href={
+                        caps.canApproveAnnouncements
+                          ? `/admin${q}`
+                          : `/announcements/${selected.relatedAnnouncementId}${q}`
+                      }
                       className="btn"
                       style={{ fontSize: 13 }}
                     >
-                      📥 前往公告審核佇列 →
+                      {caps.canApproveAnnouncements
+                        ? '📥 前往公告審核佇列 →'
+                        : '📢 查看公告詳情 →'}
                     </Link>
                   )}
                 </div>
@@ -467,8 +474,17 @@ export default function MessagesPage(props: {
                     gap: 10,
                   }}
                 >
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>
-                    ↩ 回覆給 {selected.fromName}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>
+                      ↩ 回覆給 {selected.fromName}
+                    </div>
+                    <Link
+                      href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`幫我回覆這則訊息：${selected.subject}`)}`}
+                      className="btn"
+                      style={{ fontSize: 12, padding: '4px 10px' }}
+                    >
+                      🤖 AI 起草
+                    </Link>
                   </div>
                   <textarea
                     value={replyText}

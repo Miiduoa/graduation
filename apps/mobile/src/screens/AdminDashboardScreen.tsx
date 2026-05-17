@@ -40,6 +40,7 @@ import {
 } from '../services/admin';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { formatDateTime } from '../utils/format';
+import { AIMissionControl } from '../components/AIMissionControl';
 
 type AdminTab = 'overview' | 'announcements' | 'events' | 'members' | 'settings';
 type SortMode = 'latest' | 'oldest' | 'pinned';
@@ -1085,6 +1086,13 @@ export function AdminDashboardScreen(props: any) {
 
         {tab === 'overview' && (
           <>
+            {/* AI 任務指揮 — 管理員專屬下一步 */}
+            <AIMissionControl
+              uid={auth.user?.uid ?? 'demo_admin_sys'}
+              maxVisible={3}
+              hideWhenEmpty
+            />
+
             <AnimatedCard title="管理員總覽" subtitle={`${school.name}（${school.code}）`}>
               <View
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}

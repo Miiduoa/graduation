@@ -407,40 +407,52 @@ export default function ProfilePage(props: {
         {/* ── Courses ── */}
         {activeTab === 'courses' && demoRole === 'student' && (
           <div className="insetGroup">
-            {MOCK_COURSES.map((c, i) => (
-              <Link
-                key={c.name}
-                href={c.courseId ? `/course/${c.courseId}${q}` : '#'}
-                className="insetGroupRow"
-                style={{
-                  borderTop: i === 0 ? 'none' : undefined,
-                  color: 'inherit',
-                  textDecoration: 'none',
-                  cursor: c.courseId ? 'pointer' : 'default',
-                }}
-              >
-                <div
-                  className="insetGroupRowIcon"
-                  style={{
-                    fontSize: 14,
-                    fontWeight: 800,
-                    background: 'var(--accent-soft)',
-                    color: 'var(--brand)',
-                  }}
-                >
-                  {c.grade}
-                </div>
-                <div className="insetGroupRowContent">
-                  <div className="insetGroupRowTitle">{c.name}</div>
-                  <div className="insetGroupRowMeta">
-                    {c.semester} · {c.credits} 學分
+            {MOCK_COURSES.map((c, i) => {
+              const rowContent = (
+                <>
+                  <div
+                    className="insetGroupRowIcon"
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 800,
+                      background: 'var(--accent-soft)',
+                      color: 'var(--brand)',
+                    }}
+                  >
+                    {c.grade}
                   </div>
+                  <div className="insetGroupRowContent">
+                    <div className="insetGroupRowTitle">{c.name}</div>
+                    <div className="insetGroupRowMeta">
+                      {c.semester} · {c.credits} 學分
+                    </div>
+                  </div>
+                  {c.courseId && (
+                    <span style={{ fontSize: 13, color: 'var(--muted)' }}>→</span>
+                  )}
+                </>
+              );
+              const sharedStyle: CSSProperties = {
+                borderTop: i === 0 ? 'none' : undefined,
+                color: 'inherit',
+                textDecoration: 'none',
+                cursor: c.courseId ? 'pointer' : 'default',
+              };
+              return c.courseId ? (
+                <Link
+                  key={c.name}
+                  href={`/course/${c.courseId}${q}`}
+                  className="insetGroupRow"
+                  style={sharedStyle}
+                >
+                  {rowContent}
+                </Link>
+              ) : (
+                <div key={c.name} className="insetGroupRow" style={sharedStyle}>
+                  {rowContent}
                 </div>
-                {c.courseId && (
-                  <span style={{ fontSize: 13, color: 'var(--muted)' }}>→</span>
-                )}
-              </Link>
-            ))}
+              );
+            })}
           </div>
         )}
         {activeTab === 'courses' && demoRole === 'ta' && (
@@ -465,6 +477,36 @@ export default function ProfilePage(props: {
             <div style={{ fontWeight: 700, marginBottom: 6 }}>校友在校修課紀錄（唯讀）</div>
             <div>張學長（B09203001）已於 109 屆修業期滿畢業，歷史修課紀錄請至教務處申請成績單。</div>
             <a href={`/grades${q}`} className="btn" style={{ marginTop: 14, fontSize: 13 }}>查看歷史成績 →</a>
+          </div>
+        )}
+        {activeTab === 'courses' && demoRole === 'teacher' && (
+          <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>🧑‍🏫</div>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>授課課程</div>
+            <div>王大明老師目前授課：<strong>資料結構（CS301）</strong>，48 位學生。前往課程工作台可管理作業、成績與點名。</div>
+            <a href={`/teacher/course/c1${q}`} className="btn" style={{ marginTop: 14, fontSize: 13 }}>前往課程工作台 →</a>
+          </div>
+        )}
+        {activeTab === 'courses' && demoRole === 'department_head' && (
+          <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>🏛️</div>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>系主任課程總覽</div>
+            <div>黃主任可查看全系 {16} 門本學期課程。點下方可進入全系成績統計頁或個別課程工作台（唯讀模式）。</div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <a href={`/grades${q}`} className="btn primary" style={{ fontSize: 13 }}>全系成績統計 →</a>
+              <a href={`/groups${q}`} className="btn" style={{ fontSize: 13 }}>課程列表 →</a>
+            </div>
+          </div>
+        )}
+        {activeTab === 'courses' && demoRole === 'admin' && (
+          <div className="card" style={{ padding: '24px', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>🛡️</div>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>系統管理員課程管理</div>
+            <div>管理員可查看所有課程的完整資料。前往管理後台可進行課程停用、成績複查等系統級操作。</div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <a href={`/admin${q}`} className="btn primary" style={{ fontSize: 13 }}>管理後台 →</a>
+              <a href={`/groups${q}`} className="btn" style={{ fontSize: 13 }}>課程列表 →</a>
+            </div>
           </div>
         )}
 
