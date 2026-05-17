@@ -4,12 +4,14 @@
  * Teacher · Course · Modules
  * TronClass parity 「教材單元」教師管理頁。
  *
- * 暫以 mock 串接，後續接 fetchCourseWorkspace().modules。
+ * 2026-05-17：補齊「新增單元 / 編輯 / 新增教材」三個原本沒 onClick 的死按鈕。
+ * 全部走本地 state 即可，demo 不需 backend。
  */
 import Link from 'next/link';
 import { useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
+import { Modal, useToast } from '@/components/ui';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 
 type ModuleRow = {
@@ -18,24 +20,137 @@ type ModuleRow = {
   week: number;
   materialCount: number;
   visible: boolean;
+  materials?: { id: string; name: string; kind: 'pdf' | 'video' | 'link' | 'slides' }[];
 };
 
 const MOCK: ModuleRow[] = [
-  { id: 'm1', title: '第 1 週：課程簡介', week: 1, materialCount: 3, visible: true },
-  { id: 'm2', title: '第 2 週：關聯模型', week: 2, materialCount: 5, visible: true },
-  { id: 'm3', title: '第 3 週：SQL 基礎', week: 3, materialCount: 4, visible: false },
+  {
+    id: 'm1',
+    title: '第 1 週：課程簡介',
+    week: 1,
+    materialCount: 3,
+    visible: true,
+    materials: [
+      { id: 'mat-1-1', name: '課程大綱.pdf', kind: 'pdf' },
+      { id: 'mat-1-2', name: '評分標準說明.pdf', kind: 'pdf' },
+      { id: 'mat-1-3', name: 'TronClass 操作影片', kind: 'video' },
+    ],
+  },
+  {
+    id: 'm2',
+    title: '第 2 週：關聯模型',
+    week: 2,
+    materialCount: 5,
+    visible: true,
+    materials: [
+      { id: 'mat-2-1', name: 'Lecture 02 slides.pdf', kind: 'slides' },
+      { id: 'mat-2-2', name: 'Ch2 補充教材.pdf', kind: 'pdf' },
+    ],
+  },
+  {
+    id: 'm3',
+    title: '第 3 週：SQL 基礎',
+    week: 3,
+    materialCount: 4,
+    visible: false,
+    materials: [
+      { id: 'mat-3-1', name: 'SQL 練習題.pdf', kind: 'pdf' },
+    ],
+  },
 ];
 
 export default function TeacherModulesPage({ params }: { params: { courseId: string } }) {
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const isTaView = demoRole === 'ta';
+  const { success, info } = useToast();
   const [rows, setRows] = useState<ModuleRow[]>(MOCK);
+
+  // ── Modal 狀態 ─────────────────────────────────────
+  const [newOpen, setNewOpen] = useState(false);
+  const [newDraft, setNewDraft] = useState({ title: '', week: '' });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({ title: '', week: '' });
+  const [addMaterialFor, setAddMaterialFor] = useState<string | null>(null);
+  const [materialDraft, setMaterialDraft] = useState({ name: '', kind: 'pdf' as const });
 
   const toggleVisible = (id: string) => {
     if (!caps.canEditModules) return;
     setRows((r) => r.map((m) => (m.id === id ? { ...m, visible: !m.visible } : m)));
   };
+
+  // ── 新增單元 ───────────────────────────────────────
+  const onAddModule = () => {
+    const week = Number(newDraft.week);
+    if (!newDraft.title.trim() || !Number.isFinite(week) || week < 1) {
+      info('請輸入單元標題與週次（1~18）');
+      return;
+    }
+    const newRow: ModuleRow = {
+      id: `m-${Date.now()}`,
+      title: newDraft.title.trim(),
+      week,
+      materialCount: 0,
+      visible: false,
+      materials: [],
+    };
+    setRows((r) => [...r, newRow].sort((a, b) => a.week - b.week));
+    setNewDraft({ title: '', week: '' });
+    setNewOpen(false);
+    success(`已新增「${newRow.title}」（預設不可見，記得勾選可見）`);
+  };
+
+  // ── 編輯單元 ───────────────────────────────────────
+  const onEditClick = (m: ModuleRow) => {
+    setEditingId(m.id);
+    setEditDraft({ title: m.title, week: String(m.week) });
+  };
+  const onSaveEdit = () => {
+    if (!editingId) return;
+    const week = Number(editDraft.week);
+    if (!editDraft.title.trim() || !Number.isFinite(week)) {
+      info('標題與週次不可為空');
+      return;
+    }
+    setRows((r) =>
+      r
+        .map((m) => (m.id === editingId ? { ...m, title: editDraft.title.trim(), week } : m))
+        .sort((a, b) => a.week - b.week),
+    );
+    success(`已更新「${editDraft.title}」`);
+    setEditingId(null);
+  };
+  const editingRow = rows.find((m) => m.id === editingId);
+
+  // ── 新增教材 ───────────────────────────────────────
+  const onAddMaterial = () => {
+    if (!addMaterialFor || !materialDraft.name.trim()) {
+      info('請輸入教材名稱');
+      return;
+    }
+    setRows((r) =>
+      r.map((m) =>
+        m.id === addMaterialFor
+          ? {
+              ...m,
+              materialCount: m.materialCount + 1,
+              materials: [
+                ...(m.materials ?? []),
+                {
+                  id: `mat-${Date.now()}`,
+                  name: materialDraft.name.trim(),
+                  kind: materialDraft.kind,
+                },
+              ],
+            }
+          : m,
+      ),
+    );
+    success(`已新增教材「${materialDraft.name}」`);
+    setMaterialDraft({ name: '', kind: 'pdf' });
+    setAddMaterialFor(null);
+  };
+  const addMaterialRow = rows.find((m) => m.id === addMaterialFor);
 
   return (
     <SiteShell>
@@ -80,6 +195,8 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
         {/* 新增按鈕：TA 不可用 */}
         {caps.canEditModules ? (
           <button
+            type="button"
+            onClick={() => setNewOpen(true)}
             style={{
               padding: '10px 16px',
               borderRadius: 8,
@@ -137,8 +254,8 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
                 </td>
                 {caps.canEditModules && (
                   <td style={td}>
-                    <button style={linkBtn}>編輯</button>
-                    <button style={linkBtn}>新增教材</button>
+                    <button type="button" style={linkBtn} onClick={() => onEditClick(m)}>編輯</button>
+                    <button type="button" style={linkBtn} onClick={() => setAddMaterialFor(m.id)}>新增教材</button>
                   </td>
                 )}
               </tr>
@@ -177,6 +294,127 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
         </div>
         </>}
       </main>
+
+      {/* 新增單元 Modal */}
+      <Modal
+        isOpen={newOpen}
+        onClose={() => setNewOpen(false)}
+        title="＋ 新增教材單元"
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="btn" onClick={() => setNewOpen(false)}>取消</button>
+            <button type="button" className="btn primary" onClick={onAddModule}>建立</button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label style={{ fontSize: 13, fontWeight: 600 }}>單元標題</label>
+          <input
+            className="input"
+            placeholder="例：第 5 週：樹與圖"
+            value={newDraft.title}
+            onChange={(e) => setNewDraft({ ...newDraft, title: e.target.value })}
+          />
+          <label style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>週次</label>
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={18}
+            placeholder="例：5"
+            value={newDraft.week}
+            onChange={(e) => setNewDraft({ ...newDraft, week: e.target.value })}
+          />
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            新單元預設為「不可見」，請建立後勾選可見性才會對學生顯示。
+          </div>
+        </div>
+      </Modal>
+
+      {/* 編輯單元 Modal */}
+      <Modal
+        isOpen={editingId !== null}
+        onClose={() => setEditingId(null)}
+        title={editingRow ? `編輯：${editingRow.title}` : '編輯單元'}
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="btn" onClick={() => setEditingId(null)}>取消</button>
+            <button type="button" className="btn primary" onClick={onSaveEdit}>儲存</button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label style={{ fontSize: 13, fontWeight: 600 }}>單元標題</label>
+          <input
+            className="input"
+            value={editDraft.title}
+            onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })}
+          />
+          <label style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>週次</label>
+          <input
+            className="input"
+            type="number"
+            min={1}
+            max={18}
+            value={editDraft.week}
+            onChange={(e) => setEditDraft({ ...editDraft, week: e.target.value })}
+          />
+          {editingRow ? (
+            <div style={{ marginTop: 10, padding: 12, background: '#f3f4f6', borderRadius: 8, fontSize: 12 }}>
+              📦 此單元目前有 <strong>{editingRow.materialCount}</strong> 個教材
+              {editingRow.materials && editingRow.materials.length > 0 ? (
+                <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                  {editingRow.materials.map((mat) => (
+                    <li key={mat.id} style={{ marginBottom: 2 }}>
+                      {mat.kind === 'pdf' ? '📄' : mat.kind === 'video' ? '🎬' : mat.kind === 'link' ? '🔗' : '📊'} {mat.name}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      {/* 新增教材 Modal */}
+      <Modal
+        isOpen={addMaterialFor !== null}
+        onClose={() => setAddMaterialFor(null)}
+        title={addMaterialRow ? `為「${addMaterialRow.title}」新增教材` : '新增教材'}
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="btn" onClick={() => setAddMaterialFor(null)}>取消</button>
+            <button type="button" className="btn primary" onClick={onAddMaterial}>新增</button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <label style={{ fontSize: 13, fontWeight: 600 }}>教材名稱</label>
+          <input
+            className="input"
+            placeholder="例：Ch5 樹.pdf"
+            value={materialDraft.name}
+            onChange={(e) => setMaterialDraft({ ...materialDraft, name: e.target.value })}
+          />
+          <label style={{ fontSize: 13, fontWeight: 600, marginTop: 4 }}>類型</label>
+          <select
+            className="input"
+            value={materialDraft.kind}
+            onChange={(e) => setMaterialDraft({ ...materialDraft, kind: e.target.value as 'pdf' })}
+          >
+            <option value="pdf">📄 PDF</option>
+            <option value="video">🎬 影片</option>
+            <option value="slides">📊 投影片</option>
+            <option value="link">🔗 連結</option>
+          </select>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            上傳檔案需在 TronClass 端，這裡僅建立教材條目並對應檔案名稱。
+          </div>
+        </div>
+      </Modal>
     </SiteShell>
   );
 }
