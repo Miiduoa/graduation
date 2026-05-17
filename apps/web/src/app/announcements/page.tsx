@@ -20,7 +20,8 @@ import {
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 import { useRoleScopedState } from '@/lib/useRoleScopedState';
-import { notifyDeptHeadNewAnn, notifyStudentsAnnApproved } from '@/lib/demoStore';
+import { notifyDeptHeadNewAnn, notifyStudentsAnnApproved, rejectAnnouncementWithReason } from '@/lib/demoStore';
+import type { DemoRole } from '@/lib/demoRole';
 
 type FilterCategory = 'all' | 'academic' | 'event' | 'general';
 type AnnouncementView = 'all' | 'important' | 'today' | 'mine' | 'pending';
@@ -586,9 +587,19 @@ export default function AnnouncementsPage(props: {
                           className="btn"
                           style={{ fontSize: 13 }}
                           onClick={() => {
-                            approvePendingAnn(p.id);
+                            const reason = typeof window !== 'undefined'
+                              ? window.prompt(`退回「${p.title}」的原因（提交者會收到通知）：`, '請補充截止日、地點等資訊後重新送審')
+                              : '請補充細節後重新送審';
+                            if (!reason) return;
+                            rejectAnnouncementWithReason({
+                              pendingId: p.id,
+                              title: p.title,
+                              reason,
+                              submitterRole: p.submittedByRole as DemoRole,
+                              reviewedByLabel: '系主任',
+                            });
                             setPendingQueue(readPendingAnns());
-                            info('🔄 已退回提交者修改');
+                            info(`🔄 已退回「${p.title}」並通知原提交者`);
                           }}
                         >
                           退回修改

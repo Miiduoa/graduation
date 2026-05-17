@@ -370,3 +370,13 @@ export function useCapabilities(): RoleCapabilities {
   const [role] = useDemoRole();
   return getCapabilities(role);
 }
+
+/** 整合切換器：寫入角色 + 回傳該角色的進入點
+ *
+ * 用途：login 頁與 DemoRolePill 都呼叫此 helper，邏輯統一。
+ * 呼叫端拿到 entryHref 後自行決定要 router.push 還是 location.assign。
+ */
+export function switchToRole(next: DemoRole): string {
+  writeDemoRole(next);
+  return getDemoRoleDefinition(next).entryHref;
+}

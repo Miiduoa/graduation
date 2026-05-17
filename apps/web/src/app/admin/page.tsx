@@ -23,6 +23,7 @@ import {
   useDemoStore,
   isUserDisabled,
   sendDeptBroadcast,
+  rejectAnnouncementWithReason,
 } from '@/lib/demoStore';
 
 export default function AdminPage(props: {
@@ -157,9 +158,21 @@ export default function AdminPage(props: {
   };
 
   const rejectPending = (id: string) => {
-    approvePendingAnn(id); // 標為已處理（退回也移出佇列）
+    const ann = pendingQueue.find((p) => p.id === id);
+    if (!ann) return;
+    const reason = typeof window !== 'undefined'
+      ? window.prompt(`退回「${ann.title}」的原因（提交者會收到通知）：`, '請補充截止日、地點等資訊後重新送審')
+      : '請補充細節後重新送審';
+    if (!reason) return;
+    rejectAnnouncementWithReason({
+      pendingId: id,
+      title: ann.title,
+      reason,
+      submitterRole: ann.submittedByRole as DemoRole,
+      reviewedByLabel: roleDef.label,
+    });
     setPendingQueue(readPendingAnns());
-    info('🔄 已退回提交者修改');
+    info(`🔄 已退回「${ann.title}」並通知原提交者`);
   };
 
   return (

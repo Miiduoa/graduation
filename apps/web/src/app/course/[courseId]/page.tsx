@@ -390,34 +390,52 @@ export default function CoursePage(props: {
                           {module.resourceCount ?? 0} 個資源
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!canTakeAction) {
-                            info(
-                              demoRole === 'alumni'
-                                ? '校友身份無法下載課程教材'
-                                : '請先登入後才能下載教材',
-                            );
-                            return;
-                          }
-                          success(`已開始下載：${module.title}`);
-                        }}
-                        title={!canTakeAction ? '此身份無法下載' : '下載教材'}
-                        style={{
-                          padding: '6px 12px',
-                          borderRadius: 8,
-                          border: '1px solid var(--border)',
-                          background: canTakeAction ? 'var(--surface)' : 'var(--panel)',
-                          color: canTakeAction ? 'var(--brand)' : 'var(--muted)',
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: canTakeAction ? 'pointer' : 'not-allowed',
-                          opacity: canTakeAction ? 1 : 0.6,
-                        }}
-                      >
-                        {canTakeAction ? '⬇ 下載' : '🔒 無法下載'}
-                      </button>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <Link
+                          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`幫我重點整理「${module.title ?? `第 ${module.week ?? ''} 單元`}」這份教材的核心觀念`)}`}
+                          title="讓 AI 摘要這份教材"
+                          style={{
+                            padding: '6px 10px',
+                            borderRadius: 8,
+                            border: '1px solid rgba(94,106,210,0.30)',
+                            background: 'rgba(94,106,210,0.10)',
+                            color: '#5E6AD2',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            textDecoration: 'none',
+                          }}
+                        >
+                          🤖
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!canTakeAction) {
+                              info(
+                                demoRole === 'alumni'
+                                  ? '校友身份無法下載課程教材'
+                                  : '請先登入後才能下載教材',
+                              );
+                              return;
+                            }
+                            success(`已開始下載：${module.title}`);
+                          }}
+                          title={!canTakeAction ? '此身份無法下載' : '下載教材'}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            border: '1px solid var(--border)',
+                            background: canTakeAction ? 'var(--surface)' : 'var(--panel)',
+                            color: canTakeAction ? 'var(--brand)' : 'var(--muted)',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: canTakeAction ? 'pointer' : 'not-allowed',
+                            opacity: canTakeAction ? 1 : 0.6,
+                          }}
+                        >
+                          {canTakeAction ? '⬇ 下載' : '🔒 無法下載'}
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -495,47 +513,67 @@ export default function CoursePage(props: {
                           {isQuiz ? '測驗' : '作業'} · 截止：{formatDate(item.dueAt)}
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!canTakeAction) {
-                            info(
-                              demoRole === 'alumni'
-                                ? '校友身份無法繳交作業或應試'
-                                : '請先登入後才能進行此動作',
-                            );
-                            return;
-                          }
-                          success(actionToast);
-                        }}
-                        title={!canTakeAction ? '此身份無法執行' : undefined}
-                        style={{
-                          padding: '6px 12px',
-                          borderRadius: 8,
-                          border: '1px solid',
-                          borderColor: canTakeAction
-                            ? isQuiz
-                              ? '#7C3AED'
-                              : '#FF9500'
-                            : 'var(--border)',
-                          background: canTakeAction
-                            ? isQuiz
-                              ? 'rgba(124,58,237,0.10)'
-                              : 'rgba(255,149,0,0.10)'
-                            : 'var(--panel)',
-                          color: canTakeAction
-                            ? isQuiz
-                              ? '#7C3AED'
-                              : '#B45309'
-                            : 'var(--muted)',
-                          fontSize: 12,
-                          fontWeight: 700,
-                          cursor: canTakeAction ? 'pointer' : 'not-allowed',
-                          opacity: canTakeAction ? 1 : 0.6,
-                        }}
-                      >
-                        {canTakeAction ? actionLabel : '🔒 唯讀'}
-                      </button>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        {demoRole === 'student' && (
+                          <Link
+                            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`幫我構思「${item.title}」這份${isQuiz ? '考試' : '作業'}的方向與重點`)}`}
+                            title="讓 AI 給你靈感"
+                            style={{
+                              padding: '6px 10px',
+                              borderRadius: 8,
+                              border: '1px solid rgba(94,106,210,0.30)',
+                              background: 'rgba(94,106,210,0.10)',
+                              color: '#5E6AD2',
+                              fontSize: 12,
+                              fontWeight: 700,
+                              textDecoration: 'none',
+                            }}
+                          >
+                            🤖
+                          </Link>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!canTakeAction) {
+                              info(
+                                demoRole === 'alumni'
+                                  ? '校友身份無法繳交作業或應試'
+                                  : '請先登入後才能進行此動作',
+                              );
+                              return;
+                            }
+                            success(actionToast);
+                          }}
+                          title={!canTakeAction ? '此身份無法執行' : undefined}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: 8,
+                            border: '1px solid',
+                            borderColor: canTakeAction
+                              ? isQuiz
+                                ? '#7C3AED'
+                                : '#FF9500'
+                              : 'var(--border)',
+                            background: canTakeAction
+                              ? isQuiz
+                                ? 'rgba(124,58,237,0.10)'
+                                : 'rgba(255,149,0,0.10)'
+                              : 'var(--panel)',
+                            color: canTakeAction
+                              ? isQuiz
+                                ? '#7C3AED'
+                                : '#B45309'
+                              : 'var(--muted)',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: canTakeAction ? 'pointer' : 'not-allowed',
+                            opacity: canTakeAction ? 1 : 0.6,
+                          }}
+                        >
+                          {canTakeAction ? actionLabel : '🔒 唯讀'}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}

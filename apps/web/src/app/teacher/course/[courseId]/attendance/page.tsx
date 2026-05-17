@@ -188,6 +188,13 @@ export default function TeacherAttendancePage({ params }: { params: { courseId: 
                     >
                       📥 匯出 CSV
                     </button>
+                    <a
+                      href={`/ai-assistant?q=${encodeURIComponent(`資料結構（CS301）${s.startedAt} 的出席率 ${pct}%，幫我分析缺席原因與建議追蹤動作`)}`}
+                      title="讓 AI 分析這場出勤"
+                      style={{ ...linkBtn, border: '1px solid #5E6AD2', borderRadius: 6, padding: '6px 12px', color: '#5E6AD2', background: 'rgba(94,106,210,0.08)', textDecoration: 'none' }}
+                    >
+                      🤖
+                    </a>
                   </div>
                 </div>
 

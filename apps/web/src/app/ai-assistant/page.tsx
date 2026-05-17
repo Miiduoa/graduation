@@ -106,6 +106,9 @@ const ROLE_QUICK_PROMPTS: Record<DemoRole, QuickPrompt[]> = {
   guest: [
     { label: '這個 App 有什麼功能？', icon: '🏫', prompt: '這個校園 App 有哪些主要功能？不同身份的使用者各能使用什麼服務？' },
     { label: '如何申請帳號？', icon: '📝', prompt: '如何申請這個校園 App 的帳號？需要哪些資格或文件？' },
+    { label: '靜宜大學在哪？怎麼去？', icon: '📍', prompt: '靜宜大學在哪裡？最近的公車站怎麼到？大眾運輸有什麼選擇？' },
+    { label: '校園地圖在哪可以看？', icon: '🗺️', prompt: '我想看校園地圖、瀏覽教學大樓、餐廳、停車場的位置，App 哪裡可以看？' },
+    { label: '我可以先看哪些公開資訊？', icon: '📢', prompt: '我還沒登入，請告訴我訪客身份可以瀏覽哪些公開資訊（公告、餐廳、公車、地圖）。' },
   ],
 };
 
