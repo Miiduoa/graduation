@@ -158,9 +158,24 @@ export default function AnnouncementsPage(props: {
   };
   // 待審公告（共用 localStorage，與 admin 頁同步）
   const [pendingQueue, setPendingQueue] = useState<DemoPendingAnn[]>([]);
-  // 新增公告 Modal
-  const [showModal, setShowModal] = useState(false);
+  // 新增公告 Modal — 支援 ?compose=1 從別處（例如 /admin）跳過來自動開啟
+  const initialCompose =
+    typeof props.searchParams?.school === 'undefined'
+      ? false
+      : false; // placeholder
+  const [showModal, setShowModal] = useState(initialCompose);
   const { success, info } = useToast();
+
+  // Mount 後檢查 ?compose=1
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('compose') === '1' && caps.canPublishAnnouncements) {
+        setShowModal(true);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Mount 後讀取 localStorage（SSR 安全）
   useEffect(() => {

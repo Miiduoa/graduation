@@ -27,7 +27,26 @@ import {
   getUnreadCountDynamic,
   getPendingClubMembers,
   getPendingSubmissions,
+  // 一鍵動作 — AI 主軸
+  renewBook,
+  requestHelp,
+  requestLeave,
+  placeOrder,
+  submitFeedback,
+  bulkRemind,
+  replyHelpRequest,
+  approveClubMember,
+  publishGrades,
+  sendDeptBroadcast,
+  notifyStudentsAnnApproved,
+  notifySubmitterAnnApproved,
+  setUserDisabled,
+  getOpenHelpRequests,
+  postDiscussion,
+  decideLeave,
 } from '@/lib/demoStore';
+import { approvePendingAnn } from '@/lib/demoData';
+import { useToast, Modal } from '@/components/ui';
 
 // ── 型別 ──────────────────────────────────────────────────────
 interface Message {
@@ -662,6 +681,14 @@ export default function AIAssistantPage(props: {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [demoRole] = useDemoRole();
   const store = useDemoStore();
+  const { success, info } = useToast();
+
+  // AI 主軸：通用動作 modal
+  const [actionModal, setActionModal] = useState<{
+    title: string;
+    body: import('react').ReactNode;
+    footer?: import('react').ReactNode;
+  } | null>(null);
 
   // 初始開場白（先用 student 預設，mount 後依角色更新）
   const [messages, setMessages] = useState<Message[]>([]);
@@ -884,7 +911,7 @@ export default function AIAssistantPage(props: {
             {[
               { label: '課程', val: '資料結構', color: '#0F8B8D' },
               { label: '修課人數', val: 48, color: '#5E6AD2' },
-              { label: '待批改', val: TEACHER_PENDING_REVIEWS.filter(r => r.status === 'submitted').length + getPendingSubmissions('course-1', store).length, color: '#FF9500' },
+              { label: '待批改', val: TEACHER_PENDING_REVIEWS.filter(r => r.status === 'submitted').length + getPendingSubmissions('c1', store).length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
                 <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
@@ -941,6 +968,19 @@ export default function AIAssistantPage(props: {
             ))}
           </div>
         )}
+
+        {/* ── 一鍵動作（AI 主軸 — 真的會改 demoStore） ── */}
+        {!isRestrictedRole && demoRole !== 'guest' ? (
+          <AIActionBar
+            role={demoRole}
+            roleLabel={roleDef.label}
+            store={store}
+            onClose={() => setActionModal(null)}
+            openModal={(m) => setActionModal(m)}
+            toastSuccess={success}
+            toastInfo={info}
+          />
+        ) : null}
 
         {/* ── 快速問題（角色感知） ── */}
         <div>
