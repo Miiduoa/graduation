@@ -1,0 +1,221 @@
+import { router } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+type CourseRow = {
+  role: string;
+  courses: {
+    id: string;
+    title: string;
+    description: string | null;
+  } | null;
+};
+
+export default function CoursesScreen() {
+  const { session } = useAuth();
+  const [items, setItems] = useState<CourseRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [title, setTitle] = useState('');
+  const [joinId, setJoinId] = useState('');
+
+  const load = useCallback(async () => {
+    const uid = session?.user.id;
+    if (!uid) return;
+
+    const { data, error } = await supabase
+      .from('course_members')
+      .select('role, courses ( id, title, description )')
+      .eq('user_id', uid);
+
+    if (error) {
+      console.warn(error.message);
+      setItems([]);
+      return;
+    }
+
+    setItems(
+      ((data ?? []) as Array<{ role: string; courses: CourseRow['courses'] | CourseRow['courses'][] | null }>).map(
+        (row) => ({
+          role: row.role,
+          courses: Array.isArray(row.courses) ? row.courses[0] ?? null : row.courses,
+        }),
+      ),
+    );
+  }, [session?.user.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    load().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  async function createCourse() {
+    const uid = session?.user.id;
+    if (!uid) return;
+    const trimmed = title.trim();
+    if (!trimmed) {
+      Alert.alert('請輸入課程名稱');
+      return;
+    }
+    const { data, error } = await supabase
+      .from('courses')
+      .insert({ title: trimmed, description: '', owner_id: uid })
+      .select('id')
+      .single();
+    if (error) {
+      Alert.alert('建立失敗', error.message);
+      return;
+    }
+    setTitle('');
+    await load();
+    if (data?.id) router.push(`/(app)/course/${data.id}`);
+  }
+
+  async function joinCourse() {
+    const uid = session?.user.id;
+    if (!uid) return;
+    const id = joinId.trim();
+    if (!id) {
+      Alert.alert('請輸入課程 UUID');
+      return;
+    }
+    const { error } = await supabase.from('course_members').insert({
+      course_id: id,
+      user_id: uid,
+      role: 'student',
+    });
+    if (error) {
+      Alert.alert('加入失敗', error.message);
+      return;
+    }
+    setJoinId('');
+    await load();
+    router.push(`/(app)/course/${id}`);
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>建立課程（擔任教師）</Text>
+        <TextInput placeholder="課程名稱" style={styles.input} value={title} onChangeText={setTitle} />
+        <Pressable style={styles.primaryBtn} onPress={createCourse}>
+          <Text style={styles.primaryBtnText}>建立並進入</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>加入課程（學生）</Text>
+        <TextInput placeholder="課程 ID（UUID）" style={styles.input} value={joinId} onChangeText={setJoinId} />
+        <Pressable style={styles.secondaryBtn} onPress={joinCourse}>
+          <Text style={styles.secondaryBtnText}>加入課程</Text>
+        </Pressable>
+      </View>
+
+      <Text style={styles.sectionTitle}>我的課程</Text>
+      <FlatList
+        data={items}
+        keyExtractor={(row, index) => row.courses?.id ?? `missing-${index}`}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={<Text style={styles.empty}>尚無課程，請建立或加入。</Text>}
+        renderItem={({ item }) => {
+          const course = item.courses;
+          if (!course) return null;
+          return (
+            <Pressable style={styles.row} onPress={() => router.push(`/(app)/course/${course.id}`)}>
+              <Text style={styles.rowTitle}>{course.title}</Text>
+              <Text style={styles.rowMeta}>
+                身分：
+                {item.role === 'teacher'
+                  ? '教師'
+                  : item.role === 'moderator'
+                    ? '課程仲裁'
+                    : item.role === 'assistant'
+                      ? '助教'
+                      : '學生'}
+              </Text>
+            </Pressable>
+          );
+        }}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 16, gap: 12 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+  },
+  cardTitle: { fontWeight: '700', fontSize: 16 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '600' },
+  secondaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '600' },
+  sectionTitle: { marginTop: 8, fontWeight: '700', fontSize: 16 },
+  empty: { color: '#6b7280', marginTop: 12 },
+  row: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    gap: 4,
+  },
+  rowTitle: { fontSize: 17, fontWeight: '600' },
+  rowMeta: { color: '#6b7280', fontSize: 13 },
+});

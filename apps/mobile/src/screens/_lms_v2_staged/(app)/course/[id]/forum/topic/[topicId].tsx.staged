@@ -1,0 +1,636 @@
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { canCourseModerateForum, useCourseRole } from '@/hooks/useCourseRole';
+import { supabase } from '@/lib/supabase';
+
+type TopicMeta = {
+  id: string;
+  title: string;
+  course_id: string;
+  locked_at: string | null;
+};
+
+type Post = {
+  id: string;
+  author_id: string;
+  body: string;
+  created_at: string;
+  parent_post_id: string | null;
+  deleted_at: string | null;
+};
+
+type ForumReport = {
+  id: string;
+  post_id: string | null;
+  reason: string;
+  status: string;
+  reporter_id: string;
+  created_at: string;
+};
+
+function PostTree({
+  postsByParent,
+  parentId,
+  depth,
+  uid,
+  moderateForum,
+  locked,
+  replyTargetId,
+  onReplyTarget,
+  onSoftDelete,
+  onHardDelete,
+  onReport,
+  onEdit,
+  onShowEdits,
+}: {
+  postsByParent: Map<string | null, Post[]>;
+  parentId: string | null;
+  depth: number;
+  uid?: string;
+  moderateForum: boolean;
+  locked: boolean;
+  replyTargetId: string | null;
+  onReplyTarget: (id: string | null) => void;
+  onSoftDelete: (post: Post) => void;
+  onHardDelete: (post: Post) => void;
+  onReport: (post: Post) => void;
+  onEdit: (post: Post) => void;
+  onShowEdits: (post: Post) => void;
+}) {
+  const list = postsByParent.get(parentId) ?? [];
+
+  return (
+    <>
+      {list.map((p) => (
+        <View key={p.id} style={[styles.threadWrap, { marginLeft: depth * 14 }]}>
+          <View style={[styles.post, p.deleted_at ? styles.postDeleted : null]}>
+            <Text style={styles.postMeta}>
+              {p.author_id.slice(0, 8)}…｜{new Date(p.created_at).toLocaleString()}
+              {p.deleted_at ? '｜（已隱藏）' : ''}
+            </Text>
+            {!p.deleted_at ? (
+              <Text style={styles.postBody}>{p.body}</Text>
+            ) : moderateForum ? (
+              <Text style={styles.postBodyMuted}>（教師／仲裁可見：已軟刪）</Text>
+            ) : null}
+
+            <View style={styles.postActions}>
+              {!locked || moderateForum ? (
+                <Pressable style={styles.miniBtn} onPress={() => onReplyTarget(p.id)}>
+                  <Text style={styles.miniBtnText}>{replyTargetId === p.id ? '取消回覆' : '回覆此則'}</Text>
+                </Pressable>
+              ) : null}
+              {uid ? (
+                <Pressable style={styles.miniBtnWarn} onPress={() => onReport(p)}>
+                  <Text style={styles.miniBtnWarnText}>檢舉</Text>
+                </Pressable>
+              ) : null}
+              {uid === p.author_id && !p.deleted_at ? (
+                <Pressable style={styles.miniBtn} onPress={() => onEdit(p)}>
+                  <Text style={styles.miniBtnText}>編輯</Text>
+                </Pressable>
+              ) : null}
+              {(moderateForum || uid === p.author_id) && !p.deleted_at ? (
+                <Pressable style={styles.miniBtnMuted} onPress={() => onShowEdits(p)}>
+                  <Text style={styles.miniBtnMutedText}>編輯紀錄</Text>
+                </Pressable>
+              ) : null}
+              {moderateForum && !p.deleted_at ? (
+                <>
+                  <Pressable style={styles.miniBtnDanger} onPress={() => onSoftDelete(p)}>
+                    <Text style={styles.miniBtnDangerText}>軟刪</Text>
+                  </Pressable>
+                  <Pressable style={styles.miniBtnDanger} onPress={() => onHardDelete(p)}>
+                    <Text style={styles.miniBtnDangerText}>硬刪</Text>
+                  </Pressable>
+                </>
+              ) : null}
+            </View>
+          </View>
+
+          <PostTree
+            postsByParent={postsByParent}
+            parentId={p.id}
+            depth={depth + 1}
+            uid={uid}
+            moderateForum={moderateForum}
+            locked={locked}
+            replyTargetId={replyTargetId}
+            onReplyTarget={onReplyTarget}
+            onSoftDelete={onSoftDelete}
+            onHardDelete={onHardDelete}
+            onReport={onReport}
+            onEdit={onEdit}
+            onShowEdits={onShowEdits}
+          />
+        </View>
+      ))}
+    </>
+  );
+}
+
+export default function ForumTopicScreen() {
+  const { id: courseId, topicId } = useLocalSearchParams<{ id: string; topicId: string }>();
+  const { session } = useAuth();
+  const uid = session?.user.id;
+  const role = useCourseRole(courseId, uid);
+  const moderateForum = canCourseModerateForum(role);
+
+  const [topic, setTopic] = useState<TopicMeta | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [reports, setReports] = useState<ForumReport[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [body, setBody] = useState('');
+  const [replyTargetId, setReplyTargetId] = useState<string | null>(null);
+
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportPost, setReportPost] = useState<Post | null>(null);
+  const [reportReason, setReportReason] = useState('');
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editPost, setEditPost] = useState<Post | null>(null);
+  const [editBody, setEditBody] = useState('');
+
+  const locked = !!topic?.locked_at;
+
+  const loadTopic = useCallback(async () => {
+    if (!topicId) return;
+    const { data, error } = await supabase
+      .from('forum_topics')
+      .select('id, title, course_id, locked_at')
+      .eq('id', topicId)
+      .maybeSingle();
+    if (error) {
+      console.warn(error.message);
+      setTopic(null);
+      return;
+    }
+    setTopic(data as TopicMeta);
+  }, [topicId]);
+
+  const loadPosts = useCallback(async () => {
+    if (!topicId) return;
+    const { data, error } = await supabase
+      .from('forum_posts')
+      .select('id, author_id, body, created_at, parent_post_id, deleted_at')
+      .eq('topic_id', topicId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      console.warn(error.message);
+      setPosts([]);
+      return;
+    }
+    setPosts((data ?? []) as Post[]);
+  }, [topicId]);
+
+  const loadReports = useCallback(async () => {
+    if (!moderateForum || !topicId || posts.length === 0) {
+      setReports([]);
+      return;
+    }
+    const ids = posts.map((p) => p.id);
+    const { data, error } = await supabase.from('forum_reports').select('*').in('post_id', ids).order('created_at', { ascending: false });
+    if (error) {
+      console.warn(error.message);
+      setReports([]);
+      return;
+    }
+    setReports((data ?? []) as ForumReport[]);
+  }, [moderateForum, topicId, posts]);
+
+  useEffect(() => {
+    loadTopic();
+  }, [loadTopic]);
+
+  useEffect(() => {
+    loadPosts();
+  }, [loadPosts]);
+
+  useEffect(() => {
+    void loadReports();
+  }, [loadReports]);
+
+  const postsByParent = useMemo(() => {
+    const m = new Map<string | null, Post[]>();
+    for (const p of posts) {
+      const key = p.parent_post_id;
+      const arr = m.get(key) ?? [];
+      arr.push(p);
+      m.set(key, arr);
+    }
+    return m;
+  }, [posts]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await Promise.all([loadTopic(), loadPosts()]);
+    setRefreshing(false);
+  }
+
+  async function toggleLock() {
+    if (!topicId || !uid || !moderateForum) return;
+    if (!locked) {
+      const { error } = await supabase
+        .from('forum_topics')
+        .update({ locked_at: new Date().toISOString(), locked_by: uid })
+        .eq('id', topicId);
+      if (error) Alert.alert('鎖帖失敗', error.message);
+    } else {
+      const { error } = await supabase.from('forum_topics').update({ locked_at: null, locked_by: null }).eq('id', topicId);
+      if (error) Alert.alert('解除鎖定失敗', error.message);
+    }
+    await loadTopic();
+  }
+
+  async function reply() {
+    if (!topicId || !uid) return;
+    const trimmed = body.trim();
+    if (!trimmed) {
+      Alert.alert('請輸入內容');
+      return;
+    }
+
+    const { error } = await supabase.from('forum_posts').insert({
+      topic_id: topicId,
+      author_id: uid,
+      parent_post_id: replyTargetId,
+      body: trimmed,
+    });
+
+    if (error) {
+      Alert.alert('發表失敗', error.message);
+      return;
+    }
+
+    setBody('');
+    setReplyTargetId(null);
+    await loadPosts();
+  }
+
+  async function softDelete(post: Post) {
+    Alert.alert('確認軟刪', '此貼將對學生隱藏，教師仍可見狀態。', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '軟刪',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('forum_posts').update({ deleted_at: new Date().toISOString() }).eq('id', post.id);
+          if (error) Alert.alert('失敗', error.message);
+          await loadPosts();
+        },
+      },
+    ]);
+  }
+
+  function hardDelete(post: Post) {
+    Alert.alert('確認硬刪', '將自資料庫刪除此貼（含回覆可能存在 FK cascade）。確定？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '硬刪',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('forum_posts').delete().eq('id', post.id);
+          if (error) Alert.alert('失敗', error.message);
+          await loadPosts();
+        },
+      },
+    ]);
+  }
+
+  function openReport(post: Post) {
+    setReportPost(post);
+    setReportReason('');
+    setReportOpen(true);
+  }
+
+  async function submitReport() {
+    if (!reportPost || !uid) return;
+    const reason = reportReason.trim();
+    if (!reason) {
+      Alert.alert('請填寫檢舉原因');
+      return;
+    }
+    const { error } = await supabase.from('forum_reports').insert({
+      post_id: reportPost.id,
+      reporter_id: uid,
+      reason,
+    });
+    if (error) Alert.alert('檢舉失敗', error.message);
+    else {
+      Alert.alert('已送出檢舉');
+      setReportOpen(false);
+      setReportPost(null);
+      await loadReports();
+    }
+  }
+
+  function openEdit(post: Post) {
+    setEditPost(post);
+    setEditBody(post.body);
+    setEditOpen(true);
+  }
+
+  async function saveEdit() {
+    if (!editPost || !uid) return;
+    const trimmed = editBody.trim();
+    if (!trimmed) {
+      Alert.alert('內容不可為空');
+      return;
+    }
+    const { error } = await supabase.from('forum_posts').update({ body: trimmed }).eq('id', editPost.id).eq('author_id', uid);
+    if (error) Alert.alert('更新失敗', error.message);
+    else {
+      setEditOpen(false);
+      setEditPost(null);
+      await loadPosts();
+    }
+  }
+
+  async function showEdits(post: Post) {
+    const { data, error } = await supabase
+      .from('forum_post_edits')
+      .select('created_at, editor_id, previous_body, new_body')
+      .eq('post_id', post.id)
+      .order('created_at', { ascending: true });
+    if (error) {
+      Alert.alert('讀取失敗', error.message);
+      return;
+    }
+    const rows = data ?? [];
+    if (!rows.length) {
+      Alert.alert('編輯紀錄', '尚無修改紀錄。');
+      return;
+    }
+    const txt = rows
+      .map(
+        (r: { created_at: string; editor_id: string; previous_body: string; new_body: string }) =>
+          `${new Date(r.created_at).toLocaleString()}｜編輯者 ${r.editor_id.slice(0, 8)}…\n---\n${r.previous_body.slice(0, 120)}… → ${r.new_body.slice(0, 120)}…`,
+      )
+      .join('\n\n');
+    Alert.alert('編輯紀錄', txt.slice(0, 2000));
+  }
+
+  async function dismissReport(rep: ForumReport) {
+    const { error } = await supabase.from('forum_reports').update({ status: 'resolved' }).eq('id', rep.id);
+    if (error) Alert.alert('更新失敗', error.message);
+    else await loadReports();
+  }
+
+  return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={{ flex: 1 }}>
+        <FlatList
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12 }}
+          data={[1]}
+          keyExtractor={() => 't'}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          renderItem={() => (
+            <>
+              <Text style={styles.title}>{topic?.title ?? '討論串'}</Text>
+              {locked ? <Text style={styles.banner}>此串已鎖帖（僅教師／課程仲裁可發言）</Text> : null}
+
+              {moderateForum ? (
+                <Pressable style={styles.lockBtn} onPress={toggleLock}>
+                  <Text style={styles.lockBtnText}>{locked ? '解除鎖帖' : '鎖帖（禁止學生發言）'}</Text>
+                </Pressable>
+              ) : null}
+
+              {moderateForum && reports.length > 0 ? (
+                <View style={styles.reportCard}>
+                  <Text style={styles.reportCardTitle}>檢舉列表（本串貼文）</Text>
+                  {reports.map((r) => (
+                    <View key={r.id} style={styles.reportRow}>
+                      <Text style={styles.reportMeta}>
+                        {(r.post_id ?? '').slice(0, 8)}…｜{r.status}｜檢舉人 {r.reporter_id.slice(0, 8)}…
+                      </Text>
+                      <Text style={styles.reportReason}>{r.reason}</Text>
+                      {r.status === 'open' ? (
+                        <Pressable style={styles.miniBtnMuted} onPress={() => dismissReport(r)}>
+                          <Text style={styles.miniBtnMutedText}>標記已處理</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+
+              <PostTree
+                postsByParent={postsByParent}
+                parentId={null}
+                depth={0}
+                uid={uid}
+                moderateForum={moderateForum}
+                locked={locked}
+                replyTargetId={replyTargetId}
+                onReplyTarget={setReplyTargetId}
+                onSoftDelete={softDelete}
+                onHardDelete={hardDelete}
+                onReport={openReport}
+                onEdit={openEdit}
+                onShowEdits={showEdits}
+              />
+              {!posts.length ? <Text style={styles.empty}>尚無貼文。</Text> : null}
+            </>
+          )}
+        />
+
+        <View style={[styles.composer, { paddingHorizontal: 16, paddingBottom: 16 }]}>
+          {replyTargetId ? (
+            <Text style={styles.replyHint}>回覆對象：{replyTargetId.slice(0, 8)}…</Text>
+          ) : (
+            <Text style={styles.replyHint}>發表頂層貼文（或以「回覆此則」巢狀）</Text>
+          )}
+          <TextInput
+            placeholder={locked && !moderateForum ? '串已鎖定，無法發言' : '輸入內容…'}
+            style={[styles.input, styles.multiline]}
+            multiline
+            editable={moderateForum || !locked}
+            value={body}
+            onChangeText={setBody}
+          />
+          <Pressable style={[styles.primaryBtn, locked && !moderateForum ? styles.disabled : null]} disabled={locked && !moderateForum} onPress={reply}>
+            <Text style={styles.primaryBtnText}>送出</Text>
+          </Pressable>
+        </View>
+
+        <Modal visible={reportOpen} transparent animationType="fade">
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>檢舉貼文</Text>
+              <Text style={styles.meta}>請簡述原因（將通知教師於後台列表檢視）。</Text>
+              <TextInput
+                placeholder="檢舉原因"
+                style={[styles.input, styles.multiline]}
+                multiline
+                value={reportReason}
+                onChangeText={setReportReason}
+              />
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <Pressable style={styles.secondaryBtn} onPress={() => setReportOpen(false)}>
+                  <Text style={styles.secondaryBtnText}>取消</Text>
+                </Pressable>
+                <Pressable style={styles.primaryBtn} onPress={submitReport}>
+                  <Text style={styles.primaryBtnText}>送出</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={editOpen} transparent animationType="fade">
+          <View style={styles.modalBackdrop}>
+            <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', padding: 24 }}>
+              <View style={styles.modalCard}>
+                <Text style={styles.modalTitle}>編輯貼文</Text>
+                <TextInput style={[styles.input, styles.multiline]} multiline value={editBody} onChangeText={setEditBody} />
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <Pressable style={styles.secondaryBtn} onPress={() => setEditOpen(false)}>
+                    <Text style={styles.secondaryBtnText}>取消</Text>
+                  </Pressable>
+                  <Pressable style={styles.primaryBtn} onPress={saveEdit}>
+                    <Text style={styles.primaryBtnText}>儲存</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </Modal>
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const styles = StyleSheet.create({
+  title: { fontSize: 20, fontWeight: '900', marginBottom: 10 },
+  banner: { backgroundColor: '#fef3c7', padding: 10, borderRadius: 10, marginBottom: 10, fontWeight: '700' },
+  empty: { color: '#6b7280', marginTop: 18 },
+  meta: { color: '#6b7280', fontSize: 12 },
+  threadWrap: { marginBottom: 4 },
+  post: {
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    gap: 6,
+  },
+  postDeleted: { opacity: 0.85 },
+  postMeta: { color: '#6b7280', fontSize: 12 },
+  postBody: { fontSize: 15, lineHeight: 20 },
+  postBodyMuted: { fontSize: 13, color: '#9ca3af', fontStyle: 'italic' },
+  postActions: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 4 },
+  miniBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#eff6ff',
+  },
+  miniBtnText: { fontSize: 12, fontWeight: '800', color: '#1d4ed8' },
+  miniBtnWarn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#fff7ed',
+  },
+  miniBtnWarnText: { fontSize: 12, fontWeight: '800', color: '#c2410c' },
+  miniBtnMuted: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#f3f4f6',
+  },
+  miniBtnMutedText: { fontSize: 12, fontWeight: '800', color: '#374151' },
+  miniBtnDanger: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#fef2f2',
+  },
+  miniBtnDangerText: { fontSize: 12, fontWeight: '800', color: '#b91c1c' },
+  lockBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  lockBtnText: { color: '#fff', fontWeight: '900', fontSize: 13 },
+  reportCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#fecaca',
+    backgroundColor: '#fffbeb',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    gap: 10,
+  },
+  reportCardTitle: { fontWeight: '900', color: '#991b1b' },
+  reportRow: { gap: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#fde68a', paddingBottom: 8 },
+  reportMeta: { fontSize: 11, color: '#92400e' },
+  reportReason: { fontSize: 13 },
+  composer: {
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#eee',
+    gap: 10,
+  },
+  replyHint: { fontSize: 12, color: '#6b7280', fontWeight: '600' },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  multiline: { minHeight: 90, textAlignVertical: 'top' },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '900' },
+  secondaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#6b7280',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '900' },
+  disabled: { opacity: 0.45 },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
+    gap: 12,
+  },
+  modalTitle: { fontSize: 17, fontWeight: '900' },
+});

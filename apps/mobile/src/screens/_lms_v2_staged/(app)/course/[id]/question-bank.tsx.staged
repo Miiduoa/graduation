@@ -1,0 +1,418 @@
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { canCourseStaffManageContent, useCourseRole } from '@/hooks/useCourseRole';
+import { supabase } from '@/lib/supabase';
+
+type QuestionType = 'single' | 'multiple' | 'boolean' | 'short' | 'essay';
+
+type BankRow = {
+  id: string;
+  question_type: QuestionType;
+  prompt: string;
+  choices: unknown;
+  points: number;
+  correct_answer: unknown;
+  sort_order: number;
+  created_at: string;
+};
+
+function parseChoices(text: string) {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const out: { id: string; label: string }[] = [];
+  for (const line of lines) {
+    const idx = line.indexOf('|');
+    if (idx <= 0) continue;
+    const id = line.slice(0, idx).trim();
+    const label = line.slice(idx + 1).trim();
+    if (!id || !label) continue;
+    out.push({ id, label });
+  }
+  return out;
+}
+
+export default function CourseQuestionBankScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const { session } = useAuth();
+  const uid = session?.user.id;
+  const role = useCourseRole(courseId, uid);
+  const staff = canCourseStaffManageContent(role);
+
+  const [items, setItems] = useState<BankRow[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const [qType, setQType] = useState<QuestionType>('single');
+  const [prompt, setPrompt] = useState('');
+  const [points, setPoints] = useState('1');
+  const [choicesText, setChoicesText] = useState('a|選項 A\nb|選項 B\nc|選項 C');
+  const [singleCorrect, setSingleCorrect] = useState('a');
+  const [multiCorrect, setMultiCorrect] = useState('a,b');
+  const [boolCorrect, setBoolCorrect] = useState(true);
+  const [shortCorrect, setShortCorrect] = useState('');
+
+  const [editing, setEditing] = useState<BankRow | null>(null);
+
+  const load = useCallback(async () => {
+    if (!courseId) return;
+    const { data, error } = await supabase
+      .from('course_question_bank')
+      .select('*')
+      .eq('course_id', courseId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn(error.message);
+      setItems([]);
+      return;
+    }
+    setItems((data ?? []) as BankRow[]);
+  }, [courseId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  function resetForm() {
+    setEditing(null);
+    setQType('single');
+    setPrompt('');
+    setPoints('1');
+    setChoicesText('a|選項 A\nb|選項 B\nc|選項 C');
+    setSingleCorrect('a');
+    setMultiCorrect('a,b');
+    setBoolCorrect(true);
+    setShortCorrect('');
+  }
+
+  function hydrateForEdit(row: BankRow) {
+    setEditing(row);
+    setQType(row.question_type);
+    setPrompt(row.prompt);
+    setPoints(String(row.points ?? 1));
+    if (typeof row.choices === 'object' && row.choices != null && Array.isArray(row.choices)) {
+      const ch = row.choices as { id?: string; label?: string }[];
+      const text = ch
+        .map((c) => `${(c.id ?? '').trim()}|${(c.label ?? '').trim()}`)
+        .filter(Boolean)
+        .join('\n');
+      setChoicesText(text || choicesText);
+    }
+    const ca = row.correct_answer as Record<string, unknown> | null | undefined;
+    if (row.question_type === 'boolean') {
+      const v = ca?.value;
+      setBoolCorrect(v === true || v === 'true');
+    } else if (row.question_type === 'single') {
+      const ids =
+        typeof ca?.optionIds === 'object' &&
+        Array.isArray((ca.optionIds as unknown[]) ?? null) &&
+        (ca.optionIds as string[])[0];
+      setSingleCorrect(typeof ids === 'string' ? ids : 'a');
+    } else if (row.question_type === 'multiple') {
+      const ids = Array.isArray(ca?.optionIds) ? (ca.optionIds as string[]).sort().join(',') : '';
+      setMultiCorrect(ids || 'a');
+    } else if (row.question_type === 'short') {
+      setShortCorrect(typeof ca?.text === 'string' ? ca.text : '');
+    }
+  }
+
+  async function saveRow() {
+    if (!staff || !courseId || !uid) {
+      Alert.alert('僅助教／教師可維護題庫');
+      return;
+    }
+    const pts = Number(points);
+    if (!Number.isFinite(pts) || pts < 0) {
+      Alert.alert('配分錯誤');
+      return;
+    }
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) {
+      Alert.alert('請輸入題幹');
+      return;
+    }
+
+    let choices: { id: string; label: string }[] | null = null;
+    if (qType === 'single' || qType === 'multiple') {
+      choices = parseChoices(choicesText);
+      if (choices.length < 2) {
+        Alert.alert('選擇題至少兩個選項');
+        return;
+      }
+    }
+
+    let correct: unknown = null;
+    if (qType === 'essay') correct = {};
+    if (qType === 'boolean') correct = { value: boolCorrect };
+    if (qType === 'short') correct = { text: shortCorrect.trim() };
+    if (qType === 'single') correct = { optionIds: [singleCorrect.trim()] };
+    if (qType === 'multiple') {
+      const ids = multiCorrect
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .sort();
+      correct = { optionIds: ids };
+    }
+
+    const nextSort =
+      editing != null ? editing.sort_order : items.reduce((m, q) => Math.max(m, q.sort_order ?? 0), 0) + 1;
+
+    let errMsg: string | null = null;
+    if (editing) {
+      const { error } = await supabase
+        .from('course_question_bank')
+        .update({
+          question_type: qType,
+          prompt: trimmedPrompt,
+          choices: qType === 'single' || qType === 'multiple' ? choices : null,
+          points: pts,
+          correct_answer: correct,
+          sort_order: nextSort,
+        })
+        .eq('id', editing.id);
+      errMsg = error?.message ?? null;
+    } else {
+      const { error } = await supabase.from('course_question_bank').insert({
+        course_id: courseId,
+        question_type: qType,
+        prompt: trimmedPrompt,
+        choices: qType === 'single' || qType === 'multiple' ? choices : null,
+        points: pts,
+        correct_answer: correct,
+        sort_order: nextSort,
+        created_by: uid,
+      });
+      errMsg = error?.message ?? null;
+    }
+
+    if (errMsg) {
+      Alert.alert('儲存失敗', errMsg);
+      return;
+    }
+
+    resetForm();
+    await load();
+    Alert.alert('已儲存');
+  }
+
+  async function deleteRow(row: BankRow) {
+    if (!staff) return;
+    Alert.alert('刪除此題', '將移除題庫快照（不等於自動從已匯試卷題目移除）', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '刪除',
+        style: 'destructive',
+        onPress: async () => {
+          const { error } = await supabase.from('course_question_bank').delete().eq('id', row.id);
+          if (error) {
+            Alert.alert('刪除失敗', error.message);
+            return;
+          }
+          if (editing?.id === row.id) resetForm();
+          await load();
+        },
+      },
+    ]);
+  }
+
+  if (!courseId) {
+    return (
+      <View style={styles.center}>
+        <Text>找不到課程</Text>
+      </View>
+    );
+  }
+
+  if (!staff) {
+    return (
+      <View style={styles.screen}>
+        <Text style={{ color: '#6b7280' }}>題庫維護僅對教師與助教開放。</Text>
+        <ScrollView style={{ marginTop: 16 }}>
+          {items.length === 0 ? (
+            <Text style={{ color: '#9ca3af' }}>此課題庫尚未建立項目。</Text>
+          ) : (
+            items.map((item) => (
+              <View key={item.id} style={styles.row}>
+                <Text style={styles.rowTitle}>{item.prompt.slice(0, 120)}{item.prompt.length > 120 ? '…' : ''}</Text>
+                <Text style={styles.rowMeta}>
+                  {item.question_type}｜配分 {item.points}
+                </Text>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={{ paddingBottom: 40 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      <Text style={{ fontWeight: '800', fontSize: 20, marginBottom: 12 }}>課程題庫</Text>
+      <Text style={{ color: '#6b7280', marginBottom: 16 }}>
+        與 import_bank_questions_to_quiz RPC 欄位一致；教師可於試卷頁勾選匯入。此處維護題庫本體 CRUD。
+      </Text>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>{editing ? '編輯題庫項目' : '新增題庫項目'}</Text>
+        <Text style={{ fontWeight: '600', marginBottom: 6 }}>題型</Text>
+        {(['single', 'multiple', 'boolean', 'short', 'essay'] as QuestionType[]).map((t) => (
+          <Pressable
+            key={t}
+            onPress={() => setQType(t)}
+            style={[styles.smallChip, qType === t ? styles.smallChipActive : null]}>
+            <Text style={{ fontWeight: '600', color: qType === t ? '#fff' : '#111' }}>{t}</Text>
+          </Pressable>
+        ))}
+        <TextInput placeholder="題幹" style={[styles.input, { marginTop: 10 }]} value={prompt} onChangeText={setPrompt} multiline />
+        <TextInput placeholder="配分" style={styles.input} value={points} onChangeText={setPoints} keyboardType="decimal-pad" />
+
+        {(qType === 'single' || qType === 'multiple') ? (
+          <>
+            <Text style={{ marginTop: 8, fontWeight: '600' }}>選項（id|標籤）</Text>
+            <TextInput
+              placeholder="每行「a|標籤」"
+              style={[styles.input, styles.multiline]}
+              value={choicesText}
+              onChangeText={setChoicesText}
+              multiline
+            />
+          </>
+        ) : null}
+
+        {qType === 'single' ? (
+          <TextInput placeholder="正解 option id（單選）" style={styles.input} value={singleCorrect} onChangeText={setSingleCorrect} />
+        ) : null}
+        {qType === 'multiple' ? (
+          <TextInput placeholder="正解選項 ids，逗號分隔" style={styles.input} value={multiCorrect} onChangeText={setMultiCorrect} />
+        ) : null}
+        {qType === 'short' ? (
+          <TextInput placeholder="参考答案（自動批改用）" style={styles.input} value={shortCorrect} onChangeText={setShortCorrect} />
+        ) : null}
+        {qType === 'boolean' ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 6 }}>
+            <Text>正確（true）</Text>
+            <Switch value={boolCorrect} onValueChange={setBoolCorrect} />
+          </View>
+        ) : null}
+
+        <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+          <Pressable style={styles.primaryBtn} onPress={() => void saveRow()}>
+            <Text style={styles.primaryBtnText}>{editing ? '更新' : '新增'}</Text>
+          </Pressable>
+          {editing ? (
+            <Pressable style={styles.secondaryBtn} onPress={resetForm}>
+              <Text style={styles.secondaryBtnText}>取消編輯</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+
+      <Text style={{ fontWeight: '700', marginVertical: 12 }}>題庫列表</Text>
+      {items.length === 0 ? (
+        <Text style={{ color: '#9ca3af' }}>尚無題庫項目。</Text>
+      ) : (
+        items.map((item) => (
+          <View key={item.id} style={styles.row}>
+            <Pressable onPress={() => hydrateForEdit(item)}>
+              <Text style={styles.rowTitle}>{item.prompt}</Text>
+              <Text style={styles.rowMeta}>
+                {item.question_type}｜配分 {item.points}｜sort {item.sort_order}
+              </Text>
+            </Pressable>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+              <Pressable style={styles.linkBtn} onPress={() => hydrateForEdit(item)}>
+                <Text style={styles.linkBtnText}>編輯</Text>
+              </Pressable>
+              <Pressable style={styles.dangerBtn} onPress={() => void deleteRow(item)}>
+                <Text style={styles.dangerBtnText}>刪除</Text>
+              </Pressable>
+            </View>
+          </View>
+        ))
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 16 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 8,
+    marginBottom: 20,
+  },
+  cardTitle: { fontWeight: '800', fontSize: 17, marginBottom: 6 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  multiline: { minHeight: 100, textAlignVertical: 'top' },
+  smallChip: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#d1d5db',
+    marginBottom: 6,
+  },
+  smallChipActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
+  primaryBtn: {
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '800' },
+  secondaryBtn: {
+    backgroundColor: '#111827',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '700' },
+  row: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    gap: 6,
+  },
+  rowTitle: { fontSize: 16, fontWeight: '700' },
+  rowMeta: { color: '#6b7280', fontSize: 12 },
+  linkBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#eff6ff' },
+  linkBtnText: { color: '#1d4ed8', fontWeight: '700' },
+  dangerBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#fef2f2' },
+  dangerBtnText: { color: '#b91c1c', fontWeight: '700' },
+});

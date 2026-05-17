@@ -1,0 +1,11 @@
+import { Stack } from 'expo-router';
+
+export default function AuthLayout() {
+  return (
+    <Stack>
+      <Stack.Screen name="login" options={{ title: '登入' }} />
+      <Stack.Screen name="register" options={{ title: '註冊' }} />
+      <Stack.Screen name="auth-callback" options={{ title: 'OAuth', headerShown: false }} />
+    </Stack>
+  );
+}
