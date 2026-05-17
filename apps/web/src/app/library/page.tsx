@@ -3,11 +3,11 @@
 import { useState, useMemo, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
-import { useToast } from '@/components/ui';
+import { useToast, Modal } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { useDemoRole, getCapabilities } from '@/lib/demoRole';
-import { DEMO_LIBRARY_DUE_SOON_BOOK, DEMO_LIBRARY_DUE_SOON_DAYS } from '@/lib/demoData';
-import { useDemoStore, renewBook } from '@/lib/demoStore';
+import { useDemoRole, getCapabilities, getDemoRoleDefinition } from '@/lib/demoRole';
+import { DEMO_LIBRARY_DUE_SOON_BOOK, DEMO_LIBRARY_DUE_SOON_DAYS, DEMO_STUDENTS } from '@/lib/demoData';
+import { useDemoStore, renewBook, reserveBook, transferBook } from '@/lib/demoStore';
 
 interface BorrowedBook {
   id: string;
@@ -243,7 +243,12 @@ export default function LibraryPage(props: {
   const { success, info } = useToast();
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
+  const roleDef = getDemoRoleDefinition(demoRole);
   const store = useDemoStore();
+  // 轉讓 modal 狀態
+  const [transferBookState, setTransferBookState] = useState<BorrowedBook | null>(null);
+  const [transferTo, setTransferTo] = useState<string>('');
+  const closeTransfer = () => { setTransferBookState(null); setTransferTo(''); };
 
   // 從 store 的 borrowingOverrides 合併 DEFAULT_BORROWED，讓續借後的到期日持久化
   const borrowedBooks = useMemo(() => {
@@ -413,6 +418,7 @@ export default function LibraryPage(props: {
                         {book.daysLeft} 天
                       </div>
                       {book.renewCount < 3 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-end' }}>
                         <button
                           type="button"
                           onClick={() => {
@@ -452,6 +458,25 @@ export default function LibraryPage(props: {
                         >
                           {!caps.canBorrowBooks ? '🔒 無法續借' : '續借 +14 天'}
                         </button>
+                        {caps.canBorrowBooks ? (
+                          <button
+                            type="button"
+                            onClick={() => setTransferBookState(book)}
+                            style={{
+                              fontSize: 11,
+                              color: 'var(--muted)',
+                              fontWeight: 600,
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: 0,
+                              textDecoration: 'underline',
+                            }}
+                          >
+                            轉讓 →
+                          </button>
+                        ) : null}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -541,11 +566,74 @@ export default function LibraryPage(props: {
                 );
                 return;
               }
-              success(`✅ 已預約「${title}」，請至 1F 服務台取書`);
+              // 寫入 demoStore.reserveBook，並通知使用者
+              reserveBook({
+                bookId: `cat-${Date.now()}`,
+                bookTitle: title,
+                studentId: 'stu-001',
+                studentName: roleDef.label,
+              });
+              success(`✅ 已預約「${title}」，可在「訊息」收到預約確認，並至 1F 服務台取書`);
             }}
           />
         )}
       </div>
+
+      {/* 轉讓 Modal */}
+      <Modal
+        isOpen={transferBookState !== null}
+        onClose={closeTransfer}
+        title={`轉讓「${transferBookState?.title ?? ''}」`}
+        size="sm"
+        footer={
+          <>
+            <button type="button" className="btn" onClick={closeTransfer}>取消</button>
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => {
+                if (!transferBookState || !transferTo) {
+                  info('請選擇受讓人');
+                  return;
+                }
+                const recipient = DEMO_STUDENTS.find((s) => s.uid === transferTo);
+                transferBook({
+                  bookId: transferBookState.id,
+                  bookTitle: transferBookState.title,
+                  fromStudentName: roleDef.label,
+                  toStudentName: recipient?.displayName ?? transferTo,
+                });
+                success(`✅ 已轉讓給 ${recipient?.displayName ?? transferTo}`);
+                closeTransfer();
+              }}
+            >
+              確認轉讓
+            </button>
+          </>
+        }
+      >
+        <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+          <div style={{ marginBottom: 8 }}>
+            選擇要把《{transferBookState?.title}》轉讓給哪位同學：
+          </div>
+          <select
+            className="input"
+            value={transferTo}
+            onChange={(e) => setTransferTo(e.target.value)}
+            style={{ width: '100%' }}
+          >
+            <option value="">— 選擇同學 —</option>
+            {DEMO_STUDENTS.filter((s) => s.uid !== 'stu-001').map((s) => (
+              <option key={s.uid} value={s.uid}>
+                {s.displayName}（{s.studentId}）
+              </option>
+            ))}
+          </select>
+          <div style={{ marginTop: 12, padding: 10, background: 'var(--panel)', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
+            ℹ️ 轉讓後到期日不變，續借次數累計給新借閱人。受讓人會收到通知。
+          </div>
+        </div>
+      </Modal>
     </SiteShell>
   );
 }

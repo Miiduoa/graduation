@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { SiteShell } from '@/components/SiteShell';
-import { useToast } from '@/components/ui';
+import { useToast, Modal } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { useDemoRole, getCapabilities, getDemoRoleDefinition } from '@/lib/demoRole';
+import { useDemoRole, getCapabilities, getDemoRoleDefinition, type DemoRole } from '@/lib/demoRole';
 import {
   DEMO_COURSES,
   DEMO_USERS,
@@ -15,21 +16,43 @@ import {
   approvePendingAnn,
   type DemoPendingAnn,
 } from '@/lib/demoData';
-import { notifyStudentsAnnApproved } from '@/lib/demoStore';
+import {
+  notifyStudentsAnnApproved,
+  notifySubmitterAnnApproved,
+  setUserDisabled,
+  useDemoStore,
+  isUserDisabled,
+  sendDeptBroadcast,
+} from '@/lib/demoStore';
 
 export default function AdminPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const router = useRouter();
   const [role] = useDemoRole();
   const caps = getCapabilities(role);
   const roleDef = getDemoRoleDefinition(role);
   const { success, info } = useToast();
+  const store = useDemoStore();
   // 待審公告：共用 localStorage（與 announcements/page.tsx 同步）
   // 用空陣列作初始值避免 SSR hydration mismatch，mount 後再從 localStorage 讀
   const [pendingQueue, setPendingQueue] = useState<DemoPendingAnn[]>([]);
   const [userSearch, setUserSearch] = useState('');
-  const [disabledUsers, setDisabledUsers] = useState<Set<string>>(new Set());
+  // 改用 demoStore 持久化停用狀態
+  const isDisabled = (uid: string) => isUserDisabled(uid, store);
+  // 統一 modal 狀態
+  const [actionModal, setActionModal] = useState<{
+    title: string;
+    body: ReactNode;
+    footer?: ReactNode;
+  } | null>(null);
+  // 角色變更 modal
+  const [roleChangeUser, setRoleChangeUser] = useState<typeof DEMO_USERS[number] | null>(null);
+  // 系所廣播 form
+  const [broadcastDraft, setBroadcastDraft] = useState({ title: '', body: '' });
+  // 維護模式
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
 
   useEffect(() => {
     // handler 包一層讓 lint 不認為是「直接」在 effect body 呼叫 setState
@@ -111,9 +134,17 @@ export default function AdminPage(props: {
     const ann = pendingQueue.find((p) => p.id === id);
     approvePendingAnn(id);
     setPendingQueue(readPendingAnns());
-    // 通知學生有新公告（與 announcements/page.tsx 核准行為一致）
-    if (ann) notifyStudentsAnnApproved(ann.title, ann.source);
-    success('✅ 已核准並發布公告，學生現在可以看到');
+    if (ann) {
+      // 通知學生有新公告
+      notifyStudentsAnnApproved(ann.title, ann.source);
+      // 通知原提交者：你提交的公告已核准
+      notifySubmitterAnnApproved({
+        title: ann.title,
+        submitterRole: ann.submittedByRole as DemoRole,
+        approvedBy: roleDef.label,
+      });
+    }
+    success('✅ 已核准並發布公告，學生與提交者皆收到通知');
   };
 
   const rejectPending = (id: string) => {
@@ -299,12 +330,12 @@ export default function AdminPage(props: {
                   </div>
                   <div className="insetGroup">
                     {filteredUsers.map((u, i) => {
-                      const isDisabled = disabledUsers.has(u.uid);
+                      const disabled = isDisabled(u.uid);
                       return (
                         <div
                           key={u.uid}
                           className="insetGroupRow"
-                          style={{ borderTop: i === 0 ? 'none' : undefined, opacity: isDisabled ? 0.55 : 1 }}
+                          style={{ borderTop: i === 0 ? 'none' : undefined, opacity: disabled ? 0.55 : 1 }}
                         >
                           <div className="insetGroupRowContent">
                             <div className="insetGroupRowTitle" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -317,7 +348,7 @@ export default function AdminPage(props: {
                               >
                                 {u.role}
                               </span>
-                              {isDisabled && (
+                              {disabled && (
                                 <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 6, background: 'rgba(255,59,48,0.12)', color: '#C0392B' }}>
                                   已停用
                                 </span>
@@ -329,26 +360,27 @@ export default function AdminPage(props: {
                             <button
                               type="button"
                               onClick={() => {
-                                setDisabledUsers((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(u.uid)) { next.delete(u.uid); success(`已重新啟用 ${u.displayName} 的帳號`); }
-                                  else { next.add(u.uid); info(`已停用 ${u.displayName} 的帳號（demo）`); }
-                                  return next;
-                                });
+                                if (disabled) {
+                                  setUserDisabled(u.uid, false);
+                                  success(`已重新啟用 ${u.displayName} 的帳號`);
+                                } else {
+                                  setUserDisabled(u.uid, true, '管理員手動停用');
+                                  info(`已停用 ${u.displayName} 的帳號（可再次點擊啟用）`);
+                                }
                               }}
                               style={{
                                 padding: '4px 10px', fontSize: 11, borderRadius: 6, cursor: 'pointer',
-                                background: isDisabled ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.10)',
-                                border: `1px solid ${isDisabled ? '#34C759' : '#FF3B30'}`,
-                                color: isDisabled ? '#1F7A2E' : '#C0392B',
+                                background: disabled ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.10)',
+                                border: `1px solid ${disabled ? '#34C759' : '#FF3B30'}`,
+                                color: disabled ? '#1F7A2E' : '#C0392B',
                                 fontWeight: 700,
                               }}
                             >
-                              {isDisabled ? '啟用' : '停用'}
+                              {disabled ? '啟用' : '停用'}
                             </button>
                             <button
                               type="button"
-                              onClick={() => info(`已開啟 ${u.displayName} 的角色設定（demo）`)}
+                              onClick={() => setRoleChangeUser(u)}
                               style={{
                                 padding: '4px 10px', fontSize: 11, background: 'none',
                                 border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', color: 'var(--muted)',
@@ -407,18 +439,17 @@ export default function AdminPage(props: {
                 <div className="sectionCard">
                   <div className="homeSectionHeader">
                     <h2 className="homeSectionTitle">⚙️ 系統設定</h2>
+                    <span className="homeSectionNote">維護模式 {maintenanceMode ? '🟠 開' : '🟢 關'}</span>
                   </div>
                   <div className="insetGroup">
-                    {[
-                      { icon: '🏫', title: '學校資訊', meta: '校徽、聯絡資訊、學期設定' },
-                      { icon: '🔐', title: '認證設定', meta: 'SSO、密碼策略、雙因素' },
-                      { icon: '📊', title: '系統日誌', meta: '登入紀錄、API 錯誤、稽核軌跡' },
-                      { icon: '🔔', title: '通知設定', meta: '推播、Email、SMS' },
-                    ].map((row, i) => (
+                    {SYSTEM_SETTINGS_ROWS.map((row, i) => (
                       <button
                         key={row.title}
                         type="button"
-                        onClick={() => info(`已開啟「${row.title}」設定面板（demo）`)}
+                        onClick={() => setActionModal({
+                          title: `${row.icon} ${row.title}`,
+                          body: row.body,
+                        })}
                         className="insetGroupRow"
                         style={{
                           borderTop: i === 0 ? 'none' : undefined,
@@ -436,13 +467,52 @@ export default function AdminPage(props: {
                         <span className="insetGroupRowChevron">›</span>
                       </button>
                     ))}
+                    {/* 維護模式 toggle */}
+                    <div
+                      className="insetGroupRow"
+                      style={{ width: '100%' }}
+                    >
+                      <div className="insetGroupRowIcon">🚧</div>
+                      <div className="insetGroupRowContent">
+                        <div className="insetGroupRowTitle">維護模式</div>
+                        <div className="insetGroupRowMeta">
+                          {maintenanceMode ? '已啟用：學生端會看到維護橫幅' : '未啟用：系統正常運作'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMaintenanceMode(!maintenanceMode);
+                          if (!maintenanceMode) {
+                            sendDeptBroadcast({
+                              title: '系統將於今晚進入維護模式',
+                              body: '系統將於今晚 23:00 進入例行維護，預計約 2 小時。請預先儲存進度。',
+                              audience: ['student', 'teacher', 'ta'],
+                              fromName: '系統管理員',
+                            });
+                            success('已啟用維護模式並廣播給全校');
+                          } else {
+                            info('已關閉維護模式');
+                          }
+                        }}
+                        style={{
+                          padding: '6px 12px', fontSize: 12, borderRadius: 8, cursor: 'pointer',
+                          background: maintenanceMode ? 'rgba(255,149,0,0.12)' : 'var(--panel)',
+                          border: `1px solid ${maintenanceMode ? '#FF9500' : 'var(--border)'}`,
+                          color: maintenanceMode ? '#C17A00' : 'var(--muted)', fontWeight: 700,
+                        }}
+                      >
+                        {maintenanceMode ? '🟠 已開啟' : '⚪ 關閉'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </>
             ) : null}
 
-            {/* 系主任額外：教師名冊 */}
+            {/* 系主任額外：教師名冊 + 系所廣播 */}
             {isDeptHead ? (
+              <>
               <div className="sectionCard">
                 <div className="homeSectionHeader">
                   <h2 className="homeSectionTitle">🧑‍🏫 教師名冊</h2>
@@ -462,7 +532,32 @@ export default function AdminPage(props: {
                       </div>
                       <button
                         type="button"
-                        onClick={() => info(`已開啟 ${c.instructor} 老師的檔案（demo）`)}
+                        onClick={() => setActionModal({
+                          title: `🧑‍🏫 ${c.instructor} 老師檔案`,
+                          body: (
+                            <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+                              <div><strong>系所：</strong>{schoolName ?? '靜宜大學'} 資訊管理系</div>
+                              <div><strong>授課課程：</strong>{c.name}（{c.code}）</div>
+                              <div><strong>教室：</strong>{c.room}</div>
+                              <div><strong>本學期學生：</strong>{c.members} 位</div>
+                              <div><strong>學分數：</strong>{c.credits} 學分</div>
+                              <div><strong>最近一則動態：</strong>{c.lastMessage}（{c.lastTime}）</div>
+                              <div style={{ marginTop: 12, padding: 10, background: 'var(--panel)', borderRadius: 8, fontSize: 12 }}>
+                                ℹ️ 系主任可以從此檔案進一步檢視該教師本學期的成績分布、出缺席與待批改件數。
+                              </div>
+                            </div>
+                          ),
+                          footer: (
+                            <Link
+                              href={`/teacher/course/${c.id}${q}`}
+                              className="btn primary"
+                              onClick={() => setActionModal(null)}
+                              style={{ textDecoration: 'none' }}
+                            >
+                              進入課程工作台 →
+                            </Link>
+                          ),
+                        })}
                         style={{
                           padding: '4px 10px',
                           fontSize: 11,
@@ -479,6 +574,54 @@ export default function AdminPage(props: {
                   ))}
                 </div>
               </div>
+
+              {/* 系所廣播 */}
+              <div className="sectionCard">
+                <div className="homeSectionHeader">
+                  <h2 className="homeSectionTitle">📢 系所廣播</h2>
+                  <span className="homeSectionNote">寄給全系師生</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="廣播標題（例：本學期期末考時程公告）"
+                    value={broadcastDraft.title}
+                    onChange={(e) => setBroadcastDraft({ ...broadcastDraft, title: e.target.value })}
+                    style={{ width: '100%', fontSize: 13, padding: '8px 12px' }}
+                  />
+                  <textarea
+                    className="input"
+                    placeholder="廣播內文…"
+                    rows={3}
+                    value={broadcastDraft.body}
+                    onChange={(e) => setBroadcastDraft({ ...broadcastDraft, body: e.target.value })}
+                    style={{ width: '100%', fontSize: 13, padding: '8px 12px', fontFamily: 'inherit' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn primary"
+                    onClick={() => {
+                      if (!broadcastDraft.title.trim() || !broadcastDraft.body.trim()) {
+                        info('請輸入標題與內文');
+                        return;
+                      }
+                      sendDeptBroadcast({
+                        title: broadcastDraft.title,
+                        body: broadcastDraft.body,
+                        audience: ['student', 'teacher', 'ta'],
+                        fromName: roleDef.label,
+                      });
+                      setBroadcastDraft({ title: '', body: '' });
+                      success('✅ 已廣播給全系師生，可至訊息頁查看');
+                    }}
+                    style={{ alignSelf: 'flex-start' }}
+                  >
+                    📤 發送廣播
+                  </button>
+                </div>
+              </div>
+              </>
             ) : null}
           </div>
         </div>
@@ -543,7 +686,7 @@ export default function AdminPage(props: {
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
-              onClick={() => success('已開啟「發布公告」表單（demo）')}
+              onClick={() => router.push(`/announcements${q ? q + '&' : '?'}compose=1`)}
               className="btn primary"
             >
               ＋ 發布公告
@@ -554,6 +697,151 @@ export default function AdminPage(props: {
           </div>
         </div>
       </div>
+
+      {/* 通用動作 Modal */}
+      <Modal
+        isOpen={actionModal !== null}
+        onClose={() => setActionModal(null)}
+        title={actionModal?.title}
+        size="lg"
+        footer={actionModal?.footer ?? (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setActionModal(null)}
+          >
+            關閉
+          </button>
+        )}
+      >
+        {actionModal?.body}
+      </Modal>
+
+      {/* 角色變更 Modal */}
+      <Modal
+        isOpen={roleChangeUser !== null}
+        onClose={() => setRoleChangeUser(null)}
+        title={`角色設定：${roleChangeUser?.displayName}`}
+        size="sm"
+        footer={
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setRoleChangeUser(null)}
+          >
+            關閉
+          </button>
+        }
+      >
+        {roleChangeUser ? (
+          <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+            <div style={{ marginBottom: 12 }}>
+              <strong>{roleChangeUser.displayName}</strong>（{roleChangeUser.email}）
+            </div>
+            <div style={{ marginBottom: 10 }}>目前角色：<strong>{roleChangeUser.role}</strong></div>
+            <div style={{ marginBottom: 10 }}>變更為：</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(['student', 'teacher', 'ta', 'club_officer', 'department_head', 'admin', 'alumni'] as DemoRole[]).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => {
+                    info(`已將 ${roleChangeUser.displayName} 的角色變更為 ${r}（demo：寫入 audit log）`);
+                    setRoleChangeUser(null);
+                  }}
+                  disabled={r === roleChangeUser.role}
+                  style={{
+                    padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: r === roleChangeUser.role ? 'default' : 'pointer',
+                    border: '1px solid var(--border)',
+                    background: r === roleChangeUser.role ? 'var(--brand-soft)' : 'var(--panel)',
+                    color: r === roleChangeUser.role ? 'var(--brand)' : 'var(--text)',
+                    opacity: r === roleChangeUser.role ? 0.7 : 1,
+                  }}
+                >
+                  {r}{r === roleChangeUser.role ? ' ✓' : ''}
+                </button>
+              ))}
+            </div>
+            <div style={{ marginTop: 12, padding: 10, background: 'var(--panel)', borderRadius: 8, fontSize: 12, color: 'var(--muted)' }}>
+              ℹ️ 角色變更會寫入安全日誌，並要求該使用者下次登入重新驗證。
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </SiteShell>
   );
 }
+
+// ── 系統設定 modal 內容（demo 用） ─────────────────────────────
+const SYSTEM_SETTINGS_ROWS: { icon: string; title: string; meta: string; body: ReactNode }[] = [
+  {
+    icon: '🏫',
+    title: '學校資訊',
+    meta: '校徽、聯絡資訊、學期設定',
+    body: (
+      <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+        <div><strong>學校：</strong>靜宜大學</div>
+        <div><strong>學年度：</strong>114 學年度 第 2 學期</div>
+        <div><strong>學期起訖：</strong>2026-02-15 ~ 2026-06-22</div>
+        <div><strong>校長：</strong>林思伶</div>
+        <div><strong>聯絡 Email：</strong>contact@pu.edu.tw</div>
+        <div><strong>校徽：</strong>已上傳（pu_logo.svg）</div>
+        <div style={{ marginTop: 12, padding: 10, background: 'var(--panel)', borderRadius: 8, fontSize: 12 }}>
+          ℹ️ 編輯學校資訊需要超級管理員權限與審核流程，demo 僅供檢視。
+        </div>
+      </div>
+    ),
+  },
+  {
+    icon: '🔐',
+    title: '認證設定',
+    meta: 'SSO、密碼策略、雙因素',
+    body: (
+      <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+        <div><strong>單一登入（SSO）：</strong>✅ 已啟用（pu.edu.tw OAuth2）</div>
+        <div><strong>密碼最短長度：</strong>8 字元</div>
+        <div><strong>密碼複雜度：</strong>需包含大小寫 + 數字</div>
+        <div><strong>雙因素驗證：</strong>強制（教師、行政、管理員）／可選（學生）</div>
+        <div><strong>Session 過期：</strong>30 天</div>
+        <div><strong>登入失敗鎖定：</strong>5 次失敗即鎖定 15 分鐘</div>
+      </div>
+    ),
+  },
+  {
+    icon: '📊',
+    title: '系統日誌',
+    meta: '登入紀錄、API 錯誤、稽核軌跡',
+    body: (
+      <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+        <div style={{ marginBottom: 8 }}><strong>近 24 小時日誌摘要：</strong></div>
+        <div style={{ background: 'var(--panel)', padding: 12, borderRadius: 8, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.6 }}>
+          <div>09:23 [WARN] 5 次登入失敗（IP: 荷蘭 Tor 出口節點）</div>
+          <div>08:45 [INFO] API 請求速率 83% 峰值</div>
+          <div>07:30 [OK] 例行備份完成 1.2 GB</div>
+          <div>06:15 [INFO] 1 位教師密碼重設成功</div>
+          <div>02:00 [OK] 排程任務：清除過期 session 完成</div>
+        </div>
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted)' }}>
+          完整日誌可匯出 CSV / Splunk，並支援按角色 / 時間 / 事件類型過濾。
+        </div>
+      </div>
+    ),
+  },
+  {
+    icon: '🔔',
+    title: '通知設定',
+    meta: '推播、Email、SMS',
+    body: (
+      <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+        <div><strong>App 推播：</strong>✅ 已啟用（Firebase Cloud Messaging）</div>
+        <div><strong>Email 通知：</strong>✅ 已啟用（SendGrid）</div>
+        <div><strong>SMS 通知：</strong>⚠️ 僅緊急公告</div>
+        <div><strong>批次通知時段：</strong>07:00–22:00</div>
+        <div><strong>每日通知上限：</strong>每使用者 20 則</div>
+        <div style={{ marginTop: 12, padding: 10, background: 'var(--panel)', borderRadius: 8, fontSize: 12 }}>
+          ℹ️ 系所廣播會繞過每日上限，但仍受時段限制。
+        </div>
+      </div>
+    ),
+  },
+];
