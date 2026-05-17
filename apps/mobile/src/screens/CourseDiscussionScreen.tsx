@@ -40,6 +40,7 @@ import {
   courseChipScrollContentStyle,
 } from '../ui/courseChipShell';
 import { useNavigation } from '@react-navigation/native';
+import { safeNavigate } from '../utils/safeNavigate';
 
 type RouteProps = {
   route?: {
@@ -389,7 +390,7 @@ export default function CourseDiscussionScreen(props: RouteProps) {
                 opacity: pressed ? 0.92 : 1,
               })}
               onPress={() => {
-                navigation.navigate('DiscussionThreadDetail', {
+                safeNavigate(navigation, 'DiscussionThreadDetail', {
                   groupId: groupIdStr || `tc:${courseId}`,
                   groupName,
                   discussionId: t.id,

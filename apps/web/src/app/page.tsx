@@ -15,6 +15,7 @@ import {
 } from '@/lib/firebase';
 import { mockAnnouncements } from '@campus/shared/src/mockData';
 import { useDemoRole, getDemoRoleDefinition } from '@/lib/demoRole';
+import { getStudentContextSummary, getTeacherContextSummary, getClubOfficerContextSummary, getDeptHeadContextSummary, getAdminContextSummary } from '@/lib/aiContext';
 
 function formatGreeting() {
   const hour = new Date().getHours();
@@ -90,6 +91,115 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
   }, [schoolId, user]);
 
   const userLabel = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? '訪客';
+
+  // ── 待審公告計數（系主任 / 管理員）：需訂閱 demoPendingAnnChange 才能即時更新 ──
+  const [pendingAnnTick, setPendingAnnTick] = useState(0);
+  useEffect(() => {
+    const handler = () => setPendingAnnTick((n) => n + 1);
+    window.addEventListener('demoPendingAnnChange', handler);
+    window.addEventListener('storage', handler);
+    return () => {
+      window.removeEventListener('demoPendingAnnChange', handler);
+      window.removeEventListener('storage', handler);
+    };
+  }, []);
+
+  // Context 函數在 render 時才呼叫，確保讀到最新 localStorage 資料
+  const aiCtx = useMemo(() => demoRole === 'student' ? getStudentContextSummary() : null, [demoRole]);
+  const teacherCtx = useMemo(() => (demoRole === 'teacher' || demoRole === 'ta') ? getTeacherContextSummary() : null, [demoRole]);
+  const clubCtx = useMemo(() => demoRole === 'club_officer' ? getClubOfficerContextSummary() : null, [demoRole]);
+  // pendingAnnTick 是觸發器：demoPendingAnnChange 時 +1，迫使 useMemo 重新讀 readPendingAnns()
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: pendingAnnTick triggers re-read of localStorage
+  const deptCtx = useMemo(() => demoRole === 'department_head' ? getDeptHeadContextSummary() : null, [demoRole, pendingAnnTick]);
+  const adminCtx = useMemo(() => demoRole === 'admin' ? getAdminContextSummary() : null, [demoRole]);
+
+  const heroConfig = (() => {
+    switch (demoRole) {
+      case 'teacher':
+        return {
+          eyebrow: 'Teaching Dashboard',
+          headline: `今日 2 堂課 · ${teacherCtx?.totalPending ?? 5} 份待批改`,
+          sub: '資料結構 CS301 09:10–10:50 · 最舊待批改：2 天前繳交',
+          buttons: [
+            { href: `/teacher/course/c1${q}`, label: '⚡ 進入工作台', primary: true },
+            { href: `/grades${q}`, label: '成績分布' },
+            { href: `/ai-assistant${q}`, label: 'AI 分析' },
+          ],
+          badge: '王大明老師',
+        };
+      case 'ta':
+        return {
+          eyebrow: 'TA Dashboard',
+          headline: `1 門助教課 · ${teacherCtx?.totalPending ?? 8} 件待批改`,
+          sub: '資料結構（林助教）· 本週辦公室時間 Wed 14:00–15:30',
+          buttons: [
+            { href: `/teacher/course/c1${q}`, label: '⚡ 進入助教台', primary: true },
+            { href: `/grades${q}`, label: '成績列表' },
+          ],
+          badge: '林助教',
+        };
+      case 'club_officer':
+        return {
+          eyebrow: 'Club Dashboard',
+          headline: `${clubCtx?.clubName ?? '程式設計社'} · ${clubCtx?.pendingMemberRequests ?? 3} 筆申請待審`,
+          sub: `${clubCtx?.memberCount ?? 120} 位成員 · 本週五社課 15:30 工程館 203`,
+          buttons: [
+            { href: `/clubs${q}`, label: '⚡ 社團管理', primary: true },
+            { href: `/announcements${q}`, label: '發布公告' },
+            { href: `/ai-assistant${q}`, label: 'AI 招募文案' },
+          ],
+          badge: '陳社長',
+        };
+      case 'department_head':
+        return {
+          eyebrow: 'Department Dashboard',
+          headline: `${deptCtx?.pendingAnnCount ?? 0} 則公告待審核 · 全系 ${deptCtx?.studentCount ?? 312} 位學生`,
+          sub: `資訊工程學系 · 本學期開設課程 · ${deptCtx?.teacherCount ?? 19} 位教師`,
+          buttons: [
+            { href: `/admin${q}`, label: '⚡ 行政後台', primary: true },
+            { href: `/announcements${q}`, label: '公告管理' },
+            { href: `/ai-assistant${q}`, label: 'AI 助理' },
+          ],
+          badge: '黃主任',
+        };
+      case 'admin':
+        return {
+          eyebrow: 'System Dashboard',
+          headline: `系統${adminCtx?.systemOk ? '正常' : '異常'} · 今日 ${adminCtx?.securityEventCount ?? 0} 件安全事件`,
+          sub: `${adminCtx?.activeUsers ?? 89} 位活躍使用者 · API 回應正常 · 最近備份今日 03:00`,
+          buttons: [
+            { href: `/admin${q}`, label: '⚡ 系統後台', primary: true },
+            { href: `/ai-assistant${q}`, label: 'AI 安全分析' },
+          ],
+          badge: adminCtx?.hasSecurity ? '⚠️ 注意安全警示' : '✅ 系統正常',
+        };
+      case 'alumni':
+        return {
+          eyebrow: 'Alumni Portal',
+          headline: '歡迎回來，李校友 · 已畢業 3 年',
+          sub: '資訊工程學系 109 屆 · 128 學分 · GPA 3.65 · 校友服務與母校資訊都在這裡',
+          buttons: [
+            { href: `/announcements${q}`, label: '🎓 校園公告', primary: true },
+            { href: `/clubs${q}`, label: '校友活動' },
+            { href: `/profile${q}`, label: '我的檔案' },
+          ],
+          badge: '109 屆校友',
+        };
+      default: // student
+        return {
+          eyebrow: 'Today Dashboard',
+          headline: `今日 3 堂課 · ${aiCtx?.pendingAssignmentCount ?? 2} 份作業截止`,
+          sub: '資料結構 09:10 · 微積分 13:10 · 英文 15:10',
+          buttons: [
+            { href: `/timetable${q}`, label: '📅 查看課表', primary: true },
+            { href: `/grades${q}`, label: '我的成績' },
+            { href: `/ai-assistant${q}`, label: '問 AI' },
+          ],
+          badge: loading ? '整理中…' : `${announcements.length} 則今日更新`,
+        };
+    }
+  })();
+
   const importantAnnouncements = useMemo(
     () =>
       announcements.filter(
@@ -147,10 +257,51 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
             </div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <Link href={`/login${q}`} className="btn primary">
-                登入開始
+                🎭 看 8 種角色 demo
               </Link>
               <Link href={`/announcements${q}`} className="btn">
                 先看公告
+              </Link>
+            </div>
+          </div>
+
+          {/* 首次到訪導覽：把 demo 路徑說清楚 */}
+          <div
+            className="card"
+            style={{
+              padding: '16px 20px',
+              background: 'var(--info-soft)',
+              border: '1px solid var(--info)',
+              display: 'grid',
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 700,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: 'var(--info)',
+              }}
+            >
+              👋 第一次到訪？
+            </div>
+            <div style={{ fontSize: 14, lineHeight: 1.75, color: 'var(--text)' }}>
+              這是「校園整合應用」畢業專題的 demo。我們把 <strong>8 種角色</strong>
+              （學生、教師、TA、社團幹部、系主任、管理員、校友、訪客）都建立了示範流程，
+              你可以從 <Link href={`/login${q}`}>登入頁</Link> 任選一個身份進入，
+              或進站後從右上角「身份膠囊」一鍵切換。每個角色看到的權限、入口都不同。
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Link href={`/login${q}`} className="btn primary" style={{ fontSize: 13 }}>
+                👩‍🎓 從學生身份開始
+              </Link>
+              <Link href={`/admin${q}`} className="btn" style={{ fontSize: 13 }}>
+                🏛️ 看管理員後台
+              </Link>
+              <Link href={`/teacher/course/c1${q}`} className="btn" style={{ fontSize: 13 }}>
+                🧑‍🏫 看教師端
               </Link>
             </div>
           </div>
@@ -217,6 +368,214 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
           </div>
         ) : null}
 
+        {/* ── AI Today 提醒浮動卡（學生 / 教師） ── */}
+        {demoRole === 'student' && aiCtx && (aiCtx.pendingAssignmentCount > 0 || aiCtx.libraryDueSoonDays <= 3 || aiCtx.nextExam) && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(94,106,210,0.12) 0%, rgba(142,186,255,0.08) 100%)',
+              border: '1px solid rgba(94,106,210,0.28)',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--brand)', marginBottom: 6 }}>
+                🤖 AI 今日提醒
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+                {aiCtx.pendingAssignmentCount > 0 && aiCtx.soonestAssignment && (
+                  <div>📝 <strong>{aiCtx.pendingAssignmentCount} 份作業</strong>待繳，最緊急：【{aiCtx.soonestAssignment.courseName}】{aiCtx.soonestAssignment.title} 截止 <strong>{aiCtx.soonestAssignment.due}</strong></div>
+                )}
+                {aiCtx.nextExam && (
+                  <div>📅 下一場考試：【{aiCtx.nextExam.courseName}】{aiCtx.nextExam.title}，{aiCtx.nextExam.date} {aiCtx.nextExam.time} @ {aiCtx.nextExam.location}</div>
+                )}
+                {aiCtx.libraryDueSoonDays <= 3 && (
+                  <div>📚 《{aiCtx.libraryDueSoonBook}》還有 <strong>{aiCtx.libraryDueSoonDays} 天</strong>到期，<Link href={`/library${q}`} style={{ color: 'var(--brand)' }}>前往續借 →</Link></div>
+                )}
+                {aiCtx.nextClubActivity && (
+                  <div>🎯 【{aiCtx.nextClubActivity.clubName}】{aiCtx.nextClubActivity.title}，{aiCtx.nextClubActivity.date}</div>
+                )}
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('我今天有什麼重要的事要做？整理一下截止日和考試')}`}
+              className="btn primary"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI 規劃 →
+            </Link>
+          </div>
+        )}
+
+        {/* ── AI 今日提醒（教師）── */}
+        {demoRole === 'teacher' && teacherCtx && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(15,139,141,0.12) 0%, rgba(0,200,200,0.06) 100%)',
+              border: '1px solid rgba(15,139,141,0.28)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 4 }}>🤖 AI 今日提醒</div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                資料結構（CS301）有 <strong>{teacherCtx.totalPending} 份作業</strong>待批改，其中 {teacherCtx.pendingCount} 份尚未開始。今日班級出席率待確認。
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我查一下資料結構今天的點名和待批改作業情況')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
+          </div>
+        )}
+
+        {/* ── AI 今日提醒（TA）── */}
+        {demoRole === 'ta' && teacherCtx && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(167,139,250,0.06) 100%)',
+              border: '1px solid rgba(124,58,237,0.28)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#7C3AED', marginBottom: 4 }}>🤖 AI 批改助理</div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                資料結構有 <strong>{teacherCtx.totalPending} 份程式作業</strong>待批改。本週辦公室時間 Wed 14:00–15:30。
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我列出所有待批改的作業並排序優先順序')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
+          </div>
+        )}
+
+        {/* ── AI 今日提醒（社團幹部）── */}
+        {demoRole === 'club_officer' && clubCtx && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(52,199,89,0.10) 0%, rgba(52,199,89,0.04) 100%)',
+              border: '1px solid rgba(52,199,89,0.30)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#1F7A2E', marginBottom: 4 }}>🤖 AI 社團助理</div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                {clubCtx.clubName}有 <strong>{clubCtx.pendingMemberRequests} 筆成員申請</strong>待審核。
+                {clubCtx.nextActivity ? ` 下次活動：${clubCtx.nextActivity.title}（${clubCtx.nextActivity.date}）。` : ''}
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我寫一份社團招募公告草稿')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
+          </div>
+        )}
+
+        {/* ── AI 今日提醒（系主任）── */}
+        {demoRole === 'department_head' && deptCtx && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(255,149,0,0.10) 0%, rgba(255,149,0,0.04) 100%)',
+              border: '1px solid rgba(255,149,0,0.30)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#C17A00', marginBottom: 4 }}>🤖 AI 行政助理</div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                有 <strong>{deptCtx.pendingAnnCount} 則公告</strong>待審核發布。全系共 {deptCtx.studentCount} 位學生、{deptCtx.teacherCount} 位教師。
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我查看待審核公告並給出處理建議')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
+          </div>
+        )}
+
+        {/* ── AI 今日提醒（管理員）── */}
+        {demoRole === 'admin' && adminCtx && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: adminCtx.hasSecurity
+                ? 'linear-gradient(135deg, rgba(255,59,48,0.10) 0%, rgba(255,59,48,0.04) 100%)'
+                : 'linear-gradient(135deg, rgba(52,199,89,0.10) 0%, rgba(52,199,89,0.04) 100%)',
+              border: `1px solid ${adminCtx.hasSecurity ? 'rgba(255,59,48,0.30)' : 'rgba(52,199,89,0.30)'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: adminCtx.hasSecurity ? '#C0392B' : '#1F7A2E', marginBottom: 4 }}>
+                {adminCtx.hasSecurity ? '⚠️ 安全警示' : '🤖 AI 系統助理'}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                {adminCtx.hasSecurity
+                  ? `今日偵測到 ${adminCtx.securityEventCount} 件異常登入嘗試，來自境外 IP。建議立即查看安全日誌。`
+                  : `系統正常運行，${adminCtx.activeUsers} 位活躍使用者，無安全事件。`}
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('分析今日系統安全事件，給出處置建議')}`}
+              className="btn"
+              style={{
+                fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0,
+                ...(adminCtx.hasSecurity ? { background: 'var(--danger)', color: '#fff', borderColor: 'var(--danger)' } : {}),
+              }}
+            >
+              {adminCtx.hasSecurity ? '⚠️ 立即查看' : '問 AI →'}
+            </Link>
+          </div>
+        )}
+
         <div
           className="card"
           style={{
@@ -237,29 +596,25 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
           >
             <div style={{ maxWidth: 760 }}>
               <div className="pageHeadEyebrow" style={{ marginBottom: 10 }}>
-                Today Dashboard
+                {heroConfig.eyebrow}
               </div>
               <h2 style={{ margin: 0, fontSize: 32, fontWeight: 900, letterSpacing: '-0.05em' }}>
-                先完成今天最重要的一步
+                {heroConfig.headline}
               </h2>
               <p className="sub" style={{ marginTop: 10 }}>
-                課程、校園與收件匣都在，但首頁只顯示會改變你下一步的內容。
+                {heroConfig.sub}
               </p>
             </div>
             <span className="pill brand">
-              {loading ? '整理中…' : `${announcements.length} 則今日更新`}
+              {heroConfig.badge}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <Link href={`/groups${q}`} className="btn primary">
-              進入課程
-            </Link>
-            <Link href={`/map${q}`} className="btn">
-              打開校園
-            </Link>
-            <Link href={`/announcements${q}`} className="btn">
-              查看收件匣
-            </Link>
+            {heroConfig.buttons.map((btn) => (
+              <Link key={btn.label} href={btn.href} className={btn.primary ? 'btn primary' : 'btn'}>
+                {btn.label}
+              </Link>
+            ))}
           </div>
         </div>
 
@@ -270,19 +625,68 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
             gap: 16,
           }}
         >
-          {[
-            {
+          {(() => {
+            // 角色感知統計卡：每個角色看到不同的「核心指標」
+            const baseAnnCard = {
               label: '重要公告',
               value: importantAnnouncements || announcements.length,
               tone: 'var(--warning)',
-            },
-            { label: '累計 GPA', value: gpa != null ? gpa.toFixed(2) : '—', tone: 'var(--brand)' },
-            {
+            };
+            const idCard = {
               label: '登入身份',
               value: user?.email ? '已登入' : demoRoleDef.shortLabel,
               tone: 'var(--growth)',
-            },
-          ].map((item) => (
+            };
+            const gpaCard = {
+              label: '累計 GPA',
+              value: gpa != null ? gpa.toFixed(2) : '3.82',
+              tone: 'var(--brand)',
+            };
+            const teachingCard = {
+              label: '我授課的課程',
+              value: '1 門 · 48 位學生',
+              tone: 'var(--brand)',
+            };
+            const taCard = {
+              label: '助教課程',
+              value: '1 門 · 8 件待批改',
+              tone: '#7C3AED',
+            };
+            const clubOfficerCard = {
+              label: '社團成員',
+              value: '120 人',
+              tone: '#34C759',
+            };
+            const deptCard = {
+              label: '待審公告',
+              value: '3 件',
+              tone: '#FF9500',
+            };
+            const adminCard = {
+              label: '系統狀態',
+              value: '正常運行',
+              tone: 'var(--success)',
+            };
+
+            switch (demoRole) {
+              case 'teacher':
+                return [baseAnnCard, teachingCard, idCard];
+              case 'ta':
+                return [baseAnnCard, taCard, idCard];
+              case 'club_officer':
+                return [baseAnnCard, clubOfficerCard, idCard];
+              case 'department_head':
+                return [deptCard, baseAnnCard, idCard];
+              case 'admin':
+                return [adminCard, deptCard, idCard];
+              case 'alumni':
+              case 'guest':
+                return [baseAnnCard, idCard];
+              case 'student':
+              default:
+                return [baseAnnCard, gpaCard, idCard];
+            }
+          })().map((item) => (
             <div key={item.label} className="card" style={{ '--tone': item.tone } as CSSProperties}>
               <div style={{ color: 'var(--muted)', fontSize: 12, fontWeight: 700 }}>
                 {item.label}

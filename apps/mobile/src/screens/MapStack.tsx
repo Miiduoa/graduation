@@ -12,6 +12,7 @@ import { OnBusModeScreen } from './OnBusModeScreen';
 import { GoogleMapsLikeScreen } from './GoogleMapsLikeScreen';
 import { BusStopDetailScreen } from './BusStopDetailScreen';
 import { TripPlannerScreen } from './TripPlannerScreen';
+import { IndoorFloorMapScreen } from './IndoorFloorMapScreen';
 import { TransportHubScreen } from './TransportHubScreen';
 import { CafeteriaScreen } from './CafeteriaScreen';
 import { MenuDetailScreen } from './MenuDetailScreen';
@@ -76,6 +77,21 @@ export function MapStack() {
         name="OnBusMode"
         component={OnBusModeScreen}
         options={{ title: '搭車中', headerShown: false }}
+      />
+      <Stack.Screen
+        name="BusStopDetail"
+        component={BusStopDetailScreen}
+        options={{ title: '站點詳情' }}
+      />
+      <Stack.Screen
+        name="TripPlanner"
+        component={TripPlannerScreen}
+        options={{ title: '路線規劃' }}
+      />
+      <Stack.Screen
+        name="IndoorFloorMap"
+        component={IndoorFloorMapScreen}
+        options={{ title: '樓層平面圖', headerShown: false }}
       />
       <Stack.Screen
         name="TransportHub"

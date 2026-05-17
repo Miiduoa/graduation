@@ -121,8 +121,11 @@ export default function LoginLandingScreen() {
         // 否則切角色時會看到上一個角色已收到的舊事件
         const prev = await loadMockAuthSession().catch(() => null);
         if (prev?.uid && prev.uid !== preset.uid) {
+          // 清掉前一個角色的個人 inbox，但 **保留 __all__ 廣播 inbox**
+          //   ── 這是跨角色 demo 的關鍵：學生下單 / 老師批改 / 主任公告等事件
+          //     都是 broadcast，要在切角色後另一個 demo 帳號還能看到。
+          //   ── 若清掉 __all__，學生剛下的訂單在切到餐廳帳號時會消失。
           await clearRoleEventInbox(prev.uid).catch(() => {});
-          await clearRoleEventInbox('__all__').catch(() => {});
           // 重置這個 preset uid 的 seed flag（讓重 login 也能看到 demo 事件）
           await resetSeedFlag(preset.uid).catch(() => {});
           await clearMockAuthSession().catch(() => {});

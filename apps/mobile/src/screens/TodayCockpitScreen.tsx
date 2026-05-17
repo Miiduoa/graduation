@@ -62,6 +62,7 @@ import {
   CockpitRow,
   CockpitToolChip,
 } from '../ui/cockpitShell';
+import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -204,6 +205,9 @@ export default function TodayCockpitScreen() {
             return `✨ ${studyPlan.summary}`;
           })()}
         />
+
+        {/* 🤖 AI Agent 摘要 banner — 點進 AIAgentConsole */}
+        <AgentSummaryBanner cockpitLabel="學生 Today" />
 
         {/* 焦點 CTA */}
         {nextTask && (
@@ -395,7 +399,7 @@ export default function TodayCockpitScreen() {
               <CockpitRow
                 title="開始今日複習"
                 subtitle={`${mistakesDue.length} 題依間隔重複排程`}
-                onPress={() => navigation.navigate('MistakeRepertoire' as never)}
+                onPress={() => safeNavigate(navigation, 'MistakeRepertoire', undefined, { fallbackMessage: '即將跳到錯題本' })}
               />
             </CockpitSection>
           )}
@@ -501,7 +505,6 @@ export default function TodayCockpitScreen() {
             label="AI 學伴"
             onPress={() =>
               safeNavigate(navigation, 'AICourseAdvisor', undefined, {
-                fallbackMessage: 'AI 學伴即將推出',
               })
             }
           />
@@ -510,7 +513,6 @@ export default function TodayCockpitScreen() {
             label="AI 觀察台"
             onPress={() =>
               safeNavigate(navigation, 'AIAgentObservatory', undefined, {
-                fallbackMessage: 'AI 觀察台即將推出',
               })
             }
           />
@@ -519,7 +521,6 @@ export default function TodayCockpitScreen() {
             label="收件匣"
             onPress={() =>
               safeNavigate(navigation, 'StudentInbox', undefined, {
-                fallbackMessage: '收件匣即將推出',
               })
             }
           />
@@ -528,7 +529,6 @@ export default function TodayCockpitScreen() {
             label="校園精靈"
             onPress={() =>
               safeNavigate(navigation, 'Companion', undefined, {
-                fallbackMessage: '校園精靈即將推出',
               })
             }
           />
@@ -537,7 +537,6 @@ export default function TodayCockpitScreen() {
             label="學習星圖"
             onPress={() =>
               safeNavigate(navigation, 'Constellation', undefined, {
-                fallbackMessage: '學習星圖即將推出',
               })
             }
           />
@@ -546,7 +545,6 @@ export default function TodayCockpitScreen() {
             label="學習花園"
             onPress={() =>
               safeNavigate(navigation, 'CampusGarden', undefined, {
-                fallbackMessage: '學習花園即將推出',
               })
             }
           />
@@ -555,7 +553,6 @@ export default function TodayCockpitScreen() {
             label="我的成就"
             onPress={() =>
               safeNavigate(navigation, 'Achievements', undefined, {
-                fallbackMessage: '成就頁即將推出',
               })
             }
           />
@@ -564,7 +561,6 @@ export default function TodayCockpitScreen() {
             label="本月回顧"
             onPress={() =>
               safeNavigate(navigation, 'MonthlySummary', undefined, {
-                fallbackMessage: '本月回顧即將推出',
               })
             }
           />
@@ -573,8 +569,14 @@ export default function TodayCockpitScreen() {
             label="我的訂單"
             onPress={() =>
               safeNavigate(navigation, 'StudentOrders', undefined, {
-                fallbackMessage: '我的訂單即將推出',
               })
+            }
+          />
+          <CockpitToolChip
+            icon="document-text-outline"
+            label="請假 / 報修"
+            onPress={() =>
+              safeNavigate(navigation, 'LifeRequests', undefined, {})
             }
           />
           <CockpitToolChip
@@ -582,7 +584,6 @@ export default function TodayCockpitScreen() {
             label="成績試算"
             onPress={() =>
               safeNavigate(navigation, 'GradeWhatIf', undefined, {
-                fallbackMessage: '成績試算即將推出',
               })
             }
           />
@@ -591,7 +592,6 @@ export default function TodayCockpitScreen() {
             label="番茄專注"
             onPress={() =>
               safeNavigate(navigation, 'PomodoroSession', undefined, {
-                fallbackMessage: '番茄專注即將推出',
               })
             }
           />
@@ -600,7 +600,6 @@ export default function TodayCockpitScreen() {
             label="錯題本"
             onPress={() =>
               safeNavigate(navigation, 'MistakeRepertoire', undefined, {
-                fallbackMessage: '錯題本即將推出',
               })
             }
           />

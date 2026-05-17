@@ -401,6 +401,14 @@ export function CampusHubScreen(props: Record<string, unknown>) {
             crossTab: { tab: 'Today', screen: 'CampusSocialScreen' },
             keywords: ['社群', '看板', '動態', '匿名', '學伴', '即時', 'story', '發文'],
           },
+          {
+            icon: 'ic_tab_today',
+            label: '今天的故事',
+            subtitle: '一日完整動線',
+            tint: theme.colors.accent,
+            crossTab: { tab: 'Today', screen: 'DemoStory' },
+            keywords: ['今天', '一天', '故事', 'timeline', '行程', '時程'],
+          },
         ],
       },
       {
@@ -443,6 +451,14 @@ export function CampusHubScreen(props: Record<string, unknown>) {
             tint: theme.colors.accent,
             screen: 'MapV2',
             keywords: ['地圖', '導航', 'turn by turn', '路線'],
+          },
+          {
+            icon: 'ic_navigate_pin',
+            label: '路線規劃',
+            subtitle: '走路 / 公車組合',
+            tint: theme.colors.success,
+            screen: 'TripPlanner',
+            keywords: ['路線', '導航', '規劃', 'directions', '怎麼去'],
           },
           {
             icon: 'ic_bus',

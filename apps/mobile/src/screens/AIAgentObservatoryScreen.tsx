@@ -288,7 +288,6 @@ export default function AIAgentObservatoryScreen() {
           break;
         case 'study_plan':
           safeNavigate(navigation, 'PomodoroSession', undefined, {
-            fallbackMessage: '番茄專注即將推出',
           });
           break;
         case 'inbox_followup':

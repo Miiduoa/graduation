@@ -1,15 +1,26 @@
 'use client';
 
 import { SiteShell } from '@/components/SiteShell';
+import { useToast } from '@/components/ui';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
-import { useState, useCallback, type CSSProperties, type ReactNode } from 'react';
+import { useState, useCallback, useMemo, type CSSProperties, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut } from 'firebase/auth';
 import { getAuth } from '@/lib/firebase';
+import { useDemoRole, getCapabilities, writeDemoRole } from '@/lib/demoRole';
+import { clearAllDemoState } from '@/lib/useRoleScopedState';
+import { getDemoUser } from '@/lib/demoData';
 
-type Section = 'general' | 'notifications' | 'appearance' | 'privacy' | 'account';
+type Section =
+  | 'general'
+  | 'notifications'
+  | 'appearance'
+  | 'privacy'
+  | 'account'
+  | 'system'
+  | 'department';
 
-const SECTIONS: { id: Section; label: string; icon: string }[] = [
+const BASE_SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'general', label: '一般', icon: '⚙️' },
   { id: 'notifications', label: '通知', icon: '🔔' },
   { id: 'appearance', label: '外觀', icon: '🎨' },
@@ -89,6 +100,22 @@ export default function SettingsPage(props: {
 }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const router = useRouter();
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
+  const { success, info } = useToast();
+
+  // 根據角色決定 sidebar sections
+  const SECTIONS = useMemo<{ id: Section; label: string; icon: string }[]>(() => {
+    const list = [...BASE_SECTIONS];
+    if (caps.canManageSystem) {
+      list.push({ id: 'system', label: '系統管理', icon: '🛡️' });
+    }
+    if (demoRole === 'department_head') {
+      list.push({ id: 'department', label: '系所設定', icon: '🏛️' });
+    }
+    return list;
+  }, [caps.canManageSystem, demoRole]);
+
   const [activeSection, setActiveSection] = useState<Section>('general');
   const [signingOut, setSigningOut] = useState(false);
 
@@ -103,7 +130,8 @@ export default function SettingsPage(props: {
     } catch (err) {
       console.error('[settings] signOut failed', err);
     } finally {
-      // 不管成功失敗，demo 體驗都應該帶回登入頁
+      // Demo 體驗：登出時也把 demoRole 清回 guest
+      writeDemoRole('guest');
       router.replace(`/login${q}`);
     }
   }, [signingOut, router, q]);
@@ -402,6 +430,13 @@ export default function SettingsPage(props: {
     );
   }
 
+  // 帳號顯示資訊：從 demoData DEMO_USERS 取，確保與其他頁面一致
+  const demoUser = demoRole !== 'guest' ? getDemoUser(demoRole) : undefined;
+  const roleDisplay = {
+    name: demoUser?.displayName ?? '訪客',
+    avatar: demoUser?.displayName?.[0] ?? '訪',
+  };
+
   function renderAccount() {
     return (
       <div className="pageStack">
@@ -430,10 +465,10 @@ export default function SettingsPage(props: {
               boxShadow: 'var(--shadow-sm)',
             }}
           >
-            學
+            {roleDisplay.avatar}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 700 }}>學生姓名</div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>{roleDisplay.name}</div>
             <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 2 }}>
               學號登入 · {schoolName || '靜宜大學'}
             </div>
@@ -484,6 +519,28 @@ export default function SettingsPage(props: {
         </div>
 
         <div>
+          <div className="insetGroupHeader">Demo 工具</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="🔄"
+              iconBg="#FFF8E8"
+              title="重置 demo 資料"
+              subtitle="清除所有 demo 角色、收藏、加入社團等狀態，回到初始訪客身份"
+              onClick={() => {
+                if (typeof window === 'undefined') return;
+                const ok = window.confirm(
+                  '確定要清除所有 demo 狀態？此動作會：\n\n• 清除目前的 demo 角色\n• 清除以各角色收藏的公告\n• 清除加入的社團、續借記錄等\n\n網頁會回到登入頁，但不會影響真實 Firebase 帳號。',
+                );
+                if (!ok) return;
+                clearAllDemoState();
+                success('已重置所有 demo 資料');
+                router.replace(`/login${q}`);
+              }}
+            />
+          </div>
+        </div>
+
+        <div>
           <div className="insetGroupHeader">登出</div>
           <div className="insetGroup">
             <SettingRow
@@ -501,12 +558,183 @@ export default function SettingsPage(props: {
     );
   }
 
+  function renderSystem() {
+    return (
+      <div className="pageStack">
+        <div>
+          <div className="insetGroupHeader">使用者管理</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="👥"
+              iconBg="#FFF0F5"
+              title="使用者列表"
+              subtitle="檢視 / 編輯所有帳號"
+              onClick={() => info('已開啟使用者管理面板（demo）')}
+            />
+            <SettingRow
+              icon="🎭"
+              iconBg="#F3F0FF"
+              title="角色與權限"
+              subtitle="11 種正式角色 + 衍生身份"
+              onClick={() => info('已開啟角色管理（demo）')}
+            />
+            <SettingRow
+              icon="🛡️"
+              iconBg="#FFF3E8"
+              title="登入安全策略"
+              subtitle="密碼複雜度、雙因素、SSO"
+              onClick={() => info('已開啟安全策略（demo）')}
+            />
+          </div>
+        </div>
+        <div>
+          <div className="insetGroupHeader">學校資訊</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="🏫"
+              iconBg="#E8F4FD"
+              title="校徽 / 名稱"
+              onClick={() => info('已開啟學校設定（demo）')}
+            />
+            <SettingRow
+              icon="📅"
+              iconBg="#FFF8E8"
+              title="學期設定"
+              subtitle="目前學期：114-2"
+              onClick={() => info('已開啟學期設定（demo）')}
+            />
+            <SettingRow
+              icon="🌐"
+              iconBg="#E8FFF2"
+              title="網域 / API 設定"
+              onClick={() => info('已開啟整合設定（demo）')}
+            />
+          </div>
+        </div>
+        <div>
+          <div className="insetGroupHeader">系統日誌</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="📊"
+              iconBg="#E8F4FD"
+              title="登入紀錄"
+              subtitle="近 24 小時 1,247 次"
+              onClick={() => info('已開啟登入紀錄（demo）')}
+            />
+            <SettingRow
+              icon="⚠️"
+              iconBg="var(--warning-soft)"
+              title="錯誤日誌"
+              subtitle="近 24 小時 3 次"
+              onClick={() => info('已開啟錯誤日誌（demo）')}
+            />
+            <SettingRow
+              icon="📡"
+              iconBg="#F3F0FF"
+              title="API 監控"
+              onClick={() => info('已開啟 API 監控（demo）')}
+            />
+          </div>
+        </div>
+        <div>
+          <div className="insetGroupHeader">高權限動作</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="💾"
+              iconBg="#E8F4FD"
+              title="資料備份"
+              onClick={() => success('已啟動備份（demo）')}
+            />
+            <SettingRow
+              icon="🚧"
+              iconBg="var(--warning-soft)"
+              title="維護模式"
+              subtitle="目前為正常運作"
+              right={<Toggle value={false} onChange={() => info('維護模式切換（demo）')} />}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderDepartment() {
+    return (
+      <div className="pageStack">
+        <div>
+          <div className="insetGroupHeader">系所資訊</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="🏛️"
+              iconBg="#FFF3E8"
+              title="資訊管理系"
+              subtitle="本學期開課 8 門 · 教師 18 人 · 學生 132 人"
+            />
+            <SettingRow
+              icon="📚"
+              iconBg="#E8F4FD"
+              title="課程規劃"
+              subtitle="畢業學分要求、必選修配置"
+              onClick={() => info('已開啟課程規劃（demo）')}
+            />
+            <SettingRow
+              icon="🎯"
+              iconBg="#F3F0FF"
+              title="畢業審查規則"
+              subtitle="進入學分稽核系統"
+              onClick={() => router.push(`/credit-planner${q}`)}
+            />
+          </div>
+        </div>
+        <div>
+          <div className="insetGroupHeader">公告審核</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="📥"
+              iconBg="var(--warning-soft)"
+              title="待審公告"
+              subtitle="目前 3 件待處理"
+              onClick={() => router.push(`/admin${q}`)}
+            />
+            <SettingRow
+              icon="📢"
+              iconBg="#E8FFF2"
+              title="發布系所公告"
+              onClick={() => success('已開啟「發布系所公告」表單（demo）')}
+            />
+          </div>
+        </div>
+        <div>
+          <div className="insetGroupHeader">教師與助教</div>
+          <div className="insetGroup">
+            <SettingRow
+              icon="🧑‍🏫"
+              iconBg="#E8FFF2"
+              title="教師名冊"
+              subtitle="管理任課教師資料與權限"
+              onClick={() => router.push(`/admin${q}`)}
+            />
+            <SettingRow
+              icon="🧑‍💻"
+              iconBg="#F3F0FF"
+              title="助教指派"
+              subtitle="管理 TA 與課程的對應"
+              onClick={() => info('已開啟助教指派（demo）')}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const contentMap: Record<Section, () => ReactNode> = {
     general: renderGeneral,
     notifications: renderNotifications,
     appearance: renderAppearance,
     privacy: renderPrivacy,
     account: renderAccount,
+    system: renderSystem,
+    department: renderDepartment,
   };
 
   return (

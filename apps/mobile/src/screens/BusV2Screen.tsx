@@ -23,7 +23,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import type { WebView } from 'react-native-webview';
 import * as Notifications from 'expo-notifications';
 import { PuWebView } from '../ui/PuWebView';
@@ -46,6 +46,8 @@ import {
   type CampusBusVehicle,
   type AiBusRecommendation,
 } from '../data/campusBusRoutes';
+import { usePersonaContext } from '../services/personaContext';
+import { useLiveBusEstimates, LiveStatusBadge } from '../services/tdxLive';
 
 // ═════════════════════════════════════════════════════
 // Leaflet HTML — 公車即時地圖
@@ -140,11 +142,25 @@ type BusReminder = {
 
 export function BusV2Screen(_props: Record<string, unknown>) {
   const nav = useNavigation<any>();
+  const route = useRoute<any>();
+  const params = (route.params ?? {}) as { initialRouteId?: string };
   const webRef = useRef<WebView>(null);
 
+  // ── Persona（要在 selectedRouteId 之前 init，因為要用它初始化預設選中路線） ──
+  const persona = usePersonaContext();
+  const personaDefaultRouteId =
+    params.initialRouteId ??
+    persona.subscribedRoutes[0]?.id ??
+    CAMPUS_BUS_ROUTES[0].id;
+
   const [view, setView] = useState<ViewMode>('map');
-  const [selectedRouteId, setSelectedRouteId] = useState<string>(CAMPUS_BUS_ROUTES[0].id);
+  const [selectedRouteId, setSelectedRouteId] = useState<string>(personaDefaultRouteId);
   const [refreshing, setRefreshing] = useState(false);
+
+  // 當 persona 切換登入帳號 → 跟著切預設選中路線
+  useEffect(() => {
+    setSelectedRouteId(personaDefaultRouteId);
+  }, [personaDefaultRouteId]);
 
   // GPS
   const geo = useGeolocation({ enableHighAccuracy: true, distanceInterval: 8, autoStart: true });
@@ -169,12 +185,12 @@ export function BusV2Screen(_props: Record<string, unknown>) {
     defaultValue: [],
   });
 
-  // 目的地（AI 推薦用，預設為 user 下節課地點，這裡先 mock 為任垣樓）
-  const [destPoiId] = useState<string>('pu-renyuan');
+  // 目的地：用「下一節課」推算；若沒有則退回任垣樓
+  const destPoiId = persona.nextClass?.poi.id ?? 'pu-renyuan';
+  const destPoi = persona.nextClass?.poi ?? null;
 
   // ── AI 推薦 ──
   const aiRecs: AiBusRecommendation[] = useMemo(() => {
-    const destPoi = require('../data/puCampusData').getCampusPoi(destPoiId);
     return recommendBus({
       userLat: uLat,
       userLng: uLng,
@@ -183,9 +199,16 @@ export function BusV2Screen(_props: Record<string, unknown>) {
       destinationLng: destPoi?.lng,
       isRaining: false,
     });
-  }, [uLat, uLng, destPoiId]);
+  }, [uLat, uLng, destPoiId, destPoi?.lat, destPoi?.lng]);
 
   const topAiRec: AiBusRecommendation | null = aiRecs[0] ?? null;
+
+  // 個人化的 AI 推薦理由
+  const aiReason = useMemo(() => {
+    if (!topAiRec) return '';
+    if (!persona.nextClass) return topAiRec.reason;
+    return `${persona.displayName}，你 ${persona.nextClass.startHHmm} 的「${persona.nextClass.courseName}」在 ${destPoi?.name}（${persona.nextClass.roomCode}）· ${topAiRec.reason}`;
+  }, [topAiRec, persona.displayName, persona.nextClass, destPoi?.name]);
 
   // ── 對 WebView 下指令 ──
   const postCmd = useCallback((p: any) => {
@@ -239,6 +262,39 @@ export function BusV2Screen(_props: Record<string, unknown>) {
     postCmd({ type: 'setUser', lat: uLat, lng: uLng });
   }, [uLat, uLng, postCmd]);
 
+  /**
+   * 算「下車站」：給定一條路線，找離 destPoi（下節課地點）最近的站
+   * 沒有 destPoi 就用該路線終點站
+   */
+  const pickAlightStopForRoute = useCallback(
+    (route: CampusBusRoute): string => {
+      if (!destPoi) return route.stops[route.stops.length - 1].id;
+      let best: { id: string; d: number } | null = null;
+      for (const s of route.stops) {
+        const d = haversineMeters(destPoi.lat, destPoi.lng, s.lat, s.lng);
+        if (!best || d < best.d) best = { id: s.id, d };
+      }
+      return best?.id ?? route.stops[route.stops.length - 1].id;
+    },
+    [destPoi],
+  );
+
+  // 將路線排序：persona 訂閱的優先在前
+  const orderedRoutes = useMemo(() => {
+    const subIds = new Set(persona.subscribedRoutes.map((r) => r.id));
+    return [
+      ...CAMPUS_BUS_ROUTES.filter((r) => subIds.has(r.id)),
+      ...CAMPUS_BUS_ROUTES.filter((r) => !subIds.has(r.id)),
+    ];
+  }, [persona.subscribedRoutes]);
+
+  // ── TDX 即時資料（針對 persona 訂閱路線） ──
+  const liveBusRouteIds = useMemo(
+    () => persona.subscribedRoutes.map((r) => r.id),
+    [persona.subscribedRoutes],
+  );
+  const liveBusData = useLiveBusEstimates(liveBusRouteIds);
+
   // ── WebView 訊息 ──
   const onWebMessage = useCallback((event: any) => {
     try {
@@ -261,14 +317,14 @@ export function BusV2Screen(_props: Record<string, unknown>) {
                 nav.navigate('OnBusMode', {
                   routeId: r.id,
                   vehicleId: v.id,
-                  alightStopId: r.stops[r.stops.length - 1].id,
+                  alightStopId: pickAlightStopForRoute(r),
                 }),
             },
           ],
         );
       }
     } catch {}
-  }, [postCmd, allVehicles, nav]);
+  }, [postCmd, allVehicles, nav, pickAlightStopForRoute]);
 
   // ── Focus analytics ──
   useFocusEffect(
@@ -341,6 +397,23 @@ export function BusV2Screen(_props: Record<string, unknown>) {
   // ── Render ──
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+      {/* Persona greeting bar */}
+      {persona.isDemoPersona && (
+        <PersonaGreeting
+          name={persona.displayName}
+          role={persona.role}
+          nextClass={persona.nextClass}
+          onPressNextClass={() => {
+            if (persona.nextClass) {
+              nav.navigate('TripPlanner', {
+                toPoiId: persona.nextClass.poi.id,
+                toName: persona.nextClass.poi.name,
+              });
+            }
+          }}
+        />
+      )}
+
       {/* Tab segment */}
       <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: 4 }}>
         <SegmentedControl
@@ -379,15 +452,16 @@ export function BusV2Screen(_props: Record<string, unknown>) {
               allowsBackForwardNavigationGestures={false}
             />
 
-            {/* Route filter pills (overlaid on map) */}
+            {/* Route filter pills (overlaid on map) — persona 訂閱優先 */}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               style={{ position: 'absolute', left: 0, right: 0, bottom: 8 }}
               contentContainerStyle={{ gap: 6, paddingHorizontal: 10 }}
             >
-              {CAMPUS_BUS_ROUTES.map((r) => {
+              {orderedRoutes.map((r) => {
                 const active = r.id === selectedRouteId;
+                const isSubscribed = persona.subscribedRoutes.some((sr) => sr.id === r.id);
                 return (
                   <Pressable
                     key={r.id}
@@ -405,6 +479,9 @@ export function BusV2Screen(_props: Record<string, unknown>) {
                       transform: [{ scale: pressed ? 0.97 : 1 }],
                     })}
                   >
+                    {isSubscribed && (
+                      <Ionicons name="star" size={9} color={active ? '#fff' : '#FBBF24'} />
+                    )}
                     <View
                       style={{
                         width: 6,
@@ -422,6 +499,14 @@ export function BusV2Screen(_props: Record<string, unknown>) {
                 );
               })}
             </ScrollView>
+
+            {/* Live status badge */}
+            <View style={{ position: 'absolute', top: 10, left: 10 }}>
+              <LiveStatusBadge
+                status={liveBusData.status}
+                onPress={liveBusData.refresh}
+              />
+            </View>
 
             {/* My location FAB */}
             <Pressable
@@ -464,6 +549,12 @@ export function BusV2Screen(_props: Record<string, unknown>) {
             {topAiRec && (
               <AiRecommendCard
                 rec={topAiRec}
+                customReason={aiReason}
+                titleOverride={
+                  persona.nextClass
+                    ? `${persona.nextClass.startHHmm} 上課前，建議搭 ${topAiRec.route.shortName} ${topAiRec.nextDepartureHHmm} 班`
+                    : undefined
+                }
                 onSetReminder={() => {
                   const v = allVehicles.find((x) => x.routeId === topAiRec.route.id);
                   if (v) setReminder(v, topAiRec.route);
@@ -515,7 +606,7 @@ export function BusV2Screen(_props: Record<string, unknown>) {
                       nav.navigate('OnBusMode', {
                         routeId: r.id,
                         vehicleId: v.id,
-                        alightStopId: r.stops[r.stops.length - 1].id,
+                        alightStopId: pickAlightStopForRoute(r),
                       })
                     }
                     style={({ pressed }) => ({
@@ -768,10 +859,14 @@ function AiRecommendCard({
   rec,
   onSetReminder,
   onSeeOthers,
+  customReason,
+  titleOverride,
 }: {
   rec: AiBusRecommendation;
   onSetReminder: () => void;
   onSeeOthers: () => void;
+  customReason?: string;
+  titleOverride?: string;
 }) {
   return (
     <View
@@ -802,10 +897,10 @@ function AiRecommendCard({
         <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>AI 為你建議</Text>
       </View>
       <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '800', lineHeight: 21 }}>
-        建議搭 {rec.route.shortName} {rec.nextDepartureHHmm} 班 → {rec.alightStop.name}
+        {titleOverride ?? `建議搭 ${rec.route.shortName} ${rec.nextDepartureHHmm} 班 → ${rec.alightStop.name}`}
       </Text>
       <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6, lineHeight: 18 }}>
-        {rec.reason} · 全程約 {rec.totalMin} 分
+        {customReason ?? rec.reason} · 全程約 {rec.totalMin} 分
       </Text>
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
         <Pressable
@@ -1025,6 +1120,82 @@ function FavoritesView({
 // ═════════════════════════════════════════════════════
 // Small components
 // ═════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════
+// Persona greeting bar — 個人化問候
+// ═════════════════════════════════════════════════════
+function PersonaGreeting({
+  name,
+  role,
+  nextClass,
+  onPressNextClass,
+}: {
+  name: string;
+  role: 'student' | 'teacher' | 'ta' | 'admin' | 'vendor' | 'unknown';
+  nextClass: ReturnType<typeof usePersonaContext>['nextClass'];
+  onPressNextClass: () => void;
+}) {
+  const hour = new Date().getHours();
+  const greeting = hour < 11 ? '早安' : hour < 14 ? '午安' : hour < 18 ? '下午好' : '晚安';
+  const roleEmoji =
+    role === 'teacher' ? '👨‍🏫' :
+    role === 'student' ? '🎓' :
+    role === 'ta' ? '🧑‍💼' :
+    role === 'admin' ? '🏛️' :
+    role === 'vendor' ? '🏪' : '👤';
+
+  return (
+    <Pressable
+      onPress={nextClass ? onPressNextClass : undefined}
+      style={{
+        marginHorizontal: 12,
+        marginTop: 8,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 14,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+      }}
+    >
+      <Text style={{ fontSize: 22 }}>{roleEmoji}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '800' }}>
+          {greeting}，{name}
+        </Text>
+        {nextClass ? (
+          <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }} numberOfLines={1}>
+            下一節「{nextClass.courseName}」{nextClass.startHHmm}（剩 {nextClass.startsInMin} 分）·{' '}
+            {nextClass.poi.name} {nextClass.roomCode}
+          </Text>
+        ) : (
+          <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
+            今天沒有排程，享受悠閒時光
+          </Text>
+        )}
+      </View>
+      {nextClass && (
+        <View
+          style={{
+            paddingHorizontal: 8,
+            paddingVertical: 4,
+            borderRadius: 8,
+            backgroundColor: theme.colors.accentSoft,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 3,
+          }}
+        >
+          <Ionicons name="navigate" size={11} color={theme.colors.accent} />
+          <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: '700' }}>規劃</Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 function StatPill({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <View

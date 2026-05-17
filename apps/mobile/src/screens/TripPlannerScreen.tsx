@@ -27,7 +27,8 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { analytics } from '../services/analytics';
 import { useGeolocation } from '../hooks/useGeolocation';
-import { useSavedPlaces, recordPlaceUsage, type SavedPlace } from '../services/savedPlaces';
+import { useSavedPlaces, type SavedPlace } from '../services/savedPlaces';
+import { usePersonaContext } from '../services/personaContext';
 import {
   CAMPUS_POIS,
   getCampusPoi,
@@ -109,6 +110,7 @@ function EndpointPicker({
   userLat,
   userLng,
   savedPlaces,
+  onRecordPlaceUsage,
   active,
   onActive,
 }: {
@@ -118,6 +120,7 @@ function EndpointPicker({
   userLat: number;
   userLng: number;
   savedPlaces: SavedPlace[];
+  onRecordPlaceUsage: (id: string) => void;
   active: boolean;
   onActive: () => void;
 }) {
@@ -257,7 +260,7 @@ function EndpointPicker({
                     lng: p.lng,
                     poiId: p.poiId,
                   });
-                  void recordPlaceUsage(p.id);
+                  onRecordPlaceUsage(p.id);
                 }}
                 style={({ pressed }) => ({
                   flexDirection: 'row',
@@ -347,7 +350,8 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
   const uLat = typeof geo.latitude === 'number' ? geo.latitude : 24.22612;
   const uLng = typeof geo.longitude === 'number' ? geo.longitude : 120.5647;
 
-  const { places: savedPlaces } = useSavedPlaces();
+  const { places: savedPlaces, useNow: recordPlaceUsageNow } = useSavedPlaces();
+  const persona = usePersonaContext();
 
   // 起點預設「我的位置」
   const [from, setFrom] = useState<Endpoint | null>({
@@ -357,7 +361,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
     lng: uLng,
   });
 
-  // 終點如果 params 有帶就用
+  // 終點：params > 下節課地點 > null
   const [to, setTo] = useState<Endpoint | null>(() => {
     if (params?.toPoiId) {
       const poi = getCampusPoi(params.toPoiId);
@@ -377,6 +381,17 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
         label: params.toName,
         lat: params.toLat,
         lng: params.toLng,
+      };
+    }
+    // 從 persona.nextClass 推測
+    if (persona.nextClass) {
+      const np = persona.nextClass.poi;
+      return {
+        kind: 'poi',
+        label: `${np.name}（下節課 ${persona.nextClass.courseName}）`,
+        lat: np.lat,
+        lng: np.lng,
+        poiId: np.id,
       };
     }
     return null;
@@ -522,6 +537,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
             userLat={uLat}
             userLng={uLng}
             savedPlaces={savedPlaces}
+            onRecordPlaceUsage={(id) => void recordPlaceUsageNow(id)}
           />
           <EndpointPicker
             label="B"
@@ -535,6 +551,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
             userLat={uLat}
             userLng={uLng}
             savedPlaces={savedPlaces}
+            onRecordPlaceUsage={(id) => void recordPlaceUsageNow(id)}
           />
 
           {/* Swap button */}
@@ -562,6 +579,74 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
             </Pressable>
           )}
         </View>
+
+        {/* Persona quick chips */}
+        {(persona.nextClass || savedPlaces.find((p) => p.kind === 'home')) && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+            {persona.nextClass && (
+              <Pressable
+                onPress={() => {
+                  const nc = persona.nextClass!;
+                  setTo({
+                    kind: 'poi',
+                    label: `${nc.poi.name}（下節課 ${nc.courseName}）`,
+                    lat: nc.poi.lat,
+                    lng: nc.poi.lng,
+                    poiId: nc.poi.id,
+                  });
+                }}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: 11,
+                  paddingVertical: 7,
+                  borderRadius: 99,
+                  backgroundColor: theme.colors.accent,
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Ionicons name="school" size={12} color="#fff" />
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
+                  去下節課 · {persona.nextClass.startHHmm}
+                </Text>
+              </Pressable>
+            )}
+            {savedPlaces
+              .filter((p) => p.kind === 'home' || p.kind === 'school' || p.kind === 'work')
+              .map((p) => (
+                <Pressable
+                  key={p.id}
+                  onPress={() =>
+                    setTo({
+                      kind: 'savedplace',
+                      label: p.label,
+                      lat: p.lat,
+                      lng: p.lng,
+                      poiId: p.poiId,
+                    })
+                  }
+                  style={({ pressed }) => ({
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: 11,
+                    paddingVertical: 7,
+                    borderRadius: 99,
+                    backgroundColor: theme.colors.surface,
+                    borderWidth: 1,
+                    borderColor: theme.colors.border,
+                    opacity: pressed ? 0.85 : 1,
+                  })}
+                >
+                  <Text style={{ fontSize: 12 }}>{p.emoji}</Text>
+                  <Text style={{ color: theme.colors.text, fontSize: 11, fontWeight: '700' }}>
+                    {p.label}
+                  </Text>
+                </Pressable>
+              ))}
+          </ScrollView>
+        )}
 
         {/* Mode selector */}
         <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>

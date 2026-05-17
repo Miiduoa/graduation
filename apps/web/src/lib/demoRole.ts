@@ -147,21 +147,22 @@ export function writeDemoRole(role: DemoRole): void {
   window.dispatchEvent(new CustomEvent('demoRoleChange', { detail: role }));
 }
 
-/** React hook：讀取與切換 demo 角色 */
+/** React hook：讀取與切換 demo 角色
+ *
+ * Lazy init：browser 端首次 render 就同步從 localStorage 讀取，避免 hydration flash。
+ * SSR 仍回傳 'guest'，但 Next.js 'use client' 元件在 SSR 後立即 hydrate；只要 client 端
+ * 第一次 render 就拿到正確值，使用者不會看到「閃過 guest 狀態」。
+ */
 export function useDemoRole(): [DemoRole, (next: DemoRole) => void] {
-  // 初始用 'guest'（SSR）；mount 後立即用 client-side localStorage 同步
-  const [role, setRole] = useState<DemoRole>('guest');
-  const [hydrated, setHydrated] = useState(false);
+  const [role, setRole] = useState<DemoRole>(() => readDemoRole());
 
-  // Mount 一次：把 localStorage 值同步進來。
-  // 用 hydrated flag 避免 hydration mismatch warning。
+  // 後續 subscribe 變動（本頁切換 / 其他分頁 / 其他 hook 派發）
   useEffect(() => {
-    const initial = readDemoRole();
-    if (initial !== role) {
-      setRole(initial);
+    // 確保 mount 後與 localStorage 同步一次（保險）
+    const current = readDemoRole();
+    if (current !== role) {
+      setRole(current);
     }
-    setHydrated(true);
-    // 後續 subscribe 變動
     const handler = (e: Event) => {
       const next = (e as CustomEvent<DemoRole>).detail;
       if (next) setRole(next);
@@ -179,9 +180,6 @@ export function useDemoRole(): [DemoRole, (next: DemoRole) => void] {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // 用 hydrated 標記避免 unused-vars warning（並保留給 caller 將來判斷 hydration 狀態）
-  void hydrated;
 
   const update = useCallback((next: DemoRole) => {
     writeDemoRole(next);
@@ -286,7 +284,7 @@ const CAPS: Record<DemoRole, RoleCapabilities> = {
     canJoinClubs: true,
     canPublishClubEvents: true,
     canManageClubMembers: true,
-    canPublishAnnouncements: false,
+    canPublishAnnouncements: true,
     canApproveAnnouncements: false,
     canViewAdminDashboard: false,
     canManageUsers: false,

@@ -40,6 +40,16 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
   return (
     <SiteShell>
       <main style={{ maxWidth: 960, margin: '0 auto', padding: 24 }}>
+        {!caps.canViewTeacherDashboard ? (
+          <div className="card" style={{ padding: '24px 20px', textAlign: 'center', background: 'var(--danger-soft)', borderColor: 'var(--danger)' }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>教師工作台專用</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.7 }}>
+              請從右上角「身份膠囊」切換為 🧑‍🏫 教師 或 🧑‍💻 助教 角色後再進入。
+            </div>
+            <Link href="/" className="btn">← 回首頁</Link>
+          </div>
+        ) : <>
         <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
           <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
         </nav>
@@ -135,6 +145,37 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
             ))}
           </tbody>
         </table>
+
+        {/* ── AI 教材助理入口 ── */}
+        <div
+          style={{
+            marginTop: 20,
+            padding: '14px 18px',
+            borderRadius: 12,
+            background: 'rgba(15,139,141,0.08)',
+            border: '1px solid #0F8B8D',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 3 }}>🤖 AI 教材助理</div>
+            <div style={{ fontSize: 13, color: '#374151' }}>
+              讓 AI 幫你生成本週課程簡介、學習目標，或根據大綱草擬教材結構。
+            </div>
+          </div>
+          <a
+            href={`/ai-assistant?q=${encodeURIComponent('幫我根據資料結構課程大綱，草擬第 5 週「樹與圖」的教材模組結構，包含學習目標、活動設計和評量方式')}`}
+            className="btn"
+            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            問 AI →
+          </a>
+        </div>
+        </>}
       </main>
     </SiteShell>
   );

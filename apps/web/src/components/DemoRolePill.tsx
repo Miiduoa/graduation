@@ -50,19 +50,32 @@ export function DemoRolePill() {
   const def = getDemoRoleDefinition(role);
   const user = def.demoUserUid ? getDemoUser(def.role === 'guest' ? 'student' : def.role) : null;
 
+  // 判斷新角色是否可以停在當前 pathname
+  const isPathOkForRole = (path: string, nextRole: DemoRole): boolean => {
+    if (path.startsWith('/admin')) {
+      return nextRole === 'admin' || nextRole === 'department_head';
+    }
+    if (path.startsWith('/teacher')) {
+      return nextRole === 'teacher' || nextRole === 'ta' || nextRole === 'admin';
+    }
+    return true;
+  };
+
   const handleSwitch = (nextRole: DemoRole) => {
     setRole(nextRole);
     setOpen(false);
-    const target = getDemoRoleDefinition(nextRole).entryHref;
+    const def = getDemoRoleDefinition(nextRole);
     const school = searchParams.get('school') || '';
     const schoolId = searchParams.get('schoolId') || '';
     const q = school
       ? `?school=${encodeURIComponent(school)}&schoolId=${encodeURIComponent(schoolId)}`
       : '';
-    // 若已經在目標頁就不重新導，避免重新整理
-    if (pathname !== target) {
-      router.push(`${target}${q}`);
+    // 當前頁對新角色不合適 → 跳到該角色的 entry
+    if (!isPathOkForRole(pathname, nextRole)) {
+      router.push(`${def.entryHref}${q}`);
+      return;
     }
+    // 否則停在當前頁，讓使用者看權限差異即時生效
   };
 
   const pillStyle: CSSProperties = {
@@ -87,21 +100,37 @@ export function DemoRolePill() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         style={pillStyle}
-        title="切換 demo 身份"
+        title={`目前身份：${def.label}${user ? ` · ${user.displayName}` : ''}（點我切換）`}
         aria-expanded={open}
         aria-haspopup="menu"
+        className="demoRolePillBtn"
       >
         <span aria-hidden style={{ fontSize: 14 }}>
           {def.icon}
         </span>
-        <span>{def.shortLabel}</span>
+        {/* 在窄螢幕只保留 icon，文字會被 CSS 隱藏 */}
+        <span className="demoRolePillLabel">{def.shortLabel}</span>
         {user && (
-          <span style={{ opacity: 0.7, fontWeight: 500 }}>· {user.displayName}</span>
+          <span className="demoRolePillUser" style={{ opacity: 0.7, fontWeight: 500 }}>
+            · {user.displayName}
+          </span>
         )}
         <span aria-hidden style={{ fontSize: 9, opacity: 0.7 }}>
           ▼
         </span>
       </button>
+      <style jsx>{`
+        @media (max-width: 768px) {
+          :global(.demoRolePillUser) {
+            display: none;
+          }
+        }
+        @media (max-width: 480px) {
+          :global(.demoRolePillLabel) {
+            display: none;
+          }
+        }
+      `}</style>
 
       {open && (
         <div
