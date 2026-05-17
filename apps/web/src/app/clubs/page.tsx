@@ -103,7 +103,7 @@ export default function ClubsPage(props: {
   const [clubs, setClubs] = useState<Club[]>(MOCK_CLUBS);
   const [search, setSearch] = useState('');
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const [usingDemo, setUsingDemo] = useState(true);
 
@@ -517,32 +517,52 @@ export default function ClubsPage(props: {
                     </span>
                   )}
                 </div>
-                <button
-                  onClick={() => toggleJoin(c.id)}
-                  disabled={joiningId === c.id}
-                  title={
-                    !caps.canJoinClubs
-                      ? demoRole === 'guest' ? '請先登入' : demoRole === 'alumni' ? '校友無法加入' : `${roleDef.label}無法加入社團`
-                      : undefined
-                  }
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid',
-                    borderColor: !caps.canJoinClubs ? 'var(--border)' : c.isJoined ? 'var(--border)' : c.color,
-                    background: !caps.canJoinClubs ? 'var(--panel)' : c.isJoined ? 'var(--panel)' : `${c.color}14`,
-                    color: !caps.canJoinClubs ? 'var(--muted)' : c.isJoined ? 'var(--muted)' : c.color,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    cursor: joiningId === c.id ? 'wait' : 'pointer',
-                    transition: 'all 0.15s ease',
-                    opacity: joiningId === c.id ? 0.6 : 1,
-                  }}
-                >
-                  {joiningId === c.id ? '處理中...'
-                    : !caps.canJoinClubs ? (demoRole === 'guest' ? '🔒 登入後加入' : '🔒 無法加入')
-                    : c.isJoined ? '已加入' : '申請加入'}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {demoRole === 'student' && !c.isJoined && (
+                    <Link
+                      href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`【${c.name}】這個社團適合我嗎？它平常做什麼活動？我能從中得到什麼？`)}`}
+                      title="問 AI 這社團適不適合我"
+                      style={{
+                        padding: '6px 8px',
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid rgba(94,106,210,0.30)',
+                        background: 'rgba(94,106,210,0.10)',
+                        color: '#5E6AD2',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      🤖
+                    </Link>
+                  )}
+                  <button
+                    onClick={() => toggleJoin(c.id)}
+                    disabled={joiningId === c.id}
+                    title={
+                      !caps.canJoinClubs
+                        ? demoRole === 'guest' ? '請先登入' : demoRole === 'alumni' ? '校友無法加入' : `${roleDef.label}無法加入社團`
+                        : undefined
+                    }
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid',
+                      borderColor: !caps.canJoinClubs ? 'var(--border)' : c.isJoined ? 'var(--border)' : c.color,
+                      background: !caps.canJoinClubs ? 'var(--panel)' : c.isJoined ? 'var(--panel)' : `${c.color}14`,
+                      color: !caps.canJoinClubs ? 'var(--muted)' : c.isJoined ? 'var(--muted)' : c.color,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: joiningId === c.id ? 'wait' : 'pointer',
+                      transition: 'all 0.15s ease',
+                      opacity: joiningId === c.id ? 0.6 : 1,
+                    }}
+                  >
+                    {joiningId === c.id ? '處理中...'
+                      : !caps.canJoinClubs ? (demoRole === 'guest' ? '🔒 登入後加入' : '🔒 無法加入')
+                      : c.isJoined ? '已加入' : '申請加入'}
+                  </button>
+                </div>
               </div>
             </div>
           ))}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, type CSSProperties } from 'react';
+import { useState, useMemo, useCallback, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { SiteShell } from '@/components/SiteShell';
 import { resolveSchoolPageContext } from '@/lib/pageContext';
@@ -62,12 +62,15 @@ export default function GroupsPage(props: {
   }, [demoRole]);
 
   // 課程頁面路由：教師/TA/系主任/管理員進教師工作台，其他進課程詳情
-  const courseHref = (courseId: string) => {
-    if (demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'department_head' || demoRole === 'admin') {
-      return `/teacher/course/${courseId}${q}`;
-    }
-    return `/course/${courseId}${q}`;
-  };
+  const courseHref = useCallback(
+    (courseId: string) => {
+      if (demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'department_head' || demoRole === 'admin') {
+        return `/teacher/course/${courseId}${q}`;
+      }
+      return `/course/${courseId}${q}`;
+    },
+    [demoRole, q],
+  );
 
   // 從統一 demoData 合併課程與社團
   //
@@ -113,7 +116,7 @@ export default function GroupsPage(props: {
       };
     });
     return [...courses, ...clubs];
-  }, [q, courseToMyRole, clubToMyRole, demoRole]);
+  }, [q, courseToMyRole, clubToMyRole, demoRole, courseHref]);
 
   const filtered = groups.filter(
     (g) => (filter === 'all' || g.type === filter) && (!search || g.name.includes(search)),

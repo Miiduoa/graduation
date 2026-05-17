@@ -121,7 +121,7 @@ export default function GradesPage(props: {
   const [grades, setGrades] = useState<GradeDisplay[]>(DEFAULT_GRADES);
   const [gpaHistory, setGpaHistory] = useState(DEFAULT_GPA_HISTORY);
   const [loading, setLoading] = useState(false);
-  const [usingDemo, setUsingDemo] = useState(true);
+  const [, setUsingDemo] = useState(true);
 
   // 監聽 Auth 狀態
   useEffect(() => {
@@ -735,20 +735,41 @@ export default function GradesPage(props: {
                       {g.rank ? ` · 排名 ${g.rank}` : ''}
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 18,
-                        fontWeight: 800,
-                        color: gradeColor(g.grade),
-                        letterSpacing: '-0.04em',
-                      }}
-                    >
-                      {g.score}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <div style={{ textAlign: 'right' }}>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 800,
+                          color: gradeColor(g.grade),
+                          letterSpacing: '-0.04em',
+                        }}
+                      >
+                        {g.score}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
+                        GPA {g.gpa.toFixed(1)}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
-                      GPA {g.gpa.toFixed(1)}
-                    </div>
+                    {demoRole === 'student' && (
+                      <a
+                        href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`【${g.name}】拿 ${g.score} 分，是不是有什麼地方可以改進？給我 3 個具體建議`)}`}
+                        title="讓 AI 分析這科成績"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          padding: '6px 10px',
+                          borderRadius: 8,
+                          border: '1px solid rgba(94,106,210,0.30)',
+                          background: 'rgba(94,106,210,0.10)',
+                          color: '#5E6AD2',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          textDecoration: 'none',
+                        }}
+                      >
+                        🤖
+                      </a>
+                    )}
                   </div>
                 </>
               );

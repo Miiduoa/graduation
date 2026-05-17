@@ -460,7 +460,10 @@ export default function ProfilePage(props: {
             <div style={{ fontSize: 32, marginBottom: 10 }}>🧑‍💻</div>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>助教修課紀錄</div>
             <div>助教個人修課資料來自研究所系統。正式課表請至教務系統查詢。</div>
-            <a href={`/timetable${q}`} className="btn" style={{ marginTop: 14, fontSize: 13 }}>查看課表 →</a>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <a href={`/timetable${q}`} className="btn" style={{ fontSize: 13 }}>查看課表 →</a>
+              <a href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('我擔任資料結構助教，幫我整理本週批改進度與下一步行動')}`} className="btn primary" style={{ fontSize: 13 }}>🤖 AI 整理進度</a>
+            </div>
           </div>
         )}
         {activeTab === 'courses' && demoRole === 'club_officer' && (
@@ -468,7 +471,10 @@ export default function ProfilePage(props: {
             <div style={{ fontSize: 32, marginBottom: 10 }}>🎯</div>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>社團幹部修課紀錄</div>
             <div>陳社長（B11203015）的個人修課資料來自教務系統，此處為社團幹部示範視角。請至教務系統或課表頁查詢個人課表。</div>
-            <a href={`/timetable${q}`} className="btn" style={{ marginTop: 14, fontSize: 13 }}>查看課表 →</a>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <a href={`/timetable${q}`} className="btn" style={{ fontSize: 13 }}>查看課表 →</a>
+              <a href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我分析程式設計社成員活躍度與下次活動籌備建議')}`} className="btn primary" style={{ fontSize: 13 }}>🤖 AI 社團助理</a>
+            </div>
           </div>
         )}
         {activeTab === 'courses' && demoRole === 'alumni' && (
@@ -476,7 +482,10 @@ export default function ProfilePage(props: {
             <div style={{ fontSize: 32, marginBottom: 10 }}>🎓</div>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>校友在校修課紀錄（唯讀）</div>
             <div>張學長（B09203001）已於 109 屆修業期滿畢業，歷史修課紀錄請至教務處申請成績單。</div>
-            <a href={`/grades${q}`} className="btn" style={{ marginTop: 14, fontSize: 13 }}>查看歷史成績 →</a>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <a href={`/grades${q}`} className="btn" style={{ fontSize: 13 }}>查看歷史成績 →</a>
+              <a href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我整理在校期間的學業成就與重點修課經歷，可以用在履歷上')}`} className="btn primary" style={{ fontSize: 13 }}>🤖 AI 整理在校紀錄</a>
+            </div>
           </div>
         )}
         {activeTab === 'courses' && demoRole === 'teacher' && (
@@ -484,7 +493,10 @@ export default function ProfilePage(props: {
             <div style={{ fontSize: 32, marginBottom: 10 }}>🧑‍🏫</div>
             <div style={{ fontWeight: 700, marginBottom: 6 }}>授課課程</div>
             <div>王大明老師目前授課：<strong>資料結構（CS301）</strong>，48 位學生。前往課程工作台可管理作業、成績與點名。</div>
-            <a href={`/teacher/course/c1${q}`} className="btn" style={{ marginTop: 14, fontSize: 13 }}>前往課程工作台 →</a>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
+              <a href={`/teacher/course/c1${q}`} className="btn" style={{ fontSize: 13 }}>前往課程工作台 →</a>
+              <a href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我分析資料結構這學期班級的整體表現，找出需要關注的學生')}`} className="btn primary" style={{ fontSize: 13 }}>🤖 AI 班級分析</a>
+            </div>
           </div>
         )}
         {activeTab === 'courses' && demoRole === 'department_head' && (
@@ -495,6 +507,7 @@ export default function ProfilePage(props: {
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
               <a href={`/grades${q}`} className="btn primary" style={{ fontSize: 13 }}>全系成績統計 →</a>
               <a href={`/groups${q}`} className="btn" style={{ fontSize: 13 }}>課程列表 →</a>
+              <a href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我生成本學期資管系教學摘要週報，包含開課數、平均成績、待批改、待審公告')}`} className="btn" style={{ fontSize: 13, background: 'var(--accent-soft)', color: 'var(--brand)' }}>🤖 AI 系所週報</a>
             </div>
           </div>
         )}
@@ -506,6 +519,7 @@ export default function ProfilePage(props: {
             <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 14, flexWrap: 'wrap' }}>
               <a href={`/admin${q}`} className="btn primary" style={{ fontSize: 13 }}>管理後台 →</a>
               <a href={`/groups${q}`} className="btn" style={{ fontSize: 13 }}>課程列表 →</a>
+              <a href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我生成系統健康摘要，包含今日安全事件、活躍使用者、API 用量與備份狀態')}`} className="btn" style={{ fontSize: 13, background: 'var(--accent-soft)', color: 'var(--brand)' }}>🤖 AI 系統摘要</a>
             </div>
           </div>
         )}

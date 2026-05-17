@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
@@ -18,7 +17,6 @@ import {
   DEMO_ANNOUNCEMENTS,
   DEMO_COURSES,
   readPendingAnns,
-  type DemoAnnouncement,
 } from '@/lib/demoData';
 import { useDemoStore, getUnreadCountDynamic } from '@/lib/demoStore';
 
@@ -45,12 +43,10 @@ function getTodayCourses(): { count: number; label: string; courses: typeof DEMO
 
 export default function HomePage(props: { searchParams?: { school?: string; schoolId?: string } }) {
   const {
-    schoolId,
     schoolCode,
     schoolName,
     schoolSearch: q,
   } = resolveSchoolPageContext(props.searchParams);
-  const router = useRouter();
   const [demoRole] = useDemoRole();
   const demoRoleDef = getDemoRoleDefinition(demoRole);
   const isAlumniOrGuest = demoRole === 'alumni' || demoRole === 'guest';
@@ -95,7 +91,6 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
     () => (demoRole === 'club_officer' ? getClubOfficerContextSummary() : null),
     [demoRole],
   );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const deptCtx = useMemo(
     () => (demoRole === 'department_head' ? getDeptHeadContextSummary() : null),
     // pendingAnnTick 觸發重新讀 readPendingAnns()
