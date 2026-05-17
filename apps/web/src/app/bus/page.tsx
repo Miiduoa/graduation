@@ -318,6 +318,35 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
             ),
           )}
         </div>
+
+        {/* ── AI 公車查詢入口 ── */}
+        <div
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--radius)',
+            background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.07) 100%)',
+            border: '1px solid rgba(94,106,210,0.22)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 3 }}>🤖 AI 公車助理</div>
+            <div style={{ fontSize: 13, color: 'var(--text)' }}>
+              想知道下一班到宿舍或圖書館的公車幾分鐘後到？讓 AI 幫你查詢。
+            </div>
+          </div>
+          <a
+            href={`/ai-assistant?q=${encodeURIComponent('現在最近一班到圖書館的校園公車是幾分鐘後到？途中要在哪一站換車？')}`}
+            className="btn"
+            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            問 AI →
+          </a>
+        </div>
       </div>
     </SiteShell>
   );

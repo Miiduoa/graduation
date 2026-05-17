@@ -9,6 +9,7 @@ import { SearchHistoryProvider } from './searchHistory';
 import { FavoritesProvider } from './favorites';
 import { ScheduleProvider } from './schedule';
 import { DemoProvider } from './demo';
+import { DemoRoleProvider } from './demoRole';
 import { I18nProvider } from '../i18n';
 import { ToastProvider } from '../ui/Toast';
 import { useLatestValue } from '../hooks/useLatestValue';
@@ -91,6 +92,7 @@ const AuthAwareProvidersContent = memo(function AuthAwareProvidersContent({
       },
       { Provider: ScheduleProvider },
       { Provider: DemoProvider },
+      { Provider: DemoRoleProvider },
     ],
     [schoolId, userId],
   );

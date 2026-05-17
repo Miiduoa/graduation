@@ -238,10 +238,29 @@ function extractCreateOrderSuccess(
   return { orderId, merchantLabel, itemName, quantity, total, statusHint: '待店家確認' };
 }
 
+/**
+ * 把內部 mock id 轉成使用者友善的短代號：
+ *   mock_1778928670157_lazdpl4 → #LAZDPL4
+ *   normal-id-XYZ-9            → #XYZ-9
+ * 不適合顯示給使用者的內部前綴會被剝掉。
+ */
+function friendlyOrderCode(rawId: string | undefined): string {
+  const id = String(rawId ?? '').trim();
+  if (!id) return '#—';
+  if (id.startsWith('mock_')) {
+    const parts = id.split('_');
+    const tail = parts[parts.length - 1];
+    if (tail) return `#${tail.toUpperCase()}`;
+  }
+  // 一般情況：取後 8 碼大寫
+  const compact = id.replace(/[^A-Za-z0-9-]/g, '');
+  const tail = compact.length > 8 ? compact.slice(-8) : compact;
+  return `#${tail.toUpperCase()}`;
+}
+
 function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
   const { summary } = props;
-  const totalLine =
-    typeof summary.total === 'number' ? `金額約 $${summary.total}（以店家確認為準）` : undefined;
+  const hasPrice = typeof summary.total === 'number' && summary.total > 0;
   return (
     <View
       style={{
@@ -255,19 +274,49 @@ function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
         <Ionicons name="checkmark-circle" size={22} color="#10B981" />
-        <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>訂單已送出</Text>
+        <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
+          訂單已送出
+        </Text>
       </View>
+
+      {/* 主要訊息：餐廳 · 品項 · 數量（去掉跟上方對話泡泡重複的「已幫你向...」開頭）*/}
       <Text style={{ color: theme.colors.text, fontSize: 14, lineHeight: 22 }}>
-        已幫你向「{summary.merchantLabel}」點 {summary.quantity} 份「{summary.itemName}」。可到「校園 → 點餐 →
-        我的訂單」看進度。
+        <Text style={{ fontWeight: '700' }}>{summary.merchantLabel}</Text>
+        {'  ·  '}
+        {summary.itemName} × {summary.quantity}
       </Text>
-      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 8 }}>
-        訂單編號：{summary.orderId}
-        {summary.statusHint ? ` · ${summary.statusHint}` : ''}
+
+      {/* 下一步指引 */}
+      <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 6 }}>
+        可到「校園 → 點餐 → 我的訂單」追蹤進度。
       </Text>
-      {totalLine ? (
-        <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>{totalLine}</Text>
-      ) : null}
+
+      {/* 訂單代號 + 金額 — 同一行；金額未確認時顯示「店家未報價」*/}
+      <View
+        style={{
+          marginTop: 10,
+          paddingTop: 8,
+          borderTopWidth: 1,
+          borderTopColor: '#10B98133',
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 12,
+          alignItems: 'center',
+        }}
+      >
+        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+          訂單代號：
+          <Text style={{ fontFamily: 'monospace', color: theme.colors.text }}>
+            {friendlyOrderCode(summary.orderId)}
+          </Text>
+        </Text>
+        <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
+          {hasPrice ? `金額約 $${summary.total}` : '金額待店家報價'}
+        </Text>
+        {summary.statusHint ? (
+          <Text style={{ color: theme.colors.muted, fontSize: 12 }}>· {summary.statusHint}</Text>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -5944,7 +5993,8 @@ export function AIChatScreen(props: any) {
               successActions[0].tool === 'create_order';
             const bubbleContent =
               onlyCreateOrderOk && orderSuccessSummary
-                ? `已幫你向「${orderSuccessSummary.merchantLabel}」點 ${orderSuccessSummary.quantity} 份「${orderSuccessSummary.itemName}」，詳情見下方卡片。`
+                ? // 卡片本身已顯示完整資訊，泡泡只保留一句口語確認，避免重複
+                  `好，已送出訂單 👇`
                 : content || '已處理你的請求。';
             // 根據操作類型動態生成建議
             const intentType = agentResult.intents[0]?.tool ?? 'unknown';

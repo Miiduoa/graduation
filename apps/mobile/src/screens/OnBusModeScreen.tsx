@@ -31,10 +31,12 @@ import * as Haptics from 'expo-haptics';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { theme } from '../ui/theme';
 import { analytics } from '../services/analytics';
+import { usePersonaContext } from '../services/personaContext';
 import {
   CAMPUS_BUS_ROUTES,
   crowdLabel,
   getCampusBusRoute,
+  haversineMeters,
   simulateActiveVehicles,
   type CampusBusRoute,
   type CampusBusStop,
@@ -54,6 +56,7 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const params = (route.params ?? {}) as Partial<OnBusRouteParams>;
+  const persona = usePersonaContext();
 
   // ── State ──
   const [now, setNow] = useState<Date>(new Date());
@@ -80,9 +83,23 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
 
   const alightStop: CampusBusStop | null = useMemo(() => {
     if (!busRoute) return null;
-    const id = params.alightStopId ?? busRoute.stops[busRoute.stops.length - 1].id;
-    return busRoute.stops.find((s) => s.id === id) ?? null;
-  }, [busRoute, params.alightStopId]);
+    // 1. 明確指定的下車站
+    if (params.alightStopId) {
+      return busRoute.stops.find((s) => s.id === params.alightStopId) ?? null;
+    }
+    // 2. 用 persona 下節課地點推算最近的下車站
+    if (persona.nextClass) {
+      const np = persona.nextClass.poi;
+      let best: { stop: CampusBusStop; d: number } | null = null;
+      for (const s of busRoute.stops) {
+        const d = haversineMeters(np.lat, np.lng, s.lat, s.lng);
+        if (!best || d < best.d) best = { stop: s, d };
+      }
+      if (best) return best.stop;
+    }
+    // 3. fallback：終點站
+    return busRoute.stops[busRoute.stops.length - 1];
+  }, [busRoute, params.alightStopId, persona.nextClass]);
 
   const nextStop: CampusBusStop | null = useMemo(() => {
     if (!busRoute || !vehicle) return null;
@@ -302,6 +319,25 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
             <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, marginTop: 8 }}>
               司機 · {vehicle.driverName}
             </Text>
+          )}
+          {persona.isDemoPersona && persona.nextClass && (
+            <View
+              style={{
+                marginTop: 10,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 12,
+                backgroundColor: 'rgba(232,181,71,0.18)',
+                borderWidth: 1,
+                borderColor: 'rgba(232,181,71,0.35)',
+              }}
+            >
+              <Text style={{ color: '#FBBF24', fontSize: 11, fontWeight: '700' }}>
+                {persona.displayName} · {persona.nextClass.startHHmm}「
+                {persona.nextClass.courseName}」在 {persona.nextClass.poi.name}{' '}
+                {persona.nextClass.roomCode}
+              </Text>
+            </View>
           )}
         </View>
 

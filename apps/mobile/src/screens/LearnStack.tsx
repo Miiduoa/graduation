@@ -56,17 +56,27 @@ import MyQuizScoresScreen from './MyQuizScoresScreen';
 import MyAttendanceHistoryScreen from './MyAttendanceHistoryScreen';
 import CourseScoresScreen from './CourseScoresScreen';
 import TodayCockpitScreen from './TodayCockpitScreen';
+import { DemoStoryScreen } from './DemoStoryScreen';
 import GradeWhatIfScreen from './GradeWhatIfScreen';
 import MistakeRepertoireScreen from './MistakeRepertoireScreen';
 import PomodoroSessionScreen from './PomodoroSessionScreen';
 import AIAgentObservatoryScreen from './AIAgentObservatoryScreen';
+import AIAgentConsoleScreen from './AIAgentConsoleScreen';
 import StudentInboxScreen from './StudentInboxScreen';
 import MonthlySummaryScreen from './MonthlySummaryScreen';
 import StudentOrdersScreen from './StudentOrdersScreen';
+import LifeRequestsScreen from './LifeRequestsScreen';
 import TeacherCockpitScreen from './TeacherCockpitScreen';
 import TADashboardScreen from './TADashboardScreen';
 import DepartmentDashboardScreen from './DepartmentDashboardScreen';
 import VendorDashboardScreen from './VendorDashboardScreen';
+import VendorRevenueReportScreen from './VendorRevenueReportScreen';
+import VendorLoyaltyPushScreen from './VendorLoyaltyPushScreen';
+import VendorMenuManageScreen from './VendorMenuManageScreen';
+import StudentRiskScreen from './StudentRiskScreen';
+import TeachingEvaluationScreen from './TeachingEvaluationScreen';
+import AITrustCardScreen from './AITrustCardScreen';
+import AIStudyBuddyScreen from './AIStudyBuddyScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
@@ -453,6 +463,11 @@ export function LearnStack() {
         options={{ title: '🚀 今日駕駛艙' }}
       />
       <Stack.Screen
+        name="DemoStory"
+        component={DemoStoryScreen}
+        options={{ title: '今天的故事' }}
+      />
+      <Stack.Screen
         name="GradeWhatIf"
         component={GradeWhatIfScreen}
         options={{ title: '📊 成績試算' }}
@@ -478,6 +493,11 @@ export function LearnStack() {
         options={{ title: '🤖 AI 觀察台' }}
       />
       <Stack.Screen
+        name="AIAgentConsole"
+        component={AIAgentConsoleScreen}
+        options={{ title: '🤖 AI Agent 駕駛室' }}
+      />
+      <Stack.Screen
         name="StudentInbox"
         component={StudentInboxScreen}
         options={{ title: '📥 我的 Inbox' }}
@@ -491,6 +511,46 @@ export function LearnStack() {
         name="StudentOrders"
         component={StudentOrdersScreen}
         options={{ title: '🛒 我的訂單' }}
+      />
+      <Stack.Screen
+        name="VendorRevenueReport"
+        component={VendorRevenueReportScreen}
+        options={{ title: '📊 月度報表' }}
+      />
+      <Stack.Screen
+        name="VendorLoyaltyPush"
+        component={VendorLoyaltyPushScreen}
+        options={{ title: '📣 Loyalty 推播' }}
+      />
+      <Stack.Screen
+        name="VendorMenuManage"
+        component={VendorMenuManageScreen}
+        options={{ title: '🍽 菜單管理' }}
+      />
+      <Stack.Screen
+        name="StudentRisk"
+        component={StudentRiskScreen}
+        options={{ title: '🏛 學生風險' }}
+      />
+      <Stack.Screen
+        name="TeachingEvaluation"
+        component={TeachingEvaluationScreen}
+        options={{ title: '🏛 教學評鑑' }}
+      />
+      <Stack.Screen
+        name="AITrustCard"
+        component={AITrustCardScreen}
+        options={{ title: '🛡 AI 信任卡' }}
+      />
+      <Stack.Screen
+        name="AIStudyBuddy"
+        component={AIStudyBuddyScreen}
+        options={{ title: '🤝 AI 學伴' }}
+      />
+      <Stack.Screen
+        name="LifeRequests"
+        component={LifeRequestsScreen}
+        options={{ title: '📝 請假 / 報修' }}
       />
     </Stack.Navigator>
   );

@@ -1049,3 +1049,613 @@ export function computeEarnedCredits(): {
     currentSemesterTotal: CURRENT_SEMESTER.courses.reduce((s, c) => s + c.credits, 0),
   };
 }
+
+// ──────────────────────────────────────────────────────────────
+// 班級學生名單（教師端點名 / 成績冊共用）
+// 資料結構 c1 有 48 位學生，此處列出前 12 位作為 demo 代表
+// ──────────────────────────────────────────────────────────────
+export interface DemoStudent {
+  uid: string;
+  studentId: string;
+  displayName: string;
+  email: string;
+  /** 作業（3 次平均）/ 期中 / 期末 分數 */
+  scores: { hw: number; mid: number; final: number };
+}
+
+export const DEMO_STUDENTS: DemoStudent[] = [
+  { uid: 'stu-001', studentId: 'M11302001', displayName: '王小明', email: 'm11302001@pu.edu.tw', scores: { hw: 95, mid: 96, final: 97 } },
+  { uid: 'stu-002', studentId: 'M11302002', displayName: '陳雅婷', email: 'm11302002@pu.edu.tw', scores: { hw: 88, mid: 91, final: 89 } },
+  { uid: 'stu-003', studentId: 'M11302003', displayName: '林俊宏', email: 'm11302003@pu.edu.tw', scores: { hw: 72, mid: 68, final: 74 } },
+  { uid: 'stu-004', studentId: 'M11302004', displayName: '黃美珍', email: 'm11302004@pu.edu.tw', scores: { hw: 90, mid: 88, final: 92 } },
+  { uid: 'stu-005', studentId: 'M11302005', displayName: '張志偉', email: 'm11302005@pu.edu.tw', scores: { hw: 60, mid: 55, final: 58 } },
+  { uid: 'stu-006', studentId: 'M11302006', displayName: '吳怡君', email: 'm11302006@pu.edu.tw', scores: { hw: 85, mid: 84, final: 86 } },
+  { uid: 'stu-007', studentId: 'M11302007', displayName: '劉建宇', email: 'm11302007@pu.edu.tw', scores: { hw: 78, mid: 80, final: 76 } },
+  { uid: 'stu-008', studentId: 'M11302008', displayName: '蔡雅芳', email: 'm11302008@pu.edu.tw', scores: { hw: 93, mid: 90, final: 94 } },
+  { uid: 'stu-009', studentId: 'M11302009', displayName: '許志明', email: 'm11302009@pu.edu.tw', scores: { hw: 66, mid: 70, final: 65 } },
+  { uid: 'stu-010', studentId: 'M11302010', displayName: '周曉雯', email: 'm11302010@pu.edu.tw', scores: { hw: 82, mid: 85, final: 83 } },
+  { uid: 'stu-011', studentId: 'M11302011', displayName: '鄭國豪', email: 'm11302011@pu.edu.tw', scores: { hw: 75, mid: 72, final: 78 } },
+  { uid: 'stu-012', studentId: 'M11302012', displayName: '簡佩君', email: 'm11302012@pu.edu.tw', scores: { hw: 88, mid: 92, final: 91 } },
+];
+
+// ──────────────────────────────────────────────────────────────
+// 圖書館借閱（與 AI 助理開場白同步）
+// AI 開場白說「人月神話 2 天後到期」— 需與 library/page.tsx 的
+// DEFAULT_BORROWED 第三本書一致（daysFromToday(2)）
+// ──────────────────────────────────────────────────────────────
+export const DEMO_LIBRARY_DUE_SOON_BOOK = '人月神話';   // AI 開場白提到的書名
+export const DEMO_LIBRARY_DUE_SOON_DAYS = 2;            // 與 library page 的 daysFromToday(2) 一致
+export const DEMO_LIBRARY_DUE_SOON_BOOK_ID = '3';       // 與 library/page.tsx DEFAULT_BORROWED[2].id 一致
+
+// ──────────────────────────────────────────────────────────────
+// 待審核公告共用資料（announcements + admin 頁共用）
+// 用 localStorage key 'demoPendingAnn' 存取，模組只提供初始值
+// ──────────────────────────────────────────────────────────────
+export interface DemoPendingAnn {
+  id: string;
+  title: string;
+  source: string;
+  submittedAt: string;
+  /** 'teacher' | 'department_head' | 'club_officer' | 'admin' */
+  submittedByRole: string;
+}
+
+/** 系統預設待審公告（硬編碼初始值） */
+export const INITIAL_PENDING_ANNS: DemoPendingAnn[] = [
+  { id: 'pa-1', title: '【待審】資管系畢業專題評分標準調整', source: '系所辦公室', submittedAt: '2 小時前', submittedByRole: 'department_head' },
+  { id: 'pa-2', title: '【待審】2025 暑期實習合作廠商說明會', source: '產學合作中心', submittedAt: '4 小時前', submittedByRole: 'department_head' },
+  { id: 'pa-3', title: '【待審】系友回娘家活動', source: '系學會', submittedAt: '昨天', submittedByRole: 'club_officer' },
+];
+
+const PENDING_ANN_KEY = 'demoPendingAnn';
+const APPROVED_ANN_KEY = 'demoApprovedAnn';
+
+/** 讀取目前所有待審公告（合併初始值 + 動態新增） */
+export function readPendingAnns(): DemoPendingAnn[] {
+  if (typeof window === 'undefined') return INITIAL_PENDING_ANNS;
+  try {
+    const raw = window.localStorage.getItem(PENDING_ANN_KEY);
+    const extra: DemoPendingAnn[] = raw ? (JSON.parse(raw) as DemoPendingAnn[]) : [];
+    const approvedRaw = window.localStorage.getItem(APPROVED_ANN_KEY);
+    const approved: Set<string> = new Set(approvedRaw ? (JSON.parse(approvedRaw) as string[]) : []);
+    const combined = [...INITIAL_PENDING_ANNS, ...extra].filter((a) => !approved.has(a.id));
+    return combined;
+  } catch {
+    return INITIAL_PENDING_ANNS;
+  }
+}
+
+/** 新增一則待審公告（教師 / 社團幹部發布後呼叫） */
+export function addPendingAnn(ann: Omit<DemoPendingAnn, 'id'>): DemoPendingAnn {
+  const newAnn: DemoPendingAnn = { ...ann, id: `pa-dyn-${Date.now()}` };
+  if (typeof window === 'undefined') return newAnn;
+  try {
+    const raw = window.localStorage.getItem(PENDING_ANN_KEY);
+    const extra: DemoPendingAnn[] = raw ? (JSON.parse(raw) as DemoPendingAnn[]) : [];
+    extra.unshift(newAnn);
+    window.localStorage.setItem(PENDING_ANN_KEY, JSON.stringify(extra));
+    window.dispatchEvent(new CustomEvent('demoPendingAnnChange'));
+  } catch { /* ignore */ }
+  return newAnn;
+}
+
+/** 核准或退回一則待審公告 */
+export function approvePendingAnn(id: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(APPROVED_ANN_KEY);
+    const approved: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+    if (!approved.includes(id)) approved.push(id);
+    window.localStorage.setItem(APPROVED_ANN_KEY, JSON.stringify(approved));
+    window.dispatchEvent(new CustomEvent('demoPendingAnnChange'));
+  } catch { /* ignore */ }
+}
+
+/** 清除 demo 待審狀態（測試用） */
+export function resetPendingAnns(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(PENDING_ANN_KEY);
+  window.localStorage.removeItem(APPROVED_ANN_KEY);
+}
+
+// ──────────────────────────────────────────────────────────────
+// 學生待繳作業（影響 AI 開場白 + 課程頁作業狀態）
+// ──────────────────────────────────────────────────────────────
+export type AssignmentStatus = 'pending' | 'submitted' | 'graded' | 'overdue';
+
+export interface StudentAssignment {
+  id: string;
+  courseId: string;          // 對應 DEMO_COURSES.id
+  courseName: string;
+  title: string;
+  due: string;               // YYYY-MM-DD
+  status: AssignmentStatus;
+  points?: number;
+}
+
+export const STUDENT_ASSIGNMENTS: StudentAssignment[] = [
+  {
+    id: 'a1',
+    courseId: 'c1',
+    courseName: '資料結構',
+    title: '期末專題提案',
+    due: '2026-05-20',
+    status: 'pending',
+    points: 100,
+  },
+  {
+    id: 'a2',
+    courseId: 'c3',
+    courseName: '作業系統',
+    title: 'Lab 5 實作',
+    due: '2026-05-18',
+    status: 'pending',
+    points: 80,
+  },
+  {
+    id: 'a3',
+    courseId: 'c2',
+    courseName: '線性代數',
+    title: '演算法作業 3',
+    due: '2026-05-15',
+    status: 'submitted',
+    points: 100,
+  },
+  {
+    id: 'a4',
+    courseId: 'c4',
+    courseName: '計算機網路',
+    title: '期末專題分組報告',
+    due: '2026-05-30',
+    status: 'pending',
+    points: 150,
+  },
+  {
+    id: 'a5',
+    courseId: 'c8',
+    courseName: '軟體工程',
+    title: 'Sprint 3 Review 報告',
+    due: '2026-05-26',
+    status: 'pending',
+    points: 100,
+  },
+];
+
+/** 取得 pending 狀態的作業（未繳），按截止日排序 */
+export function getPendingAssignments(): StudentAssignment[] {
+  return STUDENT_ASSIGNMENTS
+    .filter((a) => a.status === 'pending')
+    .sort((a, b) => a.due.localeCompare(b.due));
+}
+
+// ──────────────────────────────────────────────────────────────
+// 社團近期活動（影響 AI 開場白 + 社團頁）
+// ──────────────────────────────────────────────────────────────
+export interface ClubActivity {
+  clubId: string;            // 對應 DEMO_CLUBS.id
+  clubName: string;
+  title: string;
+  date: string;              // YYYY-MM-DD
+  location: string;
+  registrationDeadline?: string;
+}
+
+export const CLUB_ACTIVITIES: ClubActivity[] = [
+  {
+    clubId: 'club-1',
+    clubName: '程式設計社',
+    title: '黑客松報名截止',
+    date: '2026-05-19',
+    location: '工程館 B101',
+    registrationDeadline: '2026-05-19',
+  },
+  {
+    clubId: 'club-1',
+    clubName: '程式設計社',
+    title: '24 小時黑客松',
+    date: '2026-05-23',
+    location: '工程館 B101',
+  },
+  {
+    clubId: 'club-1',
+    clubName: '程式設計社',
+    title: '期末成果展示',
+    date: '2026-06-05',
+    location: '活動中心大廳',
+  },
+  {
+    clubId: 'club-2',
+    clubName: '攝影社',
+    title: '春季外拍',
+    date: '2026-05-24',
+    location: '中社花卉中心',
+  },
+];
+
+// ──────────────────────────────────────────────────────────────
+// 教師待批改作業（影響 AI 開場白 + 教師端成績冊）
+// ──────────────────────────────────────────────────────────────
+export type ReviewStatus = 'submitted' | 'grading' | 'graded';
+
+export interface TeacherPendingReview {
+  studentId: string;
+  studentName: string;
+  assignmentTitle: string;
+  courseId: string;
+  submittedAt: string;       // 人類可讀時間
+  status: ReviewStatus;
+}
+
+export const TEACHER_PENDING_REVIEWS: TeacherPendingReview[] = [
+  { studentId: 'stu-001', studentName: '王小明',  assignmentTitle: '作業二：實作專題', courseId: 'c1', submittedAt: '2026-05-14 14:22', status: 'submitted' },
+  { studentId: 'stu-002', studentName: '陳雅婷',  assignmentTitle: '作業二：實作專題', courseId: 'c1', submittedAt: '2026-05-14 16:05', status: 'submitted' },
+  { studentId: 'stu-003', studentName: '林俊宏',  assignmentTitle: '作業二：實作專題', courseId: 'c1', submittedAt: '2026-05-15 09:11', status: 'submitted' },
+  { studentId: 'stu-004', studentName: '黃美珍',  assignmentTitle: '作業二：實作專題', courseId: 'c1', submittedAt: '2026-05-15 11:47', status: 'grading' },
+  { studentId: 'stu-005', studentName: '張志偉',  assignmentTitle: '作業二：實作專題', courseId: 'c1', submittedAt: '2026-05-15 23:58', status: 'submitted' },
+];
+
+// ──────────────────────────────────────────────────────────────
+// 訊息系統（Demo inbox — 每個角色各有 3-5 則示範訊息）
+// ──────────────────────────────────────────────────────────────
+export interface DemoMessage {
+  id: string;
+  /** 寄件人顯示名稱 */
+  fromName: string;
+  /** 寄件人 emoji 頭像 */
+  fromAvatar: string;
+  /** 主旨 */
+  subject: string;
+  /** 完整內容 */
+  body: string;
+  /** 送出時間（人類可讀） */
+  sentAt: string;
+  /** 是否已讀 */
+  isRead: boolean;
+  /** 訊息類型（影響 icon / 色調） */
+  type: 'info' | 'warning' | 'action' | 'success';
+  /** 關聯課程（按鈕跳轉） */
+  relatedCourseId?: string;
+  /** 關聯社團 */
+  relatedClubId?: string;
+  /** 關聯公告 */
+  relatedAnnouncementId?: string;
+  /** 哪些角色收得到這則訊息 */
+  recipientRoles: DemoUserRole[];
+}
+
+/** Demo 訊息全量資料（按角色過濾使用） */
+export const DEMO_MESSAGES: DemoMessage[] = [
+  // ── 學生（王小明）收件匣 ──
+  {
+    id: 'msg-s1',
+    fromName: '王大明 老師',
+    fromAvatar: '🧑‍🏫',
+    subject: '【重要】資料結構期末專題截止提醒',
+    body: '王小明同學你好，\n\n提醒你「資料結構期末專題提案」截止日為 2026-05-20（三）23:59，請務必在期限前透過課程頁面繳交。\n\n如對題目有疑問，歡迎在截止前三天前預約辦公室時間（工程館 308，週二 14:00-17:00）。\n\n祝學習順利！\n王大明 敬上',
+    sentAt: '2 小時前',
+    isRead: false,
+    type: 'warning',
+    relatedCourseId: 'c1',
+    recipientRoles: ['student'],
+  },
+  {
+    id: 'msg-s2',
+    fromName: '李志明 老師',
+    fromAvatar: '🧑‍🏫',
+    subject: '【作業系統】第三次作業截止日延期通知',
+    body: '各位同學，\n\n第三次作業（Lab 5 實作）截止日由 5/19 延期至 **5/23 23:59**，請把握時間完成。\n\n延期原因：本週提前公告未達 72 小時，基於公平原則給予延期。\n\n繳交連結請見課程頁。\n\n李志明 敬上',
+    sentAt: '8 小時前',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: 'c3',
+    recipientRoles: ['student'],
+  },
+  {
+    id: 'msg-s3',
+    fromName: '程式設計社',
+    fromAvatar: '💻',
+    subject: '【程式設計社】黑客松報名即將截止（明天 23:59）',
+    body: '社員你好！\n\n2026 年度黑客松活動報名截止日為 **2026-05-19 23:59**，名額僅剩 4 組！\n\n活動資訊：\n- 時間：2026-05-23（六）09:00 起\n- 地點：工程館 B101\n- 形式：24 小時不限主題黑客松\n- 獎金：NTD 30,000（第一名）\n\n如尚未報名，請立即前往社團頁面！',
+    sentAt: '5 小時前',
+    isRead: true,
+    type: 'info',
+    relatedClubId: 'club-1',
+    recipientRoles: ['student'],
+  },
+  {
+    id: 'msg-s4',
+    fromName: '陳小華 老師',
+    fromAvatar: '🧑‍🏫',
+    subject: '【線性代數】第二次小考 5/22 提醒',
+    body: '同學你好，\n\n提醒本週四（5/22）13:10 在理學院 201 進行第二次小考，考試範圍為第 6-9 章（行列式、特徵值與特徵向量）。\n\n考試時長 40 分鐘，帶好學生證與文具。\n\n祝考試順利！',
+    sentAt: '昨天',
+    isRead: true,
+    type: 'info',
+    relatedCourseId: 'c2',
+    recipientRoles: ['student'],
+  },
+  {
+    id: 'msg-s5',
+    fromName: '張美玲 老師',
+    fromAvatar: '🧑‍🏫',
+    subject: '【計算機網路】期末專題分組截止提醒',
+    body: '各位選課學生，\n\n計算機網路期末專題分組截止日為 **2026-05-30**，每組 3-4 人，請自行組隊後在課程系統填寫組別資訊。\n\n未完成組隊者，系統將於截止後自動隨機分配，請盡快確認。\n\n張美玲 敬上',
+    sentAt: '昨天',
+    isRead: false,
+    type: 'warning',
+    relatedCourseId: 'c4',
+    recipientRoles: ['student'],
+  },
+
+  // ── 教師（王大明）收件匣 ──
+  {
+    id: 'msg-t1',
+    fromName: '王小明（M11302001）',
+    fromAvatar: '👩‍🎓',
+    subject: '關於資料結構期末專題的問題',
+    body: '王大明老師好，\n\n我是資料結構的學生王小明，想請教關於期末專題提案的問題：\n\n1. 題目可以自訂嗎？還是必須從老師提供的清單選？\n2. 提案報告格式有要求嗎？（頁數、字型等）\n3. 可以兩人組隊還是必須單人？\n\n謝謝老師！',
+    sentAt: '1 小時前',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: 'c1',
+    recipientRoles: ['teacher'],
+  },
+  {
+    id: 'msg-t2',
+    fromName: '課程系統',
+    fromAvatar: '🔔',
+    subject: '【資料結構】作業二已收到 5 份提交，待批改',
+    body: '資料結構（CS301）作業二「實作專題」共有 5 位學生完成提交：\n\n- 王小明（2026-05-14 14:22）\n- 陳雅婷（2026-05-14 16:05）\n- 林俊宏（2026-05-15 09:11）\n- 黃美珍（2026-05-15 11:47）\n- 張志偉（2026-05-15 23:58）\n\n請前往課程成績冊進行批改，建議於 5/30 前完成。',
+    sentAt: '30 分鐘前',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: 'c1',
+    recipientRoles: ['teacher'],
+  },
+  {
+    id: 'msg-t3',
+    fromName: '林助教',
+    fromAvatar: '🧑‍💻',
+    subject: '作業批改進度回報：已完成前 3 份',
+    body: '王老師好，\n\n報告批改進度：已完成作業二前 3 份（王小明、陳雅婷、林俊宏），評語與分數已填入成績冊。\n\n林俊宏同學有一題邏輯錯誤，已附評語建議修改。\n\n其餘 2 份（黃美珍、張志偉）預計明天前完成，請老師最後審閱後發布成績。\n\n林助教 敬上',
+    sentAt: '3 小時前',
+    isRead: true,
+    type: 'success',
+    relatedCourseId: 'c1',
+    recipientRoles: ['teacher'],
+  },
+  {
+    id: 'msg-t4',
+    fromName: '系統通知',
+    fromAvatar: '✅',
+    subject: '你發布的公告「期中考試範圍公布」已獲系主任核准',
+    body: '通知你：\n\n你在 2026-05-17 提交的課程公告「【重要】資料結構期中考試範圍公布」已由系主任（黃主任）核准，現已正式對選課學生公開。\n\n48 位選課學生已收到通知。',
+    sentAt: '昨天',
+    isRead: true,
+    type: 'success',
+    relatedAnnouncementId: 'ann-1',
+    recipientRoles: ['teacher'],
+  },
+
+  // ── 助教（林助教）收件匣 ──
+  {
+    id: 'msg-a1',
+    fromName: '王大明 老師',
+    fromAvatar: '🧑‍🏫',
+    subject: '請協助批改資料結構作業二（第 11-20 號學生）',
+    body: '林助教你好，\n\n麻煩你協助批改作業二「實作專題」第 11-20 號學生的提交，批改規則如下：\n\n- 正確性 50 分（程式碼能執行且輸出正確）\n- 程式碼品質 30 分（可讀性、命名規範）\n- 報告撰寫 20 分（說明清楚、有截圖）\n\n請在 2026-05-17 前完成並填入成績冊，我會再最終審閱。\n\n謝謝你的協助！\n王大明',
+    sentAt: '30 分鐘前',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: 'c1',
+    recipientRoles: ['ta'],
+  },
+  {
+    id: 'msg-a2',
+    fromName: '課程系統',
+    fromAvatar: '🔔',
+    subject: '助教批改權限已開通：資料結構（CS301）',
+    body: '你已被指定為資料結構（CS301）課程助教，以下權限已開通：\n\n✅ 查看學生作業提交\n✅ 填寫批改分數與評語\n✅ 查看成績冊\n\n⛔ 以下權限僅限授課教師操作：\n- 發布成績（讓學生看見）\n- 修改課程設定\n- 管理教材模組\n\n如有問題請聯絡課程負責人王大明老師。',
+    sentAt: '2 天前',
+    isRead: true,
+    type: 'info',
+    relatedCourseId: 'c1',
+    recipientRoles: ['ta'],
+  },
+  {
+    id: 'msg-a3',
+    fromName: '王小明（M11302001）',
+    fromAvatar: '👩‍🎓',
+    subject: '請問作業二第三題的評分標準？',
+    body: '林助教你好，\n\n我想請問作業二第三題（鏈結串列反轉）的評分標準：\n\n我用遞迴實作，但老師課堂上示範的是迭代，這樣算不算符合要求？輸出是正確的，但不知道方法不同會不會被扣分。\n\n謝謝助教！\n王小明',
+    sentAt: '45 分鐘前',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: 'c1',
+    recipientRoles: ['ta'],
+  },
+
+  // ── 社團幹部（陳社長）收件匣 ──
+  {
+    id: 'msg-c1',
+    fromName: '課程系統',
+    fromAvatar: '🔔',
+    subject: '【程式設計社】3 位新成員申請入社',
+    body: '程式設計社最新入社申請（共 3 位）：\n\n1. 李宇欣（資管系大一，B11302088）\n2. 張博文（資工系大二，B11202044）\n3. 陳怡萱（電機系大一，B11305012）\n\n請前往「管理成員」頁面進行審核。',
+    sentAt: '1 小時前',
+    isRead: false,
+    type: 'action',
+    relatedClubId: 'club-1',
+    recipientRoles: ['club_officer'],
+  },
+  {
+    id: 'msg-c2',
+    fromName: '校學生活動中心',
+    fromAvatar: '🏫',
+    subject: '黑客松場地使用確認：工程館 B101',
+    body: '陳社長您好，\n\n2026-05-23（六）09:00 至 2026-05-24（日）09:00 工程館 B101 場地預訂已確認核准。\n\n注意事項：\n- 活動前一天請至場控室領取鑰匙\n- 活動後需恢復原狀並填寫場地使用紀錄表\n- 活動期間禁止大聲喧嘩（22:00 後）\n\n如有問題請洽學生事務處（分機 1234）。',
+    sentAt: '昨天',
+    isRead: true,
+    type: 'success',
+    relatedClubId: 'club-1',
+    recipientRoles: ['club_officer'],
+  },
+  {
+    id: 'msg-c3',
+    fromName: '系統通知',
+    fromAvatar: '✅',
+    subject: '黑客松活動公告已獲核准並對外公開',
+    body: '你提交的社團公告「程式設計社：本週五黑客松開放報名」已獲系主任核准，現已向全校學生公開。\n\n目前共有 18 組報名，距滿額（20 組）還剩 2 組名額。',
+    sentAt: '2 天前',
+    isRead: true,
+    type: 'success',
+    relatedClubId: 'club-1',
+    recipientRoles: ['club_officer'],
+  },
+
+  // ── 系主任（黃主任）收件匣 ──
+  {
+    id: 'msg-d1',
+    fromName: '公告審核系統',
+    fromAvatar: '⏳',
+    subject: '3 則公告待你審核',
+    body: '目前有 3 則公告待你審核，請盡快處理：\n\n1. 【待審】資管系畢業專題評分標準調整（系所辦公室，2 小時前）\n2. 【待審】2025 暑期實習合作廠商說明會（產學合作中心，4 小時前）\n3. 【待審】系友回娘家活動（系學會，昨天）\n\n請前往管理後台進行審核。',
+    sentAt: '2 小時前',
+    isRead: false,
+    type: 'warning',
+    relatedAnnouncementId: 'ann-1',
+    recipientRoles: ['department_head'],
+  },
+  {
+    id: 'msg-d2',
+    fromName: '林宜珊 老師',
+    fromAvatar: '🧑‍🏫',
+    subject: '教師基本資料已提交，請審核',
+    body: '黃主任您好，\n\n本人林宜珊已完成教師基本資料更新，包含：\n- 個人學術著作清單（新增 3 篇）\n- 兼職申報表\n- 新學年授課意願表\n\n煩請撥冗審核，謝謝！\n林宜珊 敬上',
+    sentAt: '昨天',
+    isRead: false,
+    type: 'action',
+    recipientRoles: ['department_head'],
+  },
+  {
+    id: 'msg-d3',
+    fromName: '系統報表',
+    fromAvatar: '📊',
+    subject: '本週系所課程統計報表已生成',
+    body: '本週（2026-05-11 ～ 2026-05-17）資訊管理系統計摘要：\n\n- 本週課程總節數：47 節\n- 平均出席率：94.2%\n- 作業繳交率：88.7%\n- 已登錄成績課程：12 門 / 全學期 34 門\n\n完整報表已匯出 Excel，請前往系統後台下載。',
+    sentAt: '今天 08:00',
+    isRead: true,
+    type: 'info',
+    recipientRoles: ['department_head'],
+  },
+
+  // ── 管理員收件匣 ──
+  {
+    id: 'msg-ad1',
+    fromName: '資安監控系統',
+    fromAvatar: '🛡️',
+    subject: '⚠️ 異常登入嘗試偵測（來自境外 IP）',
+    body: '系統偵測到異常活動：\n\n- 時間：2026-05-17 09:23\n- 事件：5 次登入失敗嘗試\n- 來源 IP：185.220.101.xx（荷蘭，Tor 出口節點）\n- 目標帳號：admin@pu.edu.tw\n\n建議措施：\n1. 確認帳號密碼無外洩\n2. 啟用雙因子驗證\n3. 加入該 IP 段至封鎖清單\n\n[前往管理後台處理]',
+    sentAt: '30 分鐘前',
+    isRead: false,
+    type: 'warning',
+    recipientRoles: ['admin'],
+  },
+  {
+    id: 'msg-ad2',
+    fromName: '備份系統',
+    fromAvatar: '💾',
+    subject: '每日備份完成（1.2GB）',
+    body: '每日例行備份已完成：\n\n- 時間：2026-05-17 03:00\n- 備份大小：1.2 GB\n- 備份目的地：AWS S3（ap-northeast-1）\n- 資料保存期：30 天\n- 狀態：成功 ✅\n\n如需下載備份請前往系統管理後台。',
+    sentAt: '今天 03:00',
+    isRead: true,
+    type: 'success',
+    recipientRoles: ['admin'],
+  },
+  {
+    id: 'msg-ad3',
+    fromName: '系統監控',
+    fromAvatar: '📡',
+    subject: 'API 速率警告：tronclass-proxy 超出 80%',
+    body: 'tronclass-proxy 服務在過去 1 小時（09:00-10:00）請求數達到速率限制的 83%。\n\n詳情：\n- 實際請求數：4,150 次 / 小時\n- 速率限制上限：5,000 次 / 小時\n- 峰值時間：09:30-09:45\n\n如持續增加，建議考慮：\n- 啟用快取層\n- 升級 API 方案',
+    sentAt: '1 小時前',
+    isRead: false,
+    type: 'warning',
+    recipientRoles: ['admin'],
+  },
+
+  // ── 校友（張學長）收件匣 ──
+  {
+    id: 'msg-al1',
+    fromName: '資管系學生會',
+    fromAvatar: '🎓',
+    subject: '系友回娘家活動邀請（2026/06/15）',
+    body: '張學長您好！\n\n誠摯邀請您參加「資管系 109 屆系友回娘家」活動：\n\n📅 時間：2026-06-15（日）13:00 ～ 17:00\n📍 地點：靜宜大學學生活動中心 3F\n🍱 餐點：自助下午茶\n🎤 活動：現任師生分享、業界交流座談\n\n請於 6/10 前填寫報名表（詳見附件連結）。\n\n期待與你相聚！',
+    sentAt: '昨天',
+    isRead: true,
+    type: 'info',
+    recipientRoles: ['alumni'],
+  },
+];
+
+/** 根據角色取得對應收件匣訊息（按時間倒序） */
+export function getMessagesForRole(role: DemoUserRole): DemoMessage[] {
+  return DEMO_MESSAGES.filter((m) => m.recipientRoles.includes(role));
+}
+
+/** 取得某角色的未讀訊息數量 */
+export function getUnreadCountForRole(role: DemoUserRole): number {
+  return DEMO_MESSAGES.filter((m) => m.recipientRoles.includes(role) && !m.isRead).length;
+}
+
+// ──────────────────────────────────────────────────────────────
+// 即將到來的考試（影響 AI 開場白 + 課程頁）
+// ──────────────────────────────────────────────────────────────
+export interface UpcomingExam {
+  courseId: string;
+  courseName: string;
+  title: string;
+  date: string;              // YYYY-MM-DD
+  time: string;              // HH:MM
+  location: string;
+  type: 'midterm' | 'final' | 'quiz';
+}
+
+export const UPCOMING_EXAMS: UpcomingExam[] = [
+  {
+    courseId: 'c1',
+    courseName: '資料結構',
+    title: '期末考試',
+    date: '2026-06-15',
+    time: '09:00',
+    location: '工學院 301',
+    type: 'final',
+  },
+  {
+    courseId: 'c2',
+    courseName: '線性代數',
+    title: '第二次小考',
+    date: '2026-05-22',
+    time: '13:10',
+    location: '理學院 201',
+    type: 'quiz',
+  },
+  {
+    courseId: 'c3',
+    courseName: '作業系統',
+    title: '期中補考',
+    date: '2026-05-22',
+    time: '14:00',
+    location: '工學院 201',
+    type: 'midterm',
+  },
+  {
+    courseId: 'c5',
+    courseName: '微積分',
+    title: '期末考試',
+    date: '2026-06-17',
+    time: '10:00',
+    location: '理學院 101',
+    type: 'final',
+  },
+];

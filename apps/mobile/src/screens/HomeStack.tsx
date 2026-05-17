@@ -35,6 +35,7 @@ import { PostDetailScreen } from './social/PostDetailScreen';
 import { StoryComposeScreen } from './social/StoryComposeScreen';
 import { UnifiedCalendarScreen } from './UnifiedCalendarScreen';
 import { CampusGameScreen } from './CampusGameScreen';
+import AIAgentConsoleScreen from './AIAgentConsoleScreen';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import type { CampusActorRole } from '../data';
@@ -101,6 +102,11 @@ export function HomeStack() {
         name="SmartCalendarScreen"
         component={UnifiedCalendarScreen}
         options={{ title: '行事曆', headerShown: false }}
+      />
+      <Stack.Screen
+        name="AIAgentConsole"
+        component={AIAgentConsoleScreen}
+        options={{ title: '🤖 AI Agent 駕駛室' }}
       />
     </Stack.Navigator>
   );

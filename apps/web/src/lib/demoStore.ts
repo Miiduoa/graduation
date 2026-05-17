@@ -1,0 +1,1324 @@
+'use client';
+
+/**
+ * demoStore.ts — 跨角色動作關聯的核心狀態管理
+ *
+ * 使用 localStorage 實現跨頁 / 跨角色的資料同步。
+ * 任何角色的動作（新增作業、點名、發布成績…）都會寫入此 store，
+ * 其他角色頁面從這裡讀到更新後的狀態，呈現真實因果關係。
+ *
+ * KEY:   'demoStore_v1'
+ * 事件:  'demoStoreChange' (CustomEvent)，同頁跨元件同步
+ * 跨頁:  window storage event
+ *
+ * 2026-05-17 擴充：新增 9 條動作鏈（求助/評語/討論/訂餐/請假/報修/同儕互評/批量提醒/系所廣播）
+ * 並修正既有 publishGrades / approveClubMember / endAttendanceSession 寫死 stu-001 的問題。
+ */
+
+import { useEffect, useState } from 'react';
+import {
+  DEMO_MESSAGES,
+  DEMO_STUDENTS,
+  DEMO_CLUBS,
+  type DemoMessage,
+  type DemoUserRole,
+} from './demoData';
+
+// ─────────────────────────────────────────────────────────────
+// 常數
+// ─────────────────────────────────────────────────────────────
+
+export const STORE_KEY = 'demoStore_v1';
+export const STORE_EVENT = 'demoStoreChange';
+
+// ─────────────────────────────────────────────────────────────
+// 型別
+// ─────────────────────────────────────────────────────────────
+
+/** 動態訊息（角色動作觸發，與靜態 DEMO_MESSAGES 合併顯示） */
+export interface StoreDynamicMessage {
+  id: string;
+  fromName: string;
+  fromAvatar: string;
+  subject: string;
+  body: string;
+  sentAt: string;
+  isRead: boolean;
+  type: 'info' | 'warning' | 'action' | 'success';
+  relatedCourseId?: string;
+  relatedClubId?: string;
+  relatedAnnouncementId?: string;
+  recipientRoles: DemoUserRole[];
+}
+
+/** 教師新增的作業（補充靜態 STUDENT_ASSIGNMENTS） */
+export interface StoreDynamicAssignment {
+  id: string;
+  courseId: string;
+  courseName: string;
+  title: string;
+  due: string;     // YYYY-MM-DD
+  points: number;
+  createdAt: string; // ISO
+}
+
+/** 學生作業繳交紀錄 */
+export interface StoreSubmission {
+  id: string;
+  assignmentId: string;
+  courseId: string;
+  studentId: string;
+  studentName: string;
+  submittedAt: string; // ISO
+  score?: number;
+  graded: boolean;
+}
+
+/** 社團入社申請 */
+export interface StoreClubMembership {
+  id: string;
+  clubId: string;
+  clubName: string;
+  studentId: string;
+  studentName: string;
+  status: 'pending' | 'approved' | 'rejected';
+  appliedAt: string; // ISO
+}
+
+/** 點名 session 狀態 */
+export interface StoreAttendanceSession {
+  courseId: string;
+  active: boolean;
+  startedAt: string; // ISO
+}
+
+/** 已發布成績（讓學生看到） */
+export interface StorePublishedGrade {
+  courseId: string;
+  courseName: string;
+  studentId: string;
+  score: number;
+  grade: string;
+  publishedAt: string; // ISO
+}
+
+/** 圖書館借閱覆寫（續借後更新到期日） */
+export interface StoreBorrowingOverride {
+  dueDate: string;    // YYYY-MM-DD
+  renewCount: number;
+}
+
+/** 整個 demo 共享狀態
+ *
+ *  新增欄位（2026-05-17 擴充）：feedbackDrafts / discussionPosts / helpRequests /
+ *  orders / leaveRequests / dormRepairs / peerReviews / disabledUsers / libraryReservations
+ *  這些都標為 optional 以保留 backwards-compat（已存的 localStorage 不會壞）。
+ */
+export interface DemoStore {
+  dynamicMessages: StoreDynamicMessage[];
+  dynamicAssignments: StoreDynamicAssignment[];
+  submissions: StoreSubmission[];
+  clubMemberships: StoreClubMembership[];
+  attendanceSessions: StoreAttendanceSession[];
+  publishedGrades: StorePublishedGrade[];
+  borrowingOverrides: Record<string, StoreBorrowingOverride>;
+  readMessageIds: string[];
+  // ── 擴充 ──
+  feedbackDrafts?: StoreFeedbackDraft[];
+  discussionPosts?: StoreDiscussionPost[];
+  helpRequests?: StoreHelpRequest[];
+  orders?: StoreOrder[];
+  leaveRequests?: StoreLeaveRequest[];
+  dormRepairs?: StoreDormRepair[];
+  peerReviews?: StorePeerReview[];
+  disabledUsers?: StoreDisabledUser[];
+  libraryReservations?: StoreLibraryReservation[];
+}
+
+const EMPTY_STORE: DemoStore = {
+  dynamicMessages: [],
+  dynamicAssignments: [],
+  submissions: [],
+  clubMemberships: [],
+  attendanceSessions: [],
+  publishedGrades: [],
+  borrowingOverrides: {},
+  readMessageIds: [],
+  feedbackDrafts: [],
+  discussionPosts: [],
+  helpRequests: [],
+  orders: [],
+  leaveRequests: [],
+  dormRepairs: [],
+  peerReviews: [],
+  disabledUsers: [],
+  libraryReservations: [],
+};
+
+// ─────────────────────────────────────────────────────────────
+// 讀 / 寫
+// ─────────────────────────────────────────────────────────────
+
+export function getDemoStore(): DemoStore {
+  if (typeof window === 'undefined') return EMPTY_STORE;
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    if (!raw) return EMPTY_STORE;
+    return { ...EMPTY_STORE, ...(JSON.parse(raw) as Partial<DemoStore>) };
+  } catch {
+    return EMPTY_STORE;
+  }
+}
+
+function setDemoStore(store: DemoStore): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(store));
+    window.dispatchEvent(new CustomEvent(STORE_EVENT));
+  } catch { /* storage full or private mode */ }
+}
+
+function updateDemoStore(updater: (prev: DemoStore) => DemoStore): void {
+  setDemoStore(updater(getDemoStore()));
+}
+
+// ─────────────────────────────────────────────────────────────
+// React Hook
+// ─────────────────────────────────────────────────────────────
+
+export function useDemoStore(): DemoStore {
+  const [store, setStore] = useState<DemoStore>(() => getDemoStore());
+
+  useEffect(() => {
+    const refresh = () => setStore(getDemoStore());
+    const storageHandler = (e: StorageEvent) => {
+      if (e.key === STORE_KEY) refresh();
+    };
+    window.addEventListener(STORE_EVENT, refresh);
+    window.addEventListener('storage', storageHandler);
+    return () => {
+      window.removeEventListener(STORE_EVENT, refresh);
+      window.removeEventListener('storage', storageHandler);
+    };
+  }, []);
+
+  return store;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 訊息 helpers
+// ─────────────────────────────────────────────────────────────
+
+/** 傳送動態訊息（角色動作呼叫） */
+export function sendMessage(msg: Omit<StoreDynamicMessage, 'id'>): void {
+  updateDemoStore((store) => ({
+    ...store,
+    dynamicMessages: [
+      {
+        ...msg,
+        id: `dyn-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      },
+      ...store.dynamicMessages,
+    ],
+  }));
+}
+
+/** 標記動態訊息為已讀 */
+export function markDynamicMessageRead(msgId: string): void {
+  updateDemoStore((store) => ({
+    ...store,
+    readMessageIds: store.readMessageIds.includes(msgId)
+      ? store.readMessageIds
+      : [...store.readMessageIds, msgId],
+  }));
+}
+
+/**
+ * 取得某角色的完整收件匣
+ * = 靜態 DEMO_MESSAGES（filter recipientRoles） + 動態 dynamicMessages（倒序）
+ */
+export type AnyMessage = (DemoMessage | StoreDynamicMessage) & { _dynamic?: boolean };
+
+export function getAllMessagesForRole(
+  role: DemoUserRole,
+  store: DemoStore,
+): AnyMessage[] {
+  const staticMsgs = DEMO_MESSAGES.filter((m) => m.recipientRoles.includes(role));
+  const dynamicMsgs = store.dynamicMessages
+    .filter((m) => m.recipientRoles.includes(role))
+    .map((m) => ({ ...m, _dynamic: true as const }));
+  return [...dynamicMsgs, ...staticMsgs];
+}
+
+/** 動態 + 靜態未讀數 */
+export function getUnreadCountDynamic(
+  role: DemoUserRole,
+  store: DemoStore,
+): number {
+  const all = getAllMessagesForRole(role, store);
+  return all.filter(
+    (m) => !m.isRead && !store.readMessageIds.includes(m.id),
+  ).length;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 1：作業流程
+// ─────────────────────────────────────────────────────────────
+
+/** 教師新增作業 → 學生收到通知 */
+export function addAssignment(
+  assignment: Omit<StoreDynamicAssignment, 'id' | 'createdAt'>,
+): void {
+  const newAssign: StoreDynamicAssignment = {
+    ...assignment,
+    id: `dyn-hw-${Date.now()}`,
+    createdAt: new Date().toISOString(),
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    dynamicAssignments: [newAssign, ...store.dynamicAssignments],
+  }));
+  // 通知學生
+  sendMessage({
+    fromName: '王大明 老師',
+    fromAvatar: '🧑‍🏫',
+    subject: `【新作業】${assignment.courseName}：${assignment.title}`,
+    body: `老師剛發布了新作業「${assignment.title}」，截止日為 ${assignment.due}，配分 ${assignment.points} 分。\n\n請前往課程頁面查看詳情並準時繳交。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: assignment.courseId,
+    recipientRoles: ['student'],
+  });
+}
+
+/** 學生繳交作業 → 教師 / TA 收到通知 */
+export function submitAssignment(params: {
+  assignmentId: string;
+  courseId: string;
+  courseName: string;
+  assignmentTitle: string;
+  studentId: string;
+  studentName: string;
+}): void {
+  const sub: StoreSubmission = {
+    id: `sub-${Date.now()}`,
+    assignmentId: params.assignmentId,
+    courseId: params.courseId,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    submittedAt: new Date().toISOString(),
+    graded: false,
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    submissions: [sub, ...store.submissions],
+  }));
+  sendMessage({
+    fromName: `${params.studentName}（系統通知）`,
+    fromAvatar: '📬',
+    subject: `【作業繳交】${params.studentName} 已繳交：${params.assignmentTitle}`,
+    body: `${params.studentName} 已於 ${new Date().toLocaleString('zh-TW')} 繳交「${params.assignmentTitle}」（${params.courseName}）。\n\n請前往成績簿進行批改。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: params.courseId,
+    recipientRoles: ['teacher', 'ta'],
+  });
+}
+
+/** 某學生某作業是否已繳交 */
+export function isSubmitted(
+  assignmentId: string,
+  studentId: string,
+  store: DemoStore,
+): boolean {
+  return store.submissions.some(
+    (s) => s.assignmentId === assignmentId && s.studentId === studentId,
+  );
+}
+
+/** 取得某課程的所有待批改繳交 */
+export function getPendingSubmissions(
+  courseId: string,
+  store: DemoStore,
+): StoreSubmission[] {
+  return store.submissions.filter(
+    (s) => s.courseId === courseId && !s.graded,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 2：公告審核流程
+// ─────────────────────────────────────────────────────────────
+
+/** 教師 / 幹部新增公告後，通知系主任 */
+export function notifyDeptHeadNewAnn(title: string, source: string): void {
+  sendMessage({
+    fromName: source,
+    fromAvatar: '⏳',
+    subject: `【待審核公告】${title}`,
+    body: `${source} 剛提交了一則待審公告：「${title}」\n\n請前往公告頁面的「待審核」Tab 進行審核。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    recipientRoles: ['department_head'],
+  });
+}
+
+/** 系主任核准公告後，通知學生 */
+export function notifyStudentsAnnApproved(title: string, source: string): void {
+  sendMessage({
+    fromName: source,
+    fromAvatar: '📣',
+    subject: `【新公告】${title}`,
+    body: `一則新公告已發布：「${title}」\n\n請前往公告頁面查看詳情。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'info',
+    recipientRoles: ['student'],
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 3：社團申請流程
+// ─────────────────────────────────────────────────────────────
+
+/** 學生申請加入社團 */
+export function applyClub(params: {
+  clubId: string;
+  clubName: string;
+  studentId: string;
+  studentName: string;
+}): void {
+  const existing = getDemoStore().clubMemberships.find(
+    (m) => m.clubId === params.clubId && m.studentId === params.studentId,
+  );
+  if (existing) return;
+
+  const membership: StoreClubMembership = {
+    id: `cm-${Date.now()}`,
+    clubId: params.clubId,
+    clubName: params.clubName,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    status: 'pending',
+    appliedAt: new Date().toISOString(),
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    clubMemberships: [membership, ...store.clubMemberships],
+  }));
+  sendMessage({
+    fromName: `${params.studentName}（申請加入）`,
+    fromAvatar: '📨',
+    subject: `【社員申請】${params.studentName} 申請加入 ${params.clubName}`,
+    body: `${params.studentName} 剛剛申請加入 ${params.clubName}，請前往社團頁面審核這份申請。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    relatedClubId: params.clubId,
+    recipientRoles: ['club_officer'],
+  });
+}
+
+/** 社長核准社員申請（fromName / clubName 從 store + DEMO_CLUBS 動態讀，不再寫死陳社長） */
+export function approveClubMember(membershipId: string, opts?: { officerName?: string }): void {
+  let memberName = '';
+  let clubId = '';
+  let clubName = '';
+  updateDemoStore((store) => {
+    const updated = store.clubMemberships.map((m) => {
+      if (m.id === membershipId) {
+        memberName = m.studentName;
+        clubId = m.clubId;
+        clubName = m.clubName;
+        return { ...m, status: 'approved' as const };
+      }
+      return m;
+    });
+    return { ...store, clubMemberships: updated };
+  });
+  if (memberName) {
+    // 若沒帶 officerName，從 DEMO_CLUBS 找出該社團的代表幹部稱呼（fallback：「社長」）
+    const club = DEMO_CLUBS.find((c) => c.id === clubId);
+    const officerName = opts?.officerName ?? `${club?.name ?? clubName} 社長`;
+    sendMessage({
+      fromName: officerName,
+      fromAvatar: club?.icon ?? '🎯',
+      subject: `【${clubName}】你的入社申請已通過！`,
+      body: `恭喜！你申請加入 ${clubName} 的申請已通過審核。\n\n歡迎加入我們！近期活動訊息請關注社團公告。`,
+      sentAt: '剛剛',
+      isRead: false,
+      type: 'success',
+      relatedClubId: clubId,
+      recipientRoles: ['student'],
+    });
+  }
+}
+
+/** 社長退回社員申請 */
+export function rejectClubMember(membershipId: string): void {
+  updateDemoStore((store) => ({
+    ...store,
+    clubMemberships: store.clubMemberships.map((m) =>
+      m.id === membershipId ? { ...m, status: 'rejected' as const } : m,
+    ),
+  }));
+}
+
+/** 是否已申請（pending or approved） */
+export function getClubMembershipStatus(
+  clubId: string,
+  studentId: string,
+  store: DemoStore,
+): 'none' | 'pending' | 'approved' | 'rejected' {
+  const m = store.clubMemberships.find(
+    (x) => x.clubId === clubId && x.studentId === studentId,
+  );
+  return m ? m.status : 'none';
+}
+
+/** 取得某社團的待審核申請 */
+export function getPendingClubMembers(
+  clubId: string,
+  store: DemoStore,
+): StoreClubMembership[] {
+  return store.clubMemberships.filter(
+    (m) => m.clubId === clubId && m.status === 'pending',
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 4：課程點名流程
+// ─────────────────────────────────────────────────────────────
+
+/** 教師開始點名（在 localStorage 設旗） */
+export function startAttendanceSession(courseId: string): void {
+  updateDemoStore((store) => ({
+    ...store,
+    attendanceSessions: [
+      { courseId, active: true, startedAt: new Date().toISOString() },
+      ...store.attendanceSessions.filter(
+        (s) => !(s.courseId === courseId && s.active),
+      ),
+    ],
+  }));
+}
+
+/** 教師結束點名，所有缺席學生都收到訊息（不再只通知 stu-001）。
+ *  demo 簡化：因為 message 是按角色廣播（不是按 uid 點對點），
+ *  只要 absentUids 非空就會發出一則「N 位學生缺席」的廣播給 student 角色，
+ *  訊息內容會列出缺席學生姓名，讓 demo 看得到「多人缺席」的情境。
+ */
+export function endAttendanceSession(
+  courseId: string,
+  courseName: string,
+  absentUids: string[],
+): void {
+  updateDemoStore((store) => ({
+    ...store,
+    attendanceSessions: store.attendanceSessions.map((s) =>
+      s.courseId === courseId && s.active ? { ...s, active: false } : s,
+    ),
+  }));
+  if (absentUids.length > 0) {
+    const absentNames = absentUids
+      .map((uid) => DEMO_STUDENTS.find((s) => s.uid === uid)?.displayName ?? uid)
+      .join('、');
+    sendMessage({
+      fromName: '課程系統',
+      fromAvatar: '📋',
+      subject: `【${courseName}】今日點名：${absentUids.length} 位學生缺席`,
+      body: `本次 ${courseName} 課程點名共有 ${absentUids.length} 位學生缺席：${absentNames}。\n\n若為本人且有異議，請在 48 小時內聯絡授課教師。`,
+      sentAt: '剛剛',
+      isRead: false,
+      type: 'warning',
+      relatedCourseId: courseId,
+      recipientRoles: ['student'],
+    });
+  }
+}
+
+/** 某課程是否正在點名中（學生端用） */
+export function getActiveAttendance(courseId: string): boolean {
+  return getDemoStore().attendanceSessions.some(
+    (s) => s.courseId === courseId && s.active,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 5：圖書館續借
+// ─────────────────────────────────────────────────────────────
+
+/** 續借書本（到期日 +14 天） */
+export function renewBook(
+  bookId: string,
+  currentDueDate: string,
+  currentRenewCount: number,
+): void {
+  const due = new Date(currentDueDate);
+  due.setDate(due.getDate() + 14);
+  const newDueDate = due.toISOString().slice(0, 10);
+  updateDemoStore((store) => ({
+    ...store,
+    borrowingOverrides: {
+      ...store.borrowingOverrides,
+      [bookId]: { dueDate: newDueDate, renewCount: currentRenewCount + 1 },
+    },
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 6：成績發布
+// ─────────────────────────────────────────────────────────────
+
+/** 教師發布成績 → 全班學生收到通知（不再寫死 stu-001）。
+ *  若帶入 studentScores，會逐筆寫入個人成績；否則用 DEMO_STUDENTS 全班的 final 平均。
+ */
+export function publishGrades(params: {
+  courseId: string;
+  courseName: string;
+  /** 不帶就用 DEMO_STUDENTS 全班 final 分數；帶的話為個別學生成績 */
+  studentScores?: { studentId: string; score: number; grade: string }[];
+  /** 廣播版本：通知全班這次成績已發布（demo 顯示用） */
+  summaryGrade?: string;
+  summaryScore?: number;
+}): void {
+  const entries: StorePublishedGrade[] =
+    params.studentScores && params.studentScores.length > 0
+      ? params.studentScores.map((s) => ({
+          courseId: params.courseId,
+          courseName: params.courseName,
+          studentId: s.studentId,
+          score: s.score,
+          grade: s.grade,
+          publishedAt: new Date().toISOString(),
+        }))
+      : DEMO_STUDENTS.map((s) => {
+          const score = s.scores.final;
+          const grade =
+            score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F';
+          return {
+            courseId: params.courseId,
+            courseName: params.courseName,
+            studentId: s.uid,
+            score,
+            grade,
+            publishedAt: new Date().toISOString(),
+          };
+        });
+  updateDemoStore((store) => ({
+    ...store,
+    publishedGrades: [
+      ...entries,
+      ...store.publishedGrades.filter((g) => g.courseId !== params.courseId),
+    ],
+  }));
+  // 廣播一則訊息給 student 角色（demo 簡化：所有 demo 學生都收到「成績已發布」）
+  const headlineScore = params.summaryScore ?? DEMO_STUDENTS[0]?.scores.final ?? 0;
+  const headlineGrade =
+    params.summaryGrade ??
+    (headlineScore >= 90 ? 'A' : headlineScore >= 80 ? 'B' : headlineScore >= 70 ? 'C' : 'D');
+  sendMessage({
+    fromName: '課程系統',
+    fromAvatar: '🎓',
+    subject: `【${params.courseName}】成績已發布（全班 ${entries.length} 位）`,
+    body: `${params.courseName} 的最終成績已由教師發布。\n\n你的成績：${headlineGrade}（${headlineScore} 分）\n\n可前往成績頁面查看詳情。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'success',
+    relatedCourseId: params.courseId,
+    recipientRoles: ['student'],
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 其他 helpers
+// ─────────────────────────────────────────────────────────────
+
+/** 取得某課程的動態作業（教師新增的） */
+export function getDynamicAssignmentsForCourse(
+  courseId: string,
+  store: DemoStore,
+): StoreDynamicAssignment[] {
+  return store.dynamicAssignments.filter((a) => a.courseId === courseId);
+}
+
+/** 重置 demo store（開發用 / 角色切換時可選擇是否清空） */
+export function resetDemoStore(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(STORE_KEY);
+  window.dispatchEvent(new CustomEvent(STORE_EVENT));
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 7：教師起草評語 → 學生收到評語
+// ─────────────────────────────────────────────────────────────
+
+export interface StoreFeedbackDraft {
+  id: string;
+  courseId: string;
+  studentId: string;
+  studentName: string;
+  draftPreview: string;
+  createdAt: string;
+}
+
+export function submitFeedback(params: {
+  courseId: string;
+  courseName: string;
+  studentId: string;
+  studentName: string;
+  draftPreview: string;
+}): void {
+  const fb: StoreFeedbackDraft = {
+    id: `fb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    courseId: params.courseId,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    draftPreview: params.draftPreview,
+    createdAt: new Date().toISOString(),
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    feedbackDrafts: [fb, ...(store.feedbackDrafts ?? [])],
+  }));
+  sendMessage({
+    fromName: '王大明 老師',
+    fromAvatar: '🧑‍🏫',
+    subject: `【${params.courseName}】老師為你起草了個人化評語`,
+    body: `${params.studentName} 同學，老師剛起草了一份針對你作業表現的評語：\n\n${params.draftPreview}\n\n可前往成績頁查看完整批改。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'info',
+    relatedCourseId: params.courseId,
+    recipientRoles: ['student'],
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 8：學生發討論 → 同學/老師/TA 收通知
+// ─────────────────────────────────────────────────────────────
+
+export interface StoreDiscussionPost {
+  id: string;
+  courseId: string;
+  authorId: string;
+  authorName: string;
+  preview: string;
+  createdAt: string;
+  replies: number;
+}
+
+export function postDiscussion(params: {
+  courseId: string;
+  courseName: string;
+  authorId: string;
+  authorName: string;
+  preview: string;
+}): void {
+  const post: StoreDiscussionPost = {
+    id: `disc-${Date.now()}`,
+    courseId: params.courseId,
+    authorId: params.authorId,
+    authorName: params.authorName,
+    preview: params.preview,
+    createdAt: new Date().toISOString(),
+    replies: 0,
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    discussionPosts: [post, ...(store.discussionPosts ?? [])],
+  }));
+  sendMessage({
+    fromName: `${params.authorName}（討論串）`,
+    fromAvatar: '💬',
+    subject: `【${params.courseName}】新討論：${params.preview.slice(0, 30)}…`,
+    body: `${params.authorName} 在 ${params.courseName} 討論區發了新貼文：\n\n「${params.preview}」\n\n前往課程頁面參與討論。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'info',
+    relatedCourseId: params.courseId,
+    recipientRoles: ['student', 'teacher', 'ta'],
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 9：學生求助 → TA 佇列 / TA 回覆 → 學生收答覆
+// ─────────────────────────────────────────────────────────────
+
+export interface StoreHelpRequest {
+  id: string;
+  courseId?: string;
+  topic: string;
+  urgency: 'low' | 'normal' | 'high';
+  studentId: string;
+  studentName: string;
+  status: 'open' | 'replied' | 'resolved';
+  reply?: string;
+  createdAt: string;
+}
+
+export function requestHelp(params: {
+  courseId?: string;
+  courseName?: string;
+  topic: string;
+  urgency?: 'low' | 'normal' | 'high';
+  studentId: string;
+  studentName: string;
+}): void {
+  const req: StoreHelpRequest = {
+    id: `help-${Date.now()}`,
+    courseId: params.courseId,
+    topic: params.topic,
+    urgency: params.urgency ?? 'normal',
+    studentId: params.studentId,
+    studentName: params.studentName,
+    status: 'open',
+    createdAt: new Date().toISOString(),
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    helpRequests: [req, ...(store.helpRequests ?? [])],
+  }));
+  sendMessage({
+    fromName: `${params.studentName}（求助）`,
+    fromAvatar: '🙋',
+    subject: `【求助】${params.topic}`,
+    body: `${params.studentName} 在 ${params.courseName ?? '系統'} 提出求助：\n\n「${params.topic}」\n\n緊急度：${req.urgency === 'high' ? '🔥 高' : req.urgency === 'low' ? '🟢 低' : '🟡 一般'}`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: params.courseId,
+    recipientRoles: ['ta', 'teacher'],
+  });
+}
+
+export function replyHelpRequest(params: {
+  helpId: string;
+  reply: string;
+  replierName: string;
+}): void {
+  let target: StoreHelpRequest | undefined;
+  updateDemoStore((store) => {
+    const updated = (store.helpRequests ?? []).map((h) => {
+      if (h.id === params.helpId) {
+        target = h;
+        return { ...h, status: 'replied' as const, reply: params.reply };
+      }
+      return h;
+    });
+    return { ...store, helpRequests: updated };
+  });
+  if (target) {
+    sendMessage({
+      fromName: params.replierName,
+      fromAvatar: '🧑‍💻',
+      subject: `【回覆】${target.topic}`,
+      body: `${params.replierName} 回覆了你的求助：\n\n${params.reply}\n\n如已解決，可在求助頁標記「已解決」。`,
+      sentAt: '剛剛',
+      isRead: false,
+      type: 'success',
+      relatedCourseId: target.courseId,
+      recipientRoles: ['student'],
+    });
+  }
+}
+
+export function getOpenHelpRequests(store: DemoStore): StoreHelpRequest[] {
+  return (store.helpRequests ?? []).filter((h) => h.status === 'open');
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 10：訂餐 → vendor / vendor 推進 → student
+// ─────────────────────────────────────────────────────────────
+
+export type OrderStatus = 'placed' | 'processing' | 'ready' | 'completed' | 'cancelled';
+
+export interface StoreOrder {
+  id: string;
+  studentId: string;
+  studentName: string;
+  vendorName: string;
+  items: { name: string; qty: number; price: number }[];
+  total: number;
+  status: OrderStatus;
+  placedAt: string;
+}
+
+export function placeOrder(params: {
+  studentId: string;
+  studentName: string;
+  vendorName: string;
+  items: { name: string; qty: number; price: number }[];
+}): StoreOrder {
+  const total = params.items.reduce((sum, i) => sum + i.qty * i.price, 0);
+  const order: StoreOrder = {
+    id: `ord-${Date.now()}`,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    vendorName: params.vendorName,
+    items: params.items,
+    total,
+    status: 'placed',
+    placedAt: new Date().toISOString(),
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    orders: [order, ...(store.orders ?? [])],
+  }));
+  // 訊息：給 alumni 用的「您的訂單已成立」回執
+  sendMessage({
+    fromName: params.vendorName,
+    fromAvatar: '🍱',
+    subject: `【訂單成立】${params.vendorName}`,
+    body: `已收到你的訂單：\n${params.items.map((i) => `· ${i.name} × ${i.qty}`).join('\n')}\n\n總計 NT$${total}。我們會盡快備餐。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'success',
+    recipientRoles: ['student'],
+  });
+  return order;
+}
+
+export function updateOrderStatus(orderId: string, status: OrderStatus): void {
+  let target: StoreOrder | undefined;
+  updateDemoStore((store) => {
+    const updated = (store.orders ?? []).map((o) => {
+      if (o.id === orderId) {
+        target = { ...o, status };
+        return target;
+      }
+      return o;
+    });
+    return { ...store, orders: updated };
+  });
+  if (target) {
+    const label =
+      status === 'processing' ? '🍳 準備中'
+      : status === 'ready' ? '🛎️ 已備好可取餐'
+      : status === 'completed' ? '✅ 已完成'
+      : status === 'cancelled' ? '❌ 已取消' : '已下單';
+    sendMessage({
+      fromName: target.vendorName,
+      fromAvatar: '🍱',
+      subject: `【訂單狀態】${label}`,
+      body: `你在 ${target.vendorName} 的訂單狀態更新為「${label}」。\n\n總計 NT$${target.total}`,
+      sentAt: '剛剛',
+      isRead: false,
+      type: status === 'ready' ? 'action' : 'info',
+      recipientRoles: ['student'],
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 11：請假 → teacher 核准/退回 → student
+// ─────────────────────────────────────────────────────────────
+
+export interface StoreLeaveRequest {
+  id: string;
+  courseId?: string;
+  studentId: string;
+  studentName: string;
+  reason: string;
+  dateFrom: string;
+  dateTo: string;
+  status: 'pending' | 'approved' | 'rejected';
+  decidedBy?: string;
+  createdAt: string;
+}
+
+export function requestLeave(params: {
+  courseId?: string;
+  courseName?: string;
+  studentId: string;
+  studentName: string;
+  reason: string;
+  dateFrom: string;
+  dateTo: string;
+}): void {
+  const leave: StoreLeaveRequest = {
+    id: `lv-${Date.now()}`,
+    courseId: params.courseId,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    reason: params.reason,
+    dateFrom: params.dateFrom,
+    dateTo: params.dateTo,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    leaveRequests: [leave, ...(store.leaveRequests ?? [])],
+  }));
+  sendMessage({
+    fromName: `${params.studentName}（請假申請）`,
+    fromAvatar: '📅',
+    subject: `【請假申請】${params.studentName}：${params.dateFrom} ~ ${params.dateTo}`,
+    body: `${params.studentName} 提交請假申請：\n\n課程：${params.courseName ?? '一般請假'}\n日期：${params.dateFrom} ~ ${params.dateTo}\n原因：${params.reason}\n\n請至課程頁面審核。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: params.courseId,
+    recipientRoles: ['teacher', 'department_head'],
+  });
+}
+
+export function decideLeave(params: {
+  leaveId: string;
+  decision: 'approved' | 'rejected';
+  decidedBy: string;
+  note?: string;
+}): void {
+  let target: StoreLeaveRequest | undefined;
+  updateDemoStore((store) => {
+    const updated = (store.leaveRequests ?? []).map((l) => {
+      if (l.id === params.leaveId) {
+        target = { ...l, status: params.decision, decidedBy: params.decidedBy };
+        return target;
+      }
+      return l;
+    });
+    return { ...store, leaveRequests: updated };
+  });
+  if (target) {
+    const label = params.decision === 'approved' ? '✅ 已核准' : '❌ 已退回';
+    sendMessage({
+      fromName: params.decidedBy,
+      fromAvatar: '📅',
+      subject: `【請假結果】${label}`,
+      body: `你的請假申請（${target.dateFrom} ~ ${target.dateTo}）已${params.decision === 'approved' ? '核准' : '退回'}。${params.note ? `\n\n附註：${params.note}` : ''}`,
+      sentAt: '剛剛',
+      isRead: false,
+      type: params.decision === 'approved' ? 'success' : 'warning',
+      relatedCourseId: target.courseId,
+      recipientRoles: ['student'],
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 12：宿舍報修 → admin 處理
+// ─────────────────────────────────────────────────────────────
+
+export interface StoreDormRepair {
+  id: string;
+  building: string;
+  room: string;
+  urgency: 'low' | 'normal' | 'high';
+  description: string;
+  studentId: string;
+  studentName: string;
+  status: 'reported' | 'dispatched' | 'resolved';
+  createdAt: string;
+}
+
+export function submitDormRepair(params: {
+  building: string;
+  room: string;
+  urgency?: 'low' | 'normal' | 'high';
+  description: string;
+  studentId: string;
+  studentName: string;
+}): void {
+  const r: StoreDormRepair = {
+    id: `dr-${Date.now()}`,
+    building: params.building,
+    room: params.room,
+    urgency: params.urgency ?? 'normal',
+    description: params.description,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    status: 'reported',
+    createdAt: new Date().toISOString(),
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    dormRepairs: [r, ...(store.dormRepairs ?? [])],
+  }));
+  sendMessage({
+    fromName: `${params.studentName}（宿舍報修）`,
+    fromAvatar: '🔧',
+    subject: `【宿舍報修】${params.building} ${params.room}`,
+    body: `${params.studentName} 報修：\n\n地點：${params.building} ${params.room}\n問題：${params.description}\n緊急度：${r.urgency}\n\n請至管理後台派工。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    recipientRoles: ['admin'],
+  });
+}
+
+export function setDormRepairStatus(repairId: string, status: StoreDormRepair['status']): void {
+  let target: StoreDormRepair | undefined;
+  updateDemoStore((store) => {
+    const updated = (store.dormRepairs ?? []).map((r) => {
+      if (r.id === repairId) {
+        target = { ...r, status };
+        return target;
+      }
+      return r;
+    });
+    return { ...store, dormRepairs: updated };
+  });
+  if (target) {
+    const label = status === 'dispatched' ? '已派工' : status === 'resolved' ? '已修復' : '已收件';
+    sendMessage({
+      fromName: '宿舍管理組',
+      fromAvatar: '🔧',
+      subject: `【報修狀態】${label}`,
+      body: `你的宿舍報修（${target.building} ${target.room}）狀態更新為「${label}」。`,
+      sentAt: '剛剛',
+      isRead: false,
+      type: status === 'resolved' ? 'success' : 'info',
+      recipientRoles: ['student'],
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 13：同儕互評（指派 + 提交）
+// ─────────────────────────────────────────────────────────────
+
+export interface StorePeerReview {
+  id: string;
+  courseId: string;
+  assignmentTitle: string;
+  reviewerId: string;
+  revieweeId: string;
+  reviewerName: string;
+  revieweeName: string;
+  dueDate: string;
+  status: 'pending' | 'submitted';
+  comment?: string;
+  rating?: number;
+  createdAt: string;
+}
+
+export function assignPeerReview(params: {
+  courseId: string;
+  courseName: string;
+  assignmentTitle: string;
+  pairs: { reviewerId: string; reviewerName: string; revieweeId: string; revieweeName: string }[];
+  dueDate: string;
+}): void {
+  const reviews: StorePeerReview[] = params.pairs.map((p) => ({
+    id: `pr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    courseId: params.courseId,
+    assignmentTitle: params.assignmentTitle,
+    reviewerId: p.reviewerId,
+    revieweeId: p.revieweeId,
+    reviewerName: p.reviewerName,
+    revieweeName: p.revieweeName,
+    dueDate: params.dueDate,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  }));
+  updateDemoStore((store) => ({
+    ...store,
+    peerReviews: [...reviews, ...(store.peerReviews ?? [])],
+  }));
+  sendMessage({
+    fromName: '課程系統',
+    fromAvatar: '🔁',
+    subject: `【同儕互評】${params.courseName}：${params.assignmentTitle}`,
+    body: `已指派 ${reviews.length} 組同儕互評，截止 ${params.dueDate}。請至課程頁進行互評。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    relatedCourseId: params.courseId,
+    recipientRoles: ['student'],
+  });
+}
+
+export function submitPeerReview(params: {
+  reviewId: string;
+  comment: string;
+  rating: number;
+}): void {
+  let target: StorePeerReview | undefined;
+  updateDemoStore((store) => {
+    const updated = (store.peerReviews ?? []).map((r) => {
+      if (r.id === params.reviewId) {
+        target = { ...r, status: 'submitted', comment: params.comment, rating: params.rating };
+        return target;
+      }
+      return r;
+    });
+    return { ...store, peerReviews: updated };
+  });
+  if (target) {
+    sendMessage({
+      fromName: `${target.reviewerName}（同儕回饋）`,
+      fromAvatar: '🔁',
+      subject: `【互評收到】${target.assignmentTitle}`,
+      body: `你的同儕 ${target.reviewerName} 完成了一份互評：\n\n評分：${params.rating}/5\n回饋：${params.comment}`,
+      sentAt: '剛剛',
+      isRead: false,
+      type: 'info',
+      relatedCourseId: target.courseId,
+      recipientRoles: ['student'],
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 14：批量提醒（teacher 對未交作業的學生）
+// ─────────────────────────────────────────────────────────────
+
+export function bulkRemind(params: {
+  courseName: string;
+  homeworkTitle: string;
+  count: number;
+  fromName?: string;
+}): void {
+  sendMessage({
+    fromName: params.fromName ?? '王大明 老師',
+    fromAvatar: '⏰',
+    subject: `【提醒】${params.courseName}：${params.homeworkTitle} 即將截止`,
+    body: `老師注意到你尚未繳交 ${params.courseName} 的「${params.homeworkTitle}」。\n\n請盡快前往課程頁面繳交，避免影響成績。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'warning',
+    recipientRoles: ['student'],
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 15：系所廣播（dept_head → 全系）
+// ─────────────────────────────────────────────────────────────
+
+export function sendDeptBroadcast(params: {
+  title: string;
+  body: string;
+  audience?: DemoUserRole[];
+  fromName?: string;
+}): void {
+  const audience = params.audience ?? ['student', 'teacher', 'ta'];
+  sendMessage({
+    fromName: params.fromName ?? '黃主任',
+    fromAvatar: '🏛️',
+    subject: `【系所廣播】${params.title}`,
+    body: params.body,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'info',
+    recipientRoles: audience,
+  });
+}
+
+/** 公告核准 → 通知原提交者 */
+export function notifySubmitterAnnApproved(params: {
+  title: string;
+  submitterRole: DemoUserRole;
+  approvedBy?: string;
+}): void {
+  sendMessage({
+    fromName: params.approvedBy ?? '黃主任',
+    fromAvatar: '✅',
+    subject: `【公告已核准】${params.title}`,
+    body: `你提交的公告「${params.title}」已通過審核並發布。學生現在可以看到了。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'success',
+    recipientRoles: [params.submitterRole],
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 16：管理員停用 / 啟用使用者
+// ─────────────────────────────────────────────────────────────
+
+export interface StoreDisabledUser {
+  uid: string;
+  disabledAt: string;
+  reason?: string;
+}
+
+export function setUserDisabled(uid: string, disabled: boolean, reason?: string): void {
+  updateDemoStore((store) => {
+    const current = store.disabledUsers ?? [];
+    if (disabled) {
+      if (current.some((u) => u.uid === uid)) return store;
+      return {
+        ...store,
+        disabledUsers: [
+          { uid, disabledAt: new Date().toISOString(), reason },
+          ...current,
+        ],
+      };
+    } else {
+      return {
+        ...store,
+        disabledUsers: current.filter((u) => u.uid !== uid),
+      };
+    }
+  });
+}
+
+export function isUserDisabled(uid: string, store: DemoStore): boolean {
+  return (store.disabledUsers ?? []).some((u) => u.uid === uid);
+}
+
+// ─────────────────────────────────────────────────────────────
+// 動作鏈 17：圖書館 預約 / 轉讓（補齊原本只能續借）
+// ─────────────────────────────────────────────────────────────
+
+export interface StoreLibraryReservation {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  studentId: string;
+  studentName: string;
+  reservedAt: string;
+}
+
+export function reserveBook(params: {
+  bookId: string;
+  bookTitle: string;
+  studentId: string;
+  studentName: string;
+}): void {
+  const r: StoreLibraryReservation = {
+    id: `rsv-${Date.now()}`,
+    bookId: params.bookId,
+    bookTitle: params.bookTitle,
+    studentId: params.studentId,
+    studentName: params.studentName,
+    reservedAt: new Date().toISOString(),
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    libraryReservations: [r, ...(store.libraryReservations ?? [])],
+  }));
+  sendMessage({
+    fromName: '圖書館系統',
+    fromAvatar: '📚',
+    subject: `【預約成功】${params.bookTitle}`,
+    body: `你已成功預約《${params.bookTitle}》。當該書歸還後，系統會通知你前來借閱。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'success',
+    recipientRoles: ['student'],
+  });
+}
+
+export function transferBook(params: {
+  bookId: string;
+  bookTitle: string;
+  fromStudentName: string;
+  toStudentName: string;
+}): void {
+  sendMessage({
+    fromName: '圖書館系統',
+    fromAvatar: '📚',
+    subject: `【借閱轉讓】${params.bookTitle}`,
+    body: `《${params.bookTitle}》已從 ${params.fromStudentName} 轉讓給 ${params.toStudentName}。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'info',
+    recipientRoles: ['student'],
+  });
+}

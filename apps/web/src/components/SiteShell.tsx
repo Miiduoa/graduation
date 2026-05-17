@@ -2,15 +2,18 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useMemo } from 'react';
 import { PWAInstallBanner } from './PWAInstallBanner';
 import { OfflineBanner } from './OfflineBanner';
 import { UpdateBanner } from './UpdateBanner';
 import { DemoRolePill } from './DemoRolePill';
+import { useDemoRole } from '@/lib/demoRole';
+import { useDemoStore, getUnreadCountDynamic } from '@/lib/demoStore';
 
 const NAV_ICONS: Record<string, string> = {
   '/': '☀️',
   '/groups': '🎓',
+  '/messages': '💬',
   '/map': '🗺️',
   '/announcements': '📥',
   '/profile': '👤',
@@ -33,6 +36,9 @@ function SiteShellInner(props: {
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const [demoRole] = useDemoRole();
+  const store = useDemoStore();
+  const msgUnread = useMemo(() => getUnreadCountDynamic(demoRole, store), [demoRole, store]);
 
   const school = searchParams.get('school') || '';
   const schoolId = searchParams.get('schoolId') || '';
@@ -43,6 +49,7 @@ function SiteShellInner(props: {
   const navItems = [
     { href: '/', label: 'Today', group: 'primary' as const },
     { href: '/groups', label: '課程', group: 'primary' as const },
+    { href: '/messages', label: '訊息', group: 'primary' as const },
     { href: '/map', label: '校園', group: 'primary' as const },
     { href: '/announcements', label: '收件匣', group: 'primary' as const },
     { href: '/profile', label: '我的', group: 'primary' as const },
@@ -123,9 +130,33 @@ function SiteShellInner(props: {
                     key={item.href}
                     href={`${item.href}${q}`}
                     className={`navLink${isActive(item.href) ? ' active' : ''}`}
+                    style={{ position: 'relative' }}
                   >
                     <span style={{ marginRight: 4 }}>{NAV_ICONS[item.href]}</span>
                     {item.label}
+                    {item.href === '/messages' && msgUnread > 0 && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: -4,
+                          right: -6,
+                          minWidth: 16,
+                          height: 16,
+                          borderRadius: 99,
+                          background: '#FF3B30',
+                          color: '#fff',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '0 3px',
+                          lineHeight: 1,
+                        }}
+                      >
+                        {msgUnread}
+                      </span>
+                    )}
                   </Link>
                 ))}
               </nav>

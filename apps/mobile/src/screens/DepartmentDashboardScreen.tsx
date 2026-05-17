@@ -7,7 +7,11 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { simulateDepartmentBroadcast } from '../services/demoActionSimulator';
-import { subscribeAllRoleEvents, type RoleEvent } from '../services/roleEventBus';
+import {
+  subscribeAllRoleEvents,
+  loadRoleEventInbox,
+  type RoleEvent,
+} from '../services/roleEventBus';
 
 import { predictCurrent, type PredictorItem } from '@campus/shared';
 import {
@@ -29,6 +33,7 @@ import {
 import { useAuth } from '../state/auth';
 import { safeNavigate } from '../utils/safeNavigate';
 import { aiDepartmentHealthScore } from '../services/aiOrchestrator';
+import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -45,16 +50,37 @@ export default function DepartmentDashboardScreen() {
     setOpenSection(openSection === k ? null : k);
   };
 
-  // 主任端：監看全系動態（grade_published / homework_submitted / attendance_*）
+  // 主任端：載入歷史 inbox + 監看全系動態
   useEffect(() => {
+    const adminUid = auth.user?.uid ?? 'demo_admin_huang';
+    let cancelled = false;
+
+    // 1. 載入歷史 inbox（學生 / 老師之前發生的 events，主任登入時要看得到）
+    (async () => {
+      const events = await loadRoleEventInbox(adminUid).catch(() => []);
+      if (cancelled) return;
+      const filtered = events.filter((event) => {
+        if (event.kind === 'order_placed' || event.kind === 'order_status_changed') return false;
+        if (event.kind === 'department_broadcast' && event.actorUid === auth.user?.uid) return false;
+        return true;
+      });
+      setRecentEvents(filtered.slice(0, 20));
+    })();
+
+    // 2. 訂閱即時
     const unsub = subscribeAllRoleEvents((event) => {
-      // 只收教學相關 events，不要 vendor / department_broadcast 自己回波
       if (event.kind === 'order_placed' || event.kind === 'order_status_changed') return;
       if (event.kind === 'department_broadcast' && event.actorUid === auth.user?.uid) return;
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setRecentEvents((prev) => [event, ...prev].slice(0, 20));
+      setRecentEvents((prev) => {
+        if (prev.find((e) => e.id === event.id)) return prev;
+        return [event, ...prev].slice(0, 20);
+      });
     });
-    return () => { unsub(); };
+    return () => {
+      cancelled = true;
+      unsub();
+    };
   }, [auth.user?.uid]);
 
   const courseStats = useMemo(() => {
@@ -110,6 +136,9 @@ export default function DepartmentDashboardScreen() {
           title="本系今日概況"
           summary={`🤖 系所健康度 ${aiHealth.score}%。${aiHealth.suggestions[0] ?? ''}`}
         />
+
+        {/* 🤖 AI Agent 摘要 */}
+        <AgentSummaryBanner cockpitLabel="主任" />
 
         <CockpitMetricRow>
           <CockpitMetricChip label="風險課程" value={totalAtRisk} tone={totalAtRisk > 0 ? 'danger' : 'success'} />
@@ -223,10 +252,10 @@ export default function DepartmentDashboardScreen() {
                 subtitle={`${cs.course.instructor} · 待批 ${cs.pendingGrade} · 出席 ${cs.attRate}%`}
                 tone={cs.atRisk ? 'warn' : undefined}
                 onPress={() =>
-                  navigation.navigate('CourseScores', {
+                  safeNavigate(navigation, 'CourseScores', {
                     groupId: String(cs.course.id),
                     groupName: cs.course.name,
-                  })
+                  }, { fallbackMessage: '即將跳到課程成績' })
                 }
               />
             ))}
@@ -263,8 +292,7 @@ export default function DepartmentDashboardScreen() {
             icon="stats-chart-outline"
             label="教學評鑑"
             onPress={() =>
-              safeNavigate(navigation, 'LearningAnalytics', undefined, {
-                fallbackMessage: '教學評鑑頁面即將推出',
+              safeNavigate(navigation, 'TeachingEvaluation', undefined, {
               })
             }
           />
@@ -302,8 +330,7 @@ export default function DepartmentDashboardScreen() {
             icon="people-outline"
             label="學生 risk"
             onPress={() =>
-              safeNavigate(navigation, 'LearningAnalytics', undefined, {
-                fallbackMessage: '學生風險頁面即將推出',
+              safeNavigate(navigation, 'StudentRisk', undefined, {
               })
             }
           />

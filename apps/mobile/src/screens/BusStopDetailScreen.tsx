@@ -30,7 +30,8 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { analytics } from '../services/analytics';
 import { scheduleLocalNotification } from '../services/notifications';
-import { savePoi, upsertSavedPlace } from '../services/savedPlaces';
+import { upsertSavedPlace } from '../services/savedPlaces';
+import { useAuth } from '../state/auth';
 import {
   CAMPUS_BUS_ROUTES,
   crowdLabel,
@@ -52,6 +53,8 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
   const nav = useNavigation<any>();
   const route = useRoute<any>();
   const params = (route.params ?? {}) as Partial<ParamShape>;
+  const { user } = useAuth();
+  const uid = user?.uid ?? null;
 
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -142,7 +145,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
 
   const handleSavePlace = useCallback(async () => {
     if (!stop) return;
-    await upsertSavedPlace({
+    await upsertSavedPlace(uid, {
       id: `busstop-${stop.id}`,
       kind: 'custom',
       label: stop.name,
@@ -152,7 +155,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
     });
     Alert.alert('已儲存', `${stop.name} 已加入儲存地點`);
     analytics.logEvent('busstop_save', { stop_id: stop.id });
-  }, [stop]);
+  }, [stop, uid]);
 
   const handleShareStop = useCallback(async () => {
     if (!stop) return;

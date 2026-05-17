@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react';
 
 import { SiteShell } from '@/components/SiteShell';
 import { evaluateRubric, type Rubric, type RubricCriterion } from '@campus/shared';
+import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 
 const SAMPLE: Rubric = {
   id: 'r1',
@@ -49,6 +50,10 @@ const SAMPLE: Rubric = {
 };
 
 export default function TeacherRubricsPage({ params }: { params: { courseId: string } }) {
+  const [demoRole] = useDemoRole();
+  const caps = getCapabilities(demoRole);
+  const canEdit = caps.canEditModules; // rubric 編輯權限對齊教材編輯
+  const isTaView = demoRole === 'ta';
   const [rubric, setRubric] = useState<Rubric>(SAMPLE);
   const [previewScores, setPreviewScores] = useState<Record<string, string>>({});
 
@@ -59,16 +64,21 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
     return evaluateRubric(rubric, scores);
   }, [rubric, previewScores]);
 
-  const updateWeight = (cid: string, w: number) =>
+  const updateWeight = (cid: string, w: number) => {
+    if (!canEdit) return;
     setRubric((r) => ({
       ...r,
       criteria: r.criteria.map((c) => (c.id === cid ? { ...c, weight: w } : c)),
     }));
+  };
 
-  const removeCriterion = (cid: string) =>
+  const removeCriterion = (cid: string) => {
+    if (!canEdit) return;
     setRubric((r) => ({ ...r, criteria: r.criteria.filter((c) => c.id !== cid) }));
+  };
 
   const addCriterion = () => {
+    if (!canEdit) return;
     const id = `c${Date.now()}`;
     const c: RubricCriterion = {
       id,
@@ -87,27 +97,55 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
   return (
     <SiteShell>
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: 24 }}>
+        {!caps.canViewTeacherDashboard ? (
+          <div className="card" style={{ padding: '24px 20px', textAlign: 'center', background: 'var(--danger-soft)', borderColor: 'var(--danger)' }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🔒</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>教師工作台專用</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.7 }}>
+              請從右上角「身份膠囊」切換為 🧑‍🏫 教師 或 🧑‍💻 助教 角色後再進入。
+            </div>
+            <Link href="/" className="btn">← 回首頁</Link>
+          </div>
+        ) : <>
         <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
           <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
         </nav>
-        <h1 style={{ fontSize: 28, fontWeight: 700 }}>Rubric 評分標準</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 700 }}>
+          Rubric 評分標準{!canEdit ? '（檢視）' : ''}
+        </h1>
         <p style={{ color: '#6b7280', marginBottom: 16 }}>
-          編輯評分項與等級；下方即時預覽教師打分後的加權結果。
+          {canEdit
+            ? '編輯評分項與等級；下方即時預覽教師打分後的加權結果。'
+            : isTaView
+              ? '助教 TA 可使用 Rubric 為作業打分，但不能修改 Rubric 結構（僅授課教師可編輯）。'
+              : '此頁僅授課教師可編輯。'}
         </p>
 
         <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
           <input
             value={rubric.title}
-            onChange={(e) => setRubric((r) => ({ ...r, title: e.target.value }))}
+            disabled={!canEdit}
+            onChange={(e) => canEdit && setRubric((r) => ({ ...r, title: e.target.value }))}
             style={{
               flex: 1,
               padding: 10,
               borderRadius: 8,
               border: '1px solid #d1d5db',
               fontSize: 16,
+              background: canEdit ? '#fff' : '#f3f4f6',
+              color: canEdit ? '#111' : '#6b7280',
             }}
           />
-          <button onClick={addCriterion} style={primaryBtn}>
+          <button
+            onClick={addCriterion}
+            disabled={!canEdit}
+            title={!canEdit ? '僅授課教師可新增評分項' : undefined}
+            style={{
+              ...primaryBtn,
+              opacity: canEdit ? 1 : 0.5,
+              cursor: canEdit ? 'pointer' : 'not-allowed',
+            }}
+          >
             + 新增評分項
           </button>
         </div>
@@ -215,6 +253,43 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
             ))}
           </ul>
         </div>
+
+        {/* ── AI Rubric 助理 ── */}
+        <div
+          style={{
+            marginTop: 20,
+            padding: '14px 18px',
+            borderRadius: 12,
+            background: 'rgba(94,106,210,0.08)',
+            border: '1px solid #5E6AD2',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5E6AD2', marginBottom: 3 }}>🤖 AI Rubric 助理</div>
+            <div style={{ fontSize: 13, color: '#374151' }}>
+              {canEdit
+                ? '讓 AI 幫你設計符合課程目標的評分標準，或建議各評分項的等級描述與權重分配。'
+                : '讓 AI 解釋這份 Rubric 的評分邏輯，或建議如何在打分時保持一致性。'}
+            </div>
+          </div>
+          <a
+            href={`/ai-assistant?q=${encodeURIComponent(
+              canEdit
+                ? '幫我為「期末報告」設計一份 Rubric，評分項包含：內容深度（40%）、結構清晰（30%）、參考資料（20%）、創新性（10%），每項設計 4 個等級（優/良/可/差）並附說明'
+                : '請解釋 Rubric 評分法如何在批改作業時保持評分一致性？有哪些常見誤判需要特別注意？'
+            )}`}
+            className="btn"
+            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            問 AI →
+          </a>
+        </div>
+        </>}
       </main>
     </SiteShell>
   );

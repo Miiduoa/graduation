@@ -567,6 +567,35 @@ export default function CafeteriaPage(props: {
             目前共有 {stats.soldOutMenus} 項菜色標記為售完，若店家更新供應狀態，頁面會自動刷新。
           </div>
         ) : null}
+
+        {/* ── AI 餐廳推薦入口 ── */}
+        <div
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--radius)',
+            background: 'linear-gradient(135deg, rgba(52,199,89,0.10) 0%, rgba(52,199,89,0.04) 100%)',
+            border: '1px solid rgba(52,199,89,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#1F7A2E', marginBottom: 3 }}>🤖 AI 餐廳助理</div>
+            <div style={{ fontSize: 13, color: 'var(--text)' }}>
+              想吃什麼卻沒靈感？讓 AI 根據今日菜單幫你推薦適合的餐點。
+            </div>
+          </div>
+          <a
+            href={`/ai-assistant?q=${encodeURIComponent('根據今日學生餐廳菜單，幫我推薦一套均衡的午餐組合（不超過 120 元），以及適合下午課前的點心。')}`}
+            className="btn"
+            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            問 AI →
+          </a>
+        </div>
       </div>
     </SiteShell>
   );

@@ -40,6 +40,10 @@ export type RoleEventKind =
   // 餐廳 ↔ 學生
   | 'order_placed'                // 學生下單 → 餐廳收到
   | 'order_status_changed'        // 餐廳備餐進度更新 → 學生收通知
+  // 學生請假 / 報修
+  | 'leave_requested'             // 學生請假申請 → 老師審核
+  | 'leave_decision'              // 老師准/駁回 → 學生收通知
+  | 'dorm_repair_requested'       // 學生宿舍報修 → 宿舍系統 / 主任收到
   // 主任 → 全體
   | 'department_broadcast';        // 系所公告 → 全班 / 全系
 
@@ -105,6 +109,10 @@ export const ALL_ROLE_EVENT_KINDS: RoleEventKind[] = [
   // 餐廳 ↔ 學生
   'order_placed',
   'order_status_changed',
+  // 學生請假 / 報修（v3 新增 — 確保 subscribeAll 收得到）
+  'leave_requested',
+  'leave_decision',
+  'dorm_repair_requested',
   // 主任 → 全體
   'department_broadcast',
 ];
@@ -360,3 +368,48 @@ export interface DepartmentBroadcastPayload {
 export const emitDepartmentBroadcast = (
   e: Omit<RoleEvent<DepartmentBroadcastPayload>, 'id' | 'occurredAt' | 'kind'>,
 ) => emitRoleEvent({ ...e, kind: 'department_broadcast' });
+
+// ─────────────────────────────────────────────────────────
+// 學生請假 / 報修
+// ─────────────────────────────────────────────────────────
+
+export interface LeaveRequestedPayload {
+  leaveId: string;
+  studentName: string;
+  /** 假別 */
+  category: 'sick' | 'personal' | 'official' | 'bereavement';
+  fromDate: string;
+  toDate: string;
+  reason: string;
+  attachmentName?: string;
+}
+
+export const emitLeaveRequested = (
+  e: Omit<RoleEvent<LeaveRequestedPayload>, 'id' | 'occurredAt' | 'kind'>,
+) => emitRoleEvent({ ...e, kind: 'leave_requested' });
+
+export interface LeaveDecisionPayload {
+  leaveId: string;
+  decision: 'approved' | 'rejected';
+  /** 老師 / 主任的回覆訊息 */
+  message?: string;
+  decidedBy: string;
+}
+
+export const emitLeaveDecision = (
+  e: Omit<RoleEvent<LeaveDecisionPayload>, 'id' | 'occurredAt' | 'kind'>,
+) => emitRoleEvent({ ...e, kind: 'leave_decision' });
+
+export interface DormRepairRequestedPayload {
+  repairId: string;
+  building: string;
+  room: string;
+  category: 'ac' | 'plumbing' | 'electric' | 'furniture' | 'door' | 'other';
+  title: string;
+  description: string;
+  urgency: 'low' | 'medium' | 'high';
+}
+
+export const emitDormRepairRequested = (
+  e: Omit<RoleEvent<DormRepairRequestedPayload>, 'id' | 'occurredAt' | 'kind'>,
+) => emitRoleEvent({ ...e, kind: 'dorm_repair_requested' });

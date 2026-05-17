@@ -8,6 +8,7 @@ import { getAuth, fetchUserCourses, isFirebaseConfigured, type UserCourse } from
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { DEMO_COURSES } from '@/lib/demoData';
 import { useDemoRole } from '@/lib/demoRole';
+import { getStudentContextSummary } from '@/lib/aiContext';
 
 type ViewMode = 'week' | 'day' | 'list';
 
@@ -130,13 +131,21 @@ export default function TimetablePage(props: {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [demoRole] = useDemoRole();
   const isRestrictedRole = demoRole === 'alumni' || demoRole === 'guest';
+  const isTeacherView = demoRole === 'teacher' || demoRole === 'ta';
+  const isDeptHead = demoRole === 'department_head';
+  const isClubOfficer = demoRole === 'club_officer';
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [selectedDay, setSelectedDay] = useState<number>(
     Math.min(Math.max(new Date().getDay() || 5, 1), 5),
   );
   const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
   const [user, setUser] = useState<User | null>(null);
-  const [courses, setCourses] = useState<CourseSlot[]>(MOCK_COURSES);
+  // 教師 / TA：只看「我授課的課」（demo 中為 c1）
+  const baseCourses = useMemo(
+    () => (isTeacherView ? MOCK_COURSES.filter((c) => c.id === 'c1') : MOCK_COURSES),
+    [isTeacherView],
+  );
+  const [courses, setCourses] = useState<CourseSlot[]>(baseCourses);
   const [usingDemo, setUsingDemo] = useState(true);
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -159,7 +168,7 @@ export default function TimetablePage(props: {
   // 依學期載入課程
   useEffect(() => {
     if (!user || !isFirebaseConfigured()) {
-      setCourses(MOCK_COURSES);
+      setCourses(baseCourses);
       setUsingDemo(true);
       return;
     }
@@ -173,12 +182,12 @@ export default function TimetablePage(props: {
           setCourses(fbCourses.map(mapUserCourse));
           setUsingDemo(false);
         } else {
-          setCourses(MOCK_COURSES);
+          setCourses(baseCourses);
           setUsingDemo(true);
         }
       } catch {
         if (active) {
-          setCourses(MOCK_COURSES);
+          setCourses(baseCourses);
           setUsingDemo(true);
         }
       } finally {
@@ -189,9 +198,10 @@ export default function TimetablePage(props: {
     return () => {
       active = false;
     };
-  }, [user, selectedSemester]);
+  }, [user, selectedSemester, baseCourses]);
 
   const totalCredits = useMemo(() => courses.reduce((acc, c) => acc + c.credits, 0), [courses]);
+  const aiCtx = useMemo(() => (demoRole === 'student' ? getStudentContextSummary() : null), [demoRole]);
 
   const todayCourses = useMemo(
     () =>
@@ -233,16 +243,107 @@ export default function TimetablePage(props: {
     marginBottom: 6,
   });
 
-  return (
-    <SiteShell
-      title="課表"
-      subtitle={`${selectedSemester} 學期課程安排`}
-      schoolName={schoolName}
-      schoolCode={selectedSemester}
-    >
-      <div className="pageStack">
-        {/* 校友 / 訪客：課表為個人資料 */}
-        {isRestrictedRole && (
+  // ── 系主任：全系課程總覽（非個人課表）──
+  if (isDeptHead) {
+    return (
+      <SiteShell title="全系課程總覽" subtitle="本學期開設課程一覽" schoolName={schoolName}>
+        <div className="pageStack">
+          <div
+            className="card"
+            style={{ padding: '14px 16px', background: 'rgba(255,149,0,0.10)', border: '1px solid rgba(255,149,0,0.30)', fontSize: 13 }}
+          >
+            🏛️ <strong>系主任視角</strong> · 以下顯示本學期全系所有開設課程，非個人修課課表。
+          </div>
+          <div className="metricGrid">
+            <div className="metricCard" style={{ '--tone': '#FF9500' } as CSSProperties}>
+              <div className="metricIcon">📚</div>
+              <div className="metricValue">{DEMO_COURSES.length + 8}</div>
+              <div className="metricLabel">本學期開設課程</div>
+            </div>
+            <div className="metricCard" style={{ '--tone': '#0F8B8D' } as CSSProperties}>
+              <div className="metricIcon">🧑‍🏫</div>
+              <div className="metricValue">19</div>
+              <div className="metricLabel">授課教師</div>
+            </div>
+            <div className="metricCard" style={{ '--tone': 'var(--brand)' } as CSSProperties}>
+              <div className="metricIcon">👥</div>
+              <div className="metricValue">312</div>
+              <div className="metricLabel">修課學生數</div>
+            </div>
+            <div className="metricCard" style={{ '--tone': '#34C759' } as CSSProperties}>
+              <div className="metricIcon">🎓</div>
+              <div className="metricValue">96</div>
+              <div className="metricLabel">總開課學分</div>
+            </div>
+          </div>
+          <div className="sectionCard">
+            <div className="homeSectionHeader">
+              <h2 className="homeSectionTitle">📋 課程一覽</h2>
+              <Link
+                href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('列出本學期選課人數最多和最少的課程並分析師資分配')}`}
+                className="btn"
+                style={{ fontSize: 12 }}
+              >
+                AI 分析 →
+              </Link>
+            </div>
+            <div className="insetGroup">
+              {DEMO_COURSES.map((c, i) => (
+                <div key={c.id} className="insetGroupRow" style={{ borderTop: i === 0 ? 'none' : undefined }}>
+                  <div
+                    className="insetGroupRowIcon"
+                    style={{ background: `${c.color}14`, color: c.color, fontSize: 18 }}
+                  >
+                    {c.icon}
+                  </div>
+                  <div className="insetGroupRowContent">
+                    <div className="insetGroupRowTitle">{c.name}</div>
+                    <div className="insetGroupRowMeta">
+                      {c.instructor} · {c.members} 位學生 ·{' '}
+                      週{['', '一', '二', '三', '四', '五'][c.dayOfWeek]} 第{c.startPeriod}–{c.endPeriod}節 · {c.room}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 12, color: c.color, fontWeight: 700, flexShrink: 0 }}>
+                    {c.credits} 學分
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <Link href={`/admin${q}`} className="btn" style={{ alignSelf: 'flex-start' }}>
+            ← 回行政後台
+          </Link>
+        </div>
+      </SiteShell>
+    );
+  }
+
+  // ── 社團幹部：無個人修課課表 ──
+  if (isClubOfficer) {
+    return (
+      <SiteShell title="課表" subtitle="社團幹部無個人修課課表" schoolName={schoolName}>
+        <div className="pageStack">
+          <div className="emptyState">
+            <div className="emptyIcon">🎪</div>
+            <h3 className="emptyTitle">社團幹部無個人課表</h3>
+            <p className="emptyBody">
+              目前以社團幹部身份瀏覽，此視角不顯示個人修課課表。若要查看社課時間，請前往社團頁面。如需個人課表，請切換為學生身份。
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
+              <Link href={`/clubs${q}`} className="btn primary">前往社團管理</Link>
+              <Link href={`/${q}`} className="btn">← 回首頁</Link>
+            </div>
+          </div>
+        </div>
+      </SiteShell>
+    );
+  }
+
+  // ── 校友 / 訪客：課表為個人資料，無法查看 ──
+  if (isRestrictedRole) {
+    return (
+      <SiteShell title="課表" subtitle="課表屬個人修課資料" schoolName={schoolName}>
+        <div className="pageStack">
           <div
             className="card"
             style={{
@@ -255,7 +356,84 @@ export default function TimetablePage(props: {
             {demoRole === 'alumni' ? '🎓' : '👀'}{' '}
             <strong>{demoRole === 'alumni' ? '校友身份' : '訪客身份'}</strong>
             {' '}· 課表屬於個人選課資料，{demoRole === 'alumni' ? '校友' : '訪客'}無法查看在校學生課表。
-            以下為示範展示用資料。
+          </div>
+          <div className="emptyState">
+            <div className="emptyIcon">{demoRole === 'alumni' ? '🎓' : '🔒'}</div>
+            <h3 className="emptyTitle">無法查看個人課表</h3>
+            <p className="emptyBody">
+              {demoRole === 'alumni'
+                ? '你已畢業，無個人修課課表。如需查看在校期間的歷史成績，請前往成績頁面。'
+                : '訪客身份無法查看個人課表。請登入以使用完整功能。'}
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
+              {demoRole === 'alumni'
+                ? <Link href={`/grades${q}`} className="btn primary">查看歷史成績</Link>
+                : <Link href={`/login${q}`} className="btn primary">登入</Link>}
+              <Link href={`/${q}`} className="btn">← 回首頁</Link>
+            </div>
+          </div>
+        </div>
+      </SiteShell>
+    );
+  }
+
+  // ── 系統管理員：不適用個人課表 ──
+  if (demoRole === 'admin') {
+    return (
+      <SiteShell title="課表" subtitle="系統管理員不適用個人課表" schoolName={schoolName}>
+        <div className="pageStack">
+          <div className="emptyState">
+            <div className="emptyIcon">🛡️</div>
+            <h3 className="emptyTitle">系統管理員不適用個人課表</h3>
+            <p className="emptyBody">
+              系統管理員不是在校修課身份，無個人課表。如需查看全系課程，請前往管理後台或系主任視角。
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
+              <Link href={`/admin${q}`} className="btn primary">前往管理後台</Link>
+              <Link href={`/${q}`} className="btn">← 回首頁</Link>
+            </div>
+          </div>
+        </div>
+      </SiteShell>
+    );
+  }
+
+  return (
+    <SiteShell
+      title="課表"
+      subtitle={`${selectedSemester} 學期課程安排`}
+      schoolName={schoolName}
+      schoolCode={selectedSemester}
+    >
+      <div className="pageStack">
+        {/* 教師 / TA：顯示「我授課」 banner */}
+        {isTeacherView && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 16px',
+              background: demoRole === 'ta' ? 'rgba(124,58,237,0.10)' : 'rgba(15,139,141,0.10)',
+              border: `1px solid ${demoRole === 'ta' ? '#7C3AED' : '#0F8B8D'}`,
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              {demoRole === 'ta' ? '🧑‍💻' : '🧑‍🏫'}{' '}
+              <strong>{demoRole === 'ta' ? '助教課表' : '教師課表'}</strong>
+              {' '}· 顯示你{demoRole === 'ta' ? '助教' : '授課'}的 {courses.length} 門課，
+              不是個人修課。要切回學生視角請從右上角身份膠囊。
+            </div>
+            <Link
+              href={`/teacher/course/c1${q}`}
+              className="btn primary"
+              style={{ fontSize: 12 }}
+            >
+              進入教師工作台
+            </Link>
           </div>
         )}
 
@@ -272,6 +450,81 @@ export default function TimetablePage(props: {
           >
             ⚠️ 目前顯示示範資料。{!user ? '請登入帳號' : '本學期尚無課表記錄'}以查看實際課表。
             {loading && ' 載入中...'}
+          </div>
+        )}
+
+        {/* ── AI 今日提醒（學生專用）── */}
+        {demoRole === 'student' && aiCtx && (aiCtx.pendingAssignmentCount > 0 || aiCtx.libraryDueSoonDays <= 3) && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.08) 100%)',
+              border: '1px solid rgba(94,106,210,0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--brand)', marginBottom: 4 }}>
+                🤖 AI 今日提醒
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+                {aiCtx.pendingAssignmentCount > 0 && aiCtx.soonestAssignment && (
+                  <span>
+                    📝 有 <strong>{aiCtx.pendingAssignmentCount} 份作業</strong>待繳，最緊急：
+                    【{aiCtx.soonestAssignment.courseName}】{aiCtx.soonestAssignment.title}，截止 {aiCtx.soonestAssignment.due}
+                    {aiCtx.libraryDueSoonDays <= 3 && <span>　・　📚 《{aiCtx.libraryDueSoonBook}》還有 <strong>{aiCtx.libraryDueSoonDays} 天</strong>到期</span>}
+                  </span>
+                )}
+                {aiCtx.pendingAssignmentCount === 0 && aiCtx.libraryDueSoonDays <= 3 && (
+                  <span>📚 《{aiCtx.libraryDueSoonBook}》還有 <strong>{aiCtx.libraryDueSoonDays} 天</strong>到期，記得歸還或續借！</span>
+                )}
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('我今天有什麼作業要繳？有沒有考試快到了？')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
+          </div>
+        )}
+
+        {/* ── 教師 AI 提示 ── */}
+        {(demoRole === 'teacher' || demoRole === 'ta') && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, rgba(15,139,141,0.10) 0%, rgba(0,200,200,0.06) 100%)',
+              border: '1px solid rgba(15,139,141,0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 4 }}>
+                🤖 AI 課程助理
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                資料結構（CS301）本週有 <strong>5 份作業</strong>待批改，班級今日出席率上週平均 <strong>92%</strong>
+              </div>
+            </div>
+            <Link
+              href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('請分析資料結構班上本週的出席與作業繳交狀況')}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              問 AI →
+            </Link>
           </div>
         )}
 

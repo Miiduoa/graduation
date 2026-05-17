@@ -1,6 +1,7 @@
 /* eslint-disable */
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { ScrollView, Text, View, Alert, TextInput } from 'react-native';
+import { ScrollView, Text, View, Alert, TextInput, TouchableOpacity } from 'react-native';
+import { DEMO_ROLES, useDemoRole } from '../state/demoRole';
 import Constants from 'expo-constants';
 import { PROVIDENCE_UNIVERSITY_SCHOOL_CODE } from '@campus/shared/src';
 import {
@@ -125,12 +126,84 @@ export function SettingsScreen(props: any) {
     ]);
   };
 
+  // Demo 角色切換（mobile 對應 web 的「身份膠囊」）
+  const demoRoleCtx = useDemoRole();
+
   return (
     <Screen>
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ gap: theme.layout.sectionGap, paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }}
       >
+        <AnimatedCard title="Demo 身份切換" subtitle="畢業專題口試示範 · 8 種角色">
+          <View style={{ paddingHorizontal: theme.layout.screenPadding, gap: 8, paddingBottom: 12 }}>
+            <Text style={{ color: theme.colors.textSecondary, fontSize: 12, lineHeight: 18 }}>
+              目前以「{demoRoleCtx.definition.icon} {demoRoleCtx.definition.label}」身份瀏覽。
+              點下方任一角色卡片即可切換，使用內建示範資料、免登入。
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+              {DEMO_ROLES.map((r) => {
+                const isActive = r.role === demoRoleCtx.role;
+                return (
+                  <TouchableOpacity
+                    key={r.role}
+                    onPress={() => demoRoleCtx.setRole(r.role)}
+                    activeOpacity={0.7}
+                    style={{
+                      flexBasis: '48%',
+                      minHeight: 64,
+                      padding: 10,
+                      borderRadius: 12,
+                      borderWidth: 1,
+                      borderColor: isActive ? r.tone : theme.colors.border,
+                      backgroundColor: isActive ? r.toneSoft : theme.colors.surface,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 10,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 10,
+                        backgroundColor: r.toneSoft,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text style={{ fontSize: 20 }}>{r.icon}</Text>
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontWeight: '700',
+                          color: theme.colors.text,
+                        }}
+                        numberOfLines={1}
+                      >
+                        {r.shortLabel}
+                        {isActive ? '  ✓' : ''}
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          color: theme.colors.textSecondary,
+                          marginTop: 2,
+                        }}
+                        numberOfLines={2}
+                      >
+                        {r.description}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </AnimatedCard>
+
         <AnimatedCard title="外觀" subtitle="">
           <View style={{ gap: 0 }}>
             <View style={{ paddingVertical: theme.layout.listItemVertical, paddingHorizontal: theme.layout.screenPadding }}>

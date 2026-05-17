@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { safeNavigate } from '../utils/safeNavigate';
 
 import { evaluateRubric, type Rubric, type RubricScore } from '@campus/shared';
 
@@ -328,7 +329,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
             <Pressable
               key={i}
               onPress={() =>
-                navigation.navigate('CourseMaterialViewer', {
+                safeNavigate(navigation, 'CourseMaterialViewer', {
                   url: att.url,
                   title: att.name,
                   kind: 'homework',

@@ -40,13 +40,17 @@ import {
   CockpitSection,
   CockpitRow,
 } from '../ui/cockpitShell';
+import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
 import { useAuth } from '../state/auth';
 import {
   emitBulkReminder,
   emitFeedbackDrafted,
+  emitLeaveDecision,
   subscribeRoleEvent,
+  loadRoleEventInbox,
   type HomeworkSubmittedPayload,
   type DiscussionPostedPayload,
+  type LeaveRequestedPayload,
 } from '../services/roleEventBus';
 import {
   aiForecastBulkReminder,
@@ -146,25 +150,147 @@ export default function TeacherCockpitScreen() {
 
   const totalMissing = homeworkStats.reduce((s, x) => s + x.missing, 0);
 
-  // 🔔 即時收學生反向事件（繳交 / 發討論）→ 更新待批改 / 待回覆計數
+  // 🔔 即時收學生反向事件（繳交 / 發討論 / 請假）→ 更新待批改 / 待回覆計數
   const [liveSubmits, setLiveSubmits] = useState<Array<{ id: string; studentName: string; homeworkTitle: string; at: string }>>([]);
   const [liveDiscussions, setLiveDiscussions] = useState<Array<{ id: string; studentName: string; threadTitle: string; preview: string }>>([]);
+  const [liveLeaves, setLiveLeaves] = useState<Array<{
+    id: string;
+    studentUid: string;
+    studentName: string;
+    leaveId: string;
+    category: LeaveRequestedPayload['category'];
+    fromDate: string;
+    toDate: string;
+    reason: string;
+    at: string;
+    decision?: 'approved' | 'rejected';
+  }>>([]);
 
+  // 載入歷史 inbox events（學生在切到老師帳號前已經做的動作）+ 訂閱即時
   useEffect(() => {
+    const teacherUid = auth.user?.uid ?? 'demo_teacher_chang';
+    let cancelled = false;
+
+    // 1. 載入歷史 — 從 inbox 拉所有 homework_submitted / discussion_posted / leave_requested
+    (async () => {
+      const events = await loadRoleEventInbox(teacherUid).catch(() => []);
+      if (cancelled) return;
+      const submits: typeof liveSubmits = [];
+      const discussions: typeof liveDiscussions = [];
+      const leaves: typeof liveLeaves = [];
+      for (const event of events) {
+        if (event.kind === 'homework_submitted') {
+          const p = event.payload as HomeworkSubmittedPayload;
+          submits.push({
+            id: event.id,
+            studentName: event.actorName ?? '學生',
+            homeworkTitle: p.homeworkTitle,
+            at: event.occurredAt,
+          });
+        } else if (event.kind === 'discussion_posted') {
+          const p = event.payload as DiscussionPostedPayload;
+          discussions.push({
+            id: event.id,
+            studentName: p.authorName,
+            threadTitle: p.threadTitle,
+            preview: p.preview,
+          });
+        } else if (event.kind === 'leave_requested') {
+          const p = event.payload as LeaveRequestedPayload;
+          leaves.push({
+            id: event.id,
+            studentUid: event.actorUid,
+            studentName: p.studentName,
+            leaveId: p.leaveId,
+            category: p.category,
+            fromDate: p.fromDate,
+            toDate: p.toDate,
+            reason: p.reason,
+            at: event.occurredAt,
+          });
+        }
+      }
+      setLiveSubmits(submits.slice(0, 10));
+      setLiveDiscussions(discussions.slice(0, 10));
+      setLiveLeaves(leaves.slice(0, 10));
+    })();
+
+    // 2. 訂閱即時（同 session 中其他動作觸發）
     const unsubSubmit = subscribeRoleEvent<HomeworkSubmittedPayload>('homework_submitted', (event) => {
-      setLiveSubmits((prev) => [
-        { id: event.id, studentName: event.actorName ?? '學生', homeworkTitle: event.payload.homeworkTitle, at: event.occurredAt },
-        ...prev,
-      ].slice(0, 10));
+      setLiveSubmits((prev) => {
+        if (prev.find((s) => s.id === event.id)) return prev;
+        return [
+          { id: event.id, studentName: event.actorName ?? '學生', homeworkTitle: event.payload.homeworkTitle, at: event.occurredAt },
+          ...prev,
+        ].slice(0, 10);
+      });
     });
     const unsubDiscussion = subscribeRoleEvent<DiscussionPostedPayload>('discussion_posted', (event) => {
-      setLiveDiscussions((prev) => [
-        { id: event.id, studentName: event.payload.authorName, threadTitle: event.payload.threadTitle, preview: event.payload.preview },
-        ...prev,
-      ].slice(0, 10));
+      setLiveDiscussions((prev) => {
+        if (prev.find((d) => d.id === event.id)) return prev;
+        return [
+          { id: event.id, studentName: event.payload.authorName, threadTitle: event.payload.threadTitle, preview: event.payload.preview },
+          ...prev,
+        ].slice(0, 10);
+      });
     });
-    return () => { unsubSubmit(); unsubDiscussion(); };
-  }, []);
+    const unsubLeave = subscribeRoleEvent<LeaveRequestedPayload>('leave_requested', (event) => {
+      setLiveLeaves((prev) => {
+        if (prev.find((l) => l.id === event.id)) return prev;
+        return [
+          {
+            id: event.id,
+            studentUid: event.actorUid,
+            studentName: event.payload.studentName,
+            leaveId: event.payload.leaveId,
+            category: event.payload.category,
+            fromDate: event.payload.fromDate,
+            toDate: event.payload.toDate,
+            reason: event.payload.reason,
+            at: event.occurredAt,
+          },
+          ...prev,
+        ].slice(0, 10);
+      });
+    });
+    return () => {
+      cancelled = true;
+      unsubSubmit();
+      unsubDiscussion();
+      unsubLeave();
+    };
+  }, [auth.user?.uid]);
+
+  // 處理請假審核
+  const handleLeaveDecision = useCallback(async (
+    leave: typeof liveLeaves[number],
+    decision: 'approved' | 'rejected',
+  ) => {
+    try {
+      await emitLeaveDecision({
+        actorUid: auth.user?.uid ?? 'demo_teacher_chang',
+        actorName: auth.profile?.displayName ?? '張怡君',
+        targetUids: [leave.studentUid],
+        courseId: 'leave',
+        courseName: '請假審核',
+        payload: {
+          leaveId: leave.leaveId,
+          decision,
+          decidedBy: auth.profile?.displayName ?? '張怡君',
+          message: decision === 'approved'
+            ? `已核准 ${leave.fromDate} ~ ${leave.toDate} 的${leave.category === 'sick' ? '病假' : leave.category === 'personal' ? '事假' : leave.category === 'official' ? '公假' : '喪假'}`
+            : '請另外提交補件資料',
+        },
+      });
+      setLiveLeaves((prev) => prev.map((l) => l.id === leave.id ? { ...l, decision } : l));
+      Alert.alert(
+        decision === 'approved' ? '✅ 已核准' : '❌ 已駁回',
+        `${leave.studentName} 的 inbox 立刻會收到結果。`,
+      );
+    } catch (e) {
+      Alert.alert('送出失敗', String(e));
+    }
+  }, [auth.user?.uid, auth.profile?.displayName]);
 
   const flagged = useMemo(() => {
     const out: Array<{ student: typeof students[number]; reason: string; severity: 'high' | 'medium' }> = [];
@@ -348,6 +474,9 @@ export default function TeacherCockpitScreen() {
           })()}
         />
 
+        {/* 🤖 AI Agent 摘要 — 點進 AIAgentConsole */}
+        <AgentSummaryBanner cockpitLabel="老師" />
+
         {/* 一鍵跨角色 demo */}
         <Pressable
           onPress={async () => {
@@ -405,7 +534,96 @@ export default function TeacherCockpitScreen() {
           <CockpitMetricChip label="待批改" value={pendingGradeCount} />
           <CockpitMetricChip label="缺繳人次" value={totalMissing} tone={totalMissing > 0 ? 'warn' : undefined} />
           <CockpitMetricChip label="🚩 紅旗" value={flagged.length} tone={flagged.length > 0 ? 'danger' : 'success'} />
+          <CockpitMetricChip
+            label="📝 請假"
+            value={liveLeaves.filter((l) => !l.decision).length}
+            tone={liveLeaves.filter((l) => !l.decision).length > 0 ? 'warn' : undefined}
+          />
         </CockpitMetricRow>
+
+        {/* 待審請假 */}
+        {liveLeaves.length > 0 && (
+          <View
+            style={{
+              marginTop: theme.space.sm,
+              marginBottom: theme.space.sm,
+              padding: theme.space.md,
+              borderRadius: theme.radius.lg,
+              backgroundColor: theme.colors.surface,
+              borderLeftWidth: 3,
+              borderLeftColor: theme.colors.warning,
+              gap: theme.space.sm,
+            }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.colors.text }}>
+              📝 學生請假申請 ({liveLeaves.length})
+            </Text>
+            {liveLeaves.map((l) => {
+              const catLabel = l.category === 'sick' ? '🤒 病假' : l.category === 'personal' ? '📅 事假' : l.category === 'official' ? '🏛 公假' : '🕯 喪假';
+              return (
+                <View
+                  key={l.id}
+                  style={{
+                    padding: theme.space.sm + 2,
+                    borderRadius: theme.radius.md,
+                    backgroundColor: theme.colors.surfaceMuted,
+                    gap: 4,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.xs }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: theme.colors.text, flex: 1 }}>
+                      {l.studentName} · {catLabel}
+                    </Text>
+                    {l.decision && (
+                      <Text style={{
+                        fontSize: 11,
+                        fontWeight: '700',
+                        color: l.decision === 'approved' ? theme.colors.success : theme.colors.danger,
+                      }}>
+                        {l.decision === 'approved' ? '✅ 已核准' : '❌ 已駁回'}
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={{ fontSize: 11, color: theme.colors.muted }}>
+                    {l.fromDate} → {l.toDate} · {l.reason}
+                  </Text>
+                  {!l.decision && (
+                    <View style={{ flexDirection: 'row', gap: theme.space.xs, marginTop: 4 }}>
+                      <Pressable
+                        onPress={() => handleLeaveDecision(l, 'approved')}
+                        style={({ pressed }) => ({
+                          paddingHorizontal: theme.space.sm + 2,
+                          paddingVertical: theme.space.xs + 2,
+                          borderRadius: theme.radius.full,
+                          backgroundColor: theme.colors.success + '20',
+                          opacity: pressed ? 0.6 : 1,
+                        })}
+                      >
+                        <Text style={{ color: theme.colors.success, fontSize: 12, fontWeight: '700' }}>
+                          ✓ 核准
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleLeaveDecision(l, 'rejected')}
+                        style={({ pressed }) => ({
+                          paddingHorizontal: theme.space.sm + 2,
+                          paddingVertical: theme.space.xs + 2,
+                          borderRadius: theme.radius.full,
+                          backgroundColor: theme.colors.surface,
+                          opacity: pressed ? 0.6 : 1,
+                        })}
+                      >
+                        <Text style={{ color: theme.colors.muted, fontSize: 12, fontWeight: '600' }}>
+                          ✗ 駁回
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {/* 課程切換 */}
         <View style={{
