@@ -1,0 +1,146 @@
+import { Link, router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { useCourseRole } from '@/hooks/useCourseRole';
+import { supabase } from '@/lib/supabase';
+
+type Quiz = {
+  id: string;
+  title: string;
+  description: string | null;
+};
+
+export default function QuizzesScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const { session } = useAuth();
+  const role = useCourseRole(courseId, session?.user.id);
+  const teacher = role === 'teacher';
+
+  const [items, setItems] = useState<Quiz[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [title, setTitle] = useState('');
+
+  const load = useCallback(async () => {
+    if (!courseId) return;
+    const { data, error } = await supabase
+      .from('quizzes')
+      .select('id, title, description')
+      .eq('course_id', courseId)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn(error.message);
+      setItems([]);
+      return;
+    }
+    setItems((data ?? []) as Quiz[]);
+  }, [courseId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  async function createQuiz() {
+    const uid = session?.user.id;
+    if (!courseId || !uid) return;
+    const trimmed = title.trim();
+    if (!trimmed) {
+      Alert.alert('請輸入測驗名稱');
+      return;
+    }
+    const { data, error } = await supabase
+      .from('quizzes')
+      .insert({ course_id: courseId, title: trimmed, description: '', created_by: uid })
+      .select('id')
+      .single();
+    if (error) {
+      Alert.alert('建立失敗', error.message);
+      return;
+    }
+    setTitle('');
+    await load();
+    if (data?.id) {
+      router.push(`/(app)/course/${courseId}/quizzes/${data.id}`);
+    }
+  }
+
+  return (
+    <View style={styles.screen}>
+      {teacher ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>新增測驗</Text>
+          <TextInput placeholder="測驗名稱" style={styles.input} value={title} onChangeText={setTitle} />
+          <Pressable style={styles.primaryBtn} onPress={createQuiz}>
+            <Text style={styles.primaryBtnText}>建立並編輯題目</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={<Text style={styles.empty}>尚無測驗。</Text>}
+        renderItem={({ item }) => (
+          <Link href={`./quizzes/${item.id}`} style={styles.row}>
+            <Text style={styles.rowTitle}>{item.title}</Text>
+            <Text style={styles.rowMeta}>{item.description ? item.description : '點進進入作答／題目編輯'}</Text>
+          </Link>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 16 },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+    marginBottom: 12,
+  },
+  cardTitle: { fontWeight: '700' },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '700' },
+  empty: { color: '#6b7280', marginTop: 18 },
+  row: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    gap: 6,
+  },
+  rowTitle: { fontSize: 17, fontWeight: '700' },
+  rowMeta: { color: '#6b7280', fontSize: 12 },
+});

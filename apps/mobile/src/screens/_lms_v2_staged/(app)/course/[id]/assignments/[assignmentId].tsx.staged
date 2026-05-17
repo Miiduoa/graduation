@@ -1,0 +1,373 @@
+import * as DocumentPicker from 'expo-document-picker';
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { useCourseRole } from '@/hooks/useCourseRole';
+import { supabase } from '@/lib/supabase';
+
+type AssignmentRow = {
+  id: string;
+  course_id: string;
+  title: string;
+  description: string | null;
+  max_points: number;
+};
+
+type SubmissionRow = {
+  id: string;
+  student_id: string;
+  body_text: string | null;
+  storage_path: string | null;
+  grade: number | null;
+  feedback: string | null;
+};
+
+export default function AssignmentDetailScreen() {
+  const { id: courseId, assignmentId } = useLocalSearchParams<{ id: string; assignmentId: string }>();
+  const { session } = useAuth();
+  const uid = session?.user.id;
+  const role = useCourseRole(courseId, uid);
+  const teacher = role === 'teacher';
+
+  const [assignment, setAssignment] = useState<AssignmentRow | null>(null);
+  const [mySubmission, setMySubmission] = useState<SubmissionRow | null>(null);
+  const [allSubs, setAllSubs] = useState<SubmissionRow[]>([]);
+  const [selected, setSelected] = useState<SubmissionRow | null>(null);
+
+  const [bodyText, setBodyText] = useState('');
+  const [gradeInput, setGradeInput] = useState('');
+  const [feedbackInput, setFeedbackInput] = useState('');
+
+  const selectedStudentLabel = useMemo(() => {
+    if (!selected) return '';
+    return `${selected.student_id.slice(0, 8)}…`;
+  }, [selected]);
+
+  const loadAssignment = useCallback(async () => {
+    if (!assignmentId) return;
+
+    const { data: a, error: aErr } = await supabase.from('assignments').select('*').eq('id', assignmentId).single();
+    if (aErr) {
+      console.warn(aErr.message);
+      setAssignment(null);
+      return;
+    }
+    setAssignment(a as AssignmentRow);
+  }, [assignmentId]);
+
+  const loadStudentSubmission = useCallback(async () => {
+    if (!assignmentId || !uid) return;
+
+    const { data: s } = await supabase
+      .from('submissions')
+      .select('*')
+      .eq('assignment_id', assignmentId)
+      .eq('student_id', uid)
+      .maybeSingle();
+
+    const sub = (s ?? null) as SubmissionRow | null;
+    setMySubmission(sub);
+    setBodyText(sub?.body_text ?? '');
+  }, [assignmentId, uid]);
+
+  const loadTeacherSubs = useCallback(async () => {
+    if (!assignmentId || !teacher) return;
+
+    const { data, error } = await supabase.from('submissions').select('*').eq('assignment_id', assignmentId);
+    if (error) {
+      console.warn(error.message);
+      setAllSubs([]);
+      return;
+    }
+
+    const rows = (data ?? []) as SubmissionRow[];
+    setAllSubs(rows);
+
+    setSelected((prev) => {
+      if (prev) {
+        const still = rows.find((r) => r.id === prev.id);
+        if (still) return still;
+      }
+      return rows[0] ?? null;
+    });
+  }, [assignmentId, teacher]);
+
+  useEffect(() => {
+    loadAssignment();
+  }, [loadAssignment]);
+
+  useEffect(() => {
+    loadStudentSubmission();
+  }, [loadStudentSubmission]);
+
+  useEffect(() => {
+    loadTeacherSubs();
+  }, [loadTeacherSubs]);
+
+  useEffect(() => {
+    if (!teacher) return;
+    if (!selected) {
+      setGradeInput('');
+      setFeedbackInput('');
+      return;
+    }
+    setGradeInput(selected.grade != null ? String(selected.grade) : '');
+    setFeedbackInput(selected.feedback ?? '');
+  }, [teacher, selected]);
+
+  async function submitText() {
+    if (!assignmentId || !uid) return;
+
+    const { error } = await supabase.from('submissions').upsert(
+      {
+        assignment_id: assignmentId,
+        student_id: uid,
+        body_text: bodyText,
+        submitted_at: new Date().toISOString(),
+      },
+      { onConflict: 'assignment_id,student_id' },
+    );
+
+    if (error) {
+      Alert.alert('繳交失敗', error.message);
+      return;
+    }
+
+    await loadStudentSubmission();
+    Alert.alert('已繳交');
+  }
+
+  async function attachFile() {
+    if (!assignmentId || !uid || !courseId) return;
+
+    const picked = await DocumentPicker.getDocumentAsync({ multiple: false, copyToCacheDirectory: true });
+    if (picked.canceled) return;
+
+    const asset = picked.assets?.[0];
+    if (!asset?.uri) return;
+
+    const safeName = asset.name ?? 'submission.bin';
+    const objectPath = `${courseId}/${assignmentId}/${uid}/${Date.now()}-${safeName}`;
+
+    try {
+      const res = await fetch(asset.uri);
+      const blob = await res.blob();
+
+      const { error: uploadError } = await supabase.storage.from('submissions').upload(objectPath, blob, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: asset.mimeType ?? 'application/octet-stream',
+      });
+      if (uploadError) throw uploadError;
+
+      const { error: upsertError } = await supabase.from('submissions').upsert(
+        {
+          assignment_id: assignmentId,
+          student_id: uid,
+          body_text: bodyText,
+          storage_path: objectPath,
+          submitted_at: new Date().toISOString(),
+        },
+        { onConflict: 'assignment_id,student_id' },
+      );
+      if (upsertError) throw upsertError;
+
+      await loadStudentSubmission();
+      Alert.alert('檔案已附檔並更新繳交紀錄');
+    } catch (e: unknown) {
+      Alert.alert('上傳失敗', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function saveGrade() {
+    if (!selected?.id || !teacher || !assignmentId || !uid) return;
+
+    const parsed = Number(gradeInput);
+    if (!Number.isFinite(parsed)) {
+      Alert.alert('請輸入數字成績');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('submissions')
+      .update({
+        grade: parsed,
+        feedback: feedbackInput,
+        graded_at: new Date().toISOString(),
+        graded_by: uid,
+      })
+      .eq('id', selected.id);
+
+    if (error) {
+      Alert.alert('批改失敗', error.message);
+      return;
+    }
+
+    const { data: items } = await supabase
+      .from('grade_items')
+      .select('id')
+      .eq('source_type', 'assignment')
+      .eq('source_id', assignmentId);
+
+    const gradeItemId = items?.[0]?.id as string | undefined;
+    if (gradeItemId) {
+      await supabase.from('grade_scores').upsert(
+        {
+          grade_item_id: gradeItemId,
+          student_id: selected.student_id,
+          score: parsed,
+        },
+        { onConflict: 'grade_item_id,student_id' },
+      );
+    }
+
+    await loadTeacherSubs();
+    Alert.alert('已儲存批改');
+  }
+
+  if (!assignment) {
+    return (
+      <View style={styles.center}>
+        <Text>載入作業中…</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.screen}>
+      <Text style={styles.title}>{assignment.title}</Text>
+      <Text style={styles.meta}>配分：{assignment.max_points}</Text>
+
+      {teacher ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>全班繳交列表</Text>
+          <FlatList
+            scrollEnabled={false}
+            data={allSubs}
+            keyExtractor={(item) => item.id}
+            ListEmptyComponent={<Text style={styles.empty}>尚無繳交。</Text>}
+            renderItem={({ item }) => (
+              <Pressable style={[styles.pickRow, selected?.id === item.id && styles.pickRowActive]} onPress={() => setSelected(item)}>
+                <Text style={styles.pickTitle}>學生 {item.student_id.slice(0, 8)}…</Text>
+                <Text style={styles.pickMeta}>成績：{item.grade ?? '—'}</Text>
+              </Pressable>
+            )}
+          />
+
+          {selected ? (
+            <>
+              <Text style={styles.label}>目前選擇：{selectedStudentLabel}</Text>
+              <Text style={styles.block}>{selected.body_text || '（無文字說明）'}</Text>
+              <Text style={styles.label}>檔案：{selected.storage_path ?? '無'}</Text>
+              <TextInput placeholder="成績" style={styles.input} value={gradeInput} onChangeText={setGradeInput} keyboardType="decimal-pad" />
+              <TextInput
+                placeholder="評語"
+                style={[styles.input, styles.multiline]}
+                multiline
+                value={feedbackInput}
+                onChangeText={setFeedbackInput}
+              />
+              <Pressable style={styles.primaryBtn} onPress={saveGrade}>
+                <Text style={styles.primaryBtnText}>儲存批改</Text>
+              </Pressable>
+            </>
+          ) : null}
+        </View>
+      ) : (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>繳交區</Text>
+          <TextInput
+            placeholder="作業說明／心得（文字）"
+            style={[styles.input, styles.multiline]}
+            multiline
+            value={bodyText}
+            onChangeText={setBodyText}
+          />
+          <Pressable style={styles.primaryBtn} onPress={submitText}>
+            <Text style={styles.primaryBtnText}>繳交文字</Text>
+          </Pressable>
+          <Pressable style={styles.secondaryBtn} onPress={attachFile}>
+            <Text style={styles.secondaryBtnText}>附加檔案（選填）</Text>
+          </Pressable>
+
+          {mySubmission?.grade != null ? (
+            <Text style={styles.result}>已批改：{mySubmission.grade} 分</Text>
+          ) : (
+            <Text style={styles.result}>尚未批改</Text>
+          )}
+          {mySubmission?.feedback ? <Text style={styles.feedback}>評語：{mySubmission.feedback}</Text> : null}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { padding: 16, gap: 12, paddingBottom: 40 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 22, fontWeight: '800' },
+  meta: { color: '#6b7280' },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+  },
+  cardTitle: { fontWeight: '800' },
+  label: { fontWeight: '700' },
+  block: { fontSize: 15, lineHeight: 20 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  multiline: { minHeight: 110, textAlignVertical: 'top' },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '800' },
+  secondaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '800' },
+  empty: { color: '#6b7280' },
+  pickRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#eee',
+    marginBottom: 8,
+    gap: 4,
+  },
+  pickRowActive: {
+    borderColor: '#2563eb',
+    backgroundColor: '#eff6ff',
+  },
+  pickTitle: { fontWeight: '700' },
+  pickMeta: { color: '#6b7280', fontSize: 12 },
+  result: { marginTop: 8, fontWeight: '700' },
+  feedback: { fontSize: 14, color: '#374151' },
+});

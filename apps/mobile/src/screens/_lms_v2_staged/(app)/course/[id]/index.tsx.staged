@@ -1,0 +1,84 @@
+import { Link, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { supabase } from '@/lib/supabase';
+
+export default function CourseHomeScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const [title, setTitle] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from('courses')
+      .select('title')
+      .eq('id', id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!cancelled) setTitle((data?.title as string | undefined) ?? '');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  if (!id) {
+    return (
+      <View style={styles.center}>
+        <Text>找不到課程</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.screen}>
+      <Text style={styles.heading}>{title || '載入中…'}</Text>
+
+      {!title ? <ActivityIndicator /> : null}
+
+      <Link href="./announcements" style={styles.link}>
+        <Text style={styles.linkText}>公告</Text>
+      </Link>
+      <Link href="./materials" style={styles.link}>
+        <Text style={styles.linkText}>教材與檔案</Text>
+      </Link>
+      <Link href="./assignments" style={styles.link}>
+        <Text style={styles.linkText}>作業</Text>
+      </Link>
+      <Link href="./quizzes" style={styles.link}>
+        <Text style={styles.linkText}>線上測驗</Text>
+      </Link>
+      <Link href="./question-bank" style={styles.link}>
+        <Text style={styles.linkText}>題庫維護（CRUD）</Text>
+      </Link>
+      <Link href="./forum" style={styles.link}>
+        <Text style={styles.linkText}>討論區</Text>
+      </Link>
+      <Link href="./grades" style={styles.link}>
+        <Text style={styles.linkText}>成績簿（類別／項目）</Text>
+      </Link>
+      <Link href="./ai-assistant" style={styles.link}>
+        <Text style={styles.linkText}>AI 助教（Edge）</Text>
+      </Link>
+      <Link href="./live" style={styles.link}>
+        <Text style={styles.linkText}>互動課堂（Realtime）</Text>
+      </Link>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { padding: 18, gap: 14 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  heading: { fontSize: 22, fontWeight: '800', marginBottom: 8 },
+  link: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    backgroundColor: '#fafafa',
+  },
+  linkText: { fontSize: 16, fontWeight: '600' },
+});

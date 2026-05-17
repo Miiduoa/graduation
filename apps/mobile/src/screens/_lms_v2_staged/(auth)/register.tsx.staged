@@ -1,0 +1,83 @@
+import { Link, router } from 'expo-router';
+import { useState } from 'react';
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { supabase } from '@/lib/supabase';
+
+export default function RegisterScreen() {
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function signUp() {
+    setBusy(true);
+    const { error } = await supabase.auth.signUp({
+      email: email.trim(),
+      password,
+      options: {
+        data: { display_name: displayName.trim() },
+      },
+    });
+    setBusy(false);
+    if (error) {
+      Alert.alert('註冊失敗', error.message);
+      return;
+    }
+    Alert.alert('完成', '請檢查信箱是否需驗證後再登入。', [
+      { text: '確定', onPress: () => router.replace('/(auth)/login') },
+    ]);
+  }
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>建立帳號</Text>
+      <TextInput placeholder="顯示名稱" style={styles.input} value={displayName} onChangeText={setDisplayName} />
+      <TextInput
+        autoCapitalize="none"
+        keyboardType="email-address"
+        placeholder="Email"
+        style={styles.input}
+        value={email}
+        onChangeText={setEmail}
+      />
+      <TextInput
+        placeholder="密碼（至少 6 字）"
+        secureTextEntry
+        style={styles.input}
+        value={password}
+        onChangeText={setPassword}
+      />
+      <Pressable disabled={busy} style={[styles.button, busy && styles.buttonDisabled]} onPress={signUp}>
+        <Text style={styles.buttonText}>{busy ? '送出中…' : '註冊'}</Text>
+      </Pressable>
+      <Link href="/(auth)/login" style={styles.link}>
+        <Text style={styles.linkText}>已有帳號？返回登入</Text>
+      </Link>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 24, gap: 12, justifyContent: 'center' },
+  title: { fontSize: 22, fontWeight: '700', marginBottom: 8 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  button: {
+    marginTop: 8,
+    backgroundColor: '#111827',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  buttonDisabled: { opacity: 0.6 },
+  buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
+  link: { marginTop: 12, alignSelf: 'center' },
+  linkText: { color: '#2563eb' },
+});

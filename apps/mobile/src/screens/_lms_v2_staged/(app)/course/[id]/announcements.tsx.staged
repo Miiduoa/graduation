@@ -1,0 +1,157 @@
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { canCourseStaffManageContent, useCourseRole } from '@/hooks/useCourseRole';
+import { supabase } from '@/lib/supabase';
+
+type Announcement = {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+};
+
+export default function AnnouncementsScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const { session } = useAuth();
+  const role = useCourseRole(courseId, session?.user.id);
+  const staffCanPublish = canCourseStaffManageContent(role);
+
+  const [items, setItems] = useState<Announcement[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+
+  const load = useCallback(async () => {
+    if (!courseId) return;
+    const { data, error } = await supabase
+      .from('announcements')
+      .select('id, title, body, created_at')
+      .eq('course_id', courseId)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn(error.message);
+      setItems([]);
+      return;
+    }
+    setItems((data ?? []) as Announcement[]);
+  }, [courseId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  async function publish() {
+    const uid = session?.user.id;
+    if (!courseId || !uid) return;
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      Alert.alert('請輸入標題');
+      return;
+    }
+    const { error } = await supabase.from('announcements').insert({
+      course_id: courseId,
+      author_id: uid,
+      title: trimmedTitle,
+      body,
+    });
+    if (error) {
+      Alert.alert('發布失敗', error.message);
+      return;
+    }
+    setTitle('');
+    setBody('');
+    await load();
+  }
+
+  return (
+    <View style={styles.screen}>
+      {staffCanPublish ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>發布公告</Text>
+          <TextInput placeholder="標題" style={styles.input} value={title} onChangeText={setTitle} />
+          <TextInput
+            placeholder="內容"
+            style={[styles.input, styles.multiline]}
+            multiline
+            value={body}
+            onChangeText={setBody}
+          />
+          <Pressable style={styles.primaryBtn} onPress={publish}>
+            <Text style={styles.primaryBtnText}>發布</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={<Text style={styles.empty}>尚無公告。</Text>}
+        renderItem={({ item }) => (
+          <View style={styles.row}>
+            <Text style={styles.rowTitle}>{item.title}</Text>
+            <Text style={styles.rowMeta}>{new Date(item.created_at).toLocaleString()}</Text>
+            <Text style={styles.rowBody}>{item.body}</Text>
+          </View>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 16 },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+    marginBottom: 12,
+  },
+  cardTitle: { fontWeight: '700' },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  multiline: { minHeight: 90, textAlignVertical: 'top' },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '700' },
+  empty: { color: '#6b7280', marginTop: 18 },
+  row: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    gap: 6,
+  },
+  rowTitle: { fontSize: 17, fontWeight: '700' },
+  rowMeta: { color: '#6b7280', fontSize: 12 },
+  rowBody: { fontSize: 15, lineHeight: 20 },
+});
