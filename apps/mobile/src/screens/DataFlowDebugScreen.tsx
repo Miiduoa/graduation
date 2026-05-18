@@ -122,12 +122,12 @@ export default function DataFlowDebugScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: '#0f172a' }} contentContainerStyle={{ padding: 16, paddingBottom: 64 }}>
       <Text style={{ color: '#fbbf24', fontSize: 24, fontWeight: '700' }}>🔍 資料流診斷</Text>
-      <Text style={{ color: '#cbd5e1', fontSize: 12, marginTop: 4 }}>
+      <Text style={{ color: '#E5E5EA', fontSize: 12, marginTop: 4 }}>
         逐一打 TronClass endpoint，看哪些回資料、哪些回空、哪些失敗
       </Text>
 
       <View style={{ marginTop: 16 }}>
-        <Text style={{ color: '#cbd5e1', fontSize: 13, marginBottom: 4 }}>Course ID</Text>
+        <Text style={{ color: '#E5E5EA', fontSize: 13, marginBottom: 4 }}>Course ID</Text>
         <TextInput
           value={courseId}
           onChangeText={setCourseId}
@@ -174,7 +174,7 @@ export default function DataFlowDebugScreen() {
               borderRadius: 10,
               padding: 12,
               borderLeftWidth: 4,
-              borderLeftColor: r.ok === true ? '#22c55e' : r.ok === false ? '#dc2626' : '#64748b',
+              borderLeftColor: r.ok === true ? '#22c55e' : r.ok === false ? '#D70015' : '#64748b',
             }}
           >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -201,11 +201,11 @@ export default function DataFlowDebugScreen() {
 
             {r.ok !== undefined && (
               <View style={{ marginTop: 8, flexDirection: 'row', gap: 12 }}>
-                <Text style={{ color: r.ok ? '#22c55e' : '#dc2626', fontSize: 12 }}>
+                <Text style={{ color: r.ok ? '#22c55e' : '#D70015', fontSize: 12 }}>
                   {r.ok ? '✓' : '✗'} {r.ms}ms
                 </Text>
                 {r.count !== undefined && (
-                  <Text style={{ color: '#cbd5e1', fontSize: 12 }}>
+                  <Text style={{ color: '#E5E5EA', fontSize: 12 }}>
                     📊 {r.count} 筆
                   </Text>
                 )}

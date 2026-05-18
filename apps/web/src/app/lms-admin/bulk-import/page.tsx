@@ -55,7 +55,7 @@ export default function BulkImportMembersPage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>批量匯入課程成員</h1>
-      <p style={{ color: '#4b5563', fontSize: 14 }}>
+      <p style={{ color: '#3C3C43', fontSize: 14 }}>
         依 email 對應既有 Supabase 使用者寫入 course_members。使用者須已註冊（可先跑 Edge Function{' '}
         <code>sync-external-directory</code>
         發邀請）。
@@ -89,7 +89,7 @@ export default function BulkImportMembersPage() {
           padding: '12px 18px',
           borderRadius: 10,
           border: 'none',
-          background: '#2563eb',
+          background: '#007aff',
           color: '#fff',
           fontWeight: 700,
           cursor: busy ? 'wait' : 'pointer',
@@ -99,7 +99,7 @@ export default function BulkImportMembersPage() {
       </button>
 
       {result ? (
-        <pre style={{ marginTop: 16, padding: 12, background: '#f9fafb', borderRadius: 8, overflow: 'auto' }}>{result}</pre>
+        <pre style={{ marginTop: 16, padding: 12, background: '#F2F2F7', borderRadius: 8, overflow: 'auto' }}>{result}</pre>
       ) : null}
     </RequireAdmin>
   );

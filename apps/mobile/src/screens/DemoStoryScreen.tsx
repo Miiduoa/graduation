@@ -29,15 +29,15 @@ import { analytics } from '../services/analytics';
 import { usePersonaContext, type TimelineEvent } from '../services/personaContext';
 
 const CATEGORY_COLOR: Record<TimelineEvent['category'], string> = {
-  wake: '#F59E0B',
-  bus: '#3B82F6',
-  class: '#8B5CF6',
-  food: '#EF4444',
+  wake: '#FF9500',
+  bus: '#007AFF',
+  class: '#AF52DE',
+  food: '#FF3B30',
   study: '#06B6D4',
   office: '#64748B',
   work: '#0EA5E9',
   home: '#22C55E',
-  social: '#EC4899',
+  social: '#FF2D55',
   health: '#34D399',
 };
 
@@ -220,7 +220,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {persona.nextClass && (
               <PersonaShortcut
                 icon="school-outline"
-                color="#8B5CF6"
+                color="#AF52DE"
                 title="去下節課"
                 subtitle={`${persona.nextClass.startHHmm} · ${persona.nextClass.poi.name} ${persona.nextClass.roomCode}`}
                 onPress={() =>
@@ -234,7 +234,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {persona.subscribedRoutes[0] && (
               <PersonaShortcut
                 icon="bus-outline"
-                color="#3B82F6"
+                color="#007AFF"
                 title="即時公車"
                 subtitle={`常搭 ${persona.subscribedRoutes[0].shortName}`}
                 onPress={() =>
@@ -245,7 +245,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {persona.nextClass && (
               <PersonaShortcut
                 icon="business-outline"
-                color="#10B981"
+                color="#34C759"
                 title="教室平面圖"
                 subtitle={`找 ${persona.nextClass.roomCode}`}
                 onPress={() =>
@@ -258,7 +258,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             )}
             <PersonaShortcut
               icon="map-outline"
-              color="#F59E0B"
+              color="#FF9500"
               title="校園地圖"
               subtitle="多圖層 · POI · AR"
               onPress={() => nav.navigate('MapV2')}

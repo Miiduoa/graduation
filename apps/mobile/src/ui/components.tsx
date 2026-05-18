@@ -1051,7 +1051,7 @@ export function RatingStars(props: {
             <Ionicons
               name={filled ? 'star' : half ? 'star-half' : 'star-outline'}
               size={size}
-              color="#F59E0B"
+              color="#FF9500"
             />
           </Pressable>
         );

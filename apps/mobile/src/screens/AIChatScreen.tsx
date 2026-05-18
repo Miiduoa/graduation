@@ -267,13 +267,13 @@ function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
         marginTop: 10,
         padding: 14,
         borderRadius: 14,
-        backgroundColor: '#10B98112',
+        backgroundColor: '#34C75912',
         borderWidth: 1,
-        borderColor: '#10B98155',
+        borderColor: '#34C75955',
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <Ionicons name="checkmark-circle" size={22} color="#10B981" />
+        <Ionicons name="checkmark-circle" size={22} color="#34C759" />
         <Text style={{ color: theme.colors.text, fontSize: 15, fontWeight: '700' }}>
           訂單已送出
         </Text>
@@ -297,7 +297,7 @@ function OrderSuccessCard(props: { summary: OrderSuccessSummary }) {
           marginTop: 10,
           paddingTop: 8,
           borderTopWidth: 1,
-          borderTopColor: '#10B98133',
+          borderTopColor: '#34C75933',
           flexDirection: 'row',
           flexWrap: 'wrap',
           gap: 12,
@@ -587,10 +587,10 @@ function ThinkingBubble(props: { steps: ThinkingStepUI[]; collapsed?: boolean })
   const { steps } = props;
   const [isExpanded, setIsExpanded] = useState(false);
   const statusIcon: Record<string, { icon: string; color: string }> = {
-    done: { icon: 'checkmark-circle', color: '#10B981' },
-    checking: { icon: 'sync-outline', color: '#6366F1' },
-    warning: { icon: 'alert-circle', color: '#F59E0B' },
-    info: { icon: 'information-circle', color: '#3B82F6' },
+    done: { icon: 'checkmark-circle', color: '#34C759' },
+    checking: { icon: 'sync-outline', color: '#5856D6' },
+    warning: { icon: 'alert-circle', color: '#FF9500' },
+    info: { icon: 'information-circle', color: '#007AFF' },
   };
 
   return (
@@ -782,12 +782,12 @@ function ToolStatusCard(props: { execution: ToolExecution; tool: AgentTool | und
   if (!tool) return null;
   const statusConfig: Record<ToolExecutionStatus, { icon: string; color: string; label: string }> =
     {
-      pending: { icon: 'hourglass-outline', color: '#F59E0B', label: '等待中' },
-      confirming: { icon: 'help-circle-outline', color: '#3B82F6', label: '待確認' },
-      executing: { icon: 'sync-outline', color: '#6366F1', label: '執行中' },
-      success: { icon: 'checkmark-circle', color: '#10B981', label: '完成' },
-      failed: { icon: 'close-circle', color: '#EF4444', label: '失敗' },
-      cancelled: { icon: 'ban-outline', color: '#6B7280', label: '已取消' },
+      pending: { icon: 'hourglass-outline', color: '#FF9500', label: '等待中' },
+      confirming: { icon: 'help-circle-outline', color: '#007AFF', label: '待確認' },
+      executing: { icon: 'sync-outline', color: '#5856D6', label: '執行中' },
+      success: { icon: 'checkmark-circle', color: '#34C759', label: '完成' },
+      failed: { icon: 'close-circle', color: '#FF3B30', label: '失敗' },
+      cancelled: { icon: 'ban-outline', color: '#8E8E93', label: '已取消' },
     };
   const sc = statusConfig[execution.status];
   return (
@@ -817,7 +817,7 @@ function ToolStatusCard(props: { execution: ToolExecution; tool: AgentTool | und
         </Text>
       )}
       {execution.error && (
-        <Text style={{ color: '#EF4444', fontSize: 13, lineHeight: 20, marginTop: 2 }}>
+        <Text style={{ color: '#FF3B30', fontSize: 13, lineHeight: 20, marginTop: 2 }}>
           {execution.error}
         </Text>
       )}
@@ -868,7 +868,7 @@ function ChainProgressCard(props: {
                 height: 24,
                 borderRadius: 12,
                 backgroundColor: isDone
-                  ? '#10B981'
+                  ? '#34C759'
                   : isCurrent
                     ? chain.color
                     : theme.colors.surface2,
@@ -890,7 +890,7 @@ function ChainProgressCard(props: {
             </View>
             <Text
               style={{
-                color: isDone ? '#10B981' : isCurrent ? theme.colors.text : theme.colors.muted,
+                color: isDone ? '#34C759' : isCurrent ? theme.colors.text : theme.colors.muted,
                 fontSize: 13,
                 fontWeight: isCurrent ? '700' : '400',
                 flex: 1,
@@ -1148,15 +1148,15 @@ function RecentExecutionsBar(props: { executions: ToolExecution[] }) {
                 paddingHorizontal: 10,
                 paddingVertical: 6,
                 borderRadius: 999,
-                backgroundColor: isSuccess ? '#10B98115' : '#EF444415',
+                backgroundColor: isSuccess ? '#34C75915' : '#FF3B3015',
                 borderWidth: 1,
-                borderColor: isSuccess ? '#10B98125' : '#EF444425',
+                borderColor: isSuccess ? '#34C75925' : '#FF3B3025',
               }}
             >
               <Ionicons
                 name={isSuccess ? 'checkmark-circle' : 'close-circle'}
                 size={14}
-                color={isSuccess ? '#10B981' : '#EF4444'}
+                color={isSuccess ? '#34C759' : '#FF3B30'}
               />
               <Text style={{ color: theme.colors.text, fontSize: 12 }}>{tool.name}</Text>
             </View>
@@ -1470,7 +1470,7 @@ function MessageBubble(props: {
               width: 22,
               height: 22,
               borderRadius: 11,
-              backgroundColor: '#6366F1',
+              backgroundColor: '#5856D6',
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -1498,10 +1498,10 @@ function MessageBubble(props: {
                 paddingHorizontal: 6,
                 paddingVertical: 1,
                 borderRadius: 4,
-                backgroundColor: '#6366F115',
+                backgroundColor: '#5856D615',
               }}
             >
-              <Text style={{ color: '#6366F1', fontSize: 9, fontWeight: '600' }}>
+              <Text style={{ color: '#5856D6', fontSize: 9, fontWeight: '600' }}>
                 {message.agentType === 'tool_confirm'
                   ? '確認'
                   : message.agentType === 'tool_executing'
@@ -1837,7 +1837,7 @@ export function AIChatScreen(props: any) {
         icon: aiStatus.webSearchEnabled
           ? ('search-outline' as const)
           : ('phone-portrait-outline' as const),
-        color: '#10B981',
+        color: '#34C759',
       };
     }
     if (aiStatus.provider === 'local-llm') {
@@ -1847,14 +1847,14 @@ export function AIChatScreen(props: any) {
           ? '使用已下載的 AI 模型在裝置上推理'
           : '連線到你設定的本機 LLM server',
         icon: 'hardware-chip-outline' as const,
-        color: aiStatus.localModelReady ? '#8B5CF6' : '#3B82F6',
+        color: aiStatus.localModelReady ? '#AF52DE' : '#007AFF',
       };
     }
     return {
       label: '雲端模型',
       detail: '目前會呼叫外部 AI provider',
       icon: 'cloud-outline' as const,
-      color: '#F59E0B',
+      color: '#FF9500',
     };
   }, [aiStatus.provider, aiStatus.webSearchEnabled, aiStatus.localModelReady, isOfflineAI]);
 
@@ -7649,7 +7649,7 @@ export function AIChatScreen(props: any) {
                       width: 22,
                       height: 22,
                       borderRadius: 11,
-                      backgroundColor: '#6366F1',
+                      backgroundColor: '#5856D6',
                       alignItems: 'center',
                       justifyContent: 'center',
                     }}
@@ -7706,11 +7706,11 @@ export function AIChatScreen(props: any) {
                   borderRadius: 3,
                   backgroundColor:
                     agentContext.state === 'executing'
-                      ? '#10B981'
+                      ? '#34C759'
                       : agentContext.state === 'confirming' ||
                           agentContext.state === 'waiting_chain_confirm'
-                        ? '#F59E0B'
-                        : '#6366F1',
+                        ? '#FF9500'
+                        : '#5856D6',
                 }}
               />
               <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
@@ -7775,7 +7775,7 @@ export function AIChatScreen(props: any) {
                 width: 40,
                 height: 40,
                 borderRadius: 20,
-                backgroundColor: input.trim() ? '#6366F1' : theme.colors.surface2,
+                backgroundColor: input.trim() ? '#5856D6' : theme.colors.surface2,
                 alignItems: 'center',
                 justifyContent: 'center',
                 opacity: pressed ? 0.8 : 1,

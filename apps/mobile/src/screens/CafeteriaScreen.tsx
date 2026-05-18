@@ -264,14 +264,14 @@ export function CafeteriaScreen(props: any) {
                   width: 36,
                   height: 36,
                   borderRadius: 18,
-                  backgroundColor: '#7C3AED10',
+                  backgroundColor: '#AF52DE10',
                   borderWidth: 1,
-                  borderColor: '#7C3AED30',
+                  borderColor: '#AF52DE30',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="shield-checkmark-outline" size={18} color="#7C3AED" />
+                <Ionicons name="shield-checkmark-outline" size={18} color="#AF52DE" />
               </Pressable>
             )}
             {/* 店家管理入口 */}
@@ -476,15 +476,15 @@ export function CafeteriaScreen(props: any) {
                   borderRadius: 3,
                   backgroundColor:
                     budget.spent > budget.budgetLimit * 0.9
-                      ? '#DC2626'
+                      ? '#D70015'
                       : budget.spent > budget.budgetLimit * 0.7
-                        ? '#F59E0B'
+                        ? '#FF9500'
                         : theme.colors.accent,
                 }}
               />
             </View>
             {budget.spent > budget.budgetLimit * 0.9 && (
-              <Text style={{ color: '#DC2626', fontSize: 11, marginTop: 4, fontWeight: '600' }}>
+              <Text style={{ color: '#D70015', fontSize: 11, marginTop: 4, fontWeight: '600' }}>
                 已接近預算上限，注意控制開支
               </Text>
             )}
@@ -495,7 +495,7 @@ export function CafeteriaScreen(props: any) {
         {flashDeals.length > 0 && (
           <View style={{ gap: 8 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Ionicons name="flash" size={16} color="#F59E0B" />
+              <Ionicons name="flash" size={16} color="#FF9500" />
               <SectionTitle text="惜食快閃折扣" />
             </View>
             <ScrollView
@@ -530,9 +530,9 @@ export function CafeteriaScreen(props: any) {
                         width: 160,
                         padding: 12,
                         borderRadius: 12,
-                        backgroundColor: '#F59E0B08',
+                        backgroundColor: '#FF950008',
                         borderWidth: 1,
-                        borderColor: '#F59E0B30',
+                        borderColor: '#FF950030',
                       }}
                     >
                       <View
@@ -548,10 +548,10 @@ export function CafeteriaScreen(props: any) {
                             paddingHorizontal: 8,
                             paddingVertical: 2,
                             borderRadius: 6,
-                            backgroundColor: '#DC262620',
+                            backgroundColor: '#D7001520',
                           }}
                         >
-                          <Text style={{ color: '#DC2626', fontSize: 11, fontWeight: '800' }}>
+                          <Text style={{ color: '#D70015', fontSize: 11, fontWeight: '800' }}>
                             -{discount}%
                           </Text>
                         </View>
@@ -577,7 +577,7 @@ export function CafeteriaScreen(props: any) {
                         {vendor?.name ?? ''} · {deal.reason}
                       </Text>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={{ color: '#DC2626', fontWeight: '800', fontSize: 15 }}>
+                        <Text style={{ color: '#D70015', fontWeight: '800', fontSize: 15 }}>
                           NT${deal.discountPrice}
                         </Text>
                         <Text
@@ -591,7 +591,7 @@ export function CafeteriaScreen(props: any) {
                         </Text>
                       </View>
                       <Text
-                        style={{ color: '#F59E0B', fontSize: 10, marginTop: 4, fontWeight: '600' }}
+                        style={{ color: '#FF9500', fontSize: 10, marginTop: 4, fontWeight: '600' }}
                       >
                         {expiresIn > 60
                           ? `${Math.floor(expiresIn / 60)}h ${expiresIn % 60}m 後結束`
@@ -616,7 +616,7 @@ export function CafeteriaScreen(props: any) {
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Ionicons name="people-circle-outline" size={16} color="#7C3AED" />
+                <Ionicons name="people-circle-outline" size={16} color="#AF52DE" />
                 <SectionTitle text="揪團訂餐" />
               </View>
               <Pressable
@@ -625,7 +625,7 @@ export function CafeteriaScreen(props: any) {
                   paddingHorizontal: 12,
                   paddingVertical: 6,
                   borderRadius: 8,
-                  backgroundColor: '#7C3AED',
+                  backgroundColor: '#AF52DE',
                   flexDirection: 'row',
                   alignItems: 'center',
                   gap: 4,
@@ -665,9 +665,9 @@ export function CafeteriaScreen(props: any) {
                       style={{
                         padding: 12,
                         borderRadius: 12,
-                        backgroundColor: '#7C3AED08',
+                        backgroundColor: '#AF52DE08',
                         borderWidth: 1,
-                        borderColor: '#7C3AED30',
+                        borderColor: '#AF52DE30',
                       }}
                     >
                       <View
@@ -686,12 +686,12 @@ export function CafeteriaScreen(props: any) {
                             paddingHorizontal: 8,
                             paddingVertical: 2,
                             borderRadius: 6,
-                            backgroundColor: group.status === 'open' ? '#16A34A20' : '#F59E0B20',
+                            backgroundColor: group.status === 'open' ? '#16A34A20' : '#FF950020',
                           }}
                         >
                           <Text
                             style={{
-                              color: group.status === 'open' ? '#16A34A' : '#F59E0B',
+                              color: group.status === 'open' ? '#16A34A' : '#FF9500',
                               fontSize: 10,
                               fontWeight: '600',
                             }}
@@ -716,7 +716,7 @@ export function CafeteriaScreen(props: any) {
                           <Ionicons name="time-outline" size={14} color={theme.colors.muted} />
                           <Text
                             style={{
-                              color: remaining < 30 ? '#DC2626' : theme.colors.muted,
+                              color: remaining < 30 ? '#D70015' : theme.colors.muted,
                               fontSize: 12,
                             }}
                           >
@@ -1037,7 +1037,7 @@ export function CafeteriaScreen(props: any) {
               <View
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}
               >
-                <Ionicons name="people-circle" size={22} color="#7C3AED" />
+                <Ionicons name="people-circle" size={22} color="#AF52DE" />
                 <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                   發起揪團訂餐
                 </Text>
@@ -1083,9 +1083,9 @@ export function CafeteriaScreen(props: any) {
                           paddingVertical: 8,
                           borderRadius: 8,
                           backgroundColor:
-                            groupVendorId === v.id ? '#7C3AED' : theme.colors.surface2,
+                            groupVendorId === v.id ? '#AF52DE' : theme.colors.surface2,
                           borderWidth: 1,
-                          borderColor: groupVendorId === v.id ? '#7C3AED' : theme.colors.border,
+                          borderColor: groupVendorId === v.id ? '#AF52DE' : theme.colors.border,
                         }}
                       >
                         <Text
@@ -1185,7 +1185,7 @@ export function CafeteriaScreen(props: any) {
                     flex: 1,
                     paddingVertical: 13,
                     borderRadius: 10,
-                    backgroundColor: '#7C3AED',
+                    backgroundColor: '#AF52DE',
                     alignItems: 'center',
                   }}
                 >
@@ -1306,7 +1306,7 @@ function VendorCard(props: {
         borderRadius: 14,
         backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
         borderWidth: 1,
-        borderColor: isOpen ? theme.colors.border : '#DC262620',
+        borderColor: isOpen ? theme.colors.border : '#D7001520',
         opacity: pressed ? 0.8 : isOpen ? 1 : 0.7,
       })}
     >
@@ -1330,13 +1330,13 @@ function VendorCard(props: {
           {!isOpen && (
             <View
               style={{
-                backgroundColor: '#DC262620',
+                backgroundColor: '#D7001520',
                 paddingHorizontal: 5,
                 paddingVertical: 1,
                 borderRadius: 4,
               }}
             >
-              <Text style={{ color: '#DC2626', fontSize: 9, fontWeight: '700' }}>休息中</Text>
+              <Text style={{ color: '#D70015', fontSize: 9, fontWeight: '700' }}>休息中</Text>
             </View>
           )}
         </View>
@@ -1349,8 +1349,8 @@ function VendorCard(props: {
           </Text>
         ) : null}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
-          <Ionicons name="star" size={12} color="#F59E0B" />
-          <Text style={{ color: '#F59E0B', fontSize: 12, fontWeight: '700' }}>
+          <Ionicons name="star" size={12} color="#FF9500" />
+          <Text style={{ color: '#FF9500', fontSize: 12, fontWeight: '700' }}>
             {v.rating.toFixed(1)}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 10 }}>({v.ratingCount})</Text>
@@ -1364,7 +1364,7 @@ function VendorCard(props: {
         <Ionicons
           name={isFavorite ? 'heart' : 'heart-outline'}
           size={20}
-          color={isFavorite ? '#DC2626' : theme.colors.muted}
+          color={isFavorite ? '#D70015' : theme.colors.muted}
         />
       </Pressable>
     </Pressable>
@@ -1556,7 +1556,7 @@ function VendorDetailView(props: {
               <Ionicons
                 name={isFavorite ? 'heart' : 'heart-outline'}
                 size={24}
-                color={isFavorite ? '#DC2626' : theme.colors.muted}
+                color={isFavorite ? '#D70015' : theme.colors.muted}
               />
             </Pressable>
           </View>
@@ -1568,8 +1568,8 @@ function VendorDetailView(props: {
           <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
             <View style={{ alignItems: 'center' }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                <Ionicons name="star" size={16} color="#F59E0B" />
-                <Text style={{ color: '#F59E0B', fontWeight: '800', fontSize: 18 }}>
+                <Ionicons name="star" size={16} color="#FF9500" />
+                <Text style={{ color: '#FF9500', fontWeight: '800', fontSize: 18 }}>
                   {v.rating.toFixed(1)}
                 </Text>
               </View>
@@ -1587,7 +1587,7 @@ function VendorDetailView(props: {
             <View style={{ width: 1, backgroundColor: theme.colors.border }} />
             <View style={{ alignItems: 'center' }}>
               <Text
-                style={{ color: isOpen ? '#16A34A' : '#DC2626', fontWeight: '800', fontSize: 14 }}
+                style={{ color: isOpen ? '#16A34A' : '#D70015', fontWeight: '800', fontSize: 14 }}
               >
                 {isOpen ? '營業中' : '休息中'}
               </Text>
@@ -1702,13 +1702,13 @@ function VendorDetailView(props: {
                             {item.isPopular && (
                               <View
                                 style={{
-                                  backgroundColor: '#F59E0B20',
+                                  backgroundColor: '#FF950020',
                                   paddingHorizontal: 4,
                                   paddingVertical: 1,
                                   borderRadius: 3,
                                 }}
                               >
-                                <Text style={{ color: '#F59E0B', fontSize: 9, fontWeight: '700' }}>
+                                <Text style={{ color: '#FF9500', fontSize: 9, fontWeight: '700' }}>
                                   熱門
                                 </Text>
                               </View>
@@ -1765,7 +1765,7 @@ function VendorDetailView(props: {
                     <Ionicons
                       name={star <= reviewRating ? 'star' : 'star-outline'}
                       size={24}
-                      color="#F59E0B"
+                      color="#FF9500"
                     />
                   </Pressable>
                 ))}
@@ -1838,7 +1838,7 @@ function VendorDetailView(props: {
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
                     {Array.from({ length: r.rating }).map((_, i) => (
-                      <Ionicons key={i} name="star" size={12} color="#F59E0B" />
+                      <Ionicons key={i} name="star" size={12} color="#FF9500" />
                     ))}
                   </View>
                 </View>

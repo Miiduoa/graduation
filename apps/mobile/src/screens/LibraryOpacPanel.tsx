@@ -101,7 +101,7 @@ function InfoPill(props: { text?: string; tone?: 'default' | 'success' | 'warnin
     props.tone === 'success'
       ? '#16A34A'
       : props.tone === 'warning'
-        ? '#D97706'
+        ? '#FF9500'
         : theme.colors.accent;
   return (
     <View
@@ -315,8 +315,8 @@ function DetailModal(props: {
                   padding: 12,
                   borderRadius: theme.radius.md,
                   borderWidth: 1,
-                  borderColor: '#F59E0B55',
-                  backgroundColor: '#F59E0B18',
+                  borderColor: '#FF950055',
+                  backgroundColor: '#FF950018',
                 }}
               >
                 <Text style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18 }}>
@@ -546,9 +546,9 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
           style={{
             padding: 10,
             borderRadius: theme.radius.md,
-            backgroundColor: '#F59E0B18',
+            backgroundColor: '#FF950018',
             borderWidth: 1,
-            borderColor: '#F59E0B55',
+            borderColor: '#FF950055',
           }}
         >
           <Text style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18 }}>

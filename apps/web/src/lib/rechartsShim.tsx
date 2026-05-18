@@ -45,7 +45,7 @@ export const LineChart: React.FC<any> = (props: any) => {
   const pts = ys.map((y: number, i: number) => `${pad + i * stepX},${h - pad - (y / maxY) * (h - 2 * pad)}`).join(' ');
   return (
     <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: '100%' }}>
-      <polyline fill="none" stroke="#2563EB" strokeWidth="2" points={pts} />
+      <polyline fill="none" stroke="#007AFF" strokeWidth="2" points={pts} />
       {children}
     </svg>
   );
@@ -74,7 +74,7 @@ export const BarChart: React.FC<any> = (props: any) => {
             y={h - pad - barH}
             width={barW}
             height={barH}
-            fill="#2563EB"
+            fill="#007AFF"
           />
         );
       })}

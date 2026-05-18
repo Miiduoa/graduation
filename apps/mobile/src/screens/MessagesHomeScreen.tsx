@@ -473,7 +473,7 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
                     width: 40,
                     height: 40,
                     borderRadius: 12,
-                    backgroundColor: g.type === 'course' ? '#6366f120' : '#22c55e20',
+                    backgroundColor: g.type === 'course' ? '#5856D620' : '#22c55e20',
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
@@ -481,7 +481,7 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
                   <Ionicons
                     name={g.type === 'course' ? 'school' : 'people'}
                     size={18}
-                    color={g.type === 'course' ? '#6366f1' : '#22c55e'}
+                    color={g.type === 'course' ? '#5856D6' : '#22c55e'}
                   />
                 </View>
                 <View style={{ flex: 1 }}>
@@ -578,12 +578,12 @@ export function MessagesHomeScreen(props: Record<string, unknown>) {
                     width: 40,
                     height: 40,
                     borderRadius: 12,
-                    backgroundColor: '#3b82f620',
+                    backgroundColor: '#007AFF20',
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
-                  <Text style={{ color: '#3b82f6', fontWeight: '800', fontSize: 16 }}>
+                  <Text style={{ color: '#007AFF', fontWeight: '800', fontSize: 16 }}>
                     {dm.participantName[0]?.toUpperCase() ?? '?'}
                   </Text>
                 </View>

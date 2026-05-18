@@ -178,7 +178,7 @@ export default function CoursePage(props: {
             style={{
               padding: '12px 16px',
               background: 'rgba(220,38,38,0.10)',
-              border: '1px solid #dc2626',
+              border: '1px solid #FF3B30',
               fontSize: 13,
               fontWeight: 600,
               color: '#991b1b',
@@ -241,7 +241,7 @@ export default function CoursePage(props: {
           <div
             className="metricCard"
             style={
-              { '--tone': summary.activeSessions > 0 ? '#DC2626' : '#34C759' } as CSSProperties
+              { '--tone': summary.activeSessions > 0 ? '#FF3B30' : '#34C759' } as CSSProperties
             }
           >
             <div className="metricIcon">{summary.activeSessions > 0 ? '🟢' : '⏸'}</div>
@@ -303,8 +303,8 @@ export default function CoursePage(props: {
             className="card"
             style={{
               padding: '16px 20px',
-              background: 'linear-gradient(135deg, rgba(94,106,210,0.08) 0%, rgba(142,186,255,0.06) 100%)',
-              border: '1px solid rgba(94,106,210,0.28)',
+              background: 'linear-gradient(135deg, rgba(0,122,255,0.08) 0%, rgba(90,200,250,0.06) 100%)',
+              border: '1px solid rgba(0,122,255,0.28)',
               display: 'flex',
               flexDirection: 'column',
               gap: 12,
@@ -397,9 +397,9 @@ export default function CoursePage(props: {
                           style={{
                             padding: '6px 10px',
                             borderRadius: 8,
-                            border: '1px solid rgba(94,106,210,0.30)',
-                            background: 'rgba(94,106,210,0.10)',
-                            color: '#5E6AD2',
+                            border: '1px solid rgba(0,122,255,0.30)',
+                            background: 'rgba(0,122,255,0.10)',
+                            color: '#007AFF',
                             fontSize: 12,
                             fontWeight: 700,
                             textDecoration: 'none',
@@ -457,7 +457,7 @@ export default function CoursePage(props: {
                     <div
                       key={item.id}
                       className="insetGroupRow"
-                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'rgba(94,106,210,0.06)' }}
+                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'rgba(0,122,255,0.06)' }}
                     >
                       <div className="insetGroupRowContent">
                         <div className="insetGroupRowTitle">🆕 {item.title}</div>
@@ -482,9 +482,9 @@ export default function CoursePage(props: {
                           }}
                           style={{
                             padding: '6px 12px', borderRadius: 8, border: '1px solid',
-                            borderColor: submitted ? '#34C759' : '#5E6AD2',
-                            background: submitted ? 'rgba(52,199,89,0.10)' : 'rgba(94,106,210,0.10)',
-                            color: submitted ? '#16a34a' : '#5E6AD2',
+                            borderColor: submitted ? '#34C759' : '#007AFF',
+                            background: submitted ? 'rgba(52,199,89,0.10)' : 'rgba(0,122,255,0.10)',
+                            color: submitted ? '#34C759' : '#007AFF',
                             fontSize: 12, fontWeight: 700,
                             cursor: submitted ? 'default' : 'pointer',
                           }}
@@ -521,9 +521,9 @@ export default function CoursePage(props: {
                             style={{
                               padding: '6px 10px',
                               borderRadius: 8,
-                              border: '1px solid rgba(94,106,210,0.30)',
-                              background: 'rgba(94,106,210,0.10)',
-                              color: '#5E6AD2',
+                              border: '1px solid rgba(0,122,255,0.30)',
+                              background: 'rgba(0,122,255,0.10)',
+                              color: '#007AFF',
                               fontSize: 12,
                               fontWeight: 700,
                               textDecoration: 'none',

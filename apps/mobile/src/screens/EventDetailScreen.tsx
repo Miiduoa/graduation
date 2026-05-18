@@ -606,7 +606,7 @@ export function EventDetailScreen(props: any) {
             </View>
             {reviews.length > 0 && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Ionicons name="star" size={16} color="#F59E0B" />
+                <Ionicons name="star" size={16} color="#FF9500" />
                 <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
                   {averageRating.toFixed(1)}
                 </Text>
@@ -720,7 +720,7 @@ export function EventDetailScreen(props: any) {
                     alignItems: 'center',
                   }}
                 >
-                  <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+                  <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
                     {waitlistCount}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>候補中</Text>
@@ -823,14 +823,14 @@ export function EventDetailScreen(props: any) {
                 marginBottom: 14,
                 borderLeftWidth: 3,
                 borderLeftColor:
-                  myRegistration.status === 'waitlist' ? '#F59E0B' : theme.colors.success,
+                  myRegistration.status === 'waitlist' ? '#FF9500' : theme.colors.success,
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Ionicons
                   name={myRegistration.status === 'waitlist' ? 'time' : 'checkmark-circle'}
                   size={24}
-                  color={myRegistration.status === 'waitlist' ? '#F59E0B' : theme.colors.success}
+                  color={myRegistration.status === 'waitlist' ? '#FF9500' : theme.colors.success}
                 />
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
@@ -1069,7 +1069,7 @@ export function EventDetailScreen(props: any) {
                               width: 24,
                               height: 24,
                               borderRadius: 12,
-                              backgroundColor: '#F59E0B',
+                              backgroundColor: '#FF9500',
                               alignItems: 'center',
                               justifyContent: 'center',
                             }}
@@ -1148,7 +1148,7 @@ export function EventDetailScreen(props: any) {
                 }}
               >
                 <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 36 }}>
+                  <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 36 }}>
                     {averageRating.toFixed(1)}
                   </Text>
                   <RatingStars rating={averageRating} size={16} />
@@ -1168,7 +1168,7 @@ export function EventDetailScreen(props: any) {
                         <Text style={{ color: theme.colors.muted, fontSize: 11, width: 14 }}>
                           {star}
                         </Text>
-                        <Ionicons name="star" size={10} color="#F59E0B" />
+                        <Ionicons name="star" size={10} color="#FF9500" />
                         <View
                           style={{
                             flex: 1,
@@ -1182,7 +1182,7 @@ export function EventDetailScreen(props: any) {
                             style={{
                               height: '100%',
                               width: `${pct}%`,
-                              backgroundColor: '#F59E0B',
+                              backgroundColor: '#FF9500',
                               borderRadius: 3,
                             }}
                           />
@@ -1223,7 +1223,7 @@ export function EventDetailScreen(props: any) {
                       <Ionicons
                         name={star <= reviewRating ? 'star' : 'star-outline'}
                         size={32}
-                        color="#F59E0B"
+                        color="#FF9500"
                       />
                     </Pressable>
                   ))}
@@ -1378,7 +1378,7 @@ export function EventDetailScreen(props: any) {
                   icon="qr-code-outline"
                   title="活動簽到"
                   description="掃碼簽到，快速確認出席"
-                  color="#F59E0B"
+                  color="#FF9500"
                 />
               </Pressable>
             )}

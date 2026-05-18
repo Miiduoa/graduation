@@ -133,7 +133,7 @@ function getSmartSuggestions(
       icon: 'school-outline',
       title: '去上課',
       subtitle: '找到最近的教學大樓',
-      color: '#2563EB',
+      color: '#007AFF',
       action: 'navigate_category',
       payload: 'academic',
     });
@@ -143,7 +143,7 @@ function getSmartSuggestions(
         icon: 'cafe-outline',
         title: '早餐',
         subtitle: `${nearestCafe.name} · ${userLat ? fmtDist(haverDist(userLat!, userLng!, nearestCafe.lat, nearestCafe.lng)) : ''}`,
-        color: '#DC2626',
+        color: '#D70015',
         action: 'navigate_poi',
         payload: nearestCafe.id,
       });
@@ -154,7 +154,7 @@ function getSmartSuggestions(
       icon: 'restaurant-outline',
       title: '找吃的',
       subtitle: '查看餐廳人潮 · 最近的先',
-      color: '#DC2626',
+      color: '#D70015',
       action: 'navigate_category',
       payload: 'cafeteria',
     });
@@ -175,7 +175,7 @@ function getSmartSuggestions(
       icon: 'school-outline',
       title: '下午課',
       subtitle: '找教室',
-      color: '#2563EB',
+      color: '#007AFF',
       action: 'navigate_category',
       payload: 'academic',
     });
@@ -183,7 +183,7 @@ function getSmartSuggestions(
       icon: 'library-outline',
       title: '去圖書館',
       subtitle: '自習、借書',
-      color: '#059669',
+      color: '#34C759',
       action: 'navigate_poi',
       payload: 'pu-library',
     });
@@ -193,7 +193,7 @@ function getSmartSuggestions(
       icon: 'library-outline',
       title: '晚自習',
       subtitle: '蓋夏圖書館開到 22:00',
-      color: '#059669',
+      color: '#34C759',
       action: 'navigate_poi',
       payload: 'pu-library',
     });
@@ -201,7 +201,7 @@ function getSmartSuggestions(
       icon: 'home-outline',
       title: '回宿舍',
       subtitle: '帶你走最近的路',
-      color: '#D97706',
+      color: '#FF9500',
       action: 'navigate_category',
       payload: 'dormitory',
     });
@@ -219,7 +219,7 @@ function getSmartSuggestions(
       icon: 'home-outline',
       title: '回宿舍',
       subtitle: '夜間路線',
-      color: '#D97706',
+      color: '#FF9500',
       action: 'navigate_category',
       payload: 'dormitory',
     });
@@ -230,7 +230,7 @@ function getSmartSuggestions(
     icon: 'bus-outline',
     title: '公車站',
     subtitle: '靜宜大學站',
-    color: '#3B82F6',
+    color: '#007AFF',
     action: 'navigate_poi',
     payload: 'pu-bus-stop',
   });
@@ -248,25 +248,25 @@ const QUICK_SCENARIOS: Array<{
   {
     icon: 'school',
     label: '上課',
-    color: '#2563EB',
+    color: '#007AFF',
     filter: (p) => p.filter((x) => x.category === 'academic'),
   },
   {
     icon: 'restaurant',
     label: '吃飯',
-    color: '#DC2626',
+    color: '#D70015',
     filter: (p) => p.filter((x) => x.category === 'cafeteria' || x.category === 'convenience'),
   },
   {
     icon: 'home',
     label: '宿舍',
-    color: '#D97706',
+    color: '#FF9500',
     filter: (p) => p.filter((x) => x.category === 'dormitory'),
   },
   {
     icon: 'library',
     label: '圖書館',
-    color: '#059669',
+    color: '#34C759',
     filter: (p) => p.filter((x) => x.category === 'library'),
   },
   {
@@ -278,7 +278,7 @@ const QUICK_SCENARIOS: Array<{
   {
     icon: 'medkit',
     label: '醫療',
-    color: '#DC2626',
+    color: '#D70015',
     filter: (p) => p.filter((x) => x.category === 'medical'),
   },
 ];
@@ -387,7 +387,7 @@ function MiniMap({
                 width: 14,
                 height: 14,
                 borderRadius: 7,
-                backgroundColor: '#3B82F6',
+                backgroundColor: '#007AFF',
                 borderWidth: 2.5,
                 borderColor: '#fff',
                 zIndex: 999,
@@ -399,7 +399,7 @@ function MiniMap({
       {pois.map((poi) => {
         const p = toXY(poi.lat, poi.lng);
         const sel = poi.id === selectedId;
-        const c = CAT_COLORS[poi.category] ?? '#6B7280';
+        const c = CAT_COLORS[poi.category] ?? '#8E8E93';
         const sz = sel ? 14 : 7;
         return (
           <Pressable
@@ -481,7 +481,7 @@ function RouteModal({
     d === 'destination'
       ? theme.colors.success
       : d.includes('left') || d.includes('right')
-        ? '#F59E0B'
+        ? '#FF9500'
         : theme.colors.accent;
 
   return (
@@ -927,7 +927,7 @@ export function MapScreen(props: Record<string, unknown>) {
           />
         }
         renderItem={({ item: poi }) => {
-          const c = CAT_COLORS[poi.category] ?? '#6B7280';
+          const c = CAT_COLORS[poi.category] ?? '#8E8E93';
           const dist = getDist(poi);
           const sel = poi.id === selectedPoiId;
 

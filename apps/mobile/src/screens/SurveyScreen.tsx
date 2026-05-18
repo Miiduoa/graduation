@@ -144,9 +144,9 @@ export default function SurveyScreen(props: RouteProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
-        <Text style={{ fontSize: 22, fontWeight: '700', color: '#111827' }}>{title}</Text>
+        <Text style={{ fontSize: 22, fontWeight: '700', color: '#1C1C1E' }}>{title}</Text>
         {courseName ? (
-          <Text style={{ color: '#6b7280', marginTop: 4 }}>{courseName}</Text>
+          <Text style={{ color: '#8E8E93', marginTop: 4 }}>{courseName}</Text>
         ) : null}
 
         {questions.map((q, idx) => (
@@ -161,8 +161,8 @@ export default function SurveyScreen(props: RouteProps) {
               borderColor: '#e5e7eb',
             }}
           >
-            <Text style={{ fontSize: 15, fontWeight: '600', color: '#111827' }}>
-              {idx + 1}. {q.prompt} {q.required ? <Text style={{ color: '#dc2626' }}>*</Text> : null}
+            <Text style={{ fontSize: 15, fontWeight: '600', color: '#1C1C1E' }}>
+              {idx + 1}. {q.prompt} {q.required ? <Text style={{ color: '#D70015' }}>*</Text> : null}
             </Text>
 
             {q.type === 'single' &&
@@ -177,17 +177,17 @@ export default function SurveyScreen(props: RouteProps) {
                     padding: 10,
                     marginTop: 6,
                     borderRadius: 8,
-                    backgroundColor: answers[q.id] === opt.id ? '#1F4E7814' : '#f3f4f6',
+                    backgroundColor: answers[q.id] === opt.id ? '#003F8A14' : '#f3f4f6',
                     borderWidth: 1,
-                    borderColor: answers[q.id] === opt.id ? '#1F4E78' : '#e5e7eb',
+                    borderColor: answers[q.id] === opt.id ? '#003F8A' : '#e5e7eb',
                   }}
                 >
                   <Ionicons
                     name={answers[q.id] === opt.id ? 'radio-button-on' : 'radio-button-off'}
                     size={18}
-                    color={answers[q.id] === opt.id ? '#1F4E78' : '#6b7280'}
+                    color={answers[q.id] === opt.id ? '#003F8A' : '#8E8E93'}
                   />
-                  <Text style={{ fontSize: 14, color: '#111827' }}>{opt.label}</Text>
+                  <Text style={{ fontSize: 14, color: '#1C1C1E' }}>{opt.label}</Text>
                 </Pressable>
               ))}
 
@@ -207,17 +207,17 @@ export default function SurveyScreen(props: RouteProps) {
                       padding: 10,
                       marginTop: 6,
                       borderRadius: 8,
-                      backgroundColor: checked ? '#1F4E7814' : '#f3f4f6',
+                      backgroundColor: checked ? '#003F8A14' : '#f3f4f6',
                       borderWidth: 1,
-                      borderColor: checked ? '#1F4E78' : '#e5e7eb',
+                      borderColor: checked ? '#003F8A' : '#e5e7eb',
                     }}
                   >
                     <Ionicons
                       name={checked ? 'checkbox' : 'square-outline'}
                       size={18}
-                      color={checked ? '#1F4E78' : '#6b7280'}
+                      color={checked ? '#003F8A' : '#8E8E93'}
                     />
-                    <Text style={{ fontSize: 14, color: '#111827' }}>{opt.label}</Text>
+                    <Text style={{ fontSize: 14, color: '#1C1C1E' }}>{opt.label}</Text>
                   </Pressable>
                 );
               })}
@@ -234,13 +234,13 @@ export default function SurveyScreen(props: RouteProps) {
                         flex: 1,
                         padding: 12,
                         borderRadius: 8,
-                        backgroundColor: selected ? '#1F4E78' : '#f3f4f6',
+                        backgroundColor: selected ? '#003F8A' : '#f3f4f6',
                         alignItems: 'center',
                       }}
                     >
                       <Text
                         style={{
-                          color: selected ? '#fff' : '#111827',
+                          color: selected ? '#fff' : '#1C1C1E',
                           fontWeight: '700',
                           fontSize: 16,
                         }}
@@ -285,7 +285,7 @@ export default function SurveyScreen(props: RouteProps) {
               marginTop: 24,
               padding: 14,
               borderRadius: 12,
-              backgroundColor: '#1F4E78',
+              backgroundColor: '#003F8A',
               alignItems: 'center',
               opacity: submitting ? 0.6 : 1,
             }}

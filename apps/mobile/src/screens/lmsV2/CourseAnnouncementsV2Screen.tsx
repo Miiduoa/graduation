@@ -63,6 +63,6 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   title: { fontSize: 16, fontWeight: '700' },
-  body: { fontSize: 14, color: '#374151', marginTop: 6, lineHeight: 20 },
-  time: { fontSize: 11, color: '#9CA3AF', marginTop: 8 },
+  body: { fontSize: 14, color: '#3C3C43', marginTop: 6, lineHeight: 20 },
+  time: { fontSize: 11, color: '#AEAEB2', marginTop: 8 },
 });

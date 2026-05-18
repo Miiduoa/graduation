@@ -423,7 +423,7 @@ export function GroupMembersScreen(props: any) {
                             width: 20,
                             height: 20,
                             borderRadius: 10,
-                            backgroundColor: m.role === 'owner' ? '#F59E0B' : theme.colors.accent,
+                            backgroundColor: m.role === 'owner' ? '#FF9500' : theme.colors.accent,
                             alignItems: 'center',
                             justifyContent: 'center',
                             borderWidth: 2,

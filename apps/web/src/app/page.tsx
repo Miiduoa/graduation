@@ -355,7 +355,7 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
 
         {/* ── AI Today 提醒（學生）── */}
         {demoRole === 'student' && aiCtx && (aiCtx.pendingAssignmentCount > 0 || aiCtx.libraryDueSoonDays <= 3 || aiCtx.nextExam) && (
-          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(94,106,210,0.12) 0%, rgba(142,186,255,0.08) 100%)', border: '1px solid rgba(94,106,210,0.28)', display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
+          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(0,122,255,0.12) 0%, rgba(90,200,250,0.08) 100%)', border: '1px solid rgba(0,122,255,0.28)', display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--brand)', marginBottom: 6 }}>🤖 AI 今日提醒</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
@@ -383,7 +383,7 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
         {demoRole === 'teacher' && teacherCtx && (
           <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(15,139,141,0.12) 0%, rgba(0,200,200,0.06) 100%)', border: '1px solid rgba(15,139,141,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 4 }}>🤖 AI 今日提醒</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#007AFF', marginBottom: 4 }}>🤖 AI 今日提醒</div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>
                 資料結構（CS301）有 <strong>{teacherCtx.totalPending} 份作業</strong>待批改，其中 {teacherCtx.pendingCount} 份尚未開始。今日 {todayCourseInfo.count > 0 ? `有 ${todayCourseInfo.count} 堂課` : '無課，可批改作業'}。
               </div>
@@ -577,7 +577,7 @@ export default function HomePage(props: { searchParams?: { school?: string; scho
             </div>
 
             {/* AI 助理入口 */}
-            <div className="card" style={{ background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(94,106,210,0.04) 100%)', border: '1px solid rgba(94,106,210,0.22)' }}>
+            <div className="card" style={{ background: 'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(0,122,255,0.04) 100%)', border: '1px solid rgba(0,122,255,0.22)' }}>
               <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>🤖 AI 助理</div>
               <div style={{ color: 'var(--muted)', fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
                 詢問課程規劃、查閱作業截止日、讓 AI 起草公告或分析學習報告。

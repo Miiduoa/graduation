@@ -67,7 +67,7 @@ function NewAnnModal({
         <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 800 }}>
           {role === 'teacher' ? '發布課程公告' : role === 'department_head' ? '發布系所公告' : '發布社團公告'}
         </h2>
-        <p style={{ margin: '0 0 20px', fontSize: 13, color: '#6b7280' }}>
+        <p style={{ margin: '0 0 20px', fontSize: 13, color: '#8E8E93' }}>
           發布後將進入待審核佇列，由系主任核准後正式對外公開。
         </p>
         <div style={{ marginBottom: 14 }}>
@@ -91,7 +91,7 @@ function NewAnnModal({
             style={{ width: '100%', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' }}
           />
         </div>
-        <div style={{ marginBottom: 20, fontSize: 13, color: '#6b7280', background: 'var(--panel2, #f3f4f6)', padding: '10px 14px', borderRadius: 8 }}>
+        <div style={{ marginBottom: 20, fontSize: 13, color: '#8E8E93', background: 'var(--panel2, #F2F2F7)', padding: '10px 14px', borderRadius: 8 }}>
           📌 發布來源：<strong>{sourceLabel}</strong>
         </div>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -478,8 +478,8 @@ export default function AnnouncementsPage(props: {
             className="card"
             style={{
               padding: '12px 16px',
-              background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.07) 100%)',
-              border: '1px solid rgba(94,106,210,0.22)',
+              background: 'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(90,200,250,0.07) 100%)',
+              border: '1px solid rgba(0,122,255,0.22)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

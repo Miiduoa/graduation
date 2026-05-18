@@ -19,7 +19,7 @@ export default function JoinPage(props: { searchParams?: { school?: string; scho
               color: '#fff',
               textAlign: 'center',
               padding: '32px 24px',
-              boxShadow: '6px 6px 16px rgba(94,106,210,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
+              boxShadow: '6px 6px 16px rgba(0,122,255,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
             }}
           >
             <div style={{ fontSize: 52, marginBottom: 12 }}>🏫</div>

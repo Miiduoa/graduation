@@ -112,7 +112,7 @@ function getRepairStatusLabel(status: string): string {
 function getRepairStatusColor(status: string): string {
   const m: Record<string, string> = {
     pending: theme.colors.muted,
-    assigned: '#F59E0B',
+    assigned: '#FF9500',
     inProgress: theme.colors.accent,
     completed: theme.colors.success,
     cancelled: theme.colors.danger,
@@ -134,8 +134,8 @@ function getLaundryStatusLabel(status: LaundryStatus): string {
 function getLaundryStatusColor(status: LaundryStatus): string {
   const m: Record<LaundryStatus, string> = {
     available: theme.colors.success,
-    inUse: '#F59E0B',
-    finished: '#3B82F6',
+    inUse: '#FF9500',
+    finished: '#007AFF',
     maintenance: theme.colors.danger,
     reserved: theme.colors.accent,
   };
@@ -675,7 +675,7 @@ export function DormitoryScreen(props: any) {
             />
             <StatBox
               icon="construct"
-              color="#F59E0B"
+              color="#FF9500"
               value={activeRepairs.length}
               label="處理中報修"
               highlight={activeRepairs.length > 0}
@@ -829,9 +829,9 @@ export function DormitoryScreen(props: any) {
             {announcements.slice(0, 3).map((ann) => {
               const typeColor: Record<string, string> = {
                 notice: theme.colors.accent,
-                warning: '#F59E0B',
+                warning: '#FF9500',
                 emergency: theme.colors.danger,
-                maintenance: '#6366F1',
+                maintenance: '#5856D6',
               };
               const color = typeColor[ann.type] ?? theme.colors.muted;
               return (
@@ -1289,7 +1289,7 @@ export function DormitoryScreen(props: any) {
                   size="sm"
                 />
                 {machine.status === 'inUse' && machine.remainingMinutes > 0 && (
-                  <Text style={{ color: '#F59E0B', fontSize: 11, fontWeight: '600' }}>
+                  <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '600' }}>
                     剩 {machine.remainingMinutes} 分
                   </Text>
                 )}
@@ -1529,7 +1529,7 @@ export function DormitoryScreen(props: any) {
                 tension === 'danger'
                   ? theme.colors.danger
                   : tension === 'warning'
-                    ? '#F59E0B'
+                    ? '#FF9500'
                     : theme.colors.success;
               return (
                 <View
@@ -2142,7 +2142,7 @@ export function DormitoryScreen(props: any) {
                       rating.score >= 4
                         ? theme.colors.success
                         : rating.score >= 3
-                          ? '#F59E0B'
+                          ? '#FF9500'
                           : theme.colors.danger,
                     width: `${(rating.score / 5) * 100}%`,
                   }}
@@ -2194,10 +2194,10 @@ export function DormitoryScreen(props: any) {
                   borderRadius: 14,
                   backgroundColor:
                     bld.gender === 'female'
-                      ? '#EC489915'
+                      ? '#FF2D5515'
                       : bld.gender === 'male'
-                        ? '#3B82F615'
-                        : '#8B5CF615',
+                        ? '#007AFF15'
+                        : '#AF52DE15',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
@@ -2207,10 +2207,10 @@ export function DormitoryScreen(props: any) {
                   size={24}
                   color={
                     bld.gender === 'female'
-                      ? '#EC4899'
+                      ? '#FF2D55'
                       : bld.gender === 'male'
-                        ? '#3B82F6'
-                        : '#8B5CF6'
+                        ? '#007AFF'
+                        : '#AF52DE'
                   }
                 />
               </View>

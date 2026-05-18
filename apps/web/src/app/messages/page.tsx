@@ -19,7 +19,7 @@ import {
 } from '@/lib/demoStore';
 
 const TYPE_COLOR: Record<DemoMessage['type'], string> = {
-  info: '#5E6AD2',
+  info: '#007AFF',
   warning: '#FF9500',
   action: '#FF3B30',
   success: '#34C759',
@@ -128,8 +128,8 @@ export default function MessagesPage(props: {
             className="card"
             style={{
               padding: '12px 16px',
-              background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.07) 100%)',
-              border: '1px solid rgba(94,106,210,0.22)',
+              background: 'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(90,200,250,0.07) 100%)',
+              border: '1px solid rgba(0,122,255,0.22)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -223,9 +223,9 @@ export default function MessagesPage(props: {
                       borderRadius: 'var(--radius)',
                       border: `1px solid ${isSelected ? 'var(--brand)' : 'var(--border)'}`,
                       background: isSelected
-                        ? 'rgba(94,106,210,0.08)'
+                        ? 'rgba(0,122,255,0.08)'
                         : isUnread
-                          ? 'var(--accent-soft, rgba(94,106,210,0.05))'
+                          ? 'var(--accent-soft, rgba(0,122,255,0.05))'
                           : 'var(--surface)',
                       cursor: 'pointer',
                       transition: 'all 0.15s',

@@ -80,10 +80,10 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
   },
   title: { fontSize: 15, fontWeight: '600' },
-  meta: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  meta: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
   scoreBox: { alignItems: 'flex-end' },
-  score: { fontSize: 22, fontWeight: '700', color: '#2563EB' },
-  max: { fontSize: 12, color: '#9CA3AF', fontWeight: '400' },
+  score: { fontSize: 22, fontWeight: '700', color: '#007AFF' },
+  max: { fontSize: 12, color: '#AEAEB2', fontWeight: '400' },
   summary: {
     margin: 12,
     padding: 14,

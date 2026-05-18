@@ -62,13 +62,13 @@ const PERIODS = [
 ];
 
 const COURSE_COLORS = [
-  '#8B5CF6',
-  '#EC4899',
-  '#F59E0B',
-  '#10B981',
-  '#3B82F6',
-  '#EF4444',
-  '#6366F1',
+  '#AF52DE',
+  '#FF2D55',
+  '#FF9500',
+  '#34C759',
+  '#007AFF',
+  '#FF3B30',
+  '#5856D6',
   '#14B8A6',
 ];
 
@@ -830,7 +830,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>總學分</Text>
           </View>
           <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
               {todayCourses.length}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>今日課程</Text>

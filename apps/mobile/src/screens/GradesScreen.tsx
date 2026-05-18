@@ -134,16 +134,16 @@ const GRADE_COLORS: Record<string, string> = {
   'A+': '#22C55E',
   A: '#22C55E',
   'A-': '#4ADE80',
-  'B+': '#3B82F6',
-  B: '#3B82F6',
+  'B+': '#007AFF',
+  B: '#007AFF',
   'B-': '#60A5FA',
-  'C+': '#F59E0B',
-  C: '#F59E0B',
+  'C+': '#FF9500',
+  C: '#FF9500',
   'C-': '#FBBF24',
-  D: '#EF4444',
-  F: '#DC2626',
+  D: '#FF3B30',
+  F: '#D70015',
   通過: '#22C55E',
-  不通過: '#DC2626',
+  不通過: '#D70015',
 };
 
 // Infer category from course code patterns
@@ -158,10 +158,10 @@ function inferCategory(courseCode?: string, courseName?: string): Grade['categor
 }
 
 const CATEGORY_LABELS: Record<string, { label: string; color: string }> = {
-  required: { label: '必修', color: '#3B82F6' },
-  elective: { label: '選修', color: '#8B5CF6' },
-  general: { label: '通識', color: '#10B981' },
-  english: { label: '英文', color: '#F59E0B' },
+  required: { label: '必修', color: '#007AFF' },
+  elective: { label: '選修', color: '#AF52DE' },
+  general: { label: '通識', color: '#34C759' },
+  english: { label: '英文', color: '#FF9500' },
 };
 
 function GradeCard({ course }: { course: Grade }) {
@@ -490,7 +490,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課數</Text>
                       </View>
                       <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 28 }}>
+                        <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 28 }}>
                           {currentSemester.courses.filter((c) => c.midterm !== undefined).length}
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
@@ -610,7 +610,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>取得學分</Text>
                         </View>
                         <View style={{ flex: 1, alignItems: 'center' }}>
-                          <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 28 }}>
+                          <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 28 }}>
                             {completedInSem.length}
                           </Text>
                           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課數</Text>
@@ -674,7 +674,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+                    <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
                       {completedCourses.length}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 11 }}>完成課程</Text>
@@ -688,7 +688,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ color: '#3B82F6', fontWeight: '900', fontSize: 24 }}>
+                    <Text style={{ color: '#007AFF', fontWeight: '900', fontSize: 24 }}>
                       {
                         semesters.filter((s) => s.courses.some((c) => c.status === 'completed'))
                           .length
@@ -708,9 +708,9 @@ export function GradesScreen(props: Record<string, unknown>) {
                       label === 'A系列'
                         ? '#22C55E'
                         : label === 'B系列'
-                          ? '#3B82F6'
+                          ? '#007AFF'
                           : label === 'C系列'
-                            ? '#F59E0B'
+                            ? '#FF9500'
                             : theme.colors.muted;
 
                     return (

@@ -572,8 +572,8 @@ function RoomSheet({
             borderColor: '#FBBF2455',
           }}
         >
-          <Ionicons name="school" size={14} color="#D97706" />
-          <Text style={{ color: '#D97706', fontSize: 11, fontWeight: '800' }}>
+          <Ionicons name="school" size={14} color="#FF9500" />
+          <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '800' }}>
             這是 {personaName} 下節課的教室
           </Text>
         </View>
@@ -813,7 +813,7 @@ function onRoomTap(id){
 }
 
 function hexWithAlpha(hex: string, alpha: number): string {
-  // hex like '#10B981' or '#10B981XX' — we just append alpha as 2-digit hex
+  // hex like '#34C759' or '#34C759XX' — we just append alpha as 2-digit hex
   const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255)
     .toString(16)
     .padStart(2, '0');

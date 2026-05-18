@@ -402,15 +402,15 @@ export default function AttendanceLiveScreen({ route, navigation }: AttendanceLi
             {/* Stats */}
             <View style={s.statsRow}>
               <View style={[s.statCard, { backgroundColor: '#ECFDF5' }]}>
-                <Text style={[s.statNum, { color: '#10B981' }]}>{stats.present}</Text>
+                <Text style={[s.statNum, { color: '#34C759' }]}>{stats.present}</Text>
                 <Text style={s.statLabel}>出席</Text>
               </View>
               <View style={[s.statCard, { backgroundColor: '#FEF3C7' }]}>
-                <Text style={[s.statNum, { color: '#F59E0B' }]}>{stats.late}</Text>
+                <Text style={[s.statNum, { color: '#FF9500' }]}>{stats.late}</Text>
                 <Text style={s.statLabel}>遲到</Text>
               </View>
               <View style={[s.statCard, { backgroundColor: '#FEE2E2' }]}>
-                <Text style={[s.statNum, { color: '#EF4444' }]}>{stats.absent}</Text>
+                <Text style={[s.statNum, { color: '#FF3B30' }]}>{stats.absent}</Text>
                 <Text style={s.statLabel}>缺席</Text>
               </View>
               <View style={[s.statCard, { backgroundColor: theme.colors.surface2 }]}>
@@ -861,7 +861,7 @@ const s = StyleSheet.create({
     backgroundColor: '#ECFDF5',
     borderRadius: 10,
   },
-  liveTagText: { fontSize: 11, fontWeight: '600', color: '#10B981' },
+  liveTagText: { fontSize: 11, fontWeight: '600', color: '#34C759' },
 
   // Student input
   studentInputSection: { alignItems: 'center', paddingHorizontal: 16, paddingTop: 24 },

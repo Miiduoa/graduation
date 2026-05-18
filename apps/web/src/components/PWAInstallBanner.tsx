@@ -106,7 +106,7 @@ export function PWAInstallBanner() {
               onClick={handleInstall}
               style={{
                 background: '#fff',
-                color: '#7C5CFF',
+                color: '#007AFF',
                 border: 'none',
                 padding: '10px 20px',
                 borderRadius: 8,

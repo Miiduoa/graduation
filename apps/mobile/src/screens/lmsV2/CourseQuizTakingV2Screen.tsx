@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     gap: 8,
   },
-  qIndex: { fontSize: 12, color: '#6B7280', fontWeight: '600' },
+  qIndex: { fontSize: 12, color: '#8E8E93', fontWeight: '600' },
   qPrompt: { fontSize: 15, lineHeight: 22 },
   input: {
     minHeight: 80,
@@ -120,7 +120,7 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     paddingVertical: 12,
-    backgroundColor: '#2563EB',
+    backgroundColor: '#007AFF',
     borderRadius: 8,
     alignItems: 'center',
   },

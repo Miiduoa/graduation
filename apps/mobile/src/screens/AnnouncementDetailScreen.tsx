@@ -313,7 +313,7 @@ export function AnnouncementDetailScreen(props: any) {
 
   const sentimentConfig = {
     urgent: { color: theme.colors.danger, icon: 'alert-circle', label: '緊急' },
-    important: { color: '#F59E0B', icon: 'warning', label: '重要' },
+    important: { color: '#FF9500', icon: 'warning', label: '重要' },
     positive: { color: theme.colors.success, icon: 'checkmark-circle', label: '好消息' },
     neutral: { color: theme.colors.muted, icon: 'information-circle', label: '一般' },
   };

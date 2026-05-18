@@ -107,7 +107,7 @@ export function FeedbackPromptModal(props: {
                 <Ionicons
                   name={s <= score ? 'star' : 'star-outline'}
                   size={34}
-                  color={s <= score ? '#F59E0B' : theme.colors.muted}
+                  color={s <= score ? '#FF9500' : theme.colors.muted}
                 />
               </Pressable>
             ))}

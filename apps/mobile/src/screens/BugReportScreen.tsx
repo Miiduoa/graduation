@@ -35,9 +35,9 @@ const CATEGORY_OPTIONS: Array<{ key: BugCategory; label: string; icon: string }>
 
 const SEVERITY_OPTIONS: Array<{ key: BugSeverity; label: string; color: string }> = [
   { key: 'low', label: '輕微', color: '#22C55E' },
-  { key: 'medium', label: '中等', color: '#F59E0B' },
-  { key: 'high', label: '嚴重', color: '#F97316' },
-  { key: 'critical', label: '緊急', color: '#EF4444' },
+  { key: 'medium', label: '中等', color: '#FF9500' },
+  { key: 'high', label: '嚴重', color: '#FF9500' },
+  { key: 'critical', label: '緊急', color: '#FF3B30' },
 ];
 
 export function BugReportScreen(props: any) {

@@ -132,8 +132,8 @@ type SettingsModalType = 'passcode' | 'dailyLimit' | 'invoiceCarrier' | null;
 const QUICK_ACTIONS: QuickAction[] = [
   { id: 'topup', title: '儲值', icon: 'add-circle', color: theme.colors.success },
   { id: 'transfer', title: '轉帳', icon: 'swap-horizontal', color: theme.colors.accent },
-  { id: 'pay', title: '付款', icon: 'qr-code', color: '#8B5CF6' },
-  { id: 'history', title: '紀錄', icon: 'receipt', color: '#F59E0B' },
+  { id: 'pay', title: '付款', icon: 'qr-code', color: '#AF52DE' },
+  { id: 'history', title: '紀錄', icon: 'receipt', color: '#FF9500' },
 ];
 
 const DEFAULT_TRANSFER_TARGETS: TransferTarget[] = [
@@ -169,13 +169,13 @@ function getCategoryIcon(category: Transaction['category']): string {
 function getCategoryColor(category: Transaction['category']): string {
   switch (category) {
     case 'meal':
-      return '#F97316';
+      return '#FF9500';
     case 'print':
-      return '#6366F1';
+      return '#5856D6';
     case 'laundry':
       return '#06B6D4';
     case 'vending':
-      return '#8B5CF6';
+      return '#AF52DE';
     case 'parking':
       return '#64748B';
     default:
@@ -886,7 +886,7 @@ export function PaymentScreen(props: any) {
                       </View>
                       <View style={{ width: 1, backgroundColor: theme.colors.border }} />
                       <View style={{ alignItems: 'center' }}>
-                        <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+                        <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
                           ${monthExpense}
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>

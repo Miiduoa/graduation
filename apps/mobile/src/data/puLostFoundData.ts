@@ -50,7 +50,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'student_card',
     label: '學生證',
     icon: 'id-card-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     avgReturnDays: 1.2,
     returnRate: 0.92,
     commonLocations: ['蓋夏圖書館', '學生餐廳', '行政大樓'],
@@ -59,7 +59,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'wallet',
     label: '錢包',
     icon: 'wallet-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     avgReturnDays: 1.5,
     returnRate: 0.78,
     commonLocations: ['學生餐廳', '便利商店', '體育館'],
@@ -68,7 +68,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'keys',
     label: '鑰匙',
     icon: 'key-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     avgReturnDays: 2.0,
     returnRate: 0.71,
     commonLocations: ['教室', '停車場', '宿舍'],
@@ -77,7 +77,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'phone',
     label: '手機',
     icon: 'phone-portrait-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     avgReturnDays: 0.5,
     returnRate: 0.88,
     commonLocations: ['教室', '蓋夏圖書館', '學生餐廳'],
@@ -86,7 +86,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'earbuds',
     label: '耳機',
     icon: 'headset-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     avgReturnDays: 3.0,
     returnRate: 0.55,
     commonLocations: ['蓋夏圖書館', '教室', '操場'],
@@ -104,7 +104,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'umbrella',
     label: '雨傘',
     icon: 'umbrella-outline',
-    color: '#6366F1',
+    color: '#5856D6',
     avgReturnDays: 7.0,
     returnRate: 0.35,
     commonLocations: ['教室', '圖書館', '行政大樓'],
@@ -113,7 +113,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'bottle',
     label: '水壺',
     icon: 'water-outline',
-    color: '#0D9488',
+    color: '#5AC8FA',
     avgReturnDays: 5.0,
     returnRate: 0.42,
     commonLocations: ['教室', '體育館', '操場'],
@@ -131,7 +131,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'clothing',
     label: '衣物',
     icon: 'shirt-outline',
-    color: '#059669',
+    color: '#34C759',
     avgReturnDays: 6.0,
     returnRate: 0.38,
     commonLocations: ['體育館', '宿舍洗衣間', '操場'],
@@ -140,7 +140,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'bag',
     label: '包包',
     icon: 'bag-handle-outline',
-    color: '#DC2626',
+    color: '#D70015',
     avgReturnDays: 1.0,
     returnRate: 0.82,
     commonLocations: ['學生餐廳', '蓋夏圖書館', '教室'],
@@ -149,7 +149,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'books',
     label: '書籍',
     icon: 'book-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     avgReturnDays: 4.0,
     returnRate: 0.48,
     commonLocations: ['蓋夏圖書館', '教室', '自習室'],
@@ -158,7 +158,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'usb',
     label: '隨身碟',
     icon: 'save-outline',
-    color: '#374151',
+    color: '#3C3C43',
     avgReturnDays: 3.5,
     returnRate: 0.52,
     commonLocations: ['電腦教室', '蓋夏圖書館', '伯鐸樓'],
@@ -194,7 +194,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'other',
     label: '其他',
     icon: 'help-circle-outline',
-    color: '#9CA3AF',
+    color: '#AEAEB2',
     avgReturnDays: 5.0,
     returnRate: 0.3,
     commonLocations: [],
@@ -477,14 +477,14 @@ export function getPostStatusLabel(status: PostStatus): string {
 
 export function getPostStatusColor(status: PostStatus): string {
   const m: Record<PostStatus, string> = {
-    open: '#3B82F6',
-    matching: '#F59E0B',
-    claimed: '#8B5CF6',
-    returned: '#10B981',
-    expired: '#9CA3AF',
-    archived: '#6B7280',
+    open: '#007AFF',
+    matching: '#FF9500',
+    claimed: '#AF52DE',
+    returned: '#34C759',
+    expired: '#AEAEB2',
+    archived: '#8E8E93',
   };
-  return m[status] ?? '#9CA3AF';
+  return m[status] ?? '#AEAEB2';
 }
 
 export function getPostStatusIcon(status: PostStatus): string {
@@ -547,7 +547,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'student',
     label: '學生',
     icon: 'school-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     features: [
       'post_lost',
       'post_found',
@@ -566,7 +566,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'faculty',
     label: '教職員',
     icon: 'person-outline',
-    color: '#DC2626',
+    color: '#D70015',
     features: [
       'post_lost',
       'post_found',
@@ -584,7 +584,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'guard',
     label: '校園警衛',
     icon: 'shield-outline',
-    color: '#059669',
+    color: '#34C759',
     features: [
       'post_found',
       'receive_item',
@@ -601,7 +601,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'dept_office',
     label: '系辦公室',
     icon: 'business-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     features: [
       'post_found',
       'receive_item',
@@ -616,7 +616,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'student_affairs',
     label: '學務處',
     icon: 'people-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     features: [
       'post_found',
       'receive_item',
@@ -633,7 +633,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'library_counter',
     label: '圖書館櫃檯',
     icon: 'library-outline',
-    color: '#0D9488',
+    color: '#5AC8FA',
     features: ['post_found', 'receive_item', 'store_item', 'transfer_item', 'view_all'],
     description: '圖書館內拾獲物品暫存、學期末轉交學務處',
   },
@@ -641,7 +641,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'dorm_admin',
     label: '宿舍管理員',
     icon: 'home-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     features: [
       'post_found',
       'receive_item',
@@ -656,7 +656,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'system_admin',
     label: '系統管理',
     icon: 'settings-outline',
-    color: '#374151',
+    color: '#3C3C43',
     features: ['manage_posts', 'view_statistics', 'batch_archive', 'send_alert', 'hotspot_map'],
     description: '系統設定、資料管理、統計儀表板',
   },
@@ -1020,7 +1020,7 @@ export const REPUTATION_ACTIONS: ReputationAction[] = [
     label: '發布拾獲文',
     points: 5,
     icon: 'add-circle-outline',
-    color: '#10B981',
+    color: '#34C759',
     description: '主動發布拾獲物品',
   },
   {
@@ -1028,7 +1028,7 @@ export const REPUTATION_ACTIONS: ReputationAction[] = [
     label: '歸還物品',
     points: 20,
     icon: 'checkmark-circle-outline',
-    color: '#059669',
+    color: '#34C759',
     description: '成功將物品歸還失主',
   },
   {
@@ -1036,7 +1036,7 @@ export const REPUTATION_ACTIONS: ReputationAction[] = [
     label: '24h 內歸還',
     points: 10,
     icon: 'flash-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '拾獲後 24 小時內歸還（額外加分）',
   },
   {
@@ -1044,7 +1044,7 @@ export const REPUTATION_ACTIONS: ReputationAction[] = [
     label: '送交警衛室',
     points: 8,
     icon: 'shield-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     description: '將物品送交警衛室保管',
   },
   {
@@ -1052,7 +1052,7 @@ export const REPUTATION_ACTIONS: ReputationAction[] = [
     label: '獲得好評',
     points: 3,
     icon: 'star-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '交接後獲得失主好評',
   },
   {
@@ -1060,7 +1060,7 @@ export const REPUTATION_ACTIONS: ReputationAction[] = [
     label: '幫忙轉發',
     points: 2,
     icon: 'share-social-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     description: '分享失物文章協助擴散',
   },
   {
@@ -1068,7 +1068,7 @@ export const REPUTATION_ACTIONS: ReputationAction[] = [
     label: '高價值物品歸還',
     points: 30,
     icon: 'diamond-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     description: '歸還手機/筆電/錢包等高價值物',
   },
 ];
@@ -1089,7 +1089,7 @@ export const REPUTATION_LEVELS: ReputationLevel[] = [
     name: '熱心新手',
     minPoints: 0,
     icon: 'heart-outline',
-    color: '#9CA3AF',
+    color: '#AEAEB2',
     badge: '🤍',
     perk: '基本功能',
   },
@@ -1098,7 +1098,7 @@ export const REPUTATION_LEVELS: ReputationLevel[] = [
     name: '善良夥伴',
     minPoints: 20,
     icon: 'heart-half-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     badge: '💙',
     perk: '發文置頂 1 天',
   },
@@ -1107,7 +1107,7 @@ export const REPUTATION_LEVELS: ReputationLevel[] = [
     name: '校園天使',
     minPoints: 60,
     icon: 'heart',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     badge: '💜',
     perk: '專屬標誌 + 優先配對',
   },
@@ -1116,7 +1116,7 @@ export const REPUTATION_LEVELS: ReputationLevel[] = [
     name: '拾金不昧大使',
     minPoints: 120,
     icon: 'trophy',
-    color: '#F59E0B',
+    color: '#FF9500',
     badge: '🏆',
     perk: '學期末表揚 + 優先配對',
   },
@@ -1125,7 +1125,7 @@ export const REPUTATION_LEVELS: ReputationLevel[] = [
     name: '傳奇守護者',
     minPoints: 250,
     icon: 'star',
-    color: '#EF4444',
+    color: '#FF3B30',
     badge: '⭐',
     perk: '校長嘉獎推薦 + 永久標誌',
   },
@@ -1202,70 +1202,70 @@ export const LF_NOTIFICATION_TYPES: LFNotificationConfig[] = [
     type: 'ai_match_found',
     label: 'AI 配對通知',
     icon: 'sparkles-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     defaultEnabled: true,
   },
   {
     type: 'item_claimed',
     label: '物品被認領',
     icon: 'hand-left-outline',
-    color: '#10B981',
+    color: '#34C759',
     defaultEnabled: true,
   },
   {
     type: 'claim_approved',
     label: '認領通過',
     icon: 'checkmark-circle-outline',
-    color: '#059669',
+    color: '#34C759',
     defaultEnabled: true,
   },
   {
     type: 'new_message',
     label: '新訊息',
     icon: 'chatbubble-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     defaultEnabled: true,
   },
   {
     type: 'post_expiring',
     label: '到期提醒',
     icon: 'time-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     defaultEnabled: true,
   },
   {
     type: 'item_transferred',
     label: '轉交通知',
     icon: 'arrow-forward-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     defaultEnabled: true,
   },
   {
     type: 'hotspot_alert',
     label: '熱點提醒',
     icon: 'location-outline',
-    color: '#F97316',
+    color: '#FF9500',
     defaultEnabled: false,
   },
   {
     type: 'reputation_earned',
     label: '積分獲得',
     icon: 'ribbon-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     defaultEnabled: true,
   },
   {
     type: 'nearby_found',
     label: '附近拾獲',
     icon: 'navigate-outline',
-    color: '#0D9488',
+    color: '#5AC8FA',
     defaultEnabled: false,
   },
   {
     type: 'monthly_report',
     label: '月報推送',
     icon: 'bar-chart-outline',
-    color: '#374151',
+    color: '#3C3C43',
     defaultEnabled: false,
   },
 ];
@@ -1289,14 +1289,14 @@ export function getSmartLFSuggestions(): LFSuggestion[] {
     suggestions.push({
       icon: 'sunny-outline',
       text: '早安！離開宿舍前記得檢查鑰匙和學生證',
-      color: '#F59E0B',
+      color: '#FF9500',
     });
   }
   if (hour >= 11 && hour < 14) {
     suggestions.push({
       icon: 'restaurant-outline',
       text: '用餐後別忘了檢查手機和錢包',
-      color: '#EF4444',
+      color: '#FF3B30',
       action: 'hotspot',
     });
   }
@@ -1304,26 +1304,26 @@ export function getSmartLFSuggestions(): LFSuggestion[] {
     suggestions.push({
       icon: 'school-outline',
       text: '下課換教室時記得帶走充電器和水壺',
-      color: '#3B82F6',
+      color: '#007AFF',
     });
   }
   if (hour >= 18 && hour < 21) {
     suggestions.push({
       icon: 'library-outline',
       text: '離開圖書館前檢查桌上是否遺漏物品',
-      color: '#8B5CF6',
+      color: '#AF52DE',
       action: 'hotspot',
     });
   }
   if (hour >= 21 || hour < 6) {
-    suggestions.push({ icon: 'moon-outline', text: '晚歸注意隨身物品安全', color: '#6366F1' });
+    suggestions.push({ icon: 'moon-outline', text: '晚歸注意隨身物品安全', color: '#5856D6' });
   }
 
   // 固定建議
   suggestions.push({
     icon: 'sparkles-outline',
     text: '開啟 AI 配對，系統會自動幫你比對拾獲物',
-    color: '#F59E0B',
+    color: '#FF9500',
     action: 'ai_match',
   });
 

@@ -121,7 +121,7 @@ function getCategoryColor(category: CourseCategory): string {
     case 'general':
       return theme.colors.success;
     case 'free':
-      return '#8B5CF6';
+      return '#AF52DE';
     default:
       return theme.colors.muted;
   }
@@ -145,7 +145,7 @@ function getDifficultyColor(difficulty: CourseDifficulty): string {
     case 'easy':
       return theme.colors.success;
     case 'medium':
-      return '#F59E0B';
+      return '#FF9500';
     case 'hard':
       return theme.colors.danger;
     default:
@@ -898,7 +898,7 @@ ${top
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Ionicons name="time" size={18} color="#F59E0B" />
+                        <Ionicons name="time" size={18} color="#FF9500" />
                         <Text style={{ color: theme.colors.muted, flex: 1 }}>
                           避開早八：{preferences.avoidEarly ? '是' : '否'}
                         </Text>
@@ -1056,7 +1056,7 @@ ${top
 
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            <Ionicons name="star" size={14} color="#F59E0B" />
+                            <Ionicons name="star" size={14} color="#FF9500" />
                             <Text
                               style={{ color: theme.colors.text, fontWeight: '600', fontSize: 13 }}
                             >
@@ -1346,7 +1346,7 @@ ${top
                     }}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                      <Ionicons name="sunny" size={22} color="#F59E0B" />
+                      <Ionicons name="sunny" size={22} color="#FF9500" />
                       <Text style={{ color: theme.colors.text, fontWeight: '600' }}>避開早八</Text>
                     </View>
                     <View

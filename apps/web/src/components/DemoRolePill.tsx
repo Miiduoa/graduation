@@ -154,7 +154,7 @@ export function DemoRolePill() {
               fontSize: 10,
               letterSpacing: '0.15em',
               textTransform: 'uppercase',
-              color: 'var(--muted, #6b7280)',
+              color: 'var(--muted, #8E8E93)',
               fontWeight: 700,
               padding: '8px 10px 6px',
             }}
@@ -216,12 +216,12 @@ export function DemoRolePill() {
                   <span style={{ fontSize: 13, fontWeight: 700 }}>
                     {r.label}
                     {u && (
-                      <span style={{ marginLeft: 6, color: 'var(--muted, #6b7280)', fontWeight: 500 }}>
+                      <span style={{ marginLeft: 6, color: 'var(--muted, #8E8E93)', fontWeight: 500 }}>
                         · {u.displayName}
                       </span>
                     )}
                   </span>
-                  <span style={{ fontSize: 11, color: 'var(--muted, #6b7280)', lineHeight: 1.4 }}>
+                  <span style={{ fontSize: 11, color: 'var(--muted, #8E8E93)', lineHeight: 1.4 }}>
                     {r.description}
                   </span>
                 </span>

@@ -328,7 +328,7 @@ export function PersonalHubScreen(props: any) {
             })}
           >
             <LinearGradient
-              colors={[theme.colors.accent, '#7C3AED'] as [string, string]}
+              colors={[theme.colors.accent, '#AF52DE'] as [string, string]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={{
@@ -362,7 +362,7 @@ export function PersonalHubScreen(props: any) {
             icon="hardware-chip-outline"
             title="AI 模型管理"
             meta="本地推理"
-            tint="#8B5CF6"
+            tint="#AF52DE"
             onPress={() => nav?.navigate?.('AIModelManager')}
           />
           {can('achievements.view') ? (
@@ -385,21 +385,21 @@ export function PersonalHubScreen(props: any) {
             icon="paw-outline"
             title="校園精靈"
             meta="與你一起長大"
-            tint="#F59E0B"
+            tint="#FF9500"
             onPress={() => nav?.navigate?.('Companion')}
           />
           <ListRow
             icon="star-outline"
             title="我的收藏"
             meta="解鎖成就"
-            tint="#3B82F6"
+            tint="#007AFF"
             onPress={() => nav?.navigate?.('CompanionCollection')}
           />
           <ListRow
             icon="planet-outline"
             title="校園星圖"
             meta="走訪足跡"
-            tint="#8B5CF6"
+            tint="#AF52DE"
             onPress={() => nav?.navigate?.('Constellation')}
             isLast={!can('courses.view')}
           />

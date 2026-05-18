@@ -179,11 +179,11 @@ export default function Wave6Page() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>商用核心模組（Wave 6）</h1>
-      <p style={{ color: '#4b5563', lineHeight: 1.6 }}>
+      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
         LTI 1.3／Rubric／會議整合／直播課程／教師工作量；對應 migration 20260520140000–140200。
       </p>
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
-      {info ? <p style={{ color: '#059669' }}>{info}</p> : null}
+      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
+      {info ? <p style={{ color: '#34C759' }}>{info}</p> : null}
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -199,7 +199,7 @@ export default function Wave6Page() {
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              style={{ ...tabBtn, background: tab === t ? '#2563eb' : '#fff', color: tab === t ? '#fff' : '#111827' }}>
+              style={{ ...tabBtn, background: tab === t ? '#007aff' : '#fff', color: tab === t ? '#fff' : '#111827' }}>
               {labelOf(t)}
             </button>
           ))}
@@ -208,7 +208,7 @@ export default function Wave6Page() {
 
       {subtitle ? <p style={{ marginTop: 12, fontWeight: 600 }}>{subtitle}</p> : null}
 
-      <div style={{ marginTop: 16, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16 }}>
+      <div style={{ marginTop: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12, padding: 16 }}>
         {tab === 'lti' ? (
           <>
             <button type="button" onClick={() => void addLtiTool()} disabled={busy} style={primaryBtn}>新增 LTI 1.3 工具</button>
@@ -216,7 +216,7 @@ export default function Wave6Page() {
               {tools.map((t) => (
                 <li key={t.id} style={listItem}>
                   <strong>{t.name}</strong>
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>
+                  <div style={{ fontSize: 12, color: '#8E8E93' }}>
                     issuer: {t.issuer}｜client_id: {t.client_id}｜active: {t.is_active ? 'Y' : 'N'}
                   </div>
                 </li>
@@ -230,7 +230,7 @@ export default function Wave6Page() {
               {rubrics.map((r) => (
                 <li key={r.id} style={listItem}>
                   <strong>{r.title}</strong>
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>{r.description || '—'}</div>
+                  <div style={{ fontSize: 12, color: '#8E8E93' }}>{r.description || '—'}</div>
                 </li>
               ))}
             </ul>
@@ -242,7 +242,7 @@ export default function Wave6Page() {
               {meetings.map((m) => (
                 <li key={m.id} style={listItem}>
                   <strong>{m.title}</strong>（{m.provider}）
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>
+                  <div style={{ fontSize: 12, color: '#8E8E93' }}>
                     {new Date(m.starts_at).toLocaleString()} ｜ <a href={m.meeting_url} target="_blank" rel="noreferrer">URL</a>
                   </div>
                 </li>
@@ -256,7 +256,7 @@ export default function Wave6Page() {
               {livestreams.map((ls) => (
                 <li key={ls.id} style={listItem}>
                   <strong>{ls.title}</strong>（{ls.status}）
-                  <div style={{ fontSize: 12, color: '#6b7280' }}>
+                  <div style={{ fontSize: 12, color: '#8E8E93' }}>
                     {new Date(ls.scheduled_at).toLocaleString()}
                   </div>
                 </li>
@@ -267,7 +267,7 @@ export default function Wave6Page() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ background: '#f3f4f6' }}>
+                <tr style={{ background: '#F2F2F7' }}>
                   <th style={cellStyle}>teacher_id</th>
                   <th style={cellStyle}>course_id</th>
                   <th style={cellStyle}>公告</th>
@@ -308,6 +308,6 @@ function labelOf(t: Tab): string {
 
 const selectStyle: React.CSSProperties = { padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 14, minWidth: 220 };
 const tabBtn: React.CSSProperties = { padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', fontWeight: 700, cursor: 'pointer' };
-const primaryBtn: React.CSSProperties = { padding: '10px 14px', borderRadius: 10, border: '1px solid #2563eb', background: '#2563eb', color: '#fff', fontWeight: 700, cursor: 'pointer' };
-const listItem: React.CSSProperties = { padding: 12, border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: 8 };
-const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #e5e7eb', textAlign: 'left' };
+const primaryBtn: React.CSSProperties = { padding: '10px 14px', borderRadius: 10, border: '1px solid #007aff', background: '#007aff', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const listItem: React.CSSProperties = { padding: 12, border: '1px solid #E5E5EA', borderRadius: 8, marginBottom: 8 };
+const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #E5E5EA', textAlign: 'left' };
