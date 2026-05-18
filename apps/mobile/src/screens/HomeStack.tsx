@@ -31,7 +31,7 @@ import AnnouncementDetailAiFirstScreen from './AnnouncementDetailAiFirstScreen';
 import AnnouncementsListAiFirstScreen from './AnnouncementsListAiFirstScreen';
 import EventDetailAiFirstScreen from './EventDetailAiFirstScreen';
 import EventsListAiFirstScreen from './EventsListAiFirstScreen';
-import AIChatAiFirstScreen from './AIChatAiFirstScreen';
+import { AIChatScreen } from './AIChatScreen';
 import { CommunityScreen } from './CommunityScreen';
 import { BoardDetailScreen } from './social/BoardDetailScreen';
 import { PostComposeScreen } from './social/PostComposeScreen';
@@ -92,7 +92,7 @@ export function HomeStack() {
         options={{ title: '公告詳情', headerShown: false }}
       />
       <Stack.Screen name="活動總覽" component={EventsListAiFirstScreen} options={{ title: '活動', headerShown: false }} />
-      <Stack.Screen name="AIChat" component={AIChatAiFirstScreen} options={{ title: '校園 AI', headerShown: false }} />
+      <Stack.Screen name="AIChat" component={AIChatScreen} options={{ title: '校園 AI', headerShown: false }} />
       <Stack.Screen name="活動詳情" component={EventDetailAiFirstScreen} options={{ title: '活動詳情', headerShown: false }} />
       <Stack.Screen
         name="CampusSocialScreen"

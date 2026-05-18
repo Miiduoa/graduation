@@ -19,11 +19,10 @@ import { useAuth } from '../state/auth';
 import { useDataSource } from '../hooks/useDataSource';
 import { useAsyncList } from '../hooks/useAsyncList';
 import {
-  chatWithAI,
   getAIStatus,
   type AIMessage,
   type AIContext,
-  createCancellableChat,
+  createCancellableCampusChat,
 } from '../services/ai';
 import { analytics } from '../services/analytics';
 import { getFirstStorageValue, getScopedStorageKey } from '../services/scopedStorage';
@@ -159,7 +158,7 @@ export function AICourseAdvisorScreen(props: any) {
   const auth = useAuth();
   const ds = useDataSource();
   const scrollRef = useRef<ScrollView>(null);
-  const aiChatRef = useRef(createCancellableChat());
+  const aiChatRef = useRef(createCancellableCampusChat());
 
   // 從 CoursesHomeScreen chip 傳進來：限縮 AI 對話到該課程
   const focusedGroupId = props?.route?.params?.groupId as string | undefined;
