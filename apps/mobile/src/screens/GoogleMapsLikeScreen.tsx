@@ -24,7 +24,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { WebView } from 'react-native-webview';
 import { PuWebView } from '../ui/PuWebView';
 import { theme } from '../ui/theme';
@@ -237,7 +237,17 @@ function isOpenNow(open: string, close: string, now: Date = new Date()): boolean
 
 export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
   const nav = useNavigation<any>();
+  const route = useRoute<any>();
   const webRef = useRef<WebView>(null);
+
+  // ── AI 帶來的路線/聚焦參數 ──
+  // fromPoiId + toPoiId：自動規劃路線並開始導航
+  // focusPoiId：聚焦到單一 POI
+  // autoStart：來自 AI route_card 點擊
+  const aiFromPoiId: string | undefined = route?.params?.fromPoiId;
+  const aiToPoiId: string | undefined = route?.params?.toPoiId;
+  const aiFocusPoiId: string | undefined = route?.params?.focusPoiId;
+  const aiAutoStart: boolean | undefined = route?.params?.autoStart;
 
   const [layer, setLayer] = useState<Layer>('standard');
   const [showBusLayer, setShowBusLayer] = useState<boolean>(true);
@@ -454,6 +464,36 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
     [uLat, uLng, postCmd],
   );
 
+  // ── AI 帶 toPoiId 進來 → 自動聚焦 + 開始導航 ──
+  const aiAppliedRef = useRef(false);
+  useEffect(() => {
+    if (aiAppliedRef.current) return;
+    // Focus to a POI
+    if (aiFocusPoiId) {
+      const target = getCampusPoi(aiFocusPoiId);
+      if (target) {
+        setSelectedPoiId(target.id);
+        postCmd({ type: 'centerOn', lat: target.lat, lng: target.lng, zoom: 18 });
+        aiAppliedRef.current = true;
+        return;
+      }
+    }
+    // Start navigation from→to
+    if (aiToPoiId) {
+      const dest = getCampusPoi(aiToPoiId);
+      if (dest) {
+        setSelectedPoiId(dest.id);
+        if (aiAutoStart) {
+          // 等地理位置就緒再開始（uLat/uLng 預設為校園中心，所以也能跑）
+          setTimeout(() => startNavigation(dest), 800);
+        } else {
+          postCmd({ type: 'setView', lat: dest.lat, lng: dest.lng, zoom: 18 });
+        }
+        aiAppliedRef.current = true;
+      }
+    }
+  }, [aiFromPoiId, aiToPoiId, aiFocusPoiId, aiAutoStart, postCmd, startNavigation]);
+
   // 模擬步進
   useEffect(() => {
     if (!navMode) return;
@@ -551,6 +591,19 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
             style={{ marginLeft: 4 }}
           >
             <Ionicons name="git-network-outline" size={18} color={theme.colors.accent} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              const target = selectedPoi?.name;
+              const prefill = target
+                ? `從我目前位置到「${target}」要怎麼走？順便看看附近能吃什麼。`
+                : '幫我規劃從校門口到工程館 302 的路線，並推薦中午吃哪一家。';
+              nav.navigate('AIChat', { prompt: prefill });
+            }}
+            hitSlop={8}
+            style={{ marginLeft: 4 }}
+          >
+            <Ionicons name="sparkles" size={18} color={theme.colors.accent} />
           </Pressable>
         </View>
 

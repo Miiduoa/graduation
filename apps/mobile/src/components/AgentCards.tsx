@@ -1,6 +1,8 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { getFirebaseApp, getCloudFunctionRegion } from '../firebase';
 
 export interface AgentCard {
   kind:
@@ -12,7 +14,12 @@ export interface AgentCard {
     | 'repair_submitted'
     | 'repair_list'
     | 'order_submitted'
-    | 'tool_failed';
+    | 'tool_failed'
+    | 'route_card'
+    | 'poi_card'
+    | 'menu_card'
+    | 'cafeteria_list_card'
+    | 'order_draft_card';
   payload: Record<string, any>;
 }
 
@@ -47,9 +54,239 @@ function AgentCardItem({ card }: { card: AgentCard }) {
       return <OrderSubmittedCard payload={card.payload} />;
     case 'tool_failed':
       return <ToolFailedCard payload={card.payload} />;
+    case 'route_card':
+      return <RouteCard payload={card.payload} />;
+    case 'poi_card':
+      return <PoiListCard payload={card.payload} />;
+    case 'menu_card':
+      return <MenuCard payload={card.payload} />;
+    case 'cafeteria_list_card':
+      return <CafeteriaListCard payload={card.payload} />;
+    case 'order_draft_card':
+      return <OrderDraftCard payload={card.payload} />;
     default:
       return null;
   }
+}
+
+// ───────────────────────────────────────────────
+// New card types for AI campus navigation + ordering
+// ───────────────────────────────────────────────
+
+function RouteCard({ payload }: { payload: any }) {
+  const nav = useNavigation<any>();
+  const from = payload.from || {};
+  const to = payload.to || {};
+  const steps = Array.isArray(payload.steps) ? payload.steps : [];
+  return (
+    <TouchableOpacity
+      style={styles.routeCard}
+      onPress={() =>
+        nav.navigate('GoogleMapsLike', { fromPoiId: from.id, toPoiId: to.id, autoStart: true })
+      }
+      activeOpacity={0.85}
+    >
+      <View style={styles.routeHeader}>
+        <Text style={styles.routeIcon}>🗺️</Text>
+        <Text style={styles.routeTitle}>校園路線</Text>
+        <View style={styles.routeMetaBadge}>
+          <Text style={styles.routeMetaText}>
+            {payload.walkMinutes || 0} 分 · {payload.distanceMeters || 0} m
+          </Text>
+        </View>
+      </View>
+      <View style={styles.routeEndpoints}>
+        <View style={styles.routeEpRow}>
+          <View style={[styles.routeDot, { backgroundColor: '#22c55e' }]} />
+          <Text style={styles.routeEpText}>{from.name || '起點'}</Text>
+        </View>
+        <View style={styles.routeEpRow}>
+          <View style={[styles.routeDot, { backgroundColor: '#ef4444' }]} />
+          <Text style={styles.routeEpText}>
+            {to.name || '終點'}
+            {to.floor ? `（${to.floor}）` : ''}
+          </Text>
+        </View>
+      </View>
+      {steps.slice(0, 3).map((s: any, i: number) => (
+        <Text key={i} style={styles.routeStep}>
+          • {s.instruction}
+        </Text>
+      ))}
+      <Text style={styles.routeCta}>在地圖開啟路線 ›</Text>
+    </TouchableOpacity>
+  );
+}
+
+function PoiListCard({ payload }: { payload: any }) {
+  const pois: any[] = payload.pois || [];
+  const nav = useNavigation<any>();
+  return (
+    <View style={styles.card}>
+      <CardHeader icon="📍" title={`找到 ${pois.length} 個地點`} />
+      {pois.slice(0, 4).map((p) => (
+        <TouchableOpacity
+          key={p.id}
+          style={styles.poiRow}
+          onPress={() => nav.navigate('GoogleMapsLike', { focusPoiId: p.id })}
+        >
+          <Text style={styles.poiName}>
+            {p.name}
+            {p.code ? `（${p.code}）` : ''}
+          </Text>
+          <Text style={styles.poiMeta}>
+            {p.floor || ''} {p.openTime && p.closeTime ? `· ${p.openTime}–${p.closeTime}` : ''}
+            {p.openNow === true ? ' · 營業中' : p.openNow === false ? ' · 未營業' : ''}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+function CafeteriaListCard({ payload }: { payload: any }) {
+  const cafs: any[] = payload.cafeterias || [];
+  return (
+    <View style={styles.card}>
+      <CardHeader icon="🍱" title={`校園餐廳（${cafs.length}）`} />
+      {cafs.map((c) => (
+        <View key={c.id} style={styles.poiRow}>
+          <Text style={styles.poiName}>{c.name}</Text>
+          <Text style={styles.poiMeta}>
+            {c.openTime && c.closeTime ? `${c.openTime}–${c.closeTime}` : ''}
+            {c.seats ? ` · ${c.seats} 座` : ''}
+            {c.openNow === true ? ' · 營業中' : c.openNow === false ? ' · 未營業' : ''}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function MenuCard({ payload }: { payload: any }) {
+  const items: any[] = payload.items || [];
+  return (
+    <View style={styles.card}>
+      <CardHeader icon="📜" title={`${payload.cafeteriaName || '餐廳'} 菜單（${items.length}）`} />
+      {items.slice(0, 6).map((it) => (
+        <View key={it.menuItemId || it.id} style={styles.menuRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.menuName}>{it.name}</Text>
+            {it.description ? <Text style={styles.menuDesc}>{it.description}</Text> : null}
+          </View>
+          <Text style={styles.menuPrice}>${it.price}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function OrderDraftCard({ payload }: { payload: any }) {
+  const [paymentMethod, setPaymentMethod] = useState<string>(payload.paymentMethod || 'campus_card');
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const items: any[] = payload.items || [];
+
+  const handleConfirm = async () => {
+    if (paymentMethod === 'tappay' || paymentMethod === 'linepay') {
+      Alert.alert(
+        '金流尚未審核',
+        `${paymentMethod === 'tappay' ? 'TapPay' : 'Line Pay'} sandbox 待商家審核中（本 demo 暫不串接金流）。請改用「校園卡 / 取餐付款」。`,
+      );
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const callable = httpsCallable(getFunctions(getFirebaseApp(), getCloudFunctionRegion()), 'createOrder');
+      const res = await callable({
+        schoolId: payload.confirmAction?.input?.schoolId || 'pu',
+        cafeteriaId: payload.cafeteriaId,
+        items: items.map((it) => ({
+          menuItemId: it.menuItemId,
+          name: it.name,
+          price: it.price,
+          quantity: it.quantity,
+          note: it.note,
+        })),
+        pickupTime: payload.pickupTime,
+        paymentMethod,
+        note: payload.note,
+        source: 'ai_agent',
+      });
+      const data = (res.data as any) || {};
+      if (data.success && data.orderId) {
+        setResult({ ok: true, message: `✓ 訂單建立成功！訂單號 ${data.orderId}` });
+      } else {
+        setResult({ ok: false, message: data.errorMessage || '下單失敗，請稍後再試' });
+      }
+    } catch (e: any) {
+      setResult({ ok: false, message: e?.message || '下單失敗' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <View style={styles.draftCard}>
+      <CardHeader icon="📝" title={`${payload.cafeteriaName || ''} 訂單草稿`} />
+      {items.map((it: any, i: number) => (
+        <View key={i} style={styles.menuRow}>
+          <Text style={styles.menuName}>
+            {it.name} × {it.quantity}
+          </Text>
+          <Text style={styles.menuPrice}>${it.price * it.quantity}</Text>
+        </View>
+      ))}
+      <View style={styles.totalRow}>
+        <Text style={styles.totalLabel}>小計</Text>
+        <Text style={styles.totalValue}>${payload.subtotal || 0}</Text>
+      </View>
+      <View style={styles.totalRow}>
+        <Text style={styles.totalLabel}>稅 (5%)</Text>
+        <Text style={styles.totalValue}>${payload.tax || 0}</Text>
+      </View>
+      <View style={[styles.totalRow, { marginTop: 4 }]}>
+        <Text style={styles.totalLabelBold}>總計</Text>
+        <Text style={styles.totalValueBold}>${payload.total || 0}</Text>
+      </View>
+      <Text style={styles.paymentLabel}>付款方式</Text>
+      <View style={styles.paymentRow}>
+        {[
+          { id: 'campus_card', label: '校園卡' },
+          { id: 'tappay', label: 'TapPay\n(sandbox待審)' },
+          { id: 'linepay', label: 'LinePay\n(sandbox待審)' },
+        ].map((opt) => (
+          <TouchableOpacity
+            key={opt.id}
+            style={[styles.payChip, paymentMethod === opt.id && styles.payChipSel]}
+            onPress={() => setPaymentMethod(opt.id)}
+            disabled={submitting || Boolean(result?.ok)}
+          >
+            <Text style={[styles.payChipText, paymentMethod === opt.id && styles.payChipTextSel]}>
+              {opt.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {result ? (
+        <View style={[styles.resultBox, result.ok ? styles.resultOk : styles.resultErr]}>
+          <Text style={result.ok ? styles.resultOkText : styles.resultErrText}>{result.message}</Text>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={[styles.confirmBtn, submitting && styles.confirmBtnDisabled]}
+          onPress={handleConfirm}
+          disabled={submitting}
+        >
+          {submitting ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.confirmBtnText}>✅ 確認下單</Text>
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 }
 
 function NavigateCard({ payload }: { payload: any }) {
@@ -395,5 +632,94 @@ const styles = StyleSheet.create({
 
   errorMessage: { fontSize: 13, color: '#8E1B1B', lineHeight: 20 },
   errorSuggestion: { marginTop: 8, fontSize: 12, color: '#9C3B3B' },
+
+  // ── Route card ──
+  routeCard: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  routeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  routeIcon: { fontSize: 18, marginRight: 8 },
+  routeTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: '#1E3A8A' },
+  routeMetaBadge: { backgroundColor: '#CCFBF1', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
+  routeMetaText: { fontSize: 11, color: '#0F766E', fontWeight: '600' },
+  routeEndpoints: { paddingVertical: 8 },
+  routeEpRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  routeDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
+  routeEpText: { fontSize: 13, color: '#0F172A' },
+  routeStep: { fontSize: 12, color: '#475569', marginVertical: 1 },
+  routeCta: { marginTop: 10, color: '#2563EB', fontWeight: '700', fontSize: 13, textAlign: 'center' },
+
+  // ── POI / Cafeteria list row ──
+  poiRow: {
+    backgroundColor: '#FFF',
+    borderRadius: 10,
+    padding: 10,
+    marginVertical: 3,
+    borderWidth: 1,
+    borderColor: '#E0E4F4',
+  },
+  poiName: { fontSize: 14, fontWeight: '600', color: '#0F172A' },
+  poiMeta: { fontSize: 12, color: '#64748B', marginTop: 2 },
+
+  // ── Menu / Draft ──
+  menuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E2E8F0',
+  },
+  menuName: { fontSize: 14, color: '#0F172A', fontWeight: '500' },
+  menuDesc: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  menuPrice: { fontSize: 14, fontWeight: '700', color: '#C2410C' },
+
+  draftCard: {
+    backgroundColor: '#FAF5FF',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#D8B4FE',
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  totalLabel: { fontSize: 13, color: '#4A044E' },
+  totalValue: { fontSize: 13, color: '#4A044E' },
+  totalLabelBold: { fontSize: 15, fontWeight: '700', color: '#6B21A8' },
+  totalValueBold: { fontSize: 15, fontWeight: '700', color: '#6B21A8' },
+  paymentLabel: { marginTop: 10, fontSize: 12, color: '#6B21A8', fontWeight: '600' },
+  paymentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
+  payChip: {
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#D8B4FE',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  payChipSel: { backgroundColor: '#6B21A8', borderColor: '#6B21A8' },
+  payChipText: { color: '#581C87', fontSize: 11, textAlign: 'center' },
+  payChipTextSel: { color: '#FFF' },
+  confirmBtn: {
+    marginTop: 12,
+    backgroundColor: '#16A34A',
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  confirmBtnDisabled: { backgroundColor: '#94A3B8' },
+  confirmBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
+  resultBox: { marginTop: 12, padding: 10, borderRadius: 10 },
+  resultOk: { backgroundColor: '#D1FAE5' },
+  resultErr: { backgroundColor: '#FEE2E2' },
+  resultOkText: { color: '#065F46', fontSize: 13 },
+  resultErrText: { color: '#991B1B', fontSize: 13 },
 });
 
