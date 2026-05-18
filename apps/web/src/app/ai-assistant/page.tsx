@@ -179,17 +179,42 @@ function buildDemoReply(messages: { role: string; content: string }[], role?: De
   // ── 教師 / TA 角色的 demo 回應 ──
   if (role === 'teacher' || role === 'ta') {
     if (lastUserMsg.includes('學生') || lastUserMsg.includes('關注') || lastUserMsg.includes('成績')) {
-      return `🔍 **班級成績分析（資料結構 CS301）**
+      // 即時讀 DEMO_STUDENTS 班級成績，動態算出需關注 / 優異學生
+      const enriched = DEMO_STUDENTS.map((s) => ({
+        ...s,
+        avg: Math.round((s.scores.hw + s.scores.mid + s.scores.final) / 3),
+      }));
+      const lowPerformers = enriched.filter((s) => s.avg < 70).sort((a, b) => a.avg - b.avg);
+      const topPerformers = enriched
+        .filter((s) => s.avg >= 90)
+        .sort((a, b) => b.avg - a.avg)
+        .slice(0, 3);
+      const classAvg = Math.round(enriched.reduce((sum, s) => sum + s.avg, 0) / enriched.length);
 
-根據目前成績數據，以下學生需要特別關注：
+      const lowLines = lowPerformers.length
+        ? lowPerformers
+            .map(
+              (s) =>
+                `- ${s.displayName}（${s.studentId}）：作業 ${s.scores.hw}、期中 ${s.scores.mid}、期末 ${s.scores.final}（平均 ${s.avg}）→ 建議約談`,
+            )
+            .join('\n')
+        : '（目前沒有低於 70 分的學生）';
+      const topLines = topPerformers
+        .map(
+          (s) =>
+            `- ${s.displayName}（${s.studentId}）：作業 ${s.scores.hw}、期中 ${s.scores.mid}、期末 ${s.scores.final}（平均 ${s.avg}）`,
+        )
+        .join('\n');
 
-⚠️ **需要關注的學生（分數 < 70）：**
-- 張志偉（M11302005）：作業 60、期中 55、期末 58 → 建議約談輔導
-- 許志明（M11302009）：作業 66、期中 70、期末 65 → 邊緣通過，需加油
+      return `🔍 **班級成績分析（資料結構 CS301，即時自 DEMO_STUDENTS）**
 
-📈 **表現優異：**
-- 王小明（M11302001）：作業 95、期中 96、期末 97 → 班級第一
-- 蔡雅芳（M11302008）：作業 93、期中 90、期末 94
+**全班 ${enriched.length} 位，平均 ${classAvg} 分**
+
+⚠️ **需要關注的學生（平均 < 70，${lowPerformers.length} 位）：**
+${lowLines}
+
+📈 **表現優異（平均 ≥ 90，前 3 名）：**
+${topLines}
 
 **建議行動：**
 1. 針對低分學生發送關懷訊息，了解學習困難
