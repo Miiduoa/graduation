@@ -898,7 +898,7 @@ export default function AIAssistantPage(props: {
                 { label: '畢業 GPA', val: '3.65', color: '#FF9500' },
               ].map((s) => (
                 <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
                 </div>
               ))
@@ -911,7 +911,7 @@ export default function AIAssistantPage(props: {
                 { label: '畢業需求', val: summary.totalRequired, color: '#8E8E93' },
               ].map((s) => (
                 <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
                 </div>
               ))
@@ -928,7 +928,7 @@ export default function AIAssistantPage(props: {
               { label: '待批改', val: TEACHER_PENDING_REVIEWS.filter(r => r.status === 'submitted').length + getPendingSubmissions('c1', store).length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
@@ -944,7 +944,7 @@ export default function AIAssistantPage(props: {
               { label: '待審申請', val: getPendingClubMembers('club-1', store).length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 14, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 14, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
@@ -960,7 +960,7 @@ export default function AIAssistantPage(props: {
               { label: '待審公告', val: readPendingAnns().length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
@@ -976,7 +976,7 @@ export default function AIAssistantPage(props: {
               { label: '安全事件', val: 1, color: '#FF3B30' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}

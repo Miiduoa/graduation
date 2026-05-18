@@ -126,7 +126,7 @@ export function FeedbackScreen(props: any) {
           <Text
             style={{
               color: theme.colors.text,
-              fontWeight: '900',
+              fontWeight: '700',
               fontSize: 22,
               textAlign: 'center',
             }}

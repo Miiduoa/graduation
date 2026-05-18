@@ -567,7 +567,7 @@ function MiniScheduleView(props: {
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
                 {next.startPeriod}
               </Text>
             </View>
@@ -615,7 +615,7 @@ function MiniScheduleView(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: s.color, fontWeight: '900', fontSize: 22 }}>{s.value}</Text>
+            <Text style={{ color: s.color, fontWeight: '700', fontSize: 22 }}>{s.value}</Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{s.label}</Text>
           </View>
         ))}
@@ -1485,7 +1485,7 @@ function GradesView(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
               {gpa.toFixed(2)}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>GPA</Text>
@@ -1501,7 +1501,7 @@ function GradesView(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
               {totalCredits}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已修學分</Text>
@@ -1517,7 +1517,7 @@ function GradesView(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 24 }}>
               {props.grades.length}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>科目數</Text>
@@ -1607,7 +1607,7 @@ function GradesView(props: {
                         {cs.examRows.length} 項測驗
                       </Text>
                     </View>
-                    <Text style={{ color: finalColor, fontWeight: '900', fontSize: 22 }}>
+                    <Text style={{ color: finalColor, fontWeight: '700', fontSize: 22 }}>
                       {cs.estimatedFinal}
                     </Text>
                   </View>
@@ -1691,7 +1691,7 @@ function GradesView(props: {
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   {g.final_score != null && (
-                    <Text style={{ color: scoreColor, fontWeight: '900', fontSize: 20 }}>
+                    <Text style={{ color: scoreColor, fontWeight: '700', fontSize: 20 }}>
                       {g.final_score}
                     </Text>
                   )}
@@ -1978,7 +1978,7 @@ export function CoursesHomeScreen(props: any) {
               <HeaderAvatarButton />
               <View style={{ gap: 2, flex: 1 }}>
                 <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>學習</Text>
-                <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>我的課程</Text>
+                <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>我的課程</Text>
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -2031,7 +2031,7 @@ export function CoursesHomeScreen(props: any) {
               >
                 學習
               </Text>
-              <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
                 我的課程
               </Text>
             </View>

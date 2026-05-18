@@ -698,7 +698,7 @@ const s = StyleSheet.create({
     padding: 12,
     alignItems: 'center',
   },
-  statNum: { fontSize: 22, fontWeight: '800' },
+  statNum: { fontSize: 22, fontWeight: '700' },
   statLabel: { fontSize: 11, color: theme.colors.muted, marginTop: 2 },
 
   // Mode Display
@@ -742,7 +742,7 @@ const s = StyleSheet.create({
     borderWidth: 2,
     borderColor: theme.colors.accent,
   },
-  codeDigit: { fontSize: 28, fontWeight: '800', color: theme.colors.accent },
+  codeDigit: { fontSize: 28, fontWeight: '700', color: theme.colors.accent },
   codeHint: { fontSize: 13, color: theme.colors.muted, marginTop: 16 },
 
   // Manual mode
@@ -830,7 +830,7 @@ const s = StyleSheet.create({
     borderRadius: 20,
   },
   successIcon: {},
-  successTitle: { fontSize: 24, fontWeight: '800', color: theme.colors.success, marginTop: 12 },
+  successTitle: { fontSize: 24, fontWeight: '700', color: theme.colors.success, marginTop: 12 },
   successMessage: { fontSize: 14, color: theme.colors.muted, marginTop: 8 },
   successTime: { fontSize: 32, fontWeight: '700', color: theme.colors.text, marginTop: 8 },
   sessionInfoBox: {
@@ -879,7 +879,7 @@ const s = StyleSheet.create({
   },
   studentDigitSmall: { width: 38, height: 46 },
   studentDigitFilled: { borderColor: theme.colors.accent },
-  studentDigitText: { fontSize: 22, fontWeight: '800', color: theme.colors.text },
+  studentDigitText: { fontSize: 22, fontWeight: '700', color: theme.colors.text },
   hiddenInput: { position: 'absolute', width: 1, height: 1, opacity: 0 },
 
   checkInBtn: {

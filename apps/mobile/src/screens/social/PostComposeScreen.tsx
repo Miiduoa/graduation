@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     marginTop: 8,
   },
-  submitText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  submitText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });
 
 export default PostComposeScreen;

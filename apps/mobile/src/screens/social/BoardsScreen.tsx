@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 12,
   },
-  title: { fontSize: 18, fontWeight: '800', color: theme.colors.text },
+  title: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',

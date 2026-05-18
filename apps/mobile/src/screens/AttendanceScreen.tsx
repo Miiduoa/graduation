@@ -123,7 +123,7 @@ function StatPill({
 }) {
   return (
     <View style={{ flex: 1, alignItems: 'center', paddingVertical: 12 }}>
-      <Text style={{ fontSize: 22, fontWeight: '800', color }}>{value}</Text>
+      <Text style={{ fontSize: 22, fontWeight: '700', color }}>{value}</Text>
       <Text style={{ fontSize: 11, color: theme.colors.textSecondary, marginTop: 2 }}>{label}</Text>
     </View>
   );
@@ -391,7 +391,7 @@ export function AttendanceScreen(props: any) {
               <Ionicons name="arrow-back" size={22} color={theme.colors.text} />
             </Pressable>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 24, fontWeight: '800', color: theme.colors.text }}>
+              <Text style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text }}>
                 智慧點名
               </Text>
               <Text style={{ fontSize: 12, color: theme.colors.textSecondary, marginTop: 2 }}>
@@ -930,7 +930,7 @@ export function AttendanceScreen(props: any) {
                             {course.instructorName} · {course.courseCode}
                           </Text>
                         </View>
-                        <Text style={{ fontSize: 20, fontWeight: '800', color: rc }}>
+                        <Text style={{ fontSize: 20, fontWeight: '700', color: rc }}>
                           {course.rate}%
                         </Text>
                       </View>

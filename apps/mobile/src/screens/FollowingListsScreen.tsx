@@ -163,7 +163,7 @@ export function FollowingListsScreen(props: any) {
                   </Pressable>
                   {tab === 'following' ? (
                     <Pressable onPress={() => void unfollowTap(uid)} hitSlop={6} style={{ paddingVertical: 4 }}>
-                      <Text style={{ color: theme.colors.danger, fontWeight: '800', fontSize: 13 }}>取消追蹤</Text>
+                      <Text style={{ color: theme.colors.danger, fontWeight: '700', fontSize: 13 }}>取消追蹤</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -190,7 +190,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tabOn: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
-  tabTxt: { fontSize: 13, fontWeight: '800', color: theme.colors.textSecondary },
+  tabTxt: { fontSize: 13, fontWeight: '700', color: theme.colors.textSecondary },
   tabTxtOn: { color: theme.colors.accent },
   card: {
     flexDirection: 'row',
@@ -203,7 +203,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     gap: 12,
   },
-  title: { fontSize: 16, fontWeight: '800', color: theme.colors.text },
+  title: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
   sub: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 4 },
 });
 

@@ -124,14 +124,14 @@ export default function MyQuizScoresScreen() {
         <Text style={{ color: '#E5F2FF', fontSize: 12 }}>📊 我的測驗成績總覽</Text>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
           <View>
-            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>
               {stats.avg ?? '—'}
               {stats.avg !== null && <Text style={{ fontSize: 14 }}>分</Text>}
             </Text>
             <Text style={{ color: '#E5E5EA', fontSize: 11 }}>平均（百分比）</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '800' }}>
+            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700' }}>
               {stats.gradedCount} / {stats.count}
             </Text>
             <Text style={{ color: '#E5E5EA', fontSize: 11 }}>已批改 / 總數</Text>
@@ -218,7 +218,7 @@ export default function MyQuizScoresScreen() {
                 <View style={{ alignItems: 'flex-end' }}>
                   {r.score !== null ? (
                     <>
-                      <Text style={{ fontSize: 24, fontWeight: '800', color: tone }}>
+                      <Text style={{ fontSize: 24, fontWeight: '700', color: tone }}>
                         {r.score}
                         {r.total ? <Text style={{ fontSize: 12 }}> / {r.total}</Text> : null}
                       </Text>

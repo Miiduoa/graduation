@@ -691,7 +691,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
               <Text
                 style={{
                   color: (exam.submission.exam_score ?? 0) >= 60 ? '#34C759' : '#D70015',
-                  fontWeight: '800',
+                  fontWeight: '700',
                   fontSize: 20,
                 }}
               >
@@ -1028,7 +1028,7 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
           <Text
             style={{
               color: finalScore >= 60 ? '#34C759' : '#D70015',
-              fontWeight: '800',
+              fontWeight: '700',
               fontSize: 24,
             }}
           >
@@ -1134,7 +1134,7 @@ function ModuleSection(props: {
               justifyContent: 'center',
             }}
           >
-            <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 14 }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 14 }}>
               {mod.sort}
             </Text>
           </View>

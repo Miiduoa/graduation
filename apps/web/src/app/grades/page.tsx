@@ -367,7 +367,7 @@ export default function GradesPage(props: {
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <div style={{ fontSize: 12, color: 'var(--muted)' }}>加權分數</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: isAtRisk ? 'var(--danger)' : 'var(--success)' }}>{finalScore}</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: isAtRisk ? 'var(--danger)' : 'var(--success)' }}>{finalScore}</div>
                     </div>
                   </div>
                 );
@@ -428,7 +428,7 @@ export default function GradesPage(props: {
                     <div className="insetGroupRowMeta">{c.code} · {c.instructor} · {c.members} 人</div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: c.avg >= 80 ? 'var(--success)' : c.avg >= 70 ? 'var(--warning)' : 'var(--danger)' }}>{c.avg} 分</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: c.avg >= 80 ? 'var(--success)' : c.avg >= 70 ? 'var(--warning)' : 'var(--danger)' }}>{c.avg} 分</div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>通過率 {c.passRate}%</div>
                   </div>
                 </Link>
@@ -561,7 +561,7 @@ export default function GradesPage(props: {
                 {selectedSemester} 學期 · 學期 GPA
               </p>
               <div
-                style={{ fontSize: 64, fontWeight: 900, letterSpacing: '-0.06em', lineHeight: 1 }}
+                style={{ fontSize: 64, fontWeight: 700, letterSpacing: '-0.06em', lineHeight: 1 }}
               >
                 {loading ? '…' : semGpa}
               </div>
@@ -579,7 +579,7 @@ export default function GradesPage(props: {
                 { label: 'A 以上', val: grades.filter((g) => g.grade.startsWith('A')).length },
               ].map((s) => (
                 <div key={s.label} style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.05em' }}>
+                  <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.05em' }}>
                     {s.val}
                   </div>
                   <div style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>{s.label}</div>
@@ -654,7 +654,7 @@ export default function GradesPage(props: {
                     <div
                       style={{
                         fontSize: 13,
-                        fontWeight: 800,
+                        fontWeight: 700,
                         color: isLatest ? 'var(--brand)' : 'var(--text)',
                       }}
                     >
@@ -753,7 +753,7 @@ export default function GradesPage(props: {
                     style={{
                       background: gradeBackground(g.grade),
                       fontSize: 15,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: gradeColor(g.grade),
                       width: 38,
                       height: 38,
@@ -774,7 +774,7 @@ export default function GradesPage(props: {
                       <div
                         style={{
                           fontSize: 18,
-                          fontWeight: 800,
+                          fontWeight: 700,
                           color: gradeColor(g.grade),
                           letterSpacing: '-0.04em',
                         }}

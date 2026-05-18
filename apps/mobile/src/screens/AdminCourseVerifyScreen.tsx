@@ -356,7 +356,7 @@ export function AdminCourseVerifyScreen() {
               <Text
                 style={{
                   color: theme.colors.text,
-                  fontWeight: '800',
+                  fontWeight: '700',
                   fontSize: 18,
                   marginBottom: 8,
                 }}
@@ -449,7 +449,7 @@ export function AdminCourseVerifyScreen() {
                   backgroundColor: theme.colors.surface2,
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 24 }}>
                   {stats.total}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11 }}>總課程數</Text>
@@ -463,7 +463,7 @@ export function AdminCourseVerifyScreen() {
                   backgroundColor: `#FF950015`,
                 }}
               >
-                <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 24 }}>
                   {stats.pending}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11 }}>待審核</Text>
@@ -477,7 +477,7 @@ export function AdminCourseVerifyScreen() {
                   backgroundColor: `${theme.colors.success}15`,
                 }}
               >
-                <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
                   {stats.verified}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已認證</Text>
@@ -491,7 +491,7 @@ export function AdminCourseVerifyScreen() {
                   backgroundColor: `${theme.colors.danger}15`,
                 }}
               >
-                <Text style={{ color: theme.colors.danger, fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.danger, fontWeight: '700', fontSize: 24 }}>
                   {stats.rejected}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已拒絕</Text>
@@ -599,7 +599,7 @@ export function AdminCourseVerifyScreen() {
                             }}
                           >
                             <Text
-                              style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16 }}
+                              style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}
                             >
                               {g.name}
                             </Text>

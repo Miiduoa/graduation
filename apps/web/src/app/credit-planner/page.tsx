@@ -243,7 +243,7 @@ export default function CreditPlannerPage(props: {
                 <div
                   style={{
                     fontSize: 64,
-                    fontWeight: 900,
+                    fontWeight: 700,
                     letterSpacing: '-0.06em',
                     lineHeight: 1,
                   }}
@@ -280,7 +280,7 @@ export default function CreditPlannerPage(props: {
               ].map((s) => (
                 <div key={s.label} style={{ textAlign: 'center' }}>
                   <div
-                    style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.05em' }}
+                    style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.05em' }}
                   >
                     {s.val}
                     {s.unit && (
@@ -472,7 +472,7 @@ export default function CreditPlannerPage(props: {
                     <div
                       style={{
                         fontSize: 22,
-                        fontWeight: 800,
+                        fontWeight: 700,
                         color: 'var(--brand)',
                         letterSpacing: '-0.04em',
                       }}
@@ -607,7 +607,7 @@ export default function CreditPlannerPage(props: {
                     <div
                       style={{
                         fontSize: 18,
-                        fontWeight: 800,
+                        fontWeight: 700,
                         color: isSelected ? 'var(--brand)' : 'var(--text)',
                         letterSpacing: '-0.04em',
                       }}
@@ -732,7 +732,7 @@ export default function CreditPlannerPage(props: {
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontSize: 11,
-                        fontWeight: 800,
+                        fontWeight: 700,
                         color: CATEGORY_COLORS[course.category],
                         flexShrink: 0,
                       }}
@@ -750,7 +750,7 @@ export default function CreditPlannerPage(props: {
                       <div
                         style={{
                           fontSize: 16,
-                          fontWeight: 800,
+                          fontWeight: 700,
                           color: 'var(--brand)',
                           letterSpacing: '-0.04em',
                         }}
@@ -832,7 +832,7 @@ export default function CreditPlannerPage(props: {
                               alignItems: 'center',
                               justifyContent: 'center',
                               fontSize: 11,
-                              fontWeight: 800,
+                              fontWeight: 700,
                               color: CATEGORY_COLORS[course.category],
                               flexShrink: 0,
                             }}
@@ -850,7 +850,7 @@ export default function CreditPlannerPage(props: {
                             <div
                               style={{
                                 fontSize: 16,
-                                fontWeight: 800,
+                                fontWeight: 700,
                                 color: gradeColor(course.grade),
                                 letterSpacing: '-0.04em',
                               }}

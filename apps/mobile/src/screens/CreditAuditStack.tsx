@@ -18,7 +18,7 @@ export function CreditAuditStack() {
       id={undefined}
       screenOptions={{
         headerStyle: { backgroundColor: theme.colors.bg },
-        headerTitleStyle: { color: theme.colors.text, fontWeight: '800' },
+        headerTitleStyle: { color: theme.colors.text, fontWeight: '700' },
         headerTintColor: theme.colors.text,
         headerShadowVisible: false,
       }}

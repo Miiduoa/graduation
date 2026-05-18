@@ -354,7 +354,7 @@ export function LostFoundDetailScreen(props: any) {
             <Text
               style={{
                 color: theme.colors.text,
-                fontWeight: '900',
+                fontWeight: '700',
                 fontSize: 22,
                 textAlign: 'center',
                 marginBottom: 8,
@@ -492,7 +492,7 @@ export function LostFoundDetailScreen(props: any) {
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 18 }}>
+              <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 18 }}>
                 {item.authorName?.[0] ?? '?'}
               </Text>
             </View>

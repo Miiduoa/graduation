@@ -127,7 +127,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
           <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '700', letterSpacing: 3 }}>
             今天的一天 · {now.getMonth() + 1}/{now.getDate()} ({['日', '一', '二', '三', '四', '五', '六'][now.getDay()]})
           </Text>
-          <Text style={{ color: '#fff', fontSize: 24, fontWeight: '900', marginTop: 4 }}>
+          <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700', marginTop: 4 }}>
             {persona.displayName} 的校園動態
           </Text>
           <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 4 }}>
@@ -157,7 +157,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
               <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '700', letterSpacing: 2 }}>
                 下一個 · {nextEvent.hhmm}
               </Text>
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800', marginTop: 4 }}>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', marginTop: 4 }}>
                 {nextEvent.title}
               </Text>
               {!!nextEvent.detail && (
@@ -358,7 +358,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
                         <Text
                           style={{
                             color: theme.colors.text,
-                            fontWeight: '800',
+                            fontWeight: '700',
                             fontSize: 14,
                             textDecorationLine: e.done ? 'line-through' : 'none',
                           }}
@@ -374,7 +374,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
                               backgroundColor: color,
                             }}
                           >
-                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
+                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>
                               下一個
                             </Text>
                           </View>
@@ -469,7 +469,7 @@ function PersonaShortcut({
       >
         <Ionicons name={icon} size={16} color={color} />
       </View>
-      <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 13, marginTop: 8 }}>
+      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13, marginTop: 8 }}>
         {title}
       </Text>
       <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }} numberOfLines={2}>
@@ -494,7 +494,7 @@ function HeroStat({ label, value, highlight }: { label: string; value: string; h
       <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 10, fontWeight: '700', letterSpacing: 1 }}>
         {label.toUpperCase()}
       </Text>
-      <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900', marginTop: 2 }}>{value}</Text>
+      <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', marginTop: 2 }}>{value}</Text>
     </View>
   );
 }

@@ -146,7 +146,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
                 下一班 · {timeStr}
               </p>
               <div
-                style={{ fontSize: 64, fontWeight: 900, letterSpacing: '-0.06em', lineHeight: 1 }}
+                style={{ fontSize: 64, fontWeight: 700, letterSpacing: '-0.06em', lineHeight: 1 }}
               >
                 {nextBus.minutesAway}
                 <span style={{ fontSize: 28, fontWeight: 700, marginLeft: 4 }}>分</span>
@@ -167,7 +167,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
                     border: '1px solid rgba(255,255,255,0.25)',
                   }}
                 >
-                  <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.05em' }}>
+                  <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.05em' }}>
                     {b.minutesAway}
                     <span style={{ fontSize: 14 }}>分</span>
                   </div>
@@ -204,7 +204,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
                   <div
                     style={{
                       fontSize: 20,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: b.color,
                       letterSpacing: '-0.04em',
                     }}

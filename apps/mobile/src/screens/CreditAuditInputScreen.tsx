@@ -966,7 +966,7 @@ export function CreditAuditInputScreen(props: any) {
                   }}
                 >
                   <Text style={{ color: theme.colors.text, fontWeight: '600' }}>畢業總學分</Text>
-                  <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 22 }}>
+                  <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 22 }}>
                     {detailedAudit.total.earned} / {detailedTemplate.totalCreditsRequired}
                   </Text>
                 </View>
@@ -1263,7 +1263,7 @@ export function CreditAuditInputScreen(props: any) {
                           <Text
                             style={{
                               color: catInfo?.color || theme.colors.accent,
-                              fontWeight: '900',
+                              fontWeight: '700',
                               fontSize: 16,
                             }}
                           >

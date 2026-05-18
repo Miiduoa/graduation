@@ -759,7 +759,7 @@ export function HealthScreen(props: any) {
                   alignItems: 'center',
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 20 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
                   {moodTrend.weekAvg}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 10 }}>本週平均</Text>
@@ -773,7 +773,7 @@ export function HealthScreen(props: any) {
                   alignItems: 'center',
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 20 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
                   {moodTrend.monthAvg}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 10 }}>本月平均</Text>
@@ -1493,7 +1493,7 @@ export function HealthScreen(props: any) {
                   justifyContent: 'center',
                 }}
               >
-                <Text style={{ color: s.color, fontWeight: '800', fontSize: 12 }}>{s.step}</Text>
+                <Text style={{ color: s.color, fontWeight: '700', fontSize: 12 }}>{s.step}</Text>
               </View>
               <Ionicons name={s.icon as any} size={16} color={s.color} />
               <Text style={{ color: theme.colors.text, fontSize: 12, flex: 1 }}>{s.text}</Text>

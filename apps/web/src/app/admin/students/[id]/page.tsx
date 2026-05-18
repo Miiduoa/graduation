@@ -200,7 +200,7 @@ export default function StudentDetailPage(props: {
                   </div>
                   {grade ? (
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: c.color }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: c.color }}>
                         {grade.grade}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--muted)' }}>{grade.score} 分</div>

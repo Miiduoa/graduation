@@ -250,7 +250,7 @@ export default function CourseScoresScreen(props: RouteProps) {
         </Text>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
           <View>
-            <Text style={{ color: theme.colors.onAccent, fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 28, fontWeight: '700' }}>
               {stats.avgPct ?? '—'}
               {stats.avgPct !== null && <Text style={{ fontSize: 14 }}>%</Text>}
             </Text>
@@ -259,7 +259,7 @@ export default function CourseScoresScreen(props: RouteProps) {
             </Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ color: theme.colors.onAccent, fontSize: 24, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 24, fontWeight: '700' }}>
               {stats.gradedCount} / {stats.count}
             </Text>
             <Text style={{ color: theme.colors.onAccent, fontSize: 11, opacity: 0.88 }}>
@@ -283,7 +283,7 @@ export default function CourseScoresScreen(props: RouteProps) {
           accessibilityRole="summary"
           accessibilityLabel="依加權試算的可能成績、樂觀與悲觀範圍"
         >
-          <Text style={{ fontSize: 13, fontWeight: '800', color: theme.colors.text }}>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.colors.text }}>
             加權成績預估（試算）
           </Text>
           <Text style={{ fontSize: 12, color: theme.colors.muted, lineHeight: 18 }}>
@@ -293,7 +293,7 @@ export default function CourseScoresScreen(props: RouteProps) {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
             <View style={{ minWidth: '45%', flex: 1 }}>
               <Text style={{ fontSize: 11, color: theme.colors.muted }}>可能情境</Text>
-              <Text style={{ fontSize: 22, fontWeight: '800', color: theme.colors.primary }}>
+              <Text style={{ fontSize: 22, fontWeight: '700', color: theme.colors.primary }}>
                 {gradeOutlook.snapshot.likelyCase !== null
                   ? `${gradeOutlook.snapshot.likelyCase}%`
                   : '—'}
@@ -306,7 +306,7 @@ export default function CourseScoresScreen(props: RouteProps) {
             </View>
             <View style={{ minWidth: '45%', flex: 1 }}>
               <Text style={{ fontSize: 11, color: theme.colors.muted }}>成績區間（加權）</Text>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: theme.colors.text }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text }}>
                 {gradeOutlook.snapshot.worstCase}% — {gradeOutlook.snapshot.bestCase}%
               </Text>
               <Text style={{ fontSize: 11, color: theme.colors.muted }}>悲觀 · 樂觀</Text>
@@ -399,7 +399,7 @@ export default function CourseScoresScreen(props: RouteProps) {
                 <View style={{ alignItems: 'flex-end' }}>
                   {r.score !== null ? (
                     <>
-                      <Text style={{ fontSize: 22, fontWeight: '800', color: tone }}>
+                      <Text style={{ fontSize: 22, fontWeight: '700', color: tone }}>
                         {r.score}
                         {r.totalScore ? (
                           <Text style={{ fontSize: 12 }}> / {r.totalScore}</Text>

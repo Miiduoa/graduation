@@ -814,7 +814,7 @@ export default function TimetablePage(props: {
                           left: 2,
                           top: -9,
                           fontSize: 9,
-                          fontWeight: 800,
+                          fontWeight: 700,
                           color: 'var(--danger, #FF3B30)',
                           letterSpacing: '0.02em',
                           lineHeight: 1,
@@ -1008,7 +1008,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: 'var(--brand)',
                       letterSpacing: '-0.05em',
                     }}
@@ -1021,7 +1021,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: '#34C759',
                       letterSpacing: '-0.05em',
                     }}
@@ -1034,7 +1034,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: '#FF9500',
                       letterSpacing: '-0.05em',
                     }}

@@ -455,7 +455,7 @@ export default function LibraryPage(props: {
                       <div
                         style={{
                           fontSize: 16,
-                          fontWeight: 800,
+                          fontWeight: 700,
                           color: isUrgent
                             ? 'var(--danger)'
                             : isExpiring
