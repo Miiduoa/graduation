@@ -363,7 +363,10 @@ const sharedAnimation: ThemeAnimation = {
  * Secondary: restrained campus gold for achievement and high-signal accents.
  * Purple remains available as a social/brand accent, but it no longer dominates the UI.
  */
-const DEFAULT_ACCENT = '#2F7D6C';
+// ── AI-First v1：主色從校園綠改為 AI Indigo（#6366F1）──
+// 此覆寫讓所有沿用 theme.colors.accent 的舊畫面自動變紫色 AI 配色
+// 設計總綱：docs/design/AI_FIRST_REDESIGN.md
+const DEFAULT_ACCENT = '#6366F1';
 const DEFAULT_GOLD = '#C79532';
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
