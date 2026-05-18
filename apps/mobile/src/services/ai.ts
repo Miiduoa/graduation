@@ -3149,6 +3149,10 @@ async function callCampusAssistant(
           (t): t is string => typeof t === 'string' && t.length > 0,
         )
       : undefined;
+    // 新增：抓取 backend cards（route_card / menu_card / order_draft_card / poi_card / cafeteria_list_card / navigate）
+    const cardsFromData = Array.isArray((data as any).cards)
+      ? ((data as any).cards as Array<{ kind: AgentCard['kind']; payload: Record<string, any> }>)
+      : undefined;
     return {
       content,
       suggestions: data.suggestions ?? extractSuggestions(data.content ?? ''),
@@ -3156,6 +3160,7 @@ async function callCampusAssistant(
       citations: data.citations,
       error: data.error,
       ...(toolsFromData && toolsFromData.length > 0 ? { assistantToolsUsed: toolsFromData } : {}),
+      ...(cardsFromData && cardsFromData.length > 0 ? { cards: cardsFromData } : {}),
       ...(sessionFromDebug ? { campusAssistantSessionId: sessionFromDebug } : {}),
       ...(runIdFromEnvelope ? { campusAssistantRunId: runIdFromEnvelope } : {}),
     };
