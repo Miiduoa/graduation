@@ -124,7 +124,7 @@ function ConflictItem({
             </View>
             <View style={{ width: 1, backgroundColor: theme.colors.border }} />
             <View style={{ flex: 1 }}>
-              <Text style={{ color: '#007AFF', fontSize: 10, marginBottom: 2 }}>伺服器</Text>
+              <Text style={{ color: '#5856D6', fontSize: 10, marginBottom: 2 }}>伺服器</Text>
               <Text style={{ color: theme.colors.text, fontSize: 13 }} numberOfLines={2}>
                 {formatValue(conflict.serverData[field])}
               </Text>
@@ -175,19 +175,19 @@ function ConflictItem({
             paddingVertical: 10,
             paddingHorizontal: 12,
             borderRadius: theme.radius.md,
-            backgroundColor: '#007AFF20',
+            backgroundColor: '#5856D620',
             borderWidth: 1,
-            borderColor: '#007AFF50',
+            borderColor: '#5856D650',
             alignItems: 'center',
             opacity: resolving ? 0.5 : 1,
           }}
         >
           {resolving && selectedResolution === 'keep_server' ? (
-            <ActivityIndicator size="small" color="#007AFF" />
+            <ActivityIndicator size="small" color="#5856D6" />
           ) : (
             <>
-              <Ionicons name="cloud" size={16} color="#007AFF" />
-              <Text style={{ color: '#007AFF', fontSize: 12, fontWeight: '600', marginTop: 4 }}>
+              <Ionicons name="cloud" size={16} color="#5856D6" />
+              <Text style={{ color: '#5856D6', fontSize: 12, fontWeight: '600', marginTop: 4 }}>
                 保留伺服器
               </Text>
             </>

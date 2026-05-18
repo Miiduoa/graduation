@@ -374,7 +374,7 @@ export function AttendanceScreen(props: any) {
           colors={
             theme.mode === 'dark'
               ? (['#1A0A3E', '#0D1B3E', theme.colors.bg] as [string, string, string])
-              : (['#F9FAFB', '#FFFFFF', theme.colors.bg] as [string, string, string])
+              : (['#F2F2F7', '#FFFFFF', theme.colors.bg] as [string, string, string])
           }
           style={{ paddingTop: insets.top + 12, paddingBottom: 24 }}
         >
@@ -425,7 +425,7 @@ export function AttendanceScreen(props: any) {
               marginBottom: 12,
               padding: 14,
               borderRadius: 12,
-              backgroundColor: '#16a34a',
+              backgroundColor: '#34C759',
               flexDirection: 'row',
               alignItems: 'center',
               gap: 10,

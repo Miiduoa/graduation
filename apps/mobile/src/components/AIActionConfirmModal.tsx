@@ -126,7 +126,7 @@ export function AIActionConfirmModal(props: AIActionConfirmModalProps) {
               style={({ pressed }) => [
                 styles.actionButton,
                 {
-                  backgroundColor: isDark ? theme.colors.surface2 : '#F3F4F6',
+                  backgroundColor: isDark ? theme.colors.surface2 : '#F2F2F7',
                   opacity: pressed ? 0.85 : 1,
                   borderColor: theme.colors.border,
                   borderWidth: 1,

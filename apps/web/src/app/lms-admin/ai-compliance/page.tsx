@@ -212,8 +212,8 @@ export default function AiCompliancePage() {
               style={{
                 padding: '10px 16px',
                 borderRadius: 10,
-                border: '1px solid #007aff',
-                background: '#007aff',
+                border: '1px solid #5856D6',
+                background: '#5856D6',
                 color: '#fff',
                 fontWeight: 700,
                 cursor: busy ? 'wait' : 'pointer',

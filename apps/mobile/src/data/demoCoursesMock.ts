@@ -172,7 +172,7 @@ export const DEMO_COURSES: MockCourse[] = [
     instructor: '康贊清',
     credit: 3,
     semester: '1142',
-    color: '#007AFF',
+    color: '#5856D6',
     iconEmoji: '📊',
   },
   {

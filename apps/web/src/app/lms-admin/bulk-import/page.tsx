@@ -89,7 +89,7 @@ export default function BulkImportMembersPage() {
           padding: '12px 18px',
           borderRadius: 10,
           border: 'none',
-          background: '#007aff',
+          background: '#5856D6',
           color: '#fff',
           fontWeight: 700,
           cursor: busy ? 'wait' : 'pointer',

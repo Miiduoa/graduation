@@ -19,7 +19,7 @@ import {
 } from '@/lib/demoStore';
 
 const TYPE_COLOR: Record<DemoMessage['type'], string> = {
-  info: '#007AFF',
+  info: '#5856D6',
   warning: '#FF9500',
   action: '#FF3B30',
   success: '#34C759',
@@ -97,8 +97,8 @@ export default function MessagesPage(props: {
             style={{
               padding: '32px 24px',
               textAlign: 'center',
-              background: 'rgba(0,122,255,0.06)',
-              border: '1px solid #007AFF',
+              background: 'rgba(88,86,214,0.06)',
+              border: '1px solid #5856D6',
             }}
           >
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
@@ -128,8 +128,8 @@ export default function MessagesPage(props: {
             className="card"
             style={{
               padding: '12px 16px',
-              background: 'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(90,200,250,0.07) 100%)',
-              border: '1px solid rgba(0,122,255,0.22)',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.07) 100%)',
+              border: '1px solid rgba(88,86,214,0.22)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -223,9 +223,9 @@ export default function MessagesPage(props: {
                       borderRadius: 'var(--radius)',
                       border: `1px solid ${isSelected ? 'var(--brand)' : 'var(--border)'}`,
                       background: isSelected
-                        ? 'rgba(0,122,255,0.08)'
+                        ? 'rgba(88,86,214,0.08)'
                         : isUnread
-                          ? 'var(--accent-soft, rgba(0,122,255,0.05))'
+                          ? 'var(--accent-soft, rgba(88,86,214,0.05))'
                           : 'var(--surface)',
                       cursor: 'pointer',
                       transition: 'all 0.15s',

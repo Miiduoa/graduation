@@ -50,7 +50,7 @@ export const ITEM_CATEGORIES: CategoryInfo[] = [
     id: 'student_card',
     label: '學生證',
     icon: 'id-card-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     avgReturnDays: 1.2,
     returnRate: 0.92,
     commonLocations: ['蓋夏圖書館', '學生餐廳', '行政大樓'],
@@ -477,7 +477,7 @@ export function getPostStatusLabel(status: PostStatus): string {
 
 export function getPostStatusColor(status: PostStatus): string {
   const m: Record<PostStatus, string> = {
-    open: '#007AFF',
+    open: '#5856D6',
     matching: '#FF9500',
     claimed: '#AF52DE',
     returned: '#34C759',
@@ -547,7 +547,7 @@ export const ROLE_LF_CONFIG: LFRoleConfig[] = [
     role: 'student',
     label: '學生',
     icon: 'school-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     features: [
       'post_lost',
       'post_found',
@@ -1044,7 +1044,7 @@ export const REPUTATION_ACTIONS: ReputationAction[] = [
     label: '送交警衛室',
     points: 8,
     icon: 'shield-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     description: '將物品送交警衛室保管',
   },
   {
@@ -1098,7 +1098,7 @@ export const REPUTATION_LEVELS: ReputationLevel[] = [
     name: '善良夥伴',
     minPoints: 20,
     icon: 'heart-half-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     badge: '💙',
     perk: '發文置頂 1 天',
   },
@@ -1223,7 +1223,7 @@ export const LF_NOTIFICATION_TYPES: LFNotificationConfig[] = [
     type: 'new_message',
     label: '新訊息',
     icon: 'chatbubble-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     defaultEnabled: true,
   },
   {
@@ -1304,7 +1304,7 @@ export function getSmartLFSuggestions(): LFSuggestion[] {
     suggestions.push({
       icon: 'school-outline',
       text: '下課換教室時記得帶走充電器和水壺',
-      color: '#007AFF',
+      color: '#5856D6',
     });
   }
   if (hour >= 18 && hour < 21) {

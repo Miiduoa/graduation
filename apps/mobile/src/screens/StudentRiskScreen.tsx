@@ -56,7 +56,7 @@ const TIER_COLOR: Record<RiskTier, string> = {
   critical: '#D70015',
   high: '#ea580c',
   medium: '#ca8a04',
-  low: '#16a34a',
+  low: '#34C759',
 };
 
 export default function StudentRiskScreen() {

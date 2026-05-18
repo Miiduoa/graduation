@@ -362,11 +362,11 @@ const sharedAnimation: ThemeAnimation = {
  * Primary interactive：AI-First 使用 Indigo（見下方 DEFAULT_ACCENT），狀態色仍對齊 iOS system colors。
  * Secondary: campus gold for achievement/reward signal only (kept restrained for low-frequency use).
  */
-// ── AI-First v1：主色從校園綠改為 AI Indigo（#6366F1）──
+// ── AI-First v1：主色從校園綠改為 AI Indigo（#5856D6）──
 // 此覆寫讓所有沿用 theme.colors.accent 的舊畫面自動變紫色 AI 配色
 // 設計總綱：docs/design/AI_FIRST_REDESIGN.md
 // Dark theme default accent：較亮一階的 Indigo，在深色系統底上維持對比（對齊 iOS「深色用較亮主色」）
-const DEFAULT_ACCENT = '#6366F1';
+const DEFAULT_ACCENT = '#5856D6';
 const DEFAULT_ACCENT_DARK = '#818CF8';
 const DEFAULT_GOLD = '#C79532';
 

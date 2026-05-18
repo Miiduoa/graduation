@@ -169,7 +169,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'cafeteria',
     name: '查詢等候時間',
     icon: 'time-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     description: '查看各餐廳目前的排隊/等候時間',
     parameters: [],
     requiresConfirmation: false,
@@ -403,7 +403,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'dorm',
     name: '查洗衣機',
     icon: 'water-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     description: '查看洗衣機/烘衣機使用狀態和預估完成時間',
     parameters: [
       {
@@ -589,7 +589,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '查成績',
     icon: 'school-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     description: '查詢最新成績或學期平均',
     parameters: [
       {
@@ -894,7 +894,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '發布作業',
     icon: 'create-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     description: 'AI 格式化作業要求、設定截止日、通知全班',
     parameters: [
       { name: 'course', type: 'string', label: '課程', required: true },
@@ -1516,7 +1516,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '上課提醒',
     condition: '上課前 15 分鐘',
     icon: 'school-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     message: '你的「{course}」{time} 在 {location} 上課，要出發了嗎？',
     priority: 'high',
   },
@@ -1623,7 +1623,7 @@ export const AGENT_ROLE_CONFIG: AgentRoleConfig[] = [
     role: 'student',
     label: '學生',
     icon: 'school-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     toolCategories: [
       'cafeteria',
       'health',

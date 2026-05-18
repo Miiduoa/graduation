@@ -157,7 +157,7 @@ export default function GradeWhatIfScreen() {
             <Text
               style={{
                 textAlign: 'center',
-                color: whatIf.delta > 0 ? '#16A34A' : '#D70015',
+                color: whatIf.delta > 0 ? '#34C759' : '#D70015',
                 fontSize: 13,
                 fontWeight: '600',
               }}
@@ -374,7 +374,7 @@ export default function GradeWhatIfScreen() {
 
 function Box(props: { label: string; value: string; tone: 'success' | 'danger' | 'primary'; big?: boolean }) {
   const color =
-    props.tone === 'success' ? '#16A34A'
+    props.tone === 'success' ? '#34C759'
     : props.tone === 'danger' ? '#D70015'
     : theme.colors.primary;
   return (

@@ -197,7 +197,7 @@ function getRandomColor(seed: string): string {
     '#FF2D55',
     '#FF9500',
     '#34C759',
-    '#007AFF',
+    '#5856D6',
     '#5856D6',
     '#FF9500',
     '#14B8A6',

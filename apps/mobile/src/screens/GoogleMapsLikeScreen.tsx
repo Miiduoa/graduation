@@ -108,7 +108,7 @@ function buildMapHtml(opts: {
 <style>
   *{margin:0;padding:0}
   html,body,#map{width:100%;height:100%;background:#0B1014}
-  .user-dot{width:20px;height:20px;border-radius:50%;background:#007AFF;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4);animation:pulse 2s infinite ease-out}
+  .user-dot{width:20px;height:20px;border-radius:50%;background:#5856D6;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4);animation:pulse 2s infinite ease-out}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4)}50%{box-shadow:0 0 0 14px rgba(59,130,246,.06),0 4px 8px rgba(0,0,0,.4)}}
   .poi-pin{display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
   .poi-pin .head{width:34px;height:34px;border-radius:50%;border:3px solid #fff;display:grid;place-items:center;font-size:16px}

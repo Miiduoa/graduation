@@ -266,8 +266,8 @@ export default function TeacherRubricsPage({ params, searchParams }: { params: {
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(0,122,255,0.08)',
-            border: '1px solid #007AFF',
+            background: 'rgba(88,86,214,0.08)',
+            border: '1px solid #5856D6',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -276,7 +276,7 @@ export default function TeacherRubricsPage({ params, searchParams }: { params: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#007AFF', marginBottom: 3 }}>🤖 AI Rubric 助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI Rubric 助理</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               {canEdit
                 ? '讓 AI 幫你設計符合課程目標的評分標準，或建議各評分項的等級描述與權重分配。'

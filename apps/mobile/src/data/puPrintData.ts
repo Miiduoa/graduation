@@ -893,7 +893,7 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'undergraduate',
     label: '大學部學生',
     icon: 'school-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     features: [
       'self_print',
       'self_copy',
@@ -1446,7 +1446,7 @@ export function getPrintJobStatusLabel(status: PrintJobStatus): string {
 export function getPrintJobStatusColor(status: PrintJobStatus): string {
   const m: Record<PrintJobStatus, string> = {
     draft: '#AEAEB2',
-    uploading: '#007AFF',
+    uploading: '#5856D6',
     queued: '#FF9500',
     printing: '#5856D6',
     done: '#34C759',
@@ -1608,7 +1608,7 @@ export function getFaultStatusColor(status: FaultReport['status']): string {
   const m: Record<string, string> = {
     reported: '#FF3B30',
     assigned: '#FF9500',
-    in_progress: '#007AFF',
+    in_progress: '#5856D6',
     resolved: '#34C759',
     cannot_fix: '#AEAEB2',
   };
@@ -1658,7 +1658,7 @@ export function getTransactionTypeLabel(type: CardTransactionType): string {
 export function getTransactionTypeColor(type: CardTransactionType): string {
   const m: Record<CardTransactionType, string> = {
     purchase: '#34C759',
-    print: '#007AFF',
+    print: '#5856D6',
     copy: '#5856D6',
     scan: '#AF52DE',
     refund: '#FF9500',
@@ -1927,7 +1927,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'machine_alt',
     label: '替代機器',
     icon: 'swap-horizontal-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     defaultEnabled: true,
     description: '附近有更快的替代機器',
   },
@@ -1975,7 +1975,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'quota_refresh',
     label: '額度刷新',
     icon: 'refresh-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     defaultEnabled: true,
     description: '新學期免費額度已發放',
   },

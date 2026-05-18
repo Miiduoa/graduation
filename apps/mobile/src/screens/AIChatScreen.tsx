@@ -590,7 +590,7 @@ function ThinkingBubble(props: { steps: ThinkingStepUI[]; collapsed?: boolean })
     done: { icon: 'checkmark-circle', color: '#34C759' },
     checking: { icon: 'sync-outline', color: '#5856D6' },
     warning: { icon: 'alert-circle', color: '#FF9500' },
-    info: { icon: 'information-circle', color: '#007AFF' },
+    info: { icon: 'information-circle', color: '#5856D6' },
   };
 
   return (
@@ -783,7 +783,7 @@ function ToolStatusCard(props: { execution: ToolExecution; tool: AgentTool | und
   const statusConfig: Record<ToolExecutionStatus, { icon: string; color: string; label: string }> =
     {
       pending: { icon: 'hourglass-outline', color: '#FF9500', label: '等待中' },
-      confirming: { icon: 'help-circle-outline', color: '#007AFF', label: '待確認' },
+      confirming: { icon: 'help-circle-outline', color: '#5856D6', label: '待確認' },
       executing: { icon: 'sync-outline', color: '#5856D6', label: '執行中' },
       success: { icon: 'checkmark-circle', color: '#34C759', label: '完成' },
       failed: { icon: 'close-circle', color: '#FF3B30', label: '失敗' },
@@ -1847,7 +1847,7 @@ export function AIChatScreen(props: any) {
           ? '使用已下載的 AI 模型在裝置上推理'
           : '連線到你設定的本機 LLM server',
         icon: 'hardware-chip-outline' as const,
-        color: aiStatus.localModelReady ? '#AF52DE' : '#007AFF',
+        color: aiStatus.localModelReady ? '#AF52DE' : '#5856D6',
       };
     }
     return {

@@ -65,7 +65,7 @@ function buildCsvContent(courses: SavedCourse[]): string {
 
 const legacyCategories: Array<{ key: CreditCategory; label: string; color: string }> = [
   { key: 'required', label: '必修', color: '#FF3B30' },
-  { key: 'elective', label: '選修', color: '#007AFF' },
+  { key: 'elective', label: '選修', color: '#5856D6' },
   { key: 'general', label: '通識', color: '#34C759' },
   { key: 'english', label: '英文', color: '#AF52DE' },
   { key: 'other', label: '其他', color: '#FF9500' },

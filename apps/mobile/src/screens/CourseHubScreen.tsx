@@ -957,7 +957,7 @@ export function CourseHubScreen(props: any) {
                 <ActionChip
                   icon="albums-outline"
                   label="教材單元"
-                  tint="#007AFF"
+                  tint="#5856D6"
                   onPress={() =>
                     nav?.navigate?.('CourseModules', {
                       groupId: membership.groupId,

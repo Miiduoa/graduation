@@ -806,12 +806,12 @@ function StatisticsTab(props: { orders: Order[] }) {
                 width: 28,
                 height: 28,
                 borderRadius: 14,
-                backgroundColor: '#16A34A20',
+                backgroundColor: '#34C75920',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: '#16A34A', fontWeight: '700', fontSize: 12 }}>{i + 1}</Text>
+              <Text style={{ color: '#34C759', fontWeight: '700', fontSize: 12 }}>{i + 1}</Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 13 }}>
@@ -1003,7 +1003,7 @@ function InspectionCard(props: { inspection: InspectionRecord }) {
   const { inspection: insp } = props;
   const vendor = getVendor(insp.vendorId);
 
-  const scoreColor = insp.score >= 90 ? '#16A34A' : insp.score >= 70 ? '#FF9500' : '#D70015';
+  const scoreColor = insp.score >= 90 ? '#34C759' : insp.score >= 70 ? '#FF9500' : '#D70015';
 
   return (
     <View
@@ -1592,17 +1592,17 @@ function CreateInspectionModal(props: { onClose: () => void }) {
               padding: 12,
               borderRadius: 10,
               backgroundColor:
-                totalScore >= 90 ? '#16A34A10' : totalScore >= 70 ? '#FF950010' : '#D7001510',
+                totalScore >= 90 ? '#34C75910' : totalScore >= 70 ? '#FF950010' : '#D7001510',
               borderWidth: 1,
               borderColor:
-                totalScore >= 90 ? '#16A34A30' : totalScore >= 70 ? '#FF950030' : '#D7001530',
+                totalScore >= 90 ? '#34C75930' : totalScore >= 70 ? '#FF950030' : '#D7001530',
               alignItems: 'center',
               gap: 4,
             }}
           >
             <Text
               style={{
-                color: totalScore >= 90 ? '#16A34A' : totalScore >= 70 ? '#FF9500' : '#D70015',
+                color: totalScore >= 90 ? '#34C759' : totalScore >= 70 ? '#FF9500' : '#D70015',
                 fontWeight: '800',
                 fontSize: 20,
               }}
@@ -1611,7 +1611,7 @@ function CreateInspectionModal(props: { onClose: () => void }) {
             </Text>
             <Text
               style={{
-                color: totalScore >= 90 ? '#16A34A' : totalScore >= 70 ? '#FF9500' : '#D70015',
+                color: totalScore >= 90 ? '#34C759' : totalScore >= 70 ? '#FF9500' : '#D70015',
                 fontWeight: '700',
                 fontSize: 13,
               }}

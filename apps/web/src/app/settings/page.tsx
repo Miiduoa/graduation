@@ -144,7 +144,7 @@ export default function SettingsPage(props: {
   const [compactMode, setCompactMode] = useState(false);
   const [animations, setAnimations] = useState(true);
   const [fontSize, setFontSize] = useState('medium');
-  const [themeColor, setThemeColor] = useState('#007AFF');
+  const [themeColor, setThemeColor] = useState('#5856D6');
 
   // Notifications
   const [pushEnabled, setPushEnabled] = useState(true);
@@ -165,8 +165,8 @@ export default function SettingsPage(props: {
   }, []);
 
   const THEME_COLORS = [
-    '#007AFF',
-    '#007AFF',
+    '#5856D6',
+    '#5856D6',
     '#34C759',
     '#FF9500',
     '#FF3B30',
@@ -268,7 +268,7 @@ export default function SettingsPage(props: {
           <div className="insetGroup">
             <SettingRow
               icon="🔔"
-              iconBg={pushEnabled ? 'rgba(0,122,255,0.12)' : 'var(--panel)'}
+              iconBg={pushEnabled ? 'rgba(88,86,214,0.12)' : 'var(--panel)'}
               title="推播通知"
               subtitle="接收應用程式通知"
               right={<Toggle value={pushEnabled} onChange={setPushEnabled} />}

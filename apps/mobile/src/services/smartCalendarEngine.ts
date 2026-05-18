@@ -175,7 +175,7 @@ const KEYS = {
 })();
 
 const TYPE_COLORS: Record<CalendarEventType, string> = {
-  class: '#007AFF',
+  class: '#5856D6',
   assignment: '#FF3B30',
   exam: '#FF9500',
   campus_event: '#AF52DE',
@@ -307,7 +307,7 @@ const TC_TYPE_ICONS: Record<Deadline['type'], string> = {
 const TC_TYPE_COLORS: Record<Deadline['type'], string> = {
   assignment: '#FF3B30',
   exam: '#FF9500',
-  quiz: '#007AFF',
+  quiz: '#5856D6',
   project: '#AF52DE',
   other: '#8E8E93',
 };
@@ -756,7 +756,7 @@ export async function addDeadline(data: {
             ? 'folder-outline'
             : 'document-text-outline',
     color:
-      data.priority === 'high' ? '#FF3B30' : data.priority === 'medium' ? '#FF9500' : '#007AFF',
+      data.priority === 'high' ? '#FF3B30' : data.priority === 'medium' ? '#FF9500' : '#5856D6',
   };
 
   const deadlines = await loadDeadlines();

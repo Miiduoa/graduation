@@ -430,7 +430,7 @@ const QUICK_COMMANDS: Array<{
     icon: 'book-outline',
     label: '我的學業狀況？',
     prompt: '我目前所有課程的進度跟成績狀況怎麼樣？有什麼風險嗎？',
-    tint: '#007AFF',
+    tint: '#5856D6',
   },
   {
     id: 'schedule',

@@ -29,10 +29,10 @@ export const tokens = {
     border: '#E5E5EA',
     borderStrong: '#D1D1D6',
 
-    // ── 品牌（Apple HIG · iOS System Blue）──
-    brand: '#007AFF',
-    brand2: '#5AC8FA',
-    accentSoft: 'rgba(0,122,255,0.10)',
+    // ── 品牌（Apple HIG · AI-First Indigo）──
+    brand: '#5856D6',
+    brand2: '#818CF8',
+    accentSoft: 'rgba(88,86,214,0.10)',
 
     // ── 狀態（iOS System Colors）──
     success: '#34C759',

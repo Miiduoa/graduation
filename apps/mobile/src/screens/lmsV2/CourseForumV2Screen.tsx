@@ -27,7 +27,7 @@ export default function CourseForumV2Screen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <CourseV2Header title="討論區" subtitle={courseName} />
       <CourseV2List
         loadable={loadable}

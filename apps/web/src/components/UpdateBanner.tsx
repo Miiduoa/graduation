@@ -41,13 +41,13 @@ export function UpdateBanner() {
         <div style={{ fontWeight: 600, marginBottom: 2, color: 'var(--text, #fff)' }}>
           有新版本可用
         </div>
-        <div style={{ fontSize: 13, color: 'var(--muted, #9CA3AF)' }}>重新載入以取得最新功能</div>
+        <div style={{ fontSize: 13, color: 'var(--muted, #AEAEB2)' }}>重新載入以取得最新功能</div>
       </div>
 
       <button
         onClick={handleRefresh}
         style={{
-          background: 'var(--brand, #007AFF)',
+          background: 'var(--brand, #5856D6)',
           color: '#fff',
           border: 'none',
           padding: '10px 16px',

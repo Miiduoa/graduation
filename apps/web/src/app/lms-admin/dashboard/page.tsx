@@ -195,7 +195,7 @@ export default function DashboardPage() {
                         style={{
                           padding: '2px 8px',
                           borderRadius: 999,
-                          background: r.risk_level === 'critical' ? '#FF3B30' : '#d97706',
+                          background: r.risk_level === 'critical' ? '#FF3B30' : '#FF9500',
                           color: '#fff',
                           fontSize: 11,
                           fontWeight: 700,
@@ -237,7 +237,7 @@ export default function DashboardPage() {
                 style={{ padding: 10, marginBottom: 6, border: '1px solid #E5E5EA', borderRadius: 8, background: '#fff' }}>
                 <strong>[{h.kind}]</strong> {h.title}
                 <div style={{ fontSize: 12, color: '#8E8E93' }}>{h.snippet}</div>
-                <div style={{ fontSize: 11, color: '#9ca3af' }}>{new Date(h.touched_at).toLocaleString()}</div>
+                <div style={{ fontSize: 11, color: '#AEAEB2' }}>{new Date(h.touched_at).toLocaleString()}</div>
               </li>
             ))}
           </ul>
@@ -251,7 +251,7 @@ function Card({ label, value }: { label: string; value: string | number }) {
   return (
     <div style={{ padding: 12, background: '#F2F2F7', borderRadius: 10, border: '1px solid #E5E5EA' }}>
       <div style={{ fontSize: 12, color: '#8E8E93' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: '#111827' }}>{value}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: '#1C1C1E' }}>{value}</div>
     </div>
   );
 }
@@ -260,8 +260,8 @@ const selectStyle: React.CSSProperties = {
   padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 14,
 };
 const btnStyle: React.CSSProperties = {
-  padding: '10px 14px', borderRadius: 10, border: '1px solid #007aff',
-  background: '#007aff', color: '#fff', fontWeight: 700, cursor: 'pointer',
+  padding: '10px 14px', borderRadius: 10, border: '1px solid #5856D6',
+  background: '#5856D6', color: '#fff', fontWeight: 700, cursor: 'pointer',
 };
 const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13 };
 const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #E5E5EA', textAlign: 'left' };

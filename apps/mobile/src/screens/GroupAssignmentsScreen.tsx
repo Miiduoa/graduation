@@ -53,7 +53,7 @@ function HomeworkCard(props: { hw: TCHomework }) {
   let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
   if (hasSubmission) {
-    statusColor = '#16A34A';
+    statusColor = '#34C759';
     statusText = '已繳交';
     statusIcon = 'checkmark-circle';
   } else if (hw.is_closed || isOverdue) {
@@ -87,7 +87,7 @@ function HomeworkCard(props: { hw: TCHomework }) {
         backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
         borderWidth: 1,
         borderColor: hasSubmission
-          ? '#16A34A30'
+          ? '#34C75930'
           : hw.is_closed || isOverdue
             ? '#D7001520'
             : theme.colors.border,
@@ -336,7 +336,7 @@ export function GroupAssignmentsScreen(props: any) {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: '#16A34A', fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: '#34C759', fontWeight: '900', fontSize: 24 }}>
               {submittedCount}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已繳交</Text>

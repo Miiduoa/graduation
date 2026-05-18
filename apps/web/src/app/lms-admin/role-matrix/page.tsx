@@ -122,8 +122,8 @@ export default function RoleMatrixPage() {
           style={{
             padding: '8px 14px',
             borderRadius: 8,
-            border: '1px solid #007aff',
-            background: '#007aff',
+            border: '1px solid #5856D6',
+            background: '#5856D6',
             color: '#fff',
             fontWeight: 700,
             cursor: 'pointer',

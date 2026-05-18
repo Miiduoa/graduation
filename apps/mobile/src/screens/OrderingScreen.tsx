@@ -179,7 +179,7 @@ function getStatusColor(status: OrderStatus): string {
     case 'pending':
       return theme.colors.muted;
     case 'confirmed':
-      return '#007AFF';
+      return '#5856D6';
     case 'preparing':
       return '#FF9500';
     case 'ready':
@@ -1524,14 +1524,14 @@ export function OrderingScreen(props: any) {
                           style={{
                             padding: 14,
                             borderRadius: theme.radius.md,
-                            backgroundColor: '#007AFF15',
+                            backgroundColor: '#5856D615',
                             flexDirection: 'row',
                             alignItems: 'center',
                             gap: 10,
                           }}
                         >
-                          <Ionicons name="restaurant" size={24} color="#007AFF" />
-                          <Text style={{ color: '#007AFF', fontWeight: '600', flex: 1 }}>
+                          <Ionicons name="restaurant" size={24} color="#5856D6" />
+                          <Text style={{ color: '#5856D6', fontWeight: '600', flex: 1 }}>
                             店家已接單，即將開始製作
                           </Text>
                         </View>

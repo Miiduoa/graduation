@@ -37,7 +37,7 @@ type ItemCategory =
   | 'other';
 
 const CATEGORY_INFO: Record<ItemCategory, { label: string; icon: string; color: string }> = {
-  electronics: { label: '電子產品', icon: 'phone-portrait', color: '#007AFF' },
+  electronics: { label: '電子產品', icon: 'phone-portrait', color: '#5856D6' },
   cards: { label: '證件/卡片', icon: 'card', color: '#AF52DE' },
   clothing: { label: '衣物', icon: 'shirt', color: '#FF2D55' },
   accessories: { label: '配件', icon: 'glasses', color: '#FF9500' },

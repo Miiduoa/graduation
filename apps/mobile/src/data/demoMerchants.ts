@@ -205,7 +205,7 @@ export const DEMO_MERCHANTS: DemoMerchant[] = [
     reviewCount: 156,
     todayServedCount: 42,
     todayRevenue: 4620,
-    color: '#16A34A',
+    color: '#34C759',
     description: '越南河粉、東南亞風味',
   },
   {

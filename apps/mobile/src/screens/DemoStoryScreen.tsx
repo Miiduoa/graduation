@@ -30,7 +30,7 @@ import { usePersonaContext, type TimelineEvent } from '../services/personaContex
 
 const CATEGORY_COLOR: Record<TimelineEvent['category'], string> = {
   wake: '#FF9500',
-  bus: '#007AFF',
+  bus: '#5856D6',
   class: '#AF52DE',
   food: '#FF3B30',
   study: '#06B6D4',
@@ -234,7 +234,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {persona.subscribedRoutes[0] && (
               <PersonaShortcut
                 icon="bus-outline"
-                color="#007AFF"
+                color="#5856D6"
                 title="即時公車"
                 subtitle={`常搭 ${persona.subscribedRoutes[0].shortName}`}
                 onPress={() =>

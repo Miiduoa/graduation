@@ -99,7 +99,7 @@ function InfoPill(props: { text?: string; tone?: 'default' | 'success' | 'warnin
   if (!props.text) return null;
   const toneColor =
     props.tone === 'success'
-      ? '#16A34A'
+      ? '#34C759'
       : props.tone === 'warning'
         ? '#FF9500'
         : theme.colors.accent;
