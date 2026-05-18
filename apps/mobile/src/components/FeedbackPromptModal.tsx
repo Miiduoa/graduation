@@ -94,7 +94,7 @@ export function FeedbackPromptModal(props: {
             borderColor: theme.colors.border,
           }}
         >
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 17 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 17 }}>
             {headline}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 8, lineHeight: 20 }}>
@@ -164,7 +164,7 @@ export function FeedbackPromptModal(props: {
               {busy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={{ color: '#fff', fontWeight: '800' }}>送出</Text>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>送出</Text>
               )}
             </Pressable>
           </View>

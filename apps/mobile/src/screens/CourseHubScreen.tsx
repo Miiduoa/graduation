@@ -266,7 +266,7 @@ function CourseOpsHero(props: {
         }}
       >
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#7E91AA', fontSize: 11, fontWeight: '900' }}>
+          <Text style={{ color: '#7E91AA', fontSize: 11, fontWeight: '700' }}>
             Course Operating System
           </Text>
           <Text
@@ -274,7 +274,7 @@ function CourseOpsHero(props: {
               color: '#FFFFFF',
               fontSize: 23,
               lineHeight: 30,
-              fontWeight: '900',
+              fontWeight: '700',
               marginTop: 8,
             }}
           >
@@ -298,7 +298,7 @@ function CourseOpsHero(props: {
             justifyContent: 'center',
           }}
         >
-          <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '900' }}>{load}</Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '700' }}>{load}</Text>
           <Text style={{ color: '#7E91AA', fontSize: 9, fontWeight: '700' }}>LOAD</Text>
         </View>
       </View>
@@ -329,7 +329,7 @@ function CourseOpsHero(props: {
                 style={{
                   color: stage.active ? '#D9E8FF' : '#637089',
                   fontSize: 10,
-                  fontWeight: '800',
+                  fontWeight: '700',
                   marginTop: 6,
                 }}
               >
@@ -371,7 +371,7 @@ function CourseOpsHero(props: {
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: item.color, fontSize: 18, fontWeight: '900' }}>{item.value}</Text>
+            <Text style={{ color: item.color, fontSize: 18, fontWeight: '700' }}>{item.value}</Text>
             <Text style={{ color: '#7E91AA', fontSize: 10, fontWeight: '700', marginTop: 2 }}>
               {item.label}
             </Text>
@@ -395,7 +395,7 @@ function CourseOpsHero(props: {
           })}
         >
           <Ionicons name="flash" size={16} color="#FFFFFF" />
-          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '900' }}>回 Today 排序</Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>回 Today 排序</Text>
         </Pressable>
         <Pressable
           onPress={props.onOpenAI}
@@ -658,7 +658,7 @@ export function CourseHubScreen(props: any) {
               <Text
                 style={{
                   fontSize: 22,
-                  fontWeight: '800',
+                  fontWeight: '700',
                   color: stat.count > 0 ? theme.colors.accent : theme.colors.text,
                   marginTop: 4,
                 }}
@@ -706,7 +706,7 @@ export function CourseHubScreen(props: any) {
                   <Ionicons name={item.icon} size={17} color={theme.colors.accent} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '800' }}>
+                  <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>
                     {item.title}
                   </Text>
                   <Text

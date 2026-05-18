@@ -278,7 +278,7 @@ export default function ProfilePage(props: {
               個人中心
             </span>
             <div>
-              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 900, letterSpacing: "-0.05em" }}>
+              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.05em" }}>
                 Profile 不再顯示假資料
               </h1>
               <p style={{ margin: "10px 0 0", fontSize: 14, lineHeight: 1.8, opacity: 0.86 }}>
@@ -322,7 +322,7 @@ export default function ProfilePage(props: {
                 display: "grid",
                 placeItems: "center",
                 fontSize: 34,
-                fontWeight: 800,
+                fontWeight: 700,
                 flexShrink: 0,
               }}
             >
@@ -339,7 +339,7 @@ export default function ProfilePage(props: {
                   </span>
                 ) : null}
               </div>
-              <h1 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 900, letterSpacing: "-0.05em" }}>
+              <h1 style={{ margin: "0 0 4px", fontSize: 26, fontWeight: 700, letterSpacing: "-0.05em" }}>
                 {displayName}
               </h1>
               <p style={{ margin: 0, fontSize: 14, opacity: 0.84 }}>

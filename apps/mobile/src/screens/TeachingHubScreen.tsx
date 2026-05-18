@@ -265,7 +265,7 @@ export function TeachingHubScreen(props: any) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <HeaderAvatarButton />
           <View style={{ flex: 1, gap: 4 }}>
-            <Text style={{ fontSize: 28, fontWeight: '800', color: theme.colors.text }}>
+            <Text style={{ fontSize: 28, fontWeight: '700', color: theme.colors.text }}>
               教學主流程
             </Text>
             <Text style={{ fontSize: 14, color: theme.colors.textSecondary }}>
@@ -301,7 +301,7 @@ export function TeachingHubScreen(props: any) {
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Ionicons name="flash-outline" size={22} color={theme.colors.accent} />
-            <Text style={{ fontSize: 16, fontWeight: '800', color: theme.colors.text, flex: 1 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.text, flex: 1 }}>
               示範：教到評一條龍（本機資料）
             </Text>
           </View>

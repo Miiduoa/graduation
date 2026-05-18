@@ -194,7 +194,7 @@ export default function StudentRiskScreen() {
                       backgroundColor: color + '20',
                     }}
                   >
-                    <Text style={{ color, fontSize: 16, fontWeight: '800' }}>{r.score}</Text>
+                    <Text style={{ color, fontSize: 16, fontWeight: '700' }}>{r.score}</Text>
                   </View>
                 </Pressable>
 

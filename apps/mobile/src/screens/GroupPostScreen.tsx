@@ -648,7 +648,7 @@ export function GroupPostScreen(props: any) {
                   <Text
                     style={{
                       color: theme.colors.text,
-                      fontWeight: '800',
+                      fontWeight: '700',
                       fontSize: 18,
                       marginBottom: 10,
                     }}

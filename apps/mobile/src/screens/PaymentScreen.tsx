@@ -818,7 +818,7 @@ export function PaymentScreen(props: any) {
                         style={{
                           color: theme.colors.text,
                           fontSize: 48,
-                          fontWeight: '900',
+                          fontWeight: '700',
                           marginTop: 8,
                         }}
                       >
@@ -876,7 +876,7 @@ export function PaymentScreen(props: any) {
                     <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
                       <View style={{ alignItems: 'center' }}>
                         <Text
-                          style={{ color: theme.colors.danger, fontWeight: '900', fontSize: 24 }}
+                          style={{ color: theme.colors.danger, fontWeight: '700', fontSize: 24 }}
                         >
                           ${todayExpense}
                         </Text>
@@ -886,7 +886,7 @@ export function PaymentScreen(props: any) {
                       </View>
                       <View style={{ width: 1, backgroundColor: theme.colors.border }} />
                       <View style={{ alignItems: 'center' }}>
-                        <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
+                        <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 24 }}>
                           ${monthExpense}
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
@@ -1240,7 +1240,7 @@ export function PaymentScreen(props: any) {
               maxHeight: '75%',
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
               選擇轉帳對象
             </Text>
             <TextInput
@@ -1368,7 +1368,7 @@ export function PaymentScreen(props: any) {
               gap: 12,
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
               自訂轉帳金額
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 13 }}>
@@ -1426,7 +1426,7 @@ export function PaymentScreen(props: any) {
               gap: 12,
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
               {settingsModal === 'passcode'
                 ? '設定支付密碼'
                 : settingsModal === 'dailyLimit'

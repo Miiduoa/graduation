@@ -298,7 +298,7 @@ export function GroupAssignmentsScreen(props: any) {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
               {homeworks.length}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>全部作業</Text>
@@ -317,7 +317,7 @@ export function GroupAssignmentsScreen(props: any) {
             <Text
               style={{
                 color: pendingCount > 0 ? '#FF9500' : theme.colors.muted,
-                fontWeight: '900',
+                fontWeight: '700',
                 fontSize: 24,
               }}
             >
@@ -336,7 +336,7 @@ export function GroupAssignmentsScreen(props: any) {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: '#34C759', fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: '#34C759', fontWeight: '700', fontSize: 24 }}>
               {submittedCount}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已繳交</Text>

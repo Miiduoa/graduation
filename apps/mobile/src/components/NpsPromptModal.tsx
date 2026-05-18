@@ -83,7 +83,7 @@ export function NpsPromptModal(props: {
             borderColor: theme.colors.border,
           }}
         >
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 17 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 17 }}>
             推薦我們給同學？
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 8, lineHeight: 20 }}>
@@ -171,7 +171,7 @@ export function NpsPromptModal(props: {
               {busy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={{ color: '#fff', fontWeight: '800' }}>送出</Text>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>送出</Text>
               )}
             </Pressable>
           </View>

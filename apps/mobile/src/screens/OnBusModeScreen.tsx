@@ -303,9 +303,9 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: '#fff', fontWeight: '900' }}>{busRoute.code}</Text>
+              <Text style={{ color: '#fff', fontWeight: '700' }}>{busRoute.code}</Text>
             </View>
-            <Text style={{ color: '#fff', fontSize: 20, fontWeight: '900' }}>
+            <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700' }}>
               {busRoute.shortName}
               <Text style={{ color: '#E8B547' }}> · {vehicle.plate}</Text>
             </Text>
@@ -369,7 +369,7 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
             style={{
               color: '#fff',
               fontSize: 36,
-              fontWeight: '900',
+              fontWeight: '700',
               marginTop: 6,
               textAlign: 'center',
             }}
@@ -573,7 +573,7 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
           })}
         >
           <Ionicons name="paper-plane" size={17} color="#fff" />
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>分享位置</Text>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>分享位置</Text>
         </Pressable>
         <Pressable
           onPress={handleEndTrip}
@@ -590,7 +590,7 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
           })}
         >
           <Ionicons name="exit-outline" size={17} color="#fff" />
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>
             {isAtAlight ? '已到站' : '提前下車'}
           </Text>
         </Pressable>

@@ -24,7 +24,7 @@ export default function JoinPage(props: { searchParams?: { school?: string; scho
           >
             <div style={{ fontSize: 52, marginBottom: 12 }}>🏫</div>
             <h1
-              style={{ margin: '0 0 8px', fontSize: 24, fontWeight: 800, letterSpacing: '-0.04em' }}
+              style={{ margin: '0 0 8px', fontSize: 24, fontWeight: 700, letterSpacing: '-0.04em' }}
             >
               {schoolName} 已開通
             </h1>

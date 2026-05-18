@@ -388,7 +388,7 @@ export default function MessagesPage(props: {
                     ✕
                   </button>
                 </div>
-                <h2 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 800, lineHeight: 1.4 }}>
+                <h2 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 700, lineHeight: 1.4 }}>
                   {selected.subject}
                 </h2>
                 <div

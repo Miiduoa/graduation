@@ -172,7 +172,7 @@ export default function TeachingEvaluationScreen() {
                     backgroundColor: color + '22',
                   }}
                 >
-                  <Text style={{ color, fontSize: 16, fontWeight: '800' }}>{e.healthScore}</Text>
+                  <Text style={{ color, fontSize: 16, fontWeight: '700' }}>{e.healthScore}</Text>
                 </View>
               </Pressable>
 

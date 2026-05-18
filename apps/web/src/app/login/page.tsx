@@ -114,7 +114,7 @@ export default function LoginPage(props: {
             🎓
           </div>
           <h1
-            style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 800, letterSpacing: '-0.04em' }}
+            style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 700, letterSpacing: '-0.04em' }}
           >
             {schoolName}
           </h1>

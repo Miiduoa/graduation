@@ -246,7 +246,7 @@ function MediumWidget({ widget }: { widget: Widget }) {
           <Text style={{ color: widget.color, fontSize: 12, fontWeight: '700' }}>
             22 分鐘後開始
           </Text>
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
             程式設計
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
@@ -389,7 +389,7 @@ function MediumWidget({ widget }: { widget: Widget }) {
           <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
             程式設計競賽
           </Text>
-          <Text style={{ color: widget.color, fontWeight: '800', fontSize: 20 }}>5 天 3 小時</Text>
+          <Text style={{ color: widget.color, fontWeight: '700', fontSize: 20 }}>5 天 3 小時</Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
             工程館國際會議廳 · 剩餘 12 名額
           </Text>
@@ -400,7 +400,7 @@ function MediumWidget({ widget }: { widget: Widget }) {
         <View style={{ gap: 10 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>本學期 GPA</Text>
-            <Text style={{ color: widget.color, fontWeight: '800', fontSize: 18 }}>3.75</Text>
+            <Text style={{ color: widget.color, fontWeight: '700', fontSize: 18 }}>3.75</Text>
           </View>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>最新成績</Text>

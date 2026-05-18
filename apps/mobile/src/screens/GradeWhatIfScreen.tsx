@@ -150,7 +150,7 @@ export default function GradeWhatIfScreen() {
           </View>
           {whatIf.letterGrade && (
             <Text style={{ textAlign: 'center', color: theme.colors.text, fontSize: 18 }}>
-              預估等第：<Text style={{ fontWeight: '800' }}>{whatIf.letterGrade}</Text>
+              預估等第：<Text style={{ fontWeight: '700' }}>{whatIf.letterGrade}</Text>
             </Text>
           )}
           {whatIf.delta !== null && whatIf.delta !== 0 && (
@@ -340,7 +340,7 @@ export default function GradeWhatIfScreen() {
                 backgroundColor: theme.colors.surface2,
               }}
             >
-              <Text style={{ fontWeight: '800', color: theme.colors.text, width: 50, fontSize: 14 }}>
+              <Text style={{ fontWeight: '700', color: theme.colors.text, width: 50, fontSize: 14 }}>
                 {t} 分
               </Text>
               <View style={{ flex: 1 }}>
@@ -390,7 +390,7 @@ function Box(props: { label: string; value: string; tone: 'success' | 'danger' |
       }}
     >
       <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{props.label}</Text>
-      <Text style={{ color, fontSize: props.big ? 30 : 20, fontWeight: '800', marginTop: 2 }}>
+      <Text style={{ color, fontSize: props.big ? 30 : 20, fontWeight: '700', marginTop: 2 }}>
         {props.value}
       </Text>
     </View>

@@ -286,7 +286,7 @@ const sharedTypography: ThemeTypography = {
     fontSize: 30,
     lineHeight: 38,
     letterSpacing: 0,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   display: {
     fontSize: 24,

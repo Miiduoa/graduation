@@ -625,7 +625,7 @@ function ResultsScreen({
               }}
             >
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ fontSize: 32, fontWeight: '800', color: status.color }}>
+                <Text style={{ fontSize: 32, fontWeight: '700', color: status.color }}>
                   {percentage}%
                 </Text>
                 <Text style={{ fontSize: 12, color: theme.colors.muted, marginTop: 2 }}>

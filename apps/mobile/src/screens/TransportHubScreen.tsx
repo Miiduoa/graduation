@@ -557,7 +557,7 @@ export function TransportHubScreen(props: any) {
                 }}
               >
                 <View>
-                  <Text style={{ color: '#fff', fontWeight: '900', fontSize: 22 }}>
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 22 }}>
                     {liveETA || formatDuration(activeRoute.totalDuration)}
                   </Text>
                   <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11 }}>
@@ -865,7 +865,7 @@ export function TransportHubScreen(props: any) {
                     paddingHorizontal: 4,
                   }}
                 >
-                  <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
                     路線方案
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 12 }}>到 {destName}</Text>
@@ -916,7 +916,7 @@ export function TransportHubScreen(props: any) {
                       <View style={{ flex: 1 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                           <Text
-                            style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}
+                            style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}
                           >
                             {formatDuration(route.totalDuration)}
                           </Text>
@@ -1467,7 +1467,7 @@ function QuickBusPanel() {
                   marginRight: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 11 }}>{r.name}</Text>
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>{r.name}</Text>
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 11, flex: 1 }} numberOfLines={1}>
                 {r.desc}
@@ -1504,7 +1504,7 @@ function QuickBusPanel() {
                   marginRight: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 11 }}>
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>
                   {r.RouteName.Zh_tw}
                 </Text>
               </View>
@@ -1898,7 +1898,7 @@ function QuickBikePanel() {
             alignItems: 'center',
           }}
         >
-          <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 20 }}>
+          <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 20 }}>
             {total}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 10 }}>可借車輛</Text>
@@ -1912,7 +1912,7 @@ function QuickBikePanel() {
             alignItems: 'center',
           }}
         >
-          <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 20 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
             {stations.length}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 10 }}>站點數</Text>
@@ -1947,7 +1947,7 @@ function QuickBikePanel() {
                 <Text
                   style={{
                     color: st.availableRent === 0 ? '#f43f5e' : theme.colors.accent,
-                    fontWeight: '900',
+                    fontWeight: '700',
                     fontSize: 13,
                   }}
                 >

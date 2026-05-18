@@ -305,7 +305,7 @@ function CourseCard(props: {
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
         <View style={{ flex: 1 }}>
           <Text
-            style={{ fontWeight: '800', fontSize: 16, color: theme.colors.text }}
+            style={{ fontWeight: '700', fontSize: 16, color: theme.colors.text }}
             numberOfLines={2}
           >
             {c.name || '未命名課程'}
@@ -661,7 +661,7 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
       >
         <Ionicons name="library-outline" size={32} color={theme.colors.accent} />
       </View>
-      <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
         靜宜大學 課綱查詢
       </Text>
       <Text

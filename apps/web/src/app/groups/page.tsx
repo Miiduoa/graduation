@@ -310,7 +310,7 @@ export default function GroupsPage(props: {
                   <span
                     style={{
                       fontSize: 11,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       background: 'var(--danger)',
                       color: '#fff',
                       borderRadius: '999px',

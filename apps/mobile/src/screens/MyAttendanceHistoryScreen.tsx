@@ -161,14 +161,14 @@ export default function MyAttendanceHistoryScreen() {
         <Text style={{ color: '#E5F2FF', fontSize: 12 }}>✅ 我的點名紀錄總覽</Text>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
           <View>
-            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>
               {totalStats.rate ?? '—'}
               {totalStats.rate !== null && <Text style={{ fontSize: 14 }}>%</Text>}
             </Text>
             <Text style={{ color: '#E5E5EA', fontSize: 11 }}>整體出席率</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '800' }}>
+            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700' }}>
               {totalStats.total}
             </Text>
             <Text style={{ color: '#E5E5EA', fontSize: 11 }}>總點名次數</Text>
@@ -252,7 +252,7 @@ export default function MyAttendanceHistoryScreen() {
                 <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', flex: 1 }} numberOfLines={1}>
                   {c.courseName}
                 </Text>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: tone }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: tone }}>
                   {Math.round(rate * 100)}%
                 </Text>
               </View>
