@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import type { Icon, IconOptions, Map as LeafletMap, Marker } from 'leaflet';
+import type { Icon, IconOptions, Map as LeafletMap, Marker, Polyline } from 'leaflet';
 import {
   fetchPois,
   addFavorite,
@@ -12,6 +12,7 @@ import {
   type Poi,
 } from '@/lib/firebase';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+import { getCampusPoiLite, distanceMeters } from '@/lib/campusPoiLookup';
 
 interface Location {
   id: string;
@@ -136,9 +137,18 @@ type IconDefaultWithPrivateUrl = typeof Icon.Default.prototype & {
 };
 type MarkerWithFlag = Marker & { _isMarker?: boolean };
 
-export default function MapClient({ school }: { school: string }) {
+export default function MapClient({
+  school,
+  route,
+  focus,
+}: {
+  school: string;
+  route?: string;
+  focus?: string;
+}) {
   const mapRef = useRef<LeafletMap | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const routeLineRef = useRef<Polyline | null>(null);
   const [locations, setLocations] = useState<Location[]>(DEMO_LOCATIONS);
   const [selected, setSelected] = useState<Location | null>(null);
   const [category, setCategory] = useState('全部');
@@ -146,6 +156,12 @@ export default function MapClient({ school }: { school: string }) {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [user, setUser] = useState<User | null>(null);
   const [usingDemo, setUsingDemo] = useState(true);
+  const [routeBanner, setRouteBanner] = useState<{
+    fromName: string;
+    toName: string;
+    distance: number;
+    minutes: number;
+  } | null>(null);
 
   const categories = ['全部', ...Array.from(new Set(locations.map((l) => l.category)))];
 
@@ -264,6 +280,71 @@ export default function MapClient({ school }: { school: string }) {
     });
   }, [filtered.length, category, search]); // eslint-disable-line
 
+  // ── AI 規劃路線：?route=POI_A,POI_B → 在地圖上畫 polyline + 自動 fit bounds ──
+  useEffect(() => {
+    if (!route || !mapRef.current) return;
+    const [fromId, toId] = String(route).split(',').map((s) => s.trim()).filter(Boolean);
+    if (!fromId || !toId) return;
+    const from = getCampusPoiLite(fromId);
+    const to = getCampusPoiLite(toId);
+    if (!from || !to) return;
+
+    import('leaflet').then((L) => {
+      const map = mapRef.current;
+      if (!map) return;
+      if (routeLineRef.current) {
+        map.removeLayer(routeLineRef.current);
+        routeLineRef.current = null;
+      }
+      // 簡化版：直接連線（demo 用；完整轉折由 backend 規劃的 polyline 提供）
+      const latlngs: [number, number][] = [
+        [from.lat, from.lng],
+        [to.lat, to.lng],
+      ];
+      const line = L.polyline(latlngs, {
+        color: '#2563eb',
+        weight: 5,
+        opacity: 0.85,
+        dashArray: '8,6',
+      }).addTo(map);
+      routeLineRef.current = line;
+
+      // 起點/終點突顯標記
+      const startIcon = L.divIcon({
+        html: '<div style="background:#22c55e;width:18px;height:18px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3)"></div>',
+        className: '',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+      const endIcon = L.divIcon({
+        html: '<div style="background:#ef4444;width:18px;height:18px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3)"></div>',
+        className: '',
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+      L.marker([from.lat, from.lng], { icon: startIcon })
+        .bindTooltip(`起點：${from.name}`, { permanent: true, direction: 'top', offset: [0, -12] })
+        .addTo(map);
+      L.marker([to.lat, to.lng], { icon: endIcon })
+        .bindTooltip(`終點：${to.name}`, { permanent: true, direction: 'top', offset: [0, -12] })
+        .addTo(map);
+
+      map.fitBounds(line.getBounds(), { padding: [40, 40] });
+
+      const dist = Math.round(distanceMeters(from, to));
+      const minutes = Math.max(1, Math.round(dist / 1.25 / 60));
+      setRouteBanner({ fromName: from.name, toName: to.name, distance: dist, minutes });
+    });
+  }, [route]);
+
+  // ── ?focus=POI_ID → 平移到該 POI ──
+  useEffect(() => {
+    if (!focus || !mapRef.current) return;
+    const poi = getCampusPoiLite(focus);
+    if (!poi) return;
+    mapRef.current.setView([poi.lat, poi.lng], 18, { animate: true });
+  }, [focus]);
+
   // 點擊列表項目時移動地圖
   const handleSelectLocation = (loc: Location) => {
     setSelected(loc);
@@ -288,7 +369,7 @@ export default function MapClient({ school }: { school: string }) {
 
   return (
     <div className="pageStack">
-      {usingDemo && (
+      {usingDemo && !route && (
         <div
           className="card"
           style={{
@@ -300,6 +381,43 @@ export default function MapClient({ school }: { school: string }) {
           }}
         >
           ⚠️ 目前顯示示範校園地點。設定 Firebase 並加入含 lat/lng 的 POI 資料後即可顯示實際地圖。
+        </div>
+      )}
+
+      {routeBanner && (
+        <div
+          className="card"
+          style={{
+            padding: '12px 16px',
+            background: 'linear-gradient(135deg, #eff6ff, #f0fdf4)',
+            borderColor: '#bfdbfe',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ fontSize: 24 }}>🗺️</div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 12, color: '#1e40af', fontWeight: 700 }}>AI 規劃路線</div>
+            <div style={{ fontSize: 15, marginTop: 2, color: '#0f172a' }}>
+              <span style={{ color: '#16a34a', fontWeight: 600 }}>{routeBanner.fromName}</span>
+              <span style={{ margin: '0 8px', color: '#94a3b8' }}>→</span>
+              <span style={{ color: '#dc2626', fontWeight: 600 }}>{routeBanner.toName}</span>
+            </div>
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              gap: 16,
+              fontSize: 13,
+              color: '#0f766e',
+              fontWeight: 600,
+            }}
+          >
+            <span>🚶 {routeBanner.minutes} 分鐘</span>
+            <span>📏 {routeBanner.distance} m</span>
+          </div>
         </div>
       )}
 

@@ -47,6 +47,8 @@ import {
 import { approvePendingAnn, addPendingAnn } from '@/lib/demoData';
 import { useToast, Modal } from '@/components/ui';
 import { notifyDeptHeadNewAnn, assignPeerReview, rsvpAlumniEvent } from '@/lib/demoStore';
+import { callCampusAssistant, type AgentCard } from '@/lib/campusAssistantClient';
+import { AgentCardList } from './AgentCards';
 
 // ── 型別 ──────────────────────────────────────────────────────
 interface Message {
@@ -54,6 +56,8 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  cards?: AgentCard[];
+  suggestions?: string[];
 }
 
 type QuickPrompt = {
@@ -132,25 +136,34 @@ const CATEGORY_COLORS: Record<CreditCategory, string> = {
   other: '#8E8E93',
 };
 
-// ── AI 回應（模擬 + Anthropic API） ──────────────────────────────
-async function callAI(messages: { role: string; content: string }[], role?: DemoRole): Promise<string> {
-  // 嘗試呼叫 API route（若設定好就用真的 AI）
+// ── AI 回應結果型別 ──────────────────────────────
+type AIReply = { content: string; cards?: AgentCard[]; suggestions?: string[] };
+
+// ── AI 回應（真實後端 askCampusAssistant + fallback demo） ──────────
+async function callAI(messages: { role: string; content: string }[], role?: DemoRole): Promise<AIReply> {
+  // 真實 AI：呼叫部署的 Cloud Function `askCampusAssistant`（含 4 個地圖/餐廳工具 + cards）
   try {
-    const res = await fetch('/api/ai-chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages }),
-      signal: AbortSignal.timeout(15000),
+    const envelope = await callCampusAssistant({
+      messages: messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
+      schoolId: 'pu',
+      screen: 'web/ai-assistant',
     });
-    if (res.ok) {
-      const data = (await res.json()) as { reply?: string };
-      if (data.reply) return data.reply;
+    if (envelope && envelope.content) {
+      return {
+        content: envelope.content,
+        cards: envelope.cards || [],
+        suggestions: envelope.suggestions || [],
+      };
     }
   } catch {
     // fallback to demo reply
   }
 
-  // Demo 回應（API 未設定時的 fallback）
+  // Demo 回應（Firebase 未設定或 callable 失敗時的 fallback）
+  return { content: buildDemoReply(messages, role) };
+}
+
+function buildDemoReply(messages: { role: string; content: string }[], role?: DemoRole): string {
   const summary = getCreditSummary();
   const lastUserMsg = messages[messages.length - 1]?.content ?? '';
 
@@ -766,7 +779,14 @@ export default function AIAssistantPage(props: {
       const reply = await callAI(apiMessages, demoRole);
       setMessages((prev) => [
         ...prev,
-        { id: `a-${Date.now()}`, role: 'assistant', content: reply, timestamp: new Date() },
+        {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          content: reply.content,
+          cards: reply.cards,
+          suggestions: reply.suggestions,
+          timestamp: new Date(),
+        },
       ]);
     } catch {
       setMessages((prev) => [
@@ -1111,6 +1131,11 @@ export default function AIAssistantPage(props: {
                   }}
                 >
                   {msg.content}
+                  {msg.role === 'assistant' && msg.cards && msg.cards.length > 0 ? (
+                    <div style={{ marginTop: 10 }}>
+                      <AgentCardList cards={msg.cards} schoolId="pu" />
+                    </div>
+                  ) : null}
                   <div
                     style={{
                       fontSize: 10,
