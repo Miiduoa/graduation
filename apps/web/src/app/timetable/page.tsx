@@ -422,7 +422,7 @@ export default function TimetablePage(props: {
             className="card"
             style={{
               padding: '14px 16px',
-              background: 'rgba(251,191,36,0.10)',
+              background: 'rgba(255,204,0,0.10)',
               border: '1px solid #FF9500',
               fontSize: 13,
               display: 'flex',

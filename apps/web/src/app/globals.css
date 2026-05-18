@@ -3204,8 +3204,8 @@ select.input option {
   /* AI 主色：Indigo → Purple → Pink 漸層體系 */
   --ai: #6366f1;
   --ai-strong: #4f46e5;
-  --ai-soft: rgba(99, 102, 241, 0.10);
-  --ai-halo: rgba(99, 102, 241, 0.20);
+  --ai-soft: rgba(88,86,214, 0.10);
+  --ai-halo: rgba(88,86,214, 0.20);
   --ai-surface: #fafbff;
   --ai-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
   --ai-gradient-soft: linear-gradient(180deg, #eef2ff 0%, #fce7f3 100%);
@@ -3219,9 +3219,9 @@ select.input option {
   --confidence-low-soft: rgba(255, 59, 48, 0.12);
 
   /* AI 元件陰影 */
-  --shadow-ai: 0 0 0 3px rgba(99, 102, 241, 0.18),
-    0 8px 24px rgba(99, 102, 241, 0.12);
-  --shadow-ai-strong: 0 0 0 4px rgba(99, 102, 241, 0.25),
+  --shadow-ai: 0 0 0 3px rgba(88,86,214, 0.18),
+    0 8px 24px rgba(88,86,214, 0.12);
+  --shadow-ai-strong: 0 0 0 4px rgba(88,86,214, 0.25),
     0 12px 32px rgba(139, 92, 246, 0.20);
 
   /* AI 元件層級 */
