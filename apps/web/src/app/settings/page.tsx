@@ -638,7 +638,7 @@ export default function SettingsPage(props: {
           <div className="insetGroupHeader">學校資訊</div>
           <div className="insetGroup">
             <SettingRow icon="🏫" iconBg="#E8F4FD" title="校徽 / 名稱" onClick={goAdmin} />
-            <SettingRow icon="📅" iconBg="#FFF8E8" title="學期設定" subtitle="目前學期：114-2" onClick={goAdmin} />
+            <SettingRow icon="📅" iconBg="#FFF8E8" title="學期設定" subtitle="目前學期：113-1" onClick={goAdmin} />
             <SettingRow icon="🌐" iconBg="#E8FFF2" title="網域 / API 設定" onClick={goAdmin} />
           </div>
         </div>

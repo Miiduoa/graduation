@@ -113,7 +113,7 @@ select
     where a.course_id = tc.course_id
       and (s.grade is not null or s.feedback is not null)
       and s.graded_by = tc.teacher_id) as submissions_graded,
-  (select count(distinct qa.id) from public.quiz_answers qa
+  (select count(distinct (qa.attempt_id, qa.question_id)) from public.quiz_answers qa
     join public.quiz_attempts qat on qat.id = qa.attempt_id
     join public.quizzes q on q.id = qat.quiz_id
     where q.course_id = tc.course_id and qa.manual_score is not null) as essay_manual_scored,

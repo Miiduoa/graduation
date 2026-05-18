@@ -560,14 +560,38 @@ export function approveClubMember(membershipId: string, opts?: { officerName?: s
   }
 }
 
-/** 社長退回社員申請 */
+/** 社長退回社員申請 → 學生收到「申請未通過」通知 */
 export function rejectClubMember(membershipId: string): void {
-  updateDemoStore((store) => ({
-    ...store,
-    clubMemberships: store.clubMemberships.map((m) =>
-      m.id === membershipId ? { ...m, status: 'rejected' as const } : m,
-    ),
-  }));
+  let memberName = '';
+  let clubId = '';
+  let clubName = '';
+  updateDemoStore((store) => {
+    const updated = store.clubMemberships.map((m) => {
+      if (m.id === membershipId) {
+        memberName = m.studentName;
+        clubId = m.clubId;
+        clubName = m.clubName;
+        return { ...m, status: 'rejected' as const };
+      }
+      return m;
+    });
+    return { ...store, clubMemberships: updated };
+  });
+  if (memberName) {
+    const club = DEMO_CLUBS.find((c) => c.id === clubId);
+    const officerName = `${club?.name ?? clubName} 社長`;
+    sendMessage({
+      fromName: officerName,
+      fromAvatar: club?.icon ?? '🎯',
+      subject: `【${clubName}】你的入社申請未通過`,
+      body: `感謝你申請加入 ${clubName}。\n\n非常遺憾，你的申請在這次審核中未能通過。如有疑問，歡迎聯繫我們了解詳情，也歡迎下次再次申請！`,
+      sentAt: '剛剛',
+      isRead: false,
+      type: 'warning',
+      relatedClubId: clubId,
+      recipientRoles: ['student'],
+    });
+  }
 }
 
 /** 是否已申請（pending or approved） */

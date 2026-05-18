@@ -56,7 +56,8 @@ export function DemoRolePill() {
       return nextRole === 'admin' || nextRole === 'department_head';
     }
     if (path.startsWith('/teacher')) {
-      return nextRole === 'teacher' || nextRole === 'ta' || nextRole === 'admin';
+      // department_head can view teacher pages (read-only via isReadOnlyView)
+      return nextRole === 'teacher' || nextRole === 'ta' || nextRole === 'admin' || nextRole === 'department_head';
     }
     return true;
   };

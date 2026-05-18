@@ -77,6 +77,21 @@ import StudentRiskScreen from './StudentRiskScreen';
 import TeachingEvaluationScreen from './TeachingEvaluationScreen';
 import AITrustCardScreen from './AITrustCardScreen';
 import AIStudyBuddyScreen from './AIStudyBuddyScreen';
+// LMS v2 — 新版課程子頁 (取代舊 Course*Screen 系列)
+import CourseHubV2Screen from './lmsV2/CourseHubV2Screen';
+import CourseMaterialsV2Screen from './lmsV2/CourseMaterialsV2Screen';
+import CourseAssignmentsV2Screen from './lmsV2/CourseAssignmentsV2Screen';
+import CourseAssignmentDetailV2Screen from './lmsV2/CourseAssignmentDetailV2Screen';
+import CourseQuizzesV2Screen from './lmsV2/CourseQuizzesV2Screen';
+import CourseQuizTakingV2Screen from './lmsV2/CourseQuizTakingV2Screen';
+import CourseForumV2Screen from './lmsV2/CourseForumV2Screen';
+import CourseForumTopicV2Screen from './lmsV2/CourseForumTopicV2Screen';
+import CourseAnnouncementsV2Screen from './lmsV2/CourseAnnouncementsV2Screen';
+import CourseGradesV2Screen from './lmsV2/CourseGradesV2Screen';
+import CourseAIAssistantV2Screen from './lmsV2/CourseAIAssistantV2Screen';
+import CourseQuestionBankV2Screen from './lmsV2/CourseQuestionBankV2Screen';
+import CourseLiveV2Screen from './lmsV2/CourseLiveV2Screen';
+import { isLmsV2Enabled } from '../services/lmsV2FeatureFlag';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
@@ -301,25 +316,47 @@ export function LearnStack() {
         options={{ title: '行事曆', headerShown: false }}
       />
       <Stack.Screen name="AddCourse" component={GuardedAddCourse} options={{ title: '新增課程' }} />
-      <Stack.Screen name="CourseHub" component={guardCourseView(CourseHubScreen)} options={{ title: '課程中樞' }} />
+      {/* ═══════════════════════════════════════════════════════════
+          LMS v2 整批接管:Supabase 連上時,舊路由名沿用但 component 改 V2
+          (保留路由名 = CoursesHomeScreen/TodayCockpit 不用改;component 換掉 = 看到新 UI)
+          ═══════════════════════════════════════════════════════════ */}
+      <Stack.Screen
+        name="CourseHub"
+        component={isLmsV2Enabled() ? CourseHubV2Screen : guardCourseView(CourseHubScreen)}
+        options={{ title: '課程中樞', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CourseModules"
+        component={isLmsV2Enabled() ? CourseHubV2Screen : guardCourseView(CourseModulesScreen)}
+        options={{ title: '課程', headerShown: false }}
+      />
+      {/* LMS v2 課程子頁(13 個)*/}
+      <Stack.Screen name="CourseHubV2" component={CourseHubV2Screen} options={{ title: '課程中樞', headerShown: false }} />
+      <Stack.Screen name="CourseMaterialsV2" component={CourseMaterialsV2Screen} options={{ title: '教材', headerShown: false }} />
+      <Stack.Screen name="CourseAssignmentsV2" component={CourseAssignmentsV2Screen} options={{ title: '作業', headerShown: false }} />
+      <Stack.Screen name="CourseAssignmentDetailV2" component={CourseAssignmentDetailV2Screen} options={{ title: '作業', headerShown: false }} />
+      <Stack.Screen name="CourseQuizzesV2" component={CourseQuizzesV2Screen} options={{ title: '測驗', headerShown: false }} />
+      <Stack.Screen name="CourseQuizTakingV2" component={CourseQuizTakingV2Screen} options={{ title: '作答', headerShown: false }} />
+      <Stack.Screen name="CourseForumV2" component={CourseForumV2Screen} options={{ title: '討論', headerShown: false }} />
+      <Stack.Screen name="CourseForumTopicV2" component={CourseForumTopicV2Screen} options={{ title: '討論', headerShown: false }} />
+      <Stack.Screen name="CourseAnnouncementsV2" component={CourseAnnouncementsV2Screen} options={{ title: '公告', headerShown: false }} />
+      <Stack.Screen name="CourseGradesV2" component={CourseGradesV2Screen} options={{ title: '成績', headerShown: false }} />
+      <Stack.Screen name="CourseAIAssistantV2" component={CourseAIAssistantV2Screen} options={{ title: 'AI 助教', headerShown: false }} />
+      <Stack.Screen name="CourseQuestionBankV2" component={CourseQuestionBankV2Screen} options={{ title: '題庫', headerShown: false }} />
+      <Stack.Screen name="CourseLiveV2" component={CourseLiveV2Screen} options={{ title: '直播', headerShown: false }} />
       <Stack.Screen
         name="CourseCatalog"
         component={CourseCatalogScreen}
         options={{ title: '課綱查詢', headerShown: false }}
       />
       <Stack.Screen
-        name="CourseModules"
-        component={guardCourseView(CourseModulesScreen)}
-        options={{ title: '教材單元' }}
-      />
-      <Stack.Screen
         name="QuizCenter"
-        component={guardCourseView(QuizCenterScreen)}
-        options={{ title: '測驗中心' }}
+        component={isLmsV2Enabled() ? CourseQuizzesV2Screen : guardCourseView(QuizCenterScreen)}
+        options={{ title: '測驗', headerShown: false }}
       />
       <Stack.Screen
         name="Attendance"
-        component={GuardedAttendance}
+        component={isLmsV2Enabled() ? CourseLiveV2Screen : GuardedAttendance}
         options={{ title: '智慧點名', headerShown: false }}
       />
       <Stack.Screen
@@ -329,8 +366,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseGradebook"
-        component={GuardedGradebook}
-        options={{ title: '課內成績簿' }}
+        component={isLmsV2Enabled() ? CourseGradesV2Screen : GuardedGradebook}
+        options={{ title: '成績', headerShown: false }}
       />
       <Stack.Screen
         name="Classroom"
@@ -369,7 +406,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="QuizTaking"
-        component={guardCourseView(QuizTakingScreen)}
+        component={isLmsV2Enabled() ? CourseQuizTakingV2Screen : guardCourseView(QuizTakingScreen)}
         options={{ title: '作答中', headerShown: false }}
       />
       <Stack.Screen
@@ -394,13 +431,13 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseDiscussion"
-        component={guardCourseView(CourseDiscussionScreen)}
-        options={{ title: '課程討論' }}
+        component={isLmsV2Enabled() ? CourseForumV2Screen : guardCourseView(CourseDiscussionScreen)}
+        options={{ title: '課程討論', headerShown: false }}
       />
       <Stack.Screen
         name="DiscussionThreadDetail"
-        component={guardCourseView(DiscussionThreadDetailScreen)}
-        options={{ title: '討論串' }}
+        component={isLmsV2Enabled() ? CourseForumTopicV2Screen : guardCourseView(DiscussionThreadDetailScreen)}
+        options={{ title: '討論串', headerShown: false }}
       />
       <Stack.Screen
         name="CourseMaterialViewer"
@@ -409,8 +446,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="HomeworkSubmit"
-        component={guardCourseView(HomeworkSubmitScreen)}
-        options={{ title: '繳交作業' }}
+        component={isLmsV2Enabled() ? CourseAssignmentDetailV2Screen : guardCourseView(HomeworkSubmitScreen)}
+        options={{ title: '繳交作業', headerShown: false }}
       />
       <Stack.Screen
         name="VideoMaterial"
@@ -439,8 +476,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="AttendanceMultiMethod"
-        component={guardCourseView(AttendanceMultiMethodScreen)}
-        options={{ title: '智慧簽到' }}
+        component={isLmsV2Enabled() ? CourseLiveV2Screen : guardCourseView(AttendanceMultiMethodScreen)}
+        options={{ title: '智慧簽到', headerShown: false }}
       />
       <Stack.Screen
         name="MyQuizScores"
@@ -454,8 +491,8 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="CourseScores"
-        component={guardCourseView(CourseScoresScreen)}
-        options={{ title: '課內成績' }}
+        component={isLmsV2Enabled() ? CourseGradesV2Screen : guardCourseView(CourseScoresScreen)}
+        options={{ title: '課內成績', headerShown: false }}
       />
       <Stack.Screen
         name="TodayCockpit"

@@ -70,7 +70,7 @@ const DEFAULT_UPCOMING: UpcomingBus[] = [
 ];
 
 export default function BusPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
-  const { schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [selectedRoute, setSelectedRoute] = useState<string>('all');
   const [now, setNow] = useState(new Date());
 
@@ -87,7 +87,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
       <div className="pageStack">
         {/* AI 推薦卡 */}
         <Link
-          href={`/ai-assistant?q=${encodeURIComponent('今天最近的公車到逢甲商圈幾點？')}`}
+          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('今天最近的公車到逢甲商圈幾點？')}`}
           className="card"
           style={{
             padding: '14px 18px',
@@ -368,7 +368,7 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
             </div>
           </div>
           <a
-            href={`/ai-assistant?q=${encodeURIComponent('現在最近一班到圖書館的校園公車是幾分鐘後到？途中要在哪一站換車？')}`}
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('現在最近一班到圖書館的校園公車是幾分鐘後到？途中要在哪一站換車？')}`}
             className="btn"
             style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
           >

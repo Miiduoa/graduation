@@ -1,15 +1,15 @@
 /**
- * LMS v2 Feature Flag
+ * LMS v2 Feature Flag (V2 — 自動啟用版)
  * ───────────────────────────────────────────────────────────
- * 中央化 feature flag,所有「LMS v2 是否啟用」的判斷都走這裡。
- * 預設 OFF — 行為與舊版 TronClass LMS 完全一致。
+ * 用戶決定直接換,不再保留 OFF 路徑作為產品行為。
+ * 但保留「Supabase URL/Key 缺失時 graceful fallback 回 TronClass」作為**安全網**
+ * (避免 dev 環境沒設變數時 App crash)。
  *
- * 啟用條件 (ALL 必須成立):
- *   1. EXPO_PUBLIC_LMS_V2 = 'true' (或 app.config extra.lmsV2 = true)
- *   2. EXPO_PUBLIC_SUPABASE_URL 不為空
- *   3. EXPO_PUBLIC_SUPABASE_ANON_KEY 不為空
+ * 啟用條件 (任一即視為 ON):
+ *   1. EXPO_PUBLIC_SUPABASE_URL 與 EXPO_PUBLIC_SUPABASE_ANON_KEY 都不為空
+ *   2. (或 app.config extra.supabaseUrl 與 supabaseAnonKey 都有)
  *
- * 任一缺漏即視為 OFF,並走 puDataCache 舊路徑。
+ * EXPO_PUBLIC_LMS_V2='false' 仍可強制關閉 (緊急回退用)。
  */
 
 import Constants from 'expo-constants';
@@ -35,8 +35,7 @@ const env = (typeof process !== 'undefined' ? (process.env ?? {}) : {}) as Recor
 >;
 const extra = readExtra();
 
-const FLAG_RAW =
-  env.EXPO_PUBLIC_LMS_V2 ?? (extra.lmsV2 ? 'true' : 'false');
+const FLAG_RAW = env.EXPO_PUBLIC_LMS_V2; // 預設 undefined = 自動依 URL/Key 判斷
 const SUPABASE_URL =
   env.EXPO_PUBLIC_SUPABASE_URL ?? extra.supabaseUrl ?? '';
 const SUPABASE_ANON_KEY =
@@ -44,13 +43,20 @@ const SUPABASE_ANON_KEY =
 
 const isTruthy = (v: string | undefined) =>
   typeof v === 'string' && /^(1|true|yes|on)$/i.test(v.trim());
+const isFalsy = (v: string | undefined) =>
+  typeof v === 'string' && /^(0|false|no|off)$/i.test(v.trim());
 
 /**
  * 主要 API:LMS v2 是否啟用?
- * 任何呼叫 Supabase 的程式碼都要先檢查這個。
+ *
+ * 規則:
+ *   1. 若 EXPO_PUBLIC_LMS_V2='false' (或 0/no/off) → 強制關閉 (緊急回退)
+ *   2. 若有 SUPABASE_URL + ANON_KEY → 自動啟用
+ *   3. 否則(沒設 Supabase) → 關閉 (fallback to TronClass,避免 crash)
  */
 export function isLmsV2Enabled(): boolean {
-  return isTruthy(FLAG_RAW) && !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
+  if (isFalsy(FLAG_RAW)) return false; // 緊急回退
+  return !!SUPABASE_URL && !!SUPABASE_ANON_KEY;
 }
 
 /**

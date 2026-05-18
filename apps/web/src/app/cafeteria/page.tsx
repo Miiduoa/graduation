@@ -107,7 +107,7 @@ function getCafeteriaStatus(cafeteria: Cafeteria) {
 export default function CafeteriaPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolId, schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [selectedCafeteria, setSelectedCafeteria] = useState(ALL_CAFETERIAS_KEY);
   const [search, setSearch] = useState('');
 
@@ -273,7 +273,7 @@ export default function CafeteriaPage(props: {
       <div className="pageStack">
         {/* AI 推薦卡 */}
         <Link
-          href={`/ai-assistant${schoolName ? '?' : '?'}q=${encodeURIComponent('今天午餐建議？要熱量低一點的')}`}
+          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('今天午餐建議？要熱量低一點的')}`}
           className="card"
           style={{
             padding: '14px 18px',
@@ -617,7 +617,7 @@ export default function CafeteriaPage(props: {
             </div>
           </div>
           <a
-            href={`/ai-assistant?q=${encodeURIComponent('根據今日學生餐廳菜單，幫我推薦一套均衡的午餐組合（不超過 120 元），以及適合下午課前的點心。')}`}
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('根據今日學生餐廳菜單，幫我推薦一套均衡的午餐組合（不超過 120 元），以及適合下午課前的點心。')}`}
             className="btn"
             style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
           >
