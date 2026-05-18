@@ -64,6 +64,11 @@ import {
   type AIAppRuntimeData,
 } from '../services/aiAppContext';
 import {
+  DEMO_HOMEWORKS,
+  DEMO_ANNOUNCEMENTS,
+  DEMO_COURSES,
+} from '../data/demoCoursesMock';
+import {
   getAIAmbientAwarenessSnapshot,
   refreshAIAmbientAwareness,
   subscribeAIAmbientAwareness,
@@ -2294,14 +2299,40 @@ export function AIChatScreen(props: any) {
       }
       return undefined;
     })();
-    const enriched: AIContext = {
+    let enriched: AIContext = {
       ...base,
       ...(lastChoiceMenu ? { lastChoiceMenu } : {}),
     };
+    // ── Demo / 訪客種子：未登入帳號 → backend prefetch 會跳過全部 tool，
+    //    這裡把 demoCoursesMock 種子塞進 context，配合 runtime.js 的後備邏輯
+    //    讓 AI 在 demo 模式仍能回答「我這週有什麼作業 / 公告」。
+    if (!auth.user?.uid) {
+      const courseNameById = new Map(DEMO_COURSES.map((c) => [c.id, c.name]));
+      const seededAssignments = (enriched.pendingAssignments?.length ?? 0) > 0
+        ? enriched.pendingAssignments
+        : DEMO_HOMEWORKS.filter((h) => !h.submitted).map((h) => ({
+            id: String(h.id),
+            title: h.title,
+            groupName: courseNameById.get(h.courseId) ?? '課程',
+            dueAt: h.dueAt,
+          }));
+      const seededAnnouncements = (enriched.announcements?.length ?? 0) > 0
+        ? enriched.announcements
+        : DEMO_ANNOUNCEMENTS.map((a) => ({
+            id: String(a.id),
+            title: a.title,
+            source: courseNameById.get(a.courseId) ?? '課程公告',
+          }));
+      enriched = {
+        ...enriched,
+        pendingAssignments: seededAssignments,
+        announcements: seededAnnouncements,
+      };
+    }
     return campusAssistantSessionId
       ? { ...enriched, campusAssistantSessionId }
       : enriched;
-  }, [buildLiveAIContext, appRuntimeData, campusAssistantSessionId, messages]);
+  }, [buildLiveAIContext, appRuntimeData, campusAssistantSessionId, messages, auth.user?.uid]);
 
   useEffect(() => {
     setCampusAssistantSessionId(undefined);

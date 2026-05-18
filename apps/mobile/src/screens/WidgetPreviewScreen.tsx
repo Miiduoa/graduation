@@ -100,7 +100,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 function WidgetStatusBadge({ status }: { status: WidgetStatus }) {
   const isNative = status === 'native';
   const color = isNative ? '#34C759' : '#FF9500';
-  const backgroundColor = isNative ? 'rgba(16,185,129,0.14)' : 'rgba(245,158,11,0.14)';
+  const backgroundColor = isNative ? 'rgba(16,185,129,0.14)' : 'rgba(255,149,0,0.14)';
 
   return (
     <View
@@ -312,7 +312,7 @@ function MediumWidget({ widget }: { widget: Widget }) {
                       paddingHorizontal: 8,
                       paddingVertical: 4,
                       borderRadius: 999,
-                      backgroundColor: 'rgba(244,63,94,0.14)',
+                      backgroundColor: 'rgba(255,45,85,0.14)',
                     }}
                   >
                     <Text style={{ color: '#F43F5E', fontSize: 10, fontWeight: '700' }}>重要</Text>
@@ -531,7 +531,7 @@ function LargeWidget({ widget }: { widget: Widget }) {
                       paddingHorizontal: 8,
                       paddingVertical: 4,
                       borderRadius: 999,
-                      backgroundColor: 'rgba(244,63,94,0.14)',
+                      backgroundColor: 'rgba(255,45,85,0.14)',
                     }}
                   >
                     <Text style={{ color: '#F43F5E', fontSize: 10, fontWeight: '700' }}>重要</Text>
@@ -856,7 +856,7 @@ export function WidgetPreviewScreen() {
                     style={{
                       padding: 14,
                       borderRadius: theme.radius.md,
-                      backgroundColor: 'rgba(245,158,11,0.12)',
+                      backgroundColor: 'rgba(255,149,0,0.12)',
                       gap: 6,
                     }}
                   >

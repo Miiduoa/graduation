@@ -20,6 +20,7 @@ import {
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import { BlurView } from 'expo-blur';
+import { StatusBar } from 'expo-status-bar';
 
 import { theme, softShadowStyle } from './src/ui/theme';
 import { SchoolProvider, useSchool } from './src/state/school';
@@ -1197,6 +1198,8 @@ class AppErrorBoundary extends React.Component<
 export default function App() {
   return (
     <SafeAreaProvider>
+      {/* iOS: status bar 字色隨主題自動切換（亮底深字、暗底白字）；translucent 讓內容貼齊頂部 */}
+      <StatusBar style="auto" translucent />
       <AppErrorBoundary>
         <ThemeProvider>
           <AccessibilityProvider>

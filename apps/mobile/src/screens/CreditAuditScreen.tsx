@@ -676,7 +676,7 @@ export function CreditAuditScreen(props: any) {
                               paddingHorizontal: 12,
                               paddingVertical: 8,
                               borderRadius: theme.radius.sm,
-                              backgroundColor: passed ? 'transparent' : 'rgba(244,63,94,0.05)',
+                              backgroundColor: passed ? 'transparent' : 'rgba(255,45,85,0.05)',
                               borderBottomWidth: i < semGrades.length - 1 ? 1 : 0,
                               borderBottomColor: theme.colors.surface2,
                             }}
