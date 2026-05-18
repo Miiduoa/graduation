@@ -296,7 +296,7 @@ export function VendorManagementScreen(props: any) {
           }}
         >
           <View>
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 22 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 22 }}>
               {myVendor.name}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -649,7 +649,7 @@ export function VendorManagementScreen(props: any) {
                 padding: 16,
                 color: theme.colors.text,
                 fontSize: 28,
-                fontWeight: '900',
+                fontWeight: '700',
                 letterSpacing: 6,
                 textAlign: 'center',
                 marginBottom: 10,
@@ -747,7 +747,7 @@ function DashboardTab(props: {
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
               今日訂單
             </Text>
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 20 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
               {orderStats.total}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -767,7 +767,7 @@ function DashboardTab(props: {
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
               今日營收
             </Text>
-            <Text style={{ color: theme.colors.success, fontWeight: '800', fontSize: 20 }}>
+            <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 20 }}>
               NT${orderStats.revenue}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -789,7 +789,7 @@ function DashboardTab(props: {
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
               平均評分
             </Text>
-            <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 20 }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 20 }}>
               {avgRating}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -807,7 +807,7 @@ function DashboardTab(props: {
             }}
           >
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>待處理</Text>
-            <Text style={{ color: '#FF9500', fontWeight: '800', fontSize: 20 }}>
+            <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 20 }}>
               {orderStats.pending + orderStats.confirmed}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -1940,7 +1940,7 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
             <Ionicons name="star" size={24} color="#FF9500" />
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 28 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 28 }}>
               {avgRating}
             </Text>
           </View>

@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   statLabel: {
     fontSize: 10,

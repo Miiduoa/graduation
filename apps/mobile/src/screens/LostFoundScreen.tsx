@@ -288,7 +288,7 @@ export function LostFoundScreen(props: any) {
                 alignItems: 'center',
               }}
             >
-              <Text style={{ color: s.color, fontWeight: '900', fontSize: 22 }}>{s.value}</Text>
+              <Text style={{ color: s.color, fontWeight: '700', fontSize: 22 }}>{s.value}</Text>
               <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
                 {s.label}
               </Text>
@@ -1087,7 +1087,7 @@ export function LostFoundScreen(props: any) {
             >
               <Text style={{ fontSize: 28 }}>{currentLevel.badge}</Text>
             </View>
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
               {currentLevel.name}
             </Text>
             <Text style={{ color: currentLevel.color, fontWeight: '700', fontSize: 24 }}>
@@ -1218,7 +1218,7 @@ export function LostFoundScreen(props: any) {
                     {action.description}
                   </Text>
                 </View>
-                <Text style={{ color: '#34C759', fontWeight: '800', fontSize: 14 }}>
+                <Text style={{ color: '#34C759', fontWeight: '700', fontSize: 14 }}>
                   +{action.points}
                 </Text>
               </View>
@@ -1312,7 +1312,7 @@ export function LostFoundScreen(props: any) {
                   <Text
                     style={{
                       color: i < 3 ? '#FF3B30' : theme.colors.muted,
-                      fontWeight: '800',
+                      fontWeight: '700',
                       fontSize: 12,
                     }}
                   >

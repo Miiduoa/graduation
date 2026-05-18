@@ -206,7 +206,7 @@ function GradeCard({ course }: { course: Grade }) {
 
         {course.status === 'completed' && course.grade && (
           <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: gradeColor, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: gradeColor, fontWeight: '700', fontSize: 24 }}>
               {course.grade}
             </Text>
             {course.gpa !== undefined && (
@@ -475,7 +475,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                     <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
                       <View style={{ flex: 1, alignItems: 'center' }}>
                         <Text
-                          style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 28 }}
+                          style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 28 }}
                         >
                           {currentSemester.credits}
                         </Text>
@@ -483,14 +483,14 @@ export function GradesScreen(props: Record<string, unknown>) {
                       </View>
                       <View style={{ flex: 1, alignItems: 'center' }}>
                         <Text
-                          style={{ color: theme.colors.success, fontWeight: '900', fontSize: 28 }}
+                          style={{ color: theme.colors.success, fontWeight: '700', fontSize: 28 }}
                         >
                           {currentSemester.courses.length}
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課數</Text>
                       </View>
                       <View style={{ flex: 1, alignItems: 'center' }}>
-                        <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 28 }}>
+                        <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 28 }}>
                           {currentSemester.courses.filter((c) => c.midterm !== undefined).length}
                         </Text>
                         <Text style={{ color: theme.colors.muted, fontSize: 12 }}>
@@ -595,7 +595,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       <View style={{ flexDirection: 'row', gap: 16 }}>
                         <View style={{ flex: 1, alignItems: 'center' }}>
                           <Text
-                            style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 28 }}
+                            style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 28 }}
                           >
                             {sem.gpa.toFixed(2)}
                           </Text>
@@ -603,14 +603,14 @@ export function GradesScreen(props: Record<string, unknown>) {
                         </View>
                         <View style={{ flex: 1, alignItems: 'center' }}>
                           <Text
-                            style={{ color: theme.colors.success, fontWeight: '900', fontSize: 28 }}
+                            style={{ color: theme.colors.success, fontWeight: '700', fontSize: 28 }}
                           >
                             {completedInSem.reduce((sum, c) => sum + c.credits, 0)}
                           </Text>
                           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>取得學分</Text>
                         </View>
                         <View style={{ flex: 1, alignItems: 'center' }}>
-                          <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 28 }}>
+                          <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 28 }}>
                             {completedInSem.length}
                           </Text>
                           <Text style={{ color: theme.colors.muted, fontSize: 12 }}>修課數</Text>
@@ -641,7 +641,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                   />
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: theme.colors.muted, fontSize: 12 }}>累積 GPA</Text>
-                    <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 36 }}>
+                    <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 36 }}>
                       {overallGPA.toFixed(2)}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
@@ -660,7 +660,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+                    <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
                       {totalCredits}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已修學分</Text>
@@ -674,7 +674,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
+                    <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 24 }}>
                       {completedCourses.length}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 11 }}>完成課程</Text>
@@ -688,7 +688,7 @@ export function GradesScreen(props: Record<string, unknown>) {
                       alignItems: 'center',
                     }}
                   >
-                    <Text style={{ color: '#5856D6', fontWeight: '900', fontSize: 24 }}>
+                    <Text style={{ color: '#5856D6', fontWeight: '700', fontSize: 24 }}>
                       {
                         semesters.filter((s) => s.courses.some((c) => c.status === 'completed'))
                           .length

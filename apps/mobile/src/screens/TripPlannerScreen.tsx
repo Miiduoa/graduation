@@ -157,7 +157,7 @@ function EndpointPicker({
             justifyContent: 'center',
           }}
         >
-          <Text style={{ color: theme.colors.muted, fontSize: 10, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.muted, fontSize: 10, fontWeight: '700' }}>
             {label}
           </Text>
         </View>
@@ -607,7 +607,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                 })}
               >
                 <Ionicons name="school" size={12} color="#fff" />
-                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
                   去下節課 · {persona.nextClass.startHHmm}
                 </Text>
               </Pressable>
@@ -768,7 +768,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                     </View>
                     <View style={{ flex: 1 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>
+                        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
                           {item.title}
                         </Text>
                         {isBest && (
@@ -780,7 +780,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                               backgroundColor: item.color,
                             }}
                           >
-                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>最佳</Text>
+                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>最佳</Text>
                           </View>
                         )}
                       </View>
@@ -789,7 +789,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                       </Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ color: item.color, fontSize: 22, fontWeight: '900', lineHeight: 24 }}>
+                      <Text style={{ color: item.color, fontSize: 22, fontWeight: '700', lineHeight: 24 }}>
                         {item.totalMin}
                       </Text>
                       <Text style={{ color: theme.colors.muted, fontSize: 10 }}>分</Text>
@@ -849,7 +849,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                         })}
                       >
                         <Ionicons name="navigate" size={14} color="#fff" />
-                        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>出發</Text>
+                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>出發</Text>
                       </Pressable>
                     </View>
                   )}

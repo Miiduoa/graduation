@@ -213,7 +213,7 @@ export function SmartCalendarPanel({
         {/* Header — 嵌入模式隱藏 */}
         {!embedded && (
           <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.md }}>
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
               智慧行事曆
             </Text>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 14, marginTop: 4 }}>
@@ -446,7 +446,7 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
           { label: '待辦', value: `${weekSummary.upcomingDeadlines}`, color: '#FF3B30' },
         ].map((s) => (
           <View key={s.label} style={{ alignItems: 'center' }}>
-            <Text style={{ color: s.color, fontSize: 18, fontWeight: '800' }}>{s.value}</Text>
+            <Text style={{ color: s.color, fontSize: 18, fontWeight: '700' }}>{s.value}</Text>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 11 }}>{s.label}</Text>
           </View>
         ))}
@@ -779,7 +779,7 @@ function PomodoroSection({
             style={{
               color: active ? theme.colors.accent : theme.colors.text,
               fontSize: 42,
-              fontWeight: '800',
+              fontWeight: '700',
               fontVariant: ['tabular-nums'],
             }}
           >
@@ -852,7 +852,7 @@ function PomodoroSection({
               { label: '連續', value: `${stats.streak}天`, sub: '', color: '#FF9500' },
             ].map((s) => (
               <View key={s.label} style={{ alignItems: 'center' }}>
-                <Text style={{ color: s.color, fontSize: 22, fontWeight: '800' }}>{s.value}</Text>
+                <Text style={{ color: s.color, fontSize: 22, fontWeight: '700' }}>{s.value}</Text>
                 <Text style={{ color: theme.colors.textSecondary, fontSize: 11 }}>{s.label}</Text>
                 {s.sub && <Text style={{ color: theme.colors.muted, fontSize: 10 }}>{s.sub}</Text>}
               </View>

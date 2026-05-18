@@ -763,7 +763,7 @@ export default function SettingsPage(props: {
               </label>
               <div className="card" style={{ padding: 16, background: "linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)", border: "none", color: "#fff" }}>
                 <div style={{ fontSize: 12, opacity: 0.8 }}>即時預覽</div>
-                <div style={{ fontSize: 22, fontWeight: 800, marginTop: 8 }}>Campus One</div>
+                <div style={{ fontSize: 22, fontWeight: 700, marginTop: 8 }}>Campus One</div>
                 <div style={{ fontSize: 13, opacity: 0.86, marginTop: 4 }}>主色與字級已立即套用</div>
               </div>
             </div>
@@ -854,7 +854,7 @@ export default function SettingsPage(props: {
               display: "grid",
               placeItems: "center",
               fontSize: 24,
-              fontWeight: 800,
+              fontWeight: 700,
               flexShrink: 0,
               boxShadow: "var(--shadow-sm)",
             }}

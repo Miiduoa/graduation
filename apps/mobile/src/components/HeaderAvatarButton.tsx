@@ -52,7 +52,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
               style={{
                 color: theme.colors.onAccent,
                 fontSize: size * 0.45,
-                fontWeight: '800',
+                fontWeight: '700',
               }}
             >
               {initial}
@@ -79,7 +79,7 @@ export function HeaderAvatarButton({ size = 36 }: HeaderAvatarButtonProps) {
               borderColor: theme.colors.bg,
             }}
           >
-            <Text style={{ color: theme.colors.onAccent, fontSize: 9, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 9, fontWeight: '700' }}>
               {notifs.unreadCount > 9 ? '9+' : notifs.unreadCount}
             </Text>
           </View>

@@ -696,7 +696,7 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
           style={{
             color: offline.info.exists ? theme.colors.success : theme.colors.muted,
             fontSize: 10,
-            fontWeight: '800',
+            fontWeight: '700',
           }}
         >
           {offline.progress.status === 'downloading'
@@ -814,7 +814,7 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
         >
           <Ionicons name="school" size={18} color="#fff" />
           <View>
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>下節課</Text>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>下節課</Text>
             <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 10 }}>
               {persona.nextClass.startHHmm} · {persona.nextClass.roomCode}
             </Text>
@@ -974,7 +974,7 @@ function PoiCard({
         >
           <Ionicons name="close" size={18} color="#fff" />
         </Pressable>
-        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900' }} numberOfLines={1}>
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700' }} numberOfLines={1}>
           {poi.name}
         </Text>
         <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }} numberOfLines={1}>
@@ -1040,7 +1040,7 @@ function PoiCard({
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 11 }}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>
                 {nearbyBus.route.code}
               </Text>
             </View>
@@ -1072,7 +1072,7 @@ function PoiCard({
             })}
           >
             <Ionicons name="navigate" size={16} color="#fff" />
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>
               開始導航 · {fmtWalk(distanceM)}
             </Text>
           </Pressable>
@@ -1194,7 +1194,7 @@ function TurnByTurnHud({
           />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#fff', fontWeight: '900', fontSize: 26, lineHeight: 28 }}>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 26, lineHeight: 28 }}>
             {step ? fmtDist(step.distM) : ''}
           </Text>
           <Text style={{ color: '#fff', fontSize: 13, marginTop: 2, fontWeight: '600' }} numberOfLines={2}>
@@ -1242,7 +1242,7 @@ function TurnByTurnHud({
         }}
       >
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#34D399', fontWeight: '900', fontSize: 22, lineHeight: 24 }}>
+          <Text style={{ color: '#34D399', fontWeight: '700', fontSize: 22, lineHeight: 24 }}>
             {fmtWalk(remainingM)}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -1275,7 +1275,7 @@ function TurnByTurnHud({
             justifyContent: 'center',
           })}
         >
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>結束</Text>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>結束</Text>
         </Pressable>
       </View>
     </>

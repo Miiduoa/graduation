@@ -190,7 +190,7 @@ export default function MistakeRepertoireScreen() {
         <Text style={{ color: theme.colors.onAccent, fontSize: 12, opacity: 0.85 }}>🧠 錯題本</Text>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
           <View>
-            <Text style={{ color: theme.colors.onAccent, fontSize: 30, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 30, fontWeight: '700' }}>
               {stats.dueTodayCount}
             </Text>
             <Text style={{ color: theme.colors.onAccent, opacity: 0.8, fontSize: 11 }}>今天該練</Text>

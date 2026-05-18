@@ -874,7 +874,7 @@ export function OrderingScreen(props: any) {
                   <Text
                     style={{
                       fontSize: 18,
-                      fontWeight: '900',
+                      fontWeight: '700',
                       color: getStatusColor(activeOrders[0].status),
                     }}
                   >
@@ -1116,7 +1116,7 @@ export function OrderingScreen(props: any) {
                             <Text
                               style={{
                                 color: theme.colors.accent,
-                                fontWeight: '800',
+                                fontWeight: '700',
                                 fontSize: 16,
                               }}
                             >
@@ -1261,7 +1261,7 @@ export function OrderingScreen(props: any) {
                           總計
                         </Text>
                         <Text
-                          style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 20 }}
+                          style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 20 }}
                         >
                           ${cartTotal}
                         </Text>
@@ -1398,7 +1398,7 @@ export function OrderingScreen(props: any) {
                             <Text
                               style={{
                                 fontSize: 16,
-                                fontWeight: '900',
+                                fontWeight: '700',
                                 color: getStatusColor(order.status),
                               }}
                             >
@@ -1438,7 +1438,7 @@ export function OrderingScreen(props: any) {
                           </View>
                         </View>
                         <Text
-                          style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 18 }}
+                          style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 18 }}
                         >
                           ${order.totalPrice}
                         </Text>
@@ -1637,7 +1637,7 @@ export function OrderingScreen(props: any) {
                   <Text
                     style={{
                       fontSize: 48,
-                      fontWeight: '900',
+                      fontWeight: '700',
                       color: theme.colors.success,
                       letterSpacing: 8,
                       fontFamily: 'System',
@@ -1652,7 +1652,7 @@ export function OrderingScreen(props: any) {
                     style={{
                       color: theme.colors.text,
                       fontSize: 22,
-                      fontWeight: '800',
+                      fontWeight: '700',
                       marginBottom: 4,
                     }}
                   >
@@ -1728,7 +1728,7 @@ export function OrderingScreen(props: any) {
                 marginBottom: 12,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                 飲食偏好與過敏原
               </Text>
               <Pressable

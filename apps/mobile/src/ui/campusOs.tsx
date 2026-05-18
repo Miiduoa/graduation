@@ -229,7 +229,7 @@ export function HeroActionCard(props: {
           style={{
             color: fg,
             fontSize: 11,
-            fontWeight: '800',
+            fontWeight: '700',
             letterSpacing: 1.5,
             textTransform: 'uppercase',
             opacity: 0.8,
@@ -660,7 +660,7 @@ export function RoleCtaCard(props: {
               style={{
                 color: fg,
                 fontSize: 11,
-                fontWeight: '800',
+                fontWeight: '700',
                 letterSpacing: 1.5,
                 textTransform: 'uppercase',
                 opacity: 0.8,

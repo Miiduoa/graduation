@@ -236,7 +236,7 @@ export function IndoorFloorMapScreen(_props: Record<string, unknown>) {
             <Ionicons name="business" size={18} color="#fff" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '900' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
               {building.name}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }} numberOfLines={1}>
@@ -294,7 +294,7 @@ export function IndoorFloorMapScreen(_props: Record<string, unknown>) {
                     style={{
                       color: active ? '#fff' : theme.colors.textSecondary,
                       fontSize: 13,
-                      fontWeight: '800',
+                      fontWeight: '700',
                     }}
                   >
                     {f.shortLabel}
@@ -349,7 +349,7 @@ export function IndoorFloorMapScreen(_props: Record<string, unknown>) {
                 backgroundColor: theme.colors.accent,
               }}
             >
-              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
+              <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
                 {navigationHint.actionLabel}
               </Text>
             </Pressable>
@@ -547,7 +547,7 @@ function RoomSheet({
           <Text style={{ fontSize: 20 }}>{ROOM_KIND_EMOJI[room.kind]}</Text>
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 16 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
             {room.name} · {room.code}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }}>
@@ -573,7 +573,7 @@ function RoomSheet({
           }}
         >
           <Ionicons name="school" size={14} color="#FF9500" />
-          <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '800' }}>
+          <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '700' }}>
             這是 {personaName} 下節課的教室
           </Text>
         </View>
@@ -642,7 +642,7 @@ function RoomSheet({
               alignItems: 'center',
             })}
           >
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>預約</Text>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>預約</Text>
           </Pressable>
         )}
         {room.requiresCard && (
@@ -694,7 +694,7 @@ function StatChip({
         <Ionicons name={icon} size={11} color={color} />
         <Text style={{ color: theme.colors.muted, fontSize: 10 }}>{label}</Text>
       </View>
-      <Text style={{ color, fontSize: 12, fontWeight: '800', marginTop: 2 }} numberOfLines={1}>
+      <Text style={{ color, fontSize: 12, fontWeight: '700', marginTop: 2 }} numberOfLines={1}>
         {value}
       </Text>
     </View>

@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
   title: {
     paddingHorizontal: theme.layout.screenPadding,
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '700',
     color: theme.colors.text,
     marginTop: theme.space.sm,
     marginBottom: theme.space.md,
@@ -451,7 +451,7 @@ const styles = StyleSheet.create({
   },
   sendTxt: { color: '#fff', fontWeight: '700', fontSize: 14 },
   commentHeader: {
-    fontWeight: '800',
+    fontWeight: '700',
     color: theme.colors.text,
     fontSize: 15,
     paddingHorizontal: theme.layout.screenPadding,

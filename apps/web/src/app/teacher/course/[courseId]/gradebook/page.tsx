@@ -130,7 +130,7 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
                 textAlign: 'center', minWidth: 100,
               }}
             >
-              <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.value}</div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
             </div>
           ))}

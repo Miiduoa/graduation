@@ -68,7 +68,7 @@ function RateGauge({ rate, size = 140, label }: { rate: number; size?: number; l
         />
         {/* Center text */}
         <View style={{ alignItems: 'center' }}>
-          <Text style={{ color, fontSize: size * 0.24, fontWeight: '900' }}>
+          <Text style={{ color, fontSize: size * 0.24, fontWeight: '700' }}>
             {Math.round(rate)}%
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>{label}</Text>
@@ -403,7 +403,7 @@ const s = StyleSheet.create({
     borderBottomRightRadius: 20,
   },
   headerContent: {},
-  headerTitle: { fontSize: 24, fontWeight: '800', color: '#FFFFFF' },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: '#FFFFFF' },
   headerSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
 
   scroll: { flex: 1 },
@@ -421,7 +421,7 @@ const s = StyleSheet.create({
   // Summary
   summaryRow: { flexDirection: 'row', marginTop: 20, gap: 24 },
   summaryItem: { alignItems: 'center' },
-  summaryNum: { fontSize: 18, fontWeight: '800', color: theme.colors.text },
+  summaryNum: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
   summaryLabel: { fontSize: 11, color: theme.colors.muted, marginTop: 2 },
 
   // Risk students (teacher)
@@ -470,5 +470,5 @@ const s = StyleSheet.create({
   courseDetailName: { fontSize: 14, fontWeight: '600', color: theme.colors.text },
   courseDetailSub: { fontSize: 11, color: theme.colors.muted, marginTop: 2 },
   courseDetailRate: { marginLeft: 8 },
-  courseDetailRateText: { fontSize: 18, fontWeight: '800' },
+  courseDetailRateText: { fontSize: 18, fontWeight: '700' },
 });

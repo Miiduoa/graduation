@@ -92,5 +92,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   summaryLabel: { fontSize: 13, color: '#1E40AF' },
-  summaryValue: { fontSize: 32, fontWeight: '800', color: '#1E3A8A', marginTop: 4 },
+  summaryValue: { fontSize: 32, fontWeight: '700', color: '#1E3A8A', marginTop: 4 },
 });

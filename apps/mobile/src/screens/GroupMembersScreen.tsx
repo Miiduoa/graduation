@@ -286,7 +286,7 @@ export function GroupMembersScreen(props: any) {
                   backgroundColor: theme.colors.accentSoft,
                 }}
               >
-                <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
                   {memberCount}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
@@ -302,7 +302,7 @@ export function GroupMembersScreen(props: any) {
                   backgroundColor: `${theme.colors.success}15`,
                 }}
               >
-                <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
                   {instructorCount}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
@@ -318,7 +318,7 @@ export function GroupMembersScreen(props: any) {
                   backgroundColor: theme.colors.surface2,
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 24 }}>
                   {memberCount - instructorCount}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 4 }}>
@@ -447,7 +447,7 @@ export function GroupMembersScreen(props: any) {
                           flexWrap: 'wrap',
                         }}
                       >
-                        <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16 }}>
+                        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
                           {displayName}
                         </Text>
                         {isMe && <Pill text="我" kind="accent" />}

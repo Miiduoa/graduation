@@ -256,7 +256,7 @@ function DetailModal(props: {
             gap: 12,
           }}
         >
-          <Text style={{ flex: 1, color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+          <Text style={{ flex: 1, color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
             館藏書目
           </Text>
           <Pressable onPress={onClose} hitSlop={10}>
@@ -273,7 +273,7 @@ function DetailModal(props: {
                   style={{
                     color: theme.colors.text,
                     fontSize: 18,
-                    fontWeight: '800',
+                    fontWeight: '700',
                     lineHeight: 24,
                   }}
                 >
@@ -352,7 +352,7 @@ function DetailModal(props: {
                   gap: 8,
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 13 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>
                   MARC 編目資料
                 </Text>
                 <Text

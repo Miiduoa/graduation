@@ -459,7 +459,7 @@ export default function CafeteriaPage(props: {
                   </div>
                   <div style={{ textAlign: 'right', minWidth: 120 }}>
                     <div style={{ fontSize: 13, color: 'var(--muted)' }}>供應中 / 菜單總數</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.04em' }}>
+                    <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.04em' }}>
                       {availableCount} / {totalCount}
                     </div>
                     {typeof cafeteria.rating === 'number' ? (
@@ -573,7 +573,7 @@ export default function CafeteriaPage(props: {
                           <div
                             style={{
                               fontSize: 20,
-                              fontWeight: 800,
+                              fontWeight: 700,
                               color: 'var(--brand)',
                               letterSpacing: '-0.04em',
                             }}

@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.surface,
   },
-  chipTxt: { fontSize: 14, fontWeight: '800', color: theme.colors.accent },
+  chipTxt: { fontSize: 14, fontWeight: '700', color: theme.colors.accent },
   qrCard: {
     padding: 14,
     marginBottom: 18,
@@ -290,12 +290,12 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border,
     alignItems: 'center',
   },
-  qrTitle: { fontSize: 15, fontWeight: '800', color: theme.colors.text, marginBottom: 10 },
+  qrTitle: { fontSize: 15, fontWeight: '700', color: theme.colors.text, marginBottom: 10 },
   qrFrame: { padding: 12, backgroundColor: '#fff', borderRadius: theme.radius.md },
   qrHint: { fontSize: 11, color: theme.colors.muted, marginTop: 10, textAlign: 'center' },
   sectionTitle: {
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
     color: theme.colors.muted,
     marginBottom: 8,
     marginTop: 4,
@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  cardTitle: { fontSize: 16, fontWeight: '800', color: theme.colors.text },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
   cardSub: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 4 },
   uidHint: { fontSize: 11, color: theme.colors.muted, marginTop: 6 },
 });

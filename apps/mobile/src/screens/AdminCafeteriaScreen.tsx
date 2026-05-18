@@ -115,7 +115,7 @@ export function AdminCafeteriaScreen(props: any) {
           style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
         >
           <View>
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 22 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 22 }}>
               餐廳管理
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -1028,7 +1028,7 @@ function InspectionCard(props: { inspection: InspectionRecord }) {
           </Text>
         </View>
         <View style={{ alignItems: 'center' }}>
-          <Text style={{ color: scoreColor, fontWeight: '800', fontSize: 18 }}>{insp.score}</Text>
+          <Text style={{ color: scoreColor, fontWeight: '700', fontSize: 18 }}>{insp.score}</Text>
           <Text style={{ color: scoreColor, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
             {insp.passed ? '及格' : '不及格'}
           </Text>
@@ -1217,7 +1217,7 @@ function CreateAnnouncementModal(props: { onClose: () => void }) {
             borderBottomColor: theme.colors.border,
           }}
         >
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
             新建公告
           </Text>
           <Pressable onPress={onClose}>
@@ -1491,7 +1491,7 @@ function CreateInspectionModal(props: { onClose: () => void }) {
             borderBottomColor: theme.colors.border,
           }}
         >
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
             新增稽查紀錄
           </Text>
           <Pressable onPress={onClose}>
@@ -1603,7 +1603,7 @@ function CreateInspectionModal(props: { onClose: () => void }) {
             <Text
               style={{
                 color: totalScore >= 90 ? '#34C759' : totalScore >= 70 ? '#FF9500' : '#D70015',
-                fontWeight: '800',
+                fontWeight: '700',
                 fontSize: 20,
               }}
             >

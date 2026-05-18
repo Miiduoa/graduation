@@ -1046,7 +1046,7 @@ export function AdminDashboardScreen(props: any) {
             <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>
               學習 · 管理員模式
             </Text>
-            <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700' }}>
               管理後台
             </Text>
           </View>

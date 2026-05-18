@@ -170,7 +170,7 @@ export function CampusSocialPanel() {
           <View
             style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
               校園社群
             </Text>
             <Pressable
@@ -469,7 +469,7 @@ function PostCard({
             marginBottom: theme.space.sm,
           }}
         >
-          <Text style={{ color: '#34C759', fontSize: 20, fontWeight: '800' }}>${post.price}</Text>
+          <Text style={{ color: '#34C759', fontSize: 20, fontWeight: '700' }}>${post.price}</Text>
           {post.condition && (
             <View
               style={{

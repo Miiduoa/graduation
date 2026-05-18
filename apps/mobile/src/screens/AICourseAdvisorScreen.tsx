@@ -1045,7 +1045,7 @@ ${top
                             <Text
                               style={{
                                 color: theme.colors.accent,
-                                fontWeight: '800',
+                                fontWeight: '700',
                                 fontSize: 14,
                               }}
                             >

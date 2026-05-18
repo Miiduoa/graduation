@@ -244,7 +244,7 @@ export function LiveStatusBadge({
         color={color}
         style={isLive ? { transform: [{ scale: 1.2 }] } : undefined}
       />
-      <Text style={{ color, fontSize: size === 'xs' ? 9 : 10, fontWeight: '800' }}>
+      <Text style={{ color, fontSize: size === 'xs' ? 9 : 10, fontWeight: '700' }}>
         {label}
         {isLive ? ' · TDX' : ''}
       </Text>
