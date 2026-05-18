@@ -88,8 +88,8 @@ function buildDirectory(): DirEntry[] {
     subtitle: `${s.studentId}・資管系`,
     avatar: '👩‍🎓',
   }));
-  // 防呆：剔除可能重複的 uid（demo-student-1 與 stu-001 是不同實體，沒有交集；
-  // 但若未來有衝突就以 demo-* 優先）
+  // 防呆：剔除可能重複的 uid（DEMO_USERS[0] 與 DEMO_STUDENTS[0] 共享 uid 'stu-001'，
+  // 確實會 collision；以先出現者為主，避免 directory 出現重複名字）
   const seen = new Set<string>();
   const merged: DirEntry[] = [];
   for (const e of [...usersFromRoles, ...usersFromStudents]) {
