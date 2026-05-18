@@ -1946,7 +1946,7 @@ export function CoursesHomeScreen(props: any) {
           {
             text: '校園地圖',
             onPress: () => {
-              rootNav?.navigate?.('校園', { screen: 'Map' });
+              rootNav?.navigate?.('校園', { screen: 'MapV2' });
             },
           },
         ],

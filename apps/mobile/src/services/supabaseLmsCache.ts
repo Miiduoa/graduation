@@ -124,11 +124,11 @@ export async function getAnyCachedTCCourses(): ReturnType<typeof puGetAnyCachedT
       if (!c) return null;
       return {
         id: typeof c.id === 'number' ? c.id : Number.parseInt(String(c.id), 10) || c.id,
-        name: c.name || '',
-        course_code: c.code || '',
-        term: c.term || '',
-        startTime: c.start_at || '',
-        endTime: c.end_at || '',
+        name: c.title || '',
+        course_code: c.catalog_summary || '',
+        term: String(c.term_id ?? ''),
+        
+        
         description: c.description || '',
         // 角色資訊嵌進來,讓上游能感知教師 / 學生
         __role: r.role,
@@ -150,10 +150,10 @@ export async function getAnyCachedTCActivities(): ReturnType<typeof puGetAnyCach
 
   // 取本人所屬課程的 assignments + quizzes 合併
   const assignments = await fromSupabase(() =>
-    sb.from('assignments').select('id, course_id, title, due_at, status').limit(500),
+    sb.from('assignments').select('id, course_id, title, due_at, max_points').limit(500),
   );
   const quizzes = await fromSupabase(() =>
-    sb.from('quizzes').select('id, course_id, title, due_at, status').limit(500),
+    sb.from('quizzes').select('id, course_id, title, due_at, max_points').limit(500),
   );
 
   if (!assignments && !quizzes) return puGetAnyCachedTCActivities();
@@ -326,7 +326,7 @@ export async function getAnyCachedTCScoreItems(): ReturnType<typeof puGetAnyCach
   const rows = await fromSupabase(() =>
     sb
       .from('course_grade_rollups')
-      .select('id, course_id, item_name, score, weight, max_score')
+      .select('course_id, student_id, weighted_percent')
       .limit(500),
   );
   if (!rows || !Array.isArray(rows)) return puGetAnyCachedTCScoreItems();

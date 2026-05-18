@@ -50,6 +50,29 @@ function isNotificationBoundaryMetaMessage(message: string): boolean {
   return /(?:不要|別|不能|不該).{0,12}(?:直接|亂)?(?:標成已讀|已讀|讀通知)|只是(?:提到通知|通知這個詞).{0,18}(?:不要|別|不能|不該).{0,12}(?:標成已讀|已讀)|(?:誤判|當成).{0,12}(?:通知|已讀|mark_notifications_read)/.test(msg);
 }
 
+function isCalendarBoundaryMetaMessage(message: string): boolean {
+  const msg = message.replace(/[\u200B-\u200D\uFEFF]/g, '').normalize('NFKC').toLowerCase().trim();
+  return /(?:不要|別|不能|不該).{0,12}(?:直接|亂)?(?:建立|新增|加到|排進|安排).{0,10}(?:行事曆|日曆|行程)|沒有(?:明確|確認|指定).{0,16}(?:日期|時間|日期時間).{0,16}(?:建立|新增|加到|排進|安排).{0,10}(?:行事曆|日曆|行程)|(?:誤判|當成).{0,12}(?:行事曆|日曆|行程|create_calendar_event)/.test(
+    msg,
+  );
+}
+
+function isLostFoundBoundaryMetaMessage(message: string): boolean {
+  const msg = message.replace(/[\u200B-\u200D\uFEFF]/g, '').normalize('NFKC').toLowerCase().trim();
+  const hasLostFoundCue =
+    /失物|遺失|撿到|拾獲|不見了|搞丟|遺落|錢包|手機|鑰匙|學生證|\bi\s+lost\s+my\b|\blost\s+my\s+(?:wallet|phone|keys|card|airpods)\b/.test(
+      msg,
+    );
+  if (hasLostFoundCue) return false;
+  return /(?:找不到|查不到|查無).{0,12}(?:資料|結果|工具|紀錄|記錄)|(?:不要|別|不能|不該).{0,12}(?:編答案|編造)|(?:資料不足|缺口|不確定性)/.test(
+    msg,
+  );
+}
+
+function stripTrainingMetadata(message: string): string {
+  return message.replace(/（訓練(?:樣本|情境)\s+[a-z0-9-]+）/g, '').trim();
+}
+
 function filterCapabilityGapMisfires(message: string, intents: DetectedIntent[]): DetectedIntent[] {
   const gap = detectCapabilityGap(message);
   if (!gap) return intents;
@@ -1627,6 +1650,7 @@ export async function autonomousQuery(
   conversationHistory?: ConversationTurn[],
 ): Promise<AgentQueryResult> {
   const start = Date.now();
+  message = stripTrainingMetadata(message);
   // 上下文校正可能在 Step -1 改寫成「幫我點 X」（讓 Step 0+ 走正常 order_food 流程）
   let contextCorrectedMessage: string | null = null;
 
@@ -1910,6 +1934,14 @@ export async function autonomousQuery(
     intents = intents.filter((intent) =>
       !['mark_notifications_read', 'query_notifications'].includes(intent.tool),
     );
+  }
+  if (isCalendarBoundaryMetaMessage(resolvedMessage)) {
+    intents = intents.filter((intent) =>
+      !['create_calendar_event', 'update_calendar_event', 'delete_calendar_event'].includes(intent.tool),
+    );
+  }
+  if (isLostFoundBoundaryMetaMessage(resolvedMessage)) {
+    intents = intents.filter((intent) => intent.tool !== 'create_lost_found');
   }
   intents = filterCapabilityGapMisfires(resolvedMessage, intents);
 

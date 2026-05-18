@@ -21,6 +21,15 @@
 import React, { useMemo } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CoursesHomeScreen } from './CoursesHomeScreen';
+// AI-First v1：學習 Tab 主入口換新版
+import LearnAiFirstScreen from './LearnAiFirstScreen';
+import GradesAiFirstScreen from './GradesAiFirstScreen';
+import CourseHubAiFirstScreen from './CourseHubAiFirstScreen';
+import AcademicOverviewAiFirstScreen from './AcademicOverviewAiFirstScreen';
+import QuizCenterAiFirstScreen from './QuizCenterAiFirstScreen';
+import AddCourseAiFirstScreen from './AddCourseAiFirstScreen';
+import TeacherCockpitAiFirstScreen from './TeacherCockpitAiFirstScreen';
+import AIChatAiFirstScreen from './AIChatAiFirstScreen';
 import { TeachingHubScreen } from './TeachingHubScreen';
 import { StaffHubScreen } from './StaffHubScreen';
 import { DepartmentHubScreen } from './DepartmentHubScreen';
@@ -92,6 +101,7 @@ import CourseAIAssistantV2Screen from './lmsV2/CourseAIAssistantV2Screen';
 import CourseQuestionBankV2Screen from './lmsV2/CourseQuestionBankV2Screen';
 import CourseLiveV2Screen from './lmsV2/CourseLiveV2Screen';
 import { isLmsV2Enabled } from '../services/lmsV2FeatureFlag';
+import { ensureLmsV2DemoSignIn } from '../services/lmsV2DemoSignIn';
 import { useThemeMode } from '../state/theme';
 import { createStackScreenOptions } from '../ui/navigationTheme';
 import { RouteGuard } from '../ui/RouteGuard';
@@ -272,41 +282,55 @@ function LearnHomeDispatcher(props: any) {
 export function LearnStack() {
   useThemeMode();
 
+  // LMS v2:首次進入學習 Tab 時,自動用 demo 帳號登入 Supabase
+  // (Production 改用 lmsAuthBridge)
+  React.useEffect(() => {
+    if (isLmsV2Enabled()) {
+      ensureLmsV2DemoSignIn('student').then(r => {
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          // eslint-disable-next-line no-console
+          console.log('[LMS v2] demo sign-in:', r);
+        }
+      });
+    }
+  }, []);
+
   return (
     <Stack.Navigator
       id={undefined}
       initialRouteName="LearnHome"
       screenOptions={createStackScreenOptions()}
     >
+      {/* AI-First v1：landing 唯一入口 */}
       <Stack.Screen
         name="LearnHome"
-        component={LearnHomeDispatcher}
+        component={LearnAiFirstScreen}
         options={{ title: '學習', headerShown: false }}
       />
-      {/* 保留舊路由名稱作為別名，向後相容（兩個都導到同一個 dispatcher） */}
+      {/* 保留舊路由名稱作為別名（向後相容 deep link），全部導向新版 landing */}
       <Stack.Screen
         name="CoursesHome"
-        component={LearnHomeDispatcher}
+        component={LearnAiFirstScreen}
         options={{ title: '學習', headerShown: false }}
       />
       <Stack.Screen
         name="TeachingHub"
-        component={LearnHomeDispatcher}
+        component={LearnAiFirstScreen}
         options={{ title: '學習', headerShown: false }}
       />
       <Stack.Screen
         name="StaffHub"
-        component={LearnHomeDispatcher}
+        component={LearnAiFirstScreen}
         options={{ title: '服務', headerShown: false }}
       />
       <Stack.Screen
         name="DepartmentHub"
-        component={LearnHomeDispatcher}
+        component={LearnAiFirstScreen}
         options={{ title: '審核', headerShown: false }}
       />
       <Stack.Screen
         name="AdminDashboard"
-        component={LearnHomeDispatcher}
+        component={LearnAiFirstScreen}
         options={{ title: '管理', headerShown: false }}
       />
 
@@ -315,14 +339,15 @@ export function LearnStack() {
         component={UnifiedCalendarScreen}
         options={{ title: '行事曆', headerShown: false }}
       />
-      <Stack.Screen name="AddCourse" component={GuardedAddCourse} options={{ title: '新增課程' }} />
+      <Stack.Screen name="AddCourse" component={AddCourseAiFirstScreen} options={{ title: '新增課程', headerShown: false }} />
       {/* ═══════════════════════════════════════════════════════════
           LMS v2 整批接管:Supabase 連上時,舊路由名沿用但 component 改 V2
           (保留路由名 = CoursesHomeScreen/TodayCockpit 不用改;component 換掉 = 看到新 UI)
           ═══════════════════════════════════════════════════════════ */}
+      {/* AI-First v1：課程中樞唯一入口 */}
       <Stack.Screen
         name="CourseHub"
-        component={isLmsV2Enabled() ? CourseHubV2Screen : guardCourseView(CourseHubScreen)}
+        component={CourseHubAiFirstScreen}
         options={{ title: '課程中樞', headerShown: false }}
       />
       <Stack.Screen
@@ -351,7 +376,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="QuizCenter"
-        component={isLmsV2Enabled() ? CourseQuizzesV2Screen : guardCourseView(QuizCenterScreen)}
+        component={QuizCenterAiFirstScreen}
         options={{ title: '測驗', headerShown: false }}
       />
       <Stack.Screen
@@ -361,7 +386,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="AcademicOverview"
-        component={GuardedAcademicOverview}
+        component={AcademicOverviewAiFirstScreen}
         options={{ title: '學業總覽', headerShown: false }}
       />
       <Stack.Screen
@@ -374,10 +399,11 @@ export function LearnStack() {
         component={guardCourseView(ClassroomScreen)}
         options={{ title: '課堂互動' }}
       />
+      {/* AI-First v1：Grades 唯一入口 */}
       <Stack.Screen
         name="Grades"
-        component={GuardedAcademicGrades}
-        options={{ title: '成績查詢', headerShown: false }}
+        component={GradesAiFirstScreen}
+        options={{ title: '成績', headerShown: false }}
       />
       <Stack.Screen
         name="AcademicInsights"
@@ -516,7 +542,7 @@ export function LearnStack() {
       />
       <Stack.Screen
         name="TeacherCockpit"
-        component={TeacherCockpitScreen}
+        component={TeacherCockpitAiFirstScreen}
         options={{ title: '👨‍🏫 教師駕駛艙' }}
       />
       <Stack.Screen

@@ -3,6 +3,8 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CreditAuditScreen } from './CreditAuditScreen';
 import { CreditAuditInputScreen } from './CreditAuditInputScreen';
+// AI-First v1
+import CreditAuditAiFirstScreen from './CreditAuditAiFirstScreen';
 import { theme } from '../ui/theme';
 import { useThemeMode } from '../state/theme';
 
@@ -23,8 +25,13 @@ export function CreditAuditStack() {
     >
       <Stack.Screen
         name="CreditAudit"
+        component={CreditAuditAiFirstScreen}
+        options={{ title: '學分試算', headerShown: false }}
+      />
+      <Stack.Screen
+        name="CreditAuditLegacy"
         component={CreditAuditScreen}
-        options={{ title: '學分試算' }}
+        options={{ title: '學分試算（舊版）' }}
       />
       <Stack.Screen
         name="CreditAuditInput"

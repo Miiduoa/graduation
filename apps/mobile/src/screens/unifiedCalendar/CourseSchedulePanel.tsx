@@ -356,7 +356,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
             text: '開啟地圖',
             onPress: () => {
               if (rootNavigation?.navigate) {
-                rootNavigation.navigate('校園', { screen: 'Map' });
+                rootNavigation.navigate('校園', { screen: 'MapV2' });
               }
               analytics.logEvent('course_location_navigation', {
                 location,
