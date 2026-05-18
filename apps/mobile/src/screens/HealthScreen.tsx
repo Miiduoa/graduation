@@ -925,7 +925,12 @@ export function HealthScreen(props: any) {
               </View>
             );
           })}
-          <Pressable style={{ alignItems: 'center', padding: 8 }}>
+          <Pressable
+            style={{ alignItems: 'center', padding: 8 }}
+            onPress={() =>
+              Alert.alert('心情交流圈', '查看更多 / 發布心情 — demo 版尚未啟用')
+            }
+          >
             <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '600' }}>
               查看更多 / 發布心情 →
             </Text>

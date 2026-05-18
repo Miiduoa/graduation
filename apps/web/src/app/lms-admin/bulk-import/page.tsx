@@ -1,5 +1,8 @@
 'use client';
 
+// Supabase 客戶端會在 prerender 時 throw（env 缺失），明確 opt-out 靜態產生
+export const dynamic = 'force-dynamic';
+
 import { RequireAdmin } from '@/components/RequireAdmin';
 import { getBrowserSupabase } from '@/lib/supabase-browser';
 import { useState } from 'react';
