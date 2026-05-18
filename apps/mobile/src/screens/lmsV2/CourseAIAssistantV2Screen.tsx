@@ -23,16 +23,17 @@ export default function CourseAIAssistantV2Screen() {
         courseName,
       });
       // 替換 (replace) 而非 push,避免按返回回到空殼畫面
-      nav.replace?.('AIChat', {
+      const args = {
         seedContext: ctx,
         systemPromptPrefix: hint,
         courseId,
         title: `${courseName ?? '課程'} · AI 助教`,
-      }) ?? nav.navigate('AIChat', {
-        seedContext: ctx,
-        systemPromptPrefix: hint,
-        courseId,
-      });
+      };
+      if (typeof nav.replace === 'function') {
+        nav.replace('AIChat', args);
+      } else {
+        nav.navigate('AIChat', args);
+      }
     })();
   }, [courseId, courseName, nav]);
 
