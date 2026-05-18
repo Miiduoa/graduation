@@ -34,7 +34,7 @@ export const LineChart: React.FC<any> = (props: any) => {
   const pad = 30;
   if (!yKey || data.length === 0) {
     return (
-      <div style={{ padding: 24, color: '#9CA3AF', textAlign: 'center' }}>
+      <div style={{ padding: 24, color: '#AEAEB2', textAlign: 'center' }}>
         無資料 — recharts shim
       </div>
     );
@@ -45,7 +45,7 @@ export const LineChart: React.FC<any> = (props: any) => {
   const pts = ys.map((y: number, i: number) => `${pad + i * stepX},${h - pad - (y / maxY) * (h - 2 * pad)}`).join(' ');
   return (
     <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: '100%' }}>
-      <polyline fill="none" stroke="#2563EB" strokeWidth="2" points={pts} />
+      <polyline fill="none" stroke="#5856D6" strokeWidth="2" points={pts} />
       {children}
     </svg>
   );
@@ -59,7 +59,7 @@ export const BarChart: React.FC<any> = (props: any) => {
   const w = 600;
   const h = 200;
   const pad = 30;
-  if (!yKey || data.length === 0) return <div style={{ padding: 24, color: '#9CA3AF' }}>無資料</div>;
+  if (!yKey || data.length === 0) return <div style={{ padding: 24, color: '#AEAEB2' }}>無資料</div>;
   const ys: number[] = data.map((d: any) => Number(d[yKey] ?? 0));
   const maxY = Math.max(...ys, 1);
   const barW = (w - 2 * pad) / data.length - 4;
@@ -74,7 +74,7 @@ export const BarChart: React.FC<any> = (props: any) => {
             y={h - pad - barH}
             width={barW}
             height={barH}
-            fill="#2563EB"
+            fill="#5856D6"
           />
         );
       })}

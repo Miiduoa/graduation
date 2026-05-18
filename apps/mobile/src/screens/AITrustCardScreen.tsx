@@ -173,7 +173,7 @@ export default function AITrustCardScreen() {
               marginBottom: theme.space.md,
             }}
           >
-            <Text style={{ fontSize: 64, fontWeight: '800', color: scoreColor }}>
+            <Text style={{ fontSize: 64, fontWeight: '700', color: scoreColor }}>
               {card.trustScore}
             </Text>
             <Text style={{ fontSize: 12, color: theme.colors.muted, marginTop: -4 }}>
@@ -404,7 +404,7 @@ function Stat({ label, value, accent }: { label: string; value: number; accent?:
       <Text
         style={{
           fontSize: 24,
-          fontWeight: '800',
+          fontWeight: '700',
           color: accent ?? theme.colors.text,
         }}
       >

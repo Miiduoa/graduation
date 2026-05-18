@@ -62,13 +62,13 @@ const PERIODS = [
 ];
 
 const COURSE_COLORS = [
-  '#8B5CF6',
-  '#EC4899',
-  '#F59E0B',
-  '#10B981',
-  '#3B82F6',
-  '#EF4444',
-  '#6366F1',
+  '#AF52DE',
+  '#FF2D55',
+  '#FF9500',
+  '#34C759',
+  '#5856D6',
+  '#FF3B30',
+  '#5856D6',
   '#14B8A6',
 ];
 
@@ -356,7 +356,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
             text: '開啟地圖',
             onPress: () => {
               if (rootNavigation?.navigate) {
-                rootNavigation.navigate('校園', { screen: 'Map' });
+                rootNavigation.navigate('校園', { screen: 'MapV2' });
               }
               analytics.logEvent('course_location_navigation', {
                 location,
@@ -573,7 +573,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
                 }}
               >
                 <View style={{ alignItems: 'center', minWidth: 50 }}>
-                  <Text style={{ color: course.color, fontWeight: '900', fontSize: 18 }}>
+                  <Text style={{ color: course.color, fontWeight: '700', fontSize: 18 }}>
                     {course.startPeriod}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
@@ -642,7 +642,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
                 <Text
                   style={{
                     color: day === today ? theme.colors.accent : theme.colors.text,
-                    fontWeight: '800',
+                    fontWeight: '700',
                     fontSize: 15,
                   }}
                 >
@@ -794,7 +794,7 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
                   justifyContent: 'center',
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: '900', fontSize: 18 }}>
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 18 }}>
                   {nextCourse.startPeriod}
                 </Text>
               </View>
@@ -818,19 +818,19 @@ export function CourseSchedulePanel(props: Record<string, unknown>) {
 
         <View style={{ flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 8 }}>
           <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
               {courses.length}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>課程數</Text>
           </View>
           <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
               {totalCredits}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>總學分</Text>
           </View>
           <View style={{ alignItems: 'center' }}>
-            <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 24 }}>
               {todayCourses.length}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12 }}>今日課程</Text>

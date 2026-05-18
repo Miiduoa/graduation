@@ -12,12 +12,14 @@ const MapClient = dynamic(() => import('./MapClient'), {
   loading: () => <PageLoadingCard message="地圖載入中..." />,
 });
 
-export default function MapPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
+export default function MapPage(props: { searchParams?: { school?: string; schoolId?: string; route?: string; focus?: string } }) {
   const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
+  const route = props.searchParams?.route;
+  const focus = props.searchParams?.focus;
 
   return (
     <SiteShell title="校園地圖" subtitle="互動地圖 · 探索校園各設施" schoolName={schoolName}>
-      <MapClient school={schoolId} />
+      <MapClient school={schoolId} route={route} focus={focus} />
 
       {/* ── AI 校園導航入口 ── */}
       <div

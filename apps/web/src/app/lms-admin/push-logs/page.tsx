@@ -246,7 +246,7 @@ export default function PushLogsPage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>推播發送紀錄與 DLQ（商用對齊）</h1>
-      <p style={{ color: '#4b5563', fontSize: 14, lineHeight: 1.6 }}>
+      <p style={{ color: '#3C3C43', fontSize: 14, lineHeight: 1.6 }}>
         由 Edge <code>dispatch-notification-push</code> 寫入紀錄；未成功派發之通知仍留在 <code>notifications</code>（
         <code>push_dispatched_at</code>
         {` `}為 null）。環境變數 <code>PUSH_DISPATCH_MAX_ATTEMPTS</code> 決定自動重試上限，逾限後標記{' '}
@@ -259,7 +259,7 @@ export default function PushLogsPage() {
           padding: 16,
           background: '#fff',
           borderRadius: 12,
-          border: '1px solid #e5e7eb',
+          border: '1px solid #E5E5EA',
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
           gap: 12,
@@ -281,23 +281,23 @@ export default function PushLogsPage() {
           padding: 16,
           background: '#fff',
           borderRadius: 12,
-          border: '1px solid #e5e7eb',
+          border: '1px solid #E5E5EA',
         }}>
         <h2 style={{ marginTop: 0, fontSize: 16 }}>近 48 小時派發重試曲線</h2>
         {curve.length === 0 ? (
-          <p style={{ color: '#6b7280', fontSize: 13 }}>尚無資料（或 migration 未到帳）。</p>
+          <p style={{ color: '#8E8E93', fontSize: 13 }}>尚無資料（或 migration 未到帳）。</p>
         ) : (
           <div style={{ width: '100%', height: 240 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={curve}>
-                <CartesianGrid strokeDasharray="4 8" stroke="#e5e7eb" />
+                <CartesianGrid strokeDasharray="4 8" stroke="#E5E5EA" />
                 <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
                 <YAxis allowDecimals={false} width={40} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="success" stackId="a" fill="#059669" name="success" />
-                <Bar dataKey="attempted" stackId="a" fill="#2563eb" name="attempted" />
-                <Bar dataKey="failed" stackId="a" fill="#dc2626" name="failed" />
+                <Bar dataKey="success" stackId="a" fill="#34C759" name="success" />
+                <Bar dataKey="attempted" stackId="a" fill="#5856D6" name="attempted" />
+                <Bar dataKey="failed" stackId="a" fill="#FF3B30" name="failed" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -335,7 +335,7 @@ export default function PushLogsPage() {
         </div>
 
         {dlqError ? (
-          <p style={{ color: '#b91c1c', marginTop: 12 }}>
+          <p style={{ color: '#FF3B30', marginTop: 12 }}>
             DLQ 讀取錯誤：{dlqError}（若 migration 未到帳或未具 admin RLS）
           </p>
         ) : null}
@@ -386,7 +386,7 @@ export default function PushLogsPage() {
         />
       </section>
 
-      <hr style={{ margin: '28px 0', borderColor: '#e5e7eb' }} />
+      <hr style={{ margin: '28px 0', borderColor: '#E5E5EA' }} />
 
       <h2 style={{ fontSize: 18 }}>推播發送紀錄</h2>
       <label style={{ display: 'block', marginTop: 12, fontSize: 14, fontWeight: 600 }}>
@@ -408,18 +408,18 @@ export default function PushLogsPage() {
           }}
         />
       </label>
-      <p style={{ color: '#6b7280', fontSize: 13 }}>目前顯示 {summaryView.count} 筆（最多 120）。</p>
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
+      <p style={{ color: '#8E8E93', fontSize: 13 }}>目前顯示 {summaryView.count} 筆（最多 120）。</p>
+      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
       <div style={{ overflowX: 'auto', marginTop: 16 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#f3f4f6', textAlign: 'left' }}>
-              <th style={{ padding: 8, border: '1px solid #e5e7eb' }}>時間</th>
-              <th style={{ padding: 8, border: '1px solid #e5e7eb' }}>notification</th>
-              <th style={{ padding: 8, border: '1px solid #e5e7eb' }}>狀態</th>
-              <th style={{ padding: 8, border: '1px solid #e5e7eb' }}>HTTP</th>
-              <th style={{ padding: 8, border: '1px solid #e5e7eb' }}>錯誤摘要</th>
-              <th style={{ padding: 8, border: '1px solid #e5e7eb' }}>Expo ticket 樣本</th>
+            <tr style={{ background: '#F2F2F7', textAlign: 'left' }}>
+              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>時間</th>
+              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>notification</th>
+              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>狀態</th>
+              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>HTTP</th>
+              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>錯誤摘要</th>
+              <th style={{ padding: 8, border: '1px solid #E5E5EA' }}>Expo ticket 樣本</th>
             </tr>
           </thead>
           <tbody>
@@ -445,7 +445,7 @@ export default function PushLogsPage() {
         </table>
       </div>
       {!error && rows.length === 0 ? (
-        <p style={{ color: '#6b7280' }}>尚無紀錄（或請確認 migration 已套用）。</p>
+        <p style={{ color: '#8E8E93' }}>尚無紀錄（或請確認 migration 已套用）。</p>
       ) : null}
     </RequireAdmin>
   );
@@ -466,12 +466,12 @@ function SummaryCell({ label, value, highlight }: { label: string; value?: numbe
     <div
       style={{
         padding: 12,
-        background: highlight ? '#fef2f2' : '#f9fafb',
+        background: highlight ? '#fef2f2' : '#F2F2F7',
         borderRadius: 10,
-        border: highlight ? '1px solid #fecaca' : '1px solid #e5e7eb',
+        border: highlight ? '1px solid #fecaca' : '1px solid #E5E5EA',
       }}>
-      <div style={{ fontSize: 12, color: '#6b7280' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? '#b91c1c' : '#111827' }}>
+      <div style={{ fontSize: 12, color: '#8E8E93' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? '#FF3B30' : '#1C1C1E' }}>
         {value == null ? '—' : value}
       </div>
     </div>
@@ -528,7 +528,7 @@ function DlqMiniTable({
 }) {
   if (rows.length === 0) {
     return (
-      <p style={{ color: '#6b7280', fontSize: 13 }}>
+      <p style={{ color: '#8E8E93', fontSize: 13 }}>
         {variant === 'pending' ? '目前沒有待處理的「卡住」通知。' : '目前沒有窮舉記錄。'}
       </p>
     );
@@ -573,7 +573,7 @@ function DlqMiniTable({
               <td style={{ padding: 8, border: '1px solid #fde8e8', fontFamily: 'monospace', fontSize: 11 }}>{r.user_id}</td>
               <td style={{ padding: 8, border: '1px solid #fde8e8', maxWidth: 220 }}>
                 <strong>{r.title}</strong>
-                <div style={{ fontSize: 12, color: '#4b5563' }}>{(r.body ?? '').slice(0, 120)}{(r.body?.length ?? 0) > 120 ? '…' : ''}</div>
+                <div style={{ fontSize: 12, color: '#3C3C43' }}>{(r.body ?? '').slice(0, 120)}{(r.body?.length ?? 0) > 120 ? '…' : ''}</div>
               </td>
               <td style={{ padding: 8, border: '1px solid #fde8e8' }}>{r.push_dispatch_attempts ?? 0}</td>
               <td style={{ padding: 8, border: '1px solid #fde8e8', maxWidth: 280, wordBreak: 'break-word', fontSize: 12 }}>
@@ -613,7 +613,7 @@ const selBtnStyle: React.CSSProperties = {
   padding: '4px 10px',
   fontSize: 12,
   borderRadius: 6,
-  border: '1px solid #e5e7eb',
+  border: '1px solid #E5E5EA',
   background: '#fff',
   cursor: 'pointer',
 };

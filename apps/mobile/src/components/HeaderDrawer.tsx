@@ -227,7 +227,7 @@ export function HeaderDrawerHost() {
                 style={{
                   color: theme.colors.text,
                   fontSize: 18,
-                  fontWeight: '800',
+                  fontWeight: '700',
                   letterSpacing: -0.3,
                 }}
                 numberOfLines={1}
@@ -628,7 +628,7 @@ function DrawerRow({
             justifyContent: 'center',
           }}
         >
-          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>
+          <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
             {badge}
           </Text>
         </View>

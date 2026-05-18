@@ -77,7 +77,7 @@ export default function AdminNotifyPage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>發送站內通知 / 公告</h1>
-      <p style={{ color: '#6b7280', lineHeight: 1.6 }}>
+      <p style={{ color: '#8E8E93', lineHeight: 1.6 }}>
         Notification 走 <code>notify_course_members</code> RPC（純文字）；公告寫入 <code>announcements</code>（含 body_html、排程、對象範圍）。
       </p>
 
@@ -91,8 +91,8 @@ export default function AdminNotifyPage() {
               padding: '8px 16px',
               borderRadius: 8,
               border: '1px solid #d1d5db',
-              background: mode === m ? '#2563eb' : '#fff',
-              color: mode === m ? '#fff' : '#111827',
+              background: mode === m ? '#5856D6' : '#fff',
+              color: mode === m ? '#fff' : '#1C1C1E',
               fontWeight: 700,
               cursor: 'pointer',
             }}>
@@ -154,7 +154,7 @@ export default function AdminNotifyPage() {
           </label>
         )}
 
-        {error ? <p style={{ color: '#b91c1c', margin: 0 }}>{error}</p> : null}
+        {error ? <p style={{ color: '#FF3B30', margin: 0 }}>{error}</p> : null}
         {msg ? <p style={{ color: '#047857', margin: 0 }}>{msg}</p> : null}
         <button type="submit" disabled={busy} style={submitBtn}>
           {busy ? '送出中…' : '送出'}
@@ -177,7 +177,7 @@ const formStyle: React.CSSProperties = {
   background: '#fff',
   padding: 16,
   borderRadius: 12,
-  border: '1px solid #e5e7eb',
+  border: '1px solid #E5E5EA',
 };
 const fieldStyle: React.CSSProperties = {
   display: 'flex',
@@ -194,7 +194,7 @@ const submitBtn: React.CSSProperties = {
   padding: '12px 16px',
   borderRadius: 10,
   border: 'none',
-  background: '#111827',
+  background: '#1C1C1E',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',

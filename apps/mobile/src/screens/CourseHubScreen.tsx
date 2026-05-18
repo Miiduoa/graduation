@@ -266,7 +266,7 @@ function CourseOpsHero(props: {
         }}
       >
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#7E91AA', fontSize: 11, fontWeight: '900' }}>
+          <Text style={{ color: '#7E91AA', fontSize: 11, fontWeight: '700' }}>
             Course Operating System
           </Text>
           <Text
@@ -274,7 +274,7 @@ function CourseOpsHero(props: {
               color: '#FFFFFF',
               fontSize: 23,
               lineHeight: 30,
-              fontWeight: '900',
+              fontWeight: '700',
               marginTop: 8,
             }}
           >
@@ -298,7 +298,7 @@ function CourseOpsHero(props: {
             justifyContent: 'center',
           }}
         >
-          <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '900' }}>{load}</Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: '700' }}>{load}</Text>
           <Text style={{ color: '#7E91AA', fontSize: 9, fontWeight: '700' }}>LOAD</Text>
         </View>
       </View>
@@ -329,7 +329,7 @@ function CourseOpsHero(props: {
                 style={{
                   color: stage.active ? '#D9E8FF' : '#637089',
                   fontSize: 10,
-                  fontWeight: '800',
+                  fontWeight: '700',
                   marginTop: 6,
                 }}
               >
@@ -371,7 +371,7 @@ function CourseOpsHero(props: {
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: item.color, fontSize: 18, fontWeight: '900' }}>{item.value}</Text>
+            <Text style={{ color: item.color, fontSize: 18, fontWeight: '700' }}>{item.value}</Text>
             <Text style={{ color: '#7E91AA', fontSize: 10, fontWeight: '700', marginTop: 2 }}>
               {item.label}
             </Text>
@@ -395,7 +395,7 @@ function CourseOpsHero(props: {
           })}
         >
           <Ionicons name="flash" size={16} color="#FFFFFF" />
-          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '900' }}>回 Today 排序</Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>回 Today 排序</Text>
         </Pressable>
         <Pressable
           onPress={props.onOpenAI}
@@ -658,7 +658,7 @@ export function CourseHubScreen(props: any) {
               <Text
                 style={{
                   fontSize: 22,
-                  fontWeight: '800',
+                  fontWeight: '700',
                   color: stat.count > 0 ? theme.colors.accent : theme.colors.text,
                   marginTop: 4,
                 }}
@@ -706,7 +706,7 @@ export function CourseHubScreen(props: any) {
                   <Ionicons name={item.icon} size={17} color={theme.colors.accent} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '800' }}>
+                  <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '700' }}>
                     {item.title}
                   </Text>
                   <Text
@@ -832,7 +832,7 @@ export function CourseHubScreen(props: any) {
                   autoCapitalize="none"
                   style={{
                     borderWidth: 1,
-                    borderColor: tcError ? '#DC2626' : theme.colors.border,
+                    borderColor: tcError ? '#D70015' : theme.colors.border,
                     borderRadius: 10,
                     paddingHorizontal: 14,
                     paddingVertical: 12,
@@ -841,7 +841,7 @@ export function CourseHubScreen(props: any) {
                     backgroundColor: theme.colors.bg,
                   }}
                 />
-                {tcError ? <Text style={{ color: '#DC2626', fontSize: 13 }}>{tcError}</Text> : null}
+                {tcError ? <Text style={{ color: '#D70015', fontSize: 13 }}>{tcError}</Text> : null}
                 <View
                   style={{
                     flexDirection: 'row',
@@ -957,7 +957,7 @@ export function CourseHubScreen(props: any) {
                 <ActionChip
                   icon="albums-outline"
                   label="教材單元"
-                  tint="#2563EB"
+                  tint="#5856D6"
                   onPress={() =>
                     nav?.navigate?.('CourseModules', {
                       groupId: membership.groupId,
@@ -968,7 +968,7 @@ export function CourseHubScreen(props: any) {
                 <ActionChip
                   icon="document-text-outline"
                   label="作業"
-                  tint="#F97316"
+                  tint="#FF9500"
                   onPress={() => {
                     // 導向新的課程首頁作業 tab，避免跨 tab 導航到收件匣
                     const rootNav = nav?.getParent?.() ?? nav;
@@ -989,7 +989,7 @@ export function CourseHubScreen(props: any) {
                 <ActionChip
                   icon="checkmark-done-outline"
                   label="點名"
-                  tint="#DC2626"
+                  tint="#D70015"
                   onPress={() =>
                     nav?.navigate?.('Attendance', {
                       groupId: membership.groupId,
@@ -1001,7 +1001,7 @@ export function CourseHubScreen(props: any) {
                   <ActionChip
                     icon="pulse-outline"
                     label="課堂"
-                    tint="#059669"
+                    tint="#34C759"
                     onPress={() =>
                       nav?.navigate?.('Classroom', {
                         groupId: membership.groupId,

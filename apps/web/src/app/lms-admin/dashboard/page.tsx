@@ -120,7 +120,7 @@ export default function DashboardPage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>教學儀表板（學生儀表板／預警／搜尋）</h1>
-      <p style={{ color: '#4b5563', lineHeight: 1.6 }}>
+      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
         對應 view <code>reporting_student_dashboard</code>、<code>reporting_at_risk_students</code> 與 RPC <code>search_course</code>。
       </p>
 
@@ -136,13 +136,13 @@ export default function DashboardPage() {
         </select>
       </label>
 
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
+      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
 
       {/* Widget 1: 課程整體儀表板摘要 */}
       <section style={{ marginTop: 20 }}>
         <h2 style={{ fontSize: 16 }}>課程整體統計（aggregated student dashboard）</h2>
         {!summary ? (
-          <p style={{ color: '#6b7280' }}>請選課。</p>
+          <p style={{ color: '#8E8E93' }}>請選課。</p>
         ) : (
           <div
             style={{
@@ -164,12 +164,12 @@ export default function DashboardPage() {
       <section style={{ marginTop: 32 }}>
         <h2 style={{ fontSize: 16 }}>預警學員（warn/critical）</h2>
         {atRisk.length === 0 ? (
-          <p style={{ color: '#6b7280' }}>目前沒有預警學員。</p>
+          <p style={{ color: '#8E8E93' }}>目前沒有預警學員。</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={tableStyle}>
               <thead>
-                <tr style={{ background: '#f3f4f6' }}>
+                <tr style={{ background: '#F2F2F7' }}>
                   <th style={cellStyle}>學號／profile</th>
                   <th style={cellStyle}>加權</th>
                   <th style={cellStyle}>21d 簽到</th>
@@ -195,7 +195,7 @@ export default function DashboardPage() {
                         style={{
                           padding: '2px 8px',
                           borderRadius: 999,
-                          background: r.risk_level === 'critical' ? '#b91c1c' : '#d97706',
+                          background: r.risk_level === 'critical' ? '#FF3B30' : '#FF9500',
                           color: '#fff',
                           fontSize: 11,
                           fontWeight: 700,
@@ -234,10 +234,10 @@ export default function DashboardPage() {
             {hits.map((h) => (
               <li
                 key={`${h.kind}-${h.record_id}`}
-                style={{ padding: 10, marginBottom: 6, border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff' }}>
+                style={{ padding: 10, marginBottom: 6, border: '1px solid #E5E5EA', borderRadius: 8, background: '#fff' }}>
                 <strong>[{h.kind}]</strong> {h.title}
-                <div style={{ fontSize: 12, color: '#6b7280' }}>{h.snippet}</div>
-                <div style={{ fontSize: 11, color: '#9ca3af' }}>{new Date(h.touched_at).toLocaleString()}</div>
+                <div style={{ fontSize: 12, color: '#8E8E93' }}>{h.snippet}</div>
+                <div style={{ fontSize: 11, color: '#AEAEB2' }}>{new Date(h.touched_at).toLocaleString()}</div>
               </li>
             ))}
           </ul>
@@ -249,9 +249,9 @@ export default function DashboardPage() {
 
 function Card({ label, value }: { label: string; value: string | number }) {
   return (
-    <div style={{ padding: 12, background: '#f9fafb', borderRadius: 10, border: '1px solid #e5e7eb' }}>
-      <div style={{ fontSize: 12, color: '#6b7280' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: '#111827' }}>{value}</div>
+    <div style={{ padding: 12, background: '#F2F2F7', borderRadius: 10, border: '1px solid #E5E5EA' }}>
+      <div style={{ fontSize: 12, color: '#8E8E93' }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: '#1C1C1E' }}>{value}</div>
     </div>
   );
 }
@@ -260,8 +260,8 @@ const selectStyle: React.CSSProperties = {
   padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 14,
 };
 const btnStyle: React.CSSProperties = {
-  padding: '10px 14px', borderRadius: 10, border: '1px solid #2563eb',
-  background: '#2563eb', color: '#fff', fontWeight: 700, cursor: 'pointer',
+  padding: '10px 14px', borderRadius: 10, border: '1px solid #5856D6',
+  background: '#5856D6', color: '#fff', fontWeight: 700, cursor: 'pointer',
 };
 const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: 13 };
-const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #e5e7eb', textAlign: 'left' };
+const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #E5E5EA', textAlign: 'left' };

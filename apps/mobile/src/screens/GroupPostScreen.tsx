@@ -432,7 +432,7 @@ export function GroupPostScreen(props: any) {
   const getKindColor = (kind: PostKind) => {
     switch (kind) {
       case 'announcement':
-        return '#F59E0B';
+        return '#FF9500';
       case 'question':
         return theme.colors.accent;
       default:
@@ -648,7 +648,7 @@ export function GroupPostScreen(props: any) {
                   <Text
                     style={{
                       color: theme.colors.text,
-                      fontWeight: '800',
+                      fontWeight: '700',
                       fontSize: 18,
                       marginBottom: 10,
                     }}

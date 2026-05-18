@@ -239,7 +239,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  cardTitle: { fontSize: 16, fontWeight: '800', color: theme.colors.text },
+  cardTitle: { fontSize: 16, fontWeight: '700', color: theme.colors.text },
   cardSub: { fontSize: 12, color: theme.colors.textSecondary, marginTop: 4 },
   uidHint: { fontSize: 11, color: theme.colors.muted, marginTop: 6 },
   help: { color: theme.colors.muted, textAlign: 'center', fontSize: 14 },

@@ -2082,6 +2082,9 @@ export async function updateUserProfile(
   userId: string,
   updates: Partial<{
     displayName: string;
+    studentId: string;
+    department: string;
+    grade: string;
     phone: string;
     bio: string;
     avatarUrl: string;

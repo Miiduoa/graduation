@@ -38,7 +38,7 @@ function buildDefaultSessions(): SessionRow[] {
 }
 
 const STATUS_LABEL: Record<AttendStatus, string> = { present: '✅ 出席', absent: '❌ 缺席', late: '🟡 遲到' };
-const STATUS_COLOR: Record<AttendStatus, string> = { present: '#16a34a', absent: '#dc2626', late: '#d97706' };
+const STATUS_COLOR: Record<AttendStatus, string> = { present: '#34C759', absent: '#FF3B30', late: '#FF9500' };
 
 function countPresent(att: Record<string, AttendStatus>) {
   return Object.values(att).filter((v) => v === 'present').length;
@@ -120,8 +120,8 @@ export default function TeacherAttendancePage({ params, searchParams }: { params
           <div style={{
             padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 20,
             background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
-            border: `1px solid ${isTaView ? '#7C3AED' : '#FF9500'}`,
-            color: isTaView ? '#5B21B6' : '#92400E',
+            border: `1px solid ${isTaView ? '#AF52DE' : '#FF9500'}`,
+            color: isTaView ? '#5856D6' : '#92400E',
           }}>
             {isTaView
               ? <><span>🧑‍💻 </span><strong>助教 TA 視角</strong>：可查看出席記錄，但<strong>無法開啟或結束 QR 點名</strong>（授課教師專用）。</>
@@ -139,9 +139,9 @@ export default function TeacherAttendancePage({ params, searchParams }: { params
           {isReadOnlyView ? (
             <button disabled title={isTaView ? 'TA 無法開啟點名' : '系主任唯讀瀏覽，無法開啟點名'} style={{ ...btnBase, background: 'var(--border)', color: 'var(--muted-light)', cursor: 'not-allowed' }}>🔒 開啟 QR（教師專用）</button>
           ) : running ? (
-            <button style={{ ...btnBase, background: '#dc2626' }} onClick={handleEnd}>結束點名並儲存</button>
+            <button style={{ ...btnBase, background: '#FF3B30' }} onClick={handleEnd}>結束點名並儲存</button>
           ) : (
-            <button style={{ ...btnBase, background: '#16a34a' }} onClick={handleStart}>🟢 開啟 QR 點名</button>
+            <button style={{ ...btnBase, background: '#34C759' }} onClick={handleStart}>🟢 開啟 QR 點名</button>
           )}
         </div>
 
@@ -203,7 +203,7 @@ export default function TeacherAttendancePage({ params, searchParams }: { params
                     <a
                       href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`資料結構（CS301）${s.startedAt} 的出席率 ${pct}%，幫我分析缺席原因與建議追蹤動作`)}`}
                       title="讓 AI 分析這場出勤"
-                      style={{ ...linkBtn, border: '1px solid #5E6AD2', borderRadius: 6, padding: '6px 12px', color: '#5E6AD2', background: 'rgba(94,106,210,0.08)', textDecoration: 'none' }}
+                      style={{ ...linkBtn, border: '1px solid #5856D6', borderRadius: 6, padding: '6px 12px', color: '#5856D6', background: 'rgba(88,86,214,0.08)', textDecoration: 'none' }}
                     >
                       🤖
                     </a>
@@ -237,8 +237,8 @@ export default function TeacherAttendancePage({ params, searchParams }: { params
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: isReadOnlyView ? 'rgba(124,58,237,0.08)' : 'rgba(15,139,141,0.08)',
-            border: `1px solid ${isReadOnlyView ? '#7C3AED' : '#0F8B8D'}`,
+            background: isReadOnlyView ? 'rgba(124,58,237,0.08)' : 'rgba(88,86,214,0.08)',
+            border: `1px solid ${isReadOnlyView ? '#AF52DE' : '#5856D6'}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -247,7 +247,7 @@ export default function TeacherAttendancePage({ params, searchParams }: { params
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: isReadOnlyView ? '#7C3AED' : '#0F8B8D', marginBottom: 3 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: isReadOnlyView ? '#AF52DE' : '#5856D6', marginBottom: 3 }}>
               🤖 AI 出勤分析
             </div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>

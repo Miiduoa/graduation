@@ -112,7 +112,7 @@ function getRepairStatusLabel(status: string): string {
 function getRepairStatusColor(status: string): string {
   const m: Record<string, string> = {
     pending: theme.colors.muted,
-    assigned: '#F59E0B',
+    assigned: '#FF9500',
     inProgress: theme.colors.accent,
     completed: theme.colors.success,
     cancelled: theme.colors.danger,
@@ -134,8 +134,8 @@ function getLaundryStatusLabel(status: LaundryStatus): string {
 function getLaundryStatusColor(status: LaundryStatus): string {
   const m: Record<LaundryStatus, string> = {
     available: theme.colors.success,
-    inUse: '#F59E0B',
-    finished: '#3B82F6',
+    inUse: '#FF9500',
+    finished: '#5856D6',
     maintenance: theme.colors.danger,
     reserved: theme.colors.accent,
   };
@@ -633,7 +633,7 @@ export function DormitoryScreen(props: any) {
                 <Ionicons name="home" size={28} color={theme.colors.accent} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+                <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
                   {dormInfo.building} {dormInfo.room}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -675,7 +675,7 @@ export function DormitoryScreen(props: any) {
             />
             <StatBox
               icon="construct"
-              color="#F59E0B"
+              color="#FF9500"
               value={activeRepairs.length}
               label="處理中報修"
               highlight={activeRepairs.length > 0}
@@ -744,7 +744,7 @@ export function DormitoryScreen(props: any) {
               style={{
                 color: acBalance > 50 ? theme.colors.success : theme.colors.danger,
                 fontSize: 28,
-                fontWeight: '800',
+                fontWeight: '700',
               }}
             >
               ${acBalance}
@@ -760,7 +760,7 @@ export function DormitoryScreen(props: any) {
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
               {monthlyUsage}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}>本月 kWh</Text>
@@ -829,9 +829,9 @@ export function DormitoryScreen(props: any) {
             {announcements.slice(0, 3).map((ann) => {
               const typeColor: Record<string, string> = {
                 notice: theme.colors.accent,
-                warning: '#F59E0B',
+                warning: '#FF9500',
                 emergency: theme.colors.danger,
-                maintenance: '#6366F1',
+                maintenance: '#5856D6',
               };
               const color = typeColor[ann.type] ?? theme.colors.muted;
               return (
@@ -1151,7 +1151,7 @@ export function DormitoryScreen(props: any) {
           >
             <Ionicons name="water" size={24} color={theme.colors.success} />
             <Text
-              style={{ color: theme.colors.success, fontSize: 24, fontWeight: '800', marginTop: 6 }}
+              style={{ color: theme.colors.success, fontSize: 24, fontWeight: '700', marginTop: 6 }}
             >
               {laundryStats.washersAvailable}
             </Text>
@@ -1170,7 +1170,7 @@ export function DormitoryScreen(props: any) {
           >
             <Ionicons name="sunny" size={24} color={theme.colors.accent} />
             <Text
-              style={{ color: theme.colors.accent, fontSize: 24, fontWeight: '800', marginTop: 6 }}
+              style={{ color: theme.colors.accent, fontSize: 24, fontWeight: '700', marginTop: 6 }}
             >
               {laundryStats.dryersAvailable}
             </Text>
@@ -1190,7 +1190,7 @@ export function DormitoryScreen(props: any) {
             >
               <Ionicons name="time" size={24} color={theme.colors.muted} />
               <Text
-                style={{ color: theme.colors.text, fontSize: 24, fontWeight: '800', marginTop: 6 }}
+                style={{ color: theme.colors.text, fontSize: 24, fontWeight: '700', marginTop: 6 }}
               >
                 {laundryStats.avgWaitMinutes}
               </Text>
@@ -1289,7 +1289,7 @@ export function DormitoryScreen(props: any) {
                   size="sm"
                 />
                 {machine.status === 'inUse' && machine.remainingMinutes > 0 && (
-                  <Text style={{ color: '#F59E0B', fontSize: 11, fontWeight: '600' }}>
+                  <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '600' }}>
                     剩 {machine.remainingMinutes} 分
                   </Text>
                 )}
@@ -1529,7 +1529,7 @@ export function DormitoryScreen(props: any) {
                 tension === 'danger'
                   ? theme.colors.danger
                   : tension === 'warning'
-                    ? '#F59E0B'
+                    ? '#FF9500'
                     : theme.colors.success;
               return (
                 <View
@@ -1551,7 +1551,7 @@ export function DormitoryScreen(props: any) {
                     <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
                       {bld?.name ?? bs.building}
                     </Text>
-                    <Text style={{ color: tensionColor, fontWeight: '800', fontSize: 15 }}>
+                    <Text style={{ color: tensionColor, fontWeight: '700', fontSize: 15 }}>
                       {Math.round(bs.rate * 100)}%
                     </Text>
                   </View>
@@ -1636,7 +1636,7 @@ export function DormitoryScreen(props: any) {
                   <Text
                     style={{
                       color: getLotteryStatusColor(myApplication!.status),
-                      fontWeight: '800',
+                      fontWeight: '700',
                       fontSize: 16,
                     }}
                   >
@@ -1687,7 +1687,7 @@ export function DormitoryScreen(props: any) {
                         }}
                       >
                         <Text
-                          style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 13 }}
+                          style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}
                         >
                           {w.priority}
                         </Text>
@@ -1756,7 +1756,7 @@ export function DormitoryScreen(props: any) {
                           {rule?.label ?? bd.ruleId}
                         </Text>
                         <Text
-                          style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 13 }}
+                          style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13 }}
                         >
                           +{bd.points}
                         </Text>
@@ -1773,7 +1773,7 @@ export function DormitoryScreen(props: any) {
                     }}
                   >
                     <Text style={{ color: theme.colors.text, fontWeight: '700' }}>總分</Text>
-                    <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 16 }}>
+                    <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 16 }}>
                       {myApplication!.priorityPoints} 分
                     </Text>
                   </View>
@@ -1790,7 +1790,7 @@ export function DormitoryScreen(props: any) {
                     gap: 6,
                   }}
                 >
-                  <Text style={{ color: theme.colors.success, fontWeight: '800', fontSize: 15 }}>
+                  <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 15 }}>
                     分配結果
                   </Text>
                   <Text style={{ color: theme.colors.text, fontSize: 13 }}>
@@ -1840,7 +1840,7 @@ export function DormitoryScreen(props: any) {
                             justifyContent: 'center',
                           }}
                         >
-                          <Text style={{ color: theme.colors.accent, fontWeight: '800' }}>
+                          <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
                             {idx + 1}
                           </Text>
                         </View>
@@ -2003,7 +2003,7 @@ export function DormitoryScreen(props: any) {
                     {rule.description}
                   </Text>
                 </View>
-                <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 14 }}>
+                <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 14 }}>
                   +{rule.points}
                 </Text>
               </View>
@@ -2142,7 +2142,7 @@ export function DormitoryScreen(props: any) {
                       rating.score >= 4
                         ? theme.colors.success
                         : rating.score >= 3
-                          ? '#F59E0B'
+                          ? '#FF9500'
                           : theme.colors.danger,
                     width: `${(rating.score / 5) * 100}%`,
                   }}
@@ -2194,10 +2194,10 @@ export function DormitoryScreen(props: any) {
                   borderRadius: 14,
                   backgroundColor:
                     bld.gender === 'female'
-                      ? '#EC489915'
+                      ? '#FF2D5515'
                       : bld.gender === 'male'
-                        ? '#3B82F615'
-                        : '#8B5CF615',
+                        ? '#5856D615'
+                        : '#AF52DE15',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
@@ -2207,10 +2207,10 @@ export function DormitoryScreen(props: any) {
                   size={24}
                   color={
                     bld.gender === 'female'
-                      ? '#EC4899'
+                      ? '#FF2D55'
                       : bld.gender === 'male'
-                        ? '#3B82F6'
-                        : '#8B5CF6'
+                        ? '#5856D6'
+                        : '#AF52DE'
                   }
                 />
               </View>
@@ -2249,7 +2249,7 @@ export function DormitoryScreen(props: any) {
                 <Text style={{ color: theme.colors.muted, fontSize: 10 }}>{rt.note}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={{ color: theme.colors.accent, fontWeight: '800' }}>
+                <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>
                   ${rt.totalCost.toLocaleString()}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 10 }}>
@@ -2370,7 +2370,7 @@ export function DormitoryScreen(props: any) {
               borderBottomColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.danger, fontSize: 18, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.danger, fontSize: 18, fontWeight: '700' }}>
               緊急聯絡
             </Text>
             <Pressable onPress={() => setShowEmergency(false)}>
@@ -2415,7 +2415,7 @@ export function DormitoryScreen(props: any) {
                     {contact.note}
                   </Text>
                 </View>
-                <Text style={{ color: contact.color, fontWeight: '800', fontSize: 15 }}>
+                <Text style={{ color: contact.color, fontWeight: '700', fontSize: 15 }}>
                   {contact.phone}
                 </Text>
               </Pressable>
@@ -2456,7 +2456,7 @@ export function DormitoryScreen(props: any) {
                 borderBottomColor: theme.colors.border,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
                 {bld.name}
               </Text>
               <Pressable onPress={() => setShowBuildingDetail(null)}>
@@ -2547,7 +2547,7 @@ export function DormitoryScreen(props: any) {
               borderBottomColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+            <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
               常見問題
             </Text>
             <Pressable onPress={() => setShowFAQ(false)}>
@@ -2664,7 +2664,7 @@ function StatBox({
       }}
     >
       <Ionicons name={icon as any} size={20} color={color} />
-      <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '800', marginTop: 4 }}>
+      <Text style={{ color: theme.colors.text, fontSize: 22, fontWeight: '700', marginTop: 4 }}>
         {value}
       </Text>
       <Text style={{ color: theme.colors.muted, fontSize: 10 }}>{label}</Text>

@@ -244,7 +244,7 @@ export default function TodayCockpitScreen() {
                 color: theme.colors.onAccent,
                 fontSize: theme.typography.h2.fontSize,
                 lineHeight: theme.typography.h2.lineHeight,
-                fontWeight: '800',
+                fontWeight: '700',
                 marginTop: theme.space.xs,
               }}
               numberOfLines={2}

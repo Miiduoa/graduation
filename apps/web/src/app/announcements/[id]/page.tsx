@@ -133,7 +133,7 @@ export default function AnnouncementDetailPage(props: {
             style={{
               margin: 0,
               fontSize: 26,
-              fontWeight: 800,
+              fontWeight: 700,
               letterSpacing: '-0.04em',
               marginBottom: 10,
             }}
