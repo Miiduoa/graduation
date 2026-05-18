@@ -29,8 +29,9 @@ import {
   type StoredWebPreferences,
   type ThemePreference,
 } from "@/lib/webPreferences";
+import { resetDemoStore, seedDemoQueues } from "@/lib/demoStore";
 
-type Section = "general" | "notifications" | "appearance" | "privacy" | "account";
+type Section = "general" | "notifications" | "appearance" | "privacy" | "account" | "demo";
 type NotificationToggleKey =
   | "announcements"
   | "events"
@@ -54,6 +55,7 @@ const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "appearance", label: "外觀", icon: "🎨" },
   { id: "privacy", label: "隱私", icon: "🔒" },
   { id: "account", label: "帳號", icon: "👤" },
+  { id: "demo", label: "示範工具", icon: "🎬" },
 ];
 
 const THEME_COLORS = [
@@ -1010,12 +1012,76 @@ export default function SettingsPage(props: {
     );
   }
 
+  function renderDemo() {
+    return (
+      <div className="settingsContent">
+        <div className="settingsSectionHeader">
+          <h2>🎬 示範工具</h2>
+          <p className="settingsSectionSubtitle">
+            口試 / 演示專用：一鍵產生跨角色待處理事項，或清空所有 demo 資料重新開始。
+          </p>
+        </div>
+        <div className="insetGroup">
+          <SettingRow
+            icon="🌱"
+            iconBg="rgba(52,199,89,0.18)"
+            title="一鍵 seed 示範佇列"
+            subtitle="以王小明名義產生 5 件待處理：請假 / 報修 / 訂單 / 求助 / 作業繳交"
+            onClick={() => {
+              seedDemoQueues();
+              success(
+                "🌱 已產生 5 件示範事項",
+                "切換到教師 / TA / admin / 系主任的訊息收件匣即可看到對應佇列",
+              );
+            }}
+          />
+          <SettingRow
+            icon="♻️"
+            iconBg="rgba(94,106,210,0.18)"
+            title="一鍵重置 demo 資料"
+            subtitle="清除所有跨角色寫入（訊息、繳交、訂單、報修…），不影響登入身份"
+            onClick={() => {
+              if (typeof window === "undefined") return;
+              const confirmed = window.confirm(
+                "⚠️ 確定要重置 demo 資料嗎？\n\n會清除：所有動態訊息、繳交、社團申請、訂單、報修、請假…\n保留：當前登入身份。",
+              );
+              if (!confirmed) return;
+              resetDemoStore();
+              info("♻️ Demo 資料已重置");
+            }}
+          />
+          <SettingRow
+            icon="🧨"
+            iconBg="var(--danger-soft)"
+            title="清空全部本機資料（含登入身份）"
+            subtitle="登出並清空 localStorage。適合 demo 開始前歸零。"
+            danger
+            onClick={() => {
+              if (typeof window === "undefined") return;
+              const confirmed = window.confirm(
+                "⚠️ 將清空 localStorage 全部內容並登出。確定？",
+              );
+              if (!confirmed) return;
+              try {
+                window.localStorage.clear();
+              } catch {
+                /* ignore */
+              }
+              window.location.href = "/login";
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   const contentMap: Record<Section, () => ReactNode> = {
     general: renderGeneral,
     notifications: renderNotifications,
     appearance: renderAppearance,
     privacy: renderPrivacy,
     account: renderAccount,
+    demo: renderDemo,
   };
 
   return (

@@ -514,6 +514,55 @@ export default function LibraryPage(props: {
                 );
               })}
             </div>
+
+            {/* ── 已預約待取（reserveBook 寫入 → 這裡讀回顯示）── */}
+            {(store.libraryReservations ?? []).filter(
+              (r) => r.studentId === (roleDef.demoUserUid || 'stu-001'),
+            ).length > 0 && (
+              <div className="card" style={{ padding: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>
+                  📌 已預約待取（{(store.libraryReservations ?? []).filter(
+                    (r) => r.studentId === (roleDef.demoUserUid || 'stu-001'),
+                  ).length}）
+                </div>
+                <div className="insetGroup">
+                  {(store.libraryReservations ?? [])
+                    .filter((r) => r.studentId === (roleDef.demoUserUid || 'stu-001'))
+                    .map((r, i) => (
+                      <div
+                        key={r.id}
+                        className="insetGroupRow"
+                        style={{ borderTop: i === 0 ? 'none' : undefined }}
+                      >
+                        <div
+                          className="insetGroupRowIcon"
+                          style={{ background: 'var(--accent-soft)', fontSize: 20 }}
+                        >
+                          📚
+                        </div>
+                        <div className="insetGroupRowContent">
+                          <div className="insetGroupRowTitle">{r.bookTitle}</div>
+                          <div className="insetGroupRowMeta">
+                            預約於 {r.reservedAt.slice(0, 10)} · 等待中
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            padding: '2px 8px',
+                            borderRadius: 99,
+                            background: 'var(--warning-soft)',
+                            color: 'var(--warning)',
+                            fontWeight: 700,
+                          }}
+                        >
+                          待取
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

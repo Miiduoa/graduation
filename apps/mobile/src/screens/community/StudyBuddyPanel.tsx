@@ -15,6 +15,7 @@ import {
   Platform,
   Animated,
   FlatList,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -192,7 +193,13 @@ const BuddyMatchCard: React.FC<BuddyMatchCardProps> = ({ match }) => {
           </View>
         )}
 
-        <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.accent }]}>
+        <TouchableOpacity
+          style={[styles.actionButton, { backgroundColor: theme.colors.accent }]}
+          onPress={(e) => {
+            e.stopPropagation();
+            Alert.alert('開始聊天', `已開啟與 ${match.displayName} 的對話`);
+          }}
+        >
           <Text style={styles.actionButtonText}>開始聊天</Text>
         </TouchableOpacity>
       </TouchableOpacity>
@@ -284,7 +291,10 @@ const StudyGroupCard: React.FC<StudyGroupCardProps> = ({ group }) => {
         </View>
       )}
 
-      <TouchableOpacity style={[styles.actionButton, { backgroundColor: theme.colors.success }]}>
+      <TouchableOpacity
+        style={[styles.actionButton, { backgroundColor: theme.colors.success }]}
+        onPress={() => Alert.alert('已申請加入', `「${group.name}」社長會儘快審核你的申請`)}
+      >
         <Text style={styles.actionButtonText}>加入讀書會</Text>
       </TouchableOpacity>
     </View>
