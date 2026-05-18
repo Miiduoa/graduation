@@ -53,7 +53,7 @@ export const DEMO_ROLES: DemoRoleDefinition[] = [
     shortLabel: '教師',
     icon: '🧑‍🏫',
     tone: '#5856D6',
-    toneSoft: 'rgba(15,139,141,0.12)',
+    toneSoft: 'rgba(88,86,214,0.12)',
     description: '進入教師端：點名、成績冊、題庫、教材管理',
     entryHref: '/teacher/course/c1',
     demoUserUid: 'demo-teacher-1',
