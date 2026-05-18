@@ -820,9 +820,9 @@ export function ARNavigationScreen(props: any) {
                     marginTop: 8,
                     padding: 10,
                     borderRadius: theme.radius.md,
-                    backgroundColor: 'rgba(245,158,11,0.2)',
+                    backgroundColor: 'rgba(255,149,0,0.2)',
                     borderWidth: 1,
-                    borderColor: 'rgba(245,158,11,0.4)',
+                    borderColor: 'rgba(255,149,0,0.4)',
                   }}
                 >
                   <Text style={{ color: '#fff', fontSize: 12 }}>

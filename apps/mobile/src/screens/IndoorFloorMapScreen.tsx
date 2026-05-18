@@ -782,8 +782,8 @@ function buildSvgHtml(
   .room:active{filter:brightness(0.95)}
   .pulse{animation:pulse 1.8s ease-in-out infinite}
   @keyframes pulse{
-    0%,100%{stroke-width:3;filter:drop-shadow(0 0 0 rgba(251,191,36,0.0))}
-    50%{stroke-width:5;filter:drop-shadow(0 0 10px rgba(251,191,36,0.7))}
+    0%,100%{stroke-width:3;filter:drop-shadow(0 0 0 rgba(255,204,0,0.0))}
+    50%{stroke-width:5;filter:drop-shadow(0 0 10px rgba(255,204,0,0.7))}
   }
   .legend{position:absolute;bottom:8px;right:8px;background:rgba(255,255,255,0.92);padding:6px 8px;border-radius:8px;font-size:9px;color:#64748B;border:1px solid #E2E8F0;font-weight:600}
 </style>
