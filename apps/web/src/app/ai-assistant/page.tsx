@@ -46,7 +46,7 @@ import {
 } from '@/lib/demoStore';
 import { approvePendingAnn, addPendingAnn } from '@/lib/demoData';
 import { useToast, Modal } from '@/components/ui';
-import { notifyDeptHeadNewAnn, assignPeerReview } from '@/lib/demoStore';
+import { notifyDeptHeadNewAnn, assignPeerReview, rsvpAlumniEvent } from '@/lib/demoStore';
 
 // ── 型別 ──────────────────────────────────────────────────────
 interface Message {
@@ -1786,7 +1786,16 @@ function buildActions(args: {
         icon: '🎉',
         label: '報名校友回娘家活動',
         onClick: () => {
-          toastSuccess('🎉 已成功報名，活動詳情會 Email 給你');
+          const { alreadyRegistered } = rsvpAlumniEvent({
+            eventId: 'alumni-reunion-2026',
+            eventName: '2026 校友回娘家活動',
+            by: 'B09203001',
+          });
+          if (alreadyRegistered) {
+            toastSuccess('✅ 你已經報名過了，活動詳情會再 Email 提醒');
+          } else {
+            toastSuccess('🎉 已成功報名 2026 校友回娘家，活動詳情會 Email 給你');
+          }
         },
       },
     ];
