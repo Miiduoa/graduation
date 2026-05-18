@@ -333,7 +333,14 @@ export default function GradesPage(props: {
             <div className="homeSectionHeader">
               <h2 className="homeSectionTitle">👥 學生成績清單</h2>
               {demoRole === 'teacher' && (
-                <Link href={`/teacher/course/c1/gradebook${q}`} className="btn" style={{ fontSize: 12 }}>發布成績</Link>
+                <Link
+                  href={`/teacher/course/c1/gradebook${q ? q + '&' : '?'}action=publish`}
+                  className="btn"
+                  style={{ fontSize: 12 }}
+                  title="前往成績冊執行發布動作（含尚未發布提示）"
+                >
+                  發布尚未公開成績
+                </Link>
               )}
               {demoRole === 'ta' && (
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>唯讀 · 由教師發布</span>
