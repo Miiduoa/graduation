@@ -169,6 +169,41 @@ export interface DemoStore {
   takendownAnnIds?: string[];
   /** 校友活動報名（含 校友回娘家） */
   alumniEventRsvps?: StoreAlumniEventRsvp[];
+  /** 好友關係（雙向；status=accepted 才算朋友） */
+  friendships?: StoreFriendship[];
+  /** 私訊執行緒（單對單；id 由 [a,b].sort().join('_') 推得） */
+  directThreads?: StoreDirectThread[];
+  /** 私訊訊息 */
+  directMessages?: StoreDirectMessage[];
+}
+
+/** 好友關係 */
+export interface StoreFriendship {
+  /** 由發起者排序 a<b 的兩端 uid 組成 */
+  fromUid: string;
+  toUid: string;
+  status: 'pending' | 'accepted' | 'blocked';
+  /** 發出邀請的時間 */
+  createdAt: string;
+}
+
+/** 私訊執行緒（兩人對話的容器） */
+export interface StoreDirectThread {
+  id: string;          // sortedUids.join('_')
+  participantUids: [string, string];
+  lastMessagePreview: string;
+  lastSentAt: string;  // ISO
+  /** 對應每個 uid 最後一次「進入此 thread」的時間，用以計算未讀 */
+  readAt: Record<string, string>;
+}
+
+/** 私訊訊息 */
+export interface StoreDirectMessage {
+  id: string;
+  threadId: string;
+  fromUid: string;
+  body: string;
+  sentAt: string;  // ISO
 }
 
 const EMPTY_STORE: DemoStore = {
@@ -192,6 +227,9 @@ const EMPTY_STORE: DemoStore = {
   announcementEdits: [],
   takendownAnnIds: [],
   alumniEventRsvps: [],
+  friendships: [],
+  directThreads: [],
+  directMessages: [],
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -1617,4 +1655,370 @@ export function rsvpAlumniEvent(params: { eventId: string; eventName: string; by
 export function getAlumniEventRsvps(store: DemoStore, by?: string): StoreAlumniEventRsvp[] {
   const list = store.alumniEventRsvps ?? [];
   return by ? list.filter((r) => r.by === by) : list;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 好友 / 私訊（DM）— 真正可用的聊天系統
+// ─────────────────────────────────────────────────────────────
+
+/** 計算雙人 thread 的固定 id（與排序順序無關） */
+export function buildThreadId(a: string, b: string): string {
+  return [a, b].sort().join('__');
+}
+
+/** 取得兩人之間的好友關係狀態（不限發起方向） */
+export function getFriendshipStatus(
+  selfUid: string,
+  otherUid: string,
+  store: DemoStore,
+): 'none' | 'pending_outgoing' | 'pending_incoming' | 'accepted' | 'blocked' {
+  const list = store.friendships ?? [];
+  const f = list.find(
+    (x) =>
+      (x.fromUid === selfUid && x.toUid === otherUid) ||
+      (x.fromUid === otherUid && x.toUid === selfUid),
+  );
+  if (!f) return 'none';
+  if (f.status === 'accepted') return 'accepted';
+  if (f.status === 'blocked') return 'blocked';
+  return f.fromUid === selfUid ? 'pending_outgoing' : 'pending_incoming';
+}
+
+/** 列出某使用者已接受的好友 uid */
+export function listFriendUids(selfUid: string, store: DemoStore): string[] {
+  return (store.friendships ?? [])
+    .filter((f) => f.status === 'accepted' && (f.fromUid === selfUid || f.toUid === selfUid))
+    .map((f) => (f.fromUid === selfUid ? f.toUid : f.fromUid));
+}
+
+/** 列出收到的待處理好友邀請（對方→自己） */
+export function listIncomingFriendRequests(
+  selfUid: string,
+  store: DemoStore,
+): StoreFriendship[] {
+  return (store.friendships ?? []).filter(
+    (f) => f.status === 'pending' && f.toUid === selfUid,
+  );
+}
+
+/** 列出自己發出但對方尚未回覆的邀請 */
+export function listOutgoingFriendRequests(
+  selfUid: string,
+  store: DemoStore,
+): StoreFriendship[] {
+  return (store.friendships ?? []).filter(
+    (f) => f.status === 'pending' && f.fromUid === selfUid,
+  );
+}
+
+/** 發送好友邀請（若已存在不重複） */
+export function sendFriendRequest(fromUid: string, toUid: string): {
+  ok: boolean;
+  reason?: string;
+} {
+  if (!fromUid || !toUid || fromUid === toUid) {
+    return { ok: false, reason: '無效的對象' };
+  }
+  let reason: string | undefined;
+  let ok = true;
+  updateDemoStore((store) => {
+    const list = store.friendships ?? [];
+    const existing = list.find(
+      (x) =>
+        (x.fromUid === fromUid && x.toUid === toUid) ||
+        (x.fromUid === toUid && x.toUid === fromUid),
+    );
+    if (existing) {
+      if (existing.status === 'accepted') {
+        ok = false;
+        reason = '你們已經是好友';
+      } else if (existing.status === 'pending') {
+        ok = false;
+        reason = existing.fromUid === fromUid ? '已送出邀請，等待對方回覆' : '對方已邀請你，請至「好友邀請」回覆';
+      } else if (existing.status === 'blocked') {
+        ok = false;
+        reason = '此使用者已封鎖往來';
+      }
+      return store;
+    }
+    const next: StoreFriendship = {
+      fromUid,
+      toUid,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    return { ...store, friendships: [next, ...list] };
+  });
+  return { ok, reason };
+}
+
+/** 接受好友邀請 */
+export function acceptFriendRequest(fromUid: string, toUid: string): void {
+  updateDemoStore((store) => {
+    const list = store.friendships ?? [];
+    return {
+      ...store,
+      friendships: list.map((f) =>
+        f.fromUid === fromUid && f.toUid === toUid && f.status === 'pending'
+          ? { ...f, status: 'accepted' as const }
+          : f,
+      ),
+    };
+  });
+}
+
+/** 拒絕邀請（直接移除） */
+export function rejectFriendRequest(fromUid: string, toUid: string): void {
+  updateDemoStore((store) => ({
+    ...store,
+    friendships: (store.friendships ?? []).filter(
+      (f) => !(f.fromUid === fromUid && f.toUid === toUid && f.status === 'pending'),
+    ),
+  }));
+}
+
+/** 移除好友（雙向移除） */
+export function removeFriend(selfUid: string, otherUid: string): void {
+  updateDemoStore((store) => ({
+    ...store,
+    friendships: (store.friendships ?? []).filter(
+      (f) =>
+        !(
+          (f.fromUid === selfUid && f.toUid === otherUid) ||
+          (f.fromUid === otherUid && f.toUid === selfUid)
+        ),
+    ),
+  }));
+}
+
+/** 取得（或建立）某兩人的私訊 thread */
+export function getOrCreateThread(selfUid: string, otherUid: string): StoreDirectThread {
+  const id = buildThreadId(selfUid, otherUid);
+  const existing = (getDemoStore().directThreads ?? []).find((t) => t.id === id);
+  if (existing) return existing;
+  const fresh: StoreDirectThread = {
+    id,
+    participantUids: [selfUid, otherUid].sort() as [string, string],
+    lastMessagePreview: '',
+    lastSentAt: new Date(0).toISOString(),
+    readAt: { [selfUid]: new Date().toISOString() },
+  };
+  updateDemoStore((store) => ({
+    ...store,
+    directThreads: [fresh, ...(store.directThreads ?? [])],
+  }));
+  return fresh;
+}
+
+/** 寄出私訊（自動建立 thread 如不存在） */
+export function sendDirectMessage(params: {
+  fromUid: string;
+  toUid: string;
+  body: string;
+}): StoreDirectMessage | null {
+  if (!params.body.trim()) return null;
+  const threadId = buildThreadId(params.fromUid, params.toUid);
+  const now = new Date().toISOString();
+  const msg: StoreDirectMessage = {
+    id: `dm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    threadId,
+    fromUid: params.fromUid,
+    body: params.body.trim(),
+    sentAt: now,
+  };
+  updateDemoStore((store) => {
+    const threads = store.directThreads ?? [];
+    const sortedPair = [params.fromUid, params.toUid].sort() as [string, string];
+    const found = threads.find((t) => t.id === threadId);
+    const updatedThread: StoreDirectThread = found
+      ? {
+          ...found,
+          lastMessagePreview: msg.body.slice(0, 80),
+          lastSentAt: now,
+          readAt: { ...found.readAt, [params.fromUid]: now },
+        }
+      : {
+          id: threadId,
+          participantUids: sortedPair,
+          lastMessagePreview: msg.body.slice(0, 80),
+          lastSentAt: now,
+          readAt: { [params.fromUid]: now },
+        };
+    return {
+      ...store,
+      directThreads: found
+        ? threads.map((t) => (t.id === threadId ? updatedThread : t))
+        : [updatedThread, ...threads],
+      directMessages: [...(store.directMessages ?? []), msg],
+    };
+  });
+  return msg;
+}
+
+/** 標記某 thread 已被自己讀過（更新 readAt） */
+export function markThreadRead(threadId: string, selfUid: string): void {
+  updateDemoStore((store) => ({
+    ...store,
+    directThreads: (store.directThreads ?? []).map((t) =>
+      t.id === threadId
+        ? { ...t, readAt: { ...t.readAt, [selfUid]: new Date().toISOString() } }
+        : t,
+    ),
+  }));
+}
+
+/** 取得某使用者的全部 threads，依最後發送時間排序 */
+export function listThreadsFor(selfUid: string, store: DemoStore): StoreDirectThread[] {
+  return (store.directThreads ?? [])
+    .filter((t) => t.participantUids.includes(selfUid))
+    .sort((a, b) => (a.lastSentAt < b.lastSentAt ? 1 : -1));
+}
+
+/** 取得 thread 的所有訊息（時間正序） */
+export function listMessagesInThread(threadId: string, store: DemoStore): StoreDirectMessage[] {
+  return (store.directMessages ?? [])
+    .filter((m) => m.threadId === threadId)
+    .sort((a, b) => (a.sentAt < b.sentAt ? -1 : 1));
+}
+
+/** 計算某 thread 對自己的未讀數 */
+export function countUnreadInThread(
+  thread: StoreDirectThread,
+  selfUid: string,
+  store: DemoStore,
+): number {
+  const lastRead = thread.readAt[selfUid] ?? new Date(0).toISOString();
+  return (store.directMessages ?? []).filter(
+    (m) => m.threadId === thread.id && m.fromUid !== selfUid && m.sentAt > lastRead,
+  ).length;
+}
+
+/** 計算所有 thread 對自己的未讀數總和（給訊息圖示徽章用） */
+export function countTotalDmUnread(selfUid: string, store: DemoStore): number {
+  return listThreadsFor(selfUid, store).reduce(
+    (sum, t) => sum + countUnreadInThread(t, selfUid, store),
+    0,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 預設好友/私訊資料種子（首次進站時注入，讓 demo 一打開就有內容）
+// ─────────────────────────────────────────────────────────────
+let _seeded = false;
+export function seedFriendsIfNeeded(): void {
+  if (_seeded) return;
+  if (typeof window === 'undefined') return;
+  _seeded = true;
+  const store = getDemoStore();
+  // 若已經種過，跳過
+  if ((store.friendships?.length ?? 0) > 0 || (store.directThreads?.length ?? 0) > 0) return;
+  const now = new Date();
+  const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString();
+  const seededFriendships: StoreFriendship[] = [
+    { fromUid: 'demo-student-1', toUid: 'demo-teacher-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 30) },
+    { fromUid: 'demo-student-1', toUid: 'demo-ta-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 21) },
+    { fromUid: 'demo-student-1', toUid: 'stu-002', status: 'accepted', createdAt: minutesAgo(60 * 24 * 60) },
+    { fromUid: 'stu-003', toUid: 'demo-student-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 14) },
+    { fromUid: 'demo-club-1', toUid: 'demo-student-1', status: 'pending', createdAt: minutesAgo(60 * 2) },
+    { fromUid: 'demo-teacher-1', toUid: 'demo-ta-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 90) },
+  ];
+  const t1 = buildThreadId('demo-student-1', 'demo-teacher-1');
+  const t2 = buildThreadId('demo-student-1', 'demo-ta-1');
+  const t3 = buildThreadId('demo-student-1', 'stu-002');
+  const t4 = buildThreadId('demo-teacher-1', 'demo-ta-1');
+
+  const seededMessages: StoreDirectMessage[] = [
+    {
+      id: 'dm-seed-1',
+      threadId: t1,
+      fromUid: 'demo-student-1',
+      body: '王老師好，想請問期末專題的題目可以自訂嗎?',
+      sentAt: minutesAgo(180),
+    },
+    {
+      id: 'dm-seed-2',
+      threadId: t1,
+      fromUid: 'demo-teacher-1',
+      body: '可以自訂,但需要先把題目大綱寄給我審核哦。',
+      sentAt: minutesAgo(120),
+    },
+    {
+      id: 'dm-seed-3',
+      threadId: t1,
+      fromUid: 'demo-student-1',
+      body: '了解!我大概想做「校園活動推薦系統」,使用協同過濾。',
+      sentAt: minutesAgo(60),
+    },
+    {
+      id: 'dm-seed-4',
+      threadId: t2,
+      fromUid: 'demo-ta-1',
+      body: '小明你好,作業二第三題你用遞迴的版本我看過了,寫得很好,只有 base case 的條件可以再簡化。',
+      sentAt: minutesAgo(45),
+    },
+    {
+      id: 'dm-seed-5',
+      threadId: t3,
+      fromUid: 'stu-002',
+      body: '今天的點名沒到我幫你點了一下,記得下次來!',
+      sentAt: minutesAgo(30),
+    },
+    {
+      id: 'dm-seed-6',
+      threadId: t3,
+      fromUid: 'demo-student-1',
+      body: '謝啦雅婷,我下次會準時!',
+      sentAt: minutesAgo(25),
+    },
+    {
+      id: 'dm-seed-7',
+      threadId: t4,
+      fromUid: 'demo-teacher-1',
+      body: '林助教,作業二批改進度怎麼樣?',
+      sentAt: minutesAgo(15),
+    },
+    {
+      id: 'dm-seed-8',
+      threadId: t4,
+      fromUid: 'demo-ta-1',
+      body: '已批改完前 5 份,評語都填好了,週末會完成剩下的。',
+      sentAt: minutesAgo(10),
+    },
+  ];
+  const seededThreads: StoreDirectThread[] = [
+    {
+      id: t1,
+      participantUids: ['demo-student-1', 'demo-teacher-1'].sort() as [string, string],
+      lastMessagePreview: '了解!我大概想做「校園活動推薦系統」,使用協同過濾。',
+      lastSentAt: minutesAgo(60),
+      readAt: { 'demo-teacher-1': minutesAgo(90) },
+    },
+    {
+      id: t2,
+      participantUids: ['demo-student-1', 'demo-ta-1'].sort() as [string, string],
+      lastMessagePreview: '小明你好,作業二第三題你用遞迴的版本我看過了...',
+      lastSentAt: minutesAgo(45),
+      readAt: {},
+    },
+    {
+      id: t3,
+      participantUids: ['demo-student-1', 'stu-002'].sort() as [string, string],
+      lastMessagePreview: '謝啦雅婷,我下次會準時!',
+      lastSentAt: minutesAgo(25),
+      readAt: { 'demo-student-1': minutesAgo(20) },
+    },
+    {
+      id: t4,
+      participantUids: ['demo-teacher-1', 'demo-ta-1'].sort() as [string, string],
+      lastMessagePreview: '已批改完前 5 份,評語都填好了...',
+      lastSentAt: minutesAgo(10),
+      readAt: {},
+    },
+  ];
+  updateDemoStore((s) => ({
+    ...s,
+    friendships: seededFriendships,
+    directThreads: seededThreads,
+    directMessages: seededMessages,
+  }));
 }

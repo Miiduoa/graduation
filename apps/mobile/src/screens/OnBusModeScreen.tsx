@@ -466,9 +466,9 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
                   paddingVertical: 10,
                   paddingHorizontal: 8,
                   borderRadius: 12,
-                  backgroundColor: isNow ? 'rgba(251,191,36,0.12)' : 'transparent',
+                  backgroundColor: isNow ? 'rgba(255,204,0,0.12)' : 'transparent',
                   borderWidth: isNow ? 1 : 0,
-                  borderColor: 'rgba(251,191,36,0.3)',
+                  borderColor: 'rgba(255,204,0,0.3)',
                   gap: 12,
                 }}
               >

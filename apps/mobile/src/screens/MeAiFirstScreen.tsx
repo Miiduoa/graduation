@@ -128,7 +128,7 @@ export default function MeAiFirstScreen() {
             marginTop: aiTokens.space.lg,
             paddingTop: aiTokens.space.md,
             borderTopWidth: 1,
-            borderTopColor: 'rgba(99,102,241,0.15)',
+            borderTopColor: 'rgba(88,86,214,0.15)',
             gap: aiTokens.space.lg,
           }}
         >

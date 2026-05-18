@@ -1023,7 +1023,7 @@ export function GroupDetailScreen(props: any) {
                               paddingHorizontal: 14,
                               paddingVertical: 8,
                               borderRadius: theme.radius.full,
-                              backgroundColor: 'rgba(99,102,241,0.1)',
+                              backgroundColor: 'rgba(88,86,214,0.1)',
                               borderWidth: 1,
                               borderColor: '#5856D6',
                               opacity: pressed ? 0.7 : 1,
