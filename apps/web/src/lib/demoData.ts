@@ -1120,6 +1120,7 @@ export const DEMO_LIBRARY_DUE_SOON_BOOK_ID = '3';       // 與 library/page.tsx 
 export interface DemoPendingAnn {
   id: string;
   title: string;
+  body?: string;
   source: string;
   submittedAt: string;
   /** 'teacher' | 'department_head' | 'club_officer' | 'admin' */

@@ -30,15 +30,21 @@ import { theme } from '../ui/theme';
 import { rootNavigateNested } from '../app/rootNavigation';
 import { getPersonaMissions, getPersona, type PersonaMission } from '../data/demoPersona';
 
-const SEVERITY_STYLE: Record<
-  PersonaMission['severity'],
-  { color: string; bg: string; icon: keyof typeof Ionicons.glyphMap; label: string }
-> = {
-  critical: { color: '#dc2626', bg: '#fef2f2', icon: 'alert-circle', label: '優先處理' },
-  warn: { color: '#d97706', bg: '#fffbeb', icon: 'warning', label: '本日重要' },
-  info: { color: '#2563eb', bg: '#eff6ff', icon: 'sparkles', label: 'AI 建議' },
-  success: { color: '#059669', bg: '#ecfdf5', icon: 'checkmark-circle', label: '進度更新' },
-};
+function getSeverityStyle(
+  severity: PersonaMission['severity'],
+): { color: string; bg: string; icon: keyof typeof Ionicons.glyphMap; label: string } {
+  switch (severity) {
+    case 'critical':
+      return { color: theme.colors.danger, bg: theme.colors.dangerSoft, icon: 'alert-circle', label: '優先處理' };
+    case 'warn':
+      return { color: theme.colors.warning, bg: theme.colors.warningSoft, icon: 'warning', label: '本日重要' };
+    case 'success':
+      return { color: theme.colors.success, bg: theme.colors.successSoft, icon: 'checkmark-circle', label: '進度更新' };
+    case 'info':
+    default:
+      return { color: theme.colors.info, bg: theme.colors.infoSoft, icon: 'sparkles', label: 'AI 建議' };
+  }
+}
 
 export interface AIMissionControlProps {
   /** 當前登入身分 uid */
@@ -97,7 +103,7 @@ export function AIMissionControl(props: AIMissionControlProps) {
         </View>
         {totalSavedMinutes > 0 && (
           <View style={styles.savedBadge}>
-            <Ionicons name="time-outline" size={12} color="#059669" />
+            <Ionicons name="time-outline" size={12} color={theme.colors.success} />
             <Text style={styles.savedText}>AI 已替你節省 {totalSavedMinutes} 分鐘</Text>
           </View>
         )}
@@ -107,8 +113,8 @@ export function AIMissionControl(props: AIMissionControlProps) {
       {props.subtitle && <Text style={styles.subtitle}>{props.subtitle}</Text>}
 
       <View style={styles.missionList}>
-        {missions.map((mission, idx) => {
-          const sev = SEVERITY_STYLE[mission.severity];
+        {missions.map((mission) => {
+          const sev = getSeverityStyle(mission.severity);
           return (
             <Pressable
               key={mission.id}
@@ -136,7 +142,7 @@ export function AIMissionControl(props: AIMissionControlProps) {
                 {mission.title}
               </Text>
               <Text style={styles.missionReason} numberOfLines={2}>
-                💡 {mission.reason}
+                {mission.reason}
               </Text>
               <Text style={styles.missionDetail} numberOfLines={3}>
                 {mission.detail}
@@ -197,7 +203,7 @@ const styles = StyleSheet.create({
     color: theme.colors.accent,
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.4,
+    letterSpacing: 0,
   },
   savedBadge: {
     flexDirection: 'row',
@@ -205,11 +211,11 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: '#ecfdf5',
+    borderRadius: theme.radius.sm,
+    backgroundColor: theme.colors.successSoft,
   },
   savedText: {
-    color: '#059669',
+    color: theme.colors.success,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -217,7 +223,7 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     fontSize: 17,
     fontWeight: '800',
-    letterSpacing: -0.2,
+    letterSpacing: 0,
   },
   subtitle: {
     color: theme.colors.muted,
@@ -229,7 +235,7 @@ const styles = StyleSheet.create({
   },
   missionCard: {
     backgroundColor: theme.colors.bg,
-    borderRadius: theme.radius.lg,
+    borderRadius: theme.radius.md,
     padding: 14,
     borderWidth: 1,
     borderColor: theme.colors.border,
@@ -256,7 +262,7 @@ const styles = StyleSheet.create({
   severityText: {
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.3,
+    letterSpacing: 0,
   },
   savedInline: {
     fontSize: 11,
@@ -312,7 +318,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   primaryBtnText: {
-    color: '#fff',
+    color: theme.colors.onAccent,
     fontSize: 13,
     fontWeight: '700',
   },

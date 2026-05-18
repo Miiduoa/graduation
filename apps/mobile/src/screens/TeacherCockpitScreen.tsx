@@ -458,7 +458,7 @@ export default function TeacherCockpitScreen() {
             } catch { /* swallow */ }
             return `午安，${auth.profile?.displayName?.split('（')[0] ?? '老師'}`;
           })()}
-          title="今天教學一覽"
+          title="AI 教學中樞"
           summary={(() => {
             try {
               const { getDemoUserStory } = require('../data/demoUserStories');

@@ -18,7 +18,6 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -44,6 +43,7 @@ import { theme } from '../ui/theme';
 import { useTabBarContentBottomPadding } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
 import { getScopedStorageKey } from '../services/scopedStorage';
+import { loadPersistedValue } from '../services/persistedStorage';
 import {
   loadRoleEventInbox,
   subscribeAllRoleEvents,
@@ -133,11 +133,15 @@ export default function TodayCockpitScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(mistakeStorageKey);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) setMistakes(parsed);
-        }
+        const parsed = await loadPersistedValue<MistakeEntry[]>({
+          storageKey: mistakeStorageKey,
+          fallback: [],
+          deserialize: (raw) => {
+            const value = JSON.parse(raw);
+            return Array.isArray(value) ? value : [];
+          },
+        });
+        setMistakes(parsed);
       } catch { /* swallow */ } finally { setLoading(false); }
     })();
   }, [mistakeStorageKey]);
@@ -221,24 +225,26 @@ export default function TodayCockpitScreen() {
             style={({ pressed }) => ({
               padding: theme.space.lg,
               borderRadius: theme.radius.lg,
-              backgroundColor: theme.colors.text,
+              backgroundColor: theme.colors.accent,
               opacity: pressed ? 0.85 : 1,
               marginBottom: theme.space.lg,
+              borderWidth: 1,
+              borderColor: theme.colors.accent,
             })}
           >
             <Text style={{
-              color: theme.colors.bg, opacity: 0.6,
+              color: theme.colors.onAccent, opacity: 0.74,
               fontSize: theme.typography.labelSmall.fontSize,
-              fontWeight: '500',
+              fontWeight: '700',
             }}>
-              {nextTask.courseName} · {urgencyLabel(nextTask.urgency)}
+              AI 排定 · {nextTask.courseName} · {urgencyLabel(nextTask.urgency)}
             </Text>
             <Text
               style={{
-                color: theme.colors.bg,
+                color: theme.colors.onAccent,
                 fontSize: theme.typography.h2.fontSize,
                 lineHeight: theme.typography.h2.lineHeight,
-                fontWeight: '700',
+                fontWeight: '800',
                 marginTop: theme.space.xs,
               }}
               numberOfLines={2}
@@ -252,8 +258,8 @@ export default function TodayCockpitScreen() {
               marginTop: theme.space.md,
             }}>
               <Text style={{
-                color: theme.colors.bg,
-                opacity: 0.6,
+                color: theme.colors.onAccent,
+                opacity: 0.74,
                 fontSize: theme.typography.bodySmall.fontSize,
               }}>
                 預估 {Math.round(nextTask.estimatedMinutes)} 分鐘
@@ -264,12 +270,12 @@ export default function TodayCockpitScreen() {
                 gap: 6,
                 paddingHorizontal: theme.space.sm + 2,
                 paddingVertical: theme.space.xs + 4,
-                borderRadius: theme.radius.full,
-                backgroundColor: theme.colors.bg,
+                borderRadius: theme.radius.md,
+                backgroundColor: theme.colors.surface,
               }}>
-                <Ionicons name="play" size={12} color={theme.colors.text} />
+                <Ionicons name="play" size={12} color={theme.colors.accent} />
                 <Text style={{
-                  color: theme.colors.text,
+                  color: theme.colors.accent,
                   fontSize: theme.typography.bodySmall.fontSize,
                   fontWeight: '700',
                 }}>開始</Text>

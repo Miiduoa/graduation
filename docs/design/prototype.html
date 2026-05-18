@@ -1,0 +1,1658 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campus AI-First Redesign · 視覺化原型</title>
+<style>
+  :root {
+    --bg: #F8F9FC;
+    --surface: #FFFFFF;
+    --panel: #F2F2F7;
+    --text: #1C1C1E;
+    --muted: #8E8E93;
+    --border: #E5E5EA;
+    --border-strong: #D1D1D6;
+    --brand: #2563EB;
+    --brand2: #60A5FA;
+    --success: #34C759;
+    --warning: #FF9500;
+    --danger: #FF3B30;
+
+    /* AI-First Tokens v1 */
+    --ai: #6366F1;
+    --ai-strong: #4F46E5;
+    --ai-soft: rgba(99,102,241,.10);
+    --ai-halo: rgba(99,102,241,.20);
+    --ai-surface: #FAFBFF;
+    --ai-gradient: linear-gradient(135deg, #6366F1 0%, #8B5CF6 50%, #EC4899 100%);
+    --ai-gradient-soft: linear-gradient(180deg, #EEF2FF 0%, #FCE7F3 100%);
+
+    --c-high: #34C759;
+    --c-mid: #FF9500;
+    --c-low: #FF3B30;
+
+    --shadow-sm: 0 2px 10px rgba(17,25,60,.08);
+    --shadow-md: 0 6px 18px rgba(17,25,60,.10);
+    --shadow-lg: 0 10px 28px rgba(17,25,60,.14);
+    --shadow-ai: 0 0 0 3px rgba(99,102,241,.18), 0 8px 24px rgba(99,102,241,.12);
+
+    --r-sm: 12px;
+    --r-md: 18px;
+    --r-lg: 22px;
+    --r-pill: 999px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── Prototype Toolbar (展示用) ─── */
+  .proto-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    background: rgba(255,255,255,.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .proto-title {
+    font-size: 14px;
+    font-weight: 600;
+    background: var(--ai-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.2px;
+  }
+  .proto-tabs { display: flex; gap: 4px; }
+  .proto-tab {
+    padding: 6px 14px;
+    border-radius: var(--r-pill);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all .18s;
+  }
+  .proto-tab:hover { background: var(--panel); color: var(--text); }
+  .proto-tab.active {
+    background: var(--ai);
+    color: white;
+  }
+
+  /* ─── Section ─── */
+  .section {
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 64px 32px 32px;
+    display: none;
+  }
+  .section.active { display: block; }
+  .section-header { margin-bottom: 32px; }
+  .section-eyebrow {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--ai);
+    background: var(--ai-soft);
+    padding: 4px 10px;
+    border-radius: var(--r-pill);
+  }
+  .section-title {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 12px 0 8px;
+    letter-spacing: -0.5px;
+  }
+  .section-sub {
+    color: var(--muted);
+    font-size: 16px;
+    max-width: 680px;
+  }
+
+  /* ═══════════════════════════════════
+     WEB DESKTOP MOCKUP
+     ═══════════════════════════════════ */
+  .desktop-frame {
+    background: var(--surface);
+    border-radius: 20px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .desktop-chrome {
+    background: linear-gradient(180deg, #EAEAEC 0%, #DCDCDF 100%);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .chrome-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .chrome-dot.r { background: #FF5F57; }
+  .chrome-dot.y { background: #FEBC2E; }
+  .chrome-dot.g { background: #28C840; }
+  .chrome-url {
+    margin-left: 20px;
+    flex: 1;
+    background: rgba(255,255,255,.7);
+    padding: 4px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    max-width: 420px;
+  }
+
+  /* ── App Shell：三欄式 ── */
+  .app-shell {
+    display: grid;
+    grid-template-columns: 72px 1fr 380px;
+    height: 760px;
+    background: var(--bg);
+  }
+
+  /* Left Rail */
+  .rail {
+    background: white;
+    border-right: 1px solid var(--border);
+    padding: 16px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .rail-logo {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: var(--ai-gradient);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 18px;
+    margin-bottom: 12px;
+    box-shadow: var(--shadow-sm);
+    animation: breath 2.4s ease-in-out infinite;
+  }
+  @keyframes breath {
+    0%, 100% { transform: scale(1); box-shadow: var(--shadow-sm); }
+    50% { transform: scale(1.03); box-shadow: var(--shadow-ai); }
+  }
+  .rail-item {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--muted);
+    transition: all .18s;
+    position: relative;
+    gap: 2px;
+  }
+  .rail-item:hover { background: var(--panel); color: var(--text); }
+  .rail-item.active { color: var(--ai); background: var(--ai-soft); }
+  .rail-item .ic { font-size: 18px; }
+  .rail-item .lb { font-size: 9px; font-weight: 600; }
+  .rail-spacer { flex: 1; }
+
+  /* Main Content */
+  .main {
+    overflow-y: auto;
+    padding: 0 32px 32px;
+  }
+  .command-bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(248, 249, 252, .85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding: 16px 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .command-input {
+    flex: 1;
+    height: 48px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: text;
+    transition: all .2s;
+    box-shadow: var(--shadow-sm);
+  }
+  .command-input:hover { border-color: var(--ai); box-shadow: var(--shadow-ai); }
+  .command-input .ai-mark {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--ai-gradient);
+    flex-shrink: 0;
+  }
+  .command-input .placeholder { color: var(--muted); flex: 1; }
+  .command-input .kbd {
+    font-family: SF Mono, monospace;
+    font-size: 11px;
+    background: var(--panel);
+    color: var(--muted);
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .role-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: var(--r-pill);
+    background: white;
+    border: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  /* Quick chips */
+  .quick-chips {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    padding: 6px 14px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--r-pill);
+    font-size: 13px;
+    color: var(--text);
+    cursor: pointer;
+    transition: all .18s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .chip:hover { border-color: var(--ai); color: var(--ai); }
+  .chip .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--ai);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+
+  /* Hero / Today */
+  .hero {
+    margin-top: 24px;
+    padding: 28px 32px;
+    background: var(--ai-gradient-soft);
+    border-radius: var(--r-lg);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    top: -40px; right: -40px;
+    width: 200px; height: 200px;
+    background: var(--ai-gradient);
+    opacity: .08;
+    border-radius: 50%;
+    filter: blur(40px);
+  }
+  .hero-eyebrow {
+    font-size: 12px;
+    color: var(--ai);
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .hero-title {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 8px 0 8px;
+    letter-spacing: -0.4px;
+  }
+  .hero-sub {
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  /* Slot Cards Grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+  }
+
+  /* Slot Card */
+  .slot-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    padding: 20px;
+    position: relative;
+    transition: all .22s;
+  }
+  .slot-card:hover {
+    border-color: var(--ai);
+    box-shadow: var(--shadow-ai);
+    transform: translateY(-2px);
+  }
+  .slot-card.ai-generated::before {
+    content: '';
+    position: absolute;
+    top: -1px; left: -1px; right: -1px;
+    height: 3px;
+    background: var(--ai-gradient);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .card-icon {
+    width: 32px; height: 32px;
+    border-radius: 10px;
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+  .card-icon.ai { background: var(--ai-soft); color: var(--ai); }
+  .card-title {
+    font-size: 16px;
+    font-weight: 600;
+    flex: 1;
+  }
+  .card-body {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .card-body strong { color: var(--text); font-weight: 600; }
+
+  /* Source stamp + confidence */
+  .card-footer {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .source-stamp {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .confidence {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    font-weight: 600;
+  }
+  .confidence.high { color: var(--c-high); background: rgba(52,199,89,.10); }
+  .confidence.mid { color: var(--c-mid); background: rgba(255,149,0,.10); }
+  .confidence.low { color: var(--c-low); background: rgba(255,59,48,.10); }
+
+  /* Card actions */
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .btn {
+    padding: 8px 14px;
+    border-radius: var(--r-sm);
+    font-size: 13px;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    background: white;
+    color: var(--text);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn:hover { background: var(--panel); }
+  .btn.primary {
+    background: var(--ai);
+    color: white;
+    border-color: var(--ai);
+  }
+  .btn.primary:hover { background: var(--ai-strong); }
+  .btn.danger {
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+
+  /* Compare card内 */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .compare-opt {
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    padding: 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .18s;
+  }
+  .compare-opt:hover { border-color: var(--ai); background: var(--ai-soft); }
+  .compare-opt .price { font-size: 16px; font-weight: 700; color: var(--ai); }
+  .compare-opt .star { color: var(--warning); font-size: 12px; margin-top: 2px; }
+  .compare-opt .time { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* Schedule items */
+  .sched-list { display: flex; flex-direction: column; gap: 10px; }
+  .sched-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+  }
+  .sched-time {
+    font-size: 12px;
+    color: var(--muted);
+    width: 64px;
+    flex-shrink: 0;
+  }
+  .sched-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .sched-text { flex: 1; font-size: 13px; }
+  .sched-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-weight: 600;
+  }
+  .sched-tag.todo { background: var(--ai-soft); color: var(--ai); }
+  .sched-tag.warn { background: rgba(255,149,0,.12); color: var(--warning); }
+  .sched-tag.done { background: rgba(52,199,89,.12); color: var(--success); }
+
+  /* AI Drawer (right column) */
+  .drawer {
+    background: white;
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .drawer-head {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .drawer-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--ai-gradient);
+    animation: breath 2.4s ease-in-out infinite;
+  }
+  .drawer-title { font-weight: 600; flex: 1; }
+  .drawer-status {
+    font-size: 11px;
+    color: var(--success);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .drawer-status::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .msg-row { display: flex; flex-direction: column; gap: 4px; }
+  .msg-row.you { align-items: flex-end; }
+  .msg-bubble {
+    max-width: 90%;
+    padding: 10px 14px;
+    border-radius: var(--r-md);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .msg-bubble.ai {
+    background: var(--ai-surface);
+    border: 1px solid var(--border);
+  }
+  .msg-bubble.you {
+    background: var(--ai);
+    color: white;
+  }
+  .msg-meta { font-size: 10px; color: var(--muted); padding: 0 4px; }
+
+  .inline-card {
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    padding: 14px;
+    background: white;
+    margin-top: 6px;
+  }
+  .inline-card-title {
+    font-weight: 600;
+    margin-bottom: 6px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .inline-card-row {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 4px 0;
+  }
+  .inline-card-row strong { color: var(--text); }
+
+  .typing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 12px;
+    background: var(--ai-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    max-width: fit-content;
+  }
+  .typing .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--ai);
+    animation: typing 1.2s ease-in-out infinite;
+  }
+  .typing .dot:nth-child(2) { animation-delay: .2s; }
+  .typing .dot:nth-child(3) { animation-delay: .4s; }
+  @keyframes typing {
+    0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-3px); }
+  }
+
+  .drawer-input {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    background: white;
+  }
+  .drawer-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background: var(--panel);
+    border-radius: var(--r-pill);
+    padding: 8px 12px;
+  }
+  .drawer-input-row input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    outline: none;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .send-btn {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--ai-gradient);
+    color: white;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+
+  /* ═══════════════════════════════════
+     MOBILE MOCKUP
+     ═══════════════════════════════════ */
+  .mobile-row {
+    display: flex;
+    gap: 32px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .mobile-frame {
+    width: 320px;
+    height: 680px;
+    border-radius: 44px;
+    background: #1C1C1E;
+    padding: 12px;
+    box-shadow: var(--shadow-lg);
+    flex-shrink: 0;
+  }
+  .mobile-screen {
+    width: 100%;
+    height: 100%;
+    border-radius: 32px;
+    background: var(--bg);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .mobile-statusbar {
+    height: 40px;
+    background: var(--bg);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 24px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .mobile-notch {
+    position: absolute;
+    top: 8px; left: 50%;
+    transform: translateX(-50%);
+    width: 110px; height: 28px;
+    background: #1C1C1E;
+    border-radius: 14px;
+  }
+  .mobile-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 16px 100px;
+  }
+  .mobile-hero {
+    padding: 16px 4px;
+  }
+  .mobile-greet { font-size: 13px; color: var(--muted); }
+  .mobile-title { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin-top: 2px; }
+  .mobile-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+  .mobile-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .mobile-card.ai {
+    background: var(--ai-gradient-soft);
+    border-color: rgba(99,102,241,.20);
+  }
+  .mobile-card-title { font-weight: 600; font-size: 14px; }
+  .mobile-card-body { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  /* Mobile bottom dock with central AI button */
+  .mobile-dock {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 84px;
+    background: rgba(255,255,255,.96);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding: 0 8px 20px;
+  }
+  .dock-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 9px;
+    color: var(--muted);
+  }
+  .dock-item.active { color: var(--ai); }
+  .dock-item .ic { font-size: 22px; }
+  .dock-ai {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--ai-gradient);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-top: -28px;
+    box-shadow: var(--shadow-ai);
+    animation: breath 2.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+
+  /* Mobile Command Sheet */
+  .mobile-sheet {
+    position: absolute;
+    left: 8px; right: 8px;
+    bottom: 78px;
+    height: 76%;
+    background: white;
+    border-radius: 28px 28px 12px 12px;
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .mobile-sheet-handle {
+    width: 40px; height: 4px;
+    background: var(--border-strong);
+    border-radius: 2px;
+    margin: 10px auto;
+  }
+  .mobile-sheet-title {
+    padding: 0 20px 12px;
+    font-size: 13px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ═══════════════════════════════════
+     ADMIN MOCKUP
+     ═══════════════════════════════════ */
+  .admin-shell {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    height: 760px;
+    background: #0F1419;
+    color: #E5E7EB;
+  }
+  .admin-sidebar {
+    background: #1A1F2E;
+    border-right: 1px solid #2A3142;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .admin-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    margin-bottom: 24px;
+  }
+  .admin-brand-mark {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #F43F5E 0%, #8B5CF6 100%);
+  }
+  .admin-brand-name {
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: -0.2px;
+  }
+  .admin-brand-sub { font-size: 11px; color: #9CA3B5; margin-top: 2px; }
+  .admin-nav-group {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6B7280;
+    padding: 16px 12px 6px;
+  }
+  .admin-nav-item {
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #9CA3B5;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .admin-nav-item:hover { background: rgba(255,255,255,.06); color: #E5E7EB; }
+  .admin-nav-item.active { background: rgba(139,92,246,.15); color: #C4B5FD; }
+  .admin-nav-item .badge {
+    margin-left: auto;
+    background: var(--danger);
+    color: white;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .admin-main {
+    padding: 0 32px 32px;
+    overflow-y: auto;
+  }
+  .admin-cmdbar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    margin: 0 -32px;
+    padding: 16px 32px;
+    background: rgba(15,20,25,.85);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid #2A3142;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .admin-mode-badge {
+    background: linear-gradient(135deg, #F43F5E 0%, #8B5CF6 100%);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .admin-input {
+    flex: 1;
+    height: 40px;
+    background: rgba(255,255,255,.06);
+    border: 1px solid #2A3142;
+    border-radius: 999px;
+    padding: 0 16px;
+    color: #E5E7EB;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .admin-input .placeholder { color: #6B7280; flex: 1; }
+  .admin-h1 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 24px 0 4px;
+    letter-spacing: -0.3px;
+  }
+  .admin-sub { color: #9CA3B5; font-size: 13px; }
+
+  .admin-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 24px;
+  }
+  .admin-stat {
+    background: #1A1F2E;
+    border: 1px solid #2A3142;
+    border-radius: 14px;
+    padding: 16px;
+  }
+  .admin-stat-label {
+    font-size: 11px;
+    color: #9CA3B5;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .admin-stat-value {
+    font-size: 26px;
+    font-weight: 700;
+    margin-top: 4px;
+    color: #F9FAFB;
+  }
+  .admin-stat-delta { font-size: 11px; margin-top: 4px; color: var(--success); }
+  .admin-stat-delta.down { color: var(--danger); }
+
+  .admin-card {
+    background: #1A1F2E;
+    border: 1px solid #2A3142;
+    border-radius: 16px;
+    padding: 20px;
+    margin-top: 20px;
+  }
+  .admin-card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #F9FAFB;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ═══════════════════════════════════
+     IA Diagram Section
+     ═══════════════════════════════════ */
+  .ia-frame {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 40px;
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Generative UI showcase */
+  .gen-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 16px;
+  }
+  .gen-ask {
+    padding: 32px;
+    background: var(--ai-gradient-soft);
+    border-radius: var(--r-lg);
+    border: 1px dashed var(--ai);
+  }
+  .gen-ask-q {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--ai);
+  }
+  .gen-ask-q::before { content: '「'; }
+  .gen-ask-q::after { content: '」'; }
+  .gen-arrow {
+    font-size: 24px;
+    color: var(--ai);
+    text-align: center;
+    margin: 8px 0;
+  }
+
+  .footer-tip {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 40px 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="proto-toolbar">
+  <div class="proto-title">✨ Campus AI-First Redesign · 視覺化原型 v1.0</div>
+  <div class="proto-tabs">
+    <button class="proto-tab active" data-tab="web">Web 桌面</button>
+    <button class="proto-tab" data-tab="mobile">Mobile</button>
+    <button class="proto-tab" data-tab="admin">Admin 後台</button>
+    <button class="proto-tab" data-tab="ia">資訊架構</button>
+    <button class="proto-tab" data-tab="generative">Generative UI</button>
+  </div>
+</div>
+
+<!-- ════════════════ WEB DESKTOP ════════════════ -->
+<section class="section active" data-section="web">
+  <div class="section-header">
+    <span class="section-eyebrow">PART 1 / 5</span>
+    <h1 class="section-title">Web 桌面：AI Command Center</h1>
+    <p class="section-sub">三欄式佈局：左側 72px 精簡導航 Rail、中欄 AI 主導內容、右側可摺疊 AI Drawer。Command Bar 永遠置頂，<code>Cmd+K</code> 全屏喚醒。</p>
+  </div>
+
+  <div class="desktop-frame">
+    <div class="desktop-chrome">
+      <span class="chrome-dot r"></span>
+      <span class="chrome-dot y"></span>
+      <span class="chrome-dot g"></span>
+      <div class="chrome-url">🔒 campus.pu.edu.tw / today</div>
+    </div>
+
+    <div class="app-shell">
+      <!-- Left Rail -->
+      <nav class="rail">
+        <div class="rail-logo">C</div>
+        <div class="rail-item active"><span class="ic">☀️</span><span class="lb">Today</span></div>
+        <div class="rail-item"><span class="ic">🏛</span><span class="lb">Hub</span></div>
+        <div class="rail-item"><span class="ic">👤</span><span class="lb">Me</span></div>
+        <div class="rail-spacer"></div>
+        <div class="rail-item"><span class="ic">⚙</span></div>
+      </nav>
+
+      <!-- Main Content -->
+      <main class="main">
+        <div class="command-bar">
+          <div class="command-input">
+            <div class="ai-mark"></div>
+            <span class="placeholder">問校園 AI 任何事...</span>
+            <span class="kbd">⌘ K</span>
+          </div>
+          <div class="role-pill">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--ai)"></span>
+            學生 · 王小明
+          </div>
+        </div>
+
+        <div class="quick-chips">
+          <div class="chip"><span class="dot"></span>下節課在哪？</div>
+          <div class="chip"><span class="dot"></span>這週還要交什麼？</div>
+          <div class="chip"><span class="dot"></span>幫我請週四的假</div>
+          <div class="chip"><span class="dot"></span>中午吃什麼便宜營養</div>
+        </div>
+
+        <div class="hero">
+          <div class="hero-eyebrow">Today · 週一 5/18 早安</div>
+          <h2 class="hero-title">今天 3 堂課、2 份作業，<br/>AI 幫你排好了。</h2>
+          <p class="hero-sub">下節課 09:10 資料結構 工程館 302（步行 4 分鐘）· 23:59 截止 Lab 3 進度 60%</p>
+        </div>
+
+        <div class="grid">
+          <!-- AI Generated Answer Card -->
+          <div class="slot-card ai-generated">
+            <div class="card-header">
+              <div class="card-icon ai">⏰</div>
+              <div class="card-title">下節課</div>
+            </div>
+            <div class="card-body">
+              <strong>資料結構</strong> · 09:10–10:50<br/>
+              📍 工程館 302（步行 4 分鐘）<br/>
+              👨‍🏫 王大明老師
+            </div>
+            <div class="card-actions">
+              <button class="btn primary">🧭 導航</button>
+              <button class="btn">課程資料</button>
+              <button class="btn">請假</button>
+            </div>
+            <div class="card-footer">
+              <span class="source-stamp">📡 教務系統 · 09:43</span>
+              <span class="confidence high">✓ 已驗證</span>
+            </div>
+          </div>
+
+          <!-- Schedule Card -->
+          <div class="slot-card ai-generated">
+            <div class="card-header">
+              <div class="card-icon ai">📅</div>
+              <div class="card-title">本週待辦</div>
+            </div>
+            <div class="sched-list">
+              <div class="sched-row">
+                <span class="sched-time">週三 23:59</span>
+                <span class="sched-dot" style="background:var(--warning)"></span>
+                <span class="sched-text">作業系統 Lab 3</span>
+                <span class="sched-tag warn">未開始</span>
+              </div>
+              <div class="sched-row">
+                <span class="sched-time">週四 09:00</span>
+                <span class="sched-dot" style="background:var(--success)"></span>
+                <span class="sched-text">資料庫小考</span>
+                <span class="sched-tag done">已準備</span>
+              </div>
+              <div class="sched-row">
+                <span class="sched-time">週五 14:00</span>
+                <span class="sched-dot" style="background:var(--ai)"></span>
+                <span class="sched-text">專題期中報告 60%</span>
+                <span class="sched-tag todo">進行中</span>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="btn primary">📥 加入行事曆</button>
+              <button class="btn">AI 排週計畫</button>
+            </div>
+            <div class="card-footer">
+              <span class="source-stamp">📡 LMS · 09:42</span>
+              <span class="confidence high">✓ 已驗證</span>
+            </div>
+          </div>
+
+          <!-- Compare Card -->
+          <div class="slot-card ai-generated">
+            <div class="card-header">
+              <div class="card-icon ai">🍱</div>
+              <div class="card-title">中午選擇 · 3 個建議</div>
+            </div>
+            <div class="compare-grid">
+              <div class="compare-opt">
+                <div style="font-weight:600;font-size:13px">學餐</div>
+                <div class="price">$65</div>
+                <div class="star">⭐ 4.2</div>
+                <div class="time">5 min</div>
+              </div>
+              <div class="compare-opt" style="border-color:var(--ai);background:var(--ai-soft)">
+                <div style="font-weight:600;font-size:13px;color:var(--ai)">主餐廳 ★</div>
+                <div class="price">$95</div>
+                <div class="star">⭐ 4.5</div>
+                <div class="time">8 min</div>
+              </div>
+              <div class="compare-opt">
+                <div style="font-weight:600;font-size:13px">7-11</div>
+                <div class="price">$45</div>
+                <div class="star">⭐ 3.8</div>
+                <div class="time">2 min</div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="btn">展開全部 12 個</button>
+              <button class="btn primary">📌 釘到 Today</button>
+            </div>
+            <div class="card-footer">
+              <span class="source-stamp">📡 餐廳資料 + 你的偏好</span>
+              <span class="confidence mid">● 中信心</span>
+            </div>
+          </div>
+
+          <!-- Action Card (待確認) -->
+          <div class="slot-card ai-generated" style="grid-column:span 2">
+            <div class="card-header">
+              <div class="card-icon ai">📝</div>
+              <div class="card-title">請假草稿（待你確認）</div>
+              <span class="confidence mid" style="margin-left:auto">● 待確認</span>
+            </div>
+            <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px">
+              <div><strong>日期：</strong>5/22（週四）</div>
+              <div><strong>課程：</strong>資料庫系統 (CS302)</div>
+              <div><strong>事由：</strong>病假（請選擇 ▾）</div>
+              <div><strong>附件：</strong>診斷證明（選用）</div>
+            </div>
+            <div class="card-actions" style="margin-top:14px">
+              <button class="btn">取消</button>
+              <button class="btn primary">提交給授課老師 →</button>
+              <span style="margin-left:auto;font-size:12px;color:var(--muted);align-self:center">⚠ AI 不會自動送出，需你最終按一次</span>
+            </div>
+            <div class="card-footer">
+              <span class="source-stamp">🤖 從你的對話自動填入</span>
+              <span class="confidence mid">● 中信心 · 建議再讀一次事由</span>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- AI Drawer -->
+      <aside class="drawer">
+        <div class="drawer-head">
+          <div class="drawer-avatar"></div>
+          <div>
+            <div class="drawer-title">校園 AI</div>
+            <div class="drawer-status">線上 · 已連結 7 個系統</div>
+          </div>
+        </div>
+        <div class="drawer-body">
+          <div class="msg-row">
+            <div class="msg-bubble ai">早安王同學 ☀️ 今天我幫你抓到幾件重要的事，已放在 Today 區塊。要先聊哪一件？</div>
+            <span class="msg-meta">校園 AI · 09:43</span>
+          </div>
+          <div class="msg-row you">
+            <div class="msg-bubble you">幫我看週四能不能蹺資料庫的課</div>
+            <span class="msg-meta">你 · 09:43</span>
+          </div>
+          <div class="msg-row">
+            <div class="msg-bubble ai">
+              我查了你的出缺勤紀錄：
+              <div class="inline-card">
+                <div class="inline-card-title">📊 資料庫 (CS302) 出席</div>
+                <div class="inline-card-row">已上 <strong>13/15 週</strong>，缺席 2 次</div>
+                <div class="inline-card-row">本門課可缺席上限：<strong>3 次</strong></div>
+                <div class="inline-card-row">蹺一次 → <strong>還剩 0 次</strong> 額度</div>
+                <div class="inline-card-row" style="color:var(--warning);margin-top:6px">⚠️ 接下來不能再缺席，否則扣考試 5 分</div>
+              </div>
+              要我幫你生請假草稿嗎？
+            </div>
+            <span class="msg-meta">校園 AI · 09:43 · 高信心 ✓</span>
+          </div>
+          <div class="typing">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          </div>
+        </div>
+        <div class="drawer-input">
+          <div class="drawer-input-row">
+            <input placeholder="繼續對話...">
+            <button class="send-btn">↑</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ MOBILE ════════════════ -->
+<section class="section" data-section="mobile">
+  <div class="section-header">
+    <span class="section-eyebrow">PART 2 / 5</span>
+    <h1 class="section-title">Mobile：底部凸起 AI 主按鈕</h1>
+    <p class="section-sub">三個分頁（Today / Hub / Me）+ 中央凸起 AI 大按鈕。按下展開 75% 高度的 Command Sheet，所有功能用講的即可達到。</p>
+  </div>
+
+  <div class="mobile-row">
+    <!-- Mobile Today screen -->
+    <div class="mobile-frame">
+      <div class="mobile-screen">
+        <div class="mobile-notch"></div>
+        <div class="mobile-statusbar">
+          <span>9:43</span>
+          <span>● ● ●</span>
+        </div>
+        <div class="mobile-body">
+          <div class="mobile-hero">
+            <div class="mobile-greet">☀️ 早安 王小明</div>
+            <div class="mobile-title">今天 3 堂課<br/>+ 2 份作業</div>
+            <div class="mobile-sub">下節 09:10 資料結構 · 工程館 302</div>
+          </div>
+
+          <div class="mobile-card ai">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <div style="width:24px;height:24px;border-radius:50%;background:var(--ai-gradient)"></div>
+              <span style="font-size:11px;color:var(--ai);font-weight:600">AI 建議</span>
+            </div>
+            <div class="mobile-card-title">先去主餐廳吃中餐？</div>
+            <div class="mobile-card-body">$95 · 步行 8 分鐘 · 你上次給 ⭐4.5</div>
+          </div>
+
+          <div class="mobile-card">
+            <div class="mobile-card-title">⏰ 下節課</div>
+            <div class="mobile-card-body">資料結構 09:10–10:50<br/>工程館 302（步行 4 分鐘）</div>
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <button class="btn primary" style="font-size:11px;padding:6px 10px">導航</button>
+              <button class="btn" style="font-size:11px;padding:6px 10px">請假</button>
+            </div>
+          </div>
+
+          <div class="mobile-card">
+            <div class="mobile-card-title">📅 本週待辦 3 件</div>
+            <div class="mobile-card-body">週三 Lab 3 · 週五 期中報告 · 週日 英文週記</div>
+          </div>
+        </div>
+
+        <!-- Bottom Dock with AI button -->
+        <div class="mobile-dock">
+          <div class="dock-item active"><span class="ic">☀️</span><span>Today</span></div>
+          <div class="dock-item"><span class="ic">🏛</span><span>Hub</span></div>
+          <div class="dock-ai">✨</div>
+          <div class="dock-item"><span class="ic">👤</span><span>Me</span></div>
+          <div class="dock-item"><span class="ic">⚙</span><span>More</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile with AI Sheet open -->
+    <div class="mobile-frame">
+      <div class="mobile-screen">
+        <div class="mobile-notch"></div>
+        <div class="mobile-statusbar">
+          <span>9:43</span>
+          <span>● ● ●</span>
+        </div>
+        <div class="mobile-body" style="filter:blur(2px);opacity:.6">
+          <div class="mobile-hero">
+            <div class="mobile-greet">☀️ 早安 王小明</div>
+            <div class="mobile-title">今天 3 堂課</div>
+          </div>
+        </div>
+
+        <!-- Mobile AI Sheet -->
+        <div class="mobile-sheet">
+          <div class="mobile-sheet-handle"></div>
+          <div class="mobile-sheet-title">校園 AI · 線上 · 已連結 7 系統</div>
+          <div style="flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:12px">
+            <div class="msg-row">
+              <div class="msg-bubble ai" style="font-size:12px">早安王同學 ☀️ 你今天有 3 堂課，要先看哪一件？</div>
+            </div>
+            <div class="msg-row you">
+              <div class="msg-bubble you" style="font-size:12px">中午吃什麼便宜營養</div>
+            </div>
+            <div class="msg-row">
+              <div class="msg-bubble ai" style="font-size:12px;padding:8px;width:100%">
+                <div style="font-weight:600;margin-bottom:4px">🍱 3 個建議</div>
+                <div class="compare-grid" style="gap:4px">
+                  <div class="compare-opt" style="padding:6px;font-size:10px">
+                    <div style="font-weight:600">學餐</div>
+                    <div style="color:var(--ai);font-weight:700">$65</div>
+                  </div>
+                  <div class="compare-opt" style="padding:6px;font-size:10px;border-color:var(--ai);background:var(--ai-soft)">
+                    <div style="font-weight:600;color:var(--ai)">主餐 ★</div>
+                    <div style="color:var(--ai);font-weight:700">$95</div>
+                  </div>
+                  <div class="compare-opt" style="padding:6px;font-size:10px">
+                    <div style="font-weight:600">7-11</div>
+                    <div style="color:var(--ai);font-weight:700">$45</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <div class="chip" style="font-size:11px;padding:4px 10px"><span class="dot"></span>明天課表</div>
+              <div class="chip" style="font-size:11px;padding:4px 10px"><span class="dot"></span>幫我請假</div>
+            </div>
+          </div>
+          <div class="drawer-input">
+            <div class="drawer-input-row" style="padding:6px 10px">
+              <input placeholder="繼續對話..." style="font-size:13px">
+              <button class="send-btn" style="width:28px;height:28px;font-size:12px">↑</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="mobile-dock">
+          <div class="dock-item active"><span class="ic">☀️</span><span>Today</span></div>
+          <div class="dock-item"><span class="ic">🏛</span><span>Hub</span></div>
+          <div class="dock-ai" style="transform:scale(1.05)">✨</div>
+          <div class="dock-item"><span class="ic">👤</span><span>Me</span></div>
+          <div class="dock-item"><span class="ic">⚙</span><span>More</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ ADMIN ════════════════ -->
+<section class="section" data-section="admin">
+  <div class="section-header">
+    <span class="section-eyebrow">PART 3 / 5</span>
+    <h1 class="section-title">Admin Console：克制的 AI</h1>
+    <p class="section-sub">深色模式提醒「正在管理模式」，紅紫漸層的 Mode Badge 永遠在視線中。AI 在後台預設關閉自動執行，所有動作需二次確認，並完整記錄審計軌跡。</p>
+  </div>
+
+  <div class="desktop-frame" style="background:#0F1419;border-color:#2A3142">
+    <div class="desktop-chrome" style="background:linear-gradient(180deg,#222 0%,#111 100%);border-color:#2A3142">
+      <span class="chrome-dot r"></span>
+      <span class="chrome-dot y"></span>
+      <span class="chrome-dot g"></span>
+      <div class="chrome-url" style="background:rgba(255,255,255,.08);color:#9CA3B5">🔒 campus.pu.edu.tw / console / dashboard</div>
+    </div>
+
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <div class="admin-brand">
+          <div class="admin-brand-mark"></div>
+          <div>
+            <div class="admin-brand-name">Campus Console</div>
+            <div class="admin-brand-sub">管理模式 · v3</div>
+          </div>
+        </div>
+
+        <div class="admin-nav-group">總覽</div>
+        <div class="admin-nav-item active">📊 儀表板</div>
+        <div class="admin-nav-item">📥 公告審核 <span class="badge">7</span></div>
+        <div class="admin-nav-item">👥 成員</div>
+
+        <div class="admin-nav-group">教務</div>
+        <div class="admin-nav-item">📚 課程</div>
+        <div class="admin-nav-item">📝 角色矩陣</div>
+        <div class="admin-nav-item">📤 批次匯入</div>
+
+        <div class="admin-nav-group">系統</div>
+        <div class="admin-nav-item">🤖 AI 合規 <span class="badge" style="background:var(--warning)">!</span></div>
+        <div class="admin-nav-item">🔔 推播紀錄</div>
+        <div class="admin-nav-item">📦 匯出工作</div>
+        <div class="admin-nav-item">🛡 審計軌跡</div>
+      </aside>
+
+      <main class="admin-main">
+        <div class="admin-cmdbar">
+          <span class="admin-mode-badge">⚠ ADMIN MODE</span>
+          <div class="admin-input">
+            <div style="width:18px;height:18px;border-radius:50%;background:linear-gradient(135deg,#F43F5E,#8B5CF6)"></div>
+            <span class="placeholder">問 Admin AI（所有動作需二次確認）...</span>
+            <span class="kbd" style="background:rgba(255,255,255,.06);color:#9CA3B5;border-color:#2A3142">⌘ K</span>
+          </div>
+          <div class="role-pill" style="background:rgba(255,255,255,.06);border-color:#2A3142;color:#E5E7EB">
+            <span style="width:8px;height:8px;border-radius:50%;background:#F43F5E"></span>
+            黃主任
+          </div>
+        </div>
+
+        <h1 class="admin-h1">儀表板</h1>
+        <p class="admin-sub">資訊管理系 · 312 位學生 · 19 位教師 · 5/18 09:43</p>
+
+        <div class="admin-grid">
+          <div class="admin-stat">
+            <div class="admin-stat-label">待審公告</div>
+            <div class="admin-stat-value">7</div>
+            <div class="admin-stat-delta">+3 自昨日</div>
+          </div>
+          <div class="admin-stat">
+            <div class="admin-stat-label">今日活躍</div>
+            <div class="admin-stat-value">89</div>
+            <div class="admin-stat-delta">+12% 較上週</div>
+          </div>
+          <div class="admin-stat">
+            <div class="admin-stat-label">安全事件</div>
+            <div class="admin-stat-value" style="color:var(--warning)">1</div>
+            <div class="admin-stat-delta down">非緊急</div>
+          </div>
+          <div class="admin-stat">
+            <div class="admin-stat-label">AI 信心均值</div>
+            <div class="admin-stat-value" style="color:#C4B5FD">92%</div>
+            <div class="admin-stat-delta">本週穩定</div>
+          </div>
+        </div>
+
+        <div class="admin-card">
+          <div class="admin-card-title">
+            <div style="width:20px;height:20px;border-radius:50%;background:linear-gradient(135deg,#F43F5E,#8B5CF6);animation:breath 2.4s ease-in-out infinite"></div>
+            Admin AI · 今日重點
+          </div>
+          <div style="font-size:13px;color:#9CA3B5;line-height:1.7">
+            黃主任早安。我把今天需要你做決定的 3 件事列出來：<br/>
+            <br/>
+            <strong style="color:#E5E7EB">1. 7 則公告待審</strong> · 其中 2 則高優先（系務通知）<br/>
+            <strong style="color:#E5E7EB">2. 1 件 SSO 登入異常</strong> · 來源 IP 在西班牙，建議停用該帳號重設密碼<br/>
+            <strong style="color:#E5E7EB">3. 本週成績登錄完成度 73%</strong> · 缺 5 位老師，要不要發提醒？<br/>
+            <br/>
+            <button class="btn primary" style="background:linear-gradient(135deg,#F43F5E,#8B5CF6);border:none">⚡ 一鍵處理（會二次確認）</button>
+            <button class="btn" style="background:rgba(255,255,255,.06);border-color:#2A3142;color:#E5E7EB;margin-left:6px">展開審計軌跡</button>
+          </div>
+          <div style="margin-top:14px;padding-top:12px;border-top:1px dashed #2A3142;display:flex;justify-content:space-between;font-size:11px;color:#6B7280">
+            <span>📡 7 個系統 · 即時同步</span>
+            <span class="confidence high" style="background:rgba(52,199,89,.15)">✓ 高信心 · 已交叉驗證</span>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════ IA Diagram ════════════════ -->
+<section class="section" data-section="ia">
+  <div class="section-header">
+    <span class="section-eyebrow">PART 4 / 5</span>
+    <h1 class="section-title">資訊架構：三層金字塔</h1>
+    <p class="section-sub">從 14 個分頁 → 3 個分頁 + AI Command。Layer 0（AI）是預設導航方式，Layer 1（時空軸）只剩 3 個，Layer 2 是 AI 拉出的卡 + 傳統索引頁作為備援。</p>
+  </div>
+
+  <div class="ia-frame">
+    <svg viewBox="0 0 1000 540" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+      <defs>
+        <linearGradient id="aiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#6366F1"/>
+          <stop offset="50%" stop-color="#8B5CF6"/>
+          <stop offset="100%" stop-color="#EC4899"/>
+        </linearGradient>
+        <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+          <feOffset dx="0" dy="4"/>
+          <feComponentTransfer><feFuncA type="linear" slope="0.15"/></feComponentTransfer>
+          <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- Layer 0: AI Command -->
+      <rect x="280" y="20" width="440" height="80" rx="20" fill="url(#aiGrad)" filter="url(#softShadow)"/>
+      <text x="500" y="55" text-anchor="middle" fill="white" font-size="14" font-weight="600" letter-spacing="2">LAYER 0  ·  ALWAYS-ON</text>
+      <text x="500" y="80" text-anchor="middle" fill="white" font-size="22" font-weight="700">⊕ Ask Anything · AI Command</text>
+
+      <!-- Arrows down -->
+      <line x1="380" y1="100" x2="220" y2="160" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+      <line x1="500" y1="100" x2="500" y2="160" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+      <line x1="620" y1="100" x2="780" y2="160" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" marker-end="url(#arrow)"/>
+      <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><polygon points="0 0, 10 3, 0 6" fill="#8B5CF6"/></marker></defs>
+
+      <!-- Layer 1 -->
+      <text x="500" y="135" text-anchor="middle" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="2">LAYER 1 · 三個時空軸（取代 14 分頁）</text>
+
+      <!-- Today -->
+      <rect x="60" y="160" width="280" height="180" rx="18" fill="#FFFBEB" stroke="#FCD34D" stroke-width="1.5"/>
+      <text x="200" y="190" text-anchor="middle" font-size="14" font-weight="700" fill="#92400E">☀️  TODAY · 此刻</text>
+      <text x="200" y="212" text-anchor="middle" font-size="11" fill="#92400E" opacity="0.7">現在 / 今日相關</text>
+      <line x1="80" y1="225" x2="320" y2="225" stroke="#FCD34D" opacity="0.3"/>
+      <text x="80" y="248" font-size="12" fill="#374151">• 今日課表 + 教室導航</text>
+      <text x="80" y="268" font-size="12" fill="#374151">• 作業 / 截止倒數</text>
+      <text x="80" y="288" font-size="12" fill="#374151">• 未讀公告 / 訊息</text>
+      <text x="80" y="308" font-size="12" fill="#374151">• 公車 / 即時資訊</text>
+      <text x="80" y="328" font-size="12" fill="#374151">• AI 主動推送的事件</text>
+
+      <!-- Hub -->
+      <rect x="360" y="160" width="280" height="180" rx="18" fill="#EFF6FF" stroke="#93C5FD" stroke-width="1.5"/>
+      <text x="500" y="190" text-anchor="middle" font-size="14" font-weight="700" fill="#1E3A8A">🏛  HUB · 校園</text>
+      <text x="500" y="212" text-anchor="middle" font-size="11" fill="#1E3A8A" opacity="0.7">場域與資源</text>
+      <line x1="380" y1="225" x2="620" y2="225" stroke="#93C5FD" opacity="0.3"/>
+      <text x="380" y="248" font-size="12" fill="#374151">• 校園地圖 / AR 導航</text>
+      <text x="380" y="268" font-size="12" fill="#374151">• 餐廳 / 圖書館</text>
+      <text x="380" y="288" font-size="12" fill="#374151">• 課程目錄 / 開課查詢</text>
+      <text x="380" y="308" font-size="12" fill="#374151">• 社團 / 活動</text>
+      <text x="380" y="328" font-size="12" fill="#374151">• 場地預約</text>
+
+      <!-- Me -->
+      <rect x="660" y="160" width="280" height="180" rx="18" fill="#F0FDF4" stroke="#86EFAC" stroke-width="1.5"/>
+      <text x="800" y="190" text-anchor="middle" font-size="14" font-weight="700" fill="#14532D">👤  ME · 我的</text>
+      <text x="800" y="212" text-anchor="middle" font-size="11" fill="#14532D" opacity="0.7">我的歷程與身份</text>
+      <line x1="680" y1="225" x2="920" y2="225" stroke="#86EFAC" opacity="0.3"/>
+      <text x="680" y="248" font-size="12" fill="#374151">• 成績 / 學分試算</text>
+      <text x="680" y="268" font-size="12" fill="#374151">• 課表 / 選課歷程</text>
+      <text x="680" y="288" font-size="12" fill="#374151">• 個人檔案 / 設定</text>
+      <text x="680" y="308" font-size="12" fill="#374151">• 角色擴展（教師/管理）</text>
+      <text x="680" y="328" font-size="12" fill="#374151">• 隱私 / AI 資料控制</text>
+
+      <!-- Layer 2 -->
+      <text x="500" y="380" text-anchor="middle" fill="#6B7280" font-size="11" font-weight="600" letter-spacing="2">LAYER 2 · AI 拉出的卡 + 傳統索引（兩者並存）</text>
+
+      <rect x="60" y="400" width="420" height="110" rx="14" fill="#FAF5FF" stroke="#C4B5FD" stroke-width="1.5"/>
+      <text x="270" y="425" text-anchor="middle" font-size="13" font-weight="700" fill="#5B21B6">✨ Slot Card（AI 拉出）</text>
+      <text x="80" y="448" font-size="11" fill="#374151">• Answer / Action / Compare / Schedule</text>
+      <text x="80" y="466" font-size="11" fill="#374151">• 來源戳記 + 信心度標記</text>
+      <text x="80" y="484" font-size="11" fill="#374151">• 釘到 Today 變個人 Widget</text>
+      <text x="80" y="502" font-size="11" fill="#374151">• 點展開 → 變一頁 → 可回頭</text>
+
+      <rect x="520" y="400" width="420" height="110" rx="14" fill="#F9FAFB" stroke="#D1D5DB" stroke-width="1.5"/>
+      <text x="730" y="425" text-anchor="middle" font-size="13" font-weight="700" fill="#374151">📁 Catalog（傳統索引）</text>
+      <text x="540" y="448" font-size="11" fill="#374151">• 給「我已知路徑」的人作備援</text>
+      <text x="540" y="466" font-size="11" fill="#374151">• /me/transcript / /hub/dining ...</text>
+      <text x="540" y="484" font-size="11" fill="#374151">• 完整功能保留，不破壞既有 bookmark</text>
+      <text x="540" y="502" font-size="11" fill="#374151">• 過渡期：301 轉址</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ════════════════ Generative UI ════════════════ -->
+<section class="section" data-section="generative">
+  <div class="section-header">
+    <span class="section-eyebrow">PART 5 / 5</span>
+    <h1 class="section-title">Generative UI：對話即介面</h1>
+    <p class="section-sub">同一句話、不同情境下，AI 自動選用四種卡片之一。介面不再是「事先設計好的頁」，而是「即時組裝出來的回應」。</p>
+  </div>
+
+  <div class="gen-row">
+    <div class="gen-ask">
+      <div class="gen-ask-q">下節課在哪？</div>
+      <div class="gen-arrow">↓ AI 選擇 Answer Card</div>
+      <div class="slot-card ai-generated" style="margin-top:8px">
+        <div class="card-header">
+          <div class="card-icon ai">⏰</div>
+          <div class="card-title">下節課</div>
+        </div>
+        <div class="card-body">
+          <strong>資料結構</strong> · 09:10–10:50<br/>
+          📍 工程館 302（步行 4 分鐘）
+        </div>
+        <div class="card-footer">
+          <span class="source-stamp">📡 教務系統</span>
+          <span class="confidence high">✓ 高</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="gen-ask">
+      <div class="gen-ask-q">幫我請週四的假</div>
+      <div class="gen-arrow">↓ AI 選擇 Action Card（需二次確認）</div>
+      <div class="slot-card ai-generated" style="margin-top:8px">
+        <div class="card-header">
+          <div class="card-icon ai">📝</div>
+          <div class="card-title">請假草稿</div>
+          <span class="confidence mid">● 待確認</span>
+        </div>
+        <div class="card-body">
+          <strong>5/22</strong> 資料庫系統 · 病假
+        </div>
+        <div class="card-actions">
+          <button class="btn">取消</button>
+          <button class="btn primary">送出 →</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="gen-ask">
+      <div class="gen-ask-q">中午吃什麼便宜營養</div>
+      <div class="gen-arrow">↓ AI 選擇 Compare Card</div>
+      <div class="slot-card ai-generated" style="margin-top:8px">
+        <div class="card-header">
+          <div class="card-icon ai">🍱</div>
+          <div class="card-title">3 個建議</div>
+        </div>
+        <div class="compare-grid">
+          <div class="compare-opt"><div>學餐</div><div class="price">$65</div></div>
+          <div class="compare-opt" style="border-color:var(--ai)"><div style="color:var(--ai)">主餐 ★</div><div class="price">$95</div></div>
+          <div class="compare-opt"><div>7-11</div><div class="price">$45</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="gen-ask">
+      <div class="gen-ask-q">這週還要交什麼？</div>
+      <div class="gen-arrow">↓ AI 選擇 Schedule Card</div>
+      <div class="slot-card ai-generated" style="margin-top:8px">
+        <div class="card-header">
+          <div class="card-icon ai">📅</div>
+          <div class="card-title">本週 3 件</div>
+        </div>
+        <div class="sched-list">
+          <div class="sched-row"><span class="sched-time">週三</span><span class="sched-dot" style="background:var(--warning)"></span><span class="sched-text">Lab 3</span><span class="sched-tag warn">未開始</span></div>
+          <div class="sched-row"><span class="sched-time">週五</span><span class="sched-dot" style="background:var(--ai)"></span><span class="sched-text">期中報告</span><span class="sched-tag todo">60%</span></div>
+          <div class="sched-row"><span class="sched-time">週日</span><span class="sched-dot" style="background:var(--muted)"></span><span class="sched-text">英文週記</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-tip">
+    👆 點上方 Tab 切換不同端的設計 · 滑鼠移到卡片看 hover · 此原型僅展示視覺，功能未串接
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll('.proto-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      document.querySelectorAll('.proto-tab').forEach(t => t.classList.toggle('active', t === tab));
+      document.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.dataset.section === target));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+</script>
+
+</body>
+</html>

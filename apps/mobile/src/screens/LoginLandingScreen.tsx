@@ -43,7 +43,7 @@ interface DemoRolePreset {
   schoolId: string;
   department: string;
   studentId?: string;
-  emoji: string;
+  icon: keyof typeof Ionicons.glyphMap;
   description: string;
   color: string;
 }
@@ -57,9 +57,9 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     schoolId: 'pu',
     department: '資訊管理學系',
     studentId: '411211325',
-    emoji: '🎓',
-    description: '看作業、考試、AI 學伴、錯題本，體驗每日駕駛艙',
-    color: '#1F4E78',
+    icon: 'person-outline',
+    description: 'AI 先排今日任務、風險提醒、作業與學伴行動',
+    color: '#2F7D6C',
   },
   {
     role: 'teacher',
@@ -68,9 +68,9 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     displayName: '張怡君（demo 老師）',
     schoolId: 'pu',
     department: '資訊管理學系',
-    emoji: '👨‍🏫',
-    description: '批改、AI 起草評語、bulk 提醒、學生紅旗',
-    color: '#0EA5E9',
+    icon: 'school-outline',
+    description: 'AI 預判缺交、起草評語、整理待批與提醒',
+    color: '#3567C8',
   },
   {
     role: 'staff',
@@ -79,9 +79,9 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     displayName: '林助教（demo TA）',
     schoolId: 'pu',
     department: '資訊管理學系',
-    emoji: '🧑‍💼',
-    description: '協助批改、輔導學生、查看出席異常',
-    color: '#7C3AED',
+    icon: 'people-outline',
+    description: 'AI 彙整求助、討論與批改優先順序',
+    color: '#7B4DB8',
   },
   {
     role: 'admin',
@@ -90,9 +90,9 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     displayName: '黃主任（demo 系所）',
     schoolId: 'pu',
     department: '資訊管理學系',
-    emoji: '🏛',
-    description: '系所儀表板、學生 risk、課程平均、教學評鑑',
-    color: '#16A34A',
+    icon: 'business-outline',
+    description: 'AI 看全系健康度、風險課程與跨角色動態',
+    color: '#C79532',
   },
   {
     role: 'staff',
@@ -101,9 +101,9 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     displayName: '阿英（demo 餐廳）',
     schoolId: 'pu',
     department: '校園服務',
-    emoji: '🍱',
-    description: '菜單管理、訂單接收、Loyalty 推播',
-    color: '#F59E0B',
+    icon: 'restaurant-outline',
+    description: 'AI 提醒訂單佇列、熱門品項與下一步營運',
+    color: '#C95F28',
   },
 ];
 
@@ -179,17 +179,17 @@ export default function LoginLandingScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Hero：品牌漸層 + 層級 */}
+        {/* Hero：AI-first 入口 */}
         <LinearGradient
           colors={
             theme.mode === 'dark'
-              ? ([theme.colors.surfaceElevated, theme.colors.surfaceMuted] as const)
-              : ([theme.colors.accentSoft, theme.colors.surfaceMuted] as const)
+              ? ([theme.colors.surfaceElevated, theme.colors.surface] as const)
+              : ([theme.colors.surface, theme.colors.surfaceMuted] as const)
           }
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={{
-            borderRadius: theme.radius.xl,
+            borderRadius: theme.radius.lg,
             padding: theme.layout.cardPadding,
             marginBottom: theme.space.lg,
             borderWidth: 1,
@@ -198,7 +198,31 @@ export default function LoginLandingScreen() {
           }}
         >
           <View style={{ alignItems: 'center' }}>
-            <Text style={{ fontSize: 56, marginBottom: theme.space.xs }}>🎓</Text>
+            <View
+              style={{
+                width: 64,
+                height: 64,
+                borderRadius: 20,
+                backgroundColor: theme.colors.accentSoft,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: theme.space.md,
+              }}
+            >
+              <Ionicons name="sparkles-outline" size={30} color={theme.colors.accent} />
+            </View>
+            <Text
+              style={{
+                color: theme.colors.accent,
+                fontSize: theme.typography.overline.fontSize,
+                lineHeight: theme.typography.overline.lineHeight,
+                letterSpacing: theme.typography.overline.letterSpacing,
+                fontWeight: theme.typography.overline.fontWeight ?? '700',
+                marginBottom: theme.space.xs,
+              }}
+            >
+              CAMPUS AI CORE
+            </Text>
             <Text
               style={{
                 fontSize: theme.typography.display.fontSize,
@@ -209,7 +233,7 @@ export default function LoginLandingScreen() {
                 textAlign: 'center',
               }}
             >
-              Campus Companion
+              AI 校園工作台
             </Text>
             <Text
               style={{
@@ -220,8 +244,8 @@ export default function LoginLandingScreen() {
                 textAlign: 'center',
               }}
             >
-              以 AI 為核心的校園學習平台{'\n'}
-              超越 TronClass 的智慧助手
+              登入後先看到 AI 幫你整理的下一步，{'\n'}
+              再進入學習、校園、訊息與跨角色協作。
             </Text>
           </View>
         </LinearGradient>
@@ -244,7 +268,7 @@ export default function LoginLandingScreen() {
             marginBottom: theme.space.lg,
           }}
         >
-          用學號／教師帳號連到正式系統
+          用學號／教師帳號連到正式系統，直接進入 AI Today。
         </Text>
 
         <View
@@ -265,7 +289,7 @@ export default function LoginLandingScreen() {
               textTransform: 'uppercase',
             }}
           >
-            或 demo 體驗
+            demo 角色
           </Text>
           <View style={{ flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: theme.colors.separator }} />
         </View>
@@ -285,7 +309,7 @@ export default function LoginLandingScreen() {
                   alignItems: 'center',
                   gap: theme.space.sm,
                   padding: theme.space.md,
-                  borderRadius: theme.radius.lg,
+                  borderRadius: theme.radius.md,
                   backgroundColor: theme.colors.surface,
                   borderWidth: 1,
                   borderColor: theme.colors.border,
@@ -299,13 +323,13 @@ export default function LoginLandingScreen() {
                   style={{
                     width: 52,
                     height: 52,
-                    borderRadius: theme.radius.lg,
+                    borderRadius: theme.radius.md,
                     backgroundColor: preset.color + '18',
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
-                  <Text style={{ fontSize: 30 }}>{preset.emoji}</Text>
+                  <Ionicons name={preset.icon} size={24} color={preset.color} />
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text
@@ -345,24 +369,32 @@ export default function LoginLandingScreen() {
           style={{
             marginTop: theme.space.lg,
             padding: theme.space.md,
-            borderRadius: theme.radius.lg,
+            borderRadius: theme.radius.md,
             backgroundColor: theme.colors.surface,
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: theme.colors.border,
           }}
         >
-          <Text
+          <View
             style={{
-              fontSize: theme.typography.labelSmall.fontSize,
-              fontWeight: '700',
-              color: theme.colors.muted,
-              textTransform: 'uppercase',
-              letterSpacing: 0.6,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: theme.space.xs,
               marginBottom: theme.space.xs,
             }}
           >
-            🎬 7 分鐘 demo 導覽腳本
-          </Text>
+            <Ionicons name="play-circle-outline" size={15} color={theme.colors.muted} />
+            <Text
+              style={{
+                fontSize: theme.typography.labelSmall.fontSize,
+                fontWeight: '700',
+                color: theme.colors.muted,
+                letterSpacing: 0,
+              }}
+            >
+              7 分鐘 demo 導覽腳本
+            </Text>
+          </View>
           {[
             { sec: '0:30', step: '張怡君老師 → 批量提醒 → AI 預測補交率 → 起草評語' },
             { sec: '2:00', step: '切到顧晉瑋學生 → 收到老師的提醒與評語 inbox' },

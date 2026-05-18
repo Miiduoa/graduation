@@ -292,7 +292,7 @@ export default function TADashboardScreen() {
       >
         <CockpitHero
           eyebrow={`午安，${auth.profile?.displayName?.split('（')[0] ?? '助教'}`}
-          title="今日協助任務"
+          title="AI 協助中樞"
           summary={`🤖 ${aiAdvice.headline} · ${aiAdvice.suggestion}`}
         />
 

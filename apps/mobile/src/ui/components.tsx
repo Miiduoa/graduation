@@ -93,11 +93,14 @@ export function Screen(props: {
         <View
           style={{
             flexDirection: 'row',
-            alignItems: 'flex-end',
+            alignItems: 'center',
             justifyContent: 'space-between',
             paddingHorizontal: theme.layout.screenHorizontalPadding,
-            paddingTop: Math.max(insets.top, 8) + theme.space.sm,
-            paddingBottom: theme.space.lg,
+            paddingTop: Math.max(insets.top, 8) + theme.space.md,
+            paddingBottom: theme.space.md,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.colors.separator,
+            backgroundColor: theme.colors.bg,
           }}
         >
           <View style={{ flex: 1 }}>
@@ -118,7 +121,7 @@ export function Screen(props: {
                 style={{
                   fontSize: theme.typography.bodySmall.fontSize,
                   color: theme.colors.textSecondary,
-                  marginTop: theme.space.sm,
+                  marginTop: theme.space.xs,
                 }}
               >
                 {props.subtitle}
@@ -203,15 +206,15 @@ export function Card(props: {
     (props.title && props.subtitle ? `${props.title}, ${props.subtitle}` : props.title);
 
   const content = (
-    <View style={{ borderRadius: theme.radius.xl, ...style.shell }}>
+    <View style={{ borderRadius: theme.radius.lg, ...style.shell }}>
       <View
         accessible={!!props.title}
         accessibilityRole={props.title ? 'header' : undefined}
         accessibilityLabel={accessibilityLabel}
         style={{
           padding: theme.layout.cardPadding,
-          borderRadius: theme.radius.xl,
-          gap: theme.space.md,
+          borderRadius: theme.radius.lg,
+          gap: theme.space.sm,
           overflow: 'hidden',
           ...style.surface,
         }}
@@ -326,7 +329,7 @@ export function Pill(props: {
           gap: theme.space.xs,
           paddingHorizontal: sStyle.px + 2,
           paddingVertical: sStyle.py + 1,
-          borderRadius: theme.radius.full,
+          borderRadius: theme.radius.sm,
           backgroundColor: kStyle.bg,
         },
         props.style,
@@ -403,19 +406,19 @@ export function Button(props: {
       paddingVertical: theme.space.xs,
       paddingHorizontal: theme.space.md,
       fontSize: 13,
-      radius: theme.radius.md,
+      radius: theme.radius.sm,
     },
     default: {
       paddingVertical: theme.space.sm,
       paddingHorizontal: theme.space.lg,
       fontSize: 15,
-      radius: theme.radius.lg,
+      radius: theme.radius.md,
     },
     large: {
       paddingVertical: theme.space.md,
       paddingHorizontal: theme.space.xl,
       fontSize: 16,
-      radius: theme.radius.xl,
+      radius: theme.radius.lg,
     },
   };
 
@@ -466,7 +469,7 @@ export function Button(props: {
           color: disabled ? theme.colors.disabledText : textColors[kind],
           fontWeight: '600',
           fontSize: s.fontSize,
-          letterSpacing: -0.1,
+          letterSpacing: 0,
         }}
       >
         {props.loading ? '處理中...' : props.text}
@@ -575,7 +578,7 @@ export function EmptyState(props: {
           fontSize: 18,
           fontWeight: '700',
           textAlign: 'center',
-          letterSpacing: -0.3,
+          letterSpacing: 0,
         }}
       >
         {props.title ?? '目前沒有資料'}
@@ -713,7 +716,7 @@ export function ErrorState(props: {
                 fontSize: 16,
                 fontWeight: '700',
                 color: theme.colors.text,
-                letterSpacing: -0.2,
+                letterSpacing: 0,
               }}
             >
               {title}
@@ -763,7 +766,7 @@ export function SectionTitle(props: { text: string }) {
         color: theme.colors.text,
         fontWeight: '700',
         fontSize: theme.typography.label.fontSize,
-        letterSpacing: -0.1,
+        letterSpacing: 0,
         textTransform: 'uppercase',
       }}
     >
@@ -904,7 +907,7 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
                 color: theme.colors.accent,
                 fontWeight: '800',
                 fontSize: 22,
-                letterSpacing: -0.5,
+                letterSpacing: 0,
               }}
             >
               {String(unit.value).padStart(2, '0')}
@@ -1112,7 +1115,7 @@ export function AnimatedCard(props: {
     >
       {props.title ? (
         <Text
-          style={{ fontSize: 17, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.2 }}
+          style={{ fontSize: 17, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
         >
           {props.title}
         </Text>
@@ -1179,7 +1182,7 @@ export function QuickAction(props: {
           fontWeight: '600',
           color: theme.colors.text,
           textAlign: 'center',
-          letterSpacing: 0.1,
+          letterSpacing: 0,
         }}
       >
         {props.label}
@@ -1305,7 +1308,7 @@ export function FeatureHighlight(props: {
         <Ionicons name={props.icon as any} size={20} color={color} />
       </View>
       <Text
-        style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text, letterSpacing: -0.2 }}
+        style={{ fontSize: 15, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
       >
         {props.title}
       </Text>
@@ -1601,12 +1604,12 @@ export function StatCard(props: {
       </View>
       <View style={{ gap: theme.space.xxs }}>
         <Text
-          style={{ fontSize: 12, color: theme.colors.muted, fontWeight: '500', letterSpacing: 0.2 }}
+          style={{ fontSize: 12, color: theme.colors.muted, fontWeight: '500', letterSpacing: 0 }}
         >
           {props.label}
         </Text>
         <Text
-          style={{ fontSize: 24, fontWeight: '800', color: theme.colors.text, letterSpacing: -0.6 }}
+          style={{ fontSize: 24, fontWeight: '800', color: theme.colors.text, letterSpacing: 0 }}
         >
           {valueStr}
         </Text>
@@ -1798,7 +1801,7 @@ export function ListItem(props: {
         </View>
       )}
       <View style={{ flex: 1 }}>
-        <Text style={{ color: textColor, fontWeight: '500', fontSize: 15, letterSpacing: -0.1 }}>
+        <Text style={{ color: textColor, fontWeight: '500', fontSize: 15, letterSpacing: 0 }}>
           {props.title}
         </Text>
         {props.subtitle && (

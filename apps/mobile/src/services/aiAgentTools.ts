@@ -13,6 +13,10 @@
  */
 
 import { getDataSource, hasDataSource, type DataSource } from '../data/source';
+// LMS v2: 改 import 自 supabaseLmsCache facade。
+// flag OFF 時:facade 自動委派回 puDataCache (TronClass),行為與舊版完全相同。
+// flag ON  時:同樣的函數會自動改打 Supabase,AI 立即拿到新 LMS 資料。
+// 介面 100% 對齊,所有原本 import 語法都不用改。
 import {
   getAnyCachedCourses as getCachedCourses,
   getAnyCachedGrades as getCachedGrades,
@@ -32,7 +36,7 @@ import {
   getAnyCachedTCCourseMembers as getCachedTCCourseMembers,
   getAnyCachedTCCourseAnnouncements as getCachedTCCourseAnnouncements,
   syncAllData,
-} from './puDataCache';
+} from './supabaseLmsCache';
 import type { CampusActorRole } from '../data';
 import {
   getPuDiningMenuItems,

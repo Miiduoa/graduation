@@ -24,7 +24,7 @@ import {
   getAnyCachedTCActivities,
   getAnyCachedTCAttendance,
   getAnyCachedTCTodos,
-} from './puDataCache';
+} from './supabaseLmsCache'; // LMS v2 facade — flag OFF 時自動委派回 puDataCache
 
 // ─── Types ───────────────────────────────────────────────
 

@@ -14,6 +14,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { theme } from './theme';
+import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
 
 // ─────────────────────────────────────────────────────────
 // Hero — 大字 + 細 eyebrow + 摘要
@@ -25,28 +26,86 @@ export function CockpitHero(props: {
   summary?: string;
 }) {
   return (
-    <View style={{ marginBottom: theme.space.xl }}>
-      <Text
+    <View style={{ marginBottom: theme.space.lg }}>
+      <View
         style={{
-          fontSize: theme.typography.labelSmall.fontSize,
-          lineHeight: theme.typography.labelSmall.lineHeight,
-          fontWeight: '500',
-          letterSpacing: 0.4,
-          color: theme.colors.muted,
-          textTransform: 'uppercase',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.space.sm,
+          marginBottom: theme.space.md,
         }}
       >
-        {props.eyebrow}
-      </Text>
+        <HeaderAvatarButton size={42} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            style={{
+              fontSize: theme.typography.labelSmall.fontSize,
+              lineHeight: theme.typography.labelSmall.lineHeight,
+              fontWeight: '700',
+              letterSpacing: theme.typography.labelSmall.letterSpacing,
+              color: theme.colors.muted,
+            }}
+            numberOfLines={1}
+          >
+            {props.eyebrow}
+          </Text>
+          <Text
+            style={{
+              color: theme.colors.text,
+              fontSize: theme.typography.bodySmall.fontSize,
+              lineHeight: theme.typography.bodySmall.lineHeight,
+              marginTop: 1,
+            }}
+            numberOfLines={1}
+          >
+            AI-first 工作台
+          </Text>
+        </View>
+        <View
+          style={{
+            width: 38,
+            height: 38,
+            borderRadius: theme.radius.md,
+            backgroundColor: theme.colors.accentSoft,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Ionicons name="sparkles-outline" size={18} color={theme.colors.accent} />
+        </View>
+      </View>
+      <View
+        style={{
+          padding: theme.space.lg,
+          borderRadius: theme.radius.lg,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderLeftWidth: 4,
+          borderLeftColor: theme.colors.accent,
+        }}
+      >
+        <Text
+          style={{
+            color: theme.colors.accent,
+            fontSize: theme.typography.overline.fontSize,
+            lineHeight: theme.typography.overline.lineHeight,
+            fontWeight: theme.typography.overline.fontWeight ?? '700',
+            letterSpacing: theme.typography.overline.letterSpacing,
+          }}
+        >
+          AI 下一步
+        </Text>
       <Text
         style={{
           fontSize: theme.typography.hero?.fontSize ?? theme.typography.display.fontSize,
           lineHeight: theme.typography.hero?.lineHeight ?? theme.typography.display.lineHeight,
           letterSpacing: theme.typography.hero?.letterSpacing ?? theme.typography.display.letterSpacing,
-          fontWeight: '700',
+          fontWeight: '800',
           color: theme.colors.text,
-          marginTop: theme.space.xs + 2,
+          marginTop: theme.space.xs,
         }}
+        numberOfLines={3}
       >
         {props.title}
       </Text>
@@ -58,10 +117,12 @@ export function CockpitHero(props: {
             color: theme.colors.textSecondary,
             marginTop: theme.space.sm + 2,
           }}
+          numberOfLines={4}
         >
           {props.summary}
         </Text>
       ) : null}
+      </View>
     </View>
   );
 }
@@ -75,7 +136,8 @@ export function CockpitMetricRow(props: { children: React.ReactNode }) {
     <View
       style={{
         flexDirection: 'row',
-        gap: theme.space.xs + 2,
+        flexWrap: 'wrap',
+        gap: theme.space.sm,
         marginBottom: theme.space.lg,
       }}
     >
@@ -98,13 +160,15 @@ export function CockpitMetricChip(props: {
     <View
       style={{
         flex: 1,
-        paddingVertical: theme.space.md - 2,
-        paddingHorizontal: theme.space.sm,
+        minWidth: 132,
+        minHeight: 82,
+        paddingVertical: theme.space.md,
+        paddingHorizontal: theme.space.md,
         borderRadius: theme.radius.md,
         backgroundColor: theme.colors.surface,
-        alignItems: 'center',
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.colors.border,
+        justifyContent: 'space-between',
       }}
     >
       <Text
@@ -115,6 +179,7 @@ export function CockpitMetricChip(props: {
           fontWeight: '700',
           color: tint,
         }}
+        numberOfLines={1}
       >
         {props.value}
       </Text>
@@ -124,8 +189,9 @@ export function CockpitMetricChip(props: {
           lineHeight: theme.typography.labelSmall.lineHeight,
           color: theme.colors.muted,
           marginTop: 4,
-          letterSpacing: 0.2,
+          letterSpacing: 0,
         }}
+        numberOfLines={1}
       >
         {props.label}
       </Text>
@@ -147,8 +213,12 @@ export function CockpitSection(props: {
   return (
     <View
       style={{
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: theme.colors.separator,
+        marginBottom: theme.space.sm,
+        borderRadius: theme.radius.lg,
+        backgroundColor: theme.colors.surface,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
+        overflow: 'hidden',
       }}
     >
       <Pressable
@@ -157,7 +227,8 @@ export function CockpitSection(props: {
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
-          paddingVertical: theme.space.md - 2,
+          paddingVertical: theme.space.md,
+          paddingHorizontal: theme.space.md,
           opacity: pressed ? 0.55 : 1,
         })}
       >
@@ -167,8 +238,9 @@ export function CockpitSection(props: {
             lineHeight: theme.typography.h3.lineHeight,
             fontWeight: '600',
             color: theme.colors.text,
-            letterSpacing: -0.1,
+            letterSpacing: 0,
           }}
+          numberOfLines={1}
         >
           {props.label}
         </Text>
@@ -178,8 +250,8 @@ export function CockpitSection(props: {
               style={{
                 paddingHorizontal: theme.space.xs + 2,
                 paddingVertical: 2,
-                borderRadius: theme.radius.full,
-                backgroundColor: theme.colors.surface,
+                borderRadius: theme.radius.sm,
+                backgroundColor: theme.colors.surfaceMuted,
                 minWidth: 22,
                 alignItems: 'center',
               }}
@@ -202,7 +274,18 @@ export function CockpitSection(props: {
           />
         </View>
       </Pressable>
-      {props.open && <View style={{ paddingBottom: theme.space.sm }}>{props.children}</View>}
+      {props.open && (
+        <View
+          style={{
+            paddingHorizontal: theme.space.md,
+            paddingBottom: theme.space.sm,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: theme.colors.separator,
+          }}
+        >
+          {props.children}
+        </View>
+      )}
     </View>
   );
 }
@@ -229,7 +312,8 @@ export function CockpitRow(props: {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: theme.space.sm + 2,
+        minHeight: 58,
+        paddingVertical: theme.space.sm,
         gap: theme.space.sm,
       }}
     >
@@ -239,7 +323,7 @@ export function CockpitRow(props: {
             width: 32,
             height: 32,
             borderRadius: theme.radius.sm,
-            backgroundColor: theme.colors.surface,
+            backgroundColor: theme.colors.surfaceMuted,
             alignItems: 'center',
             justifyContent: 'center',
             borderWidth: StyleSheet.hairlineWidth,
@@ -256,9 +340,9 @@ export function CockpitRow(props: {
             lineHeight: theme.typography.body.lineHeight,
             color: theme.colors.text,
             fontWeight: '500',
-            letterSpacing: -0.1,
+            letterSpacing: 0,
           }}
-          numberOfLines={1}
+          numberOfLines={2}
         >
           {props.title}
         </Text>
@@ -270,7 +354,7 @@ export function CockpitRow(props: {
               color: subtitleTint,
               marginTop: 2,
             }}
-            numberOfLines={1}
+            numberOfLines={2}
           >
             {props.subtitle}
           </Text>
@@ -316,7 +400,7 @@ export function CockpitToolChip(props: {
         gap: 6,
         paddingVertical: theme.space.xs + 6,
         paddingHorizontal: theme.space.sm + 4,
-        borderRadius: theme.radius.full,
+        borderRadius: theme.radius.md,
         backgroundColor: theme.colors.surface,
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.colors.border,
@@ -329,8 +413,8 @@ export function CockpitToolChip(props: {
         style={{
           color: theme.colors.text,
           fontSize: theme.typography.bodySmall.fontSize,
-          fontWeight: '500',
-          letterSpacing: 0.1,
+          fontWeight: '600',
+          letterSpacing: 0,
         }}
       >
         {props.label}
@@ -358,7 +442,7 @@ export function CockpitAccentCard(props: {
       style={({ pressed }) => ({
         padding: theme.space.lg,
         borderRadius: theme.radius.lg,
-        backgroundColor: theme.colors.text,
+        backgroundColor: theme.mode === 'dark' ? theme.colors.surfaceElevated : theme.colors.accent,
         opacity: pressed ? 0.88 : 1,
         transform: [{ scale: pressed ? 0.99 : 1 }],
         marginBottom: theme.space.lg,
@@ -367,11 +451,11 @@ export function CockpitAccentCard(props: {
       {props.eyebrow ? (
         <Text
           style={{
-            color: theme.colors.bg,
+            color: theme.colors.onAccent,
             opacity: 0.55,
             fontSize: theme.typography.labelSmall.fontSize,
             fontWeight: '500',
-            letterSpacing: 0.3,
+            letterSpacing: 0,
             textTransform: 'uppercase',
           }}
         >
@@ -380,12 +464,12 @@ export function CockpitAccentCard(props: {
       ) : null}
       <Text
         style={{
-          color: theme.colors.bg,
+          color: theme.colors.onAccent,
           fontSize: theme.typography.h2.fontSize,
           lineHeight: theme.typography.h2.lineHeight,
           fontWeight: '700',
           marginTop: theme.space.xs + 2,
-          letterSpacing: -0.2,
+          letterSpacing: 0,
         }}
         numberOfLines={2}
       >
@@ -402,7 +486,7 @@ export function CockpitAccentCard(props: {
         {props.meta ? (
           <Text
             style={{
-              color: theme.colors.bg,
+          color: theme.colors.onAccent,
               opacity: 0.55,
               fontSize: theme.typography.bodySmall.fontSize,
             }}
@@ -419,16 +503,16 @@ export function CockpitAccentCard(props: {
               paddingHorizontal: theme.space.sm + 4,
               paddingVertical: theme.space.xs + 4,
               borderRadius: theme.radius.full,
-              backgroundColor: theme.colors.bg,
+              backgroundColor: theme.mode === 'dark' ? theme.colors.accent : theme.colors.surface,
             }}
           >
-            {props.ctaIcon && <Ionicons name={props.ctaIcon} size={12} color={theme.colors.text} />}
+            {props.ctaIcon && <Ionicons name={props.ctaIcon} size={12} color={theme.colors.accent} />}
             <Text
               style={{
-                color: theme.colors.text,
+                color: theme.colors.accent,
                 fontSize: theme.typography.bodySmall.fontSize,
                 fontWeight: '700',
-                letterSpacing: 0.1,
+                letterSpacing: 0,
               }}
             >
               {props.ctaLabel}

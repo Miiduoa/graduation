@@ -429,7 +429,7 @@ export default function MessagesPage(props: {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {selected.relatedCourseId && getDemoCourseById(selected.relatedCourseId) && (
                     <Link
-                      href={`/course/${selected.relatedCourseId}${q}`}
+                      href={`${(demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'admin' || demoRole === 'department_head') ? '/teacher' : ''}/course/${selected.relatedCourseId}${q}`}
                       className="btn primary"
                       style={{ fontSize: 13 }}
                     >

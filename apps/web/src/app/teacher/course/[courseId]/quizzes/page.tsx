@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { useToast, Modal } from '@/components/ui';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
 
 type QuizRow = {
   id: string;
@@ -26,10 +27,12 @@ const MOCK: QuizRow[] = [
   { id: 'q2', title: '期中考', type: 'exam', dueAt: '2026-06-10', submitted: 0, total: 42, gradesPublished: false },
 ];
 
-export default function TeacherQuizzesPage({ params }: { params: { courseId: string } }) {
+export default function TeacherQuizzesPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const isTaView = demoRole === 'ta';
+  const isReadOnlyView = isTaView || demoRole === 'department_head';
   const { success, info } = useToast();
   const [rows, setRows] = useState<QuizRow[]>(MOCK);
   const [showNewQuizModal, setShowNewQuizModal] = useState(false);
@@ -55,7 +58,7 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
   };
 
   return (
-    <SiteShell>
+    <SiteShell title="測驗管理" schoolName={schoolName}>
       <main style={{ maxWidth: 960, margin: '0 auto', padding: 24 }}>
         {!caps.canViewTeacherDashboard ? (
           <div className="card" style={{ padding: '24px 20px', textAlign: 'center', background: 'var(--danger-soft)', borderColor: 'var(--danger)' }}>
@@ -64,33 +67,33 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.7 }}>
               請從右上角「身份膠囊」切換為 🧑‍🏫 教師 或 🧑‍💻 助教 角色後再進入。
             </div>
-            <Link href="/" className="btn">← 回首頁</Link>
+            <Link href={`/${q}`} className="btn">← 回首頁</Link>
           </div>
         ) : <>
-        <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
-          <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
+        <nav style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 12 }}>
+          <Link href={`/teacher/course/${params.courseId}${q}`}>← 回課程總覽</Link>
         </nav>
         <h1 style={{ fontSize: 28, fontWeight: 700 }}>
-          測驗 / 考試管理{isTaView ? '（檢視）' : ''}
+          測驗 / 考試管理{isReadOnlyView ? '（檢視）' : ''}
         </h1>
-        <p style={{ color: '#6b7280', marginBottom: isTaView ? 12 : 24 }}>
+        <p style={{ color: 'var(--muted)', marginBottom: isReadOnlyView ? 12 : 24 }}>
           設計題目、設定截止、發布成績。送出後 mobile 端 QuizTakingScreen 即可作答。
         </p>
 
-        {/* TA 提示 */}
-        {isTaView && (
+        {/* TA / 系主任 唯讀提示 */}
+        {isReadOnlyView && (
           <div
             style={{
-              padding: '10px 14px',
-              borderRadius: 8,
-              background: 'rgba(124,58,237,0.10)',
-              border: '1px solid #7C3AED',
-              fontSize: 13,
-              color: '#5B21B6',
-              marginBottom: 20,
+              padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 20,
+              background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
+              border: `1px solid ${isTaView ? '#7C3AED' : '#FF9500'}`,
+              color: isTaView ? '#5B21B6' : '#92400E',
             }}
           >
-            🧑‍💻 <strong>助教 TA 視角</strong>：可查看作答情況，但<strong>無法新增測驗或發布成績</strong>（授課教師專用）。
+            {isTaView
+              ? <><span>🧑‍💻 </span><strong>助教 TA 視角</strong>：可查看作答情況，但<strong>無法新增測驗或發布成績</strong>（授課教師專用）。</>
+              : <><span>🏛️ </span><strong>系主任視角</strong>：可唯讀瀏覽測驗管理，但<strong>無法新增測驗或發布成績</strong>（授課教師專用）。</>
+            }
           </div>
         )}
 
@@ -101,7 +104,7 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
           <button
             disabled
             title="新增測驗為授課教師專用"
-            style={{ ...primaryBtn, background: '#e5e7eb', color: '#9ca3af', cursor: 'not-allowed' }}
+            style={{ ...primaryBtn, background: 'var(--border)', color: 'var(--muted-light)', cursor: 'not-allowed' }}
           >
             🔒 新增測驗（教師專用）
           </button>
@@ -109,7 +112,7 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
 
         <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 16 }}>
           <thead>
-            <tr style={{ background: '#f3f4f6', textAlign: 'left' }}>
+            <tr style={{ background: 'var(--panel)', textAlign: 'left' }}>
               <th style={th}>標題</th>
               <th style={th}>類型</th>
               <th style={th}>截止</th>
@@ -119,34 +122,34 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
             </tr>
           </thead>
           <tbody>
-            {rows.map((q) => (
-              <tr key={q.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                <td style={td}>{q.title}</td>
-                <td style={td}>{q.type === 'quiz' ? '小考' : '考試'}</td>
-                <td style={td}>{q.dueAt ?? '—'}</td>
+            {rows.map((qr) => (
+              <tr key={qr.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={td}>{qr.title}</td>
+                <td style={td}>{qr.type === 'quiz' ? '小考' : '考試'}</td>
+                <td style={td}>{qr.dueAt ?? '—'}</td>
                 <td style={td}>
-                  {q.submitted} / {q.total}
+                  {qr.submitted} / {qr.total}
                 </td>
-                <td style={td}>{q.gradesPublished ? '🟢 已發布' : '⚪ 待發布'}</td>
+                <td style={td}>{qr.gradesPublished ? '🟢 已發布' : '⚪ 待發布'}</td>
                 <td style={td}>
-                  {/* 編輯題目：TA 不可用 */}
+                  {/* 編輯題目：TA / 系主任 不可用 */}
                   {caps.canEditModules ? (
                     <Link
-                      href={`/teacher/course/${params.courseId}/question-banks`}
+                      href={`/teacher/course/${params.courseId}/question-banks${q}`}
                       style={{ ...linkBtn, display: 'inline' }}
                     >
                       編輯題目
                     </Link>
                   ) : null}
-                  <button style={linkBtn} onClick={() => setViewingAnswerOf(q)}>看答案</button>
-                  {/* 發布成績：TA 不可用 */}
-                  {!q.gradesPublished && caps.canPublishGrades && (
-                    <button style={linkBtn} onClick={() => publish(q.id)}>
+                  <button style={linkBtn} onClick={() => setViewingAnswerOf(qr)}>看答案</button>
+                  {/* 發布成績：TA / 系主任 不可用 */}
+                  {!qr.gradesPublished && caps.canPublishGrades && (
+                    <button style={linkBtn} onClick={() => publish(qr.id)}>
                       發布成績
                     </button>
                   )}
-                  {!q.gradesPublished && !caps.canPublishGrades && (
-                    <span style={{ fontSize: 12, color: '#9ca3af' }}>🔒 教師發布</span>
+                  {!qr.gradesPublished && !caps.canPublishGrades && (
+                    <span style={{ fontSize: 12, color: 'var(--muted-light)' }}>🔒 教師發布</span>
                   )}
                 </td>
               </tr>
@@ -171,12 +174,12 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
         >
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#5E6AD2', marginBottom: 3 }}>🤖 AI 出題助理</div>
-            <div style={{ fontSize: 13, color: '#374151' }}>
+            <div style={{ fontSize: 13, color: 'var(--text)' }}>
               讓 AI 根據課程大綱生成選擇題、是非題或程式題，並附上答案與解析。
             </div>
           </div>
           <a
-            href={`/ai-assistant?q=${encodeURIComponent('幫我為資料結構第 5 週「樹與二元搜尋樹」生成 5 道選擇題，包含答案與詳細解析，難度中等')}`}
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我為資料結構第 5 週「樹與二元搜尋樹」生成 5 道選擇題，包含答案與詳細解析，難度中等')}`}
             className="btn"
             style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
           >
@@ -233,7 +236,7 @@ export default function TeacherQuizzesPage({ params }: { params: { courseId: str
             />
           </label>
           <div style={{ background: 'var(--accent-soft)', padding: 10, borderRadius: 8, fontSize: 12, color: 'var(--brand)' }}>
-            💡 也可以讓 <Link href={`/ai-assistant?q=${encodeURIComponent(`幫我為${newQuiz.title || '本週'}生成 5 道題目`)}`}>AI 起草題目</Link> 後再回到此處設定。
+            💡 也可以讓 <Link href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`幫我為${newQuiz.title || '本週'}生成 5 道題目`)}`}>AI 起草題目</Link> 後再回到此處設定。
           </div>
         </div>
       </Modal>

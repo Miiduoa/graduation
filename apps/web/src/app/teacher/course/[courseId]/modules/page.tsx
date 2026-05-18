@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { Modal, useToast } from '@/components/ui';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
 
 type ModuleRow = {
   id: string;
@@ -59,10 +60,12 @@ const MOCK: ModuleRow[] = [
   },
 ];
 
-export default function TeacherModulesPage({ params }: { params: { courseId: string } }) {
+export default function TeacherModulesPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const isTaView = demoRole === 'ta';
+  const isReadOnlyView = isTaView || demoRole === 'department_head';
   const { success, info } = useToast();
   const [rows, setRows] = useState<ModuleRow[]>(MOCK);
 
@@ -153,7 +156,7 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
   const addMaterialRow = rows.find((m) => m.id === addMaterialFor);
 
   return (
-    <SiteShell>
+    <SiteShell title="教材單元" schoolName={schoolName}>
       <main style={{ maxWidth: 960, margin: '0 auto', padding: 24 }}>
         {!caps.canViewTeacherDashboard ? (
           <div className="card" style={{ padding: '24px 20px', textAlign: 'center', background: 'var(--danger-soft)', borderColor: 'var(--danger)' }}>
@@ -162,33 +165,33 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.7 }}>
               請從右上角「身份膠囊」切換為 🧑‍🏫 教師 或 🧑‍💻 助教 角色後再進入。
             </div>
-            <Link href="/" className="btn">← 回首頁</Link>
+            <Link href={`/${q}`} className="btn">← 回首頁</Link>
           </div>
         ) : <>
-        <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
-          <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
+        <nav style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 12 }}>
+          <Link href={`/teacher/course/${params.courseId}${q}`}>← 回課程總覽</Link>
         </nav>
         <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
-          教材單元管理{isTaView ? '（檢視）' : ''}
+          教材單元管理{isReadOnlyView ? '（檢視）' : ''}
         </h1>
-        <p style={{ color: '#6b7280', marginBottom: isTaView ? 12 : 24 }}>
+        <p style={{ color: 'var(--muted)', marginBottom: isReadOnlyView ? 12 : 24 }}>
           管理本課程的週次與教材；勾選後學生才看得到。
         </p>
 
-        {/* TA 提示 */}
-        {isTaView && (
+        {/* TA / 系主任 唯讀提示 */}
+        {isReadOnlyView && (
           <div
             style={{
-              padding: '10px 14px',
-              borderRadius: 8,
-              background: 'rgba(124,58,237,0.10)',
-              border: '1px solid #7C3AED',
-              fontSize: 13,
-              color: '#5B21B6',
-              marginBottom: 20,
+              padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 20,
+              background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
+              border: `1px solid ${isTaView ? '#7C3AED' : '#FF9500'}`,
+              color: isTaView ? '#5B21B6' : '#92400E',
             }}
           >
-            🧑‍💻 <strong>助教 TA 視角</strong>：可查看教材結構，但<strong>無法新增、編輯或調整可見性</strong>（授課教師專用）。
+            {isTaView
+              ? <><span>🧑‍💻 </span><strong>助教 TA 視角</strong>：可查看教材結構，但<strong>無法新增、編輯或調整可見性</strong>（授課教師專用）。</>
+              : <><span>🏛️ </span><strong>系主任視角</strong>：可唯讀瀏覽教材結構，但<strong>無法新增、編輯或調整可見性</strong>（授課教師專用）。</>
+            }
           </div>
         )}
 
@@ -200,7 +203,7 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
             style={{
               padding: '10px 16px',
               borderRadius: 8,
-              background: '#1F4E78',
+              background: 'var(--brand)',
               color: '#fff',
               border: 'none',
               marginBottom: 16,
@@ -216,8 +219,8 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
             style={{
               padding: '10px 16px',
               borderRadius: 8,
-              background: '#e5e7eb',
-              color: '#9ca3af',
+              background: 'var(--border)',
+              color: 'var(--muted-light)',
               border: 'none',
               marginBottom: 16,
               cursor: 'not-allowed',
@@ -229,7 +232,7 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
 
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ background: '#f3f4f6', textAlign: 'left' }}>
+            <tr style={{ background: 'var(--panel)', textAlign: 'left' }}>
               <th style={th}>週次</th>
               <th style={th}>標題</th>
               <th style={th}>教材數</th>
@@ -239,7 +242,7 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
           </thead>
           <tbody>
             {rows.map((m) => (
-              <tr key={m.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+              <tr key={m.id} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={td}>第 {m.week} 週</td>
                 <td style={td}>{m.title}</td>
                 <td style={td}>{m.materialCount} 個</td>
@@ -285,7 +288,7 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
             </div>
           </div>
           <a
-            href={`/ai-assistant?q=${encodeURIComponent('幫我根據資料結構課程大綱，草擬第 5 週「樹與圖」的教材模組結構，包含學習目標、活動設計和評量方式')}`}
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我根據資料結構課程大綱，草擬第 5 週「樹與圖」的教材模組結構，包含學習目標、活動設計和評量方式')}`}
             className="btn"
             style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
           >
@@ -326,7 +329,7 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
             value={newDraft.week}
             onChange={(e) => setNewDraft({ ...newDraft, week: e.target.value })}
           />
-          <div style={{ fontSize: 12, color: '#6b7280' }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
             新單元預設為「不可見」，請建立後勾選可見性才會對學生顯示。
           </div>
         </div>
@@ -362,7 +365,7 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
             onChange={(e) => setEditDraft({ ...editDraft, week: e.target.value })}
           />
           {editingRow ? (
-            <div style={{ marginTop: 10, padding: 12, background: '#f3f4f6', borderRadius: 8, fontSize: 12 }}>
+            <div style={{ marginTop: 10, padding: 12, background: 'var(--panel)', borderRadius: 8, fontSize: 12 }}>
               📦 此單元目前有 <strong>{editingRow.materialCount}</strong> 個教材
               {editingRow.materials && editingRow.materials.length > 0 ? (
                 <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
@@ -410,7 +413,7 @@ export default function TeacherModulesPage({ params }: { params: { courseId: str
             <option value="slides">📊 投影片</option>
             <option value="link">🔗 連結</option>
           </select>
-          <div style={{ fontSize: 12, color: '#6b7280' }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)' }}>
             上傳檔案需在 TronClass 端，這裡僅建立教材條目並對應檔案名稱。
           </div>
         </div>
@@ -423,7 +426,7 @@ const th = { padding: '12px 8px', fontWeight: 600, fontSize: 14 } as const;
 const td = { padding: '12px 8px', fontSize: 14 } as const;
 const linkBtn = {
   background: 'transparent',
-  color: '#1F4E78',
+  color: 'var(--brand)',
   border: 'none',
   cursor: 'pointer',
   marginRight: 8,

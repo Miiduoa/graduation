@@ -2,6 +2,25 @@
 
 > 由 `LMS_整合計畫.docx` 派生的執行手冊。所有檔案路徑可直接 `cd` 進去使用。
 
+## ✅ 已完成範圍 (2026-05-17)
+
+**Phase A — AI 工具切換至 Supabase facade:** `aiAgentTools.ts` / `aiRealtimeAnalytics.ts` / `aiSmartActions.ts` 已改 import `supabaseLmsCache`,舊 AI 自動拿 Supabase 資料。
+
+**Phase B — Mobile LearnStack 直接換掉:** 新增 13 個 `Course*V2Screen.tsx` (`apps/mobile/src/screens/lmsV2/`),LearnStack `CourseHub` 已 dispatcher 化(`isLmsV2Enabled()` 為 true 走 V2)。LMS 課程頁的 AI 助教按鈕走 `buildPerCourseAIContext` → 既有 `AIChat`(舊 `chatWithCampusAssistant`)。
+
+**Phase C — Web Admin 14 頁直接遷移:** 14 個 page 已從 `_lms_v2_staged_admin/` 移到 `apps/web/src/app/lms-admin/`。`SiteShell` secondaryNav 新增「LMS 管理」入口。`supabase-browser.ts`、`RequireAdmin.tsx`、`rechartsShim.tsx`、`RichTextEditor.tsx` 等相容層已建。
+
+**AI 深度整合 — 完整角色 × 動作 × 跨角色因果鏈:** 21 個 AI 寫入工具(`lmsV2WriteTools.ts`)註冊到 `aiToolRegistry`,跨 student/teacher/TA/moderator/department 五角色,內建 RBAC + RLS 雙重防線、audit log、5 分鐘內可撤銷 (`undoLastWrite`)。設計文件:`docs/LMS_V2_ROLE_ACTION_MAP.md`。
+
+**驗證:**
+- Mobile tsc: **0 errors** (含 13 個新 V2 Screen + 21 個 AI 工具)
+- Web tsc: **0 errors** (含 14 個 admin page + recharts shim + RichTextEditor)
+- Shared tsc: **0 errors**
+- Jest 12 套件 / **179 tests 全綠** (LMS 共用引擎 8 + AI 助理 4)
+
+---
+
+
 ## ⚠️ 關鍵設計決定(覆寫整合計畫第 6 章)
 
 **AI 助理:全部使用舊版**(畢業專題既有的 `chatWithCampusAssistant` + `aiAgentRuntime`)。
@@ -232,7 +251,7 @@ cd apps/web && pnpm build && pnpm start
 | Mobile 路由樣式衝突 | ✅ Staged 檔以 `.staged` 後綴,Metro/TS 不打包;Phase 2 統一改 RN 寫法 |
 | 共用引擎相依 tronclassAdapter | ✅ `supabaseLmsAdapter.ts` 已寫,介面完全對偶 |
 | Demo 模式破損 | ✅ flag OFF 時 facade 委派回 puDataCache,Demo 完全不變 |
-| ai-course-assistant 每日限額 30 次 | ⚠️ Edge Function 內常數,若不足需手動改 DAILY_LIMIT |
+| ai-course-assistant 每日限額 30 次 | ✅ **不適用** — Edge Function 已封存,AI 走舊版,沒有此限制 |
 | Supabase RLS 漏寫導致洩漏 | ⏳ 上線前要跑「多 user 假登入測試」(見 Phase 0 驗收清單) |
 | 推播 Token 不一致 | ⏳ Phase 4 寫入工具時處理 |
 | 舊 LMS 仍被部分非 LMS 功能 import | ✅ 舊 LMS 完全沒動,import 不破 |

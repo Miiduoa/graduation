@@ -37,6 +37,9 @@ export default function TeacherCoursePage(props: {
   const [workspace, setWorkspace] = useState<CourseWorkspace>(EMPTY_WORKSPACE);
   const [loading, setLoading] = useState(true);
   const [authReady, setAuthReady] = useState(false);
+  /** canView：可讀取 workspace（teacher / ta / admin / department_head）*/
+  const [canView, setCanView] = useState(false);
+  /** canManage：可編輯教材、批改作業、發布成績（teacher / ta / admin，不含系主任）*/
   const [canManage, setCanManage] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [demoRole] = useDemoRole();
@@ -55,10 +58,13 @@ export default function TeacherCoursePage(props: {
   useEffect(() => {
     if (!isFirebaseConfigured()) {
       setAuthReady(true);
-      // Demo 模式：教師 / TA / 管理員 → 完整操作；系主任 → 唯讀瀏覽
-      const allowedDemoRoles: string[] = ['teacher', 'ta', 'admin', 'department_head'];
-      setCanManage(allowedDemoRoles.includes(demoRole));
-      if (!allowedDemoRoles.includes(demoRole)) {
+      // Demo 模式：教師 / TA / 管理員 → 完整操作；系主任 → 唯讀瀏覽（canView = true, canManage = false）
+      const viewAllowedRoles: string[] = ['teacher', 'ta', 'admin', 'department_head'];
+      const manageAllowedRoles: string[] = ['teacher', 'ta', 'admin'];
+      const canViewNow = viewAllowedRoles.includes(demoRole);
+      setCanView(canViewNow);
+      setCanManage(manageAllowedRoles.includes(demoRole));
+      if (!canViewNow) {
         setAuthError(`目前以「${demoRole}」身份瀏覽，無教師課程管理權限。請從右上角切換為「🧑‍🏫 教師」或「🧑‍💻 TA」角色。`);
       }
       return;
@@ -67,6 +73,7 @@ export default function TeacherCoursePage(props: {
     const auth = getAuth();
     if (!auth) {
       setAuthReady(true);
+      setCanView(false);
       setCanManage(false);
       setAuthError('目前無法驗證登入狀態。');
       return;
@@ -74,6 +81,7 @@ export default function TeacherCoursePage(props: {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
+        setCanView(false);
         setCanManage(false);
         setAuthError('請先登入具備課程管理權限的帳號。');
         setAuthReady(true);
@@ -84,9 +92,11 @@ export default function TeacherCoursePage(props: {
         const membership = await checkGroupMembership(props.params.courseId, user.uid);
         const role = membership.role ?? '';
         const allowed = membership.isMember && ['owner', 'instructor', 'moderator'].includes(role);
+        setCanView(allowed);
         setCanManage(allowed);
         setAuthError(allowed ? null : '你不是這門課程的教師或管理成員。');
       } catch {
+        setCanView(false);
         setCanManage(false);
         setAuthError('無法確認你的課程權限。');
       } finally {
@@ -103,7 +113,7 @@ export default function TeacherCoursePage(props: {
 
     async function load() {
       if (!authReady) return;
-      if (!canManage) {
+      if (!canView) {
         setWorkspace(EMPTY_WORKSPACE);
         setLoading(false);
         return;
@@ -133,7 +143,7 @@ export default function TeacherCoursePage(props: {
     return () => {
       active = false;
     };
-  }, [authReady, canManage, props.params.courseId]);
+  }, [authReady, canView, props.params.courseId]);
 
   const summary = useMemo(
     () => ({
@@ -144,8 +154,8 @@ export default function TeacherCoursePage(props: {
     }),
     [workspace],
   );
-  // Demo 模式（Firebase 未設定）也要檢查 canManage（角色 guard）
-  const accessDenied = authReady && !canManage;
+  // accessDenied：authReady 後 canView 仍為 false → 顯示錯誤提示
+  const accessDenied = authReady && !canView;
 
   return (
     <SiteShell
@@ -239,9 +249,12 @@ export default function TeacherCoursePage(props: {
                 </span>
                 <span className="pill subtle">{summary.publishedGrades} 筆已發布</span>
               </div>
-              <Link href={`/course/${props.params.courseId}${q}`} className="btn">
-                學生視角
-              </Link>
+              {/* 系主任已被 auto-redirect 回教師端，無法瀏覽學生視角，故隱藏此按鈕 */}
+              {!isDeptHeadView && (
+                <Link href={`/course/${props.params.courseId}${q}`} className="btn">
+                  學生視角
+                </Link>
+              )}
             </div>
 
             {/* ── TronClass parity 教師工具區 ── */}
@@ -252,7 +265,7 @@ export default function TeacherCoursePage(props: {
             >
               {/* 教材單元：TA 不能編輯結構，只能看 */}
               {caps.canEditModules ? (
-                <Link href={`/teacher/course/${props.params.courseId}/modules`} className="btn">
+                <Link href={`/teacher/course/${props.params.courseId}/modules${q}`} className="btn">
                   📚 教材單元
                 </Link>
               ) : (
@@ -265,13 +278,13 @@ export default function TeacherCoursePage(props: {
                 </span>
               )}
               {/* 測驗：TA 可看，不可建 */}
-              <Link href={`/teacher/course/${props.params.courseId}/quizzes`} className="btn">
+              <Link href={`/teacher/course/${props.params.courseId}/quizzes${q}`} className="btn">
                 📝 測驗 / 考試{isTaView ? '（檢視）' : ''}
               </Link>
               {/* 題庫：教師專用 */}
               {caps.canEditQuestionBank ? (
                 <Link
-                  href={`/teacher/course/${props.params.courseId}/question-banks`}
+                  href={`/teacher/course/${props.params.courseId}/question-banks${q}`}
                   className="btn"
                 >
                   🗂️ 題庫
@@ -285,13 +298,13 @@ export default function TeacherCoursePage(props: {
                   🗂️ 題庫（教師專用）
                 </span>
               )}
-              <Link href={`/teacher/course/${props.params.courseId}/rubrics`} className="btn">
+              <Link href={`/teacher/course/${props.params.courseId}/rubrics${q}`} className="btn">
                 📐 Rubric
               </Link>
-              <Link href={`/teacher/course/${props.params.courseId}/attendance`} className="btn">
+              <Link href={`/teacher/course/${props.params.courseId}/attendance${q}`} className="btn">
                 ✅ 點名
               </Link>
-              <Link href={`/teacher/course/${props.params.courseId}/gradebook`} className="btn">
+              <Link href={`/teacher/course/${props.params.courseId}/gradebook${q}`} className="btn">
                 📊 成績簿{isTaView ? '（批改）' : ''}
               </Link>
             </nav>

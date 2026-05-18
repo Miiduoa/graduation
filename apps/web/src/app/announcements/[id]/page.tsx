@@ -169,7 +169,7 @@ export default function AnnouncementDetailPage(props: {
           >
             {relatedCourse && (
               <Link
-                href={`/course/${relatedCourse.id}${q}`}
+                href={`${(demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'admin' || demoRole === 'department_head') ? '/teacher' : ''}/course/${relatedCourse.id}${q}`}
                 className="btn primary"
                 style={{ fontSize: 13 }}
               >
@@ -228,7 +228,7 @@ export default function AnnouncementDetailPage(props: {
                   if (typeof window === 'undefined') return;
                   const ok = window.confirm(`確定要下架「${announcement.title}」？學生與課程成員將無法再看到此公告。`);
                   if (!ok) return;
-                  takedownAnnouncement(announcement.id, '系主任');
+                  takedownAnnouncement(announcement.id, demoRole === 'admin' ? '系統管理員' : '系主任');
                   success('🗑️ 已將公告下架，原發布者已收到通知');
                   router.push(`/announcements${q}`);
                 }}
@@ -277,7 +277,7 @@ export default function AnnouncementDetailPage(props: {
                   id: announcement.id,
                   title: editDraft.title,
                   body: editDraft.body,
-                  editedBy: caps.canApproveAnnouncements ? '系主任' : '教師',
+                  editedBy: demoRole === 'admin' ? '系統管理員' : caps.canApproveAnnouncements ? '系主任' : '教師',
                 });
                 setEditing(false);
                 success('✅ 公告已更新');

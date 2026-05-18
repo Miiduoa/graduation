@@ -134,7 +134,7 @@ export default function DepartmentDashboardScreen() {
       >
         <CockpitHero
           eyebrow={`午安，${auth.profile?.displayName?.split('（')[0] ?? '主任'}`}
-          title="本系今日概況"
+          title="AI 系所中樞"
           summary={`🤖 系所健康度 ${aiHealth.score}%。${aiHealth.suggestions[0] ?? ''}`}
         />
 

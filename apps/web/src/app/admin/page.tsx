@@ -251,6 +251,11 @@ export default function AdminPage(props: {
                 >
                   <div className="insetGroupRowContent">
                     <div className="insetGroupRowTitle">{p.title}</div>
+                    {p.body && (
+                      <div style={{ fontSize: 12, color: 'var(--text)', margin: '3px 0 2px', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                        {p.body.length > 120 ? `${p.body.slice(0, 120)}…` : p.body}
+                      </div>
+                    )}
                     <div className="insetGroupRowMeta">
                       {p.source} · 提交於 {p.submittedAt}
                     </div>

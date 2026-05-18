@@ -568,14 +568,14 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
  * - Mental Model：使用者學到「找東西點 Tab；要 AI 做點球」
  */
 /** 須與下方 AIFloatingBall size 一致 */
-const FAB_SIZE = 62;
+const FAB_SIZE = 68;
 /** 整顆 FAB 相對 Tab 列的微調（像素；預設 0，避免與章面 nudge 疊加偏移） */
 const FAB_SHELL_NUDGE_X = 0;
 const FAB_SHELL_NUDGE_Y = 0;
 /** 與 TabBar pill `paddingVertical` 對齊，供 FAB overlay 垂直錨點 */
 const TAB_BAR_PILL_PADDING_V = 6;
 /** 中央為 AI 球保留的淨空；若拿掉會讓左右各兩個 Tab 往中線擠、視覺與點擊區「跑掉」 */
-const FAB_CENTER_GAP = Math.max(72, FAB_SIZE + 10);
+const FAB_CENTER_GAP = Math.max(84, FAB_SIZE + 14);
 
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -614,19 +614,19 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         style={({ pressed }) => ({
           flex: 1,
           justifyContent: 'center',
-          transform: [{ scale: pressed ? 0.94 : 1 }],
+          transform: [{ scale: pressed ? 0.95 : 1 }],
         })}
       >
         <View
           style={{
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 2,
-            paddingVertical: 9,
+            gap: 3,
+            paddingVertical: 8,
             paddingHorizontal: 4,
             borderRadius: theme.radius.md,
             backgroundColor: focused ? theme.colors.chromeTabItemActive : 'transparent',
-            minHeight: 52,
+            minHeight: 54,
           }}
         >
           <AppActionIcon
@@ -634,7 +634,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             size={focused ? 22 : 20}
             fallback="ionicon"
             color={focused ? theme.colors.accent : theme.colors.muted}
-            style={{ opacity: focused ? 1 : 0.55 }}
+            style={{ opacity: focused ? 1 : 0.66 }}
           />
           <Text
             style={{
@@ -642,7 +642,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               lineHeight: 13,
               fontWeight: focused ? '700' : '600',
               color: focused ? theme.colors.accent : theme.colors.muted,
-              letterSpacing: focused ? 0.15 : 0.25,
+              letterSpacing: 0,
             }}
           >
             {config?.label ?? route.name}
@@ -656,10 +656,10 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     <View
       style={{
         position: 'absolute',
-        bottom: Math.max(insets.bottom, 8) + 8,
-        left: 12,
-        right: 12,
-        minHeight: 72,
+        bottom: Math.max(insets.bottom, 8) + 6,
+        left: 14,
+        right: 14,
+        minHeight: 76,
       }}
       pointerEvents="box-none"
     >
@@ -671,9 +671,9 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           flexDirection: 'row',
           alignItems: 'stretch',
           overflow: 'visible',
-          borderRadius: theme.radius.xl,
+          borderRadius: theme.radius.lg,
           paddingVertical: TAB_BAR_PILL_PADDING_V,
-          paddingHorizontal: 10,
+          paddingHorizontal: 8,
           borderWidth: 1,
           borderColor: theme.colors.chromeTabBorder,
           backgroundColor: theme.colors.chromeTabBar,

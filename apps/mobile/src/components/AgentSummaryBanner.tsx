@@ -69,19 +69,34 @@ export function AgentSummaryBanner({ cockpitLabel = '' }: AgentSummaryBannerProp
       accessibilityLabel={`AI Agent 摘要 ${cockpitLabel}`}
       style={({ pressed }) => ({
         marginTop: theme.space.sm,
-        marginBottom: theme.space.xs,
-        padding: theme.space.sm + 2,
-        borderRadius: theme.radius.md,
-        backgroundColor: hasUrgent ? '#FEF3C7' : theme.colors.surface,
-        borderLeftWidth: 4,
-        borderLeftColor: hasUrgent ? theme.colors.warning : theme.colors.accent,
+        marginBottom: theme.space.md,
+        padding: theme.space.md,
+        borderRadius: theme.radius.lg,
+        backgroundColor: hasUrgent ? theme.colors.warningSoft : theme.colors.surface,
+        borderWidth: 1,
+        borderColor: hasUrgent ? `${theme.colors.warning}40` : theme.colors.border,
         opacity: pressed ? 0.85 : 1,
         flexDirection: 'row',
         alignItems: 'center',
         gap: theme.space.sm,
       })}
     >
-      <Text style={{ fontSize: 22 }}>🤖</Text>
+      <View
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: theme.radius.md,
+          backgroundColor: hasUrgent ? theme.colors.warningSoft : theme.colors.accentSoft,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Ionicons
+          name={hasUrgent ? 'alert-circle-outline' : 'sparkles-outline'}
+          size={19}
+          color={hasUrgent ? theme.colors.warning : theme.colors.accent}
+        />
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={{
           color: theme.colors.text,
@@ -98,9 +113,9 @@ export function AgentSummaryBanner({ cockpitLabel = '' }: AgentSummaryBannerProp
           marginTop: 2,
         }}>
           {summary.awaitingApprovalCount > 0
-            ? `🟡 ${summary.awaitingApprovalCount} 件等你批准`
+            ? `${summary.awaitingApprovalCount} 件等你批准`
             : summary.pendingCount > 0
-              ? `🟢 ${summary.pendingCount} 件執行中`
+              ? `${summary.pendingCount} 件執行中`
               : '點此查看可代理任務'}
         </Text>
       </View>

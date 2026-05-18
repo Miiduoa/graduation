@@ -46,6 +46,8 @@ function SiteShellInner(props: {
     ? `?school=${encodeURIComponent(school)}&schoolId=${encodeURIComponent(schoolId)}`
     : '';
 
+  const isAdminLike = demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'admin' || demoRole === 'department_head';
+
   const navItems = [
     { href: '/', label: 'Today', group: 'primary' as const },
     { href: '/groups', label: '課程', group: 'primary' as const },
@@ -55,6 +57,14 @@ function SiteShellInner(props: {
     { href: '/profile', label: '我的', group: 'primary' as const },
     { href: '/timetable', label: '課表', group: 'secondary' as const },
     { href: '/credit-planner', label: '學分試算', group: 'secondary' as const },
+    // 管理後台入口：僅對管理員 / 系主任顯示（teacher / ta 無需進後台管理頁）
+    ...(demoRole === 'admin' || demoRole === 'department_head'
+      ? [{ href: '/admin', label: '管理後台', group: 'secondary' as const }]
+      : []),
+    // LMS 管理（Supabase 技術後台）：僅 admin-like 角色可見
+    ...(isAdminLike
+      ? [{ href: '/lms-admin', label: 'LMS 管理', group: 'secondary' as const }]
+      : []),
     { href: '/ai-assistant', label: 'AI 助理', group: 'secondary' as const },
     { href: '/cafeteria', label: '餐廳', group: 'secondary' as const },
     { href: '/bus', label: '公車', group: 'secondary' as const },

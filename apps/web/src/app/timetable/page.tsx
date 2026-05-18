@@ -201,7 +201,7 @@ export default function TimetablePage(props: {
   }, [user, selectedSemester, baseCourses]);
 
   const totalCredits = useMemo(() => courses.reduce((acc, c) => acc + c.credits, 0), [courses]);
-  const aiCtx = useMemo(() => (demoRole === 'student' ? getStudentContextSummary() : null), [demoRole]);
+  const aiCtx = useMemo(() => (demoRole === 'student' || demoRole === 'club_officer' ? getStudentContextSummary() : null), [demoRole]);
 
   const todayCourses = useMemo(
     () =>
@@ -318,27 +318,6 @@ export default function TimetablePage(props: {
     );
   }
 
-  // ── 社團幹部：無個人修課課表 ──
-  if (isClubOfficer) {
-    return (
-      <SiteShell title="課表" subtitle="社團幹部無個人修課課表" schoolName={schoolName}>
-        <div className="pageStack">
-          <div className="emptyState">
-            <div className="emptyIcon">🎪</div>
-            <h3 className="emptyTitle">社團幹部無個人課表</h3>
-            <p className="emptyBody">
-              目前以社團幹部身份瀏覽，此視角不顯示個人修課課表。若要查看社課時間，請前往社團頁面。如需個人課表，請切換為學生身份。
-            </p>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginTop: 16 }}>
-              <Link href={`/clubs${q}`} className="btn primary">前往社團管理</Link>
-              <Link href={`/${q}`} className="btn">← 回首頁</Link>
-            </div>
-          </div>
-        </div>
-      </SiteShell>
-    );
-  }
-
   // ── 校友 / 訪客：課表為個人資料，無法查看 ──
   if (isRestrictedRole) {
     return (
@@ -437,6 +416,30 @@ export default function TimetablePage(props: {
           </div>
         )}
 
+        {/* 社團幹部：顯示「兼修課學生」提示 */}
+        {isClubOfficer && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 16px',
+              background: 'rgba(251,191,36,0.10)',
+              border: '1px solid #F59E0B',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              🎪 <strong>社團幹部視角</strong> · 你同時是資工系大三學生，以下顯示你個人修課課表。
+              社課時間請前往{' '}
+              <Link href={`/clubs${q}`} style={{ color: '#D97706', fontWeight: 600 }}>社團管理</Link>
+              {' '}查看。
+            </div>
+          </div>
+        )}
+
         {usingDemo && (
           <div
             className="card"
@@ -453,8 +456,8 @@ export default function TimetablePage(props: {
           </div>
         )}
 
-        {/* ── AI 今日提醒（學生專用）── */}
-        {demoRole === 'student' && aiCtx && (aiCtx.pendingAssignmentCount > 0 || aiCtx.libraryDueSoonDays <= 3) && (
+        {/* ── AI 今日提醒（學生 / 社團幹部）── */}
+        {(demoRole === 'student' || demoRole === 'club_officer') && aiCtx && (aiCtx.pendingAssignmentCount > 0 || aiCtx.libraryDueSoonDays <= 3) && (
           <div
             className="card"
             style={{
@@ -637,11 +640,14 @@ export default function TimetablePage(props: {
         {/* ── Week View ── */}
         {viewMode === 'week' && (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {/* Scrollable container for mobile */}
+            <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' as 'auto', minWidth: 0 }}>
             {/* Header */}
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '56px repeat(5, 1fr)',
+                gridTemplateColumns: '56px repeat(5, minmax(80px, 1fr))',
+                minWidth: 480,
                 borderBottom: '1px solid var(--border)',
                 background: 'var(--panel)',
               }}
@@ -697,7 +703,8 @@ export default function TimetablePage(props: {
                       key={p.period}
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '56px repeat(5, 1fr)',
+                        gridTemplateColumns: '56px repeat(5, minmax(80px, 1fr))',
+                        minWidth: 480,
                         minHeight: PERIOD_ROW_HEIGHT,
                         borderBottom: '1px solid var(--border)',
                       }}
@@ -739,7 +746,7 @@ export default function TimetablePage(props: {
                           >
                             {course && (
                               <Link
-                                href={`/course/${course.id}${q}`}
+                                href={`${isTeacherView ? '/teacher' : ''}/course/${course.id}${q}`}
                                 style={{
                                   background: `${course.color}12`,
                                   borderLeft: `3px solid ${course.color}`,
@@ -822,6 +829,7 @@ export default function TimetablePage(props: {
                 </div>
               );
             })()}
+            </div>{/* end scroll wrapper */}
           </div>
         )}
 
@@ -842,7 +850,7 @@ export default function TimetablePage(props: {
                   return (
                     <Link
                       key={c.id}
-                      href={`/course/${c.id}${q}`}
+                      href={`${isTeacherView ? '/teacher' : ''}/course/${c.id}${q}`}
                       className="card"
                       style={{
                         borderLeft: `4px solid ${c.color}`,
@@ -911,8 +919,8 @@ export default function TimetablePage(props: {
           <div className="pageStack">
             {DAYS.map((d, di) => {
               const dow = di + 1;
-              const courses = coursesByDay[dow];
-              if (!courses || courses.length === 0) return null;
+              const dayCourses = coursesByDay[dow];
+              if (!dayCourses || dayCourses.length === 0) return null;
               return (
                 <div key={d} className="sectionCard">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -935,16 +943,16 @@ export default function TimetablePage(props: {
                         background: 'var(--border)',
                       }}
                     />
-                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{courses.length} 堂</span>
+                    <span style={{ fontSize: 12, color: 'var(--muted)' }}>{dayCourses.length} 堂</span>
                   </div>
                   <div className="insetGroup">
-                    {courses.map((c, ci) => {
+                    {dayCourses.map((c, ci) => {
                       const startP = PERIODS.find((p) => p.period === c.startPeriod);
                       const endP = PERIODS.find((p) => p.period === c.endPeriod);
                       return (
                         <Link
                           key={c.id}
-                          href={`/course/${c.id}${q}`}
+                          href={`${isTeacherView ? '/teacher' : ''}/course/${c.id}${q}`}
                           className="insetGroupRow"
                           style={{
                             borderTop: ci === 0 ? 'none' : undefined,

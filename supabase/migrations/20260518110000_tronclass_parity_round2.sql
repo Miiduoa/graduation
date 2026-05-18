@@ -69,7 +69,7 @@ create or replace view public.reporting_grade_course_item_scores as
 select
   gc.course_id,
   gc.id as category_id,
-  gc.title as category_title,
+  gc.name as category_title,
   gi.id as grade_item_id,
   gi.title as item_title,
   gi.max_points,

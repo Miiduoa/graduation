@@ -3196,3 +3196,74 @@ select.input option {
 /* ============================
    Leaflet Map
    ============================ */
+
+/* ════════════════════════════════════════════════════
+   AI-First Tokens v1 (附加於 Campus Soft v3.0 之後)
+   詳見：docs/design/AI_FIRST_REDESIGN.md
+   ════════════════════════════════════════════════════ */
+:root {
+  /* AI 主色：Indigo → Purple → Pink 漸層體系 */
+  --ai: #6366f1;
+  --ai-strong: #4f46e5;
+  --ai-soft: rgba(99, 102, 241, 0.10);
+  --ai-halo: rgba(99, 102, 241, 0.20);
+  --ai-surface: #fafbff;
+  --ai-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+  --ai-gradient-soft: linear-gradient(180deg, #eef2ff 0%, #fce7f3 100%);
+
+  /* 信心度 */
+  --confidence-high: #34c759;
+  --confidence-mid: #ff9500;
+  --confidence-low: #ff3b30;
+  --confidence-high-soft: rgba(52, 199, 89, 0.12);
+  --confidence-mid-soft: rgba(255, 149, 0, 0.12);
+  --confidence-low-soft: rgba(255, 59, 48, 0.12);
+
+  /* AI 元件陰影 */
+  --shadow-ai: 0 0 0 3px rgba(99, 102, 241, 0.18),
+    0 8px 24px rgba(99, 102, 241, 0.12);
+  --shadow-ai-strong: 0 0 0 4px rgba(99, 102, 241, 0.25),
+    0 12px 32px rgba(139, 92, 246, 0.20);
+
+  /* AI 元件層級 */
+  --z-ai-drawer: 200;
+  --z-ai-command: 300;
+  --z-ai-takeover: 700;
+
+  /* 動效 */
+  --ai-breath-duration: 1600ms;
+  --ai-card-enter-duration: 220ms;
+  --ai-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ai-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* AI 簽名動畫 */
+@keyframes aiBreath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+@keyframes aiSlotEnter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes aiTypingDot {
+  0%, 80%, 100% { opacity: 0.3; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* 暗黑模式 AI tokens */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ai-surface: #1a1b2e;
+    --ai-soft: rgba(139, 92, 246, 0.18);
+    --ai-halo: rgba(139, 92, 246, 0.32);
+  }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ai-breath-duration: 0ms;
+    --ai-card-enter-duration: 0ms;
+  }
+}

@@ -8,6 +8,7 @@ import { getAuth, fetchGrades, fetchGPA, isFirebaseConfigured, type Grade } from
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { DEMO_GRADES, DEMO_HISTORY_SEMESTERS, DEMO_STUDENTS, DEMO_COURSES } from '@/lib/demoData';
 import { useDemoRole } from '@/lib/demoRole';
+import { useDemoStore } from '@/lib/demoStore';
 
 interface GradeDisplay {
   courseId?: string;
@@ -115,6 +116,7 @@ export default function GradesPage(props: {
 }) {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [demoRole] = useDemoRole();
+  const store = useDemoStore();
   const [selectedSemester, setSelectedSemester] = useState(SEMESTERS[0]);
   const [sortBy, setSortBy] = useState<'name' | 'score' | 'gpa'>('score');
   const [user, setUser] = useState<User | null>(null);
@@ -134,7 +136,22 @@ export default function GradesPage(props: {
   // 依學期載入成績
   useEffect(() => {
     if (!user || !isFirebaseConfigured()) {
-      setGrades(DEFAULT_GRADES);
+      if (demoRole === 'alumni') {
+        // 校友：顯示歷史學期成績（最後一個學期）
+        const lastSem = DEMO_HISTORY_SEMESTERS[DEMO_HISTORY_SEMESTERS.length - 1];
+        setGrades(lastSem.courses.map((c) => ({
+          code: c.code,
+          name: c.name,
+          credits: c.credits,
+          grade: c.grade,
+          score: c.score,
+          gpa: c.gpa,
+          instructor: c.instructor,
+        })));
+        setGpaHistory(DEMO_HISTORY_SEMESTERS.map((s) => ({ semester: s.semester, gpa: s.semesterGpa })));
+      } else {
+        setGrades(DEFAULT_GRADES);
+      }
       setUsingDemo(true);
       return;
     }
@@ -170,7 +187,7 @@ export default function GradesPage(props: {
     return () => {
       active = false;
     };
-  }, [user, selectedSemester]);
+  }, [user, selectedSemester, demoRole]);
 
   const sorted = useMemo(
     () =>
@@ -425,28 +442,6 @@ export default function GradesPage(props: {
     );
   }
 
-  // 社團幹部：無個人學業成績（社團幹部身份不是在校修課視角）
-  if (demoRole === 'club_officer') {
-    return (
-      <SiteShell title="成績" schoolName={schoolName}>
-        <div className="pageStack">
-          <div className="card" style={{ padding: '32px 24px', textAlign: 'center', background: 'rgba(52,199,89,0.08)', border: '1px solid #34C759' }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>🎯</div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>社團幹部無個人學業成績</div>
-            <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>
-              你目前以社團幹部身份瀏覽。成績頁面顯示的是個人修課成績，
-              社團幹部視角不提供此頁面。如需查看成績，請切換為學生身份。
-            </div>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <a href={`/clubs${q}`} className="btn primary">前往社團管理 →</a>
-              <a href={`/ai-assistant${q}`} className="btn">AI 助理</a>
-            </div>
-          </div>
-        </div>
-      </SiteShell>
-    );
-  }
-
   // 系統管理員：不適用個人成績
   if (demoRole === 'admin') {
     return (
@@ -492,7 +487,39 @@ export default function GradesPage(props: {
           </div>
         )}
 
-
+        {/* 教師剛發布成績：動態通知橫幅（學生專用） */}
+        {demoRole === 'student' && store.publishedGrades.length > 0 && (
+          <div
+            className="card"
+            style={{
+              padding: '14px 18px',
+              background: 'rgba(22,163,74,0.10)',
+              border: '1px solid #16a34a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 14,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#16a34a', marginBottom: 3 }}>
+                🎓 成績已更新！
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)' }}>
+                {store.publishedGrades[0].courseName} 的成績已由教師發布。
+                你的成績：<strong>{store.publishedGrades[0].grade}（{store.publishedGrades[0].score} 分）</strong>
+              </div>
+            </div>
+            <Link
+              href={`/messages${q}`}
+              className="btn"
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0, background: '#16a34a', color: '#fff', border: 'none' }}
+            >
+              查看訊息通知 →
+            </Link>
+          </div>
+        )}
 
         {/* ── GPA Hero Card ── */}
         <div
@@ -501,7 +528,7 @@ export default function GradesPage(props: {
             background: 'linear-gradient(135deg, var(--brand) 0%, #8EA5FF 100%)',
             border: 'none',
             color: '#fff',
-            boxShadow: '6px 6px 16px rgba(94,106,210,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
+            boxShadow: 'var(--shadow-lg)',
           }}
         >
           <div
