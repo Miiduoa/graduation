@@ -264,7 +264,7 @@ export default function GradesPage(props: {
       >
         <div className="pageStack">
           {/* 角色說明 */}
-          <div className="card" style={{ padding: '14px 16px', background: 'rgba(15,139,141,0.10)', border: '1px solid #5856D6' }}>
+          <div className="card" style={{ padding: '14px 16px', background: 'rgba(88,86,214,0.10)', border: '1px solid #5856D6' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <div>
                 <div style={{ fontWeight: 700, color: '#5856D6', marginBottom: 4 }}>
@@ -369,7 +369,7 @@ export default function GradesPage(props: {
           </div>
 
           {/* AI 班級分析入口 */}
-          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(15,139,141,0.10) 0%, rgba(0,200,200,0.06) 100%)', border: '1px solid rgba(15,139,141,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(0,200,200,0.06) 100%)', border: '1px solid rgba(88,86,214,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 班級分析</div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>班級平均 {classAvg} 分，{classScores.filter((s) => s < 70).length} 位學生需要關注。讓 AI 分析成績趨勢？</div>
