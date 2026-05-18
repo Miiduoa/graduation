@@ -688,8 +688,15 @@ export function AIDetailHeader({
   return (
     <View style={detailStyles.header}>
       {onBack ? (
-        <TouchableOpacity onPress={onBack} hitSlop={10} style={detailStyles.backBtn}>
-          <Text style={{ fontSize: 22, color: aiTokens.text }}>‹</Text>
+        // iOS Nav Bar Back Button：chevron-back + tint accent
+        <TouchableOpacity
+          onPress={onBack}
+          hitSlop={10}
+          style={detailStyles.backBtn}
+          accessibilityLabel="返回"
+          accessibilityRole="button"
+        >
+          <Ionicons name="chevron-back" size={26} color={aiTokens.ai} />
         </TouchableOpacity>
       ) : (
         <View style={detailStyles.backBtn} />
