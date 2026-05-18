@@ -95,7 +95,7 @@ export default function LoginPage(props: {
             background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)',
             border: 'none',
             color: '#fff',
-            boxShadow: '6px 6px 16px rgba(94,106,210,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
+            boxShadow: '6px 6px 16px rgba(0,122,255,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
           }}
         >
           <div

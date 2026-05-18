@@ -288,14 +288,14 @@ export default function CafeteriaPage(props: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 3 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#007AFF', marginBottom: 3 }}>
               🤖 AI 推薦 · 今日午餐
             </div>
             <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
               不知道吃什麼？讓 AI 幫你推薦適合的菜色（含熱量、口味偏好）。
             </div>
           </div>
-          <span style={{ fontSize: 12, color: '#0F8B8D', fontWeight: 600 }}>問 AI →</span>
+          <span style={{ fontSize: 12, color: '#007AFF', fontWeight: 600 }}>問 AI →</span>
         </Link>
 
         <div

@@ -805,15 +805,15 @@ export function getCategoryIcon(cat: PostCategory): string {
 
 export function getCategoryColor(cat: PostCategory): string {
   const colors: Record<PostCategory, string> = {
-    course_discussion: '#3B82F6',
-    confession: '#EC4899',
-    vent: '#EF4444',
-    marketplace: '#10B981',
-    lost_found: '#F59E0B',
-    food_review: '#F97316',
-    club_recruit: '#8B5CF6',
-    question: '#6366F1',
+    course_discussion: '#007AFF',
+    confession: '#FF2D55',
+    vent: '#FF3B30',
+    marketplace: '#34C759',
+    lost_found: '#FF9500',
+    food_review: '#FF9500',
+    club_recruit: '#AF52DE',
+    question: '#5856D6',
     poll: '#14B8A6',
   };
-  return colors[cat] || '#6B7280';
+  return colors[cat] || '#8E8E93';
 }

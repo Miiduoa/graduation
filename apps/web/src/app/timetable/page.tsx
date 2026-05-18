@@ -54,7 +54,7 @@ const MOCK_COURSES: CourseSlot[] = DEMO_COURSES.map((c) => ({
 
 const DAYS = ['一', '二', '三', '四', '五'];
 const COURSE_COLORS = [
-  '#5E6AD2',
+  '#007AFF',
   '#34C759',
   '#FF9500',
   '#007AFF',
@@ -260,7 +260,7 @@ export default function TimetablePage(props: {
               <div className="metricValue">{DEMO_COURSES.length + 8}</div>
               <div className="metricLabel">本學期開設課程</div>
             </div>
-            <div className="metricCard" style={{ '--tone': '#0F8B8D' } as CSSProperties}>
+            <div className="metricCard" style={{ '--tone': '#007AFF' } as CSSProperties}>
               <div className="metricIcon">🧑‍🏫</div>
               <div className="metricValue">19</div>
               <div className="metricLabel">授課教師</div>
@@ -392,7 +392,7 @@ export default function TimetablePage(props: {
             style={{
               padding: '14px 16px',
               background: demoRole === 'ta' ? 'rgba(124,58,237,0.10)' : 'rgba(15,139,141,0.10)',
-              border: `1px solid ${demoRole === 'ta' ? '#7C3AED' : '#0F8B8D'}`,
+              border: `1px solid ${demoRole === 'ta' ? '#7C3AED' : '#007AFF'}`,
               fontSize: 13,
               display: 'flex',
               alignItems: 'center',
@@ -462,8 +462,8 @@ export default function TimetablePage(props: {
             className="card"
             style={{
               padding: '14px 18px',
-              background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.08) 100%)',
-              border: '1px solid rgba(94,106,210,0.25)',
+              background: 'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(90,200,250,0.08) 100%)',
+              border: '1px solid rgba(0,122,255,0.25)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -514,7 +514,7 @@ export default function TimetablePage(props: {
             }}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#007AFF', marginBottom: 4 }}>
                 🤖 AI 課程助理
               </div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>
@@ -741,7 +741,7 @@ export default function TimetablePage(props: {
                               padding: '4px',
                               position: 'relative',
                               background:
-                                isNowCol && isThisWeek ? 'rgba(94,106,210,0.03)' : undefined,
+                                isNowCol && isThisWeek ? 'rgba(0,122,255,0.03)' : undefined,
                             }}
                           >
                             {course && (

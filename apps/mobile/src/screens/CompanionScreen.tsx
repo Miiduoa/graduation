@@ -74,7 +74,7 @@ export default function CompanionScreen({ navigation }: { navigation?: { navigat
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
-        <Text style={{ marginTop: 12, color: '#6b7280' }}>正在喚醒你的校園精靈⋯⋯</Text>
+        <Text style={{ marginTop: 12, color: '#8E8E93' }}>正在喚醒你的校園精靈⋯⋯</Text>
       </View>
     );
   }
@@ -112,10 +112,10 @@ export default function CompanionScreen({ navigation }: { navigation?: { navigat
 
       {/* ── 4 需求 ── */}
       <Section title="今日精靈四象">
-        <NeedBar label="學" value={sprite.needs.study} color="#6366F1" />
-        <NeedBar label="動" value={sprite.needs.move} color="#10B981" />
-        <NeedBar label="食" value={sprite.needs.nourish} color="#F59E0B" />
-        <NeedBar label="友" value={sprite.needs.social} color="#EF4444" />
+        <NeedBar label="學" value={sprite.needs.study} color="#5856D6" />
+        <NeedBar label="動" value={sprite.needs.move} color="#34C759" />
+        <NeedBar label="食" value={sprite.needs.nourish} color="#FF9500" />
+        <NeedBar label="友" value={sprite.needs.social} color="#FF3B30" />
       </Section>
 
       {/* ── 花園預覽 ── */}
@@ -131,7 +131,7 @@ export default function CompanionScreen({ navigation }: { navigation?: { navigat
             />
           ))}
           {data.garden.plants.length === 0 && (
-            <Text style={{ color: '#6b7280', padding: 12 }}>
+            <Text style={{ color: '#8E8E93', padding: 12 }}>
               還沒有植物，先選一門課讓花園開始長出來。
             </Text>
           )}
@@ -141,7 +141,7 @@ export default function CompanionScreen({ navigation }: { navigation?: { navigat
       {/* ── 最近解鎖 ── */}
       <Section title="最近解鎖">
         {recentUnlocks.length === 0 ? (
-          <Text style={{ color: '#6b7280' }}>還沒有新解鎖，繼續使用 APP 就會出現 ✨</Text>
+          <Text style={{ color: '#8E8E93' }}>還沒有新解鎖，繼續使用 APP 就會出現 ✨</Text>
         ) : (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             {recentUnlocks.map((u) => (
@@ -207,7 +207,7 @@ function SpriteHeader({ sprite }: { sprite: SpriteState }) {
   return (
     <View
       style={{
-        backgroundColor: '#1F4E78',
+        backgroundColor: '#003F8A',
         borderRadius: 16,
         padding: 20,
         marginBottom: 16,
@@ -219,7 +219,7 @@ function SpriteHeader({ sprite }: { sprite: SpriteState }) {
           <Text style={{ color: '#fff', fontSize: 20, fontWeight: '700' }}>
             {sprite.evolutionStage} ・ {weatherEmoji} {sprite.appearance.season}
           </Text>
-          <Text style={{ color: '#dbeafe', fontSize: 14, marginTop: 4 }}>
+          <Text style={{ color: '#E5F2FF', fontSize: 14, marginTop: 4 }}>
             裝飾：{sprite.appearance.seasonalAccessory}
           </Text>
           <View
@@ -297,9 +297,9 @@ function CareHintCard({
     >
       <Text style={{ fontSize: 32 }}>{icon}</Text>
       <View style={{ flex: 1 }}>
-        <Text style={{ fontSize: 14, color: '#111827' }}>{hint.text}</Text>
+        <Text style={{ fontSize: 14, color: '#1C1C1E' }}>{hint.text}</Text>
         {hint.ctaTarget && (
-          <Text style={{ fontSize: 12, color: '#1F4E78', marginTop: 6, fontWeight: '600' }}>
+          <Text style={{ fontSize: 12, color: '#003F8A', marginTop: 6, fontWeight: '600' }}>
             ▶ 點此前往
           </Text>
         )}
@@ -311,7 +311,7 @@ function CareHintCard({
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={{ marginBottom: 20 }}>
-      <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 8, color: '#111827' }}>
+      <Text style={{ fontSize: 16, fontWeight: '700', marginBottom: 8, color: '#1C1C1E' }}>
         {title}
       </Text>
       {children}
@@ -323,8 +323,8 @@ function NeedBar({ label, value, color }: { label: string; value: number; color:
   return (
     <View style={{ marginBottom: 8 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-        <Text style={{ fontSize: 13, color: '#374151' }}>{label}</Text>
-        <Text style={{ fontSize: 13, color: '#6b7280' }}>{value}</Text>
+        <Text style={{ fontSize: 13, color: '#3C3C43' }}>{label}</Text>
+        <Text style={{ fontSize: 13, color: '#8E8E93' }}>{value}</Text>
       </View>
       <View
         style={{
@@ -364,7 +364,7 @@ function PlantCard({ plant, onPress }: { plant: Plant; onPress: () => void }) {
       <Text style={{ fontSize: 13, fontWeight: '600', marginTop: 4 }} numberOfLines={1}>
         {plant.courseName}
       </Text>
-      <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{plant.stage}</Text>
+      <Text style={{ fontSize: 11, color: '#8E8E93', marginTop: 2 }}>{plant.stage}</Text>
       <View
         style={{
           height: 4,
@@ -378,7 +378,7 @@ function PlantCard({ plant, onPress }: { plant: Plant; onPress: () => void }) {
           style={{
             height: 4,
             width: `${plant.growth}%`,
-            backgroundColor: plant.health < 50 ? '#dc2626' : '#10B981',
+            backgroundColor: plant.health < 50 ? '#D70015' : '#34C759',
             borderRadius: 2,
           }}
         />
@@ -406,7 +406,7 @@ function UnlockChip({ unlock }: { unlock: Unlockable }) {
       }}
     >
       <Text style={{ fontSize: 16 }}>{unlock.emoji}</Text>
-      <Text style={{ fontSize: 12, color: '#111827' }}>{unlock.label}</Text>
+      <Text style={{ fontSize: 12, color: '#1C1C1E' }}>{unlock.label}</Text>
     </View>
   );
 }
@@ -425,7 +425,7 @@ function NavButton({ label, onPress }: { label: string; onPress?: () => void }) 
         borderColor: '#e5e7eb',
       }}
     >
-      <Text style={{ fontSize: 13, color: '#111827', fontWeight: '600' }}>{label}</Text>
+      <Text style={{ fontSize: 13, color: '#1C1C1E', fontWeight: '600' }}>{label}</Text>
     </Pressable>
   );
 }

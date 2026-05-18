@@ -1140,7 +1140,7 @@ export function AdminDashboardScreen(props: any) {
                   icon="people-outline"
                   label="成員"
                   value={stats.members}
-                  color="#F59E0B"
+                  color="#FF9500"
                   onPress={() => setTab('members')}
                 />
               </View>

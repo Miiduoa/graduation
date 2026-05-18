@@ -85,14 +85,14 @@ export default function CourseAssignmentDetailV2Screen() {
         />
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Pressable
-            style={[styles.btn, { backgroundColor: '#9CA3AF' }]}
+            style={[styles.btn, { backgroundColor: '#AEAEB2' }]}
             disabled={submitting}
             onPress={() => handleSubmit(false)}
           >
             <Text style={styles.btnLabel}>存草稿</Text>
           </Pressable>
           <Pressable
-            style={[styles.btn, { backgroundColor: '#2563EB' }]}
+            style={[styles.btn, { backgroundColor: '#007AFF' }]}
             disabled={submitting}
             onPress={() => handleSubmit(true)}
           >
@@ -105,8 +105,8 @@ export default function CourseAssignmentDetailV2Screen() {
 }
 
 const styles = StyleSheet.create({
-  body: { fontSize: 14, lineHeight: 20, color: '#374151' },
-  label: { fontSize: 13, fontWeight: '600', color: '#374151' },
+  body: { fontSize: 14, lineHeight: 20, color: '#3C3C43' },
+  label: { fontSize: 13, fontWeight: '600', color: '#3C3C43' },
   input: {
     minHeight: 160,
     borderRadius: 8,
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#ECFDF5',
     borderRadius: 8,
-    borderColor: '#10B981',
+    borderColor: '#34C759',
     borderWidth: StyleSheet.hairlineWidth,
   },
   score: { fontSize: 18, fontWeight: '700', color: '#065F46' },

@@ -29,7 +29,7 @@ type FeedbackType = 'bug' | 'feature' | 'improvement' | 'other';
 
 const FEEDBACK_TYPES = [
   { key: 'bug', label: 'Bug 回報', icon: 'bug-outline', color: theme.colors.danger },
-  { key: 'feature', label: '功能建議', icon: 'bulb-outline', color: '#F59E0B' },
+  { key: 'feature', label: '功能建議', icon: 'bulb-outline', color: '#FF9500' },
   {
     key: 'improvement',
     label: '改善建議',
@@ -300,7 +300,7 @@ export function FeedbackScreen(props: any) {
                     <Ionicons
                       name={star <= rating ? 'star' : 'star-outline'}
                       size={36}
-                      color="#F59E0B"
+                      color="#FF9500"
                     />
                   </Pressable>
                 ))}

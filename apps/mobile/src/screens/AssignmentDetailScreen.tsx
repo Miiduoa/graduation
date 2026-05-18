@@ -788,7 +788,7 @@ export function AssignmentDetailScreen(props: any) {
       case 'overdue':
         return theme.colors.danger;
       case 'urgent':
-        return '#F59E0B';
+        return '#FF9500';
       case 'soon':
         return theme.colors.accent;
       default:
@@ -1141,7 +1141,7 @@ export function AssignmentDetailScreen(props: any) {
                 <Ionicons
                   name={mySubmission.isLate ? 'time' : 'checkmark-circle'}
                   size={18}
-                  color={mySubmission.isLate ? '#F59E0B' : theme.colors.success}
+                  color={mySubmission.isLate ? '#FF9500' : theme.colors.success}
                 />
                 <Text style={{ color: theme.colors.text, fontWeight: '600' }}>
                   {mySubmission.isLate ? '已遲交繳交' : '已準時繳交'}
@@ -1239,7 +1239,7 @@ export function AssignmentDetailScreen(props: any) {
                   </Text>
                 </View>
                 <View style={{ flex: 1, minWidth: 80, alignItems: 'center' }}>
-                  <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+                  <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
                     {stats.lateCount}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 4 }}>

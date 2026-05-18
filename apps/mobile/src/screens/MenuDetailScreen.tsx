@@ -589,7 +589,7 @@ export function MenuDetailScreen(props: any) {
               }}
             >
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 32 }}>
+                <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 32 }}>
                   {avgRating.toFixed(1)}
                 </Text>
                 <RatingStars rating={avgRating} size={14} />
@@ -606,7 +606,7 @@ export function MenuDetailScreen(props: any) {
                       <Text style={{ color: theme.colors.muted, fontSize: 10, width: 10 }}>
                         {star}
                       </Text>
-                      <Ionicons name="star" size={10} color="#F59E0B" />
+                      <Ionicons name="star" size={10} color="#FF9500" />
                       <View
                         style={{
                           flex: 1,
@@ -620,7 +620,7 @@ export function MenuDetailScreen(props: any) {
                           style={{
                             height: '100%',
                             width: `${pct}%`,
-                            backgroundColor: '#F59E0B',
+                            backgroundColor: '#FF9500',
                             borderRadius: 3,
                           }}
                         />
@@ -801,11 +801,11 @@ export function MenuDetailScreen(props: any) {
           <AnimatedCard title="營養資訊" subtitle="每份估計值" delay={200}>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
               {[
-                { label: '熱量', value: `${nutrition.calories}`, unit: 'kcal', color: '#F59E0B' },
-                { label: '蛋白質', value: `${nutrition.protein}`, unit: 'g', color: '#EF4444' },
-                { label: '碳水', value: `${nutrition.carbs}`, unit: 'g', color: '#3B82F6' },
-                { label: '脂肪', value: `${nutrition.fat}`, unit: 'g', color: '#10B981' },
-                { label: '鈉', value: `${nutrition.sodium}`, unit: 'mg', color: '#8B5CF6' },
+                { label: '熱量', value: `${nutrition.calories}`, unit: 'kcal', color: '#FF9500' },
+                { label: '蛋白質', value: `${nutrition.protein}`, unit: 'g', color: '#FF3B30' },
+                { label: '碳水', value: `${nutrition.carbs}`, unit: 'g', color: '#007AFF' },
+                { label: '脂肪', value: `${nutrition.fat}`, unit: 'g', color: '#34C759' },
+                { label: '鈉', value: `${nutrition.sodium}`, unit: 'mg', color: '#AF52DE' },
               ].map((n) => (
                 <View
                   key={n.label}
@@ -879,7 +879,7 @@ export function MenuDetailScreen(props: any) {
                       <Ionicons
                         name={star <= userRating ? 'star' : 'star-outline'}
                         size={32}
-                        color="#F59E0B"
+                        color="#FF9500"
                       />
                     </Pressable>
                   ))}
@@ -1266,7 +1266,7 @@ export function MenuDetailScreen(props: any) {
               icon="calendar-outline"
               title="每日菜單訂閱"
               description="每天推播今日菜單資訊"
-              color="#F59E0B"
+              color="#FF9500"
             />
           </View>
           <View style={{ gap: 10, marginTop: 14 }}>

@@ -226,7 +226,7 @@ function getDirectionColor(direction: NavigationStep['direction']): string {
       return theme.colors.success;
     case 'up':
     case 'down':
-      return '#F59E0B';
+      return '#FF9500';
     default:
       return theme.colors.accent;
   }
@@ -680,7 +680,7 @@ export function ARNavigationScreen(props: any) {
           <View
             style={{
               flex: 1,
-              backgroundColor: '#1a1a2e',
+              backgroundColor: '#000000',
               borderRadius: theme.radius.lg,
               overflow: 'hidden',
               position: 'relative',
@@ -693,7 +693,7 @@ export function ARNavigationScreen(props: any) {
                 onCameraReady={handleCameraReady}
               />
             ) : (
-              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#1a1a2e' }]} />
+              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000000' }]} />
             )}
 
             <View

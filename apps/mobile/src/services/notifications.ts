@@ -150,7 +150,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
         name: '預設',
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#7C5CFF',
+        lightColor: '#007AFF',
       }),
       Notifications.setNotificationChannelAsync('announcements', {
         name: '公告通知',

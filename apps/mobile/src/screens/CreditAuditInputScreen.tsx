@@ -64,11 +64,11 @@ function buildCsvContent(courses: SavedCourse[]): string {
 }
 
 const legacyCategories: Array<{ key: CreditCategory; label: string; color: string }> = [
-  { key: 'required', label: '必修', color: '#EF4444' },
-  { key: 'elective', label: '選修', color: '#3B82F6' },
-  { key: 'general', label: '通識', color: '#10B981' },
-  { key: 'english', label: '英文', color: '#8B5CF6' },
-  { key: 'other', label: '其他', color: '#F59E0B' },
+  { key: 'required', label: '必修', color: '#FF3B30' },
+  { key: 'elective', label: '選修', color: '#007AFF' },
+  { key: 'general', label: '通識', color: '#34C759' },
+  { key: 'english', label: '英文', color: '#AF52DE' },
+  { key: 'other', label: '其他', color: '#FF9500' },
 ];
 
 const semesters = [
@@ -650,7 +650,7 @@ export function CreditAuditInputScreen(props: any) {
                 {detailedTemplate.categories.map((cat) => {
                   const isMainSelected = detailedCatKey === cat.key && !detailedSubKey;
                   const hasSubs = cat.subCategories && cat.subCategories.length > 0;
-                  const catColor = cat.color || '#6366F1';
+                  const catColor = cat.color || '#5856D6';
                   return (
                     <View key={cat.key}>
                       <Pressable
@@ -868,7 +868,7 @@ export function CreditAuditInputScreen(props: any) {
                 <View style={{ gap: 6 }}>
                   {detailedAudit.byCategory.map((cat) => {
                     const catDef = detailedTemplate.categories.find((c) => c.key === cat.key);
-                    const catColor = catDef?.color || '#6366F1';
+                    const catColor = catDef?.color || '#5856D6';
                     const pct =
                       cat.required > 0
                         ? Math.min((cat.earned / cat.required) * 100, 100)
@@ -982,7 +982,7 @@ export function CreditAuditInputScreen(props: any) {
                     style={{
                       width: `${Math.min((detailedAudit.total.earned / Math.max(detailedTemplate.totalCreditsRequired, 1)) * 100, 100)}%`,
                       height: '100%',
-                      backgroundColor: detailedAudit.satisfied ? '#10B981' : theme.colors.accent,
+                      backgroundColor: detailedAudit.satisfied ? '#34C759' : theme.colors.accent,
                       borderRadius: 5,
                     }}
                   />
@@ -998,7 +998,7 @@ export function CreditAuditInputScreen(props: any) {
             {/* 各分類詳細進度 */}
             {detailedAudit.byCategory.map((cat, idx) => {
               const catDef = detailedTemplate.categories.find((c) => c.key === cat.key);
-              const catColor = catDef?.color || '#6366F1';
+              const catColor = catDef?.color || '#5856D6';
               const pct =
                 cat.required > 0
                   ? Math.min((cat.earned / cat.required) * 100, 100)
@@ -1080,7 +1080,7 @@ export function CreditAuditInputScreen(props: any) {
                                 </View>
                               </View>
                               {sub.remaining <= 0 && sub.required > 0 && (
-                                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                                <Ionicons name="checkmark-circle" size={16} color="#34C759" />
                               )}
                             </View>
                           );
@@ -1148,17 +1148,17 @@ export function CreditAuditInputScreen(props: any) {
                         flexDirection: 'row',
                         alignItems: 'center',
                         padding: 12,
-                        backgroundColor: satisfied ? '#10B98110' : theme.colors.surface2,
+                        backgroundColor: satisfied ? '#34C75910' : theme.colors.surface2,
                         borderRadius: theme.radius.md,
                         borderWidth: 1,
-                        borderColor: satisfied ? '#10B98140' : theme.colors.border,
+                        borderColor: satisfied ? '#34C75940' : theme.colors.border,
                         gap: 12,
                       }}
                     >
                       <Ionicons
                         name={satisfied ? 'checkmark-circle' : 'ellipse-outline'}
                         size={24}
-                        color={satisfied ? '#10B981' : theme.colors.muted}
+                        color={satisfied ? '#34C759' : theme.colors.muted}
                       />
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 14 }}>
@@ -1369,7 +1369,7 @@ export function CreditAuditInputScreen(props: any) {
                   }}
                 >
                   <Text style={{ color: theme.colors.text }}>待同步</Text>
-                  <Text style={{ color: unsyncedCount > 0 ? '#F59E0B' : theme.colors.muted }}>
+                  <Text style={{ color: unsyncedCount > 0 ? '#FF9500' : theme.colors.muted }}>
                     {unsyncedCount} 門
                   </Text>
                 </View>

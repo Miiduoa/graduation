@@ -1163,7 +1163,7 @@ export function getModeIcon(mode: AttendanceMode): string {
 }
 
 export function getStatusColor(status: AttendanceStatus): string {
-  return { present: '#10B981', late: '#F59E0B', absent: '#EF4444', excused: '#6366F1' }[status];
+  return { present: '#34C759', late: '#FF9500', absent: '#FF3B30', excused: '#5856D6' }[status];
 }
 
 export function getStatusLabel(status: AttendanceStatus): string {
@@ -1171,7 +1171,7 @@ export function getStatusLabel(status: AttendanceStatus): string {
 }
 
 export function getRiskColor(level: 'safe' | 'warning' | 'danger'): string {
-  return { safe: '#10B981', warning: '#F59E0B', danger: '#EF4444' }[level];
+  return { safe: '#34C759', warning: '#FF9500', danger: '#FF3B30' }[level];
 }
 
 // Legacy compatibility exports

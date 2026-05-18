@@ -65,7 +65,7 @@ function buildBusMapHtml(): string {
 .bus-pin{width:42px;height:42px;border-radius:50%;background:#fff;display:grid;place-items:center;font-weight:900;font-size:13px;box-shadow:0 4px 10px rgba(0,0,0,.45);position:relative;border:3px solid var(--c)}
 .bus-pin::after{content:"";position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #fff}
 .stop-dot{width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid var(--c);box-shadow:0 2px 4px rgba(0,0,0,.4)}
-.user-dot{width:20px;height:20px;border-radius:50%;background:#3B82F6;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4)}
+.user-dot{width:20px;height:20px;border-radius:50%;background:#007AFF;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4)}
 </style></head><body>
 <div id="map"></div>
 <script>
@@ -250,7 +250,7 @@ export function BusV2Screen(_props: Record<string, unknown>) {
           lat: v.position.lat,
           lng: v.position.lng,
           code: r?.code ?? '?',
-          color: r?.color ?? '#DC2626',
+          color: r?.color ?? '#D70015',
           plate: v.plate,
           next: nextStop?.name ?? '-',
         };
@@ -583,7 +583,7 @@ export function BusV2Screen(_props: Record<string, unknown>) {
               <StatPill
                 label="最近班次"
                 value={`${Math.max(1, upcomingArrivals[0]?.v.etaToNextStopMin ?? 5)} 分`}
-                color="#F59E0B"
+                color="#FF9500"
               />
               <StatPill
                 label="路線"
@@ -1107,7 +1107,7 @@ function FavoritesView({
               <Ionicons
                 name={isFav ? 'star' : 'star-outline'}
                 size={22}
-                color={isFav ? '#F59E0B' : theme.colors.muted}
+                color={isFav ? '#FF9500' : theme.colors.muted}
               />
             </Pressable>
           </Pressable>

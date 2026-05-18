@@ -57,14 +57,14 @@ function HomeworkCard(props: { hw: TCHomework }) {
     statusText = '已繳交';
     statusIcon = 'checkmark-circle';
   } else if (hw.is_closed || isOverdue) {
-    statusColor = '#DC2626';
+    statusColor = '#D70015';
     statusText = '已截止';
     statusIcon = 'close-circle-outline';
   } else if (endTime) {
     // 檢查是否快到截止時間（24小時內）
     const hoursLeft = (endTime.getTime() - now.getTime()) / (1000 * 60 * 60);
     if (hoursLeft <= 24 && hoursLeft > 0) {
-      statusColor = '#F59E0B';
+      statusColor = '#FF9500';
       statusText = `剩 ${Math.floor(hoursLeft)} 小時`;
       statusIcon = 'alarm-outline';
     }
@@ -89,7 +89,7 @@ function HomeworkCard(props: { hw: TCHomework }) {
         borderColor: hasSubmission
           ? '#16A34A30'
           : hw.is_closed || isOverdue
-            ? '#DC262620'
+            ? '#D7001520'
             : theme.colors.border,
         opacity: pressed ? 0.8 : 1,
       })}
@@ -316,7 +316,7 @@ export function GroupAssignmentsScreen(props: any) {
           >
             <Text
               style={{
-                color: pendingCount > 0 ? '#F59E0B' : theme.colors.muted,
+                color: pendingCount > 0 ? '#FF9500' : theme.colors.muted,
                 fontWeight: '900',
                 fontSize: 24,
               }}

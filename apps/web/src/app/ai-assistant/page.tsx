@@ -125,7 +125,7 @@ const ROLE_QUICK_PROMPTS: Record<DemoRole, QuickPrompt[]> = {
 
 // ── 顏色 ──────────────────────────────────────────────────────
 const CATEGORY_COLORS: Record<CreditCategory, string> = {
-  required: '#5E6AD2',
+  required: '#007AFF',
   elective: '#34C759',
   general: '#FF9500',
   pe: '#FF3B30',
@@ -893,7 +893,7 @@ export default function AIAssistantPage(props: {
             {demoRole === 'alumni' ? (
               // 校友：顯示畢業資訊
               [
-                { label: '已修學分', val: 128, color: '#5E6AD2' },
+                { label: '已修學分', val: 128, color: '#007AFF' },
                 { label: '畢業年份', val: '109屆', color: '#34C759' },
                 { label: '畢業 GPA', val: '3.65', color: '#FF9500' },
               ].map((s) => (
@@ -905,7 +905,7 @@ export default function AIAssistantPage(props: {
             ) : (
               // 學生 / TA：學分進度
               [
-                { label: '已修學分', val: summary.historicalEarned, color: '#5E6AD2' },
+                { label: '已修學分', val: summary.historicalEarned, color: '#007AFF' },
                 { label: '修習中', val: summary.currentSemester, color: '#34C759' },
                 { label: '還差', val: summary.remaining, color: '#FF9500' },
                 { label: '畢業需求', val: summary.totalRequired, color: '#8E8E93' },
@@ -923,8 +923,8 @@ export default function AIAssistantPage(props: {
         {(demoRole === 'teacher' || demoRole === 'ta') && (
           <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
-              { label: '課程', val: '資料結構', color: '#0F8B8D' },
-              { label: '修課人數', val: 48, color: '#5E6AD2' },
+              { label: '課程', val: '資料結構', color: '#007AFF' },
+              { label: '修課人數', val: 48, color: '#007AFF' },
               { label: '待批改', val: TEACHER_PENDING_REVIEWS.filter(r => r.status === 'submitted').length + getPendingSubmissions('c1', store).length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
@@ -940,7 +940,7 @@ export default function AIAssistantPage(props: {
           <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
               { label: '社團', val: '程式設計社', color: '#34C759' },
-              { label: '成員', val: 120, color: '#5E6AD2' },
+              { label: '成員', val: 120, color: '#007AFF' },
               { label: '待審申請', val: getPendingClubMembers('club-1', store).length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
@@ -955,8 +955,8 @@ export default function AIAssistantPage(props: {
         {demoRole === 'department_head' && (
           <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
-              { label: '在學學生', val: 312, color: '#5E6AD2' },
-              { label: '教師人數', val: 19, color: '#0F8B8D' },
+              { label: '在學學生', val: 312, color: '#007AFF' },
+              { label: '教師人數', val: 19, color: '#007AFF' },
               { label: '待審公告', val: readPendingAnns().length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
@@ -972,7 +972,7 @@ export default function AIAssistantPage(props: {
           <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
               { label: '系統狀態', val: '✅ 正常', color: '#34C759' },
-              { label: '活躍使用者', val: 89, color: '#5E6AD2' },
+              { label: '活躍使用者', val: 89, color: '#007AFF' },
               { label: '安全事件', val: 1, color: '#FF3B30' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
@@ -1383,8 +1383,8 @@ function AIActionBar({
       style={{
         padding: '14px 16px',
         background:
-          'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(124,58,237,0.06) 100%)',
-        border: '1px solid rgba(94,106,210,0.28)',
+          'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(124,58,237,0.06) 100%)',
+        border: '1px solid rgba(0,122,255,0.28)',
       }}
     >
       <div
