@@ -349,6 +349,9 @@ async function executeCampusAssistantCore({
       ) {
         response.assistantToolsUsed = modelBacked.response.assistantToolsUsed;
       }
+      if (Array.isArray(modelBacked.response.cards) && modelBacked.response.cards.length > 0) {
+        response.cards = modelBacked.response.cards;
+      }
       response.debug.route = 'agent_model_rag';
       response.debug.sourcesUsed =
         campusChunks.length +
