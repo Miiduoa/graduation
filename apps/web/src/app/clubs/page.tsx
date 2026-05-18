@@ -41,12 +41,12 @@ interface Club {
 }
 
 const CLUB_COLORS = [
-  '#007AFF',
+  '#5856D6',
   '#BF5AF2',
   '#34C759',
   '#FF9500',
   '#FF3B30',
-  '#007AFF',
+  '#5856D6',
   '#32ADE6',
   '#FF6B35',
 ];
@@ -528,9 +528,9 @@ export default function ClubsPage(props: {
                       style={{
                         padding: '6px 8px',
                         borderRadius: 'var(--radius-sm)',
-                        border: '1px solid rgba(0,122,255,0.30)',
-                        background: 'rgba(0,122,255,0.10)',
-                        color: '#007AFF',
+                        border: '1px solid rgba(88,86,214,0.30)',
+                        background: 'rgba(88,86,214,0.10)',
+                        color: '#5856D6',
                         fontSize: 12,
                         fontWeight: 700,
                         textDecoration: 'none',

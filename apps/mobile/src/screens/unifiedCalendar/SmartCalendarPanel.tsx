@@ -418,7 +418,7 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
                     <View
                       style={{
                         height: `${(day.classMinutes / total) * 100}%` as any,
-                        backgroundColor: day.isToday ? theme.colors.accent : '#007AFF',
+                        backgroundColor: day.isToday ? theme.colors.accent : '#5856D6',
                       }}
                     />
                   )}
@@ -441,7 +441,7 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
       {/* Stats */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
         {[
-          { label: '上課', value: `${weekSummary.totalClassHours}h`, color: '#007AFF' },
+          { label: '上課', value: `${weekSummary.totalClassHours}h`, color: '#5856D6' },
           { label: '自習', value: `${weekSummary.totalStudyHours}h`, color: '#34C759' },
           { label: '待辦', value: `${weekSummary.upcomingDeadlines}`, color: '#FF3B30' },
         ].map((s) => (
@@ -847,7 +847,7 @@ function PomodoroSection({
                 label: '本週',
                 value: `${stats.weekSessions}`,
                 sub: `${stats.weekMinutes}分鐘`,
-                color: '#007AFF',
+                color: '#5856D6',
               },
               { label: '連續', value: `${stats.streak}天`, sub: '', color: '#FF9500' },
             ].map((s) => (

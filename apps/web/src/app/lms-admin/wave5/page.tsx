@@ -193,8 +193,8 @@ export default function Wave5Page() {
               onClick={() => setTab(t)}
               style={{
                 ...tabBtn,
-                background: tab === t ? '#007aff' : '#fff',
-                color: tab === t ? '#fff' : '#111827',
+                background: tab === t ? '#5856D6' : '#fff',
+                color: tab === t ? '#fff' : '#1C1C1E',
               }}>
               {labelOf(t)}
             </button>
@@ -311,8 +311,8 @@ const tabBtn: React.CSSProperties = {
 const primaryBtn: React.CSSProperties = {
   padding: '10px 14px',
   borderRadius: 10,
-  border: '1px solid #007aff',
-  background: '#007aff',
+  border: '1px solid #5856D6',
+  background: '#5856D6',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',

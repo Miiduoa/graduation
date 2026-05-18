@@ -32,7 +32,7 @@ export const aiTokens = {
   textSecondary: '#3A3A3C',
   muted: '#8E8E93',
   border: '#E5E5EA',
-  ai: '#6366F1',
+  ai: '#5856D6',
   aiStrong: '#4F46E5',
   aiSoft: 'rgba(99,102,241,0.10)',
   aiSurface: '#FAFBFF',

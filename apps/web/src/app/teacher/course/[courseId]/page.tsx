@@ -198,7 +198,7 @@ export default function TeacherCoursePage(props: {
           <>
             {/* TA 角色提示 */}
             {isTaView ? (
-              <div className="card" style={{ padding: '12px 16px', background: 'rgba(124,58,237,0.10)', border: '1px solid #7C3AED', fontSize: 13, color: '#007AFF' }}>
+              <div className="card" style={{ padding: '12px 16px', background: 'rgba(124,58,237,0.10)', border: '1px solid #AF52DE', fontSize: 13, color: '#5856D6' }}>
                 🧑‍💻 <strong>助教 TA 視角</strong> ·
                 你可以批改作業、查看出席與成績，但教材結構、題庫編輯、成績發布屬於授課教師的權限，相關按鈕會以灰色顯示。
               </div>
@@ -430,7 +430,7 @@ export default function TeacherCoursePage(props: {
                     <div
                       key={assignment.id}
                       className="insetGroupRow"
-                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'rgba(0,122,255,0.06)' }}
+                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'rgba(88,86,214,0.06)' }}
                     >
                       <div className="insetGroupRowContent">
                         <div className="insetGroupRowTitle">
@@ -557,7 +557,7 @@ export default function TeacherCoursePage(props: {
             }}
           >
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: isTaView ? '#7C3AED' : '#007AFF', marginBottom: 3 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: isTaView ? '#AF52DE' : '#5856D6', marginBottom: 3 }}>
                 🤖 {isTaView ? 'AI 批改助理' : 'AI 教學助理'}
               </div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>

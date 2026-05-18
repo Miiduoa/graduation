@@ -104,7 +104,7 @@ const COURSE_COLORS = [
   '#FF2D55',
   '#FF9500',
   '#34C759',
-  '#007AFF',
+  '#5856D6',
   '#FF3B30',
   '#5856D6',
   '#14B8A6',
@@ -430,7 +430,7 @@ function CourseToolsSection(props: { nav: any; variant: 'compact' | 'empty' }) {
       title: '課綱查詢',
       subtitle: '全校課程搜尋',
       icon: 'library-outline' as const,
-      color: '#007AFF',
+      color: '#5856D6',
       onPress: () => props.nav?.navigate?.('CourseCatalog'),
     },
     {
@@ -1007,7 +1007,7 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                 <CourseChip
                   icon="albums-outline"
                   label="教材"
-                  color="#007AFF"
+                  color="#5856D6"
                   onPress={() =>
                     props.nav?.navigate?.('CourseModules', {
                       groupId: String(course.id),
@@ -1187,7 +1187,7 @@ function HomeworkView(props: {
       statusText = item.score != null ? `${item.score}/${item.total_score ?? 100}` : '已批改';
       statusIcon = 'checkmark-circle';
     } else if (isSubmitted) {
-      statusColor = '#007AFF';
+      statusColor = '#5856D6';
       statusText = '已繳交';
       statusIcon = 'checkmark-done-outline';
     } else if (isOverdue) {

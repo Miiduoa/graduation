@@ -225,7 +225,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       {/* 頂部進度 */}
@@ -274,7 +274,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
                 borderRadius: 999,
                 backgroundColor: i === activeIdx ? '#003F8A' : '#fff',
                 borderWidth: 1,
-                borderColor: i === activeIdx ? '#003F8A' : '#e5e7eb',
+                borderColor: i === activeIdx ? '#003F8A' : '#E5E5EA',
                 flexDirection: 'row',
                 gap: 6,
                 alignItems: 'center',
@@ -293,7 +293,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
                 <Ionicons
                   name="checkmark-circle"
                   size={16}
-                  color={i === activeIdx ? '#fbbf24' : '#16a34a'}
+                  color={i === activeIdx ? '#fbbf24' : '#34C759'}
                 />
               )}
               {s.isLate && (
@@ -311,7 +311,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
             borderRadius: 12,
             padding: 14,
             borderWidth: 1,
-            borderColor: '#e5e7eb',
+            borderColor: '#E5E5EA',
           }}
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -338,7 +338,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
               style={{
                 marginTop: 8,
                 padding: 8,
-                backgroundColor: '#f3f4f6',
+                backgroundColor: '#F2F2F7',
                 borderRadius: 6,
                 flexDirection: 'row',
                 gap: 6,
@@ -385,7 +385,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
               borderRadius: 12,
               padding: 14,
               borderWidth: 1,
-              borderColor: '#e5e7eb',
+              borderColor: '#E5E5EA',
             }}
           >
             <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -402,7 +402,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
                     minWidth: 80,
                     padding: 10,
                     borderRadius: 8,
-                    backgroundColor: scores[c.id] === l.id ? '#003F8A' : '#f3f4f6',
+                    backgroundColor: scores[c.id] === l.id ? '#003F8A' : '#F2F2F7',
                     alignItems: 'center',
                   }}
                 >
@@ -453,7 +453,7 @@ export default function TeacherGradingScreen(props: RouteProps) {
             padding: 10,
             fontSize: 13,
             borderWidth: 1,
-            borderColor: '#e5e7eb',
+            borderColor: '#E5E5EA',
             minHeight: 80,
             textAlignVertical: 'top',
           }}

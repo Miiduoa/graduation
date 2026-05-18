@@ -61,8 +61,8 @@ export default function ExportJobsPage() {
           marginTop: 12,
           padding: '8px 14px',
           borderRadius: 8,
-          border: '1px solid #007aff',
-          background: '#007aff',
+          border: '1px solid #5856D6',
+          background: '#5856D6',
           color: '#fff',
           fontWeight: 700,
           cursor: 'pointer',
@@ -129,7 +129,7 @@ export default function ExportJobsPage() {
 
 function statusBg(s: string) {
   if (s === 'queued') return '#fef3c7';
-  if (s === 'running') return '#dbeafe';
+  if (s === 'running') return '#E5F2FF';
   if (s === 'ready') return '#dcfce7';
   if (s === 'failed') return '#fecaca';
   return '#F2F2F7';
@@ -139,7 +139,7 @@ function statusFg(s: string) {
   if (s === 'running') return '#1d4ed8';
   if (s === 'ready') return '#166534';
   if (s === 'failed') return '#991b1b';
-  return '#111827';
+  return '#1C1C1E';
 }
 
 const cellStyle: React.CSSProperties = {

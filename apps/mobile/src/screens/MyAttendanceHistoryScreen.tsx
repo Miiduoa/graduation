@@ -138,7 +138,7 @@ export default function MyAttendanceHistoryScreen() {
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
       refreshControl={
         <RefreshControl
@@ -227,7 +227,7 @@ export default function MyAttendanceHistoryScreen() {
           const rate = c.totalSessions > 0
             ? (c.presentCount + c.lateCount) / c.totalSessions
             : 0;
-          const tone = rate >= 0.9 ? '#16a34a' : rate >= 0.7 ? '#FF9500' : '#D70015';
+          const tone = rate >= 0.9 ? '#34C759' : rate >= 0.7 ? '#FF9500' : '#D70015';
           return (
             <Pressable
               key={c.courseId}
@@ -243,7 +243,7 @@ export default function MyAttendanceHistoryScreen() {
                 borderRadius: 12,
                 padding: 14,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: '#E5E5EA',
                 borderLeftWidth: 4,
                 borderLeftColor: tone,
               }}
@@ -257,7 +257,7 @@ export default function MyAttendanceHistoryScreen() {
                 </Text>
               </View>
               <View style={{ flexDirection: 'row', gap: 12, marginTop: 6 }}>
-                <Text style={{ fontSize: 11, color: '#16a34a' }}>✓ {c.presentCount}</Text>
+                <Text style={{ fontSize: 11, color: '#34C759' }}>✓ {c.presentCount}</Text>
                 <Text style={{ fontSize: 11, color: '#FF9500' }}>⏰ {c.lateCount}</Text>
                 <Text style={{ fontSize: 11, color: '#D70015' }}>✗ {c.absentCount}</Text>
                 <Text style={{ fontSize: 11, color: '#8E8E93' }}>共 {c.totalSessions} 次</Text>

@@ -1038,18 +1038,18 @@ export const CATEGORY_ICONS: Record<CampusPoiCategory, string> = {
 };
 
 export const CATEGORY_COLORS: Record<CampusPoiCategory, string> = {
-  academic: '#007AFF',
+  academic: '#5856D6',
   admin: '#AF52DE',
   library: '#34C759',
   cafeteria: '#D70015',
   dormitory: '#FF9500',
-  sports: '#16A34A',
+  sports: '#34C759',
   parking: '#8E8E93',
   convenience: '#0891B2',
   medical: '#D70015',
   religious: '#9333EA',
   gate: '#475569',
-  research: '#007AFF',
+  research: '#5856D6',
   other: '#8E8E93',
 };
 

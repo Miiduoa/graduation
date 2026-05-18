@@ -149,7 +149,7 @@ export default function CourseNotesScreen(props: RouteProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View
@@ -192,7 +192,7 @@ export default function CourseNotesScreen(props: RouteProps) {
                   borderRadius: 999,
                   backgroundColor: !filterTag ? '#003F8A' : '#fff',
                   borderWidth: 1,
-                  borderColor: !filterTag ? '#003F8A' : '#e5e7eb',
+                  borderColor: !filterTag ? '#003F8A' : '#E5E5EA',
                 }}
               >
                 <Text style={{ color: !filterTag ? '#fff' : '#1C1C1E', fontSize: 12 }}>全部</Text>
@@ -207,7 +207,7 @@ export default function CourseNotesScreen(props: RouteProps) {
                     borderRadius: 999,
                     backgroundColor: filterTag === t ? '#003F8A' : '#fff',
                     borderWidth: 1,
-                    borderColor: filterTag === t ? '#003F8A' : '#e5e7eb',
+                    borderColor: filterTag === t ? '#003F8A' : '#E5E5EA',
                   }}
                 >
                   <Text style={{ color: filterTag === t ? '#fff' : '#1C1C1E', fontSize: 12 }}>
@@ -239,7 +239,7 @@ export default function CourseNotesScreen(props: RouteProps) {
                     borderRadius: 12,
                     padding: 12,
                     borderWidth: 1,
-                    borderColor: '#e5e7eb',
+                    borderColor: '#E5E5EA',
                   }}
                 >
                   <Text style={{ fontSize: 14, color: '#1C1C1E', lineHeight: 20 }}>{n.text}</Text>
@@ -293,7 +293,7 @@ export default function CourseNotesScreen(props: RouteProps) {
           backgroundColor: '#fff',
           padding: 12,
           borderTopWidth: 1,
-          borderTopColor: '#e5e7eb',
+          borderTopColor: '#E5E5EA',
         }}
       >
         <TextInput
@@ -303,7 +303,7 @@ export default function CourseNotesScreen(props: RouteProps) {
           multiline
           editable={!notesLoading}
           style={{
-            backgroundColor: '#f9fafb',
+            backgroundColor: '#F2F2F7',
             borderRadius: 8,
             padding: 10,
             fontSize: 14,

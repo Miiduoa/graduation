@@ -275,7 +275,7 @@ export function LostFoundScreen(props: any) {
           {[
             { label: '遺失', value: stats.totalLostThisMonth, color: '#FF3B30' },
             { label: '拾獲', value: stats.totalFoundThisMonth, color: '#34C759' },
-            { label: '歸還', value: stats.returnedThisMonth, color: '#007AFF' },
+            { label: '歸還', value: stats.returnedThisMonth, color: '#5856D6' },
             { label: '警衛室', value: stats.pendingAtGuard, color: '#FF9500' },
           ].map((s) => (
             <View
@@ -779,7 +779,7 @@ export function LostFoundScreen(props: any) {
               dim: '類別匹配',
               weight: '30%',
               icon: 'grid-outline',
-              color: '#007AFF',
+              color: '#5856D6',
               desc: '物品分類是否相同/相近',
             },
             {
@@ -962,7 +962,7 @@ export function LostFoundScreen(props: any) {
                         label: '類別',
                         score: mr.breakdown.categoryMatch,
                         max: 30,
-                        color: '#007AFF',
+                        color: '#5856D6',
                       },
                       {
                         label: '地點',

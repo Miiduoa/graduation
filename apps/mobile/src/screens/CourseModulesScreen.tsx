@@ -170,8 +170,8 @@ function getFileColor(name: string): string {
   if (lower.endsWith('.pdf')) return '#D70015';
   if (lower.endsWith('.pptx') || lower.endsWith('.ppt')) return '#FF9500';
   if (lower.endsWith('.mp4') || lower.endsWith('.mov')) return '#AF52DE';
-  if (lower.endsWith('.docx') || lower.endsWith('.doc')) return '#007AFF';
-  if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) return '#16A34A';
+  if (lower.endsWith('.docx') || lower.endsWith('.doc')) return '#5856D6';
+  if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) return '#34C759';
   if (
     lower.endsWith('.jpg') ||
     lower.endsWith('.jpeg') ||
@@ -375,11 +375,11 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
   let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
   if (hasScore) {
-    statusColor = score >= 60 ? '#16A34A' : '#D70015';
+    statusColor = score >= 60 ? '#34C759' : '#D70015';
     statusText = `${score} 分`;
     statusIcon = 'checkmark-circle';
   } else if (isSubmitted) {
-    statusColor = '#007AFF';
+    statusColor = '#5856D6';
     statusText = '已交卷';
     statusIcon = 'checkmark-done-outline';
   } else if (isEnded) {
@@ -417,7 +417,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
           borderBottomRightRadius: expanded ? 0 : 14,
           backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
           borderWidth: 1,
-          borderColor: hasScore ? (score >= 60 ? '#16A34A30' : '#D7001530') : theme.colors.border,
+          borderColor: hasScore ? (score >= 60 ? '#34C75930' : '#D7001530') : theme.colors.border,
           borderBottomWidth: expanded ? 0 : 1,
           opacity: pressed ? 0.8 : 1,
         })}
@@ -474,7 +474,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
             borderTopRightRadius: 0,
             backgroundColor: theme.colors.surface2,
             borderWidth: 1,
-            borderColor: hasScore ? (score >= 60 ? '#16A34A30' : '#D7001530') : theme.colors.border,
+            borderColor: hasScore ? (score >= 60 ? '#34C75930' : '#D7001530') : theme.colors.border,
             borderTopWidth: 0,
             gap: 10,
           }}
@@ -548,7 +548,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                     style={{
                       color:
                         Number(sub.score) >= 60
-                          ? '#16A34A'
+                          ? '#34C759'
                           : Number(sub.score) > 0
                             ? '#D70015'
                             : theme.colors.muted,
@@ -586,7 +586,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                     </Text>
                     <Text
                       style={{
-                        color: (attempt.score ?? 0) >= 60 ? '#16A34A' : '#D70015',
+                        color: (attempt.score ?? 0) >= 60 ? '#34C759' : '#D70015',
                         fontWeight: '700',
                         fontSize: 14,
                       }}
@@ -616,7 +616,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                             borderRadius: 6,
                             backgroundColor:
                               ans.correct === true
-                                ? '#16A34A10'
+                                ? '#34C75910'
                                 : ans.correct === false
                                   ? '#D7001510'
                                   : 'transparent',
@@ -633,7 +633,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                             size={14}
                             color={
                               ans.correct === true
-                                ? '#16A34A'
+                                ? '#34C759'
                                 : ans.correct === false
                                   ? '#D70015'
                                   : theme.colors.muted
@@ -647,7 +647,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                               color:
                                 ans.score != null
                                   ? ans.score > 0
-                                    ? '#16A34A'
+                                    ? '#34C759'
                                     : '#D70015'
                                   : theme.colors.muted,
                               fontSize: 11,
@@ -690,7 +690,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
               </Text>
               <Text
                 style={{
-                  color: (exam.submission.exam_score ?? 0) >= 60 ? '#16A34A' : '#D70015',
+                  color: (exam.submission.exam_score ?? 0) >= 60 ? '#34C759' : '#D70015',
                   fontWeight: '800',
                   fontSize: 20,
                 }}
@@ -748,7 +748,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
   let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
   if (hasSubmission) {
-    statusColor = '#16A34A';
+    statusColor = '#34C759';
     statusText = '已繳交';
     statusIcon = 'checkmark-circle';
   } else if (isEnded) {
@@ -781,7 +781,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
           borderBottomRightRadius: expanded ? 0 : 14,
           backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
           borderWidth: 1,
-          borderColor: hasSubmission ? '#16A34A30' : isEnded ? '#D7001520' : theme.colors.border,
+          borderColor: hasSubmission ? '#34C75930' : isEnded ? '#D7001520' : theme.colors.border,
           borderBottomWidth: expanded ? 0 : 1,
           opacity: pressed ? 0.8 : 1,
         })}
@@ -830,7 +830,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
             borderTopRightRadius: 0,
             backgroundColor: theme.colors.surface2,
             borderWidth: 1,
-            borderColor: hasSubmission ? '#16A34A30' : isEnded ? '#D7001520' : theme.colors.border,
+            borderColor: hasSubmission ? '#34C75930' : isEnded ? '#D7001520' : theme.colors.border,
             borderTopWidth: 0,
             gap: 8,
           }}
@@ -912,7 +912,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                     {sub.score != null && (
                       <Text
                         style={{
-                          color: sub.score >= 60 ? '#16A34A' : '#D70015',
+                          color: sub.score >= 60 ? '#34C759' : '#D70015',
                           fontWeight: '700',
                           fontSize: 14,
                         }}
@@ -1027,7 +1027,7 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
           </Text>
           <Text
             style={{
-              color: finalScore >= 60 ? '#16A34A' : '#D70015',
+              color: finalScore >= 60 ? '#34C759' : '#D70015',
               fontWeight: '800',
               fontSize: 24,
             }}
@@ -1056,7 +1056,7 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
             </View>
             <Text
               style={{
-                color: (exam.submission?.exam_score ?? 0) >= 60 ? '#16A34A' : '#D70015',
+                color: (exam.submission?.exam_score ?? 0) >= 60 ? '#34C759' : '#D70015',
                 fontWeight: '700',
                 fontSize: 16,
               }}

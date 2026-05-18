@@ -817,7 +817,7 @@ export function getTransactionStatusText(status: PaymentStatus): string {
 export function getTransactionStatusColor(status: PaymentStatus): string {
   const colors: Record<PaymentStatus, string> = {
     pending: '#FF9500',
-    processing: '#007AFF',
+    processing: '#5856D6',
     completed: '#22C55E',
     failed: '#FF3B30',
     cancelled: '#8E8E93',

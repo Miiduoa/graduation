@@ -36,7 +36,7 @@ const WIDGETS: Widget[] = [
     description: '顯示即將開始的課程',
     sizes: ['small', 'medium'],
     icon: 'alarm',
-    color: '#007AFF',
+    color: '#5856D6',
     status: 'native',
   },
   {

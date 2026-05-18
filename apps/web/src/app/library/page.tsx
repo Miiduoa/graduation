@@ -312,7 +312,7 @@ export default function LibraryPage(props: {
             <div className="metricValue">{totalAvailable}</div>
             <div className="metricLabel">可用座位</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#007AFF' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
             <div className="metricIcon">🕐</div>
             <div className="metricValue">22:00</div>
             <div className="metricLabel">今日關閉</div>
@@ -397,7 +397,7 @@ export default function LibraryPage(props: {
           <div className="pageStack">
             {/* 非學生角色：提示這是示範學生的借閱視角 */}
             {demoRole !== 'student' && (
-              <div className="card" style={{ padding: '12px 16px', background: 'rgba(0,122,255,0.08)', border: '1px solid rgba(0,122,255,0.25)', fontSize: 13 }}>
+              <div className="card" style={{ padding: '12px 16px', background: 'rgba(88,86,214,0.08)', border: '1px solid rgba(88,86,214,0.25)', fontSize: 13 }}>
                 📋 <strong>{roleDef.label}視角</strong> · 以下顯示示範學生（王小明）的借閱紀錄，正式版將連結個人圖書館帳號。
                 <Link href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我推薦一份適合教學參考的書單')}`} style={{ marginLeft: 10, color: 'var(--brand)' }}>
                   問 AI 推薦書單 →

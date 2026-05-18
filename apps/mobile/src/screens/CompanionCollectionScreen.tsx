@@ -82,7 +82,7 @@ export default function CompanionCollectionScreen() {
   const tabUnlockedCount = tabAchievements.filter((a) => unlocked.has(a.id)).length;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f9fafb' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       {/* 頂部 */}
       <View style={{ padding: 16, backgroundColor: '#003F8A' }}>
         <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700' }}>我的收藏</Text>
@@ -95,7 +95,7 @@ export default function CompanionCollectionScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={{ backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}
+        style={{ backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' }}
         contentContainerStyle={{ padding: 12, gap: 8 }}
       >
         {DOMAIN_TABS.map((t) => (
@@ -106,7 +106,7 @@ export default function CompanionCollectionScreen() {
               paddingHorizontal: 14,
               paddingVertical: 8,
               borderRadius: 999,
-              backgroundColor: activeTab === t.key ? '#003F8A' : '#f3f4f6',
+              backgroundColor: activeTab === t.key ? '#003F8A' : '#F2F2F7',
             }}
           >
             <Text style={{ color: activeTab === t.key ? '#fff' : '#3C3C43', fontSize: 13 }}>
@@ -136,7 +136,7 @@ export default function CompanionCollectionScreen() {
                 marginBottom: 10,
                 opacity: has ? 1 : 0.6,
                 borderWidth: has ? 2 : 1,
-                borderColor: has ? '#fbbf24' : '#e5e7eb',
+                borderColor: has ? '#fbbf24' : '#E5E5EA',
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -153,7 +153,7 @@ export default function CompanionCollectionScreen() {
                       <View
                         style={{
                           height: 4,
-                          backgroundColor: '#e5e7eb',
+                          backgroundColor: '#E5E5EA',
                           borderRadius: 2,
                           overflow: 'hidden',
                         }}

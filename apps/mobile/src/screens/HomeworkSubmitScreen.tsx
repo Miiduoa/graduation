@@ -168,7 +168,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
@@ -244,7 +244,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
               minHeight: 160,
               textAlignVertical: 'top',
               borderWidth: 1,
-              borderColor: '#e5e7eb',
+              borderColor: '#E5E5EA',
             }}
           />
         </View>
@@ -275,7 +275,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                 alignItems: 'center',
                 gap: 8,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: '#E5E5EA',
               }}
             >
               <Ionicons name="document-outline" size={18} color="#8E8E93" />

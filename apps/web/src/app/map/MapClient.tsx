@@ -109,10 +109,10 @@ const DEMO_LOCATIONS: Location[] = [
 ];
 
 const CATEGORY_COLORS: Record<string, string> = {
-  教學: '#007AFF',
+  教學: '#5856D6',
   學習: '#34C759',
   餐廳: '#FF9500',
-  運動: '#007AFF',
+  運動: '#5856D6',
   交通: '#32ADE6',
   行政: '#BF5AF2',
   住宿: '#FF6B35',
@@ -240,7 +240,7 @@ export default function MapClient({ school }: { school: string }) {
     });
 
     filtered.forEach((loc) => {
-      const color = CATEGORY_COLORS[loc.category] ?? '#007AFF';
+      const color = CATEGORY_COLORS[loc.category] ?? '#5856D6';
       const iconHtml = `<div style="background:${color};width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3)"></div>`;
       const icon = L.divIcon({
         html: iconHtml,
@@ -284,7 +284,7 @@ export default function MapClient({ school }: { school: string }) {
     setSavedIds(newSaved);
   };
 
-  const color = selected ? (CATEGORY_COLORS[selected.category] ?? '#007AFF') : '#007AFF';
+  const color = selected ? (CATEGORY_COLORS[selected.category] ?? '#5856D6') : '#5856D6';
 
   return (
     <div className="pageStack">
@@ -429,7 +429,7 @@ export default function MapClient({ school }: { school: string }) {
         </div>
         <div className="insetGroup">
           {filtered.map((loc, i) => {
-            const locColor = CATEGORY_COLORS[loc.category] ?? '#007AFF';
+            const locColor = CATEGORY_COLORS[loc.category] ?? '#5856D6';
             const isSelected = selected?.id === loc.id;
             return (
               <div

@@ -406,7 +406,7 @@ export default function MistakeRepertoireScreen() {
                       flex: 1,
                       padding: 12,
                       borderRadius: 10,
-                      backgroundColor: '#16A34A',
+                      backgroundColor: '#34C759',
                       alignItems: 'center',
                       opacity: pressed ? 0.85 : 1,
                     })}

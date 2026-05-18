@@ -17,7 +17,7 @@ import {
 
 // ── 顏色映射 ──────────────────────────────────────────────────
 const CATEGORY_COLORS: Record<CreditCategory, string> = {
-  required: '#007AFF',
+  required: '#5856D6',
   elective: '#34C759',
   general: '#FF9500',
   pe: '#FF3B30',
@@ -25,7 +25,7 @@ const CATEGORY_COLORS: Record<CreditCategory, string> = {
 };
 
 const CATEGORY_BG: Record<CreditCategory, string> = {
-  required: 'rgba(0,122,255,0.12)',
+  required: 'rgba(88,86,214,0.12)',
   elective: 'rgba(52,199,89,0.12)',
   general: 'rgba(255,149,0,0.12)',
   pe: 'rgba(255,59,48,0.12)',
@@ -179,8 +179,8 @@ export default function CreditPlannerPage(props: {
             className="card"
             style={{
               padding: '14px 16px',
-              background: 'rgba(0,122,255,0.08)',
-              border: '1px solid #007AFF',
+              background: 'rgba(88,86,214,0.08)',
+              border: '1px solid #5856D6',
               fontSize: 13,
             }}
           >
@@ -214,7 +214,7 @@ export default function CreditPlannerPage(props: {
             background: 'linear-gradient(135deg, var(--brand) 0%, #8EA5FF 100%)',
             border: 'none',
             color: '#fff',
-            boxShadow: '6px 6px 16px rgba(0,122,255,0.36)',
+            boxShadow: '6px 6px 16px rgba(88,86,214,0.36)',
           }}
         >
           <div
@@ -571,7 +571,7 @@ export default function CreditPlannerPage(props: {
                             fontSize: 10,
                             padding: '1px 6px',
                             borderRadius: 99,
-                            background: 'rgba(0,122,255,0.15)',
+                            background: 'rgba(88,86,214,0.15)',
                             color: 'var(--brand)',
                             fontWeight: 700,
                           }}
@@ -875,7 +875,7 @@ export default function CreditPlannerPage(props: {
         <div
           className="card"
           style={{
-            background: 'linear-gradient(135deg, #007AFF 0%, #8EA5FF 100%)',
+            background: 'linear-gradient(135deg, #5856D6 0%, #8EA5FF 100%)',
             border: 'none',
             color: '#fff',
             cursor: 'pointer',

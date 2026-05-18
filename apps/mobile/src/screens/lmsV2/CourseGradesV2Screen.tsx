@@ -28,7 +28,7 @@ export default function CourseGradesV2Screen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <CourseV2Header title="成績" subtitle={courseName} />
       {loadable.data?.rollup ? (
         <View style={styles.summary}>
@@ -77,12 +77,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
   },
   title: { fontSize: 15, fontWeight: '600' },
   meta: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
   scoreBox: { alignItems: 'flex-end' },
-  score: { fontSize: 22, fontWeight: '700', color: '#007AFF' },
+  score: { fontSize: 22, fontWeight: '700', color: '#5856D6' },
   max: { fontSize: 12, color: '#AEAEB2', fontWeight: '400' },
   summary: {
     margin: 12,

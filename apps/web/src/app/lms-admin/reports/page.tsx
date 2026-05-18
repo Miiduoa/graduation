@@ -414,8 +414,8 @@ const selectStyle: React.CSSProperties = {
 const primaryBtnStyle: React.CSSProperties = {
   padding: '10px 14px',
   borderRadius: 10,
-  border: '1px solid #007aff',
-  background: '#007aff',
+  border: '1px solid #5856D6',
+  background: '#5856D6',
   color: '#fff',
   fontWeight: 700,
   cursor: 'pointer',
@@ -453,7 +453,7 @@ function RollupView({
             <YAxis domain={[0, 100]} unit="%" width={52} />
             <Tooltip formatter={(value: number) => [`${value?.toFixed(2)}%`, 'weighted']} />
             <Legend />
-            <Bar name="weighted %" dataKey="pct" fill="#007aff" radius={[8, 8, 2, 2]} />
+            <Bar name="weighted %" dataKey="pct" fill="#5856D6" radius={[8, 8, 2, 2]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -544,7 +544,7 @@ function QuizView({
             <YAxis />
             <Tooltip />
             <Legend />
-            <Bar name="avg score" dataKey="avg" fill="#7c3aed" />
+            <Bar name="avg score" dataKey="avg" fill="#AF52DE" />
             <Bar name="繳交人次" dataKey="students" fill="#0ea5e9" />
           </BarChart>
         </ResponsiveContainer>
@@ -667,7 +667,7 @@ function EngagementView({
             <Legend />
             <Bar dataKey="forum" name="討論" fill="#0ea5e9" stackId="a" />
             <Bar dataKey="quiz" name="作答" fill="#34C759" stackId="a" />
-            <Bar dataKey="live" name="簽到" fill="#f59e0b" stackId="a" />
+            <Bar dataKey="live" name="簽到" fill="#FF9500" stackId="a" />
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -101,7 +101,7 @@ export default function MyQuizScoresScreen() {
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
       refreshControl={
         <RefreshControl
@@ -151,7 +151,7 @@ export default function MyQuizScoresScreen() {
               borderRadius: 8,
               backgroundColor: filter === f ? '#003F8A' : '#fff',
               borderWidth: 1,
-              borderColor: filter === f ? '#003F8A' : '#e5e7eb',
+              borderColor: filter === f ? '#003F8A' : '#E5E5EA',
               alignItems: 'center',
             }}
           >
@@ -180,7 +180,7 @@ export default function MyQuizScoresScreen() {
         filtered.map((r, i) => {
           const pass = (r.percentage ?? 0) >= 60;
           const tone =
-            r.percentage === null ? '#8E8E93' : pass ? '#16a34a' : '#D70015';
+            r.percentage === null ? '#8E8E93' : pass ? '#34C759' : '#D70015';
           return (
             <Pressable
               key={`${r.courseId}-${r.exam.id}`}
@@ -196,7 +196,7 @@ export default function MyQuizScoresScreen() {
                 borderRadius: 12,
                 padding: 14,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: '#E5E5EA',
                 borderLeftWidth: 4,
                 borderLeftColor: tone,
               }}
@@ -241,7 +241,7 @@ export default function MyQuizScoresScreen() {
                   style={{
                     marginTop: 8,
                     height: 4,
-                    backgroundColor: '#e5e7eb',
+                    backgroundColor: '#E5E5EA',
                     borderRadius: 2,
                     overflow: 'hidden',
                   }}

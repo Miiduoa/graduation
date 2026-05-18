@@ -168,8 +168,8 @@ export function HeroActionCard(props: {
               iconBg: '#FEE2E220',
             }
           : {
-              colors: ['#F3F4F6', '#E5E7EB'] as [string, string],
-              fg: '#007AFF',
+              colors: ['#F2F2F7', '#E5E5EA'] as [string, string],
+              fg: '#5856D6',
               iconBg: 'rgba(17,24,39,0.06)',
             };
 
@@ -605,7 +605,7 @@ export function RoleCtaCard(props: {
       ? { colors: ['#D1FAE5', '#A7F3D0'] as const, fg: '#34C759' }
       : props.tone === 'admin'
         ? { colors: ['#FEF3C7', '#FDE68A'] as const, fg: '#FF9500' }
-        : { colors: ['#F3F4F6', '#E5E7EB'] as const, fg: '#007AFF' };
+        : { colors: ['#F2F2F7', '#E5E5EA'] as const, fg: '#5856D6' };
 
   const isDark = theme.mode === 'dark';
   const gradColors = isDark

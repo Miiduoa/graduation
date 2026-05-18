@@ -262,7 +262,7 @@ export function HealthScreen(props: any) {
       <AnimatedCard title="快速操作" delay={100}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
           {[
-            { key: 'clinic', label: '症狀自評', icon: 'git-compare-outline', color: '#007AFF' },
+            { key: 'clinic', label: '症狀自評', icon: 'git-compare-outline', color: '#5856D6' },
             { key: 'book', label: '預約掛號', icon: 'calendar-outline', color: '#34C759' },
             { key: 'mood', label: '記錄心情', icon: 'happy-outline', color: '#AF52DE' },
             { key: 'emergency', label: '緊急求助', icon: 'warning-outline', color: '#FF3B30' },
@@ -415,7 +415,7 @@ export function HealthScreen(props: any) {
               name: HEALTH_CENTER.name,
               hours: HEALTH_CENTER.hours[0].time,
               icon: 'medical-outline',
-              color: '#007AFF',
+              color: '#5856D6',
             },
             {
               name: COUNSELING_CENTER.name,
@@ -526,7 +526,7 @@ export function HealthScreen(props: any) {
                         : triageResult.severity === 'severe'
                           ? '#FF950020'
                           : triageResult.severity === 'moderate'
-                            ? '#007AFF20'
+                            ? '#5856D620'
                             : '#34C75915',
                     borderWidth: 1,
                     borderColor:
@@ -535,7 +535,7 @@ export function HealthScreen(props: any) {
                         : triageResult.severity === 'severe'
                           ? '#FF950050'
                           : triageResult.severity === 'moderate'
-                            ? '#007AFF50'
+                            ? '#5856D650'
                             : '#34C75930',
                   }}
                 >
@@ -815,7 +815,7 @@ export function HealthScreen(props: any) {
                 gap: 8,
                 padding: 10,
                 borderRadius: 8,
-                backgroundColor: `${MOOD_FACTORS.find((f) => f.id === moodTrend.dominantFactor)?.id ? '#AF52DE' : '#007AFF'}10`,
+                backgroundColor: `${MOOD_FACTORS.find((f) => f.id === moodTrend.dominantFactor)?.id ? '#AF52DE' : '#5856D6'}10`,
               }}
             >
               <Ionicons name="analytics-outline" size={16} color="#AF52DE" />
@@ -991,7 +991,7 @@ export function HealthScreen(props: any) {
                   label: 'BMI',
                   value: passport.bmi?.toString() ?? '--',
                   icon: 'body',
-                  color: '#007AFF',
+                  color: '#5856D6',
                 },
                 {
                   label: '視力(左)',
@@ -1285,7 +1285,7 @@ export function HealthScreen(props: any) {
               color: '#FF9500',
             },
             { name: '韻律教室', hours: '08:00-21:00', icon: 'body-outline', color: '#FF2D55' },
-            { name: '操場/跑道', hours: '06:00-22:00', icon: 'walk-outline', color: '#007AFF' },
+            { name: '操場/跑道', hours: '06:00-22:00', icon: 'walk-outline', color: '#5856D6' },
             { name: '籃球場', hours: '06:00-22:00', icon: 'basketball-outline', color: '#EA580C' },
             {
               name: '游泳池',
@@ -1455,7 +1455,7 @@ export function HealthScreen(props: any) {
       <AnimatedCard title="急救步驟" subtitle="黃金 4 分鐘" delay={100}>
         <View style={{ gap: 6 }}>
           {[
-            { step: '1', text: '確認環境安全，評估意識', icon: 'eye-outline', color: '#007AFF' },
+            { step: '1', text: '確認環境安全，評估意識', icon: 'eye-outline', color: '#5856D6' },
             { step: '2', text: '呼叫 119 + 請人取 AED', icon: 'call-outline', color: '#FF3B30' },
             { step: '3', text: '壓額抬下巴，檢查呼吸', icon: 'body-outline', color: '#FF9500' },
             {

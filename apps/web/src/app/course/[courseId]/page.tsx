@@ -160,8 +160,8 @@ export default function CoursePage(props: {
             className="card"
             style={{
               padding: '12px 16px',
-              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(0,122,255,0.08)',
-              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#007AFF'}`,
+              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(88,86,214,0.08)',
+              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#5856D6'}`,
               fontSize: 13,
             }}
           >
@@ -233,7 +233,7 @@ export default function CoursePage(props: {
             <div className="metricValue">{summary.assignments}</div>
             <div className="metricLabel">作業</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#7C3AED' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': '#AF52DE' } as CSSProperties}>
             <div className="metricIcon">❓</div>
             <div className="metricValue">{summary.quizzes}</div>
             <div className="metricLabel">測驗 / 考試</div>
@@ -303,8 +303,8 @@ export default function CoursePage(props: {
             className="card"
             style={{
               padding: '16px 20px',
-              background: 'linear-gradient(135deg, rgba(0,122,255,0.08) 0%, rgba(90,200,250,0.06) 100%)',
-              border: '1px solid rgba(0,122,255,0.28)',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.08) 0%, rgba(90,200,250,0.06) 100%)',
+              border: '1px solid rgba(88,86,214,0.28)',
               display: 'flex',
               flexDirection: 'column',
               gap: 12,
@@ -397,9 +397,9 @@ export default function CoursePage(props: {
                           style={{
                             padding: '6px 10px',
                             borderRadius: 8,
-                            border: '1px solid rgba(0,122,255,0.30)',
-                            background: 'rgba(0,122,255,0.10)',
-                            color: '#007AFF',
+                            border: '1px solid rgba(88,86,214,0.30)',
+                            background: 'rgba(88,86,214,0.10)',
+                            color: '#5856D6',
                             fontSize: 12,
                             fontWeight: 700,
                             textDecoration: 'none',
@@ -457,7 +457,7 @@ export default function CoursePage(props: {
                     <div
                       key={item.id}
                       className="insetGroupRow"
-                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'rgba(0,122,255,0.06)' }}
+                      style={{ borderTop: index === 0 ? 'none' : undefined, background: 'rgba(88,86,214,0.06)' }}
                     >
                       <div className="insetGroupRowContent">
                         <div className="insetGroupRowTitle">🆕 {item.title}</div>
@@ -482,9 +482,9 @@ export default function CoursePage(props: {
                           }}
                           style={{
                             padding: '6px 12px', borderRadius: 8, border: '1px solid',
-                            borderColor: submitted ? '#34C759' : '#007AFF',
-                            background: submitted ? 'rgba(52,199,89,0.10)' : 'rgba(0,122,255,0.10)',
-                            color: submitted ? '#34C759' : '#007AFF',
+                            borderColor: submitted ? '#34C759' : '#5856D6',
+                            background: submitted ? 'rgba(52,199,89,0.10)' : 'rgba(88,86,214,0.10)',
+                            color: submitted ? '#34C759' : '#5856D6',
                             fontSize: 12, fontWeight: 700,
                             cursor: submitted ? 'default' : 'pointer',
                           }}
@@ -521,9 +521,9 @@ export default function CoursePage(props: {
                             style={{
                               padding: '6px 10px',
                               borderRadius: 8,
-                              border: '1px solid rgba(0,122,255,0.30)',
-                              background: 'rgba(0,122,255,0.10)',
-                              color: '#007AFF',
+                              border: '1px solid rgba(88,86,214,0.30)',
+                              background: 'rgba(88,86,214,0.10)',
+                              color: '#5856D6',
                               fontSize: 12,
                               fontWeight: 700,
                               textDecoration: 'none',
@@ -552,7 +552,7 @@ export default function CoursePage(props: {
                             border: '1px solid',
                             borderColor: canTakeAction
                               ? isQuiz
-                                ? '#7C3AED'
+                                ? '#AF52DE'
                                 : '#FF9500'
                               : 'var(--border)',
                             background: canTakeAction
@@ -562,7 +562,7 @@ export default function CoursePage(props: {
                               : 'var(--panel)',
                             color: canTakeAction
                               ? isQuiz
-                                ? '#7C3AED'
+                                ? '#AF52DE'
                                 : '#B45309'
                               : 'var(--muted)',
                             fontSize: 12,

@@ -296,7 +296,7 @@ export default function PushLogsPage() {
                 <Tooltip />
                 <Legend />
                 <Bar dataKey="success" stackId="a" fill="#34C759" name="success" />
-                <Bar dataKey="attempted" stackId="a" fill="#007aff" name="attempted" />
+                <Bar dataKey="attempted" stackId="a" fill="#5856D6" name="attempted" />
                 <Bar dataKey="failed" stackId="a" fill="#FF3B30" name="failed" />
               </BarChart>
             </ResponsiveContainer>
@@ -471,7 +471,7 @@ function SummaryCell({ label, value, highlight }: { label: string; value?: numbe
         border: highlight ? '1px solid #fecaca' : '1px solid #E5E5EA',
       }}>
       <div style={{ fontSize: 12, color: '#8E8E93' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? '#FF3B30' : '#111827' }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: highlight ? '#FF3B30' : '#1C1C1E' }}>
         {value == null ? '—' : value}
       </div>
     </div>
