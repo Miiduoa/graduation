@@ -3395,6 +3395,26 @@ export function createCancellableChat() {
 }
 
 /**
+ * 可取消版的 Campus Assistant：走後端 agent runtime（與中間 FAB 球同一條管線）。
+ * 簽名與 createCancellableChat 完全相同，呼叫端可無痛切換。
+ */
+export function createCancellableCampusChat() {
+  let abortController: AbortController | null = null;
+
+  return {
+    chat: async (messages: AIMessage[], context: AIContext): Promise<AIResponse> => {
+      abortController?.abort();
+      abortController = new AbortController();
+      return chatWithCampusAssistant(messages, context, abortController.signal);
+    },
+    cancel: () => {
+      abortController?.abort();
+      abortController = null;
+    },
+  };
+}
+
+/**
  * 檢查 AI 服務是否可用
  */
 export function getAIStatus(): {

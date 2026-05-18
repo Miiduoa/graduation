@@ -33,7 +33,7 @@ import {
   updateDoc,
   where,
 } from 'firebase/firestore';
-import { chatWithAI } from '../services/ai';
+import { chatWithCampusAssistant } from '../services/ai';
 import { navigateToCourseScreen } from '../utils/courseNavigation';
 
 type Group = {
@@ -378,7 +378,7 @@ export function GroupDetailScreen(props: any) {
         // 非同步生成 AI 回答（不阻擋 UI）
         (async () => {
           try {
-            const aiResponse = await chatWithAI(
+            const aiResponse = await chatWithCampusAssistant(
               [{ role: 'user', content: `課程問題：${postTitle}\n\n詳細說明：${postBody}` }],
               { schoolId: school.id, userId: 'ai-assistant' },
             );
