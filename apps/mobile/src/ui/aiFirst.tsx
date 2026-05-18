@@ -22,6 +22,7 @@ import {
   type ViewStyle,
   type TextStyle,
 } from 'react-native';
+import { useTabBarContentBottomPadding } from './navigationTheme';
 
 // ── Tokens (Apple HIG iOS systemBackground / label / Indigo accent) ──
 export const aiTokens = {
@@ -99,17 +100,18 @@ export function AIMark({ size = 28 }: { size?: number }) {
 // ──────────────────────────────────────────────
 export function AIScreen({
   children,
-  bottomPadding = 120,
+  bottomPadding,
   ...rest
 }: {
   children: React.ReactNode;
   bottomPadding?: number;
 } & ScrollViewProps) {
+  const defaultPadding = useTabBarContentBottomPadding();
   return (
     <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: bottomPadding }}
+        contentContainerStyle={{ paddingBottom: bottomPadding ?? defaultPadding }}
         showsVerticalScrollIndicator={false}
         {...rest}
       >
@@ -660,7 +662,7 @@ export function AIDetailScreen({
   onBack,
   rightAction,
   children,
-  bottomPadding = 120,
+  bottomPadding,
 }: {
   title: string;
   subtitle?: string;
@@ -669,6 +671,7 @@ export function AIDetailScreen({
   children: React.ReactNode;
   bottomPadding?: number;
 }) {
+  const defaultPadding = useTabBarContentBottomPadding();
   return (
     <View style={{ flex: 1, backgroundColor: aiTokens.bg }}>
       <AIDetailHeader
@@ -679,7 +682,7 @@ export function AIDetailScreen({
       />
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: bottomPadding }}
+        contentContainerStyle={{ paddingBottom: bottomPadding ?? defaultPadding }}
         showsVerticalScrollIndicator={false}
       >
         {children}
