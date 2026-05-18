@@ -117,6 +117,14 @@ export interface StoreAnnouncementEdit {
   editedBy: string;    // demoRole label
 }
 
+/** 校友回娘家 / 校友活動報名 */
+export interface StoreAlumniEventRsvp {
+  eventId: string;
+  eventName: string;
+  rsvpAt: string;     // ISO
+  by: string;         // 報名人姓名 / 學號
+}
+
 /** 整個 demo 共享狀態
  *
  *  新增欄位（2026-05-17 擴充）：feedbackDrafts / discussionPosts / helpRequests /
@@ -146,6 +154,8 @@ export interface DemoStore {
   announcementEdits?: StoreAnnouncementEdit[];
   /** 已下架的公告 id 列表（announcements 與 announcement detail 都會 filter 掉） */
   takendownAnnIds?: string[];
+  /** 校友活動報名（含 校友回娘家） */
+  alumniEventRsvps?: StoreAlumniEventRsvp[];
 }
 
 const EMPTY_STORE: DemoStore = {
@@ -168,6 +178,7 @@ const EMPTY_STORE: DemoStore = {
   libraryReservations: [],
   announcementEdits: [],
   takendownAnnIds: [],
+  alumniEventRsvps: [],
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -1448,4 +1459,39 @@ export function transferBook(params: {
     type: 'info',
     recipientRoles: ['student'],
   });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 校友活動報名（校友回娘家）
+// ─────────────────────────────────────────────────────────────
+export function rsvpAlumniEvent(params: { eventId: string; eventName: string; by: string }): {
+  alreadyRegistered: boolean;
+} {
+  let alreadyRegistered = false;
+  updateDemoStore((store) => {
+    const list = store.alumniEventRsvps ?? [];
+    const existing = list.find((r) => r.eventId === params.eventId && r.by === params.by);
+    if (existing) {
+      alreadyRegistered = true;
+      return store;
+    }
+    return {
+      ...store,
+      alumniEventRsvps: [
+        {
+          eventId: params.eventId,
+          eventName: params.eventName,
+          by: params.by,
+          rsvpAt: new Date().toISOString(),
+        },
+        ...list,
+      ],
+    };
+  });
+  return { alreadyRegistered };
+}
+
+export function getAlumniEventRsvps(store: DemoStore, by?: string): StoreAlumniEventRsvp[] {
+  const list = store.alumniEventRsvps ?? [];
+  return by ? list.filter((r) => r.by === by) : list;
 }
