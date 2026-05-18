@@ -20,7 +20,7 @@ import {
 import { resolveSchoolPageContext } from '@/lib/pageContext';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 import { useRoleScopedState } from '@/lib/useRoleScopedState';
-import { notifyDeptHeadNewAnn, notifyStudentsAnnApproved, rejectAnnouncementWithReason } from '@/lib/demoStore';
+import { notifyDeptHeadNewAnn, notifyStudentsAnnApproved, notifySubmitterAnnApproved, rejectAnnouncementWithReason } from '@/lib/demoStore';
 import type { DemoRole } from '@/lib/demoRole';
 
 type FilterCategory = 'all' | 'academic' | 'event' | 'general';
@@ -159,12 +159,8 @@ export default function AnnouncementsPage(props: {
   };
   // 待審公告（共用 localStorage，與 admin 頁同步）
   const [pendingQueue, setPendingQueue] = useState<DemoPendingAnn[]>([]);
-  // 新增公告 Modal — 支援 ?compose=1 從別處（例如 /admin）跳過來自動開啟
-  const initialCompose =
-    typeof props.searchParams?.school === 'undefined'
-      ? false
-      : false; // placeholder
-  const [showModal, setShowModal] = useState(initialCompose);
+  // 新增公告 Modal — ?compose=1 由 useEffect 讀取（SSR 安全）
+  const [showModal, setShowModal] = useState(false);
   const { success, info } = useToast();
 
   // Mount 後檢查 ?compose=1
@@ -477,7 +473,7 @@ export default function AnnouncementsPage(props: {
         </div>
 
         {/* ── AI 公告摘要入口 ── */}
-        {!loading && demoRole === 'student' && filteredAnnouncements.length > 0 && (
+        {!loading && demoRole !== 'guest' && filteredAnnouncements.length > 0 && (
           <div
             className="card"
             style={{
@@ -562,6 +558,11 @@ export default function AnnouncementsPage(props: {
                             <span className="annTag source">{p.source}</span>
                           </div>
                           <h2 className="annCardTitle">{p.title}</h2>
+                          {p.body && (
+                            <div style={{ fontSize: 13, color: 'var(--text)', margin: '4px 0 2px', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                              {p.body.length > 200 ? `${p.body.slice(0, 200)}…` : p.body}
+                            </div>
+                          )}
                           <div className="annCardMeta">
                             <span>📅</span>
                             <span>提交於 {p.submittedAt}</span>
@@ -577,6 +578,7 @@ export default function AnnouncementsPage(props: {
                             approvePendingAnn(p.id);
                             setPendingQueue(readPendingAnns());
                             notifyStudentsAnnApproved(p.title, p.source);
+                            notifySubmitterAnnApproved({ title: p.title, submitterRole: p.submittedByRole as DemoRole, approvedBy: demoRole === 'admin' ? '系統管理員' : '系主任' });
                             success('✅ 已核准並發布公告，學生現在可以看到');
                           }}
                         >
@@ -596,7 +598,7 @@ export default function AnnouncementsPage(props: {
                               title: p.title,
                               reason,
                               submitterRole: p.submittedByRole as DemoRole,
-                              reviewedByLabel: '系主任',
+                              reviewedByLabel: demoRole === 'admin' ? '系統管理員' : '系主任',
                             });
                             setPendingQueue(readPendingAnns());
                             info(`🔄 已退回「${p.title}」並通知原提交者`);
@@ -672,7 +674,7 @@ export default function AnnouncementsPage(props: {
                           {/* 下一步：跳轉到關聯的課程 / 社團 */}
                           {a.relatedCourseId && getDemoCourseById(a.relatedCourseId) && (
                             <Link
-                              href={`/course/${a.relatedCourseId}${q}`}
+                              href={`${(demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'admin' || demoRole === 'department_head') ? '/teacher' : ''}/course/${a.relatedCourseId}${q}`}
                               onClick={(event) => event.stopPropagation()}
                               style={{
                                 background: 'var(--brand)',
@@ -722,21 +724,23 @@ export default function AnnouncementsPage(props: {
         <NewAnnModal
           role={demoRole}
           onClose={() => setShowModal(false)}
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          onSubmit={(title, _body) => {
+          onSubmit={(title, body) => {
             const sourceLabel =
               demoRole === 'teacher' ? '王大明老師' :
               demoRole === 'department_head' ? '黃主任（系所辦公室）' :
               demoRole === 'club_officer' ? '程式設計社' : '發布者';
             addPendingAnn({
               title,
+              body,
               source: sourceLabel,
               submittedAt: '剛剛',
               submittedByRole: demoRole,
             });
             setPendingQueue(readPendingAnns());
-            // 通知系主任有新公告待審核
-            notifyDeptHeadNewAnn(title, sourceLabel);
+            // 通知系主任有新公告待審核（系主任 / 管理員本人提交時不自我通知）
+            if (demoRole !== 'department_head' && demoRole !== 'admin') {
+              notifyDeptHeadNewAnn(title, sourceLabel);
+            }
             setShowModal(false);
             success(`✅ 已送出「${title.slice(0, 20)}${title.length > 20 ? '…' : ''}」，待系主任審核後公開`);
           }}

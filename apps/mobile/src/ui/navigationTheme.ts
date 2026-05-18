@@ -10,7 +10,7 @@ import { theme, shadowStyle } from './theme';
 // 整個函式 + 常數都搬進這個檔案，徹底斷開外部相依。
 
 /** 浮動 Tab Bar 所需的 ScrollView 底部留白基準（單位 dp）。 */
-export const TAB_BAR_SCROLL_BOTTOM_PADDING = 130;
+export const TAB_BAR_SCROLL_BOTTOM_PADDING = 118;
 
 /** 與舊 API 對齊：等同於 TAB_BAR_SCROLL_BOTTOM_PADDING */
 export const TAB_BAR_CONTENT_BOTTOM_PADDING = TAB_BAR_SCROLL_BOTTOM_PADDING;
@@ -22,15 +22,9 @@ function calcExtraScrollPadding(insetsBottom: number): number {
 
 /**
  * 主畫面 Tab 與共用 Screen 取得「捲動底部安全留白」的 hook。
- * 包 try/catch 避免測試環境未掛 SafeAreaProvider 時 throw。
  */
 export function useTabBarContentBottomPadding(): number {
-  let bottom = 0;
-  try {
-    bottom = useSafeAreaInsets().bottom;
-  } catch {
-    bottom = 0;
-  }
+  const bottom = useSafeAreaInsets().bottom;
   return TAB_BAR_SCROLL_BOTTOM_PADDING + calcExtraScrollPadding(bottom);
 }
 
@@ -58,17 +52,17 @@ export function createTabScreenOptions(_routeName: string): BottomTabNavigationO
     headerShown: false,
     tabBarStyle: {
       position: 'absolute',
-      left: 24,
-      right: 24,
-      bottom: Platform.OS === 'ios' ? 30 : 18,
+      left: 18,
+      right: 18,
+      bottom: Platform.OS === 'ios' ? 24 : 16,
       backgroundColor: theme.colors.chromeTabBar,
       borderTopColor: 'transparent',
       borderTopWidth: 0,
-      borderRadius: theme.radius.full,
-      height: 68,
-      paddingTop: 8,
-      paddingBottom: 8,
-      paddingHorizontal: 8,
+      borderRadius: theme.radius.xl,
+      height: 64,
+      paddingTop: 6,
+      paddingBottom: 6,
+      paddingHorizontal: 6,
       borderWidth: 1,
       borderColor: theme.colors.chromeTabBorder,
       ...shadowStyle(theme.shadows.lg),
@@ -76,7 +70,7 @@ export function createTabScreenOptions(_routeName: string): BottomTabNavigationO
     tabBarLabelStyle: {
       fontSize: 10,
       fontWeight: '600',
-      letterSpacing: 0.3,
+      letterSpacing: 0,
       marginTop: 1,
     },
     tabBarActiveTintColor: theme.colors.accent,

@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import { SiteShell } from '@/components/SiteShell';
 import { evaluateRubric, type Rubric, type RubricCriterion } from '@campus/shared';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
 
 const SAMPLE: Rubric = {
   id: 'r1',
@@ -49,7 +50,8 @@ const SAMPLE: Rubric = {
   ],
 };
 
-export default function TeacherRubricsPage({ params }: { params: { courseId: string } }) {
+export default function TeacherRubricsPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const canEdit = caps.canEditModules; // rubric 編輯權限對齊教材編輯
@@ -95,7 +97,7 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
   const totalWeight = rubric.criteria.reduce((acc, c) => acc + c.weight, 0);
 
   return (
-    <SiteShell>
+    <SiteShell title="Rubric 評分標準" schoolName={schoolName}>
       <main style={{ maxWidth: 1100, margin: '0 auto', padding: 24 }}>
         {!caps.canViewTeacherDashboard ? (
           <div className="card" style={{ padding: '24px 20px', textAlign: 'center', background: 'var(--danger-soft)', borderColor: 'var(--danger)' }}>
@@ -104,21 +106,23 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.7 }}>
               請從右上角「身份膠囊」切換為 🧑‍🏫 教師 或 🧑‍💻 助教 角色後再進入。
             </div>
-            <Link href="/" className="btn">← 回首頁</Link>
+            <Link href={`/${q}`} className="btn">← 回首頁</Link>
           </div>
         ) : <>
-        <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
-          <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
+        <nav style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 12 }}>
+          <Link href={`/teacher/course/${params.courseId}${q}`}>← 回課程總覽</Link>
         </nav>
         <h1 style={{ fontSize: 28, fontWeight: 700 }}>
           Rubric 評分標準{!canEdit ? '（檢視）' : ''}
         </h1>
-        <p style={{ color: '#6b7280', marginBottom: 16 }}>
+        <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
           {canEdit
             ? '編輯評分項與等級；下方即時預覽教師打分後的加權結果。'
             : isTaView
               ? '助教 TA 可使用 Rubric 為作業打分，但不能修改 Rubric 結構（僅授課教師可編輯）。'
-              : '此頁僅授課教師可編輯。'}
+              : demoRole === 'department_head'
+                ? '系主任可唯讀瀏覽評分標準，評分與結構編輯為授課教師專用。'
+                : '此頁僅授課教師可編輯。'}
         </p>
 
         <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
@@ -130,10 +134,10 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
               flex: 1,
               padding: 10,
               borderRadius: 8,
-              border: '1px solid #d1d5db',
+              border: '1px solid var(--border)',
               fontSize: 16,
-              background: canEdit ? '#fff' : '#f3f4f6',
-              color: canEdit ? '#111' : '#6b7280',
+              background: canEdit ? 'var(--panel)' : 'var(--panel2)',
+              color: canEdit ? 'var(--text)' : 'var(--muted)',
             }}
           />
           <button
@@ -156,7 +160,7 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
 
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 24 }}>
           <thead>
-            <tr style={{ background: '#f3f4f6' }}>
+            <tr style={{ background: 'var(--panel)' }}>
               <th style={th}>評分項</th>
               <th style={th}>權重</th>
               <th style={th}>等級</th>
@@ -166,27 +170,29 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
           </thead>
           <tbody>
             {rubric.criteria.map((c) => (
-              <tr key={c.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+              <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={td}>
                   <input
                     value={c.title}
+                    disabled={!canEdit}
                     onChange={(e) =>
-                      setRubric((r) => ({
+                      canEdit && setRubric((r) => ({
                         ...r,
                         criteria: r.criteria.map((x) =>
                           x.id === c.id ? { ...x, title: e.target.value } : x,
                         ),
                       }))
                     }
-                    style={{ width: '100%', padding: 6, border: '1px solid #e5e7eb', borderRadius: 6 }}
+                    style={{ width: '100%', padding: 6, border: '1px solid var(--border)', borderRadius: 6, background: canEdit ? 'var(--panel)' : 'var(--panel2)', cursor: canEdit ? 'text' : 'not-allowed' }}
                   />
                 </td>
                 <td style={td}>
                   <input
                     type="number"
                     value={c.weight}
+                    disabled={!canEdit}
                     onChange={(e) => updateWeight(c.id, Number(e.target.value))}
-                    style={{ width: 60, padding: 6, border: '1px solid #e5e7eb', borderRadius: 6 }}
+                    style={{ width: 60, padding: 6, border: '1px solid var(--border)', borderRadius: 6, cursor: canEdit ? 'text' : 'not-allowed' }}
                   />
                   %
                 </td>
@@ -197,7 +203,7 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
                       style={{
                         display: 'inline-block',
                         padding: '4px 8px',
-                        background: '#eef2ff',
+                        background: 'var(--accent-soft)',
                         borderRadius: 6,
                         marginRight: 4,
                         fontSize: 12,
@@ -213,7 +219,7 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
                     onChange={(e) =>
                       setPreviewScores((s) => ({ ...s, [c.id]: e.target.value }))
                     }
-                    style={{ padding: 6, border: '1px solid #e5e7eb', borderRadius: 6 }}
+                    style={{ padding: 6, border: '1px solid var(--border)', borderRadius: 6 }}
                   >
                     <option value="">— 未評 —</option>
                     {c.levels.map((l) => (
@@ -235,17 +241,17 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
 
         <div
           style={{
-            background: '#f0fdf4',
-            border: '1px solid #86efac',
+            background: 'var(--success-soft)',
+            border: '1px solid var(--success)',
             borderRadius: 12,
             padding: 16,
           }}
         >
-          <div style={{ fontSize: 14, color: '#15803d', fontWeight: 600 }}>即時預覽</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: '#14532d', marginTop: 4 }}>
+          <div style={{ fontSize: 14, color: 'var(--success)', fontWeight: 600 }}>即時預覽</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--success)', marginTop: 4 }}>
             總分：{evaluation.totalScore} / 100
           </div>
-          <ul style={{ marginTop: 8, fontSize: 13, color: '#166534' }}>
+          <ul style={{ marginTop: 8, fontSize: 13, color: 'var(--success)' }}>
             {evaluation.perCriterion.map((p) => (
               <li key={p.criterionId}>
                 {p.title}：{p.levelLabel ?? '未評'}（權重 {p.normalizedWeight}%，得 {p.weightedScore} 分）
@@ -271,14 +277,14 @@ export default function TeacherRubricsPage({ params }: { params: { courseId: str
         >
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#5E6AD2', marginBottom: 3 }}>🤖 AI Rubric 助理</div>
-            <div style={{ fontSize: 13, color: '#374151' }}>
+            <div style={{ fontSize: 13, color: 'var(--text)' }}>
               {canEdit
                 ? '讓 AI 幫你設計符合課程目標的評分標準，或建議各評分項的等級描述與權重分配。'
                 : '讓 AI 解釋這份 Rubric 的評分邏輯，或建議如何在打分時保持一致性。'}
             </div>
           </div>
           <a
-            href={`/ai-assistant?q=${encodeURIComponent(
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(
               canEdit
                 ? '幫我為「期末報告」設計一份 Rubric，評分項包含：內容深度（40%）、結構清晰（30%）、參考資料（20%）、創新性（10%），每項設計 4 個等級（優/良/可/差）並附說明'
                 : '請解釋 Rubric 評分法如何在批改作業時保持評分一致性？有哪些常見誤判需要特別注意？'

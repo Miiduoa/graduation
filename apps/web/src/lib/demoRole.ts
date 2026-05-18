@@ -293,7 +293,7 @@ const CAPS: Record<DemoRole, RoleCapabilities> = {
     canReadPublic: true,
   },
   department_head: {
-    canViewTeacherDashboard: false,
+    canViewTeacherDashboard: true,  // 系主任可唯讀瀏覽所有教師子頁（成績簿/點名/教材）；但無法 edit/publish
     canEditModules: false,
     canPublishGrades: false,
     canGradeAssignments: false,

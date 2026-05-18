@@ -108,10 +108,12 @@ function SearchTab({
   searchQuery,
   setSearchQuery,
   onBorrow,
+  schoolQ,
 }: {
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   onBorrow: (title: string) => void;
+  schoolQ: string;
 }) {
   const q = searchQuery.trim().toLowerCase();
   const results = q
@@ -208,7 +210,7 @@ function SearchTab({
                   </div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
                     <Link
-                      href={`/ai-assistant?q=${encodeURIComponent(`幫我推薦類似《${book.title}》的書`)}`}
+                      href={`/ai-assistant${schoolQ ? schoolQ + '&' : '?'}q=${encodeURIComponent(`幫我推薦類似《${book.title}》的書`)}`}
                       title="問 AI 推薦類似書籍"
                       style={{
                         padding: '6px 8px',
@@ -370,7 +372,7 @@ export default function LibraryPage(props: {
           ))}
         </div>
 
-        {/* ── Borrow Tab ── */}
+        {/* ── Borrow Tab：無借書權（訪客 / 校友）── */}
         {activeTab === 'borrow' && !caps.canBorrowBooks && (
           <div className="card" style={{ padding: '28px 24px', textAlign: 'center' }}>
             {demoRole === 'guest' ? (
@@ -380,33 +382,28 @@ export default function LibraryPage(props: {
                 <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>訪客身份無法借閱書籍。請登入後使用完整圖書館服務。</div>
                 <a href={`/login${q}`} className="btn primary">前往登入 →</a>
               </>
-            ) : demoRole === 'alumni' ? (
+            ) : (
+              // alumni（canBorrowBooks: false）
               <>
                 <div style={{ fontSize: 40, marginBottom: 12 }}>🎓</div>
                 <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>校友借閱權限已停用</div>
                 <div style={{ color: 'var(--muted)', fontSize: 13 }}>張學長（B09203001）於畢業後圖書館借閱資格停用。如需資料，請洽圖書館服務台辦理校友借閱申請。</div>
               </>
-            ) : (
-              <>
-                <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
-                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>
-                  {demoRole === 'teacher' ? '教師借閱管理' : demoRole === 'ta' ? '助教借閱管理' : demoRole === 'department_head' ? '系主任借閱管理' : '管理員借閱管理'}
-                </div>
-                <div style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 20 }}>
-                  {demoRole === 'teacher' ? '教師借閱帳號另設於圖書館系統。此處為學生借閱視角示範。' : demoRole === 'ta' ? '助教借閱帳號另設於圖書館系統。此處為學生借閱視角示範。' : '此頁為學生借閱管理，你的身份無個人借閱記錄。'}
-                </div>
-                <Link
-                  href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我推薦一份適合教學參考的書單')}`}
-                  className="btn"
-                >
-                  問 AI 推薦書單 →
-                </Link>
-              </>
             )}
           </div>
         )}
+        {/* ── Borrow Tab：有借書權（student / teacher / ta / club_officer / dept_head / admin）── */}
         {activeTab === 'borrow' && caps.canBorrowBooks && (
           <div className="pageStack">
+            {/* 非學生角色：提示這是示範學生的借閱視角 */}
+            {demoRole !== 'student' && (
+              <div className="card" style={{ padding: '12px 16px', background: 'rgba(94,106,210,0.08)', border: '1px solid rgba(94,106,210,0.25)', fontSize: 13 }}>
+                📋 <strong>{roleDef.label}視角</strong> · 以下顯示示範學生（王小明）的借閱紀錄，正式版將連結個人圖書館帳號。
+                <Link href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我推薦一份適合教學參考的書單')}`} style={{ marginLeft: 10, color: 'var(--brand)' }}>
+                  問 AI 推薦書單 →
+                </Link>
+              </div>
+            )}
             {urgentBooks > 0 && (
               <div
                 style={{
@@ -589,6 +586,7 @@ export default function LibraryPage(props: {
           <SearchTab
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
+            schoolQ={q}
             onBorrow={(title) => {
               if (!caps.canBorrowBooks) {
                 info(
@@ -604,7 +602,7 @@ export default function LibraryPage(props: {
               reserveBook({
                 bookId: `cat-${Date.now()}`,
                 bookTitle: title,
-                studentId: 'stu-001',
+                studentId: roleDef.demoUserUid || 'stu-001',
                 studentName: roleDef.label,
               });
               success(`✅ 已預約「${title}」，可在「訊息」收到預約確認，並至 1F 服務台取書`);

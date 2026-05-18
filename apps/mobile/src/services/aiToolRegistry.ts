@@ -1046,7 +1046,13 @@ const ORDER_FOOD_PARAMETERS: ToolParametersSpec = {
   required: ['vendorId', 'itemId'],
 };
 
+// LMS v2 tool specs — 從外部檔合併進來 (21 個工具,對應 docs/LMS_V2_ROLE_ACTION_MAP.md)
+// 任何 LMS 相關的 read/write 都已由 supabaseLmsCache facade 與 lmsV2WriteTools 處理。
+// 此處只是把它們註冊到 registry,讓 Agent / LLM 看見。
+import { LMS_V2_TOOL_SPECS } from './lmsV2ToolSpecs';
+
 const TOOL_SPECS: readonly ToolSpec[] = [
+  ...LMS_V2_TOOL_SPECS,
   // ── 訂餐（canonical：嚴格用 itemId/vendorId；
   //     若 AI 仍使用舊名 create_order/order_meal 則 fallback 走 legacy executor，
   //     因為它們欄位是 itemName/cafeteria，schema 不同）

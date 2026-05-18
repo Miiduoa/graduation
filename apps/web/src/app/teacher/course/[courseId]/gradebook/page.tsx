@@ -13,6 +13,7 @@ import { useToast } from '@/components/ui';
 import { useDemoRole, getCapabilities } from '@/lib/demoRole';
 import { getStudentsForCourse, getDemoCourseById } from '@/lib/demoData';
 import { publishGrades, getPendingSubmissions, useDemoStore } from '@/lib/demoStore';
+import { resolveSchoolPageContext } from '@/lib/pageContext';
 import {
   computeGradebook,
   type GradeItem,
@@ -25,7 +26,8 @@ const ITEMS: GradeItem[] = [
   { id: 'final', title: '期末考',           weight: 40 },
 ];
 
-export default function TeacherGradebookPage({ params }: { params: { courseId: string } }) {
+export default function TeacherGradebookPage({ params, searchParams }: { params: { courseId: string }; searchParams?: { school?: string; schoolId?: string } }) {
+  const { schoolName, schoolSearch: q } = resolveSchoolPageContext(searchParams);
   const [demoRole] = useDemoRole();
   const caps = getCapabilities(demoRole);
   const isTaView = demoRole === 'ta';
@@ -66,7 +68,7 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
   }, [computed.rows]);
 
   return (
-    <SiteShell>
+    <SiteShell title="成績簿" schoolName={schoolName}>
       <main style={{ maxWidth: 1200, margin: '0 auto', padding: 24 }}>
         {!caps.canViewTeacherDashboard ? (
           <div className="card" style={{ padding: '24px 20px', textAlign: 'center', background: 'var(--danger-soft)', borderColor: 'var(--danger)' }}>
@@ -75,21 +77,21 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
             <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 14, lineHeight: 1.7 }}>
               請從右上角「身份膠囊」切換為 🧑‍🏫 教師 或 🧑‍💻 助教 角色後再進入。
             </div>
-            <Link href="/" className="btn">← 回首頁</Link>
+            <Link href={`/${q}`} className="btn">← 回首頁</Link>
           </div>
         ) : <>
-        <nav style={{ fontSize: 14, color: '#6b7280', marginBottom: 12 }}>
-          <Link href={`/teacher/course/${params.courseId}`}>← 回課程總覽</Link>
+        <nav style={{ fontSize: 14, color: 'var(--muted)', marginBottom: 12 }}>
+          <Link href={`/teacher/course/${params.courseId}${q}`}>← 回課程總覽</Link>
         </nav>
         <h1 style={{ fontSize: 28, fontWeight: 700 }}>
           成績簿{isTaView ? '（批改視角）' : ''}{' '}
           {course ? (
-            <span style={{ fontSize: 18, fontWeight: 500, color: '#6b7280' }}>
+            <span style={{ fontSize: 18, fontWeight: 500, color: 'var(--muted)' }}>
               — {course.name}
             </span>
           ) : null}
         </h1>
-        <p style={{ color: '#6b7280', marginBottom: 16 }}>
+        <p style={{ color: 'var(--muted)', marginBottom: 16 }}>
           班級平均 <strong>{classAvg}</strong> 分・通過率 <strong>{passRate}%</strong>・
           共 {courseStudents.length} 位學生（示範名單）
         </p>
@@ -124,12 +126,12 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
               key={s.label}
               style={{
                 padding: '14px 20px', borderRadius: 10,
-                border: '1px solid #e5e7eb', background: '#f9fafb',
+                border: '1px solid var(--border)', background: 'var(--panel)',
                 textAlign: 'center', minWidth: 100,
               }}
             >
               <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div>
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{s.label}</div>
+              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
             </div>
           ))}
         </div>
@@ -198,7 +200,7 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
             title="發布成績為授課教師專用"
             style={{
               padding: '10px 16px', borderRadius: 8, marginBottom: 16,
-              background: '#e5e7eb', color: '#9ca3af',
+              background: 'var(--border)', color: 'var(--muted-light)',
               border: 'none', cursor: 'not-allowed', fontSize: 14,
             }}
           >
@@ -209,12 +211,12 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
             <thead>
-              <tr style={{ background: '#f3f4f6', textAlign: 'left' }}>
+              <tr style={{ background: 'var(--panel)', textAlign: 'left' }}>
                 <th style={th}>學生姓名</th>
                 {computed.items.map((it) => (
                   <th key={it.id} style={th}>
                     {it.title}
-                    <div style={{ fontWeight: 400, fontSize: 12, color: '#6b7280' }}>
+                    <div style={{ fontWeight: 400, fontSize: 12, color: 'var(--muted)' }}>
                       {it.normalizedWeight}%
                     </div>
                   </th>
@@ -245,7 +247,7 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
                   <tr
                     key={row.uid}
                     style={{
-                      borderBottom: '1px solid #e5e7eb',
+                      borderBottom: '1px solid var(--border)',
                       background: isDemoUser ? 'rgba(94,106,210,0.07)' : undefined,
                     }}
                   >
@@ -279,7 +281,7 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
           </table>
         </div>
 
-        <p style={{ marginTop: 14, fontSize: 12, color: '#9ca3af' }}>
+        <p style={{ marginTop: 14, fontSize: 12, color: 'var(--muted-light)' }}>
           ＊ 示範名單顯示前 {courseStudents.length} 位學生（來自 demoData getStudentsForCourse）；
           {course
             ? `實際班級共 ${course.members} 位，其餘 ${course.members - courseStudents.length} 位連接 Firebase 後可見。`
@@ -303,12 +305,12 @@ export default function TeacherGradebookPage({ params }: { params: { courseId: s
         >
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 3 }}>🤖 AI 成績分析</div>
-            <div style={{ fontSize: 13, color: '#374151' }}>
+            <div style={{ fontSize: 13, color: 'var(--text)' }}>
               讓 AI 找出成績偏低的學生，分析作業與考試的相關性，並生成成績摘要報告。
             </div>
           </div>
           <a
-            href={`/ai-assistant?q=${encodeURIComponent(`幫我分析「${course?.name ?? '資料結構'}」班級成績分布：哪些學生需要特別關注？作業成績和考試成績有什麼相關性？`)}`}
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent(`幫我分析「${course?.name ?? '資料結構'}」班級成績分布：哪些學生需要特別關注？作業成績和考試成績有什麼相關性？`)}`}
             className="btn"
             style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
           >

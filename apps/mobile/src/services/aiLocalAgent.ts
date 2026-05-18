@@ -2260,37 +2260,92 @@ export function parseToolSelection(modelResponse: string): { tool: string; args:
  * 未來可擴展到 AsyncStorage 做持久化
  */
 const learnedPatterns: Map<string, { tool: string; args: Record<string, string>; isWrite: boolean; count: number }> = new Map();
+let learnedPatternsVersion = 0;
+
+const TOKEN_CACHE_LIMIT = 800;
+const SEMANTIC_INFERENCE_CACHE_LIMIT = 300;
+
+const tokenCache = new Map<string, string[]>();
+const semanticInferenceCache = new Map<string, DetectedIntent[]>();
+
+type SemanticToolIndexEntry = {
+  tool: GeminiToolDeclaration;
+  descTokens: string[];
+  paramTokens: string[];
+  isWrite: boolean;
+};
+
+const semanticToolIndexCache = new Map<string, SemanticToolIndexEntry[]>();
+
+const TOKEN_DICT_WORDS = [
+  '課程', '課表', '成績', '作業', '出席', '請假', '學分', '畢業',
+  '選課', '退選', '公告', '活動', '社團', '菜單', '餐廳', '午餐',
+  '早餐', '晚餐', '圖書館', '借書', '還書', '座位', '預約', '公車',
+  '通知', '行事曆', '行程', '排程', '訊息', '私訊', '訂單', '外送',
+  '宿舍', '包裹', '洗衣機', '健康', '掛號', '看診', '報修', '維修',
+  '繳交', '提交', '報名', '參加', '取消', '刪除', '修改', '新增',
+  '簽到', '打卡', '評分', '列印', '失物', '遺失', '點名', '點餐',
+  '訂餐', '便當', '蛋餅', '牛肉麵', '飲料', '咖啡', '奶茶',
+  '考試', '測驗', '截止', '待辦', '分數', '績點', '排名',
+  '個人資料', '學號', '科系', '幾年級', '公假', '病假', '事假',
+  '續借', '借閱', '洗衣', '領取', '查詢', '分析', '預測',
+  '投票', '問卷', '調查', '停車', '停車場', '獎學金', '實習',
+  '教室', '換教室', '補課', '調課', '轉學', '休學', '復學',
+] as const;
+
+const SORTED_TOKEN_DICT_WORDS = [...TOKEN_DICT_WORDS].sort((a, b) => b.length - a.length);
+
+function rememberBounded<K, V>(cache: Map<K, V>, key: K, value: V, limit: number): V {
+  if (cache.has(key)) cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > limit) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey === undefined) break;
+    cache.delete(firstKey);
+  }
+  return value;
+}
+
+function cloneIntent(intent: DetectedIntent): DetectedIntent {
+  return {
+    ...intent,
+    args: { ...intent.args },
+    prereqRead: intent.prereqRead
+      ? { tool: intent.prereqRead.tool, args: { ...intent.prereqRead.args } }
+      : undefined,
+    requiredArgs: intent.requiredArgs ? [...intent.requiredArgs] : undefined,
+    resolvedRequiredArgs: intent.resolvedRequiredArgs ? [...intent.resolvedRequiredArgs] : undefined,
+  };
+}
+
+function cloneIntents(intents: DetectedIntent[]): DetectedIntent[] {
+  return intents.map(cloneIntent);
+}
 
 /** Jest：清空 inferIntent 的自適應映射與技能快取，避免測試檔執行順序互相污染 */
 export function resetAdaptiveLearnedPatternsForTests(): void {
   learnedPatterns.clear();
+  learnedPatternsVersion++;
+  tokenCache.clear();
+  semanticInferenceCache.clear();
+  semanticToolIndexCache.clear();
   skillMemory.clear();
 }
 
 /** 中文分詞（簡易版：按字元 + 常見詞彙拆分） */
 function tokenize(text: string): string[] {
   const t = text.toLowerCase().trim();
-  // 常見校園詞彙（2-4 字詞優先匹配）
-  const dictWords = [
-    '課程', '課表', '成績', '作業', '出席', '請假', '學分', '畢業',
-    '選課', '退選', '公告', '活動', '社團', '菜單', '餐廳', '午餐',
-    '早餐', '晚餐', '圖書館', '借書', '還書', '座位', '預約', '公車',
-    '通知', '行事曆', '行程', '排程', '訊息', '私訊', '訂單', '外送',
-    '宿舍', '包裹', '洗衣機', '健康', '掛號', '看診', '報修', '維修',
-    '繳交', '提交', '報名', '參加', '取消', '刪除', '修改', '新增',
-    '簽到', '打卡', '評分', '列印', '失物', '遺失', '點名', '點餐',
-    '訂餐', '便當', '蛋餅', '牛肉麵', '飲料', '咖啡', '奶茶',
-    '考試', '測驗', '截止', '待辦', '分數', '績點', '排名',
-    '個人資料', '學號', '科系', '幾年級', '公假', '病假', '事假',
-    '續借', '借閱', '洗衣', '領取', '查詢', '分析', '預測',
-    '投票', '問卷', '調查', '停車', '停車場', '獎學金', '實習',
-    '教室', '換教室', '補課', '調課', '轉學', '休學', '復學',
-  ];
+  const cached = tokenCache.get(t);
+  if (cached) {
+    tokenCache.delete(t);
+    tokenCache.set(t, cached);
+    return cached.slice();
+  }
+
   const found: string[] = [];
   let remaining = t;
   // 先匹配長詞
-  const sorted = [...dictWords].sort((a, b) => b.length - a.length);
-  for (const word of sorted) {
+  for (const word of SORTED_TOKEN_DICT_WORDS) {
     if (remaining.includes(word)) {
       found.push(word);
       remaining = remaining.replace(new RegExp(word, 'g'), ' ');
@@ -2300,7 +2355,9 @@ function tokenize(text: string): string[] {
   for (const ch of remaining) {
     if (/[一-鿿]/.test(ch)) found.push(ch);
   }
-  return [...new Set(found)];
+  const tokens = [...new Set(found)];
+  rememberBounded(tokenCache, t, tokens, TOKEN_CACHE_LIMIT);
+  return tokens.slice();
 }
 
 /** 計算兩組 token 的相似度 (Jaccard + 加權) */
@@ -2373,6 +2430,39 @@ function hasSemanticDomainCue(toolName: string, msg: string): boolean {
   return true;
 }
 
+function getSemanticToolIndex(role?: CampusActorRole): SemanticToolIndexEntry[] {
+  const tools = getToolDeclarations(role);
+  const cacheKey = `${role ?? 'default'}:${tools.map((tool) => tool.name).join('|')}`;
+  const cached = semanticToolIndexCache.get(cacheKey);
+  if (cached) return cached;
+
+  const entries = tools.map((tool) => {
+    const descTokens = tokenize(`${tool.name.replace(/_/g, ' ')} ${tool.description}`);
+    const props = tool.parameters.properties || {};
+    const paramNames = Object.keys(props);
+    const paramDescs = Object.values(props).map((prop) => String(prop.description ?? ''));
+
+    return {
+      tool,
+      descTokens,
+      paramTokens: tokenize(`${paramNames.join(' ')} ${paramDescs.join(' ')}`),
+      isWrite: isWriteToolName(tool.name),
+    };
+  });
+
+  semanticToolIndexCache.set(cacheKey, entries);
+  return entries;
+}
+
+function semanticInferenceCacheKey(message: string, role?: CampusActorRole): string {
+  return `${role ?? 'default'}:${learnedPatternsVersion}:${message}`;
+}
+
+function cacheSemanticInference(key: string, intents: DetectedIntent[]): DetectedIntent[] {
+  rememberBounded(semanticInferenceCache, key, cloneIntents(intents), SEMANTIC_INFERENCE_CACHE_LIMIT);
+  return cloneIntents(intents);
+}
+
 /**
  * 自適應意圖推理：當 analyzeIntents 的 regex 全部 miss 時，
  * 用工具描述的語意匹配來推理最可能的工具。
@@ -2405,45 +2495,46 @@ export function inferIntentFromToolDescriptions(
     return [];
   }
 
+  const cacheKey = semanticInferenceCacheKey(msg, role);
+  const cachedInference = semanticInferenceCache.get(cacheKey);
+  if (cachedInference) {
+    semanticInferenceCache.delete(cacheKey);
+    semanticInferenceCache.set(cacheKey, cachedInference);
+    return cloneIntents(cachedInference);
+  }
+
   // 1. 先查學習記憶
-  const memoryKey = msgTokens.sort().join('|');
+  const memoryKey = [...msgTokens].sort().join('|');
   const learned = learnedPatterns.get(memoryKey);
   if (learned && learned.count >= 1) {
     console.log(`[AI Adaptive] 從學習記憶命中: ${memoryKey} → ${learned.tool}`);
-    return [{
+    return cacheSemanticInference(cacheKey, [{
       tool: learned.tool,
       args: { ...learned.args },
       priority: 14,
       reason: `(學習記憶) ${learned.tool}`,
       isWrite: learned.isWrite,
-    }];
+    }]);
   }
 
-  // 2. 對所有工具做語意匹配
-  const tools = getToolDeclarations(role);
+  // 2. 對所有工具做語意匹配。工具描述與參數分詞做成角色索引，避免每次 fallback 重建。
+  const toolIndex = getSemanticToolIndex(role);
   const rwIntent = inferReadWrite(msg);
 
   type ScoredTool = { tool: GeminiToolDeclaration; score: number; isWrite: boolean };
   const scored: ScoredTool[] = [];
 
-  for (const tool of tools) {
+  for (const entry of toolIndex) {
+    const { tool } = entry;
     if (!hasSemanticDomainCue(tool.name, msg)) continue;
 
-    const descTokens = tokenize(tool.description);
-    // 也加入工具名的語意（把 snake_case 轉中文 token）
-    const nameTokens = tokenize(tool.name.replace(/_/g, ' '));
-    const allDescTokens = [...new Set([...descTokens, ...nameTokens])];
-
-    let score = tokenSimilarity(msgTokens, allDescTokens);
+    let score = tokenSimilarity(msgTokens, entry.descTokens);
 
     // 參數名也貢獻語意分數
-    const paramNames = Object.keys(tool.parameters.properties || {});
-    const paramDescs = Object.values(tool.parameters.properties || {}).map(p => p.description);
-    const paramTokens = tokenize(paramNames.join(' ') + ' ' + paramDescs.join(' '));
-    score += tokenSimilarity(msgTokens, paramTokens) * 0.3;
+    score += tokenSimilarity(msgTokens, entry.paramTokens) * 0.3;
 
     // 讀寫意圖對齊加分
-    const isWrite = isWriteToolName(tool.name);
+    const isWrite = entry.isWrite;
 
     if (rwIntent === 'write' && isWrite) score *= 1.3;
     if (rwIntent === 'read' && !isWrite) score *= 1.2;
@@ -2457,11 +2548,11 @@ export function inferIntentFromToolDescriptions(
 
   scored.sort((a, b) => b.score - a.score);
 
-  if (scored.length === 0) return [];
+  if (scored.length === 0) return cacheSemanticInference(cacheKey, []);
 
   // 3. 取最高分工具（可以取多個如果分數接近）
   const best = scored[0];
-  if (best.score < 0.26) return []; // 略高於原本 0.2，減少誤配但不致完全不命中
+  if (best.score < 0.26) return cacheSemanticInference(cacheKey, []); // 略高於原本 0.2，減少誤配但不致完全不命中
 
   const intents: DetectedIntent[] = [];
   const topN = scored.filter(s => s.score >= best.score * 0.8).slice(0, 3);
@@ -2541,7 +2632,7 @@ export function inferIntentFromToolDescriptions(
   }
 
   // 只取最佳的一個（避免亂執行）
-  return intents.slice(0, 1);
+  return cacheSemanticInference(cacheKey, intents.slice(0, 1));
 }
 
 /**
@@ -2558,6 +2649,8 @@ export function learnFromSuccess(message: string, tool: string, args: Record<str
   } else {
     learnedPatterns.set(key, { tool, args, isWrite, count: 1 });
   }
+  learnedPatternsVersion++;
+  semanticInferenceCache.clear();
   // 限制記憶大小（LRU 簡易版）
   if (learnedPatterns.size > 200) {
     const firstKey = learnedPatterns.keys().next().value;

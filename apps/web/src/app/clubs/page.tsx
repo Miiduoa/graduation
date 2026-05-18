@@ -101,6 +101,7 @@ export default function ClubsPage(props: {
   const pendingClubMembers = getPendingClubMembers('club-1', store);
   const [category, setCategory] = useState('全部');
   const [clubs, setClubs] = useState<Club[]>(MOCK_CLUBS);
+  // isPending 從 demoStore 衍生（持久化），不再用 session 記憶體 Set
   const [search, setSearch] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [, setLoading] = useState(false);
@@ -185,8 +186,7 @@ export default function ClubsPage(props: {
         setClubs((prev) => prev.map((c) => (c.id === id ? { ...c, isJoined: false, members: c.members - 1 } : c)));
         info(`已退出「${club.name}」`);
       } else if (club) {
-        setClubs((prev) => prev.map((c) => (c.id === id ? { ...c, isJoined: true, members: c.members + 1 } : c)));
-        // 學生（王小明）申請加入，通知社長
+        // 學生（王小明）申請加入，通知社長 — 不立即標記 isJoined，等社長核准後才生效
         if (demoRole === 'student') {
           applyClub({
             clubId: club.id,
@@ -196,6 +196,7 @@ export default function ClubsPage(props: {
           });
           success(`✅ 已送出加入申請！社長審核後你會收到通知。`);
         } else {
+          setClubs((prev) => prev.map((c) => (c.id === id ? { ...c, isJoined: true, members: c.members + 1 } : c)));
           success(`已加入「${club.name}」！`);
         }
       }
@@ -228,8 +229,8 @@ export default function ClubsPage(props: {
   return (
     <SiteShell title="社團活動" subtitle="探索校園活動與社團" schoolName={schoolName}>
       <div className="pageStack">
-        {/* 社團幹部管理區（只有 club_officer / admin 看得到） */}
-        {caps.canPublishClubEvents ? (
+        {/* 社團幹部管理區（只有 club_officer 看得到；admin 另有全校管理視角） */}
+        {demoRole === 'club_officer' ? (
           <div
             className="card"
             style={{
@@ -290,8 +291,8 @@ export default function ClubsPage(props: {
           </div>
         ) : null}
 
-        {/* 社長：待審核成員列表（有申請時才顯示） */}
-        {caps.canManageClubMembers && pendingClubMembers.length > 0 && (
+        {/* 社長：待審核成員列表（有申請時才顯示，club_officer 專用） */}
+        {demoRole === 'club_officer' && pendingClubMembers.length > 0 && (
           <div id="pending-applicants" className="card" style={{ padding: '14px 18px', border: '1px solid #FF9500', background: 'rgba(255,149,0,0.08)' }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
               📥 待審核入社申請（{pendingClubMembers.length} 筆）
@@ -331,13 +332,15 @@ export default function ClubsPage(props: {
           </div>
         )}
 
-        {/* 學生：顯示申請狀態 */}
+        {/* 學生：顯示所有申請中社團的狀態橫幅 */}
         {demoRole === 'student' && (() => {
-          const status = getClubMembershipStatus('club-1', 'stu-001', store);
-          if (status !== 'pending') return null;
+          const pendingClubs = clubs.filter(
+            (c) => getClubMembershipStatus(c.id, 'stu-001', store) === 'pending',
+          );
+          if (pendingClubs.length === 0) return null;
           return (
             <div className="card" style={{ padding: '10px 14px', border: '1px solid #FF9500', background: 'rgba(255,149,0,0.08)', fontSize: 13 }}>
-              ⏳ <strong>程式設計社申請審核中</strong>，社長核准後你會收到通知。
+              ⏳ <strong>{pendingClubs.map((c) => c.name).join('、')} 申請審核中</strong>，社長核准後你會收到通知。
             </div>
           );
         })()}
@@ -536,32 +539,40 @@ export default function ClubsPage(props: {
                       🤖
                     </Link>
                   )}
-                  <button
-                    onClick={() => toggleJoin(c.id)}
-                    disabled={joiningId === c.id}
-                    title={
-                      !caps.canJoinClubs
-                        ? demoRole === 'guest' ? '請先登入' : demoRole === 'alumni' ? '校友無法加入' : `${roleDef.label}無法加入社團`
-                        : undefined
-                    }
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: 'var(--radius-sm)',
-                      border: '1px solid',
-                      borderColor: !caps.canJoinClubs ? 'var(--border)' : c.isJoined ? 'var(--border)' : c.color,
-                      background: !caps.canJoinClubs ? 'var(--panel)' : c.isJoined ? 'var(--panel)' : `${c.color}14`,
-                      color: !caps.canJoinClubs ? 'var(--muted)' : c.isJoined ? 'var(--muted)' : c.color,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: joiningId === c.id ? 'wait' : 'pointer',
-                      transition: 'all 0.15s ease',
-                      opacity: joiningId === c.id ? 0.6 : 1,
-                    }}
-                  >
-                    {joiningId === c.id ? '處理中...'
-                      : !caps.canJoinClubs ? (demoRole === 'guest' ? '🔒 登入後加入' : '🔒 無法加入')
-                      : c.isJoined ? '已加入' : '申請加入'}
-                  </button>
+                  {(() => {
+                    // 從 demoStore 衍生（持久化跨頁），所有社團一致處理
+                    const isPending = demoRole === 'student' &&
+                      getClubMembershipStatus(c.id, 'stu-001', store) === 'pending';
+                    return (
+                      <button
+                        onClick={() => !isPending && toggleJoin(c.id)}
+                        disabled={joiningId === c.id || isPending}
+                        title={
+                          !caps.canJoinClubs
+                            ? demoRole === 'guest' ? '請先登入' : demoRole === 'alumni' ? '校友無法加入' : `${roleDef.label}無法加入社團`
+                            : isPending ? '申請審核中，請等候社長核准' : undefined
+                        }
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: '1px solid',
+                          borderColor: !caps.canJoinClubs ? 'var(--border)' : isPending ? 'rgba(255,149,0,0.5)' : c.isJoined ? 'var(--border)' : c.color,
+                          background: !caps.canJoinClubs ? 'var(--panel)' : isPending ? 'rgba(255,149,0,0.1)' : c.isJoined ? 'var(--panel)' : `${c.color}14`,
+                          color: !caps.canJoinClubs ? 'var(--muted)' : isPending ? '#B45309' : c.isJoined ? 'var(--muted)' : c.color,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: joiningId === c.id || isPending ? 'default' : 'pointer',
+                          transition: 'all 0.15s ease',
+                          opacity: joiningId === c.id ? 0.6 : 1,
+                        }}
+                      >
+                        {joiningId === c.id ? '處理中...'
+                          : !caps.canJoinClubs ? (demoRole === 'guest' ? '🔒 登入後加入' : '🔒 無法加入')
+                          : isPending ? '⏳ 審核中'
+                          : c.isJoined ? '已加入' : '申請加入'}
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

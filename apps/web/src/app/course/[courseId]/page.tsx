@@ -59,9 +59,9 @@ export default function CoursePage(props: {
   const [showAskTeacher, setShowAskTeacher] = useState(false);
   const [askTeacherText, setAskTeacherText] = useState('');
 
-  // 教師 / TA / admin 自動跳教師端，省去手動點按鈕的一步
+  // 教師 / TA / admin / 系主任 自動跳教師端，省去手動點按鈕的一步
   useEffect(() => {
-    if (demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'admin') {
+    if (demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'admin' || demoRole === 'department_head') {
       router.replace(`/teacher/course/${props.params.courseId}${q}`);
     }
   }, [demoRole, props.params.courseId, q, router]);

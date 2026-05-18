@@ -161,7 +161,7 @@ export default function ProfilePage(props: {
     : 100;
 
   return (
-    <SiteShell schoolName={schoolName}>
+    <SiteShell title="個人檔案" schoolName={schoolName}>
       <div className="pageStack">
         {/* ── Profile Hero ── */}
         <div
@@ -170,7 +170,7 @@ export default function ProfilePage(props: {
             background: 'linear-gradient(135deg, var(--brand) 0%, var(--brand2) 100%)',
             border: 'none',
             color: '#fff',
-            boxShadow: '6px 6px 16px rgba(94,106,210,0.36), -3px -3px 8px rgba(255,255,255,0.7)',
+            boxShadow: 'var(--shadow-lg)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }}>

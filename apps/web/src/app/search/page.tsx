@@ -134,10 +134,9 @@ export default function SearchPage(props: {
     [normalizedQuery, visibleResults],
   );
   const QUICK_LINKS = QUICK_LINKS_BY_ROLE[demoRole] ?? QUICK_LINKS_BY_ROLE.student;
-  const isSearching = false;
 
   return (
-    <SiteShell schoolName={schoolName}>
+    <SiteShell title="搜尋" schoolName={schoolName}>
       <div className="pageStack" style={{ maxWidth: 680, margin: '0 auto' }}>
         {/* ── Search Bar ── */}
         <div
@@ -220,31 +219,7 @@ export default function SearchPage(props: {
         {/* ── Results ── */}
         {query && (
           <div>
-            {isSearching ? (
-              <div className="pageStack">
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'flex',
-                      gap: 12,
-                      padding: '14px 16px',
-                      background: 'var(--surface)',
-                      borderRadius: 'var(--radius-sm)',
-                    }}
-                  >
-                    <div
-                      className="skeleton"
-                      style={{ width: 40, height: 40, borderRadius: 10, flexShrink: 0 }}
-                    />
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div className="skeleton" style={{ height: 14, width: '70%' }} />
-                      <div className="skeleton" style={{ height: 12, width: '50%' }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : results.length === 0 ? (
+            {results.length === 0 ? (
               <div className="emptyState">
                 <div className="emptyIcon">🔍</div>
                 <h3 className="emptyTitle">找不到「{query}」的結果</h3>
@@ -252,10 +227,16 @@ export default function SearchPage(props: {
               </div>
             ) : (
               <div className="insetGroup">
-                {results.map((r, i) => (
+                {results.map((r, i) => {
+                  // 教師 / TA / admin / 系主任 搜尋課程時直接跳教師端，省去 redirect hop
+                  const isTeacherLike = demoRole === 'teacher' || demoRole === 'ta' || demoRole === 'admin' || demoRole === 'department_head';
+                  const resolvedHref = (r.type === 'course' && isTeacherLike)
+                    ? r.href.replace(/^\/course\//, '/teacher/course/')
+                    : r.href;
+                  return (
                   <Link
                     key={r.id}
-                    href={`${r.href}${q}`}
+                    href={`${resolvedHref}${q}`}
                     className="insetGroupRow"
                     style={{ borderTop: i === 0 ? 'none' : undefined }}
                   >
@@ -283,7 +264,8 @@ export default function SearchPage(props: {
                       {TYPE_LABELS[r.type]}
                     </span>
                   </Link>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
