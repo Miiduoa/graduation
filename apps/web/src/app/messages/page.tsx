@@ -48,6 +48,7 @@ import {
   rejectClubMember,
   notifyStudentsAnnApproved,
   rejectAnnouncementWithReason,
+  sendMessage as sendDynamicMessage,
   type AnyMessage,
   type StoreDirectThread,
   type StoreDynamicMessage,
@@ -167,6 +168,9 @@ export default function MessagesPage(props: {
   const selfUid = roleToUid(demoRole);
 
   const [tab, setTab] = useState<'dm' | 'inbox' | 'friends'>('dm');
+  // 首次掛載：若有未讀系統通知，預設停在 inbox tab，讓跨角色動作面板
+  // 立刻可見；否則維持私訊 tab 的預設行為。
+  const tabAutoPickedRef = useRef(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [composeText, setComposeText] = useState('');
   const [friendSearch, setFriendSearch] = useState('');
@@ -228,6 +232,16 @@ export default function MessagesPage(props: {
     (m) => !m.isRead && !readIds.has(m.id) && !store.readMessageIds.includes(m.id),
   ).length;
 
+  // 首次掛載：若有未讀系統通知，自動切到 inbox tab（一次性，使用者切了就不再覆寫）
+  useEffect(() => {
+    if (tabAutoPickedRef.current) return;
+    if (sysUnread > 0) {
+      setTab('inbox');
+      tabAutoPickedRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sysUnread]);
+
   function handleSelectSys(msg: AnyMessage) {
     setSelectedSysId(msg.id);
     if (!msg.isRead && !readIds.has(msg.id)) {
@@ -238,7 +252,26 @@ export default function MessagesPage(props: {
 
   function handleReplySys() {
     if (!replyText.trim() || !selectedSys) return;
-    success(`✅ 已回覆給 ${selectedSys.fromName}`);
+    const me = getDemoUser(demoRole);
+    const dyn = selectedSys as StoreDynamicMessage & { _dynamic?: boolean };
+    // 動態訊息：真實送訊息回原寄件人；靜態訊息：toast 模擬
+    if (dyn._dynamic && dyn.senderRole && me) {
+      sendDynamicMessage({
+        fromName: me.displayName,
+        fromAvatar: roleDef.icon,
+        subject: `Re: ${selectedSys.subject}`,
+        body: replyText.trim(),
+        sentAt: '剛剛',
+        isRead: false,
+        type: 'info',
+        senderRole: demoRole,
+        inReplyTo: selectedSys.id,
+        recipientRoles: [dyn.senderRole],
+      });
+      success(`✅ 已回覆給 ${selectedSys.fromName}`, '對方會在訊息收件匣看到');
+    } else {
+      info('回覆已送出（demo 範圍：靜態訊息僅模擬）');
+    }
     setReplyText('');
   }
 
