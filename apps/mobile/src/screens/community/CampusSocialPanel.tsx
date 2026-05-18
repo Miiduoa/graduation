@@ -20,6 +20,7 @@ import {
   Modal,
   FlatList,
   KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -621,7 +622,12 @@ function PostCard({
             color={post.bookmarked ? theme.colors.accent : theme.colors.textSecondary}
           />
         </Pressable>
-        <Pressable>
+        <Pressable
+          onPress={() =>
+            Alert.alert('分享', '已複製貼文連結到剪貼簿（demo 範圍）')
+          }
+          accessibilityLabel="分享貼文"
+        >
           <Ionicons name="share-social-outline" size={18} color={theme.colors.textSecondary} />
         </Pressable>
       </View>

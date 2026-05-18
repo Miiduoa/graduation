@@ -21,7 +21,9 @@ import {
   Modal,
   Animated,
   Easing,
+  Alert,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 
 // ──────────────────────────────────────────────
 // 內嵌 Design Tokens（避開 packages alias 風險）
@@ -148,7 +150,54 @@ function SlotCard({
 // Main Screen
 // ──────────────────────────────────────────────
 export default function TodayAiFirstScreen() {
+  const navigation = useNavigation<any>();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [pinned, setPinned] = useState<Record<string, boolean>>({});
+  const [leaveStatus, setLeaveStatus] = useState<'draft' | 'cancelled' | 'submitted'>('draft');
+  const [draft, setDraft] = useState('');
+
+  const pin = (id: string) =>
+    setPinned((p) => ({ ...p, [id]: !p[id] }));
+
+  const goToMap = (destination?: string) => {
+    try {
+      navigation.navigate('校園', { screen: 'Map', params: { destination } });
+    } catch {
+      Alert.alert('導航', `已為你規劃前往 ${destination ?? '目的地'} 的路線`);
+    }
+  };
+
+  const goToCafeteria = () => {
+    try {
+      navigation.navigate('校園', { screen: '餐廳總覽' });
+    } catch {
+      Alert.alert('餐廳', '已開啟餐廳清單');
+    }
+  };
+
+  const askAi = (q: string) => {
+    setSheetOpen(false);
+    setTimeout(() => Alert.alert('校園 AI', `已記下你的問題：「${q}」\nAI 正在準備回覆…`), 200);
+  };
+
+  const submitLeave = () => {
+    setLeaveStatus('submitted');
+    Alert.alert(
+      '請假已送出',
+      '5/22 資料庫系統 病假 已通知老師。\n（demo 範圍：訊息會出現在老師收件匣）',
+    );
+  };
+
+  const cancelLeave = () => {
+    setLeaveStatus('cancelled');
+  };
+
+  const sendDraft = () => {
+    const q = draft.trim();
+    if (!q) return;
+    setDraft('');
+    askAi(q);
+  };
 
   return (
     <View style={styles.root}>
@@ -167,44 +216,55 @@ export default function TodayAiFirstScreen() {
         </View>
 
         {/* AI Suggestion */}
-        <View style={styles.aiSuggestion}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          style={styles.aiSuggestion}
+          onPress={goToCafeteria}
+          accessibilityLabel="開啟餐廳清單"
+        >
           <View style={styles.aiSuggestionHead}>
             <AiMark size={24} />
             <Text style={styles.aiSuggestionLabel}>AI 建議</Text>
           </View>
           <Text style={styles.aiSuggestionTitle}>先去主餐廳吃中餐？</Text>
           <Text style={styles.aiSuggestionSub}>$95 · 步行 8 分鐘 · 你上次給 ⭐4.5</Text>
-        </View>
+        </TouchableOpacity>
 
         {/* Slot Cards */}
         <View style={styles.cardsList}>
           <SlotCard
-            title="下節課"
+            title={pinned['next-class'] ? '下節課 · 已釘選 📌' : '下節課'}
             icon="⏰"
             confidence="high"
             source="教務系統 · 09:43"
-            onPin={() => {}}
+            onPin={() => pin('next-class')}
           >
             <Text style={styles.body}>
               <Text style={styles.bold}>資料結構</Text> · 09:10–10:50
             </Text>
             <Text style={styles.body}>📍 工程館 302（步行 4 分鐘）</Text>
             <View style={styles.btnRow}>
-              <TouchableOpacity style={styles.btnPrimary}>
+              <TouchableOpacity
+                style={styles.btnPrimary}
+                onPress={() => goToMap('工程館 302')}
+              >
                 <Text style={styles.btnPrimaryText}>🧭 導航</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.btnGhost}>
+              <TouchableOpacity
+                style={styles.btnGhost}
+                onPress={() => askAi('幫我請資料結構的假')}
+              >
                 <Text style={styles.btnGhostText}>請假</Text>
               </TouchableOpacity>
             </View>
           </SlotCard>
 
           <SlotCard
-            title="本週待辦 3 件"
+            title={pinned['week-todo'] ? '本週待辦 3 件 · 已釘選 📌' : '本週待辦 3 件'}
             icon="📅"
             confidence="high"
             source="LMS · 09:42"
-            onPin={() => {}}
+            onPin={() => pin('week-todo')}
           >
             <ScheduleRow when="週三" text="作業系統 Lab 3" tone="warn" tag="未開始" />
             <ScheduleRow when="週五" text="專題期中報告 60%" tone="todo" tag="進行中" />
@@ -212,7 +272,13 @@ export default function TodayAiFirstScreen() {
           </SlotCard>
 
           <SlotCard
-            title="請假草稿（待確認）"
+            title={
+              leaveStatus === 'submitted'
+                ? '請假草稿（已送出）'
+                : leaveStatus === 'cancelled'
+                  ? '請假草稿（已取消）'
+                  : '請假草稿（待確認）'
+            }
             icon="📝"
             confidence="mid"
             source="從對話自動填入"
@@ -220,15 +286,33 @@ export default function TodayAiFirstScreen() {
             <Text style={styles.body}>
               <Text style={styles.bold}>5/22</Text> 資料庫系統 · 病假
             </Text>
-            <View style={styles.btnRow}>
-              <TouchableOpacity style={styles.btnGhost}>
-                <Text style={styles.btnGhostText}>取消</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btnPrimary}>
-                <Text style={styles.btnPrimaryText}>提交給老師 →</Text>
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.warnNote}>⚠ AI 不會自動送出，需你最終確認</Text>
+            {leaveStatus === 'draft' ? (
+              <>
+                <View style={styles.btnRow}>
+                  <TouchableOpacity style={styles.btnGhost} onPress={cancelLeave}>
+                    <Text style={styles.btnGhostText}>取消</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.btnPrimary} onPress={submitLeave}>
+                    <Text style={styles.btnPrimaryText}>提交給老師 →</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.warnNote}>⚠ AI 不會自動送出，需你最終確認</Text>
+              </>
+            ) : (
+              <Text
+                style={[
+                  styles.warnNote,
+                  {
+                    color:
+                      leaveStatus === 'submitted' ? tokens.success : tokens.muted,
+                  },
+                ]}
+              >
+                {leaveStatus === 'submitted'
+                  ? '✅ 已送出給授課老師，等待回覆'
+                  : '✕ 已取消，未送出'}
+              </Text>
+            )}
           </SlotCard>
         </View>
       </ScrollView>
@@ -236,7 +320,17 @@ export default function TodayAiFirstScreen() {
       {/* Bottom Dock with AI Pill */}
       <View style={styles.dock}>
         <DockItem icon="☀️" label="Today" active />
-        <DockItem icon="🏛" label="Hub" />
+        <DockItem
+          icon="🏛"
+          label="Hub"
+          onPress={() => {
+            try {
+              navigation.navigate('學習');
+            } catch {
+              Alert.alert('Hub', '已開啟學習中樞');
+            }
+          }}
+        />
         <TouchableOpacity
           style={styles.dockAi}
           onPress={() => setSheetOpen(true)}
@@ -244,8 +338,22 @@ export default function TodayAiFirstScreen() {
         >
           <Text style={{ fontSize: 26 }}>✨</Text>
         </TouchableOpacity>
-        <DockItem icon="👤" label="Me" />
-        <DockItem icon="⚙" label="More" />
+        <DockItem
+          icon="👤"
+          label="Me"
+          onPress={() => {
+            try {
+              navigation.navigate('我的');
+            } catch {
+              Alert.alert('我的', '已開啟個人頁');
+            }
+          }}
+        />
+        <DockItem
+          icon="⚙"
+          label="More"
+          onPress={() => Alert.alert('More', '其他功能 demo 中未啟用')}
+        />
       </View>
 
       {/* AI Command Sheet */}
@@ -284,7 +392,11 @@ export default function TodayAiFirstScreen() {
 
               <View style={styles.suggestionsRow}>
                 {['下節課', '本週作業', '中午吃什麼', '請假'].map((s) => (
-                  <TouchableOpacity key={s} style={styles.suggestion}>
+                  <TouchableOpacity
+                    key={s}
+                    style={styles.suggestion}
+                    onPress={() => askAi(s)}
+                  >
                     <View style={styles.suggestionDot} />
                     <Text style={styles.suggestionText}>{s}</Text>
                   </TouchableOpacity>
@@ -294,11 +406,19 @@ export default function TodayAiFirstScreen() {
 
             <View style={styles.sheetInputRow}>
               <TextInput
+                value={draft}
+                onChangeText={setDraft}
+                onSubmitEditing={sendDraft}
+                returnKeyType="send"
                 style={styles.sheetInput}
                 placeholder="問校園 AI 任何事..."
                 placeholderTextColor={tokens.muted}
               />
-              <TouchableOpacity style={styles.sheetSend}>
+              <TouchableOpacity
+                style={[styles.sheetSend, !draft.trim() && { opacity: 0.4 }]}
+                disabled={!draft.trim()}
+                onPress={sendDraft}
+              >
                 <Text style={{ color: 'white', fontSize: 14 }}>↑</Text>
               </TouchableOpacity>
             </View>
@@ -345,13 +465,15 @@ function DockItem({
   icon,
   label,
   active,
+  onPress,
 }: {
   icon: string;
   label: string;
   active?: boolean;
+  onPress?: () => void;
 }) {
   return (
-    <TouchableOpacity style={styles.dockItem}>
+    <TouchableOpacity style={styles.dockItem} onPress={onPress} disabled={!onPress}>
       <Text style={{ fontSize: 22, color: active ? tokens.ai : tokens.muted }}>
         {icon}
       </Text>
