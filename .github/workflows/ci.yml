@@ -151,10 +151,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run web tests
-        # vitest 4 doesn't accept --ci; `vitest run` is already CI-friendly。
-        # --coverage 需要 @vitest/coverage-v8（尚未加入 devDeps）；先移除以 unblock，
-        # 後續可在 devDeps 加入該套件並還原 --coverage。
-        run: pnpm --filter web test
+        # vitest 4 不接受 --ci flag（vitest run 已預設 CI-friendly）；
+        # --coverage 需要 @vitest/coverage-v8（已在 devDeps）。
+        run: pnpm --filter web exec vitest run --coverage
 
   test-functions:
     name: Functions Tests

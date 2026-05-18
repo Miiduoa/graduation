@@ -95,9 +95,9 @@ describe('cross-role action chains', () => {
     const teacherMsg = lastMessageForRole('teacher');
     expect(teacherMsg).toBeDefined();
     expect(teacherMsg.subject).toContain('請假申請');
-    // @ts-expect-error _dynamic message has these fields
+    // @ts-expect-error _dynamic message has optional deep-link fields
     expect(teacherMsg.relatedLeaveId).toBe(leave.id);
-    // @ts-expect-error
+    // @ts-expect-error _dynamic message has optional deep-link fields
     expect(teacherMsg.senderRole).toBe('student');
 
     const deptMsg = lastMessageForRole('department_head');
@@ -146,7 +146,7 @@ describe('cross-role action chains', () => {
     const adminMsg = lastMessageForRole('admin');
     expect(adminMsg).toBeDefined();
     expect(adminMsg.subject).toContain('宿舍報修');
-    // @ts-expect-error
+    // @ts-expect-error _dynamic message has optional deep-link fields
     expect(adminMsg.relatedDormRepairId).toBe(repair.id);
   });
 
@@ -183,7 +183,7 @@ describe('cross-role action chains', () => {
     const adminMsg = lastMessageForRole('admin');
     expect(adminMsg).toBeDefined();
     expect(adminMsg.type).toBe('action');
-    // @ts-expect-error
+    // @ts-expect-error _dynamic message has optional deep-link fields
     expect(adminMsg.relatedOrderId).toBe(order.id);
 
     // Student gets receipt
@@ -222,7 +222,7 @@ describe('cross-role action chains', () => {
 
     const taMsg = lastMessageForRole('ta');
     expect(taMsg).toBeDefined();
-    // @ts-expect-error
+    // @ts-expect-error _dynamic message has optional deep-link fields
     expect(taMsg.relatedHelpId).toBe(help.id);
 
     const teacherMsg = lastMessageForRole('teacher');
@@ -267,7 +267,7 @@ describe('cross-role action chains', () => {
 
     const officerMsg = lastMessageForRole('club_officer');
     expect(officerMsg).toBeDefined();
-    // @ts-expect-error
+    // @ts-expect-error _dynamic message has optional deep-link fields
     expect(officerMsg.relatedClubMembershipId).toBe(membership.id);
   });
 
@@ -306,7 +306,7 @@ describe('cross-role action chains', () => {
 
     const teacherMsg = lastMessageForRole('teacher');
     expect(teacherMsg.subject).toContain('作業繳交');
-    // @ts-expect-error
+    // @ts-expect-error _dynamic message has optional deep-link fields
     expect(teacherMsg.relatedAssignmentId).toBe('hw-final');
   });
 
