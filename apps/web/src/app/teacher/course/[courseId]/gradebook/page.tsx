@@ -294,7 +294,7 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(15,139,141,0.08)',
+            background: 'rgba(88,86,214,0.08)',
             border: '1px solid #5856D6',
             display: 'flex',
             alignItems: 'center',

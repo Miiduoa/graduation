@@ -547,8 +547,8 @@ export default function TeacherCoursePage(props: {
               padding: '14px 18px',
               background: isTaView
                 ? 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(167,139,250,0.06) 100%)'
-                : 'linear-gradient(135deg, rgba(15,139,141,0.10) 0%, rgba(0,200,200,0.06) 100%)',
-              border: `1px solid ${isTaView ? 'rgba(124,58,237,0.28)' : 'rgba(15,139,141,0.28)'}`,
+                : 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(0,200,200,0.06) 100%)',
+              border: `1px solid ${isTaView ? 'rgba(124,58,237,0.28)' : 'rgba(88,86,214,0.28)'}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

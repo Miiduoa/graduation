@@ -458,9 +458,12 @@ export function AIChip({
       disabled={!chipInteractive}
       accessibilityRole={chipInteractive ? 'button' : undefined}
       accessibilityState={chipInteractive ? undefined : { disabled: true }}
+      // iOS Chip 視覺較緊湊，但仍用 hitSlop 延伸到 44pt 觸控目標
+      hitSlop={chipInteractive ? { top: 8, bottom: 8, left: 4, right: 4 } : undefined}
       style={{
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        minHeight: 32,
         borderRadius: aiTokens.radius.pill,
         borderWidth: 1,
         borderColor: active ? aiTokens.ai : aiTokens.border,
@@ -471,17 +474,20 @@ export function AIChip({
         opacity: chipInteractive ? 1 : 0.55,
       }}
     >
-      <View
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: 3,
-          backgroundColor: aiTokens.ai,
-        }}
-      />
+      {/* iOS Capsule 不一定有 indicator dot；保留但隱藏在非 active 時 */}
+      {active ? (
+        <View
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: aiTokens.ai,
+          }}
+        />
+      ) : null}
       <Text
         style={{
-          fontSize: 12,
+          fontSize: 13,
           color: active ? aiTokens.ai : aiTokens.text,
           fontWeight: '500',
         }}

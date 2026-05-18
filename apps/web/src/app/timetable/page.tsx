@@ -391,7 +391,7 @@ export default function TimetablePage(props: {
             className="card"
             style={{
               padding: '14px 16px',
-              background: demoRole === 'ta' ? 'rgba(124,58,237,0.10)' : 'rgba(15,139,141,0.10)',
+              background: demoRole === 'ta' ? 'rgba(124,58,237,0.10)' : 'rgba(88,86,214,0.10)',
               border: `1px solid ${demoRole === 'ta' ? '#AF52DE' : '#5856D6'}`,
               fontSize: 13,
               display: 'flex',
@@ -504,8 +504,8 @@ export default function TimetablePage(props: {
             className="card"
             style={{
               padding: '14px 18px',
-              background: 'linear-gradient(135deg, rgba(15,139,141,0.10) 0%, rgba(0,200,200,0.06) 100%)',
-              border: '1px solid rgba(15,139,141,0.25)',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(0,200,200,0.06) 100%)',
+              border: '1px solid rgba(88,86,214,0.25)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

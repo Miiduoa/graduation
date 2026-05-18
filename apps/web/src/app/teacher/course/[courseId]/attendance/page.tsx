@@ -237,7 +237,7 @@ export default function TeacherAttendancePage({ params, searchParams }: { params
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: isReadOnlyView ? 'rgba(124,58,237,0.08)' : 'rgba(15,139,141,0.08)',
+            background: isReadOnlyView ? 'rgba(124,58,237,0.08)' : 'rgba(88,86,214,0.08)',
             border: `1px solid ${isReadOnlyView ? '#AF52DE' : '#5856D6'}`,
             display: 'flex',
             alignItems: 'center',
