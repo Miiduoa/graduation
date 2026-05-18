@@ -143,7 +143,22 @@ export function AIHero({
 }
 
 // ──────────────────────────────────────────────
-// AISection — 標題 + 副標題分組
+// AISectionContext — 讓 AISection 內的 AIRow 知道自己處於 iOS insetGrouped 列表中
+// ──────────────────────────────────────────────
+type AISectionContextValue = {
+  inGroup: boolean;
+  isFirst: boolean;
+  isLast: boolean;
+};
+const AISectionContext = React.createContext<AISectionContextValue>({
+  inGroup: false,
+  isFirst: false,
+  isLast: false,
+});
+
+// ──────────────────────────────────────────────
+// AISection — iOS insetGrouped 列表分組
+// 標題（13pt uppercase secondaryLabel）+ 圓角白底容器 + 內部 hairline 分隔
 // ──────────────────────────────────────────────
 export function AISection({
   title,
@@ -158,6 +173,8 @@ export function AISection({
   children: React.ReactNode;
   style?: ViewStyle;
 }) {
+  // 把 children 轉成 array 以便插入 first/last 標記
+  const items = React.Children.toArray(children);
   return (
     <View style={[{ marginTop: aiTokens.space.lg, paddingHorizontal: aiTokens.space.md }, style]}>
       <View style={styles.sectionHead}>
@@ -167,7 +184,16 @@ export function AISection({
         </View>
         {action}
       </View>
-      {children}
+      <View style={styles.sectionGroup}>
+        {items.map((child, i) => (
+          <AISectionContext.Provider
+            key={i}
+            value={{ inGroup: true, isFirst: i === 0, isLast: i === items.length - 1 }}
+          >
+            {child}
+          </AISectionContext.Provider>
+        ))}
+      </View>
     </View>
   );
 }
@@ -292,14 +318,30 @@ export function AIRow({
     console.warn(`[AIRow] "${title}" 缺少 onPress，會顯示但點擊無反應`);
   }
   const interactive = typeof onPress === 'function';
+  const sectionCtx = React.useContext(AISectionContext);
+
+  // 在 AISection 容器內：iOS insetGrouped 樣式 — 無邊框、hairline 分隔、首末圓角
+  const groupedStyle: ViewStyle = sectionCtx.inGroup
+    ? {
+        backgroundColor: 'transparent',
+        marginHorizontal: 0,
+        marginBottom: 0,
+        borderWidth: 0,
+        borderRadius: 0,
+        borderTopWidth: sectionCtx.isFirst ? 0 : StyleSheet.hairlineWidth,
+        borderTopColor: aiTokens.border,
+        paddingVertical: 12,
+      }
+    : {};
+
   return (
     <TouchableOpacity
-      activeOpacity={interactive ? 0.7 : 1}
+      activeOpacity={interactive ? 0.6 : 1}
       onPress={onPress}
       disabled={!interactive}
       accessibilityRole={interactive ? 'button' : undefined}
       accessibilityState={interactive ? undefined : { disabled: true }}
-      style={[styles.row, !interactive && { opacity: 0.55 }]}
+      style={[styles.row, groupedStyle, !interactive && { opacity: 0.55 }]}
     >
       {icon ? <Text style={{ fontSize: 20, marginRight: 12 }}>{icon}</Text> : null}
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -318,6 +360,10 @@ export function AIRow({
         </View>
       ) : null}
       {right ?? null}
+      {/* iOS chevron：在 group 內可點時顯示，與 SF Symbols chevron.right 對齊 */}
+      {sectionCtx.inGroup && interactive && !right && !tag ? (
+        <Text style={{ fontSize: 16, color: aiTokens.muted, marginLeft: 6 }}>›</Text>
+      ) : null}
     </TouchableOpacity>
   );
 }
@@ -510,6 +556,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: aiTokens.muted,
     marginTop: 2,
+  },
+  // iOS insetGrouped 群組容器：圓角白底 + overflow hidden 把 row 分隔線切齊
+  sectionGroup: {
+    backgroundColor: aiTokens.surface,
+    borderRadius: aiTokens.radius.md,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: aiTokens.border,
   },
 
   card: {
