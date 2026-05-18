@@ -360,7 +360,7 @@ export function CampusGameScreen() {
 
   const openCampusMap = () => {
     try {
-      navigation.getParent()?.navigate?.('校園', { screen: 'Map' });
+      navigation.getParent()?.navigate?.('校園', { screen: 'MapV2' });
     } catch {
       /* ignore */
     }
