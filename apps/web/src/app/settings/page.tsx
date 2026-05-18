@@ -341,12 +341,12 @@ export default function SettingsPage(props: {
 
     try {
       const result = await updateUserProfile(user.uid, {
-        displayName: profileForm.displayName || null,
-        studentId: profileForm.studentId || null,
-        department: profileForm.department || null,
-        grade: profileForm.grade || null,
-        phone: profileForm.phone || null,
-        bio: profileForm.bio || null,
+        displayName: profileForm.displayName.trim() || undefined,
+        studentId: profileForm.studentId.trim() || undefined,
+        department: profileForm.department.trim() || undefined,
+        grade: profileForm.grade.trim() || undefined,
+        phone: profileForm.phone.trim() || undefined,
+        bio: profileForm.bio.trim() || undefined,
       });
 
       if (!result.success) {
@@ -475,7 +475,9 @@ export default function SettingsPage(props: {
         {!user && (
           <div className="card" style={{ display: "grid", gap: 10, background: "var(--warning-soft)", borderColor: "var(--warning)" }}>
             <div className="sectionTitle">通知同步需要登入</div>
-            <div className="sectionText">登入後即可把通知偏好同步到 `users/{uid}/settings/notifications`。</div>
+            <div className="sectionText">
+              登入後即可把通知偏好同步到 <code>users/{'{'}uid{'}'}/settings/notifications</code>。
+            </div>
             <div>
               <Link href={`/login${schoolSearch}`} className="btn primary">
                 前往登入
