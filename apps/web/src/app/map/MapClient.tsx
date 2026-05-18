@@ -238,6 +238,9 @@ export default function MapClient({
       }).addTo(map);
 
       mapRef.current = map;
+      // updateMarkers 是函式宣告，JS hoist 後 runtime 可達；
+      // react-hooks/immutability 的 use-before-declare 在此情境為誤判。
+      // eslint-disable-next-line react-hooks/immutability
       updateMarkers(L, map);
     });
 
