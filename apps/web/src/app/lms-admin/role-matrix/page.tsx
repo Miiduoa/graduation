@@ -111,7 +111,7 @@ export default function RoleMatrixPage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>課程角色能力矩陣（組態 RBAC）</h1>
-      <p style={{ color: '#4b5563', lineHeight: 1.6 }}>
+      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
         資料表 <code>course_role_capabilities</code>；變更會即時影響 <code>course_member_has_capability</code> 與所有以該函式為門檻的 RLS／RPC。
         修改前請確認你的角色為 <code>profiles.role=&apos;admin&apos;</code>，且該能力之 RLS／RPC 已對應到該 slug。
       </p>
@@ -122,8 +122,8 @@ export default function RoleMatrixPage() {
           style={{
             padding: '8px 14px',
             borderRadius: 8,
-            border: '1px solid #2563eb',
-            background: '#2563eb',
+            border: '1px solid #007aff',
+            background: '#007aff',
             color: '#fff',
             fontWeight: 700,
             cursor: 'pointer',
@@ -131,18 +131,18 @@ export default function RoleMatrixPage() {
           onClick={() => void addSlugFromPrompt()}>
           新增能力 slug
         </button>
-        {info ? <p style={{ color: '#059669', margin: 0 }}>{info}</p> : null}
+        {info ? <p style={{ color: '#34C759', margin: 0 }}>{info}</p> : null}
       </div>
 
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
+      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
 
-      <div style={{ overflowX: 'auto', marginTop: 16, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12 }}>
+      <div style={{ overflowX: 'auto', marginTop: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#f3f4f6', textAlign: 'left' }}>
-              <th style={{ padding: 10, borderBottom: '1px solid #e5e7eb' }}>Capability</th>
+            <tr style={{ background: '#F2F2F7', textAlign: 'left' }}>
+              <th style={{ padding: 10, borderBottom: '1px solid #E5E5EA' }}>Capability</th>
               {ROLE_KEYS.map((rk) => (
-                <th key={rk} style={{ padding: 10, borderBottom: '1px solid #e5e7eb', textAlign: 'center' }}>
+                <th key={rk} style={{ padding: 10, borderBottom: '1px solid #E5E5EA', textAlign: 'center' }}>
                   {ROLE_LABEL[rk]}
                 </th>
               ))}
@@ -154,7 +154,7 @@ export default function RoleMatrixPage() {
                 <td
                   style={{
                     padding: 10,
-                    borderBottom: '1px solid #f3f4f6',
+                    borderBottom: '1px solid #F2F2F7',
                     fontFamily: 'ui-monospace, monospace',
                     fontSize: 12,
                   }}>
@@ -169,7 +169,7 @@ export default function RoleMatrixPage() {
                       key={rk}
                       style={{
                         padding: 10,
-                        borderBottom: '1px solid #f3f4f6',
+                        borderBottom: '1px solid #F2F2F7',
                         textAlign: 'center',
                       }}>
                       <label style={{ cursor: busy ? 'wait' : 'pointer' }}>
@@ -190,7 +190,7 @@ export default function RoleMatrixPage() {
       </div>
 
       {!error && slugs.length === 0 ? (
-        <p style={{ color: '#6b7280' }}>資料表為空或未套用最新 migration。</p>
+        <p style={{ color: '#8E8E93' }}>資料表為空或未套用最新 migration。</p>
       ) : null}
     </RequireAdmin>
   );

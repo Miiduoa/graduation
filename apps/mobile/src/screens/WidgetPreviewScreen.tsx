@@ -36,7 +36,7 @@ const WIDGETS: Widget[] = [
     description: '顯示即將開始的課程',
     sizes: ['small', 'medium'],
     icon: 'alarm',
-    color: '#2563EB',
+    color: '#007AFF',
     status: 'native',
   },
   {
@@ -54,7 +54,7 @@ const WIDGETS: Widget[] = [
     description: '顯示最新公告與未讀數',
     sizes: ['medium', 'large'],
     icon: 'megaphone',
-    color: '#F97316',
+    color: '#FF9500',
     status: 'native',
   },
   {
@@ -63,7 +63,7 @@ const WIDGETS: Widget[] = [
     description: '顯示今日推薦菜色',
     sizes: ['medium'],
     icon: 'restaurant',
-    color: '#F97316',
+    color: '#FF9500',
     status: 'preview',
   },
   {
@@ -72,7 +72,7 @@ const WIDGETS: Widget[] = [
     description: '借閱狀態與到期提醒',
     sizes: ['small', 'medium'],
     icon: 'library',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     status: 'preview',
   },
   {
@@ -81,7 +81,7 @@ const WIDGETS: Widget[] = [
     description: '顯示即將舉辦的活動',
     sizes: ['medium', 'large'],
     icon: 'ticket',
-    color: '#EC4899',
+    color: '#FF2D55',
     status: 'preview',
   },
   {
@@ -99,7 +99,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 function WidgetStatusBadge({ status }: { status: WidgetStatus }) {
   const isNative = status === 'native';
-  const color = isNative ? '#10B981' : '#F59E0B';
+  const color = isNative ? '#34C759' : '#FF9500';
   const backgroundColor = isNative ? 'rgba(16,185,129,0.14)' : 'rgba(245,158,11,0.14)';
 
   return (
@@ -844,7 +844,7 @@ export function WidgetPreviewScreen() {
                       gap: 6,
                     }}
                   >
-                    <Text style={{ color: '#10B981', fontWeight: '700' }}>
+                    <Text style={{ color: '#34C759', fontWeight: '700' }}>
                       已完成原生整合 ({integratedWidgets.length})
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>
@@ -860,7 +860,7 @@ export function WidgetPreviewScreen() {
                       gap: 6,
                     }}
                   >
-                    <Text style={{ color: '#F59E0B', fontWeight: '700' }}>
+                    <Text style={{ color: '#FF9500', fontWeight: '700' }}>
                       預覽與資料模型已完成 ({previewWidgets.length})
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 12, lineHeight: 18 }}>

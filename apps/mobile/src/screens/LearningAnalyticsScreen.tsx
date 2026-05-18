@@ -611,7 +611,7 @@ export function LearningAnalyticsScreen(props: any) {
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>繳交作業</Text>
                 </View>
                 <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 22 }}>
+                  <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 22 }}>
                     {weeklyReports[0].stats.newAchievements}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>新成就</Text>

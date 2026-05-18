@@ -832,7 +832,7 @@ export function CourseHubScreen(props: any) {
                   autoCapitalize="none"
                   style={{
                     borderWidth: 1,
-                    borderColor: tcError ? '#DC2626' : theme.colors.border,
+                    borderColor: tcError ? '#D70015' : theme.colors.border,
                     borderRadius: 10,
                     paddingHorizontal: 14,
                     paddingVertical: 12,
@@ -841,7 +841,7 @@ export function CourseHubScreen(props: any) {
                     backgroundColor: theme.colors.bg,
                   }}
                 />
-                {tcError ? <Text style={{ color: '#DC2626', fontSize: 13 }}>{tcError}</Text> : null}
+                {tcError ? <Text style={{ color: '#D70015', fontSize: 13 }}>{tcError}</Text> : null}
                 <View
                   style={{
                     flexDirection: 'row',
@@ -957,7 +957,7 @@ export function CourseHubScreen(props: any) {
                 <ActionChip
                   icon="albums-outline"
                   label="教材單元"
-                  tint="#2563EB"
+                  tint="#007AFF"
                   onPress={() =>
                     nav?.navigate?.('CourseModules', {
                       groupId: membership.groupId,
@@ -968,7 +968,7 @@ export function CourseHubScreen(props: any) {
                 <ActionChip
                   icon="document-text-outline"
                   label="作業"
-                  tint="#F97316"
+                  tint="#FF9500"
                   onPress={() => {
                     // 導向新的課程首頁作業 tab，避免跨 tab 導航到收件匣
                     const rootNav = nav?.getParent?.() ?? nav;
@@ -989,7 +989,7 @@ export function CourseHubScreen(props: any) {
                 <ActionChip
                   icon="checkmark-done-outline"
                   label="點名"
-                  tint="#DC2626"
+                  tint="#D70015"
                   onPress={() =>
                     nav?.navigate?.('Attendance', {
                       groupId: membership.groupId,
@@ -1001,7 +1001,7 @@ export function CourseHubScreen(props: any) {
                   <ActionChip
                     icon="pulse-outline"
                     label="課堂"
-                    tint="#059669"
+                    tint="#34C759"
                     onPress={() =>
                       nav?.navigate?.('Classroom', {
                         groupId: membership.groupId,

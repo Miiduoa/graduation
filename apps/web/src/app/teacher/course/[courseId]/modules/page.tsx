@@ -185,7 +185,7 @@ export default function TeacherModulesPage({ params, searchParams }: { params: {
               padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 20,
               background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
               border: `1px solid ${isTaView ? '#7C3AED' : '#FF9500'}`,
-              color: isTaView ? '#5B21B6' : '#92400E',
+              color: isTaView ? '#007AFF' : '#92400E',
             }}
           >
             {isTaView
@@ -273,7 +273,7 @@ export default function TeacherModulesPage({ params, searchParams }: { params: {
             padding: '14px 18px',
             borderRadius: 12,
             background: 'rgba(15,139,141,0.08)',
-            border: '1px solid #0F8B8D',
+            border: '1px solid #007AFF',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -282,7 +282,7 @@ export default function TeacherModulesPage({ params, searchParams }: { params: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 3 }}>🤖 AI 教材助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#007AFF', marginBottom: 3 }}>🤖 AI 教材助理</div>
             <div style={{ fontSize: 13, color: '#374151' }}>
               讓 AI 幫你生成本週課程簡介、學習目標，或根據大綱草擬教材結構。
             </div>

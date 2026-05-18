@@ -158,18 +158,18 @@ export function HeroActionCard(props: {
 }) {
   const palette =
     props.tone === 'warning'
-      ? { colors: ['#FEF3C7', '#FDE68A'] as [string, string], fg: '#D97706', iconBg: '#FEF3C720' }
+      ? { colors: ['#FEF3C7', '#FDE68A'] as [string, string], fg: '#FF9500', iconBg: '#FEF3C720' }
       : props.tone === 'success'
-        ? { colors: ['#D1FAE5', '#A7F3D0'] as [string, string], fg: '#059669', iconBg: '#D1FAE520' }
+        ? { colors: ['#D1FAE5', '#A7F3D0'] as [string, string], fg: '#34C759', iconBg: '#D1FAE520' }
         : props.tone === 'danger'
           ? {
               colors: ['#FEE2E2', '#FECACA'] as [string, string],
-              fg: '#DC2626',
+              fg: '#D70015',
               iconBg: '#FEE2E220',
             }
           : {
               colors: ['#F3F4F6', '#E5E7EB'] as [string, string],
-              fg: '#5B21B6',
+              fg: '#007AFF',
               iconBg: 'rgba(17,24,39,0.06)',
             };
 
@@ -602,10 +602,10 @@ export function RoleCtaCard(props: {
 }) {
   const palette =
     props.tone === 'teacher'
-      ? { colors: ['#D1FAE5', '#A7F3D0'] as const, fg: '#059669' }
+      ? { colors: ['#D1FAE5', '#A7F3D0'] as const, fg: '#34C759' }
       : props.tone === 'admin'
-        ? { colors: ['#FEF3C7', '#FDE68A'] as const, fg: '#D97706' }
-        : { colors: ['#F3F4F6', '#E5E7EB'] as const, fg: '#5B21B6' };
+        ? { colors: ['#FEF3C7', '#FDE68A'] as const, fg: '#FF9500' }
+        : { colors: ['#F3F4F6', '#E5E7EB'] as const, fg: '#007AFF' };
 
   const isDark = theme.mode === 'dark';
   const gradColors = isDark
@@ -731,7 +731,7 @@ export function CompletionState(props: {
           backgroundColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.7)',
         }}
       >
-        <Ionicons name="checkmark-done" size={28} color={isDark ? '#34D399' : '#059669'} />
+        <Ionicons name="checkmark-done" size={28} color={isDark ? '#34D399' : '#34C759'} />
       </View>
       <Text
         style={{
@@ -764,7 +764,7 @@ export function CompletionState(props: {
             opacity: pressed ? 0.8 : 1,
           })}
         >
-          <Text style={{ color: isDark ? '#34D399' : '#059669', fontSize: 14, fontWeight: '700' }}>
+          <Text style={{ color: isDark ? '#34D399' : '#34C759', fontSize: 14, fontWeight: '700' }}>
             {props.actionLabel}
           </Text>
         </Pressable>

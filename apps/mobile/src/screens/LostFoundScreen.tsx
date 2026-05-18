@@ -194,12 +194,12 @@ export function LostFoundScreen(props: any) {
   // ═════════════════════════════════════════════════
 
   const QUICK_ACTIONS = [
-    { key: 'post_lost', label: '我遺失了', icon: 'alert-circle-outline', color: '#EF4444' },
-    { key: 'post_found', label: '我拾獲了', icon: 'hand-right-outline', color: '#10B981' },
-    { key: 'ai_match', label: 'AI配對', icon: 'sparkles-outline', color: '#F59E0B' },
-    { key: 'hotspot', label: '熱點地圖', icon: 'map-outline', color: '#8B5CF6' },
-    { key: 'my_rep', label: '我的信譽', icon: 'ribbon-outline', color: '#EC4899' },
-    { key: 'custody', label: '保管查詢', icon: 'archive-outline', color: '#0D9488' },
+    { key: 'post_lost', label: '我遺失了', icon: 'alert-circle-outline', color: '#FF3B30' },
+    { key: 'post_found', label: '我拾獲了', icon: 'hand-right-outline', color: '#34C759' },
+    { key: 'ai_match', label: 'AI配對', icon: 'sparkles-outline', color: '#FF9500' },
+    { key: 'hotspot', label: '熱點地圖', icon: 'map-outline', color: '#AF52DE' },
+    { key: 'my_rep', label: '我的信譽', icon: 'ribbon-outline', color: '#FF2D55' },
+    { key: 'custody', label: '保管查詢', icon: 'archive-outline', color: '#5AC8FA' },
   ];
 
   const handleQuickAction = (key: string) => {
@@ -273,10 +273,10 @@ export function LostFoundScreen(props: any) {
       >
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {[
-            { label: '遺失', value: stats.totalLostThisMonth, color: '#EF4444' },
-            { label: '拾獲', value: stats.totalFoundThisMonth, color: '#10B981' },
-            { label: '歸還', value: stats.returnedThisMonth, color: '#3B82F6' },
-            { label: '警衛室', value: stats.pendingAtGuard, color: '#F59E0B' },
+            { label: '遺失', value: stats.totalLostThisMonth, color: '#FF3B30' },
+            { label: '拾獲', value: stats.totalFoundThisMonth, color: '#34C759' },
+            { label: '歸還', value: stats.returnedThisMonth, color: '#007AFF' },
+            { label: '警衛室', value: stats.pendingAtGuard, color: '#FF9500' },
           ].map((s) => (
             <View
               key={s.label}
@@ -420,19 +420,19 @@ export function LostFoundScreen(props: any) {
               loc: '警衛室/系辦/圖書館',
               days: CUSTODY_POLICY.guardHoldDays,
               icon: 'shield-outline',
-              color: '#059669',
+              color: '#34C759',
             },
             {
               loc: '宿舍服務台',
               days: CUSTODY_POLICY.dormHoldDays,
               icon: 'home-outline',
-              color: '#EC4899',
+              color: '#FF2D55',
             },
             {
               loc: '學務處（最終）',
               days: CUSTODY_POLICY.affairsHoldDays,
               icon: 'people-outline',
-              color: '#7C3AED',
+              color: '#AF52DE',
             },
           ].map((step, i) => (
             <View
@@ -521,12 +521,12 @@ export function LostFoundScreen(props: any) {
                   paddingHorizontal: 7,
                   paddingVertical: 2,
                   borderRadius: 4,
-                  backgroundColor: p.type === 'lost' ? '#EF444420' : '#10B98120',
+                  backgroundColor: p.type === 'lost' ? '#FF3B3020' : '#34C75920',
                 }}
               >
                 <Text
                   style={{
-                    color: p.type === 'lost' ? '#EF4444' : '#10B981',
+                    color: p.type === 'lost' ? '#FF3B30' : '#34C759',
                     fontSize: 10,
                     fontWeight: '700',
                   }}
@@ -555,11 +555,11 @@ export function LostFoundScreen(props: any) {
                     paddingHorizontal: 6,
                     paddingVertical: 2,
                     borderRadius: 4,
-                    backgroundColor: '#F59E0B18',
+                    backgroundColor: '#FF950018',
                   }}
                 >
-                  <Ionicons name="sparkles" size={10} color="#F59E0B" />
-                  <Text style={{ color: '#F59E0B', fontSize: 10, fontWeight: '600' }}>
+                  <Ionicons name="sparkles" size={10} color="#FF9500" />
+                  <Text style={{ color: '#FF9500', fontSize: 10, fontWeight: '600' }}>
                     {p.matchScore}%
                   </Text>
                 </View>
@@ -779,28 +779,28 @@ export function LostFoundScreen(props: any) {
               dim: '類別匹配',
               weight: '30%',
               icon: 'grid-outline',
-              color: '#3B82F6',
+              color: '#007AFF',
               desc: '物品分類是否相同/相近',
             },
             {
               dim: '地點匹配',
               weight: '25%',
               icon: 'location-outline',
-              color: '#10B981',
+              color: '#34C759',
               desc: '遺失與拾獲地點距離',
             },
             {
               dim: '時間匹配',
               weight: '25%',
               icon: 'time-outline',
-              color: '#F59E0B',
+              color: '#FF9500',
               desc: '遺失與拾獲時間差距',
             },
             {
               dim: '特徵匹配',
               weight: '20%',
               icon: 'finger-print-outline',
-              color: '#8B5CF6',
+              color: '#AF52DE',
               desc: '顏色/品牌/型號/特殊標記',
             },
           ].map((d) => (
@@ -865,10 +865,10 @@ export function LostFoundScreen(props: any) {
 
               const confidenceColor =
                 mr.confidence === 'high'
-                  ? '#10B981'
+                  ? '#34C759'
                   : mr.confidence === 'medium'
-                    ? '#F59E0B'
-                    : '#9CA3AF';
+                    ? '#FF9500'
+                    : '#AEAEB2';
 
               return (
                 <View
@@ -891,7 +891,7 @@ export function LostFoundScreen(props: any) {
                     }}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Ionicons name="sparkles" size={16} color="#F59E0B" />
+                      <Ionicons name="sparkles" size={16} color="#FF9500" />
                       <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
                         匹配度 {mr.score}%
                       </Text>
@@ -917,9 +917,9 @@ export function LostFoundScreen(props: any) {
                   {/* 遺失 ↔ 拾獲 */}
                   <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
                     <View
-                      style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: '#EF444410' }}
+                      style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: '#FF3B3010' }}
                     >
-                      <Text style={{ color: '#EF4444', fontSize: 10, fontWeight: '600' }}>
+                      <Text style={{ color: '#FF3B30', fontSize: 10, fontWeight: '600' }}>
                         遺失
                       </Text>
                       <Text
@@ -936,9 +936,9 @@ export function LostFoundScreen(props: any) {
                     </View>
                     <Ionicons name="swap-horizontal" size={18} color={theme.colors.muted} />
                     <View
-                      style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: '#10B98110' }}
+                      style={{ flex: 1, padding: 8, borderRadius: 8, backgroundColor: '#34C75910' }}
                     >
-                      <Text style={{ color: '#10B981', fontSize: 10, fontWeight: '600' }}>
+                      <Text style={{ color: '#34C759', fontSize: 10, fontWeight: '600' }}>
                         拾獲
                       </Text>
                       <Text
@@ -962,20 +962,20 @@ export function LostFoundScreen(props: any) {
                         label: '類別',
                         score: mr.breakdown.categoryMatch,
                         max: 30,
-                        color: '#3B82F6',
+                        color: '#007AFF',
                       },
                       {
                         label: '地點',
                         score: mr.breakdown.locationMatch,
                         max: 25,
-                        color: '#10B981',
+                        color: '#34C759',
                       },
-                      { label: '時間', score: mr.breakdown.timeMatch, max: 25, color: '#F59E0B' },
+                      { label: '時間', score: mr.breakdown.timeMatch, max: 25, color: '#FF9500' },
                       {
                         label: '特徵',
                         score: mr.breakdown.featureMatch,
                         max: 20,
-                        color: '#8B5CF6',
+                        color: '#AF52DE',
                       },
                     ].map((d) => (
                       <View key={d.label} style={{ flex: 1, alignItems: 'center' }}>
@@ -1218,7 +1218,7 @@ export function LostFoundScreen(props: any) {
                     {action.description}
                   </Text>
                 </View>
-                <Text style={{ color: '#10B981', fontWeight: '800', fontSize: 14 }}>
+                <Text style={{ color: '#34C759', fontWeight: '800', fontSize: 14 }}>
                   +{action.points}
                 </Text>
               </View>
@@ -1261,7 +1261,7 @@ export function LostFoundScreen(props: any) {
                       </Text>
                       <Text style={{ color: theme.colors.muted, fontSize: 10 }}>{h.date}</Text>
                     </View>
-                    <Text style={{ color: '#10B981', fontWeight: '700', fontSize: 13 }}>
+                    <Text style={{ color: '#34C759', fontWeight: '700', fontSize: 13 }}>
                       +{h.points}
                     </Text>
                   </View>
@@ -1304,14 +1304,14 @@ export function LostFoundScreen(props: any) {
                     width: 28,
                     height: 28,
                     borderRadius: 14,
-                    backgroundColor: i < 3 ? '#EF444420' : theme.colors.bg,
+                    backgroundColor: i < 3 ? '#FF3B3020' : theme.colors.bg,
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
                   <Text
                     style={{
-                      color: i < 3 ? '#EF4444' : theme.colors.muted,
+                      color: i < 3 ? '#FF3B30' : theme.colors.muted,
                       fontWeight: '800',
                       fontSize: 12,
                     }}
@@ -1328,7 +1328,7 @@ export function LostFoundScreen(props: any) {
                   )}
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={{ color: '#EF4444', fontWeight: '700', fontSize: 13 }}>
+                  <Text style={{ color: '#FF3B30', fontWeight: '700', fontSize: 13 }}>
                     {loc.lostCount}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 9 }}>次</Text>
@@ -1378,7 +1378,7 @@ export function LostFoundScreen(props: any) {
                         width: `${pct * 100}%`,
                         height: '100%',
                         borderRadius: 3,
-                        backgroundColor: loc.isHotspot ? '#EF4444' : theme.colors.accent,
+                        backgroundColor: loc.isHotspot ? '#FF3B30' : theme.colors.accent,
                       }}
                     />
                   </View>
@@ -1405,35 +1405,35 @@ export function LostFoundScreen(props: any) {
               {
                 name: '校門口警衛室',
                 icon: 'shield-outline',
-                color: '#059669',
+                color: '#34C759',
                 desc: '24h 可認領，攜帶證件',
                 items: stats.pendingAtGuard,
               },
               {
                 name: '學務處生活輔導組',
                 icon: 'people-outline',
-                color: '#7C3AED',
+                color: '#AF52DE',
                 desc: '行政大樓 1F，週一至週五',
                 items: stats.pendingAtAffairs,
               },
               {
                 name: '蓋夏圖書館櫃檯',
                 icon: 'library-outline',
-                color: '#0D9488',
+                color: '#5AC8FA',
                 desc: '開館時間可認領',
                 items: 3,
               },
               {
                 name: '各系辦公室',
                 icon: 'business-outline',
-                color: '#F59E0B',
+                color: '#FF9500',
                 desc: '上班時間洽詢',
                 items: null,
               },
               {
                 name: '宿舍服務台',
                 icon: 'home-outline',
-                color: '#EC4899',
+                color: '#FF2D55',
                 desc: '限住宿生',
                 items: 2,
               },
@@ -1506,7 +1506,7 @@ export function LostFoundScreen(props: any) {
                   backgroundColor: theme.colors.surface2,
                 }}
               >
-                <Ionicons name="bulb-outline" size={14} color="#F59E0B" style={{ marginTop: 1 }} />
+                <Ionicons name="bulb-outline" size={14} color="#FF9500" style={{ marginTop: 1 }} />
                 <Text style={{ color: theme.colors.text, fontSize: 12, flex: 1, lineHeight: 18 }}>
                   {tip}
                 </Text>

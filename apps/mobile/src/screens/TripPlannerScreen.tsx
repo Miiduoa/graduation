@@ -93,10 +93,10 @@ type PlanStep = {
 };
 
 const MODE_CONFIG: Record<TravelMode, { icon: string; label: string; color: string; mPerMin: number }> = {
-  walk: { icon: 'walk-outline', label: '走路', color: '#10B981', mPerMin: 75 },
-  bus: { icon: 'bus-outline', label: '公車', color: '#3B82F6', mPerMin: 350 },
-  bike: { icon: 'bicycle-outline', label: '騎車', color: '#F59E0B', mPerMin: 250 },
-  drive: { icon: 'car-outline', label: '開車', color: '#8B5CF6', mPerMin: 500 },
+  walk: { icon: 'walk-outline', label: '走路', color: '#34C759', mPerMin: 75 },
+  bus: { icon: 'bus-outline', label: '公車', color: '#007AFF', mPerMin: 350 },
+  bike: { icon: 'bicycle-outline', label: '騎車', color: '#FF9500', mPerMin: 250 },
+  drive: { icon: 'car-outline', label: '開車', color: '#AF52DE', mPerMin: 500 },
 };
 
 // ═════════════════════════════════════════════════════
@@ -234,12 +234,12 @@ function EndpointPicker({
                   width: 28,
                   height: 28,
                   borderRadius: 14,
-                  backgroundColor: '#3B82F622',
+                  backgroundColor: '#007AFF22',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="locate" size={15} color="#3B82F6" />
+                <Ionicons name="locate" size={15} color="#007AFF" />
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
                 我的位置

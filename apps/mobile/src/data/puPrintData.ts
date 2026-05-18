@@ -404,15 +404,15 @@ export function getStationStatusLabel(status: MachineStatus): string {
 
 export function getStationStatusColor(status: MachineStatus): string {
   const map: Record<MachineStatus, string> = {
-    online: '#10B981',
-    busy: '#F59E0B',
-    offline: '#9CA3AF',
-    error: '#EF4444',
-    outOfPaper: '#EF4444',
-    outOfToner: '#F97316',
-    maintenance: '#8B5CF6',
+    online: '#34C759',
+    busy: '#FF9500',
+    offline: '#AEAEB2',
+    error: '#FF3B30',
+    outOfPaper: '#FF3B30',
+    outOfToner: '#FF9500',
+    maintenance: '#AF52DE',
   };
-  return map[status] ?? '#9CA3AF';
+  return map[status] ?? '#AEAEB2';
 }
 
 export function getMachineTypeLabel(type: MachineType): string {
@@ -588,7 +588,7 @@ export const ECO_LEVELS: EcoLevel[] = [
     name: '環保新手',
     minPoints: 0,
     icon: 'leaf-outline',
-    color: '#9CA3AF',
+    color: '#AEAEB2',
     perk: '基本功能',
   },
   {
@@ -596,7 +596,7 @@ export const ECO_LEVELS: EcoLevel[] = [
     name: '綠色使者',
     minPoints: 50,
     icon: 'leaf',
-    color: '#10B981',
+    color: '#34C759',
     perk: '列印提醒與建議',
   },
   {
@@ -604,7 +604,7 @@ export const ECO_LEVELS: EcoLevel[] = [
     name: '地球守護者',
     minPoints: 150,
     icon: 'earth',
-    color: '#059669',
+    color: '#34C759',
     perk: '每月免費 10 點',
   },
   {
@@ -893,7 +893,7 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'undergraduate',
     label: '大學部學生',
     icon: 'school-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     features: [
       'self_print',
       'self_copy',
@@ -915,7 +915,7 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'master_student',
     label: '碩士生',
     icon: 'school-outline',
-    color: '#6366F1',
+    color: '#5856D6',
     features: [
       'self_print',
       'self_copy',
@@ -936,7 +936,7 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'doctoral_student',
     label: '博士生',
     icon: 'school-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     features: [
       'self_print',
       'self_copy',
@@ -957,7 +957,7 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'full_time_faculty',
     label: '專任教師',
     icon: 'person-outline',
-    color: '#DC2626',
+    color: '#D70015',
     features: [
       'self_print',
       'self_copy',
@@ -977,7 +977,7 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'adjunct_faculty',
     label: '兼任教師',
     icon: 'person-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     features: [
       'self_print',
       'self_copy',
@@ -994,7 +994,7 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'staff',
     label: '職員',
     icon: 'briefcase-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     features: [
       'self_print',
       'self_copy',
@@ -1012,7 +1012,7 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'library_counter',
     label: '圖書館櫃檯人員',
     icon: 'desktop-outline',
-    color: '#059669',
+    color: '#34C759',
     features: [
       'sell_card',
       'process_refund',
@@ -1029,21 +1029,21 @@ export const PRINT_ROLE_FEATURES: PrintRoleFeatures[] = [
     role: 'maintenance_tech',
     label: '設備維護技師',
     icon: 'construct-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     features: ['fix_machine', 'replace_toner', 'replace_paper', 'view_map', 'view_statistics'],
   },
   {
     role: 'copy_shop',
     label: '校內影印店',
     icon: 'storefront-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     features: ['color_print', 'binding', 'large_format', 'self_copy', 'self_scan'],
   },
   {
     role: 'system_admin',
     label: '系統管理員',
     icon: 'settings-outline',
-    color: '#374151',
+    color: '#3C3C43',
     features: [
       'manage_quota',
       'manage_printers',
@@ -1445,17 +1445,17 @@ export function getPrintJobStatusLabel(status: PrintJobStatus): string {
 
 export function getPrintJobStatusColor(status: PrintJobStatus): string {
   const m: Record<PrintJobStatus, string> = {
-    draft: '#9CA3AF',
-    uploading: '#3B82F6',
-    queued: '#F59E0B',
-    printing: '#6366F1',
-    done: '#10B981',
-    picked: '#059669',
-    expired: '#EF4444',
-    failed: '#DC2626',
-    cancelled: '#9CA3AF',
+    draft: '#AEAEB2',
+    uploading: '#007AFF',
+    queued: '#FF9500',
+    printing: '#5856D6',
+    done: '#34C759',
+    picked: '#34C759',
+    expired: '#FF3B30',
+    failed: '#D70015',
+    cancelled: '#AEAEB2',
   };
-  return m[status] ?? '#9CA3AF';
+  return m[status] ?? '#AEAEB2';
 }
 
 export function getPrintJobStatusIcon(status: PrintJobStatus): string {
@@ -1606,13 +1606,13 @@ export function getFaultTypeIcon(type: FaultType): string {
 
 export function getFaultStatusColor(status: FaultReport['status']): string {
   const m: Record<string, string> = {
-    reported: '#EF4444',
-    assigned: '#F59E0B',
-    in_progress: '#3B82F6',
-    resolved: '#10B981',
-    cannot_fix: '#9CA3AF',
+    reported: '#FF3B30',
+    assigned: '#FF9500',
+    in_progress: '#007AFF',
+    resolved: '#34C759',
+    cannot_fix: '#AEAEB2',
   };
-  return m[status] ?? '#9CA3AF';
+  return m[status] ?? '#AEAEB2';
 }
 
 // ═══════════════════════════════════════════════════
@@ -1657,16 +1657,16 @@ export function getTransactionTypeLabel(type: CardTransactionType): string {
 
 export function getTransactionTypeColor(type: CardTransactionType): string {
   const m: Record<CardTransactionType, string> = {
-    purchase: '#10B981',
-    print: '#3B82F6',
-    copy: '#6366F1',
-    scan: '#8B5CF6',
-    refund: '#F59E0B',
-    transfer: '#EC4899',
-    bonus: '#059669',
-    expired: '#9CA3AF',
+    purchase: '#34C759',
+    print: '#007AFF',
+    copy: '#5856D6',
+    scan: '#AF52DE',
+    refund: '#FF9500',
+    transfer: '#FF2D55',
+    bonus: '#34C759',
+    expired: '#AEAEB2',
   };
-  return m[type] ?? '#9CA3AF';
+  return m[type] ?? '#AEAEB2';
 }
 
 // 模擬交易紀錄
@@ -1871,7 +1871,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'job_queued',
     label: '任務排隊',
     icon: 'time-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     defaultEnabled: true,
     description: '列印任務已加入排隊',
   },
@@ -1879,7 +1879,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'job_printing',
     label: '開始列印',
     icon: 'print-outline',
-    color: '#6366F1',
+    color: '#5856D6',
     defaultEnabled: true,
     description: '你的文件正在列印',
   },
@@ -1887,7 +1887,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'job_done',
     label: '列印完成',
     icon: 'checkmark-circle-outline',
-    color: '#10B981',
+    color: '#34C759',
     defaultEnabled: true,
     description: '文件已列印完成，請前往取件',
   },
@@ -1895,7 +1895,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'job_expiring',
     label: '取件提醒',
     icon: 'alarm-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     defaultEnabled: true,
     description: '列印文件即將過期，請盡快取件',
   },
@@ -1903,7 +1903,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'job_failed',
     label: '列印失敗',
     icon: 'close-circle-outline',
-    color: '#DC2626',
+    color: '#D70015',
     defaultEnabled: true,
     description: '列印失敗，點數已退還',
   },
@@ -1911,7 +1911,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'machine_fault',
     label: '機器故障',
     icon: 'warning-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     defaultEnabled: true,
     description: '你正在使用的機器發生故障',
   },
@@ -1919,7 +1919,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'machine_fixed',
     label: '故障修復',
     icon: 'construct-outline',
-    color: '#10B981',
+    color: '#34C759',
     defaultEnabled: true,
     description: '之前故障的機器已修復',
   },
@@ -1927,7 +1927,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'machine_alt',
     label: '替代機器',
     icon: 'swap-horizontal-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     defaultEnabled: true,
     description: '附近有更快的替代機器',
   },
@@ -1935,7 +1935,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'low_balance',
     label: '餘額不足',
     icon: 'card-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     defaultEnabled: true,
     description: '影印卡餘額低於 20 點',
   },
@@ -1943,7 +1943,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'eco_badge',
     label: '環保徽章',
     icon: 'ribbon-outline',
-    color: '#059669',
+    color: '#34C759',
     defaultEnabled: true,
     description: '獲得新的環保成就徽章',
   },
@@ -1951,7 +1951,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'eco_reward',
     label: '環保獎勵',
     icon: 'gift-outline',
-    color: '#10B981',
+    color: '#34C759',
     defaultEnabled: false,
     description: '環保積分兌換免費點數',
   },
@@ -1959,7 +1959,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'co_print_invite',
     label: '合印邀請',
     icon: 'people-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     defaultEnabled: true,
     description: '收到合印拼單邀請',
   },
@@ -1967,7 +1967,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'co_print_ready',
     label: '合印就緒',
     icon: 'checkmark-done-outline',
-    color: '#059669',
+    color: '#34C759',
     defaultEnabled: true,
     description: '合印訂單人數已滿可列印',
   },
@@ -1975,7 +1975,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'quota_refresh',
     label: '額度刷新',
     icon: 'refresh-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     defaultEnabled: true,
     description: '新學期免費額度已發放',
   },
@@ -1983,7 +1983,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'price_change',
     label: '費率變動',
     icon: 'cash-outline',
-    color: '#F97316',
+    color: '#FF9500',
     defaultEnabled: true,
     description: '影印卡價格或點數比率變動',
   },
@@ -1991,7 +1991,7 @@ export const PRINT_NOTIFICATION_TYPES: PrintNotificationConfig[] = [
     type: 'system_maintenance',
     label: '系統維護',
     icon: 'settings-outline',
-    color: '#374151',
+    color: '#3C3C43',
     defaultEnabled: true,
     description: '列印系統維護時段通知',
   },

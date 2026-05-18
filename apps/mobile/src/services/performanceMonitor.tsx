@@ -63,8 +63,8 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
 
   const getFpsColor = () => {
     if (fps >= 55) return '#22C55E';
-    if (fps >= 30) return '#F59E0B';
-    return '#EF4444';
+    if (fps >= 30) return '#FF9500';
+    return '#FF3B30';
   };
 
   return (
@@ -100,7 +100,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Performance Monitor</Text>
               <Pressable onPress={() => setIsExpanded(false)}>
-                <Ionicons name="close" size={24} color="#374151" />
+                <Ionicons name="close" size={24} color="#3C3C43" />
               </Pressable>
             </View>
 
@@ -135,7 +135,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                         style={[
                           styles.statValue,
                           {
-                            color: report.httpStats.errorRate > 0.1 ? '#EF4444' : '#22C55E',
+                            color: report.httpStats.errorRate > 0.1 ? '#FF3B30' : '#22C55E',
                           },
                         ]}
                       >
@@ -148,7 +148,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                         style={[
                           styles.statValue,
                           {
-                            color: report.httpStats.slowRequests > 0 ? '#F59E0B' : '#22C55E',
+                            color: report.httpStats.slowRequests > 0 ? '#FF9500' : '#22C55E',
                           },
                         ]}
                       >
@@ -203,7 +203,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                 </Pressable>
 
                 <Pressable
-                  style={[styles.actionButton, { backgroundColor: '#3B82F6' }]}
+                  style={[styles.actionButton, { backgroundColor: '#007AFF' }]}
                   onPress={refreshReport}
                 >
                   <Ionicons name="refresh-outline" size={18} color="#fff" />
@@ -257,7 +257,7 @@ const styles = StyleSheet.create({
   },
   fpsLabel: {
     fontSize: 8,
-    color: '#9CA3AF',
+    color: '#AEAEB2',
   },
   modalOverlay: {
     flex: 1,
@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6B7280',
+    color: '#8E8E93',
     marginBottom: 10,
     textTransform: 'uppercase',
   },
@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
   },
   fpsLargeLabel: {
     fontSize: 18,
-    color: '#9CA3AF',
+    color: '#AEAEB2',
   },
   statRow: {
     flexDirection: 'row',
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: '#8E8E93',
   },
   statValue: {
     fontSize: 14,
@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 14,
-    color: '#9CA3AF',
+    color: '#AEAEB2',
     textAlign: 'center',
     paddingVertical: 20,
   },
@@ -351,7 +351,7 @@ const styles = StyleSheet.create({
   },
   traceCount: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: '#AEAEB2',
   },
   traceDurations: {
     flexDirection: 'row',
@@ -359,18 +359,18 @@ const styles = StyleSheet.create({
   },
   traceAvg: {
     fontSize: 12,
-    color: '#6B7280',
+    color: '#8E8E93',
   },
   traceP95: {
     fontSize: 12,
-    color: '#F59E0B',
+    color: '#FF9500',
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: '#EF4444',
+    backgroundColor: '#FF3B30',
     paddingVertical: 12,
     borderRadius: 8,
     marginBottom: 10,

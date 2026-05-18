@@ -8,7 +8,7 @@ export default function AdminHomePage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>總覽</h1>
-      <p style={{ color: '#4b5563', lineHeight: 1.6 }}>
+      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
         此後台使用瀏覽器端的 Supabase anon key；資料列的可見性完全交由 RLS 控制（profiles.role = admin 可唯讀課程／成員／使用者）。
       </p>
       <ul style={{ lineHeight: 1.8 }}>

@@ -249,7 +249,7 @@ export function OnBusModeScreen(_props: Record<string, unknown>) {
           left: -100,
           right: -100,
           height: 400,
-          backgroundColor: '#5B21B6',
+          backgroundColor: '#007AFF',
           opacity: 0.35,
           borderRadius: 999,
         }}

@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
 
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   cardHeaderIcon: { fontSize: 16, marginRight: 6 },
-  cardHeaderTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A2E', flex: 1 },
+  cardHeaderTitle: { fontSize: 14, fontWeight: '700', color: '#000000', flex: 1 },
 
   navigateCard: {
     backgroundColor: '#E8F0FE',

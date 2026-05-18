@@ -48,7 +48,7 @@ export default function ExportJobsPage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>匯出任務（非同步）</h1>
-      <p style={{ color: '#4b5563', lineHeight: 1.6 }}>
+      <p style={{ color: '#3C3C43', lineHeight: 1.6 }}>
         報表匯出任務由各報表頁「入列」後寫入 <code>report_export_jobs</code>；外部 worker（Edge function 或 cron）
         以 <code>report_export_jobs_claim_next</code> 取出處理；完成時 <code>storage_path</code> 會指到簽名儲存物件路徑。
         頁面每 8 秒自動重整。
@@ -61,8 +61,8 @@ export default function ExportJobsPage() {
           marginTop: 12,
           padding: '8px 14px',
           borderRadius: 8,
-          border: '1px solid #2563eb',
-          background: '#2563eb',
+          border: '1px solid #007aff',
+          background: '#007aff',
           color: '#fff',
           fontWeight: 700,
           cursor: 'pointer',
@@ -70,12 +70,12 @@ export default function ExportJobsPage() {
         手動重整
       </button>
 
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
+      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
 
-      <div style={{ overflowX: 'auto', marginTop: 16, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12 }}>
+      <div style={{ overflowX: 'auto', marginTop: 16, background: '#fff', border: '1px solid #E5E5EA', borderRadius: 12 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#f3f4f6' }}>
+            <tr style={{ background: '#F2F2F7' }}>
               <th style={cellStyle}>建立</th>
               <th style={cellStyle}>kind</th>
               <th style={cellStyle}>scope</th>
@@ -121,7 +121,7 @@ export default function ExportJobsPage() {
         </table>
       </div>
       {!error && rows.length === 0 ? (
-        <p style={{ color: '#6b7280' }}>目前沒有匯出任務。</p>
+        <p style={{ color: '#8E8E93' }}>目前沒有匯出任務。</p>
       ) : null}
     </RequireAdmin>
   );
@@ -132,7 +132,7 @@ function statusBg(s: string) {
   if (s === 'running') return '#dbeafe';
   if (s === 'ready') return '#dcfce7';
   if (s === 'failed') return '#fecaca';
-  return '#f3f4f6';
+  return '#F2F2F7';
 }
 function statusFg(s: string) {
   if (s === 'queued') return '#92400e';
@@ -144,6 +144,6 @@ function statusFg(s: string) {
 
 const cellStyle: React.CSSProperties = {
   padding: 8,
-  border: '1px solid #e5e7eb',
+  border: '1px solid #E5E5EA',
   textAlign: 'left',
 };

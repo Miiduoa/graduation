@@ -175,14 +175,14 @@ const KEYS = {
 })();
 
 const TYPE_COLORS: Record<CalendarEventType, string> = {
-  class: '#3B82F6',
-  assignment: '#EF4444',
-  exam: '#F97316',
-  campus_event: '#8B5CF6',
-  study_plan: '#10B981',
-  pomodoro: '#EC4899',
-  personal: '#6366F1',
-  reminder: '#F59E0B',
+  class: '#007AFF',
+  assignment: '#FF3B30',
+  exam: '#FF9500',
+  campus_event: '#AF52DE',
+  study_plan: '#34C759',
+  pomodoro: '#FF2D55',
+  personal: '#5856D6',
+  reminder: '#FF9500',
 };
 
 const TYPE_ICONS: Record<CalendarEventType, string> = {
@@ -305,11 +305,11 @@ const TC_TYPE_ICONS: Record<Deadline['type'], string> = {
 };
 
 const TC_TYPE_COLORS: Record<Deadline['type'], string> = {
-  assignment: '#EF4444',
-  exam: '#F97316',
-  quiz: '#3B82F6',
-  project: '#8B5CF6',
-  other: '#6B7280',
+  assignment: '#FF3B30',
+  exam: '#FF9500',
+  quiz: '#007AFF',
+  project: '#AF52DE',
+  other: '#8E8E93',
 };
 
 /**
@@ -756,7 +756,7 @@ export async function addDeadline(data: {
             ? 'folder-outline'
             : 'document-text-outline',
     color:
-      data.priority === 'high' ? '#EF4444' : data.priority === 'medium' ? '#F97316' : '#3B82F6',
+      data.priority === 'high' ? '#FF3B30' : data.priority === 'medium' ? '#FF9500' : '#007AFF',
   };
 
   const deadlines = await loadDeadlines();
@@ -912,10 +912,10 @@ export async function addCalendarEvent(event: {
       location: '',
       color:
         event.type === 'attendance'
-          ? '#10B981'
+          ? '#34C759'
           : event.type === 'assignment_deadline'
-            ? '#EF4444'
-            : '#6366F1',
+            ? '#FF3B30'
+            : '#5856D6',
       icon: event.type === 'attendance' ? 'checkmark-circle' : 'document-text',
       completed: false,
       priority: 'medium',

@@ -51,18 +51,18 @@ type LostFoundItem = {
 };
 
 const CATEGORY_INFO: Record<ItemCategory, { label: string; icon: string; color: string }> = {
-  electronics: { label: '電子產品', icon: 'phone-portrait', color: '#3B82F6' },
-  cards: { label: '證件/卡片', icon: 'card', color: '#8B5CF6' },
-  clothing: { label: '衣物', icon: 'shirt', color: '#EC4899' },
-  accessories: { label: '配件', icon: 'glasses', color: '#F59E0B' },
-  books: { label: '書籍', icon: 'book', color: '#10B981' },
-  keys: { label: '鑰匙', icon: 'key', color: '#6366F1' },
-  other: { label: '其他', icon: 'help-circle', color: '#6B7280' },
+  electronics: { label: '電子產品', icon: 'phone-portrait', color: '#007AFF' },
+  cards: { label: '證件/卡片', icon: 'card', color: '#AF52DE' },
+  clothing: { label: '衣物', icon: 'shirt', color: '#FF2D55' },
+  accessories: { label: '配件', icon: 'glasses', color: '#FF9500' },
+  books: { label: '書籍', icon: 'book', color: '#34C759' },
+  keys: { label: '鑰匙', icon: 'key', color: '#5856D6' },
+  other: { label: '其他', icon: 'help-circle', color: '#8E8E93' },
 };
 
 const STATUS_INFO: Record<ItemStatus, { label: string; color: string; icon: string }> = {
   open: { label: '尋找中', color: theme.colors.accent, icon: 'search' },
-  claimed: { label: '已認領', color: '#F59E0B', icon: 'hand-left' },
+  claimed: { label: '已認領', color: '#FF9500', icon: 'hand-left' },
   returned: { label: '已歸還', color: theme.colors.success, icon: 'checkmark-circle' },
   expired: { label: '已過期', color: theme.colors.muted, icon: 'time' },
 };

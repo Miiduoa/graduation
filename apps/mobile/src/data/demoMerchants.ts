@@ -109,7 +109,7 @@ export const DEMO_MERCHANTS: DemoMerchant[] = [
     reviewCount: 312,
     todayServedCount: 142,
     todayRevenue: 11380,
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '校園主餐廳，便當套餐多元',
   },
   {
@@ -157,7 +157,7 @@ export const DEMO_MERCHANTS: DemoMerchant[] = [
     reviewCount: 412,
     todayServedCount: 185,
     todayRevenue: 7950,
-    color: '#EF4444',
+    color: '#FF3B30',
     description: '中西式早餐，趕課首選',
   },
   {
@@ -173,7 +173,7 @@ export const DEMO_MERCHANTS: DemoMerchant[] = [
     reviewCount: 689,
     todayServedCount: 124,
     todayRevenue: 4880,
-    color: '#7C3AED',
+    color: '#AF52DE',
     description: '手搖飲、咖啡因救星',
   },
   {
@@ -189,7 +189,7 @@ export const DEMO_MERCHANTS: DemoMerchant[] = [
     reviewCount: 234,
     todayServedCount: 76,
     todayRevenue: 6080,
-    color: '#DC2626',
+    color: '#D70015',
     description: '手工麵條、湯頭濃郁',
   },
   {
@@ -221,7 +221,7 @@ export const DEMO_MERCHANTS: DemoMerchant[] = [
     reviewCount: 198,
     todayServedCount: 94,
     todayRevenue: 7520,
-    color: '#10B981',
+    color: '#34C759',
     description: '夾菜計價、健康均衡',
   },
 ];

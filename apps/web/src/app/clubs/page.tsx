@@ -41,7 +41,7 @@ interface Club {
 }
 
 const CLUB_COLORS = [
-  '#5E6AD2',
+  '#007AFF',
   '#BF5AF2',
   '#34C759',
   '#FF9500',
@@ -301,7 +301,7 @@ export default function ClubsPage(props: {
               <div key={m.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
                 <div>
                   <span style={{ fontWeight: 600 }}>{m.studentName}</span>
-                  <span style={{ fontSize: 12, color: '#6b7280', marginLeft: 8 }}>申請加入 {m.clubName}</span>
+                  <span style={{ fontSize: 12, color: '#8E8E93', marginLeft: 8 }}>申請加入 {m.clubName}</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button
@@ -528,9 +528,9 @@ export default function ClubsPage(props: {
                       style={{
                         padding: '6px 8px',
                         borderRadius: 'var(--radius-sm)',
-                        border: '1px solid rgba(94,106,210,0.30)',
-                        background: 'rgba(94,106,210,0.10)',
-                        color: '#5E6AD2',
+                        border: '1px solid rgba(0,122,255,0.30)',
+                        background: 'rgba(0,122,255,0.10)',
+                        color: '#007AFF',
                         fontSize: 12,
                         fontWeight: 700,
                         textDecoration: 'none',

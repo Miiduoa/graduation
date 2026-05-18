@@ -40,10 +40,10 @@ const STATUS_LABEL: Record<LiveStatus, string> = {
 };
 
 const STATUS_COLOR: Record<LiveStatus, string> = {
-  live: '#10B981',
-  mock: '#F59E0B',
+  live: '#34C759',
+  mock: '#FF9500',
   offline: '#94A3B8',
-  loading: '#3B82F6',
+  loading: '#007AFF',
 };
 
 const STATUS_ICON: Record<LiveStatus, any> = {

@@ -418,7 +418,7 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
                     <View
                       style={{
                         height: `${(day.classMinutes / total) * 100}%` as any,
-                        backgroundColor: day.isToday ? theme.colors.accent : '#3B82F6',
+                        backgroundColor: day.isToday ? theme.colors.accent : '#007AFF',
                       }}
                     />
                   )}
@@ -441,9 +441,9 @@ function WeekSummaryCard({ weekView }: { weekView: WeekView }) {
       {/* Stats */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
         {[
-          { label: '上課', value: `${weekSummary.totalClassHours}h`, color: '#3B82F6' },
-          { label: '自習', value: `${weekSummary.totalStudyHours}h`, color: '#10B981' },
-          { label: '待辦', value: `${weekSummary.upcomingDeadlines}`, color: '#EF4444' },
+          { label: '上課', value: `${weekSummary.totalClassHours}h`, color: '#007AFF' },
+          { label: '自習', value: `${weekSummary.totalStudyHours}h`, color: '#34C759' },
+          { label: '待辦', value: `${weekSummary.upcomingDeadlines}`, color: '#FF3B30' },
         ].map((s) => (
           <View key={s.label} style={{ alignItems: 'center' }}>
             <Text style={{ color: s.color, fontSize: 18, fontWeight: '800' }}>{s.value}</Text>
@@ -682,7 +682,7 @@ function StudyPlanSection({
                     borderWidth: 1,
                     borderColor: theme.colors.border,
                     borderLeftWidth: 3,
-                    borderLeftColor: '#10B981',
+                    borderLeftColor: '#34C759',
                   }}
                 >
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -847,9 +847,9 @@ function PomodoroSection({
                 label: '本週',
                 value: `${stats.weekSessions}`,
                 sub: `${stats.weekMinutes}分鐘`,
-                color: '#3B82F6',
+                color: '#007AFF',
               },
-              { label: '連續', value: `${stats.streak}天`, sub: '', color: '#F97316' },
+              { label: '連續', value: `${stats.streak}天`, sub: '', color: '#FF9500' },
             ].map((s) => (
               <View key={s.label} style={{ alignItems: 'center' }}>
                 <Text style={{ color: s.color, fontSize: 22, fontWeight: '800' }}>{s.value}</Text>

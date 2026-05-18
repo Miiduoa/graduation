@@ -56,7 +56,7 @@ export const DEMO_ROLES: DemoRoleDefinition[] = [
     label: '助教 TA',
     shortLabel: 'TA',
     icon: '🧑‍💻',
-    tone: '#7C3AED',
+    tone: '#AF52DE',
     toneSoft: 'rgba(124,58,237,0.12)',
     description: '可批改作業、看成績冊，但無法編輯教材或發布成績',
     entryRoute: 'TeacherDashboard',

@@ -108,14 +108,14 @@ function buildMapHtml(opts: {
 <style>
   *{margin:0;padding:0}
   html,body,#map{width:100%;height:100%;background:#0B1014}
-  .user-dot{width:20px;height:20px;border-radius:50%;background:#3B82F6;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4);animation:pulse 2s infinite ease-out}
+  .user-dot{width:20px;height:20px;border-radius:50%;background:#007AFF;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4);animation:pulse 2s infinite ease-out}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4)}50%{box-shadow:0 0 0 14px rgba(59,130,246,.06),0 4px 8px rgba(0,0,0,.4)}}
   .poi-pin{display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
   .poi-pin .head{width:34px;height:34px;border-radius:50%;border:3px solid #fff;display:grid;place-items:center;font-size:16px}
   .poi-pin .tail{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:9px solid #fff;margin-top:-2px}
-  .bus-pin{width:40px;height:40px;border-radius:50%;background:#fff;border:3px solid #DC2626;display:grid;place-items:center;color:#DC2626;font-weight:900;font-size:13px;box-shadow:0 4px 10px rgba(0,0,0,.4);position:relative}
+  .bus-pin{width:40px;height:40px;border-radius:50%;background:#fff;border:3px solid #D70015;display:grid;place-items:center;color:#D70015;font-weight:900;font-size:13px;box-shadow:0 4px 10px rgba(0,0,0,.4);position:relative}
   .bus-pin::after{content:"";position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #fff}
-  .stop-dot{width:14px;height:14px;border-radius:50%;background:#7C3AED;border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,.4)}
+  .stop-dot{width:14px;height:14px;border-radius:50%;background:#AF52DE;border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,.4)}
   .selected-glow{filter:drop-shadow(0 0 6px rgba(111,134,255,.9))}
 </style>
 </head>
@@ -383,7 +383,7 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
           lat: v.position.lat,
           lng: v.position.lng,
           code: r?.code ?? '?',
-          color: r?.color ?? '#DC2626',
+          color: r?.color ?? '#D70015',
         };
       }),
     });
@@ -893,7 +893,7 @@ function PoiCard({
   const crowd =
     crowdRoll < 25 ? '人少' : crowdRoll < 65 ? '適中' : crowdRoll < 90 ? '擁擠' : '客滿';
   const crowdColor =
-    crowdRoll < 25 ? '#34D399' : crowdRoll < 65 ? '#F59E0B' : crowdRoll < 90 ? '#F87171' : '#A855F7';
+    crowdRoll < 25 ? '#34D399' : crowdRoll < 65 ? '#FF9500' : crowdRoll < 90 ? '#F87171' : '#A855F7';
   const stars = 3.6 + ((poi.name.length * 11) % 14) / 10;
   const reviews = 80 + ((poi.name.length * 17) % 380);
 
@@ -990,7 +990,7 @@ function PoiCard({
             text={open ? `營業中 · 至 ${poi.closeTime}` : `已關閉 · ${poi.openTime}-${poi.closeTime}`}
             color={open ? '#34D399' : theme.colors.muted}
           />
-          <MetaItem icon="star" text={`${stars.toFixed(1)}`} color="#F59E0B" />
+          <MetaItem icon="star" text={`${stars.toFixed(1)}`} color="#FF9500" />
           <MetaItem icon="chatbubbles-outline" text={`${reviews} 則評論`} color={theme.colors.muted} />
           {poi.accessible && <MetaItem icon="accessibility-outline" text="無障礙" color="#34D399" />}
         </View>
@@ -1270,7 +1270,7 @@ function TurnByTurnHud({
             paddingHorizontal: 16,
             height: 44,
             borderRadius: 12,
-            backgroundColor: pressed ? '#EF4444' : '#F87171',
+            backgroundColor: pressed ? '#FF3B30' : '#F87171',
             alignItems: 'center',
             justifyContent: 'center',
           })}

@@ -702,7 +702,7 @@ export function QRCodeScreen(props: any) {
                   icon="person-outline"
                   title="個人名片"
                   description="分享你的個人 QR 碼，讓其他同學快速加你好友"
-                  color="#F59E0B"
+                  color="#FF9500"
                 />
               </View>
             </AnimatedCard>

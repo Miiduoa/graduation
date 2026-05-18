@@ -69,7 +69,7 @@ export function AIBrainOverviewCard({ onPress, hideChevron }: AIBrainOverviewCar
           color={insightCount > 0 ? theme.colors.urgent : theme.colors.muted}
         />
         <Stat label="學到事實" value={factCount} color={theme.colors.calm} />
-        <Stat label="學會技能" value={skillCount} color="#8B5CF6" />
+        <Stat label="學會技能" value={skillCount} color="#AF52DE" />
         <Stat label="近期動作" value={recentCount} color={theme.colors.warning} />
       </View>
     </Pressable>
