@@ -803,11 +803,71 @@ export function getDynamicAssignmentsForCourse(
   return store.dynamicAssignments.filter((a) => a.courseId === courseId);
 }
 
-/** 重置 demo store（開發用 / 角色切換時可選擇是否清空） */
+/** 重置 demo store（開發用 / 角色切換時可選擇是否清空）
+ *
+ *  同時清空：demoStore_v1、demoApprovedAnn、demoPendingAnn 與已讀標記。
+ */
 export function resetDemoStore(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(STORE_KEY);
+  window.localStorage.removeItem('demoApprovedAnn');
+  window.localStorage.removeItem('demoPendingAnn');
   window.dispatchEvent(new CustomEvent(STORE_EVENT));
+  window.dispatchEvent(new CustomEvent('demoPendingAnnChange'));
+}
+
+/** 一鍵 seed：以「王小明」名義同時觸發 5 條典型動作鏈，
+ *  讓口試主持人不必再切學生點 5 個按鈕，可直接切到老師 / admin / TA / 系主任
+ *  看跨角色面板與佇列。
+ */
+export function seedDemoQueues(): void {
+  // 1. 學生請假
+  requestLeave({
+    courseId: 'c7',
+    courseName: '資料庫系統',
+    studentId: 'stu-001',
+    studentName: '王小明',
+    reason: '感冒發燒（醫師建議在家休息）',
+    dateFrom: '2026-05-21',
+    dateTo: '2026-05-21',
+  });
+  // 2. 學生宿舍報修
+  submitDormRepair({
+    building: '靜園男舍',
+    room: '305',
+    urgency: 'normal',
+    description: '浴室水龍頭關不緊，整夜滴水',
+    studentId: 'stu-001',
+    studentName: '王小明',
+  });
+  // 3. 學生訂餐
+  placeOrder({
+    studentId: 'stu-001',
+    studentName: '王小明',
+    vendorName: '校園小棧',
+    items: [
+      { name: '雞排便當', qty: 1, price: 90 },
+      { name: '紅茶', qty: 1, price: 25 },
+    ],
+  });
+  // 4. 學生求助
+  requestHelp({
+    courseId: 'c1',
+    courseName: '資料結構',
+    topic: '鏈結串列遞迴實作卡關，能否安排答疑時間？',
+    urgency: 'normal',
+    studentId: 'stu-001',
+    studentName: '王小明',
+  });
+  // 5. 學生繳交作業（讓老師端 gradebook 有「待批改」）
+  submitAssignment({
+    assignmentId: 'hw-final',
+    courseId: 'c1',
+    courseName: '資料結構',
+    assignmentTitle: '期末專題提案',
+    studentId: 'stu-001',
+    studentName: '王小明',
+  });
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -19,6 +19,8 @@ import {
   UPCOMING_EXAMS,
   CLUB_ACTIVITIES,
   readPendingAnns,
+  DEMO_STUDENTS,
+  DEMO_COURSES,
 } from '@/lib/demoData';
 import {
   getDemoStore,
@@ -499,36 +501,114 @@ async function callAI(messages: { role: string; content: string }[], role?: Demo
 選這兩門通識學分就達標 ✅`;
   }
 
-  // 成績弱項
+  // 成績弱項 — 改為讀 DEMO_STUDENTS[0].scores + store.publishedGrades
   if (lastUserMsg.includes('弱') || lastUserMsg.includes('成績') || lastUserMsg.includes('補強')) {
-    return `💡 **成績分析與建議**
+    const store2 = getDemoStore();
+    const meStu = DEMO_STUDENTS[0];
+    const published = (store2.publishedGrades ?? []).filter((g) => g.studentId === 'stu-001');
+    const publishedLines = published
+      .map((g) => `- ${g.courseName}：**${g.score} 分（${g.grade}）** — ${g.publishedAt.slice(0, 10)} 發布`)
+      .join('\n');
+    const { hw, mid, final } = meStu.scores;
+    const avg = Math.round((hw + mid + final) / 3);
+    const trend = final > mid && mid > hw ? '📈 持續上升 ✨' : final > hw ? '📈 整體上升' : '📊 平穩';
+    return `💡 **王小明的成績分析（即時資料）**
 
-📈 **表現優異：** 程式設計（91, 93 分）、網頁程式設計（96 分）
-⚠️ **相對偏弱：** 微積分（83, 79 分）、計算機網路（84 分）
+**本學期資料結構（c1，CS301）：**
+- 作業平均：**${hw}**
+- 期中考：**${mid}**
+- 期末考：**${final}**
+- 學期平均：**${avg}**　趨勢：${trend}
 
-**選課策略：**
-1. 數學底子較弱 → 修「機器學習實務」前先修完「人工智慧導論」
-2. 程式能力強 → 「行動應用程式開發」適合你
+${published.length > 0 ? `**已發布成績（${published.length} 門）：**\n${publishedLines}\n` : '（其他課程成績尚未發布，老師按下「發布全班成績」後會出現在這裡）\n'}
+**選課策略建議：**
+1. ${hw >= 90 ? '作業表現出色 → 適合修進階實作（如「行動應用程式開發」）' : '建議多預習作業以拉高總分'}
+2. ${final - mid >= 5 ? '期末顯著進步，往這個方向衝刺' : '考前 2 週進入衝刺期，建議排小組共讀'}
 
-整體 GPA 3.63，繼續保持！ 💪`;
+整體 GPA 3.63，繼續保持！💪`;
   }
 
-  // 作業 / 截止日
+  // 作業 / 截止日 — 改為讀 STUDENT_ASSIGNMENTS + store.dynamicAssignments
   if (lastUserMsg.includes('作業') || lastUserMsg.includes('截止') || lastUserMsg.includes('今天')) {
-    return `📋 **今日重要待辦清單**
+    const store2 = getDemoStore();
+    const today = new Date('2026-05-18').getTime();
+    const pendingStatic = STUDENT_ASSIGNMENTS.filter((a) => a.status === 'pending');
+    const pendingDynamic = (store2.dynamicAssignments ?? []).filter((a) => {
+      // 動態作業以 stu-001 為視角，沒繳交才算
+      const submitted = (store2.submissions ?? []).some(
+        (s) => s.assignmentId === a.id && s.studentId === 'stu-001',
+      );
+      return !submitted;
+    });
+    const all = [
+      ...pendingStatic.map((a) => ({ title: a.title, courseName: a.courseName, due: a.due })),
+      ...pendingDynamic.map((a) => ({ title: a.title, courseName: a.courseName, due: a.due })),
+    ].sort((a, b) => a.due.localeCompare(b.due));
 
-⚠️ **作業截止（4 件）：**
-- 【作業系統】Lab 5 實作 → 截止 **2026-05-18**（明天！）
-- 【資料結構】期末專題提案 → 截止 **2026-05-20**
-- 【軟體工程】Sprint 3 Review 報告 → 截止 **2026-05-26**
-- 【計算機網路】期末專題分組報告 → 截止 **2026-05-30**
+    if (all.length === 0) {
+      return `🎉 **目前沒有待繳作業**\n\n所有指派作業都已完成，繼續保持！`;
+    }
+
+    const lines = all
+      .map((a) => {
+        const dueTs = new Date(a.due).getTime();
+        const days = Math.round((dueTs - today) / 86400_000);
+        const tag = days < 0 ? '⚠️ 已逾期' : days === 0 ? '🔥 今天截止' : days === 1 ? '🔥 明天截止' : `還有 ${days} 天`;
+        return `- 【${a.courseName}】${a.title} → ${a.due}（${tag}）`;
+      })
+      .join('\n');
+
+    const examLines = UPCOMING_EXAMS.slice(0, 2)
+      .map((e) => `- ${e.courseName} ${e.title} → **${e.date} ${e.time}**，${e.location}`)
+      .join('\n');
+
+    return `📋 **你的待繳作業（${all.length} 件，依截止日排序）**
+
+${lines}
 
 📅 **近期考試：**
-- 線性代數 第二次小考 → **2026-05-22 13:10**，理學院 201
+${examLines}
 
 📚 **圖書館：** 《${DEMO_LIBRARY_DUE_SOON_BOOK}》還有 **${DEMO_LIBRARY_DUE_SOON_DAYS} 天**到期，記得續借！
 
-建議優先完成 Lab 5（明天截止），加油！`;
+建議優先完成「${all[0]?.title ?? ''}」（${all[0]?.due ?? ''} 截止）。`;
+  }
+
+  // 課表 / 今天上什麼課
+  if (lastUserMsg.includes('課表') || lastUserMsg.includes('今天上') || lastUserMsg.includes('下節')) {
+    // 本日為週一（2026-05-18 是星期一）
+    const today = new Date('2026-05-18');
+    const dow = today.getDay() || 7; // 1 = 週一
+    const meStu = DEMO_STUDENTS[0];
+    const myCourses = DEMO_COURSES.filter(
+      (c) => meStu.enrolledCourses.includes(c.id) && c.dayOfWeek === dow,
+    ).sort((a, b) => a.startPeriod - b.startPeriod);
+    if (myCourses.length === 0) {
+      return `🗓️ **今天（${today.toISOString().slice(0, 10)}）沒有排課**\n\n可以好好休息或處理待辦事項。`;
+    }
+    const lines = myCourses
+      .map(
+        (c) =>
+          `- 第 ${c.startPeriod}-${c.endPeriod} 節｜**${c.name}**（${c.code}）｜${c.instructor}｜📍 ${c.room}`,
+      )
+      .join('\n');
+    return `🗓️ **今天的課表（${today.toISOString().slice(0, 10)} 週${['日','一','二','三','四','五','六'][today.getDay()]}）**\n\n${lines}\n\n下節課：**${myCourses[0]?.name}**，記得帶筆電與課本。`;
+  }
+
+  // 訊息 / 收件匣
+  if (lastUserMsg.includes('訊息') || lastUserMsg.includes('收件匣') || lastUserMsg.includes('未讀')) {
+    const store2 = getDemoStore();
+    const unread = (store2.dynamicMessages ?? []).filter(
+      (m) => m.recipientRoles.includes('student') && !m.isRead && !(store2.readMessageIds ?? []).includes(m.id),
+    );
+    const topActions = unread.filter((m) => m.type === 'action' || m.type === 'warning').slice(0, 3);
+    if (unread.length === 0) {
+      return `📬 **收件匣**\n\n目前沒有新的動態訊息，所有通知都已處理 ✅`;
+    }
+    const lines = topActions.map((m) => `- ${m.subject}（${m.fromName}）`).join('\n');
+    return `📬 **你的訊息摘要**\n\n未讀訊息共 **${unread.length} 則**${
+      topActions.length ? `\n\n重要：\n${lines}` : ''
+    }\n\n[前往訊息頁 →](/messages)`;
   }
 
   // 預設回應
