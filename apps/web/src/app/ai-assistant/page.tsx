@@ -316,24 +316,34 @@ ${topLines}
   // ── 系主任角色的 demo 回應 ──
   if (role === 'department_head') {
     if (lastUserMsg.includes('課程') || lastUserMsg.includes('選課') || lastUserMsg.includes('趨勢')) {
-      return `📈 **本學期課程選課趨勢分析**
+      // 即時自 DEMO_COURSES 計算選課人數分佈
+      const sorted = [...DEMO_COURSES].sort((a, b) => b.members - a.members);
+      const top5 = sorted.slice(0, 5);
+      const totalSeats = sorted.reduce((s, c) => s + c.members, 0);
+      const lines = top5
+        .map(
+          (c) =>
+            `| ${c.name} | ${c.code} | ${c.members} 人 | ${c.members > 100 ? '接近滿額' : c.members < 40 ? '可考慮整併' : '正常'} |`,
+        )
+        .join('\n');
+      const small = sorted.filter((c) => c.members < 40);
+      const smallLines = small.length
+        ? small.map((c) => `- ${c.name}（${c.code}）僅 ${c.members} 人，可檢視必選修配置`).join('\n')
+        : '- 所有課程選課人數都在合理範圍';
+      return `📈 **本學期課程選課趨勢分析（即時自 DEMO_COURSES）**
+
+**全系 ${sorted.length} 門課，總修課人次 ${totalSeats}**
 
 **選課人數 Top 5：**
 | 課程 | 代碼 | 選課人數 | 狀態 |
 |------|------|---------|------|
-| 微積分 | MATH101 | 120 人 | 接近滿額 |
-| 線性代數 | MATH201 | 102 人 | 正常 |
-| 作業系統 | CS302 | 76 人 | 正常 |
-| 計算機網路 | CS401 | 68 人 | 正常 |
-| 資料庫系統 | CS303 | 54 人 | 正常 |
+${lines}
 
 **分析摘要：**
-- 數學類課程需求高，微積分接近滿額，建議下學期增開一班
-- 資料結構（CS301）48 人，班級規模適中
-- 英文寫作（ENG201）僅 32 人，可考慮是否調整必選修規定
+${smallLines}
 
 **班級平均分數警示：**
-- 資料結構班級平均約 82 分，正常範圍
+- 資料結構（CS301）平均約 82 分，正常範圍
 - 建議定期追蹤各課程期中考後的成績分布`;
     }
     if (lastUserMsg.includes('公告') || lastUserMsg.includes('草稿')) {
@@ -374,19 +384,31 @@ ${topLines}
   // ── 管理員角色的 demo 回應 ──
   if (role === 'admin') {
     if (lastUserMsg.includes('異常') || lastUserMsg.includes('登入') || lastUserMsg.includes('安全')) {
-      return `🛡️ **過去 7 天安全事件摘要（2026-05-11 ～ 2026-05-17）**
+      const store2 = getDemoStore();
+      const disabled = store2.disabledUsers ?? [];
+      const dormReports = store2.dormRepairs ?? [];
+      const openOrders = (store2.orders ?? []).filter((o) => o.status === 'placed' || o.status === 'processing');
+      const disabledLines = disabled.length
+        ? disabled
+            .map((d) => `- 已停用 \`${d.uid}\` — 原因：${d.reason ?? '未指定'}`)
+            .join('\n')
+        : '- 目前沒有已停用帳號';
+      return `🛡️ **過去 7 天安全 / 營運事件摘要（即時自 demoStore）**
 
 **⚠️ 高優先事件（1 件）：**
 - **2026-05-17 09:23** — 5 次登入失敗（來自 185.220.101.xx，荷蘭 Tor 出口節點）
   - 目標帳號：admin@pu.edu.tw
   - 建議：立即確認密碼安全，考慮加入 IP 封鎖清單，並啟用雙因子驗證
 
-**一般事件（3 件）：**
-- 2026-05-14：使用者密碼重設 × 2（一般帳號）
-- 2026-05-15：異地登入偵測 × 1（台北 IP，已確認為師生出差）
+**帳號狀態（store.disabledUsers）：**
+${disabledLines}
 
-**整體評估：** 風險等級 🟡 中等
-→ 主要威脅來自 Tor 節點嘗試，建議今日處理 admin 帳號的 2FA 設定。`;
+**待處理跨角色動作：**
+- 宿舍報修待派工：**${dormReports.filter((r) => r.status === 'reported').length}** 件
+- 訂單待備餐：**${openOrders.length}** 筆
+
+**整體評估：** 風險等級 ${disabled.length > 2 ? '🔴 高' : disabled.length > 0 ? '🟡 中等' : '🟢 低'}
+→ 切到 /messages 訊息詳情可一鍵推進報修 / 訂單；切到 /admin 查全部帳號。`;
     }
     return `你好！我是系統管理 AI 助手 🤖
 
