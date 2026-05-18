@@ -22,6 +22,7 @@ import {
   type ViewStyle,
   type TextStyle,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 // ── Tokens (Apple HIG iOS systemBackground / label / Indigo accent) ──
 export const aiTokens = {
@@ -634,20 +635,23 @@ const styles = StyleSheet.create({
   cardConfText: { fontSize: 10, fontWeight: '700' },
 
   row: {
+    // iOS Inset Cell：白底 + 圓角 + 細邊；卡與卡間距小（接近 insetGrouped 視覺）
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: aiTokens.space.md,
     paddingVertical: 14,
+    minHeight: 44, // iOS HIG 觸控目標
     backgroundColor: aiTokens.surface,
     marginHorizontal: aiTokens.space.md,
     borderRadius: aiTokens.radius.md,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: aiTokens.border,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   rowTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    // iOS body：15pt / 500 / label
+    fontSize: 15,
+    fontWeight: '500',
     color: aiTokens.text,
   },
   rowSub: {

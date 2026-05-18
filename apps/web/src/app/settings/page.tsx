@@ -908,7 +908,9 @@ export default function SettingsPage(props: {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <div>
               <div className="sectionTitle">個人資料</div>
-              <div className="sectionText">更新後會寫入 `users/{'{uid}'}` 並同步 Firebase Auth 顯示名稱。</div>
+              <div className="sectionText">
+                更新後會寫入 <code>users/{'{'}uid{'}'}</code> 並同步 Firebase Auth 顯示名稱。
+              </div>
             </div>
             <button
               type="button"
