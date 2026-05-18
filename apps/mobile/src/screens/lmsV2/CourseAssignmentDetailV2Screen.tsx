@@ -60,7 +60,7 @@ export default function CourseAssignmentDetailV2Screen() {
   const sub = loadable.data?.ownSub;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <CourseV2Header
         title={a?.title ?? '作業'}
         subtitle={courseName}
@@ -92,7 +92,7 @@ export default function CourseAssignmentDetailV2Screen() {
             <Text style={styles.btnLabel}>存草稿</Text>
           </Pressable>
           <Pressable
-            style={[styles.btn, { backgroundColor: '#007AFF' }]}
+            style={[styles.btn, { backgroundColor: '#5856D6' }]}
             disabled={submitting}
             onPress={() => handleSubmit(true)}
           >
@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
     minHeight: 160,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
     padding: 12,
     backgroundColor: '#FFFFFF',
     textAlignVertical: 'top',

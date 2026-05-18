@@ -203,7 +203,7 @@ export function PerformanceMonitor({ enabled = __DEV__ }: PerformanceMonitorProp
                 </Pressable>
 
                 <Pressable
-                  style={[styles.actionButton, { backgroundColor: '#007AFF' }]}
+                  style={[styles.actionButton, { backgroundColor: '#5856D6' }]}
                   onPress={refreshReport}
                 >
                   <Ionicons name="refresh-outline" size={18} color="#fff" />
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: '#E5E5EA',
   },
   modalTitle: {
     fontSize: 18,
@@ -314,7 +314,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: '#F2F2F7',
   },
   statLabel: {
     fontSize: 14,
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   traceRow: {
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: '#F2F2F7',
   },
   traceInfo: {
     flexDirection: 'row',

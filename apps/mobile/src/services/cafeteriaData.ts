@@ -185,9 +185,9 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 
 export const ORDER_STATUS_COLORS: Record<OrderStatus, string> = {
   pending: '#FF9500',
-  confirmed: '#007AFF',
+  confirmed: '#5856D6',
   preparing: '#AF52DE',
-  ready: '#16A34A',
+  ready: '#34C759',
   completed: '#8E8E93',
   cancelled: '#D70015',
 };
@@ -4474,7 +4474,7 @@ export const CROWD_LABELS = {
 };
 
 export const CROWD_COLORS = {
-  low: '#16A34A',
+  low: '#34C759',
   medium: '#FF9500',
   high: '#D70015',
 };

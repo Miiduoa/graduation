@@ -199,7 +199,7 @@ export default function Wave6Page() {
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              style={{ ...tabBtn, background: tab === t ? '#007aff' : '#fff', color: tab === t ? '#fff' : '#111827' }}>
+              style={{ ...tabBtn, background: tab === t ? '#5856D6' : '#fff', color: tab === t ? '#fff' : '#1C1C1E' }}>
               {labelOf(t)}
             </button>
           ))}
@@ -308,6 +308,6 @@ function labelOf(t: Tab): string {
 
 const selectStyle: React.CSSProperties = { padding: '10px 12px', borderRadius: 10, border: '1px solid #d1d5db', fontSize: 14, minWidth: 220 };
 const tabBtn: React.CSSProperties = { padding: '8px 14px', borderRadius: 8, border: '1px solid #d1d5db', fontWeight: 700, cursor: 'pointer' };
-const primaryBtn: React.CSSProperties = { padding: '10px 14px', borderRadius: 10, border: '1px solid #007aff', background: '#007aff', color: '#fff', fontWeight: 700, cursor: 'pointer' };
+const primaryBtn: React.CSSProperties = { padding: '10px 14px', borderRadius: 10, border: '1px solid #5856D6', background: '#5856D6', color: '#fff', fontWeight: 700, cursor: 'pointer' };
 const listItem: React.CSSProperties = { padding: 12, border: '1px solid #E5E5EA', borderRadius: 8, marginBottom: 8 };
 const cellStyle: React.CSSProperties = { padding: 8, border: '1px solid #E5E5EA', textAlign: 'left' };

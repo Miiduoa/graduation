@@ -1025,7 +1025,7 @@ export const LIBRARY_BOOKS: LibraryBookEntry[] = [
     totalCopies: 8,
     availableCopies: 3,
     language: 'zh',
-    coverColor: '#007AFF',
+    coverColor: '#5856D6',
     tags: ['資料結構', 'C++', '教科書'],
     description: '以 C++ 實作各種資料結構，含陣列、鏈結串列、樹、圖、排序等',
     pageCount: 528,
@@ -1105,7 +1105,7 @@ export const LIBRARY_BOOKS: LibraryBookEntry[] = [
     totalCopies: 10,
     availableCopies: 5,
     language: 'zh',
-    coverColor: '#007AFF',
+    coverColor: '#5856D6',
     tags: ['Python', '入門', '程式設計'],
     description: '從零開始學 Python，包含基礎語法、物件導向、檔案處理、網路爬蟲',
     pageCount: 448,
@@ -1205,7 +1205,7 @@ export const LIBRARY_BOOKS: LibraryBookEntry[] = [
     totalCopies: 5,
     availableCopies: 2,
     language: 'zh',
-    coverColor: '#16A34A',
+    coverColor: '#34C759',
     tags: ['軟體工程', '敏捷', '需求分析', '測試'],
     description: '涵蓋軟體生命週期、敏捷開發、需求工程、軟體測試等',
     pageCount: 600,
@@ -1785,7 +1785,7 @@ export const READING_ACHIEVEMENTS: ReadingAchievement[] = [
     name: '初次邂逅',
     description: '借出第一本書',
     icon: 'book',
-    color: '#007AFF',
+    color: '#5856D6',
     requirement: '借閱 1 本書',
     category: 'borrow',
   },
@@ -2466,7 +2466,7 @@ export function getILLStatusLabel(status: ILLStatus): string {
 export function getILLStatusColor(status: ILLStatus): string {
   const m: Record<ILLStatus, string> = {
     draft: '#AEAEB2',
-    submitted: '#007AFF',
+    submitted: '#5856D6',
     processing: '#FF9500',
     shipped: '#5856D6',
     arrived: '#34C759',
@@ -2864,7 +2864,7 @@ export const NOTIFICATION_TYPES: NotificationConfig[] = [
     type: 'room_reminder',
     label: '討論室提醒',
     icon: 'home-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     defaultEnabled: true,
     description: '預約討論室使用前 30 分鐘提醒',
   },
@@ -3034,7 +3034,7 @@ export function getPurchaseStatusLabel(status: PurchaseRequestStatus): string {
 
 export function getPurchaseStatusColor(status: PurchaseRequestStatus): string {
   const m: Record<PurchaseRequestStatus, string> = {
-    submitted: '#007AFF',
+    submitted: '#5856D6',
     reviewing: '#FF9500',
     approved: '#34C759',
     ordered: '#5856D6',

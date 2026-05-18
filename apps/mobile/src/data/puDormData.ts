@@ -559,7 +559,7 @@ export const REPAIR_CATEGORIES: RepairCategoryInfo[] = [
     id: 'ac',
     label: '冷氣',
     icon: 'snow-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     avgResponseHours: 4,
     description: '冷氣不冷、異響、漏水',
   },
@@ -734,7 +734,7 @@ export function getSmartDormSuggestions(building?: DormBuildingId): DormSuggesti
         action: 'laundry',
         color: '#FF9500',
       },
-      { icon: 'water-outline', text: '記得帶水瓶補充飲水', color: '#007AFF' },
+      { icon: 'water-outline', text: '記得帶水瓶補充飲水', color: '#5856D6' },
     );
   } else if (hour >= 11 && hour < 13) {
     suggestions.push({
@@ -801,7 +801,7 @@ export const COMMUNITY_CATEGORIES: CommunityPostCategory[] = [
     id: 'share',
     label: '分享',
     icon: 'chatbubble-ellipses-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     description: '生活分享、心得交流',
   },
   {
@@ -1065,7 +1065,7 @@ export const EMERGENCY_CONTACTS: EmergencyContact[] = [
     label: '希嘉學苑服務檯',
     phone: `${DORM_OFFICE_INFO.phone} #11245`,
     icon: 'home',
-    color: '#007AFF',
+    color: '#5856D6',
     note: '08:00-22:00',
   },
   {
@@ -1121,7 +1121,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
     icon: 'water-outline',
     label: '洗衣',
     description: '即時機台狀態',
-    color: '#007AFF',
+    color: '#5856D6',
     tabTarget: 'laundry',
   },
   {
@@ -1367,7 +1367,7 @@ export function getLotteryStatusLabel(status: LotteryAppStatus): string {
 export function getLotteryStatusColor(status: LotteryAppStatus): string {
   const m: Record<LotteryAppStatus, string> = {
     draft: '#AEAEB2',
-    submitted: '#007AFF',
+    submitted: '#5856D6',
     in_lottery: '#FF9500',
     won: '#34C759',
     waitlisted: '#FF9500',

@@ -40,7 +40,7 @@ export const PU_CATEGORY_LABELS: Record<PUCreditCat, string> = {
 
 export const PU_CATEGORY_COLORS: Record<PUCreditCat, string> = {
   required: '#f43f5e', // 紅
-  elective: '#007AFF', // 藍
+  elective: '#5856D6', // 藍
   general: '#34C759', // 綠
   common: '#FF9500', // 橙
   pe: '#AF52DE', // 紫

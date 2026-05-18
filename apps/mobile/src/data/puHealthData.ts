@@ -105,7 +105,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'general',
     label: '一般門診',
     icon: 'medical-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     description: '感冒/腸胃/皮膚/頭痛/過敏等一般症狀',
     avgWaitMinutes: 15,
     requiresAppointment: false,
@@ -591,7 +591,7 @@ export const AVAILABLE_VACCINES: {
     interval: '每年一次',
     note: '每年10-11月開放接種',
     icon: 'snow-outline',
-    color: '#007AFF',
+    color: '#5856D6',
   },
   {
     id: 'covid',
@@ -759,7 +759,7 @@ export const EMERGENCY_NUMBERS = [
     name: '衛保組',
     phone: '04-2632-8001 #11350',
     icon: 'medical-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     available: '上班時間',
   },
   {
@@ -828,7 +828,7 @@ export function generateExercisePrescription(profile: FitnessProfile): ExerciseP
       type: 'cardio',
       name: '操場慢跑',
       icon: 'walk-outline',
-      color: '#007AFF',
+      color: '#5856D6',
       durationMinutes: 30,
       frequency: '每週 3-4 次',
       intensity: 'moderate',
@@ -946,7 +946,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'student',
     label: '學生',
     icon: 'school-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     features: [
       'symptom_check',
       'book_appointment',
@@ -1433,7 +1433,7 @@ export const PEER_TOPICS: { id: PeerSupportTopic; label: string; icon: string; c
   { id: 'loneliness', label: '感到孤單', icon: 'person-outline', color: '#AF52DE' },
   { id: 'anxiety', label: '焦慮不安', icon: 'pulse-outline', color: '#FF9500' },
   { id: 'diet', label: '飲食困擾', icon: 'fast-food-outline', color: '#34C759' },
-  { id: 'exercise', label: '運動打卡', icon: 'bicycle-outline', color: '#007AFF' },
+  { id: 'exercise', label: '運動打卡', icon: 'bicycle-outline', color: '#5856D6' },
   { id: 'breakup', label: '感情傷痛', icon: 'heart-dislike-outline', color: '#FF2D55' },
   { id: 'homesick', label: '想家', icon: 'home-outline', color: '#FF9500' },
   { id: 'academic_pressure', label: '考試地獄', icon: 'school-outline', color: '#D70015' },
@@ -1478,7 +1478,7 @@ export function getActiveAlerts(): SeasonalAlert[] {
       title: '流感高峰期',
       severity: 'warning',
       icon: 'snow-outline',
-      color: '#007AFF',
+      color: '#5856D6',
       message: '10月至隔年2月為流感高峰，建議接種疫苗',
       preventionTips: ['接種流感疫苗', '勤洗手', '避免觸摸口鼻', '維持室內通風', '充足睡眠'],
       validFrom: '2025-10-01',
@@ -1572,7 +1572,7 @@ export function getSmartHealthSuggestions(): HealthSuggestion[] {
     suggestions.push({
       icon: 'water-outline',
       text: '起床後喝一杯溫水開啟新陳代謝',
-      color: '#007AFF',
+      color: '#5856D6',
     });
   }
   if (hour >= 10 && hour < 12) {
@@ -1600,7 +1600,7 @@ export function getSmartHealthSuggestions(): HealthSuggestion[] {
     suggestions.push({
       icon: 'water-outline',
       text: '提醒補充水分！每天建議 2000ml',
-      color: '#007AFF',
+      color: '#5856D6',
     });
   }
   if (hour >= 17 && hour < 20) {
@@ -1667,7 +1667,7 @@ export const HEALTH_NOTIFICATION_TYPES: HealthNotificationConfig[] = [
     type: 'appointment_remind',
     label: '看診提醒',
     icon: 'calendar-outline',
-    color: '#007AFF',
+    color: '#5856D6',
     defaultEnabled: true,
   },
   {

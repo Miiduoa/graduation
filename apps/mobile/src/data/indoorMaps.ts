@@ -136,7 +136,7 @@ export const ROOM_KIND_LABEL: Record<RoomKind, string> = {
 
 export const ROOM_KIND_COLOR: Record<RoomKind, string> = {
   study: '#34C759',
-  classroom: '#007AFF',
+  classroom: '#5856D6',
   office: '#64748B',
   restroom: '#94A3B8',
   kitchen: '#A78BFA',
@@ -808,7 +808,7 @@ export const RENYUAN_INDOOR_MAP: IndoorMap = {
   nameEn: 'Anthony Kuo Hall',
   viewBox: { width: 1000, height: 600 },
   defaultFloorId: 'rn-3f',
-  themeColor: '#007AFF',
+  themeColor: '#5856D6',
   description: '理工學院教學大樓，3 樓為計算機與網路中心',
   floors: [RENYUAN_3F, RENYUAN_1F],
 };

@@ -115,7 +115,7 @@ export default function AttendanceMethodPicker(props: Props) {
               borderRadius: 12,
               backgroundColor: sel ? '#003F8A14' : '#fff',
               borderWidth: 2,
-              borderColor: sel ? '#003F8A' : '#e5e7eb',
+              borderColor: sel ? '#003F8A' : '#E5E5EA',
               flexDirection: 'row',
               gap: 12,
               alignItems: 'flex-start',
@@ -134,7 +134,7 @@ export default function AttendanceMethodPicker(props: Props) {
               <Text style={{ fontSize: 12, color: '#3C3C43', marginTop: 4 }}>
                 {info.description}
               </Text>
-              <Text style={{ fontSize: 11, color: '#16a34a', marginTop: 4 }}>
+              <Text style={{ fontSize: 11, color: '#34C759', marginTop: 4 }}>
                 ✓ 適合：{info.bestFor}
               </Text>
               {info.cons && (

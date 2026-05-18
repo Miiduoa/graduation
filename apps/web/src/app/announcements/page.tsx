@@ -478,8 +478,8 @@ export default function AnnouncementsPage(props: {
             className="card"
             style={{
               padding: '12px 16px',
-              background: 'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(90,200,250,0.07) 100%)',
-              border: '1px solid rgba(0,122,255,0.22)',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.07) 100%)',
+              border: '1px solid rgba(88,86,214,0.22)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',

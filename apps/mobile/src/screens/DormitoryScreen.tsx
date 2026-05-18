@@ -135,7 +135,7 @@ function getLaundryStatusColor(status: LaundryStatus): string {
   const m: Record<LaundryStatus, string> = {
     available: theme.colors.success,
     inUse: '#FF9500',
-    finished: '#007AFF',
+    finished: '#5856D6',
     maintenance: theme.colors.danger,
     reserved: theme.colors.accent,
   };
@@ -2196,7 +2196,7 @@ export function DormitoryScreen(props: any) {
                     bld.gender === 'female'
                       ? '#FF2D5515'
                       : bld.gender === 'male'
-                        ? '#007AFF15'
+                        ? '#5856D615'
                         : '#AF52DE15',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -2209,7 +2209,7 @@ export function DormitoryScreen(props: any) {
                     bld.gender === 'female'
                       ? '#FF2D55'
                       : bld.gender === 'male'
-                        ? '#007AFF'
+                        ? '#5856D6'
                         : '#AF52DE'
                   }
                 />

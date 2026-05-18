@@ -43,7 +43,7 @@ const STATUS_COLOR: Record<LiveStatus, string> = {
   live: '#34C759',
   mock: '#FF9500',
   offline: '#94A3B8',
-  loading: '#007AFF',
+  loading: '#5856D6',
 };
 
 const STATUS_ICON: Record<LiveStatus, any> = {

@@ -140,7 +140,7 @@ export default function SurveyScreen(props: RouteProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
@@ -158,7 +158,7 @@ export default function SurveyScreen(props: RouteProps) {
               borderRadius: 12,
               padding: 14,
               borderWidth: 1,
-              borderColor: '#e5e7eb',
+              borderColor: '#E5E5EA',
             }}
           >
             <Text style={{ fontSize: 15, fontWeight: '600', color: '#1C1C1E' }}>
@@ -177,9 +177,9 @@ export default function SurveyScreen(props: RouteProps) {
                     padding: 10,
                     marginTop: 6,
                     borderRadius: 8,
-                    backgroundColor: answers[q.id] === opt.id ? '#003F8A14' : '#f3f4f6',
+                    backgroundColor: answers[q.id] === opt.id ? '#003F8A14' : '#F2F2F7',
                     borderWidth: 1,
-                    borderColor: answers[q.id] === opt.id ? '#003F8A' : '#e5e7eb',
+                    borderColor: answers[q.id] === opt.id ? '#003F8A' : '#E5E5EA',
                   }}
                 >
                   <Ionicons
@@ -207,9 +207,9 @@ export default function SurveyScreen(props: RouteProps) {
                       padding: 10,
                       marginTop: 6,
                       borderRadius: 8,
-                      backgroundColor: checked ? '#003F8A14' : '#f3f4f6',
+                      backgroundColor: checked ? '#003F8A14' : '#F2F2F7',
                       borderWidth: 1,
-                      borderColor: checked ? '#003F8A' : '#e5e7eb',
+                      borderColor: checked ? '#003F8A' : '#E5E5EA',
                     }}
                   >
                     <Ionicons
@@ -234,7 +234,7 @@ export default function SurveyScreen(props: RouteProps) {
                         flex: 1,
                         padding: 12,
                         borderRadius: 8,
-                        backgroundColor: selected ? '#003F8A' : '#f3f4f6',
+                        backgroundColor: selected ? '#003F8A' : '#F2F2F7',
                         alignItems: 'center',
                       }}
                     >
@@ -263,12 +263,12 @@ export default function SurveyScreen(props: RouteProps) {
                 placeholder="自由作答（可空白）"
                 style={{
                   marginTop: 8,
-                  backgroundColor: '#f9fafb',
+                  backgroundColor: '#F2F2F7',
                   borderRadius: 8,
                   padding: 10,
                   fontSize: 14,
                   borderWidth: 1,
-                  borderColor: '#e5e7eb',
+                  borderColor: '#E5E5EA',
                   minHeight: 80,
                   textAlignVertical: 'top',
                 }}

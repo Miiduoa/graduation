@@ -83,7 +83,7 @@ export default function CompanionScreen({ navigation }: { navigation?: { navigat
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
       refreshControl={
         <RefreshControl
@@ -329,7 +329,7 @@ function NeedBar({ label, value, color }: { label: string; value: number; color:
       <View
         style={{
           height: 8,
-          backgroundColor: '#e5e7eb',
+          backgroundColor: '#E5E5EA',
           borderRadius: 4,
           marginTop: 4,
           overflow: 'hidden',
@@ -368,7 +368,7 @@ function PlantCard({ plant, onPress }: { plant: Plant; onPress: () => void }) {
       <View
         style={{
           height: 4,
-          backgroundColor: '#e5e7eb',
+          backgroundColor: '#E5E5EA',
           borderRadius: 2,
           width: '100%',
           marginTop: 6,
@@ -384,7 +384,7 @@ function PlantCard({ plant, onPress }: { plant: Plant; onPress: () => void }) {
         />
       </View>
       {plant.harvestable && (
-        <Text style={{ fontSize: 10, color: '#16a34a', marginTop: 4 }}>🧺 可採收</Text>
+        <Text style={{ fontSize: 10, color: '#34C759', marginTop: 4 }}>🧺 可採收</Text>
       )}
     </Pressable>
   );
@@ -402,7 +402,7 @@ function UnlockChip({ unlock }: { unlock: Unlockable }) {
         alignItems: 'center',
         gap: 6,
         borderWidth: 1,
-        borderColor: '#e5e7eb',
+        borderColor: '#E5E5EA',
       }}
     >
       <Text style={{ fontSize: 16 }}>{unlock.emoji}</Text>
@@ -422,7 +422,7 @@ function NavButton({ label, onPress }: { label: string; onPress?: () => void }) 
         borderRadius: 12,
         alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#e5e7eb',
+        borderColor: '#E5E5EA',
       }}
     >
       <Text style={{ fontSize: 13, color: '#1C1C1E', fontWeight: '600' }}>{label}</Text>

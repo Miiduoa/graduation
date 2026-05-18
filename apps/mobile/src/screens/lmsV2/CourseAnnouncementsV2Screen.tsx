@@ -27,7 +27,7 @@ export default function CourseAnnouncementsV2Screen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <CourseV2Header title="公告" subtitle={courseName} />
       <CourseV2List
         loadable={loadable}
@@ -60,7 +60,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
   },
   title: { fontSize: 16, fontWeight: '700' },
   body: { fontSize: 14, color: '#3C3C43', marginTop: 6, lineHeight: 20 },

@@ -805,7 +805,7 @@ export function getCategoryIcon(cat: PostCategory): string {
 
 export function getCategoryColor(cat: PostCategory): string {
   const colors: Record<PostCategory, string> = {
-    course_discussion: '#007AFF',
+    course_discussion: '#5856D6',
     confession: '#FF2D55',
     vent: '#FF3B30',
     marketplace: '#34C759',

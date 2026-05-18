@@ -45,7 +45,7 @@ type UserGroup = {
 
 // joinCode helpers moved to src/utils/joinCode
 
-const AVATAR_COLORS_G = ['#5E6AD2', '#34C759', '#FF9500', '#007AFF', '#BF5AF2'];
+const AVATAR_COLORS_G = ['#5856D6', '#34C759', '#FF9500', '#5856D6', '#BF5AF2'];
 const AVATAR_EMOJIS_G = ['🧑‍💻', '👩‍🎓', '👨‍🎓', '🙋', '👩‍💻'];
 
 function hashCodeG(str: string) {
