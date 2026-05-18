@@ -770,7 +770,7 @@ export function GroupDetailScreen(props: any) {
                       backgroundColor: theme.colors.surface,
                       borderWidth: 1,
                       borderColor: p.pinned
-                        ? '#F59E0B'
+                        ? '#FF9500'
                         : isQuestion && p.solved
                           ? theme.colors.success
                           : theme.colors.border,
@@ -794,7 +794,7 @@ export function GroupDetailScreen(props: any) {
                           {p.pinned && (
                             <View
                               style={{
-                                backgroundColor: '#F59E0B',
+                                backgroundColor: '#FF9500',
                                 paddingHorizontal: 8,
                                 paddingVertical: 4,
                                 borderRadius: theme.radius.full,
@@ -864,7 +864,7 @@ export function GroupDetailScreen(props: any) {
                           borderColor: lastComment.isBestAnswer
                             ? theme.colors.success
                             : lastComment.isAI
-                              ? '#8B5CF6'
+                              ? '#AF52DE'
                               : theme.colors.border,
                         }}
                       >
@@ -877,7 +877,7 @@ export function GroupDetailScreen(props: any) {
                           }}
                         >
                           {lastComment.isAI && (
-                            <Ionicons name="sparkles" size={12} color="#8B5CF6" />
+                            <Ionicons name="sparkles" size={12} color="#AF52DE" />
                           )}
                           {lastComment.isBestAnswer && (
                             <Ionicons
@@ -888,7 +888,7 @@ export function GroupDetailScreen(props: any) {
                           )}
                           <Text
                             style={{
-                              color: lastComment.isAI ? '#8B5CF6' : theme.colors.muted,
+                              color: lastComment.isAI ? '#AF52DE' : theme.colors.muted,
                               fontSize: 11,
                               fontWeight: '700',
                             }}
@@ -930,13 +930,13 @@ export function GroupDetailScreen(props: any) {
                           name={reactionStates[p.id] || p.userLiked ? 'heart' : 'heart-outline'}
                           size={14}
                           color={
-                            reactionStates[p.id] || p.userLiked ? '#EF4444' : theme.colors.muted
+                            reactionStates[p.id] || p.userLiked ? '#FF3B30' : theme.colors.muted
                           }
                         />
                         <Text
                           style={{
                             color:
-                              reactionStates[p.id] || p.userLiked ? '#EF4444' : theme.colors.muted,
+                              reactionStates[p.id] || p.userLiked ? '#FF3B30' : theme.colors.muted,
                             fontSize: 12,
                             fontWeight: reactionStates[p.id] || p.userLiked ? '600' : '400',
                           }}
@@ -1025,11 +1025,11 @@ export function GroupDetailScreen(props: any) {
                               borderRadius: theme.radius.full,
                               backgroundColor: 'rgba(99,102,241,0.1)',
                               borderWidth: 1,
-                              borderColor: '#6366F1',
+                              borderColor: '#5856D6',
                               opacity: pressed ? 0.7 : 1,
                             })}
                           >
-                            <Text style={{ color: '#6366F1', fontSize: 13, fontWeight: '700' }}>
+                            <Text style={{ color: '#5856D6', fontSize: 13, fontWeight: '700' }}>
                               📚 歸入知識庫
                             </Text>
                           </Pressable>

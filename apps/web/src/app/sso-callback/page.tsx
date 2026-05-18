@@ -202,7 +202,7 @@ function SSOCallbackContent() {
                     borderRadius: 'var(--radius-sm)',
                     background: index === 0 ? 'var(--accent-soft)' : 'var(--panel)',
                     border: '1px solid',
-                    borderColor: index === 0 ? 'rgba(94,106,210,0.2)' : 'var(--border)',
+                    borderColor: index === 0 ? 'rgba(0,122,255,0.2)' : 'var(--border)',
                     opacity: index === 0 ? 1 : 0.5,
                   }}
                 >

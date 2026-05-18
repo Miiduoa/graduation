@@ -32,63 +32,71 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref,
   ) => {
+    // Apple HIG: 觸控目標 ≥44pt，緊湊型 34pt，超大型 52pt
     const sizeStyles: Record<ButtonSize, React.CSSProperties> = {
-      sm: { padding: '0 12px', minHeight: '34px', fontSize: '13px' },
-      md: { padding: '0 18px', minHeight: '44px', fontSize: '14px' },
-      lg: { padding: '0 24px', minHeight: '52px', fontSize: '15px' },
+      sm: { padding: '0 14px', minHeight: '34px', fontSize: '14px' },
+      md: { padding: '0 18px', minHeight: '44px', fontSize: '15px' },
+      lg: { padding: '0 24px', minHeight: '52px', fontSize: '17px' },
     };
 
     const variantStyles: Record<ButtonVariant, React.CSSProperties> = {
+      // iOS Bordered / Gray Tint — 第二序按鈕
       default: {
         background: 'var(--surface)',
         color: 'var(--text)',
         borderColor: 'var(--border)',
-        boxShadow: 'var(--shadow-sm)',
+        boxShadow: 'none',
       },
+      // iOS Filled — 主要動作
       primary: {
         background: 'var(--brand)',
         color: '#fff',
-        borderColor: 'rgba(94, 106, 210, 0.3)',
-        boxShadow: '4px 4px 10px rgba(94,106,210,0.30), -2px -2px 6px rgba(255,255,255,0.7)',
-      },
-      success: {
-        background: 'var(--success-soft)',
-        color: 'var(--success)',
-        borderColor: 'rgba(52,199,89,0.2)',
-        boxShadow: 'var(--shadow-sm)',
-      },
-      danger: {
-        background: 'var(--danger-soft)',
-        color: 'var(--danger)',
-        borderColor: 'rgba(255,59,48,0.2)',
-        boxShadow: 'var(--shadow-sm)',
-      },
-      ghost: {
-        background: 'transparent',
-        color: 'var(--text)',
         borderColor: 'transparent',
         boxShadow: 'none',
       },
+      // iOS Tinted — 成功 / 安全動作
+      success: {
+        background: 'var(--success-soft)',
+        color: 'var(--success)',
+        borderColor: 'transparent',
+        boxShadow: 'none',
+      },
+      // iOS Tinted Destructive — 刪除類動作
+      danger: {
+        background: 'var(--danger-soft)',
+        color: 'var(--danger)',
+        borderColor: 'transparent',
+        boxShadow: 'none',
+      },
+      // iOS Plain — 純文字按鈕
+      ghost: {
+        background: 'transparent',
+        color: 'var(--brand)',
+        borderColor: 'transparent',
+        boxShadow: 'none',
+      },
+      // iOS Bordered Tinted — 次要動作（描邊）
       outline: {
         background: 'transparent',
         color: 'var(--brand)',
-        borderColor: 'rgba(94,106,210,0.4)',
+        borderColor: 'var(--brand)',
         boxShadow: 'none',
       },
     };
 
+    // iOS button radius：10–12pt 視按鈕高度而定；以 radius-sm（12px）為基準
     const baseStyles: React.CSSProperties = {
       display: 'inline-flex',
       alignItems: 'center',
       justifyContent: 'center',
-      gap: '7px',
+      gap: '6px',
       borderRadius: 'var(--radius-sm)',
       border: '1px solid',
       cursor: disabled || loading ? 'not-allowed' : 'pointer',
       fontWeight: 600,
       letterSpacing: '-0.01em',
-      transition: 'box-shadow 0.2s ease, transform 0.15s ease, background 0.15s ease',
-      opacity: disabled || loading ? 0.45 : 1,
+      transition: 'opacity 0.15s ease, transform 0.1s ease, background 0.15s ease',
+      opacity: disabled || loading ? 0.4 : 1,
       width: fullWidth ? '100%' : 'auto',
       ...sizeStyles[size],
       ...variantStyles[variant],

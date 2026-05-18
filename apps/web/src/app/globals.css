@@ -28,23 +28,23 @@
   --border: #e5e5ea;
   --border-strong: #d1d1d6;
 
-  /* ── Brand ── */
-  --brand: #2563eb;
-  --brand2: #60a5fa;
-  --accent-soft: rgba(37, 99, 235, 0.1);
+  /* ── Brand (Apple HIG · iOS System Blue) ── */
+  --brand: #007aff;
+  --brand2: #5ac8fa;
+  --accent-soft: rgba(0, 122, 255, 0.1);
 
-  /* ── Status Colors ── */
+  /* ── Status Colors (iOS system) ── */
   --success: #34c759;
   --success-soft: rgba(52, 199, 89, 0.12);
   --danger: #ff3b30;
   --danger-soft: rgba(255, 59, 48, 0.12);
   --warning: #ff9500;
   --warning-soft: rgba(255, 149, 0, 0.12);
-  --info: #007aff;
-  --info-soft: rgba(0, 122, 255, 0.12);
+  --info: #5ac8fa;
+  --info-soft: rgba(90, 200, 250, 0.12);
 
   /* ── Interaction ── */
-  --focus-ring: rgba(15, 139, 141, 0.24);
+  --focus-ring: rgba(0, 122, 255, 0.24);
   --overlay: rgba(0, 0, 0, 0.36);
   --disabled-bg: rgba(142, 142, 147, 0.12);
   --disabled-text: rgba(142, 142, 147, 0.55);
@@ -74,7 +74,7 @@
 
   /* ── Today Dashboard ── */
   --today-morning: linear-gradient(135deg, #ff9500 0%, #ffcc00 100%);
-  --today-afternoon: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
+  --today-afternoon: linear-gradient(135deg, #007aff 0%, #5ac8fa 100%);
   --today-evening: linear-gradient(135deg, #30b97b 0%, #5ac8fa 100%);
   --today-night: linear-gradient(135deg, #2c2c2e 0%, #3a3a3c 100%);
 
@@ -140,9 +140,9 @@
     --muted-light: #636366;
     --border: #2a2e40;
     --border-strong: #48484a;
-    --brand: #2563eb;
-    --brand2: #60a5fa;
-    --accent-soft: rgba(37, 99, 235, 0.18);
+    --brand: #0a84ff;
+    --brand2: #5ac8fa;
+    --accent-soft: rgba(10, 132, 255, 0.18);
     --success: #30d158;
     --success-soft: rgba(48, 209, 88, 0.16);
     --danger: #ff453a;
@@ -151,7 +151,7 @@
     --warning-soft: rgba(255, 159, 10, 0.16);
     --info: #0a84ff;
     --info-soft: rgba(10, 132, 255, 0.16);
-    --focus-ring: rgba(37, 99, 235, 0.3);
+    --focus-ring: rgba(10, 132, 255, 0.3);
     --overlay: rgba(0, 0, 0, 0.6);
     --disabled-bg: rgba(255, 255, 255, 0.08);
     --disabled-text: rgba(255, 255, 255, 0.28);
@@ -171,7 +171,7 @@
     --gentle-warn: #ffd60a;
     --gentle-warn-soft: rgba(255, 214, 10, 0.16);
     --today-morning: linear-gradient(135deg, #ff9f0a 0%, #ffd60a 100%);
-    --today-afternoon: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
+    --today-afternoon: linear-gradient(135deg, #0a84ff 0%, #5ac8fa 100%);
     --today-evening: linear-gradient(135deg, #30d158 0%, #5ac8fa 100%);
     --today-night: linear-gradient(135deg, #1c1c1e 0%, #2c2c2e 100%);
   }
@@ -192,9 +192,9 @@
   --muted-light: #636366;
   --border: #2a2e40;
   --border-strong: #48484a;
-  --brand: #2563eb;
-  --brand2: #60a5fa;
-  --accent-soft: rgba(37, 99, 235, 0.18);
+  --brand: #0a84ff;
+  --brand2: #5ac8fa;
+  --accent-soft: rgba(10, 132, 255, 0.18);
   --success: #30d158;
   --success-soft: rgba(48, 209, 88, 0.16);
   --danger: #ff453a;
@@ -224,7 +224,7 @@
   --gentle-warn: #ffd60a;
   --gentle-warn-soft: rgba(255, 214, 10, 0.16);
   --today-morning: linear-gradient(135deg, #ff9f0a 0%, #ffd60a 100%);
-  --today-afternoon: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%);
+  --today-afternoon: linear-gradient(135deg, #0a84ff 0%, #5ac8fa 100%);
   --today-evening: linear-gradient(135deg, #30d158 0%, #5ac8fa 100%);
   --today-night: linear-gradient(135deg, #1c1c1e 0%, #2c2c2e 100%);
 }

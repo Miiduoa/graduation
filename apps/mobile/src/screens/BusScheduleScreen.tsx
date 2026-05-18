@@ -138,7 +138,7 @@ const MOCK_ROUTES: BusRoute[] = [
   {
     id: 'route3',
     name: '巨業客運 沙鹿↔清水',
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '沙鹿火車站 → 靜宜大學 → 清水',
     frequency: '約 20-30 分鐘一班',
     operatingHours: '06:30 - 22:00',
@@ -207,9 +207,9 @@ const MOCK_VEHICLES: BusVehicle[] = [
 function getCrowdLevelInfo(level: BusVehicle['crowdLevel']) {
   const configs = {
     low: { color: theme.colors.success, text: '人少', icon: 'person-outline' },
-    medium: { color: '#F59E0B', text: '適中', icon: 'people-outline' },
+    medium: { color: '#FF9500', text: '適中', icon: 'people-outline' },
     high: { color: theme.colors.danger, text: '擁擠', icon: 'people' },
-    full: { color: '#7C3AED', text: '客滿', icon: 'alert-circle' },
+    full: { color: '#AF52DE', text: '客滿', icon: 'alert-circle' },
   };
   return configs[level];
 }
@@ -950,7 +950,7 @@ export function BusScheduleScreen(props: any) {
                           <Ionicons
                             name={isFavorite ? 'star' : 'star-outline'}
                             size={20}
-                            color={isFavorite ? '#F59E0B' : theme.colors.muted}
+                            color={isFavorite ? '#FF9500' : theme.colors.muted}
                           />
                         </Pressable>
                       </Pressable>
@@ -1160,7 +1160,7 @@ export function BusScheduleScreen(props: any) {
                         <Text style={{ color: theme.colors.muted, fontSize: 11 }}>下一班</Text>
                       </View>
                     )}
-                    <Ionicons name="star" size={18} color="#F59E0B" />
+                    <Ionicons name="star" size={18} color="#FF9500" />
                   </View>
                 );
               })}

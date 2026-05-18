@@ -260,11 +260,11 @@ const ACHIEVEMENT_DEFINITIONS: Omit<Achievement, 'progress' | 'unlocked' | 'unlo
 ];
 
 const CATEGORY_INFO = {
-  explorer: { label: '探索', color: '#3B82F6', icon: 'compass' },
-  social: { label: '社交', color: '#10B981', icon: 'people' },
-  academic: { label: '學業', color: '#F59E0B', icon: 'school' },
-  engagement: { label: '互動', color: '#8B5CF6', icon: 'heart' },
-  special: { label: '特殊', color: '#EF4444', icon: 'star' },
+  explorer: { label: '探索', color: '#007AFF', icon: 'compass' },
+  social: { label: '社交', color: '#34C759', icon: 'people' },
+  academic: { label: '學業', color: '#FF9500', icon: 'school' },
+  engagement: { label: '互動', color: '#AF52DE', icon: 'heart' },
+  special: { label: '特殊', color: '#FF3B30', icon: 'star' },
 };
 
 /**
@@ -406,9 +406,9 @@ function StreakCard({ streak, onShare }: { streak: StreakData; onShare: () => vo
 
 const RARITY_INFO = {
   common: { label: '普通', color: '#94A3B8', bgColor: 'rgba(148,163,184,0.15)' },
-  rare: { label: '稀有', color: '#3B82F6', bgColor: 'rgba(59,130,246,0.15)' },
-  epic: { label: '史詩', color: '#8B5CF6', bgColor: 'rgba(139,92,246,0.15)' },
-  legendary: { label: '傳說', color: '#F59E0B', bgColor: 'rgba(245,158,11,0.15)' },
+  rare: { label: '稀有', color: '#007AFF', bgColor: 'rgba(59,130,246,0.15)' },
+  epic: { label: '史詩', color: '#AF52DE', bgColor: 'rgba(139,92,246,0.15)' },
+  legendary: { label: '傳說', color: '#FF9500', bgColor: 'rgba(245,158,11,0.15)' },
 };
 
 function calculateLevel(points: number): { level: number; currentXP: number; nextLevelXP: number } {
@@ -976,7 +976,7 @@ export function AchievementsScreen(props: Record<string, unknown>) {
                       borderRadius: 16,
                       backgroundColor:
                         entry.rank === 1
-                          ? '#F59E0B'
+                          ? '#FF9500'
                           : entry.rank === 2
                             ? '#94A3B8'
                             : entry.rank === 3

@@ -167,10 +167,10 @@ function getFileIcon(name: string): keyof typeof Ionicons.glyphMap {
 
 function getFileColor(name: string): string {
   const lower = name.toLowerCase();
-  if (lower.endsWith('.pdf')) return '#DC2626';
-  if (lower.endsWith('.pptx') || lower.endsWith('.ppt')) return '#F59E0B';
-  if (lower.endsWith('.mp4') || lower.endsWith('.mov')) return '#7C3AED';
-  if (lower.endsWith('.docx') || lower.endsWith('.doc')) return '#2563EB';
+  if (lower.endsWith('.pdf')) return '#D70015';
+  if (lower.endsWith('.pptx') || lower.endsWith('.ppt')) return '#FF9500';
+  if (lower.endsWith('.mp4') || lower.endsWith('.mov')) return '#AF52DE';
+  if (lower.endsWith('.docx') || lower.endsWith('.doc')) return '#007AFF';
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) return '#16A34A';
   if (
     lower.endsWith('.jpg') ||
@@ -178,7 +178,7 @@ function getFileColor(name: string): string {
     lower.endsWith('.png') ||
     lower.endsWith('.gif')
   )
-    return '#EC4899';
+    return '#FF2D55';
   return theme.colors.accent;
 }
 
@@ -375,25 +375,25 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
   let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
   if (hasScore) {
-    statusColor = score >= 60 ? '#16A34A' : '#DC2626';
+    statusColor = score >= 60 ? '#16A34A' : '#D70015';
     statusText = `${score} 分`;
     statusIcon = 'checkmark-circle';
   } else if (isSubmitted) {
-    statusColor = '#2563EB';
+    statusColor = '#007AFF';
     statusText = '已交卷';
     statusIcon = 'checkmark-done-outline';
   } else if (isEnded) {
-    statusColor = '#DC2626';
+    statusColor = '#D70015';
     statusText = '已結束';
     statusIcon = 'close-circle-outline';
   } else if (exam.end_time) {
     const hoursLeft = (new Date(exam.end_time).getTime() - Date.now()) / (1000 * 60 * 60);
     if (hoursLeft > 0 && hoursLeft <= 24) {
-      statusColor = '#F59E0B';
+      statusColor = '#FF9500';
       statusText = `剩 ${Math.floor(hoursLeft)}h`;
       statusIcon = 'alarm-outline';
     } else {
-      statusColor = '#F59E0B';
+      statusColor = '#FF9500';
       statusText = `截止：${formatDate(exam.end_time)}`;
       statusIcon = 'alarm-outline';
     }
@@ -417,7 +417,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
           borderBottomRightRadius: expanded ? 0 : 14,
           backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
           borderWidth: 1,
-          borderColor: hasScore ? (score >= 60 ? '#16A34A30' : '#DC262630') : theme.colors.border,
+          borderColor: hasScore ? (score >= 60 ? '#16A34A30' : '#D7001530') : theme.colors.border,
           borderBottomWidth: expanded ? 0 : 1,
           opacity: pressed ? 0.8 : 1,
         })}
@@ -474,7 +474,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
             borderTopRightRadius: 0,
             backgroundColor: theme.colors.surface2,
             borderWidth: 1,
-            borderColor: hasScore ? (score >= 60 ? '#16A34A30' : '#DC262630') : theme.colors.border,
+            borderColor: hasScore ? (score >= 60 ? '#16A34A30' : '#D7001530') : theme.colors.border,
             borderTopWidth: 0,
             gap: 10,
           }}
@@ -550,7 +550,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                         Number(sub.score) >= 60
                           ? '#16A34A'
                           : Number(sub.score) > 0
-                            ? '#DC2626'
+                            ? '#D70015'
                             : theme.colors.muted,
                       fontWeight: '700',
                       fontSize: 15,
@@ -586,7 +586,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                     </Text>
                     <Text
                       style={{
-                        color: (attempt.score ?? 0) >= 60 ? '#16A34A' : '#DC2626',
+                        color: (attempt.score ?? 0) >= 60 ? '#16A34A' : '#D70015',
                         fontWeight: '700',
                         fontSize: 14,
                       }}
@@ -618,7 +618,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                               ans.correct === true
                                 ? '#16A34A10'
                                 : ans.correct === false
-                                  ? '#DC262610'
+                                  ? '#D7001510'
                                   : 'transparent',
                           }}
                         >
@@ -635,7 +635,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                               ans.correct === true
                                 ? '#16A34A'
                                 : ans.correct === false
-                                  ? '#DC2626'
+                                  ? '#D70015'
                                   : theme.colors.muted
                             }
                           />
@@ -648,7 +648,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
                                 ans.score != null
                                   ? ans.score > 0
                                     ? '#16A34A'
-                                    : '#DC2626'
+                                    : '#D70015'
                                   : theme.colors.muted,
                               fontSize: 11,
                               fontWeight: '600',
@@ -690,7 +690,7 @@ function ExamCard(props: { exam: ExamWithDetails; courseId: number }) {
               </Text>
               <Text
                 style={{
-                  color: (exam.submission.exam_score ?? 0) >= 60 ? '#16A34A' : '#DC2626',
+                  color: (exam.submission.exam_score ?? 0) >= 60 ? '#16A34A' : '#D70015',
                   fontWeight: '800',
                   fontSize: 20,
                 }}
@@ -752,13 +752,13 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
     statusText = '已繳交';
     statusIcon = 'checkmark-circle';
   } else if (isEnded) {
-    statusColor = '#DC2626';
+    statusColor = '#D70015';
     statusText = '已截止';
     statusIcon = 'close-circle-outline';
   } else if (endTime) {
     const hoursLeft = (endTime.getTime() - now.getTime()) / (1000 * 60 * 60);
     if (hoursLeft <= 24 && hoursLeft > 0) {
-      statusColor = '#F59E0B';
+      statusColor = '#FF9500';
       statusText = `剩 ${Math.floor(hoursLeft)}h`;
       statusIcon = 'alarm-outline';
     }
@@ -781,7 +781,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
           borderBottomRightRadius: expanded ? 0 : 14,
           backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
           borderWidth: 1,
-          borderColor: hasSubmission ? '#16A34A30' : isEnded ? '#DC262620' : theme.colors.border,
+          borderColor: hasSubmission ? '#16A34A30' : isEnded ? '#D7001520' : theme.colors.border,
           borderBottomWidth: expanded ? 0 : 1,
           opacity: pressed ? 0.8 : 1,
         })}
@@ -830,7 +830,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
             borderTopRightRadius: 0,
             backgroundColor: theme.colors.surface2,
             borderWidth: 1,
-            borderColor: hasSubmission ? '#16A34A30' : isEnded ? '#DC262620' : theme.colors.border,
+            borderColor: hasSubmission ? '#16A34A30' : isEnded ? '#D7001520' : theme.colors.border,
             borderTopWidth: 0,
             gap: 8,
           }}
@@ -912,7 +912,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                     {sub.score != null && (
                       <Text
                         style={{
-                          color: sub.score >= 60 ? '#16A34A' : '#DC2626',
+                          color: sub.score >= 60 ? '#16A34A' : '#D70015',
                           fontWeight: '700',
                           fontSize: 14,
                         }}
@@ -921,7 +921,7 @@ function HomeworkCard(props: { hw: HomeworkItem; courseId: number }) {
                       </Text>
                     )}
                   </View>
-                  {sub.is_late && <Text style={{ color: '#F59E0B', fontSize: 10 }}>遲交</Text>}
+                  {sub.is_late && <Text style={{ color: '#FF9500', fontSize: 10 }}>遲交</Text>}
                   {sub.feedback && (
                     <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>
                       老師評語：{sub.feedback}
@@ -1027,7 +1027,7 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
           </Text>
           <Text
             style={{
-              color: finalScore >= 60 ? '#16A34A' : '#DC2626',
+              color: finalScore >= 60 ? '#16A34A' : '#D70015',
               fontWeight: '800',
               fontSize: 24,
             }}
@@ -1056,7 +1056,7 @@ function ScoreOverview(props: { exams: ExamWithDetails[]; courseId: number }) {
             </View>
             <Text
               style={{
-                color: (exam.submission?.exam_score ?? 0) >= 60 ? '#16A34A' : '#DC2626',
+                color: (exam.submission?.exam_score ?? 0) >= 60 ? '#16A34A' : '#D70015',
                 fontWeight: '700',
                 fontSize: 16,
               }}

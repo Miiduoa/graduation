@@ -177,8 +177,8 @@ function generateMockCrowdInfo(category: string): CrowdInfo {
 
 const crowdLevelConfig = {
   low: { color: theme.colors.success, label: '人少', icon: 'happy-outline' },
-  medium: { color: '#F59E0B', label: '適中', icon: 'people-outline' },
-  high: { color: '#F97316', label: '擁擠', icon: 'people' },
+  medium: { color: '#FF9500', label: '適中', icon: 'people-outline' },
+  high: { color: '#FF9500', label: '擁擠', icon: 'people' },
   very_high: { color: theme.colors.danger, label: '非常擁擠', icon: 'alert-circle' },
 };
 
@@ -1393,7 +1393,7 @@ export function PoiDetailScreen(props: any) {
                         <Ionicons
                           name={star <= userRating ? 'star' : 'star-outline'}
                           size={32}
-                          color="#F59E0B"
+                          color="#FF9500"
                         />
                       </Pressable>
                     ))}
@@ -1420,7 +1420,7 @@ export function PoiDetailScreen(props: any) {
                       <Ionicons
                         name={star <= userRating ? 'star' : 'star-outline'}
                         size={32}
-                        color="#F59E0B"
+                        color="#FF9500"
                       />
                     </Pressable>
                   ))}

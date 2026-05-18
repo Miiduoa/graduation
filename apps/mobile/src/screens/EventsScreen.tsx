@@ -124,7 +124,7 @@ function isInTimeRange(date: Date | null, filter: TimeFilter): boolean {
 
 const STATUS_COLORS: Record<string, string> = {
   ongoing: '#22C55E',
-  upcoming: '#F59E0B',
+  upcoming: '#FF9500',
   ended: '#71717A',
 };
 

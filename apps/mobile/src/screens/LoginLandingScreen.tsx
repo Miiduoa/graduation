@@ -59,7 +59,7 @@ const DEMO_PRESETS: DemoRolePreset[] = [
     studentId: '411211325',
     icon: 'person-outline',
     description: 'AI 先排今日任務、風險提醒、作業與學伴行動',
-    color: '#2F7D6C',
+    color: '#007AFF',
   },
   {
     role: 'teacher',
