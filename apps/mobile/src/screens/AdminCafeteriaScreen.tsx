@@ -439,15 +439,15 @@ function OverviewTab(props: {
                 gap: 10,
                 padding: 12,
                 borderRadius: 10,
-                backgroundColor: alert.type === 'error' ? '#DC262610' : '#F59E0B10',
+                backgroundColor: alert.type === 'error' ? '#D7001510' : '#FF950010',
                 borderLeftWidth: 4,
-                borderLeftColor: alert.type === 'error' ? '#DC2626' : '#F59E0B',
+                borderLeftColor: alert.type === 'error' ? '#D70015' : '#FF9500',
               }}
             >
               <Ionicons
                 name={alert.type === 'error' ? 'alert-circle' : 'warning'}
                 size={20}
-                color={alert.type === 'error' ? '#DC2626' : '#F59E0B'}
+                color={alert.type === 'error' ? '#D70015' : '#FF9500'}
               />
               <View style={{ flex: 1 }}>
                 <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 13 }}>
@@ -822,8 +822,8 @@ function StatisticsTab(props: { orders: Order[] }) {
               </Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-              <Ionicons name="star" size={14} color="#F59E0B" />
-              <Text style={{ color: '#F59E0B', fontWeight: '700', fontSize: 13 }}>
+              <Ionicons name="star" size={14} color="#FF9500" />
+              <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 13 }}>
                 {v.rating.toFixed(1)}
               </Text>
             </View>
@@ -845,7 +845,7 @@ function StatisticsTab(props: { orders: Order[] }) {
               borderRadius: 10,
               backgroundColor: theme.colors.surface,
               borderWidth: 1,
-              borderColor: '#DC262630',
+              borderColor: '#D7001530',
             }}
           >
             <View
@@ -853,12 +853,12 @@ function StatisticsTab(props: { orders: Order[] }) {
                 width: 28,
                 height: 28,
                 borderRadius: 14,
-                backgroundColor: '#DC262620',
+                backgroundColor: '#D7001520',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: '#DC2626', fontWeight: '700', fontSize: 12 }}>{i + 1}</Text>
+              <Text style={{ color: '#D70015', fontWeight: '700', fontSize: 12 }}>{i + 1}</Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: theme.colors.text, fontWeight: '600', fontSize: 13 }}>
@@ -869,8 +869,8 @@ function StatisticsTab(props: { orders: Order[] }) {
               </Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-              <Ionicons name="star" size={14} color="#F59E0B" />
-              <Text style={{ color: '#DC2626', fontWeight: '700', fontSize: 13 }}>
+              <Ionicons name="star" size={14} color="#FF9500" />
+              <Text style={{ color: '#D70015', fontWeight: '700', fontSize: 13 }}>
                 {v.rating.toFixed(1)}
               </Text>
             </View>
@@ -916,7 +916,7 @@ function AnnouncementCard(props: { announcement: CafeteriaAnnouncement; onRefres
   const { announcement: ann, onRefresh } = props;
 
   const priorityColor =
-    ann.priority === 'urgent' ? '#DC2626' : ann.priority === 'important' ? '#F59E0B' : '#6B7280';
+    ann.priority === 'urgent' ? '#D70015' : ann.priority === 'important' ? '#FF9500' : '#8E8E93';
 
   const cafeteriaName =
     ann.cafeteriaId === 'all'
@@ -982,7 +982,7 @@ function AnnouncementCard(props: { announcement: CafeteriaAnnouncement; onRefres
           </Text>
         </View>
         <Pressable onPress={handleDelete} style={{ padding: 4 }}>
-          <Ionicons name="trash" size={18} color="#DC2626" />
+          <Ionicons name="trash" size={18} color="#D70015" />
         </Pressable>
       </View>
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
@@ -1003,7 +1003,7 @@ function InspectionCard(props: { inspection: InspectionRecord }) {
   const { inspection: insp } = props;
   const vendor = getVendor(insp.vendorId);
 
-  const scoreColor = insp.score >= 90 ? '#16A34A' : insp.score >= 70 ? '#F59E0B' : '#DC2626';
+  const scoreColor = insp.score >= 90 ? '#16A34A' : insp.score >= 70 ? '#FF9500' : '#D70015';
 
   return (
     <View
@@ -1089,8 +1089,8 @@ function VendorManagementCard(props: {
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-            <Ionicons name="star" size={14} color="#F59E0B" />
-            <Text style={{ color: '#F59E0B', fontWeight: '700', fontSize: 12 }}>
+            <Ionicons name="star" size={14} color="#FF9500" />
+            <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 12 }}>
               {v.rating.toFixed(1)}
             </Text>
           </View>
@@ -1592,17 +1592,17 @@ function CreateInspectionModal(props: { onClose: () => void }) {
               padding: 12,
               borderRadius: 10,
               backgroundColor:
-                totalScore >= 90 ? '#16A34A10' : totalScore >= 70 ? '#F59E0B10' : '#DC262610',
+                totalScore >= 90 ? '#16A34A10' : totalScore >= 70 ? '#FF950010' : '#D7001510',
               borderWidth: 1,
               borderColor:
-                totalScore >= 90 ? '#16A34A30' : totalScore >= 70 ? '#F59E0B30' : '#DC262630',
+                totalScore >= 90 ? '#16A34A30' : totalScore >= 70 ? '#FF950030' : '#D7001530',
               alignItems: 'center',
               gap: 4,
             }}
           >
             <Text
               style={{
-                color: totalScore >= 90 ? '#16A34A' : totalScore >= 70 ? '#F59E0B' : '#DC2626',
+                color: totalScore >= 90 ? '#16A34A' : totalScore >= 70 ? '#FF9500' : '#D70015',
                 fontWeight: '800',
                 fontSize: 20,
               }}
@@ -1611,7 +1611,7 @@ function CreateInspectionModal(props: { onClose: () => void }) {
             </Text>
             <Text
               style={{
-                color: totalScore >= 90 ? '#16A34A' : totalScore >= 70 ? '#F59E0B' : '#DC2626',
+                color: totalScore >= 90 ? '#16A34A' : totalScore >= 70 ? '#FF9500' : '#D70015',
                 fontWeight: '700',
                 fontSize: 13,
               }}

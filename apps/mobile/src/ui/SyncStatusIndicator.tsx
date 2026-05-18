@@ -112,8 +112,8 @@ export function SyncStatusIndicator({ onPress, compact = false }: SyncStatusIndi
     if (!isConnected) {
       return {
         icon: 'cloud-offline' as const,
-        color: '#F59E0B',
-        bgColor: '#F59E0B15',
+        color: '#FF9500',
+        bgColor: '#FF950015',
         text: `離線 · ${totalPending} 筆待同步`,
       };
     }
@@ -130,8 +130,8 @@ export function SyncStatusIndicator({ onPress, compact = false }: SyncStatusIndi
     if (pendingCount > 0) {
       return {
         icon: 'time' as const,
-        color: '#F59E0B',
-        bgColor: '#F59E0B15',
+        color: '#FF9500',
+        bgColor: '#FF950015',
         text: `${pendingCount} 筆待同步`,
       };
     }

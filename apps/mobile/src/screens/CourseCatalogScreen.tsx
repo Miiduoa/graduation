@@ -299,7 +299,7 @@ function CourseCard(props: {
         borderRadius: 14,
         borderWidth: 1,
         backgroundColor: theme.colors.surface,
-        borderColor: props.conflict ? '#DC262640' : theme.colors.border,
+        borderColor: props.conflict ? '#D7001540' : theme.colors.border,
       }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
@@ -368,12 +368,12 @@ function CourseCard(props: {
           style={{
             padding: 8,
             borderRadius: 8,
-            backgroundColor: '#DC262611',
+            backgroundColor: '#D7001511',
             borderWidth: 1,
-            borderColor: '#DC262640',
+            borderColor: '#D7001540',
           }}
         >
-          <Text style={{ color: '#DC2626', fontSize: 12 }}>⚠️ 與已選課衝堂：{props.conflict}</Text>
+          <Text style={{ color: '#D70015', fontSize: 12 }}>⚠️ 與已選課衝堂：{props.conflict}</Text>
         </View>
       ) : null}
 
@@ -633,15 +633,15 @@ export function CourseCatalogScreen(props: { navigation?: any; route?: any }) {
           style={{
             padding: 10,
             borderRadius: 10,
-            backgroundColor: '#DC262611',
+            backgroundColor: '#D7001511',
             borderWidth: 1,
-            borderColor: '#DC262640',
+            borderColor: '#D7001540',
             flexDirection: 'row',
             gap: 8,
           }}
         >
-          <Ionicons name="alert-circle" size={16} color="#DC2626" />
-          <Text style={{ color: '#DC2626', fontSize: 12, flex: 1 }}>{error}</Text>
+          <Ionicons name="alert-circle" size={16} color="#D70015" />
+          <Text style={{ color: '#D70015', fontSize: 12, flex: 1 }}>{error}</Text>
         </View>
       ) : null}
     </View>

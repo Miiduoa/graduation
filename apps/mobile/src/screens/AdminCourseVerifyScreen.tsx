@@ -327,7 +327,7 @@ export function AdminCourseVerifyScreen() {
       case 'rejected':
         return theme.colors.danger;
       default:
-        return '#F59E0B';
+        return '#FF9500';
     }
   };
 
@@ -460,10 +460,10 @@ export function AdminCourseVerifyScreen() {
                   alignItems: 'center',
                   padding: 12,
                   borderRadius: theme.radius.md,
-                  backgroundColor: `#F59E0B15`,
+                  backgroundColor: `#FF950015`,
                 }}
               >
-                <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: '#FF9500', fontWeight: '900', fontSize: 24 }}>
                   {stats.pending}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11 }}>待審核</Text>

@@ -47,7 +47,7 @@ export function UpdateBanner() {
       <button
         onClick={handleRefresh}
         style={{
-          background: 'var(--brand, #7C5CFF)',
+          background: 'var(--brand, #007AFF)',
           color: '#fff',
           border: 'none',
           padding: '10px 16px',

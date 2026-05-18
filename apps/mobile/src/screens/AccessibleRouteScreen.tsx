@@ -71,11 +71,11 @@ function getFeatureColor(type: AccessibilityFeature['type']): string {
     case 'ramp':
       return theme.colors.success;
     case 'accessible_restroom':
-      return '#8B5CF6';
+      return '#AF52DE';
     case 'tactile_path':
-      return '#F59E0B';
+      return '#FF9500';
     case 'auto_door':
-      return '#EC4899';
+      return '#FF2D55';
     default:
       return theme.colors.muted;
   }

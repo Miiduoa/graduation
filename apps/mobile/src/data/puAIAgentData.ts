@@ -90,7 +90,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'cafeteria',
     name: '訂餐',
     icon: 'restaurant-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '從校園餐廳整理餐點，確認後以 vendorId／itemId／quantity 呼叫後端建立訂單',
     parameters: [
       {
@@ -140,7 +140,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'cafeteria',
     name: '推薦餐點',
     icon: 'sparkles-outline',
-    color: '#10B981',
+    color: '#34C759',
     description: '根據偏好、預算、營養需求推薦今日餐點',
     parameters: [
       { name: 'budget', type: 'number', label: '預算（元）', required: false, hint: '不填則不限' },
@@ -169,7 +169,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'cafeteria',
     name: '查詢等候時間',
     icon: 'time-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     description: '查看各餐廳目前的排隊/等候時間',
     parameters: [],
     requiresConfirmation: false,
@@ -184,7 +184,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'health',
     name: '預約掛號',
     icon: 'calendar-outline',
-    color: '#10B981',
+    color: '#34C759',
     description: '預約衛保組門診或心理諮商',
     parameters: [
       {
@@ -221,7 +221,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'health',
     name: '症狀自評',
     icon: 'medical-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     description: 'AI 評估症狀嚴重度，建議是否就醫',
     parameters: [
       { name: 'symptoms', type: 'string', label: '症狀描述', required: true, hint: '描述你的不適' },
@@ -238,7 +238,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'health',
     name: '記錄心情',
     icon: 'happy-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     description: '記錄今天的情緒狀態',
     parameters: [
       {
@@ -280,7 +280,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'library',
     name: '預約座位',
     icon: 'desktop-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     description: '預約圖書館自習座位或討論室',
     parameters: [
       {
@@ -329,7 +329,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'library',
     name: '查詢/借書',
     icon: 'book-outline',
-    color: '#0D9488',
+    color: '#5AC8FA',
     description: '搜尋圖書館藏書、查看可借狀態、預約借閱',
     parameters: [
       { name: 'query', type: 'string', label: '書名/作者/ISBN', required: true },
@@ -356,7 +356,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'dorm',
     name: '報修',
     icon: 'construct-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '提交宿舍設施維修申請',
     parameters: [
       {
@@ -403,7 +403,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'dorm',
     name: '查洗衣機',
     icon: 'water-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     description: '查看洗衣機/烘衣機使用狀態和預估完成時間',
     parameters: [
       {
@@ -427,7 +427,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'dorm',
     name: '查包裹',
     icon: 'cube-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     description: '查詢是否有待領包裹',
     parameters: [],
     requiresConfirmation: false,
@@ -442,7 +442,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'lost_found',
     name: '報失',
     icon: 'alert-circle-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     description: '發布遺失物品公告，AI 自動比對拾獲物',
     parameters: [
       { name: 'item', type: 'string', label: '物品名稱', required: true },
@@ -482,7 +482,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'lost_found',
     name: '搜尋拾獲物',
     icon: 'search-outline',
-    color: '#10B981',
+    color: '#34C759',
     description: '搜尋目前所有拾獲物品',
     parameters: [{ name: 'keyword', type: 'string', label: '關鍵字', required: true }],
     requiresConfirmation: false,
@@ -497,7 +497,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'print',
     name: '列印',
     icon: 'print-outline',
-    color: '#6366F1',
+    color: '#5856D6',
     description: '上傳檔案到雲端列印佇列',
     parameters: [
       { name: 'file_name', type: 'string', label: '檔案名稱', required: true },
@@ -545,7 +545,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'print',
     name: '查列印餘額',
     icon: 'card-outline',
-    color: '#374151',
+    color: '#3C3C43',
     description: '查詢影印卡餘額',
     parameters: [],
     requiresConfirmation: false,
@@ -560,7 +560,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '請假',
     icon: 'document-text-outline',
-    color: '#DC2626',
+    color: '#D70015',
     description: '向授課教師提交請假申請',
     parameters: [
       { name: 'course', type: 'string', label: '課程名稱', required: true },
@@ -589,7 +589,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '查成績',
     icon: 'school-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     description: '查詢最新成績或學期平均',
     parameters: [
       {
@@ -614,7 +614,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '查作業截止',
     icon: 'clipboard-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '查詢所有未繳作業及截止日期',
     parameters: [],
     requiresConfirmation: false,
@@ -629,7 +629,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'transport',
     name: '查公車',
     icon: 'bus-outline',
-    color: '#059669',
+    color: '#34C759',
     description: '查詢校門口公車到站時間',
     parameters: [
       {
@@ -652,7 +652,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'calendar',
     name: '設定提醒',
     icon: 'alarm-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     description: '設定時間到時推播提醒',
     parameters: [
       { name: 'title', type: 'string', label: '提醒內容', required: true },
@@ -687,7 +687,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'social',
     name: '發訊息',
     icon: 'chatbubble-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     description: '發送訊息給同學或群組',
     parameters: [
       { name: 'recipient', type: 'string', label: '收件人/群組', required: true },
@@ -705,7 +705,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'social',
     name: '同儕互評',
     icon: 'people-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     description: 'AI 分配作業互評，引導評分標準並彙整回饋',
     parameters: [
       { name: 'assignment', type: 'string', label: '作業名稱', required: true },
@@ -750,7 +750,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'social',
     name: '共享筆記',
     icon: 'document-attach-outline',
-    color: '#10B981',
+    color: '#34C759',
     description: 'AI 整理筆記重點，分享至群組並標記精華',
     parameters: [
       { name: 'course', type: 'string', label: '課程', required: true },
@@ -767,7 +767,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'cafeteria',
     name: '揪團訂餐',
     icon: 'fast-food-outline',
-    color: '#F97316',
+    color: '#FF9500',
     description: 'AI 統整多人點餐偏好，建立合併訂餐草稿並計算分攤費用',
     parameters: [
       { name: 'group', type: 'string', label: '群組/好友', required: true },
@@ -795,7 +795,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '課業求助',
     icon: 'school-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     description: 'AI 媒合學長姐或高手同學進行課業輔導',
     parameters: [
       { name: 'subject', type: 'string', label: '科目/問題', required: true },
@@ -822,7 +822,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'social',
     name: '活動邀約',
     icon: 'calendar-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     description: 'AI 根據共同興趣推薦活動，自動發送邀約給好友',
     parameters: [
       { name: 'event', type: 'string', label: '活動名稱', required: true },
@@ -839,7 +839,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'transport',
     name: '共乘配對',
     icon: 'car-outline',
-    color: '#059669',
+    color: '#34C759',
     description: 'AI 根據住址和時間配對共乘同學',
     parameters: [
       {
@@ -865,7 +865,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'social',
     name: '二手交易',
     icon: 'swap-horizontal-outline',
-    color: '#D97706',
+    color: '#FF9500',
     description: 'AI 比對二手書/用品需求，自動配對買賣雙方',
     parameters: [
       {
@@ -894,7 +894,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '發布作業',
     icon: 'create-outline',
-    color: '#2563EB',
+    color: '#007AFF',
     description: 'AI 格式化作業要求、設定截止日、通知全班',
     parameters: [
       { name: 'course', type: 'string', label: '課程', required: true },
@@ -913,7 +913,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '分配互評',
     icon: 'git-network-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     description: 'AI 公平分配互評配對，確保每人評和被評次數均等',
     parameters: [
       { name: 'assignment', type: 'string', label: '作業', required: true },
@@ -930,7 +930,7 @@ export const AGENT_TOOLS: AgentTool[] = [
     category: 'course',
     name: '出席警示',
     icon: 'alert-outline',
-    color: '#DC2626',
+    color: '#D70015',
     description: 'AI 偵測缺曠達標學生，自動發送提醒並通知導師',
     parameters: [
       { name: 'course', type: 'string', label: '課程', required: true },
@@ -995,7 +995,7 @@ export const TASK_CHAINS: TaskChain[] = [
     name: '生病處理',
     description: '症狀評估 → 掛號 → 請假 → 通知組員',
     icon: 'medical-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     steps: [
       { order: 1, toolId: 'symptom_check', label: 'AI 症狀評估' },
       { order: 2, toolId: 'book_health', label: '預約掛號', dependsOn: 1 },
@@ -1009,7 +1009,7 @@ export const TASK_CHAINS: TaskChain[] = [
     name: '遺失物處理',
     description: '發布遺失文 → AI 比對 → 通知結果',
     icon: 'alert-circle-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     steps: [
       { order: 1, toolId: 'post_lost', label: '發布遺失公告' },
       { order: 2, toolId: 'search_found', label: 'AI 自動比對拾獲物', dependsOn: 1 },
@@ -1028,7 +1028,7 @@ export const TASK_CHAINS: TaskChain[] = [
     name: '備考模式',
     description: '預約座位 → 設定讀書計時 → 關閉社群通知',
     icon: 'book-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     steps: [
       { order: 1, toolId: 'reserve_seat', label: '預約圖書館座位' },
       { order: 2, toolId: 'set_reminder', label: '設定讀書結束提醒' },
@@ -1041,7 +1041,7 @@ export const TASK_CHAINS: TaskChain[] = [
     name: '午餐助手',
     description: '推薦餐點 → 查等候資料 → 建立訂餐單 → 提醒取餐',
     icon: 'restaurant-outline',
-    color: '#10B981',
+    color: '#34C759',
     steps: [
       { order: 1, toolId: 'recommend_meal', label: '推薦餐點' },
       { order: 2, toolId: 'check_wait_time', label: '查詢等候時間' },
@@ -1061,7 +1061,7 @@ export const TASK_CHAINS: TaskChain[] = [
     name: '宿舍報修',
     description: '回報問題 → 提交報修 → 追蹤進度',
     icon: 'construct-outline',
-    color: '#DC2626',
+    color: '#D70015',
     steps: [
       { order: 1, toolId: 'report_repair', label: '提交維修單' },
       {
@@ -1099,7 +1099,7 @@ export const TASK_CHAINS: TaskChain[] = [
     name: '揪團訂餐',
     description: '建團 → 收集偏好 → 合併訂餐草稿 → 分攤',
     icon: 'fast-food-outline',
-    color: '#F97316',
+    color: '#FF9500',
     steps: [
       { order: 1, toolId: 'group_order', label: '建立揪團' },
       { order: 2, toolId: 'recommend_meal', label: 'AI 推薦大家都喜歡的', dependsOn: 1 },
@@ -1113,7 +1113,7 @@ export const TASK_CHAINS: TaskChain[] = [
     name: '課業求助',
     description: '描述問題 → 配對高手 → 發送求助',
     icon: 'school-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     steps: [
       { order: 1, toolId: 'tutoring_request', label: 'AI 媒合課業輔導' },
       { order: 2, toolId: 'send_message', label: '發送求助訊息', dependsOn: 1 },
@@ -1126,7 +1126,7 @@ export const TASK_CHAINS: TaskChain[] = [
     name: '��手交易',
     description: '刊登物品 → AI 配對買家 → 通知',
     icon: 'swap-horizontal-outline',
-    color: '#D97706',
+    color: '#FF9500',
     steps: [
       {
         order: 1,
@@ -1516,7 +1516,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '上課提醒',
     condition: '上課前 15 分鐘',
     icon: 'school-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     message: '你的「{course}」{time} 在 {location} 上課，要出發了嗎？',
     priority: 'high',
   },
@@ -1526,7 +1526,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '作業截止提醒',
     condition: '截止前 24 小時',
     icon: 'alert-circle-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     message: '「{assignment}」明天截止！目前進度如何？需要我幫你安排時間嗎？',
     suggestedTool: 'set_reminder',
     priority: 'high',
@@ -1537,7 +1537,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '包裹到件',
     condition: '新包裹到貨',
     icon: 'cube-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     message: '你有一個新包裹到了！{carrier} 送達，放在 {location}。要我設定取件提醒嗎？',
     suggestedTool: 'set_reminder',
     priority: 'medium',
@@ -1548,7 +1548,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '午餐時間',
     condition: '11:30-12:30 且未訂餐',
     icon: 'restaurant-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     message: '到了午餐時間！今天想吃什麼？餐廳有開通接單時我可以幫你送出點餐。',
     suggestedTool: 'recommend_meal',
     priority: 'low',
@@ -1559,7 +1559,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '洗衣完成',
     condition: '洗衣機完成',
     icon: 'water-outline',
-    color: '#10B981',
+    color: '#34C759',
     message: '你的洗衣已完成！記得去取衣服，避免被其他人移出。',
     priority: 'medium',
   },
@@ -1569,7 +1569,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '每日心情',
     condition: '每天 21:00',
     icon: 'happy-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     message: '今天過得如何？花 10 秒記錄一下心情吧。',
     suggestedTool: 'record_mood',
     priority: 'low',
@@ -1580,7 +1580,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '圖書館閉館',
     condition: '閉館前 30 分鐘 + 你在圖書館',
     icon: 'library-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     message: '圖書館 30 分鐘後閉館，記得收拾東西。需要我預約明天的座位嗎？',
     suggestedTool: 'reserve_seat',
     priority: 'medium',
@@ -1591,7 +1591,7 @@ export const PROACTIVE_TRIGGERS: ProactiveTrigger[] = [
     name: '下雨預報',
     condition: '未來 1 小時降雨機率 > 70%',
     icon: 'rainy-outline',
-    color: '#6366F1',
+    color: '#5856D6',
     message: '接下來可能會下雨，記得帶傘出門！',
     priority: 'low',
   },
@@ -1623,7 +1623,7 @@ export const AGENT_ROLE_CONFIG: AgentRoleConfig[] = [
     role: 'student',
     label: '學生',
     icon: 'school-outline',
-    color: '#3B82F6',
+    color: '#007AFF',
     toolCategories: [
       'cafeteria',
       'health',
@@ -1652,7 +1652,7 @@ export const AGENT_ROLE_CONFIG: AgentRoleConfig[] = [
     role: 'faculty',
     label: '教師',
     icon: 'person-outline',
-    color: '#DC2626',
+    color: '#D70015',
     toolCategories: ['cafeteria', 'health', 'library', 'lost_found', 'print', 'calendar', 'social'],
     proactiveCapabilities: ['lunch_time', 'rain_alert'],
     description: '教學輔助代理：排課提醒/學生請假審核/研究資源搜尋',
@@ -1661,7 +1661,7 @@ export const AGENT_ROLE_CONFIG: AgentRoleConfig[] = [
     role: 'staff',
     label: '職員',
     icon: 'briefcase-outline',
-    color: '#059669',
+    color: '#34C759',
     toolCategories: ['cafeteria', 'health', 'library', 'lost_found', 'print', 'calendar', 'social'],
     proactiveCapabilities: ['lunch_time', 'rain_alert'],
     description: '行政輔助代理：排程管理/訊息轉發/資源預約',
@@ -1670,7 +1670,7 @@ export const AGENT_ROLE_CONFIG: AgentRoleConfig[] = [
     role: 'vendor',
     label: '商家',
     icon: 'storefront-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     toolCategories: ['cafeteria', 'calendar', 'social'],
     proactiveCapabilities: [],
     description: '營運輔助代理：訂單管理/庫存提醒/營業報表',
@@ -1679,7 +1679,7 @@ export const AGENT_ROLE_CONFIG: AgentRoleConfig[] = [
     role: 'admin',
     label: '管理員',
     icon: 'settings-outline',
-    color: '#374151',
+    color: '#3C3C43',
     toolCategories: [
       'cafeteria',
       'health',

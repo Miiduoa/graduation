@@ -179,9 +179,9 @@ function getStatusColor(status: OrderStatus): string {
     case 'pending':
       return theme.colors.muted;
     case 'confirmed':
-      return '#2563EB';
+      return '#007AFF';
     case 'preparing':
-      return '#F59E0B';
+      return '#FF9500';
     case 'ready':
       return theme.colors.success;
     case 'completed':
@@ -1091,10 +1091,10 @@ export function OrderingScreen(props: any) {
                                   paddingHorizontal: 6,
                                   paddingVertical: 2,
                                   borderRadius: theme.radius.full,
-                                  backgroundColor: '#F59E0B20',
+                                  backgroundColor: '#FF950020',
                                 }}
                               >
-                                <Text style={{ color: '#F59E0B', fontSize: 9, fontWeight: '700' }}>
+                                <Text style={{ color: '#FF9500', fontSize: 9, fontWeight: '700' }}>
                                   熱門
                                 </Text>
                               </View>
@@ -1524,14 +1524,14 @@ export function OrderingScreen(props: any) {
                           style={{
                             padding: 14,
                             borderRadius: theme.radius.md,
-                            backgroundColor: '#2563EB15',
+                            backgroundColor: '#007AFF15',
                             flexDirection: 'row',
                             alignItems: 'center',
                             gap: 10,
                           }}
                         >
-                          <Ionicons name="restaurant" size={24} color="#2563EB" />
-                          <Text style={{ color: '#2563EB', fontWeight: '600', flex: 1 }}>
+                          <Ionicons name="restaurant" size={24} color="#007AFF" />
+                          <Text style={{ color: '#007AFF', fontWeight: '600', flex: 1 }}>
                             店家已接單，即將開始製作
                           </Text>
                         </View>
@@ -1542,14 +1542,14 @@ export function OrderingScreen(props: any) {
                           style={{
                             padding: 14,
                             borderRadius: theme.radius.md,
-                            backgroundColor: '#F59E0B15',
+                            backgroundColor: '#FF950015',
                             flexDirection: 'row',
                             alignItems: 'center',
                             gap: 10,
                           }}
                         >
-                          <Ionicons name="time" size={24} color="#F59E0B" />
-                          <Text style={{ color: '#F59E0B', fontWeight: '600', flex: 1 }}>
+                          <Ionicons name="time" size={24} color="#FF9500" />
+                          <Text style={{ color: '#FF9500', fontWeight: '600', flex: 1 }}>
                             預計 {order.estimatedTime} 分鐘後完成
                           </Text>
                         </View>

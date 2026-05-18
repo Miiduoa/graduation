@@ -395,15 +395,15 @@ export function GlobalSearchScreen(props: any) {
       case 'event':
         return theme.colors.success;
       case 'course':
-        return '#6366F1';
+        return '#5856D6';
       case 'poi':
-        return '#F59E0B';
+        return '#FF9500';
       case 'menu':
-        return '#EC4899';
+        return '#FF2D55';
       case 'post':
-        return '#8B5CF6';
+        return '#AF52DE';
       case 'assignment':
-        return '#EF4444';
+        return '#FF3B30';
       default:
         return theme.colors.muted;
     }
