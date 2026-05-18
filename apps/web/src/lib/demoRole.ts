@@ -45,7 +45,7 @@ export const DEMO_ROLES: DemoRoleDefinition[] = [
     toneSoft: 'rgba(94,106,210,0.12)',
     description: '看課表、成績、公告、加入社團、用校園服務',
     entryHref: '/timetable',
-    demoUserUid: 'demo-student-1',
+    demoUserUid: 'stu-001',
   },
   {
     role: 'teacher',

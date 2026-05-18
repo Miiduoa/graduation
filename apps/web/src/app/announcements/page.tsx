@@ -729,7 +729,7 @@ export default function AnnouncementsPage(props: {
               demoRole === 'teacher' ? '王大明老師' :
               demoRole === 'department_head' ? '黃主任（系所辦公室）' :
               demoRole === 'club_officer' ? '程式設計社' : '發布者';
-            addPendingAnn({
+            const newPending = addPendingAnn({
               title,
               body,
               source: sourceLabel,
@@ -739,7 +739,10 @@ export default function AnnouncementsPage(props: {
             setPendingQueue(readPendingAnns());
             // 通知系主任有新公告待審核（系主任 / 管理員本人提交時不自我通知）
             if (demoRole !== 'department_head' && demoRole !== 'admin') {
-              notifyDeptHeadNewAnn(title, sourceLabel);
+              notifyDeptHeadNewAnn(title, sourceLabel, {
+                pendingId: newPending.id,
+                sourceRole: demoRole,
+              });
             }
             setShowModal(false);
             success(`✅ 已送出「${title.slice(0, 20)}${title.length > 20 ? '…' : ''}」，待系主任審核後公開`);

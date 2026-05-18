@@ -15,8 +15,19 @@ import {
   useDemoStore,
   getAllMessagesForRole,
   markDynamicMessageRead,
+  decideLeave,
+  setDormRepairStatus,
+  updateOrderStatus,
+  replyHelpRequest,
+  approveClubMember,
+  rejectClubMember,
+  sendMessage,
+  notifyStudentsAnnApproved,
+  rejectAnnouncementWithReason,
   type AnyMessage,
+  type StoreDynamicMessage,
 } from '@/lib/demoStore';
+import { getDemoUser } from '@/lib/demoData';
 
 const TYPE_COLOR: Record<DemoMessage['type'], string> = {
   info: '#5E6AD2',
@@ -83,7 +94,28 @@ export default function MessagesPage(props: {
 
   function handleReply() {
     if (!replyText.trim() || !selected) return;
-    success(`✅ 已回覆給 ${selected.fromName}`);
+    const me = getDemoUser(demoRole);
+    const dyn = selected as StoreDynamicMessage & { _dynamic?: boolean };
+    // 對動態訊息：真實送訊息回原寄件人；對靜態訊息：toast 模擬
+    if (dyn._dynamic && dyn.senderRole) {
+      sendMessage({
+        fromName: me?.displayName ?? roleDef.label,
+        fromAvatar: roleDef.icon,
+        subject: `Re: ${selected.subject}`,
+        body: replyText.trim(),
+        sentAt: '剛剛',
+        isRead: false,
+        type: 'info',
+        senderRole: demoRole,
+        inReplyTo: selected.id,
+        relatedCourseId: 'relatedCourseId' in dyn ? dyn.relatedCourseId : undefined,
+        relatedClubId: 'relatedClubId' in dyn ? dyn.relatedClubId : undefined,
+        recipientRoles: [dyn.senderRole],
+      });
+      success(`✅ 已回覆給 ${selected.fromName}`, '對方會在訊息收件匣看到');
+    } else {
+      info('回覆已送出（demo 範圍：靜態訊息僅模擬）');
+    }
     setReplyText('');
   }
 
@@ -424,6 +456,17 @@ export default function MessagesPage(props: {
                 {selected.body}
               </div>
 
+              {/* ── 跨角色動作面板（依訊息附帶 id 顯示對應操作）── */}
+              <CrossRoleActionPanel
+                msg={selected}
+                roleLabel={`${roleDef.icon} ${roleDef.label}`}
+                demoRole={demoRole}
+                onDone={(label) => {
+                  success(label);
+                  setSelectedId(null);
+                }}
+              />
+
               {/* 相關連結 */}
               {(selected.relatedCourseId || selected.relatedClubId || ('relatedAnnouncementId' in selected && selected.relatedAnnouncementId)) && (
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -545,5 +588,350 @@ export default function MessagesPage(props: {
         )}
       </div>
     </SiteShell>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// 跨角色動作面板：根據訊息附帶的 id（leave / dormRepair / order / help）
+// 顯示對應按鈕，直接寫回 demoStore 並通知對方角色
+// ─────────────────────────────────────────────────────────────
+function CrossRoleActionPanel({
+  msg,
+  roleLabel,
+  demoRole,
+  onDone,
+}: {
+  msg: AnyMessage;
+  roleLabel: string;
+  demoRole: string;
+  onDone: (label: string) => void;
+}) {
+  const dyn = msg as StoreDynamicMessage & { _dynamic?: boolean };
+  if (!dyn._dynamic) return null;
+
+  // ── 請假申請：教師 / 系主任 才看得到核准按鈕 ──
+  if (dyn.relatedLeaveId && (demoRole === 'teacher' || demoRole === 'department_head')) {
+    return (
+      <ActionPanel
+        title="📅 請假審核"
+        helper="點下按鈕後，學生會收到核准 / 退回通知，store 也會更新請假狀態"
+        buttons={[
+          {
+            label: '✅ 核准請假',
+            kind: 'primary',
+            onClick: () => {
+              decideLeave({ leaveId: dyn.relatedLeaveId!, decision: 'approved', decidedBy: roleLabel });
+              onDone('已核准請假，學生會收到通知');
+            },
+          },
+          {
+            label: '❌ 退回',
+            kind: 'danger',
+            onClick: () => {
+              decideLeave({
+                leaveId: dyn.relatedLeaveId!,
+                decision: 'rejected',
+                decidedBy: roleLabel,
+                note: '請補充病假證明後重新申請',
+              });
+              onDone('已退回請假，學生會收到通知');
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  // ── 宿舍報修：admin 推進狀態 ──
+  if (dyn.relatedDormRepairId && demoRole === 'admin') {
+    return (
+      <ActionPanel
+        title="🔧 報修派工"
+        helper="派工 / 完工後，學生會即時收到狀態變更通知"
+        buttons={[
+          {
+            label: '🔧 派工中',
+            kind: 'primary',
+            onClick: () => {
+              setDormRepairStatus(dyn.relatedDormRepairId!, 'dispatched');
+              onDone('已派工，學生會收到通知');
+            },
+          },
+          {
+            label: '✅ 完工',
+            kind: 'primary',
+            onClick: () => {
+              setDormRepairStatus(dyn.relatedDormRepairId!, 'resolved');
+              onDone('已完工，學生會收到通知');
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  // ── 訂單推進：admin（代表 vendor 後台）── 學生不能對自己訂單推進
+  if (dyn.relatedOrderId && demoRole === 'admin') {
+    return (
+      <ActionPanel
+        title="🍱 訂單推進"
+        helper="推進訂單狀態後，學生會收到對應通知"
+        buttons={[
+          {
+            label: '🍳 準備中',
+            kind: 'primary',
+            onClick: () => {
+              updateOrderStatus(dyn.relatedOrderId!, 'processing');
+              onDone('訂單已標記為準備中');
+            },
+          },
+          {
+            label: '🛎️ 已備好',
+            kind: 'primary',
+            onClick: () => {
+              updateOrderStatus(dyn.relatedOrderId!, 'ready');
+              onDone('訂單已備好，學生會收到取餐通知');
+            },
+          },
+          {
+            label: '❌ 取消',
+            kind: 'danger',
+            onClick: () => {
+              updateOrderStatus(dyn.relatedOrderId!, 'cancelled');
+              onDone('訂單已取消');
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  // ── 求助快速回覆：TA / 教師 ──
+  if (dyn.relatedHelpId && (demoRole === 'ta' || demoRole === 'teacher')) {
+    return (
+      <QuickReplyPanel
+        title="🙋 求助快速回覆"
+        helper="回覆內容會以訊息送回學生，求助狀態變更為「已回覆」"
+        onSubmit={(reply) => {
+          replyHelpRequest({ helpId: dyn.relatedHelpId!, reply, replierName: roleLabel });
+          onDone('已回覆，學生會收到通知');
+        }}
+      />
+    );
+  }
+
+  // ── 公告審核：系主任 ──
+  if (dyn.relatedPendingAnnId && demoRole === 'department_head') {
+    return (
+      <ActionPanel
+        title="📣 公告審核"
+        helper="核准後全校學生收到公告通知；退回會把原因送回提交者"
+        buttons={[
+          {
+            label: '✅ 核准發布',
+            kind: 'primary',
+            onClick: () => {
+              // 標記為已處理
+              try {
+                const raw = window.localStorage.getItem('demoApprovedAnn');
+                const approved: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+                if (!approved.includes(dyn.relatedPendingAnnId!)) {
+                  approved.push(dyn.relatedPendingAnnId!);
+                  window.localStorage.setItem('demoApprovedAnn', JSON.stringify(approved));
+                  window.dispatchEvent(new CustomEvent('demoPendingAnnChange'));
+                }
+              } catch { /* ignore */ }
+              const title = msg.subject.replace(/^【待審核公告】/, '');
+              notifyStudentsAnnApproved(title, msg.fromName);
+              onDone('已核准，全校學生會收到通知');
+            },
+          },
+          {
+            label: '❌ 退回',
+            kind: 'danger',
+            onClick: () => {
+              const title = msg.subject.replace(/^【待審核公告】/, '');
+              rejectAnnouncementWithReason({
+                pendingId: dyn.relatedPendingAnnId!,
+                title,
+                reason: '請補充內容與引用來源後重新提交',
+                submitterRole: dyn.senderRole ?? 'teacher',
+                reviewedByLabel: roleLabel,
+              });
+              onDone('已退回，原提交者會收到通知與退回原因');
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  // ── 社員申請審核：club_officer ──
+  if (dyn.relatedClubMembershipId && demoRole === 'club_officer') {
+    return (
+      <ActionPanel
+        title="📨 社員申請"
+        helper="核准 / 拒絕後，學生會在收件匣看到結果"
+        buttons={[
+          {
+            label: '✅ 核准',
+            kind: 'primary',
+            onClick: () => {
+              approveClubMember(dyn.relatedClubMembershipId!, { officerName: roleLabel });
+              onDone('已核准，學生會收到通知');
+            },
+          },
+          {
+            label: '❌ 拒絕',
+            kind: 'danger',
+            onClick: () => {
+              rejectClubMember(dyn.relatedClubMembershipId!);
+              onDone('已拒絕，學生會收到通知');
+            },
+          },
+        ]}
+      />
+    );
+  }
+
+  // ── 作業繳交：教師 / TA 看到「學生繳交」時，提供前往成績簿 deep-link ──
+  if (dyn.relatedAssignmentId && (demoRole === 'teacher' || demoRole === 'ta')) {
+    const courseId = dyn.relatedCourseId ?? 'c1';
+    return (
+      <div
+        style={{
+          padding: '12px 14px',
+          background: 'var(--accent-soft, rgba(94,106,210,0.06))',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 700 }}>📝 作業批改入口</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+          點下方按鈕直接到該課程的成績簿，可看到此學生的繳交紀錄
+        </div>
+        <div>
+          <Link
+            href={`/teacher/course/${courseId}/gradebook`}
+            className="btn primary"
+            style={{ fontSize: 13 }}
+          >
+            前往成績簿批改 →
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function ActionPanel({
+  title,
+  helper,
+  buttons,
+}: {
+  title: string;
+  helper: string;
+  buttons: { label: string; kind: 'primary' | 'danger'; onClick: () => void }[];
+}) {
+  return (
+    <div
+      style={{
+        padding: '12px 14px',
+        background: 'var(--accent-soft, rgba(94,106,210,0.06))',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 700 }}>{title}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{helper}</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {buttons.map((b) => (
+          <button
+            key={b.label}
+            type="button"
+            className={`btn ${b.kind === 'primary' ? 'primary' : ''}`}
+            onClick={b.onClick}
+            style={{
+              fontSize: 13,
+              ...(b.kind === 'danger'
+                ? { background: 'rgba(255,59,48,0.12)', color: '#FF3B30', borderColor: '#FF3B30' }
+                : {}),
+            }}
+          >
+            {b.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QuickReplyPanel({
+  title,
+  helper,
+  onSubmit,
+}: {
+  title: string;
+  helper: string;
+  onSubmit: (reply: string) => void;
+}) {
+  const [text, setText] = useState('');
+  return (
+    <div
+      style={{
+        padding: '12px 14px',
+        background: 'var(--accent-soft, rgba(94,106,210,0.06))',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 700 }}>{title}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{helper}</div>
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="輸入回覆內容..."
+        rows={2}
+        style={{
+          width: '100%',
+          boxSizing: 'border-box',
+          padding: '8px 10px',
+          borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--border)',
+          background: 'var(--bg)',
+          color: 'var(--text)',
+          fontSize: 13,
+          fontFamily: 'inherit',
+          resize: 'vertical',
+        }}
+      />
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!text.trim()}
+          onClick={() => {
+            const t = text.trim();
+            if (!t) return;
+            onSubmit(t);
+            setText('');
+          }}
+          style={{ fontSize: 13 }}
+        >
+          送出回覆 →
+        </button>
+      </div>
+    </div>
   );
 }
