@@ -29,7 +29,6 @@ import AcademicOverviewAiFirstScreen from './AcademicOverviewAiFirstScreen';
 import QuizCenterAiFirstScreen from './QuizCenterAiFirstScreen';
 import AddCourseAiFirstScreen from './AddCourseAiFirstScreen';
 import TeacherCockpitAiFirstScreen from './TeacherCockpitAiFirstScreen';
-import AIChatAiFirstScreen from './AIChatAiFirstScreen';
 import { TeachingHubScreen } from './TeachingHubScreen';
 import { StaffHubScreen } from './StaffHubScreen';
 import { DepartmentHubScreen } from './DepartmentHubScreen';
