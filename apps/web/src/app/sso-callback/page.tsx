@@ -179,7 +179,7 @@ function SSOCallbackContent() {
             style={{
               margin: '0 0 8px',
               fontSize: 22,
-              fontWeight: 800,
+              fontWeight: 700,
               letterSpacing: '-0.04em',
             }}
           >
@@ -202,7 +202,7 @@ function SSOCallbackContent() {
                     borderRadius: 'var(--radius-sm)',
                     background: index === 0 ? 'var(--accent-soft)' : 'var(--panel)',
                     border: '1px solid',
-                    borderColor: index === 0 ? 'rgba(94,106,210,0.2)' : 'var(--border)',
+                    borderColor: index === 0 ? 'rgba(88,86,214,0.2)' : 'var(--border)',
                     opacity: index === 0 ? 1 : 0.5,
                   }}
                 >

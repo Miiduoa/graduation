@@ -243,7 +243,7 @@ export default function GradesPage(props: {
     return (
       <SiteShell title="成績" schoolName={schoolName}>
         <div className="pageStack">
-          <div className="card" style={{ padding: '32px 24px', textAlign: 'center', background: 'rgba(0,122,255,0.06)', border: '1px solid #007AFF' }}>
+          <div className="card" style={{ padding: '32px 24px', textAlign: 'center', background: 'rgba(88,86,214,0.06)', border: '1px solid #5856D6' }}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>需要登入</div>
             <div style={{ color: 'var(--muted)', fontSize: 14, marginBottom: 20 }}>成績為個人隱私資料，訪客無法查看。請先登入。</div>
@@ -264,10 +264,10 @@ export default function GradesPage(props: {
       >
         <div className="pageStack">
           {/* 角色說明 */}
-          <div className="card" style={{ padding: '14px 16px', background: 'rgba(15,139,141,0.10)', border: '1px solid #0F8B8D' }}>
+          <div className="card" style={{ padding: '14px 16px', background: 'rgba(88,86,214,0.10)', border: '1px solid #5856D6' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ fontWeight: 700, color: '#0F8B8D', marginBottom: 4 }}>
+                <div style={{ fontWeight: 700, color: '#5856D6', marginBottom: 4 }}>
                   {demoRole === 'ta' ? '🧑‍💻 助教視角' : '🧑‍🏫 教師視角'} · 資料結構（CS301）
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text)' }}>
@@ -285,7 +285,7 @@ export default function GradesPage(props: {
           {/* 班級成績統計卡 */}
           <div className="metricGrid">
             {[
-              { label: '班級平均', val: `${classAvg} 分`, tone: '#5E6AD2' },
+              { label: '班級平均', val: `${classAvg} 分`, tone: '#5856D6' },
               { label: '最高分', val: `${classMax} 分`, tone: '#34C759' },
               { label: '最低分', val: `${classMin} 分`, tone: '#FF3B30' },
               { label: '通過率', val: `${classPassRate}%`, tone: '#FF9500' },
@@ -333,7 +333,14 @@ export default function GradesPage(props: {
             <div className="homeSectionHeader">
               <h2 className="homeSectionTitle">👥 學生成績清單</h2>
               {demoRole === 'teacher' && (
-                <Link href={`/teacher/course/c1/gradebook${q}`} className="btn" style={{ fontSize: 12 }}>發布成績</Link>
+                <Link
+                  href={`/teacher/course/c1/gradebook${q ? q + '&' : '?'}action=publish`}
+                  className="btn"
+                  style={{ fontSize: 12 }}
+                  title="前往成績冊執行發布動作（含尚未發布提示）"
+                >
+                  發布尚未公開成績
+                </Link>
               )}
               {demoRole === 'ta' && (
                 <span style={{ fontSize: 12, color: 'var(--muted)' }}>唯讀 · 由教師發布</span>
@@ -360,7 +367,7 @@ export default function GradesPage(props: {
                     </div>
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       <div style={{ fontSize: 12, color: 'var(--muted)' }}>加權分數</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: isAtRisk ? 'var(--danger)' : 'var(--success)' }}>{finalScore}</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: isAtRisk ? 'var(--danger)' : 'var(--success)' }}>{finalScore}</div>
                     </div>
                   </div>
                 );
@@ -369,9 +376,9 @@ export default function GradesPage(props: {
           </div>
 
           {/* AI 班級分析入口 */}
-          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(15,139,141,0.10) 0%, rgba(0,200,200,0.06) 100%)', border: '1px solid rgba(15,139,141,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+          <div className="card" style={{ padding: '14px 18px', background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(0,200,200,0.06) 100%)', border: '1px solid rgba(88,86,214,0.28)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 3 }}>🤖 AI 班級分析</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 班級分析</div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>班級平均 {classAvg} 分，{classScores.filter((s) => s < 70).length} 位學生需要關注。讓 AI 分析成績趨勢？</div>
             </div>
             <Link href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('幫我分析資料結構班上成績，找出需要關注的學生')}`} className="btn" style={{ fontSize: 12 }}>問 AI →</Link>
@@ -394,8 +401,8 @@ export default function GradesPage(props: {
           {/* 全系統計卡 */}
           <div className="metricGrid">
             {[
-              { label: '本學期課程', val: `${DEMO_COURSES.length + 8} 門`, tone: '#5E6AD2' },
-              { label: '在學學生', val: '312 人', tone: '#0F8B8D' },
+              { label: '本學期課程', val: `${DEMO_COURSES.length + 8} 門`, tone: '#5856D6' },
+              { label: '在學學生', val: '312 人', tone: '#5856D6' },
               { label: '全系平均分', val: '83.2 分', tone: '#34C759' },
               { label: '不及格率', val: '3.8%', tone: '#FF9500' },
             ].map((m) => (
@@ -421,7 +428,7 @@ export default function GradesPage(props: {
                     <div className="insetGroupRowMeta">{c.code} · {c.instructor} · {c.members} 人</div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: c.avg >= 80 ? 'var(--success)' : c.avg >= 70 ? 'var(--warning)' : 'var(--danger)' }}>{c.avg} 分</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: c.avg >= 80 ? 'var(--success)' : c.avg >= 70 ? 'var(--warning)' : 'var(--danger)' }}>{c.avg} 分</div>
                     <div style={{ fontSize: 11, color: 'var(--muted)' }}>通過率 {c.passRate}%</div>
                   </div>
                 </Link>
@@ -494,7 +501,7 @@ export default function GradesPage(props: {
             style={{
               padding: '14px 18px',
               background: 'rgba(22,163,74,0.10)',
-              border: '1px solid #16a34a',
+              border: '1px solid #34C759',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -503,7 +510,7 @@ export default function GradesPage(props: {
             }}
           >
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#16a34a', marginBottom: 3 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#34C759', marginBottom: 3 }}>
                 🎓 成績已更新！
               </div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>
@@ -514,7 +521,7 @@ export default function GradesPage(props: {
             <Link
               href={`/messages${q}`}
               className="btn"
-              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0, background: '#16a34a', color: '#fff', border: 'none' }}
+              style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0, background: '#34C759', color: '#fff', border: 'none' }}
             >
               查看訊息通知 →
             </Link>
@@ -554,7 +561,7 @@ export default function GradesPage(props: {
                 {selectedSemester} 學期 · 學期 GPA
               </p>
               <div
-                style={{ fontSize: 64, fontWeight: 900, letterSpacing: '-0.06em', lineHeight: 1 }}
+                style={{ fontSize: 64, fontWeight: 700, letterSpacing: '-0.06em', lineHeight: 1 }}
               >
                 {loading ? '…' : semGpa}
               </div>
@@ -572,7 +579,7 @@ export default function GradesPage(props: {
                 { label: 'A 以上', val: grades.filter((g) => g.grade.startsWith('A')).length },
               ].map((s) => (
                 <div key={s.label} style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.05em' }}>
+                  <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.05em' }}>
                     {s.val}
                   </div>
                   <div style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>{s.label}</div>
@@ -588,8 +595,8 @@ export default function GradesPage(props: {
             className="card"
             style={{
               padding: '14px 18px',
-              background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.07) 100%)',
-              border: '1px solid rgba(94,106,210,0.22)',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.07) 100%)',
+              border: '1px solid rgba(88,86,214,0.22)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -647,7 +654,7 @@ export default function GradesPage(props: {
                     <div
                       style={{
                         fontSize: 13,
-                        fontWeight: 800,
+                        fontWeight: 700,
                         color: isLatest ? 'var(--brand)' : 'var(--text)',
                       }}
                     >
@@ -746,7 +753,7 @@ export default function GradesPage(props: {
                     style={{
                       background: gradeBackground(g.grade),
                       fontSize: 15,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: gradeColor(g.grade),
                       width: 38,
                       height: 38,
@@ -767,7 +774,7 @@ export default function GradesPage(props: {
                       <div
                         style={{
                           fontSize: 18,
-                          fontWeight: 800,
+                          fontWeight: 700,
                           color: gradeColor(g.grade),
                           letterSpacing: '-0.04em',
                         }}
@@ -786,9 +793,9 @@ export default function GradesPage(props: {
                         style={{
                           padding: '6px 10px',
                           borderRadius: 8,
-                          border: '1px solid rgba(94,106,210,0.30)',
-                          background: 'rgba(94,106,210,0.10)',
-                          color: '#5E6AD2',
+                          border: '1px solid rgba(88,86,214,0.30)',
+                          background: 'rgba(88,86,214,0.10)',
+                          color: '#5856D6',
                           fontSize: 12,
                           fontWeight: 700,
                           textDecoration: 'none',

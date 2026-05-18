@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
+import { BlurView } from 'expo-blur';
 
 import { theme, softShadowStyle } from './src/ui/theme';
 import { SchoolProvider, useSchool } from './src/state/school';
@@ -663,7 +664,28 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       }}
       pointerEvents="box-none"
     >
-      {/* TabBar pill：左右僅四個 Tab；FAB 另層絕對 overlay 對齊 pill 寬度幾何置中 */}
+      {/* TabBar pill：iOS HIG — BlurView 玻璃磨砂底 + 半透明 chrome
+          注意：overflow 必須保持 visible，FAB 浮球以負 marginTop 突出 pill 上緣；
+          所以 BlurView 用獨立的 clipping wrapper（borderRadius + overflow:hidden）
+          鋪在 pill 背景，FAB 仍可延伸到 pill 外。 */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          borderRadius: theme.radius.lg,
+          overflow: 'hidden',
+        }}
+        pointerEvents="none"
+      >
+        <BlurView
+          intensity={70}
+          tint={theme.mode === 'dark' ? 'dark' : 'light'}
+          style={{ flex: 1 }}
+        />
+      </View>
       <View
         style={{
           flex: 1,

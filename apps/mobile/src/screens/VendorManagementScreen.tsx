@@ -296,7 +296,7 @@ export function VendorManagementScreen(props: any) {
           }}
         >
           <View>
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 22 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 22 }}>
               {myVendor.name}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -649,7 +649,7 @@ export function VendorManagementScreen(props: any) {
                 padding: 16,
                 color: theme.colors.text,
                 fontSize: 28,
-                fontWeight: '900',
+                fontWeight: '700',
                 letterSpacing: 6,
                 textAlign: 'center',
                 marginBottom: 10,
@@ -747,7 +747,7 @@ function DashboardTab(props: {
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
               今日訂單
             </Text>
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 20 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
               {orderStats.total}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -767,7 +767,7 @@ function DashboardTab(props: {
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
               今日營收
             </Text>
-            <Text style={{ color: theme.colors.success, fontWeight: '800', fontSize: 20 }}>
+            <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 20 }}>
               NT${orderStats.revenue}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -789,7 +789,7 @@ function DashboardTab(props: {
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>
               平均評分
             </Text>
-            <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 20 }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 20 }}>
               {avgRating}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -801,13 +801,13 @@ function DashboardTab(props: {
               flex: 1,
               padding: 14,
               borderRadius: 14,
-              backgroundColor: `${'#F59E0B'}10`,
+              backgroundColor: `${'#FF9500'}10`,
               borderWidth: 1,
-              borderColor: `${'#F59E0B'}30`,
+              borderColor: `${'#FF9500'}30`,
             }}
           >
             <Text style={{ color: theme.colors.muted, fontSize: 11, marginBottom: 6 }}>待處理</Text>
-            <Text style={{ color: '#F59E0B', fontWeight: '800', fontSize: 20 }}>
+            <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 20 }}>
               {orderStats.pending + orderStats.confirmed}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 10, marginTop: 2 }}>
@@ -1468,10 +1468,10 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
                             paddingHorizontal: 6,
                             paddingVertical: 2,
                             borderRadius: 4,
-                            backgroundColor: '#F59E0B20',
+                            backgroundColor: '#FF950020',
                           }}
                         >
-                          <Text style={{ color: '#F59E0B', fontSize: 9, fontWeight: '600' }}>
+                          <Text style={{ color: '#FF9500', fontSize: 9, fontWeight: '600' }}>
                             熱門
                           </Text>
                         </View>
@@ -1497,7 +1497,7 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
                       {item.description}
                     </Text>
                     {item.allergens.length > 0 && (
-                      <Text style={{ color: '#F59E0B', fontSize: 10, marginBottom: 4 }}>
+                      <Text style={{ color: '#FF9500', fontSize: 10, marginBottom: 4 }}>
                         過敏原：{item.allergens.join('、')}
                       </Text>
                     )}
@@ -1553,15 +1553,15 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
                       flex: 1,
                       paddingVertical: 7,
                       borderRadius: 8,
-                      backgroundColor: '#F59E0B10',
+                      backgroundColor: '#FF950010',
                       alignItems: 'center',
                       flexDirection: 'row',
                       justifyContent: 'center',
                       gap: 4,
                     }}
                   >
-                    <Ionicons name="flash-outline" size={14} color="#F59E0B" />
-                    <Text style={{ color: '#F59E0B', fontSize: 11, fontWeight: '600' }}>
+                    <Ionicons name="flash-outline" size={14} color="#FF9500" />
+                    <Text style={{ color: '#FF9500', fontSize: 11, fontWeight: '600' }}>
                       快閃折扣
                     </Text>
                   </Pressable>
@@ -1778,7 +1778,7 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
             }}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-              <Ionicons name="flash" size={22} color="#F59E0B" />
+              <Ionicons name="flash" size={22} color="#FF9500" />
               <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                 發布惜食快閃折扣
               </Text>
@@ -1885,7 +1885,7 @@ function MenuTab(props: { vendorId: string; menuItems: MenuItem[]; onRefresh: ()
                   flex: 1,
                   paddingVertical: 13,
                   borderRadius: 10,
-                  backgroundColor: '#F59E0B',
+                  backgroundColor: '#FF9500',
                   alignItems: 'center',
                 }}
               >
@@ -1939,8 +1939,8 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
           }}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-            <Ionicons name="star" size={24} color="#F59E0B" />
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 28 }}>
+            <Ionicons name="star" size={24} color="#FF9500" />
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 28 }}>
               {avgRating}
             </Text>
           </View>
@@ -1971,7 +1971,7 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
                     style={{
                       height: '100%',
                       width: `${(ratingBreakdown[rating] / reviews.length) * 100}%`,
-                      backgroundColor: '#F59E0B',
+                      backgroundColor: '#FF9500',
                     }}
                   />
                 </View>
@@ -2015,7 +2015,7 @@ function ReviewsTab(props: { reviews: Review[]; avgRating: string }) {
                         key={i}
                         name="star"
                         size={14}
-                        color={i < review.rating ? '#F59E0B' : theme.colors.border}
+                        color={i < review.rating ? '#FF9500' : theme.colors.border}
                       />
                     ))}
                 </View>

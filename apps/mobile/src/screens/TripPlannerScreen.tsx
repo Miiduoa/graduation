@@ -93,10 +93,10 @@ type PlanStep = {
 };
 
 const MODE_CONFIG: Record<TravelMode, { icon: string; label: string; color: string; mPerMin: number }> = {
-  walk: { icon: 'walk-outline', label: '走路', color: '#10B981', mPerMin: 75 },
-  bus: { icon: 'bus-outline', label: '公車', color: '#3B82F6', mPerMin: 350 },
-  bike: { icon: 'bicycle-outline', label: '騎車', color: '#F59E0B', mPerMin: 250 },
-  drive: { icon: 'car-outline', label: '開車', color: '#8B5CF6', mPerMin: 500 },
+  walk: { icon: 'walk-outline', label: '走路', color: '#34C759', mPerMin: 75 },
+  bus: { icon: 'bus-outline', label: '公車', color: '#5856D6', mPerMin: 350 },
+  bike: { icon: 'bicycle-outline', label: '騎車', color: '#FF9500', mPerMin: 250 },
+  drive: { icon: 'car-outline', label: '開車', color: '#AF52DE', mPerMin: 500 },
 };
 
 // ═════════════════════════════════════════════════════
@@ -157,7 +157,7 @@ function EndpointPicker({
             justifyContent: 'center',
           }}
         >
-          <Text style={{ color: theme.colors.muted, fontSize: 10, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.muted, fontSize: 10, fontWeight: '700' }}>
             {label}
           </Text>
         </View>
@@ -234,12 +234,12 @@ function EndpointPicker({
                   width: 28,
                   height: 28,
                   borderRadius: 14,
-                  backgroundColor: '#3B82F622',
+                  backgroundColor: '#5856D622',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <Ionicons name="locate" size={15} color="#3B82F6" />
+                <Ionicons name="locate" size={15} color="#5856D6" />
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
                 我的位置
@@ -607,7 +607,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                 })}
               >
                 <Ionicons name="school" size={12} color="#fff" />
-                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
                   去下節課 · {persona.nextClass.startHHmm}
                 </Text>
               </Pressable>
@@ -768,7 +768,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                     </View>
                     <View style={{ flex: 1 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>
+                        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>
                           {item.title}
                         </Text>
                         {isBest && (
@@ -780,7 +780,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                               backgroundColor: item.color,
                             }}
                           >
-                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>最佳</Text>
+                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>最佳</Text>
                           </View>
                         )}
                       </View>
@@ -789,7 +789,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                       </Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ color: item.color, fontSize: 22, fontWeight: '900', lineHeight: 24 }}>
+                      <Text style={{ color: item.color, fontSize: 22, fontWeight: '700', lineHeight: 24 }}>
                         {item.totalMin}
                       </Text>
                       <Text style={{ color: theme.colors.muted, fontSize: 10 }}>分</Text>
@@ -849,7 +849,7 @@ export function TripPlannerScreen(_props: Record<string, unknown>) {
                         })}
                       >
                         <Ionicons name="navigate" size={14} color="#fff" />
-                        <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>出發</Text>
+                        <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>出發</Text>
                       </Pressable>
                     </View>
                   )}

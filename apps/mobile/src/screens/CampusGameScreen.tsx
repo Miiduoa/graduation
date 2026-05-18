@@ -360,7 +360,7 @@ export function CampusGameScreen() {
 
   const openCampusMap = () => {
     try {
-      navigation.getParent()?.navigate?.('校園', { screen: 'Map' });
+      navigation.getParent()?.navigate?.('校園', { screen: 'MapV2' });
     } catch {
       /* ignore */
     }
@@ -387,7 +387,7 @@ export function CampusGameScreen() {
         gap: theme.space.lg,
       }}
     >
-      <Text style={{ fontSize: 22, fontWeight: '800', color: theme.colors.text }}>校園漫步</Text>
+      <Text style={{ fontSize: 22, fontWeight: '700', color: theme.colors.text }}>校園漫步</Text>
       <Text style={{ fontSize: 14, color: theme.colors.textSecondary, lineHeight: 20 }}>
         角色與場景圖由 `assets/generated-game` 打包進 App；開發机上預設以 Pillow 免費產圖（不需 API）。請在設定開啟「在遊戲中展示我的所在校園節點」以啟動同 POI 好友列表與 Firebase 短期心跳。
       </Text>
@@ -625,7 +625,7 @@ export function CampusGameScreen() {
         })}
       >
         <Ionicons name="sparkles" size={20} color={theme.colors.onAccent} />
-        <Text style={{ color: theme.colors.onAccent, fontWeight: '800' }}>
+        <Text style={{ color: theme.colors.onAccent, fontWeight: '700' }}>
           {dailyBlocked ? '今日探索獎勵已領' : allVisited ? '領取探索 XP' : '踏遍四個節點以領取 XP'}
         </Text>
       </Pressable>

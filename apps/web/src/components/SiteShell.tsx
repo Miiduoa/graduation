@@ -156,7 +156,7 @@ function SiteShellInner(props: {
                           background: '#FF3B30',
                           color: '#fff',
                           fontSize: 10,
-                          fontWeight: 800,
+                          fontWeight: 700,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',

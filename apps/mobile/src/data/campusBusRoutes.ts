@@ -130,7 +130,7 @@ const CAMPUS_LOOP_A: CampusBusRoute = {
   shortName: '校園 A',
   description: '繞校園一圈，順向行駛 30 分鐘一班，免費搭乘',
   category: 'campus',
-  color: '#7C3AED',
+  color: '#AF52DE',
   operator: '靜宜大學',
   peakFrequencyMin: 15,
   offPeakFrequencyMin: 30,
@@ -322,7 +322,7 @@ const CAMPUS_LOOP_B: CampusBusRoute = {
   shortName: '校園 B',
   description: '宿舍區 ⇄ 教學區直達，下課時段加密班次',
   category: 'campus',
-  color: '#2563EB',
+  color: '#5856D6',
   operator: '靜宜大學',
   peakFrequencyMin: 10,
   offPeakFrequencyMin: 25,
@@ -463,7 +463,7 @@ const CITY_300: CampusBusRoute = {
   shortName: '300',
   description: '台中車站 ⇄ 靜宜大學 ⇄ 清水站；BRT 級高頻路線',
   category: 'city',
-  color: '#DC2626',
+  color: '#D70015',
   operator: '統聯客運',
   peakFrequencyMin: 5,
   offPeakFrequencyMin: 8,
@@ -571,7 +571,7 @@ const CITY_301: CampusBusRoute = {
   shortName: '301',
   description: '新民高中 ⇄ 靜宜大學，途經台灣大道',
   category: 'city',
-  color: '#2563EB',
+  color: '#5856D6',
   operator: '統聯客運',
   peakFrequencyMin: 10,
   offPeakFrequencyMin: 15,
@@ -643,7 +643,7 @@ const CITY_304: CampusBusRoute = {
   shortName: '304',
   description: '靜宜 ⇄ 沙鹿 ⇄ 梧棲漁港',
   category: 'city',
-  color: '#16A34A',
+  color: '#34C759',
   operator: '巨業客運',
   peakFrequencyMin: 20,
   offPeakFrequencyMin: 30,
@@ -697,7 +697,7 @@ const CITY_307: CampusBusRoute = {
   shortName: '307',
   description: '靜宜 ⇄ 沙鹿慈濟醫院 ⇄ 沙鹿火車站',
   category: 'city',
-  color: '#F59E0B',
+  color: '#FF9500',
   operator: '中鹿客運',
   peakFrequencyMin: 30,
   offPeakFrequencyMin: 45,
@@ -1130,7 +1130,7 @@ export function crowdLabel(c: CrowdLevel): { text: string; color: string } {
     case 'low':
       return { text: '人少', color: '#34D399' };
     case 'medium':
-      return { text: '適中', color: '#F59E0B' };
+      return { text: '適中', color: '#FF9500' };
     case 'high':
       return { text: '擁擠', color: '#F87171' };
     case 'full':

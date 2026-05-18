@@ -103,9 +103,9 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
               padding: '10px 14px',
               borderRadius: 8,
               background: 'rgba(124,58,237,0.10)',
-              border: '1px solid #7C3AED',
+              border: '1px solid #AF52DE',
               fontSize: 13,
-              color: '#5B21B6',
+              color: '#5856D6',
               marginBottom: 16,
             }}
           >
@@ -117,10 +117,10 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
         {/* 快速統計卡 */}
         <div style={{ display: 'flex', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
           {[
-            { label: '學生總數', value: courseStudents.length,                                            color: '#5E6AD2' },
+            { label: '學生總數', value: courseStudents.length,                                            color: '#5856D6' },
             { label: '班級平均', value: classAvg,                                                          color: '#34C759' },
             { label: '通過率',   value: `${passRate}%`,                                                    color: '#FF9500' },
-            { label: 'A 以上',   value: computed.rows.filter((r) => (r.finalScore ?? 0) >= 90).length,     color: '#0F8B8D' },
+            { label: 'A 以上',   value: computed.rows.filter((r) => (r.finalScore ?? 0) >= 90).length,     color: '#5856D6' },
           ].map((s) => (
             <div
               key={s.label}
@@ -130,7 +130,7 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
                 textAlign: 'center', minWidth: 100,
               }}
             >
-              <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.value}</div>
               <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
             </div>
           ))}
@@ -150,7 +150,7 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
           <button
             style={{
               padding: '10px 16px', borderRadius: 8, marginBottom: 16,
-              background: published ? '#dc2626' : '#16a34a',
+              background: published ? '#FF3B30' : '#34C759',
               color: '#fff', border: 'none', cursor: 'pointer',
               fontSize: 14, fontWeight: 600,
             }}
@@ -238,9 +238,9 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
                   score >= 65 ? 'B-' :
                   score >= 60 ? 'C'  : 'F';
                 const gradeColor =
-                  grade.startsWith('A') ? '#16a34a' :
-                  grade.startsWith('B') ? '#2563eb' :
-                  grade === 'C'         ? '#d97706' : '#dc2626';
+                  grade.startsWith('A') ? '#34C759' :
+                  grade.startsWith('B') ? '#5856D6' :
+                  grade === 'C'         ? '#FF9500' : '#FF3B30';
                 const isDemoUser = row.uid === 'stu-001';
 
                 return (
@@ -248,13 +248,13 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
                     key={row.uid}
                     style={{
                       borderBottom: '1px solid var(--border)',
-                      background: isDemoUser ? 'rgba(94,106,210,0.07)' : undefined,
+                      background: isDemoUser ? 'rgba(88,86,214,0.07)' : undefined,
                     }}
                   >
                     <td style={{ ...td, fontWeight: isDemoUser ? 700 : 400 }}>
                       {row.displayName}
                       {isDemoUser && (
-                        <span style={{ marginLeft: 6, fontSize: 11, color: '#5E6AD2', fontWeight: 600 }}>
+                        <span style={{ marginLeft: 6, fontSize: 11, color: '#5856D6', fontWeight: 600 }}>
                           ★ demo
                         </span>
                       )}
@@ -269,9 +269,9 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
                     <td style={{ ...td, fontWeight: 700, color: gradeColor }}>{grade}</td>
                     <td style={td}>
                       {row.passed ? (
-                        <span style={{ color: '#16a34a', fontWeight: 600 }}>✅ 通過</span>
+                        <span style={{ color: '#34C759', fontWeight: 600 }}>✅ 通過</span>
                       ) : (
-                        <span style={{ color: '#dc2626', fontWeight: 600 }}>⚠️ 未通過</span>
+                        <span style={{ color: '#FF3B30', fontWeight: 600 }}>⚠️ 未通過</span>
                       )}
                     </td>
                   </tr>
@@ -294,8 +294,8 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(15,139,141,0.08)',
-            border: '1px solid #0F8B8D',
+            background: 'rgba(88,86,214,0.08)',
+            border: '1px solid #5856D6',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -304,7 +304,7 @@ export default function TeacherGradebookPage({ params, searchParams }: { params:
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 3 }}>🤖 AI 成績分析</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 成績分析</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               讓 AI 找出成績偏低的學生，分析作業與考試的相關性，並生成成績摘要報告。
             </div>

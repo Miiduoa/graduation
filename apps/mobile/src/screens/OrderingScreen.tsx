@@ -179,9 +179,9 @@ function getStatusColor(status: OrderStatus): string {
     case 'pending':
       return theme.colors.muted;
     case 'confirmed':
-      return '#2563EB';
+      return '#5856D6';
     case 'preparing':
-      return '#F59E0B';
+      return '#FF9500';
     case 'ready':
       return theme.colors.success;
     case 'completed':
@@ -874,7 +874,7 @@ export function OrderingScreen(props: any) {
                   <Text
                     style={{
                       fontSize: 18,
-                      fontWeight: '900',
+                      fontWeight: '700',
                       color: getStatusColor(activeOrders[0].status),
                     }}
                   >
@@ -1091,10 +1091,10 @@ export function OrderingScreen(props: any) {
                                   paddingHorizontal: 6,
                                   paddingVertical: 2,
                                   borderRadius: theme.radius.full,
-                                  backgroundColor: '#F59E0B20',
+                                  backgroundColor: '#FF950020',
                                 }}
                               >
-                                <Text style={{ color: '#F59E0B', fontSize: 9, fontWeight: '700' }}>
+                                <Text style={{ color: '#FF9500', fontSize: 9, fontWeight: '700' }}>
                                   熱門
                                 </Text>
                               </View>
@@ -1116,7 +1116,7 @@ export function OrderingScreen(props: any) {
                             <Text
                               style={{
                                 color: theme.colors.accent,
-                                fontWeight: '800',
+                                fontWeight: '700',
                                 fontSize: 16,
                               }}
                             >
@@ -1261,7 +1261,7 @@ export function OrderingScreen(props: any) {
                           總計
                         </Text>
                         <Text
-                          style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 20 }}
+                          style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 20 }}
                         >
                           ${cartTotal}
                         </Text>
@@ -1398,7 +1398,7 @@ export function OrderingScreen(props: any) {
                             <Text
                               style={{
                                 fontSize: 16,
-                                fontWeight: '900',
+                                fontWeight: '700',
                                 color: getStatusColor(order.status),
                               }}
                             >
@@ -1438,7 +1438,7 @@ export function OrderingScreen(props: any) {
                           </View>
                         </View>
                         <Text
-                          style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 18 }}
+                          style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 18 }}
                         >
                           ${order.totalPrice}
                         </Text>
@@ -1524,14 +1524,14 @@ export function OrderingScreen(props: any) {
                           style={{
                             padding: 14,
                             borderRadius: theme.radius.md,
-                            backgroundColor: '#2563EB15',
+                            backgroundColor: '#5856D615',
                             flexDirection: 'row',
                             alignItems: 'center',
                             gap: 10,
                           }}
                         >
-                          <Ionicons name="restaurant" size={24} color="#2563EB" />
-                          <Text style={{ color: '#2563EB', fontWeight: '600', flex: 1 }}>
+                          <Ionicons name="restaurant" size={24} color="#5856D6" />
+                          <Text style={{ color: '#5856D6', fontWeight: '600', flex: 1 }}>
                             店家已接單，即將開始製作
                           </Text>
                         </View>
@@ -1542,14 +1542,14 @@ export function OrderingScreen(props: any) {
                           style={{
                             padding: 14,
                             borderRadius: theme.radius.md,
-                            backgroundColor: '#F59E0B15',
+                            backgroundColor: '#FF950015',
                             flexDirection: 'row',
                             alignItems: 'center',
                             gap: 10,
                           }}
                         >
-                          <Ionicons name="time" size={24} color="#F59E0B" />
-                          <Text style={{ color: '#F59E0B', fontWeight: '600', flex: 1 }}>
+                          <Ionicons name="time" size={24} color="#FF9500" />
+                          <Text style={{ color: '#FF9500', fontWeight: '600', flex: 1 }}>
                             預計 {order.estimatedTime} 分鐘後完成
                           </Text>
                         </View>
@@ -1637,7 +1637,7 @@ export function OrderingScreen(props: any) {
                   <Text
                     style={{
                       fontSize: 48,
-                      fontWeight: '900',
+                      fontWeight: '700',
                       color: theme.colors.success,
                       letterSpacing: 8,
                       fontFamily: 'System',
@@ -1652,7 +1652,7 @@ export function OrderingScreen(props: any) {
                     style={{
                       color: theme.colors.text,
                       fontSize: 22,
-                      fontWeight: '800',
+                      fontWeight: '700',
                       marginBottom: 4,
                     }}
                   >
@@ -1728,7 +1728,7 @@ export function OrderingScreen(props: any) {
                 marginBottom: 12,
               }}
             >
-              <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                 飲食偏好與過敏原
               </Text>
               <Pressable

@@ -1038,19 +1038,19 @@ export const CATEGORY_ICONS: Record<CampusPoiCategory, string> = {
 };
 
 export const CATEGORY_COLORS: Record<CampusPoiCategory, string> = {
-  academic: '#2563EB',
-  admin: '#7C3AED',
-  library: '#059669',
-  cafeteria: '#DC2626',
-  dormitory: '#D97706',
-  sports: '#16A34A',
-  parking: '#6B7280',
+  academic: '#5856D6',
+  admin: '#AF52DE',
+  library: '#34C759',
+  cafeteria: '#D70015',
+  dormitory: '#FF9500',
+  sports: '#34C759',
+  parking: '#8E8E93',
   convenience: '#0891B2',
-  medical: '#DC2626',
+  medical: '#D70015',
   religious: '#9333EA',
   gate: '#475569',
-  research: '#2563EB',
-  other: '#6B7280',
+  research: '#5856D6',
+  other: '#8E8E93',
 };
 
 // ═══════════════════════════════════════════════════════

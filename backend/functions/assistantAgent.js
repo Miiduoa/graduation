@@ -748,12 +748,17 @@ async function callAssistantModelWithTools({
 }) {
   const { tools, runTool } = require('./agent/tools/registry');
   const toolDefs = buildToolDefinitions(tools.filter((t) => !t.requiresConfirmation));
+  const { buildCardsFromToolTrace } = require('./agent/cardBuilders');
 
   const toolsInvoked = [];
+  const toolCallsTrace = [];
   function recordToolName(name) {
     const n = name && String(name).trim();
     if (!n || toolsInvoked.includes(n)) return;
     toolsInvoked.push(n);
+  }
+  function recordToolCall(name, args, output) {
+    toolCallsTrace.push({ name, args, output });
   }
 
   let currentMessages = [...messages];
@@ -771,7 +776,8 @@ async function callAssistantModelWithTools({
       if (result.content) {
         transcriptMessages.push({ role: 'assistant', content: result.content });
       }
-      return { ...result, transcriptMessages, toolsInvoked };
+      const cards = buildCardsFromToolTrace(toolCallsTrace);
+      return { ...result, transcriptMessages, toolsInvoked, toolCallsTrace, cards };
     }
 
     const assistantMsg = {
@@ -794,16 +800,19 @@ async function callAssistantModelWithTools({
         try {
           if (!name) throw new Error('missing tool name');
           const output = await runTool(name, toolCtx, args);
+          recordToolCall(name, args, output);
           return {
             role: 'tool',
             tool_call_id: call.id,
             content: JSON.stringify(output),
           };
         } catch (e) {
+          const errOut = { error: String(e?.message || e) };
+          recordToolCall(name, args, errOut);
           return {
             role: 'tool',
             tool_call_id: call.id,
-            content: JSON.stringify({ error: String(e?.message || e) }),
+            content: JSON.stringify(errOut),
           };
         }
       }),
@@ -823,7 +832,8 @@ async function callAssistantModelWithTools({
   if (finalResult.content) {
     transcriptMessages.push({ role: 'assistant', content: finalResult.content });
   }
-  return { ...finalResult, transcriptMessages, toolsInvoked };
+  const cards = buildCardsFromToolTrace(toolCallsTrace);
+  return { ...finalResult, transcriptMessages, toolsInvoked, toolCallsTrace, cards };
 }
 
 module.exports = {

@@ -28,7 +28,7 @@ export default function CourseGradesV2Screen() {
   });
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <CourseV2Header title="成績" subtitle={courseName} />
       {loadable.data?.rollup ? (
         <View style={styles.summary}>
@@ -77,13 +77,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
   },
   title: { fontSize: 15, fontWeight: '600' },
-  meta: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  meta: { fontSize: 12, color: '#8E8E93', marginTop: 2 },
   scoreBox: { alignItems: 'flex-end' },
-  score: { fontSize: 22, fontWeight: '700', color: '#2563EB' },
-  max: { fontSize: 12, color: '#9CA3AF', fontWeight: '400' },
+  score: { fontSize: 22, fontWeight: '700', color: '#5856D6' },
+  max: { fontSize: 12, color: '#AEAEB2', fontWeight: '400' },
   summary: {
     margin: 12,
     padding: 14,
@@ -92,5 +92,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   summaryLabel: { fontSize: 13, color: '#1E40AF' },
-  summaryValue: { fontSize: 32, fontWeight: '800', color: '#1E3A8A', marginTop: 4 },
+  summaryValue: { fontSize: 32, fontWeight: '700', color: '#1E3A8A', marginTop: 4 },
 });

@@ -123,6 +123,21 @@ describe('AI 開放式自然語言覆蓋', () => {
     await expectNoTools('如果只是提到通知，不要直接標成已讀', [
       'mark_notifications_read',
     ]);
+
+    await expectNoTools('沒有明確日期時間不要建立行事曆，先問我缺什麼', [
+      'create_calendar_event',
+      'update_calendar_event',
+      'delete_calendar_event',
+    ]);
+  });
+
+  it('does not treat training metadata or data-gap wording as lost-found actions', async () => {
+    await expectNoTools('如果查無資料，請回報缺口而不是編答案（訓練情境 abc-1）', [
+      'create_lost_found',
+    ]);
+
+    const realLostItem = await autonomousQuery('I lost my wallet 在圖書館附近', CTX);
+    expect(observedTools(realLostItem).has('create_lost_found')).toBe(true);
   });
 
   it('handles unsupported external actions as advice rather than fake execution', async () => {

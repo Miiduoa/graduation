@@ -149,13 +149,13 @@ export default function CourseNotesScreen(props: RouteProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View
         style={{
           padding: 14,
-          backgroundColor: '#1F4E78',
+          backgroundColor: '#003F8A',
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -163,7 +163,7 @@ export default function CourseNotesScreen(props: RouteProps) {
       >
         <View>
           <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>{courseName}</Text>
-          <Text style={{ color: '#dbeafe', fontSize: 12, marginTop: 2 }}>
+          <Text style={{ color: '#E5F2FF', fontSize: 12, marginTop: 2 }}>
             {notesLoading ? '載入中…' : `${notes.length} 則筆記 · 僅存裝置`}
           </Text>
         </View>
@@ -174,7 +174,7 @@ export default function CourseNotesScreen(props: RouteProps) {
 
       {notesLoading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <ActivityIndicator size="large" color="#1F4E78" />
+          <ActivityIndicator size="large" color="#003F8A" />
         </View>
       ) : (
         <>
@@ -190,12 +190,12 @@ export default function CourseNotesScreen(props: RouteProps) {
                   paddingHorizontal: 12,
                   paddingVertical: 6,
                   borderRadius: 999,
-                  backgroundColor: !filterTag ? '#1F4E78' : '#fff',
+                  backgroundColor: !filterTag ? '#003F8A' : '#fff',
                   borderWidth: 1,
-                  borderColor: !filterTag ? '#1F4E78' : '#e5e7eb',
+                  borderColor: !filterTag ? '#003F8A' : '#E5E5EA',
                 }}
               >
-                <Text style={{ color: !filterTag ? '#fff' : '#111827', fontSize: 12 }}>全部</Text>
+                <Text style={{ color: !filterTag ? '#fff' : '#1C1C1E', fontSize: 12 }}>全部</Text>
               </Pressable>
               {tags.map((t) => (
                 <Pressable
@@ -205,12 +205,12 @@ export default function CourseNotesScreen(props: RouteProps) {
                     paddingHorizontal: 12,
                     paddingVertical: 6,
                     borderRadius: 999,
-                    backgroundColor: filterTag === t ? '#1F4E78' : '#fff',
+                    backgroundColor: filterTag === t ? '#003F8A' : '#fff',
                     borderWidth: 1,
-                    borderColor: filterTag === t ? '#1F4E78' : '#e5e7eb',
+                    borderColor: filterTag === t ? '#003F8A' : '#E5E5EA',
                   }}
                 >
-                  <Text style={{ color: filterTag === t ? '#fff' : '#111827', fontSize: 12 }}>
+                  <Text style={{ color: filterTag === t ? '#fff' : '#1C1C1E', fontSize: 12 }}>
                     #{t}
                   </Text>
                 </Pressable>
@@ -222,10 +222,10 @@ export default function CourseNotesScreen(props: RouteProps) {
             {filteredNotes.length === 0 ? (
               <View style={{ alignItems: 'center', padding: 24, gap: 8 }}>
                 <Text style={{ fontSize: 48 }}>📓</Text>
-                <Text style={{ color: '#6b7280', fontSize: 14 }}>
+                <Text style={{ color: '#8E8E93', fontSize: 14 }}>
                   還沒有筆記。在下方輸入框寫第一則吧！
                 </Text>
-                <Text style={{ color: '#9ca3af', fontSize: 11 }}>
+                <Text style={{ color: '#AEAEB2', fontSize: 11 }}>
                   提示：用 #標籤 可以分類，例如 #期中、#重點
                 </Text>
               </View>
@@ -239,10 +239,10 @@ export default function CourseNotesScreen(props: RouteProps) {
                     borderRadius: 12,
                     padding: 12,
                     borderWidth: 1,
-                    borderColor: '#e5e7eb',
+                    borderColor: '#E5E5EA',
                   }}
                 >
-                  <Text style={{ fontSize: 14, color: '#111827', lineHeight: 20 }}>{n.text}</Text>
+                  <Text style={{ fontSize: 14, color: '#1C1C1E', lineHeight: 20 }}>{n.text}</Text>
                   {n.tags.length > 0 && (
                     <View style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
                       {n.tags.map((t) => (
@@ -250,8 +250,8 @@ export default function CourseNotesScreen(props: RouteProps) {
                           key={t}
                           style={{
                             fontSize: 11,
-                            color: '#1F4E78',
-                            backgroundColor: '#1F4E7814',
+                            color: '#003F8A',
+                            backgroundColor: '#003F8A14',
                             paddingHorizontal: 6,
                             paddingVertical: 2,
                             borderRadius: 6,
@@ -265,15 +265,15 @@ export default function CourseNotesScreen(props: RouteProps) {
                   <View
                     style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}
                   >
-                    <Text style={{ fontSize: 11, color: '#9ca3af' }}>
+                    <Text style={{ fontSize: 11, color: '#AEAEB2' }}>
                       {new Date(n.updatedAt).toLocaleString('zh-TW')}
                     </Text>
                     <View style={{ flexDirection: 'row', gap: 12 }}>
                       <Pressable onPress={() => handleEdit(n)} hitSlop={8}>
-                        <Text style={{ fontSize: 12, color: '#1F4E78' }}>編輯</Text>
+                        <Text style={{ fontSize: 12, color: '#003F8A' }}>編輯</Text>
                       </Pressable>
                       <Pressable onPress={() => handleDelete(n.id)} hitSlop={8}>
-                        <Text style={{ fontSize: 12, color: '#dc2626' }}>刪除</Text>
+                        <Text style={{ fontSize: 12, color: '#D70015' }}>刪除</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -293,7 +293,7 @@ export default function CourseNotesScreen(props: RouteProps) {
           backgroundColor: '#fff',
           padding: 12,
           borderTopWidth: 1,
-          borderTopColor: '#e5e7eb',
+          borderTopColor: '#E5E5EA',
         }}
       >
         <TextInput
@@ -303,11 +303,11 @@ export default function CourseNotesScreen(props: RouteProps) {
           multiline
           editable={!notesLoading}
           style={{
-            backgroundColor: '#f9fafb',
+            backgroundColor: '#F2F2F7',
             borderRadius: 8,
             padding: 10,
             fontSize: 14,
-            color: '#111827',
+            color: '#1C1C1E',
             minHeight: 50,
             maxHeight: 120,
             textAlignVertical: 'top',
@@ -320,7 +320,7 @@ export default function CourseNotesScreen(props: RouteProps) {
             marginTop: 8,
             padding: 10,
             borderRadius: 8,
-            backgroundColor: draft.trim() && !notesLoading ? '#1F4E78' : '#9ca3af',
+            backgroundColor: draft.trim() && !notesLoading ? '#003F8A' : '#AEAEB2',
             alignItems: 'center',
           }}
         >

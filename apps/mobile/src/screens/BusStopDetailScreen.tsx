@@ -215,7 +215,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
               <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '700', letterSpacing: 2 }}>
                 公車站
               </Text>
-              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900' }}>{stop.name}</Text>
+              <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700' }}>{stop.name}</Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
@@ -274,10 +274,10 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                       backgroundColor: rt.color,
                     }}
                   >
-                    <Text style={{ color: '#fff', fontWeight: '900', fontSize: 13 }}>{rt.code}</Text>
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>{rt.code}</Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 14 }}>
+                    <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 14 }}>
                       {rt.shortName}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 1 }} numberOfLines={1}>
@@ -324,7 +324,7 @@ export function BusStopDetailScreen(_props: Record<string, unknown>) {
                               justifyContent: 'center',
                             }}
                           >
-                            <Text style={{ color: rt.color, fontWeight: '900', fontSize: 12 }}>
+                            <Text style={{ color: rt.color, fontWeight: '700', fontSize: 12 }}>
                               {etaMin}
                             </Text>
                           </View>
@@ -483,7 +483,7 @@ function CtaBtn({ icon, label, onPress }: { icon: any; label: string; onPress: (
       })}
     >
       <Ionicons name={icon} size={14} color="#fff" />
-      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{label}</Text>
+      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{label}</Text>
     </Pressable>
   );
 }

@@ -46,5 +46,5 @@ export default function CourseAIAssistantV2Screen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  label: { color: '#6B7280' },
+  label: { color: '#8E8E93' },
 });

@@ -128,8 +128,8 @@ export default function QuestionBanksPage({ params, searchParams }: { params: { 
             style={{
               padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16,
               background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
-              border: `1px solid ${isTaView ? '#7C3AED' : '#FF9500'}`,
-              color: isTaView ? '#5B21B6' : '#92400E',
+              border: `1px solid ${isTaView ? '#AF52DE' : '#FF9500'}`,
+              color: isTaView ? '#5856D6' : '#92400E',
             }}
           >
             {isTaView
@@ -267,8 +267,8 @@ export default function QuestionBanksPage({ params, searchParams }: { params: { 
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(94,106,210,0.08)',
-            border: '1px solid #5E6AD2',
+            background: 'rgba(88,86,214,0.08)',
+            border: '1px solid #5856D6',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -277,7 +277,7 @@ export default function QuestionBanksPage({ params, searchParams }: { params: { 
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5E6AD2', marginBottom: 3 }}>🤖 AI 題庫助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI 題庫助理</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               讓 AI 根據課程主題批量生成題目，或分析現有題庫的難度分布是否平衡。
             </div>
@@ -298,11 +298,11 @@ export default function QuestionBanksPage({ params, searchParams }: { params: { 
 
 const th = { padding: '12px 8px', fontWeight: 600, fontSize: 14, textAlign: 'left' as const };
 const td = { padding: '8px', fontSize: 14 };
-const inputCss = { padding: 6, border: '1px solid #e5e7eb', borderRadius: 6, width: '100%' };
+const inputCss = { padding: 6, border: '1px solid #E5E5EA', borderRadius: 6, width: '100%' };
 const primaryBtn = {
   padding: '8px 16px',
   borderRadius: 8,
-  background: '#1F4E78',
+  background: '#003F8A',
   color: '#fff',
   border: 'none',
   cursor: 'pointer',
@@ -311,8 +311,8 @@ const dangerBtn = {
   padding: '6px 10px',
   borderRadius: 6,
   background: 'transparent',
-  color: '#dc2626',
-  border: '1px solid #dc2626',
+  color: '#FF3B30',
+  border: '1px solid #FF3B30',
   cursor: 'pointer',
   fontSize: 12,
 };

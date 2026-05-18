@@ -40,10 +40,10 @@ const STATUS_LABEL: Record<LiveStatus, string> = {
 };
 
 const STATUS_COLOR: Record<LiveStatus, string> = {
-  live: '#10B981',
-  mock: '#F59E0B',
+  live: '#34C759',
+  mock: '#FF9500',
   offline: '#94A3B8',
-  loading: '#3B82F6',
+  loading: '#5856D6',
 };
 
 const STATUS_ICON: Record<LiveStatus, any> = {
@@ -244,7 +244,7 @@ export function LiveStatusBadge({
         color={color}
         style={isLive ? { transform: [{ scale: 1.2 }] } : undefined}
       />
-      <Text style={{ color, fontSize: size === 'xs' ? 9 : 10, fontWeight: '800' }}>
+      <Text style={{ color, fontSize: size === 'xs' ? 9 : 10, fontWeight: '700' }}>
         {label}
         {isLive ? ' · TDX' : ''}
       </Text>

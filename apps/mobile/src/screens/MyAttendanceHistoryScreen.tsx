@@ -131,14 +131,14 @@ export default function MyAttendanceHistoryScreen() {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator />
-        <Text style={{ marginTop: 8, color: '#6b7280' }}>正在拉所有課的點名紀錄⋯⋯</Text>
+        <Text style={{ marginTop: 8, color: '#8E8E93' }}>正在拉所有課的點名紀錄⋯⋯</Text>
       </View>
     );
   }
 
   return (
     <ScrollView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       contentContainerStyle={{ padding: 16, paddingBottom: 64 }}
       refreshControl={
         <RefreshControl
@@ -153,25 +153,25 @@ export default function MyAttendanceHistoryScreen() {
       {/* 總覽卡 */}
       <View
         style={{
-          backgroundColor: '#1F4E78',
+          backgroundColor: '#003F8A',
           borderRadius: 12,
           padding: 16,
         }}
       >
-        <Text style={{ color: '#dbeafe', fontSize: 12 }}>✅ 我的點名紀錄總覽</Text>
+        <Text style={{ color: '#E5F2FF', fontSize: 12 }}>✅ 我的點名紀錄總覽</Text>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
           <View>
-            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '800' }}>
+            <Text style={{ color: '#fff', fontSize: 28, fontWeight: '700' }}>
               {totalStats.rate ?? '—'}
               {totalStats.rate !== null && <Text style={{ fontSize: 14 }}>%</Text>}
             </Text>
-            <Text style={{ color: '#cbd5e1', fontSize: 11 }}>整體出席率</Text>
+            <Text style={{ color: '#E5E5EA', fontSize: 11 }}>整體出席率</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '800' }}>
+            <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700' }}>
               {totalStats.total}
             </Text>
-            <Text style={{ color: '#cbd5e1', fontSize: 11 }}>總點名次數</Text>
+            <Text style={{ color: '#E5E5EA', fontSize: 11 }}>總點名次數</Text>
           </View>
         </View>
         <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
@@ -211,14 +211,14 @@ export default function MyAttendanceHistoryScreen() {
       )}
 
       {/* 各課明細 */}
-      <Text style={{ marginTop: 20, marginBottom: 8, fontSize: 16, fontWeight: '700', color: '#111827' }}>
+      <Text style={{ marginTop: 20, marginBottom: 8, fontSize: 16, fontWeight: '700', color: '#1C1C1E' }}>
         各課程出席狀況
       </Text>
 
       {data.length === 0 ? (
         <View style={{ alignItems: 'center', padding: 32, gap: 8 }}>
           <Text style={{ fontSize: 48 }}>📋</Text>
-          <Text style={{ color: '#6b7280', fontSize: 14, textAlign: 'center' }}>
+          <Text style={{ color: '#8E8E93', fontSize: 14, textAlign: 'center' }}>
             目前還沒有任何點名紀錄
           </Text>
         </View>
@@ -227,7 +227,7 @@ export default function MyAttendanceHistoryScreen() {
           const rate = c.totalSessions > 0
             ? (c.presentCount + c.lateCount) / c.totalSessions
             : 0;
-          const tone = rate >= 0.9 ? '#16a34a' : rate >= 0.7 ? '#f59e0b' : '#dc2626';
+          const tone = rate >= 0.9 ? '#34C759' : rate >= 0.7 ? '#FF9500' : '#D70015';
           return (
             <Pressable
               key={c.courseId}
@@ -243,24 +243,24 @@ export default function MyAttendanceHistoryScreen() {
                 borderRadius: 12,
                 padding: 14,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: '#E5E5EA',
                 borderLeftWidth: 4,
                 borderLeftColor: tone,
               }}
             >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', flex: 1 }} numberOfLines={1}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', flex: 1 }} numberOfLines={1}>
                   {c.courseName}
                 </Text>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: tone }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: tone }}>
                   {Math.round(rate * 100)}%
                 </Text>
               </View>
               <View style={{ flexDirection: 'row', gap: 12, marginTop: 6 }}>
-                <Text style={{ fontSize: 11, color: '#16a34a' }}>✓ {c.presentCount}</Text>
-                <Text style={{ fontSize: 11, color: '#f59e0b' }}>⏰ {c.lateCount}</Text>
-                <Text style={{ fontSize: 11, color: '#dc2626' }}>✗ {c.absentCount}</Text>
-                <Text style={{ fontSize: 11, color: '#6b7280' }}>共 {c.totalSessions} 次</Text>
+                <Text style={{ fontSize: 11, color: '#34C759' }}>✓ {c.presentCount}</Text>
+                <Text style={{ fontSize: 11, color: '#FF9500' }}>⏰ {c.lateCount}</Text>
+                <Text style={{ fontSize: 11, color: '#D70015' }}>✗ {c.absentCount}</Text>
+                <Text style={{ fontSize: 11, color: '#8E8E93' }}>共 {c.totalSessions} 次</Text>
               </View>
               {c.pattern.alerts.length > 0 && (
                 <Text style={{ fontSize: 11, color: '#92400e', marginTop: 4 }}>

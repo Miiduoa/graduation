@@ -816,12 +816,12 @@ export function getTransactionStatusText(status: PaymentStatus): string {
 
 export function getTransactionStatusColor(status: PaymentStatus): string {
   const colors: Record<PaymentStatus, string> = {
-    pending: '#F59E0B',
-    processing: '#3B82F6',
+    pending: '#FF9500',
+    processing: '#5856D6',
     completed: '#22C55E',
-    failed: '#EF4444',
-    cancelled: '#6B7280',
-    refunded: '#8B5CF6',
+    failed: '#FF3B30',
+    cancelled: '#8E8E93',
+    refunded: '#AF52DE',
   };
-  return colors[status] ?? '#6B7280';
+  return colors[status] ?? '#8E8E93';
 }

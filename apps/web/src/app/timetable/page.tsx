@@ -54,10 +54,10 @@ const MOCK_COURSES: CourseSlot[] = DEMO_COURSES.map((c) => ({
 
 const DAYS = ['一', '二', '三', '四', '五'];
 const COURSE_COLORS = [
-  '#5E6AD2',
+  '#5856D6',
   '#34C759',
   '#FF9500',
-  '#007AFF',
+  '#5856D6',
   '#FF3B30',
   '#BF5AF2',
   '#32ADE6',
@@ -260,7 +260,7 @@ export default function TimetablePage(props: {
               <div className="metricValue">{DEMO_COURSES.length + 8}</div>
               <div className="metricLabel">本學期開設課程</div>
             </div>
-            <div className="metricCard" style={{ '--tone': '#0F8B8D' } as CSSProperties}>
+            <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
               <div className="metricIcon">🧑‍🏫</div>
               <div className="metricValue">19</div>
               <div className="metricLabel">授課教師</div>
@@ -327,8 +327,8 @@ export default function TimetablePage(props: {
             className="card"
             style={{
               padding: '14px 16px',
-              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(0,122,255,0.08)',
-              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#007AFF'}`,
+              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(88,86,214,0.08)',
+              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#5856D6'}`,
               fontSize: 13,
             }}
           >
@@ -391,8 +391,8 @@ export default function TimetablePage(props: {
             className="card"
             style={{
               padding: '14px 16px',
-              background: demoRole === 'ta' ? 'rgba(124,58,237,0.10)' : 'rgba(15,139,141,0.10)',
-              border: `1px solid ${demoRole === 'ta' ? '#7C3AED' : '#0F8B8D'}`,
+              background: demoRole === 'ta' ? 'rgba(124,58,237,0.10)' : 'rgba(88,86,214,0.10)',
+              border: `1px solid ${demoRole === 'ta' ? '#AF52DE' : '#5856D6'}`,
               fontSize: 13,
               display: 'flex',
               alignItems: 'center',
@@ -423,7 +423,7 @@ export default function TimetablePage(props: {
             style={{
               padding: '14px 16px',
               background: 'rgba(251,191,36,0.10)',
-              border: '1px solid #F59E0B',
+              border: '1px solid #FF9500',
               fontSize: 13,
               display: 'flex',
               alignItems: 'center',
@@ -434,7 +434,7 @@ export default function TimetablePage(props: {
             <div style={{ flex: 1 }}>
               🎪 <strong>社團幹部視角</strong> · 你同時是資工系大三學生，以下顯示你個人修課課表。
               社課時間請前往{' '}
-              <Link href={`/clubs${q}`} style={{ color: '#D97706', fontWeight: 600 }}>社團管理</Link>
+              <Link href={`/clubs${q}`} style={{ color: '#FF9500', fontWeight: 600 }}>社團管理</Link>
               {' '}查看。
             </div>
           </div>
@@ -462,8 +462,8 @@ export default function TimetablePage(props: {
             className="card"
             style={{
               padding: '14px 18px',
-              background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.08) 100%)',
-              border: '1px solid rgba(94,106,210,0.25)',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(90,200,250,0.08) 100%)',
+              border: '1px solid rgba(88,86,214,0.25)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -504,8 +504,8 @@ export default function TimetablePage(props: {
             className="card"
             style={{
               padding: '14px 18px',
-              background: 'linear-gradient(135deg, rgba(15,139,141,0.10) 0%, rgba(0,200,200,0.06) 100%)',
-              border: '1px solid rgba(15,139,141,0.25)',
+              background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(0,200,200,0.06) 100%)',
+              border: '1px solid rgba(88,86,214,0.25)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -514,7 +514,7 @@ export default function TimetablePage(props: {
             }}
           >
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#0F8B8D', marginBottom: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 4 }}>
                 🤖 AI 課程助理
               </div>
               <div style={{ fontSize: 13, color: 'var(--text)' }}>
@@ -741,7 +741,7 @@ export default function TimetablePage(props: {
                               padding: '4px',
                               position: 'relative',
                               background:
-                                isNowCol && isThisWeek ? 'rgba(94,106,210,0.03)' : undefined,
+                                isNowCol && isThisWeek ? 'rgba(88,86,214,0.03)' : undefined,
                             }}
                           >
                             {course && (
@@ -814,7 +814,7 @@ export default function TimetablePage(props: {
                           left: 2,
                           top: -9,
                           fontSize: 9,
-                          fontWeight: 800,
+                          fontWeight: 700,
                           color: 'var(--danger, #FF3B30)',
                           letterSpacing: '0.02em',
                           lineHeight: 1,
@@ -1008,7 +1008,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: 'var(--brand)',
                       letterSpacing: '-0.05em',
                     }}
@@ -1021,7 +1021,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: '#34C759',
                       letterSpacing: '-0.05em',
                     }}
@@ -1034,7 +1034,7 @@ export default function TimetablePage(props: {
                   <div
                     style={{
                       fontSize: 28,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       color: '#FF9500',
                       letterSpacing: '-0.05em',
                     }}

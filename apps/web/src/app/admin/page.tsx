@@ -208,12 +208,12 @@ export default function AdminPage(props: {
             <div className="metricValue">{stats.totalUsers}</div>
             <div className="metricLabel">總使用者</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#0F8B8D' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
             <div className="metricIcon">🧑‍🏫</div>
             <div className="metricValue">{stats.teacherCount}</div>
             <div className="metricLabel">教師人數</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#5E6AD2' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
             <div className="metricIcon">📚</div>
             <div className="metricValue">{stats.totalCourses}</div>
             <div className="metricLabel">開設課程</div>

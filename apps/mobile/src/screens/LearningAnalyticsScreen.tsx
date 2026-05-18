@@ -579,7 +579,7 @@ export function LearningAnalyticsScreen(props: any) {
             style={{
               color: theme.colors.text,
               fontSize: 28,
-              fontWeight: '800',
+              fontWeight: '700',
               letterSpacing: -0.6,
             }}
           >
@@ -599,19 +599,19 @@ export function LearningAnalyticsScreen(props: any) {
               </Text>
               <View style={{ flexDirection: 'row', gap: 16 }}>
                 <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 22 }}>
+                  <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 22 }}>
                     {weeklyReports[0].stats.onTimeRate}%
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>準時率</Text>
                 </View>
                 <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 22 }}>
+                  <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 22 }}>
                     {weeklyReports[0].stats.totalSubmissions}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>繳交作業</Text>
                 </View>
                 <View style={{ alignItems: 'center' }}>
-                  <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 22 }}>
+                  <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 22 }}>
                     {weeklyReports[0].stats.newAchievements}
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 11 }}>新成就</Text>
@@ -645,7 +645,7 @@ export function LearningAnalyticsScreen(props: any) {
                   }}
                 >
                   <Text style={{ color: theme.colors.success, fontWeight: '700' }}>準時繳交</Text>
-                  <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                     {submissionStats.onTime}
                   </Text>
                 </View>
@@ -657,7 +657,7 @@ export function LearningAnalyticsScreen(props: any) {
                   }}
                 >
                   <Text style={{ color: theme.colors.danger, fontWeight: '700' }}>逾期繳交</Text>
-                  <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                     {submissionStats.late}
                   </Text>
                 </View>
@@ -682,7 +682,7 @@ export function LearningAnalyticsScreen(props: any) {
                 <Text
                   style={{
                     color: theme.colors.accent,
-                    fontWeight: '900',
+                    fontWeight: '700',
                     fontSize: 24,
                     textAlign: 'center',
                   }}

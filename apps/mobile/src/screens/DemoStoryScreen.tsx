@@ -29,15 +29,15 @@ import { analytics } from '../services/analytics';
 import { usePersonaContext, type TimelineEvent } from '../services/personaContext';
 
 const CATEGORY_COLOR: Record<TimelineEvent['category'], string> = {
-  wake: '#F59E0B',
-  bus: '#3B82F6',
-  class: '#8B5CF6',
-  food: '#EF4444',
+  wake: '#FF9500',
+  bus: '#5856D6',
+  class: '#AF52DE',
+  food: '#FF3B30',
   study: '#06B6D4',
   office: '#64748B',
   work: '#0EA5E9',
   home: '#22C55E',
-  social: '#EC4899',
+  social: '#FF2D55',
   health: '#34D399',
 };
 
@@ -127,7 +127,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
           <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '700', letterSpacing: 3 }}>
             今天的一天 · {now.getMonth() + 1}/{now.getDate()} ({['日', '一', '二', '三', '四', '五', '六'][now.getDay()]})
           </Text>
-          <Text style={{ color: '#fff', fontSize: 24, fontWeight: '900', marginTop: 4 }}>
+          <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700', marginTop: 4 }}>
             {persona.displayName} 的校園動態
           </Text>
           <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 4 }}>
@@ -157,7 +157,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
               <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11, fontWeight: '700', letterSpacing: 2 }}>
                 下一個 · {nextEvent.hhmm}
               </Text>
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800', marginTop: 4 }}>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', marginTop: 4 }}>
                 {nextEvent.title}
               </Text>
               {!!nextEvent.detail && (
@@ -220,7 +220,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {persona.nextClass && (
               <PersonaShortcut
                 icon="school-outline"
-                color="#8B5CF6"
+                color="#AF52DE"
                 title="去下節課"
                 subtitle={`${persona.nextClass.startHHmm} · ${persona.nextClass.poi.name} ${persona.nextClass.roomCode}`}
                 onPress={() =>
@@ -234,7 +234,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {persona.subscribedRoutes[0] && (
               <PersonaShortcut
                 icon="bus-outline"
-                color="#3B82F6"
+                color="#5856D6"
                 title="即時公車"
                 subtitle={`常搭 ${persona.subscribedRoutes[0].shortName}`}
                 onPress={() =>
@@ -245,7 +245,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             {persona.nextClass && (
               <PersonaShortcut
                 icon="business-outline"
-                color="#10B981"
+                color="#34C759"
                 title="教室平面圖"
                 subtitle={`找 ${persona.nextClass.roomCode}`}
                 onPress={() =>
@@ -258,7 +258,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
             )}
             <PersonaShortcut
               icon="map-outline"
-              color="#F59E0B"
+              color="#FF9500"
               title="校園地圖"
               subtitle="多圖層 · POI · AR"
               onPress={() => nav.navigate('MapV2')}
@@ -358,7 +358,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
                         <Text
                           style={{
                             color: theme.colors.text,
-                            fontWeight: '800',
+                            fontWeight: '700',
                             fontSize: 14,
                             textDecorationLine: e.done ? 'line-through' : 'none',
                           }}
@@ -374,7 +374,7 @@ export function DemoStoryScreen(_props: Record<string, unknown>) {
                               backgroundColor: color,
                             }}
                           >
-                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
+                            <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>
                               下一個
                             </Text>
                           </View>
@@ -469,7 +469,7 @@ function PersonaShortcut({
       >
         <Ionicons name={icon} size={16} color={color} />
       </View>
-      <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 13, marginTop: 8 }}>
+      <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13, marginTop: 8 }}>
         {title}
       </Text>
       <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }} numberOfLines={2}>
@@ -494,7 +494,7 @@ function HeroStat({ label, value, highlight }: { label: string; value: string; h
       <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 10, fontWeight: '700', letterSpacing: 1 }}>
         {label.toUpperCase()}
       </Text>
-      <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900', marginTop: 2 }}>{value}</Text>
+      <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700', marginTop: 2 }}>{value}</Text>
     </View>
   );
 }

@@ -78,7 +78,7 @@ export default function AttendanceMethodPicker(props: Props) {
       <View
         style={{
           padding: 16,
-          backgroundColor: '#1F4E78',
+          backgroundColor: '#003F8A',
           borderRadius: 12,
           flexDirection: 'row',
           alignItems: 'center',
@@ -90,7 +90,7 @@ export default function AttendanceMethodPicker(props: Props) {
           <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
             老師選擇了：{info.label}
           </Text>
-          <Text style={{ color: '#dbeafe', fontSize: 12, marginTop: 4 }}>
+          <Text style={{ color: '#E5F2FF', fontSize: 12, marginTop: 4 }}>
             {info.description}
           </Text>
         </View>
@@ -100,7 +100,7 @@ export default function AttendanceMethodPicker(props: Props) {
 
   return (
     <View>
-      <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 8 }}>
+      <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', marginBottom: 8 }}>
         選擇點名方式
       </Text>
       {ATTENDANCE_METHODS.map((info) => {
@@ -113,9 +113,9 @@ export default function AttendanceMethodPicker(props: Props) {
               marginBottom: 8,
               padding: 12,
               borderRadius: 12,
-              backgroundColor: sel ? '#1F4E7814' : '#fff',
+              backgroundColor: sel ? '#003F8A14' : '#fff',
               borderWidth: 2,
-              borderColor: sel ? '#1F4E78' : '#e5e7eb',
+              borderColor: sel ? '#003F8A' : '#E5E5EA',
               flexDirection: 'row',
               gap: 12,
               alignItems: 'flex-start',
@@ -126,19 +126,19 @@ export default function AttendanceMethodPicker(props: Props) {
               <View
                 style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}
               >
-                <Text style={{ fontSize: 15, fontWeight: '700', color: '#111827' }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#1C1C1E' }}>
                   {info.label}
                 </Text>
-                {sel && <Ionicons name="checkmark-circle" size={20} color="#1F4E78" />}
+                {sel && <Ionicons name="checkmark-circle" size={20} color="#003F8A" />}
               </View>
-              <Text style={{ fontSize: 12, color: '#374151', marginTop: 4 }}>
+              <Text style={{ fontSize: 12, color: '#3C3C43', marginTop: 4 }}>
                 {info.description}
               </Text>
-              <Text style={{ fontSize: 11, color: '#16a34a', marginTop: 4 }}>
+              <Text style={{ fontSize: 11, color: '#34C759', marginTop: 4 }}>
                 ✓ 適合：{info.bestFor}
               </Text>
               {info.cons && (
-                <Text style={{ fontSize: 11, color: '#dc2626', marginTop: 2 }}>
+                <Text style={{ fontSize: 11, color: '#D70015', marginTop: 2 }}>
                   ⚠ 注意：{info.cons}
                 </Text>
               )}

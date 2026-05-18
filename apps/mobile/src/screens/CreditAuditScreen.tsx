@@ -277,7 +277,7 @@ export function CreditAuditScreen(props: any) {
               }}
             >
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
                   {currentDept.name}
                 </Text>
                 {currentDept.college ? (
@@ -398,7 +398,7 @@ export function CreditAuditScreen(props: any) {
             <Pill text={satisfied ? '已達標' : '未達標'} kind={satisfied ? 'accent' : 'default'} />
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 8 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 40 }}>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 40 }}>
               {totalEarned}
             </Text>
             <Text
@@ -420,7 +420,7 @@ export function CreditAuditScreen(props: any) {
               style={{
                 height: '100%',
                 width: `${Math.round(totalPct * 100)}%`,
-                backgroundColor: satisfied ? '#10b981' : theme.colors.accent,
+                backgroundColor: satisfied ? '#34C759' : theme.colors.accent,
                 borderRadius: 7,
               }}
             />
@@ -439,7 +439,7 @@ export function CreditAuditScreen(props: any) {
         {gpaData && gpaData.totalCredits > 0 && (
           <Card title="GPA 總績點">
             <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-              <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 40 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 40 }}>
                 {gpaData.gpa.toFixed(2)}
               </Text>
               <Text
@@ -497,7 +497,7 @@ export function CreditAuditScreen(props: any) {
                         backgroundColor: PU_CATEGORY_COLORS[k],
                       }}
                     />
-                    <Text style={{ color: theme.colors.text, fontWeight: '800' }}>
+                    <Text style={{ color: theme.colors.text, fontWeight: '700' }}>
                       {PU_CATEGORY_LABELS[k]}
                     </Text>
                     <Text style={{ color: theme.colors.muted, fontSize: 11 }}>
@@ -506,7 +506,7 @@ export function CreditAuditScreen(props: any) {
                   </View>
                   <Text
                     style={{
-                      color: done ? '#10b981' : theme.colors.muted,
+                      color: done ? '#34C759' : theme.colors.muted,
                       fontWeight: '600',
                       fontSize: 13,
                     }}
@@ -595,7 +595,7 @@ export function CreditAuditScreen(props: any) {
                             style={{
                               color:
                                 weightedAvg >= 80
-                                  ? '#10b981'
+                                  ? '#34C759'
                                   : weightedAvg >= 60
                                     ? theme.colors.muted
                                     : '#f43f5e',
@@ -739,7 +739,7 @@ export function CreditAuditScreen(props: any) {
                                 fontWeight: '700',
                                 color: passed
                                   ? ((g.grade ?? g.score ?? 0) as number) >= 80
-                                    ? '#10b981'
+                                    ? '#34C759'
                                     : theme.colors.text
                                   : '#f43f5e',
                               }}

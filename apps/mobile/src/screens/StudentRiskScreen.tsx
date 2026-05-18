@@ -53,10 +53,10 @@ function buildDemoStudentRiskInputs(): StudentRiskInput[] {
 }
 
 const TIER_COLOR: Record<RiskTier, string> = {
-  critical: '#dc2626',
+  critical: '#D70015',
   high: '#ea580c',
   medium: '#ca8a04',
-  low: '#16a34a',
+  low: '#34C759',
 };
 
 export default function StudentRiskScreen() {
@@ -194,7 +194,7 @@ export default function StudentRiskScreen() {
                       backgroundColor: color + '20',
                     }}
                   >
-                    <Text style={{ color, fontSize: 16, fontWeight: '800' }}>{r.score}</Text>
+                    <Text style={{ color, fontSize: 16, fontWeight: '700' }}>{r.score}</Text>
                   </View>
                 </Pressable>
 

@@ -107,8 +107,8 @@ export async function getTodayScheduleData(
   // 模擬課表資料（實際應從 Firebase 取得）
   const mockCourses = [
     { id: '1', name: '微積分', time: '08:10-10:00', location: '理學院 101', color: '#4F46E5' },
-    { id: '2', name: '程式設計', time: '10:20-12:10', location: '資工系 302', color: '#059669' },
-    { id: '3', name: '資料結構', time: '14:10-16:00', location: '資工系 201', color: '#DC2626' },
+    { id: '2', name: '程式設計', time: '10:20-12:10', location: '資工系 302', color: '#34C759' },
+    { id: '3', name: '資料結構', time: '14:10-16:00', location: '資工系 201', color: '#D70015' },
   ].filter(() => dayOfWeek >= 1 && dayOfWeek <= 5); // 只有平日有課
 
   const data: TodayScheduleWidgetData = {

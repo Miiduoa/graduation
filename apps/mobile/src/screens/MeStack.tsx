@@ -2,15 +2,18 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
-import { PersonalHubScreen } from './PersonalHubScreen';
-import { SettingsScreen } from './SettingsScreen';
-import { ProfileEditScreen } from './ProfileEditScreen';
-import { NotificationsScreen } from './NotificationsScreen';
+// AI-First v1：我的 Tab 主入口（舊版 PersonalHubScreen / ProfileEditScreen /
+// SettingsScreen / NotificationsScreen / AchievementsScreen 已下架，
+// 引用全部走 *AiFirstScreen）
+import MeAiFirstScreen from './MeAiFirstScreen';
+import ProfileEditAiFirstScreen from './ProfileEditAiFirstScreen';
+import AchievementsAiFirstScreen from './AchievementsAiFirstScreen';
+import SettingsAiFirstScreen from './SettingsAiFirstScreen';
+import NotificationsAiFirstScreen from './NotificationsAiFirstScreen';
 import { NotificationSettingsScreen } from './NotificationSettingsScreen';
 import { QRCodeScreen } from './QRCodeScreen';
 import { GlobalSearchScreen } from './GlobalSearchScreen';
 import { WidgetPreviewScreen } from './WidgetPreviewScreen';
-import { AchievementsScreen } from './AchievementsScreen';
 import { CampusGardenScreen } from './CampusGardenScreen';
 import CompanionScreen from './CompanionScreen';
 import CompanionCollectionScreen from './CompanionCollectionScreen';
@@ -63,11 +66,11 @@ function GuardedCreditAuditStack(props: any) {
   );
 }
 
-/** 成就與 gamification：student/teacher 等有 achievements.view；若無權限則不透過 deep link 進入。 */
-function GuardedAchievements(props: any) {
+/** 成就與 gamification：student/teacher 等有 achievements.view；無權限不透過 deep link 進入。 */
+function GuardedAchievementsAiFirst(props: any) {
   return (
     <RouteGuard requires="achievements.view">
-      <AchievementsScreen {...props} />
+      <AchievementsAiFirstScreen {...props} />
     </RouteGuard>
   );
 }
@@ -81,22 +84,22 @@ export function MeStack() {
       initialRouteName="MeHome"
       screenOptions={createStackScreenOptions()}
     >
+      {/* AI-First v1：landing 換新版 */}
       <Stack.Screen
         name="MeHome"
-        component={PersonalHubScreen}
+        component={MeAiFirstScreen}
         options={{ title: '我的', headerShown: false }}
       />
-
       <Stack.Screen
         name="ProfileEdit"
-        component={ProfileEditScreen}
-        options={{ title: '編輯個人資料' }}
+        component={ProfileEditAiFirstScreen}
+        options={{ title: '編輯個人資料', headerShown: false }}
       />
       <Stack.Screen name="SSOLogin" component={SSOLoginScreen} options={{ title: '學校登入' }} />
       <Stack.Screen
         name="Notifications"
-        component={NotificationsScreen}
-        options={{ title: '通知' }}
+        component={NotificationsAiFirstScreen}
+        options={{ title: '通知', headerShown: false }}
       />
       <Stack.Screen
         name="NotificationSettings"
@@ -112,7 +115,7 @@ export function MeStack() {
 
       <Stack.Screen
         name="Achievements"
-        component={GuardedAchievements}
+        component={GuardedAchievementsAiFirst}
         options={{ title: '成就與積分' }}
       />
       <Stack.Screen
@@ -161,7 +164,7 @@ export function MeStack() {
         component={AIModelManagerScreen}
         options={{ title: 'AI 模型管理' }}
       />
-      <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: '設定' }} />
+      <Stack.Screen name="Settings" component={SettingsAiFirstScreen} options={{ title: '設定', headerShown: false }} />
       <Stack.Screen
         name="LanguageSettings"
         component={LanguageSettingsScreen}

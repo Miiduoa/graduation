@@ -100,13 +100,13 @@ const PERIODS = [
   { period: 13, time: '20:20-21:10' },
 ];
 const COURSE_COLORS = [
-  '#8B5CF6',
-  '#EC4899',
-  '#F59E0B',
-  '#10B981',
-  '#3B82F6',
-  '#EF4444',
-  '#6366F1',
+  '#AF52DE',
+  '#FF2D55',
+  '#FF9500',
+  '#34C759',
+  '#5856D6',
+  '#FF3B30',
+  '#5856D6',
   '#14B8A6',
 ];
 
@@ -378,7 +378,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
         autoCapitalize="none"
         style={{
           borderWidth: 1,
-          borderColor: error ? '#DC2626' : theme.colors.border,
+          borderColor: error ? '#D70015' : theme.colors.border,
           borderRadius: 10,
           paddingHorizontal: 14,
           paddingVertical: 12,
@@ -387,7 +387,7 @@ function TCLoginSection(props: { onSuccess: () => void; profile: any }) {
           backgroundColor: theme.colors.bg,
         }}
       />
-      {error ? <Text style={{ color: '#DC2626', fontSize: 13 }}>{error}</Text> : null}
+      {error ? <Text style={{ color: '#D70015', fontSize: 13 }}>{error}</Text> : null}
       <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, marginTop: 4 }}>
         <Pressable
           onPress={() => {
@@ -430,7 +430,7 @@ function CourseToolsSection(props: { nav: any; variant: 'compact' | 'empty' }) {
       title: '課綱查詢',
       subtitle: '全校課程搜尋',
       icon: 'library-outline' as const,
-      color: '#3B82F6',
+      color: '#5856D6',
       onPress: () => props.nav?.navigate?.('CourseCatalog'),
     },
     {
@@ -567,7 +567,7 @@ function MiniScheduleView(props: {
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 16 }}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 16 }}>
                 {next.startPeriod}
               </Text>
             </View>
@@ -600,7 +600,7 @@ function MiniScheduleView(props: {
           {
             label: '今日',
             value: props.courses.filter((c) => c.dayOfWeek === today).length,
-            color: '#F59E0B',
+            color: '#FF9500',
           },
         ].map((s) => (
           <View
@@ -615,7 +615,7 @@ function MiniScheduleView(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: s.color, fontWeight: '900', fontSize: 22 }}>{s.value}</Text>
+            <Text style={{ color: s.color, fontWeight: '700', fontSize: 22 }}>{s.value}</Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{s.label}</Text>
           </View>
         ))}
@@ -773,14 +773,14 @@ function CourseChip(props: {
 // ── 駕駛艙 + What-if + 錯題本 一排捷徑（差異化亮點，TronClass 沒有） ──
 function CockpitQuickRow(props: { nav: any; roleGroup?: string | null }) {
   const studentItems = [
-    { route: 'TodayCockpit', emoji: '🚀', label: '今日駕駛艙', color: '#1F4E78' },
-    { route: 'GradeWhatIf', emoji: '📊', label: '成績試算', color: '#7C3AED' },
-    { route: 'MistakeRepertoire', emoji: '🧠', label: '錯題本', color: '#EC4899' },
+    { route: 'TodayCockpit', emoji: '🚀', label: '今日駕駛艙', color: '#003F8A' },
+    { route: 'GradeWhatIf', emoji: '📊', label: '成績試算', color: '#AF52DE' },
+    { route: 'MistakeRepertoire', emoji: '🧠', label: '錯題本', color: '#FF2D55' },
   ];
   const teacherItems = [
-    { route: 'TodayCockpit', emoji: '🚀', label: '今日總覽', color: '#1F4E78' },
+    { route: 'TodayCockpit', emoji: '🚀', label: '今日總覽', color: '#003F8A' },
     { route: 'TeacherCockpit', emoji: '👨‍🏫', label: '教師駕駛艙', color: '#0EA5E9' },
-    { route: 'GradeWhatIf', emoji: '📊', label: '成績試算', color: '#7C3AED' },
+    { route: 'GradeWhatIf', emoji: '📊', label: '成績試算', color: '#AF52DE' },
   ];
   const isTeacher = props.roleGroup === 'teacher' || props.roleGroup === 'staff' || props.roleGroup === 'admin';
   const items = isTeacher ? teacherItems : studentItems;
@@ -849,9 +849,9 @@ function WeeklyFocusBanner(props: {
           marginVertical: 12,
           padding: 14,
           borderRadius: 14,
-          backgroundColor: '#1F4E7814',
+          backgroundColor: '#003F8A14',
           borderWidth: 1,
-          borderColor: '#1F4E7822',
+          borderColor: '#003F8A22',
           flexDirection: 'row',
           alignItems: 'center',
           gap: 12,
@@ -859,14 +859,14 @@ function WeeklyFocusBanner(props: {
       >
         <Text style={{ fontSize: 28 }}>🌱</Text>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#1F4E78', fontSize: 14, fontWeight: '700' }}>
+          <Text style={{ color: '#003F8A', fontSize: 14, fontWeight: '700' }}>
             這週課業很平穩 ✨
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
             點開校園精靈，看牠長到哪了
           </Text>
         </View>
-        <Ionicons name="chevron-forward" size={18} color="#1F4E78" />
+        <Ionicons name="chevron-forward" size={18} color="#003F8A" />
       </Pressable>
     );
   }
@@ -880,9 +880,9 @@ function WeeklyFocusBanner(props: {
         marginVertical: 12,
         padding: 14,
         borderRadius: 14,
-        backgroundColor: totalUrgent > 3 ? '#DC262614' : '#F59E0B14',
+        backgroundColor: totalUrgent > 3 ? '#D7001514' : '#FF950014',
         borderWidth: 1,
-        borderColor: totalUrgent > 3 ? '#DC262622' : '#F59E0B22',
+        borderColor: totalUrgent > 3 ? '#D7001522' : '#FF950022',
         flexDirection: 'row',
         alignItems: 'center',
         gap: 12,
@@ -1007,7 +1007,7 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                 <CourseChip
                   icon="albums-outline"
                   label="教材"
-                  color="#2563EB"
+                  color="#5856D6"
                   onPress={() =>
                     props.nav?.navigate?.('CourseModules', {
                       groupId: String(course.id),
@@ -1040,7 +1040,7 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                 <CourseChip
                   icon="checkmark-circle-outline"
                   label="點名"
-                  color="#10B981"
+                  color="#34C759"
                   onPress={() =>
                     props.nav?.navigate?.('AttendanceMultiMethod', {
                       courseId: String(course.id),
@@ -1051,7 +1051,7 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                 <CourseChip
                   icon="chatbubbles-outline"
                   label="討論"
-                  color="#8B5CF6"
+                  color="#AF52DE"
                   onPress={() =>
                     props.nav?.navigate?.('CourseDiscussion', {
                       groupId: String(course.id),
@@ -1062,7 +1062,7 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                 <CourseChip
                   icon="sparkles-outline"
                   label="AI 學伴"
-                  color="#F59E0B"
+                  color="#FF9500"
                   onPress={() =>
                     props.nav?.navigate?.('AICourseAdvisor', {
                       groupId: String(course.id),
@@ -1084,7 +1084,7 @@ function CourseListView(props: { courses: TCCourse[]; nav: any; onRefresh: () =>
                 <CourseChip
                   icon="people-outline"
                   label="互評"
-                  color="#EC4899"
+                  color="#FF2D55"
                   onPress={() =>
                     props.nav?.navigate?.('PeerReviewSubmit', {
                       courseId: String(course.id),
@@ -1187,21 +1187,21 @@ function HomeworkView(props: {
       statusText = item.score != null ? `${item.score}/${item.total_score ?? 100}` : '已批改';
       statusIcon = 'checkmark-circle';
     } else if (isSubmitted) {
-      statusColor = '#2563EB';
+      statusColor = '#5856D6';
       statusText = '已繳交';
       statusIcon = 'checkmark-done-outline';
     } else if (isOverdue) {
-      statusColor = '#DC2626';
+      statusColor = '#D70015';
       statusText = '已逾期';
       statusIcon = 'alert-circle';
     } else if (dueDate) {
       const diffHours = (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60);
       if (diffHours < 24) {
-        statusColor = '#F59E0B';
+        statusColor = '#FF9500';
         statusText = `${Math.max(0, Math.floor(diffHours))} 小時後截止`;
         statusIcon = 'warning-outline';
       } else if (diffHours < 72) {
-        statusColor = '#F59E0B';
+        statusColor = '#FF9500';
         statusText = `${Math.floor(diffHours / 24)} 天後截止`;
         statusIcon = 'time-outline';
       } else {
@@ -1231,7 +1231,7 @@ function HomeworkView(props: {
           borderRadius: 14,
           backgroundColor: theme.colors.surface,
           borderWidth: 1,
-          borderColor: isOverdue && !isSubmitted ? '#DC262630' : theme.colors.border,
+          borderColor: isOverdue && !isSubmitted ? '#D7001530' : theme.colors.border,
           opacity: pressed ? 0.8 : 1,
           gap: 8,
         })}
@@ -1485,7 +1485,7 @@ function GradesView(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
               {gpa.toFixed(2)}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>GPA</Text>
@@ -1501,7 +1501,7 @@ function GradesView(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
               {totalCredits}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已修學分</Text>
@@ -1517,7 +1517,7 @@ function GradesView(props: {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: '#F59E0B', fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: '#FF9500', fontWeight: '700', fontSize: 24 }}>
               {props.grades.length}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>科目數</Text>
@@ -1545,8 +1545,8 @@ function GradesView(props: {
                 ? cs.estimatedFinal >= 80
                   ? theme.colors.success
                   : cs.estimatedFinal >= 60
-                    ? '#F59E0B'
-                    : '#DC2626'
+                    ? '#FF9500'
+                    : '#D70015'
                 : theme.colors.muted;
             return (
               <View
@@ -1607,7 +1607,7 @@ function GradesView(props: {
                         {cs.examRows.length} 項測驗
                       </Text>
                     </View>
-                    <Text style={{ color: finalColor, fontWeight: '900', fontSize: 22 }}>
+                    <Text style={{ color: finalColor, fontWeight: '700', fontSize: 22 }}>
                       {cs.estimatedFinal}
                     </Text>
                   </View>
@@ -1617,7 +1617,7 @@ function GradesView(props: {
                 {cs.examRows.map((exam) => {
                   const score = exam.submission?.exam_score ?? 0;
                   const scoreColor =
-                    score >= 80 ? theme.colors.success : score >= 60 ? '#F59E0B' : '#DC2626';
+                    score >= 80 ? theme.colors.success : score >= 60 ? '#FF9500' : '#D70015';
                   return (
                     <View
                       key={exam.id}
@@ -1662,8 +1662,8 @@ function GradesView(props: {
               (g.final_score ?? 0) >= 80
                 ? theme.colors.success
                 : (g.final_score ?? 0) >= 60
-                  ? '#F59E0B'
-                  : '#DC2626';
+                  ? '#FF9500'
+                  : '#D70015';
             return (
               <View
                 key={`${g.course_id}-${idx}`}
@@ -1691,7 +1691,7 @@ function GradesView(props: {
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   {g.final_score != null && (
-                    <Text style={{ color: scoreColor, fontWeight: '900', fontSize: 20 }}>
+                    <Text style={{ color: scoreColor, fontWeight: '700', fontSize: 20 }}>
                       {g.final_score}
                     </Text>
                   )}
@@ -1731,8 +1731,8 @@ function GradesView(props: {
               </Text>
               <View style={{ flexDirection: 'row', gap: 12 }}>
                 <Text style={{ color: theme.colors.success, fontSize: 12 }}>出席 {a.attended}</Text>
-                <Text style={{ color: '#DC2626', fontSize: 12 }}>缺席 {a.absent}</Text>
-                <Text style={{ color: '#F59E0B', fontSize: 12 }}>遲到 {a.late}</Text>
+                <Text style={{ color: '#D70015', fontSize: 12 }}>缺席 {a.absent}</Text>
+                <Text style={{ color: '#FF9500', fontSize: 12 }}>遲到 {a.late}</Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>請假 {a.leave}</Text>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1751,7 +1751,7 @@ function GradesView(props: {
                       height: '100%',
                       borderRadius: 2,
                       backgroundColor:
-                        a.rate >= 80 ? theme.colors.success : a.rate >= 60 ? '#F59E0B' : '#DC2626',
+                        a.rate >= 80 ? theme.colors.success : a.rate >= 60 ? '#FF9500' : '#D70015',
                     }}
                   />
                 </View>
@@ -1946,7 +1946,7 @@ export function CoursesHomeScreen(props: any) {
           {
             text: '校園地圖',
             onPress: () => {
-              rootNav?.navigate?.('校園', { screen: 'Map' });
+              rootNav?.navigate?.('校園', { screen: 'MapV2' });
             },
           },
         ],
@@ -1978,7 +1978,7 @@ export function CoursesHomeScreen(props: any) {
               <HeaderAvatarButton />
               <View style={{ gap: 2, flex: 1 }}>
                 <Text style={{ color: theme.colors.muted, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, textTransform: 'uppercase' }}>學習</Text>
-                <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>我的課程</Text>
+                <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>我的課程</Text>
               </View>
             </View>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -2031,7 +2031,7 @@ export function CoursesHomeScreen(props: any) {
               >
                 學習
               </Text>
-              <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
                 我的課程
               </Text>
             </View>
@@ -2229,7 +2229,7 @@ export function CoursesHomeScreen(props: any) {
                 opacity: pressed ? 0.8 : 1,
               })}
             >
-              <Ionicons name="school-outline" size={16} color="#8B5CF6" />
+              <Ionicons name="school-outline" size={16} color="#AF52DE" />
               <Text style={{ color: theme.colors.text, fontSize: 13, fontWeight: '600' }}>
                 選課助理
               </Text>

@@ -50,7 +50,7 @@ export default function CourseForumTopicV2Screen() {
   const { topic, posts } = loadable.data!;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <CourseV2Header title={topic?.title ?? '討論串'} subtitle={courseName} />
       <ScrollView contentContainerStyle={{ padding: 12, gap: 10 }}>
         {posts.map((p: any) => (
@@ -60,7 +60,7 @@ export default function CourseForumTopicV2Screen() {
             <Text style={styles.time}>{new Date(p.created_at).toLocaleString()}</Text>
           </View>
         ))}
-        {posts.length === 0 ? <Text style={{ color: '#6B7280' }}>尚無回覆</Text> : null}
+        {posts.length === 0 ? <Text style={{ color: '#8E8E93' }}>尚無回覆</Text> : null}
       </ScrollView>
       <View style={styles.composer}>
         <TextInput
@@ -88,27 +88,27 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
   },
-  author: { fontSize: 12, fontWeight: '600', color: '#374151' },
+  author: { fontSize: 12, fontWeight: '600', color: '#3C3C43' },
   body: { fontSize: 14, lineHeight: 20, marginTop: 4 },
-  time: { fontSize: 11, color: '#9CA3AF', marginTop: 6 },
+  time: { fontSize: 11, color: '#AEAEB2', marginTop: 6 },
   composer: {
     flexDirection: 'row',
     padding: 12,
     gap: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
     backgroundColor: '#FFFFFF',
   },
   input: {
     flex: 1,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
     borderRadius: 8,
     padding: 8,
     maxHeight: 100,
   },
-  send: { paddingHorizontal: 16, justifyContent: 'center', backgroundColor: '#2563EB', borderRadius: 8 },
+  send: { paddingHorizontal: 16, justifyContent: 'center', backgroundColor: '#5856D6', borderRadius: 8 },
   sendLabel: { color: '#FFFFFF', fontWeight: '600' },
 });

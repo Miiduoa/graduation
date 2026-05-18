@@ -201,7 +201,7 @@ export default ({ config }: any) => {
     [
       'expo-notifications',
       {
-        color: '#6366F1',
+        color: '#007AFF',
         sounds: ['./assets/sounds/notification.wav'],
       },
     ],
@@ -259,7 +259,7 @@ export default ({ config }: any) => {
     splash: {
       image: config.splash?.image ?? './assets/splash-icon.png',
       resizeMode: 'contain',
-      backgroundColor: '#1a1a2e',
+      backgroundColor: '#000000',
     },
     assetBundlePatterns: ['**/*'],
     ios: {
@@ -292,7 +292,7 @@ export default ({ config }: any) => {
       adaptiveIcon: {
         foregroundImage:
           config.android?.adaptiveIcon?.foregroundImage ?? './assets/adaptive-icon.png',
-        backgroundColor: '#1a1a2e',
+        backgroundColor: '#000000',
       },
       package: androidPackage,
       versionCode,

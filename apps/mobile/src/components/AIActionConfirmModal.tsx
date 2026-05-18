@@ -32,9 +32,9 @@ export interface AIActionConfirmModalProps {
 }
 
 const RISK_STYLES: Record<ActionRisk, { label: string; color: string; bg: string }> = {
-  low: { label: '低風險', color: '#059669', bg: '#D1FAE5' },
+  low: { label: '低風險', color: '#34C759', bg: '#D1FAE5' },
   medium: { label: '中風險', color: '#CA8A04', bg: '#FEF3C7' },
-  high: { label: '高風險', color: '#DC2626', bg: '#FEE2E2' },
+  high: { label: '高風險', color: '#D70015', bg: '#FEE2E2' },
 };
 
 export function AIActionConfirmModal(props: AIActionConfirmModalProps) {
@@ -126,7 +126,7 @@ export function AIActionConfirmModal(props: AIActionConfirmModalProps) {
               style={({ pressed }) => [
                 styles.actionButton,
                 {
-                  backgroundColor: isDark ? theme.colors.surface2 : '#F3F4F6',
+                  backgroundColor: isDark ? theme.colors.surface2 : '#F2F2F7',
                   opacity: pressed ? 0.85 : 1,
                   borderColor: theme.colors.border,
                   borderWidth: 1,

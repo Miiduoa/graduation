@@ -152,7 +152,7 @@ export const DEMO_COURSES: MockCourse[] = [
     instructor: '王孝熙',
     credit: 2,
     semester: '1142',
-    color: '#EC4899',
+    color: '#FF2D55',
     iconEmoji: '💻',
   },
   {
@@ -162,7 +162,7 @@ export const DEMO_COURSES: MockCourse[] = [
     instructor: '王俊傑',
     credit: 2,
     semester: '1142',
-    color: '#F59E0B',
+    color: '#FF9500',
     iconEmoji: '🔢',
   },
   {
@@ -172,7 +172,7 @@ export const DEMO_COURSES: MockCourse[] = [
     instructor: '康贊清',
     credit: 3,
     semester: '1142',
-    color: '#3B82F6',
+    color: '#5856D6',
     iconEmoji: '📊',
   },
   {
@@ -182,7 +182,7 @@ export const DEMO_COURSES: MockCourse[] = [
     instructor: '楊品裕',
     credit: 1,
     semester: '1142',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     iconEmoji: '🌍',
   },
 ];

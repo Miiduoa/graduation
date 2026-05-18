@@ -529,7 +529,7 @@ async function buildCampusCue(schoolId: string): Promise<AmbientCue[]> {
         headline: `${livelyPoi.name} 現在比較熱鬧`,
         body: '當很多人同時往同一個地點移動時，提早知道現場狀態，通常能少掉來回切換的成本。',
         ctaLabel: '查看地圖',
-        target: { tab: '校園', screen: 'Map' },
+        target: { tab: '校園', screen: 'MapV2' },
         metric: '現場人潮偏高',
         distinctUserCount: AMBIENT_CUE_MIN_DISTINCT_USERS,
         updatedAt: new Date(),

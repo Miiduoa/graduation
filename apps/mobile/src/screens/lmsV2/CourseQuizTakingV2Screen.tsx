@@ -67,7 +67,7 @@ export default function CourseQuizTakingV2Screen() {
   const { quiz, questions } = loadable.data!;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <CourseV2Header title={quiz?.title ?? '測驗'} subtitle={courseName} />
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16 }}>
         {questions.map((q: any, idx: number) => (
@@ -105,22 +105,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
     gap: 8,
   },
-  qIndex: { fontSize: 12, color: '#6B7280', fontWeight: '600' },
+  qIndex: { fontSize: 12, color: '#8E8E93', fontWeight: '600' },
   qPrompt: { fontSize: 15, lineHeight: 22 },
   input: {
     minHeight: 80,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
     borderRadius: 6,
     padding: 8,
     textAlignVertical: 'top',
   },
   submitBtn: {
     paddingVertical: 12,
-    backgroundColor: '#2563EB',
+    backgroundColor: '#5856D6',
     borderRadius: 8,
     alignItems: 'center',
   },

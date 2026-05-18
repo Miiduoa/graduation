@@ -29,20 +29,20 @@ export const tokens = {
     border: '#E5E5EA',
     borderStrong: '#D1D1D6',
 
-    // ── 品牌 ──
-    brand: '#2563EB',
-    brand2: '#60A5FA',
-    accentSoft: 'rgba(37,99,235,0.10)',
+    // ── 品牌（Apple HIG · AI-First Indigo）──
+    brand: '#5856D6',
+    brand2: '#818CF8',
+    accentSoft: 'rgba(88,86,214,0.10)',
 
-    // ── 狀態 ──
+    // ── 狀態（iOS System Colors）──
     success: '#34C759',
     successSoft: 'rgba(52,199,89,0.12)',
     warning: '#FF9500',
     warningSoft: 'rgba(255,149,0,0.12)',
     danger: '#FF3B30',
     dangerSoft: 'rgba(255,59,48,0.12)',
-    info: '#007AFF',
-    infoSoft: 'rgba(0,122,255,0.12)',
+    info: '#5AC8FA',
+    infoSoft: 'rgba(90,200,250,0.12)',
 
     // ── AI 專屬色（新增）──
     // AI 是介面本身，需要與其他狀態色明顯區隔

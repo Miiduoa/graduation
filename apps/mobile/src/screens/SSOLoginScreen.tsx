@@ -233,7 +233,7 @@ export function SSOLoginScreen(props: SSOLoginScreenProps) {
                 <Ionicons name="school" size={24} color="#fff" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '800' }}>
+                <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
                   {schoolName}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 3 }}>

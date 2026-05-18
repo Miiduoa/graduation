@@ -54,7 +54,10 @@ import {
   submitDormRepair,
   submitPeerReview,
   restoreAnnouncement,
+  rsvpAlumniEvent,
 } from '@/lib/demoStore';
+import { callCampusAssistant, type AgentCard } from '@/lib/campusAssistantClient';
+import { AgentCardList } from './AgentCards';
 
 // ── 型別 ──────────────────────────────────────────────────────
 interface Message {
@@ -62,6 +65,8 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  cards?: AgentCard[];
+  suggestions?: string[];
 }
 
 type QuickPrompt = {
@@ -133,32 +138,41 @@ const ROLE_QUICK_PROMPTS: Record<DemoRole, QuickPrompt[]> = {
 
 // ── 顏色 ──────────────────────────────────────────────────────
 const CATEGORY_COLORS: Record<CreditCategory, string> = {
-  required: '#5E6AD2',
+  required: '#5856D6',
   elective: '#34C759',
   general: '#FF9500',
   pe: '#FF3B30',
   other: '#8E8E93',
 };
 
-// ── AI 回應（模擬 + Anthropic API） ──────────────────────────────
-async function callAI(messages: { role: string; content: string }[], role?: DemoRole): Promise<string> {
-  // 嘗試呼叫 API route（若設定好就用真的 AI）
+// ── AI 回應結果型別 ──────────────────────────────
+type AIReply = { content: string; cards?: AgentCard[]; suggestions?: string[] };
+
+// ── AI 回應（真實後端 askCampusAssistant + fallback demo） ──────────
+async function callAI(messages: { role: string; content: string }[], role?: DemoRole): Promise<AIReply> {
+  // 真實 AI：呼叫部署的 Cloud Function `askCampusAssistant`（含 4 個地圖/餐廳工具 + cards）
   try {
-    const res = await fetch('/api/ai-chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages }),
-      signal: AbortSignal.timeout(15000),
+    const envelope = await callCampusAssistant({
+      messages: messages.map((m) => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content })),
+      schoolId: 'pu',
+      screen: 'web/ai-assistant',
     });
-    if (res.ok) {
-      const data = (await res.json()) as { reply?: string };
-      if (data.reply) return data.reply;
+    if (envelope && envelope.content) {
+      return {
+        content: envelope.content,
+        cards: envelope.cards || [],
+        suggestions: envelope.suggestions || [],
+      };
     }
   } catch {
     // fallback to demo reply
   }
 
-  // Demo 回應（API 未設定時的 fallback）
+  // Demo 回應（Firebase 未設定或 callable 失敗時的 fallback）
+  return { content: buildDemoReply(messages, role) };
+}
+
+function buildDemoReply(messages: { role: string; content: string }[], role?: DemoRole): string {
   const summary = getCreditSummary();
   const lastUserMsg = messages[messages.length - 1]?.content ?? '';
 
@@ -852,7 +866,14 @@ export default function AIAssistantPage(props: {
       const reply = await callAI(apiMessages, demoRole);
       setMessages((prev) => [
         ...prev,
-        { id: `a-${Date.now()}`, role: 'assistant', content: reply, timestamp: new Date() },
+        {
+          id: `a-${Date.now()}`,
+          role: 'assistant',
+          content: reply.content,
+          cards: reply.cards,
+          suggestions: reply.suggestions,
+          timestamp: new Date(),
+        },
       ]);
     } catch {
       setMessages((prev) => [
@@ -958,8 +979,8 @@ export default function AIAssistantPage(props: {
             className="card"
             style={{
               padding: '14px 16px',
-              background: 'rgba(0,122,255,0.08)',
-              border: '1px solid #007AFF',
+              background: 'rgba(88,86,214,0.08)',
+              border: '1px solid #5856D6',
               fontSize: 13,
             }}
           >
@@ -979,25 +1000,25 @@ export default function AIAssistantPage(props: {
             {demoRole === 'alumni' ? (
               // 校友：顯示畢業資訊
               [
-                { label: '已修學分', val: 128, color: '#5E6AD2' },
+                { label: '已修學分', val: 128, color: '#5856D6' },
                 { label: '畢業年份', val: '109屆', color: '#34C759' },
                 { label: '畢業 GPA', val: '3.65', color: '#FF9500' },
               ].map((s) => (
                 <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
                 </div>
               ))
             ) : (
               // 學生 / TA：學分進度
               [
-                { label: '已修學分', val: summary.historicalEarned, color: '#5E6AD2' },
+                { label: '已修學分', val: summary.historicalEarned, color: '#5856D6' },
                 { label: '修習中', val: summary.currentSemester, color: '#34C759' },
                 { label: '還差', val: summary.remaining, color: '#FF9500' },
                 { label: '畢業需求', val: summary.totalRequired, color: '#8E8E93' },
               ].map((s) => (
                 <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
                 </div>
               ))
@@ -1009,12 +1030,12 @@ export default function AIAssistantPage(props: {
         {(demoRole === 'teacher' || demoRole === 'ta') && (
           <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
-              { label: '課程', val: '資料結構', color: '#0F8B8D' },
-              { label: '修課人數', val: 48, color: '#5E6AD2' },
+              { label: '課程', val: '資料結構', color: '#5856D6' },
+              { label: '修課人數', val: 48, color: '#5856D6' },
               { label: '待批改', val: TEACHER_PENDING_REVIEWS.filter(r => r.status === 'submitted').length + getPendingSubmissions('c1', store).length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
@@ -1026,11 +1047,11 @@ export default function AIAssistantPage(props: {
           <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
               { label: '社團', val: '程式設計社', color: '#34C759' },
-              { label: '成員', val: 120, color: '#5E6AD2' },
+              { label: '成員', val: 120, color: '#5856D6' },
               { label: '待審申請', val: getPendingClubMembers('club-1', store).length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 14, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 14, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
@@ -1041,12 +1062,12 @@ export default function AIAssistantPage(props: {
         {demoRole === 'department_head' && (
           <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
-              { label: '在學學生', val: 312, color: '#5E6AD2' },
-              { label: '教師人數', val: 19, color: '#0F8B8D' },
+              { label: '在學學生', val: 312, color: '#5856D6' },
+              { label: '教師人數', val: 19, color: '#5856D6' },
               { label: '待審公告', val: readPendingAnns().length, color: '#FF9500' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                <div style={{ fontSize: 24, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
@@ -1058,11 +1079,11 @@ export default function AIAssistantPage(props: {
           <div className="card" style={{ padding: '12px 16px', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
             {[
               { label: '系統狀態', val: '✅ 正常', color: '#34C759' },
-              { label: '活躍使用者', val: 89, color: '#5E6AD2' },
+              { label: '活躍使用者', val: 89, color: '#5856D6' },
               { label: '安全事件', val: 1, color: '#FF3B30' },
             ].map((s) => (
               <div key={s.label} style={{ flex: '1 1 80px', textAlign: 'center', padding: '8px 4px', borderRadius: 'var(--radius-sm)', background: 'var(--panel2)' }}>
-                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 800, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
+                <div style={{ fontSize: typeof s.val === 'number' ? 24 : 16, fontWeight: 700, color: s.color, letterSpacing: '-0.04em' }}>{s.val}</div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>{s.label}</div>
               </div>
             ))}
@@ -1197,6 +1218,11 @@ export default function AIAssistantPage(props: {
                   }}
                 >
                   {msg.content}
+                  {msg.role === 'assistant' && msg.cards && msg.cards.length > 0 ? (
+                    <div style={{ marginTop: 10 }}>
+                      <AgentCardList cards={msg.cards} schoolId="pu" />
+                    </div>
+                  ) : null}
                   <div
                     style={{
                       fontSize: 10,
@@ -1469,8 +1495,8 @@ function AIActionBar({
       style={{
         padding: '14px 16px',
         background:
-          'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(124,58,237,0.06) 100%)',
-        border: '1px solid rgba(94,106,210,0.28)',
+          'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(124,58,237,0.06) 100%)',
+        border: '1px solid rgba(88,86,214,0.28)',
       }}
     >
       <div
@@ -1921,7 +1947,16 @@ function buildActions(args: {
         icon: '🎉',
         label: '報名校友回娘家活動',
         onClick: () => {
-          toastSuccess('🎉 已成功報名，活動詳情會 Email 給你');
+          const { alreadyRegistered } = rsvpAlumniEvent({
+            eventId: 'alumni-reunion-2026',
+            eventName: '2026 校友回娘家活動',
+            by: 'B09203001',
+          });
+          if (alreadyRegistered) {
+            toastSuccess('✅ 你已經報名過了，活動詳情會再 Email 提醒');
+          } else {
+            toastSuccess('🎉 已成功報名 2026 校友回娘家，活動詳情會 Email 給你');
+          }
         },
       },
     ];

@@ -2,23 +2,23 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { CampusHubScreen } from './CampusHubScreen';
-import { MapScreen } from './MapScreen';
-import { PoiDetailScreen } from './PoiDetailScreen';
 import { ARNavigationScreen } from './ARNavigationScreen';
 import { AccessibleRouteScreen } from './AccessibleRouteScreen';
-import { BusScheduleScreen } from './BusScheduleScreen';
-import { BusV2Screen } from './BusV2Screen';
 import { OnBusModeScreen } from './OnBusModeScreen';
 import { GoogleMapsLikeScreen } from './GoogleMapsLikeScreen';
 import { BusStopDetailScreen } from './BusStopDetailScreen';
 import { TripPlannerScreen } from './TripPlannerScreen';
 import { IndoorFloorMapScreen } from './IndoorFloorMapScreen';
 import { TransportHubScreen } from './TransportHubScreen';
-import { CafeteriaScreen } from './CafeteriaScreen';
-import { MenuDetailScreen } from './MenuDetailScreen';
+// AI-First v1（已是主入口；舊版檔案已刪除）
+import CafeteriaAiFirstScreen from './CafeteriaAiFirstScreen';
+import PoiDetailAiFirstScreen from './PoiDetailAiFirstScreen';
+import BusAiFirstScreen from './BusAiFirstScreen';
+import MenuDetailAiFirstScreen from './MenuDetailAiFirstScreen';
+import LibraryAiFirstScreen from './LibraryAiFirstScreen';
+import ClubsAiFirstScreen from './ClubsAiFirstScreen';
 import { OrderingScreen } from './OrderingScreen';
 import { MenuSubscriptionScreen } from './MenuSubscriptionScreen';
-import { LibraryScreen } from './LibraryScreen';
 import { LibraryCatalogScreen } from './LibraryCatalogScreen';
 import { HealthScreen } from './HealthScreen';
 import { DormitoryScreen } from './DormitoryScreen';
@@ -46,13 +46,23 @@ export function MapStack() {
         component={CampusHubScreen}
         options={{ title: '校園', headerShown: false }}
       />
-      <Stack.Screen name="Map" component={MapScreen} options={{ title: '校園地圖' }} />
+      {/* 校園地圖 — Map 與 MapV2 為同一個新版實作（GoogleMapsLikeScreen）；
+          'Map' 保留只是為了相容舊 deep link / AI agent 路由；新代碼一律用 'MapV2'。 */}
+      <Stack.Screen
+        name="Map"
+        component={GoogleMapsLikeScreen}
+        options={{ title: '校園地圖', headerShown: false }}
+      />
       <Stack.Screen
         name="MapV2"
         component={GoogleMapsLikeScreen}
-        options={{ title: '校園地圖（V2）', headerShown: false }}
+        options={{ title: '校園地圖', headerShown: false }}
       />
-      <Stack.Screen name="PoiDetail" component={PoiDetailScreen} options={{ title: '點位詳情' }} />
+      <Stack.Screen
+        name="PoiDetail"
+        component={PoiDetailAiFirstScreen}
+        options={{ title: '點位詳情', headerShown: false }}
+      />
       <Stack.Screen
         name="ARNavigation"
         component={ARNavigationScreen}
@@ -65,13 +75,13 @@ export function MapStack() {
       />
       <Stack.Screen
         name="BusSchedule"
-        component={BusScheduleScreen}
-        options={{ title: '校園公車（舊版）' }}
+        component={BusAiFirstScreen}
+        options={{ title: '校園公車', headerShown: false }}
       />
       <Stack.Screen
         name="BusV2"
-        component={BusV2Screen}
-        options={{ title: '校園公車' }}
+        component={BusAiFirstScreen}
+        options={{ title: '校園公車', headerShown: false }}
       />
       <Stack.Screen
         name="OnBusMode"
@@ -98,10 +108,19 @@ export function MapStack() {
         component={TransportHubScreen}
         options={{ title: '交通資訊' }}
       />
-      <Stack.Screen name="餐廳總覽" component={CafeteriaScreen} options={{ title: '餐廳' }} />
+      <Stack.Screen
+        name="餐廳總覽"
+        component={CafeteriaAiFirstScreen}
+        options={{ title: '餐廳', headerShown: false }}
+      />
+      <Stack.Screen
+        name="Cafeteria"
+        component={CafeteriaAiFirstScreen}
+        options={{ title: '餐廳', headerShown: false }}
+      />
       <Stack.Screen
         name="MenuDetail"
-        component={MenuDetailScreen}
+        component={MenuDetailAiFirstScreen}
         options={{ title: '餐點詳情' }}
       />
       <Stack.Screen name="Ordering" component={OrderingScreen} options={{ title: '線上點餐' }} />
@@ -110,7 +129,16 @@ export function MapStack() {
         component={MenuSubscriptionScreen}
         options={{ title: '菜單訂閱' }}
       />
-      <Stack.Screen name="Library" component={LibraryScreen} options={{ title: '圖書館' }} />
+      <Stack.Screen
+        name="Library"
+        component={LibraryAiFirstScreen}
+        options={{ title: '圖書館', headerShown: false }}
+      />
+      <Stack.Screen
+        name="Clubs"
+        component={ClubsAiFirstScreen}
+        options={{ title: '社團', headerShown: false }}
+      />
       <Stack.Screen
         name="LibraryCatalog"
         component={LibraryCatalogScreen}

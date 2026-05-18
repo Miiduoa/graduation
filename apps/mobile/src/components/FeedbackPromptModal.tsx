@@ -94,7 +94,7 @@ export function FeedbackPromptModal(props: {
             borderColor: theme.colors.border,
           }}
         >
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 17 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 17 }}>
             {headline}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 13, marginTop: 8, lineHeight: 20 }}>
@@ -107,7 +107,7 @@ export function FeedbackPromptModal(props: {
                 <Ionicons
                   name={s <= score ? 'star' : 'star-outline'}
                   size={34}
-                  color={s <= score ? '#F59E0B' : theme.colors.muted}
+                  color={s <= score ? '#FF9500' : theme.colors.muted}
                 />
               </Pressable>
             ))}
@@ -164,7 +164,7 @@ export function FeedbackPromptModal(props: {
               {busy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={{ color: '#fff', fontWeight: '800' }}>送出</Text>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>送出</Text>
               )}
             </Pressable>
           </View>

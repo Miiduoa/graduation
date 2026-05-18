@@ -105,7 +105,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'general',
     label: '一般門診',
     icon: 'medical-outline',
-    color: '#3B82F6',
+    color: '#5856D6',
     description: '感冒/腸胃/皮膚/頭痛/過敏等一般症狀',
     avgWaitMinutes: 15,
     requiresAppointment: false,
@@ -115,7 +115,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'women',
     label: '女性保健',
     icon: 'female-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     description: '月經不適/婦科諮詢/衛教',
     avgWaitMinutes: 20,
     requiresAppointment: true,
@@ -125,7 +125,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'sports_injury',
     label: '運動傷害',
     icon: 'fitness-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '扭傷/拉傷/物理治療/復健指導',
     avgWaitMinutes: 25,
     requiresAppointment: true,
@@ -135,7 +135,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'dental',
     label: '口腔保健',
     icon: 'happy-outline',
-    color: '#10B981',
+    color: '#34C759',
     description: '洗牙/塗氟/口腔檢查（合作牙醫巡診）',
     avgWaitMinutes: 30,
     requiresAppointment: true,
@@ -145,7 +145,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'eye',
     label: '視力保健',
     icon: 'eye-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     description: '視力檢查/用眼衛教/乾眼症諮詢',
     avgWaitMinutes: 10,
     requiresAppointment: false,
@@ -155,7 +155,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'vaccination',
     label: '預防接種',
     icon: 'medkit-outline',
-    color: '#059669',
+    color: '#34C759',
     description: '流感/B肝/HPV/COVID疫苗',
     avgWaitMinutes: 10,
     requiresAppointment: true,
@@ -165,7 +165,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'nutrition',
     label: '營養諮詢',
     icon: 'nutrition-outline',
-    color: '#0D9488',
+    color: '#5AC8FA',
     description: '體重管理/飲食規劃/特殊需求飲食',
     avgWaitMinutes: 30,
     requiresAppointment: true,
@@ -175,7 +175,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'mental',
     label: '心理諮商',
     icon: 'heart-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     description: '情緒/壓力/人際/生涯/感情困擾',
     avgWaitMinutes: 0,
     requiresAppointment: true,
@@ -185,7 +185,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'group_therapy',
     label: '團體工作坊',
     icon: 'people-outline',
-    color: '#DC2626',
+    color: '#D70015',
     description: '壓力管理/人際溝通/自我探索/正念減壓',
     avgWaitMinutes: 0,
     requiresAppointment: true,
@@ -195,7 +195,7 @@ export const DEPARTMENTS: DepartmentInfo[] = [
     id: 'crisis',
     label: '危機處理',
     icon: 'alert-circle-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     description: '自傷傾向/重大創傷/緊急心理支持',
     avgWaitMinutes: 0,
     requiresAppointment: false,
@@ -464,11 +464,11 @@ export interface MoodTrend {
 }
 
 export const MOOD_EMOJIS: Record<MoodLevel, { emoji: string; label: string; color: string }> = {
-  1: { emoji: '😞', label: '很差', color: '#EF4444' },
-  2: { emoji: '😟', label: '不太好', color: '#F97316' },
-  3: { emoji: '😐', label: '普通', color: '#F59E0B' },
-  4: { emoji: '🙂', label: '不錯', color: '#10B981' },
-  5: { emoji: '😄', label: '很好', color: '#059669' },
+  1: { emoji: '😞', label: '很差', color: '#FF3B30' },
+  2: { emoji: '😟', label: '不太好', color: '#FF9500' },
+  3: { emoji: '😐', label: '普通', color: '#FF9500' },
+  4: { emoji: '🙂', label: '不錯', color: '#34C759' },
+  5: { emoji: '😄', label: '很好', color: '#34C759' },
 };
 
 export const MOOD_FACTORS: { id: MoodFactor; label: string; icon: string }[] = [
@@ -591,7 +591,7 @@ export const AVAILABLE_VACCINES: {
     interval: '每年一次',
     note: '每年10-11月開放接種',
     icon: 'snow-outline',
-    color: '#3B82F6',
+    color: '#5856D6',
   },
   {
     id: 'covid',
@@ -600,7 +600,7 @@ export const AVAILABLE_VACCINES: {
     interval: '依 CDC 公告',
     note: 'XBB 次世代疫苗',
     icon: 'shield-outline',
-    color: '#059669',
+    color: '#34C759',
   },
   {
     id: 'hpv',
@@ -609,7 +609,7 @@ export const AVAILABLE_VACCINES: {
     interval: '0-2-6 月',
     note: '26歲以下女性建議接種',
     icon: 'female-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
   },
   {
     id: 'hepb',
@@ -618,7 +618,7 @@ export const AVAILABLE_VACCINES: {
     interval: '0-1-6 月',
     note: '抗體不足者補接種',
     icon: 'water-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
   },
   {
     id: 'tetanus',
@@ -627,7 +627,7 @@ export const AVAILABLE_VACCINES: {
     interval: '每 10 年追加',
     note: '運動員/戶外活動者建議',
     icon: 'fitness-outline',
-    color: '#6366F1',
+    color: '#5856D6',
   },
   {
     id: 'mmr',
@@ -636,7 +636,7 @@ export const AVAILABLE_VACCINES: {
     interval: '間隔 4 週',
     note: '出國交換前確認',
     icon: 'airplane-outline',
-    color: '#DC2626',
+    color: '#D70015',
   },
 ];
 
@@ -752,37 +752,37 @@ export const EMERGENCY_NUMBERS = [
     name: '校園緊急專線',
     phone: '04-2632-8001 #11119',
     icon: 'warning-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     available: '24h',
   },
   {
     name: '衛保組',
     phone: '04-2632-8001 #11350',
     icon: 'medical-outline',
-    color: '#3B82F6',
+    color: '#5856D6',
     available: '上班時間',
   },
   {
     name: '諮商緊急專線',
     phone: '04-2632-8001 #11261',
     icon: 'heart-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     available: '上班時間',
   },
-  { name: '119 消防救護', phone: '119', icon: 'flame-outline', color: '#DC2626', available: '24h' },
+  { name: '119 消防救護', phone: '119', icon: 'flame-outline', color: '#D70015', available: '24h' },
   {
     name: '安心專線',
     phone: '1925',
     icon: 'call-outline',
-    color: '#059669',
+    color: '#34C759',
     available: '24h 免費',
   },
-  { name: '生命線', phone: '1995', icon: 'pulse-outline', color: '#F59E0B', available: '24h' },
+  { name: '生命線', phone: '1995', icon: 'pulse-outline', color: '#FF9500', available: '24h' },
   {
     name: '張老師專線',
     phone: '1980',
     icon: 'chatbubble-ellipses-outline',
-    color: '#0D9488',
+    color: '#5AC8FA',
     available: '24h',
   },
 ];
@@ -828,7 +828,7 @@ export function generateExercisePrescription(profile: FitnessProfile): ExerciseP
       type: 'cardio',
       name: '操場慢跑',
       icon: 'walk-outline',
-      color: '#3B82F6',
+      color: '#5856D6',
       durationMinutes: 30,
       frequency: '每週 3-4 次',
       intensity: 'moderate',
@@ -844,7 +844,7 @@ export function generateExercisePrescription(profile: FitnessProfile): ExerciseP
       type: 'flexibility',
       name: '瑜珈伸展',
       icon: 'leaf-outline',
-      color: '#10B981',
+      color: '#34C759',
       durationMinutes: 20,
       frequency: '每週 2-3 次',
       intensity: 'low',
@@ -860,7 +860,7 @@ export function generateExercisePrescription(profile: FitnessProfile): ExerciseP
       type: 'strength',
       name: '重量訓練',
       icon: 'barbell-outline',
-      color: '#F59E0B',
+      color: '#FF9500',
       durationMinutes: 40,
       frequency: '每週 2-3 次',
       intensity: 'high',
@@ -876,7 +876,7 @@ export function generateExercisePrescription(profile: FitnessProfile): ExerciseP
     type: 'cardio',
     name: '校園散步',
     icon: 'footsteps-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     durationMinutes: 15,
     frequency: '每日',
     intensity: 'low',
@@ -946,7 +946,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'student',
     label: '學生',
     icon: 'school-outline',
-    color: '#3B82F6',
+    color: '#5856D6',
     features: [
       'symptom_check',
       'book_appointment',
@@ -967,7 +967,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'student_athlete',
     label: '體育生',
     icon: 'trophy-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     features: [
       'symptom_check',
       'book_appointment',
@@ -988,7 +988,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'nurse',
     label: '校護',
     icon: 'medkit-outline',
-    color: '#10B981',
+    color: '#34C759',
     features: [
       'triage_patients',
       'manage_appointments',
@@ -1006,7 +1006,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'doctor',
     label: '駐校醫師',
     icon: 'pulse-outline',
-    color: '#DC2626',
+    color: '#D70015',
     features: [
       'view_patient_records',
       'write_prescription',
@@ -1021,7 +1021,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'counselor',
     label: '心理諮商師',
     icon: 'heart-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     features: [
       'counseling_notes',
       'crisis_response',
@@ -1037,7 +1037,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'nutritionist',
     label: '營養師',
     icon: 'nutrition-outline',
-    color: '#0D9488',
+    color: '#5AC8FA',
     features: [
       'nutrition_plan',
       'view_patient_records',
@@ -1065,7 +1065,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'dorm_admin',
     label: '宿舍管理員',
     icon: 'home-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     features: ['emergency_call', 'aed_map', 'send_alert', 'referral'],
     description: '緊急通報、協助就醫、夜間急病處理',
   },
@@ -1073,7 +1073,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'health_admin',
     label: '衛保組行政',
     icon: 'clipboard-outline',
-    color: '#374151',
+    color: '#3C3C43',
     features: [
       'manage_appointments',
       'manage_vaccines',
@@ -1088,7 +1088,7 @@ export const ROLE_HEALTH_CONFIG: HealthRoleConfig[] = [
     role: 'system_admin',
     label: '系統管理',
     icon: 'settings-outline',
-    color: '#6B7280',
+    color: '#8E8E93',
     features: ['system_config', 'statistics', 'send_alert', 'policy_manage'],
     description: '系統設定、資料管理、推播設定',
   },
@@ -1428,16 +1428,16 @@ export interface PeerSupportPost {
 }
 
 export const PEER_TOPICS: { id: PeerSupportTopic; label: string; icon: string; color: string }[] = [
-  { id: 'stress', label: '壓力山大', icon: 'thunderstorm-outline', color: '#EF4444' },
-  { id: 'sleep', label: '失眠夜貓', icon: 'moon-outline', color: '#6366F1' },
-  { id: 'loneliness', label: '感到孤單', icon: 'person-outline', color: '#8B5CF6' },
-  { id: 'anxiety', label: '焦慮不安', icon: 'pulse-outline', color: '#F59E0B' },
-  { id: 'diet', label: '飲食困擾', icon: 'fast-food-outline', color: '#10B981' },
-  { id: 'exercise', label: '運動打卡', icon: 'bicycle-outline', color: '#3B82F6' },
-  { id: 'breakup', label: '感情傷痛', icon: 'heart-dislike-outline', color: '#EC4899' },
-  { id: 'homesick', label: '想家', icon: 'home-outline', color: '#F97316' },
-  { id: 'academic_pressure', label: '考試地獄', icon: 'school-outline', color: '#DC2626' },
-  { id: 'career_worry', label: '未來迷惘', icon: 'compass-outline', color: '#0D9488' },
+  { id: 'stress', label: '壓力山大', icon: 'thunderstorm-outline', color: '#FF3B30' },
+  { id: 'sleep', label: '失眠夜貓', icon: 'moon-outline', color: '#5856D6' },
+  { id: 'loneliness', label: '感到孤單', icon: 'person-outline', color: '#AF52DE' },
+  { id: 'anxiety', label: '焦慮不安', icon: 'pulse-outline', color: '#FF9500' },
+  { id: 'diet', label: '飲食困擾', icon: 'fast-food-outline', color: '#34C759' },
+  { id: 'exercise', label: '運動打卡', icon: 'bicycle-outline', color: '#5856D6' },
+  { id: 'breakup', label: '感情傷痛', icon: 'heart-dislike-outline', color: '#FF2D55' },
+  { id: 'homesick', label: '想家', icon: 'home-outline', color: '#FF9500' },
+  { id: 'academic_pressure', label: '考試地獄', icon: 'school-outline', color: '#D70015' },
+  { id: 'career_worry', label: '未來迷惘', icon: 'compass-outline', color: '#5AC8FA' },
 ];
 
 // ═══════════════════════════════════════════════════
@@ -1478,7 +1478,7 @@ export function getActiveAlerts(): SeasonalAlert[] {
       title: '流感高峰期',
       severity: 'warning',
       icon: 'snow-outline',
-      color: '#3B82F6',
+      color: '#5856D6',
       message: '10月至隔年2月為流感高峰，建議接種疫苗',
       preventionTips: ['接種流感疫苗', '勤洗手', '避免觸摸口鼻', '維持室內通風', '充足睡眠'],
       validFrom: '2025-10-01',
@@ -1493,7 +1493,7 @@ export function getActiveAlerts(): SeasonalAlert[] {
       title: '登革熱防治期',
       severity: 'warning',
       icon: 'bug-outline',
-      color: '#F59E0B',
+      color: '#FF9500',
       message: '台中地區登革熱病媒蚊活躍，請注意防蚊',
       preventionTips: ['清除積水容器', '穿著長袖長褲', '使用防蚊液', '裝設紗門紗窗'],
       validFrom: '2026-05-01',
@@ -1508,7 +1508,7 @@ export function getActiveAlerts(): SeasonalAlert[] {
       title: '春季過敏好發期',
       severity: 'info',
       icon: 'flower-outline',
-      color: '#EC4899',
+      color: '#FF2D55',
       message: '花粉和塵蟎活躍，過敏體質者請注意',
       preventionTips: ['外出戴口罩', '回家更換衣物', '保持室內清潔', '使用空氣清淨機'],
       validFrom: '2026-03-01',
@@ -1523,7 +1523,7 @@ export function getActiveAlerts(): SeasonalAlert[] {
       title: '中暑預防',
       severity: 'warning',
       icon: 'sunny-outline',
-      color: '#EF4444',
+      color: '#FF3B30',
       message: '高溫警報！戶外活動請注意防曬補水',
       preventionTips: ['避免正午戶外活動', '隨時補充水分', '穿著透氣衣物', '注意中暑前兆'],
       validFrom: '2026-06-01',
@@ -1538,7 +1538,7 @@ export function getActiveAlerts(): SeasonalAlert[] {
     title: '空氣品質注意',
     severity: 'info',
     icon: 'cloud-outline',
-    color: '#6B7280',
+    color: '#8E8E93',
     message: '台中冬季空品易不佳，敏感族群請留意',
     preventionTips: ['查看即時 AQI', '紅燈時減少戶外運動', '戴 N95 口罩', '室內使用空氣清淨機'],
     validFrom: '2025-11-01',
@@ -1567,19 +1567,19 @@ export function getSmartHealthSuggestions(): HealthSuggestion[] {
     suggestions.push({
       icon: 'sunny-outline',
       text: '早安！吃早餐了嗎？規律飲食有助專注力',
-      color: '#F59E0B',
+      color: '#FF9500',
     });
     suggestions.push({
       icon: 'water-outline',
       text: '起床後喝一杯溫水開啟新陳代謝',
-      color: '#3B82F6',
+      color: '#5856D6',
     });
   }
   if (hour >= 10 && hour < 12) {
     suggestions.push({
       icon: 'eye-outline',
       text: '用電腦 50 分鐘了？看看遠方休息眼睛',
-      color: '#8B5CF6',
+      color: '#AF52DE',
       action: 'eye_rest',
     });
   }
@@ -1587,12 +1587,12 @@ export function getSmartHealthSuggestions(): HealthSuggestion[] {
     suggestions.push({
       icon: 'restaurant-outline',
       text: '午餐選擇蔬菜蛋白質搭配，少油少鹽',
-      color: '#10B981',
+      color: '#34C759',
     });
     suggestions.push({
       icon: 'walk-outline',
       text: '飯後走 15 分鐘幫助消化',
-      color: '#059669',
+      color: '#34C759',
       action: 'exercise',
     });
   }
@@ -1600,14 +1600,14 @@ export function getSmartHealthSuggestions(): HealthSuggestion[] {
     suggestions.push({
       icon: 'water-outline',
       text: '提醒補充水分！每天建議 2000ml',
-      color: '#3B82F6',
+      color: '#5856D6',
     });
   }
   if (hour >= 17 && hour < 20) {
     suggestions.push({
       icon: 'fitness-outline',
       text: '下課了！體育館重訓室還有位置',
-      color: '#F59E0B',
+      color: '#FF9500',
       action: 'exercise',
     });
   }
@@ -1615,13 +1615,13 @@ export function getSmartHealthSuggestions(): HealthSuggestion[] {
     suggestions.push({
       icon: 'moon-outline',
       text: '睡前 1 小時放下手機，幫助入睡',
-      color: '#6366F1',
+      color: '#5856D6',
       action: 'sleep',
     });
     suggestions.push({
       icon: 'happy-outline',
       text: '記錄今天的心情吧',
-      color: '#EC4899',
+      color: '#FF2D55',
       action: 'mood',
     });
   }
@@ -1629,7 +1629,7 @@ export function getSmartHealthSuggestions(): HealthSuggestion[] {
     suggestions.push({
       icon: 'bed-outline',
       text: '大學生也需要睡眠！明天會更好的',
-      color: '#8B5CF6',
+      color: '#AF52DE',
     });
   }
 
@@ -1667,35 +1667,35 @@ export const HEALTH_NOTIFICATION_TYPES: HealthNotificationConfig[] = [
     type: 'appointment_remind',
     label: '看診提醒',
     icon: 'calendar-outline',
-    color: '#3B82F6',
+    color: '#5856D6',
     defaultEnabled: true,
   },
   {
     type: 'vaccine_available',
     label: '疫苗通知',
     icon: 'medkit-outline',
-    color: '#059669',
+    color: '#34C759',
     defaultEnabled: true,
   },
   {
     type: 'report_ready',
     label: '報告完成',
     icon: 'document-text-outline',
-    color: '#10B981',
+    color: '#34C759',
     defaultEnabled: true,
   },
   {
     type: 'mood_nudge',
     label: '情緒關懷',
     icon: 'heart-outline',
-    color: '#7C3AED',
+    color: '#AF52DE',
     defaultEnabled: true,
   },
   {
     type: 'seasonal_alert',
     label: '季節預警',
     icon: 'warning-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     defaultEnabled: true,
   },
   {
@@ -1709,42 +1709,42 @@ export const HEALTH_NOTIFICATION_TYPES: HealthNotificationConfig[] = [
     type: 'hydration',
     label: '喝水提醒',
     icon: 'water-outline',
-    color: '#0D9488',
+    color: '#5AC8FA',
     defaultEnabled: false,
   },
   {
     type: 'counseling_remind',
     label: '諮商提醒',
     icon: 'chatbubble-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     defaultEnabled: true,
   },
   {
     type: 'checkup_due',
     label: '健檢到期',
     icon: 'clipboard-outline',
-    color: '#DC2626',
+    color: '#D70015',
     defaultEnabled: true,
   },
   {
     type: 'peer_reply',
     label: '互助圈回覆',
     icon: 'people-outline',
-    color: '#EC4899',
+    color: '#FF2D55',
     defaultEnabled: true,
   },
   {
     type: 'prescription_refill',
     label: '處方到期',
     icon: 'medical-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     defaultEnabled: true,
   },
   {
     type: 'aed_check',
     label: 'AED 巡檢',
     icon: 'pulse-outline',
-    color: '#374151',
+    color: '#3C3C43',
     defaultEnabled: false,
   },
 ];

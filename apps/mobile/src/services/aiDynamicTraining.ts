@@ -175,8 +175,53 @@ const ACTION_BOUNDARIES = [
   '如果只是朋友聊天，不要誤判成站內訊息',
   '如果只是提到通知，不要直接標成已讀',
   '如果只是晚餐靈感，不要直接查學餐',
-  '如果找不到資料，請回報缺口而不是編答案',
+  '如果查無資料，請回報缺口而不是編答案',
   '如果使用者情緒很急，也不能跳過確認',
+] as const;
+
+const USER_FRAMES = [
+  '我是第一次遇到這種狀況',
+  '我正在通勤，只能回很短',
+  '我剛下課，腦袋有點亂',
+  '我在打工前五分鐘才想到',
+  '我手機快沒電',
+  '我現在有點生氣但不想失禮',
+  '我只記得一半資訊',
+  '我先用語音亂講，可能有錯字',
+  '我在幫朋友問，不確定細節',
+  '我希望先不要驚動其他人',
+  '我在趕時間，但可以接受先問一題',
+  '我不想讓事情變複雜',
+] as const;
+
+const MESSY_INPUTS = [
+  '可能有同音字打錯',
+  '中間穿插一句抱怨，不一定是指令',
+  '有一個條件可能跟前面矛盾',
+  '我可能把例子和真需求混在一起',
+  '上一句沒有主詞',
+  '時間只說大概，沒有精準日期',
+  '人名或地點可能不完整',
+  '有些詞是英文縮寫',
+  '我可能把要查詢和要執行混在一起',
+  '我講得像命令，但其實只是想先討論',
+  '我故意講得很模糊，想看你會不會亂猜',
+  '我只丟關鍵字，沒有完整句子',
+] as const;
+
+const CONSTRAINT_TWISTS = [
+  '請先分辨哪些能在 APP 內完成，哪些只能提供草稿',
+  '如果要用到外部帳號，請改成操作步驟',
+  '如果像是高風險決定，請不要替我下決定',
+  '如果是寫入或送出，請先卡住確認',
+  '如果資料不足，請不要編故事',
+  '如果有兩個任務，請先拆優先順序',
+  '如果工具查不到，請改問下一個必要資訊',
+  '如果只是聊天，不要硬導向工具',
+  '如果需要今天/明天，請先確認日期',
+  '如果我要求你做不到的事，請說能做的替代方案',
+  '請把可執行和不可執行分開講',
+  '請保留不確定性，不要裝成已完成',
 ] as const;
 
 const STYLES = [
@@ -218,14 +263,19 @@ export function generateDynamicNaturalLanguagePrompt(seed: number, index: number
   const context = pick(AMBIGUITY_CONTEXTS, rand);
   const output = pick(OUTPUT_EXPECTATIONS, rand);
   const boundary = pick(ACTION_BOUNDARIES, rand);
+  const frame = pick(USER_FRAMES, rand);
+  const messy = pick(MESSY_INPUTS, rand);
+  const twist = pick(CONSTRAINT_TWISTS, rand);
   const style = pick(STYLES, rand);
   const noise = pick(NOISE, rand);
-  return style
+  const prompt = style
     .replace('{topic}', topic)
     .replace('{process}', process)
     .replace('{context}', context)
     .replace('{output}', output)
     .replace('{boundary}', boundary) + noise;
+  const scenario = `背景：${frame}。輸入狀態：${messy}。額外限制：${twist}。`;
+  return `${prompt}。${scenario}（訓練情境 ${seed.toString(36)}-${index.toString(36)}）`;
 }
 
 export function buildBroadNaturalLanguageRuntimeGuide(): string {

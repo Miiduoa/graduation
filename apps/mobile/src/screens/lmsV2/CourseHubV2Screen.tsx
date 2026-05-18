@@ -47,7 +47,7 @@ export default function CourseHubV2Screen() {
   const course = loadable.data!;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       <CourseV2Header
         title={course.title}
         subtitle={course.catalog_summary || (course.credit_hours ? `${course.credit_hours} 學分` : String(courseId))}
@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E5E7EB',
+    borderColor: '#E5E5EA',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
