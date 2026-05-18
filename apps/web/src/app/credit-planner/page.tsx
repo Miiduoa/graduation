@@ -89,9 +89,10 @@ export default function CreditPlannerPage(props: {
   const { schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [demoRole] = useDemoRole();
 
-  // 角色守衛
-  const isAlumniOrGuest = demoRole === 'alumni' || demoRole === 'guest';
-  const isAdminView = demoRole === 'department_head' || demoRole === 'admin';
+  // 角色守衛：只有「學生型」角色（在校學生本人 + 社團幹部）可以使用學分試算。
+  // 教師、TA、系主任、管理員、校友、訪客全部攔截 — 學分試算是個人選課與畢業進度規劃工具，
+  // 不屬於其他角色的工作範圍（教師有教師工作台，系主任/管理員有後台儀表板）。
+  const isStudentLike = demoRole === 'student' || demoRole === 'club_officer';
 
   // 歷史學期展開狀態
   const [expandedSems, setExpandedSems] = useState<Set<string>>(new Set(['112-2']));
@@ -166,6 +167,78 @@ export default function CreditPlannerPage(props: {
     [earned, simByCategory, req.breakdown],
   );
 
+  // 非「學生型」角色直接攔截
+  if (!isStudentLike) {
+    const roleLabel =
+      demoRole === 'teacher'
+        ? '教師'
+        : demoRole === 'ta'
+          ? '助教'
+          : demoRole === 'department_head'
+            ? '系主任'
+            : demoRole === 'admin'
+              ? '系統管理員'
+              : demoRole === 'alumni'
+                ? '校友'
+                : '訪客';
+    const altPath =
+      demoRole === 'teacher' || demoRole === 'ta'
+        ? '/teacher/course/c1'
+        : demoRole === 'admin' || demoRole === 'department_head'
+          ? '/admin'
+          : '/';
+    const altLabel =
+      demoRole === 'teacher' || demoRole === 'ta'
+        ? '前往教師工作台'
+        : demoRole === 'admin' || demoRole === 'department_head'
+          ? '前往管理後台'
+          : '回首頁';
+    return (
+      <SiteShell title="學分試算" subtitle="僅限在校學生使用" schoolName={schoolName}>
+        <div className="pageStack">
+          <div
+            className="card"
+            style={{
+              padding: '32px 28px',
+              textAlign: 'center',
+              background: 'rgba(88,86,214,0.06)',
+              border: '1px solid #5856D6',
+              maxWidth: 560,
+              margin: '32px auto',
+            }}
+          >
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📊</div>
+            <h2 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 800 }}>
+              學分試算僅限在校學生使用
+            </h2>
+            <p style={{ margin: '0 0 20px', fontSize: 14, color: 'var(--muted)', lineHeight: 1.7 }}>
+              目前身份為 <strong style={{ color: 'var(--text)' }}>{roleLabel}</strong>。
+              學分試算是學生個人選課與畢業進度規劃工具,屬於學生專屬功能,
+              {demoRole === 'teacher' || demoRole === 'ta'
+                ? '教師端請使用「教師工作台」管理課程與學生表現'
+                : demoRole === 'admin' || demoRole === 'department_head'
+                  ? '系主任/管理員可至「管理後台」查看全系學生學分統計'
+                  : demoRole === 'alumni'
+                    ? '校友身份僅可瀏覽公開內容,如需查詢歷年成績請至教務處系友服務'
+                    : '請先以學生身份登入'}
+              。
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <Link href={`${altPath}${q}`} className="btn primary">
+                {altLabel} →
+              </Link>
+              {demoRole === 'guest' && (
+                <Link href={`/login${q}`} className="btn">
+                  以學生身份登入
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+      </SiteShell>
+    );
+  }
+
   return (
     <SiteShell
       title="學分試算"
@@ -173,37 +246,18 @@ export default function CreditPlannerPage(props: {
       schoolName={schoolName}
     >
       <div className="pageStack">
-        {/* ── 校友 / 訪客提示 ── */}
-        {isAlumniOrGuest && (
+        {/* ── 社團幹部:同為學生但有額外身份標示 ── */}
+        {demoRole === 'club_officer' && (
           <div
             className="card"
             style={{
-              padding: '14px 16px',
-              background: 'rgba(88,86,214,0.08)',
-              border: '1px solid #5856D6',
+              padding: '12px 16px',
+              background: 'rgba(52,199,89,0.10)',
+              border: '1px solid #34C759',
               fontSize: 13,
             }}
           >
-            👀 <strong>訪客 / 校友身份</strong> · 以下為示範學生的學分試算資料，僅供瀏覽參考。
-            <Link href={`/login${q}`} style={{ marginLeft: 8, color: 'var(--brand)' }}>
-              登入以查看個人資料 →
-            </Link>
-          </div>
-        )}
-
-        {/* ── 系主任 / 管理員提示 ── */}
-        {isAdminView && (
-          <div
-            className="card"
-            style={{
-              padding: '14px 16px',
-              background: 'rgba(255,149,0,0.10)',
-              border: '1px solid #FF9500',
-              fontSize: 13,
-            }}
-          >
-            🏛️ <strong>行政 / 系主任視角</strong> · 目前顯示示範學生（王小明）的學分規劃，
-            正式版可查看全系學生的選課與學分分析統計。
+            🎯 <strong>社團幹部身份</strong> · 此為你的個人學分試算（社團幹部本身也是在校學生）。
           </div>
         )}
 
