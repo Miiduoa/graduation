@@ -151,8 +151,9 @@ export function BottomSheet({
             maxHeight: SCREEN_HEIGHT - maxHeight,
             paddingBottom: insets.bottom,
             backgroundColor: theme.colors.surface,
-            borderTopLeftRadius: theme.radius.xl,
-            borderTopRightRadius: theme.radius.xl,
+            // iOS Page Sheet：上邊圓角約 24pt（HIG）
+            borderTopLeftRadius: 24,
+            borderTopRightRadius: 24,
             borderWidth: 1,
             borderBottomWidth: 0,
             borderColor: theme.colors.border,
@@ -162,14 +163,15 @@ export function BottomSheet({
           {...panResponder.panHandlers}
         >
           {showHandle && (
-            <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+            // iOS Grabber：36×5、radius 2.5、tertiaryLabel 50% opacity
+            <View style={{ alignItems: 'center', paddingTop: 8, paddingBottom: 12 }}>
               <View
                 style={{
                   width: 36,
-                  height: 4,
-                  borderRadius: 2,
+                  height: 5,
+                  borderRadius: 2.5,
                   backgroundColor: theme.colors.muted,
-                  opacity: 0.3,
+                  opacity: 0.5,
                 }}
               />
             </View>
