@@ -207,22 +207,22 @@ export function getDirectionIcon(direction: DirectionType): string {
  */
 export function getDirectionColor(direction: DirectionType): string {
   const colors: Record<DirectionType, string> = {
-    straight: '#3B82F6',
-    slight_left: '#3B82F6',
-    left: '#F59E0B',
-    sharp_left: '#F59E0B',
-    slight_right: '#3B82F6',
-    right: '#F59E0B',
-    sharp_right: '#F59E0B',
-    u_turn: '#EF4444',
-    up_stairs: '#8B5CF6',
-    down_stairs: '#8B5CF6',
-    elevator_up: '#8B5CF6',
-    elevator_down: '#8B5CF6',
+    straight: '#007AFF',
+    slight_left: '#007AFF',
+    left: '#FF9500',
+    sharp_left: '#FF9500',
+    slight_right: '#007AFF',
+    right: '#FF9500',
+    sharp_right: '#FF9500',
+    u_turn: '#FF3B30',
+    up_stairs: '#AF52DE',
+    down_stairs: '#AF52DE',
+    elevator_up: '#AF52DE',
+    elevator_down: '#AF52DE',
     destination: '#22C55E',
   };
 
-  return colors[direction] ?? '#3B82F6';
+  return colors[direction] ?? '#007AFF';
 }
 
 /**

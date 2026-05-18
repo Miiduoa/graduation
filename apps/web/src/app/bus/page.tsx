@@ -27,7 +27,7 @@ const DEFAULT_ROUTES: RouteDisplay[] = [
   {
     id: '1',
     name: '校園環線',
-    color: '#5E6AD2',
+    color: '#007AFF',
     stops: ['校門口', '體育館', '圖書館', '工學院', '宿舍', '校門口'],
     interval: '10–15 分',
     firstBus: '07:00',
@@ -63,10 +63,10 @@ const DEFAULT_ROUTES: RouteDisplay[] = [
 ];
 
 const DEFAULT_UPCOMING: UpcomingBus[] = [
-  { route: '校園環線', stop: '校門口', arrival: '8 分鐘', minutesAway: 8, color: '#5E6AD2' },
+  { route: '校園環線', stop: '校門口', arrival: '8 分鐘', minutesAway: 8, color: '#007AFF' },
   { route: '捷運接駁線', stop: '校門口', arrival: '12 分鐘', minutesAway: 12, color: '#34C759' },
   { route: '宿舍快線', stop: '校門口', arrival: '18 分鐘', minutesAway: 18, color: '#FF9500' },
-  { route: '校園環線', stop: '校門口', arrival: '23 分鐘', minutesAway: 23, color: '#5E6AD2' },
+  { route: '校園環線', stop: '校門口', arrival: '23 分鐘', minutesAway: 23, color: '#007AFF' },
 ];
 
 export default function BusPage(props: { searchParams?: { school?: string; schoolId?: string } }) {
@@ -91,8 +91,8 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
           className="card"
           style={{
             padding: '14px 18px',
-            background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(0,122,255,0.06) 100%)',
-            border: '1px solid rgba(94,106,210,0.28)',
+            background: 'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(0,122,255,0.06) 100%)',
+            border: '1px solid rgba(0,122,255,0.28)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -102,14 +102,14 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5E6AD2', marginBottom: 3 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#007AFF', marginBottom: 3 }}>
               🤖 AI 助手 · 路線推薦
             </div>
             <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
               想知道下一班幾點到哪裡？問 AI 規劃最快的接駁路線。
             </div>
           </div>
-          <span style={{ fontSize: 12, color: '#5E6AD2', fontWeight: 600 }}>問 AI →</span>
+          <span style={{ fontSize: 12, color: '#007AFF', fontWeight: 600 }}>問 AI →</span>
         </Link>
 
         {/* ── Next Bus Hero ── */}
@@ -352,8 +352,8 @@ export default function BusPage(props: { searchParams?: { school?: string; schoo
           style={{
             padding: '14px 18px',
             borderRadius: 'var(--radius)',
-            background: 'linear-gradient(135deg, rgba(94,106,210,0.10) 0%, rgba(142,186,255,0.07) 100%)',
-            border: '1px solid rgba(94,106,210,0.22)',
+            background: 'linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(90,200,250,0.07) 100%)',
+            border: '1px solid rgba(0,122,255,0.22)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',

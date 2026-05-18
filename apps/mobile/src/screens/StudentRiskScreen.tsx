@@ -53,7 +53,7 @@ function buildDemoStudentRiskInputs(): StudentRiskInput[] {
 }
 
 const TIER_COLOR: Record<RiskTier, string> = {
-  critical: '#dc2626',
+  critical: '#D70015',
   high: '#ea580c',
   medium: '#ca8a04',
   low: '#16a34a',

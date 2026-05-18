@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
   savedInline: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#059669',
+    color: '#34C759',
   },
   missionTitle: {
     color: theme.colors.text,

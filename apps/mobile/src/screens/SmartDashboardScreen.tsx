@@ -293,7 +293,7 @@ function XPProgressBar({ gamification }: { gamification: GamificationState }) {
           }}
         >
           <LinearGradient
-            colors={[theme.colors.accent, '#7C3AED', '#A855F7'] as [string, string, string]}
+            colors={[theme.colors.accent, '#AF52DE', '#A855F7'] as [string, string, string]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={{ flex: 1 }}
@@ -2876,7 +2876,7 @@ export function SmartDashboardScreen(props: any) {
               flex: 1,
               padding: 14,
               borderRadius: 14,
-              backgroundColor: '#F59E0B',
+              backgroundColor: '#FF9500',
               alignItems: 'center',
               gap: 4,
             }}
@@ -2891,7 +2891,7 @@ export function SmartDashboardScreen(props: any) {
               flex: 1,
               padding: 14,
               borderRadius: 14,
-              backgroundColor: '#DC2626',
+              backgroundColor: '#D70015',
               alignItems: 'center',
               gap: 4,
             }}
@@ -2906,7 +2906,7 @@ export function SmartDashboardScreen(props: any) {
               flex: 1,
               padding: 14,
               borderRadius: 14,
-              backgroundColor: '#1F4E78',
+              backgroundColor: '#003F8A',
               alignItems: 'center',
               gap: 4,
             }}

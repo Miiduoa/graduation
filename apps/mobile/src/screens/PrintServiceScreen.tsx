@@ -943,7 +943,7 @@ export function PrintServiceScreen(props: any) {
           label="可用"
         />
         <StatChip
-          color="#F59E0B"
+          color="#FF9500"
           count={stations.filter((s) => s.status === 'busy').length}
           label="忙碌"
         />
@@ -1779,7 +1779,7 @@ function ToggleSwitch({ value, onToggle }: { value: boolean; onToggle: () => voi
 
 /** 迷你耗材條（推薦卡片用） */
 function MiniBar({ label, value }: { label: string; value: number }) {
-  const color = value > 50 ? theme.colors.success : value > 20 ? '#F59E0B' : theme.colors.danger;
+  const color = value > 50 ? theme.colors.success : value > 20 ? '#FF9500' : theme.colors.danger;
   return (
     <View style={{ flex: 1, gap: 2 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
@@ -1795,7 +1795,7 @@ function MiniBar({ label, value }: { label: string; value: number }) {
 
 /** 耗材進度條（機器詳情用） */
 function SupplyBar({ label, value, icon }: { label: string; value: number; icon: string }) {
-  const color = value > 50 ? theme.colors.success : value > 20 ? '#F59E0B' : theme.colors.danger;
+  const color = value > 50 ? theme.colors.success : value > 20 ? '#FF9500' : theme.colors.danger;
   return (
     <View style={{ flex: 1, gap: 4 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -1869,7 +1869,7 @@ function getJobStatusLabel(status: PrintJob['status']): string {
 function getJobStatusColor(status: PrintJob['status']): string {
   const m: Record<string, string> = {
     pending: theme.colors.muted,
-    printing: '#F59E0B',
+    printing: '#FF9500',
     completed: theme.colors.success,
     failed: theme.colors.danger,
     cancelled: theme.colors.muted,

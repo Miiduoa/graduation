@@ -59,7 +59,7 @@ const riskColor = (level: RiskLevel) => {
     case 'watch':
       return theme.colors.warning;
     case 'warning':
-      return '#F97316';
+      return '#FF9500';
     case 'critical':
       return theme.colors.danger;
   }
@@ -94,7 +94,7 @@ const recTypeColor = (t: string) => {
     case 'urgent':
       return theme.colors.danger;
     case 'priority':
-      return '#F97316';
+      return '#FF9500';
     case 'strategy':
       return theme.colors.accent;
     case 'balance':

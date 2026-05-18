@@ -184,12 +184,12 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 };
 
 export const ORDER_STATUS_COLORS: Record<OrderStatus, string> = {
-  pending: '#F59E0B',
-  confirmed: '#2563EB',
-  preparing: '#7C3AED',
+  pending: '#FF9500',
+  confirmed: '#007AFF',
+  preparing: '#AF52DE',
   ready: '#16A34A',
-  completed: '#6B7280',
-  cancelled: '#DC2626',
+  completed: '#8E8E93',
+  cancelled: '#D70015',
 };
 
 /** 評價 */
@@ -4475,8 +4475,8 @@ export const CROWD_LABELS = {
 
 export const CROWD_COLORS = {
   low: '#16A34A',
-  medium: '#F59E0B',
-  high: '#DC2626',
+  medium: '#FF9500',
+  high: '#D70015',
 };
 
 /** 判斷店家目前是否在營業時間 */

@@ -87,7 +87,7 @@ export default function TeacherQuizzesPage({ params, searchParams }: { params: {
               padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 20,
               background: isTaView ? 'rgba(124,58,237,0.10)' : 'rgba(255,149,0,0.10)',
               border: `1px solid ${isTaView ? '#7C3AED' : '#FF9500'}`,
-              color: isTaView ? '#5B21B6' : '#92400E',
+              color: isTaView ? '#007AFF' : '#92400E',
             }}
           >
             {isTaView
@@ -163,8 +163,8 @@ export default function TeacherQuizzesPage({ params, searchParams }: { params: {
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(94,106,210,0.08)',
-            border: '1px solid #5E6AD2',
+            background: 'rgba(0,122,255,0.08)',
+            border: '1px solid #007AFF',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -173,7 +173,7 @@ export default function TeacherQuizzesPage({ params, searchParams }: { params: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5E6AD2', marginBottom: 3 }}>🤖 AI 出題助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#007AFF', marginBottom: 3 }}>🤖 AI 出題助理</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               讓 AI 根據課程大綱生成選擇題、是非題或程式題，並附上答案與解析。
             </div>
@@ -284,14 +284,14 @@ const td = { padding: '12px 8px', fontSize: 14 } as const;
 const primaryBtn = {
   padding: '10px 16px',
   borderRadius: 8,
-  background: '#1F4E78',
+  background: '#003F8A',
   color: '#fff',
   border: 'none',
   cursor: 'pointer',
 } as const;
 const linkBtn = {
   background: 'transparent',
-  color: '#1F4E78',
+  color: '#003F8A',
   border: 'none',
   cursor: 'pointer',
   marginRight: 8,

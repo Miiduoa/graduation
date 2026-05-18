@@ -267,12 +267,12 @@ export default function GroupsPage(props: {
                             ? 'rgba(255,149,0,0.18)'
                             : g.myRole === '助教'
                               ? 'rgba(124,58,237,0.16)'
-                              : 'rgba(94,106,210,0.12)',
+                              : 'rgba(0,122,255,0.12)',
                         color:
                           g.myRole === '授課' || g.myRole === '社長'
                             ? '#B45309'
                             : g.myRole === '助教'
-                              ? '#5B21B6'
+                              ? '#007AFF'
                               : 'var(--brand)',
                         fontWeight: 700,
                         whiteSpace: 'nowrap',
