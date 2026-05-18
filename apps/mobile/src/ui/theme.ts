@@ -488,7 +488,8 @@ export function createDarkTheme(
       card: '#1C1C1E',
       onAccent: '#FFFFFF',
       // iOS Tab Bar：blur + translucent
-      chromeTabBar: 'rgba(28,28,30,0.94)',
+      // iOS Tab Bar：半透明使 BlurView 玻璃磨砂可見（與 expo-blur intensity 配合）
+      chromeTabBar: 'rgba(28,28,30,0.55)',
       chromeTabBorder: 'rgba(255,255,255,0.10)',
       chromeTabItemActive: createAccentSoft(accent, 0.22),
     },
@@ -624,7 +625,8 @@ export function createLightTheme(
       card: '#FFFFFF',
       onAccent: '#FFFFFF',
       // iOS Tab Bar：blur + translucent white
-      chromeTabBar: 'rgba(255,255,255,0.94)',
+      // iOS Tab Bar：半透明使 BlurView 玻璃磨砂可見（與 expo-blur intensity 配合）
+      chromeTabBar: 'rgba(255,255,255,0.55)',
       chromeTabBorder: 'rgba(0,0,0,0.10)',
       chromeTabItemActive: createAccentSoft(accent, 0.10),
     },

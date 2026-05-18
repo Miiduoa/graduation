@@ -23,28 +23,33 @@ import {
   type TextStyle,
 } from 'react-native';
 
-// ── Tokens ──
+// ── Tokens (Apple HIG iOS systemBackground / label / Indigo accent) ──
 export const aiTokens = {
-  bg: '#F8F9FC',
+  // iOS systemGroupedBackground
+  bg: '#F2F2F7',
   surface: '#FFFFFF',
   panel: '#F2F2F7',
+  // iOS label / secondaryLabel / tertiaryLabel
   text: '#1C1C1E',
-  textSecondary: '#3A3A3C',
+  textSecondary: '#3C3C43',
   muted: '#8E8E93',
+  // iOS separator
   border: '#E5E5EA',
+  // iOS Indigo accent — 與 mobile theme.ts DEFAULT_ACCENT 對齊
   ai: '#5856D6',
-  aiStrong: '#4F46E5',
-  aiSoft: 'rgba(99,102,241,0.10)',
+  aiStrong: '#3634A3',
+  aiSoft: 'rgba(88,86,214,0.10)',
   aiSurface: '#FAFBFF',
   aiGradientStart: '#EEF2FF',
   aiGradientEnd: '#FCE7F3',
+  // iOS System Colors
   success: '#34C759',
   successSoft: 'rgba(52,199,89,0.12)',
   warning: '#FF9500',
   warningSoft: 'rgba(255,149,0,0.12)',
   danger: '#FF3B30',
   dangerSoft: 'rgba(255,59,48,0.12)',
-  radius: { sm: 12, md: 18, lg: 22, pill: 999 },
+  radius: { sm: 10, md: 14, lg: 20, pill: 999 },
   space: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 },
 };
 
@@ -331,17 +336,26 @@ export function AIButton({
   label: string;
   onPress?: () => void;
   variant?: 'primary' | 'ghost' | 'danger';
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
   icon?: string;
   style?: ViewStyle;
 }) {
   const variantMap = {
+    // iOS Filled
     primary: { bg: aiTokens.ai, fg: '#fff', border: aiTokens.ai },
+    // iOS Bordered Plain
     ghost: { bg: aiTokens.surface, fg: aiTokens.text, border: aiTokens.border },
+    // iOS Bordered Destructive
     danger: { bg: aiTokens.surface, fg: aiTokens.danger, border: aiTokens.danger },
   };
   const v = variantMap[variant];
-  const sizing = size === 'sm' ? { paddingV: 6, paddingH: 10, fs: 12 } : { paddingV: 9, paddingH: 14, fs: 13 };
+  // iOS HIG：md 預設 ≥44pt 觸控目標；sm 32pt chip 用；lg 50pt 主 CTA
+  const sizing =
+    size === 'sm'
+      ? { paddingV: 8, paddingH: 14, fs: 13 }
+      : size === 'lg'
+        ? { paddingV: 14, paddingH: 20, fs: 17 }
+        : { paddingV: 12, paddingH: 18, fs: 15 };
   if (!onPress && __DEV__) {
     // eslint-disable-next-line no-console
     console.warn(`[AIButton] "${label}" 缺少 onPress，已自動 disable`);
@@ -462,18 +476,20 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   } as TextStyle,
   heroTitle: {
-    fontSize: 26,
+    // iOS Large Title：34pt / 700 / letter-spacing -0.4
+    fontSize: 34,
     fontWeight: '700',
     color: aiTokens.text,
-    letterSpacing: -0.3,
+    letterSpacing: -0.4,
     marginTop: 6,
-    lineHeight: 32,
+    lineHeight: 41,
   } as TextStyle,
   heroSub: {
-    fontSize: 13,
+    // iOS subhead：15pt / 20 line-height
+    fontSize: 15,
     color: aiTokens.muted,
     marginTop: 8,
-    lineHeight: 19,
+    lineHeight: 20,
   },
 
   sectionHead: {
@@ -483,13 +499,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: aiTokens.space.xs,
   },
   sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: aiTokens.text,
-    letterSpacing: -0.2,
-  },
+    // iOS insetGrouped section header：13pt / 600 / uppercase / secondaryLabel
+    fontSize: 13,
+    fontWeight: '600',
+    color: aiTokens.textSecondary,
+    letterSpacing: 0.06,
+    textTransform: 'uppercase',
+  } as TextStyle,
   sectionSub: {
-    fontSize: 12,
+    fontSize: 13,
     color: aiTokens.muted,
     marginTop: 2,
   },
