@@ -11,15 +11,79 @@
  * 此頁面與舊版 / 並存；如要切換，可以把 layout/route 重新指向這裡。
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppShell } from '@/components/AppShell';
 import { CommandBar } from '@/components/ai/CommandBar';
 import { SlotCard } from '@/components/ai/SlotCard';
+import { useToast } from '@/components/ui';
+import { requestLeave } from '@/lib/demoStore';
+import { useDemoRole } from '@/lib/demoRole';
+import { getDemoUser } from '@/lib/demoData';
+
+// Today v2 主要 demo 課程（c1 = 資料結構 / 王大明 / 工程館 302）
+const HERO_COURSE_ID = 'c1';
+const HERO_COURSE_NAME = '資料結構';
+const HERO_COURSE_ROOM = '工程館 302';
+// 請假草稿示範鎖定的課程（c7 = 資料庫系統 / CS303）
+const LEAVE_COURSE_ID = 'c7';
+const LEAVE_COURSE_NAME = '資料庫系統';
+const LEAVE_DATE = '2026-05-21'; // 週四
 
 export default function TodayV2Page() {
+  const router = useRouter();
+  const { success, info } = useToast();
+  const [demoRole] = useDemoRole();
+  const me = useMemo(() => getDemoUser(demoRole) ?? getDemoUser('student'), [demoRole]);
+
   const [pinned, setPinned] = useState<string[]>([]);
+  const [calendarAdded, setCalendarAdded] = useState(false);
+  const [selectedLunch, setSelectedLunch] = useState<string | null>(null);
+  const [leaveDraftState, setLeaveDraftState] = useState<'draft' | 'cancelled' | 'submitted'>(
+    'draft',
+  );
+
   const handlePin = (id: string) => {
     setPinned((p) => (p.includes(id) ? p : [...p, id]));
+  };
+
+  const goCourse = () => router.push(`/course/${HERO_COURSE_ID}`);
+  const goNavigate = () =>
+    router.push(`/map?destination=${encodeURIComponent(HERO_COURSE_ROOM)}`);
+  const askLeave = () =>
+    router.push(`/ai-assistant?q=${encodeURIComponent(`幫我請 ${HERO_COURSE_NAME} 的假`)}`);
+  const askWeekPlan = () =>
+    router.push(`/ai-assistant?q=${encodeURIComponent('幫我排這週的讀書計畫')}`);
+  const goMoreLunch = () => router.push('/cafeteria');
+
+  const addToCalendar = () => {
+    setCalendarAdded(true);
+    success('已加入行事曆', '3 項本週待辦已寫入你的行事曆');
+  };
+
+  const pickLunch = (name: string) => {
+    setSelectedLunch(name);
+    info('已選擇', `${name} — 5 分鐘後地圖會幫你導航`);
+  };
+
+  const cancelLeaveDraft = () => {
+    setLeaveDraftState('cancelled');
+    info('已取消請假草稿', '草稿不會送出');
+  };
+
+  const submitLeaveDraft = () => {
+    if (!me) return;
+    requestLeave({
+      courseId: LEAVE_COURSE_ID,
+      courseName: LEAVE_COURSE_NAME,
+      studentId: me.uid,
+      studentName: me.displayName,
+      reason: '病假（AI 草稿）',
+      dateFrom: LEAVE_DATE,
+      dateTo: LEAVE_DATE,
+    });
+    setLeaveDraftState('submitted');
+    success('請假已送出', `${LEAVE_COURSE_NAME} 老師已收到通知`);
   };
 
   return (
@@ -110,9 +174,15 @@ export default function TodayV2Page() {
             onPinToToday={() => handlePin('next-class')}
             actions={
               <>
-                <button className="actionPrimary">🧭 導航</button>
-                <button className="actionGhost">課程資料</button>
-                <button className="actionGhost">請假</button>
+                <button type="button" className="actionPrimary" onClick={goNavigate}>
+                  🧭 導航
+                </button>
+                <button type="button" className="actionGhost" onClick={goCourse}>
+                  課程資料
+                </button>
+                <button type="button" className="actionGhost" onClick={askLeave}>
+                  請假
+                </button>
               </>
             }
           >
@@ -133,8 +203,18 @@ export default function TodayV2Page() {
             onPinToToday={() => handlePin('week-todo')}
             actions={
               <>
-                <button className="actionPrimary">📥 加入行事曆</button>
-                <button className="actionGhost">AI 排週計畫</button>
+                <button
+                  type="button"
+                  className="actionPrimary"
+                  onClick={addToCalendar}
+                  disabled={calendarAdded}
+                  style={calendarAdded ? { opacity: 0.7, cursor: 'default' } : undefined}
+                >
+                  {calendarAdded ? '✅ 已加入行事曆' : '📥 加入行事曆'}
+                </button>
+                <button type="button" className="actionGhost" onClick={askWeekPlan}>
+                  AI 排週計畫
+                </button>
               </>
             }
           >
@@ -166,7 +246,11 @@ export default function TodayV2Page() {
             confidence="mid"
             source={{ name: '餐廳資料 + 你的偏好', timestamp: new Date() }}
             onPinToToday={() => handlePin('lunch')}
-            actions={<button className="actionGhost">展開全部 12 個</button>}
+            actions={
+              <button type="button" className="actionGhost" onClick={goMoreLunch}>
+                展開全部 12 個
+              </button>
+            }
           >
             <div
               style={{
@@ -175,39 +259,78 @@ export default function TodayV2Page() {
                 gap: 8,
               }}
             >
-              <CompareOption name="學餐" price="$65" star="⭐ 4.2" time="5 min" />
+              <CompareOption
+                name="學餐"
+                price="$65"
+                star="⭐ 4.2"
+                time="5 min"
+                selected={selectedLunch === '學餐'}
+                onSelect={() => pickLunch('學餐')}
+              />
               <CompareOption
                 name="主餐廳 ★"
                 price="$95"
                 star="⭐ 4.5"
                 time="8 min"
                 recommended
+                selected={selectedLunch === '主餐廳 ★'}
+                onSelect={() => pickLunch('主餐廳 ★')}
               />
-              <CompareOption name="7-11" price="$45" star="⭐ 3.8" time="2 min" />
+              <CompareOption
+                name="7-11"
+                price="$45"
+                star="⭐ 3.8"
+                time="2 min"
+                selected={selectedLunch === '7-11'}
+                onSelect={() => pickLunch('7-11')}
+              />
             </div>
           </SlotCard>
 
           {/* Action Card */}
           <SlotCard
             variant="action"
-            title="請假草稿（待你確認）"
+            title={
+              leaveDraftState === 'submitted'
+                ? '請假草稿（已送出）'
+                : leaveDraftState === 'cancelled'
+                  ? '請假草稿（已取消）'
+                  : '請假草稿（待你確認）'
+            }
             icon="📝"
             confidence="mid"
             source={{ name: '從對話自動填入' }}
             actions={
-              <>
-                <button className="actionGhost">取消</button>
-                <button className="actionPrimary">提交給授課老師 →</button>
+              leaveDraftState === 'draft' ? (
+                <>
+                  <button type="button" className="actionGhost" onClick={cancelLeaveDraft}>
+                    取消
+                  </button>
+                  <button type="button" className="actionPrimary" onClick={submitLeaveDraft}>
+                    提交給授課老師 →
+                  </button>
+                  <span
+                    style={{
+                      marginLeft: 'auto',
+                      fontSize: 12,
+                      color: 'var(--muted)',
+                    }}
+                  >
+                    ⚠ AI 不會自動送出
+                  </span>
+                </>
+              ) : (
                 <span
                   style={{
-                    marginLeft: 'auto',
                     fontSize: 12,
-                    color: 'var(--muted)',
+                    color: leaveDraftState === 'submitted' ? 'var(--success)' : 'var(--muted)',
                   }}
                 >
-                  ⚠ AI 不會自動送出
+                  {leaveDraftState === 'submitted'
+                    ? `✅ 已送出給 ${LEAVE_COURSE_NAME} 老師，等待回覆`
+                    : '✕ 已取消，未送出'}
                 </span>
-              </>
+              )
             }
           >
             <div
@@ -370,24 +493,35 @@ function CompareOption({
   star,
   time,
   recommended,
+  selected,
+  onSelect,
 }: {
   name: string;
   price: string;
   star: string;
   time: string;
   recommended?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
 }) {
+  const highlight = selected || recommended;
   return (
     <button
       type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
       style={{
-        border: `1px solid ${recommended ? 'var(--ai)' : 'var(--border)'}`,
+        border: `${selected ? 2 : 1}px solid ${highlight ? 'var(--ai)' : 'var(--border)'}`,
         borderRadius: 'var(--radius-sm)',
         padding: 10,
         textAlign: 'center',
         cursor: 'pointer',
         transition: 'all 0.18s',
-        background: recommended ? 'var(--ai-soft)' : 'var(--surface)',
+        background: selected
+          ? 'rgba(94,106,210,0.18)'
+          : recommended
+            ? 'var(--ai-soft)'
+            : 'var(--surface)',
         font: 'inherit',
         color: 'var(--text)',
       }}
@@ -396,10 +530,10 @@ function CompareOption({
         style={{
           fontWeight: 600,
           fontSize: 13,
-          color: recommended ? 'var(--ai)' : 'var(--text)',
+          color: highlight ? 'var(--ai)' : 'var(--text)',
         }}
       >
-        {name}
+        {selected ? `✓ ${name}` : name}
       </div>
       <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--ai)', marginTop: 4 }}>
         {price}
@@ -411,6 +545,13 @@ function CompareOption({
 }
 
 function AiDrawerDemo() {
+  const router = useRouter();
+  const [draft, setDraft] = useState('');
+  const submit = () => {
+    const q = draft.trim();
+    if (!q) return;
+    router.push(`/ai-assistant?q=${encodeURIComponent(q)}`);
+  };
   return (
     <>
       <header
@@ -558,7 +699,11 @@ function AiDrawerDemo() {
       </div>
 
       <footer style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
-        <div
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
           style={{
             display: 'flex',
             gap: 8,
@@ -569,7 +714,10 @@ function AiDrawerDemo() {
           }}
         >
           <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
             placeholder="繼續對話..."
+            aria-label="向 AI 提問"
             style={{
               flex: 1,
               border: 'none',
@@ -581,7 +729,9 @@ function AiDrawerDemo() {
             }}
           />
           <button
+            type="submit"
             aria-label="送出"
+            disabled={!draft.trim()}
             style={{
               width: 32,
               height: 32,
@@ -589,13 +739,14 @@ function AiDrawerDemo() {
               background: 'var(--ai-gradient)',
               color: 'white',
               border: 'none',
-              cursor: 'pointer',
+              cursor: draft.trim() ? 'pointer' : 'not-allowed',
               fontSize: 13,
+              opacity: draft.trim() ? 1 : 0.5,
             }}
           >
             ↑
           </button>
-        </div>
+        </form>
       </footer>
     </>
   );

@@ -16,6 +16,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+// eslint-disable-next-line no-restricted-imports
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {

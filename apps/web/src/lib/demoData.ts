@@ -49,7 +49,9 @@ export interface DemoUser {
 
 export const DEMO_USERS: DemoUser[] = [
   {
-    uid: 'demo-student-1',
+    // 與 DEMO_STUDENTS[0] 共用 uid，讓「學生 (王小明) 登入做的動作」
+    // 能在老師端 gradebook / attendance / submissions 等班級檢視中正確對應。
+    uid: 'stu-001',
     studentId: 'M11302001',
     email: 'm11302001@pu.edu.tw',
     displayName: '王小明',

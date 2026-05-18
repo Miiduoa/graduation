@@ -4,6 +4,26 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
+// Mock react-native-safe-area-context（很多 UI 元件呼叫 useSafeAreaInsets，
+// 若無 SafeAreaProvider 包裹會 throw；測試直接給 zero insets）
+jest.mock('react-native-safe-area-context', () => {
+  const React = require('react');
+  const insets = { top: 0, right: 0, bottom: 0, left: 0 };
+  const frame = { x: 0, y: 0, width: 0, height: 0 };
+  const SafeAreaInsetsContext = React.createContext(insets);
+  const SafeAreaFrameContext = React.createContext(frame);
+  return {
+    SafeAreaProvider: ({ children }) => React.createElement(React.Fragment, null, children),
+    SafeAreaConsumer: ({ children }) => (typeof children === 'function' ? children(insets) : null),
+    SafeAreaView: ({ children, ...props }) => React.createElement('View', props, children),
+    SafeAreaInsetsContext,
+    SafeAreaFrameContext,
+    useSafeAreaInsets: () => insets,
+    useSafeAreaFrame: () => frame,
+    initialWindowMetrics: { insets, frame },
+  };
+});
+
 // Mock WebView（PuWebView / components 匯出會靜態 require 原生模組）
 jest.mock('react-native-webview', () => {
   const React = require('react');
