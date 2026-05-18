@@ -48,8 +48,10 @@ export default function CoursePage(props: {
   const router = useRouter();
   const { success, info } = useToast();
   const [demoRole] = useDemoRole();
-  const isReadOnlyRole = demoRole === 'alumni' || demoRole === 'guest';
-  const canTakeAction = !isReadOnlyRole;
+  // 只有學生身份才能執行課程動作（繳交作業、應試）。
+  // 其他角色（社團幹部、校友、訪客）在學生視角頁屬於旁觀者，按鈕應為唯讀。
+  // 教師/TA/系主任/管理員已在上方 useEffect 自動 redirect 到 /teacher/course，不會走到這。
+  const canTakeAction = demoRole === 'student';
   const store = useDemoStore();
   const dynAssignments = getDynamicAssignmentsForCourse(props.params.courseId, store);
   const attendanceActive = getActiveAttendance(props.params.courseId);
@@ -154,20 +156,47 @@ export default function CoursePage(props: {
       schoolName={schoolName}
     >
       <div className="pageStack">
-        {/* 校友 / 訪客：課程為選課學生專屬，唯讀提示 */}
-        {isReadOnlyRole && (
+        {/* 非學生視角：唯讀提示（社團幹部 / 校友 / 訪客） */}
+        {!canTakeAction && (
           <div
             className="card"
             style={{
               padding: '12px 16px',
-              background: demoRole === 'alumni' ? 'rgba(142,142,147,0.10)' : 'rgba(88,86,214,0.08)',
-              border: `1px solid ${demoRole === 'alumni' ? '#8E8E93' : '#5856D6'}`,
+              background:
+                demoRole === 'alumni'
+                  ? 'rgba(142,142,147,0.10)'
+                  : demoRole === 'club_officer'
+                    ? 'rgba(52,199,89,0.10)'
+                    : 'rgba(88,86,214,0.08)',
+              border: `1px solid ${
+                demoRole === 'alumni'
+                  ? '#8E8E93'
+                  : demoRole === 'club_officer'
+                    ? '#34C759'
+                    : '#5856D6'
+              }`,
               fontSize: 13,
             }}
           >
-            {demoRole === 'alumni' ? '🎓' : '👀'}{' '}
-            <strong>{demoRole === 'alumni' ? '校友身份' : '訪客身份'}</strong>
-            {' '}· 課程空間僅供選課學生使用，{demoRole === 'alumni' ? '校友' : '訪客'}以唯讀方式瀏覽示範內容，無法提交作業或參加測驗。
+            {demoRole === 'alumni'
+              ? '🎓'
+              : demoRole === 'club_officer'
+                ? '🎯'
+                : '👀'}{' '}
+            <strong>
+              {demoRole === 'alumni'
+                ? '校友身份'
+                : demoRole === 'club_officer'
+                  ? '社團幹部身份'
+                  : '訪客身份'}
+            </strong>{' '}
+            · 此頁面為學生視角的課程空間,
+            {demoRole === 'club_officer'
+              ? '社團幹部可瀏覽公開課程資訊,但無法代替學生繳交作業或應試'
+              : demoRole === 'alumni'
+                ? '校友以唯讀方式瀏覽示範內容,無法提交作業或參加測驗'
+                : '訪客可瀏覽示範內容,登入學生帳號才能繳交作業或應試'}
+            。
           </div>
         )}
 
@@ -539,7 +568,9 @@ export default function CoursePage(props: {
                               info(
                                 demoRole === 'alumni'
                                   ? '校友身份無法繳交作業或應試'
-                                  : '請先登入後才能進行此動作',
+                                  : demoRole === 'club_officer'
+                                    ? '社團幹部無法代替學生繳交作業或應試'
+                                    : '請先以學生身份登入後才能進行此動作',
                               );
                               return;
                             }
