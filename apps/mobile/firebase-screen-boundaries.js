@@ -5,7 +5,6 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/CompanionCollectionScreen.tsx',
   'apps/mobile/src/screens/ConstellationScreen.tsx',
   'apps/mobile/src/screens/AdminDashboardScreen.tsx',
-  'apps/mobile/src/screens/AssignmentDetailScreen.tsx',
   'apps/mobile/src/screens/BugReportScreen.tsx',
   'apps/mobile/src/screens/ChatScreen.tsx',
   'apps/mobile/src/screens/ClassroomScreen.tsx',
@@ -20,10 +19,7 @@ const allowedScreenDirectFirebaseImports = [
   'apps/mobile/src/screens/GroupPostScreen.tsx',
   'apps/mobile/src/screens/GroupsScreen.tsx',
   'apps/mobile/src/screens/LearningAnalyticsScreen.tsx',
-  'apps/mobile/src/screens/MenuDetailScreen.tsx',
-  'apps/mobile/src/screens/MessagesHomeScreen.tsx',
   'apps/mobile/src/screens/PostLoginDebugScreen.tsx',
-  'apps/mobile/src/screens/ProfileEditScreen.tsx',
   'apps/mobile/src/screens/SSOLoginScreen.tsx',
   'apps/mobile/src/screens/social/PostDetailScreen.tsx',
 ];
