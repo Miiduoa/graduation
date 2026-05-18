@@ -46,7 +46,13 @@ import {
 } from '@/lib/demoStore';
 import { approvePendingAnn, addPendingAnn } from '@/lib/demoData';
 import { useToast, Modal } from '@/components/ui';
-import { notifyDeptHeadNewAnn, assignPeerReview } from '@/lib/demoStore';
+import {
+  notifyDeptHeadNewAnn,
+  assignPeerReview,
+  submitDormRepair,
+  submitPeerReview,
+  restoreAnnouncement,
+} from '@/lib/demoStore';
 
 // ── 型別 ──────────────────────────────────────────────────────
 interface Message {
@@ -1526,6 +1532,41 @@ function buildActions(args: {
           toastSuccess('💬 已發布討論，老師 / TA / 同學會收到通知');
         },
       },
+      {
+        icon: '🔧',
+        label: '宿舍報修：水龍頭漏水',
+        onClick: () => {
+          submitDormRepair({
+            building: '靜園男舍',
+            room: '305',
+            urgency: 'normal',
+            description: '浴室水龍頭關不緊，整夜滴水',
+            studentId: 'stu-001',
+            studentName: roleLabel,
+          });
+          toastSuccess('🔧 報修已送出，總務處 admin 會在訊息收件匣派工');
+        },
+      },
+      {
+        icon: '🔁',
+        label: '提交同儕互評（最近一筆）',
+        onClick: () => {
+          const store = getDemoStore();
+          const pending = (store.peerReviews ?? []).find(
+            (r) => r.reviewerId === 'stu-001' && r.status === 'pending',
+          );
+          if (!pending) {
+            toastInfo('目前沒有待提交的互評，請先讓老師「指派下次互評」');
+            return;
+          }
+          submitPeerReview({
+            reviewId: pending.id,
+            comment: '結構清楚，圖文比例佳，建議補充演算法效率比較。',
+            rating: 4,
+          });
+          toastSuccess(`🔁 已提交對 ${pending.revieweeName} 的互評，對方會收到回饋通知`);
+        },
+      },
     ];
   }
 
@@ -1761,6 +1802,20 @@ function buildActions(args: {
             fromName: '系統管理員',
           });
           toastSuccess('🔐 已對全校教師發送密碼重設提醒');
+        },
+      },
+      {
+        icon: '♻️',
+        label: '復原最近一筆已下架公告',
+        onClick: () => {
+          const store2 = getDemoStore();
+          const last = (store2.takendownAnnIds ?? [])[0];
+          if (!last) {
+            toastInfo('目前沒有已下架的公告可以復原');
+            return;
+          }
+          restoreAnnouncement(last);
+          toastSuccess(`♻️ 已復原公告 ${last}`);
         },
       },
     ];

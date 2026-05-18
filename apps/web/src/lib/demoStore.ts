@@ -48,6 +48,19 @@ export interface StoreDynamicMessage {
   relatedCourseId?: string;
   relatedClubId?: string;
   relatedAnnouncementId?: string;
+  /** 跨角色動作 deep-link：訊息選中後可直接針對該動作核准/退回 */
+  relatedLeaveId?: string;
+  relatedDormRepairId?: string;
+  relatedOrderId?: string;
+  relatedHelpId?: string;
+  relatedPeerReviewId?: string;
+  relatedAssignmentId?: string;
+  relatedClubMembershipId?: string;
+  relatedPendingAnnId?: string;
+  /** 寄件人角色：reply 時用來知道要送回給哪個角色 */
+  senderRole?: DemoUserRole;
+  /** 若 reply，標記為哪個原始 message 的回覆 */
+  inReplyTo?: string;
   recipientRoles: DemoUserRole[];
 }
 
@@ -205,6 +218,7 @@ export function takedownAnnouncement(id: string, by: string): void {
     sentAt: '剛剛',
     isRead: false,
     type: 'warning',
+    senderRole: 'admin',
     recipientRoles: ['teacher', 'club_officer'],
   });
 }
@@ -252,6 +266,7 @@ export function rejectAnnouncementWithReason(params: {
     sentAt: '剛剛',
     isRead: false,
     type: 'warning',
+    senderRole: 'department_head',
     recipientRoles: [params.submitterRole],
   });
 }
@@ -391,6 +406,7 @@ export function addAssignment(
     isRead: false,
     type: 'action',
     relatedCourseId: assignment.courseId,
+    senderRole: 'teacher',
     recipientRoles: ['student'],
   });
 }
@@ -421,11 +437,13 @@ export function submitAssignment(params: {
     fromName: `${params.studentName}（系統通知）`,
     fromAvatar: '📬',
     subject: `【作業繳交】${params.studentName} 已繳交：${params.assignmentTitle}`,
-    body: `${params.studentName} 已於 ${new Date().toLocaleString('zh-TW')} 繳交「${params.assignmentTitle}」（${params.courseName}）。\n\n請前往成績簿進行批改。`,
+    body: `${params.studentName} 已於 ${new Date().toLocaleString('zh-TW')} 繳交「${params.assignmentTitle}」（${params.courseName}）。\n\n請於收件匣點「前往成績簿批改」。`,
     sentAt: '剛剛',
     isRead: false,
     type: 'action',
     relatedCourseId: params.courseId,
+    relatedAssignmentId: params.assignmentId,
+    senderRole: 'student',
     recipientRoles: ['teacher', 'ta'],
   });
 }
@@ -456,15 +474,21 @@ export function getPendingSubmissions(
 // ─────────────────────────────────────────────────────────────
 
 /** 教師 / 幹部新增公告後，通知系主任 */
-export function notifyDeptHeadNewAnn(title: string, source: string): void {
+export function notifyDeptHeadNewAnn(
+  title: string,
+  source: string,
+  opts?: { pendingId?: string; sourceRole?: DemoUserRole },
+): void {
   sendMessage({
     fromName: source,
     fromAvatar: '⏳',
     subject: `【待審核公告】${title}`,
-    body: `${source} 剛提交了一則待審公告：「${title}」\n\n請前往公告頁面的「待審核」Tab 進行審核。`,
+    body: `${source} 剛提交了一則待審公告：「${title}」\n\n請於收件匣點「核准 / 退回」處理，或前往公告頁的「待審核」Tab。`,
     sentAt: '剛剛',
     isRead: false,
     type: 'action',
+    senderRole: opts?.sourceRole ?? 'teacher',
+    relatedPendingAnnId: opts?.pendingId,
     recipientRoles: ['department_head'],
   });
 }
@@ -479,6 +503,7 @@ export function notifyStudentsAnnApproved(title: string, source: string): void {
     sentAt: '剛剛',
     isRead: false,
     type: 'info',
+    senderRole: 'department_head',
     recipientRoles: ['student'],
   });
 }
@@ -516,11 +541,13 @@ export function applyClub(params: {
     fromName: `${params.studentName}（申請加入）`,
     fromAvatar: '📨',
     subject: `【社員申請】${params.studentName} 申請加入 ${params.clubName}`,
-    body: `${params.studentName} 剛剛申請加入 ${params.clubName}，請前往社團頁面審核這份申請。`,
+    body: `${params.studentName} 剛剛申請加入 ${params.clubName}，可於收件匣直接點「核准 / 拒絕」處理。`,
     sentAt: '剛剛',
     isRead: false,
     type: 'action',
     relatedClubId: params.clubId,
+    relatedClubMembershipId: membership.id,
+    senderRole: 'student',
     recipientRoles: ['club_officer'],
   });
 }
@@ -555,6 +582,7 @@ export function approveClubMember(membershipId: string, opts?: { officerName?: s
       isRead: false,
       type: 'success',
       relatedClubId: clubId,
+      senderRole: 'club_officer',
       recipientRoles: ['student'],
     });
   }
@@ -589,6 +617,7 @@ export function rejectClubMember(membershipId: string): void {
       isRead: false,
       type: 'warning',
       relatedClubId: clubId,
+      senderRole: 'club_officer',
       recipientRoles: ['student'],
     });
   }
@@ -662,6 +691,7 @@ export function endAttendanceSession(
       isRead: false,
       type: 'warning',
       relatedCourseId: courseId,
+      senderRole: 'teacher',
       recipientRoles: ['student'],
     });
   }
@@ -756,6 +786,7 @@ export function publishGrades(params: {
     isRead: false,
     type: 'success',
     relatedCourseId: params.courseId,
+    senderRole: 'teacher',
     recipientRoles: ['student'],
   });
 }
@@ -820,6 +851,7 @@ export function submitFeedback(params: {
     isRead: false,
     type: 'info',
     relatedCourseId: params.courseId,
+    senderRole: 'teacher',
     recipientRoles: ['student'],
   });
 }
@@ -867,6 +899,7 @@ export function postDiscussion(params: {
     isRead: false,
     type: 'info',
     relatedCourseId: params.courseId,
+    senderRole: 'student',
     recipientRoles: ['student', 'teacher', 'ta'],
   });
 }
@@ -913,11 +946,13 @@ export function requestHelp(params: {
     fromName: `${params.studentName}（求助）`,
     fromAvatar: '🙋',
     subject: `【求助】${params.topic}`,
-    body: `${params.studentName} 在 ${params.courseName ?? '系統'} 提出求助：\n\n「${params.topic}」\n\n緊急度：${req.urgency === 'high' ? '🔥 高' : req.urgency === 'low' ? '🟢 低' : '🟡 一般'}`,
+    body: `${params.studentName} 在 ${params.courseName ?? '系統'} 提出求助：\n\n「${params.topic}」\n\n緊急度：${req.urgency === 'high' ? '🔥 高' : req.urgency === 'low' ? '🟢 低' : '🟡 一般'}\n\n請於收件匣點「快速回覆」處理。`,
     sentAt: '剛剛',
     isRead: false,
     type: 'action',
     relatedCourseId: params.courseId,
+    relatedHelpId: req.id,
+    senderRole: 'student',
     recipientRoles: ['ta', 'teacher'],
   });
 }
@@ -995,7 +1030,7 @@ export function placeOrder(params: {
     ...store,
     orders: [order, ...(store.orders ?? [])],
   }));
-  // 訊息：給 alumni 用的「您的訂單已成立」回執
+  // 訊息：學生收到的「您的訂單已成立」回執
   sendMessage({
     fromName: params.vendorName,
     fromAvatar: '🍱',
@@ -1004,7 +1039,22 @@ export function placeOrder(params: {
     sentAt: '剛剛',
     isRead: false,
     type: 'success',
+    relatedOrderId: order.id,
+    senderRole: 'student',
     recipientRoles: ['student'],
+  });
+  // 通知 admin（demo 範圍當作 vendor / 餐廳管理者）有新訂單可推進
+  sendMessage({
+    fromName: `${params.studentName}（新訂單）`,
+    fromAvatar: '🛎️',
+    subject: `【新訂單】${params.vendorName} ${params.items.length} 項`,
+    body: `${params.studentName} 在 ${params.vendorName} 下了新訂單：\n\n${params.items.map((i) => `· ${i.name} × ${i.qty}`).join('\n')}\n\n總計 NT$${total}。請於收件匣推進訂單狀態。`,
+    sentAt: '剛剛',
+    isRead: false,
+    type: 'action',
+    relatedOrderId: order.id,
+    senderRole: 'admin',
+    recipientRoles: ['admin'],
   });
   return order;
 }
@@ -1035,6 +1085,7 @@ export function updateOrderStatus(orderId: string, status: OrderStatus): void {
       sentAt: '剛剛',
       isRead: false,
       type: status === 'ready' ? 'action' : 'info',
+      senderRole: 'admin',
       recipientRoles: ['student'],
     });
   }
@@ -1085,11 +1136,13 @@ export function requestLeave(params: {
     fromName: `${params.studentName}（請假申請）`,
     fromAvatar: '📅',
     subject: `【請假申請】${params.studentName}：${params.dateFrom} ~ ${params.dateTo}`,
-    body: `${params.studentName} 提交請假申請：\n\n課程：${params.courseName ?? '一般請假'}\n日期：${params.dateFrom} ~ ${params.dateTo}\n原因：${params.reason}\n\n請至課程頁面審核。`,
+    body: `${params.studentName} 提交請假申請：\n\n課程：${params.courseName ?? '一般請假'}\n日期：${params.dateFrom} ~ ${params.dateTo}\n原因：${params.reason}\n\n請於收件匣直接點「核准 / 退回」處理。`,
     sentAt: '剛剛',
     isRead: false,
     type: 'action',
     relatedCourseId: params.courseId,
+    relatedLeaveId: leave.id,
+    senderRole: 'teacher',
     recipientRoles: ['teacher', 'department_head'],
   });
 }
@@ -1122,6 +1175,7 @@ export function decideLeave(params: {
       isRead: false,
       type: params.decision === 'approved' ? 'success' : 'warning',
       relatedCourseId: target.courseId,
+      senderRole: 'teacher',
       recipientRoles: ['student'],
     });
   }
@@ -1170,10 +1224,12 @@ export function submitDormRepair(params: {
     fromName: `${params.studentName}（宿舍報修）`,
     fromAvatar: '🔧',
     subject: `【宿舍報修】${params.building} ${params.room}`,
-    body: `${params.studentName} 報修：\n\n地點：${params.building} ${params.room}\n問題：${params.description}\n緊急度：${r.urgency}\n\n請至管理後台派工。`,
+    body: `${params.studentName} 報修：\n\n地點：${params.building} ${params.room}\n問題：${params.description}\n緊急度：${r.urgency}\n\n請於收件匣點「派工 / 完工」處理。`,
     sentAt: '剛剛',
     isRead: false,
     type: 'action',
+    relatedDormRepairId: r.id,
+    senderRole: 'admin',
     recipientRoles: ['admin'],
   });
 }
@@ -1200,6 +1256,7 @@ export function setDormRepairStatus(repairId: string, status: StoreDormRepair['s
       sentAt: '剛剛',
       isRead: false,
       type: status === 'resolved' ? 'success' : 'info',
+      senderRole: 'admin',
       recipientRoles: ['student'],
     });
   }
@@ -1256,6 +1313,7 @@ export function assignPeerReview(params: {
     isRead: false,
     type: 'action',
     relatedCourseId: params.courseId,
+    senderRole: 'student',
     recipientRoles: ['student'],
   });
 }
@@ -1286,6 +1344,7 @@ export function submitPeerReview(params: {
       isRead: false,
       type: 'info',
       relatedCourseId: target.courseId,
+      senderRole: 'teacher',
       recipientRoles: ['student'],
     });
   }
@@ -1309,6 +1368,7 @@ export function bulkRemind(params: {
     sentAt: '剛剛',
     isRead: false,
     type: 'warning',
+    senderRole: 'department_head',
     recipientRoles: ['student'],
   });
 }
@@ -1332,6 +1392,7 @@ export function sendDeptBroadcast(params: {
     sentAt: '剛剛',
     isRead: false,
     type: 'info',
+    senderRole: 'department_head',
     recipientRoles: audience,
   });
 }
@@ -1428,6 +1489,7 @@ export function reserveBook(params: {
     sentAt: '剛剛',
     isRead: false,
     type: 'success',
+    senderRole: 'student',
     recipientRoles: ['student'],
   });
 }
@@ -1446,6 +1508,7 @@ export function transferBook(params: {
     sentAt: '剛剛',
     isRead: false,
     type: 'info',
+    senderRole: 'student',
     recipientRoles: ['student'],
   });
 }
