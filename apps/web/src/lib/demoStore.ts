@@ -865,12 +865,12 @@ export function resetDemoStore(): void {
   window.dispatchEvent(new CustomEvent('demoPendingAnnChange'));
 }
 
-/** 一鍵 seed：以「王小明」名義同時觸發 5 條典型動作鏈，
- *  讓口試主持人不必再切學生點 5 個按鈕，可直接切到老師 / admin / TA / 系主任
- *  看跨角色面板與佇列。
+/** 一鍵 seed：以「王小明」名義同時觸發典型動作鏈，
+ *  讓口試主持人不必再切學生點按鈕，可直接切到老師 / admin / TA / 系主任 / 社長
+ *  看跨角色面板與佇列。涵蓋 7 條主要鏈 + 友誼 + DM seed。
  */
 export function seedDemoQueues(): void {
-  // 1. 學生請假
+  // 1. 學生請假（→ 教師 / 系主任 inbox）
   requestLeave({
     courseId: 'c7',
     courseName: '資料庫系統',
@@ -880,7 +880,7 @@ export function seedDemoQueues(): void {
     dateFrom: '2026-05-21',
     dateTo: '2026-05-21',
   });
-  // 2. 學生宿舍報修
+  // 2. 學生宿舍報修（→ admin inbox）
   submitDormRepair({
     building: '靜園男舍',
     room: '305',
@@ -889,7 +889,7 @@ export function seedDemoQueues(): void {
     studentId: 'stu-001',
     studentName: '王小明',
   });
-  // 3. 學生訂餐
+  // 3. 學生訂餐（→ admin inbox 通知 + 學生收訂單成立回執）
   placeOrder({
     studentId: 'stu-001',
     studentName: '王小明',
@@ -899,7 +899,7 @@ export function seedDemoQueues(): void {
       { name: '紅茶', qty: 1, price: 25 },
     ],
   });
-  // 4. 學生求助
+  // 4. 學生求助（→ TA / 教師 inbox）
   requestHelp({
     courseId: 'c1',
     courseName: '資料結構',
@@ -908,7 +908,7 @@ export function seedDemoQueues(): void {
     studentId: 'stu-001',
     studentName: '王小明',
   });
-  // 5. 學生繳交作業（讓老師端 gradebook 有「待批改」）
+  // 5. 學生繳交作業（→ 教師 / TA inbox + gradebook 待批改）
   submitAssignment({
     assignmentId: 'hw-final',
     courseId: 'c1',
@@ -917,6 +917,15 @@ export function seedDemoQueues(): void {
     studentId: 'stu-001',
     studentName: '王小明',
   });
+  // 6. 學生申請加入社團（→ 社長 inbox）
+  applyClub({
+    clubId: 'club-2',
+    clubName: '攝影社',
+    studentId: 'stu-001',
+    studentName: '王小明',
+  });
+  // 7. seed 友誼 + DM 範例（讓 messages 私訊 tab 有內容可示範）
+  seedFriendsIfNeeded();
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1162,7 +1171,7 @@ export function placeOrder(params: {
     isRead: false,
     type: 'action',
     relatedOrderId: order.id,
-    senderRole: 'admin',
+    senderRole: 'student',
     recipientRoles: ['admin'],
   });
   return order;
@@ -1251,7 +1260,7 @@ export function requestLeave(params: {
     type: 'action',
     relatedCourseId: params.courseId,
     relatedLeaveId: leave.id,
-    senderRole: 'teacher',
+    senderRole: 'student',
     recipientRoles: ['teacher', 'department_head'],
   });
 }
@@ -1338,7 +1347,7 @@ export function submitDormRepair(params: {
     isRead: false,
     type: 'action',
     relatedDormRepairId: r.id,
-    senderRole: 'admin',
+    senderRole: 'student',
     recipientRoles: ['admin'],
   });
 }
@@ -1422,7 +1431,7 @@ export function assignPeerReview(params: {
     isRead: false,
     type: 'action',
     relatedCourseId: params.courseId,
-    senderRole: 'student',
+    senderRole: 'teacher',
     recipientRoles: ['student'],
   });
 }
@@ -1453,7 +1462,7 @@ export function submitPeerReview(params: {
       isRead: false,
       type: 'info',
       relatedCourseId: target.courseId,
-      senderRole: 'teacher',
+      senderRole: 'student',
       recipientRoles: ['student'],
     });
   }
@@ -1477,7 +1486,7 @@ export function bulkRemind(params: {
     sentAt: '剛剛',
     isRead: false,
     type: 'warning',
-    senderRole: 'department_head',
+    senderRole: 'teacher',
     recipientRoles: ['student'],
   });
 }
@@ -1915,23 +1924,23 @@ export function seedFriendsIfNeeded(): void {
   const now = new Date();
   const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString();
   const seededFriendships: StoreFriendship[] = [
-    { fromUid: 'demo-student-1', toUid: 'demo-teacher-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 30) },
-    { fromUid: 'demo-student-1', toUid: 'demo-ta-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 21) },
-    { fromUid: 'demo-student-1', toUid: 'stu-002', status: 'accepted', createdAt: minutesAgo(60 * 24 * 60) },
-    { fromUid: 'stu-003', toUid: 'demo-student-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 14) },
-    { fromUid: 'demo-club-1', toUid: 'demo-student-1', status: 'pending', createdAt: minutesAgo(60 * 2) },
+    { fromUid: 'stu-001', toUid: 'demo-teacher-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 30) },
+    { fromUid: 'stu-001', toUid: 'demo-ta-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 21) },
+    { fromUid: 'stu-001', toUid: 'stu-002', status: 'accepted', createdAt: minutesAgo(60 * 24 * 60) },
+    { fromUid: 'stu-003', toUid: 'stu-001', status: 'accepted', createdAt: minutesAgo(60 * 24 * 14) },
+    { fromUid: 'demo-club-1', toUid: 'stu-001', status: 'pending', createdAt: minutesAgo(60 * 2) },
     { fromUid: 'demo-teacher-1', toUid: 'demo-ta-1', status: 'accepted', createdAt: minutesAgo(60 * 24 * 90) },
   ];
-  const t1 = buildThreadId('demo-student-1', 'demo-teacher-1');
-  const t2 = buildThreadId('demo-student-1', 'demo-ta-1');
-  const t3 = buildThreadId('demo-student-1', 'stu-002');
+  const t1 = buildThreadId('stu-001', 'demo-teacher-1');
+  const t2 = buildThreadId('stu-001', 'demo-ta-1');
+  const t3 = buildThreadId('stu-001', 'stu-002');
   const t4 = buildThreadId('demo-teacher-1', 'demo-ta-1');
 
   const seededMessages: StoreDirectMessage[] = [
     {
       id: 'dm-seed-1',
       threadId: t1,
-      fromUid: 'demo-student-1',
+      fromUid: 'stu-001',
       body: '王老師好，想請問期末專題的題目可以自訂嗎?',
       sentAt: minutesAgo(180),
     },
@@ -1945,7 +1954,7 @@ export function seedFriendsIfNeeded(): void {
     {
       id: 'dm-seed-3',
       threadId: t1,
-      fromUid: 'demo-student-1',
+      fromUid: 'stu-001',
       body: '了解!我大概想做「校園活動推薦系統」,使用協同過濾。',
       sentAt: minutesAgo(60),
     },
@@ -1966,7 +1975,7 @@ export function seedFriendsIfNeeded(): void {
     {
       id: 'dm-seed-6',
       threadId: t3,
-      fromUid: 'demo-student-1',
+      fromUid: 'stu-001',
       body: '謝啦雅婷,我下次會準時!',
       sentAt: minutesAgo(25),
     },
@@ -1988,24 +1997,24 @@ export function seedFriendsIfNeeded(): void {
   const seededThreads: StoreDirectThread[] = [
     {
       id: t1,
-      participantUids: ['demo-student-1', 'demo-teacher-1'].sort() as [string, string],
+      participantUids: ['stu-001', 'demo-teacher-1'].sort() as [string, string],
       lastMessagePreview: '了解!我大概想做「校園活動推薦系統」,使用協同過濾。',
       lastSentAt: minutesAgo(60),
       readAt: { 'demo-teacher-1': minutesAgo(90) },
     },
     {
       id: t2,
-      participantUids: ['demo-student-1', 'demo-ta-1'].sort() as [string, string],
+      participantUids: ['stu-001', 'demo-ta-1'].sort() as [string, string],
       lastMessagePreview: '小明你好,作業二第三題你用遞迴的版本我看過了...',
       lastSentAt: minutesAgo(45),
       readAt: {},
     },
     {
       id: t3,
-      participantUids: ['demo-student-1', 'stu-002'].sort() as [string, string],
+      participantUids: ['stu-001', 'stu-002'].sort() as [string, string],
       lastMessagePreview: '謝啦雅婷,我下次會準時!',
       lastSentAt: minutesAgo(25),
-      readAt: { 'demo-student-1': minutesAgo(20) },
+      readAt: { 'stu-001': minutesAgo(20) },
     },
     {
       id: t4,
