@@ -193,16 +193,16 @@ function courseToScheduleEvents(course: Course): ScheduleEvent[] {
 
 function getRandomColor(seed: string): string {
   const colors = [
-    '#8B5CF6',
-    '#EC4899',
-    '#F59E0B',
-    '#10B981',
-    '#3B82F6',
-    '#6366F1',
-    '#F97316',
+    '#AF52DE',
+    '#FF2D55',
+    '#FF9500',
+    '#34C759',
+    '#5856D6',
+    '#5856D6',
+    '#FF9500',
     '#14B8A6',
     '#A855F7',
-    '#EF4444',
+    '#FF3B30',
   ];
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {

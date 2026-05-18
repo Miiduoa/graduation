@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { theme, softShadowStyle } from './theme';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
@@ -89,18 +90,27 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
   return (
     <Animated.View
       style={{
-        backgroundColor: theme.colors.surface,
+        // iOS HUD / Notification Capsule：BlurView + 半透明 chrome + soft 陰影
         borderRadius: theme.radius.lg,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        borderLeftWidth: 3,
-        borderLeftColor: color,
+        overflow: 'hidden',
         ...softShadowStyle(theme.shadows.soft),
         transform: [{ translateY }, { scale }],
         opacity,
       }}
     >
-      <View style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 }}>
+      <BlurView
+        intensity={80}
+        tint={theme.mode === 'dark' ? 'dark' : 'light'}
+        style={{
+          backgroundColor:
+            theme.mode === 'dark' ? 'rgba(28,28,30,0.65)' : 'rgba(255,255,255,0.75)',
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderLeftWidth: 3,
+          borderLeftColor: color,
+        }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 }}>
         <View
           style={{
             width: 34,
@@ -148,6 +158,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
           </Pressable>
         )}
       </View>
+      </BlurView>
     </Animated.View>
   );
 }

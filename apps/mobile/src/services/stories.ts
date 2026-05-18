@@ -34,7 +34,7 @@ export async function publishStory(payload: {
     kind: payload.kind,
     text: payload.text ?? '',
     mediaUrl: payload.mediaUrl ?? null,
-    bgColor: payload.bgColor ?? '#1a1a2e',
+    bgColor: payload.bgColor ?? '#000000',
     poiId: payload.poiId ?? null,
     createdAt: serverTimestamp(),
     expiresAt: payload.expiresAtMs,

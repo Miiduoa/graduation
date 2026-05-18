@@ -101,7 +101,7 @@ export function CockpitHero(props: {
           fontSize: theme.typography.hero?.fontSize ?? theme.typography.display.fontSize,
           lineHeight: theme.typography.hero?.lineHeight ?? theme.typography.display.lineHeight,
           letterSpacing: theme.typography.hero?.letterSpacing ?? theme.typography.display.letterSpacing,
-          fontWeight: '800',
+          fontWeight: '700',
           color: theme.colors.text,
           marginTop: theme.space.xs,
         }}

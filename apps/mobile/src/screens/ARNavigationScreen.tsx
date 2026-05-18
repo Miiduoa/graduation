@@ -226,7 +226,7 @@ function getDirectionColor(direction: NavigationStep['direction']): string {
       return theme.colors.success;
     case 'up':
     case 'down':
-      return '#F59E0B';
+      return '#FF9500';
     default:
       return theme.colors.accent;
   }
@@ -639,7 +639,7 @@ export function ARNavigationScreen(props: any) {
           <Text
             style={{
               color: theme.colors.text,
-              fontWeight: '900',
+              fontWeight: '700',
               fontSize: 28,
               marginTop: 24,
               textAlign: 'center',
@@ -680,7 +680,7 @@ export function ARNavigationScreen(props: any) {
           <View
             style={{
               flex: 1,
-              backgroundColor: '#1a1a2e',
+              backgroundColor: '#000000',
               borderRadius: theme.radius.lg,
               overflow: 'hidden',
               position: 'relative',
@@ -693,7 +693,7 @@ export function ARNavigationScreen(props: any) {
                 onCameraReady={handleCameraReady}
               />
             ) : (
-              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#1a1a2e' }]} />
+              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000000' }]} />
             )}
 
             <View
@@ -884,7 +884,7 @@ export function ARNavigationScreen(props: any) {
                   />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                     {currentInstruction.instruction}
                   </Text>
                   {currentInstruction.landmark && (
@@ -1009,13 +1009,13 @@ export function ARNavigationScreen(props: any) {
           <View style={{ gap: 12 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
                   {target ? target.lat.toFixed(4) : '--'}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>目標緯度</Text>
               </View>
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: theme.colors.success, fontWeight: '900', fontSize: 24 }}>
+                <Text style={{ color: theme.colors.success, fontWeight: '700', fontSize: 24 }}>
                   {target ? target.lng.toFixed(4) : '--'}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 12 }}>目標經度</Text>

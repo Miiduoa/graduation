@@ -66,6 +66,7 @@ export * from './puGradRequirements';
 export * from './tenant';
 export * from './puAuth';
 export * from './postLoginRoles';
+export * from './roles';
 export * from './lms/quizScoring';
 export * from './lms/gradebookCompute';
 export * from './lms/gradePredictor';

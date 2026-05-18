@@ -32,7 +32,7 @@ const { width: SCREEN_W } = Dimensions.get('window');
 
 /** 出席率圓環 */
 function RateGauge({ rate, size = 140, label }: { rate: number; size?: number; label: string }) {
-  const color = rate >= 80 ? '#10B981' : rate >= 60 ? '#F59E0B' : '#EF4444';
+  const color = rate >= 80 ? '#34C759' : rate >= 60 ? '#FF9500' : '#FF3B30';
   const strokeWidth = 10;
 
   return (
@@ -68,7 +68,7 @@ function RateGauge({ rate, size = 140, label }: { rate: number; size?: number; l
         />
         {/* Center text */}
         <View style={{ alignItems: 'center' }}>
-          <Text style={{ color, fontSize: size * 0.24, fontWeight: '900' }}>
+          <Text style={{ color, fontSize: size * 0.24, fontWeight: '700' }}>
             {Math.round(rate)}%
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 11, marginTop: 2 }}>{label}</Text>
@@ -102,7 +102,7 @@ function BarChart({
       >
         {data.map((item, i) => {
           const barH = Math.max(4, (item.value / maxVal) * height * 0.8);
-          const color = item.value >= 80 ? '#10B981' : item.value >= 60 ? '#F59E0B' : '#EF4444';
+          const color = item.value >= 80 ? '#34C759' : item.value >= 60 ? '#FF9500' : '#FF3B30';
           return (
             <View key={i} style={{ alignItems: 'center', width: barWidth }}>
               <Text style={{ color: theme.colors.muted, fontSize: 9, marginBottom: 2 }}>
@@ -268,7 +268,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                       ]}
                     >
                       <Text
-                        style={[s.riskBadgeText, { color: stu.rate < 60 ? '#EF4444' : '#F59E0B' }]}
+                        style={[s.riskBadgeText, { color: stu.rate < 60 ? '#FF3B30' : '#FF9500' }]}
                       >
                         {stu.rate < 60 ? '高風險' : '注意'}
                       </Text>
@@ -290,12 +290,12 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
               <RateGauge rate={studentData.overallRate} label="整體出席率" />
               <View style={s.summaryRow}>
                 <View style={s.summaryItem}>
-                  <Ionicons name={'flame' as any} size={16} color="#F59E0B" />
+                  <Ionicons name={'flame' as any} size={16} color="#FF9500" />
                   <Text style={s.summaryNum}>{studentData.streak.current}</Text>
                   <Text style={s.summaryLabel}>連續天數</Text>
                 </View>
                 <View style={s.summaryItem}>
-                  <Ionicons name={'trophy' as any} size={16} color="#6366F1" />
+                  <Ionicons name={'trophy' as any} size={16} color="#5856D6" />
                   <Text style={s.summaryNum}>{studentData.streak.best}</Text>
                   <Text style={s.summaryLabel}>最佳紀錄</Text>
                 </View>
@@ -336,7 +336,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                 <Text style={s.cardTitle}>星期出席模式</Text>
                 <View style={s.weekdayRow}>
                   {studentData.weekdayPattern.map((d) => {
-                    const color = d.rate >= 85 ? '#10B981' : d.rate >= 70 ? '#F59E0B' : '#EF4444';
+                    const color = d.rate >= 85 ? '#34C759' : d.rate >= 70 ? '#FF9500' : '#FF3B30';
                     return (
                       <View key={d.day} style={s.weekdayItem}>
                         <View
@@ -369,7 +369,7 @@ export default function AttendanceAnalyticsScreen({ route, navigation }: Props) 
                     <Text
                       style={[
                         s.courseDetailRateText,
-                        { color: c.rate >= 80 ? '#10B981' : c.rate >= 60 ? '#F59E0B' : '#EF4444' },
+                        { color: c.rate >= 80 ? '#34C759' : c.rate >= 60 ? '#FF9500' : '#FF3B30' },
                       ]}
                     >
                       {c.rate}%
@@ -403,7 +403,7 @@ const s = StyleSheet.create({
     borderBottomRightRadius: 20,
   },
   headerContent: {},
-  headerTitle: { fontSize: 24, fontWeight: '800', color: '#FFFFFF' },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: '#FFFFFF' },
   headerSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
 
   scroll: { flex: 1 },
@@ -421,7 +421,7 @@ const s = StyleSheet.create({
   // Summary
   summaryRow: { flexDirection: 'row', marginTop: 20, gap: 24 },
   summaryItem: { alignItems: 'center' },
-  summaryNum: { fontSize: 18, fontWeight: '800', color: theme.colors.text },
+  summaryNum: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
   summaryLabel: { fontSize: 11, color: theme.colors.muted, marginTop: 2 },
 
   // Risk students (teacher)
@@ -470,5 +470,5 @@ const s = StyleSheet.create({
   courseDetailName: { fontSize: 14, fontWeight: '600', color: theme.colors.text },
   courseDetailSub: { fontSize: 11, color: theme.colors.muted, marginTop: 2 },
   courseDetailRate: { marginLeft: 8 },
-  courseDetailRateText: { fontSize: 18, fontWeight: '800' },
+  courseDetailRateText: { fontSize: 18, fontWeight: '700' },
 });

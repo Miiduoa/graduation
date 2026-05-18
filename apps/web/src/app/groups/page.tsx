@@ -174,7 +174,7 @@ export default function GroupsPage(props: {
             <div className="metricValue">{totalUnread}</div>
             <div className="metricLabel">未讀訊息</div>
           </div>
-          <div className="metricCard" style={{ '--tone': '#007AFF' } as CSSProperties}>
+          <div className="metricCard" style={{ '--tone': '#5856D6' } as CSSProperties}>
             <div className="metricIcon">📚</div>
             <div className="metricValue">
               {groups.filter((g) => g.type === 'course').length}
@@ -267,12 +267,12 @@ export default function GroupsPage(props: {
                             ? 'rgba(255,149,0,0.18)'
                             : g.myRole === '助教'
                               ? 'rgba(124,58,237,0.16)'
-                              : 'rgba(94,106,210,0.12)',
+                              : 'rgba(88,86,214,0.12)',
                         color:
                           g.myRole === '授課' || g.myRole === '社長'
                             ? '#B45309'
                             : g.myRole === '助教'
-                              ? '#5B21B6'
+                              ? '#5856D6'
                               : 'var(--brand)',
                         fontWeight: 700,
                         whiteSpace: 'nowrap',
@@ -310,7 +310,7 @@ export default function GroupsPage(props: {
                   <span
                     style={{
                       fontSize: 11,
-                      fontWeight: 800,
+                      fontWeight: 700,
                       background: 'var(--danger)',
                       color: '#fff',
                       borderRadius: '999px',

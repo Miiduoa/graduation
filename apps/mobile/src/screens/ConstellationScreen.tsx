@@ -98,7 +98,7 @@ export default function ConstellationScreen() {
       }
     >
       <Text style={{ color: '#fbbf24', fontSize: 28, fontWeight: '700' }}>校園星圖</Text>
-      <Text style={{ color: '#cbd5e1', marginTop: 4 }}>
+      <Text style={{ color: '#E5E5EA', marginTop: 4 }}>
         已點亮 {litCount} / {stars.length} 顆星
       </Text>
 

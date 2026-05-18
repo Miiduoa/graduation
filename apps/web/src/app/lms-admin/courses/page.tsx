@@ -32,9 +32,9 @@ export default function AdminCoursesPage() {
   return (
     <RequireAdmin>
       <h1 style={{ marginTop: 0 }}>課程列表</h1>
-      {error ? <p style={{ color: '#b91c1c' }}>{error}</p> : null}
+      {error ? <p style={{ color: '#FF3B30' }}>{error}</p> : null}
       <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 12, overflow: 'hidden' }}>
-        <thead style={{ background: '#f3f4f6', textAlign: 'left' }}>
+        <thead style={{ background: '#F2F2F7', textAlign: 'left' }}>
           <tr>
             <th style={{ padding: 10 }}>標題</th>
             <th style={{ padding: 10 }}>course_id</th>
@@ -43,7 +43,7 @@ export default function AdminCoursesPage() {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.id} style={{ borderTop: '1px solid #e5e7eb' }}>
+            <tr key={r.id} style={{ borderTop: '1px solid #E5E5EA' }}>
               <td style={{ padding: 10 }}>{r.title}</td>
               <td style={{ padding: 10, fontFamily: 'monospace', fontSize: 12 }}>{r.id}</td>
               <td style={{ padding: 10 }}>{new Date(r.created_at).toLocaleString()}</td>

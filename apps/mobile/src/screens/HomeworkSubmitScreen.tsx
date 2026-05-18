@@ -168,7 +168,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
@@ -179,15 +179,15 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
             borderRadius: 12,
             padding: 16,
             borderLeftWidth: 4,
-            borderLeftColor: overdue ? '#dc2626' : '#1F4E78',
+            borderLeftColor: overdue ? '#D70015' : '#003F8A',
           }}
         >
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>{hwTitle}</Text>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: '#1C1C1E' }}>{hwTitle}</Text>
           {dueText ? (
             <Text
               style={{
                 fontSize: 13,
-                color: overdue ? '#dc2626' : '#6b7280',
+                color: overdue ? '#D70015' : '#8E8E93',
                 marginTop: 4,
               }}
             >
@@ -196,7 +196,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
             </Text>
           ) : null}
           {description ? (
-            <Text style={{ marginTop: 12, fontSize: 14, color: '#374151', lineHeight: 22 }}>
+            <Text style={{ marginTop: 12, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
               {description}
             </Text>
           ) : null}
@@ -212,11 +212,11 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
               padding: 16,
             }}
           >
-            <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827' }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#1C1C1E' }}>
               老師已批改：{currentScore} 分
             </Text>
             {feedback ? (
-              <Text style={{ marginTop: 6, fontSize: 13, color: '#374151' }}>
+              <Text style={{ marginTop: 6, fontSize: 13, color: '#3C3C43' }}>
                 💬 {feedback}
               </Text>
             ) : null}
@@ -225,7 +225,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
 
         {/* ── 答案輸入區 ── */}
         <View style={{ marginTop: 16 }}>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 6 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', marginBottom: 6 }}>
             你的答案
           </Text>
           <TextInput
@@ -240,11 +240,11 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
               borderRadius: 12,
               padding: 12,
               fontSize: 14,
-              color: '#111827',
+              color: '#1C1C1E',
               minHeight: 160,
               textAlignVertical: 'top',
               borderWidth: 1,
-              borderColor: '#e5e7eb',
+              borderColor: '#E5E5EA',
             }}
           />
         </View>
@@ -252,12 +252,12 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
         {/* ── 附件 ── */}
         <View style={{ marginTop: 16 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>
               附加檔案 ({attachments.length})
             </Text>
             {!submitted && (
               <Pressable onPress={handlePickFile} hitSlop={8}>
-                <Text style={{ color: '#1F4E78', fontSize: 13, fontWeight: '600' }}>
+                <Text style={{ color: '#003F8A', fontSize: 13, fontWeight: '600' }}>
                   + 加檔案
                 </Text>
               </Pressable>
@@ -275,27 +275,27 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                 alignItems: 'center',
                 gap: 8,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: '#E5E5EA',
               }}
             >
-              <Ionicons name="document-outline" size={18} color="#6b7280" />
+              <Ionicons name="document-outline" size={18} color="#8E8E93" />
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, color: '#111827' }} numberOfLines={1}>
+                <Text style={{ fontSize: 13, color: '#1C1C1E' }} numberOfLines={1}>
                   {att.name}
                 </Text>
-                <Text style={{ fontSize: 11, color: '#6b7280' }}>
+                <Text style={{ fontSize: 11, color: '#8E8E93' }}>
                   {att.type ?? '檔案'} {att.size ? `・ ${Math.round(att.size / 1024)} KB` : ''}
                 </Text>
               </View>
               {!submitted && (
                 <Pressable onPress={() => handleRemoveAttachment(att.id)} hitSlop={8}>
-                  <Ionicons name="close-circle" size={20} color="#dc2626" />
+                  <Ionicons name="close-circle" size={20} color="#D70015" />
                 </Pressable>
               )}
             </View>
           ))}
           {attachments.length === 0 && (
-            <Text style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic', marginTop: 4 }}>
+            <Text style={{ fontSize: 12, color: '#8E8E93', fontStyle: 'italic', marginTop: 4 }}>
               還沒附加任何檔案。可附 PDF、Word、圖片等。
             </Text>
           )}
@@ -310,7 +310,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
               marginTop: 24,
               padding: 14,
               borderRadius: 12,
-              backgroundColor: overdue ? '#f97316' : '#1F4E78',
+              backgroundColor: overdue ? '#FF9500' : '#003F8A',
               alignItems: 'center',
               opacity: submitting ? 0.6 : 1,
             }}

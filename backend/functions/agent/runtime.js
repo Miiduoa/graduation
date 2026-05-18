@@ -395,6 +395,7 @@ async function runCampusAssistantWithAgentRuntime(request) {
     actions: response.actions,
     citations: response.citations,
     assistantToolsUsed: Array.isArray(response.assistantToolsUsed) ? response.assistantToolsUsed : [],
+    cards: Array.isArray(response.cards) ? response.cards : [],
     error: response.error,
     usage: response.usage,
     debug: response.debug,

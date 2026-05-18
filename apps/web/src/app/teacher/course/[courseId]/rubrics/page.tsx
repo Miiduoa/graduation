@@ -154,7 +154,7 @@ export default function TeacherRubricsPage({ params, searchParams }: { params: {
           </button>
         </div>
 
-        <div style={{ marginBottom: 12, color: totalWeight === 100 ? '#16a34a' : '#dc2626' }}>
+        <div style={{ marginBottom: 12, color: totalWeight === 100 ? '#34C759' : '#FF3B30' }}>
           目前權重總和：{totalWeight}（會自動正規化到 100）
         </div>
 
@@ -266,8 +266,8 @@ export default function TeacherRubricsPage({ params, searchParams }: { params: {
             marginTop: 20,
             padding: '14px 18px',
             borderRadius: 12,
-            background: 'rgba(94,106,210,0.08)',
-            border: '1px solid #5E6AD2',
+            background: 'rgba(88,86,214,0.08)',
+            border: '1px solid #5856D6',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -276,7 +276,7 @@ export default function TeacherRubricsPage({ params, searchParams }: { params: {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#5E6AD2', marginBottom: 3 }}>🤖 AI Rubric 助理</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>🤖 AI Rubric 助理</div>
             <div style={{ fontSize: 13, color: 'var(--text)' }}>
               {canEdit
                 ? '讓 AI 幫你設計符合課程目標的評分標準，或建議各評分項的等級描述與權重分配。'
@@ -306,7 +306,7 @@ const td = { padding: '12px 8px', fontSize: 14 };
 const primaryBtn = {
   padding: '8px 16px',
   borderRadius: 8,
-  background: '#1F4E78',
+  background: '#003F8A',
   color: '#fff',
   border: 'none',
   cursor: 'pointer',
@@ -315,8 +315,8 @@ const dangerBtn = {
   padding: '6px 10px',
   borderRadius: 6,
   background: 'transparent',
-  color: '#dc2626',
-  border: '1px solid #dc2626',
+  color: '#FF3B30',
+  border: '1px solid #FF3B30',
   cursor: 'pointer',
   fontSize: 12,
 };

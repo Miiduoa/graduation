@@ -559,7 +559,7 @@ export const REPAIR_CATEGORIES: RepairCategoryInfo[] = [
     id: 'ac',
     label: '冷氣',
     icon: 'snow-outline',
-    color: '#3B82F6',
+    color: '#5856D6',
     avgResponseHours: 4,
     description: '冷氣不冷、異響、漏水',
   },
@@ -575,7 +575,7 @@ export const REPAIR_CATEGORIES: RepairCategoryInfo[] = [
     id: 'electrical',
     label: '電力',
     icon: 'flash-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     avgResponseHours: 1,
     description: '插座故障、跳電、燈具',
   },
@@ -583,7 +583,7 @@ export const REPAIR_CATEGORIES: RepairCategoryInfo[] = [
     id: 'internet',
     label: '網路',
     icon: 'wifi-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     avgResponseHours: 6,
     description: '斷線、速度慢、無法連線',
   },
@@ -591,7 +591,7 @@ export const REPAIR_CATEGORIES: RepairCategoryInfo[] = [
     id: 'furniture',
     label: '家具',
     icon: 'bed-outline',
-    color: '#D97706',
+    color: '#FF9500',
     avgResponseHours: 24,
     description: '床鋪、書桌、衣櫃損壞',
   },
@@ -599,7 +599,7 @@ export const REPAIR_CATEGORIES: RepairCategoryInfo[] = [
     id: 'door_lock',
     label: '門鎖',
     icon: 'lock-closed-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     avgResponseHours: 1,
     description: '門鎖故障、鑰匙遺失',
   },
@@ -623,7 +623,7 @@ export const REPAIR_CATEGORIES: RepairCategoryInfo[] = [
     id: 'other',
     label: '其他',
     icon: 'construct-outline',
-    color: '#9CA3AF',
+    color: '#AEAEB2',
     avgResponseHours: 24,
     description: '其他設施問題',
   },
@@ -672,7 +672,7 @@ export const CARRIERS = [
   { id: 'tcat', name: '黑貓宅急便', icon: 'car-outline', color: '#000000' },
   { id: 'post', name: '中華郵政', icon: 'mail-outline', color: '#D4181C' },
   { id: 'sf', name: '順豐速運', icon: 'airplane-outline', color: '#000000' },
-  { id: 'other', name: '其他', icon: 'cube-outline', color: '#9CA3AF' },
+  { id: 'other', name: '其他', icon: 'cube-outline', color: '#AEAEB2' },
 ];
 
 // ═══════════════════════════════════════════════════
@@ -732,15 +732,15 @@ export function getSmartDormSuggestions(building?: DormBuildingId): DormSuggesti
         icon: 'sunny-outline',
         text: '早安！現在洗衣機較空，適合洗衣',
         action: 'laundry',
-        color: '#F59E0B',
+        color: '#FF9500',
       },
-      { icon: 'water-outline', text: '記得帶水瓶補充飲水', color: '#3B82F6' },
+      { icon: 'water-outline', text: '記得帶水瓶補充飲水', color: '#5856D6' },
     );
   } else if (hour >= 11 && hour < 13) {
     suggestions.push({
       icon: 'restaurant-outline',
       text: '午餐時間！宿舍附近餐廳營業中',
-      color: '#10B981',
+      color: '#34C759',
     });
   } else if (hour >= 17 && hour < 19) {
     suggestions.push(
@@ -748,34 +748,34 @@ export function getSmartDormSuggestions(building?: DormBuildingId): DormSuggesti
         icon: 'alert-circle-outline',
         text: '洗衣尖峰時段即將到來 (18-22時)',
         action: 'laundry',
-        color: '#F59E0B',
+        color: '#FF9500',
       },
       {
         icon: 'cube-outline',
         text: '收發室即將關閉 (21:00)，記得取包裹',
         action: 'package',
-        color: '#8B5CF6',
+        color: '#AF52DE',
       },
     );
   } else if (hour >= 22 && hour < 24) {
     suggestions.push(
-      { icon: 'moon-outline', text: '夜間時段，請降低音量保持安靜', color: '#6366F1' },
-      { icon: 'lock-closed-outline', text: '00:00 後進出將記錄為晚歸', color: '#EF4444' },
+      { icon: 'moon-outline', text: '夜間時段，請降低音量保持安靜', color: '#5856D6' },
+      { icon: 'lock-closed-outline', text: '00:00 後進出將記錄為晚歸', color: '#FF3B30' },
     );
   } else if (hour >= 0 && hour < 6) {
     suggestions.push(
-      { icon: 'warning-outline', text: '深夜時段，進出會列入晚歸記錄', color: '#EF4444' },
+      { icon: 'warning-outline', text: '深夜時段，進出會列入晚歸記錄', color: '#FF3B30' },
       {
         icon: 'call-outline',
         text: `緊急聯絡：${DORM_OFFICE_INFO.emergencyPhone}`,
-        color: '#EF4444',
+        color: '#FF3B30',
       },
     );
   } else {
     suggestions.push({
       icon: 'checkmark-circle-outline',
       text: '一切正常！有什麼需要就用快捷功能吧',
-      color: '#10B981',
+      color: '#34C759',
     });
   }
 
@@ -801,42 +801,42 @@ export const COMMUNITY_CATEGORIES: CommunityPostCategory[] = [
     id: 'share',
     label: '分享',
     icon: 'chatbubble-ellipses-outline',
-    color: '#3B82F6',
+    color: '#5856D6',
     description: '生活分享、心得交流',
   },
   {
     id: 'lend',
     label: '借物',
     icon: 'hand-left-outline',
-    color: '#10B981',
+    color: '#34C759',
     description: '借/還工具、電器、日用品',
   },
   {
     id: 'lost',
     label: '失物',
     icon: 'search-outline',
-    color: '#F59E0B',
+    color: '#FF9500',
     description: '遺失或拾獲物品',
   },
   {
     id: 'event',
     label: '揪團',
     icon: 'people-outline',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     description: '揪人運動、出遊、共餐',
   },
   {
     id: 'trade',
     label: '交易',
     icon: 'swap-horizontal-outline',
-    color: '#D97706',
+    color: '#FF9500',
     description: '二手物品買賣交換',
   },
   {
     id: 'complaint',
     label: '反映',
     icon: 'megaphone-outline',
-    color: '#EF4444',
+    color: '#FF3B30',
     description: '公共設施問題回報',
   },
 ];
@@ -1058,32 +1058,32 @@ export const EMERGENCY_CONTACTS: EmergencyContact[] = [
     label: '宿舍 24hr 緊急電話',
     phone: DORM_OFFICE_INFO.emergencyPhone,
     icon: 'call',
-    color: '#EF4444',
+    color: '#FF3B30',
     note: '全天候緊急事件',
   },
   {
     label: '希嘉學苑服務檯',
     phone: `${DORM_OFFICE_INFO.phone} #11245`,
     icon: 'home',
-    color: '#3B82F6',
+    color: '#5856D6',
     note: '08:00-22:00',
   },
   {
     label: '思高學苑服務檯',
     phone: `${DORM_OFFICE_INFO.phone} #11254`,
     icon: 'home',
-    color: '#10B981',
+    color: '#34C759',
     note: '08:00-22:00',
   },
   {
     label: '校安中心',
     phone: '(04) 2632-8001 #11995',
     icon: 'shield',
-    color: '#F59E0B',
+    color: '#FF9500',
     note: '24 小時',
   },
-  { label: '報警', phone: '110', icon: 'alert-circle', color: '#EF4444', note: '警察局' },
-  { label: '消防 / 救護車', phone: '119', icon: 'medkit', color: '#EF4444', note: '消防局' },
+  { label: '報警', phone: '110', icon: 'alert-circle', color: '#FF3B30', note: '警察局' },
+  { label: '消防 / 救護車', phone: '119', icon: 'medkit', color: '#FF3B30', note: '消防局' },
 ];
 
 // ═══════════════════════════════════════════════════
@@ -1105,7 +1105,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
     icon: 'construct-outline',
     label: '報修',
     description: '設備故障回報',
-    color: '#F59E0B',
+    color: '#FF9500',
     tabTarget: 'repair',
   },
   {
@@ -1113,7 +1113,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
     icon: 'cube-outline',
     label: '包裹',
     description: '查看/領取包裹',
-    color: '#8B5CF6',
+    color: '#AF52DE',
     tabTarget: 'package',
   },
   {
@@ -1121,7 +1121,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
     icon: 'water-outline',
     label: '洗衣',
     description: '即時機台狀態',
-    color: '#3B82F6',
+    color: '#5856D6',
     tabTarget: 'laundry',
   },
   {
@@ -1129,28 +1129,28 @@ export const QUICK_ACTIONS: QuickAction[] = [
     icon: 'person-add-outline',
     label: '訪客登記',
     description: '來訪者登記',
-    color: '#10B981',
+    color: '#34C759',
   },
   {
     id: 'late',
     icon: 'moon-outline',
     label: '夜歸登記',
     description: '00:00 後登記',
-    color: '#6366F1',
+    color: '#5856D6',
   },
   {
     id: 'access',
     icon: 'key-outline',
     label: '門禁申請',
     description: '延長/臨時申請',
-    color: '#D97706',
+    color: '#FF9500',
   },
   {
     id: 'community',
     icon: 'people-outline',
     label: '社區',
     description: '公告/借物/揪團',
-    color: '#EC4899',
+    color: '#FF2D55',
     tabTarget: 'community',
   },
   {
@@ -1158,7 +1158,7 @@ export const QUICK_ACTIONS: QuickAction[] = [
     icon: 'warning-outline',
     label: '緊急求助',
     description: 'SOS 緊急聯絡',
-    color: '#EF4444',
+    color: '#FF3B30',
   },
 ];
 
@@ -1366,17 +1366,17 @@ export function getLotteryStatusLabel(status: LotteryAppStatus): string {
 
 export function getLotteryStatusColor(status: LotteryAppStatus): string {
   const m: Record<LotteryAppStatus, string> = {
-    draft: '#9CA3AF',
-    submitted: '#3B82F6',
-    in_lottery: '#F59E0B',
-    won: '#10B981',
-    waitlisted: '#F59E0B',
-    lost: '#EF4444',
-    confirmed: '#10B981',
-    forfeited: '#9CA3AF',
-    cancelled: '#9CA3AF',
+    draft: '#AEAEB2',
+    submitted: '#5856D6',
+    in_lottery: '#FF9500',
+    won: '#34C759',
+    waitlisted: '#FF9500',
+    lost: '#FF3B30',
+    confirmed: '#34C759',
+    forfeited: '#AEAEB2',
+    cancelled: '#AEAEB2',
   };
-  return m[status] ?? '#9CA3AF';
+  return m[status] ?? '#AEAEB2';
 }
 
 // ── 換房申請（住宿生↔住宿生→住服組） ──

@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderRadius: theme.radius.md,
   },
-  btnTx: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  btnTx: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });
 
 export default StoryComposeScreen;

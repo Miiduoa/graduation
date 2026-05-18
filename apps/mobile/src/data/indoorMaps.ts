@@ -135,23 +135,23 @@ export const ROOM_KIND_LABEL: Record<RoomKind, string> = {
 };
 
 export const ROOM_KIND_COLOR: Record<RoomKind, string> = {
-  study: '#10B981',
-  classroom: '#3B82F6',
+  study: '#34C759',
+  classroom: '#5856D6',
   office: '#64748B',
   restroom: '#94A3B8',
   kitchen: '#A78BFA',
-  service: '#F59E0B',
+  service: '#FF9500',
   computer: '#06B6D4',
-  collection: '#8B5CF6',
-  meeting: '#EC4899',
-  lounge: '#F97316',
+  collection: '#AF52DE',
+  meeting: '#FF2D55',
+  lounge: '#FF9500',
   lab: '#0EA5E9',
   storage: '#71717A',
   lobby: '#FCD34D',
   corridor: '#1F2937',
   stairs: '#475569',
-  elevator: '#374151',
-  entrance: '#DC2626',
+  elevator: '#3C3C43',
+  entrance: '#D70015',
   special: '#A855F7',
 };
 
@@ -673,7 +673,7 @@ export const LIB_INDOOR_MAP: IndoorMap = {
   nameEn: 'Gabriel Library',
   viewBox: LIB_VIEWBOX,
   defaultFloorId: 'lib-1f',
-  themeColor: '#059669',
+  themeColor: '#34C759',
   description: '靜宜大學主圖書館，藏書近 80 萬冊，5 個樓層含 24 小時自習室與電子資源',
   floors: [LIB_4F, LIB_3F, LIB_2F, LIB_1F, LIB_B1], // 由高樓層到低樓層
 };
@@ -808,7 +808,7 @@ export const RENYUAN_INDOOR_MAP: IndoorMap = {
   nameEn: 'Anthony Kuo Hall',
   viewBox: { width: 1000, height: 600 },
   defaultFloorId: 'rn-3f',
-  themeColor: '#2563EB',
+  themeColor: '#5856D6',
   description: '理工學院教學大樓，3 樓為計算機與網路中心',
   floors: [RENYUAN_3F, RENYUAN_1F],
 };
@@ -999,7 +999,7 @@ export function crowdLabel(c: CrowdLevel): { text: string; color: string } {
     case 'low':
       return { text: '人少', color: '#34D399' };
     case 'medium':
-      return { text: '適中', color: '#F59E0B' };
+      return { text: '適中', color: '#FF9500' };
     case 'high':
       return { text: '擁擠', color: '#F87171' };
     case 'full':

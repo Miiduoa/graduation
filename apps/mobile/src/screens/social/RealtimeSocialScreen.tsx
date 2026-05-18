@@ -132,7 +132,7 @@ export function RealtimeSocialScreen() {
       <View style={styles.topActions}>
         <Text style={styles.title}>即時</Text>
         <Pressable onPress={openCompose} style={styles.storyBtn}>
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>發 Story</Text>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>發 Story</Text>
         </Pressable>
       </View>
       <Text style={styles.sub}>24h Story 與輕量 LBS</Text>
@@ -146,7 +146,7 @@ export function RealtimeSocialScreen() {
           placeholderTextColor={theme.colors.textSecondary}
         />
         <Pressable style={styles.pulseBtn} onPress={tapHeart}>
-          <Text style={{ color: '#fff', fontWeight: '800' }}>我在這裡</Text>
+          <Text style={{ color: '#fff', fontWeight: '700' }}>我在這裡</Text>
         </Pressable>
       </View>
 
@@ -200,7 +200,7 @@ export function RealtimeSocialScreen() {
       <Modal visible={!!storyReader} transparent animationType="fade" onRequestClose={() => setStoryReader(null)}>
         <Pressable style={styles.storyBackdrop} onPress={() => setStoryReader(null)}>
           <View style={styles.storyPopup}>
-            <Text style={{ color: '#fff', fontWeight: '900', marginBottom: 10 }}>
+            <Text style={{ color: '#fff', fontWeight: '700', marginBottom: 10 }}>
               {String(storyReader?.kind ?? 'Story')}
             </Text>
             <Text style={{ color: '#eef2ff', lineHeight: 22 }}>
@@ -211,7 +211,7 @@ export function RealtimeSocialScreen() {
                   : '此則為純視覺內容，完整瀏覽稍後將支援。'}
             </Text>
             <Pressable style={styles.storyDismiss} onPress={() => setStoryReader(null)}>
-              <Text style={{ color: '#0f172a', fontWeight: '800' }}>關閉</Text>
+              <Text style={{ color: '#0f172a', fontWeight: '700' }}>關閉</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: theme.radius.md,
   },
-  title: { fontSize: 18, fontWeight: '900', color: theme.colors.text },
+  title: { fontSize: 18, fontWeight: '700', color: theme.colors.text },
   sub: { fontSize: 12, color: theme.colors.textSecondary, marginVertical: 6 },
   poiBar: { gap: 8, marginBottom: 12 },
   poiInput: {
@@ -248,7 +248,7 @@ const styles = StyleSheet.create({
     borderRadius: theme.radius.md,
     marginBottom: 4,
   },
-  section: { fontWeight: '800', color: theme.colors.text, marginBottom: 8 },
+  section: { fontWeight: '700', color: theme.colors.text, marginBottom: 8 },
   peerChip: {
     marginRight: 8,
     backgroundColor: theme.colors.surface,
@@ -266,7 +266,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  kind: { fontSize: 11, color: theme.colors.accent, fontWeight: '800', marginBottom: 8 },
+  kind: { fontSize: 11, color: theme.colors.accent, fontWeight: '700', marginBottom: 8 },
   storySnippet: { fontSize: 14, color: theme.colors.text, lineHeight: 20 },
   storyBackdrop: {
     flex: 1,

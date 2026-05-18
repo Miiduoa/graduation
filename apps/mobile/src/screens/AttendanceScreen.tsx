@@ -123,7 +123,7 @@ function StatPill({
 }) {
   return (
     <View style={{ flex: 1, alignItems: 'center', paddingVertical: 12 }}>
-      <Text style={{ fontSize: 22, fontWeight: '800', color }}>{value}</Text>
+      <Text style={{ fontSize: 22, fontWeight: '700', color }}>{value}</Text>
       <Text style={{ fontSize: 11, color: theme.colors.textSecondary, marginTop: 2 }}>{label}</Text>
     </View>
   );
@@ -328,7 +328,7 @@ export function AttendanceScreen(props: any) {
   // ── Derived ──
   const pendingLeaves = leaveRequests.filter((r) => r.status === 'pending');
   const rateColor =
-    overallRate >= 85 ? theme.colors.success : overallRate >= 70 ? '#F59E0B' : theme.colors.danger;
+    overallRate >= 85 ? theme.colors.success : overallRate >= 70 ? '#FF9500' : theme.colors.danger;
   const todayStr = new Date().toLocaleDateString('zh-TW', {
     month: 'long',
     day: 'numeric',
@@ -374,7 +374,7 @@ export function AttendanceScreen(props: any) {
           colors={
             theme.mode === 'dark'
               ? (['#1A0A3E', '#0D1B3E', theme.colors.bg] as [string, string, string])
-              : (['#F9FAFB', '#FFFFFF', theme.colors.bg] as [string, string, string])
+              : (['#F2F2F7', '#FFFFFF', theme.colors.bg] as [string, string, string])
           }
           style={{ paddingTop: insets.top + 12, paddingBottom: 24 }}
         >
@@ -391,7 +391,7 @@ export function AttendanceScreen(props: any) {
               <Ionicons name="arrow-back" size={22} color={theme.colors.text} />
             </Pressable>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 24, fontWeight: '800', color: theme.colors.text }}>
+              <Text style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text }}>
                 智慧點名
               </Text>
               <Text style={{ fontSize: 12, color: theme.colors.textSecondary, marginTop: 2 }}>
@@ -425,7 +425,7 @@ export function AttendanceScreen(props: any) {
               marginBottom: 12,
               padding: 14,
               borderRadius: 12,
-              backgroundColor: '#16a34a',
+              backgroundColor: '#34C759',
               flexDirection: 'row',
               alignItems: 'center',
               gap: 10,
@@ -469,7 +469,7 @@ export function AttendanceScreen(props: any) {
                 <StatPill
                   label="待審假單"
                   value={pendingLeaves.length}
-                  color={pendingLeaves.length > 0 ? '#F59E0B' : theme.colors.text}
+                  color={pendingLeaves.length > 0 ? '#FF9500' : theme.colors.text}
                 />
               </>
             ) : (
@@ -778,7 +778,7 @@ export function AttendanceScreen(props: any) {
                   {riskStudents.slice(0, 10).map((stu, idx) => {
                     const ratePercent = Math.round(stu.attendanceRate * 100);
                     const isDanger = ratePercent < 60;
-                    const statusColor = isDanger ? '#EF4444' : '#F59E0B';
+                    const statusColor = isDanger ? '#FF3B30' : '#FF9500';
                     const statusBg = isDanger ? '#FEE2E2' : '#FEF3C7';
                     const statusLabel = isDanger ? '危險' : '警告';
                     return (
@@ -901,7 +901,7 @@ export function AttendanceScreen(props: any) {
                     course.rate >= 85
                       ? theme.colors.success
                       : course.rate >= 70
-                        ? '#F59E0B'
+                        ? '#FF9500'
                         : theme.colors.danger;
                   return (
                     <View
@@ -930,7 +930,7 @@ export function AttendanceScreen(props: any) {
                             {course.instructorName} · {course.courseCode}
                           </Text>
                         </View>
-                        <Text style={{ fontSize: 20, fontWeight: '800', color: rc }}>
+                        <Text style={{ fontSize: 20, fontWeight: '700', color: rc }}>
                           {course.rate}%
                         </Text>
                       </View>
@@ -958,7 +958,7 @@ export function AttendanceScreen(props: any) {
                         <Text style={{ fontSize: 11, color: theme.colors.success }}>
                           出席 {course.attended}
                         </Text>
-                        <Text style={{ fontSize: 11, color: '#F59E0B' }}>遲到 {course.late}</Text>
+                        <Text style={{ fontSize: 11, color: '#FF9500' }}>遲到 {course.late}</Text>
                         <Text style={{ fontSize: 11, color: theme.colors.danger }}>
                           缺席 {course.absent}
                         </Text>
@@ -994,7 +994,7 @@ export function AttendanceScreen(props: any) {
                 })}
               >
                 <LinearGradient
-                  colors={['#F59E0B20', '#F59E0B08'] as [string, string]}
+                  colors={['#FF950020', '#FF950008'] as [string, string]}
                   style={{
                     width: 40,
                     height: 40,
@@ -1003,7 +1003,7 @@ export function AttendanceScreen(props: any) {
                     alignItems: 'center',
                   }}
                 >
-                  <Ionicons name="add-circle" size={18} color="#F59E0B" />
+                  <Ionicons name="add-circle" size={18} color="#FF9500" />
                 </LinearGradient>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text }}>
@@ -1036,7 +1036,7 @@ export function AttendanceScreen(props: any) {
                       borderRadius: 12,
                       backgroundColor:
                         (req.status === 'pending'
-                          ? '#F59E0B'
+                          ? '#FF9500'
                           : req.status === 'approved'
                             ? theme.colors.success
                             : theme.colors.danger) + '15',
@@ -1055,7 +1055,7 @@ export function AttendanceScreen(props: any) {
                       size={18}
                       color={
                         req.status === 'pending'
-                          ? '#F59E0B'
+                          ? '#FF9500'
                           : req.status === 'approved'
                             ? theme.colors.success
                             : theme.colors.danger
@@ -1074,7 +1074,7 @@ export function AttendanceScreen(props: any) {
                     style={{
                       backgroundColor:
                         (req.status === 'pending'
-                          ? '#F59E0B'
+                          ? '#FF9500'
                           : req.status === 'approved'
                             ? theme.colors.success
                             : theme.colors.danger) + '15',
@@ -1089,7 +1089,7 @@ export function AttendanceScreen(props: any) {
                         fontWeight: '600',
                         color:
                           req.status === 'pending'
-                            ? '#F59E0B'
+                            ? '#FF9500'
                             : req.status === 'approved'
                               ? theme.colors.success
                               : theme.colors.danger,
@@ -1117,7 +1117,7 @@ export function AttendanceScreen(props: any) {
                       )
                     : 0;
                 const rc =
-                  rate >= 80 ? theme.colors.success : rate >= 60 ? '#F59E0B' : theme.colors.danger;
+                  rate >= 80 ? theme.colors.success : rate >= 60 ? '#FF9500' : theme.colors.danger;
                 return (
                   <View
                     key={session.id}
@@ -1186,7 +1186,7 @@ export function AttendanceScreen(props: any) {
                     <Ionicons
                       name={item.icon}
                       size={20}
-                      color={item.icon === 'warning' && item.value > 0 ? '#EF4444' : theme.colors.accent}
+                      color={item.icon === 'warning' && item.value > 0 ? '#FF3B30' : theme.colors.accent}
                     />
                     <Text
                       style={{
@@ -1217,8 +1217,8 @@ export function AttendanceScreen(props: any) {
                       color: adminAnalytics.overallAttendanceRate >= 80
                         ? theme.colors.success
                         : adminAnalytics.overallAttendanceRate >= 60
-                          ? '#F59E0B'
-                          : '#EF4444',
+                          ? '#FF9500'
+                          : '#FF3B30',
                     }}
                   >
                     {adminAnalytics.overallAttendanceRate}%
@@ -1241,8 +1241,8 @@ export function AttendanceScreen(props: any) {
                         adminAnalytics.overallAttendanceRate >= 80
                           ? theme.colors.success
                           : adminAnalytics.overallAttendanceRate >= 60
-                            ? '#F59E0B'
-                            : '#EF4444',
+                            ? '#FF9500'
+                            : '#FF3B30',
                       borderRadius: 3,
                     }}
                   />
@@ -1260,8 +1260,8 @@ export function AttendanceScreen(props: any) {
                       course.averageRate >= 80
                         ? theme.colors.success
                         : course.averageRate >= 60
-                          ? '#F59E0B'
-                          : '#EF4444';
+                          ? '#FF9500'
+                          : '#FF3B30';
                     return (
                       <View
                         key={course.courseId}
@@ -1353,7 +1353,7 @@ export function AttendanceScreen(props: any) {
                         style={{
                           fontSize: 15,
                           fontWeight: '700',
-                          color: dept.avgRate >= 80 ? theme.colors.success : dept.avgRate >= 60 ? '#F59E0B' : '#EF4444',
+                          color: dept.avgRate >= 80 ? theme.colors.success : dept.avgRate >= 60 ? '#FF9500' : '#FF3B30',
                         }}
                       >
                         {dept.avgRate}%

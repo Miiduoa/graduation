@@ -24,7 +24,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { WebView } from 'react-native-webview';
 import { PuWebView } from '../ui/PuWebView';
 import { theme } from '../ui/theme';
@@ -108,14 +108,14 @@ function buildMapHtml(opts: {
 <style>
   *{margin:0;padding:0}
   html,body,#map{width:100%;height:100%;background:#0B1014}
-  .user-dot{width:20px;height:20px;border-radius:50%;background:#3B82F6;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4);animation:pulse 2s infinite ease-out}
+  .user-dot{width:20px;height:20px;border-radius:50%;background:#5856D6;border:4px solid #fff;box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4);animation:pulse 2s infinite ease-out}
   @keyframes pulse{0%,100%{box-shadow:0 0 0 6px rgba(59,130,246,.25),0 4px 8px rgba(0,0,0,.4)}50%{box-shadow:0 0 0 14px rgba(59,130,246,.06),0 4px 8px rgba(0,0,0,.4)}}
   .poi-pin{display:flex;flex-direction:column;align-items:center;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45))}
   .poi-pin .head{width:34px;height:34px;border-radius:50%;border:3px solid #fff;display:grid;place-items:center;font-size:16px}
   .poi-pin .tail{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:9px solid #fff;margin-top:-2px}
-  .bus-pin{width:40px;height:40px;border-radius:50%;background:#fff;border:3px solid #DC2626;display:grid;place-items:center;color:#DC2626;font-weight:900;font-size:13px;box-shadow:0 4px 10px rgba(0,0,0,.4);position:relative}
+  .bus-pin{width:40px;height:40px;border-radius:50%;background:#fff;border:3px solid #D70015;display:grid;place-items:center;color:#D70015;font-weight:900;font-size:13px;box-shadow:0 4px 10px rgba(0,0,0,.4);position:relative}
   .bus-pin::after{content:"";position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:8px solid #fff}
-  .stop-dot{width:14px;height:14px;border-radius:50%;background:#7C3AED;border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,.4)}
+  .stop-dot{width:14px;height:14px;border-radius:50%;background:#AF52DE;border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,.4)}
   .selected-glow{filter:drop-shadow(0 0 6px rgba(111,134,255,.9))}
 </style>
 </head>
@@ -237,7 +237,17 @@ function isOpenNow(open: string, close: string, now: Date = new Date()): boolean
 
 export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
   const nav = useNavigation<any>();
+  const route = useRoute<any>();
   const webRef = useRef<WebView>(null);
+
+  // ── AI 帶來的路線/聚焦參數 ──
+  // fromPoiId + toPoiId：自動規劃路線並開始導航
+  // focusPoiId：聚焦到單一 POI
+  // autoStart：來自 AI route_card 點擊
+  const aiFromPoiId: string | undefined = route?.params?.fromPoiId;
+  const aiToPoiId: string | undefined = route?.params?.toPoiId;
+  const aiFocusPoiId: string | undefined = route?.params?.focusPoiId;
+  const aiAutoStart: boolean | undefined = route?.params?.autoStart;
 
   const [layer, setLayer] = useState<Layer>('standard');
   const [showBusLayer, setShowBusLayer] = useState<boolean>(true);
@@ -383,7 +393,7 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
           lat: v.position.lat,
           lng: v.position.lng,
           code: r?.code ?? '?',
-          color: r?.color ?? '#DC2626',
+          color: r?.color ?? '#D70015',
         };
       }),
     });
@@ -453,6 +463,36 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
     },
     [uLat, uLng, postCmd],
   );
+
+  // ── AI 帶 toPoiId 進來 → 自動聚焦 + 開始導航 ──
+  const aiAppliedRef = useRef(false);
+  useEffect(() => {
+    if (aiAppliedRef.current) return;
+    // Focus to a POI
+    if (aiFocusPoiId) {
+      const target = getCampusPoi(aiFocusPoiId);
+      if (target) {
+        setSelectedPoiId(target.id);
+        postCmd({ type: 'centerOn', lat: target.lat, lng: target.lng, zoom: 18 });
+        aiAppliedRef.current = true;
+        return;
+      }
+    }
+    // Start navigation from→to
+    if (aiToPoiId) {
+      const dest = getCampusPoi(aiToPoiId);
+      if (dest) {
+        setSelectedPoiId(dest.id);
+        if (aiAutoStart) {
+          // 等地理位置就緒再開始（uLat/uLng 預設為校園中心，所以也能跑）
+          setTimeout(() => startNavigation(dest), 800);
+        } else {
+          postCmd({ type: 'setView', lat: dest.lat, lng: dest.lng, zoom: 18 });
+        }
+        aiAppliedRef.current = true;
+      }
+    }
+  }, [aiFromPoiId, aiToPoiId, aiFocusPoiId, aiAutoStart, postCmd, startNavigation]);
 
   // 模擬步進
   useEffect(() => {
@@ -551,6 +591,19 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
             style={{ marginLeft: 4 }}
           >
             <Ionicons name="git-network-outline" size={18} color={theme.colors.accent} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              const target = selectedPoi?.name;
+              const prefill = target
+                ? `從我目前位置到「${target}」要怎麼走？順便看看附近能吃什麼。`
+                : '幫我規劃從校門口到工程館 302 的路線，並推薦中午吃哪一家。';
+              nav.navigate('AIChat', { prompt: prefill });
+            }}
+            hitSlop={8}
+            style={{ marginLeft: 4 }}
+          >
+            <Ionicons name="sparkles" size={18} color={theme.colors.accent} />
           </Pressable>
         </View>
 
@@ -696,7 +749,7 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
           style={{
             color: offline.info.exists ? theme.colors.success : theme.colors.muted,
             fontSize: 10,
-            fontWeight: '800',
+            fontWeight: '700',
           }}
         >
           {offline.progress.status === 'downloading'
@@ -814,7 +867,7 @@ export function GoogleMapsLikeScreen(_props: Record<string, unknown>) {
         >
           <Ionicons name="school" size={18} color="#fff" />
           <View>
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 12 }}>下節課</Text>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12 }}>下節課</Text>
             <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 10 }}>
               {persona.nextClass.startHHmm} · {persona.nextClass.roomCode}
             </Text>
@@ -893,7 +946,7 @@ function PoiCard({
   const crowd =
     crowdRoll < 25 ? '人少' : crowdRoll < 65 ? '適中' : crowdRoll < 90 ? '擁擠' : '客滿';
   const crowdColor =
-    crowdRoll < 25 ? '#34D399' : crowdRoll < 65 ? '#F59E0B' : crowdRoll < 90 ? '#F87171' : '#A855F7';
+    crowdRoll < 25 ? '#34D399' : crowdRoll < 65 ? '#FF9500' : crowdRoll < 90 ? '#F87171' : '#A855F7';
   const stars = 3.6 + ((poi.name.length * 11) % 14) / 10;
   const reviews = 80 + ((poi.name.length * 17) % 380);
 
@@ -974,7 +1027,7 @@ function PoiCard({
         >
           <Ionicons name="close" size={18} color="#fff" />
         </Pressable>
-        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '900' }} numberOfLines={1}>
+        <Text style={{ color: '#fff', fontSize: 22, fontWeight: '700' }} numberOfLines={1}>
           {poi.name}
         </Text>
         <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }} numberOfLines={1}>
@@ -990,7 +1043,7 @@ function PoiCard({
             text={open ? `營業中 · 至 ${poi.closeTime}` : `已關閉 · ${poi.openTime}-${poi.closeTime}`}
             color={open ? '#34D399' : theme.colors.muted}
           />
-          <MetaItem icon="star" text={`${stars.toFixed(1)}`} color="#F59E0B" />
+          <MetaItem icon="star" text={`${stars.toFixed(1)}`} color="#FF9500" />
           <MetaItem icon="chatbubbles-outline" text={`${reviews} 則評論`} color={theme.colors.muted} />
           {poi.accessible && <MetaItem icon="accessibility-outline" text="無障礙" color="#34D399" />}
         </View>
@@ -1040,7 +1093,7 @@ function PoiCard({
                 justifyContent: 'center',
               }}
             >
-              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 11 }}>
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>
                 {nearbyBus.route.code}
               </Text>
             </View>
@@ -1072,7 +1125,7 @@ function PoiCard({
             })}
           >
             <Ionicons name="navigate" size={16} color="#fff" />
-            <Text style={{ color: '#fff', fontWeight: '800', fontSize: 14 }}>
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>
               開始導航 · {fmtWalk(distanceM)}
             </Text>
           </Pressable>
@@ -1194,7 +1247,7 @@ function TurnByTurnHud({
           />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#fff', fontWeight: '900', fontSize: 26, lineHeight: 28 }}>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 26, lineHeight: 28 }}>
             {step ? fmtDist(step.distM) : ''}
           </Text>
           <Text style={{ color: '#fff', fontSize: 13, marginTop: 2, fontWeight: '600' }} numberOfLines={2}>
@@ -1242,7 +1295,7 @@ function TurnByTurnHud({
         }}
       >
         <View style={{ flex: 1 }}>
-          <Text style={{ color: '#34D399', fontWeight: '900', fontSize: 22, lineHeight: 24 }}>
+          <Text style={{ color: '#34D399', fontWeight: '700', fontSize: 22, lineHeight: 24 }}>
             {fmtWalk(remainingM)}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -1270,12 +1323,12 @@ function TurnByTurnHud({
             paddingHorizontal: 16,
             height: 44,
             borderRadius: 12,
-            backgroundColor: pressed ? '#EF4444' : '#F87171',
+            backgroundColor: pressed ? '#FF3B30' : '#F87171',
             alignItems: 'center',
             justifyContent: 'center',
           })}
         >
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>結束</Text>
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>結束</Text>
         </Pressable>
       </View>
     </>

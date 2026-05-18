@@ -905,7 +905,7 @@ export function CountdownTimer(props: { targetDate: Date; label?: string; onExpi
             <Text
               style={{
                 color: theme.colors.accent,
-                fontWeight: '800',
+                fontWeight: '700',
                 fontSize: 22,
                 letterSpacing: 0,
               }}
@@ -970,7 +970,7 @@ export function ProgressRing(props: {
         }}
       />
       {showLabel && (
-        <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: size * 0.22 }}>
+        <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: size * 0.22 }}>
           {Math.round(progress * 100)}%
         </Text>
       )}
@@ -1051,7 +1051,7 @@ export function RatingStars(props: {
             <Ionicons
               name={filled ? 'star' : half ? 'star-half' : 'star-outline'}
               size={size}
-              color="#F59E0B"
+              color="#FF9500"
             />
           </Pressable>
         );
@@ -1609,7 +1609,7 @@ export function StatCard(props: {
           {props.label}
         </Text>
         <Text
-          style={{ fontSize: 24, fontWeight: '800', color: theme.colors.text, letterSpacing: 0 }}
+          style={{ fontSize: 24, fontWeight: '700', color: theme.colors.text, letterSpacing: 0 }}
         >
           {valueStr}
         </Text>

@@ -59,7 +59,7 @@ const riskColor = (level: RiskLevel) => {
     case 'watch':
       return theme.colors.warning;
     case 'warning':
-      return '#F97316';
+      return '#FF9500';
     case 'critical':
       return theme.colors.danger;
   }
@@ -94,7 +94,7 @@ const recTypeColor = (t: string) => {
     case 'urgent':
       return theme.colors.danger;
     case 'priority':
-      return '#F97316';
+      return '#FF9500';
     case 'strategy':
       return theme.colors.accent;
     case 'balance':
@@ -272,7 +272,7 @@ export function AcademicInsightsScreen() {
       >
         {/* Header */}
         <View style={{ paddingHorizontal: theme.space.lg, marginBottom: theme.space.lg }}>
-          <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700' }}>
             學業分析
           </Text>
           <Text style={{ color: theme.colors.textSecondary, fontSize: 14, marginTop: 4 }}>
@@ -621,7 +621,7 @@ function RiskGauge({
               ],
             }}
           />
-          <Text style={{ color, fontSize: 32, fontWeight: '800' }}>{riskScore}</Text>
+          <Text style={{ color, fontSize: 32, fontWeight: '700' }}>{riskScore}</Text>
           <Text style={{ color: theme.colors.textSecondary, fontSize: 11 }}>/100</Text>
         </View>
         <View
@@ -750,7 +750,7 @@ function ProfileCard({ profile }: { profile: AcademicProfile }) {
           <View key={s.label} style={{ alignItems: 'center' }}>
             <Ionicons name={s.icon as any} size={22} color={theme.colors.accent} />
             <Text
-              style={{ color: theme.colors.text, fontSize: 20, fontWeight: '800', marginTop: 4 }}
+              style={{ color: theme.colors.text, fontSize: 20, fontWeight: '700', marginTop: 4 }}
             >
               {s.value}
             </Text>

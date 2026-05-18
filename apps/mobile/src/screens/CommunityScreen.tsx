@@ -65,7 +65,7 @@ export function CommunityScreen(props: Record<string, unknown>) {
         <Text
           style={{
             fontSize: 22,
-            fontWeight: '800',
+            fontWeight: '700',
             color: theme.colors.text,
             marginBottom: theme.space.md,
           }}
@@ -103,7 +103,7 @@ export function CommunityScreen(props: Record<string, unknown>) {
             <Ionicons name="game-controller-outline" size={20} color={theme.colors.accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 15 }}>校園漫步</Text>
+            <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 15 }}>校園漫步</Text>
             <Text style={{ color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 }}>
               本地素材／好友挑戰 stub · 連結 today stack
             </Text>
