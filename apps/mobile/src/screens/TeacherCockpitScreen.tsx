@@ -28,6 +28,7 @@ import {
 } from '@campus/shared';
 import {
   DEMO_COURSES,
+  getDemoCoursesForUid,
   getDemoHomeworksByCourse,
   type MockHomework,
 } from '../data/demoCoursesMock';
@@ -114,7 +115,14 @@ export default function TeacherCockpitScreen() {
   const navigation = useNavigation<any>();
   const auth = useAuth();
   const tabBarBottomPad = useTabBarContentBottomPadding();
-  const [courseId, setCourseId] = useState<number>(DEMO_COURSES[0].id);
+  // 權限隔離：教師只看自己教的課。demo_teacher_chang 只教機器學習 71378。
+  const teacherCourses = useMemo(
+    () => getDemoCoursesForUid(auth.user?.uid),
+    [auth.user?.uid],
+  );
+  const [courseId, setCourseId] = useState<number>(
+    () => teacherCourses[0]?.id ?? DEMO_COURSES[0].id,
+  );
   const [tone, setTone] = useState<FeedbackTone>('encouraging');
   const [openSection, setOpenSection] = useState<null | 'flagged' | 'homeworks' | 'tone'>('flagged');
   const toggle = (k: typeof openSection) => {
@@ -130,7 +138,11 @@ export default function TeacherCockpitScreen() {
   const [reminderHw, setReminderHw] = useState<MockHomework | null>(null);
   const [reminderItems, setReminderItems] = useState<BulkReminderItem[]>([]);
 
-  const course = DEMO_COURSES.find((c) => c.id === courseId)!;
+  const course =
+    teacherCourses.find((c) => c.id === courseId) ??
+    DEMO_COURSES.find((c) => c.id === courseId) ??
+    teacherCourses[0] ??
+    DEMO_COURSES[0];
   const homeworks = useMemo(() => getDemoHomeworksByCourse(courseId), [courseId]);
   const students = DEMO_STUDENTS[courseId] ?? [];
 
@@ -638,7 +650,7 @@ export default function TeacherCockpitScreen() {
           flexWrap: 'wrap',
           marginBottom: theme.space.md,
         }}>
-          {DEMO_COURSES.map((c) => (
+          {teacherCourses.map((c) => (
             <Pressable
               key={c.id}
               onPress={() => setCourseId(c.id)}

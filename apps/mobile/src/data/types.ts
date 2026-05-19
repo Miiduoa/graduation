@@ -234,6 +234,8 @@ export type UserRole =
   | 'student'
   | 'teacher'
   | 'professor'
+  | 'ta'
+  | 'club_officer'
   | 'department_head'
   | 'principal'
   | 'admin'
@@ -241,9 +243,26 @@ export type UserRole =
   | 'alumni'
   | 'department'
   | 'school'
-  | 'vendor';
+  | 'vendor'
+  | 'guest';
 
-export type RoleGroup = 'student' | 'teacher' | 'staff' | 'department_head' | 'admin';
+/**
+ * RoleGroup 控制：分頁可見、權限基礎集、Today cockpit 派發。
+ *
+ * 注意：`ta` / `club_officer` / `alumni` / `guest` 故意不歸入更大的群組，
+ * 因為它們的 dashboard 與資料邊界與其他群組不同（TA 看待批改的協助課；社團
+ * 幹部看自家社團；校友只看公開內容；訪客只看 marketing view）。
+ */
+export type RoleGroup =
+  | 'student'
+  | 'teacher'
+  | 'ta'
+  | 'club_officer'
+  | 'staff'
+  | 'department_head'
+  | 'admin'
+  | 'alumni'
+  | 'guest';
 
 export type RoleMode = 'guest' | RoleGroup;
 
