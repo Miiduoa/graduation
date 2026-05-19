@@ -313,6 +313,37 @@ function toMockUserProfile(session: {
   department?: string | null;
   studentId?: string | null;
 }): UserProfile {
+  // 依角色補上必要的 serviceRoles / merchantAssignments，
+  // 讓各角色在 demo 模式下能通過畫面的權限檢查。
+  const serviceRoles: string[] = [];
+  let merchantAssignments: MerchantAssignment[] = [];
+
+  const r = session.role;
+  if (r === 'vendor') {
+    serviceRoles.push('merchant');
+    merchantAssignments = [
+      {
+        schoolId: session.schoolId,
+        schoolName: '靜宜大學',
+        cafeteriaId: 'demo-cafeteria-1',
+        cafeteriaName: '靜宜中餐部',
+        merchantId: 'demo-cafeteria-1',
+        brandKey: 'zhongcan',
+        operatorRole: 'owner',
+        status: 'active',
+        orderingEnabled: true,
+        pilotStatus: 'live',
+        displayName: session.displayName,
+        email: session.email,
+        lastActiveAt: new Date().toISOString(),
+      },
+    ];
+  } else if (r === 'department_head') {
+    serviceRoles.push('department');
+  } else if (r === 'admin') {
+    serviceRoles.push('department', 'admin');
+  }
+
   return {
     uid: session.uid,
     email: session.email,
@@ -329,8 +360,8 @@ function toMockUserProfile(session: {
     avatarUrl: null,
     isPublicProfile: null,
     roleGroup: getRoleGroup(session.role),
-    serviceRoles: [],
-    merchantAssignments: [],
+    serviceRoles,
+    merchantAssignments,
   };
 }
 
