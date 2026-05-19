@@ -7,7 +7,7 @@
  * 對應 web 端 apps/web/src/app/page.tsx 的灰色 alumni banner。
  */
 import React, { useMemo } from 'react';
-import { ScrollView, View, Text, Pressable, Alert } from 'react-native';
+import { ScrollView, View, Text, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
