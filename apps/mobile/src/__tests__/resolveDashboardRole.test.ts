@@ -6,8 +6,9 @@
 import { resolveDashboardRole } from '../screens/RoleAwareTodayScreen';
 
 describe('resolveDashboardRole', () => {
-  it('null profile → student', () => {
-    expect(resolveDashboardRole(null)).toBe('student');
+  // null profile = 未登入 = 訪客（改：原回 'student'，現拆出 guest dashboard）
+  it('null profile → guest', () => {
+    expect(resolveDashboardRole(null)).toBe('guest');
   });
 
   it('demo student uid → student', () => {
@@ -22,16 +23,33 @@ describe('resolveDashboardRole', () => {
     expect(resolveDashboardRole({ uid: 'demo_ta_lin' })).toBe('ta');
   });
 
-  it('demo admin uid → department', () => {
+  it('demo 系主任 uid (demo_admin_huang) → department', () => {
     expect(resolveDashboardRole({ uid: 'demo_admin_huang' })).toBe('department');
+  });
+
+  it('demo 系統管理員 uid (demo_admin_sys) → admin', () => {
+    expect(resolveDashboardRole({ uid: 'demo_admin_sys' })).toBe('admin');
+  });
+
+  it('demo 社團幹部 uid (demo_club_wei) → club_officer', () => {
+    expect(resolveDashboardRole({ uid: 'demo_club_wei' })).toBe('club_officer');
+  });
+
+  it('demo 校友 uid (demo_alumni_chang) → alumni', () => {
+    expect(resolveDashboardRole({ uid: 'demo_alumni_chang' })).toBe('alumni');
+  });
+
+  it('demo 訪客 uid (demo_guest) → guest', () => {
+    expect(resolveDashboardRole({ uid: 'demo_guest' })).toBe('guest');
   });
 
   it('demo cafeteria uid → vendor', () => {
     expect(resolveDashboardRole({ uid: 'demo_cafeteria' })).toBe('vendor');
   });
 
-  it('roleGroup=admin → department', () => {
-    expect(resolveDashboardRole({ roleGroup: 'admin' })).toBe('department');
+  // roleGroup=admin 改為 'admin'（系統管理員獨立 dashboard），不再與 department 共用
+  it('roleGroup=admin → admin', () => {
+    expect(resolveDashboardRole({ roleGroup: 'admin' })).toBe('admin');
   });
 
   it('roleGroup=department_head → department', () => {
@@ -40,6 +58,18 @@ describe('resolveDashboardRole', () => {
 
   it('roleGroup=teacher → teacher', () => {
     expect(resolveDashboardRole({ roleGroup: 'teacher' })).toBe('teacher');
+  });
+
+  it('roleGroup=club_officer → club_officer', () => {
+    expect(resolveDashboardRole({ roleGroup: 'club_officer' })).toBe('club_officer');
+  });
+
+  it('roleGroup=alumni → alumni', () => {
+    expect(resolveDashboardRole({ roleGroup: 'alumni' })).toBe('alumni');
+  });
+
+  it('roleGroup=guest → guest', () => {
+    expect(resolveDashboardRole({ roleGroup: 'guest' })).toBe('guest');
   });
 
   it('role=teacher → teacher', () => {
@@ -60,6 +90,18 @@ describe('resolveDashboardRole', () => {
 
   it('role=ta → ta', () => {
     expect(resolveDashboardRole({ role: 'ta' })).toBe('ta');
+  });
+
+  it('role=club_officer → club_officer', () => {
+    expect(resolveDashboardRole({ role: 'club_officer' })).toBe('club_officer');
+  });
+
+  it('role=alumni → alumni', () => {
+    expect(resolveDashboardRole({ role: 'alumni' })).toBe('alumni');
+  });
+
+  it('role=guest → guest', () => {
+    expect(resolveDashboardRole({ role: 'guest' })).toBe('guest');
   });
 
   it('未知 role → student', () => {
