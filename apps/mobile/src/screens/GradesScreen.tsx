@@ -17,6 +17,7 @@ import {
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { getDataSource, hasDataSource } from '../data';
 import type { Grade as DataGrade } from '../data/types';
@@ -419,7 +420,7 @@ export function GradesScreen(props: Record<string, unknown>) {
     return dist;
   }, [completedCourses]);
 
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <Screen>
         <AnimatedCard title="成績查詢" subtitle="請先登入">

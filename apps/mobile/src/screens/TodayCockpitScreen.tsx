@@ -34,7 +34,7 @@ import {
 } from '@campus/shared';
 
 import {
-  DEMO_COURSES,
+  getDemoCoursesForUid,
   getDemoHomeworksByCourse,
   getDemoExamsByCourse,
   getDemoScoreItemsByCourse,
@@ -97,9 +97,15 @@ export default function TodayCockpitScreen() {
     setOpenSection(openSection === k ? null : k);
   };
 
+  // 依當前 demo 角色篩選課程（教師/TA/餐廳/校友/訪客不該看到全部課程）
+  const visibleCourses = useMemo(
+    () => getDemoCoursesForUid(auth.user?.uid),
+    [auth.user?.uid],
+  );
+
   const plannerTasks: PlannerTask[] = useMemo(() => {
     const arr: PlannerTask[] = [];
-    for (const c of DEMO_COURSES) {
+    for (const c of visibleCourses) {
       for (const hw of getDemoHomeworksByCourse(c.id)) {
         arr.push(homeworkToPlannerTask({
           id: hw.id, courseId: hw.courseId, courseName: c.name,
@@ -115,19 +121,19 @@ export default function TodayCockpitScreen() {
       }
     }
     return arr;
-  }, []);
+  }, [visibleCourses]);
 
   const studyPlan = useMemo(() => planStudy(plannerTasks, { now }), [plannerTasks, now]);
   const nextTask = studyPlan.prioritized[0];
 
-  const grades = useMemo(() => DEMO_COURSES.map((c) => {
+  const grades = useMemo(() => visibleCourses.map((c) => {
     const items = getDemoScoreItemsByCourse(c.id);
     const pred = predictCurrent(items.map((s): PredictorItem => ({
       id: String(s.id), title: s.name, weight: s.weight,
       maxScore: s.totalScore, score: s.studentScore, graded: s.studentScore !== null,
     })));
     return { id: c.id, name: c.name, iconEmoji: c.iconEmoji, likely: pred.likelyCase, letter: pred.letterGrade };
-  }), []);
+  }), [visibleCourses]);
 
   const [mistakes, setMistakes] = useState<MistakeEntry[]>([]);
   useEffect(() => {

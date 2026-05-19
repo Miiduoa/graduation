@@ -405,11 +405,15 @@ export const DEMO_ANNOUNCEMENTS: MockAnnouncement[] = [
  * Demo 期間明確指定「哪個人負責哪些課」，避免 TA 看到全部 5 門課的待批改。
  *
  * 規則：
- *  - 教師 demo_teacher_chang（張怡君老師）：只教「機器學習 71378」（DEMO_COURSES 中 instructor 對應）
+ *  - 教師 demo_teacher_chang（張怡君老師）：只教「機器學習 71378」
  *  - TA demo_ta_lin（林助教）：協助「機器學習 71378」與「計算機概論二 71282」
  *  - 學生 demo_student_kuchih：修全部 5 門課（與課表對齊）
  *  - 系主任 demo_admin_huang：可看本系所有課（5 門）
  *  - 系統管理員 demo_admin_sys：可看本系所有課
+ *  - 社團幹部 demo_club_wei：自己也是學生，只看自己選的課（demo 化簡為 3 門）
+ *  - 餐廳員工 demo_cafeteria：完全不該看到課程（空陣列）
+ *  - 校友 demo_alumni_chang：已畢業，不該看到當前課程（空陣列）
+ *  - 訪客 demo_guest：不能看到任何課程（空陣列）
  */
 const COURSE_OWNERSHIP: Record<string, number[]> = {
   demo_teacher_chang: [71378],
@@ -417,14 +421,43 @@ const COURSE_OWNERSHIP: Record<string, number[]> = {
   demo_student_kuchih: [71378, 71282, 71240, 71393, 77418],
   demo_admin_huang: [71378, 71282, 71240, 71393, 77418],
   demo_admin_sys: [71378, 71282, 71240, 71393, 77418],
+  demo_club_wei: [71378, 71282, 77418],
+  demo_cafeteria: [],
+  demo_alumni_chang: [],
+  demo_guest: [],
 };
 
-/** 回傳該 uid 在 demo 中可看到的課程清單。fallback 視同學生（全選課）。 */
+/**
+ * 回傳該 uid 在 demo 中可看到的課程清單。
+ *
+ * 設計：
+ *  - 已知 demo uid：用 COURSE_OWNERSHIP 表
+ *  - 未知 demo_ 開頭 uid：回空陣列（謹慎，不要讓未配置的角色意外看到全部課程）
+ *  - 非 demo 帳號 / 沒 uid：回 DEMO_COURSES（給 demo 預覽用）
+ */
 export function getDemoCoursesForUid(uid: string | null | undefined): MockCourse[] {
   if (!uid) return DEMO_COURSES;
-  const ids = COURSE_OWNERSHIP[uid];
-  if (!ids) return DEMO_COURSES;
-  return DEMO_COURSES.filter((c) => ids.includes(c.id));
+  if (uid in COURSE_OWNERSHIP) {
+    const ids = COURSE_OWNERSHIP[uid];
+    return DEMO_COURSES.filter((c) => ids.includes(c.id));
+  }
+  // demo_ 開頭但未配置 → 預設不顯示，避免跨角色資料外洩
+  if (typeof uid === 'string' && uid.startsWith('demo_')) return [];
+  // 真實帳號 → 維持原本行為（demo data 當 fallback）
+  return DEMO_COURSES;
+}
+
+/** 該 uid 能否看到指定課程（demo 權限隔離輔助） */
+export function canUidSeeCourse(
+  uid: string | null | undefined,
+  courseId: number,
+): boolean {
+  if (!uid) return true;
+  if (!(uid in COURSE_OWNERSHIP)) {
+    // 非 demo 帳號維持原本不檢查
+    return !uid.startsWith('demo_');
+  }
+  return COURSE_OWNERSHIP[uid].includes(courseId);
 }
 
 // ─────────────────────────────────────────────────────────

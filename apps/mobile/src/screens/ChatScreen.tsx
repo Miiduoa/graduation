@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Screen, ErrorState } from '../ui/components';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { useDataSource } from '../hooks/useDataSource';
 import { getDb, isFirebaseMockMode } from '../firebase';
@@ -553,7 +554,7 @@ export function ChatScreen(props: any) {
   );
 
   // ── Guard ──
-  if (!auth.user) return <ErrorState title="對話" subtitle="尚未登入" hint="請先登入" />;
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) return <ErrorState title="對話" subtitle="尚未登入" hint="請先登入" />;
   if (!convoKey) return <ErrorState title="對話" subtitle="無法開啟對話" hint="請從對話列表進入" />;
   if (accessError) return <ErrorState title="對話" subtitle={accessError} hint="請從你的對話列表開啟對話" />;
 

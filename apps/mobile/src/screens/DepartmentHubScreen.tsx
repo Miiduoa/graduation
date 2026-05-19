@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../ui/theme';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useAmbientCues } from '../features/engagement';
 import { AmbientCueCard } from '../ui/campusOs';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
@@ -225,7 +226,7 @@ export function DepartmentHubScreen(props: any) {
     profile?.role === 'department_head' ||
     profile?.serviceRoles?.includes('department');
 
-  if (!user) {
+  if (shouldBlockForNoLogin({ uid: user?.uid ?? null, hasUser: !!user })) {
     return (
       <View
         style={{

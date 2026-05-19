@@ -78,6 +78,46 @@ type Comment = {
   isAI?: boolean;
 };
 
+
+// ─── Demo data ─────────────────────────────────────────────────────────────
+const DEMO_GROUPS_META: Record<string, Group> = {
+  'grp-db-sys': { id: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', isPublished: true, verification: { status: 'verified_teacher' } },
+  'grp-prog2':  { id: 'grp-prog2',  schoolId: 'demo', type: 'course', name: '程式設計二',   joinCode: 'PROG0002', isPublished: true, verification: { status: 'verified_teacher' } },
+  'grp-algo':   { id: 'grp-algo',   schoolId: 'demo', type: 'course', name: '演算法導論',   joinCode: 'ALGO0003', isPublished: true, verification: { status: 'unverified' } },
+  'grp-web':    { id: 'grp-web',    schoolId: 'demo', type: 'course', name: 'Web 程式設計', joinCode: 'WEBP0004', isPublished: true, verification: { status: 'verified_teacher' } },
+  'grp-club-im':    { id: 'grp-club-im',    schoolId: 'demo', type: 'club',  name: '資管學會',       joinCode: 'IMCLUB1X', isPublished: true },
+  'grp-admin-dept': { id: 'grp-admin-dept', schoolId: 'demo', type: 'admin', name: '資管系行政群組', joinCode: 'ADMIN001', isPublished: false },
+};
+
+const DEMO_POSTS_FOR_GROUP: Record<string, Post[]> = {
+  'grp-db-sys': [
+    { id: 'post-db-1', kind: 'announcement', title: '期中考範圍公告', body: '期中考範圍為第1章至第5章，重點包含 ER Model、正規化（1NF~3NF）、SQL 基礎。', authorId: 'demo_teacher_chen', authorName: '陳雅君老師', pinned: true, likes: 8 },
+    { id: 'post-db-2', kind: 'question', title: '請問 3NF 和 BCNF 有什麼差異？', body: '課本看起來有點模糊，可以請老師或同學解釋一下嗎？', authorId: 'demo_student_ku', authorName: '顧晉瑋', solved: false, likes: 3, commentCount: 2 },
+    { id: 'post-db-3', kind: 'post', title: '期末專題分組討論', body: '大家好，我想找 2~3 位同學一起做期末專題，有意願的同學請私訊我！', authorId: 'demo_student_peer', authorName: '林宏志', likes: 5 },
+  ],
+  'grp-prog2': [
+    { id: 'post-p2-1', kind: 'announcement', title: '作業二繳交期限提醒', body: '作業二（遞迴與排序演算法）請於本週五 23:59 前上傳至 Moodle，遲交扣 20%。', authorId: 'demo_teacher_chen', authorName: '陳雅君老師', pinned: true, likes: 6 },
+    { id: 'post-p2-2', kind: 'question', title: 'Quick Sort 為何最壞是 O(n²)？', body: '上課說平均是 O(n log n)，但最壞是 O(n²)，這種情況什麼時候會發生？', authorId: 'demo_student_ku', authorName: '顧晉瑋', solved: true, likes: 7, commentCount: 3 },
+  ],
+  'grp-web': [
+    { id: 'post-web-1', kind: 'announcement', title: '本週課程：React Hooks 複習', body: '本週將複習 useState / useEffect，請預習教材第 8 章。', authorId: 'demo_teacher_chen', authorName: '陳雅君老師', pinned: true, likes: 4 },
+  ],
+  'grp-club-im': [
+    { id: 'post-club-1', kind: 'announcement', title: '資管之夜 2026 籌備公告', body: '資管之夜預計於 2026/06/20 舉行，目前正在招募工作人員！', authorId: 'demo_club_wei', authorName: '李威廷（學會長）', pinned: true, likes: 15 },
+    { id: 'post-club-2', kind: 'post', title: '學會幹部聚會通知', body: '下週二 17:00 請各幹部到系辦集合討論活動細節，請準時出席。', authorId: 'demo_club_wei', authorName: '李威廷（學會長）', likes: 4 },
+  ],
+  'grp-admin-dept': [
+    { id: 'post-admin-1', kind: 'announcement', title: '本學期課程審查進度更新', body: '請各位老師於本週五前完成課程大綱送審。', authorId: 'demo_admin_huang', authorName: '黃系主任', pinned: true, likes: 2 },
+  ],
+};
+
+function getDemoMemberRole(role: string | undefined, groupId: string): string {
+  if (groupId === 'grp-club-im') return role === 'club_officer' ? 'owner' : 'member';
+  if (groupId === 'grp-admin-dept') return 'owner';
+  return role === 'teacher' ? 'instructor' : 'member';
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function GroupDetailScreen(props: any) {
   const nav = props?.navigation;
   const groupId: string | undefined = props?.route?.params?.groupId;
@@ -100,7 +140,10 @@ export function GroupDetailScreen(props: any) {
     error: groupError,
     reload: reloadGroup,
   } = useAsyncList<Group>(async () => {
-    if (isFirebaseMockMode()) return [];
+    if (isFirebaseMockMode()) {
+      const demo = groupId ? DEMO_GROUPS_META[groupId] : undefined;
+      return demo ? [demo] : [];
+    }
     if (!groupId) return [];
     const snap = await getDoc(doc(db, 'groups', groupId));
     if (!snap.exists()) return [];
@@ -113,7 +156,9 @@ export function GroupDetailScreen(props: any) {
   const { items: myMemberRows, reload: reloadMember } = useAsyncList<{
     role?: string;
   }>(async () => {
-    if (isFirebaseMockMode()) return [];
+    if (isFirebaseMockMode()) {
+      return [{ role: getDemoMemberRole(auth.profile?.role, groupId ?? '') }];
+    }
     if (!groupId) return [];
     if (!auth.user) return [];
     const snap = await getDoc(doc(db, 'groups', groupId, 'members', auth.user.uid));
@@ -134,7 +179,7 @@ export function GroupDetailScreen(props: any) {
     error: postsError,
     reload: reloadPosts,
   } = useAsyncList<Post>(async () => {
-    if (isFirebaseMockMode()) return [];
+    if (isFirebaseMockMode()) return (groupId ? DEMO_POSTS_FOR_GROUP[groupId] : undefined) ?? [];
     if (!groupId) return [];
     const ref = collection(db, 'groups', groupId, 'posts');
     const qy = query(ref, orderBy('createdAt', 'desc'), limit(50));
@@ -157,7 +202,7 @@ export function GroupDetailScreen(props: any) {
     comment: Comment | null;
     commentCount: number;
   }>(async () => {
-    if (isFirebaseMockMode()) return [];
+    if (isFirebaseMockMode()) return posts.map((p) => ({ postId: p.id, comment: null, commentCount: p.commentCount ?? 0 }));
     if (!groupId || posts.length === 0) return [];
 
     // Batch fetch: limit concurrent requests to avoid overwhelming Firestore

@@ -16,11 +16,29 @@ import { Screen } from '../ui/components';
 import { theme } from '../ui/theme';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { getDb, isFirebaseMockMode } from '../firebase';
 import { fetchSchoolDirectoryProfileMap } from '../services/memberDirectory';
 import { listFollowingIds, listFollowersIds, unfollowUser } from '../services/follows';
 import { PeerFollowButton } from '../components/PeerFollowButton';
+import { getPersona, isDemoPersonaUid, PERSONAS, type PersonaIdentity } from '../data/demoPersona';
+
+
+// Demo following/followers from demoPersona contactUids
+function getDemoFollowData(myUid: string) {
+  const me = isDemoPersonaUid(myUid) ? getPersona(myUid) : null;
+  if (!me) return { following: [] as string[], followers: [] as string[], profileMap: {} as Record<string, { displayName?: string | null; roleLabel?: string | null }> };
+  const following = me.contactUids ?? [];
+  const all = Object.values(PERSONAS) as PersonaIdentity[];
+  const followers = all.filter((p) => p.uid !== myUid && (p.contactUids ?? []).includes(myUid)).map((p) => p.uid);
+  const profileMap: Record<string, { displayName?: string | null; roleLabel?: string | null }> = {};
+  for (const uid of [...following, ...followers]) {
+    const p = getPersona(uid);
+    if (p) profileMap[uid] = { displayName: p.fullName, roleLabel: p.shortLabel ?? null };
+  }
+  return { following, followers, profileMap };
+}
 
 export function FollowingListsScreen(props: any) {
   const nav = props?.navigation;
@@ -39,9 +57,10 @@ export function FollowingListsScreen(props: any) {
 
   const load = useCallback(async () => {
     if (!school?.id || !myUid || isFirebaseMockMode()) {
-      setFollowing([]);
-      setFollowers([]);
-      setProfileMap({});
+      const demo = getDemoFollowData(myUid);
+      setFollowing(demo.following);
+      setFollowers(demo.followers);
+      setProfileMap(demo.profileMap);
       return;
     }
     const [fIds, ferIds] = await Promise.all([
@@ -94,7 +113,7 @@ export function FollowingListsScreen(props: any) {
     }
   }
 
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <Screen>
         <View style={styles.center}>
@@ -124,10 +143,6 @@ export function FollowingListsScreen(props: any) {
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={theme.colors.accent} />
-        </View>
-      ) : isFirebaseMockMode() ? (
-        <View style={styles.center}>
-          <Text style={styles.muted}>模擬模式無資料</Text>
         </View>
       ) : (
         <FlatList

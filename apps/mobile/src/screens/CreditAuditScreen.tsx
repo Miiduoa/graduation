@@ -8,6 +8,7 @@ import { Screen, Card, Pill, Button, LoadingState, ErrorState, AuthGuard } from 
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { hasDataSource, getDataSource } from '../data';
 import type { Grade } from '../data/types';
@@ -191,7 +192,7 @@ export function CreditAuditScreen(props: any) {
   }, [auth.user?.uid, school.id]);
 
   // ── Guards ──
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <AuthGuard
         user={auth.user}

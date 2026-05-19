@@ -30,6 +30,7 @@ import { theme, shadowStyle } from '../../ui/theme';
 import { EmptyState } from '../../ui/components';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { useAuth } from '../../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../../services/demoSession';
 import { useSchool } from '../../state/school';
 import { getDb, isFirebaseMockMode } from '../../firebase';
 import {
@@ -243,7 +244,7 @@ export function HomeFeedScreen() {
     nav?.navigate?.('StoryCompose' as never);
   };
 
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <View style={[styles.center, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }]}>
         <Text style={{ color: theme.colors.textSecondary }}>請先登入以瀏覽校園動態</Text>

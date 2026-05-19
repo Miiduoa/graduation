@@ -10,7 +10,7 @@
  *    審核 / 派工 / 訂單推進 / 求助回覆 / 社員審核 / 作業批改 deep-link
  */
 import React, { useMemo, useState } from 'react';
-import { Alert, View, Text, TextInput } from 'react-native';
+import { Alert, View, Text, TextInput, Pressable } from 'react-native';
 import {
   AIScreen,
   AIHero,
@@ -34,13 +34,16 @@ import {
   replyHelpRequest,
   approveClubMember,
   rejectClubMember,
+  approveAnnouncement,
+  rejectAnnouncementWithReason,
   sendMessage as sendDynamicMessage,
   type StoreDynamicMessage,
 } from '../services/demoStore';
 
 type FilterKey = 'all' | 'unread' | 'action';
 
-export default function MessagesAiFirstScreen() {
+export default function MessagesAiFirstScreen(props: any) {
+  const navigation = props?.navigation;
   const { role: demoRole, definition: roleDef } = useDemoRole();
   const roleLabel = roleDef.label;
   const roleIcon = roleDef.icon;
@@ -72,6 +75,41 @@ export default function MessagesAiFirstScreen() {
         title={`${unread} 則未讀\n${messages.length} 則收件匣訊息`}
         subtitle="跨角色動作面板：選一則「待辦/提醒」訊息可直接審核 / 推進"
       />
+
+      {/* 私訊 / 好友快速入口 */}
+      <View
+        style={{
+          flexDirection: 'row',
+          gap: 10,
+          paddingHorizontal: aiTokens.space.md,
+          marginTop: aiTokens.space.md,
+        }}
+      >
+        {[
+          { label: '💬 私訊', route: 'Dms' },
+          { label: '👥 好友管理', route: 'FriendsManage' },
+          { label: '🔍 搜尋好友', route: 'FriendSearch' },
+        ].map(({ label, route }) => (
+          <Pressable
+            key={route}
+            onPress={() => navigation?.navigate?.(route)}
+            style={({ pressed }) => ({
+              flex: 1,
+              paddingVertical: 10,
+              paddingHorizontal: 6,
+              borderRadius: 10,
+              backgroundColor: pressed ? aiTokens.aiSurface : aiTokens.panel,
+              borderWidth: 1,
+              borderColor: aiTokens.border,
+              alignItems: 'center',
+            })}
+          >
+            <Text style={{ fontSize: 12, fontWeight: '700', color: aiTokens.text, textAlign: 'center' }}>
+              {label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
 
       {/* Filter chips */}
       <View
@@ -308,7 +346,40 @@ function CrossRoleActionPanel({
     );
   }
 
-  // 動態訊息且為使用者角色：提供 reply
+  if (msg.relatedPendingAnnId && demoRole === 'department_head') {
+    const annTitle = msg.subject.replace(/^【公告待審】[^：]+：/, '');
+    return (
+      <ActionCard title="📢 公告審核" helper="核准後全體師生收到發布通知；退回後老師收到退件原因">
+        <AIButton
+          label="✅ 核准發布"
+          onPress={() => {
+            approveAnnouncement({
+              pendingId: msg.relatedPendingAnnId!,
+              title: annTitle,
+              approverName: roleLabel,
+              submitterName: msg.fromName.replace(/（系統通知）$/, ''),
+            });
+            done('已核准，師生會收到發布通知');
+          }}
+        />
+        <AIButton
+          label="❌ 退回並說明"
+          variant="danger"
+          onPress={() => {
+            rejectAnnouncementWithReason({
+              pendingId: msg.relatedPendingAnnId!,
+              title: annTitle,
+              approverName: roleLabel,
+              reason: '格式需修正，請重新送審',
+            });
+            done('已退回，老師會收到退件原因');
+          }}
+        />
+      </ActionCard>
+    );
+  }
+
+  // 動態訊息且為使用者角色：提供 reply（放最後，避免擋住上方有 relatedXxxId 的訊息）
   if (msg.senderRole && msg.recipientRoles.includes(demoRole as never)) {
     return <ReplyCard msg={msg} roleLabel={roleLabel} senderRole={msg.senderRole} onDone={done} />;
   }

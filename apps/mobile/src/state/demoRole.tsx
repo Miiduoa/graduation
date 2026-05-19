@@ -15,6 +15,7 @@ export type DemoRole =
   | 'club_officer'
   | 'department_head'
   | 'admin'
+  | 'vendor'
   | 'alumni'
   | 'guest';
 
@@ -90,6 +91,17 @@ export const DEMO_ROLES: DemoRoleDefinition[] = [
     toneSoft: 'rgba(255,59,48,0.12)',
     description: '使用者管理、學校設定、系統日誌',
     entryRoute: 'Admin',
+  },
+  {
+    // 餐廳員工 / 校內廠商 — 跟學生/教師完全隔離，只看到自己店面的菜單、訂單、營收
+    role: 'vendor',
+    label: '餐廳員工 / 廠商',
+    shortLabel: '餐廳',
+    icon: '🍱',
+    tone: '#C95F28',
+    toneSoft: 'rgba(201,95,40,0.14)',
+    description: '管理菜單、收訂單、推播優惠、看店面營收',
+    entryRoute: 'VendorDashboard',
   },
   {
     role: 'alumni',
@@ -237,6 +249,24 @@ const CAPS: Record<DemoRole, RoleCapabilities> = {
     canManageUsers: true,
     canManageSystem: true,
     canBorrowBooks: true,
+    canReadPublic: true,
+  },
+  vendor: {
+    // 餐廳員工：不碰學術系統，但有自家店面的全部營運權限
+    canViewTeacherDashboard: false,
+    canEditModules: false,
+    canPublishGrades: false,
+    canGradeAssignments: false,
+    canEditQuestionBank: false,
+    canJoinClubs: false,
+    canPublishClubEvents: false,
+    canManageClubMembers: false,
+    canPublishAnnouncements: false,
+    canApproveAnnouncements: false,
+    canViewAdminDashboard: false,
+    canManageUsers: false,
+    canManageSystem: false,
+    canBorrowBooks: false,
     canReadPublic: true,
   },
   alumni: {

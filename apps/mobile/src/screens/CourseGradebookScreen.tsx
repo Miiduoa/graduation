@@ -7,6 +7,7 @@ import { Button, Card, ErrorState, LoadingState, Pill, Screen } from '../ui/comp
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useAuth } from '../state/auth';
+import { shouldBlockForNoLogin, isDemoUid } from '../services/demoSession';
 import { useSchool } from '../state/school';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { useDataSource } from '../hooks/useDataSource';
@@ -55,7 +56,7 @@ export function CourseGradebookScreen(props: any) {
     return gradebook.rows.filter((row) => row.uid === auth.user?.uid);
   }, [auth.user?.uid, gradebook, isTeacher]);
 
-  if (!auth.user) {
+  if (shouldBlockForNoLogin({ uid: auth.user?.uid ?? null, hasUser: !!auth.user })) {
     return (
       <Screen>
         <Card title="課內成績簿" subtitle="登入後即可查看課程內評分與總成績">

@@ -27,7 +27,11 @@ export type DemoUid =
   | 'demo_teacher_chang'
   | 'demo_ta_lin'
   | 'demo_admin_huang'
-  | 'demo_cafeteria';
+  | 'demo_admin_sys'
+  | 'demo_club_wei'
+  | 'demo_cafeteria'
+  | 'demo_alumni_chang'
+  | 'demo_guest';
 
 export interface DormitoryStory {
   building: string;
@@ -119,7 +123,16 @@ export interface MerchantContractStory {
 export interface DemoUserStory {
   uid: DemoUid;
   fullName: string;
-  role: 'student' | 'teacher' | 'ta' | 'admin' | 'vendor';
+  role:
+    | 'student'
+    | 'teacher'
+    | 'ta'
+    | 'club_officer'
+    | 'department_head'
+    | 'admin'
+    | 'vendor'
+    | 'alumni'
+    | 'guest';
   schoolId: string;
   department: string;
   /** 入學/到職年（民國） */
@@ -344,7 +357,8 @@ export const TA_LIN: DemoUserStory = {
 export const ADMIN_HUANG: DemoUserStory = {
   uid: 'demo_admin_huang',
   fullName: '黃主任',
-  role: 'admin',
+  // 系主任 / 系所主管 — 與系統管理員區分
+  role: 'department_head',
   schoolId: 'pu',
   department: '資訊管理學系',
   joinedYear: 98,
@@ -402,6 +416,126 @@ export const VENDOR_AYING: DemoUserStory = {
 };
 
 // ─────────────────────────────────────────────────────────
+// 系統管理員 王資管（校務系統 SRE，跟黃主任不同人）
+// ─────────────────────────────────────────────────────────
+export const ADMIN_SYS: DemoUserStory = {
+  uid: 'demo_admin_sys',
+  fullName: '王系管',
+  role: 'admin',
+  schoolId: 'pu',
+  department: '校務系統組',
+  joinedYear: 105,
+  office: {
+    building: '行政大樓',
+    room: 'A-503（資訊組）',
+    floor: 5,
+    officeHours: [
+      { day: '週一至週五', from: '08:30', to: '17:30' },
+    ],
+    phone: '04-26328001 ext. 11220',
+    vehicle: { plate: 'BBB-9988', type: 'car' },
+  },
+  parking: {
+    vehicle: 'car',
+    permitNumber: 'PU-S-2025-018',
+    zone: '行政大樓 教職員區',
+    monthlyFee: 0,
+    recentEntries: [{ direction: 'in', at: hoursAgo(4) }],
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// 社團幹部 魏程式（資管系大三 + 程式設計社社長）
+// ─────────────────────────────────────────────────────────
+export const CLUB_OFFICER_WEI: DemoUserStory = {
+  uid: 'demo_club_wei',
+  fullName: '魏程式',
+  role: 'club_officer',
+  schoolId: 'pu',
+  department: '資訊管理學系',
+  joinedYear: 110,
+  dorm: {
+    building: '宜真樓',
+    room: 'B302',
+    floor: 3,
+    roomType: 'double',
+    roommates: [{ name: '蘇晨', studentId: '411211408', major: '資工系' }],
+    inDate: '2024-09-01',
+    outDate: '2025-06-30',
+    recentRepairs: [],
+    recentEntry: [
+      { at: hoursAgo(3), method: 'face' },
+      { at: daysAgo(1), method: 'face' },
+    ],
+    utilities: { electricity: 198, water: 32, month: '2026-04' },
+  },
+  clubs: {
+    active: [
+      { name: '程式設計社', role: 'president', yearJoined: 110 },
+      { name: '資管學會', role: 'officer', yearJoined: 111 },
+    ],
+    events: [
+      { name: '黑客松 2026 春', date: daysAhead(10).slice(0, 10), rsvp: 'going' },
+      { name: '社課：Web3 入門', date: daysAhead(3).slice(0, 10), rsvp: 'going' },
+    ],
+  },
+  library: {
+    borrowed: [
+      { title: 'React 設計模式', author: 'Lydia Hallie', dueAt: daysAhead(8), renewable: true },
+    ],
+    totalBorrowed: 1,
+    overdueCount: 0,
+    bookFavorites: 6,
+    studyRoomsBooked: [{ room: '社團辦 C-12', date: daysAhead(2).slice(0, 10), time: '19:00-21:00' }],
+  },
+  printing: { balance: 88, monthUsed: 65, recentJobs: [], defaultPrinter: '主顧樓 1F' },
+  finance: {
+    semesterFee: { total: 56400, paid: true, dueAt: '2026-02-15' },
+    printingBalance: 88,
+    diningBalance: 240,
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// 校友 張學長（109 屆資管系畢業，已就業）
+// ─────────────────────────────────────────────────────────
+export const ALUMNI_CHANG: DemoUserStory = {
+  uid: 'demo_alumni_chang',
+  fullName: '張學長',
+  role: 'alumni',
+  schoolId: 'pu',
+  department: '資訊管理學系（109 屆畢業）',
+  joinedYear: 106,
+  // 校友只保留少量資料：歷史借閱、目前職業聯絡資訊（用 office 模擬）
+  office: {
+    building: '台北市信義區（任職中）',
+    room: '某科技公司 後端工程師',
+    floor: 0,
+    officeHours: [],
+    phone: '0922-xxx-xxx',
+  },
+  library: {
+    borrowed: [],
+    totalBorrowed: 0,
+    overdueCount: 0,
+    bookFavorites: 22,
+    studyRoomsBooked: [],
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// 訪客 — 未登入身份，只看公開內容
+// ─────────────────────────────────────────────────────────
+export const GUEST_DEMO: DemoUserStory = {
+  uid: 'demo_guest',
+  fullName: '訪客',
+  role: 'guest',
+  schoolId: 'pu',
+  department: '訪客',
+  joinedYear: 0,
+};
+
+// ─────────────────────────────────────────────────────────
 // 索引 + accessors
 // ─────────────────────────────────────────────────────────
 
@@ -410,7 +544,11 @@ const STORIES: Record<DemoUid, DemoUserStory> = {
   demo_teacher_chang: TEACHER_CHANG,
   demo_ta_lin: TA_LIN,
   demo_admin_huang: ADMIN_HUANG,
+  demo_admin_sys: ADMIN_SYS,
+  demo_club_wei: CLUB_OFFICER_WEI,
   demo_cafeteria: VENDOR_AYING,
+  demo_alumni_chang: ALUMNI_CHANG,
+  demo_guest: GUEST_DEMO,
 };
 
 export function getDemoUserStory(uid: string): DemoUserStory | null {
