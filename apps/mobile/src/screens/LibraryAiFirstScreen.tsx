@@ -1,7 +1,10 @@
 /**
  * Campus AI-First — 圖書館 V2
+ *
+ * 接 demoStore：續借 / 預約 → renewBook / reserveBook，更新 borrowingOverrides
+ * 與 libraryReservations。學生切換進來會看到續借後的到期日（持久化）。
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { Alert, View, Text } from 'react-native';
 import {
   AIDetailScreen,
@@ -13,9 +16,34 @@ import {
   AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
+import { useDemoRole } from '../state/demoRole';
+import { useDemoStore } from '../state/demoStore';
+import { renewBook, reserveBook } from '../services/demoStore';
+
+const BOOK_ALGO = {
+  id: 'BK-ALGO-4',
+  title: '演算法導論（第 4 版）',
+  defaultDueDate: '2026-05-22',
+};
+
+const BOOK_DDIA = {
+  id: 'BK-DDIA',
+  title: 'Designing Data-Intensive Applications',
+};
 
 export default function LibraryAiFirstScreen(props: any) {
   const navigation = props?.navigation;
+  const { role, definition } = useDemoRole();
+  const store = useDemoStore();
+
+  const algoOverride = store.borrowingOverrides[BOOK_ALGO.id];
+  const algoDueDate = algoOverride?.dueDate ?? BOOK_ALGO.defaultDueDate;
+  const algoRenewCount = algoOverride?.renewCount ?? 0;
+  const ddiaReserved = useMemo(
+    () => store.libraryReservations.some((r) => r.bookId === BOOK_DDIA.id && r.studentId === 'stu-001'),
+    [store.libraryReservations],
+  );
+
   const go = useCallback(
     (screen: string) => () => {
       try {
@@ -24,6 +52,37 @@ export default function LibraryAiFirstScreen(props: any) {
     },
     [navigation],
   );
+
+  function handleRenew() {
+    if (role !== 'student') {
+      Alert.alert('需切換成學生角色', `目前是「${definition.label}」，請切回學生角色再續借。`);
+      return;
+    }
+    if (algoRenewCount >= 2) {
+      Alert.alert('無法續借', '此本書已續借 2 次，請至櫃台辦理。');
+      return;
+    }
+    renewBook(BOOK_ALGO.id, algoDueDate, algoRenewCount);
+    Alert.alert('已續借', '已寫入 demoStore，新到期日會即時更新到卡片。');
+  }
+
+  function handleReserve() {
+    if (role !== 'student') {
+      Alert.alert('需切換成學生角色', `目前是「${definition.label}」，請切回學生角色再預約。`);
+      return;
+    }
+    if (ddiaReserved) {
+      Alert.alert('已預約', '你已預約這本書，可在訊息追蹤。');
+      return;
+    }
+    reserveBook({
+      bookId: BOOK_DDIA.id,
+      bookTitle: BOOK_DDIA.title,
+      studentId: 'stu-001',
+      studentName: '王小明',
+    });
+    Alert.alert('預約成功', '已寫入 demoStore + 寄通知到你的 Inbox。');
+  }
 
   return (
     <AIDetailScreen
@@ -59,15 +118,18 @@ export default function LibraryAiFirstScreen(props: any) {
         <AICard
           icon="📖"
           title="演算法導論（第 4 版）"
-          badge="5 天後到期"
-          badgeTone="warning"
+          badge={algoRenewCount > 0 ? `已續借 ${algoRenewCount} 次` : '5 天後到期'}
+          badgeTone={algoRenewCount > 0 ? 'success' : 'warning'}
           source="借閱紀錄"
         >
           <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
-            借閱日：5/01 · 到期：5/22 · 可續借 1 次
+            借閱日：5/01 · 到期：{algoDueDate} · 剩可續借 {Math.max(0, 2 - algoRenewCount)} 次
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="續借" onPress={() => Alert.alert('已續借', '到期日延至 6/05')} />
+            <AIButton
+              label={algoRenewCount >= 2 ? '已達上限' : '續借'}
+              onPress={handleRenew}
+            />
             <AIButton label="導航到書架" variant="ghost" />
           </View>
         </AICard>
@@ -87,7 +149,7 @@ export default function LibraryAiFirstScreen(props: any) {
             與你目前修的「資料庫系統」高度相關，3F 索取號 QA76.9.D32 · 在架
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="預約" onPress={() => Alert.alert('已預約', '可到 1F 自助借書機取書')} />
+            <AIButton label={ddiaReserved ? '已預約' : '預約'} onPress={handleReserve} />
             <AIButton label="找位置" variant="ghost" />
           </View>
         </AICard>

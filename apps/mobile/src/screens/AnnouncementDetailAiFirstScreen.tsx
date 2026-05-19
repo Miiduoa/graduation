@@ -3,9 +3,11 @@
  *
  * 接收與舊版相同的 route.params（id / announcementId）→ 不破壞既有導航
  * 設計：AI 摘要在最上 + 重點抽取 + 內文 + 動作 + 連回舊版
+ *
+ * 接 demoStore：學生「私訊系辦/老師詢問」按鈕 → sendMessage 寫 store + 通知老師/admin。
  */
 import React from 'react';
-import { View, Text } from 'react-native';
+import { Alert, View, Text } from 'react-native';
 import {
   AIDetailScreen,
   AIInsightBanner,
@@ -16,11 +18,14 @@ import {
   AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
+import { useDemoRole } from '../state/demoRole';
+import { sendMessage } from '../services/demoStore';
 
 export default function AnnouncementDetailAiFirstScreen(props: any) {
   const navigation = props?.navigation;
   const params = props?.route?.params ?? {};
   const announcementId: string = params.id || params.announcementId || 'A001';
+  const { role, definition } = useDemoRole();
 
   // 演示資料（之後可串實際 store）
   const ann = {
@@ -123,7 +128,68 @@ export default function AnnouncementDetailAiFirstScreen(props: any) {
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
             <AIButton label="檢視衝堂" icon="⚠" />
-            <AIButton label="一鍵生成申請" variant="ghost" />
+            <AIButton
+              label="一鍵生成申請"
+              variant="ghost"
+              onPress={() => {
+                if (role !== 'student') {
+                  Alert.alert(
+                    '需切換成學生角色',
+                    `目前是「${definition.label}」，請先切回學生再送出衝堂申請。`,
+                  );
+                  return;
+                }
+                sendMessage({
+                  fromName: '王小明（衝堂申請）',
+                  fromAvatar: '📝',
+                  subject: `【衝堂申請】${ann.title}`,
+                  body: `來自學生 王小明 的衝堂申請：\n\n公告：${ann.title}\n衝堂日期：6/10、6/11\n\n請系辦/教務處協助安排補考時段。`,
+                  sentAt: '剛剛',
+                  isRead: false,
+                  type: 'action',
+                  relatedAnnouncementId: ann.id,
+                  senderRole: 'student',
+                  recipientRoles: ['admin', 'department_head'],
+                });
+                Alert.alert(
+                  '申請已送出',
+                  '已將衝堂申請送到系辦/教務處，切換到管理員角色可在 Messages 看到。',
+                );
+              }}
+            />
+          </View>
+        </AICard>
+
+        <AICard icon="💬" title="向系辦發問" source="直接寄到系辦 Inbox" confidence="high">
+          <Text style={{ fontSize: 13, color: aiTokens.text, lineHeight: 19 }}>
+            對公告內容有疑問？一鍵寄訊息給系辦。
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+            <AIButton
+              label="問系辦"
+              onPress={() => {
+                if (role !== 'student') {
+                  Alert.alert(
+                    '需切換成學生角色',
+                    `目前是「${definition.label}」，請先切回學生角色再送詢問。`,
+                  );
+                  return;
+                }
+                sendMessage({
+                  fromName: '王小明（提問）',
+                  fromAvatar: '💬',
+                  subject: `【提問】${ann.title}`,
+                  body: `學生 王小明 對公告「${ann.title}」有疑問，希望系辦能說明：\n\n[請在這裡輸入問題]`,
+                  sentAt: '剛剛',
+                  isRead: false,
+                  type: 'action',
+                  relatedAnnouncementId: ann.id,
+                  senderRole: 'student',
+                  recipientRoles: ['admin'],
+                });
+                Alert.alert('已送出', '系辦會在 Messages 收到你的詢問。');
+              }}
+            />
           </View>
         </AICard>
       </AISection>

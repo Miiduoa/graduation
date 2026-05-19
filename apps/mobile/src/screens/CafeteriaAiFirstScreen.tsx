@@ -1,8 +1,11 @@
 /**
  * Campus AI-First — 餐廳列表 V2
+ *
+ * 接 demoStore：點餐按鈕 → placeOrder（寫 orders + 通知學生 + 通知 vendor）
+ * → 切換角色到 vendor 在 VendorManagement 看得到。
  */
 import React, { useState } from 'react';
-import { View, Text } from 'react-native';
+import { Alert, View, Text } from 'react-native';
 import {
   AIDetailScreen,
   AIInsightBanner,
@@ -14,10 +17,36 @@ import {
   AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
+import { useDemoRole } from '../state/demoRole';
+import { useDemoStore } from '../state/demoStore';
+import { placeOrder } from '../services/demoStore';
 
 export default function CafeteriaAiFirstScreen(props: any) {
   const navigation = props?.navigation;
   const [filter, setFilter] = useState<string>('all');
+  const { role, definition } = useDemoRole();
+  const store = useDemoStore();
+  const myOrderCount = store.orders.filter((o) => o.studentId === 'stu-001').length;
+
+  function handleOrder(vendor: string, item: string, price: number) {
+    if (role !== 'student') {
+      Alert.alert(
+        '需切換成學生角色',
+        `目前是「${definition.label}」，請至「我的 → 切換角色」改成學生再點餐。`,
+      );
+      return;
+    }
+    placeOrder({
+      studentId: 'stu-001',
+      studentName: '王小明',
+      vendorName: vendor,
+      items: [{ name: item, qty: 1, price }],
+    });
+    Alert.alert(
+      '訂單已成立',
+      `${vendor} 已收到你的訂單《${item}》NT$${price}。\n切換成商家角色可在「店家後台」看到。`,
+    );
+  }
   const hour = new Date().getHours();
   const isLunch = hour >= 11 && hour < 14;
   const isDinner = hour >= 17 && hour < 21;
@@ -30,10 +59,14 @@ export default function CafeteriaAiFirstScreen(props: any) {
       onBack={() => navigation?.goBack?.()}
     >
       <AIInsightBanner
-        text={`現在 ${hour}:00${
-          isLunch ? '，主餐廳人多但便宜實惠' : isDinner ? '，學餐熱炒推薦' : '，仍有 4 家營業中'
-        } · 你最近 7 天平均花費 $82 · AI 給你 3 個建議`}
-        source="AI · 餐廳人潮 + 你的偏好"
+        text={
+          role === 'student' && myOrderCount > 0
+            ? `你已下 ${myOrderCount} 筆訂單，可至訊息收件匣追蹤備餐進度`
+            : `現在 ${hour}:00${
+                isLunch ? '，主餐廳人多但便宜實惠' : isDinner ? '，學餐熱炒推薦' : '，仍有 4 家營業中'
+              } · 你最近 7 天平均花費 $82 · AI 給你 3 個建議`
+        }
+        source={role === 'student' && myOrderCount > 0 ? '訂單紀錄' : 'AI · 餐廳人潮 + 你的偏好'}
         confidence="mid"
       />
 
@@ -53,9 +86,9 @@ export default function CafeteriaAiFirstScreen(props: any) {
             營養：650 kcal · 蛋白質 32g
           </Text>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <AIButton label="🧭 導航" />
+            <AIButton label="線上點餐" onPress={() => handleOrder('主餐廳', '紅燒牛肉麵', 95)} />
+            <AIButton label="🧭 導航" variant="ghost" />
             <AIButton label="查看菜單" variant="ghost" />
-            <AIButton label="線上點餐" variant="ghost" />
           </View>
         </AICard>
 
@@ -110,10 +143,38 @@ export default function CafeteriaAiFirstScreen(props: any) {
 
       {/* 餐廳列表 */}
       <AISection title="所有餐廳" subtitle="12 家 · 4 家現營業">
-        <AIRow icon="🍜" title="主餐廳" subtitle="麵點 / 便當 / 飲料 · 步行 8 min" tag="尖峰" tagTone="warning" />
-        <AIRow icon="🍱" title="學生餐廳" subtitle="便當 / 自助餐 · 步行 5 min" tag="營業中" tagTone="success" />
-        <AIRow icon="🥗" title="輕食吧" subtitle="沙拉 / 三明治 · 步行 6 min" tag="營業中" tagTone="success" />
-        <AIRow icon="☕" title="咖啡角落" subtitle="飲料 / 點心 · 步行 3 min" tag="營業中" tagTone="success" />
+        <AIRow
+          icon="🍜"
+          title="主餐廳"
+          subtitle="麵點 / 便當 / 飲料 · 步行 8 min"
+          tag="尖峰"
+          tagTone="warning"
+          onPress={() => handleOrder('主餐廳', '招牌麵點便當', 90)}
+        />
+        <AIRow
+          icon="🍱"
+          title="學生餐廳"
+          subtitle="便當 / 自助餐 · 步行 5 min"
+          tag="營業中"
+          tagTone="success"
+          onPress={() => handleOrder('學生餐廳', '雞腿便當', 65)}
+        />
+        <AIRow
+          icon="🥗"
+          title="輕食吧"
+          subtitle="沙拉 / 三明治 · 步行 6 min"
+          tag="營業中"
+          tagTone="success"
+          onPress={() => handleOrder('輕食吧', '凱薩沙拉', 75)}
+        />
+        <AIRow
+          icon="☕"
+          title="咖啡角落"
+          subtitle="飲料 / 點心 · 步行 3 min"
+          tag="營業中"
+          tagTone="success"
+          onPress={() => handleOrder('咖啡角落', '拿鐵 + 司康', 110)}
+        />
         <AIRow icon="🍔" title="速食吧" subtitle="漢堡 / 薯條 · 步行 10 min" tag="休息" tagTone="muted" />
         <AIRow icon="🍕" title="義式廚房" subtitle="披薩 / 義大利麵 · 步行 12 min" tag="休息" tagTone="muted" />
         <AIRow icon="🏪" title="7-11 校區店" subtitle="便利商店 · 步行 2 min" tag="24h" tagTone="ai" />
