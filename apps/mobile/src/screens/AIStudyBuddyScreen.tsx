@@ -88,11 +88,17 @@ export default function AIStudyBuddyScreen() {
   }, [matches]);
 
   const sendInvite = async (m: BuddyMatchResult) => {
+    const actorUid = auth.user?.uid ?? 'demo_student_kuchih';
+    // 不能邀請自己（demo 對 demo 自己 buddyUid 重合的保險）
+    if (m.buddyUid === actorUid) {
+      Alert.alert('提示', '不能邀請自己當學伴。');
+      return;
+    }
     setInvitedSet((s) => new Set([...s, m.buddyUid]));
     // emit 邀請事件到對方 inbox（用 announcement_posted 限定 audience）
     try {
       await emitAnnouncementPosted({
-        actorUid: auth.user?.uid ?? 'demo_student_kuchih',
+        actorUid,
         actorName: auth.profile?.displayName ?? '同學',
         targetUids: [m.buddyUid],
         courseId: m.sharedCourseIds[0] ?? 'general',
@@ -314,19 +320,26 @@ export default function AIStudyBuddyScreen() {
                       <Pressable
                         onPress={async () => {
                           // 真的 emit help_requested → TA inbox + 學伴 inbox
+                          // 收件人會自動排除 actor 自己（避免老師對自己求助）
                           try {
-                            await emitHelpRequested({
-                              actorUid: auth.user?.uid ?? 'demo_student_kuchih',
-                              actorName: auth.profile?.displayName ?? '同學',
-                              targetUids: [h.buddyUid, 'demo_ta_lin'],
-                              courseId: helpCourseId,
-                              courseName: courseNameById(helpCourseId),
-                              payload: {
-                                topic: `${courseNameById(helpCourseId)} 卡關`,
-                                preview: `想請 ${h.buddyName} 協助解題`,
-                                urgency: 'medium',
-                              },
-                            });
+                            const actorUid = auth.user?.uid ?? 'demo_student_kuchih';
+                            const targets = [h.buddyUid, 'demo_ta_lin'].filter(
+                              (uid) => uid && uid !== actorUid,
+                            );
+                            if (targets.length > 0) {
+                              await emitHelpRequested({
+                                actorUid,
+                                actorName: auth.profile?.displayName ?? '同學',
+                                targetUids: targets,
+                                courseId: helpCourseId,
+                                courseName: courseNameById(helpCourseId),
+                                payload: {
+                                  topic: `${courseNameById(helpCourseId)} 卡關`,
+                                  preview: `想請 ${h.buddyName} 協助解題`,
+                                  urgency: 'medium',
+                                },
+                              });
+                            }
                           } catch {
                             /* swallow */
                           }

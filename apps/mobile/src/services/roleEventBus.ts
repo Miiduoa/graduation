@@ -129,8 +129,32 @@ export function subscribeAllRoleEvents(listener: Listener): () => void {
 const ROLE_EVENT_LOG_BASE = 'role_event_log_v1';
 
 export async function emitRoleEvent<P>(event: Omit<RoleEvent<P>, 'id' | 'occurredAt'>): Promise<RoleEvent<P>> {
+  // 🔐 保險絲：永遠把 actor 自己從 targetUids 移除，避免「老師把假單送給老師」
+  //    這類因為 hardcoded uid 造成的角色錯亂。__all__ 廣播保留。
+  const filteredTargets = event.targetUids
+    ? event.targetUids.filter((uid) => uid && uid !== event.actorUid)
+    : undefined;
+
+  // 如果原本明確指定了 targetUids 但全部都被過濾掉，這個 event 不該發
+  // （它本來就只想送給自己，多半是 hardcoded bug 的副作用）
+  if (event.targetUids && event.targetUids.length > 0 && filteredTargets?.length === 0) {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.warn(
+        `[roleEventBus] Dropping ${event.kind} from ${event.actorUid} — `
+        + `targetUids resolved to actor self only. Check role-event-target wiring.`,
+      );
+    }
+    return {
+      ...event,
+      id: `evt_dropped_${Date.now()}`,
+      occurredAt: new Date().toISOString(),
+      targetUids: [],
+    } as RoleEvent<P>;
+  }
+
   const full: RoleEvent<P> = {
     ...event,
+    targetUids: filteredTargets,
     id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     occurredAt: new Date().toISOString(),
   };
