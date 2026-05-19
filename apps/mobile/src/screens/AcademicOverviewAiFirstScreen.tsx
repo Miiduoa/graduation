@@ -13,9 +13,11 @@ import {
   AILegacyLink,
   aiTokens,
 } from '../ui/aiFirst';
+import { usePermissions } from '../hooks/usePermissions';
 
 export default function AcademicOverviewAiFirstScreen(props: any) {
   const navigation = props?.navigation;
+  const { isStudent } = usePermissions();
   const go = useCallback(
     (screen: string, params?: any) => () => {
       try {
@@ -95,7 +97,9 @@ export default function AcademicOverviewAiFirstScreen(props: any) {
       </AISection>
 
       <AISection title="快速入口">
-        <AIRow icon="🎓" title="學分試算" subtitle="畢業進度 61%" onPress={go('CreditAudit')} />
+        {isStudent && (
+          <AIRow icon="🎓" title="學分試算" subtitle="畢業進度 61%" onPress={go('CreditAudit')} />
+        )}
         <AIRow icon="📅" title="課表" onPress={go('Calendar')} />
         <AIRow icon="🤖" title="AI 課程顧問" subtitle="幫你排下學期" tag="AI" tagTone="ai" onPress={go('AICourseAdvisor')} />
       </AISection>
