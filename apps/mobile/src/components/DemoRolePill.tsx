@@ -115,12 +115,13 @@ const ROLE_PRESETS: RolePreset[] = [
     role: 'vendor',
     uid: 'demo_cafeteria',
     email: 'demo.vendor@pu.edu.tw',
-    displayName: '阿英（demo 餐廳）',
+    displayName: '阿櫻（demo 餐廳）',
     schoolId: 'pu',
     department: '校園服務',
     icon: 'restaurant-outline',
     shortLabel: '餐廳',
-    hint: '訂單、菜單、營運',
+    // demo 內 DemoRole 型別未含 vendor，訊息收件匣與 admin 共用（toDemoRole fallback）。
+    hint: '訂單、菜單、營運（訊息共用 admin 收件匣）',
     color: '#C95F28',
   },
   {

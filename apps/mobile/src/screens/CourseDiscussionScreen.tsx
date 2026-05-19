@@ -33,6 +33,10 @@ import { EmptyState } from '../ui/components';
 import { useAuth } from '../state/auth';
 import { emitDiscussionPosted, emitHelpRequested } from '../services/roleEventBus';
 import {
+  getDiscussionTargets,
+  getHelpRequestTargets,
+} from '../services/roleEventTargets';
+import {
   CourseChipErrorBanner,
   CourseChipHeader,
   CourseChipLoading,
@@ -138,36 +142,43 @@ export default function CourseDiscussionScreen(props: RouteProps) {
         } catch {
           /* swallow */
         }
-        // ─ Demo：emit discussion_posted 給 TA + 老師 ─
+        // ─ Demo：emit discussion_posted（依角色決定收件人，避免老師送給老師） ─
         try {
+          const actorUid = auth.user?.uid ?? 'demo_student_kuchih';
+          const actorName = auth.profile?.displayName ?? '顧晉瑋';
+          const actorRole = auth.profile?.role ?? null;
           await emitDiscussionPosted({
-            actorUid: auth.user?.uid ?? 'demo_student_kuchih',
-            actorName: auth.profile?.displayName ?? '顧晉瑋',
-            targetUids: ['demo_teacher_chang', 'demo_ta_lin'],
+            actorUid,
+            actorName,
+            targetUids: getDiscussionTargets(actorRole, actorUid),
             courseId,
             courseName: groupName ?? '課程',
             payload: {
               threadId: String(newId),
               threadTitle: newTitle.trim(),
-              authorName: auth.profile?.displayName ?? '顧晉瑋',
+              authorName: actorName,
               preview: (newBody.trim() || '').slice(0, 80),
             },
           });
           // 標題含問號 / 「為什麼」/「怎麼」/ HELP 標記 → 升級為 help_requested
+          // 注意：教師 / TA 自己提問不會走 help_requested（targets 會排除自己）
           const looksLikeHelp = /[?？]|為什麼|怎麼|不會|不懂|help|HELP/i.test(newTitle + ' ' + newBody);
           if (looksLikeHelp) {
-            await emitHelpRequested({
-              actorUid: auth.user?.uid ?? 'demo_student_kuchih',
-              actorName: auth.profile?.displayName ?? '顧晉瑋',
-              targetUids: ['demo_ta_lin', 'demo_teacher_chang'],
-              courseId,
-              courseName: groupName ?? '課程',
-              payload: {
-                topic: newTitle.trim().slice(0, 40),
-                preview: (newBody.trim() || newTitle.trim()).slice(0, 120),
-                urgency: /緊急|急|要交|今天/i.test(newTitle + ' ' + newBody) ? 'high' : 'medium',
-              },
-            });
+            const helpTargets = getHelpRequestTargets(actorUid);
+            if (helpTargets.length > 0) {
+              await emitHelpRequested({
+                actorUid,
+                actorName,
+                targetUids: helpTargets,
+                courseId,
+                courseName: groupName ?? '課程',
+                payload: {
+                  topic: newTitle.trim().slice(0, 40),
+                  preview: (newBody.trim() || newTitle.trim()).slice(0, 120),
+                  urgency: /緊急|急|要交|今天/i.test(newTitle + ' ' + newBody) ? 'high' : 'medium',
+                },
+              });
+            }
           }
         } catch {
           /* swallow */
