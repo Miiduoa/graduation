@@ -21,6 +21,9 @@ firestore-debug.log*
 # LibreOffice（開啟 .xlsx 時產生的鎖檔，勿提交）
 .~lock.*
 
+# MS Office / WPS 暫存鎖檔（開啟 .pptx/.docx/.xlsx 時產生）
+~$*
+
 # 編輯器 / 臨時 backup（避免 .bak / _tmp_* 進 repo）
 *.bak
 *.bak2
