@@ -255,6 +255,45 @@ export async function seedDemoInboxIfNeeded(uid: string): Promise<{ seeded: numb
     count++;
   }
 
+  // ────────────────────────────────────────────────
+  // CLUB OFFICER 魏社長的 inbox 種子
+  // ────────────────────────────────────────────────
+  if (uid === 'demo_club_wei') {
+    await emitDepartmentBroadcast({
+      actorUid: 'demo_admin_huang',
+      actorName: '黃主任',
+      targetUids: [uid],
+      courseId: 'department',
+      courseName: '系所公告',
+      payload: {
+        title: '社團評鑑時程',
+        body: '本學期社團評鑑表單已開放填寫，請於 6/30 前繳交。',
+        audience: 'all',
+      },
+    });
+    count++;
+  }
+
+  // ────────────────────────────────────────────────
+  // DEPARTMENT_HEAD（demo_admin_huang 共用，已在 ADMIN 段處理）
+  // SYSTEM_ADMIN demo_admin_sys 與 ALUMNI / GUEST 無預設 inbox（依設計）
+  // ────────────────────────────────────────────────
+  if (uid === 'demo_admin_sys') {
+    await emitDepartmentBroadcast({
+      actorUid: 'demo_admin_sys',
+      actorName: '系統管理員',
+      targetUids: [uid],
+      courseId: 'system',
+      courseName: '系統公告',
+      payload: {
+        title: '本週系統健檢通過',
+        body: '推播服務 / 影片串流 / SSO 均正常。',
+        audience: 'all',
+      },
+    });
+    count++;
+  }
+
   // 標記已 seed
   await AsyncStorage.setItem(flagKey, 'true').catch(() => {});
 
