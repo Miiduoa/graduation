@@ -1,0 +1,12 @@
+import { Text, View } from 'react-native';
+
+/** OAuth deep link 占位（主要流程於 login 畫面 WebBrowser 完成 session 交換）。 */
+export default function AuthCallbackScreen() {
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+      <Text style={{ fontSize: 16, fontWeight: '600', textAlign: 'center' }}>
+        若瀏覽器未自動返回 App，請手動回到 LMS。
+      </Text>
+    </View>
+  );
+}

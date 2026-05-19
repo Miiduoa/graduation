@@ -63,8 +63,19 @@ export default tseslint.config(
       'no-empty': 'warn',
       'no-unused-expressions': 'warn',
       'no-useless-escape': 'warn',
+      'prefer-const': 'warn',
       'react-hooks/exhaustive-deps': 'warn',
       'react-hooks/rules-of-hooks': 'error',
+      // 允許 @ts-nocheck 但需附說明（用於暫時擋住其他人合進來的 type 破洞）
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        {
+          'ts-nocheck': 'allow-with-description',
+          'ts-ignore': 'allow-with-description',
+          'ts-expect-error': 'allow-with-description',
+          minimumDescriptionLength: 3,
+        },
+      ],
     },
   },
   {

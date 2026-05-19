@@ -1,36 +1,71 @@
 /* eslint-disable */
-import React, { useCallback, useState } from 'react';
+/**
+ * 校園社群 — 即時（Story + LBS）
+ *
+ * 變更（vs. 舊版）：
+ *  - POI 不再讓使用者打字 → 改成水平 chip 列，從 services/campusSocialPois 取真實校園 POI
+ *  - Story 全螢幕 viewer（中央顯示，含進度條、左右切換、暗背景）
+ *  - Story 卡片排版改為 grid，可顯示圖片預覽
+ *  - 「我在這裡」打卡會在 chip 上顯示 ACTIVE 標記
+ *  - 同點位列表顯示頭像 / 姓名（從 directory 取）
+ */
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   FlatList,
+  Image,
   RefreshControl,
   Pressable,
   ActivityIndicator,
   StyleSheet,
   Alert,
-  TextInput,
   Modal,
+  Dimensions,
+  ScrollView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../state/auth';
 import { useSchool } from '../../state/school';
 import { theme } from '../../ui/theme';
 import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../../ui/navigationTheme';
 import { getDb, isFirebaseMockMode } from '../../firebase';
-import { listActiveStoriesForSchool, markStoryViewed } from '../../services/stories';
+import {
+  listActiveStoriesForSchool,
+  markStoryViewed,
+  groupStoriesByAuthor,
+  type CampusStoryDoc,
+  type StoryAuthorGroup,
+} from '../../services/stories';
 import { heartbeatCheckIn, peersAtPoi, clearPresence } from '../../services/checkins';
 import { fetchSchoolDirectoryProfiles } from '../../services/memberDirectory';
+import {
+  getSocialPoiList,
+  defaultSocialPoiId,
+  findSocialPoi,
+  SOCIAL_POI_CATEGORY_LABEL,
+  type SocialPoi,
+  type SocialPoiCategory,
+} from '../../services/campusSocialPois';
 import { useCampusSocialStackNav } from './CampusSocialNavContext';
 
-type StoryLite = {
-  id: string;
-  kind?: string;
-  text?: string;
-  mediaUrl?: string | null;
+type PeerProfile = {
+  uid: string;
+  name?: string;
+  avatarUrl?: string | null;
+  department?: string | null;
 };
 
-const DEFAULT_POI = 'library-main';
+const POI_CAT_ICON: Record<SocialPoiCategory, keyof typeof Ionicons.glyphMap> = {
+  library: 'book-outline',
+  cafeteria: 'restaurant-outline',
+  sports: 'fitness-outline',
+  academic: 'school-outline',
+  social: 'people-outline',
+  transit: 'bus-outline',
+};
 
 export function RealtimeSocialScreen() {
   const injected = useCampusSocialStackNav();
@@ -38,28 +73,35 @@ export function RealtimeSocialScreen() {
   const nav = injected ?? fb;
   const auth = useAuth();
   const { school } = useSchool();
-  const [stories, setStories] = useState<any[]>([]);
+  const insets = useSafeAreaInsets();
+  const uid = auth.user?.uid;
+
+  const pois = useMemo(() => getSocialPoiList(), []);
+  const [selectedPoi, setSelectedPoi] = useState<string>(defaultSocialPoiId());
+  const [storyGroups, setStoryGroups] = useState<StoryAuthorGroup[]>([]);
   const [storiesLoading, setStoriesLoading] = useState(true);
-  const [poiInput, setPoiInput] = useState(DEFAULT_POI);
-  const [peers, setPeers] = useState<{ uid: string; name?: string }[]>([]);
+  const [peers, setPeers] = useState<PeerProfile[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [heartbeatSession, setHeartbeatSession] = useState<string | null>(null);
-  const [storyReader, setStoryReader] = useState<StoryLite | null>(null);
-  const uid = auth.user?.uid;
+  const [viewerState, setViewerState] = useState<{ group: StoryAuthorGroup; index: number } | null>(null);
+  const [nameByUid, setNameByUid] = useState<Record<string, string>>({});
+  const [avatarByUid, setAvatarByUid] = useState<Record<string, string>>({});
 
   const refreshStories = useCallback(async () => {
     if (isFirebaseMockMode() || !school?.id) {
-      setStories([]);
+      setStoryGroups([]);
       return;
     }
-    const rows = await listActiveStoriesForSchool(school.id, 40);
-    setStories(rows);
-  }, [school?.id]);
+    const rows = await listActiveStoriesForSchool(school.id, 80);
+    setStoryGroups(groupStoriesByAuthor(rows, uid));
+  }, [school?.id, uid]);
 
   const refreshPeers = useCallback(async () => {
-    if (isFirebaseMockMode() || !school?.id) return;
-    const poi = poiInput.trim() || DEFAULT_POI;
-    const raw = await peersAtPoi(school.id, poi);
+    if (isFirebaseMockMode() || !school?.id) {
+      setPeers([]);
+      return;
+    }
+    const raw = await peersAtPoi(school.id, selectedPoi);
     const db = getDb();
     const unique = [
       ...new Set(raw.map((r) => r.uid).filter((x): x is string => typeof x === 'string' && !!x)),
@@ -69,25 +111,57 @@ export function RealtimeSocialScreen() {
       return;
     }
     const profiles = await fetchSchoolDirectoryProfiles(school.id, unique, db);
-    const map: Record<string, string> = {};
-    profiles.forEach((p) => {
-      map[p.uid] = (p.displayName ?? p.uid.slice(0, 6)).trim();
-    });
-    setPeers(unique.map((id) => ({ uid: id, name: map[id] })));
-  }, [school?.id, poiInput, uid]);
+    setPeers(
+      unique.map((id) => {
+        const p = profiles.find((q) => q.uid === id);
+        return {
+          uid: id,
+          name: p?.displayName ?? id.slice(0, 6),
+          avatarUrl: p?.avatarUrl ?? null,
+          department: p?.department ?? null,
+        };
+      }),
+    );
+  }, [school?.id, selectedPoi, uid]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       setStoriesLoading(true);
       await refreshStories();
-      await refreshPeers();
       if (!cancelled) setStoriesLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [refreshStories, refreshPeers]);
+  }, [refreshStories]);
+
+  useEffect(() => {
+    void refreshPeers();
+  }, [refreshPeers]);
+
+  // hydrate story author display names
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!school?.id) return;
+      const uids = [...new Set(storyGroups.map((g) => g.authorUid))];
+      if (uids.length === 0) return;
+      const profiles = await fetchSchoolDirectoryProfiles(school.id, uids, getDb());
+      if (cancelled) return;
+      const nm: Record<string, string> = {};
+      const av: Record<string, string> = {};
+      profiles.forEach((p) => {
+        nm[p.uid] = (p.displayName ?? p.uid.slice(0, 6)).trim();
+        if (p.avatarUrl) av[p.uid] = p.avatarUrl;
+      });
+      setNameByUid(nm);
+      setAvatarByUid(av);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [storyGroups, school?.id]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -97,26 +171,42 @@ export function RealtimeSocialScreen() {
 
   const tapHeart = async () => {
     if (!uid || !school?.id) {
-      Alert.alert('請登入');
+      Alert.alert('請先登入');
       return;
     }
-    const poi = poiInput.trim() || DEFAULT_POI;
+    if (isFirebaseMockMode()) {
+      Alert.alert('模擬模式', '無法寫入 Firestore');
+      return;
+    }
     try {
       if (heartbeatSession) {
         await clearPresence(school.id, heartbeatSession);
       }
-      const sid = await heartbeatCheckIn(uid, school.id, poi);
+      const sid = await heartbeatCheckIn(uid, school.id, selectedPoi);
       setHeartbeatSession(sid);
       await refreshPeers();
-      Alert.alert('已打卡', `位置代號 · ${poi}\n將在數分鐘內對同點師生可見。`);
+      const poi = findSocialPoi(selectedPoi);
+      Alert.alert('已打卡', `位置：${poi?.name ?? selectedPoi}\n將在 15 分鐘內對同點師生可見。`);
     } catch (e: any) {
       Alert.alert('打卡失敗', e?.message ?? String(e));
     }
   };
 
-  const openStory = (row: StoryLite) => {
-    setStoryReader(row);
-    if (uid && !isFirebaseMockMode()) void markStoryViewed(row.id, uid).catch(() => {});
+  const openStoryGroup = (g: StoryAuthorGroup) => {
+    setViewerState({ group: g, index: 0 });
+    const story = g.stories[0];
+    if (story && uid && !isFirebaseMockMode()) void markStoryViewed(story.id, uid).catch(() => {});
+  };
+
+  const advanceStory = (delta: number) => {
+    setViewerState((prev) => {
+      if (!prev) return prev;
+      const nextIndex = prev.index + delta;
+      if (nextIndex < 0 || nextIndex >= prev.group.stories.length) return null;
+      const story = prev.group.stories[nextIndex];
+      if (story && uid && !isFirebaseMockMode()) void markStoryViewed(story.id, uid).catch(() => {});
+      return { group: prev.group, index: nextIndex };
+    });
   };
 
   const openCompose = () => {
@@ -124,172 +214,404 @@ export function RealtimeSocialScreen() {
       Alert.alert('請先登入');
       return;
     }
-    nav?.navigate?.('StoryCompose' as never);
+    nav?.navigate?.('StoryCompose' as never, { poiId: selectedPoi, poiName: findSocialPoi(selectedPoi)?.name });
   };
 
   return (
-    <View style={[styles.root, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING }]}>
-      <View style={styles.topActions}>
-        <Text style={styles.title}>即時</Text>
-        <Pressable onPress={openCompose} style={styles.storyBtn}>
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>發 Story</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.sub}>24h Story 與輕量 LBS</Text>
+    <View style={[styles.root, { paddingBottom: TAB_BAR_CONTENT_BOTTOM_PADDING + insets.bottom }]}>
+      <ScrollView
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={{ paddingBottom: 32 }}
+      >
+        {/* ─── POI chips ─── */}
+        <Text style={styles.section}>我在哪</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 14, gap: 8 }}>
+          {pois.map((poi) => {
+            const active = poi.id === selectedPoi;
+            const isCheckedIn = active && heartbeatSession != null;
+            return (
+              <Pressable
+                key={poi.id}
+                onPress={() => setSelectedPoi(poi.id)}
+                style={[styles.poiChip, active && styles.poiChipActive]}
+                accessibilityRole="button"
+                accessibilityLabel={`選擇 ${poi.name}`}
+              >
+                <Ionicons
+                  name={POI_CAT_ICON[poi.category]}
+                  size={14}
+                  color={active ? theme.colors.onAccent : theme.colors.textSecondary}
+                />
+                <Text style={[styles.poiChipTxt, active && { color: theme.colors.onAccent }]}>
+                  {poi.name}
+                </Text>
+                {isCheckedIn ? <View style={styles.poiDot} /> : null}
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
-      <View style={styles.poiBar}>
-        <Text style={{ color: theme.colors.text, fontWeight: '700' }}>POI ID</Text>
-        <TextInput
-          style={styles.poiInput}
-          value={poiInput}
-          onChangeText={setPoiInput}
-          placeholderTextColor={theme.colors.textSecondary}
-        />
-        <Pressable style={styles.pulseBtn} onPress={tapHeart}>
-          <Text style={{ color: '#fff', fontWeight: '800' }}>我在這裡</Text>
-        </Pressable>
-      </View>
+        <View style={styles.poiSummary}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.poiSummaryName}>{findSocialPoi(selectedPoi)?.name ?? selectedPoi}</Text>
+            <Text style={styles.poiSummaryHint}>
+              {SOCIAL_POI_CATEGORY_LABEL[findSocialPoi(selectedPoi)?.category ?? 'social']}
+              {findSocialPoi(selectedPoi)?.hint ? ` · ${findSocialPoi(selectedPoi)?.hint}` : ''}
+            </Text>
+          </View>
+          <Pressable
+            style={[styles.pulseBtn, heartbeatSession && styles.pulseBtnActive]}
+            onPress={tapHeart}
+            accessibilityRole="button"
+          >
+            <Ionicons name={heartbeatSession ? 'pulse' : 'location-outline'} size={16} color={theme.colors.onAccent} />
+            <Text style={styles.pulseBtnTxt}>{heartbeatSession ? '更新打卡' : '我在這裡'}</Text>
+          </Pressable>
+        </View>
 
-      <Text style={styles.section}>同點位 · {peers.length}</Text>
-      <FlatList
-        horizontal
-        data={peers.slice(0, 12)}
-        keyExtractor={(p) => p.uid}
-        style={{ marginBottom: 12, maxHeight: 46 }}
-        ListEmptyComponent={
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 13 }}>
-            {isFirebaseMockMode() ? '模擬模式無資料' : '暫無同點對象'}
+        {/* ─── Peers at POI ─── */}
+        <Text style={[styles.section, { marginTop: theme.space.lg }]}>同點位 · {peers.length}</Text>
+        <View style={{ paddingHorizontal: 14 }}>
+          {peers.length === 0 ? (
+            <Text style={styles.softMuted}>
+              {isFirebaseMockMode() ? '模擬模式無資料' : '暫無同點對象，按「我在這裡」加入清單。'}
+            </Text>
+          ) : (
+            <View style={styles.peerWrap}>
+              {peers.slice(0, 12).map((p) => (
+                <View key={p.uid} style={styles.peerCard}>
+                  {p.avatarUrl ? (
+                    <Image source={{ uri: p.avatarUrl }} style={styles.peerAvatar} />
+                  ) : (
+                    <View style={[styles.peerAvatar, styles.peerAvatarFb]}>
+                      <Text style={styles.peerAvatarTxt}>{(p.name ?? '?').slice(0, 1)}</Text>
+                    </View>
+                  )}
+                  <Text numberOfLines={1} style={styles.peerName}>
+                    {p.name}
+                  </Text>
+                  {p.department ? (
+                    <Text numberOfLines={1} style={styles.peerDept}>
+                      {p.department}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        {/* ─── Stories ─── */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: theme.space.lg, paddingHorizontal: 14 }}>
+          <Text style={[styles.section, { flex: 1, paddingHorizontal: 0 }]}>校園 Story</Text>
+          <Pressable onPress={openCompose} style={styles.storyComposeBtn} accessibilityRole="button">
+            <Ionicons name="add" size={16} color={theme.colors.onAccent} />
+            <Text style={styles.storyComposeTxt}>發 Story</Text>
+          </Pressable>
+        </View>
+
+        {storiesLoading ? (
+          <ActivityIndicator style={{ marginTop: theme.space.md }} color={theme.colors.accent} />
+        ) : storyGroups.length === 0 ? (
+          <Text style={[styles.softMuted, { paddingHorizontal: 14 }]}>
+            目前沒有未過期的 Story，點右上「發 Story」分享此刻。
           </Text>
-        }
-        renderItem={({ item }) => (
-          <View style={styles.peerChip}>
-            <Text style={styles.peerTxt}>{item.name ?? item.uid.slice(0, 6)}</Text>
+        ) : (
+          <View style={[styles.storyGrid, { paddingHorizontal: 14 }]}>
+            {storyGroups.map((g) => {
+              const latest = g.stories[g.stories.length - 1] ?? g.stories[0];
+              const isImage = latest?.kind === 'image' && latest.mediaUrl;
+              return (
+                <Pressable
+                  key={g.authorUid}
+                  style={styles.storyCard}
+                  onPress={() => openStoryGroup(g)}
+                  accessibilityRole="button"
+                >
+                  {isImage ? (
+                    <Image source={{ uri: latest!.mediaUrl as string }} style={styles.storyCardImg} />
+                  ) : (
+                    <View
+                      style={[
+                        styles.storyCardText,
+                        { backgroundColor: latest?.bgColor || theme.colors.surfaceElevated },
+                      ]}
+                    >
+                      <Text numberOfLines={5} style={styles.storyCardTxt}>
+                        {latest?.text || '（媒體）'}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.storyCardFooter}>
+                    {avatarByUid[g.authorUid] ? (
+                      <Image source={{ uri: avatarByUid[g.authorUid] }} style={styles.storyAuthorAv} />
+                    ) : (
+                      <View style={[styles.storyAuthorAv, styles.storyAuthorAvFb]}>
+                        <Text style={styles.storyAuthorAvTxt}>
+                          {(nameByUid[g.authorUid] ?? '?').slice(0, 1)}
+                        </Text>
+                      </View>
+                    )}
+                    <Text numberOfLines={1} style={styles.storyAuthorName}>
+                      {g.isMine ? '我的 Story' : nameByUid[g.authorUid] ?? g.authorUid.slice(0, 6)}
+                    </Text>
+                    {g.stories.length > 1 ? (
+                      <Text style={styles.storyCount}>· {g.stories.length}</Text>
+                    ) : null}
+                  </View>
+                </Pressable>
+              );
+            })}
           </View>
         )}
-      />
+      </ScrollView>
 
-      <Text style={styles.section}>活躍 Story</Text>
-      {storiesLoading ? (
-        <ActivityIndicator style={{ marginTop: 12 }} />
-      ) : (
-        <FlatList
-          style={{ flex: 1 }}
-          data={stories}
-          keyExtractor={(s) => s.id}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
-            <Text style={{ color: theme.colors.textSecondary, marginTop: 10 }}>
-              目前沒有未過期的 Story。點右上方發布。
-            </Text>
-          }
-          ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
-          renderItem={({ item }) => (
-            <Pressable style={styles.storyCard} onPress={() => openStory(item as StoryLite)}>
-              <Text style={styles.kind}>{item.kind}</Text>
-              <Text style={styles.storySnippet} numberOfLines={4}>
-                {typeof item.text === 'string'
-                  ? item.text
-                  : typeof item.mediaUrl === 'string'
-                    ? item.mediaUrl
-                    : '（媒體／點開瀏覽）'}
-              </Text>
-            </Pressable>
-          )}
-        />
-      )}
-      <Modal visible={!!storyReader} transparent animationType="fade" onRequestClose={() => setStoryReader(null)}>
-        <Pressable style={styles.storyBackdrop} onPress={() => setStoryReader(null)}>
-          <View style={styles.storyPopup}>
-            <Text style={{ color: '#fff', fontWeight: '900', marginBottom: 10 }}>
-              {String(storyReader?.kind ?? 'Story')}
-            </Text>
-            <Text style={{ color: '#eef2ff', lineHeight: 22 }}>
-              {typeof storyReader?.text === 'string' && storyReader.text.trim()
-                ? storyReader.text
-                : typeof storyReader?.mediaUrl === 'string' && storyReader.mediaUrl
-                  ? storyReader.mediaUrl
-                  : '此則為純視覺內容，完整瀏覽稍後將支援。'}
-            </Text>
-            <Pressable style={styles.storyDismiss} onPress={() => setStoryReader(null)}>
-              <Text style={{ color: '#0f172a', fontWeight: '800' }}>關閉</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
+      <StoryViewerModal
+        state={viewerState}
+        onClose={() => setViewerState(null)}
+        onAdvance={advanceStory}
+      />
     </View>
   );
 }
 
+// ─── Story Viewer Modal（全螢幕） ───────────────────────────
+
+function StoryViewerModal(props: {
+  state: { group: StoryAuthorGroup; index: number } | null;
+  onClose: () => void;
+  onAdvance: (delta: number) => void;
+}) {
+  const { state, onClose, onAdvance } = props;
+  if (!state) return null;
+  const story = state.group.stories[state.index];
+  if (!story) return null;
+  const total = state.group.stories.length;
+  const screenW = Dimensions.get('window').width;
+
+  return (
+    <Modal visible animationType="fade" transparent onRequestClose={onClose}>
+      <Pressable style={styles.viewerBackdrop} onPress={onClose}>
+        <Pressable style={styles.viewerInner} onPress={(e) => e.stopPropagation?.()}>
+          {/* 進度條 */}
+          <View style={styles.viewerProgressBar}>
+            {Array.from({ length: total }).map((_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.viewerProgressSegment,
+                  i < state.index && { backgroundColor: '#ffffff' },
+                  i === state.index && { backgroundColor: '#ffffffcc' },
+                ]}
+              />
+            ))}
+          </View>
+
+          {/* 內容（圖片或文字） */}
+          <View style={styles.viewerCanvas}>
+            {story.kind === 'image' && story.mediaUrl ? (
+              <Image source={{ uri: story.mediaUrl }} style={styles.viewerImage} resizeMode="contain" />
+            ) : (
+              <View
+                style={[
+                  styles.viewerText,
+                  { backgroundColor: story.bgColor || '#0f172a' },
+                ]}
+              >
+                <Text style={styles.viewerTextTxt}>{story.text || '（無內容）'}</Text>
+              </View>
+            )}
+          </View>
+
+          {/* 左右切換 hit zones */}
+          <Pressable
+            style={[styles.viewerHitLeft, { width: screenW * 0.35 }]}
+            onPress={() => onAdvance(-1)}
+            accessibilityLabel="上一則"
+          />
+          <Pressable
+            style={[styles.viewerHitRight, { width: screenW * 0.55 }]}
+            onPress={() => onAdvance(+1)}
+            accessibilityLabel="下一則"
+          />
+
+          {/* 關閉鈕 */}
+          <Pressable style={styles.viewerClose} onPress={onClose} hitSlop={10}>
+            <Ionicons name="close" size={22} color="#fff" />
+          </Pressable>
+
+          {/* 底部資訊 */}
+          {story.poiName ? (
+            <View style={styles.viewerMeta}>
+              <Ionicons name="location" size={12} color="#fff" />
+              <Text style={styles.viewerMetaTxt}>{story.poiName}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.bg, paddingHorizontal: 14, paddingTop: 6 },
-  topActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  storyBtn: {
-    backgroundColor: theme.colors.social,
+  root: { flex: 1, backgroundColor: theme.colors.bg, paddingTop: theme.space.sm },
+
+  section: {
     paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: theme.radius.md,
-  },
-  title: { fontSize: 18, fontWeight: '900', color: theme.colors.text },
-  sub: { fontSize: 12, color: theme.colors.textSecondary, marginVertical: 6 },
-  poiBar: { gap: 8, marginBottom: 12 },
-  poiInput: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.sm,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    fontWeight: '700',
     color: theme.colors.text,
-    backgroundColor: theme.colors.surface,
+    marginBottom: 8,
+    fontSize: 14,
   },
-  pulseBtn: {
-    backgroundColor: theme.colors.accent,
+  softMuted: { color: theme.colors.textSecondary, fontSize: 13, marginVertical: 8 },
+
+  poiChip: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    borderRadius: theme.radius.md,
-    marginBottom: 4,
-  },
-  section: { fontWeight: '800', color: theme.colors.text, marginBottom: 8 },
-  peerChip: {
-    marginRight: 8,
-    backgroundColor: theme.colors.surface,
+    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+  },
+  poiChipActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
+  poiChipTxt: { fontSize: 12, color: theme.colors.textSecondary, fontWeight: '700' },
+  poiDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.colors.success,
+    marginLeft: 4,
+  },
+
+  poiSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 12,
+    marginHorizontal: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: theme.colors.surfaceElevated ?? theme.colors.surface,
+    borderRadius: theme.radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+  },
+  poiSummaryName: { color: theme.colors.text, fontWeight: '700', fontSize: 15 },
+  poiSummaryHint: { color: theme.colors.textSecondary, fontSize: 12, marginTop: 2 },
+  pulseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: theme.radius.md,
+  },
+  pulseBtnActive: { backgroundColor: theme.colors.success },
+  pulseBtnTxt: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 13 },
+
+  peerWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  peerCard: {
+    width: 84,
+    alignItems: 'center',
+    padding: 8,
+    backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.sm,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  peerTxt: { fontSize: 13, fontWeight: '600', color: theme.colors.text },
+  peerAvatar: { width: 44, height: 44, borderRadius: 22 },
+  peerAvatarFb: { alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.accent },
+  peerAvatarTxt: { color: theme.colors.onAccent, fontWeight: '700' },
+  peerName: { marginTop: 6, fontSize: 12, color: theme.colors.text, fontWeight: '600' },
+  peerDept: { fontSize: 10, color: theme.colors.textSecondary },
+
+  storyComposeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: theme.colors.accent,
+    borderRadius: 999,
+  },
+  storyComposeTxt: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 12 },
+
+  storyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
   storyCard: {
-    padding: 14,
+    width: (Dimensions.get('window').width - 14 * 2 - 10) / 2,
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.md,
+    overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border,
   },
-  kind: { fontSize: 11, color: theme.colors.accent, fontWeight: '800', marginBottom: 8 },
-  storySnippet: { fontSize: 14, color: theme.colors.text, lineHeight: 20 },
-  storyBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.72)',
+  storyCardImg: { width: '100%', aspectRatio: 9 / 14 },
+  storyCardText: {
+    width: '100%',
+    aspectRatio: 9 / 14,
+    padding: 14,
     justifyContent: 'center',
-    padding: 22,
   },
-  storyPopup: {
-    padding: 20,
-    borderRadius: theme.radius.md,
-    backgroundColor: '#1f2937',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.22)',
-    maxHeight: '80%',
+  storyCardTxt: { color: '#fff', fontSize: 14, lineHeight: 20, fontWeight: '600' },
+  storyCardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    padding: 8,
   },
-  storyDismiss: {
-    alignSelf: 'flex-end',
-    marginTop: 18,
-    backgroundColor: '#e2e8f0',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: theme.radius.md,
+  storyAuthorAv: { width: 20, height: 20, borderRadius: 10 },
+  storyAuthorAvFb: {
+    backgroundColor: theme.colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  storyAuthorAvTxt: { color: theme.colors.onAccent, fontWeight: '700', fontSize: 11 },
+  storyAuthorName: { fontSize: 12, color: theme.colors.text, fontWeight: '700', flex: 1 },
+  storyCount: { fontSize: 11, color: theme.colors.textSecondary },
+
+  viewerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    justifyContent: 'center',
+    padding: 12,
+  },
+  viewerInner: { flex: 1, justifyContent: 'center' },
+  viewerProgressBar: {
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: 8,
+    marginTop: 30,
+  },
+  viewerProgressSegment: {
+    flex: 1,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+  },
+  viewerCanvas: { flex: 1, marginTop: 12, justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '100%' },
+  viewerText: { flex: 1, padding: 24, justifyContent: 'center', borderRadius: theme.radius.md },
+  viewerTextTxt: { color: '#fff', fontSize: 22, lineHeight: 32, fontWeight: '700', textAlign: 'center' },
+  viewerHitLeft: { position: 'absolute', top: 60, bottom: 60, left: 0 },
+  viewerHitRight: { position: 'absolute', top: 60, bottom: 60, right: 0 },
+  viewerClose: { position: 'absolute', top: 36, right: 16, padding: 8 },
+  viewerMeta: {
+    position: 'absolute',
+    bottom: 28,
+    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  viewerMetaTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
 });
 
 export default RealtimeSocialScreen;

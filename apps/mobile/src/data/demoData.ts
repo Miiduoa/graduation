@@ -6813,79 +6813,110 @@ export function getDemoGrades(userId: string, semester = '113-1', schoolId = 'tw
     return [];
   }
 
+  /**
+   * Demo 學分 / 成績資料庫
+   *
+   * 設定：顧晉瑋（demo 學生，資管系大三）
+   *  - 已修完 110-1 ~ 113-1 共 6 個學期
+   *  - 涵蓋專業必修 / 選修 / 通識 / 校共同 / 體育 / 服務學習 / 自由選修 7 大類
+   *  - 偶有低分（讓 GPA 真實 ~3.5）
+   *
+   * 注意：CreditAudit 用 `courseType` 欄位映射到 PUCreditCat。
+   */
+  let id = 0;
+  const make = (
+    sem: string,
+    name: string,
+    type: string,
+    credits: number,
+    score: number,
+    letter: string,
+    points: number,
+    instructor = '範例教師',
+  ): Grade => ({
+    id: createId(schoolId, 'grd', ++id),
+    userId,
+    courseId: createId(schoolId, 'crs', id),
+    courseName: name,
+    courseCode: `DM${String(id).padStart(3, '0')}`,
+    credits,
+    semester: sem,
+    schoolId,
+    courseType: type,
+    letterGrade: letter,
+    gradePoints: points,
+    score,
+    instructor,
+  } as Grade);
+
   const grades: Grade[] = [
-    {
-      id: createId(schoolId, 'grd', 1),
-      userId,
-      courseId: createId(schoolId, 'crs', 1),
-      courseName: '程式設計',
-      courseCode: 'DEMO',
-      credits: 3,
-      semester,
-      schoolId,
-      letterGrade: 'A',
-      gradePoints: 4.0,
-      score: 90,
-      instructor: '範例教師',
-    },
-    {
-      id: createId(schoolId, 'grd', 2),
-      userId,
-      courseId: createId(schoolId, 'crs', 2),
-      courseName: '微積分',
-      courseCode: 'DEMO',
-      credits: 3,
-      semester,
-      schoolId,
-      letterGrade: 'B+',
-      gradePoints: 3.5,
-      score: 84,
-      instructor: '範例教師',
-    },
-    {
-      id: createId(schoolId, 'grd', 3),
-      userId,
-      courseId: createId(schoolId, 'crs', 3),
-      courseName: '英文',
-      courseCode: 'DEMO',
-      credits: 2,
-      semester,
-      schoolId,
-      letterGrade: 'A-',
-      gradePoints: 3.7,
-      score: 87,
-      instructor: '範例教師',
-    },
-    {
-      id: createId(schoolId, 'grd', 4),
-      userId,
-      courseId: createId(schoolId, 'crs', 4),
-      courseName: '通識課程',
-      courseCode: 'DEMO',
-      credits: 2,
-      semester,
-      schoolId,
-      letterGrade: 'A',
-      gradePoints: 4.0,
-      score: 92,
-      instructor: '範例教師',
-    },
-    {
-      id: createId(schoolId, 'grd', 5),
-      userId,
-      courseId: createId(schoolId, 'crs', 5),
-      courseName: '體育',
-      courseCode: 'DEMO',
-      credits: 0,
-      semester,
-      schoolId,
-      letterGrade: '通過',
-      gradePoints: 0,
-      score: 85,
-      instructor: '體育室',
-    },
+    // ── 110-1 大一上 ──
+    make('110-1', '大學國文（一）', '必修', 2, 88, 'A-', 3.7, '王老師'),
+    make('110-1', '英文（一）', '必修', 3, 82, 'B+', 3.3, '林教師'),
+    make('110-1', '計算機概論', '必修', 3, 91, 'A', 4.0, '張怡君'),
+    make('110-1', '微積分（一）', '必修', 3, 76, 'B', 3.0, '陳教授'),
+    make('110-1', '體育（桌球）', '體育', 0, 88, '通過', 0, '體育室'),
+    make('110-1', '服務學習（一）', '服務學習', 0, 100, '通過', 0, '輔導室'),
+    make('110-1', '當代藝術賞析', '通識', 2, 90, 'A', 4.0, '藝術系'),
+
+    // ── 110-2 大一下 ──
+    make('110-2', '大學國文（二）', '必修', 2, 85, 'A-', 3.7, '王老師'),
+    make('110-2', '英文（二）', '必修', 3, 80, 'B+', 3.3, '林教師'),
+    make('110-2', '程式設計（一）', '必修', 3, 95, 'A', 4.0, '張怡君'),
+    make('110-2', '微積分（二）', '必修', 3, 68, 'B-', 2.7, '陳教授'),
+    make('110-2', '體育（羽球）', '體育', 0, 86, '通過', 0, '體育室'),
+    make('110-2', '服務學習（二）', '服務學習', 0, 100, '通過', 0, '輔導室'),
+    make('110-2', '生活科技概論', '通識', 2, 87, 'A-', 3.7, '科技中心'),
+
+    // ── 111-1 大二上 ──
+    make('111-1', '英語會話（一）', '必修', 2, 84, 'A-', 3.7, '林教師'),
+    make('111-1', '程式設計（二）', '必修', 3, 92, 'A', 4.0, '張怡君'),
+    make('111-1', '統計學（一）', '必修', 3, 78, 'B+', 3.3, '李教授'),
+    make('111-1', '管理學', '必修', 3, 81, 'B+', 3.3, '黃教授'),
+    make('111-1', '經濟學（一）', '必修', 3, 74, 'B', 3.0, '吳教授'),
+    make('111-1', '體育（瑜珈）', '體育', 0, 90, '通過', 0, '體育室'),
+    make('111-1', '心理學概論', '通識', 2, 88, 'A-', 3.7, '心理系'),
+
+    // ── 111-2 大二下 ──
+    make('111-2', '英語會話（二）', '必修', 2, 86, 'A-', 3.7, '林教師'),
+    make('111-2', '資料結構', '必修', 3, 94, 'A', 4.0, '張怡君'),
+    make('111-2', '統計學（二）', '必修', 3, 75, 'B', 3.0, '李教授'),
+    make('111-2', '會計學', '必修', 3, 70, 'B-', 2.7, '會計系'),
+    make('111-2', '經濟學（二）', '必修', 3, 78, 'B+', 3.3, '吳教授'),
+    make('111-2', '體育（游泳）', '體育', 0, 88, '通過', 0, '體育室'),
+    make('111-2', '法律與生活', '通識', 2, 85, 'A-', 3.7, '法律系'),
+
+    // ── 112-1 大三上 ──
+    make('112-1', '資料庫管理系統', '必修', 3, 96, 'A', 4.0, '張怡君'),
+    make('112-1', '系統分析與設計', '必修', 3, 89, 'A-', 3.7, '張怡君'),
+    make('112-1', '管理資訊系統', '必修', 3, 91, 'A', 4.0, '黃教授'),
+    make('112-1', '網頁程式設計', '選修', 3, 93, 'A', 4.0, '張怡君'),
+    make('112-1', '行銷管理', '選修', 3, 82, 'B+', 3.3, '陳教授'),
+    make('112-1', '永續發展', '通識', 2, 87, 'A-', 3.7, '環境系'),
+    make('112-1', '社會企業創新', '通識', 2, 90, 'A', 4.0, '創新中心'),
+
+    // ── 112-2 大三下 ──
+    make('112-2', '人工智慧概論', '必修', 3, 95, 'A', 4.0, '張怡君'),
+    make('112-2', '專題研究（一）', '必修', 2, 92, 'A', 4.0, '張怡君'),
+    make('112-2', '行動應用程式設計', '選修', 3, 90, 'A', 4.0, '張怡君'),
+    make('112-2', '資料探勘', '選修', 3, 88, 'A-', 3.7, '李教授'),
+    make('112-2', '商業數據分析', '選修', 3, 85, 'A-', 3.7, '黃教授'),
+    make('112-2', '創造力與創新', '通識', 2, 89, 'A-', 3.7, '創新中心'),
+
+    // ── 113-1 大四上（目前） ──
+    make('113-1', '專題研究（二）', '必修', 2, 0, '修課中', 0, '張怡君'),
+    make('113-1', '深度學習實務', '選修', 3, 0, '修課中', 0, '張怡君'),
+    make('113-1', '雲端服務開發', '選修', 3, 0, '修課中', 0, '李教授'),
+    make('113-1', '企業實習', '自由選修', 3, 0, '修課中', 0, '輔導室'),
+    make('113-1', '生命關懷', '通識', 2, 0, '修課中', 0, '宗教系'),
   ];
 
+  // 若指定特定學期則過濾
+  if (semester && semester !== 'all' && semester !== '113-1') {
+    const filtered = grades.filter((g) => g.semester === semester);
+    if (filtered.length > 0) return filtered;
+  }
+  // 預設回所有學期（CreditAudit 會自己分組）
   return grades;
 }
 

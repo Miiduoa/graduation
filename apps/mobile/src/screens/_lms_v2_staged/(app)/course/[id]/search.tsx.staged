@@ -1,0 +1,101 @@
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { supabase } from '@/lib/supabase';
+
+type SearchRow = {
+  kind: string;
+  record_id: string;
+  title: string;
+  snippet: string;
+  touched_at: string;
+};
+
+/**
+ * 課程內全文搜尋（教材／公告／論壇）；對應 search_course RPC（Wave 8）。
+ */
+export default function CourseSearchScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<SearchRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(async () => {
+    if (!courseId || !query.trim()) return;
+    setBusy(true);
+    setError(null);
+    const { data, error: e } = await supabase.rpc('search_course', {
+      p_course_id: courseId,
+      p_query: query.trim(),
+    });
+    setBusy(false);
+    if (e) {
+      setError(e.message);
+      setRows([]);
+      return;
+    }
+    setRows((data ?? []) as SearchRow[]);
+  }, [courseId, query]);
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.searchRow}>
+        <TextInput
+          style={styles.input}
+          placeholder="搜尋教材／公告／論壇主題…"
+          value={query}
+          onChangeText={setQuery}
+          onSubmitEditing={() => void run()}
+          returnKeyType="search"
+        />
+        <Pressable style={styles.btn} onPress={() => void run()}>
+          <Text style={styles.btnText}>搜尋</Text>
+        </Pressable>
+      </View>
+
+      {busy ? <ActivityIndicator /> : null}
+      {error ? <Text style={styles.err}>{error}</Text> : null}
+
+      <FlatList
+        data={rows}
+        keyExtractor={(r) => `${r.kind}-${r.record_id}`}
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <Text style={styles.kind}>[{item.kind}]</Text>
+            <Text style={styles.title}>{item.title}</Text>
+            <Text style={styles.snippet} numberOfLines={3}>
+              {item.snippet}
+            </Text>
+            <Text style={styles.date}>{new Date(item.touched_at).toLocaleString()}</Text>
+          </View>
+        )}
+        ListEmptyComponent={
+          query && !busy ? <Text style={styles.empty}>無結果。</Text> : null
+        }
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 12 },
+  searchRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  input: {
+    flex: 1, padding: 10, borderWidth: 1, borderColor: '#d1d5db',
+    borderRadius: 8, fontSize: 14, backgroundColor: '#fff',
+  },
+  btn: { paddingHorizontal: 16, justifyContent: 'center', backgroundColor: '#2563eb', borderRadius: 8 },
+  btnText: { color: '#fff', fontWeight: '700' },
+  card: {
+    padding: 12, marginBottom: 8, borderRadius: 8,
+    borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#fff',
+  },
+  kind: { fontSize: 11, color: '#6b7280', fontWeight: '700' },
+  title: { fontSize: 15, fontWeight: '700', marginTop: 4 },
+  snippet: { fontSize: 13, color: '#4b5563', marginTop: 4 },
+  date: { fontSize: 11, color: '#9ca3af', marginTop: 4 },
+  err: { color: '#b91c1c', marginBottom: 8 },
+  empty: { color: '#6b7280', textAlign: 'center', marginTop: 20 },
+});

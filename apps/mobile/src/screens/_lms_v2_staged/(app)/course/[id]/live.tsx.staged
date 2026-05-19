@@ -1,0 +1,687 @@
+import type { RealtimeChannel } from '@supabase/supabase-js';
+import { cacheDirectory, writeAsStringAsync } from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
+import { useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { useCourseRole } from '@/hooks/useCourseRole';
+import { supabase } from '@/lib/supabase';
+
+type PollPayload = {
+  question: string;
+  optionA: string;
+  optionB: string;
+};
+
+type VotePayload = {
+  choice: 'A' | 'B';
+  user_id: string;
+};
+
+type AttendanceRow = {
+  user_id: string;
+  status: string;
+  recorded_at: string;
+};
+
+type ChatRow = {
+  id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+};
+
+export default function LiveClassroomScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const { session } = useAuth();
+  const uid = session?.user.id;
+
+  const role = useCourseRole(courseId, uid);
+  const teacher = role === 'teacher';
+
+  const [liveSessionId, setLiveSessionId] = useState<string | null>(null);
+  const [sessionCourseId, setSessionCourseId] = useState<string | null>(null);
+
+  const [poll, setPoll] = useState<PollPayload | null>(null);
+  const [votesA, setVotesA] = useState(0);
+  const [votesB, setVotesB] = useState(0);
+  const [presenceCount, setPresenceCount] = useState<number | null>(null);
+
+  const [joinId, setJoinId] = useState('');
+  const [pollQ, setPollQ] = useState('你最喜歡哪種上課方式？');
+  const [pollA, setPollA] = useState('講授');
+  const [pollB, setPollB] = useState('討論');
+
+  const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
+  const [randomPickResult, setRandomPickResult] = useState<string | null>(null);
+
+  const [chatMessages, setChatMessages] = useState<ChatRow[]>([]);
+  const [chatDraft, setChatDraft] = useState('');
+
+  const [attendanceOpenAt, setAttendanceOpenAt] = useState<string | null>(null);
+  const [attendanceCloseAt, setAttendanceCloseAt] = useState<string | null>(null);
+  const [attendanceLateCutoffAt, setAttendanceLateCutoffAt] = useState<string | null>(null);
+  const [winOpenMin, setWinOpenMin] = useState('0');
+  const [winDurMin, setWinDurMin] = useState('30');
+  /** 自開放刻起算，逾此分鐘視為遲到（留空＝逾時皆仍算準時 present） */
+  const [winLateMin, setWinLateMin] = useState('10');
+
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
+  const topic = useMemo(() => (liveSessionId ? `live:${liveSessionId}` : null), [liveSessionId]);
+
+  const loadAttendance = useCallback(async () => {
+    if (!liveSessionId) return;
+    const { data, error } = await supabase
+      .from('live_attendance')
+      .select('user_id, status, recorded_at')
+      .eq('session_id', liveSessionId)
+      .order('recorded_at', { ascending: false });
+    if (error) console.warn(error.message);
+    setAttendance((data ?? []) as AttendanceRow[]);
+  }, [liveSessionId]);
+
+  const loadChat = useCallback(async () => {
+    if (!liveSessionId) return;
+    const { data, error } = await supabase
+      .from('live_chat_messages')
+      .select('id, user_id, body, created_at')
+      .eq('session_id', liveSessionId)
+      .order('created_at', { ascending: true })
+      .limit(200);
+    if (error) console.warn(error.message);
+    setChatMessages((data ?? []) as ChatRow[]);
+  }, [liveSessionId]);
+
+  useEffect(() => {
+    return () => {
+      const ch = channelRef.current;
+      if (ch) {
+        supabase.removeChannel(ch);
+        channelRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!liveSessionId) return;
+    loadAttendance();
+    loadChat();
+  }, [liveSessionId, loadAttendance, loadChat]);
+
+  async function subscribeTo(sessionId: string) {
+    const chOld = channelRef.current;
+    if (chOld) {
+      await supabase.removeChannel(chOld);
+      channelRef.current = null;
+    }
+
+    const { data: ls } = await supabase
+      .from('live_sessions')
+      .select('course_id, attendance_open_at, attendance_close_at, attendance_late_cutoff_at')
+      .eq('id', sessionId)
+      .maybeSingle();
+    setSessionCourseId((ls?.course_id as string | undefined) ?? courseId ?? null);
+    setAttendanceOpenAt((ls?.attendance_open_at as string | null | undefined) ?? null);
+    setAttendanceCloseAt((ls?.attendance_close_at as string | null | undefined) ?? null);
+    setAttendanceLateCutoffAt((ls?.attendance_late_cutoff_at as string | null | undefined) ?? null);
+
+    const channelName = `live:${sessionId}`;
+    const channel = supabase.channel(channelName, {
+      config: {
+        broadcast: { self: true },
+        presence: { key: uid ?? sessionId },
+      },
+    });
+
+    channel.on('broadcast', { event: 'poll_start' }, ({ payload }) => {
+      const p = payload as PollPayload;
+      setPoll(p);
+      setVotesA(0);
+      setVotesB(0);
+    });
+
+    channel.on('broadcast', { event: 'poll_vote' }, ({ payload }) => {
+      const v = payload as VotePayload;
+      if (!v?.choice) return;
+      if (v.choice === 'A') setVotesA((x) => x + 1);
+      if (v.choice === 'B') setVotesB((x) => x + 1);
+    });
+
+    channel.on('broadcast', { event: 'random_pick' }, ({ payload }) => {
+      const pid = (payload as { user_id?: string })?.user_id;
+      if (pid) setRandomPickResult(pid);
+    });
+
+    channel.on('presence', { event: 'sync' }, () => {
+      const state = channel.presenceState();
+      setPresenceCount(Object.keys(state).length);
+    });
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'live_chat_messages',
+        filter: `session_id=eq.${sessionId}`,
+      },
+      (payload) => {
+        const row = payload.new as ChatRow;
+        setChatMessages((prev) => [...prev.filter((m) => m.id !== row.id), row]);
+      },
+    );
+
+    channel.on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'live_attendance',
+        filter: `session_id=eq.${sessionId}`,
+      },
+      () => {
+        loadAttendance();
+      },
+    );
+
+    channel.subscribe(async (status) => {
+      if (status !== 'SUBSCRIBED') return;
+      if (uid) {
+        await channel.track({ user_id: uid, role: teacher ? 'teacher' : 'student', ts: Date.now() });
+      }
+    });
+
+    channelRef.current = channel;
+  }
+
+  async function createLiveSession() {
+    if (!courseId || !uid || !teacher) return;
+
+    const { data, error } = await supabase
+      .from('live_sessions')
+      .insert({
+        course_id: courseId,
+        host_id: uid,
+        title: '互動課堂',
+        status: 'live',
+      })
+      .select('id')
+      .single();
+
+    if (error || !data?.id) {
+      Alert.alert('建立失敗', error?.message ?? '');
+      return;
+    }
+
+    setLiveSessionId(String(data.id));
+    await subscribeTo(String(data.id));
+  }
+
+  async function joinLiveSession() {
+    const sid = joinId.trim();
+    if (!sid) {
+      Alert.alert('請輸入 Session UUID');
+      return;
+    }
+
+    setLiveSessionId(sid);
+    await subscribeTo(sid);
+  }
+
+  async function broadcastPollStart() {
+    const channel = channelRef.current;
+    if (!channel) {
+      Alert.alert('請先建立或加入 Session');
+      return;
+    }
+
+    const payload: PollPayload = {
+      question: pollQ.trim() || '投票',
+      optionA: pollA.trim() || 'A',
+      optionB: pollB.trim() || 'B',
+    };
+
+    await channel.send({ type: 'broadcast', event: 'poll_start', payload });
+    setPoll(payload);
+    setVotesA(0);
+    setVotesB(0);
+  }
+
+  async function vote(choice: 'A' | 'B') {
+    const channel = channelRef.current;
+    if (!channel || !uid) return;
+
+    await channel.send({
+      type: 'broadcast',
+      event: 'poll_vote',
+      payload: { choice, user_id: uid } satisfies VotePayload,
+    });
+  }
+
+  async function buzzer() {
+    if (!liveSessionId) return;
+
+    const { data, error } = await supabase.rpc('claim_live_buzzer', { p_session_id: liveSessionId });
+    if (error) {
+      Alert.alert('搶答失敗', error.message);
+      return;
+    }
+
+    Alert.alert('搶答結果', data ? '你是第一位！（已由資料庫 PK 鎖定）' : '慢了一步，已被其他人搶走。');
+  }
+
+  async function resetBuzzer() {
+    if (!liveSessionId || !teacher) return;
+    const { error } = await supabase.from('live_buzzer_state').delete().eq('session_id', liveSessionId);
+    if (error) Alert.alert('重置失敗', error.message);
+  }
+
+  async function endLiveSession() {
+    if (!liveSessionId || !teacher) return;
+    const { error } = await supabase
+      .from('live_sessions')
+      .update({ status: 'ended', ended_at: new Date().toISOString() })
+      .eq('id', liveSessionId);
+    if (error) Alert.alert('結束失敗', error.message);
+  }
+
+  async function studentCheckIn() {
+    if (!liveSessionId || !uid) return;
+    const { data: st, error } = await supabase.rpc('record_live_attendance', { p_session_id: liveSessionId });
+    if (error) Alert.alert('簽到失敗', error.message);
+    else {
+      Alert.alert('簽到成功', st === 'late' ? '狀態：遲到' : '狀態：準時出席');
+      await loadAttendance();
+    }
+  }
+
+  async function teacherApplyAttendanceWindow() {
+    if (!liveSessionId || !teacher) return;
+    const off = Number(winOpenMin);
+    const dur = Number(winDurMin);
+    if (!Number.isFinite(off) || !Number.isFinite(dur) || dur <= 0) {
+      Alert.alert('請輸入有效的「延後分鐘」與「開放時長（分鐘）」');
+      return;
+    }
+    const t0 = Date.now() + off * 60_000;
+    const openIso = new Date(t0).toISOString();
+    const closeIso = new Date(t0 + dur * 60_000).toISOString();
+    let lateIso: string | null = null;
+    const lm = winLateMin.trim();
+    if (lm !== '') {
+      const lateMin = Number(lm);
+      if (!Number.isFinite(lateMin) || lateMin < 0 || lateMin > dur) {
+        Alert.alert('遲到分界需在 0～開放時長之間');
+        return;
+      }
+      lateIso = new Date(t0 + lateMin * 60_000).toISOString();
+    }
+
+    const { error } = await supabase
+      .from('live_sessions')
+      .update({
+        attendance_open_at: openIso,
+        attendance_close_at: closeIso,
+        attendance_late_cutoff_at: lateIso,
+      })
+      .eq('id', liveSessionId);
+
+    if (error) Alert.alert('設定失敗', error.message);
+    else {
+      setAttendanceOpenAt(openIso);
+      setAttendanceCloseAt(closeIso);
+      setAttendanceLateCutoffAt(lateIso);
+      Alert.alert('已設定簽到時間窗');
+    }
+  }
+
+  async function teacherClearAttendanceWindow() {
+    if (!liveSessionId || !teacher) return;
+    const { error } = await supabase
+      .from('live_sessions')
+      .update({
+        attendance_open_at: null,
+        attendance_close_at: null,
+        attendance_late_cutoff_at: null,
+      })
+      .eq('id', liveSessionId);
+    if (error) Alert.alert('清除失敗', error.message);
+    else {
+      setAttendanceOpenAt(null);
+      setAttendanceCloseAt(null);
+      setAttendanceLateCutoffAt(null);
+      Alert.alert('已清除', '恢復為不限時間簽到（RPC）');
+    }
+  }
+
+  function attendanceHint(): string {
+    if (!attendanceOpenAt && !attendanceCloseAt) return '目前：不限時間簽到（開放／截止皆未設定）。';
+    const o = attendanceOpenAt ? new Date(attendanceOpenAt).toLocaleString() : '立即';
+    const c = attendanceCloseAt ? new Date(attendanceCloseAt).toLocaleString() : '未設定截止';
+    const l = attendanceLateCutoffAt ? new Date(attendanceLateCutoffAt).toLocaleString() : null;
+    return `簽到窗口：${o} ～ ${c}${l ? `｜逾 ${l} 標記遲到` : ''}`;
+  }
+
+  async function teacherExportChat(which: 'share' | 'file') {
+    if (!teacher || !liveSessionId) return;
+    const lines = chatMessages.map(
+      (m) => `[${new Date(m.created_at).toISOString()}] ${m.user_id}\t${m.body.replace(/\n/g, ' ')}`,
+    );
+    const body = lines.join('\n');
+    if (which === 'share') {
+      try {
+        if (Platform.OS === 'web') {
+          await navigator.clipboard?.writeText(body);
+          Alert.alert('已複製', '聊天紀錄已複製到剪貼簿');
+        } else {
+          await Share.share({ title: 'live_chat_messages', message: body });
+        }
+      } catch (e: unknown) {
+        Alert.alert('分享失敗', e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+    try {
+      const base = cacheDirectory ?? '';
+      const path = `${base}live-chat-${liveSessionId.slice(0, 8)}.txt`;
+      await writeAsStringAsync(path, '\ufeff' + body, { encoding: 'utf8' });
+      const ok = await Sharing.isAvailableAsync();
+      if (ok) await Sharing.shareAsync(path, { mimeType: 'text/plain', dialogTitle: '匯出聊天紀錄' });
+      else Alert.alert('無法開啟分享面板', body.slice(0, 800));
+    } catch (e: unknown) {
+      Alert.alert('匯出失敗', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function teacherRandomPick() {
+    const cid = sessionCourseId ?? courseId;
+    if (!cid || !teacher) return;
+    const { data: picked, error } = await supabase.rpc('pick_random_student', { p_course_id: cid });
+    if (error) {
+      Alert.alert('抽點失敗', error.message);
+      return;
+    }
+    const pid = picked as string | null;
+    if (!pid) {
+      Alert.alert('抽點', '班上沒有學生成员');
+      return;
+    }
+    setRandomPickResult(pid);
+    const channel = channelRef.current;
+    if (channel) {
+      await channel.send({ type: 'broadcast', event: 'random_pick', payload: { user_id: pid } });
+    }
+    const { data: prof } = await supabase.from('profiles').select('display_name').eq('id', pid).maybeSingle();
+    Alert.alert('抽到', (prof?.display_name as string) ?? pid.slice(0, 8));
+  }
+
+  async function sendChat() {
+    if (!liveSessionId || !uid) return;
+    const body = chatDraft.trim();
+    if (!body) return;
+    const { error } = await supabase.from('live_chat_messages').insert({
+      session_id: liveSessionId,
+      user_id: uid,
+      body,
+    });
+    if (error) Alert.alert('送出失敗', error.message);
+    else {
+      setChatDraft('');
+      await loadChat();
+    }
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.screen}>
+      <Text style={styles.title}>互動課堂（投票／點名／彈幕／搶答）</Text>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Session</Text>
+        <Text style={styles.mono}>{liveSessionId ?? '尚未連線'}</Text>
+        <Text style={styles.meta}>Presence 連線數（約略）：{presenceCount ?? '—'}</Text>
+
+        {teacher ? (
+          <Pressable style={styles.primaryBtn} onPress={createLiveSession}>
+            <Text style={styles.primaryBtnText}>建立並進入 Live Session</Text>
+          </Pressable>
+        ) : (
+          <>
+            <TextInput placeholder="輸入 Session UUID 加入" style={styles.input} value={joinId} onChangeText={setJoinId} autoCapitalize="none" />
+            <Pressable style={styles.secondaryBtn} onPress={joinLiveSession}>
+              <Text style={styles.secondaryBtnText}>加入</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
+
+      {liveSessionId ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>點名（live_attendance）</Text>
+          <Text style={styles.meta}>{attendanceHint()}</Text>
+
+          {teacher ? (
+            <View style={{ gap: 8 }}>
+              <Text style={styles.section}>簽到時間窗（相對現在）</Text>
+              <Text style={styles.meta}>延後幾分鐘開放、開放多久、逾多久算遲到（選填）</Text>
+              <TextInput
+                placeholder="延後開放（分鐘）預設 0"
+                style={styles.input}
+                keyboardType="number-pad"
+                value={winOpenMin}
+                onChangeText={setWinOpenMin}
+              />
+              <TextInput
+                placeholder="開放時長（分鐘）預設 30"
+                style={styles.input}
+                keyboardType="number-pad"
+                value={winDurMin}
+                onChangeText={setWinDurMin}
+              />
+              <TextInput
+                placeholder="遲到分界：開放後第幾分鐘（留空＝無遲到）"
+                style={styles.input}
+                keyboardType="number-pad"
+                value={winLateMin}
+                onChangeText={setWinLateMin}
+              />
+              <Pressable style={styles.primaryBtn} onPress={teacherApplyAttendanceWindow}>
+                <Text style={styles.primaryBtnText}>套用時間窗</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryBtn} onPress={teacherClearAttendanceWindow}>
+                <Text style={styles.secondaryBtnText}>清除時間窗（不限時）</Text>
+              </Pressable>
+              <Pressable style={[styles.secondaryBtn, { marginTop: 8 }]} onPress={teacherRandomPick}>
+                <Text style={styles.secondaryBtnText}>隨機抽一位學生（RPC）</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable style={styles.primaryBtn} onPress={studentCheckIn}>
+              <Text style={styles.primaryBtnText}>簽到（伺服端 RPC 判定準時／遲到）</Text>
+            </Pressable>
+          )}
+          {randomPickResult ? (
+            <Text style={styles.meta}>上次抽到 user：{randomPickResult.slice(0, 8)}…</Text>
+          ) : null}
+          <Text style={styles.section}>簽到紀錄 ({attendance.length})</Text>
+          <FlatList
+            scrollEnabled={false}
+            data={attendance}
+            keyExtractor={(item, i) => `${item.user_id}-${i}`}
+            renderItem={({ item }) => (
+              <Text style={styles.smallRow}>
+                {item.user_id.slice(0, 8)}…｜{item.status}｜{new Date(item.recorded_at).toLocaleTimeString()}
+              </Text>
+            )}
+          />
+        </View>
+      ) : null}
+
+      {liveSessionId ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>彈幕（live_chat_messages + Realtime）</Text>
+          <FlatList
+            style={{ maxHeight: 160 }}
+            data={chatMessages}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <Text style={styles.chatLine}>
+                <Text style={styles.chatUser}>{item.user_id.slice(0, 6)}…:</Text> {item.body}
+              </Text>
+            )}
+          />
+          <TextInput
+            placeholder="輸入彈幕…"
+            style={styles.input}
+            value={chatDraft}
+            onChangeText={setChatDraft}
+          />
+          <Pressable style={styles.secondaryBtn} onPress={sendChat}>
+            <Text style={styles.secondaryBtnText}>送出</Text>
+          </Pressable>
+          {teacher ? (
+            <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+              <Pressable style={styles.secondaryBtn} onPress={() => teacherExportChat('share')}>
+                <Text style={styles.secondaryBtnText}>複製／分享紀錄</Text>
+              </Pressable>
+              <Pressable style={styles.secondaryBtn} onPress={() => teacherExportChat('file')}>
+                <Text style={styles.secondaryBtnText}>匯出 UTF-8 文字檔</Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>即時投票（Broadcast）</Text>
+        {teacher ? (
+          <>
+            <TextInput style={styles.input} value={pollQ} onChangeText={setPollQ} placeholder="題目" />
+            <TextInput style={styles.input} value={pollA} onChangeText={setPollA} placeholder="選項 A" />
+            <TextInput style={styles.input} value={pollB} onChangeText={setPollB} placeholder="選項 B" />
+            <Pressable style={styles.primaryBtn} onPress={broadcastPollStart}>
+              <Text style={styles.primaryBtnText}>發布投票</Text>
+            </Pressable>
+          </>
+        ) : (
+          <Text style={styles.meta}>等待教師發布投票。</Text>
+        )}
+
+        {poll ? (
+          <View style={{ gap: 10, marginTop: 10 }}>
+            <Text style={styles.pollQ}>{poll.question}</Text>
+            <Text style={styles.meta}>
+              票數：A {votesA} / B {votesB}
+            </Text>
+            <View style={styles.row}>
+              <Pressable style={styles.optionBtn} onPress={() => vote('A')}>
+                <Text style={styles.optionText}>投 A：{poll.optionA}</Text>
+              </Pressable>
+              <Pressable style={styles.optionBtn} onPress={() => vote('B')}>
+                <Text style={styles.optionText}>投 B：{poll.optionB}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>搶答（Postgres 原子鎖）</Text>
+        <Pressable style={styles.secondaryBtn} onPress={buzzer}>
+          <Text style={styles.secondaryBtnText}>搶答</Text>
+        </Pressable>
+        {teacher ? (
+          <>
+            <Pressable style={[styles.secondaryBtn, { marginTop: 10 }]} onPress={resetBuzzer}>
+              <Text style={styles.secondaryBtnText}>重置搶答狀態（刪除 winner）</Text>
+            </Pressable>
+            <Pressable style={[styles.dangerBtn, { marginTop: 10 }]} onPress={endLiveSession}>
+              <Text style={styles.dangerBtnText}>標記 Session 結束</Text>
+            </Pressable>
+          </>
+        ) : null}
+      </View>
+
+      <Text style={styles.footer}>
+        頻道：{topic ?? '（無）'}｜請在 Supabase 啟用 Broadcast／Presence／Realtime（live_chat_messages、live_attendance）。
+      </Text>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { padding: 16, gap: 12, paddingBottom: 36 },
+  title: { fontSize: 18, fontWeight: '900' },
+  section: { fontWeight: '800', marginTop: 8 },
+  card: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    gap: 10,
+    backgroundColor: '#fff',
+  },
+  cardTitle: { fontWeight: '900' },
+  mono: { fontFamily: 'SpaceMono-Regular' },
+  meta: { color: '#6b7280', fontSize: 12 },
+  smallRow: { fontSize: 12, color: '#374151' },
+  chatLine: { fontSize: 13, marginBottom: 4 },
+  chatUser: { fontWeight: '800', color: '#1d4ed8' },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '900' },
+  secondaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#111827',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '900' },
+  dangerBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  dangerBtnText: { color: '#fff', fontWeight: '900' },
+  pollQ: { fontSize: 16, fontWeight: '800' },
+  row: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  optionBtn: {
+    flexGrow: 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#fafafa',
+  },
+  optionText: { fontWeight: '800' },
+  footer: { color: '#6b7280', fontSize: 11, marginTop: 8 },
+});

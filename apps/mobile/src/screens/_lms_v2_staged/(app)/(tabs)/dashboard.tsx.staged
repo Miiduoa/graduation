@@ -1,0 +1,122 @@
+import { router } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+type DashboardRow = {
+  course_id: string;
+  student_id: string;
+  assignments_pending: number | null;
+  quizzes_not_attempted: number | null;
+  peer_reviews_pending: number | null;
+  badges_earned: number | null;
+  weighted_percent: number | null;
+};
+type CourseTitle = { id: string; title: string };
+
+/**
+ * 學生 dashboard tab：彙整 my_dashboard RPC（V3 Wave 5 落地）。
+ */
+export default function DashboardScreen() {
+  const { session } = useAuth();
+  const [rows, setRows] = useState<DashboardRow[]>([]);
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!session) return;
+    setLoading(true);
+    const { data, error } = await supabase.rpc('my_dashboard');
+    if (error) {
+      setLoading(false);
+      return;
+    }
+    const list = (data ?? []) as DashboardRow[];
+    setRows(list);
+
+    const ids = list.map((r) => r.course_id);
+    if (ids.length > 0) {
+      const { data: cs } = await supabase
+        .from('courses').select('id, title').in('id', ids);
+      const map: Record<string, string> = {};
+      for (const c of (cs ?? []) as CourseTitle[]) map[c.id] = c.title;
+      setTitles(map);
+    }
+    setLoading(false);
+  }, [session]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <FlatList
+      data={rows}
+      keyExtractor={(r) => `${r.course_id}-${r.student_id}`}
+      contentContainerStyle={{ padding: 12 }}
+      refreshControl={<RefreshControl refreshing={false} onRefresh={() => void load()} />}
+      ListEmptyComponent={
+        <Text style={{ color: '#6b7280', textAlign: 'center', marginTop: 40 }}>
+          目前沒有任何課程儀表板資料；請先加入課程或聯絡老師。
+        </Text>
+      }
+      renderItem={({ item }) => (
+        <Pressable
+          onPress={() => router.push(`/(app)/course/${item.course_id}`)}
+          style={styles.card}>
+          <Text style={styles.title}>{titles[item.course_id] ?? item.course_id.slice(0, 8)}</Text>
+          <View style={styles.row}>
+            <Stat label="待繳" value={item.assignments_pending} />
+            <Stat label="待答" value={item.quizzes_not_attempted} />
+            <Stat label="待評" value={item.peer_reviews_pending} />
+            <Stat label="徽章" value={item.badges_earned} />
+          </View>
+          <View style={styles.weighted}>
+            <Text style={styles.weightedLabel}>加權</Text>
+            <Text style={styles.weightedValue}>
+              {Number(item.weighted_percent ?? 0).toFixed(1)}%
+            </Text>
+          </View>
+        </Pressable>
+      )}
+    />
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number | null }) {
+  return (
+    <View style={styles.stat}>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>{value ?? 0}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  card: {
+    backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 12,
+    borderWidth: 1, borderColor: '#e5e7eb',
+  },
+  title: { fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  stat: { alignItems: 'center', flex: 1 },
+  statLabel: { fontSize: 11, color: '#6b7280' },
+  statValue: { fontSize: 20, fontWeight: '700', color: '#111827' },
+  weighted: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline',
+    marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#f3f4f6',
+  },
+  weightedLabel: { fontSize: 12, color: '#6b7280' },
+  weightedValue: { fontSize: 18, fontWeight: '700', color: '#059669' },
+});

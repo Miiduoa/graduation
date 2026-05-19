@@ -177,7 +177,7 @@ export function parseGroupCourseHubDeepLink(
     /* use raw url */
   }
 
-  let m = candidate.match(GROUP_HUB_SUFFIX_RE) ?? url.match(GROUP_HUB_SUFFIX_RE);
+  const m = candidate.match(GROUP_HUB_SUFFIX_RE) ?? url.match(GROUP_HUB_SUFFIX_RE);
   if (m) {
     try {
       return { groupId: decodeURIComponent(m[1]) };

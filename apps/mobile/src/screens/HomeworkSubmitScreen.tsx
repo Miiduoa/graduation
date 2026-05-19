@@ -19,6 +19,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 
+import { useAuth } from '../state/auth';
+import { simulateStudentSubmit } from '../services/demoActionSimulator';
+import { getTeacherUidForCourse } from '../data/demoUserStories';
+
 type RouteProps = {
   route?: {
     params?: {
@@ -43,6 +47,7 @@ interface Attachment {
 
 export default function HomeworkSubmitScreen(props: RouteProps) {
   const navigation = useNavigation<any>();
+  const auth = useAuth();
   const courseId = props.route?.params?.courseId ?? '';
   const hwId = props.route?.params?.hwId ?? '';
   const hwTitle = props.route?.params?.hwTitle ?? '作業繳交';
@@ -126,18 +131,19 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
   const doSubmit = useCallback(async () => {
     setSubmitting(true);
     try {
-      const { tcSubmitHomework } = await import('../services/tronClassClient');
+      // ─ Demo 模式：emit cross-role event 給老師（取代 TronClass 提交）─
       const numericCourseId = Number(String(courseId).replace(/^tc:/, '')) || 0;
       const numericHwId = Number(String(hwId).replace(/^tc:/, '')) || 0;
-      const result = await tcSubmitHomework(numericCourseId, numericHwId, {
-        content: answer.trim(),
-        attachments: attachments.map((a) => ({ uri: a.uri, name: a.name, type: a.type })),
+      await simulateStudentSubmit({
+        studentUid: auth.user?.uid ?? 'demo_student_kuchih',
+        studentName: auth.profile?.displayName ?? '顧晉瑋',
+        teacherUid: getTeacherUidForCourse(courseId),
+        courseId: numericCourseId,
+        courseName: hwTitle.split(' ')[0] ?? '課程',
+        homeworkId: numericHwId,
+        homeworkTitle: hwTitle,
+        isLate: !!overdue,
       });
-
-      if (!result.success) {
-        Alert.alert('送出失敗', result.error ?? '請檢查網路後再試一次。');
-        return;
-      }
 
       // 紀錄 companion signal
       try {
@@ -148,19 +154,21 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
       }
 
       setSubmitted(true);
-      Alert.alert('✅ 已送出', `${hwTitle} 已成功繳交。`, [
-        { text: '回課程', onPress: () => navigation.goBack() },
-      ]);
+      Alert.alert(
+        '✅ 已送出',
+        `${hwTitle} 已成功繳交${overdue ? '（標記為遲交）' : ''}。\n老師端會收到即時通知。`,
+        [{ text: '回課程', onPress: () => navigation.goBack() }],
+      );
     } catch (e) {
       Alert.alert('送出失敗', String((e as Error)?.message ?? e));
     } finally {
       setSubmitting(false);
     }
-  }, [answer, attachments, courseId, hwId, hwTitle, navigation]);
+  }, [answer, attachments, courseId, hwId, hwTitle, navigation, overdue, auth.user?.uid, auth.profile?.displayName]);
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: '#f9fafb' }}
+      style={{ flex: 1, backgroundColor: '#F2F2F7' }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
@@ -171,15 +179,15 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
             borderRadius: 12,
             padding: 16,
             borderLeftWidth: 4,
-            borderLeftColor: overdue ? '#dc2626' : '#1F4E78',
+            borderLeftColor: overdue ? '#D70015' : '#003F8A',
           }}
         >
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827' }}>{hwTitle}</Text>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: '#1C1C1E' }}>{hwTitle}</Text>
           {dueText ? (
             <Text
               style={{
                 fontSize: 13,
-                color: overdue ? '#dc2626' : '#6b7280',
+                color: overdue ? '#D70015' : '#8E8E93',
                 marginTop: 4,
               }}
             >
@@ -188,7 +196,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
             </Text>
           ) : null}
           {description ? (
-            <Text style={{ marginTop: 12, fontSize: 14, color: '#374151', lineHeight: 22 }}>
+            <Text style={{ marginTop: 12, fontSize: 14, color: '#3C3C43', lineHeight: 22 }}>
               {description}
             </Text>
           ) : null}
@@ -204,11 +212,11 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
               padding: 16,
             }}
           >
-            <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827' }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#1C1C1E' }}>
               老師已批改：{currentScore} 分
             </Text>
             {feedback ? (
-              <Text style={{ marginTop: 6, fontSize: 13, color: '#374151' }}>
+              <Text style={{ marginTop: 6, fontSize: 13, color: '#3C3C43' }}>
                 💬 {feedback}
               </Text>
             ) : null}
@@ -217,7 +225,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
 
         {/* ── 答案輸入區 ── */}
         <View style={{ marginTop: 16 }}>
-          <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827', marginBottom: 6 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E', marginBottom: 6 }}>
             你的答案
           </Text>
           <TextInput
@@ -232,11 +240,11 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
               borderRadius: 12,
               padding: 12,
               fontSize: 14,
-              color: '#111827',
+              color: '#1C1C1E',
               minHeight: 160,
               textAlignVertical: 'top',
               borderWidth: 1,
-              borderColor: '#e5e7eb',
+              borderColor: '#E5E5EA',
             }}
           />
         </View>
@@ -244,12 +252,12 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
         {/* ── 附件 ── */}
         <View style={{ marginTop: 16 }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-            <Text style={{ fontSize: 14, fontWeight: '600', color: '#111827' }}>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: '#1C1C1E' }}>
               附加檔案 ({attachments.length})
             </Text>
             {!submitted && (
               <Pressable onPress={handlePickFile} hitSlop={8}>
-                <Text style={{ color: '#1F4E78', fontSize: 13, fontWeight: '600' }}>
+                <Text style={{ color: '#003F8A', fontSize: 13, fontWeight: '600' }}>
                   + 加檔案
                 </Text>
               </Pressable>
@@ -267,27 +275,27 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
                 alignItems: 'center',
                 gap: 8,
                 borderWidth: 1,
-                borderColor: '#e5e7eb',
+                borderColor: '#E5E5EA',
               }}
             >
-              <Ionicons name="document-outline" size={18} color="#6b7280" />
+              <Ionicons name="document-outline" size={18} color="#8E8E93" />
               <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, color: '#111827' }} numberOfLines={1}>
+                <Text style={{ fontSize: 13, color: '#1C1C1E' }} numberOfLines={1}>
                   {att.name}
                 </Text>
-                <Text style={{ fontSize: 11, color: '#6b7280' }}>
+                <Text style={{ fontSize: 11, color: '#8E8E93' }}>
                   {att.type ?? '檔案'} {att.size ? `・ ${Math.round(att.size / 1024)} KB` : ''}
                 </Text>
               </View>
               {!submitted && (
                 <Pressable onPress={() => handleRemoveAttachment(att.id)} hitSlop={8}>
-                  <Ionicons name="close-circle" size={20} color="#dc2626" />
+                  <Ionicons name="close-circle" size={20} color="#D70015" />
                 </Pressable>
               )}
             </View>
           ))}
           {attachments.length === 0 && (
-            <Text style={{ fontSize: 12, color: '#6b7280', fontStyle: 'italic', marginTop: 4 }}>
+            <Text style={{ fontSize: 12, color: '#8E8E93', fontStyle: 'italic', marginTop: 4 }}>
               還沒附加任何檔案。可附 PDF、Word、圖片等。
             </Text>
           )}
@@ -302,7 +310,7 @@ export default function HomeworkSubmitScreen(props: RouteProps) {
               marginTop: 24,
               padding: 14,
               borderRadius: 12,
-              backgroundColor: overdue ? '#f97316' : '#1F4E78',
+              backgroundColor: overdue ? '#FF9500' : '#003F8A',
               alignItems: 'center',
               opacity: submitting ? 0.6 : 1,
             }}

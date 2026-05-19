@@ -97,6 +97,7 @@ import { campusEventBus } from '../services/campusEventBus';
 import { getDeadlines, type Deadline } from '../services/smartCalendarEngine';
 import { getAnyCachedTCTodos, seedCachedTCCourses, seedCachedTCAttendance } from '../services/puDataCache';
 import { BrainInsightCards } from '../components/BrainInsightCards';
+import { AIMissionControl } from '../components/AIMissionControl';
 import { CompanionStrip } from '../components/CompanionStrip';
 import { NpsPromptModal } from '../components/NpsPromptModal';
 import { HeaderAvatarButton } from '../components/HeaderAvatarButton';
@@ -159,7 +160,7 @@ function GreetingHeader({
         style={{
           color: theme.colors.text,
           fontSize: 28,
-          fontWeight: '800',
+          fontWeight: '700',
           marginTop: theme.space.xs,
           letterSpacing: -0.5,
         }}
@@ -292,7 +293,7 @@ function XPProgressBar({ gamification }: { gamification: GamificationState }) {
           }}
         >
           <LinearGradient
-            colors={[theme.colors.accent, '#7C3AED', '#A855F7'] as [string, string, string]}
+            colors={[theme.colors.accent, '#AF52DE', '#A855F7'] as [string, string, string]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={{ flex: 1 }}
@@ -356,7 +357,7 @@ function GpaTrendChart({
       >
         <View>
           <Text style={{ color: theme.colors.textSecondary, fontSize: 12 }}>GPA 趨勢</Text>
-          <Text style={{ color: theme.colors.text, fontSize: 24, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.text, fontSize: 24, fontWeight: '700' }}>
             {prediction.current.toFixed(2)}
           </Text>
         </View>
@@ -603,7 +604,7 @@ function RiskAssessmentCard({
                 transform: [{ rotate: '-45deg' }],
               }}
             />
-            <Text style={{ color: c.color, fontSize: 16, fontWeight: '800' }}>{100 - score}</Text>
+            <Text style={{ color: c.color, fontSize: 16, fontWeight: '700' }}>{100 - score}</Text>
           </View>
         </View>
       </View>
@@ -1204,7 +1205,7 @@ function AgentActionCenter(props: {
         }}
       >
         <View>
-          <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
             行動中樞
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -1230,7 +1231,7 @@ function AgentActionCenter(props: {
                       : 'medium',
                 ),
                 fontSize: 11,
-                fontWeight: '800',
+                fontWeight: '700',
               }}
             >
               風險 {props.risk.score}
@@ -1270,7 +1271,7 @@ function AgentActionCenter(props: {
               />
             </LinearGradient>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '800' }}>
+              <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>
                 {primary.title}
               </Text>
               <Text
@@ -1300,7 +1301,7 @@ function AgentActionCenter(props: {
               {primary.nextStep}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <Text style={{ color, fontSize: 13, fontWeight: '800' }}>{primary.actionLabel}</Text>
+              <Text style={{ color, fontSize: 13, fontWeight: '700' }}>{primary.actionLabel}</Text>
               <Ionicons name="chevron-forward" size={14} color={color} />
             </View>
           </View>
@@ -1317,7 +1318,7 @@ function AgentActionCenter(props: {
             opacity: pressed ? 0.82 : 1,
           })}
         >
-          <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>
             今天沒有高壓待辦
           </Text>
           <Text
@@ -1415,7 +1416,7 @@ function AgentActionCenter(props: {
         >
           <Ionicons name="sparkles-outline" size={14} color={theme.colors.accent} />
         </LinearGradient>
-        <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '800', flex: 1 }}>
+        <Text style={{ color: theme.colors.accent, fontSize: 13, fontWeight: '700', flex: 1 }}>
           AI 可依授權資料拆作業、排讀書順序與建立提醒草稿
         </Text>
         <Ionicons name="arrow-forward" size={14} color={theme.colors.accent} />
@@ -1442,7 +1443,7 @@ function CloudPulseStrip(props: { aggregates: PulseAggregate[]; onReportPress: (
         }}
       >
         <View>
-          <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '800' }}>
+          <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>
             校園脈動資料層
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -1458,7 +1459,7 @@ function CloudPulseStrip(props: { aggregates: PulseAggregate[]; onReportPress: (
             backgroundColor: theme.colors.accentSoft,
           }}
         >
-          <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '800' }}>回報</Text>
+          <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: '700' }}>回報</Text>
         </Pressable>
       </View>
       <View style={{ flexDirection: 'row', gap: theme.space.sm }}>
@@ -1482,12 +1483,12 @@ function CloudPulseStrip(props: { aggregates: PulseAggregate[]; onReportPress: (
               }}
             >
               <Text
-                style={{ color: theme.colors.text, fontSize: 12, fontWeight: '800' }}
+                style={{ color: theme.colors.text, fontSize: 12, fontWeight: '700' }}
                 numberOfLines={1}
               >
                 {aggregate.locationName}
               </Text>
-              <Text style={{ color, fontSize: 18, fontWeight: '900', marginTop: 6 }}>
+              <Text style={{ color, fontSize: 18, fontWeight: '700', marginTop: 6 }}>
                 {aggregate.currentLevel}/5
               </Text>
               <Text
@@ -1645,7 +1646,7 @@ function AgentOSHero(props: {
         <Text style={{ color: theme.colors.textSecondary, fontSize: 14 }}>{greeting}</Text>
       </View>
       <Text
-        style={{ color: theme.colors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.5 }}
+        style={{ color: theme.colors.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.5 }}
       >
         {props.displayName}
       </Text>
@@ -1734,7 +1735,7 @@ function AgentOSHero(props: {
           ) : null}
 
           <Text
-            style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '800', lineHeight: 28 }}
+            style={{ color: '#FFFFFF', fontSize: 20, fontWeight: '700', lineHeight: 28 }}
             numberOfLines={2}
           >
             {primary ? primary.title : '校園代理已就緒'}
@@ -1762,7 +1763,7 @@ function AgentOSHero(props: {
               }}
             >
               <Ionicons name="flash" size={16} color="#FFF" />
-              <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '800' }}>
+              <Text style={{ color: '#FFF', fontSize: 14, fontWeight: '700' }}>
                 {primary?.actionLabel ?? '生成今日計畫'}
               </Text>
             </LinearGradient>
@@ -1832,7 +1833,7 @@ function TwinNode(props: {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
         <Ionicons name={props.icon} size={14} color={props.color} />
         <Text
-          style={{ color: theme.colors.text, fontSize: 11, fontWeight: '900' }}
+          style={{ color: theme.colors.text, fontSize: 11, fontWeight: '700' }}
           numberOfLines={1}
         >
           {props.title}
@@ -1872,7 +1873,7 @@ function CampusTwinPanel(props: {
         }}
       >
         <View>
-          <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '900' }}>
+          <Text style={{ color: theme.colors.text, fontSize: 17, fontWeight: '700' }}>
             Campus Twin
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 12, marginTop: 2 }}>
@@ -1893,7 +1894,7 @@ function CampusTwinPanel(props: {
             colors={[`${theme.colors.success}25`, `${theme.colors.success}10`] as [string, string]}
             style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 12 }}
           />
-          <Text style={{ color: theme.colors.success, fontSize: 12, fontWeight: '900' }}>
+          <Text style={{ color: theme.colors.success, fontSize: 12, fontWeight: '700' }}>
             Live Pulse
           </Text>
         </Pressable>
@@ -2074,7 +2075,7 @@ function AutopilotMissionRail(props: {
 
   return (
     <View style={{ marginHorizontal: theme.space.lg, marginBottom: theme.space.xl }}>
-      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800', marginBottom: 14 }}>
+      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700', marginBottom: 14 }}>
         今日待辦
       </Text>
       <View
@@ -2183,7 +2184,7 @@ function DataMoatPanel(props: {
         >
           <Ionicons name="layers-outline" size={16} color={theme.colors.accent} />
         </LinearGradient>
-        <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '900' }}>
+        <Text style={{ color: theme.colors.text, fontSize: 16, fontWeight: '700' }}>
           資料閉環狀態
         </Text>
       </View>
@@ -2196,7 +2197,7 @@ function DataMoatPanel(props: {
               <Text style={{ color: theme.colors.textSecondary, fontSize: 12, fontWeight: '700' }}>
                 {row.label}
               </Text>
-              <Text style={{ color: row.color, fontSize: 12, fontWeight: '900' }}>
+              <Text style={{ color: row.color, fontSize: 12, fontWeight: '700' }}>
                 {row.value}%
               </Text>
             </View>
@@ -2875,7 +2876,7 @@ export function SmartDashboardScreen(props: any) {
               flex: 1,
               padding: 14,
               borderRadius: 14,
-              backgroundColor: '#F59E0B',
+              backgroundColor: '#FF9500',
               alignItems: 'center',
               gap: 4,
             }}
@@ -2890,7 +2891,7 @@ export function SmartDashboardScreen(props: any) {
               flex: 1,
               padding: 14,
               borderRadius: 14,
-              backgroundColor: '#DC2626',
+              backgroundColor: '#D70015',
               alignItems: 'center',
               gap: 4,
             }}
@@ -2905,7 +2906,7 @@ export function SmartDashboardScreen(props: any) {
               flex: 1,
               padding: 14,
               borderRadius: 14,
-              backgroundColor: '#1F4E78',
+              backgroundColor: '#003F8A',
               alignItems: 'center',
               gap: 4,
             }}
@@ -2976,6 +2977,11 @@ export function SmartDashboardScreen(props: any) {
             </Text>
           </View>
         )}
+
+        {/* ── AI 任務指揮中心 — 學生身分專屬下一步 ── */}
+        <View style={{ marginBottom: theme.space.md }}>
+          <AIMissionControl uid={auth.user?.uid} maxVisible={3} hideWhenEmpty />
+        </View>
 
         {/* ── AI Brain 即時洞察卡片 ── */}
         <BrainInsightCards
@@ -3199,13 +3205,13 @@ export function SmartDashboardScreen(props: any) {
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: theme.colors.accent, fontSize: 22, fontWeight: '800' }}>
+                <Text style={{ color: theme.colors.accent, fontSize: 22, fontWeight: '700' }}>
                   {tcCourses.length}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11 }}>本學期課程</Text>
               </View>
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: theme.colors.success, fontSize: 22, fontWeight: '800' }}>
+                <Text style={{ color: theme.colors.success, fontSize: 22, fontWeight: '700' }}>
                   {tcAttendance.length > 0
                     ? Math.round(
                         tcAttendance.reduce((sum, a) => sum + a.rate, 0) / tcAttendance.length,
@@ -3216,7 +3222,7 @@ export function SmartDashboardScreen(props: any) {
                 <Text style={{ color: theme.colors.muted, fontSize: 11 }}>平均出席率</Text>
               </View>
               <View style={{ alignItems: 'center' }}>
-                <Text style={{ color: theme.colors.danger, fontSize: 22, fontWeight: '800' }}>
+                <Text style={{ color: theme.colors.danger, fontSize: 22, fontWeight: '700' }}>
                   {tcAttendance.reduce((sum, a) => sum + a.absent, 0)}
                 </Text>
                 <Text style={{ color: theme.colors.muted, fontSize: 11 }}>總缺席次數</Text>

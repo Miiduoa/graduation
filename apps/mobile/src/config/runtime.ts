@@ -15,9 +15,11 @@ import {
 export type DataSourceMode = 'mock' | 'firebase' | 'hybrid';
 
 export const DATA_SOURCE_DESIGN_TARGET_MODE: DataSourceMode = 'hybrid';
-// In dev we still want real integration paths (PU scraper, adapters) to run,
-// otherwise student-id login succeeds but the app keeps reading demo/mock data.
-export const DEFAULT_RUNTIME_DATA_SOURCE_MODE: DataSourceMode = __DEV__ ? 'hybrid' : 'firebase';
+// 2026-05 demo 階段：暫停接 TronClass / E 校園，全部走 demo / mock 資料源。
+// 這樣學分試算、成績、課程、餐廳訂單等所有功能都來自本地 demo data。
+// 若要重新打開真實整合，把 DEFAULT 改回 __DEV__ ? 'hybrid' : 'firebase' 或設環境變數
+// EXPO_PUBLIC_DATA_SOURCE_MODE=hybrid。
+export const DEFAULT_RUNTIME_DATA_SOURCE_MODE: DataSourceMode = 'mock';
 
 export function parseDataSourceMode(raw?: string): DataSourceMode {
   const value = (raw ?? '').trim().toLowerCase();

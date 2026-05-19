@@ -99,9 +99,9 @@ function InfoPill(props: { text?: string; tone?: 'default' | 'success' | 'warnin
   if (!props.text) return null;
   const toneColor =
     props.tone === 'success'
-      ? '#16A34A'
+      ? '#34C759'
       : props.tone === 'warning'
-        ? '#D97706'
+        ? '#FF9500'
         : theme.colors.accent;
   return (
     <View
@@ -256,7 +256,7 @@ function DetailModal(props: {
             gap: 12,
           }}
         >
-          <Text style={{ flex: 1, color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+          <Text style={{ flex: 1, color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
             館藏書目
           </Text>
           <Pressable onPress={onClose} hitSlop={10}>
@@ -273,7 +273,7 @@ function DetailModal(props: {
                   style={{
                     color: theme.colors.text,
                     fontSize: 18,
-                    fontWeight: '800',
+                    fontWeight: '700',
                     lineHeight: 24,
                   }}
                 >
@@ -315,8 +315,8 @@ function DetailModal(props: {
                   padding: 12,
                   borderRadius: theme.radius.md,
                   borderWidth: 1,
-                  borderColor: '#F59E0B55',
-                  backgroundColor: '#F59E0B18',
+                  borderColor: '#FF950055',
+                  backgroundColor: '#FF950018',
                 }}
               >
                 <Text style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18 }}>
@@ -352,7 +352,7 @@ function DetailModal(props: {
                   gap: 8,
                 }}
               >
-                <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 13 }}>
+                <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 13 }}>
                   MARC 編目資料
                 </Text>
                 <Text
@@ -546,9 +546,9 @@ export function LibraryOpacPanel(props: LibraryOpacPanelProps) {
           style={{
             padding: 10,
             borderRadius: theme.radius.md,
-            backgroundColor: '#F59E0B18',
+            backgroundColor: '#FF950018',
             borderWidth: 1,
-            borderColor: '#F59E0B55',
+            borderColor: '#FF950055',
           }}
         >
           <Text style={{ color: theme.colors.text, fontSize: 12, lineHeight: 18 }}>

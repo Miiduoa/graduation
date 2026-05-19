@@ -82,11 +82,11 @@ export default function CompanionCollectionScreen() {
   const tabUnlockedCount = tabAchievements.filter((a) => unlocked.has(a.id)).length;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#f9fafb' }}>
+    <View style={{ flex: 1, backgroundColor: '#F2F2F7' }}>
       {/* 頂部 */}
-      <View style={{ padding: 16, backgroundColor: '#1F4E78' }}>
+      <View style={{ padding: 16, backgroundColor: '#003F8A' }}>
         <Text style={{ color: '#fff', fontSize: 24, fontWeight: '700' }}>我的收藏</Text>
-        <Text style={{ color: '#dbeafe', marginTop: 4 }}>
+        <Text style={{ color: '#E5F2FF', marginTop: 4 }}>
           已解鎖 {unlocked.size} / {ACHIEVEMENTS.length} 個成就
         </Text>
       </View>
@@ -95,7 +95,7 @@ export default function CompanionCollectionScreen() {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        style={{ backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}
+        style={{ backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' }}
         contentContainerStyle={{ padding: 12, gap: 8 }}
       >
         {DOMAIN_TABS.map((t) => (
@@ -106,10 +106,10 @@ export default function CompanionCollectionScreen() {
               paddingHorizontal: 14,
               paddingVertical: 8,
               borderRadius: 999,
-              backgroundColor: activeTab === t.key ? '#1F4E78' : '#f3f4f6',
+              backgroundColor: activeTab === t.key ? '#003F8A' : '#F2F2F7',
             }}
           >
-            <Text style={{ color: activeTab === t.key ? '#fff' : '#374151', fontSize: 13 }}>
+            <Text style={{ color: activeTab === t.key ? '#fff' : '#3C3C43', fontSize: 13 }}>
               {t.label}
             </Text>
           </Pressable>
@@ -117,7 +117,7 @@ export default function CompanionCollectionScreen() {
       </ScrollView>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 64 }}>
-        <Text style={{ color: '#6b7280', marginBottom: 12 }}>
+        <Text style={{ color: '#8E8E93', marginBottom: 12 }}>
           {DOMAIN_TABS.find((t) => t.key === activeTab)?.label}：{tabUnlockedCount} /{' '}
           {tabAchievements.length} 已解鎖
         </Text>
@@ -136,16 +136,16 @@ export default function CompanionCollectionScreen() {
                 marginBottom: 10,
                 opacity: has ? 1 : 0.6,
                 borderWidth: has ? 2 : 1,
-                borderColor: has ? '#fbbf24' : '#e5e7eb',
+                borderColor: has ? '#fbbf24' : '#E5E5EA',
               }}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <Text style={{ fontSize: 36, opacity: has ? 1 : 0.4 }}>{a.unlock.emoji}</Text>
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#111827' }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1C1C1E' }}>
                     {a.unlock.label} {has && '✨'}
                   </Text>
-                  <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                  <Text style={{ fontSize: 12, color: '#8E8E93', marginTop: 2 }}>
                     {a.description}
                   </Text>
                   {!has && (
@@ -153,7 +153,7 @@ export default function CompanionCollectionScreen() {
                       <View
                         style={{
                           height: 4,
-                          backgroundColor: '#e5e7eb',
+                          backgroundColor: '#E5E5EA',
                           borderRadius: 2,
                           overflow: 'hidden',
                         }}
@@ -162,11 +162,11 @@ export default function CompanionCollectionScreen() {
                           style={{
                             width: `${pct}%`,
                             height: 4,
-                            backgroundColor: '#1F4E78',
+                            backgroundColor: '#003F8A',
                           }}
                         />
                       </View>
-                      <Text style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                      <Text style={{ fontSize: 11, color: '#8E8E93', marginTop: 2 }}>
                         進度 {current} / {a.threshold}（{pct}%）
                       </Text>
                     </View>

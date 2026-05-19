@@ -1,0 +1,134 @@
+import { useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+
+import { supabase } from '@/lib/supabase';
+
+export default function CourseAiAssistantScreen() {
+  const { id: courseId } = useLocalSearchParams<{ id: string }>();
+  const [prompt, setPrompt] = useState('');
+  const [context, setContext] = useState('');
+  const [reply, setReply] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function ask() {
+    if (!courseId) return;
+    const p = prompt.trim();
+    if (!p) {
+      Alert.alert('請輸入問題');
+      return;
+    }
+    setBusy(true);
+    setReply('');
+    try {
+      const { data, error } = await supabase.functions.invoke('ai-course-assistant', {
+        body: {
+          course_id: courseId,
+          prompt: p,
+          context: context.trim() || undefined,
+        },
+      });
+      if (error) {
+        Alert.alert('請求失敗', error.message);
+        setBusy(false);
+        return;
+      }
+      const body = data as { reply?: string; usage_count_today?: number; error?: string };
+      if (body?.error) {
+        Alert.alert('錯誤', body.error);
+        setBusy(false);
+        return;
+      }
+      const text = typeof body?.reply === 'string' ? body.reply : JSON.stringify(data ?? {});
+      const cnt = body?.usage_count_today;
+      setReply(cnt != null ? `${text}\n\n—— 今日已用 ${cnt} 次 ——` : text);
+    } catch (e: unknown) {
+      Alert.alert('錯誤', e instanceof Error ? e.message : String(e));
+    }
+    setBusy(false);
+  }
+
+  return (
+    <ScrollView contentContainerStyle={styles.screen}>
+      <Text style={styles.title}>AI 助教（實驗）</Text>
+      <Text style={styles.hint}>
+        呼叫 Edge Function「ai-course-assistant」，每日每使用者限量請求；請勿貼高度敏感個資。需在 Supabase 部署該函式並設定 OPENAI_API_KEY。
+      </Text>
+
+      <Text style={styles.label}>問題</Text>
+      <TextInput
+        style={[styles.input, styles.multiline]}
+        multiline
+        placeholder="例如：請用五點條列本章重點"
+        value={prompt}
+        onChangeText={setPrompt}
+      />
+
+      <Text style={styles.label}>上下文片段（選填，請自行貼講義／筆記）</Text>
+      <TextInput
+        style={[styles.input, styles.multilineTall]}
+        multiline
+        placeholder="貼上與問題相關的文字…"
+        value={context}
+        onChangeText={setContext}
+      />
+
+      <Pressable disabled={busy} style={[styles.primaryBtn, busy && styles.disabled]} onPress={ask}>
+        <Text style={styles.primaryBtnText}>{busy ? '思考中…' : '送出'}</Text>
+      </Pressable>
+
+      {reply ? (
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>回覆</Text>
+          <Text style={styles.reply}>{reply}</Text>
+        </View>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { padding: 16, gap: 12, paddingBottom: 48 },
+  title: { fontSize: 22, fontWeight: '900' },
+  hint: { fontSize: 13, color: '#6b7280', lineHeight: 18 },
+  label: { fontWeight: '800', marginTop: 6 },
+  input: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#ccc',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  multiline: { minHeight: 88, textAlignVertical: 'top' },
+  multilineTall: { minHeight: 140, textAlignVertical: 'top' },
+  primaryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#7c3aed',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 10,
+    marginTop: 8,
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '900' },
+  disabled: { opacity: 0.55 },
+  card: {
+    marginTop: 16,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fafafa',
+    gap: 8,
+  },
+  cardTitle: { fontWeight: '900', fontSize: 15 },
+  reply: { fontSize: 15, lineHeight: 22 },
+});

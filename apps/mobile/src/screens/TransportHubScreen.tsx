@@ -86,7 +86,7 @@ function buildLeafletHtml(opts: {
     origin,
     destination,
     routeGeometry,
-    routeColor = '#3b82f6',
+    routeColor = '#5856D6',
     transitSegments,
     userLocation,
     isDark,
@@ -120,7 +120,7 @@ function buildLeafletHtml(opts: {
 *{margin:0;padding:0}
 html,body,#map{width:100%;height:100%}
 .user-dot{width:16px;height:16px;border-radius:50%;background:#4285f4;border:3px solid #fff;box-shadow:0 0 8px rgba(66,133,244,.6)}
-.origin-dot{width:14px;height:14px;border-radius:50%;background:#3b82f6;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.origin-dot{width:14px;height:14px;border-radius:50%;background:#5856D6;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.3)}
 .dest-pin{font-size:28px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
 </style>
 </head>
@@ -160,7 +160,7 @@ document.addEventListener('message',function(e){
       map.eachLayer(function(l){if(l instanceof L.Polyline)map.removeLayer(l)});
       if(d.coords&&d.coords.length>1){
         var bg=L.polyline(d.coords,{color:'#fff',weight:8,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(map);
-        L.polyline(d.coords,{color:d.color||'#3b82f6',weight:5,opacity:0.9,lineCap:'round',lineJoin:'round'}).addTo(map);
+        L.polyline(d.coords,{color:d.color||'#5856D6',weight:5,opacity:0.9,lineCap:'round',lineJoin:'round'}).addTo(map);
         map.fitBounds(bg.getBounds().pad(0.12));
       }
     }
@@ -187,15 +187,15 @@ function openExternalMap(from: LatLng, to: LatLng, destName: string, mode: strin
 // ─── Mode 圖示/顏色 ────────────────────────────────────
 
 const MODE_CONFIG: Record<string, { icon: string; color: string; label: string }> = {
-  driving: { icon: 'car-outline', color: '#8b5cf6', label: '開車' },
-  cycling: { icon: 'bicycle-outline', color: '#f59e0b', label: '騎車' },
-  walking: { icon: 'walk-outline', color: '#10b981', label: '步行' },
-  transit: { icon: 'bus-outline', color: '#3b82f6', label: '大眾運輸' },
+  driving: { icon: 'car-outline', color: '#AF52DE', label: '開車' },
+  cycling: { icon: 'bicycle-outline', color: '#FF9500', label: '騎車' },
+  walking: { icon: 'walk-outline', color: '#34C759', label: '步行' },
+  transit: { icon: 'bus-outline', color: '#5856D6', label: '大眾運輸' },
 };
 
 const CONGESTION_COLORS = {
-  smooth: '#10b981',
-  moderate: '#f59e0b',
+  smooth: '#34C759',
+  moderate: '#FF9500',
   heavy: '#f43f5e',
 };
 
@@ -422,12 +422,12 @@ export function TransportHubScreen(props: any) {
 
   // 路線顏色
   const routeColor = useMemo(() => {
-    if (!activeRoute) return '#3b82f6';
+    if (!activeRoute) return '#5856D6';
     if (navMode) {
       if (congestionLevel === 'heavy') return CONGESTION_COLORS.heavy;
       if (congestionLevel === 'moderate') return CONGESTION_COLORS.moderate;
     }
-    return MODE_CONFIG[activeRoute.mode]?.color ?? '#3b82f6';
+    return MODE_CONFIG[activeRoute.mode]?.color ?? '#5856D6';
   }, [activeRoute, navMode, congestionLevel]);
 
   // 大眾運輸各段資訊
@@ -437,7 +437,7 @@ export function TransportHubScreen(props: any) {
       .filter((td) => td.coordinates && td.coordinates.length >= 2)
       .map((td) => ({
         coords: td.coordinates!,
-        color: td.type === 'bus' ? '#3b82f6' : td.type === 'train' ? '#8b5cf6' : '#10b981',
+        color: td.type === 'bus' ? '#5856D6' : td.type === 'train' ? '#AF52DE' : '#34C759',
         dash: td.type === 'walk',
       }));
   }, [activeRoute]);
@@ -557,7 +557,7 @@ export function TransportHubScreen(props: any) {
                 }}
               >
                 <View>
-                  <Text style={{ color: '#fff', fontWeight: '900', fontSize: 22 }}>
+                  <Text style={{ color: '#fff', fontWeight: '700', fontSize: 22 }}>
                     {liveETA || formatDuration(activeRoute.totalDuration)}
                   </Text>
                   <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 11 }}>
@@ -591,7 +591,7 @@ export function TransportHubScreen(props: any) {
                   bottom: 50,
                   left: 12,
                   right: 12,
-                  backgroundColor: '#3b82f6F0',
+                  backgroundColor: '#5856D6F0',
                   borderRadius: theme.radius.lg,
                   padding: 12,
                   flexDirection: 'row',
@@ -631,7 +631,7 @@ export function TransportHubScreen(props: any) {
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 6,
-                    backgroundColor: '#10b981',
+                    backgroundColor: '#34C759',
                     paddingHorizontal: 14,
                     paddingVertical: 8,
                     borderRadius: theme.radius.xl,
@@ -865,7 +865,7 @@ export function TransportHubScreen(props: any) {
                     paddingHorizontal: 4,
                   }}
                 >
-                  <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16 }}>
+                  <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16 }}>
                     路線方案
                   </Text>
                   <Text style={{ color: theme.colors.muted, fontSize: 12 }}>到 {destName}</Text>
@@ -916,7 +916,7 @@ export function TransportHubScreen(props: any) {
                       <View style={{ flex: 1 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                           <Text
-                            style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}
+                            style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}
                           >
                             {formatDuration(route.totalDuration)}
                           </Text>
@@ -928,7 +928,7 @@ export function TransportHubScreen(props: any) {
                                 alignItems: 'center',
                                 gap: 3,
                                 backgroundColor:
-                                  route.congestionScore > 0.5 ? '#f43f5e20' : '#f59e0b20',
+                                  route.congestionScore > 0.5 ? '#f43f5e20' : '#FF950020',
                                 paddingHorizontal: 6,
                                 paddingVertical: 2,
                                 borderRadius: 4,
@@ -940,12 +940,12 @@ export function TransportHubScreen(props: any) {
                                   height: 6,
                                   borderRadius: 3,
                                   backgroundColor:
-                                    route.congestionScore > 0.5 ? '#f43f5e' : '#f59e0b',
+                                    route.congestionScore > 0.5 ? '#f43f5e' : '#FF9500',
                                 }}
                               />
                               <Text
                                 style={{
-                                  color: route.congestionScore > 0.5 ? '#f43f5e' : '#f59e0b',
+                                  color: route.congestionScore > 0.5 ? '#f43f5e' : '#FF9500',
                                   fontSize: 10,
                                   fontWeight: '700',
                                 }}
@@ -998,20 +998,20 @@ export function TransportHubScreen(props: any) {
                                       flexDirection: 'row',
                                       alignItems: 'center',
                                       gap: 4,
-                                      backgroundColor: '#3b82f620',
+                                      backgroundColor: '#5856D620',
                                       paddingHorizontal: 6,
                                       paddingVertical: 2,
                                       borderRadius: 4,
                                     }}
                                   >
-                                    <Ionicons name="bus" size={12} color="#3b82f6" />
+                                    <Ionicons name="bus" size={12} color="#5856D6" />
                                     <Text
-                                      style={{ color: '#3b82f6', fontSize: 11, fontWeight: '700' }}
+                                      style={{ color: '#5856D6', fontSize: 11, fontWeight: '700' }}
                                     >
                                       {td.routeName}
                                     </Text>
                                     {td.estimateMinutes !== undefined && (
-                                      <Text style={{ color: '#3b82f6', fontSize: 10 }}>
+                                      <Text style={{ color: '#5856D6', fontSize: 10 }}>
                                         ({td.estimateMinutes}分到)
                                       </Text>
                                     )}
@@ -1067,7 +1067,7 @@ export function TransportHubScreen(props: any) {
                           justifyContent: 'center',
                           paddingVertical: 10,
                           gap: 6,
-                          backgroundColor: '#10b981',
+                          backgroundColor: '#34C759',
                           borderRadius: theme.radius.lg,
                           opacity: pressed ? 0.7 : 1,
                         })}
@@ -1131,7 +1131,7 @@ export function TransportHubScreen(props: any) {
                                   isFirst || isLast
                                     ? theme.colors.accent
                                     : step.maneuver === 'notification'
-                                      ? '#3b82f6'
+                                      ? '#5856D6'
                                       : theme.colors.surface2,
                                 alignItems: 'center',
                                 justifyContent: 'center',
@@ -1215,14 +1215,14 @@ export function TransportHubScreen(props: any) {
                   })}
                 >
                   {geo.loading ? (
-                    <ActivityIndicator size="small" color="#3b82f6" />
+                    <ActivityIndicator size="small" color="#5856D6" />
                   ) : (
                     <View
                       style={{
                         width: 10,
                         height: 10,
                         borderRadius: 5,
-                        backgroundColor: geo.latitude ? '#10b981' : '#f59e0b',
+                        backgroundColor: geo.latitude ? '#34C759' : '#FF9500',
                       }}
                     />
                   )}
@@ -1461,13 +1461,13 @@ function QuickBusPanel() {
                   width: 40,
                   height: 24,
                   borderRadius: 4,
-                  backgroundColor: '#3b82f6',
+                  backgroundColor: '#5856D6',
                   alignItems: 'center',
                   justifyContent: 'center',
                   marginRight: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 11 }}>{r.name}</Text>
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>{r.name}</Text>
               </View>
               <Text style={{ color: theme.colors.text, fontSize: 11, flex: 1 }} numberOfLines={1}>
                 {r.desc}
@@ -1504,7 +1504,7 @@ function QuickBusPanel() {
                   marginRight: 8,
                 }}
               >
-                <Text style={{ color: '#fff', fontWeight: '800', fontSize: 11 }}>
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 11 }}>
                   {r.RouteName.Zh_tw}
                 </Text>
               </View>
@@ -1845,7 +1845,7 @@ function QuickHSRPanel() {
                 <View style={{ width: 36, alignItems: 'center' }}>
                   <Text
                     style={{
-                      color: isSouth ? '#3b82f6' : '#f59e0b',
+                      color: isSouth ? '#5856D6' : '#FF9500',
                       fontSize: 10,
                       fontWeight: '700',
                     }}
@@ -1898,7 +1898,7 @@ function QuickBikePanel() {
             alignItems: 'center',
           }}
         >
-          <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 20 }}>
+          <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 20 }}>
             {total}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 10 }}>可借車輛</Text>
@@ -1912,7 +1912,7 @@ function QuickBikePanel() {
             alignItems: 'center',
           }}
         >
-          <Text style={{ color: theme.colors.text, fontWeight: '900', fontSize: 20 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 20 }}>
             {stations.length}
           </Text>
           <Text style={{ color: theme.colors.muted, fontSize: 10 }}>站點數</Text>
@@ -1947,7 +1947,7 @@ function QuickBikePanel() {
                 <Text
                   style={{
                     color: st.availableRent === 0 ? '#f43f5e' : theme.colors.accent,
-                    fontWeight: '900',
+                    fontWeight: '700',
                     fontSize: 13,
                   }}
                 >

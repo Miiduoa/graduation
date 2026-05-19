@@ -1,0 +1,112 @@
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+type RollupRow = {
+  course_id: string;
+  student_id: string;
+  weighted_percent: number | null;
+};
+
+export default function GradesScreen() {
+  const { session } = useAuth();
+  const [rows, setRows] = useState<RollupRow[]>([]);
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    const uid = session?.user.id;
+    if (!uid) return;
+
+    const { data, error } = await supabase
+      .from('course_grade_rollups')
+      .select('course_id, student_id, weighted_percent')
+      .eq('student_id', uid);
+
+    if (error) {
+      console.warn(error.message);
+      setRows([]);
+      return;
+    }
+
+    const rollups = (data ?? []) as RollupRow[];
+    setRows(rollups);
+
+    const ids = [...new Set(rollups.map((r) => r.course_id))];
+    if (ids.length === 0) {
+      setTitles({});
+      return;
+    }
+
+    const { data: courses } = await supabase.from('courses').select('id, title').in('id', ids);
+    const map: Record<string, string> = {};
+    for (const c of courses ?? []) {
+      map[c.id as string] = (c.title as string) ?? '';
+    }
+    setTitles(map);
+  }, [session?.user.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    load().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
+
+  async function onRefresh() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.hint}>加權總分為資料庫檢視 course_grade_rollups 計算結果。</Text>
+      <FlatList
+        data={rows}
+        keyExtractor={(item) => item.course_id}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        ListEmptyComponent={<Text style={styles.empty}>尚無成績紀錄。</Text>}
+        renderItem={({ item }) => (
+          <View style={styles.row}>
+            <Text style={styles.title}>{titles[item.course_id] ?? item.course_id}</Text>
+            <Text style={styles.score}>{item.weighted_percent ?? '--'} / 100</Text>
+          </View>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 16 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  hint: { color: '#6b7280', marginBottom: 12 },
+  empty: { color: '#6b7280', marginTop: 24 },
+  row: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#eee',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  title: { flex: 1, fontSize: 16, fontWeight: '600' },
+  score: { fontVariant: ['tabular-nums'], fontSize: 16 },
+});

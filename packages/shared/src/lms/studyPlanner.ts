@@ -192,7 +192,7 @@ export function planStudy(tasks: PlannerTask[], options: PlannerOptions = {}): P
   const pomodoros: PomodoroSlot[] = [];
   let cursorMinute = 0;
   let pomoIdx = 0;
-  let remainingPerTask = new Map<string, number>();
+  const remainingPerTask = new Map<string, number>();
   for (const t of prioritized) {
     // overdue 任務先排「修補」一段時間（25 分鐘）；
     // 其他依 estimatedMinutes × (1 - progress) 投入

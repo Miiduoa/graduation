@@ -19,11 +19,14 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
+import { BlurView } from 'expo-blur';
+import { StatusBar } from 'expo-status-bar';
 
 import { theme, softShadowStyle } from './src/ui/theme';
 import { SchoolProvider, useSchool } from './src/state/school';
 import { FavoritesProvider } from './src/state/favorites';
 import { DemoProvider } from './src/state/demo';
+import { DemoStoreProvider } from './src/state/demoStore';
 import { AuthProvider, useAuth } from './src/state/auth';
 import { ThemeProvider, useThemeMode } from './src/state/theme';
 import { NotificationsProvider } from './src/state/notifications';
@@ -45,6 +48,7 @@ import {
   ConflictInfo,
 } from './src/services/offline';
 import { ToastProvider, useToast } from './src/ui/Toast';
+import { FullScreenLoader } from './src/ui/components';
 import { NetworkStatusBanner } from './src/ui/OfflineBanner';
 import { ConflictResolutionModal } from './src/ui/ConflictResolutionModal';
 
@@ -54,6 +58,7 @@ import { MapStack } from './src/screens/MapStack';
 import { MessagesStack } from './src/screens/MessagesStack';
 import { MeStack } from './src/screens/MeStack';
 import { OnboardingScreen, hasSeenOnboarding } from './src/screens/OnboardingScreen';
+import { PreAuthStack } from './src/screens/PreAuthStack';
 import { usePushNotifications } from './src/app/usePushNotifications';
 import { useAIAmbientAwareness } from './src/app/useAIAmbientAwareness';
 import { useAIBrainLifecycle } from './src/app/useAIBrain';
@@ -63,6 +68,7 @@ import { aiOverlay } from './src/app/useAIOverlay';
 import { HeaderDrawerHost } from './src/components/HeaderDrawer';
 import { AIFloatingBall } from './src/components/AIFloatingBall';
 import { useProactiveAIReporter } from './src/app/useProactiveAIReporter';
+import { useProactiveAIAgentLoop } from './src/app/useProactiveAIAgentLoop';
 import { useWebLearningSync } from './src/app/useWebLearningSync';
 import { initializeRuntimeDataSource } from './src/config/runtime';
 import { usePermissions } from './src/hooks/usePermissions';
@@ -442,9 +448,11 @@ function TokenExpiredModal() {
               })}
             >
               {isLoggingOut ? (
-                <ActivityIndicator size="small" color="#fff" />
+                <ActivityIndicator size="small" color={theme.colors.onAccent} />
               ) : (
-                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>重新登入</Text>
+                <Text style={{ color: theme.colors.onAccent, fontWeight: '700', fontSize: 14 }}>
+                  重新登入
+                </Text>
               )}
             </Pressable>
           </View>
@@ -564,14 +572,14 @@ function AuthAwareStateProviders({ children }: { children: React.ReactNode }) {
  * - Mental Model：使用者學到「找東西點 Tab；要 AI 做點球」
  */
 /** 須與下方 AIFloatingBall size 一致 */
-const FAB_SIZE = 62;
+const FAB_SIZE = 68;
 /** 整顆 FAB 相對 Tab 列的微調（像素；預設 0，避免與章面 nudge 疊加偏移） */
 const FAB_SHELL_NUDGE_X = 0;
 const FAB_SHELL_NUDGE_Y = 0;
 /** 與 TabBar pill `paddingVertical` 對齊，供 FAB overlay 垂直錨點 */
 const TAB_BAR_PILL_PADDING_V = 6;
 /** 中央為 AI 球保留的淨空；若拿掉會讓左右各兩個 Tab 往中線擠、視覺與點擊區「跑掉」 */
-const FAB_CENTER_GAP = Math.max(72, FAB_SIZE + 10);
+const FAB_CENTER_GAP = Math.max(84, FAB_SIZE + 14);
 
 function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
@@ -614,19 +622,19 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         style={({ pressed }) => ({
           flex: 1,
           justifyContent: 'center',
-          transform: [{ scale: pressed ? 0.94 : 1 }],
+          transform: [{ scale: pressed ? 0.95 : 1 }],
         })}
       >
         <View
           style={{
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 2,
-            paddingVertical: 9,
+            gap: 3,
+            paddingVertical: 8,
             paddingHorizontal: 4,
             borderRadius: theme.radius.md,
             backgroundColor: focused ? theme.colors.chromeTabItemActive : 'transparent',
-            minHeight: 52,
+            minHeight: 54,
           }}
         >
           <View>
@@ -635,7 +643,7 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               size={focused ? 22 : 20}
               fallback="ionicon"
               color={focused ? theme.colors.accent : theme.colors.muted}
-              style={{ opacity: focused ? 1 : 0.55 }}
+              style={{ opacity: focused ? 1 : 0.66 }}
             />
             {showUnreadBadge ? (
               <View
@@ -664,9 +672,10 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           <Text
             style={{
               fontSize: 10,
-              fontWeight: focused ? '700' : '500',
+              lineHeight: 13,
+              fontWeight: focused ? '700' : '600',
               color: focused ? theme.colors.accent : theme.colors.muted,
-              letterSpacing: focused ? 0 : 0.1,
+              letterSpacing: 0,
             }}
           >
             {config?.label ?? route.name}
@@ -680,14 +689,35 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     <View
       style={{
         position: 'absolute',
-        bottom: Math.max(insets.bottom, 8) + 8,
-        left: 12,
-        right: 12,
-        minHeight: 72,
+        bottom: Math.max(insets.bottom, 8) + 6,
+        left: 14,
+        right: 14,
+        minHeight: 76,
       }}
       pointerEvents="box-none"
     >
-      {/* TabBar pill：左右僅四個 Tab；FAB 另層絕對 overlay 對齊 pill 寬度幾何置中 */}
+      {/* TabBar pill：iOS HIG — BlurView 玻璃磨砂底 + 半透明 chrome
+          注意：overflow 必須保持 visible，FAB 浮球以負 marginTop 突出 pill 上緣；
+          所以 BlurView 用獨立的 clipping wrapper（borderRadius + overflow:hidden）
+          鋪在 pill 背景，FAB 仍可延伸到 pill 外。 */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          borderRadius: theme.radius.lg,
+          overflow: 'hidden',
+        }}
+        pointerEvents="none"
+      >
+        <BlurView
+          intensity={70}
+          tint={theme.mode === 'dark' ? 'dark' : 'light'}
+          style={{ flex: 1 }}
+        />
+      </View>
       <View
         style={{
           flex: 1,
@@ -695,9 +725,9 @@ function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           flexDirection: 'row',
           alignItems: 'stretch',
           overflow: 'visible',
-          borderRadius: theme.radius.xl,
+          borderRadius: theme.radius.lg,
           paddingVertical: TAB_BAR_PILL_PADDING_V,
-          paddingHorizontal: 10,
+          paddingHorizontal: 8,
           borderWidth: 1,
           borderColor: theme.colors.chromeTabBorder,
           backgroundColor: theme.colors.chromeTabBar,
@@ -813,6 +843,7 @@ function AppNavigation() {
   useAIAmbientAwareness();
   useAIBrainLifecycle();
   useProactiveAIReporter();
+  useProactiveAIAgentLoop();
   useWebLearningSync();
 
   const flushPendingMessagingDeepLink = useCallback(() => {
@@ -934,17 +965,17 @@ function AppNavigation() {
   };
 
   if (auth.loading || auth.profileLoading) {
+    return <FullScreenLoader />;
+  }
+
+  // 沒有登入 session → Landing + 可進入正式學校登入（SSOLoginScreen）
+  if (!auth.user && !auth.profile) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: theme.colors.bg,
-        }}
-      >
-        <ActivityIndicator size="large" color={theme.colors.accent} />
-      </View>
+      <NavigationContainer ref={rootNavigationRef} theme={navTheme}>
+        <View style={{ flex: 1, backgroundColor: theme.colors.bg }}>
+          <PreAuthStack />
+        </View>
+      </NavigationContainer>
     );
   }
 
@@ -954,18 +985,74 @@ function AppNavigation() {
       theme={navTheme}
       linking={linkingConfig}
       onReady={flushPendingMessagingDeepLink}
-      fallback={
-        <View
-          style={{
-            flex: 1,
-            justifyContent: 'center',
-            alignItems: 'center',
-            backgroundColor: theme.colors.bg,
-          }}
-        >
-          <ActivityIndicator size="large" color={theme.colors.accent} />
-        </View>
-      }
+      fallback={<FullScreenLoader />}
+      onUnhandledAction={(action) => {
+        // demo 期間最後一道防線：若任何 navigate('X') 找不到 route
+        // （safeNavigate 漏網的）→ 跳明確 Alert，並提供「回到主畫面」 fallback
+        try {
+          const payload = (action as any)?.payload;
+          const targetName = payload?.name ?? '未知頁面';
+          // 已知子路由名 → 自動 fallback 到正確的 Tab + Stack
+          const TAB_HINTS: Record<string, string> = {
+            CourseGradebook: '學習',
+            CourseHub: '學習',
+            CourseDiscussion: '學習',
+            CourseModules: '學習',
+            Attendance: '學習',
+            QuizCenter: '學習',
+            AcademicInsights: '學習',
+            AcademicOverview: '學習',
+            LearningAnalytics: '學習',
+            GroupDetail: '訊息',
+            Groups: '訊息',
+            Chat: '訊息',
+            Inbox: '訊息',
+            FriendsManage: '訊息',
+            餐廳總覽: '校園',
+            MenuDetail: '校園',
+            Map: '校園',
+            BusSchedule: '校園',
+            公告總覽: 'Today',
+            活動總覽: 'Today',
+            SmartCalendarScreen: 'Today',
+          };
+          const hint = TAB_HINTS[targetName];
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { Alert } = require('react-native');
+          Alert.alert(
+            'AI 找不到該畫面的連結',
+            hint
+              ? `「${targetName}」需要從「${hint}」分頁進入。\n\n要我帶你過去嗎？`
+              : `「${targetName}」目前還沒接上路由。\n\n回到主畫面以繼續。`,
+            [
+              { text: '取消', style: 'cancel' },
+              hint
+                ? {
+                    text: `前往「${hint}」`,
+                    onPress: () => {
+                      try {
+                        rootNavigateNested(hint as any, targetName);
+                      } catch {
+                        /* swallow */
+                      }
+                    },
+                  }
+                : {
+                    text: '回主畫面',
+                    onPress: () => {
+                      try {
+                        rootNavigateNested('Today', 'TodayHome');
+                      } catch {
+                        /* swallow */
+                      }
+                    },
+                  },
+            ],
+          );
+        } catch {
+          /* swallow */
+        }
+      }}
     >
       <View style={{ flex: 1 }}>
         <NetworkStatusBanner />
@@ -1029,18 +1116,7 @@ function AppInner() {
   useThemeMode();
 
   if (isCheckingOnboarding) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: theme.colors.bg,
-          justifyContent: 'center',
-          alignItems: 'center',
-        }}
-      >
-        <ActivityIndicator size="large" color={theme.colors.accent} />
-      </View>
-    );
+    return <FullScreenLoader message="準備你的校園體驗…" />;
   }
 
   if (showOnboarding) {
@@ -1054,7 +1130,9 @@ function AppInner() {
           <ToastProvider>
             <AuthAwareStateProviders>
               <DemoProvider>
-                <AppNavigation />
+                <DemoStoreProvider>
+                  <AppNavigation />
+                </DemoStoreProvider>
               </DemoProvider>
             </AuthAwareStateProviders>
           </ToastProvider>
@@ -1138,7 +1216,9 @@ class AppErrorBoundary extends React.Component<
               opacity: pressed ? 0.85 : 1,
             })}
           >
-            <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>重新嘗試</Text>
+            <Text style={{ color: theme.colors.onAccent, fontSize: 15, fontWeight: '700' }}>
+              重新嘗試
+            </Text>
           </Pressable>
         </View>
       );
@@ -1151,6 +1231,8 @@ class AppErrorBoundary extends React.Component<
 export default function App() {
   return (
     <SafeAreaProvider>
+      {/* iOS: status bar 字色隨主題自動切換（亮底深字、暗底白字）；translucent 讓內容貼齊頂部 */}
+      <StatusBar style="auto" translucent />
       <AppErrorBoundary>
         <ThemeProvider>
           <AccessibilityProvider>

@@ -53,18 +53,18 @@ function HomeworkCard(props: { hw: TCHomework }) {
   let statusIcon: keyof typeof Ionicons.glyphMap = 'time-outline';
 
   if (hasSubmission) {
-    statusColor = '#16A34A';
+    statusColor = '#34C759';
     statusText = '已繳交';
     statusIcon = 'checkmark-circle';
   } else if (hw.is_closed || isOverdue) {
-    statusColor = '#DC2626';
+    statusColor = '#D70015';
     statusText = '已截止';
     statusIcon = 'close-circle-outline';
   } else if (endTime) {
     // 檢查是否快到截止時間（24小時內）
     const hoursLeft = (endTime.getTime() - now.getTime()) / (1000 * 60 * 60);
     if (hoursLeft <= 24 && hoursLeft > 0) {
-      statusColor = '#F59E0B';
+      statusColor = '#FF9500';
       statusText = `剩 ${Math.floor(hoursLeft)} 小時`;
       statusIcon = 'alarm-outline';
     }
@@ -87,9 +87,9 @@ function HomeworkCard(props: { hw: TCHomework }) {
         backgroundColor: pressed ? theme.colors.surface3 : theme.colors.surface2,
         borderWidth: 1,
         borderColor: hasSubmission
-          ? '#16A34A30'
+          ? '#34C75930'
           : hw.is_closed || isOverdue
-            ? '#DC262620'
+            ? '#D7001520'
             : theme.colors.border,
         opacity: pressed ? 0.8 : 1,
       })}
@@ -298,7 +298,7 @@ export function GroupAssignmentsScreen(props: any) {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: theme.colors.accent, fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 24 }}>
               {homeworks.length}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>全部作業</Text>
@@ -316,8 +316,8 @@ export function GroupAssignmentsScreen(props: any) {
           >
             <Text
               style={{
-                color: pendingCount > 0 ? '#F59E0B' : theme.colors.muted,
-                fontWeight: '900',
+                color: pendingCount > 0 ? '#FF9500' : theme.colors.muted,
+                fontWeight: '700',
                 fontSize: 24,
               }}
             >
@@ -336,7 +336,7 @@ export function GroupAssignmentsScreen(props: any) {
               borderColor: theme.colors.border,
             }}
           >
-            <Text style={{ color: '#16A34A', fontWeight: '900', fontSize: 24 }}>
+            <Text style={{ color: '#34C759', fontWeight: '700', fontSize: 24 }}>
               {submittedCount}
             </Text>
             <Text style={{ color: theme.colors.muted, fontSize: 11 }}>已繳交</Text>

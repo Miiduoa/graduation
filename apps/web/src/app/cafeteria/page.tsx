@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState, type CSSProperties } from 'react';
+import Link from 'next/link';
 import { mockMenus } from '@campus/shared/src/mockData';
 import { SiteShell } from '@/components/SiteShell';
 import {
@@ -106,7 +107,7 @@ function getCafeteriaStatus(cafeteria: Cafeteria) {
 export default function CafeteriaPage(props: {
   searchParams?: { school?: string; schoolId?: string };
 }) {
-  const { schoolId, schoolName } = resolveSchoolPageContext(props.searchParams);
+  const { schoolId, schoolName, schoolSearch: q } = resolveSchoolPageContext(props.searchParams);
   const [selectedCafeteria, setSelectedCafeteria] = useState(ALL_CAFETERIAS_KEY);
   const [search, setSearch] = useState('');
 
@@ -270,6 +271,33 @@ export default function CafeteriaPage(props: {
   return (
     <SiteShell title="餐廳" subtitle="即時同步目前校內餐廳與菜單" schoolName={schoolName}>
       <div className="pageStack">
+        {/* AI 推薦卡 */}
+        <Link
+          href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('今天午餐建議？要熱量低一點的')}`}
+          className="card"
+          style={{
+            padding: '14px 18px',
+            background: 'linear-gradient(135deg, rgba(88,86,214,0.10) 0%, rgba(52,199,89,0.06) 100%)',
+            border: '1px solid rgba(88,86,214,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            textDecoration: 'none',
+            color: 'inherit',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#5856D6', marginBottom: 3 }}>
+              🤖 AI 推薦 · 今日午餐
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.6 }}>
+              不知道吃什麼？讓 AI 幫你推薦適合的菜色（含熱量、口味偏好）。
+            </div>
+          </div>
+          <span style={{ fontSize: 12, color: '#5856D6', fontWeight: 600 }}>問 AI →</span>
+        </Link>
+
         <div
           className="toolbarPanel"
           style={{ alignItems: 'center', justifyContent: 'space-between', gap: 16 }}
@@ -431,7 +459,7 @@ export default function CafeteriaPage(props: {
                   </div>
                   <div style={{ textAlign: 'right', minWidth: 120 }}>
                     <div style={{ fontSize: 13, color: 'var(--muted)' }}>供應中 / 菜單總數</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.04em' }}>
+                    <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.04em' }}>
                       {availableCount} / {totalCount}
                     </div>
                     {typeof cafeteria.rating === 'number' ? (
@@ -545,7 +573,7 @@ export default function CafeteriaPage(props: {
                           <div
                             style={{
                               fontSize: 20,
-                              fontWeight: 800,
+                              fontWeight: 700,
                               color: 'var(--brand)',
                               letterSpacing: '-0.04em',
                             }}
@@ -567,6 +595,35 @@ export default function CafeteriaPage(props: {
             目前共有 {stats.soldOutMenus} 項菜色標記為售完，若店家更新供應狀態，頁面會自動刷新。
           </div>
         ) : null}
+
+        {/* ── AI 餐廳推薦入口 ── */}
+        <div
+          style={{
+            padding: '14px 18px',
+            borderRadius: 'var(--radius)',
+            background: 'linear-gradient(135deg, rgba(52,199,89,0.10) 0%, rgba(52,199,89,0.04) 100%)',
+            border: '1px solid rgba(52,199,89,0.28)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 14,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#1F7A2E', marginBottom: 3 }}>🤖 AI 餐廳助理</div>
+            <div style={{ fontSize: 13, color: 'var(--text)' }}>
+              想吃什麼卻沒靈感？讓 AI 根據今日菜單幫你推薦適合的餐點。
+            </div>
+          </div>
+          <a
+            href={`/ai-assistant${q ? q + '&' : '?'}q=${encodeURIComponent('根據今日學生餐廳菜單，幫我推薦一套均衡的午餐組合（不超過 120 元），以及適合下午課前的點心。')}`}
+            className="btn"
+            style={{ fontSize: 12, whiteSpace: 'nowrap', flexShrink: 0 }}
+          >
+            問 AI →
+          </a>
+        </div>
       </div>
     </SiteShell>
   );

@@ -98,7 +98,7 @@ export function CourseChipHeader(props: {
         style={{
           color: theme.colors.text,
           fontSize: 22,
-          fontWeight: '800',
+          fontWeight: '700',
           letterSpacing: -0.6,
           lineHeight: 28,
         }}
@@ -128,7 +128,7 @@ export function CourseDemoDataRibbon() {
       accessibilityRole="text"
       accessibilityLabel="Demo 資料"
     >
-      <Text style={{ fontSize: 12, fontWeight: '800', color: theme.colors.primary }}>Demo 資料</Text>
+      <Text style={{ fontSize: 12, fontWeight: '700', color: theme.colors.primary }}>Demo 資料</Text>
     </View>
   );
 }

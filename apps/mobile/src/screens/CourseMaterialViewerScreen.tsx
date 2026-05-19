@@ -91,12 +91,12 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
           paddingTop: Math.max(insets.top, 24),
         }}
       >
-        <Text style={{ color: '#dc2626', fontSize: 16 }}>沒有提供檔案連結。</Text>
+        <Text style={{ color: '#D70015', fontSize: 16 }}>沒有提供檔案連結。</Text>
         <Pressable
           onPress={goLeave}
           accessibilityRole="button"
           accessibilityLabel="返回上一頁"
-          style={{ marginTop: 16, padding: 12, backgroundColor: '#1F4E78', borderRadius: 8 }}
+          style={{ marginTop: 16, padding: 12, backgroundColor: '#003F8A', borderRadius: 8 }}
         >
           <Text style={{ color: '#fff' }}>返回</Text>
         </Pressable>
@@ -116,18 +116,18 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
         }}
       >
         <Text
-          style={{ color: '#1F4E78', fontSize: 17, fontWeight: '700', textAlign: 'center' }}
+          style={{ color: '#003F8A', fontSize: 17, fontWeight: '700', textAlign: 'center' }}
         >
           LMS（TronClass）已關閉
         </Text>
-        <Text style={{ color: '#374151', fontSize: 14, marginTop: 12, textAlign: 'center' }}>
+        <Text style={{ color: '#3C3C43', fontSize: 14, marginTop: 12, textAlign: 'center' }}>
           {TRONCLASS_DATA_DISABLED_MESSAGE}
         </Text>
         <Pressable
           onPress={goLeave}
           accessibilityRole="button"
           accessibilityLabel="返回上一頁"
-          style={{ marginTop: 20, padding: 12, backgroundColor: '#1F4E78', borderRadius: 8 }}
+          style={{ marginTop: 20, padding: 12, backgroundColor: '#003F8A', borderRadius: 8 }}
         >
           <Text style={{ color: '#fff' }}>返回</Text>
         </Pressable>
@@ -140,7 +140,7 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
       {/* 頂部資訊條（此畫面 headerShown: false，需自帶返回與 Safe Area） */}
       <View
         style={{
-          backgroundColor: '#1F4E78',
+          backgroundColor: '#003F8A',
           paddingTop: Math.max(insets.top, 8),
           paddingBottom: 12,
           paddingHorizontal: 10,
@@ -164,7 +164,7 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
             {title}
           </Text>
           {courseName ? (
-            <Text style={{ color: '#dbeafe', fontSize: 12 }} numberOfLines={1}>
+            <Text style={{ color: '#E5F2FF', fontSize: 12 }} numberOfLines={1}>
               {courseName}
             </Text>
           ) : null}
@@ -189,11 +189,11 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
               left: 0,
               right: 0,
               padding: 8,
-              backgroundColor: '#1F4E7820',
+              backgroundColor: '#003F8A20',
               zIndex: 2,
             }}
           >
-            <ActivityIndicator color="#1F4E78" />
+            <ActivityIndicator color="#003F8A" />
           </View>
         )}
         <PuWebView
@@ -222,7 +222,7 @@ export default function CourseMaterialViewerScreen(props: RouteProps) {
               left: 24,
               right: 24,
               padding: 12,
-              backgroundColor: '#dc2626',
+              backgroundColor: '#D70015',
               borderRadius: 12,
             }}
           >

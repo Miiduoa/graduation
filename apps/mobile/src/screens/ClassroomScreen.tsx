@@ -100,9 +100,9 @@ const DEMO_STUDENTS = [
 ];
 
 const REACTION_CONFIG = {
-  understood: { icon: 'checkmark-circle' as const, color: '#10B981', label: '懂了' },
-  partial: { icon: 'help-circle' as const, color: '#F59E0B', label: '有點懂' },
-  confused: { icon: 'close-circle' as const, color: '#EF4444', label: '不懂' },
+  understood: { icon: 'checkmark-circle' as const, color: '#34C759', label: '懂了' },
+  partial: { icon: 'help-circle' as const, color: '#FF9500', label: '有點懂' },
+  confused: { icon: 'close-circle' as const, color: '#FF3B30', label: '不懂' },
 } as const;
 
 type ReactionKey = keyof typeof REACTION_CONFIG;
@@ -228,7 +228,7 @@ function PollCard({
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <Ionicons name="bar-chart" size={18} color={theme.colors.accent} />
-        <Text style={{ color: theme.colors.accent, fontWeight: '800', fontSize: 13, flex: 1 }}>
+        <Text style={{ color: theme.colors.accent, fontWeight: '700', fontSize: 13, flex: 1 }}>
           即時投票
         </Text>
         <Text style={{ color: theme.colors.muted, fontSize: 11 }}>{totalVotes} 票</Text>
@@ -690,7 +690,7 @@ export function ClassroomScreen(props: any) {
             alignItems: 'center',
             padding: 16,
             gap: 12,
-            backgroundColor: session.active ? '#10B98110' : theme.colors.surface2,
+            backgroundColor: session.active ? '#34C75910' : theme.colors.surface2,
             borderBottomWidth: 1,
             borderBottomColor: theme.colors.border,
           }}
@@ -700,10 +700,10 @@ export function ClassroomScreen(props: any) {
               width: 10,
               height: 10,
               borderRadius: 5,
-              backgroundColor: session.active ? '#10B981' : '#EF4444',
+              backgroundColor: session.active ? '#34C759' : '#FF3B30',
             }}
           />
-          <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 16, flex: 1 }}>
+          <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 16, flex: 1 }}>
             {session.active ? '課堂進行中' : '課堂已結束'}
           </Text>
           <Pill text={`${session.attendeeCount} 人在線`} kind="accent" />
@@ -838,7 +838,7 @@ export function ClassroomScreen(props: any) {
                       style={{
                         color: theme.colors.accent,
                         fontSize: 36,
-                        fontWeight: '800',
+                        fontWeight: '700',
                         opacity: isSpinning ? 0.7 : 1,
                       }}
                     >
@@ -899,7 +899,7 @@ export function ClassroomScreen(props: any) {
                       style={{
                         color: theme.colors.accent,
                         fontSize: 48,
-                        fontWeight: '800',
+                        fontWeight: '700',
                         marginBottom: 12,
                       }}
                     >
@@ -922,7 +922,7 @@ export function ClassroomScreen(props: any) {
                       <Text style={{ color: theme.colors.muted, fontSize: 12, marginBottom: 6 }}>
                         回應者
                       </Text>
-                      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '800' }}>
+                      <Text style={{ color: theme.colors.text, fontSize: 18, fontWeight: '700' }}>
                         {Object.keys(quickAnswerResponses).length} 人
                       </Text>
                     </View>
@@ -972,7 +972,7 @@ export function ClassroomScreen(props: any) {
                               >
                                 <Text
                                   style={{
-                                    fontWeight: '800',
+                                    fontWeight: '700',
                                     fontSize: 12,
                                     color: idx < 3 ? '#fff' : theme.colors.muted,
                                   }}
@@ -1008,7 +1008,7 @@ export function ClassroomScreen(props: any) {
                         opacity: pressed ? 0.8 : 1,
                       })}
                     >
-                      <Text style={{ color: '#fff', fontWeight: '800', fontSize: 18 }}>搶答</Text>
+                      <Text style={{ color: '#fff', fontWeight: '700', fontSize: 18 }}>搶答</Text>
                     </Pressable>
                   )}
                 {isTeacher && quickAnswerStartTime !== null && (
@@ -1052,7 +1052,7 @@ export function ClassroomScreen(props: any) {
           {/* 投票 */}
           {polls.filter((p) => p.active).length > 0 && (
             <View style={{ gap: 12 }}>
-              <Text style={{ color: theme.colors.text, fontWeight: '800', fontSize: 18 }}>
+              <Text style={{ color: theme.colors.text, fontWeight: '700', fontSize: 18 }}>
                 即時投票
               </Text>
               {polls

@@ -1,0 +1,136 @@
+import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
+import { router } from 'expo-router';
+import { useEffect } from 'react';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: false,
+      shouldSetBadge: false,
+    }),
+  });
+}
+
+export default function ProfileScreen() {
+  const { session, profile } = useAuth();
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    Notifications.requestPermissionsAsync().catch(() => undefined);
+  }, []);
+
+  async function registerPushToken() {
+    if (!session?.user.id) {
+      Alert.alert('請先登入');
+      return;
+    }
+    if (Platform.OS === 'web') {
+      Alert.alert('Web', '瀏覽器環境通常無法取得 Expo Push Token；請用 iOS/Android。');
+      return;
+    }
+
+    const perm = await Notifications.requestPermissionsAsync();
+    if (perm.status !== 'granted') {
+      Alert.alert('未授權', '請在系統設定中允許通知權限。');
+      return;
+    }
+
+    try {
+      const projectId =
+        (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId ??
+        Constants.easConfig?.projectId;
+
+      const tokenRes = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+      const token = tokenRes.data;
+
+      const platform = Platform.OS === 'ios' ? 'ios' : Platform.OS === 'android' ? 'android' : 'web';
+
+      const { error } = await supabase.from('push_tokens').upsert(
+        {
+          user_id: session.user.id,
+          token,
+          platform,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,token' },
+      );
+
+      if (error) {
+        Alert.alert('儲存 token 失敗', error.message);
+        return;
+      }
+
+      Alert.alert('完成', `已登錄推播 token（${platform}）。長按可複製給 Edge Function 測試。\n${token}`);
+    } catch (e: unknown) {
+      Alert.alert('取得 token 失敗', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    router.replace('/(auth)/login');
+  }
+
+  function warnEnv() {
+    const bad =
+      !process.env.EXPO_PUBLIC_SUPABASE_URL ||
+      process.env.EXPO_PUBLIC_SUPABASE_URL.includes('YOUR_PROJECT');
+    if (bad) {
+      Alert.alert(
+        '環境設定',
+        '請複製 apps/mobile/.env.example 為 .env 並填入 Supabase URL / anon key（或使用 Expo extra）。',
+      );
+    }
+  }
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.title}>帳號資訊</Text>
+      <Text style={styles.line}>Email：{session?.user.email ?? '—'}</Text>
+      <Text style={styles.line}>顯示名稱：{profile?.display_name ?? '—'}</Text>
+      <Text style={styles.line}>全域身分：{profile?.role ?? '—'}</Text>
+
+      <Pressable style={styles.secondaryBtn} onPress={registerPushToken}>
+        <Text style={styles.secondaryBtnText}>登錄推播 Token（push_tokens）</Text>
+      </Pressable>
+
+      <Pressable style={styles.linkBtn} onPress={warnEnv}>
+        <Text style={styles.linkText}>檢查環境變數設定</Text>
+      </Pressable>
+      <Pressable style={styles.signOut} onPress={signOut}>
+        <Text style={styles.signOutText}>登出</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 20, gap: 10 },
+  title: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
+  line: { fontSize: 15 },
+  secondaryBtn: {
+    marginTop: 8,
+    backgroundColor: '#111827',
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  secondaryBtnText: { color: '#fff', fontWeight: '700' },
+  linkBtn: { marginTop: 12 },
+  linkText: { color: '#2563eb', fontWeight: '600' },
+  signOut: {
+    marginTop: 'auto',
+    backgroundColor: '#ef4444',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  signOutText: { color: '#fff', fontWeight: '700' },
+});
