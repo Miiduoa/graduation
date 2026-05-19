@@ -46,6 +46,11 @@ import {
   type OrderPlacedPayload,
   type RoleEvent,
 } from '../services/roleEventBus';
+import {
+  updateDemoOrderStatus,
+  listDemoMerchantOrders,
+  subscribeDemoOrders,
+} from '../services/demoMerchantOrders';
 import { AgentSummaryBanner } from '../components/AgentSummaryBanner';
 import { AIMissionControl } from '../components/AIMissionControl';
 
@@ -81,7 +86,7 @@ export default function VendorDashboardScreen() {
       return;
     }
     let cancelled = false;
-    (async () => {
+    const loadOrders = async () => {
       // 1. 從 inbox 讀「之前」的 order_placed events（broadcast）
       const vendorUid = auth.user?.uid ?? 'demo_cafeteria';
       const inboxEvents = await loadRoleEventInbox(vendorUid).catch(() => [] as RoleEvent<unknown>[]);
@@ -101,21 +106,55 @@ export default function VendorDashboardScreen() {
           orderedAt: event.occurredAt,
         });
       }
+
+      // 1.5. 從 demoMerchantOrders store 撈「同一 session 內」學生剛下的單
+      //     （它由 OrderingScreen 走 mockSource.createOrder → addDemoOrder 寫進去）
+      const storeOrders: DemoMerchantOrder[] = listDemoMerchantOrders(merchantId)
+        .filter((o) => !initialOrders.some((s) => s.id === o.id))
+        .map((o) => ({
+          id: o.id,
+          merchantId,
+          studentUid: o.userId,
+          studentName: '學生',
+          items: o.items
+            .map((it) => `${it.name} ×${it.quantity}`)
+            .join('、'),
+          total: o.totalAmount ?? o.total ?? 0,
+          status:
+            o.status === 'preparing'
+              ? 'processing'
+              : o.status === 'pending'
+                ? 'pending'
+                : o.status === 'ready'
+                  ? 'ready'
+                  : 'completed',
+          orderedAt: String(o.createdAt ?? new Date().toISOString()),
+        }));
+
       if (cancelled) return;
       // 2. merge with static mock orders（dedupe by id）
-      const seen = new Set(inboxOrders.map((o) => o.id));
-      const merged = [
-        ...inboxOrders,
-        ...initialOrders.filter((o) => !seen.has(o.id)),
-      ];
+      const merged: DemoMerchantOrder[] = [];
+      const seen = new Set<string>();
+      for (const o of [...storeOrders, ...inboxOrders, ...initialOrders]) {
+        if (seen.has(o.id)) continue;
+        seen.add(o.id);
+        merged.push(o);
+      }
       setOrders(merged);
-      if (inboxOrders.length > 0) {
+      if (inboxOrders.length > 0 || storeOrders.length > 0) {
         // 有新訂單時自動展開 pending section 提醒老闆
         setOpenSection('pending');
       }
-    })();
+    };
+    void loadOrders();
+    // 訂閱學生即時下單事件（同 session 內）
+    const unsubStore = subscribeDemoOrders(() => {
+      if (cancelled) return;
+      void loadOrders();
+    });
     return () => {
       cancelled = true;
+      unsubStore();
     };
   }, [merchantCtx.current?.merchant.id, initialOrders, auth.user?.uid]);
 
@@ -169,6 +208,12 @@ export default function VendorDashboardScreen() {
 
     // 1. 本地 state 即時更新
     setOrders((prev) => prev.map((o) => o.id === id ? { ...o, status: next } : o));
+
+    // 1.5. 同步寫進 demoMerchantOrders store，讓學生 StudentOrdersScreen
+    //      下次 refresh 拿到最新狀態（store 是 OrderingScreen 下單時寫進去的同一份）
+    const storeStatus: 'pending' | 'preparing' | 'ready' | 'completed' =
+      next === 'processing' ? 'preparing' : next;
+    updateDemoOrderStatus(id, storeStatus);
 
     // 2. emit cross-role event 讓學生 inbox 收到
     if (target.studentUid && merchantCtx.current && auth.user) {

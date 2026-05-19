@@ -465,9 +465,8 @@ export async function executeNextStep(p: ActionPlan): Promise<ActionPlan> {
   // 模擬執行（demo 用 — 真實 wiring 要在 step.serviceCall 對應實際 service）
   await new Promise((res) => setTimeout(res, Math.max(100, step.estimateSeconds * 300)));
 
-  // 成功率隨 risk 變動（demo 用，全部成功給 demo 看好看）
-  const successRate = step.risk === 'low' ? 0.99 : step.risk === 'medium' ? 0.95 : 0.92;
-  const ok = Math.random() < successRate;
+  // demo 模式一律成功；失敗 case 應透過 killSwitch / guardrail 觸發，不應該是隨機
+  const ok = true;
 
   if (ok) {
     result.status = 'success';
