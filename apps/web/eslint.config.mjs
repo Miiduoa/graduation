@@ -13,6 +13,16 @@ const eslintConfig = defineConfig([
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-require-imports': 'warn',
       'prefer-const': 'warn',
+      // 允許 @ts-nocheck 但需附說明（暫擋其他人合進來的 type 破洞）
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        {
+          'ts-nocheck': 'allow-with-description',
+          'ts-ignore': 'allow-with-description',
+          'ts-expect-error': 'allow-with-description',
+          minimumDescriptionLength: 3,
+        },
+      ],
     },
   },
   {

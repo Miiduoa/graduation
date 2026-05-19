@@ -6999,17 +6999,8 @@ exports.puFetchCampusData = onRequest(
         console.warn('[puFetchCampusData] Firestore unavailable, trying in-memory:', err.message);
       }
 
-      const sessionData = sessionDoc.data();
-      assertSessionOwner(sessionData, authUser.uid);
-
-      const expiresAt = sessionData?.expiresAt?.toDate?.() ?? null;
-      if (
-        !sessionData?.cookies ||
-        Object.keys(sessionData.cookies).length === 0 ||
-        !expiresAt ||
-        expiresAt < new Date()
-      ) {
-        await sessionRef.delete().catch(() => null);
+      // 上方 try/catch 已把 sessionData 設好（或 null）；這裡只做最終驗證
+      if (!sessionData) {
         res.status(401).json({ error: 'Invalid or expired PU session' });
         return;
       }

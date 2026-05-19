@@ -18,6 +18,7 @@ import {
   aiTokens,
 } from '../ui/aiFirst';
 import { rootNavigateNested } from '../app/rootNavigation';
+import { seedDemoQueues, resetDemoStore } from '../services/demoStore';
 import { usePermissions } from '../hooks/usePermissions';
 
 export default function MeAiFirstScreen() {
@@ -289,6 +290,43 @@ export default function MeAiFirstScreen() {
           onPress={goMe('Help')}
         />
         <AIRow icon="🚪" title="登出" onPress={confirmLogout} />
+      </AISection>
+
+      <AISection title="🎬 示範工具" subtitle="口試 / 演示專用：一鍵產生跨角色待處理事項或重置 demo 資料">
+        <AIRow
+          icon="🌱"
+          title="一鍵 seed 示範佇列"
+          subtitle="以王小明名義產生 6 件待處理：請假 / 報修 / 訂單 / 求助 / 作業 / 入社"
+          onPress={() => {
+            seedDemoQueues();
+            Alert.alert(
+              '🌱 已產生 6 件示範事項',
+              '切換到老師 / TA / admin / 系主任 / 社長 → 訊息收件匣即可看到跨角色面板。',
+            );
+          }}
+        />
+        <AIRow
+          icon="♻️"
+          title="一鍵重置 demo 資料"
+          subtitle="清除所有 dynamicMessages / leaveRequests / orders 等動態寫入"
+          onPress={() => {
+            Alert.alert(
+              '確定重置？',
+              '會清除：所有動態訊息、繳交、社團申請、訂單、報修、請假…\n保留：當前登入身份。',
+              [
+                { text: '取消', style: 'cancel' },
+                {
+                  text: '確定重置',
+                  style: 'destructive',
+                  onPress: () => {
+                    void resetDemoStore();
+                    Alert.alert('♻️ Demo 資料已重置');
+                  },
+                },
+              ],
+            );
+          }}
+        />
       </AISection>
 
       <View
