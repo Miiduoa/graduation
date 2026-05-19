@@ -1,5 +1,4 @@
 /* eslint-disable */
-// @ts-nocheck — pre-existing type breakage from main; mobile demoStore PR 範圍外
 import React, { useMemo, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
@@ -731,20 +730,18 @@ export function CourseHubScreen(props: any) {
         ) : null}
 
         {/* Course List */}
-        {sortedCourses.length > 0
-          ? sortedCourses.map((course) => (
-              <CourseCard
-                key={course.groupId}
-                course={course}
-                onPress={() => {
-                  nav?.navigate?.("CourseModules", {
-                    groupId: course.groupId,
-                    groupName: course.name,
-                  });
-                }}
-              />
-            ))
-          : null}
+        {sortedCourses.map((course) => (
+          <CourseCard
+            key={course.groupId}
+            course={course}
+            onPress={() => {
+              nav?.navigate?.("CourseModules", {
+                groupId: course.groupId,
+                groupName: course.name,
+              });
+            }}
+          />
+        ))}
 
         {/* 空狀態：TronClass 登入 */}
         {selectedRows.length === 0 || isTCSessionError ? (

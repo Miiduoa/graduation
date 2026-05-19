@@ -1,5 +1,4 @@
 /* eslint-disable */
-// @ts-nocheck — pre-existing type breakage from main; mobile demoStore PR 範圍外
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { ScrollView, Text, View, Pressable, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -461,8 +460,10 @@ export function CreditAuditScreen(props: any) {
         )}
 
         {/* ═══ 分類進度 ═══ */}
-        <Card title="各類學分進度" subtitle={currentDept.shortName}>
-          {categoryOrder.map((k) => {
+        {currentDept && (
+          <>
+          <Card title="各類學分進度" subtitle={currentDept.shortName}>
+            {categoryOrder.map((k) => {
             const b = byCategory[k];
             // 體育和服務學習看門數，其他看學分
             const isCountBased = k === 'pe' || k === 'service';
@@ -545,7 +546,16 @@ export function CreditAuditScreen(props: any) {
               </View>
             );
           })}
-        </Card>
+          </Card>
+
+          {/* ── 資料更新時間 ── */}
+          {(campusCreditAudit as any).fetchedAt && (
+            <Text style={{ color: theme.colors.muted, fontSize: 11, textAlign: "center", marginTop: 4 }}>
+              資料更新時間：{new Date((campusCreditAudit as any).fetchedAt).toLocaleString("zh-TW")}
+            </Text>
+          )}
+          </>
+        )}
 
         {/* ═══ 各學期明細 ═══ */}
         <Card title="各學期成績明細" subtitle={`共 ${bySemester.length} 個學期`}>
