@@ -33,7 +33,7 @@ import { TAB_BAR_CONTENT_BOTTOM_PADDING } from '../ui/navigationTheme';
 import { theme } from '../ui/theme';
 import { useSchool } from '../state/school';
 import { useAuth } from '../state/auth';
-import { getDb } from '../firebase';
+import { getDb, isFirebaseMockMode } from '../firebase';
 import { useAsyncList } from '../hooks/useAsyncList';
 import { fetchSchoolDirectoryProfiles } from '../services/memberDirectory';
 import { formatRelativeTime, toDate } from '../utils/format';
@@ -68,6 +68,17 @@ type UserProfile = {
   department?: string | null;
 };
 
+
+// ─── Demo data ─────────────────────────────────────────────────────────────
+const DEMO_COURSE_GROUPS: CourseGroup[] = [
+  { id: 'grp-db-sys', schoolId: 'demo', type: 'course', name: '資料庫系統', joinCode: 'DBSYS001', createdBy: 'demo_teacher_chen', createdByEmail: 'teacher.chen@pu.edu.tw', memberCount: 38, verification: { status: 'unverified' } },
+  { id: 'grp-prog2', schoolId: 'demo', type: 'course', name: '程式設計二', joinCode: 'PROG0002', createdBy: 'demo_teacher_chen', createdByEmail: 'teacher.chen@pu.edu.tw', memberCount: 45, verification: { status: 'verified_teacher', verifiedByEmail: 'admin@pu.edu.tw' } },
+  { id: 'grp-algo', schoolId: 'demo', type: 'course', name: '演算法導論', joinCode: 'ALGO0003', createdBy: 'demo_teacher_chen', createdByEmail: 'teacher.chen@pu.edu.tw', memberCount: 30, verification: { status: 'unverified' } },
+  { id: 'grp-web', schoolId: 'demo', type: 'course', name: 'Web 程式設計', joinCode: 'WEBP0004', createdBy: 'demo_teacher_chen', createdByEmail: 'teacher.chen@pu.edu.tw', memberCount: 52, verification: { status: 'verified_teacher', verifiedByEmail: 'admin@pu.edu.tw' } },
+  { id: 'grp-os', schoolId: 'demo', type: 'course', name: '作業系統', joinCode: 'OSSYS005', createdBy: 'demo_teacher_chen', createdByEmail: 'teacher.chen@pu.edu.tw', memberCount: 27, verification: { status: 'rejected', verifiedByEmail: 'admin@pu.edu.tw' } },
+];
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function AdminCourseVerifyScreen() {
   const { school } = useSchool();
   const auth = useAuth();
@@ -85,6 +96,7 @@ export function AdminCourseVerifyScreen() {
 
   const { items, loading, error, reload } = useAsyncList<CourseGroup>(async () => {
     if (!auth.isAdmin) return [];
+    if (isFirebaseMockMode()) return DEMO_COURSE_GROUPS;
     const qy = query(collection(db, 'groups'), where('type', '==', 'course'), limit(200));
     const snap = await getDocs(qy);
     const rows = snap.docs

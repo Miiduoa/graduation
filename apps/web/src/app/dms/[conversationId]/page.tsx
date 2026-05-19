@@ -54,12 +54,12 @@ function fmtTime(iso: string): string {
 
 /**
  * 從 conversationId 拆出兩個 uid。
- * 因為 demoStore 的 thread id = sortedUids.join('_')（沒前綴），而
- * conversationAccess.deriveDmConversationId 是 `dm_{schoolId}_{a}_{b}`，
- * 兩種 id 格式都得認。
+ * 因為 demoStore 的 thread id = sortedUids.join('__')（雙底線分隔，避免與 uid 中的
+ * 單底線或 '-' 衝突），而 conversationAccess.deriveDmConversationId 是
+ * `dm_{schoolId}_{a}_{b}`，兩種 id 格式都得認。
  */
 function parseConvoId(convoId: string): [string, string] | null {
-  // dm_<schoolId>_<a>_<b>
+  // dm_<schoolId>_<a>_<b>（Firestore 格式）
   if (convoId.startsWith('dm_')) {
     const parts = convoId.split('_');
     if (parts.length < 4) return null;
@@ -69,7 +69,16 @@ function parseConvoId(convoId: string): [string, string] | null {
     if (!a || !b) return null;
     return [a, b];
   }
-  // demoStore 格式：<a>_<b>
+  // demoStore 格式：<a>__<b>（雙底線，buildThreadId 產生）
+  // uid 格式如 stu-001、demo-teacher-1，其中包含 '-' 和數字但不含 '__'
+  if (convoId.includes('__')) {
+    const parts = convoId.split('__');
+    if (parts.length === 2 && parts[0] && parts[1]) {
+      return [parts[0], parts[1]];
+    }
+    return null;
+  }
+  // 相容舊格式：純 <a>_<b>（uid 不含 '_' 時才有意義）
   const parts = convoId.split('_');
   if (parts.length !== 2) return null;
   return [parts[0], parts[1]];

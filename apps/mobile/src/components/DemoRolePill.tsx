@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { theme, softShadowStyle } from '../ui/theme';
 import { useAuth, type UserRole } from '../state/auth';
+import { useDemoRole, type DemoRole } from '../state/demoRole';
 import {
   saveMockAuthSession,
   loadMockAuthSession,
@@ -153,8 +154,19 @@ function resolveCurrentPreset(uid: string | null | undefined): RolePreset {
   return ROLE_PRESETS.find((p) => p.uid === uid) ?? ROLE_PRESETS[0];
 }
 
+/** 把 auth UserRole 對應到 DemoRole context 所認識的 role。
+ *  vendor 在 DemoRole 型別中不存在，fallback 到 admin（最接近的管理類角色）。 */
+function toDemoRole(r: UserRole): DemoRole {
+  const known: DemoRole[] = [
+    'student', 'teacher', 'ta', 'club_officer',
+    'department_head', 'admin', 'alumni', 'guest',
+  ];
+  return (known as string[]).includes(r as string) ? (r as DemoRole) : 'admin';
+}
+
 export function DemoRolePill() {
   const auth = useAuth();
+  const { setRole: setDemoRole } = useDemoRole();
   const [open, setOpen] = useState(false);
   const [busyUid, setBusyUid] = useState<string | null>(null);
 
@@ -185,13 +197,16 @@ export function DemoRolePill() {
           studentId: preset.studentId ?? null,
           loginAccount: preset.email,
         });
+        // 同步更新 DemoRoleContext（state/demoRole.tsx），讓 MessagesAiFirstScreen
+        // 等使用 useDemoRole() 的畫面能正確過濾該角色的收件匣訊息。
+        setDemoRole(toDemoRole(preset.role));
         await auth.refreshProfile();
       } finally {
         setBusyUid(null);
         setOpen(false);
       }
     },
-    [auth],
+    [auth, setDemoRole],
   );
 
   // 訪客 / 未登入時不顯示 pill；登入流程由 LoginLandingScreen 處理
