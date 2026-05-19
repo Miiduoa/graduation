@@ -238,7 +238,10 @@ jobs:
 
       - name: Validate EAS configuration
         working-directory: apps/mobile
-        run: npx eas-cli config --non-interactive
+        # eas-cli 18+ 在 --non-interactive 下仍會 prompt 選 profile 與 platform；
+        # 明確指定 --profile preview --platform android 才能在 CI（無 TTY）跑通。
+        # --json 隱含 non-interactive，輸出走 stdout 方便 grep。
+        run: npx eas-cli config --json --profile preview --platform android
 
       - name: Verify preview Android build submission
         working-directory: apps/mobile
