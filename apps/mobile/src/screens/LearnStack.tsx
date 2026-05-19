@@ -195,12 +195,51 @@ function GuardedAcademicInsights(props: any) {
   );
 }
 
-/** 畢業學分試算屬個人修課脈絡；與 courses.view 對齊（校方職員請走課綱查詢等其他入口）。 */
+/** 畢業學分試算 — 個人選課/畢業進度規劃工具，僅限「學生」身份使用。
+ *  教師 / 助教 / 系主任 / 管理員 / 校友 / 訪客一律攔截到友善說明頁,
+ *  與 web 端 /credit-planner 行為對齊。
+ */
 function GuardedCreditAuditLearn(props: any) {
+  const { isStudent, displayName } = usePermissions();
+  if (isStudent) {
+    return <CreditAuditStack {...props} />;
+  }
+  return <CreditAuditBlockedScreen roleLabel={displayName} navigation={props.navigation} />;
+}
+
+function CreditAuditBlockedScreen({ roleLabel, navigation }: { roleLabel: string; navigation: any }) {
+  // 動態 import 避免在 LearnStack 頂端拉一堆 RN UI module(只在阻擋時才用)
+  const { View, Text, Pressable, ScrollView } = require('react-native');
+  const { Ionicons } = require('@expo/vector-icons');
+  const { theme } = require('../ui/theme');
   return (
-    <RouteGuard requires="courses.view">
-      <CreditAuditStack {...props} />
-    </RouteGuard>
+    <ScrollView contentContainerStyle={{ padding: 20, alignItems: 'center', backgroundColor: theme.bg }}>
+      <View style={{ marginTop: 60, padding: 24, alignItems: 'center', maxWidth: 420 }}>
+        <View style={{
+          width: 80, height: 80, borderRadius: 24,
+          backgroundColor: 'rgba(88,86,214,0.10)',
+          alignItems: 'center', justifyContent: 'center', marginBottom: 16,
+        }}>
+          <Ionicons name="school-outline" size={48} color="#5856D6" />
+        </View>
+        <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text, marginBottom: 8, textAlign: 'center' }}>
+          學分試算僅限在校學生使用
+        </Text>
+        <Text style={{ fontSize: 14, color: theme.muted, lineHeight: 22, textAlign: 'center', marginBottom: 24 }}>
+          目前身份為 <Text style={{ fontWeight: '700', color: theme.text }}>{roleLabel}</Text>。
+          學分試算是學生個人選課與畢業進度規劃工具,屬學生專屬功能 — 教師/職員可由「教學工作台」管理課程,系主任/管理員可由「管理後台」查看全系統計。
+        </Text>
+        <Pressable
+          onPress={() => navigation?.goBack?.()}
+          style={{
+            paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12,
+            backgroundColor: '#5856D6',
+          }}
+        >
+          <Text style={{ color: '#fff', fontWeight: '700', fontSize: 14 }}>← 返回</Text>
+        </Pressable>
+      </View>
+    </ScrollView>
   );
 }
 
